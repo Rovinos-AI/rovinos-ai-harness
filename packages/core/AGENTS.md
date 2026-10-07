@@ -4,7 +4,7 @@ Run loop, state machine, recorder, checkpoints, resume, approvals, budgets, canc
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [epic-02-run-loop.md](./epic-02-run-loop.md): tasks 2.1-2.13
+- [epic-02-run-loop.md](./epic-02-run-loop.md): tasks 2.1-2.14
 - [epic-23-subagents-and-model-roles.md](./epic-23-subagents-and-model-roles.md): tasks 23.1-23.6
 
 ## Allowed internal imports
@@ -27,3 +27,4 @@ Run loop, state machine, recorder, checkpoints, resume, approvals, budgets, canc
 - On resume, a dangling `tool_intent` without `tool_result` must not re-execute a non-idempotent tool without a decision. `rerun` reuses the same `callId` and appends only `tool_result`, never a second intent.
 - A checkpoint's snapshot and its event are atomic: on conflict neither is written. `atSeq` is the seq of the checkpoint event itself.
 - Each (re)start is a new `segmentId` with a new root span linked to the previous one. Don't reuse the old span context.
+- Human inputs (epic 25) follow the approval pattern: record `input_requested` before any channel sees it, suspend with `awaiting_input` for durable inputs, and never expose a model-visible way to answer.

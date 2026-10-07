@@ -1,7 +1,7 @@
 # Epic #17: Policy engine and approvals
 
 **Goal:** decide, outside the model and deterministically, whether each tool call is allowed, needs a human, or is denied; make approvals durable, editable, expiring, and auditable. Read `docs/engineering/CONVENTIONS.md` first, plus epics 2 (suspension) and 13 (tokenized arguments).
-**Tasks:** 17.1 to 17.8, all size S.
+**Tasks:** 17.1 to 17.9, all size S.
 
 Shared design for this epic:
 - **The model never decides.** Policy runs in code on the **tokenized** arguments (raw values are never visible to the policy engine).
@@ -186,3 +186,25 @@ Shared design for this epic:
 - [ ] Policy changes can be regression-tested from a fixture file.
 - [ ] Lint catches shadowed and over-broad rules.
 - [ ] Example policy tests run in CI.
+
+---
+
+## 17.9 Approver identity and separation of duties
+
+**Parent:** #17 Policy engine and approvals
+**Task Description:** Record who requested each run and who resolved each approval, and optionally forbid people from approving runs they started.
+**Expected Inputs:** Principals from the control plane, CLI, eval runner, and sweeper.
+**Expected Output:** `packages/schemas/src/principal.ts` (`Principal`), schema changes: `run_created.requestedBy?: Code` and `approval_resolved.approverId?: Code` (meta, required when `decidedBy` is `human`), policy option `separationOfDuties`, enforcement in `resolveApproval` callers, invariant (f) in 22.6, docs `docs/policy.md` section "Who approved".
+**Dependencies:** none.
+**Items it depends on:** 17.6, 18.5, 12.8.
+**Implementation guidance:**
+1. Principals are Codes with a kind prefix: `token.<tokenId>` (control plane, 18.5), `cli.<name>` (CLI, from config `cli.principal` or `--as`), `eval.simulated` (16.6), `system.sweeper` (17.6). Document that CLI principals are attributable but not authenticated; deployments that need authenticated approvals use the control plane.
+2. `requestedBy` is set when a run is created (CLI, SDK, control plane `start_run`). Subagents and continuations inherit the root run's `requestedBy`.
+3. `separationOfDuties: true` on a rule (or `approvals.separationOfDuties: true` globally): resolving an approval for a run whose `requestedBy` equals the resolving principal fails with `approver_is_requester` (exit code 4 in the CLI). Expiry decisions are unaffected.
+4. Telemetry: `approverId` and `requestedBy` are not part of the safe projection by default. With `telemetry.correlation.enabled` they may be exported only as pseudonyms (12.8).
+5. Update `classification.ts`, `SafeEvent` mappings, goldens, and (after the first release) add upcasters per 7.13.
+**Tests to write:** principal recorded for each path (CLI, control plane token, eval, sweeper); separation of duties rejection and acceptance; inheritance for subagents and continuations; approver ids absent from telemetry by default and pseudonymized when enabled (canary).
+**Acceptance Criteria:**
+- [ ] Every human approval records who decided.
+- [ ] Separation of duties can be enforced per rule or globally.
+- [ ] Identities reach telemetry only as opt-in pseudonyms.

@@ -4,7 +4,7 @@ Zod schemas and inferred types shared by every package: events, field classifica
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.1, 5.1, 5.4, 7.1, 8.4, 12.7, 13.1, 14.2, 15.1, 17.1, 20.1, 20.3, 23.1
+- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.1, 5.1, 5.4, 7.1, 8.4, 12.7, 13.1, 14.2, 15.1, 17.1, 20.1, 20.3, 23.1, 7.13, 17.9, 25.1
 
 ## Allowed internal imports
 - None (leaf package).

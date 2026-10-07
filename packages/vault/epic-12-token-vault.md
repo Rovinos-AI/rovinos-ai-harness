@@ -1,7 +1,7 @@
 # Epic #12: Token vault
 
 **Goal:** a run-scoped, encrypted mapping from placeholder tokens (`<EMAIL_1>`) to raw sensitive values, stored separately from the event log, with key management, rotation, purge, and auditing. Read `docs/engineering/CONVENTIONS.md` first.
-**Tasks:** 12.1 to 12.8, all size S.
+**Tasks:** 12.1 to 12.9, all size S.
 
 Shared design for this epic:
 - **Separation of duties via three narrow interfaces**: `VaultWriter` (put), `VaultResolver` (resolve, used only by the detokenizer and the human UI), `VaultReader` (list raw values for a run, used only by the leak sentinel). A component receives only the interface it needs.
@@ -193,3 +193,25 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 - [ ] Output always matches the pseudonym pattern.
 - [ ] Disabled by default; enabling requires explicit config.
 - [ ] Documentation lists the linkability risks.
+
+---
+
+## 12.9 Postgres vault adapter with per-scope data keys
+
+**Parent:** #12 Token vault
+**Task Description:** Add a Postgres vault so several harness instances can share one vault, and make purge effective on Postgres through crypto-shredding.
+**Expected Inputs:** Postgres connection URL (separate from the event store's), `KeyProvider`.
+**Expected Output:** `packages/vault/src/postgres.ts`, `packages/vault/migrations/postgres/0001_init.sql`, per-scope data keys in both adapters (`vault_scope_keys` table), vault config fragment `vault.backend: "sqlite" | "postgres"` and `vault.postgres.url: SecretRef`, docs update in `docs/deployment.md`.
+**Dependencies:** `pg`, Docker image `postgres:16`.
+**Items it depends on:** 12.2, 12.5, 12.6, 7.6, 8.1.
+**Implementation guidance:**
+1. Separation: the vault must use a different database or a different role and schema from the event store. Startup fails with `vault_shares_store_database` when both URLs resolve to the same database and schema. Document recommended grants (the harness role can read and write the vault; analytics roles never get vault access).
+2. Per-scope data keys (both adapters): each scope (23.2) gets a random 32-byte data encryption key stored wrapped (AES-GCM) under the master key from the `KeyProvider` in `vault_scope_keys(scope_id, wrapped_dek, key_id, created_at)`. Values are encrypted with the scope's data key. `purge(scope)` deletes the wrapped key first, then the rows, so leftover ciphertext (Postgres has no `secure_delete`, and backups may keep rows) can no longer be decrypted. Rotation (12.5) re-wraps data keys instead of re-encrypting every value; lookups keep using the HMAC lookup key (record which key id produced each lookup, as in 12.5).
+3. `put`: one transaction: `INSERT ... ON CONFLICT (run_id, entity_type, lookup) DO NOTHING RETURNING token`; when nothing is returned, select the existing token; allocate `next_n` with `UPDATE vault_counters ... RETURNING` under a row lock. `version(runId)` reads the counter sum (8.1).
+4. Run the shared vault conformance suite and a two-pool concurrency test (same value from two connections yields one token).
+5. Compose test service: reuse the `postgres` service with a second database `harness_vault` created by an init script.
+**Tests to write:** conformance suite on Postgres (integration stage); concurrency; same-database refusal; crypto-shred test (after purge, a copied ciphertext row cannot be decrypted even with the master key); rotation re-wraps data keys and reads still work; SQLite adapter still passes with per-scope keys.
+**Acceptance Criteria:**
+- [ ] Two harness instances can share one Postgres vault safely.
+- [ ] Purged scopes are unreadable even from backups (crypto-shredding).
+- [ ] The vault cannot share the event store's database and schema.

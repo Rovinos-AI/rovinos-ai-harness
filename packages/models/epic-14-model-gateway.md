@@ -1,7 +1,7 @@
 # Epic #14: Model gateway
 
 **Goal:** a provider-neutral gateway that implements the run loop's `ModelPort`, enforces Zod-validated structured outputs across providers, preserves provider-specific blobs for rehydration, and applies retries, fallbacks, and cost accounting. Read `docs/engineering/CONVENTIONS.md` first.
-**Tasks:** 14.1 to 14.15, all size S.
+**Tasks:** 14.1 to 14.20, all size S.
 
 Shared design for this epic:
 - Package `packages/models` exports `ModelGateway implements ModelPort` (port defined in 2.3). Providers plug in through `ProviderAdapter`. The gateway owns enforcement, repair, retry, routing, and accounting; adapters only translate to and from one provider's wire format.
@@ -339,3 +339,110 @@ Shared design for this epic:
 - [ ] Replayed responses are byte-identical to recorded ones.
 - [ ] Divergence is detected, not silently served.
 - [ ] Cassette files require the `containsRealData: false` declaration.
+
+---
+
+## 14.16 Streaming responses with idle timeouts and progress
+
+**Parent:** #14 Model gateway
+**Task Description:** Let adapters stream responses so long generations do not hit total-request timeouts, and report progress counts to subscribers, while the recorded response stays identical to a non-streamed one.
+**Expected Inputs:** `ModelRequest`, provider streaming APIs.
+**Expected Output:** optional `ProviderAdapter.stream(req, ctx): AsyncIterable<ProviderDelta>` plus `assembleDeltas`, gateway integration, config `models.providers[].streaming: boolean` (default true where supported), `onProgress` hook on the gateway context.
+**Dependencies:** none beyond the adapter SDKs (verify streaming event shapes).
+**Items it depends on:** 14.4, 14.5, 14.12.
+**Implementation guidance:**
+1. `ProviderDelta` is a provider-neutral union (text delta, tool-call argument delta, opaque block delta, usage, finish). `assembleDeltas` builds a `ProviderResult` equal to the non-streamed result for the same fixture, including opaque blobs byte-for-byte.
+2. Timeouts: with streaming, apply an idle timeout between deltas (`models.retry.idleTimeoutMs`, default 60 s) in addition to the overall deadline; abort cancels the stream.
+3. `onProgress({ requestId, outputTokens })` carries counts only (never text) and feeds live run updates (24.5).
+4. Enforcement, repair, events, and cassettes operate on the assembled result only; partial output is never recorded. A stream that fails midway is retried like a failed request (retryable errors only).
+**Tests to write:** assembled stream equals non-stream fixtures for each adapter (text, tool calls, thinking blocks); idle timeout; abort mid-stream; progress callback receives counts only (canary text absent); failure midway records nothing partial.
+**Acceptance Criteria:**
+- [ ] Streamed and non-streamed responses record identically.
+- [ ] Long generations are bounded by idle timeouts, not total timeouts.
+- [ ] Progress reporting carries no content.
+
+---
+
+## 14.17 Prompt caching
+
+**Parent:** #14 Model gateway
+**Task Description:** Use provider prompt caching on the stable prefix of each request and account for cached tokens in usage and cost.
+**Expected Inputs:** `ModelRequest`, the context result's stable-prefix boundary, pricing config.
+**Expected Output:** `cacheReadTokens` and `cacheWriteTokens` (meta ints, optional) on `model_response` and `ModelResponse.usage`, pricing fields `cacheReadMicrosPerMTok` and `cacheWriteMicrosPerMTok`, Anthropic cache breakpoints, `ContextResult.stablePrefixMessages`, cache-aware dropping in the sliding window, span attributes and metrics for cached tokens.
+**Dependencies:** none (verify current provider caching parameters and limits).
+**Items it depends on:** 14.4, 14.5, 14.14, 15.2.
+**Implementation guidance:**
+1. Context strategies report `stablePrefixMessages`: the count of leading messages unchanged since the previous build (system prompt, pinned run input, older kept groups). The plan message is pinned at the end, so it does not break the prefix.
+2. Anthropic adapter: place `cache_control` breakpoints on the tools block, the system prompt, and the last stable-prefix message, within the provider's breakpoint limit (verify). OpenAI-style providers cache automatically; map their reported cached input tokens.
+3. Sliding window: optional `cacheAware: true` drops old groups in chunks (`dropChunkGroups`, default 4) instead of one at a time, so the prefix changes less often. Record the option in the strategy version.
+4. Cost: cached reads and writes use their own prices when configured; otherwise fall back to the input price and log `pricing_cache_missing` once.
+5. Request hashing for cassettes (14.15) includes the breakpoint placement so replays stay deterministic.
+6. Metrics `harness.model.cache_read_tokens` and `harness.model.cache_write_tokens` (attributes `provider`, `model`); span attributes on `harness.model_call`; update `METRIC_ALLOWLIST`, catalog, and collector allowlist.
+**Tests to write:** breakpoint placement per request shape; usage mapping from recorded fixtures for both providers; cost arithmetic with cache prices; cache-aware dropping keeps the prefix stable across consecutive builds; schema and catalog updates covered by drift checks.
+**Acceptance Criteria:**
+- [ ] Cached tokens are reported and priced correctly.
+- [ ] Repeated steps in a run reuse the cached prefix (fixture shows cache reads).
+- [ ] Caching never changes recorded content.
+
+---
+
+## 14.18 Azure OpenAI adapter
+
+**Parent:** #14 Model gateway
+**Task Description:** Support Azure OpenAI deployments with API-key or Microsoft Entra ID authentication.
+**Expected Inputs:** Provider config with endpoint, deployment mapping, API version, auth settings.
+**Expected Output:** `packages/models/src/providers/azure-openai.ts`, provider kind `azure_openai` in the models config fragment, fixtures and contract test, docs `docs/models/azure-openai.md`.
+**Dependencies:** `openai` SDK Azure client or plain `fetch` with the shared mapper, `@azure/identity` (verify current API surface and API versions).
+**Items it depends on:** 14.5, 14.6, 12.4.
+**Implementation guidance:**
+1. Config: `{ kind: "azure_openai", endpoint: https url, apiVersion: string, deployments: Record<model Code, deployment name>, auth: { kind: "api_key", apiKey: SecretRef } | { kind: "entra" } }`. Entra uses `DefaultAzureCredential` with the Cognitive Services scope (verify), cached and refreshed before expiry.
+2. Reuse the chat-completions mapper (14.5) with Azure quirks (deployment in the path, `api-version` query parameter).
+3. Map Azure content-filter responses to `provider_content_filtered` and throttling to `provider_rate_limited` with `retryAfterMs`.
+4. Capabilities default per deployment come from config; do not guess model features from deployment names.
+**Tests to write:** contract suite with Azure-shaped fixtures; Entra token acquisition with a fake credential; content-filter mapping; `LIVE` test skipped without credentials.
+**Acceptance Criteria:**
+- [ ] Azure OpenAI deployments pass the provider contract suite.
+- [ ] Both API-key and Entra authentication work.
+- [ ] Content filtering maps to a typed error.
+
+---
+
+## 14.19 Amazon Bedrock adapter
+
+**Parent:** #14 Model gateway
+**Task Description:** Support models on Amazon Bedrock through the Converse API, including lossless round trip of reasoning content.
+**Expected Inputs:** Provider config with region and model ids; AWS credentials from the default provider chain.
+**Expected Output:** `packages/models/src/providers/bedrock.ts`, provider kind `bedrock`, fixtures, contract test, docs `docs/models/bedrock.md`.
+**Dependencies:** `@aws-sdk/client-bedrock-runtime` (verify the Converse API shapes and reasoning-content fields).
+**Items it depends on:** 14.3, 14.7, 14.11.
+**Implementation guidance:**
+1. Use Converse with the client's retries disabled; credentials from the default chain (never from config literals).
+2. Map messages, tool use, and tool results; store raw content blocks (including reasoning content and signatures) as `opaque` parts with provider `bedrock` and re-send them verbatim, per 14.11.
+3. Structured output uses the tool rung (forced tool choice) unless the model supports more (configurable capabilities).
+4. Map throttling, validation, access-denied, and service errors to the provider taxonomy.
+**Tests to write:** contract suite with recorded fixtures; reasoning-content round trip; error mapping; `LIVE` test gated on AWS credentials.
+**Acceptance Criteria:**
+- [ ] Bedrock models pass the contract suite.
+- [ ] Reasoning blocks survive a store round trip byte-for-byte.
+- [ ] No AWS credentials appear in config files.
+
+---
+
+## 14.20 Google Vertex AI adapter
+
+**Parent:** #14 Model gateway
+**Task Description:** Support Gemini models on Vertex AI with native function calling, schema-constrained output, and round trip of thought signatures.
+**Expected Inputs:** Provider config with project, location, and model ids; Application Default Credentials.
+**Expected Output:** `packages/models/src/providers/vertex.ts`, provider kind `vertex`, schema-lowering rules for Vertex in `provider-schema-rules.ts`, fixtures, contract test, docs `docs/models/vertex.md`.
+**Dependencies:** `@google/genai` (verify package, Vertex mode, and response fields such as thought signatures).
+**Items it depends on:** 14.3, 14.7, 14.11.
+**Implementation guidance:**
+1. Authenticate with Application Default Credentials; disable SDK retries.
+2. Map messages and function calls; keep raw parts (including thought signatures) as `opaque` blobs with provider `vertex`.
+3. Native structured output uses the provider's response schema with the Vertex lowering rules; record dropped keywords.
+4. Map quota, permission, and safety-block responses to the provider taxonomy (`provider_content_filtered` for safety blocks).
+**Tests to write:** contract suite with fixtures; schema lowering table; thought-signature round trip; error mapping; `LIVE` test gated on credentials.
+**Acceptance Criteria:**
+- [ ] Vertex Gemini models pass the contract suite.
+- [ ] Structured output works natively with recorded dropped constraints.
+- [ ] Provider blobs round-trip losslessly.

@@ -2,7 +2,7 @@
 
 An open source, TypeScript, container-native **agent harness**. It runs LLM agents as durable, resumable state machines over an append-only event log. Tool calls are decided by code-evaluated policy and human approvals, never by the model. Sensitive values are tokenized at every trust boundary. Telemetry is metadata-only by construction.
 
-> **Status: specification stage.** This repository holds the complete build specification (23 epics, 187 tasks) and the agent instructions used to implement it. No runtime code exists yet. This README describes the harness the specs define. Implementation starts at task 1.1 in [`docs/engineering/tasks/epic-01-foundation.md`](docs/engineering/tasks/epic-01-foundation.md). License: [Apache-2.0](LICENSE).
+> **Status: specification stage.** This repository holds the complete build specification (25 epics, 216 tasks) and the agent instructions used to implement it. No runtime code exists yet. This README describes the harness the specs define. Implementation starts at task 1.1 in [`docs/engineering/tasks/epic-01-foundation.md`](docs/engineering/tasks/epic-01-foundation.md). License: [Apache-2.0](LICENSE).
 
 ## Contents
 
@@ -18,17 +18,19 @@ An open source, TypeScript, container-native **agent harness**. It runs LLM agen
 10. [MCP integration: servers, apps, and the control plane](#mcp-integration-servers-apps-and-the-control-plane)
 11. [Telemetry: metadata-only, defended in depth](#telemetry-metadata-only-defended-in-depth)
 12. [Sandbox and deployment topology](#sandbox-and-deployment-topology)
-13. [Durability: checkpoints, resume, shutdown, cancel](#durability-checkpoints-resume-shutdown-cancel)
-14. [Subagents and model roles](#subagents-and-model-roles)
-15. [Replay and regression gates](#replay-and-regression-gates)
-16. [Evaluations](#evaluations)
-17. [Configuration, secrets, and keys](#configuration-secrets-and-keys)
-18. [CLI](#cli)
-19. [Security hardening and supply chain](#security-hardening-and-supply-chain)
-20. [CI/CD](#cicd)
-21. [Guarantees, best-effort measures, and known gaps](#guarantees-best-effort-measures-and-known-gaps)
-22. [Build plan](#build-plan)
-23. [Repository layout and contributing](#repository-layout-and-contributing)
+13. [Human input: MCP elicitation and agent questions](#human-input-mcp-elicitation-and-agent-questions)
+14. [Durability: checkpoints, resume, shutdown, cancel, continuations](#durability-checkpoints-resume-shutdown-cancel-continuations)
+15. [Run service: SDK, queue, workers, and scaling](#run-service-sdk-queue-workers-and-scaling)
+16. [Subagents and model roles](#subagents-and-model-roles)
+17. [Replay and regression gates](#replay-and-regression-gates)
+18. [Evaluations](#evaluations)
+19. [Configuration, secrets, and keys](#configuration-secrets-and-keys)
+20. [CLI](#cli)
+21. [Security hardening and supply chain](#security-hardening-and-supply-chain)
+22. [CI/CD](#cicd)
+23. [Guarantees, best-effort measures, and known gaps](#guarantees-best-effort-measures-and-known-gaps)
+24. [Build plan](#build-plan)
+25. [Repository layout and contributing](#repository-layout-and-contributing)
 
 ---
 
@@ -42,13 +44,15 @@ An open source, TypeScript, container-native **agent harness**. It runs LLM agen
 | **Metadata-only telemetry** | Spans and logs come only from a closed registry of typed attributes (ids, codes, enums, numbers, booleans). Three independent layers enforce it: an in-process allowlist, an exact-match leak sentinel, and an allowlisting OpenTelemetry Collector. |
 | **MCP-native human-in-the-loop** | A reference approval UI ships as an MCP App rendered in a sandboxed iframe. The control plane is itself an MCP server, so any MCP client can act as an approval console. Elicitation and CLI fallbacks cover clients without UI support. |
 | **Default-deny execution** | Agent commands run in a separate, non-root, read-only, capability-dropped sandbox container with no network. Egress goes only through an allowlisting proxy. The harness never touches `docker.sock`. |
+| **Human input through MCP elicitation** | MCP servers can ask the human for input (form or URL mode), and the agent can ask questions that suspend the run durably. Requests are bound to a tool call, validated, rate-limited, and recorded. Only humans answer: no model-visible path exists. |
+| **Runs as a service** | A semver-stable SDK, a durable run queue with interchangeable workers, live content-free run updates, quotas across runs, and a validated multi-replica topology on Postgres. Schema versioning and upcasters keep old logs loadable across upgrades. |
 | **Reproducible and measurable** | Recorded runs replay offline with content-free behavioral diffs that gate CI. An eval runner provides graders, trajectory and privacy assertions, simulated humans, pass@k, and A/B statistics. |
 
 ---
 
 ## System overview
 
-The harness is one process (the **runtime**) built by a composition root (`createRuntime`) from validated config. It talks to models through a gateway, to tools through MCP and a sandbox, to humans through MCP Apps, elicitation, or the CLI, and to observability backends only through a collector.
+The harness is a **runtime** built by a composition root (`createRuntime`) from validated config. It runs in one process for local use, or as a set of interchangeable workers fed by a durable queue. It talks to models through a gateway, to tools through MCP and a sandbox, to humans through MCP Apps, elicitation, or the CLI, and to observability backends only through a collector.
 
 ```mermaid
 flowchart LR
@@ -59,12 +63,15 @@ flowchart LR
 
   subgraph Clients["Entry points"]
     CLI["harness CLI"]
+    SDKC["Applications via @harness/sdk"]
     MCPC["MCP clients (any)"]
     HOST["Reference MCP Apps host (sandboxed iframes)"]
   end
 
   subgraph Runtime["Harness runtime"]
     CP["Control plane (MCP server)"]
+    Q["Run queue + workers"]
+    HIB["Human input broker"]
     CORE["Core run loop (state machine)"]
     GW["Model gateway"]
     CTX["Context strategies"]
@@ -81,7 +88,7 @@ flowchart LR
   end
 
   subgraph External["Outside the trust boundary"]
-    LLM["Model providers: Anthropic, OpenAI, local OpenAI-compatible"]
+    LLM["Model providers: Anthropic, OpenAI, Azure OpenAI, Bedrock, Vertex, local OpenAI-compatible"]
     SRV["MCP servers (untrusted by default)"]
     SBX["Sandbox runner (no network)"]
     COL["OTel Collector (only egress)"]
@@ -92,6 +99,14 @@ flowchart LR
   AP --> HOST
   AP --> MCPC
   CLI --> CORE
+  SDKC --> Q
+  CP --> Q
+  Q --> CORE
+  SRV -- "elicitation/create" --> TOOLS
+  TOOLS --> HIB
+  CORE --> HIB
+  HIB --> CP
+  HIB --> CLI
   MCPC --> CP
   HOST --> CP
   CP --> CORE
@@ -139,6 +154,7 @@ flowchart BT
   replay["replay"]
   evalp["eval"]
   cli["cli: harness binary"]
+  sdk["sdk: public API"]
 
   telemetry --> schemas
   config --> schemas
@@ -151,6 +167,7 @@ flowchart BT
   context --> telemetry
   policy --> telemetry
   mcp --> telemetry
+  mcp --> crypto
   sandbox --> telemetry
   sandbox --> crypto
   approval --> apptel
@@ -168,6 +185,8 @@ flowchart BT
   evalp --> core
   cli --> core
   cli --> config
+  sdk --> core
+  sdk --> config
 ```
 
 | Package | Responsibility | Epics |
@@ -175,19 +194,20 @@ flowchart BT
 | `schemas` | Event envelope and payload schemas, meta/content field classification, primitives (`Id`, `Code`, `Traceparent`), config fragments, messages, browser-safe app schemas | 7, 14, 20 |
 | `crypto` | AES-256-GCM, HKDF, HMAC wrappers over `node:crypto` | 12 |
 | `telemetry` | `defineSpan` registry, allowlist span/log processors, `SafeEvent` projection, leak sentinel, metrics allowlist, cardinality guard, sanctioned logger | 4, 8, 11, 20 |
-| `store` | `EventStore` interface; in-memory, SQLite, and Postgres adapters; conformance suites; snapshots; outbox; retention; migrations | 7 |
-| `vault` | Token vault (in-memory, encrypted SQLite), key providers (local, Azure Key Vault), rotation, purge, audit, pseudonyms | 12 |
+| `store` | `EventStore` interface; in-memory, SQLite, and Postgres adapters; conformance suites; snapshots; outbox; retention; migrations; schema versioning; live subscriptions; run queue | 7, 24 |
+| `vault` | Token vault (in-memory, encrypted SQLite, Postgres with per-scope data keys), key providers (local, Azure Key Vault), rotation, purge, audit, pseudonyms | 12 |
 | `pii` | Detectors (regex + Presidio), policy evaluator, tokenizer/detokenizer, boundary decorators | 13 |
 | `models` | Provider-neutral gateway: adapters, structured-output ladder, repair, retries, routing, cost, cassettes | 14 |
 | `context` | Context strategies, token counting, offloading, plan tools | 15 |
 | `policy` | Policy schema, evaluator, approval payloads, sweeper, lint | 17 |
-| `mcp` | MCP client pool, tool registry, trace propagation, result mapping | 6 |
-| `sandbox` | Execution backends, runner service, egress proxy, workspace, snapshots | 19 |
-| `core` | Run loop, recorder, checkpoints, resume, approvals, budgets, cancel, shutdown, subagents, roles | 2, 23 |
+| `mcp` | MCP client pool, tool registry, trace propagation, result mapping, OAuth, elicitation handling | 6, 25 |
+| `sandbox` | Execution backends, runner service and pool, egress proxy, workspace, snapshots, file tools, `web.fetch` | 19, 24 |
+| `core` | Run loop, recorder, checkpoints, resume, approvals, human-input broker, budgets, quotas, cancel, shutdown, continuations, workers, subagents, roles | 2, 23, 24, 25 |
 | `host` / `app-telemetry` / `approval-app` | MCP Apps host, browser telemetry shim, reference approval UI | 3, 5 |
 | `control-plane` | Run control as an MCP server, with auth and scopes | 18 |
 | `replay` / `eval` | Offline replay and diffs; eval runner, graders, statistics | 9, 16 |
 | `config` / `cli` | Config loading and secrets; the `harness` command | 20 |
+| `sdk` | The only semver-stable public API: start, continue, watch, approve, and answer runs; drives the queue and workers | 24 |
 
 ---
 
@@ -211,28 +231,30 @@ stateDiagram-v2
   cancelled --> [*]
 ```
 
-Terminal states absorb every trigger. Transitions and the state fold (`foldRunState`) are pure functions. A log containing an illegal transition is rejected as `corrupt_log`.
+Durable suspensions carry a reason: `awaiting_approval`, `awaiting_input`, `awaiting_subagent`, or `shutdown`. Terminal states absorb every trigger. Transitions and the state fold (`foldRunState`) are pure functions. A log containing an illegal transition is rejected as `corrupt_log`.
 
 ### Event vocabulary
 
-Each event field is classified `meta` (safe for telemetry: ids, enums, counts, timings, codes) or `content` (anything user- or model-derived; this is the default for new fields). A compile-time-exhaustive map enforces the classification. The store keeps meta and content separately, encrypts content, and exports only an explicit `SafeEvent` projection.
+Every event carries a schema version `v`. Readers upcast older versions on read, and a committed schema lock plus legacy-log tests fail CI when a schema changes without a version bump and upcaster. Each event field is classified `meta` (safe for telemetry: ids, enums, counts, timings, codes) or `content` (anything user- or model-derived; this is the default for new fields). A compile-time-exhaustive map enforces the classification. The store keeps meta and content separately, encrypts content, and exports only an explicit `SafeEvent` projection.
 
 | Event | Meta fields (examples) | Content fields |
 |---|---|---|
-| `run_created` | configHash, policyVersion, parentRunId, depth, replayOf | |
+| `run_created` | configHash, policyVersion, parentRunId, depth, replayOf, continuationOf, requestedBy | |
 | `run_input` | inputKind | input |
 | `run_status_changed` | from, to, reason | |
 | `model_request` | requestId, provider, model, role, schemaHash | messages |
-| `model_response` | tokens, costMicros, latencyMs, finishReason, schemaValid, repairAttempts, rungUsed, fallbackDepth | content, providerBlobs |
-| `tool_intent` | callId, toolId, idempotent, policyDecision, ruleId | args (tokenized) |
-| `tool_result` | callId, toolId, outcome, errorCode, latencyMs | result (tokenized) |
+| `model_response` | tokens, cache read/write tokens, costMicros, latencyMs, finishReason, schemaValid, repairAttempts, rungUsed, fallbackDepth | content, providerBlobs |
+| `tool_intent` | callId, toolId, idempotent, policyDecision, ruleId, argsHash | args (tokenized) |
+| `tool_result` | callId, toolId, outcome, errorCode, latencyMs, executedArgsHash | result (tokenized) |
 | `approval_requested` | approvalId, callId, expiresAt | payload |
-| `approval_resolved` | approvalId, decision, decidedBy, reason, waitMs | edits |
+| `approval_resolved` | approvalId, decision, decidedBy, approverId, reason, waitMs | edits |
 | `checkpoint_written` | checkpointId, atSeq, traceparent, workspaceRef | |
 | `context_compacted` | fromSeq, toSeq, strategy, strategyVersion | summary |
 | `pii_action` | boundary, action, entity types and counts | |
 | `budget_exceeded` | budget, limit, observed | |
 | `subagent_spawned` / `subagent_completed` | childRunId, role, outcome, usage | |
+| `input_requested` | requestId, source, serverId, callId, mode, expiresAt | message, schema, url |
+| `input_resolved` / `input_completed` | requestId, action, decidedBy, approverId, waitMs | answer (tokenized) |
 
 ### The loop
 
@@ -292,7 +314,7 @@ Rules worth knowing:
 - Unknown tools are denied without execution (`unknown_tool`). Timeouts and exceptions become typed `tool_result` outcomes carrying an error code and never a message.
 - Policy errors fail closed (`policy_error`). PII-blocked entities deny the call (`pii_blocked`).
 - On resume, a dangling intent with no result is re-run only if the tool is declared idempotent. Otherwise it is escalated to a human (default) or failed (`resume_ambiguous`).
-- Built-in tools include `read_offloaded` (pages offloaded output), `update_plan`/`read_plan`, `sandbox.exec`, `agent.spawn`, and `agent.verify`.
+- Built-in tools include `fs.read`/`fs.write`/`fs.edit`/`fs.list`/`fs.search` (path-safe workspace files with optional hash preconditions), `web.fetch` (allowlisted hosts only, run in the sandbox through the egress proxy, results marked untrusted), `sandbox.exec`, `read_offloaded`, `update_plan`/`read_plan`, `agent.ask_user`, `agent.spawn`, and `agent.verify`.
 
 ---
 
@@ -307,7 +329,7 @@ flowchart TD
   PREP --> SAN["PII sanitizer per attempt: tokenize for hosted, optional raw for trusted local"]
   SAN --> LIM["Rate limiter + concurrency semaphore"]
   LIM --> RET["Retry with full-jitter backoff, retry-after, run deadline"]
-  RET --> ADP["Provider adapter: Anthropic / OpenAI / OpenAI-compatible / cassette"]
+  RET --> ADP["Provider adapter: Anthropic / OpenAI / Azure OpenAI / Bedrock / Vertex / OpenAI-compatible / cassette"]
   ADP --> ENF{"Structured output requested?"}
   ENF -- no --> RESP["ModelResponse + usage + cost"]
   ENF -- yes --> R1["Rung 1: native JSON schema"]
@@ -327,6 +349,7 @@ flowchart TD
 
 - **Lossless rehydration.** Provider-specific blobs (reasoning blocks, signatures, tool-use ids) are stored as `opaque` parts and re-sent byte-for-byte to the same provider. On a provider switch they are dropped and normalized parts continue the conversation.
 - **Schema lowering.** Zod schemas convert to JSON Schema and are lowered per provider. Dropped constraints are recorded and still enforced by the Zod parse afterwards. `schemaHash` is stable across key order.
+- **Streaming and caching.** Adapters may stream; the gateway applies idle timeouts, reports token-count progress, and records the assembled response, identical to a non-streamed one. Prompt caching marks the stable prefix of each request (tools, system prompt, older context) and accounts for cached reads and writes separately.
 - **Cost.** Prices come from operator config (none hardcoded) and are computed in integer micros. Cost feeds budgets, spans, and bounded metrics.
 - **Cassettes.** A `cassette` provider records and replays responses keyed by a request hash. Replay mode serves them from the event log in order and detects divergence.
 
@@ -386,7 +409,7 @@ flowchart LR
 ```
 
 - **Tokens** use the `TYPE_N` form inside angle brackets (for example email number 1). They are numbered per run (per scope, for subagent trees) and per entity type. The same value always maps to the same token within a scope.
-- **The vault** is a separate SQLite file with AES-256-GCM values bound by AAD to `(run, token)`, keyed-HMAC lookups (never unkeyed hashes), and `secure_delete`. It exposes four least-privilege interfaces: `VaultWriter`, `VaultResolver`, `VaultReader`, `VaultAdmin`.
+- **The vault** is a separate encrypted store (SQLite, or Postgres for multi-instance deployments, never sharing the event store's database). Values are encrypted with a per-scope data key wrapped by the master key and bound by AAD to `(run, token)`; lookups use keyed HMACs (never unkeyed hashes). Purging a scope deletes its data key first, so leftover ciphertext, including in backups, can no longer be decrypted. It exposes four least-privilege interfaces: `VaultWriter`, `VaultResolver`, `VaultReader`, `VaultAdmin`.
 - **Policy safety rails.** `allow` is invalid at `storage`. Secrets and cards can be `allow`ed only to an explicit tool destination. Raw values reach a local model only with an explicit opt-in.
 - **Structured outputs** with format constraints (such as `email`) validate tokenized values by resolving them in memory only.
 - **Every detokenization** (tool argument or human reveal) is recorded as a metadata-only `pii_action` audit event.
@@ -424,10 +447,11 @@ sequenceDiagram
   L->>L: apply decision: execute, execute edited args, or record denied
 ```
 
+- **Who acted** is recorded: runs carry `requestedBy` and approvals carry `approverId` (control-plane token, CLI principal, simulated human, or sweeper). Rules can require **separation of duties**, so the person who started a run cannot approve it. Identities reach telemetry only as opt-in pseudonyms.
 - **Edits** are limited to pointers the rule marks `editable`, validated against the tool's input schema, and re-tokenized.
 - **Self-approval is blocked.** Decision tools are app-only, or else they require an out-of-band human elicitation. Without either, the call fails closed.
 - **Approval paths**: MCP Apps UI, MCP elicitation (text clients), or `harness approvals list|show|approve|deny`. Approvals can expire and escalate to webhook notifications that carry metadata only.
-- **Invariants run on every eval trial and the golden replay.** They check that `ask` executions are preceded by a human approve or edit, that `deny` never executes, that resolutions are single, that approvals stay scoped to their run, and that edits stay within editable fields.
+- **Invariants run on every eval trial and the golden replay.** They check that `ask` executions are preceded by a human approve or edit, that `deny` never executes, that resolutions are single, that approvals stay scoped to their run, that edits stay within editable fields (verified by argument hashes), that separation of duties holds when required, and that every accepted human input was answered by a human.
 - **Tooling**: `harness policy test` (expectation fixtures) and `harness policy lint` (shadowed and over-broad rules).
 
 ---
@@ -439,6 +463,7 @@ sequenceDiagram
 - **Servers are untrusted by default.** Tool names are normalized to codes. Collisions fail startup. Descriptions are sanitized and capped. Server error text never enters codes, spans, or logs. Arguments are validated against the tool's JSON Schema before any network I/O.
 - **Trace context goes only to `trust: internal` servers** with `propagateTrace: true`, only in `params._meta`, and never as baggage.
 - **Stdio servers do not inherit the parent environment.** Secrets are injected only through `SecretRef`.
+- **Remote servers can require MCP authorization.** The SDK's OAuth client support handles discovery, registration, PKCE, and refresh; tokens are encrypted at rest. `harness servers login <id>` performs the interactive flow, and runs fail with `mcp_auth_required` instead of starting one.
 - `harness servers check` shows connectivity, registered and rejected tools, and propagation behavior without calling any tool.
 
 ### MCP Apps host and the telemetry door
@@ -460,7 +485,7 @@ The reference **approval app** builds to a single HTML file with no external URL
 
 ### Control plane
 
-`harness serve --stdio | --http` exposes `list_runs`, `get_run`, `approve`, `deny`, `resume_run`, `cancel_run`, `review_approval` (elicitation), a `ui://harness/runs/v1` run console, and the app-only `harness.approvals.resolve` and `harness.approvals.reveal`. Security defaults:
+`harness serve --stdio | --http` exposes `start_run`, `continue_run`, `list_runs`, `get_run`, `approve`, `deny`, `resume_run`, `cancel_run`, `review_approval` (elicitation), `list_pending_inputs`, `answer_input`, subscribable `harness://runs` resources for live updates, a `ui://harness/runs/v1` run console, and the app-only `harness.approvals.resolve` and `harness.approvals.reveal`. Security defaults:
 
 - loopback binding, and TLS required for anything else
 - bearer tokens with scopes `read | approve | run | reveal | admin` and optional run filters
@@ -546,13 +571,86 @@ flowchart TB
 
 ---
 
-## Durability: checkpoints, resume, shutdown, cancel
+## Human input: MCP elicitation and agent questions
+
+Servers and the agent can ask a human for information. The harness supports MCP elicitation (specification revision `2025-11-25`) through the MCP SDK, and adds a durable question tool for the agent. All three sources go through one human-input broker, the same events, and the same channels.
+
+| Source | Mode | Durability |
+|---|---|---|
+| MCP server `elicitation/create` during a tool call | `form` (flat primitive schema) or `url` | Live: the server holds the call open, so the harness waits with a timeout. A crash leaves a dangling tool call handled by the resume policy. |
+| MCP server returns `URLElicitationRequiredError` (`-32042`) | `url` | Durable: the run suspends with `awaiting_input` and retries the call after the human finishes (approval first if the tool is not idempotent). |
+| Agent calls `agent.ask_user` | free text or `form` | Durable: the run suspends with `awaiting_input` until a human answers or the request expires. |
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant SV as MCP server (untrusted)
+  participant MC as MCP client handler
+  participant B as Human input broker
+  participant S as Event store
+  participant CH as Channels (MCP client relay, app view, CLI)
+  participant H as Human
+
+  SV->>MC: elicitation/create (form or url) during tools/call
+  MC->>MC: mode declared? bound to in-flight call? schema in MCP subset? no secret fields? under rate limit?
+  MC->>B: InputRequest (or decline / cancel)
+  B->>S: input_requested (tokenized message, schema or url)
+  B->>CH: present request, naming the requesting server
+  CH->>H: form (review and edit before submit) or full URL with highlighted domain
+  H-->>CH: accept + answer / decline / cancel (URL opened only with consent, never by the harness)
+  CH-->>B: response + principal
+  B->>B: validate answer against schema
+  B->>S: input_resolved (answer tokenized, approverId, waitMs)
+  B-->>MC: raw answer, in memory only
+  MC-->>SV: accept / decline / cancel
+```
+
+- **Off by default.** Each server must enable elicitation and the modes it may use. The client declares only those modes.
+- **Untrusted text.** Messages are tokenized before display. Forms that ask for passwords, tokens, keys, or card data are declined, as the spec forbids secrets in form mode. URLs are checked (https, no credentials, no `javascript:` or `data:`, punycode warnings), shown in full, never prefetched, and opened only by the human.
+- **Channels.** A connected MCP client with elicitation support gets the request relayed through the control plane. Otherwise humans answer through `list_pending_inputs` and `answer_input`, the input view in the approval app, `harness inputs`, or the terminal during `harness run --interactive`.
+- **Only humans answer.** No model-visible tool can answer an input, the red-team suite tries, and an invariant checks every trial. Evals use a scripted simulated human, and replay serves recorded answers.
+
+---
+
+## Durability: checkpoints, resume, shutdown, cancel, continuations
 
 - **Checkpoints.** A snapshot (context calibration, plan, workspace ref, `traceparent`) is written atomically with `checkpoint_written`, on a cadence (default every 20 events) and always before suspending.
 - **Resume.** The worker claims the run by appending a status change with `expectedSeq = head`. Exactly one of two concurrent resumers wins. It rebuilds state from the latest snapshot plus subsequent events, starts a new segment whose root span links to the previous one, applies the dangling-intent plan and resolved approvals, and continues.
 - **Graceful shutdown.** SIGTERM/SIGINT aborts in-flight work, reaches a safe point, suspends with a checkpoint, and exits with 143/130. Compose `stop_grace_period` exceeds the harness grace period.
 - **Cancel.** Cancelling from another process uses the same conflict mechanism. The live worker sees `lease_lost`, inspects the log tail, and stops within one step. Cancellation propagates through subagent trees.
+- **Continuations.** A follow-up message to a finished run creates a new run linked by `continuationOf`. It shares the token scope, and its context includes the earlier turns. Terminal runs are never reopened.
+- **Upgrades.** Event schemas are versioned and upcast on read, and every release commits a synthetic legacy log that later code must still load, fold, project, and resume.
 - **Crash injection.** For every append boundary `k` and both modes (crash before commit, or after commit with a lost acknowledgement), the scenario is resumed from a fresh process. It must reach the reference outcome with each non-idempotent tool executed exactly once.
+
+---
+
+## Run service: SDK, queue, workers, and scaling
+
+```mermaid
+flowchart LR
+  APPS["Applications (@harness/sdk)"] --> ENQ["startRun / continueRun / resume"]
+  MCPCL["MCP clients: start_run, continue_run"] --> ENQ
+  ENQ --> EV[("Events: run_created + run_input (status pending)")]
+  ENQ --> QUEUE[("Run queue: ids only, leases, retries, dead letters")]
+  QUEUE --> W1["Worker 1"]
+  QUEUE --> W2["Worker N"]
+  W1 --> POOL["Sandbox runner pool (lease per run)"]
+  W2 --> POOL
+  W1 --> PGS[("Postgres event store")]
+  W2 --> PGS
+  W1 --> PGV[("Postgres vault (separate database)")]
+  W2 --> PGV
+  PGS -- "LISTEN/NOTIFY ids" --> LIVE["Live updates: SDK watch, MCP resource subscriptions"]
+  QUOTA["Quotas: cost and concurrency across runs"] -.-> ENQ
+  QUOTA -.-> W1
+```
+
+- **SDK.** `@harness/sdk` is the only semver-stable API, with a snapshot-tested public surface. It returns metadata and safe events by default.
+- **Queue and workers.** Run input is recorded as events before a job is enqueued, so queue rows hold ids only. Workers claim jobs with leases (`SKIP LOCKED` on Postgres), heartbeat, and on SIGTERM suspend their runs and requeue them. A crashed worker's run is reclaimed after lease expiry, and the store's `seq` conflict blocks stale appends. Approved runs resume automatically.
+- **Live updates.** Store subscriptions (Postgres `LISTEN/NOTIFY` carrying ids, SQLite polling) feed SDK `watch` and MCP resource subscriptions. The run console stops polling.
+- **Topology.** `single` mode (SQLite, one process) is the default and refuses a second instance on the same files. `multi` mode requires Postgres for store, vault, and queue, and is tested by killing a worker mid-run.
+- **Quotas.** Cost windows, run rates, and concurrency per principal or role are enforced at enqueue and before each model call. Usage is written in the same transaction as the response that caused it.
+- **Performance budgets.** Nightly benchmarks measure store throughput, resume time, sentinel and tokenizer overhead, and pipeline throughput, and fail on regressions. A soak test runs 1,000 steps with worker restarts.
 
 ---
 
@@ -633,10 +731,12 @@ Reports hold scores, counts, codes, and costs only, never transcripts. Trajector
 
 | Command | Purpose |
 |---|---|
-| `harness run`, `resume`, `inspect`, `cancel` | Start, resume, inspect (content hidden unless `--show-content`), and cancel runs |
+| `harness run`, `resume`, `inspect`, `cancel`, `continue` | Start (optionally `--interactive` to answer live elicitations), resume, inspect (content hidden unless `--show-content`), cancel, and continue runs |
+| `harness worker` | Run a queue worker |
+| `harness inputs list/show/answer/decline` | Answer human-input requests from the terminal |
 | `harness approvals list/show/approve/deny/sweep` | Terminal approval workflow; `--reveal` is explicit and audited |
 | `harness serve --stdio / --http` | Run the control-plane MCP server |
-| `harness servers check` | MCP server diagnostics without calling tools |
+| `harness servers check/login/logout` | MCP server diagnostics without calling tools; OAuth login and logout |
 | `harness context` | Inspect or compare context strategies for a stored run, read-only |
 | `harness replay` | Replay a run or trace, diff, golden compare |
 | `harness eval run/compare/check-baseline/baseline update` | Evaluations |
@@ -653,11 +753,12 @@ Global flags: `--config`, `--json` (exactly one JSON document on stdout), `--log
 | 1 | Failure (replay: behavioral difference) |
 | 2 | Usage error |
 | 3 | Invalid config |
-| 4 | Denied by policy |
-| 5 | Run suspended, waiting for approval |
+| 4 | Denied by policy (including separation-of-duties violations) |
+| 5 | Run suspended, waiting for approval or human input |
 | 6 | Budget exceeded |
-| 7 | Approval not found or already resolved |
+| 7 | Approval or input not found or already resolved |
 | 8 | Replay failure (divergence, missing result, corrupt log) |
+| 9 | Quota exceeded |
 
 ---
 
@@ -680,14 +781,14 @@ Azure Pipelines runs the stages below. Results are published as JUnit and covera
 
 ```mermaid
 flowchart LR
-  PR(["Pull request / main"]) --> STATIC["static: lint, typecheck, SPDX, DCO, licenses, agent index, telemetry lint, generated-file drift, secrets, vulns, Semgrep, threat cases, compose lint, docs checks"]
+  PR(["Pull request / main"]) --> STATIC["static: lint, typecheck, SPDX, DCO, licenses, agent index, telemetry lint, event-schema lock, generated-file drift, secrets, vulns, Semgrep, threat cases, compose lint, docs checks"]
   STATIC --> UNIT["unit: Vitest unit project, coverage at least 85% for new packages"]
-  UNIT --> INTEG["integration: compose services, Postgres, collector, Presidio, sample MCP server, Kusto emulator, Playwright, sandbox"]
-  INTEG --> GATES["gates: canary leak suite, golden replay, example and red-team evals"]
+  UNIT --> INTEG["integration: compose services, Postgres, collector, Presidio, sample and hostile MCP servers, Kusto emulator, Playwright, sandbox, multi-worker"]
+  INTEG --> GATES["gates: canary leak suite, golden replay, legacy logs, example and red-team evals"]
   GATES --> REL{"tag v*?"}
   REL -- yes --> RELEASE["release: publish packages, build + scan + SBOM + sign images, GitHub Release"]
   REL -- "no (PR)" --> DRY["release dry run"]
-  NIGHTLY(["Nightly 03:00"]) --> NE["eval replay + live (cost-capped), full-history secret scan, vuln rescan, external links, LIVE cloud tests"]
+  NIGHTLY(["Nightly 03:00"]) --> NE["eval replay + live (cost-capped), benchmarks + soak, full-history secret scan, vuln rescan, external links, LIVE cloud tests"]
 ```
 
 ---
@@ -722,50 +823,72 @@ The project states guarantees with their evidence and assumptions, and does not 
 
 ## Build plan
 
-There are 23 epics and 187 tasks. Each task is sized for one PR (about a developer-day) with explicit inputs, outputs, tests, and acceptance criteria. Task ids are `<epic>.<n>`. The diagram groups epics by their longest dependency chain, derived from each task's "Items it depends on". Tasks interleave across epics, so an epic can start before an earlier wave fully finishes.
+There are 25 epics and 216 tasks. Each task is sized for one PR (about a developer-day) with explicit inputs, outputs, tests, and acceptance criteria. Task ids are `<epic>.<n>`. The chart places every epic on the task-level dependency graph from each task's "Items it depends on": a bar runs from the earliest to the latest dependency depth among the epic's tasks. Depth is the length of the longest dependency chain to that task (the critical path is 27 steps), not calendar time. Long bars show epics whose later tasks wait on other epics.
 
 ```mermaid
-flowchart LR
-  W0["1 Foundation"] --> W1["20 Config + CLI core"]
-  W1 --> W2["7 Event store"]
-  W2 --> W3["4 Span allowlist"]
-  W3 --> W4["2 Run loop / 10 OTel Collector"]
-  W4 --> W5["12 Token vault / 14 Model gateway"]
-  W5 --> W6["6 MCP servers / 15 Context strategy"]
-  W6 --> W7["13 PII tokenizer / 19 Sandbox"]
-  W7 --> W8["8 Leak sentinel / 17 Policy + approvals"]
-  W8 --> W9["3 Host bridge / 9 Replay / 11 Backends / 16 Eval runner"]
-  W9 --> W10["5 MCP App / 23 Subagents + roles"]
-  W10 --> W11["18 Control-plane MCP server"]
-  W11 --> W12["21 Docs, examples, release"]
-  W12 --> W13["22 Security hardening"]
+gantt
+  title Epic spans on the task dependency graph (depth = longest prerequisite chain)
+  dateFormat X
+  axisFormat %s
+  section Foundations
+  1 Foundation :e1, 0, 5
+  20 Config and CLI core :e20, 2, 5
+  7 Event store :e7, 1, 21
+  4 Span allowlist :e4, 2, 13
+  section Core runtime
+  14 Model gateway :e14, 0, 15
+  2 Run loop :e2, 2, 20
+  12 Token vault :e12, 2, 13
+  13 PII tokenizer :e13, 2, 17
+  15 Context strategy :e15, 6, 18
+  17 Policy and approvals :e17, 3, 18
+  19 Sandbox :e19, 3, 16
+  section Integration and observability
+  6 MCP servers :e6, 4, 16
+  10 OTel Collector :e10, 4, 16
+  8 Leak sentinel :e8, 11, 16
+  3 Host bridge :e3, 6, 17
+  11 Backends :e11, 15, 20
+  section Humans, service, and quality
+  5 MCP App :e5, 10, 19
+  18 Control plane :e18, 14, 19
+  24 Run service and scaling :e24, 11, 22
+  25 Elicitation and human input :e25, 18, 24
+  23 Subagents and roles :e23, 17, 23
+  9 Replay :e9, 14, 20
+  16 Eval runner :e16, 18, 26
+  section Release and hardening
+  21 Docs, examples, release :e21, 3, 27
+  22 Security hardening :e22, 4, 27
 ```
 
 | # | Epic | Tasks | Spec |
 |---|---|---|---|
 | 1 | Foundation (monorepo, CI) | 10 | [epic-01](docs/engineering/tasks/epic-01-foundation.md) |
-| 2 | Run loop (resumable state machine) | 13 | [epic-02](packages/core/epic-02-run-loop.md) |
+| 2 | Run loop (resumable state machine) | 14 | [epic-02](packages/core/epic-02-run-loop.md) |
 | 3 | Host bridge (validating app telemetry) | 7 | [epic-03](packages/host/epic-03-host-bridge.md) |
 | 4 | Span allowlist | 7 | [epic-04](packages/telemetry/epic-04-span-allowlist.md) |
 | 5 | MCP App (approval app, telemetry shim) | 6 | [epic-05](packages/approval-app/epic-05-mcp-app.md) |
-| 6 | MCP servers (client, tool bridge) | 7 | [epic-06](packages/mcp/epic-06-mcp-servers.md) |
-| 7 | Event store | 12 | [epic-07](packages/store/epic-07-event-store.md) |
+| 6 | MCP servers (client, tool bridge) | 8 | [epic-06](packages/mcp/epic-06-mcp-servers.md) |
+| 7 | Event store | 14 | [epic-07](packages/store/epic-07-event-store.md) |
 | 8 | Leak sentinel | 6 | [epic-08](packages/telemetry/epic-08-leak-sentinel.md) |
 | 9 | Replay | 6 | [epic-09](packages/replay/epic-09-replay.md) |
 | 10 | OTel Collector (isolated gateway) | 6 | [epic-10](infra/collector/epic-10-otel-collector.md) |
 | 11 | Backends (sinks, dashboards, alerts) | 6 | [epic-11](infra/epic-11-backends.md) |
-| 12 | Token vault | 8 | [epic-12](packages/vault/epic-12-token-vault.md) |
+| 12 | Token vault | 9 | [epic-12](packages/vault/epic-12-token-vault.md) |
 | 13 | PII tokenizer | 11 | [epic-13](packages/pii/epic-13-pii-tokenizer.md) |
-| 14 | Model gateway | 15 | [epic-14](packages/models/epic-14-model-gateway.md) |
+| 14 | Model gateway | 20 | [epic-14](packages/models/epic-14-model-gateway.md) |
 | 15 | Context strategy | 8 | [epic-15](packages/context/epic-15-context-strategy.md) |
 | 16 | Eval runner | 11 | [epic-16](packages/eval/epic-16-eval-runner.md) |
-| 17 | Policy engine and approvals | 8 | [epic-17](packages/policy/epic-17-policy-engine-and-approvals.md) |
+| 17 | Policy engine and approvals | 9 | [epic-17](packages/policy/epic-17-policy-engine-and-approvals.md) |
 | 18 | Control-plane MCP server | 7 | [epic-18](packages/control-plane/epic-18-control-plane-mcp-server.md) |
-| 19 | Sandbox and container execution | 8 | [epic-19](packages/sandbox/epic-19-sandbox-and-container-execution.md) |
+| 19 | Sandbox and container execution | 10 | [epic-19](packages/sandbox/epic-19-sandbox-and-container-execution.md) |
 | 20 | Config and CLI core | 5 | [epic-20](packages/config/epic-20-config-and-cli-core.md) |
 | 21 | Docs, examples, release | 8 | [epic-21](docs/epic-21-docs-examples-release.md) |
 | 22 | Security hardening | 6 | [epic-22](security/epic-22-security-hardening.md) |
 | 23 | Subagents and model roles | 6 | [epic-23](packages/core/epic-23-subagents-and-model-roles.md) |
+| 24 | Run service, SDK, and horizontal scaling | 8 | [epic-24](packages/sdk/epic-24-run-service-and-scaling.md) |
+| 25 | Elicitation and human input | 8 | [epic-25](packages/mcp/epic-25-elicitation-and-human-input.md) |
 
 The full index is [`docs/engineering/tasks/README.md`](docs/engineering/tasks/README.md), and the shared rules are in [`docs/engineering/CONVENTIONS.md`](docs/engineering/CONVENTIONS.md). Completed task ids are tracked in [`docs/progress.json`](docs/progress.json).
 

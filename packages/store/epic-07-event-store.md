@@ -1,7 +1,7 @@
 # Epic #7: Event store
 
 **Goal:** the authoritative, tokenized, encrypted, append-only log that every resume, replay, and telemetry export depends on. Read `docs/engineering/CONVENTIONS.md` first.
-**Tasks:** 7.1 to 7.12, all size S.
+**Tasks:** 7.1 to 7.14, all size S.
 
 Shared design for this epic:
 - The store assigns `seq`. Callers pass `NewEvent` (an `Event` without `seq`) plus `expectedSeq`, the value the caller believes is the next free seq for the run. If the stored head differs, the append fails with `SeqConflictError` and writes nothing. This is the optimistic-concurrency mechanism that prevents two workers from resuming one run.
@@ -20,14 +20,14 @@ Shared design for this epic:
 **Items it depends on:** 1.1.
 **Implementation guidance:**
 1. Primitives (`packages/schemas/src/primitives.ts`): `Id` (`/^[0-9A-HJKMNP-TV-Z]{26}$/`), `Code` (`/^[a-z0-9_.-]{1,64}$/`), `Sha256Hex` (64 lowercase hex), `TraceId` (32 hex), `SpanId` (16 hex), `Traceparent` (`/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/`), `JsonValue` (recursive JSON schema: null, boolean, number, string, array, object).
-2. Envelope (all `meta`): `runId: Id`, `seq: int>=0`, `ts: int>=0`, `type`, `traceId: TraceId`, `spanId: SpanId`, `segmentId: Id` (one per resume segment). `NewEvent = Omit<Event, "seq">` distributed over the union.
+2. Envelope (all `meta`): `runId: Id`, `seq: int>=0`, `ts: int>=0`, `type`, `v: int>=1` (schema version of this event type, written as the current version; task 7.13 adds upcasting), `traceId: TraceId`, `spanId: SpanId`, `segmentId: Id` (one per resume segment). `NewEvent = Omit<Event, "seq">` distributed over the union.
 3. Build `Event` as `z.discriminatedUnion("type", [...])` with each member `.strict()`. Payload fields (M = meta, C = content):
    - `run_created`: configHash M Sha256Hex, policyVersion M Code, parentRunId? M Id.
    - `run_status_changed`: from/to M `RunStatus` (`pending|running|suspended|completed|failed|cancelled`), reason M Code.
    - `model_request`: requestId M Id, provider M Code, model M Code, role? M Code, schemaHash? M Sha256Hex, messages C JsonValue.
    - `model_response`: requestId M Id, provider M Code, model M Code, inputTokens M int, outputTokens M int, finishReason M Code, latencyMs M int, schemaValid M boolean, repairAttempts M int, content C JsonValue, providerBlobs C JsonValue.
-   - `tool_intent`: callId M Id, toolId M Code, idempotent M boolean, policyDecision M `allow|ask|deny`, args C JsonValue.
-   - `tool_result`: callId M Id, toolId M Code, outcome M `ok|error|denied|timeout`, errorCode? M Code, latencyMs M int, result C JsonValue.
+   - `tool_intent`: callId M Id, toolId M Code, idempotent M boolean, policyDecision M `allow|ask|deny`, argsHash M Sha256Hex (canonical JSON of the tokenized args), args C JsonValue.
+   - `tool_result`: callId M Id, toolId M Code, outcome M `ok|error|denied|timeout`, errorCode? M Code, latencyMs M int, executedArgsHash? M Sha256Hex (set when the executed args differ from the intent, for example after an approval edit), result C JsonValue.
    - `approval_requested`: approvalId M Id, callId M Id, expiresAt? M int, payload C JsonValue.
    - `approval_resolved`: approvalId M Id, decision M `approve|deny|edit`, waitMs M int, edits? C JsonValue.
    - `checkpoint_written`: checkpointId M Id, atSeq M int, traceparent M Traceparent, workspaceRef? M `Code`-like string up to 128 (`/^[A-Za-z0-9:_./-]{1,128}$/`).
@@ -294,3 +294,47 @@ interface EventStore {
 - [ ] Adapters create their schema solely through migrations.
 - [ ] Checksum drift and downgrade attempts are rejected.
 - [ ] Concurrent startups are safe on Postgres.
+
+---
+
+## 7.13 Event schema versioning, upcasters, and legacy-log tests
+
+**Parent:** #7 Event store
+**Task Description:** Let logs written by older releases keep loading after event schemas change, and make schema changes without a version bump fail CI.
+**Expected Inputs:** Stored events with the envelope `v` field (7.1), current schemas.
+**Expected Output:** `packages/schemas/src/event-versions.ts` (`EVENT_SCHEMA_VERSIONS`, `UPCASTERS`, `upcastEvent`), read-path integration in `joinEvent` and every adapter, `packages/schemas/event-schema.lock.json`, `scripts/check-event-schema.ts` (`static` stage), `scripts/gen-legacy-log.ts`, `test/fixtures/legacy-logs/`, `test/legacy-logs.test.ts`, CONVENTIONS section 4 rule.
+**Dependencies:** none.
+**Items it depends on:** 7.1, 7.10, 7.12, 9.6.
+**Implementation guidance:**
+1. `EVENT_SCHEMA_VERSIONS: Record<EventType, int>` holds the current version per type. `UPCASTERS: { [T in EventType]?: Record<number, (payload: unknown) => unknown> }` maps version `n` to a pure function producing version `n + 1`. `upcastEvent(raw)` applies the chain up to the current version, then the strict `Event.parse` runs. Writes always use the current version. Snapshots carry the same `v` and use the same mechanism.
+2. Evolution rule (write it into CONVENTIONS section 4): until the first tagged release (21.6) schemas may change in place with golden updates. From the first release on, any change to an existing event type's payload bumps its version and adds an upcaster. Fields are never removed from meta. A new required field needs an upcaster that supplies a default (for example `decidedBy: "human"` for older `approval_resolved` events). New event types are additive and start at version 1.
+3. Lock file: `check-event-schema.ts` converts each event type's Zod schema to JSON Schema with the same converter 14.7 uses (Zod's built-in conversion, or the library 14.7 records), canonicalizes it (sorted keys), hashes it, and compares with `event-schema.lock.json` (`{ type: { v, hash } }`). A hash change without a version bump, a version bump without an upcaster, or a missing lock entry fails. `--update` rewrites the lock file after a deliberate change.
+4. Legacy logs: `gen-legacy-log.ts` runs the golden scenario from 9.6 with fake providers and writes synthetic logs as JSON Lines to `test/fixtures/legacy-logs/<version>/` (`containsRealData: false` header line). The release stage (21.6) runs it for every tag and commits the output in the release PR. `legacy-logs.test.ts` loads every committed legacy log through the current code and asserts: parse and fold succeed, `toSafeEvent` succeeds, normalized replay signatures (9.4) are stable, and non-terminal logs resume to completion with fake ports.
+5. Readers never rewrite stored rows; upcasting happens on read only. Document that a data migration (rewriting old rows) is an explicit, separate tool if it is ever needed.
+**Tests to write:** upcaster chain application (1 to 3); strict parse after upcast; lock checker failure cases (hash drift, missing upcaster, missing entry) and pass case; legacy-log suite against a hand-made v1 fixture with an upcaster for a field added in v2.
+**Acceptance Criteria:**
+- [ ] Logs from earlier releases load, fold, project, and resume with current code.
+- [ ] A schema change without a version bump and upcaster fails CI.
+- [ ] The evolution rule is documented in CONVENTIONS.
+
+---
+
+## 7.14 Live event subscriptions
+
+**Parent:** #7 Event store
+**Task Description:** Let consumers follow a run's log as it grows, and follow run status changes, without polling the whole log.
+**Expected Inputs:** `runId`, a starting seq, an `AbortSignal`.
+**Expected Output:** `watch(runId, { fromSeq, signal }): AsyncIterable<Event>` and `watchRuns({ statuses?, signal }): AsyncIterable<RunSummary>` on `EventStore`, implemented in memory, SQLite, and Postgres; conformance cases.
+**Dependencies:** none.
+**Items it depends on:** 7.4, 7.6, 7.12.
+**Implementation guidance:**
+1. `watch` first yields stored events from `fromSeq`, then new events in order with no gaps or duplicates, and ends when the signal aborts or the run reaches a terminal status (after yielding the terminal event).
+2. In-memory store: an internal emitter. SQLite: an in-process emitter for appends made through the same adapter instance plus a polling fallback (default 250 ms, configurable) for writers in other processes. Postgres: inside the append transaction, `NOTIFY harness_events, '<runId>:<seq>'` (ids only, never content); listeners wake on notification and read the new rows.
+3. Bounded buffering: if a consumer falls behind by more than `maxBuffered` (default 1,000) events, the iterator re-reads from the store instead of growing memory.
+4. `watchRuns` yields `RunSummary` changes for status transitions (used by the control plane console, 24.5).
+5. Notifications carry no content; consumers read events through the normal decode path (including upcasting from 7.13).
+**Tests to write:** conformance: catch-up then live, ordering, no gaps under concurrent appends from another connection, termination on terminal status, abort, slow-consumer re-read path; Postgres notification path in the integration stage.
+**Acceptance Criteria:**
+- [ ] Subscribers see every event exactly once and in order.
+- [ ] Cross-process appends are delivered on SQLite (polling) and Postgres (notify).
+- [ ] Notifications contain ids only.

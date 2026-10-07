@@ -4,7 +4,7 @@ The `harness` CLI. Epic 20 defines the framework; commands are added by the epic
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.3, 2.10, 2.13, 6.6, 9.1, 9.5, 12.3, 12.5, 13.9, 15.7, 16.8, 17.5, 17.8, 18.1, 20.2, 20.4
+- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.3, 2.10, 2.13, 6.6, 9.1, 9.5, 12.3, 12.5, 13.9, 15.7, 16.8, 17.5, 17.8, 18.1, 20.2, 20.4, 2.14, 6.8, 24.3, 25.6
 
 ## Allowed internal imports
 - `@harness/schemas`, `@harness/telemetry`, `@harness/crypto`, `@harness/store`, `@harness/vault`, `@harness/pii`, `@harness/models`, `@harness/context`, `@harness/policy`, `@harness/mcp`, `@harness/sandbox`, `@harness/core`, `@harness/config`. Nothing else from `@harness/*`.

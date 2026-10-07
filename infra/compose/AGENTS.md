@@ -4,7 +4,7 @@ Docker Compose files: base, dev, test, prod-like, isolation fixtures.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.3, 1.8, 7.6, 10.1, 10.4, 13.3, 19.3, 19.4, 19.8
+- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.3, 1.8, 7.6, 10.1, 10.4, 13.3, 19.3, 19.4, 19.8, 12.9, 24.6
 <!-- END GENERATED: agents-index -->
 
 ## Boundaries

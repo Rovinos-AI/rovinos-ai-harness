@@ -27,5 +27,7 @@ Specs live next to the code they describe. Read `../CONVENTIONS.md` first.
 | epic-21-docs-examples-release | [docs/epic-21-docs-examples-release.md](../../../docs/epic-21-docs-examples-release.md) |
 | epic-22-security-hardening | [security/epic-22-security-hardening.md](../../../security/epic-22-security-hardening.md) |
 | epic-23-subagents-and-model-roles | [packages/core/epic-23-subagents-and-model-roles.md](../../../packages/core/epic-23-subagents-and-model-roles.md) |
+| epic-24-run-service-and-scaling | [packages/sdk/epic-24-run-service-and-scaling.md](../../../packages/sdk/epic-24-run-service-and-scaling.md) |
+| epic-25-elicitation-and-human-input | [packages/mcp/epic-25-elicitation-and-human-input.md](../../../packages/mcp/epic-25-elicitation-and-human-input.md) |
 
 When a PR completes a task, add its id to `docs/progress.json`.

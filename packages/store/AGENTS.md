@@ -4,7 +4,7 @@ EventStore interface and adapters (in-memory, SQLite, Postgres), conformance sui
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [epic-07-event-store.md](./epic-07-event-store.md): tasks 7.1-7.12
+- [epic-07-event-store.md](./epic-07-event-store.md): tasks 7.1-7.14
 
 ## Allowed internal imports
 - `@harness/schemas`, `@harness/telemetry`, `@harness/crypto`. Nothing else from `@harness/*`.

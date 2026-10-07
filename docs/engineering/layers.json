@@ -11,7 +11,7 @@
   "models": ["schemas", "telemetry"],
   "context": ["schemas", "telemetry"],
   "policy": ["schemas", "telemetry"],
-  "mcp": ["schemas", "telemetry"],
+  "mcp": ["schemas", "telemetry", "crypto"],
   "sandbox": ["schemas", "telemetry", "crypto"],
   "approval-app": ["schemas", "app-telemetry"],
   "core": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox"],
@@ -19,5 +19,6 @@
   "control-plane": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core"],
   "replay": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core"],
   "eval": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core"],
-  "cli": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core", "config"]
+  "cli": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core", "config"],
+  "sdk": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core", "config"]
 }

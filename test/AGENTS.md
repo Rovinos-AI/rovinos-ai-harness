@@ -4,7 +4,7 @@ Cross-package tests: canary gates, replay goldens, network isolation, hostile ap
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 2.11, 3.7, 5.6, 6.7, 8.5, 9.6, 10.4, 10.6, 18.7, 21.2, 22.5
+- [TASKS.md](./TASKS.md) (specs in other folders): tasks 2.11, 3.7, 5.6, 6.7, 8.5, 9.6, 10.4, 10.6, 18.7, 21.2, 22.5, 7.13, 24.6, 24.8, 25.8
 <!-- END GENERATED: agents-index -->
 
 ## Boundaries

@@ -1,7 +1,7 @@
 # Epic #19: Sandbox and container execution
 
 **Goal:** run agent-initiated commands and file operations in an isolated, resource-limited, default-deny environment, with snapshot/restore of the workspace for resume, hardened images, and compose profiles that enforce the security posture. Read `docs/engineering/CONVENTIONS.md` first, plus epics 2 (checkpoints), 10 (network isolation), and 15 (offloading).
-**Tasks:** 19.1 to 19.8, all size S.
+**Tasks:** 19.1 to 19.10, all size S.
 
 Shared design for this epic:
 - **Never mount `docker.sock`** into the harness or sandbox. The sandbox is a **separate container** (`sandbox-runner`) reached over an internal network, not a container spawned by the harness.
@@ -184,3 +184,47 @@ Shared design for this epic:
 - [ ] Every profile passes the security linter in CI.
 - [ ] `docker stop` produces a resumable suspended run within the grace period.
 - [ ] Data stores live on separate named volumes with documented backup guidance.
+
+---
+
+## 19.9 Workspace file tools
+
+**Parent:** #19 Sandbox and container execution
+**Task Description:** Give agents safe, structured file operations on their workspace so common coding and document tasks do not need shell commands.
+**Expected Inputs:** Tool calls with workspace-relative paths.
+**Expected Output:** `packages/sandbox/src/fs-tools.ts` (built-in tools `fs.read`, `fs.write`, `fs.edit`, `fs.list`, `fs.search`), runner endpoints `POST /fs/<op>` for the remote backend, tool metadata (idempotency, timeouts), rules in `examples/policy.yaml`, docs `docs/sandbox-workspace.md` section "File tools".
+**Dependencies:** none.
+**Items it depends on:** 19.5, 2.4, 15.4, 17.1.
+**Implementation guidance:**
+1. Schemas: `fs.read { path, offset?, length? (<= 256 KiB) }`; `fs.write { path, content (<= 1 MiB), mode: "create" | "overwrite", expectedSha256? }`; `fs.edit { path, edits: { oldText, newText }[] (1..20), expectedSha256? }` where each `oldText` must match exactly once (`edit_no_match`, `edit_ambiguous`); `fs.list { path, depth (0..3), limit (<= 1000) }`; `fs.search { query, regex: boolean, path?, limit (<= 200) }` with regexes passing the shared ReDoS screen.
+2. Every path goes through `resolveWorkspacePath` (19.5). `.harness/**` is read-only to these tools (offloaded output is read with `read_offloaded`). Quotas and file-size limits from 19.5 apply. Binary files are detected and returned as `{ binary: true, bytes }` only.
+3. Idempotency: `read`, `list`, `search` are idempotent. `write` and `edit` are idempotent only when `expectedSha256` is given (a retry with the same precondition either applies once or fails with `precondition_failed`); otherwise they are non-idempotent.
+4. Execution: with the remote backend, operations run inside the runner (same uid and lease as `exec`); with the in-process backend, on the local workspace. Results flow through the PII and offload decorators like any tool output.
+5. Example policy: `fs.read`, `fs.list`, `fs.search` allow; `fs.write` and `fs.edit` allow inside the workspace with an `ask` rule for paths matching configured sensitive globs.
+**Tests to write:** each operation and its limits; traversal and symlink attempts rejected (cite `T-12`); `.harness` protection; quota enforcement (cite `T-09`); edit uniqueness errors; precondition semantics on retry; binary detection; remote and in-process backends behave identically (shared test table).
+**Acceptance Criteria:**
+- [ ] Agents can read, write, edit, list, and search workspace files without a shell.
+- [ ] No path escape or quota bypass is possible through the tools.
+- [ ] Retries with preconditions never apply an edit twice.
+
+---
+
+## 19.10 `web.fetch` through the egress proxy
+
+**Parent:** #19 Sandbox and container execution
+**Task Description:** Let agents fetch web content from allowlisted hosts, executed inside the sandbox runner through the egress proxy, with the result treated as untrusted content.
+**Expected Inputs:** `web.fetch { url, accept? }` tool calls; `sandbox.egress.allow`.
+**Expected Output:** runner endpoint `POST /fetch`, `packages/sandbox/src/web-fetch-tool.ts` (built-in tool `web.fetch`), HTML-to-text converter `packages/sandbox/runner/src/html-text.ts`, docs `docs/sandbox-egress.md` section "web.fetch".
+**Dependencies:** an HTML parser for the runner (for example `parse5`; verify license against 1.7).
+**Items it depends on:** 19.4, 19.3, 13.7, 15.4.
+**Implementation guidance:**
+1. The harness process never fetches: the runner performs the request through the egress proxy, so the proxy's allowlist and private-range blocking (19.4) apply (cite `T-05`, `T-06`). With an empty allowlist the tool is not registered.
+2. Request rules: `GET` only, `https` only (except allowlisted local test hosts), no cookies, no credentials or auth headers, fixed user agent, at most 5 redirects with every hop re-checked against the allowlist, response cap 2 MiB, total timeout 20 s.
+3. Content handling: accept `text/html`, `text/plain`, `text/markdown`, `application/json`; anything else returns `{ binary: true, contentType, bytes }`. HTML is converted to text without scripts and styles; text from hidden elements is dropped and counted (`hiddenTextDropped`), because hidden text is a prompt-injection vector (22.5).
+4. Result `{ url (final, without query string if `stripQuery`), status, contentType, text, truncated, untrusted: true }` flows through PII tokenization and offloading. The tool is idempotent.
+5. Telemetry counts outcomes only; URLs and hostnames are never logged (the proxy rule from 19.4).
+**Tests to write:** allowlisted fetch through the proxy in the integration stage; denied host; redirect to a denied host blocked; private and metadata IPs blocked even via redirects; size cap and timeout; HTML conversion and hidden-text dropping; non-text types; URL never appears in logs or spans (canary).
+**Acceptance Criteria:**
+- [ ] Fetches happen only from the runner via the proxy and only to allowlisted hosts.
+- [ ] Redirects cannot reach unallowlisted or private destinations.
+- [ ] Fetched content is tokenized and marked untrusted.

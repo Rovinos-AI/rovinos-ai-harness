@@ -1,7 +1,7 @@
 # Epic #2: Run loop (resumable state machine)
 
 **Goal:** the resumable, crash-safe core that turns model calls and tool calls into an append-only event log. Read `docs/engineering/CONVENTIONS.md` first.
-**Tasks:** 2.1 to 2.13, all size S.
+**Tasks:** 2.1 to 2.14, all size S.
 
 Shared design for this epic:
 - **Ports, not packages.** `core` depends on small interfaces defined in `packages/core/src/ports.ts`: `ModelPort`, `ToolPort`, `ContextPort`, `PolicyPort`, `Clock`, `IdGenerator`, `EventStore`. Real implementations arrive in other epics (models 14, context 15, policy 17, mcp 6, sandbox 19). Fakes live in `packages/core/src/testing/` and are the only implementations used in this epic.
@@ -203,7 +203,8 @@ Shared design for this epic:
 3. `applyResolvedApprovals(state)` is used by resume: `approve` executes the tool call with original args; `edit` executes with `edits` replacing args (validate against the tool's input schema in 6.x/17.x; here pass through); `deny` records `tool_result` outcome `denied`.
 4. `waitMs = resolvedAt - requestedAt` using the event timestamps.
 5. An approval is for exactly one `callId`; multiple approvals may be pending.
-**Tests to write:** request suspends and checkpoints; resolve from a different process instance (new store connection) then resume proceeds; double resolve rejected; deny path; edit path passes edited args; `waitMs` computed from fake clock.
+6. Hashes for audit: `tool_intent.argsHash` is the SHA-256 of the canonical JSON of the recorded (tokenized) args. When an `edit` decision changes the args, the `tool_result` records `executedArgsHash` for the edited, tokenized args, so the edit-integrity invariant (22.6) can verify that only editable pointers changed.
+**Tests to write:** request suspends and checkpoints; resolve from a different process instance (new store connection) then resume proceeds; double resolve rejected; deny path; edit path passes edited args; `waitMs` computed from fake clock; `argsHash` and `executedArgsHash` recorded and consistent with the canonical args.
 **Acceptance Criteria:**
 - [ ] A run suspended for approval can be resolved and resumed after the original process exited.
 - [ ] Double resolution rejected.
@@ -295,3 +296,26 @@ Shared design for this epic:
 - [ ] A live worker stops within one step of a cancel event.
 - [ ] The log ends with exactly one `cancelled` status event.
 - [ ] Cancel of a finished run is a clean no-op.
+
+---
+
+## 2.14 Run continuations: follow-up messages to a finished run
+
+**Parent:** #2 Run loop
+**Task Description:** Let a user continue a finished conversation with a new message by creating a linked continuation run, keeping terminal states absorbing.
+**Expected Inputs:** A terminal `runId`, a follow-up input `{ goal: string, metadata? }`.
+**Expected Output:** `packages/core/src/continue.ts` (`continueRun`), schema change adding `continuationOf?: Id` (meta) to `run_created` and the `inputKind` value `follow_up` for `run_input`, transcript support for continuation chains in `packages/context/src/transcript.ts`, CLI `packages/cli/src/commands/continue.ts` (`harness continue <runId> --input <file|->`), docs section in `docs/cli.md`.
+**Dependencies:** none.
+**Items it depends on:** 2.10, 15.1, 23.2, 7.1.
+**Implementation guidance:**
+1. Terminal states stay absorbing: a continuation is a **new run** whose `run_created.continuationOf` names the previous run. Only `completed` runs can be continued by default (`run.continuations.allowFromFailed: false`). Continuing a `running` or `suspended` run fails with `run_not_terminal` (use resume or answer the pending approval/input instead).
+2. Token scope: the continuation registers the same scope as the run it continues (`RunScopeRegistry`, 23.2), so tokens in earlier turns keep resolving. Vault purge (12.6) treats a continuation chain as one scope: the scope is purged only when every run in it is terminal past the grace period.
+3. Context: `eventsToTranscript` accepts an ordered chain of logs (oldest first, found by following `continuationOf`), concatenates their groups, and appends the new run's groups. Only the newest `run_input` is pinned. Chain length is capped by `run.continuations.maxChainLength` (default 50, `continuation_chain_too_long`).
+4. Branching is allowed: two continuations of the same run are independent runs. Document it; `harness inspect` lists known continuations via `listRuns` filtering on `continuationOf` (add the index in the store migration).
+5. Budgets apply to each continuation run on its own; `run.continuations.inheritBudgets: true` optionally subtracts the chain's usage (folded from ancestor logs).
+6. Telemetry: the continuation's root `harness.run` span has a span link to the previous run's root span context; add optional attribute `harness.run.continuation_of` (id). Replay (9.1) loads the ancestor chain when resolving a continuation.
+**Tests to write:** continue a completed run and see the earlier turns in the built context; non-terminal run rejected; tokens from the first run resolve in the continuation; chain cap; branching produces independent runs; `inheritBudgets` arithmetic; span link present; replay of a continuation resolves its chain.
+**Acceptance Criteria:**
+- [ ] A finished conversation can be continued without mutating its log.
+- [ ] Tokens keep their meaning across a continuation chain.
+- [ ] Terminal states remain absorbing.

@@ -4,7 +4,7 @@ Tool execution backends, runner service, egress proxy, workspace, snapshots.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [epic-19-sandbox-and-container-execution.md](./epic-19-sandbox-and-container-execution.md): tasks 19.1-19.8
+- [epic-19-sandbox-and-container-execution.md](./epic-19-sandbox-and-container-execution.md): tasks 19.1-19.10
 
 ## Allowed internal imports
 - `@harness/schemas`, `@harness/telemetry`, `@harness/crypto`. Nothing else from `@harness/*`.

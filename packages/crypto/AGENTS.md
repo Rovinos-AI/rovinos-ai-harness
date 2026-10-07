@@ -4,7 +4,7 @@ Small shared crypto helpers: AES-256-GCM, HKDF, HMAC. Leaf package created in ta
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 7.9 (refactor), 12.2, 12.8, 19.6
+- [TASKS.md](./TASKS.md) (specs in other folders): tasks 7.9 (refactor), 12.2, 12.8, 19.6, 6.8, 12.9
 
 ## Allowed internal imports
 - None (leaf package).

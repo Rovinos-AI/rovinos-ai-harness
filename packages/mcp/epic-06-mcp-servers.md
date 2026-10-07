@@ -1,7 +1,7 @@
 # Epic #6: MCP servers (client and tool bridge)
 
 **Goal:** connect the harness to MCP servers as tool providers, with safe, per-server trace propagation, strict tool registration, and typed error mapping. Read `docs/engineering/CONVENTIONS.md` first.
-**Tasks:** 6.1 to 6.7, all size S.
+**Tasks:** 6.1 to 6.8, all size S.
 
 Shared design for this epic:
 - Package `packages/mcp` wraps the official TypeScript SDK (`@modelcontextprotocol/sdk`, verify exact package and import paths) and exposes `McpToolPort implements ToolPort` (port from 2.4).
@@ -164,3 +164,27 @@ Shared design for this epic:
 - [ ] Trace linkage verified against a real server.
 - [ ] External servers receive no trace context.
 - [ ] Non-idempotent tool executes exactly once across crash/resume.
+
+---
+
+## 6.8 OAuth authorization for remote MCP servers
+
+**Parent:** #6 MCP servers
+**Task Description:** Support MCP authorization (OAuth 2.1) for HTTP servers through the SDK's client auth support, with encrypted token storage and an explicit login command.
+**Expected Inputs:** `ServerConfig` with `transport.kind: "http"` and an `auth` block; a human for interactive login.
+**Expected Output:** `auth` field in `packages/schemas/src/config/servers.ts`, `packages/mcp/src/oauth/{provider.ts,token-store.ts}`, CLI `harness servers login <id>` and `harness servers logout <id>`, doctor check `servers_authorized`, docs `docs/mcp-servers.md` section "Authorization".
+**Dependencies:** `@modelcontextprotocol/sdk` client auth (`OAuthClientProvider` and the `auth` helper; verify names and the supported spec revision), `@harness/crypto`.
+**Items it depends on:** 6.2, 12.2, 12.3, 20.2.
+**Implementation guidance:**
+1. Config: `Http.auth?: { kind: "oauth", grant: "authorization_code" | "client_credentials", clientId?: string, clientSecret?: SecretRef, scopes?: string[], redirectPort?: int (loopback, default random) }`. `client_credentials` requires `clientSecret`.
+2. Implement the SDK's `OAuthClientProvider` so discovery (protected resource metadata, authorization server metadata), dynamic client registration when the server supports it and no `clientId` is configured, PKCE, resource indicators, and refresh all come from the SDK (verify each against the pinned SDK and spec revision; record them in the PR).
+3. Token store: a dedicated SQLite file `<dataDir>/mcp-oauth.db` holding access and refresh tokens and client registrations per server id, encrypted with AES-GCM via `@harness/crypto` using a key from the `KeyProvider` (AAD = server id). Tokens never appear in logs, spans, errors, or `servers check` output.
+4. `harness servers login <id>`: authorization code flow with a loopback redirect (`127.0.0.1`, RFC 8252 style). Print the authorization URL; open a browser only with `--open`. `logout` deletes the stored tokens.
+5. At run time an expired session refreshes silently. If interactive authorization is needed, the call fails with `mcp_auth_required`, the server is marked `unavailable`, and `harness doctor` reports `servers_authorized: fail`. Runs never start interactive client authorization themselves; URL-mode elicitation is a different mechanism (epic 25) and must not be used for authorizing the harness to the server.
+6. `client_credentials` servers authenticate non-interactively at connect time.
+7. Update `layers.json`: `mcp` may import `crypto`.
+**Tests to write:** mock authorization server (discovery, registration, code exchange with PKCE, refresh, client credentials); token store encryption (no plaintext token in DB bytes, wrong AAD fails); login command with a fake browser hitting the loopback redirect; expired token refresh; `mcp_auth_required` path; no token in any log or output (canary).
+**Acceptance Criteria:**
+- [ ] Remote servers that require MCP authorization connect after `harness servers login`.
+- [ ] Tokens are encrypted at rest and never printed.
+- [ ] Runs fail clearly instead of starting interactive authorization.

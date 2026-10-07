@@ -36,6 +36,7 @@ packages/
   replay/         replay + trace diff
   eval/           eval runner and graders
   config/         Zod config loading
+  sdk/            public programmatic API (@harness/sdk), the only semver-stable surface
   cli/            `harness` CLI (bin)
 infra/
   compose/        docker-compose files (dev, test, prod-like)
@@ -65,7 +66,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 | `models` | `schemas`, `telemetry` |
 | `context` | `schemas`, `telemetry` |
 | `policy` | `schemas`, `telemetry` |
-| `mcp` | `schemas`, `telemetry` |
+| `mcp` | `schemas`, `telemetry`, `crypto` |
 | `sandbox` | `schemas`, `telemetry`, `crypto` |
 | `approval-app` | `schemas`, `app-telemetry` |
 | `core` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox` |
@@ -74,6 +75,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 | `replay` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
 | `eval` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
 | `cli` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config` |
+| `sdk` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config` |
 <!-- END GENERATED: agents-index -->
 
 ## 2. Tooling
@@ -99,7 +101,9 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 ## 4. Domain model (shared vocabulary)
 
 - **Run**: one execution of an agent task. Identified by `runId` (ULID). Has a monotonically increasing `seq` of events starting at 0.
-- **Event**: immutable envelope `{ runId, seq, ts, type, traceId, spanId, ... }`. Event types (canonical set, extended only by adding to `@harness/schemas`): `run_created`, `run_input` (added by task 15.1), `run_status_changed`, `model_request`, `model_response`, `tool_intent`, `tool_result`, `approval_requested`, `approval_resolved`, `checkpoint_written`, `context_compacted`, `pii_action`, `budget_exceeded`, `subagent_spawned`, `subagent_completed`.
+- **Event**: immutable envelope `{ runId, seq, ts, type, v, traceId, spanId, segmentId, ... }` where `v` is the schema version of that event type. Event types (canonical set, extended only by adding to `@harness/schemas`): `run_created`, `run_input` (added by task 15.1), `run_status_changed`, `model_request`, `model_response`, `tool_intent`, `tool_result`, `approval_requested`, `approval_resolved`, `checkpoint_written`, `context_compacted`, `pii_action`, `budget_exceeded`, `subagent_spawned`, `subagent_completed`, `input_requested`, `input_resolved`, `input_completed` (added by task 25.1).
+- **Schema evolution** (task 7.13): until the first tagged release, event schemas may change in place with golden updates. From the first release on, any change to an existing event type bumps its `v` and adds an upcaster; meta fields are never removed; new required fields need an upcaster default. `event-schema.lock.json` and the legacy-log tests enforce this.
+- **Principal**: who acted, as a Code with a kind prefix (`token.<id>`, `cli.<name>`, `eval.simulated`, `system.sweeper`), recorded as `requestedBy` and `approverId` (task 17.9).
 - **Field classification**: every event field is `meta` (safe for telemetry: IDs, enums, counts, timings, codes) or `content` (anything user- or model-derived). New fields default to `content`.
 - **SafeEvent**: closed, `.strict()` projection of an event containing only `meta`-classified fields from an explicit allowlist. Built by `toSafeEvent()` in `@harness/telemetry`.
 - **Code**: string matching `^[a-z0-9_.-]{1,64}$`. **Id**: 26-char ULID.
@@ -108,6 +112,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 - **Checkpoint**: event-log offset plus snapshot (compacted context, plan, workspace reference, `traceparent`).
 - **Trusted server**: MCP server configured `trust: internal`; only these receive trace context.
 - **Policy decision**: `allow | ask | deny`. `ask` suspends the run.
+- **Human input**: a question for a human from an MCP server (elicitation, form or URL mode) or from the agent (`agent.ask_user`). Durable inputs suspend the run with reason `awaiting_input` (epic 25).
 
 ## 5. Telemetry rules (apply to every task that emits spans, logs, or metrics)
 

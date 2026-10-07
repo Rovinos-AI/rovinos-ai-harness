@@ -4,7 +4,7 @@ Tool-call policy engine: schema, deterministic evaluator, approval payloads, swe
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [epic-17-policy-engine-and-approvals.md](./epic-17-policy-engine-and-approvals.md): tasks 17.1-17.8
+- [epic-17-policy-engine-and-approvals.md](./epic-17-policy-engine-and-approvals.md): tasks 17.1-17.9
 
 ## Allowed internal imports
 - `@harness/schemas`, `@harness/telemetry`. Nothing else from `@harness/*`.
