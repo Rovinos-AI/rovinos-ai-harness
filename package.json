@@ -1,0 +1,26 @@
+{
+  "name": "rovinos-ai-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "echo 'Lint is configured in task 1.2'",
+    "typecheck": "tsc -b --noEmit",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration --passWithNoTests",
+    "test:canary": "vitest run --project canary --passWithNoTests",
+    "test:replay": "vitest run --project replay --passWithNoTests",
+    "gen:agents": "node scripts/gen-agents-index.mjs",
+    "check:agents": "node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "3.2.6",
+    "typescript": "5.9.3",
+    "vitest": "3.2.6"
+  }
+}
