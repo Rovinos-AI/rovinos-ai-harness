@@ -1,12 +1,13 @@
 # Epic #3: Host bridge (validating app telemetry)
 
 **Goal:** the harness side of MCP Apps: render untrusted app UIs in a locked-down sandbox, hand them trace context, and accept their telemetry only through a validating, rate-limited, host-stamped door. Read `docs/engineering/CONVENTIONS.md` first, plus epic 4.
-**Tasks:** 3.1 to 3.7, all size S.
+**Tasks:** 3.1 to 3.8, all size S.
 
 Shared design for this epic:
 - The harness is the **MCP Apps host**. Apps are third-party, untrusted code. The host is the only component that talks to the collector pipeline.
 - Package `packages/host` has two parts: `src/server/` (Node, owns MCP clients, validation, telemetry, policy) and `src/web/` (browser reference UI bundled with esbuild). Browser code never receives secrets or raw detokenized values unless a human explicitly reveals them (17.5, 5.4).
-- MCP Apps API names (`AppBridge`, notification and method names, visibility metadata, CSP metadata) come from the `@modelcontextprotocol/ext-apps` package and the extension spec (verify every name against the installed version and spec revision; the extension is recent and may change). Where this document names a method it is descriptive; use the real name from the package and record it in the PR.
+- MCP Apps is the official extension `io.modelcontextprotocol/ui` (CONVENTIONS section 10: ext-apps specification revision 2026-01-26, package `@modelcontextprotocol/ext-apps`). The host uses the package's `AppBridge` module for iframe rendering, the postMessage JSON-RPC dialect (`ui/initialize` and the other `ui/*` methods), and tool-call proxying. Where this document names a method it is descriptive; use the real name from the pinned package and record it in the PR.
+- The host advertises the extension per request in `_meta["io.modelcontextprotocol/clientCapabilities"].extensions["io.modelcontextprotocol/ui"] = { mimeTypes: ["text/html;profile=mcp-app"] }` (MCP 2026-07-28) and only for servers whose config enables apps. Servers that do not support the extension fall back to text content.
 - Defaults are deny: no network from the iframe, no tool calls from the app except an explicit per-app allowlist, no top navigation.
 
 ---
@@ -17,11 +18,11 @@ Shared design for this epic:
 **Task Description:** Build a minimal web host that renders a `ui://` resource in a sandboxed iframe and connects it with the SDK's host-side bridge.
 **Expected Inputs:** An MCP server exposing a `ui://` resource and a tool whose metadata references it.
 **Expected Output:** `packages/host/src/server/index.ts` (static server + WebSocket/SSE to the browser), `packages/host/src/web/{index.html,host.ts,bridge.ts}`, host config fragment `packages/schemas/src/config/host.ts` (`apps: { id: Code, resourceUri: string, telemetry: boolean, allowedTools: Code[] }[]`), docs `docs/host.md`.
-**Dependencies:** `@modelcontextprotocol/ext-apps` (host-side `app-bridge` export, verify), `esbuild`, Playwright (test only).
+**Dependencies:** `@modelcontextprotocol/ext-apps` (`AppBridge` host module), `@modelcontextprotocol/client` (v2), `esbuild`, Playwright (test only).
 **Items it depends on:** 6.2, 1.8.
 **Implementation guidance:**
 1. Server: serves the static page on `127.0.0.1` only by default (`host.listen` config), exposes a local-only channel (WebSocket) to the browser carrying host events. Require a random per-process bearer token (printed once via CLI output, never logged) for the channel; reject cross-origin requests (`Origin` check).
-2. Resource fetch: when a tool result references a `ui://` resource, the server reads it via MCP `resources/read` from the originating server and validates the MIME type is the MCP Apps HTML type (verify) and size at most 1 MiB.
+2. Resource fetch: tools declare their UI with `_meta.ui.resourceUri`; the host may preload it. The server reads it via MCP `resources/read` from the originating server and validates the MIME type is `text/html;profile=mcp-app` and size at most 1 MiB. Resource `_meta.ui.permissions` (camera, microphone, and so on) are denied unless listed in `host.permissionAllowlist` (default empty); `_meta.ui.csp` domains are honored only when allowlisted (step 3).
 3. Iframe: create with `sandbox="allow-scripts"` only (no `allow-same-origin`, no `allow-top-navigation`, no `allow-forms`, no `allow-popups`), `referrerpolicy="no-referrer"`, content via `srcdoc` wrapped with a CSP meta tag: `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'`. Ignore any CSP domains the resource requests unless the domain appears in `host.cspAllowlist` (default empty); log a code `app_csp_request_ignored`.
 4. Connect with the SDK host bridge, implementing only: initialization, delivering the tool input and result to the app, and receiving the app's calls (routed to 3.3's handler).
 5. Each app instance gets a `sessionId` (ULID) and an `appId` from config; an iframe for an unknown `resourceUri` is refused (`app_unknown`).
@@ -59,12 +60,12 @@ Shared design for this epic:
 **Parent:** #3 Host bridge
 **Task Description:** Receive app telemetry through a host-local, app-only tool and restrict which other tools an app may call.
 **Expected Inputs:** App-initiated tool calls over the bridge.
-**Expected Output:** `packages/host/src/server/app-calls.ts` (`AppCallRouter`), host-local tool `harness.telemetry.emit` with app-only visibility metadata.
+**Expected Output:** `packages/host/src/server/app-calls.ts` (`AppCallRouter`), host-local tool `harness.telemetry.emit` declared app-only through the MCP Apps tool visibility metadata.
 **Dependencies:** none.
 **Items it depends on:** 3.1, 3.2.
 **Implementation guidance:**
 1. `AppCallRouter.handle(session, request)`: if the tool name is `harness.telemetry.emit`, handle locally (never forward to any MCP server). If the name is in `apps[session.appId].allowedTools`, forward through the normal tool pipeline (policy 17.3 still applies, with `context.subagent=false` and an added policy context key `app: <appId>`). Anything else returns a JSON-RPC error `app_tool_not_allowed` and counts `harness.host.app_rejected{reason="unknown_tool"}`.
-2. The telemetry tool is declared with visibility restricted to the app (verify the metadata field, for example `_meta.ui.visibility: ["app"]`) and is **never** part of the `ToolSpec` list given to the model; add a test asserting the model-facing registry never contains it.
+2. The telemetry tool is declared with visibility restricted to the app (the ext-apps 2026-01-26 visibility field, `_meta.ui.visibility: ["app"]`; verify against the pinned package) and is **never** part of the `ToolSpec` list given to the model; add a test asserting the model-facing registry never contains it.
 3. Calls from an app execute with the app session's `runId`; the router rejects calls whose `callId` or approval ids belong to a different run.
 4. Apps cannot list or discover other tools; return an empty list for discovery requests unless `allowedTools` is non-empty.
 **Tests to write:** local handling (no forwarding, spy on MCP pool); allowed tool forwarded and subject to policy; disallowed tool rejected and counted; model-facing registry excludes the telemetry tool; cross-run id rejected.
@@ -159,3 +160,25 @@ Shared design for this epic:
 - [ ] Every hostile behavior is contained and counted.
 - [ ] No canary data leaves through telemetry.
 - [ ] Legitimate traffic still works after the flood.
+
+---
+
+## 3.8 Host context, display modes, and gated app-to-host requests
+
+**Parent:** #3 Host bridge
+**Task Description:** Give apps a good, consistent UX (theme, display mode, sizing) through the MCP Apps host context, and gate the app requests that can reach the model or the outside world.
+**Expected Inputs:** App `ui/*` requests over the bridge, host settings.
+**Expected Output:** host context provider in `packages/host/src/server/host-context.ts`, display-mode handling in `packages/host/src/web/`, request gates in `packages/host/src/server/app-requests.ts`, config `host.apps[].allow: { openLink, message, modelContext }`, docs `docs/host.md` sections "UX" and "App requests".
+**Dependencies:** `@modelcontextprotocol/ext-apps` (verify the host-context fields, display modes, and the `ui/*` request names in the pinned revision).
+**Items it depends on:** 3.3, 3.6, 13.4, 17.3.
+**Implementation guidance:**
+1. Host context: send theme (light or dark, plus the documented CSS variables), locale, time zone, available display modes (inline, fullscreen, picture-in-picture where supported), and container size limits during `ui/initialize`; push updates when they change. Apps resize within host limits; size requests above the limits are clamped.
+2. Open-link requests: off by default per app. When allowed, show the full URL with the registrable domain highlighted and a punycode warning, and open it only after explicit user consent, in the user's browser (never inside the harness). The same component serves URL-mode elicitation (25.4).
+3. Message and model-context requests (apps asking to add a message or context for the model): off by default per app. When allowed, the content is untrusted: it passes the PII tokenizer (boundary `model_input`), is recorded as content with the app id, and is clearly labeled as app-provided in the transcript; it can never resolve approvals or inputs.
+4. App tool calls stay under 3.3 (allowlist plus policy). Every gated request is counted with a bounded reason code; payloads are never logged.
+**Tests to write:** host context delivery and updates (Playwright with a test app); size clamping; open-link denied by default, allowed with consent, URL display rules; message requests denied by default, tokenized and labeled when allowed; counters bounded; hostile app attempts (from 3.7) still contained.
+**Acceptance Criteria:**
+- [ ] Apps render with the host's theme and display modes.
+- [ ] Apps cannot open links or reach the model without per-app opt-in and user consent.
+- [ ] App-provided content is tokenized and labeled as untrusted.
+

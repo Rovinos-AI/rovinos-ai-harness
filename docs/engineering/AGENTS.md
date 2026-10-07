@@ -4,7 +4,7 @@ Engineering planning docs: conventions, task specs, and the task index.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [tasks/epic-01-foundation.md](./tasks/epic-01-foundation.md): tasks 1.1-1.10
+- [tasks/epic-01-foundation.md](./tasks/epic-01-foundation.md): tasks 1.1-1.12
 <!-- END GENERATED: agents-index -->
 
 ## Boundaries

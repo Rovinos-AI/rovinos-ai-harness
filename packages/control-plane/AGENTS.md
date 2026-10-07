@@ -4,7 +4,7 @@ Harness-as-MCP-server: list/get runs, approvals, resume/cancel, runs console app
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [epic-18-control-plane-mcp-server.md](./epic-18-control-plane-mcp-server.md): tasks 18.1-18.7
+- [epic-18-control-plane-mcp-server.md](./epic-18-control-plane-mcp-server.md): tasks 18.1-18.8
 
 ## Allowed internal imports
 - `@harness/schemas`, `@harness/telemetry`, `@harness/crypto`, `@harness/store`, `@harness/vault`, `@harness/pii`, `@harness/models`, `@harness/context`, `@harness/policy`, `@harness/mcp`, `@harness/sandbox`, `@harness/core`. Nothing else from `@harness/*`.

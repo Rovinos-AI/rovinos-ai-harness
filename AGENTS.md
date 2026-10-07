@@ -34,11 +34,14 @@ The repo holds specs and agent instructions only; there is no pnpm workspace yet
 - Privacy: raw sensitive values exist only in the vault and in-flight memory at the tool boundary. Events, context, snapshots, files, and telemetry carry tokens. Tests use synthetic data only.
 - Approvals: the model never decides authority. Policy runs in code on tokenized args; approvals are human decisions recorded in the log.
 - Sandbox: never mount `docker.sock`; argv only, no shell strings; default deny.
+- Lint: `pnpm lint` must pass with zero errors and zero warnings. Never relax a rule to make code pass; inline suppressions need `-- <reason>` and some rules cannot be suppressed at all (task 1.2).
+- Contracts: every data contract is one Zod schema with `z.infer` types; parse untrusted JSON and YAML only with `parseJson`/`parseYaml` (CONVENTIONS 3.10).
+- MCP: target protocol 2026-07-28 with the TypeScript SDK v2 and MCP Apps (`io.modelcontextprotocol/ui`) for every human-facing UI (CONVENTIONS section 10). Never use the v1 SDK or deprecated MCP features.
 - Never commit secrets, real keys, or real personal data. Never edit generated files (including the `BEGIN GENERATED` blocks in `AGENTS.md`) by hand; regenerate and commit.
 - Do not weaken a guarantee, remove a negative-control test, or relax a lint rule to make a change pass.
 
 ## Done means
-CONVENTIONS section 8: one task per PR, signed-off commits, the tests the spec lists in the stage it names, SPDX headers, docs updated, task id in `docs/progress.json`, and `node scripts/gen-agents-index.mjs --check` passing.
+CONVENTIONS section 8: one task per PR, signed-off commits, `pnpm lint` and `pnpm typecheck` clean (zero errors, zero warnings), the tests the spec lists in the stage it names, SPDX headers, docs updated, task id in `docs/progress.json`, and `node scripts/gen-agents-index.mjs --check` passing.
 
 ## Stop and ask when
 - The task spec is ambiguous or contradicts CONVENTIONS or an `AGENTS.md`.

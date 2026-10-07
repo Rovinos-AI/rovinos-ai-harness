@@ -43,7 +43,7 @@ Shared design for this epic:
 **Items it depends on:** 1.7, 1.4.
 **Implementation guidance:**
 1. Run `pnpm audit --json --prod` (and a second pass including dev dependencies reported as warnings) and `osv-scanner --lockfile pnpm-lock.yaml --format json`; normalize both outputs into `Finding = { id, aliases, package, version, severity, fixedIn? }`.
-2. Policy: fail on `high` and `critical`; `moderate` and below produce warnings. `exceptions: { id | package, reason, expires: ISO date, owner }[]`. An exception whose `expires` is in the past fails the build. Findings matching a valid exception are listed as `accepted` in the report.
+2. Policy: fail on `high` and `critical`; `moderate` and below produce warnings. `exceptions: { id | package, reason, expires: ISO date, owner }[]`. An exception whose `expires` is in the past fails the build. Findings matching a valid exception are listed as `accepted` in the report. Policy files (`config/vuln-policy.json`, and `config/image-vuln-policy.json` in 22.4) share one Zod schema and are read with `parseJson`; scanner JSON output is parsed into Zod-validated `Finding`s (CONVENTIONS 3.10).
 3. Merge duplicates across tools by advisory id/alias (GHSA, CVE).
 4. `check-vulns.ts` separates the pure evaluator (`evaluateFindings(findings, policy, now)`) from the tool invocation for testing; the clock is injected.
 5. Nightly schedule runs the same check on `main` so newly published advisories fail the next build visibly (post to the pipeline summary; notification is the owner's choice).

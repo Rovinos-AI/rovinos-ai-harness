@@ -148,12 +148,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (const [file, next] of generate(root)) {
     if (readFileSync(join(root, file), "utf8") === next) continue;
     drift++;
-    if (check) console.error(`out of date: ${file}`);
+    if (check) process.stderr.write(`out of date: ${file}\n`);
     else writeFileSync(join(root, file), next);
   }
   if (check && drift) {
-    console.error("Run: node scripts/gen-agents-index.mjs");
-    process.exit(1);
+    process.stderr.write("Run: node scripts/gen-agents-index.mjs\n");
+    process.exitCode = 1;
   }
-  if (!check) console.log(`updated ${drift} file(s)`);
+  if (!check) process.stdout.write(`updated ${drift} file(s)\n`);
 }

@@ -16,7 +16,7 @@ Shared design for this epic:
 **Parent:** #21 Docs, examples, and release
 **Task Description:** Write the project README and architecture documentation with validated diagrams.
 **Expected Inputs:** Architecture decisions across all epics.
-**Expected Output:** `README.md`, `docs/architecture.md`, `docs/glossary.md`, `docs/decisions/README.md` (ADR index), `scripts/docs/check-links.ts`, `scripts/docs/check-mermaid.ts`, `.markdownlint-cli2.yaml`, docs checks in the `static` stage.
+**Expected Output:** `README.md`, `docs/architecture.md`, `docs/glossary.md`, `docs/decisions/README.md` (ADR index), `scripts/docs/check-links.ts`, `scripts/docs/check-mermaid.ts`, docs checks in the `static` stage (Markdown linting itself comes from 1.11; extend its config only if needed).
 **Dependencies:** `markdownlint-cli2`, `mermaid` (Node parse API, verify), Azure Pipelines status badge URL (from the Azure project, documented in the README).
 **Items it depends on:** 1.4.
 **Implementation guidance:**

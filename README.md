@@ -2,7 +2,7 @@
 
 An open source, TypeScript, container-native **agent harness**. It runs LLM agents as durable, resumable state machines over an append-only event log. Tool calls are decided by code-evaluated policy and human approvals, never by the model. Sensitive values are tokenized at every trust boundary. Telemetry is metadata-only by construction.
 
-> **Status: specification stage.** This repository holds the complete build specification (25 epics, 216 tasks) and the agent instructions used to implement it. No runtime code exists yet. This README describes the harness the specs define. Implementation starts at task 1.1 in [`docs/engineering/tasks/epic-01-foundation.md`](docs/engineering/tasks/epic-01-foundation.md). License: [Apache-2.0](LICENSE).
+> **Status: specification stage.** This repository holds the complete build specification (25 epics, 222 tasks) and the agent instructions used to implement it. No runtime code exists yet. This README describes the harness the specs define. Implementation starts at task 1.1 in [`docs/engineering/tasks/epic-01-foundation.md`](docs/engineering/tasks/epic-01-foundation.md). License: [Apache-2.0](LICENSE).
 
 ## Contents
 
@@ -27,10 +27,11 @@ An open source, TypeScript, container-native **agent harness**. It runs LLM agen
 19. [Configuration, secrets, and keys](#configuration-secrets-and-keys)
 20. [CLI](#cli)
 21. [Security hardening and supply chain](#security-hardening-and-supply-chain)
-22. [CI/CD](#cicd)
-23. [Guarantees, best-effort measures, and known gaps](#guarantees-best-effort-measures-and-known-gaps)
-24. [Build plan](#build-plan)
-25. [Repository layout and contributing](#repository-layout-and-contributing)
+22. [Code quality: linting and contracts](#code-quality-linting-and-contracts)
+23. [CI/CD](#cicd)
+24. [Guarantees, best-effort measures, and known gaps](#guarantees-best-effort-measures-and-known-gaps)
+25. [Build plan](#build-plan)
+26. [Repository layout and contributing](#repository-layout-and-contributing)
 
 ---
 
@@ -42,10 +43,11 @@ An open source, TypeScript, container-native **agent harness**. It runs LLM agen
 | **The model never decides authority** | A deterministic policy engine evaluates every tool call on tokenized arguments: `allow`, `ask`, or `deny`, where the most restrictive decision wins. `ask` suspends the run durably until a human decides. |
 | **PII tokenization at every boundary** | Detected values become run-scoped tokens (`EMAIL_1` style placeholders) before they reach a model, a tool, the store, or a UI. Raw values exist only in an encrypted, separate vault and in memory at allowlisted tool arguments. |
 | **Metadata-only telemetry** | Spans and logs come only from a closed registry of typed attributes (ids, codes, enums, numbers, booleans). Three independent layers enforce it: an in-process allowlist, an exact-match leak sentinel, and an allowlisting OpenTelemetry Collector. |
-| **MCP-native human-in-the-loop** | A reference approval UI ships as an MCP App rendered in a sandboxed iframe. The control plane is itself an MCP server, so any MCP client can act as an approval console. Elicitation and CLI fallbacks cover clients without UI support. |
+| **MCP-native human-in-the-loop** | Built on MCP 2026-07-28 and the TypeScript SDK v2. Every human-facing UI (approvals, inputs, run console, run inspector, reports) is an MCP App that runs in any MCP Apps host. The control plane is itself an MCP server, so any MCP client can act as a console. Elicitation and CLI fallbacks cover clients without UI support. |
 | **Default-deny execution** | Agent commands run in a separate, non-root, read-only, capability-dropped sandbox container with no network. Egress goes only through an allowlisting proxy. The harness never touches `docker.sock`. |
-| **Human input through MCP elicitation** | MCP servers can ask the human for input (form or URL mode), and the agent can ask questions that suspend the run durably. Requests are bound to a tool call, validated, rate-limited, and recorded. Only humans answer: no model-visible path exists. |
+| **Human input through MCP elicitation** | MCP servers ask for input with Multi Round-Trip Requests (form or URL mode), and the agent can ask its own questions. Both suspend the run durably until a human answers, then the call continues. Requests are validated, bounded, and recorded. Only humans answer: no model-visible path exists. |
 | **Runs as a service** | A semver-stable SDK, a durable run queue with interchangeable workers, live content-free run updates, quotas across runs, and a validated multi-replica topology on Postgres. Schema versioning and upcasters keep old logs loadable across upgrades. |
+| **Strict by default** | Every data contract is one Zod schema with inferred types, and untrusted JSON and YAML enter only through typed parsers. Type-aware ESLint, Prettier, and linters for Markdown, YAML, shell, Dockerfiles, and spelling run with zero errors and zero warnings as part of every task's definition of done. |
 | **Reproducible and measurable** | Recorded runs replay offline with content-free behavioral diffs that gate CI. An eval runner provides graders, trajectory and privacy assertions, simulated humans, pass@k, and A/B statistics. |
 
 ---
@@ -203,7 +205,7 @@ flowchart BT
 | `mcp` | MCP client pool, tool registry, trace propagation, result mapping, OAuth, elicitation handling | 6, 25 |
 | `sandbox` | Execution backends, runner service and pool, egress proxy, workspace, snapshots, file tools, `web.fetch` | 19, 24 |
 | `core` | Run loop, recorder, checkpoints, resume, approvals, human-input broker, budgets, quotas, cancel, shutdown, continuations, workers, subagents, roles | 2, 23, 24, 25 |
-| `host` / `app-telemetry` / `approval-app` | MCP Apps host, browser telemetry shim, reference approval UI | 3, 5 |
+| `host` / `app-telemetry` / `approval-app` | MCP Apps host (AppBridge), browser telemetry shim, and every harness MCP App view with the shared UI kit | 3, 5, 16, 18, 25 |
 | `control-plane` | Run control as an MCP server, with auth and scopes | 18 |
 | `replay` / `eval` | Offline replay and diffs; eval runner, graders, statistics | 9, 16 |
 | `config` / `cli` | Config loading and secrets; the `harness` command | 20 |
@@ -253,8 +255,8 @@ Every event carries a schema version `v`. Readers upcast older versions on read,
 | `pii_action` | boundary, action, entity types and counts | |
 | `budget_exceeded` | budget, limit, observed | |
 | `subagent_spawned` / `subagent_completed` | childRunId, role, outcome, usage | |
-| `input_requested` | requestId, source, serverId, callId, mode, expiresAt | message, schema, url |
-| `input_resolved` / `input_completed` | requestId, action, decidedBy, approverId, waitMs | answer (tokenized) |
+| `input_requested` | requestId, source, serverId, callId, round, mode, expiresAt | inputKey, message, schema, url, requestState |
+| `input_resolved` | requestId, action, decidedBy, approverId, waitMs | answer (tokenized) |
 
 ### The loop
 
@@ -458,17 +460,33 @@ sequenceDiagram
 
 ## MCP integration: servers, apps, and the control plane
 
+The harness targets MCP protocol revision **2026-07-28** with the TypeScript SDK **v2** (`@modelcontextprotocol/client`, `@modelcontextprotocol/server`) and Zod 4. Requests are stateless and carry client capabilities in `_meta`, peers are discovered with `server/discover`, and server input requests use Multi Round-Trip Requests. Peers that only speak 2025-11-25 are reached through the SDK's automatic version negotiation. Deprecated features (Sampling, Roots, Logging, HTTP+SSE) are not used. CONVENTIONS section 10 pins every baseline.
+
 ### MCP servers as tool providers
 
 - **Servers are untrusted by default.** Tool names are normalized to codes. Collisions fail startup. Descriptions are sanitized and capped. Server error text never enters codes, spans, or logs. Arguments are validated against the tool's JSON Schema before any network I/O.
 - **Trace context goes only to `trust: internal` servers** with `propagateTrace: true`, only in `params._meta`, and never as baggage.
 - **Stdio servers do not inherit the parent environment.** Secrets are injected only through `SecretRef`.
-- **Remote servers can require MCP authorization.** The SDK's OAuth client support handles discovery, registration, PKCE, and refresh; tokens are encrypted at rest. `harness servers login <id>` performs the interactive flow, and runs fail with `mcp_auth_required` instead of starting one.
+- **Remote servers can require MCP authorization.** The SDK's OAuth client support handles discovery, Client ID Metadata Documents (Dynamic Client Registration only as a fallback), PKCE, `iss` validation, issuer-bound credentials, and refresh; tokens are encrypted at rest. `harness servers login <id>` performs the interactive flow, and runs fail with `mcp_auth_required` instead of starting one.
 - `harness servers check` shows connectivity, registered and rejected tools, and propagation behavior without calling any tool.
+
+### MCP Apps: the UI layer
+
+Every human-facing harness UI is an **MCP App**, using the official extension `io.modelcontextprotocol/ui` (ext-apps revision 2026-01-26). Each view is a single-file `ui://harness/<view>/v1` resource with MIME type `text/html;profile=mcp-app`, linked from tools through `_meta.ui.resourceUri`. They run in any MCP Apps host (Claude, VS Code, and others) and in the harness's own reference host, and they all fall back to text, elicitation, or the CLI.
+
+| View | Resource | Purpose |
+|---|---|---|
+| Approval | `ui://harness/approval/v1` | Review a pending tool call with tokenized values, approve, deny, or edit allowed fields; audited, auto-masking reveal |
+| Human input | `ui://harness/input/v1` | Answer an MCP elicitation or agent question: generated form or consent-gated URL |
+| Run console | `ui://harness/runs/v1` | Live list of runs with status, steps, and "needs approval" or "needs input" badges |
+| Run inspector | `ui://harness/run/v1` | Live timeline of one run: steps, policy decisions, waits, subagents, cost and budget meters; content hidden unless a scoped action shows tokenized content |
+| Reports | `ui://harness/reports/v1` | Eval reports, A/B comparisons with confidence intervals, replay diffs |
+
+The views share one UI kit with the host's theme, display modes (inline, fullscreen, picture-in-picture), locale formatting, and accessibility to WCAG 2.2 AA. They never use `innerHTML` and load no external URLs.
 
 ### MCP Apps host and the telemetry door
 
-Apps are untrusted code. The host renders them in `sandbox="allow-scripts"` iframes (never `allow-same-origin`) with a deny-all CSP and no network. App telemetry has exactly one way in:
+As a host, the harness renders third-party apps with the SDK's `AppBridge`, advertising the extension only to servers configured for apps. Apps are untrusted code. The host renders them in `sandbox="allow-scripts"` iframes (never `allow-same-origin`) with a deny-all CSP and no network. App telemetry has exactly one way in:
 
 ```mermaid
 flowchart LR
@@ -481,14 +499,14 @@ flowchart LR
   REG --> PIPE["Standard allowlist + sentinel pipeline"]
 ```
 
-The reference **approval app** builds to a single HTML file with no external URLs. It renders the DOM with `textContent` only, passes axe accessibility checks, and falls back to CLI instructions when the bridge is unavailable.
+Requests from apps to open links or add messages or context for the model are off by default per app. When allowed, links open only with user consent, and app-provided text is tokenized and labeled as untrusted. Resource permissions (camera, microphone, and so on) are denied unless allowlisted.
 
 ### Control plane
 
-`harness serve --stdio | --http` exposes `start_run`, `continue_run`, `list_runs`, `get_run`, `approve`, `deny`, `resume_run`, `cancel_run`, `review_approval` (elicitation), `list_pending_inputs`, `answer_input`, subscribable `harness://runs` resources for live updates, a `ui://harness/runs/v1` run console, and the app-only `harness.approvals.resolve` and `harness.approvals.reveal`. Security defaults:
+`harness serve --stdio | --http` serves both protocol eras (SDK v2 `createMcpHandler`) and exposes `start_run`, `continue_run`, `list_runs`, `get_run`, `get_run_timeline`, `approve`, `deny`, `resume_run`, `cancel_run`, `review_approval` and `review_input` (elicitation through MRTR), `list_pending_inputs`, `answer_input`, `open_report`, `harness://runs` resources for live updates through `subscriptions/listen`, the MCP App views above, and the app-only `harness.approvals.resolve`, `harness.approvals.reveal`, and `harness.inputs.answer`. Human confirmation for decisions uses MRTR elicitation with a sealed, single-use `requestState` bound to the token, tool, arguments, and a short expiry. Security defaults:
 
 - loopback binding, and TLS required for anything else
-- bearer tokens with scopes `read | approve | run | reveal | admin` and optional run filters
+- bearer tokens with scopes `read | read_content | approve | run | reveal | admin` and optional run filters
 - Host and Origin checks, per-token rate limits
 - metadata-only audit logs
 - reveal off by default
@@ -573,41 +591,44 @@ flowchart TB
 
 ## Human input: MCP elicitation and agent questions
 
-Servers and the agent can ask a human for information. The harness supports MCP elicitation (specification revision `2025-11-25`) through the MCP SDK, and adds a durable question tool for the agent. All three sources go through one human-input broker, the same events, and the same channels.
+Servers and the agent can ask a human for information. The harness implements MCP elicitation as defined in protocol revision **2026-07-28**, where it uses the Multi Round-Trip Requests (MRTR) pattern. Instead of holding a call open, the server answers a tool call with an `InputRequiredResult`, and the client retries the call with the human's answers. That makes every MCP elicitation **durable**: the harness records the request, suspends the run, and retries the call after a human answers, possibly from another process days later. The agent has its own durable question tool, `agent.ask_user`. All sources go through one human-input broker, the same events, and the same channels.
 
-| Source | Mode | Durability |
+| Source | Mode | How it waits |
 |---|---|---|
-| MCP server `elicitation/create` during a tool call | `form` (flat primitive schema) or `url` | Live: the server holds the call open, so the harness waits with a timeout. A crash leaves a dangling tool call handled by the resume policy. |
-| MCP server returns `URLElicitationRequiredError` (`-32042`) | `url` | Durable: the run suspends with `awaiting_input` and retries the call after the human finishes (approval first if the tool is not idempotent). |
-| Agent calls `agent.ask_user` | free text or `form` | Durable: the run suspends with `awaiting_input` until a human answers or the request expires. |
+| MCP server returns `input_required` (2026-07-28) | `form` (flat primitive schema) or `url` | Durable: suspend with `awaiting_input`, then retry the tool call with `inputResponses` and the exact opaque `requestState`. Multiple rounds are allowed, up to a limit. |
+| Legacy server on 2025-11-25 (server-initiated `elicitation/create`, `-32042`) | `form` or `url` | Live elicitations wait with a timeout through the SDK's legacy support; URL-required errors suspend durably and retry. |
+| Agent calls `agent.ask_user` | free text or `form` | Durable: suspend with `awaiting_input` until a human answers or the request expires. |
 
 ```mermaid
 sequenceDiagram
   autonumber
+  participant L as Run loop
+  participant MC as MCP client (SDK v2)
   participant SV as MCP server (untrusted)
-  participant MC as MCP client handler
-  participant B as Human input broker
   participant S as Event store
-  participant CH as Channels (MCP client relay, app view, CLI)
+  participant CH as Channels (MCP Apps view, MCP client relay, CLI)
   participant H as Human
 
-  SV->>MC: elicitation/create (form or url) during tools/call
-  MC->>MC: mode declared? bound to in-flight call? schema in MCP subset? no secret fields? under rate limit?
-  MC->>B: InputRequest (or decline / cancel)
-  B->>S: input_requested (tokenized message, schema or url)
-  B->>CH: present request, naming the requesting server
-  CH->>H: form (review and edit before submit) or full URL with highlighted domain
-  H-->>CH: accept + answer / decline / cancel (URL opened only with consent, never by the harness)
-  CH-->>B: response + principal
-  B->>B: validate answer against schema
-  B->>S: input_resolved (answer tokenized, approverId, waitMs)
-  B-->>MC: raw answer, in memory only
-  MC-->>SV: accept / decline / cancel
+  L->>MC: tools/call (after tool_intent is durable)
+  MC->>SV: tools/call, _meta declares elicitation modes
+  SV-->>MC: InputRequiredResult: inputRequests + requestState
+  MC->>MC: method declared? schema in MCP subset? no secret fields? within rounds and size limits?
+  MC->>S: input_requested per key (tokenized message, encrypted requestState)
+  L->>S: status running -> suspended (awaiting_input), checkpoint
+  Note over L,S: Process may exit. The request lives in the log.
+  CH->>H: form (review before submit) or full URL with highlighted domain
+  H-->>CH: accept + answer / decline / cancel (URL opened only with consent)
+  CH->>S: input_resolved (answer validated with Zod, tokenized, approverId)
+  L->>S: resume: claim run, new segment
+  L->>MC: retry tools/call with inputResponses + exact requestState (raw answers in memory only)
+  MC->>SV: retried tools/call (new request id)
+  SV-->>MC: final result (or another input round)
+  MC-->>L: tool_result recorded
 ```
 
-- **Off by default.** Each server must enable elicitation and the modes it may use. The client declares only those modes.
-- **Untrusted text.** Messages are tokenized before display. Forms that ask for passwords, tokens, keys, or card data are declined, as the spec forbids secrets in form mode. URLs are checked (https, no credentials, no `javascript:` or `data:`, punycode warnings), shown in full, never prefetched, and opened only by the human.
-- **Channels.** A connected MCP client with elicitation support gets the request relayed through the control plane. Otherwise humans answer through `list_pending_inputs` and `answer_input`, the input view in the approval app, `harness inputs`, or the terminal during `harness run --interactive`.
+- **Off by default.** Each server must enable elicitation and the modes it may use. The client declares only those modes per request, and never declares the deprecated `sampling` or `roots` capabilities.
+- **Untrusted text.** Messages are tokenized before display. Forms that ask for passwords, tokens, keys, or card data are declined without asking anyone, as the spec forbids secrets in form mode. URLs are checked (https, no credentials, no `javascript:` or `data:`, punycode warnings), shown in full, never prefetched, and opened only by the human. The opaque `requestState` is stored encrypted and echoed back unmodified.
+- **Channels.** The MCP Apps input view, a relay to connected MCP clients (`review_input` re-asks the human there through MRTR, with a sealed single-use state), `list_pending_inputs` / `answer_input`, `harness inputs`, or the terminal during `harness run --interactive`.
 - **Only humans answer.** No model-visible tool can answer an input, the red-team suite tries, and an invariant checks every trial. Evals use a scripted simulated human, and replay serves recorded answers.
 
 ---
@@ -775,13 +796,22 @@ Global flags: `--config`, `--json` (exactly one JSON document on stdout), `--log
 
 ---
 
+## Code quality: linting and contracts
+
+- **Zero errors, zero warnings.** `pnpm lint` runs type-aware ESLint (`typescript-eslint` strict and stylistic type-checked presets plus import, Node, promise, regexp (ReDoS), unicorn, Vitest, and JSDoc rules), Prettier, markdownlint, ESLint YAML rules, ShellCheck, hadolint, and cspell. Every rule is an error or off, so there are no warnings to ignore. Passing it is part of every task's definition of done.
+- **Hard bans.** `any`, non-null assertions, type assertions, floating promises, `console.*`, `eval`, TypeScript `enum`, default exports, raw `JSON.parse`, `innerHTML` in browser code, cross-package relative imports, and imports that break the layering in `layers.json`. Size and complexity limits keep functions small.
+- **Suppressions are explicit.** An inline disable needs a written reason, unused disables are errors, and security-critical rules cannot be disabled inline at all.
+- **Schema-first contracts.** Config, events, tool inputs and outputs, MCP payloads, HTTP and webhook bodies, CLI `--json` output, files on disk, and repository policy files each have one Zod schema, and types are `z.infer` of it. External JSON Schema (MCP servers' tool schemas) is validated through one bounded wrapper.
+
+---
+
 ## CI/CD
 
 Azure Pipelines runs the stages below. Results are published as JUnit and coverage as Cobertura. Secrets come only from variable groups or Key Vault.
 
 ```mermaid
 flowchart LR
-  PR(["Pull request / main"]) --> STATIC["static: lint, typecheck, SPDX, DCO, licenses, agent index, telemetry lint, event-schema lock, generated-file drift, secrets, vulns, Semgrep, threat cases, compose lint, docs checks"]
+  PR(["Pull request / main"]) --> STATIC["static: lint (all linters, zero warnings), typecheck, SPDX, DCO, licenses, agent index, telemetry lint, event-schema lock, generated-file drift, secrets, vulns, Semgrep, threat cases, compose lint, docs checks"]
   STATIC --> UNIT["unit: Vitest unit project, coverage at least 85% for new packages"]
   UNIT --> INTEG["integration: compose services, Postgres, collector, Presidio, sample and hostile MCP servers, Kusto emulator, Playwright, sandbox, multi-worker"]
   INTEG --> GATES["gates: canary leak suite, golden replay, legacy logs, example and red-team evals"]
@@ -823,7 +853,7 @@ The project states guarantees with their evidence and assumptions, and does not 
 
 ## Build plan
 
-There are 25 epics and 216 tasks. Each task is sized for one PR (about a developer-day) with explicit inputs, outputs, tests, and acceptance criteria. Task ids are `<epic>.<n>`. The chart places every epic on the task-level dependency graph from each task's "Items it depends on": a bar runs from the earliest to the latest dependency depth among the epic's tasks. Depth is the length of the longest dependency chain to that task (the critical path is 27 steps), not calendar time. Long bars show epics whose later tasks wait on other epics.
+There are 25 epics and 222 tasks. Each task is sized for one PR (about a developer-day) with explicit inputs, outputs, tests, and acceptance criteria. Task ids are `<epic>.<n>`. The chart places every epic on the task-level dependency graph from each task's "Items it depends on": a bar runs from the earliest to the latest dependency depth among the epic's tasks. Depth is the length of the longest dependency chain to that task (the critical path is 27 steps), not calendar time. Long bars show epics whose later tasks wait on other epics.
 
 ```mermaid
 gantt
@@ -851,7 +881,7 @@ gantt
   11 Backends :e11, 15, 20
   section Humans, service, and quality
   5 MCP App :e5, 10, 19
-  18 Control plane :e18, 14, 19
+  18 Control plane :e18, 14, 23
   24 Run service and scaling :e24, 11, 22
   25 Elicitation and human input :e25, 18, 24
   23 Subagents and roles :e23, 17, 23
@@ -864,11 +894,11 @@ gantt
 
 | # | Epic | Tasks | Spec |
 |---|---|---|---|
-| 1 | Foundation (monorepo, CI) | 10 | [epic-01](docs/engineering/tasks/epic-01-foundation.md) |
+| 1 | Foundation (monorepo, CI) | 12 | [epic-01](docs/engineering/tasks/epic-01-foundation.md) |
 | 2 | Run loop (resumable state machine) | 14 | [epic-02](packages/core/epic-02-run-loop.md) |
-| 3 | Host bridge (validating app telemetry) | 7 | [epic-03](packages/host/epic-03-host-bridge.md) |
+| 3 | Host bridge (validating app telemetry) | 8 | [epic-03](packages/host/epic-03-host-bridge.md) |
 | 4 | Span allowlist | 7 | [epic-04](packages/telemetry/epic-04-span-allowlist.md) |
-| 5 | MCP App (approval app, telemetry shim) | 6 | [epic-05](packages/approval-app/epic-05-mcp-app.md) |
+| 5 | MCP App (approval app, telemetry shim) | 7 | [epic-05](packages/approval-app/epic-05-mcp-app.md) |
 | 6 | MCP servers (client, tool bridge) | 8 | [epic-06](packages/mcp/epic-06-mcp-servers.md) |
 | 7 | Event store | 14 | [epic-07](packages/store/epic-07-event-store.md) |
 | 8 | Leak sentinel | 6 | [epic-08](packages/telemetry/epic-08-leak-sentinel.md) |
@@ -879,9 +909,9 @@ gantt
 | 13 | PII tokenizer | 11 | [epic-13](packages/pii/epic-13-pii-tokenizer.md) |
 | 14 | Model gateway | 20 | [epic-14](packages/models/epic-14-model-gateway.md) |
 | 15 | Context strategy | 8 | [epic-15](packages/context/epic-15-context-strategy.md) |
-| 16 | Eval runner | 11 | [epic-16](packages/eval/epic-16-eval-runner.md) |
+| 16 | Eval runner | 12 | [epic-16](packages/eval/epic-16-eval-runner.md) |
 | 17 | Policy engine and approvals | 9 | [epic-17](packages/policy/epic-17-policy-engine-and-approvals.md) |
-| 18 | Control-plane MCP server | 7 | [epic-18](packages/control-plane/epic-18-control-plane-mcp-server.md) |
+| 18 | Control-plane MCP server | 8 | [epic-18](packages/control-plane/epic-18-control-plane-mcp-server.md) |
 | 19 | Sandbox and container execution | 10 | [epic-19](packages/sandbox/epic-19-sandbox-and-container-execution.md) |
 | 20 | Config and CLI core | 5 | [epic-20](packages/config/epic-20-config-and-cli-core.md) |
 | 21 | Docs, examples, release | 8 | [epic-21](docs/epic-21-docs-examples-release.md) |
@@ -908,6 +938,6 @@ docs/            documentation; docs/engineering holds CONVENTIONS, task index, 
 tools/           custom ESLint plugin
 ```
 
-Work happens one task per PR. The title is `[<task id>] <task name>`, commits are signed off (`git commit -s`), and the PR lists the tests the spec requires. Before you start, read [`AGENTS.md`](AGENTS.md), the nearest folder `AGENTS.md`, CONVENTIONS, and the task spec. This applies to coding agents too, which load [`CLAUDE.md`](CLAUDE.md) and `AGENTS.md`. `node scripts/gen-agents-index.mjs --check` keeps the agent index, task ids, and import boundaries in sync.
+Work happens one task per PR, and every task leaves `pnpm lint` and `pnpm typecheck` with zero errors and warnings. The title is `[<task id>] <task name>`, commits are signed off (`git commit -s`), and the PR lists the tests the spec requires. Before you start, read [`AGENTS.md`](AGENTS.md), the nearest folder `AGENTS.md`, CONVENTIONS, and the task spec. This applies to coding agents too, which load [`CLAUDE.md`](CLAUDE.md) and `AGENTS.md`. `node scripts/gen-agents-index.mjs --check` keeps the agent index, task ids, and import boundaries in sync.
 
 Licensed under the [Apache License 2.0](LICENSE).

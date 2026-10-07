@@ -108,7 +108,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 9.4.
 **Implementation guidance:**
-1. `ReplayReport = { schemaVersion: 1, originalRunId, replayRunId, status, configDrift, policyDrift, approximate, summary, entries, divergence?: { seq, code }, goldenMatch?: boolean }`, JSON with sorted keys; text renderer prints a summary and the first 50 entries.
+1. `ReplayReport = { schemaVersion: 1, originalRunId, replayRunId, status, configDrift, policyDrift, approximate, summary, entries, divergence?: { seq, code }, goldenMatch?: boolean }`, JSON with sorted keys; text renderer prints a summary and the first 50 entries. `ReplayReport` and the golden signature file (step 3) are Zod schemas; readers use `parseJson` (CONVENTIONS 3.10).
 2. Exit codes: `0` identical or noise-only (when not `--strict`), `1` behavioral differences (or any difference with `--strict`), `2` usage, `8` replay failure (divergence, missing result, corrupt log).
 3. `--golden <file>`: instead of comparing with a live original, compare the replay's normalized signature to a committed golden signature file `{ schemaVersion, containsRealData: false, signature: NormalizedEvent[] }`.
 4. `--update-baseline` (requires `--golden`): rewrites the golden file **only if the replay completed without divergence**; prints a diff summary; refuses (exit 2) when `CI=1` unless `--force-in-ci` is passed, and never runs in the Azure `gates` stage by default.

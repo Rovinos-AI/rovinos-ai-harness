@@ -93,7 +93,7 @@ type ContextResult = { messages: Message[]; stats: { messageCount: number; estim
 **Items it depends on:** 15.1, 2.4.
 **Implementation guidance:**
 1. `interface WorkspacePort { write(path: string, data: Uint8Array): Promise<void>; read(path: string, range?: { offset: number; length: number }): Promise<Uint8Array>; }` (the real sandbox-backed implementation arrives in 19.5). Paths are workspace-relative and must be under `.harness/offload/`; reject `..`, absolute paths, and symlinks.
-2. `OffloadingToolPort(inner, workspace, { thresholdBytes: 8192, previewChars: 400 })`: after `inner.execute`, if `JSON.stringify(result).length > thresholdBytes`, write the serialized result to `.harness/offload/<handle>.json` (`handle = "wf_" + ulid`) and return `{ "$offloaded": { handle, bytes, preview } }` as the result.
+2. `OffloadingToolPort(inner, workspace, { thresholdBytes: 8192, previewChars: 400 })`: after `inner.execute`, if `JSON.stringify(result).length > thresholdBytes`, write the serialized result to `.harness/offload/<handle>.json` (`handle = "wf_" + ulid`) and return `{ "$offloaded": { handle, bytes, preview } }` as the result. The stub is a Zod schema (`OffloadedStub`) shared with replay and the context builder (CONVENTIONS 3.10).
 3. **Ordering rule (document in code):** PII tokenization (13.7) runs on tool output **before** offloading, so files and previews contain tokens only.
 4. Built-in `read_offloaded({ handle, offset?, length? })` returns at most 16 KB per call, with `{ data, nextOffset?, totalBytes }`; unknown handle returns `outcome: "error"`, errorCode `handle_not_found`. Register it as an idempotent tool.
 5. Record the handle and byte length inside the stored result stub so replay never needs the file.

@@ -1,7 +1,7 @@
 # Epic #16: Eval runner
 
 **Goal:** make it easy to evaluate the harness, models, and harness variants on repeatable tasks, with deterministic graders, trajectory assertions, simulated humans, statistically sound reports, and a nightly Azure pipeline. Read `docs/engineering/CONVENTIONS.md` first, plus epics 2, 8 (canaries), 14 (cassettes), and 17 (approvals).
-**Tasks:** 16.1 to 16.11, all size S.
+**Tasks:** 16.1 to 16.12, all size S.
 
 Shared design for this epic:
 - Package `packages/eval` plus the CLI command group `harness eval`. Evals run the **real** run loop, store, vault, and tokenizer; only models and tools may be replaced with cassettes or fakes.
@@ -147,7 +147,7 @@ Shared design for this epic:
 **Parent:** #16 Eval runner
 **Task Description:** Compute per-trial metrics and aggregates and emit JSON, Markdown, and JUnit reports.
 **Expected Inputs:** `trials.jsonl`, grade results.
-**Expected Output:** `packages/eval/src/report/{metrics.ts,aggregate.ts,json.ts,markdown.ts,junit.ts}`, schema `EvalReport` (versioned).
+**Expected Output:** `packages/eval/src/report/{metrics.ts,aggregate.ts,json.ts,markdown.ts,junit.ts}`, Zod schema `EvalReport` (versioned; `trials.jsonl` lines and baselines use Zod schemas too, CONVENTIONS 3.10).
 **Dependencies:** none.
 **Items it depends on:** 16.3, 16.4, 16.6.
 **Implementation guidance:**
@@ -248,3 +248,24 @@ Shared design for this epic:
 - [ ] Nightly replay and live stages run on schedule with a cost cap.
 - [ ] Pass-rate regressions beyond the threshold fail the pipeline.
 - [ ] New cassettes are published as artifacts, not committed automatically.
+
+---
+
+## 16.12 Eval and replay report viewer MCP App
+
+**Parent:** #16 Eval runner
+**Task Description:** Let humans explore eval reports, A/B comparisons, and replay diffs as an MCP App in any MCP Apps host, using the content-free report data.
+**Expected Inputs:** `EvalReport`, comparison output (16.9), `ReplayReport` (9.5).
+**Expected Output:** control-plane tool `open_report { kind: "eval" | "compare" | "replay", path }` (scope `read`, paths restricted to configured report directories), view `packages/approval-app/src/views/reports/` built with the kit (5.7), resource `ui://harness/reports/v1` linked via `_meta.ui.resourceUri`, docs `docs/evals.md` section "Viewing reports".
+**Dependencies:** `@modelcontextprotocol/ext-apps`.
+**Items it depends on:** 16.9, 9.5, 18.1, 5.7.
+**Implementation guidance:**
+1. `open_report` reads the file with `parseJson` and the report's Zod schema, rejects paths outside `controlPlane.reportDirs` (path-safe resolution), and returns the parsed report (already content-free by construction).
+2. Views: pass rates by task and variant with confidence intervals and pass@k; cost, steps, and latency distributions; failing grader and invariant codes; A/B tables with verdicts and adjusted p-values; replay diffs with behavioral and noise entries side by side.
+3. Charts are drawn with inline SVG from the kit (no external libraries or URLs); every chart has a table alternative for accessibility.
+4. Same security, accessibility, theming, and size checks as the other views.
+**Tests to write:** path restriction (traversal, outside directories); rendering from fixture reports for each kind; chart and table parity; axe and XSS checks; size budget.
+**Acceptance Criteria:**
+- [ ] Eval, comparison, and replay reports can be explored in an MCP Apps host.
+- [ ] Only files in configured report directories can be opened.
+- [ ] Views meet the shared security and accessibility bar.

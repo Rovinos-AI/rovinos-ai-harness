@@ -9,6 +9,7 @@ Each task has: Parent, Task Name, Task Description, Expected Inputs, Expected Ou
 - **Task ID** = `<epic>.<n>`, where `<epic>` equals the GitHub issue number of the parent epic (for example `7.3` belongs to issue #7 "Event store").
 - **Size S** = one PR, about one developer-day, one observable "done when". If a task overruns, stop, split it, and note the split in the PR. Do not silently grow scope.
 - "(verify)" next to an external API, package name, or image tag means: confirm against the installed version's types or docs before coding, adapt if different, and record the decision in the PR description.
+- **Every task's acceptance criteria are in addition to the definition of done in §8**, which every task must meet, including zero lint errors and warnings.
 - Never invent a requirement. If guidance is ambiguous, choose the simplest behavior that satisfies the acceptance criteria and document the choice in the code header comment.
 
 ## 1. Repository layout
@@ -81,8 +82,8 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 ## 2. Tooling
 
 - Node 22 LTS, pnpm 9+, TypeScript 5.x strict (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `verbatimModuleSyntax`), ESM only (`"type": "module"`, `.js` extensions in relative imports).
-- Vitest (workspace with four projects, see §6), ESLint flat config with `typescript-eslint`, Prettier.
-- Zod for every runtime boundary (config, events, tool args/results, model outputs, telemetry). Code against the stable common API only; check which Zod major the pinned MCP SDK expects before adding it (verify) and use one major across the repo.
+- Vitest (workspace with four projects, see §6). Linting: strict type-aware ESLint (`typescript-eslint` strict and stylistic type-checked presets plus the plugins in task 1.2), Prettier, markdownlint, ShellCheck, hadolint, and cspell (task 1.11). Every rule is an error or off; `pnpm lint` runs all of them with zero warnings allowed.
+- Zod for every runtime boundary (config, events, tool args/results, model outputs, telemetry). **Zod 4, version 4.2 or later**: the MCP TypeScript SDK v2 requires it and accepts Standard Schema objects. One Zod major across the repo.
 - IDs: ULID (`ulid` package). Time: epoch milliseconds integers.
 - Build: `tsc -b`. No bundler for libraries. The browser shim (`app-telemetry`) is bundled with `esbuild`.
 
@@ -97,11 +98,12 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 7. Every file starts with `// SPDX-License-Identifier: Apache-2.0` (after a shebang if present).
 8. Public interfaces have TSDoc. Non-obvious behavior has a header comment explaining why.
 9. Keep PRs small: one task, one PR, title `[<task id>] <task name>`, commits signed off (`git commit -s`).
+10. **Schema-first contracts.** Every data contract the harness owns has exactly one Zod schema, and its TypeScript type is `z.infer` of that schema (never a hand-written duplicate). This covers config fragments, events and snapshots, tool inputs and outputs (built-in tools export their JSON Schema from the Zod schema for `ToolSpec`), model messages, MCP tool and resource payloads the harness serves, app and approval payloads, HTTP bodies (runner, proxy, webhooks), CLI `--json` output, files the harness writes or reads (cassettes, golden signatures, reports, offload stubs, legacy logs), and repository policy files read by scripts (license, vulnerability, DCO, threshold, budget, and threat-case files). Untrusted text enters only through `parseJson(schema, text)` or `parseYaml(schema, text)` (task 1.12); raw `JSON.parse` is a lint error. The only exception is JSON Schema the harness does not own (MCP servers' tool schemas), validated through `compileJsonSchema` (task 1.12). Internal ports (`EventStore`, `ModelPort`, ...) are TypeScript interfaces; the data crossing them is schema-typed.
 
 ## 4. Domain model (shared vocabulary)
 
 - **Run**: one execution of an agent task. Identified by `runId` (ULID). Has a monotonically increasing `seq` of events starting at 0.
-- **Event**: immutable envelope `{ runId, seq, ts, type, v, traceId, spanId, segmentId, ... }` where `v` is the schema version of that event type. Event types (canonical set, extended only by adding to `@harness/schemas`): `run_created`, `run_input` (added by task 15.1), `run_status_changed`, `model_request`, `model_response`, `tool_intent`, `tool_result`, `approval_requested`, `approval_resolved`, `checkpoint_written`, `context_compacted`, `pii_action`, `budget_exceeded`, `subagent_spawned`, `subagent_completed`, `input_requested`, `input_resolved`, `input_completed` (added by task 25.1).
+- **Event**: immutable envelope `{ runId, seq, ts, type, v, traceId, spanId, segmentId, ... }` where `v` is the schema version of that event type. Event types (canonical set, extended only by adding to `@harness/schemas`): `run_created`, `run_input` (added by task 15.1), `run_status_changed`, `model_request`, `model_response`, `tool_intent`, `tool_result`, `approval_requested`, `approval_resolved`, `checkpoint_written`, `context_compacted`, `pii_action`, `budget_exceeded`, `subagent_spawned`, `subagent_completed`, `input_requested`, `input_resolved` (added by task 25.1).
 - **Schema evolution** (task 7.13): until the first tagged release, event schemas may change in place with golden updates. From the first release on, any change to an existing event type bumps its `v` and adds an upcaster; meta fields are never removed; new required fields need an upcaster default. `event-schema.lock.json` and the legacy-log tests enforce this.
 - **Principal**: who acted, as a Code with a kind prefix (`token.<id>`, `cli.<name>`, `eval.simulated`, `system.sweeper`), recorded as `requestedBy` and `approverId` (task 17.9).
 - **Field classification**: every event field is `meta` (safe for telemetry: IDs, enums, counts, timings, codes) or `content` (anything user- or model-derived). New fields default to `content`.
@@ -112,7 +114,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 - **Checkpoint**: event-log offset plus snapshot (compacted context, plan, workspace reference, `traceparent`).
 - **Trusted server**: MCP server configured `trust: internal`; only these receive trace context.
 - **Policy decision**: `allow | ask | deny`. `ask` suspends the run.
-- **Human input**: a question for a human from an MCP server (elicitation, form or URL mode) or from the agent (`agent.ask_user`). Durable inputs suspend the run with reason `awaiting_input` (epic 25).
+- **Human input**: a question for a human from an MCP server (elicitation through MCP Multi Round-Trip Requests, form or URL mode) or from the agent (`agent.ask_user`). Inputs suspend the run with reason `awaiting_input` and the tool call is retried with the answers (epic 25).
 
 ## 5. Telemetry rules (apply to every task that emits spans, logs, or metrics)
 
@@ -141,7 +143,9 @@ Rules: unit tests do no network or disk outside a temp dir and use fake clock/id
 ## 8. Definition of done (every task)
 
 - [ ] Acceptance criteria all met; tests listed in the task exist and pass in Azure Pipelines.
-- [ ] Types strict, lint clean, SPDX headers present, commits signed off.
+- [ ] `pnpm lint` passes with **zero errors and zero warnings**; no lint rule relaxed; any new suppression uses the `-- <reason>` format and is listed in the PR description.
+- [ ] `pnpm typecheck` passes; SPDX headers present; commits signed off.
+- [ ] New data contracts follow §3.10 (one Zod schema, inferred types, typed parsing).
 - [ ] Public API documented (TSDoc); `docs/` updated if user-visible.
 - [ ] No `console.*`, no `any`, no new dependency without a license from the allowlist (task 1.7).
 - [ ] Telemetry added by the task follows §5.
@@ -150,3 +154,18 @@ Rules: unit tests do no network or disk outside a temp dir and use fake clock/id
 ## 9. Glossary of file names reused across tasks
 
 `packages/schemas/src/events.ts` (event Zod schemas), `packages/schemas/src/classification.ts` (field classification map), `packages/telemetry/src/registry.ts` (`defineSpan`), `packages/telemetry/src/safe-event.ts` (`toSafeEvent`), `packages/store/src/types.ts` (`EventStore`), `packages/core/src/state-machine.ts`, `packages/models/src/types.ts`, `packages/vault/src/types.ts`, `packages/policy/src/schema.ts`, `config/license-policy.json`, `infra/compose/docker-compose.yml`, `infra/collector/base.yaml`.
+
+## 10. External protocol and SDK baseline
+
+One place pins the external protocols the harness implements. Tasks reference this section instead of repeating versions; bumping a baseline is a deliberate PR that updates this section, the affected specs, and the compatibility tests.
+
+| Area | Baseline |
+|---|---|
+| MCP protocol | Specification revision **2026-07-28** (stateless requests with per-request `_meta` capabilities, `server/discover`, Multi Round-Trip Requests with `InputRequiredResult`, `subscriptions/listen`, `extensions` capability). Legacy peers on **2025-11-25** are supported through SDK version negotiation, never by default for new features. |
+| MCP TypeScript SDK | **v2**: `@modelcontextprotocol/client`, `@modelcontextprotocol/server`, `@modelcontextprotocol/node` (Node HTTP transport). Clients use `versionNegotiation: { mode: "auto" }` (probe `server/discover`, fall back to the 2025 handshake) unless a server config pins an era. Servers use `createMcpHandler` (HTTP, both eras per request) and `serveStdio`. The v1 package `@modelcontextprotocol/sdk` is not used. |
+| MCP Apps | Official extension **`io.modelcontextprotocol/ui`** (ext-apps specification revision **2026-01-26**), package `@modelcontextprotocol/ext-apps` (`App` for views, `AppBridge` for hosts). UI resources use `ui://` URIs with MIME type `text/html;profile=mcp-app`; tools link to them with `_meta.ui.resourceUri`; resources declare `_meta.ui.csp` and `_meta.ui.permissions`. Every harness user interface for humans is an MCP App (approvals, inputs, run console, run inspector, reports), with text, elicitation, and CLI fallbacks. |
+| MCP authorization | OAuth per 2026-07-28: Client ID Metadata Documents preferred, Dynamic Client Registration only as a fallback (deprecated), `iss` validation (RFC 9207), credentials keyed by issuer. |
+| Deprecated MCP features | Not implemented by the harness: Sampling, Roots, Logging (use OpenTelemetry), HTTP+SSE transport. The harness never declares the `sampling` or `roots` client capabilities. |
+| Zod | 4.x, version 4.2 or later (§2). |
+
+Names marked "(verify)" in specs are checked against the pinned package versions when implementing; record the result in the PR.

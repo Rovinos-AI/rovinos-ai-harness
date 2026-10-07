@@ -35,7 +35,7 @@ harness.close(): Promise<void>;
 ```
 2. Without a queue configured, `startRun` runs in-process (detached) and returns immediately. With a queue (24.2), it enqueues.
 3. Everything returned is metadata or `SafeEvent`s. Reading content requires an explicit `getRunContent(runId, { reveal: false })` that returns tokenized content only and is documented as sensitive.
-4. Types are exported from `index.ts` with full TSDoc. Anything not exported is internal. Add an API-extractor-style snapshot test of the public surface (a committed `.d.ts` snapshot) so breaking changes are deliberate and require a major changeset (21.6).
+4. Types are exported from `index.ts` with full TSDoc. Anything not exported is internal. Add an API-extractor-style snapshot test of the public surface (a committed `.d.ts` snapshot) so breaking changes are deliberate and require a major changeset (21.6). Every public method validates its input with a Zod schema at the boundary, and exported types are `z.infer` of those schemas (CONVENTIONS 3.10).
 5. Add `sdk` to `docs/engineering/layers.json`: it may import `core` and everything below it, plus `config`.
 **Tests to write:** each method against the in-memory store and fake ports; public surface snapshot; `watch` yields safe events only (canary); idempotency key returns the same run id; example file type-checks.
 **Acceptance Criteria:**
@@ -115,10 +115,10 @@ harness.close(): Promise<void>;
 **Task Description:** Push run progress to control-plane clients and SDK users instead of polling, with content-free payloads.
 **Expected Inputs:** Store subscriptions (7.14), gateway progress (14.16).
 **Expected Output:** MCP resources `harness://runs` and `harness://runs/<runId>` with subscribe support, `get_run { sinceSeq }` deltas, progress notifications for long `start_run` calls, console (18.3) switched to subscriptions, SDK `watch` wiring.
-**Dependencies:** `@modelcontextprotocol/sdk` resources and subscriptions (verify `resources/subscribe` and update notification names).
+**Dependencies:** `@modelcontextprotocol/server` (v2: `subscriptions/listen` support and `notify.resourceUpdated(uri)`; verify names).
 **Items it depends on:** 7.14, 18.3, 24.1, 14.16.
 **Implementation guidance:**
-1. Resource reads return metadata (`RunView`, recent `SafeEvent`s). Subscriptions send `resources/updated` notifications on new events; clients re-read with `sinceSeq` to get only new safe events.
+1. Resource reads return metadata (`RunView`, recent `SafeEvent`s). MCP 2026-07-28 replaced `resources/subscribe` with `subscriptions/listen`: clients open one listen stream opting in to `resourceSubscriptions`, and the server sends resource-updated notifications tagged with the subscription id when new events arrive; clients re-read with `sinceSeq` to get only new safe events. For 2025-11-25 clients the SDK's legacy handling serves the older subscription methods.
 2. Model progress (output token counts) is relayed as MCP progress notifications when the client supplied a progress token.
 3. The run console replaces its 5 s polling with subscriptions and keeps polling as a fallback when subscriptions are unsupported.
 4. Fan-out is bounded per client (max subscriptions per session, default 50) and dropped on disconnect.
@@ -183,7 +183,7 @@ harness.close(): Promise<void>;
 **Items it depends on:** 24.6, 8.6, 7.6, 13.4, 4.2.
 **Implementation guidance:**
 1. Scenarios: store append throughput (SQLite and Postgres, batch sizes 1, 10, 100); read and fold of 100,000 events; resume time from a snapshot versus the full log; sentinel cost per span with 1,000, 10,000, and 100,000 vault values (variants on); tokenizer throughput on 1 MiB of mixed text; spans per second through the full allowlist and sentinel pipeline; queue claim throughput with 4 workers.
-2. Budgets: `bench/budgets.json` holds absolute ceilings (for example sentinel p95 per span) and relative regression limits (default 20 percent versus the previous nightly artifact). `compare.ts` fails on violations and prints a table.
+2. Budgets: `bench/budgets.json` holds absolute ceilings (for example sentinel p95 per span) and relative regression limits (default 20 percent versus the previous nightly artifact). `compare.ts` fails on violations and prints a table. Budgets and benchmark result files have Zod schemas (CONVENTIONS 3.10).
 3. Soak test (nightly): a 1,000-step scripted run with compaction, checkpoints, and a worker restart every 100 steps; assert completion, bounded heap growth between checkpoints (heap snapshot delta under a threshold), and resume time under budget.
 4. Benchmarks run on a fixed agent pool; results are published as artifacts and never block PRs (nightly only).
 **Tests to write:** compare script unit tests (absolute and relative budgets, missing baseline); the soak test itself; scenario smoke runs in the unit stage with tiny sizes.

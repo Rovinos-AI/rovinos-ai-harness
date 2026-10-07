@@ -1,7 +1,7 @@
 # Epic #1: Foundation (monorepo and Azure Pipelines CI)
 
 **Goal:** a repo where every later task has a place to live and an automated gate. Read `docs/engineering/CONVENTIONS.md` first.
-**Tasks:** 1.1 to 1.10, all size S.
+**Tasks:** 1.1 to 1.12, all size S.
 
 ---
 
@@ -32,25 +32,32 @@
 
 ---
 
-## 1.2 Shared tsconfig and ESLint config
+## 1.2 Strict ESLint and Prettier configuration with zero-warning enforcement
 
 **Parent:** #1 Foundation
-**Task Description:** Add the shared lint configuration enforcing CONVENTIONS §3, including a local ESLint plugin package that later tasks extend, and the import-direction rule.
-**Expected Inputs:** Workspace from 1.1.
-**Expected Output:** `eslint.config.js` (flat), `tools/eslint-plugin-harness` (empty rule registry), `.prettierrc`, per-package `tsconfig.json` template, root `lint` script working.
-**Dependencies:** eslint, typescript-eslint, prettier, eslint-plugin-import (or `eslint-plugin-boundaries`) (verify flat-config support).
+**Task Description:** Add a strict, type-aware lint configuration that enforces CONVENTIONS section 3, the package boundaries, and the security-relevant bans, with no warning level: every rule either fails the build or is off.
+**Expected Inputs:** Workspace from 1.1, `docs/engineering/layers.json`.
+**Expected Output:** `eslint.config.js` (flat, type-aware), `tools/eslint-plugin-harness` (rule registry wired as plugin `harness`), `.prettierrc.json`, `.prettierignore`, per-package `tsconfig.json` template, root scripts `lint` (all linters, zero warnings) and `lint:fix`, `docs/engineering/linting.md` (rule rationale, how to suppress, how to propose a rule change), `tools/eslint-plugin-harness/src/config.test.ts`.
+**Dependencies:** `eslint` (flat config), `typescript-eslint`, `eslint-plugin-import-x`, `eslint-plugin-n`, `eslint-plugin-promise`, `eslint-plugin-regexp`, `eslint-plugin-unicorn`, `@eslint-community/eslint-plugin-eslint-comments`, `@vitest/eslint-plugin`, `eslint-plugin-jsdoc`, `eslint-config-prettier`, `prettier` (verify flat-config support for each and check licenses against the 1.7 allowlist).
 **Items it depends on:** 1.1.
 **Implementation guidance:**
-1. Rules to enable as errors: `@typescript-eslint/no-explicit-any`, `no-non-null-assertion`, `no-floating-promises`, `consistent-type-imports`, `no-console`, `eqeqeq`.
-2. Configure the import-direction rule (CONVENTIONS §1) from the allowlist in `docs/engineering/layers.json` (load the JSON in `eslint.config.js`; do not copy the table), so later packages only add a row there.
-3. Create `tools/eslint-plugin-harness/src/index.ts` exporting `{ rules: {} }` and wire it into the config as plugin `harness`; task 4.5 adds `no-raw-tracer`.
-4. Each package `tsconfig.json` is `{ "extends": "../../tsconfig.base.json", "include": ["src"], "references": [...] }`.
-5. `pnpm lint` runs `eslint .` and `prettier --check .`.
-**Tests to write:** `tools/eslint-plugin-harness/src/config.test.ts` using the ESLint Node API against fixture strings: assert `any` is flagged, `console.log` is flagged, a forbidden cross-package import is flagged, and a clean file passes.
+1. Severity policy: every rule is `error` or `off`; the config contains no `warn` (a test enforces it). `linterOptions.reportUnusedDisableDirectives: "error"`. The `lint` script runs `eslint . --max-warnings 0` so a future `warn` still fails.
+2. TypeScript files: `tseslint.configs.strictTypeChecked` and `tseslint.configs.stylisticTypeChecked` with `parserOptions.projectService: true`, plus these explicitly as errors: `no-explicit-any`, `no-non-null-assertion`, `no-floating-promises`, `no-misused-promises`, `await-thenable`, `require-await`, `return-await` (`in-try-catch`), `only-throw-error`, `no-unnecessary-condition`, `strict-boolean-expressions` (no implicit nullable or number coercion), `switch-exhaustiveness-check`, `consistent-type-imports`, `consistent-type-exports`, `explicit-module-boundary-types`, `prefer-readonly`, `no-shadow`, `no-unused-vars` (args after used, `_` prefix ignored), `consistent-type-assertions` with `assertionStyle: "never"` (CONVENTIONS 3.1; an adapter that truly needs a cast uses a disable comment with a reason), `ban-ts-comment` (only `@ts-expect-error` with a description), `no-restricted-types` for `object` and `Function`.
+3. Core rules (all JS and TS files): `eqeqeq`, `no-console`, `curly: all`, `no-eval`, `no-implied-eval`, `no-new-func`, `no-param-reassign` (with props), `prefer-const`, `no-var`, `object-shorthand`, `no-nested-ternary`, `no-restricted-syntax` banning TypeScript `enum` declarations (use string-literal unions), `export default` (named exports only), `for...in`, and labeled statements; size limits `complexity: 15`, `max-depth: 4`, `max-params: 4` (use an options object), `max-lines-per-function: 80` and `max-lines: 400` (both skipping blank lines and comments).
+4. Plugin rules (errors): `import-x/no-cycle`, `no-extraneous-dependencies`, `no-duplicates`, `no-self-import`, `no-useless-path-segments`, `no-relative-packages` (cross-package imports use `@harness/*` names), `extensions` requiring `.js` in relative imports; `n/prefer-node-protocol`, `n/no-deprecated-api`, `n/no-process-exit`; `promise/param-names`, `promise/no-multiple-resolved`; `regexp` recommended plus `regexp/no-super-linear-backtracking` and `regexp/no-misleading-capturing-group` (ReDoS, which matters for PII detectors and policy matchers); curated `unicorn` rules (`throw-new-error`, `error-message`, `prefer-type-error`, `no-instanceof-array`, `prefer-number-properties`, `prefer-string-replace-all`, `no-useless-spread`, `no-abusive-eslint-disable`, `no-document-cookie`); `jsdoc/require-jsdoc` for exported functions, classes, interfaces, and type aliases (`publicOnly`), `jsdoc/no-types`, and TSDoc tag names allowed by `jsdoc/check-tag-names`.
+5. Suppressions: `eslint-comments/require-description` (format `-- <reason>`), `no-unlimited-disable`, `no-unused-disable`, `disable-enable-pair`, and `no-restricted-disable` for rules that may never be disabled inline: `harness/*`, `no-console`, `no-eval`, `no-implied-eval`, `no-new-func`, `@typescript-eslint/no-explicit-any`, `@typescript-eslint/no-floating-promises`, `regexp/no-super-linear-backtracking`, and the boundary rules from step 7. Changing those requires a config change reviewed in a PR.
+6. Tests (`**/*.test.ts` and the other Vitest patterns): `@vitest/eslint-plugin` recommended plus `no-focused-tests`, `no-disabled-tests` (conditional skips via `skipIf` stay allowed for `LIVE` tests), `expect-expect`, `no-conditional-expect`, `valid-title`. Size limits and `jsdoc` rules are off in tests; type safety rules stay on.
+7. Boundaries: the import-direction rule reads `docs/engineering/layers.json` (load the JSON; do not copy the table) so later packages only add a row there. Package-scoped `no-restricted-imports`: `pino` and `@opentelemetry/sdk-*` only in `packages/telemetry`; `node:child_process` only in `packages/sandbox` and `scripts`; `ajv` and `yaml` only through the helpers from 1.12. Browser code (`packages/app-telemetry`, `packages/approval-app`, `packages/host/src/web`, `packages/control-plane/app`): `no-restricted-globals` for `process`, `require`, `Buffer`, `no-restricted-imports` for `node:*`, and `no-restricted-properties` for `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`.
+8. Untyped parsing: `no-restricted-properties` bans `JSON.parse` everywhere except the 1.12 helper module and tests; data enters through `parseJson(schema, text)` (CONVENTIONS 3.10).
+9. Formatting is Prettier's job (`printWidth: 100`, trailing commas, double quotes); `eslint-config-prettier` goes last. Markdown is excluded from Prettier (1.11 lints it).
+10. Ignores: `dist`, `coverage`, `node_modules`, `docs/api`, and generated files (`*.generated.*`); generated files are checked by their own `--check` scripts. Existing `scripts/*.mjs` files are linted with the JavaScript rules and must pass.
+11. `docs/engineering/linting.md` explains each rule group, the suppression format, and that relaxing a rule needs a PR that states why (root `AGENTS.md`).
+**Tests to write:** `tools/eslint-plugin-harness/src/config.test.ts` using the ESLint Node API against fixture strings: one violation per rule group above is flagged (`any`, non-null assertion, floating promise, `console.log`, `enum`, default export, deep nesting, ReDoS regex, raw `JSON.parse`, `innerHTML` in browser code, forbidden cross-package import, relative cross-package import, `.only` in a test); a clean file passes; the resolved config contains no `warn` severity; a disable comment without a reason is flagged; an inline disable of a restricted rule is flagged; an unused disable directive is flagged.
 **Acceptance Criteria:**
-- [ ] `pnpm lint` passes on the repo and fails on each fixture violation (verified by the test).
-- [ ] Import-direction rule rejects `@harness/telemetry` importing `@harness/store`.
-- [ ] Plugin package builds and loads.
+- [ ] `pnpm lint` exits 0 on the repository with zero errors and zero warnings.
+- [ ] Every fixture violation fails, proven by the test.
+- [ ] The config has no warning-level rules; suppressions require a reason; restricted rules cannot be disabled inline.
+- [ ] The import-direction rule rejects `@harness/telemetry` importing `@harness/store`.
 
 ---
 
@@ -87,7 +94,7 @@
 **Implementation guidance:**
 1. `trigger: [main]`, `pr: [main]`, `pool: { vmImage: ubuntu-latest }`.
 2. Template `node-setup.yml`: `NodeTool@0` (22.x), `corepack enable`, `Cache@2` keyed on `pnpm-lock.yaml`, `pnpm install --frozen-lockfile`.
-3. Stage `static`: steps lint, typecheck, and `pnpm check:agents` (agent index drift and broken links, from 1.1). Stage `unit`: `pnpm test:unit -- --reporter=junit --outputFile=reports/junit.xml --coverage`, then `PublishTestResults@2` (`testResultsFormat: JUnit`, `condition: succeededOrFailed()`) and `PublishCodeCoverageResults@2` (Cobertura) (verify task versions).
+3. Stage `static`: steps `pnpm lint` (every linter from 1.2 and 1.11, zero warnings), typecheck, and `pnpm check:agents` (agent index drift and broken links, from 1.1). A lint failure fails the stage; there is no allow-failure path. Stage `unit`: `pnpm test:unit -- --reporter=junit --outputFile=reports/junit.xml --coverage`, then `PublishTestResults@2` (`testResultsFormat: JUnit`, `condition: succeededOrFailed()`) and `PublishCodeCoverageResults@2` (Cobertura) (verify task versions).
 4. Stage names must be exactly the ones in CONVENTIONS §7; later tasks add steps, not rename stages.
 5. Document the exact check names that branch protection will require (used by 1.9).
 **Tests to write:** `scripts/ci/verify-pipeline.test.ts` parses the YAML and asserts: PR trigger present, stages `static` and `unit` exist in order, `static` runs `pnpm check:agents`, `PublishTestResults@2` has `condition` containing `succeededOrFailed`, no secret-looking literals.
@@ -131,7 +138,7 @@
 **Implementation guidance:**
 1. Range: `git log --no-merges --format=%H%x1f%an%x1f%ae%x1f%B%x1e origin/${TARGET_BRANCH}..HEAD`; Azure sets `System.PullRequest.TargetBranch` (pass via env). Ensure the checkout step uses `fetchDepth: 0`.
 2. Valid trailer regex: `^Signed-off-by: .+ <[^<>@\s]+@[^<>\s]+>$` (multiline). Require at least one valid trailer per commit; recommend (warn, not fail) that it match the author email.
-3. Skip commits authored by `dependabot[bot]` only if configured in `config/dco-exemptions.json` (default empty).
+3. Skip commits authored by `dependabot[bot]` only if configured in `config/dco-exemptions.json` (default empty). The exemptions file has a Zod schema next to the script and is read with `parseJson` (CONVENTIONS 3.10).
 4. Output lists offending short SHAs and the fix command (`git rebase --signoff`).
 **Tests to write:** `scripts/check-dco.test.ts` creating temp repos with `git init`: signed commit passes; unsigned fails; merge commit ignored; malformed trailer fails; exemption works.
 **Acceptance Criteria:**
@@ -150,7 +157,7 @@
 **Dependencies:** `pnpm licenses list --json` (verify output shape), `spdx-expression-parse`, `spdx-satisfies`.
 **Items it depends on:** 1.1, 1.4.
 **Implementation guidance:**
-1. Policy JSON: `allow` (Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, BlueOak-1.0.0, Unlicense, CC0-1.0, Python-2.0), `deny` (any `GPL-*`, `AGPL-*`, `LGPL-*`, `SSPL-*`, `BUSL-*`, `CC-BY-NC*`), `exceptions` array of `{ package, version?, reason, expires }`.
+1. Policy JSON: `allow` (Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, BlueOak-1.0.0, Unlicense, CC0-1.0, Python-2.0), `deny` (any `GPL-*`, `AGPL-*`, `LGPL-*`, `SSPL-*`, `BUSL-*`, `CC-BY-NC*`), `exceptions` array of `{ package, version?, reason, expires }`. `config/license-policy.json` is defined by a Zod schema (`LicensePolicy`) and read with `parseJson` (CONVENTIONS 3.10).
 2. Evaluate each package's SPDX expression: `A OR B` passes if any alternative is allowed; `A AND B` requires all allowed; unknown or `UNLICENSED` fails unless excepted.
 3. Fail on expired exceptions. Print a table of violations with package, version, license.
 4. Separate the pure evaluator (`evaluateLicenses(packages, policy)`) from the pnpm invocation for testing.
@@ -192,7 +199,7 @@
 **Dependencies:** `gh` CLI (documented, run by a maintainer), `yaml` for tests.
 **Items it depends on:** 1.4, 1.6.
 **Implementation guidance:**
-1. PR template checklist mirrors CONVENTIONS §8 and asks for the task ID.
+1. PR template checklist mirrors CONVENTIONS §8 and asks for the task ID, including the item "`pnpm lint` passes with zero errors and warnings, and any new suppression has a written reason".
 2. Issue template `task.yml` (GitHub issue forms) has inputs matching the task spec fields (Parent, Description, Inputs, Output, Tests, Acceptance, Dependencies, Depends on).
 3. Script calls `gh api -X PUT repos/{owner}/{repo}/branches/main/protection` with required status checks (the exact Azure check name(s) from 1.4 and the DCO check), required PR review count 1, no force pushes, conversation resolution required. `--dry-run` prints the JSON payload without calling.
 4. CODEOWNERS: default owner is the repo owner; add path owners for `packages/telemetry/`, `packages/pii/`, `infra/collector/` (security-sensitive).
@@ -222,3 +229,48 @@
 - [ ] Config is valid (GitHub reports no errors).
 - [ ] Major bumps for the pinned packages are ignored.
 - [ ] Policy documented.
+
+---
+
+## 1.11 Linters beyond TypeScript: Markdown, YAML, shell, Dockerfiles, spelling
+
+**Parent:** #1 Foundation
+**Task Description:** Lint every non-TypeScript file type the repository holds, under the same zero-error rule, and fix existing violations.
+**Expected Inputs:** Repository files: specs and docs (Markdown), compose, pipeline, and collector configs (YAML), scripts (shell), Dockerfiles.
+**Expected Output:** `.markdownlint-cli2.yaml`, YAML linting through `eslint-plugin-yml` in the ESLint run, `.shellcheckrc`, `.hadolint.yaml`, `cspell.json` with `docs/engineering/project-words.txt`, `.editorconfig` checks, root scripts `lint:md`, `lint:yaml`, `lint:sh`, `lint:docker`, `lint:spell` included in `pnpm lint`, fixes to existing files.
+**Dependencies:** `markdownlint-cli2`, `eslint-plugin-yml`, ShellCheck, hadolint (pinned container image or binary), `cspell`, `editorconfig-checker` (verify versions and licenses against 1.7).
+**Items it depends on:** 1.2, 1.4.
+**Implementation guidance:**
+1. Markdown: start from markdownlint defaults; disable only `MD013` (line length; specs use long lines) and allow inline HTML for the comment markers the repo uses (`<!-- BEGIN GENERATED ... -->`, `<!-- test:run -->`, `<!-- claims:allow -->`). Require fenced code blocks to declare a language. Fix existing docs and specs without changing their meaning.
+2. YAML: `eslint-plugin-yml` recommended rules plus consistent indentation and no duplicate keys, covering compose, pipelines, collector configs, and `.github`.
+3. Shell: ShellCheck at severity `style` on every `*.sh`; scripts start with `set -euo pipefail`.
+4. Dockerfiles: hadolint with no ignored rules by default (any ignore needs a reason comment in `.hadolint.yaml`), pinned image digests required.
+5. Spelling: cspell over Markdown, code comments, and string literals in `packages/*/src`, with a reviewed project word list. New words are added deliberately in the PR that introduces them.
+6. `pnpm lint` runs every linter and fails if a required binary is missing (no silent skips). Locally, `LINT_SKIP_CONTAINERS=1` may skip container-based linters with a printed warning; CI never sets it.
+**Tests to write:** fixture tests per linter (a known violation fails, a clean file passes); a test that `pnpm lint` fails when a required linter binary is absent; the repository passes every linter.
+**Acceptance Criteria:**
+- [ ] Every Markdown, YAML, shell, Dockerfile, and spelling check passes on the repository with zero errors.
+- [ ] Each linter is part of `pnpm lint` and of the `static` stage.
+- [ ] Missing linters fail instead of being skipped in CI.
+
+---
+
+## 1.12 Schema-first contract helpers
+
+**Parent:** #1 Foundation
+**Task Description:** Provide the helpers that make Zod the single source of truth for every data contract: typed parsing of JSON and YAML, and one wrapper for validating against external JSON Schema documents.
+**Expected Inputs:** Zod schemas, untrusted text, external JSON Schema documents (for example MCP tool input schemas).
+**Expected Output:** `packages/schemas/src/parse.ts` (`parseJson`, `parseYaml`, `safeParseJson`), `packages/schemas/src/json-schema.ts` (`compileJsonSchema`), `ContractError` (`contract_invalid`, issue paths only), CONVENTIONS rule 3.10, lint wiring from 1.2 step 8.
+**Dependencies:** `zod` (major per CONVENTIONS section 2), `yaml`, `ajv` with JSON Schema 2020-12 support and `ajv-formats` (verify).
+**Items it depends on:** 1.1, 1.2.
+**Implementation guidance:**
+1. `parseJson(schema, text, { maxBytes })` and `parseYaml(schema, text, { maxBytes })` enforce a size limit before parsing, parse, then validate with the Zod schema and return the inferred type. Failures throw `ContractError` with issue paths and codes only, never the received values.
+2. `compileJsonSchema(jsonSchema, { maxRefDepth, maxBytes })` compiles an **external** JSON Schema (draft 2020-12) once with `ajv`, bounds `$ref` resolution and schema size, disallows remote `$ref` fetching, and returns a validator with the same error shape. It exists only for schemas the harness does not own (MCP tool `inputSchema` and `outputSchema`); harness-owned contracts never use it.
+3. Allow `yaml` and `ajv` as dependencies of `@harness/schemas` (update `packages/schemas/AGENTS.md`); `zod` stays the only schema library for harness-owned contracts.
+4. Types for contracts come from `z.infer` of the schema; a lint test (or `no-restricted-syntax` selector) flags hand-written interfaces that duplicate a schema name exported next to them.
+**Tests to write:** valid and invalid JSON and YAML; size limits; errors contain no values (canary); external schema with `$ref` depth bound, remote `$ref` rejected, 2020-12 keywords supported; inferred types checked with `expectTypeOf`.
+**Acceptance Criteria:**
+- [ ] All JSON and YAML entering the system goes through `parseJson`/`parseYaml` (raw `JSON.parse` is a lint error).
+- [ ] External JSON Schemas are validated through one bounded wrapper.
+- [ ] Contract errors never contain submitted values.
+

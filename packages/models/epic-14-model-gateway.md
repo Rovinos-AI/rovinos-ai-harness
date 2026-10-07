@@ -331,7 +331,7 @@ Shared design for this epic:
 **Implementation guidance:**
 1. `requestHash(req)`: SHA-256 of canonical JSON of the request with volatile fields removed (`requestId`) and keys sorted.
 2. `CassetteProvider(mode: "record" | "replay" | "auto", store, inner?)`. Record: call `inner`, save `{ hash, response }`. Replay: look up by hash, throw `cassette_miss` (with the hash) if absent. Auto: replay when present, record otherwise (disabled in CI by an env guard `HARNESS_CASSETTE_AUTO=0`).
-3. `FileCassetteStore`: one JSON file per scenario, entries sorted by hash, stable formatting, committed to the repo. Content must be tokenized or synthetic; a header comment field `containsRealData: false` is required and checked on load.
+3. `FileCassetteStore`: one JSON file per scenario, entries sorted by hash, stable formatting, committed to the repo. Content must be tokenized or synthetic; a header comment field `containsRealData: false` is required and checked on load. The file format is a Zod schema (`CassetteFile`, including `containsRealData: z.literal(false)`) read with `parseJson` (CONVENTIONS 3.10).
 4. `EventLogCassetteStore(events)`: serves responses in **order** from `model_request`/`model_response` pairs in an event log (used by replay, 9.2). It verifies the hash of each incoming request equals the recorded request's hash and throws `cassette_divergence` otherwise.
 5. Cassette provider registers as a normal `ProviderAdapter` with provider code `cassette`.
 **Tests to write:** record then replay identical; hash ignores `requestId` and key order; miss error; ordered mode divergence detection; auto mode disabled by env guard; file format stability (golden).

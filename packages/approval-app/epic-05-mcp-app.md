@@ -1,13 +1,14 @@
 # Epic #5: MCP App (approval app and telemetry shim)
 
 **Goal:** a reference human-in-the-loop approval UI delivered as an MCP App, plus a tiny telemetry shim any app can use to report metadata-only spans through the host. Read `docs/engineering/CONVENTIONS.md` first, then epic 3 (the host) and epic 17 (approval payloads).
-**Tasks:** 5.1 to 5.6, all size S.
+**Tasks:** 5.1 to 5.7, all size S.
 
 Shared design for this epic:
 - The app runs in a locked-down iframe (3.1): no network, scripts only, no same-origin. All I/O happens through the host bridge.
 - **Never trust payload strings.** Render with `textContent`/DOM APIs; never use `innerHTML` with payload data. Add a test with an XSS payload.
 - **The app never sees raw sensitive values by default.** It renders tokenized args. Raw values appear only after an explicit, audited human "reveal" (5.4), are held in memory, and are auto-hidden.
-- MCP Apps client API names (`App` class, notification and method names) come from `@modelcontextprotocol/ext-apps` (verify against the installed version).
+- Views use the `App` class from `@modelcontextprotocol/ext-apps` (extension `io.modelcontextprotocol/ui`, specification revision 2026-01-26 per CONVENTIONS section 10). Resources are served as `ui://harness/<view>/v1` with MIME type `text/html;profile=mcp-app`, no `_meta.ui.csp` domains, and no `_meta.ui.permissions`.
+- This package holds **every harness MCP App view** (approval, human input, run console, run inspector, reports) and the shared UI kit (5.7). Each view builds to its own single-file HTML; the control plane serves them.
 - Packages: `packages/app-telemetry` (browser-safe, no Node APIs, no dependencies), `packages/approval-app` (builds to a single HTML file served as `ui://harness/approval/v1`). Shared browser-safe schemas live in `@harness/schemas` (`app-span.ts`, `approval-tools.ts`).
 
 ---
@@ -73,7 +74,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 **Task Description:** Build the accessible approval screen that displays an approval payload.
 **Expected Inputs:** `ApprovalPayload` (17.4) delivered via the bridge as tool input/result.
 **Expected Output:** `packages/approval-app/src/{main.ts,view.ts,styles.css,tokens.ts}`, build script producing `dist/approval.html` (single file, inline script and style, no external requests), content-hash header comment.
-**Dependencies:** `esbuild`, `jsdom` (tests), `@modelcontextprotocol/ext-apps` (client `App` class, verify).
+**Dependencies:** `esbuild`, `jsdom` (tests), `@modelcontextprotocol/ext-apps` (`App` class).
 **Items it depends on:** 5.1, 17.4, 3.1.
 **Implementation guidance:**
 1. Connect with the SDK app class, receive tool input/result, validate with the shared `ApprovalPayload` schema (import from `@harness/schemas`; the payload schema must be browser-safe). Invalid payload renders an error state and reports `ui.error` code `payload_invalid`.
@@ -152,3 +153,26 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 - [ ] Full approve, deny, and edit flows work end to end in a real browser.
 - [ ] Fallback instructions appear when the bridge or tools are unavailable.
 - [ ] XSS payloads do not execute and no canary reaches telemetry.
+
+---
+
+## 5.7 Shared UI kit and multi-view build for harness MCP Apps
+
+**Parent:** #5 MCP App
+**Task Description:** Give every harness MCP App the same components, theming, accessibility, and security posture, and build each view to its own single-file resource.
+**Expected Inputs:** Host context (theme, display mode, locale) from the bridge; views from 5.3, 18.3, 18.8, 16.12, 25.7.
+**Expected Output:** `packages/approval-app/src/kit/` (token pills, form renderer for the elicitation form schema, data table, timeline, status badges, meters, confirmation dialog, URL display with domain highlight, empty and error states), `packages/approval-app/src/views/<view>/`, theme tokens mapped from host CSS variables, string catalog `src/kit/strings.ts`, build emitting `dist/<view>.html` per view, docs `docs/apps-ux.md`.
+**Dependencies:** `esbuild`, `jsdom`, `axe-core`, `@modelcontextprotocol/ext-apps`.
+**Items it depends on:** 5.3, 3.8.
+**Implementation guidance:**
+1. Components build DOM with `createElement` and `textContent` only (no `innerHTML`), are keyboard accessible, and meet WCAG 2.2 AA contrast in light and dark themes; motion respects `prefers-reduced-motion`.
+2. Theme: read host theme and CSS variables from the host context; fall back to built-in light and dark tokens. Layout adapts to inline, fullscreen, and picture-in-picture display modes and to widths down to 320 px.
+3. All user-visible strings live in one catalog (English now, ready for translation); numbers, dates, and durations format with the host locale.
+4. Build: one esbuild entry per view, each producing a single HTML file with inline script and style, a content hash, and no external URLs (the build fails if any appear). Bundle size budget per view (default 150 KB gzip) enforced in a test.
+5. Every view reports the standard UI spans through the shim (5.1, 5.5) and degrades to a text fallback when the bridge is unavailable (5.6).
+**Tests to write:** component tests in jsdom (rendering, keyboard navigation, XSS strings rendered as text); axe checks for every component in light and dark themes; display-mode layouts; string catalog completeness (no literal user-visible strings in views, via a lint test); per-view bundle size and external-URL scans.
+**Acceptance Criteria:**
+- [ ] All harness views share one component kit and theme system.
+- [ ] Every view passes accessibility, security, and size checks.
+- [ ] Views follow the host's theme and display mode.
+

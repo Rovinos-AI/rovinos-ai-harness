@@ -1,12 +1,12 @@
 # Epic #18: Control-plane MCP server
 
 **Goal:** expose run control (list, inspect, approve, deny, resume, cancel) as an MCP server so any MCP client, and any MCP Apps-capable client in particular, becomes a human-in-the-loop console for the harness. Read `docs/engineering/CONVENTIONS.md` first, plus epics 5 (approval app), 17 (approvals), and 2 (resume and cancel).
-**Tasks:** 18.1 to 18.7, all size S.
+**Tasks:** 18.1 to 18.8, all size S.
 
 Shared design for this epic:
-- Package `packages/control-plane` uses the official MCP TypeScript SDK server API (`McpServer`, streamable HTTP and stdio transports; verify names). Started with `harness serve [--stdio | --http]`.
+- Package `packages/control-plane` uses the MCP TypeScript SDK v2 server (`@modelcontextprotocol/server`, `@modelcontextprotocol/node`; CONVENTIONS section 10). HTTP uses `createMcpHandler`, which serves MCP 2026-07-28 and 2025-11-25 clients per request; stdio uses `serveStdio`. Started with `harness serve [--stdio | --http]`. The server advertises the MCP Apps extension (`io.modelcontextprotocol/ui`) in `server/discover`.
 - **Metadata by default.** Tool outputs contain statuses, ids, counts, and timings, never message content. Content-bearing outputs exist only in approvals (tokenized args) and in an explicit, audited reveal (18.4).
-- **An agent must never approve its own actions.** Approve/deny/reveal tools are declared app-only (hidden from models by compliant hosts), and when invoked outside an app they require an out-of-band human confirmation via elicitation (18.2, 18.6). If neither is available the call fails closed.
+- **An agent must never approve its own actions.** Approve/deny/reveal tools are declared app-only (hidden from models by compliant hosts), and when invoked outside an app they require a human confirmation via elicitation (18.2, 18.6), delivered with the Multi Round-Trip Requests pattern: the tool returns an `InputRequiredResult` with an `elicitation/create` request and a sealed `requestState`, and only a retry carrying the human's answer and that exact state proceeds. If neither path is available the call fails closed.
 - Safe defaults: bind to loopback, require bearer tokens with scopes (18.5), audit every call with metadata only.
 
 ---
@@ -17,7 +17,7 @@ Shared design for this epic:
 **Task Description:** Create the control-plane server with read-only run inspection tools and a `harness serve` command.
 **Expected Inputs:** Event store, config.
 **Expected Output:** `packages/control-plane/src/{server.ts,tools/list-runs.ts,tools/get-run.ts,schemas.ts}`, `packages/cli/src/commands/serve.ts`, package scaffold.
-**Dependencies:** `@modelcontextprotocol/sdk` (server, verify), `zod`.
+**Dependencies:** `@modelcontextprotocol/server` and `@modelcontextprotocol/node` (v2), `zod` (4.2 or later).
 **Items it depends on:** 2.10, 7.3, 20.2.
 **Implementation guidance:**
 1. `list_runs` input `{ status?: RunStatus, limit?: int (1..50, default 20), cursor?: string }` -> structured output `{ runs: { runId, status, createdAt, lastTs, lastSeq, steps, pendingApprovals }[], nextCursor? }`. Use `store.listRuns` and a light fold for counts.
@@ -46,7 +46,7 @@ Shared design for this epic:
 1. `approve { approvalId, edits? }` and `deny { approvalId, reason?: Code }` use `validateEdits` (17.4) and `resolveApproval` (2.9). They do not resume the run; `resume_run { runId }` does.
 2. `RunSupervisor`: runs `resumeRun` in-process asynchronously, returns `{ started: true }` immediately, tracks active runs (`Map<Id, AbortController>`), refuses beyond `controlPlane.maxConcurrentRuns` (default 2, `capacity_exceeded`), maps `resume_conflict` to `{ started: false, code }`. Active runs register with `ActiveRuns` for the sentinel (8.3).
 3. `cancel_run { runId }` calls `cancelRun` (2.13); for runs supervised locally also abort the controller.
-4. **Confirmation gate** `requireHuman(ctx, summary)`: if the call arrived through an app-visibility tool session marked as an app call (by the host-provided request metadata, verify what the SDK exposes) it passes; otherwise it must obtain an elicitation confirmation (`elicitInput` with a boolean `confirm` field and the tokenized summary). If the client does not support elicitation, fail with `human_confirmation_unavailable`. Applies to `approve`, `deny`, `cancel_run`, and `resume_run`.
+4. **Confirmation gate** `requireHuman(ctx, summary)`: if the call arrived through an app-only tool from an MCP Apps view (per the host-provided request metadata; verify what the SDK exposes) it passes. Otherwise, when the request's client capabilities include `elicitation.form`, return `inputRequired({ inputRequests: { confirm: inputRequired.elicit({ message: <tokenized summary>, requestedSchema: { confirm: boolean } }) }, requestState })`. The `requestState` is minted with the SDK's `createRequestStateCodec` (HMAC-sealed) and binds the token id, tool name, a digest of the arguments, the target approval or run id, and a 5-minute expiry; it is single-use (record consumed state ids in a small table). On retry, read the answer with `acceptedContent(...)` and proceed only on `accept` with `confirm: true`. Clients without elicitation fail with `human_confirmation_unavailable`. On 2025-era connections the SDK's legacy shim issues the elicitation as a server-to-client request with the same semantics. Applies to `approve`, `deny`, `cancel_run`, and `resume_run`.
 5. Declare `approve`/`deny` as app-visibility tools (hidden from models) in addition to being callable through elicitation confirmation; document the trust assumption on the host.
 6. Annotations: `destructiveHint` for `cancel_run`, `idempotentHint` true for `deny`/`cancel_run`.
 **Tests to write:** approve/deny flows via in-memory client with a fake elicitation responder (accept, decline, cancel); no elicitation support fails closed; supervisor concurrency limit and duplicate resume; cancel stops a supervised run (fake slow tool); edits validated before resolve.
@@ -62,8 +62,8 @@ Shared design for this epic:
 **Parent:** #18 Control-plane MCP server
 **Task Description:** Provide a visual run console for MCP Apps-capable clients.
 **Expected Inputs:** `list_runs`/`get_run` tools (app-visible copies).
-**Expected Output:** `packages/control-plane/app/runs-console/` (TS + CSS), build to `dist/runs-console.html`, resource `ui://harness/runs/v1`, tool metadata linking `list_runs` to the resource.
-**Dependencies:** `esbuild`, `@modelcontextprotocol/ext-apps` (client side, verify), `jsdom`.
+**Expected Output:** view `packages/approval-app/src/views/runs-console/` built with the shared kit (5.7) to `dist/runs-console.html`, resource `ui://harness/runs/v1` served by the control plane, tool metadata `_meta.ui.resourceUri` linking `list_runs` to the resource.
+**Dependencies:** `esbuild`, `@modelcontextprotocol/ext-apps` (`App` class), `jsdom`.
 **Items it depends on:** 18.1, 5.3.
 **Implementation guidance:**
 1. Same security posture as 5.3: DOM built with `textContent`, no network, single-file build, build fails on external URLs.
@@ -110,9 +110,9 @@ Shared design for this epic:
 **Dependencies:** Node `crypto` (`timingSafeEqual`).
 **Items it depends on:** 18.1, 20.3.
 **Implementation guidance:**
-1. Config: `auth.tokens: { id: Code, secret: SecretRef, scopes: ("read"|"approve"|"run"|"reveal"|"admin")[], runIds?: Id[] }[]`, `listen: { host: string (default "127.0.0.1"), port }`, `tls?: { certFile: SecretRef-like path, keyFile }`, `allowedHosts: string[]` (Host header allowlist, default loopback names), `rateLimitPerMinute` (default 120).
+1. Config: `auth.tokens: { id: Code, secret: SecretRef, scopes: ("read"|"read_content"|"approve"|"run"|"reveal"|"admin")[], runIds?: Id[] }[]`, `listen: { host: string (default "127.0.0.1"), port }`, `tls?: { certFile: SecretRef-like path, keyFile }`, `allowedHosts: string[]` (Host header allowlist, default loopback names), `rateLimitPerMinute` (default 120).
 2. Authenticate `Authorization: Bearer <token>`; compare using SHA-256 digests with `timingSafeEqual`; unknown token returns 401 without detail. Tokens are resolved via `SecretResolver` at startup and never logged.
-3. Scopes enforced per tool: `read` (list/get), `approve` (approve/deny/resolve), `run` (resume/cancel), `reveal` (reveal), `admin` (all). `runIds` restricts accessible runs.
+3. Scopes enforced per tool: `read` (list/get), `read_content` (tokenized run content in the run inspector, 18.8; off unless granted), `approve` (approve/deny/resolve/answer inputs), `run` (start/continue/resume/cancel), `reveal` (reveal), `admin` (all). `runIds` restricts accessible runs.
 4. Startup rules: refuse to bind a non-loopback host without `tls`; refuse to start with zero tokens in HTTP mode (stdio mode is trusted local only); reject requests whose `Host` header is not in `allowedHosts` and, when present, whose `Origin` is not same-host (DNS rebinding and CSRF defense).
 5. Per-token rate limit (token bucket with injected clock); exceeding returns 429.
 6. Audit log through the sanctioned logger: `{ tokenId (Code), tool (Code), outcome (Code) }` only.
@@ -133,7 +133,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 18.2, 17.4.
 **Implementation guidance:**
-1. `review_approval { approvalId }` (model-visible, safe because a human decides): load the payload and, if the client supports elicitation (verify capability negotiation fields), call `elicitInput` with message = payload `fallbackText` (tokenized) and a requested schema `{ decision: enum["approve","deny"], reason?: Code enum }`.
+1. `review_approval { approvalId }` (model-visible, safe because a human decides): load the payload and, if the request's client capabilities include `elicitation.form`, return an `InputRequiredResult` whose `elicitation/create` request has message = payload `fallbackText` (tokenized) and requested schema `{ decision: enum["approve","deny"], reason?: Code enum }`, with a sealed single-use `requestState` bound as in 18.2. The retry carrying the answer applies the decision.
 2. Outcomes: accept with `approve` -> `approve` logic (18.2, no second confirmation needed since the elicitation is the confirmation); `deny` likewise; user declines or cancels -> no state change, return `{ resolved: false }`.
 3. Clients without elicitation: return a text result with the CLI instructions (`harness approvals approve <id>`) and the console URL if configured, and `resolved: false`.
 4. Edits are not supported in this path (the schema allows only approve/deny); payloads requiring edits mention the CLI or app.
@@ -155,7 +155,8 @@ Shared design for this epic:
 **Dependencies:** Playwright, SDK client.
 **Items it depends on:** 18.3, 18.4, 18.5, 18.6.
 **Implementation guidance:**
-1. `tools/list` filtering: if the client does not advertise MCP Apps/UI support, omit app-only tools (`harness.approvals.*`) and app-visibility copies of list/get tools.
+1. `tools/list` filtering: if the request's client capabilities do not list the `io.modelcontextprotocol/ui` extension with the `text/html;profile=mcp-app` MIME type, omit app-only tools (`harness.approvals.*`, `harness.inputs.*`) and app-visibility copies of list/get tools, and return text content only.
+6. Protocol eras: run the matrix against both a 2026-07-28 client and a 2025-11-25 client (SDK v2 in legacy mode) for every client class.
 2. Matrix of clients: (A) SDK client with no UI and no elicitation; (B) SDK client with elicitation only; (C) reference host as an MCP Apps-capable client. For each, assert: tools listed; read tools work; approval path available (CLI instructions, elicitation, or app); self-approval attempts via the model-visible path fail closed (A) or require human elicitation (B).
 3. Scenario test per client: create a run that suspends for approval (fake model and a policy `ask` rule), resolve using the client's available path, resume, assert completion.
 4. Document the matrix and note unknown behaviors of third-party clients as "unverified".
@@ -165,3 +166,26 @@ Shared design for this epic:
 - [ ] Each client class has a working approval path or a clear fail-closed message.
 - [ ] App-only tools are never listed to clients without UI support.
 - [ ] Compatibility matrix documented.
+
+---
+
+## 18.8 Run inspector MCP App
+
+**Parent:** #18 Control-plane MCP server
+**Task Description:** Give humans a rich, live view of a single run in any MCP Apps host: timeline, steps, approvals, inputs, subagents, costs, and budgets, with content hidden by default.
+**Expected Inputs:** `get_run`, a new `get_run_timeline` tool, live updates (24.5).
+**Expected Output:** tool `get_run_timeline { runId, sinceSeq? }` (scope `read`, metadata only), view `packages/approval-app/src/views/run-inspector/` built with the kit (5.7), resource `ui://harness/run/v1` linked from `get_run` via `_meta.ui.resourceUri`, docs `docs/apps-ux.md` section "Run inspector".
+**Dependencies:** `@modelcontextprotocol/ext-apps`.
+**Items it depends on:** 18.3, 5.7, 24.5, 23.2.
+**Implementation guidance:**
+1. `get_run_timeline` returns safe events grouped into steps (model call, tool call with policy decision and outcome, approval wait, input wait, checkpoint, compaction, subagent spawn and completion) with durations, token and cost counts, and budget usage. No content.
+2. The view shows the timeline, a step detail panel, budget meters, the subagent tree (links open the child run in the same view), and badges that open the approval (5.3) or input (25.7) view for pending items.
+3. Content is off by default. A "show tokenized content" control calls an app-only tool that requires scope `read_content` (new scope, default off) and returns tokenized content only; raw values still require the audited reveal (18.4).
+4. Live updates through `subscriptions/listen` (24.5) with a polling fallback; a paused indicator when the document is hidden.
+5. Same security, accessibility, and size checks as other views (5.7).
+**Tests to write:** timeline grouping from fixture logs (each step type); content hidden without the scope; tokenized content with it, never raw; subagent navigation; live update path and fallback; axe and XSS checks.
+**Acceptance Criteria:**
+- [ ] A human can follow a run step by step in any MCP Apps host.
+- [ ] Content stays hidden unless a scoped, explicit action shows tokenized content.
+- [ ] The view updates live.
+

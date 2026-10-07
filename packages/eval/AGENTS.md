@@ -4,7 +4,7 @@ Eval runner, graders, trajectory assertions, simulated human, reports, compariso
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 ## Specs and task ids
-- [epic-16-eval-runner.md](./epic-16-eval-runner.md): tasks 16.1-16.11
+- [epic-16-eval-runner.md](./epic-16-eval-runner.md): tasks 16.1-16.12
 
 ## Allowed internal imports
 - `@harness/schemas`, `@harness/telemetry`, `@harness/crypto`, `@harness/store`, `@harness/vault`, `@harness/pii`, `@harness/models`, `@harness/context`, `@harness/policy`, `@harness/mcp`, `@harness/sandbox`, `@harness/core`. Nothing else from `@harness/*`.
