@@ -1,0 +1,23 @@
+{
+  "$comment": "Canonical internal import allowlist: package -> @harness packages it may import. Source of truth for CONVENTIONS section 1, every packages/*/AGENTS.md, and the task 1.2 import-direction lint rule. Edit here, then run: node scripts/gen-agents-index.mjs",
+  "schemas": [],
+  "crypto": [],
+  "app-telemetry": [],
+  "telemetry": ["schemas"],
+  "config": ["schemas"],
+  "store": ["schemas", "telemetry", "crypto"],
+  "vault": ["schemas", "telemetry", "crypto"],
+  "pii": ["schemas", "telemetry", "vault"],
+  "models": ["schemas", "telemetry"],
+  "context": ["schemas", "telemetry"],
+  "policy": ["schemas", "telemetry"],
+  "mcp": ["schemas", "telemetry"],
+  "sandbox": ["schemas", "telemetry", "crypto"],
+  "approval-app": ["schemas", "app-telemetry"],
+  "core": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox"],
+  "host": ["schemas", "telemetry", "core"],
+  "control-plane": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core"],
+  "replay": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core"],
+  "eval": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core"],
+  "cli": ["schemas", "telemetry", "crypto", "store", "vault", "pii", "models", "context", "policy", "mcp", "sandbox", "core", "config"]
+}

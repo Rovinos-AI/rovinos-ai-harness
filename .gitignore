@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+docs/api/
+.DS_Store
+.claude/settings.local.json
