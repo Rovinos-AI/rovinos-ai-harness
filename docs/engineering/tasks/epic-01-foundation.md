@@ -9,8 +9,8 @@
 
 **Parent:** #1 Foundation
 **Task Description:** Create the empty monorepo skeleton so `pnpm install && pnpm test:unit` works, with the four Vitest projects (unit, integration, canary, replay) defined but only the unit project populated.
-**Expected Inputs:** Repo containing only `LICENSE`. Package layout in CONVENTIONS §1.
-**Expected Output:** `package.json` (private, `engines.node >=22`, `packageManager` pnpm), `pnpm-workspace.yaml`, `tsconfig.base.json`, `vitest.workspace.ts`, `packages/schemas` with one exported `HARNESS_VERSION` constant and a test, `.gitignore`, `.nvmrc`, `.editorconfig`.
+**Expected Inputs:** Repo containing `LICENSE`, the specs and `AGENTS.md` files, `CLAUDE.md`, `.gitignore`, `docs/engineering/layers.json`, and the dependency-free agent index generator `scripts/gen-agents-index.mjs` with its `node:test` suite `scripts/gen-agents-index.test.mjs`. Package layout in CONVENTIONS §1.
+**Expected Output:** `package.json` (private, `engines.node >=22`, `packageManager` pnpm), `pnpm-workspace.yaml`, `tsconfig.base.json`, `vitest.workspace.ts`, `packages/schemas` with one exported `HARNESS_VERSION` constant and a test, `.nvmrc`, `.editorconfig`, edits to the existing `.gitignore` (add, never drop entries) and root `AGENTS.md`.
 **Dependencies:** pnpm, Node 22, typescript, vitest, `@vitest/coverage-v8`.
 **Items it depends on:** none.
 **Implementation guidance:**
@@ -20,11 +20,15 @@
 4. `vitest.workspace.ts` defines four projects named `unit`, `integration`, `canary`, `replay` using `include` globs from CONVENTIONS §6. The unit project excludes the other three patterns.
 5. Root scripts: `build`, `lint` (placeholder echoing nothing until 1.2), `typecheck` (`tsc -b --noEmit`), `test:unit`, `test:integration`, `test:canary`, `test:replay` (each `vitest run --project <name> --passWithNoTests` except unit).
 6. Create `packages/schemas/src/testing.ts` exporting `FakeClock` (`now()`, `advance(ms)`) and `SequentialIdGenerator` (deterministic fake ULID-shaped ids) with tests; later tasks extend it.
+7. Root scripts for the agent index: `gen:agents` (`node scripts/gen-agents-index.mjs`) and `check:agents` (`node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs`). Keep the generator as dependency-free `.mjs`; porting it to TypeScript is out of scope. The Vitest `unit` project includes `*.test.ts` only (CONVENTIONS §6), so it must not collect `*.test.mjs`. CI wiring happens in 1.4.
+8. Update root `AGENTS.md`: replace the "Current state" paragraph's no-workspace note (keep the `docs/progress.json` sentence), and switch the agent-index commands under Commands and "Done means" to `pnpm gen:agents` / `pnpm check:agents`. Then run `pnpm gen:agents` and commit any regenerated output.
 **Tests to write:** `packages/schemas/src/index.test.ts` (constant exported); `packages/schemas/src/testing.test.ts` (fake clock advances; ids unique and 26 chars).
 **Acceptance Criteria:**
 - [ ] Fresh clone: `pnpm install --frozen-lockfile && pnpm typecheck && pnpm test:unit` exits 0.
 - [ ] `pnpm test:integration`, `test:canary`, `test:replay` exit 0 with no tests.
 - [ ] Lockfile committed; Node version pinned in `.nvmrc`.
+- [ ] `pnpm check:agents` exits 0, and `pnpm test:unit` does not pick up `scripts/*.test.mjs`.
+- [ ] Root `AGENTS.md` no longer says the workspace is missing, and refers to `pnpm gen:agents` / `pnpm check:agents`.
 
 ---
 
@@ -83,10 +87,10 @@
 **Implementation guidance:**
 1. `trigger: [main]`, `pr: [main]`, `pool: { vmImage: ubuntu-latest }`.
 2. Template `node-setup.yml`: `NodeTool@0` (22.x), `corepack enable`, `Cache@2` keyed on `pnpm-lock.yaml`, `pnpm install --frozen-lockfile`.
-3. Stage `static`: steps lint and typecheck. Stage `unit`: `pnpm test:unit -- --reporter=junit --outputFile=reports/junit.xml --coverage`, then `PublishTestResults@2` (`testResultsFormat: JUnit`, `condition: succeededOrFailed()`) and `PublishCodeCoverageResults@2` (Cobertura) (verify task versions).
+3. Stage `static`: steps lint, typecheck, and `pnpm check:agents` (agent index drift and broken links, from 1.1). Stage `unit`: `pnpm test:unit -- --reporter=junit --outputFile=reports/junit.xml --coverage`, then `PublishTestResults@2` (`testResultsFormat: JUnit`, `condition: succeededOrFailed()`) and `PublishCodeCoverageResults@2` (Cobertura) (verify task versions).
 4. Stage names must be exactly the ones in CONVENTIONS §7; later tasks add steps, not rename stages.
 5. Document the exact check names that branch protection will require (used by 1.9).
-**Tests to write:** `scripts/ci/verify-pipeline.test.ts` parses the YAML and asserts: PR trigger present, stages `static` and `unit` exist in order, `PublishTestResults@2` has `condition` containing `succeededOrFailed`, no secret-looking literals.
+**Tests to write:** `scripts/ci/verify-pipeline.test.ts` parses the YAML and asserts: PR trigger present, stages `static` and `unit` exist in order, `static` runs `pnpm check:agents`, `PublishTestResults@2` has `condition` containing `succeededOrFailed`, no secret-looking literals.
 **Acceptance Criteria:**
 - [ ] A PR with a failing unit test shows a failing Azure check and published results.
 - [ ] A passing PR publishes JUnit and coverage.

@@ -25,6 +25,7 @@ Shared design for this epic:
 3. `check-links.ts`: verify relative links and anchors in all Markdown files resolve (headings slugified like GitHub), no external network calls in CI by default (an `--external` flag checks HTTP links on the nightly schedule).
 4. `check-mermaid.ts`: extract fenced `mermaid` blocks and parse them with the Mermaid parser; fail on syntax errors.
 5. `docs/decisions/` holds ADRs (14.1 is the first); README index lists them.
+6. `README.md` already exists as the pre-implementation specification overview (system, data flows, and build plan, with Mermaid diagrams). Revise it rather than replacing it: switch the status from "specification stage" to the real state, add the sections above that are missing, keep its diagrams consistent with `docs/architecture.md` (move detail there if the README grows too long), and run it through the link, Mermaid, and claims checks.
 **Tests to write:** unit tests for the link checker (broken link, broken anchor, valid anchors with duplicate headings) and the Mermaid extractor (valid and invalid fixtures); markdownlint runs clean on the repo.
 **Acceptance Criteria:**
 - [ ] README renders correctly on GitHub with diagrams.

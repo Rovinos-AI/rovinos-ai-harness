@@ -3,7 +3,7 @@
 // Regenerates the index blocks in every folder AGENTS.md and the dependency table in CONVENTIONS section 1.
 // Inputs: epic-*.md headings, TASKS.md "Task ids:" lines, docs/engineering/layers.json.
 // Usage: node scripts/gen-agents-index.mjs [--check]
-// Dependency-free Node 22 ESM so it runs before the pnpm workspace exists (task 1.1); port to TS with the workspace.
+// Dependency-free Node 22 ESM so it runs without installing anything; task 1.1 wires it as `pnpm gen:agents` / `pnpm check:agents`.
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, relative, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
