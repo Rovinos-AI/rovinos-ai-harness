@@ -17,4 +17,6 @@ test("sequential ids are unique and 26 characters long", () => {
   expect(first).not.toBe(second);
   expect(first).toHaveLength(26);
   expect(second).toHaveLength(26);
+  expect(first).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+  expect(second).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
 });
