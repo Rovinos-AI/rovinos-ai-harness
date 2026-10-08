@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+// Keep the coverage floor per source file so covered siblings cannot mask gaps.
 import { fileURLToPath } from "node:url";
 
 const sourceResolution = {
@@ -32,6 +33,7 @@ export default [
         include: ["packages/*/src/**/*.ts"],
         reportOnFailure: true,
         thresholds: {
+          perFile: true,
           "packages/*/src/**/*.ts": {
             lines: 85,
           },

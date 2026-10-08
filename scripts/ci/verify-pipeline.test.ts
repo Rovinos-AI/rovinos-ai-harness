@@ -94,10 +94,11 @@ it("publishes JUnit results after success or failure", () => {
   ).toContain("cobertura-coverage.xml");
 });
 
-it("uses package-scoped coverage thresholds", () => {
+it("enforces package source line coverage per file", () => {
   const workspace = readFileSync(resolve(root, "vitest.workspace.ts"), "utf8");
 
   expect(workspace).toContain('include: ["packages/*/src/**/*.ts"]');
+  expect(workspace).toContain("perFile: true");
   expect(workspace).toMatch(/"packages\/\*\/src\/\*\*\/\*\.ts":\s*\{\s*lines:\s*85/);
   expect(workspace).toContain("reportOnFailure: true");
 });
