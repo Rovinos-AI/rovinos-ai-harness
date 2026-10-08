@@ -85,12 +85,47 @@ it("publishes JUnit results after success or failure", () => {
   const publishCoverage = unitSteps.find((step) => step.task === "PublishCodeCoverageResults@2");
 
   expect(runTests?.script).toContain("--reporter=junit");
+  expect(runTests?.script).toContain("--coverage.reportOnFailure");
   expect(runTests?.script).toContain("--coverage.reporter=cobertura");
   expect(publishResults).toBeDefined();
   expect(publishResults?.condition).toContain("succeededOrFailed()");
   expect(
     isRecord(publishCoverage?.inputs) ? publishCoverage.inputs.summaryFileLocation : undefined,
   ).toContain("cobertura-coverage.xml");
+});
+
+it("uses package-scoped coverage thresholds", () => {
+  const workspace = readFileSync(resolve(root, "vitest.workspace.ts"), "utf8");
+
+  expect(workspace).toContain('include: ["packages/*/src/**/*.ts"]');
+  expect(workspace).toMatch(/"packages\/\*\/src\/\*\*\/\*\.ts":\s*\{\s*lines:\s*85/);
+  expect(workspace).toContain("reportOnFailure: true");
+});
+
+it("verifies pinned mise and Yarn toolchain paths", () => {
+  const template = readFileSync(resolve(root, "pipelines/templates/node-setup.yml"), "utf8");
+  const nodePathLine = template.indexOf("$(mise where node)/bin");
+  const corepackPathLine = template.indexOf("$(mise where npm:corepack)/bin");
+
+  expect(template).not.toContain("https://mise.run");
+  expect(template).toContain("MISE_VERSION=v2026.10.4");
+  expect(template).toContain(
+    "MISE_SHA256=2fc793020b442d08163603400236b2c693f8cede810c7e432fc77220e6c9e8a1",
+  );
+  expect(nodePathLine).toBeGreaterThanOrEqual(0);
+  expect(corepackPathLine).toBeGreaterThan(nodePathLine);
+  expect(template).toContain("yarn --version");
+  expect(template).toContain("match(/^yarn@([^+]+)/)");
+  expect(template).toContain('if [ "$actual_yarn_version" != "$expected_yarn_version" ]');
+});
+
+it("caches Yarn's global package cache", () => {
+  const pipeline = readFileSync(resolve(root, "azure-pipelines.yml"), "utf8");
+  const setupTemplate = readFileSync(resolve(root, "pipelines/templates/node-setup.yml"), "utf8");
+
+  expect(pipeline).toContain("YARN_GLOBAL_FOLDER: $(Pipeline.Workspace)/.yarn");
+  expect(setupTemplate).toContain('mkdir -p "$YARN_GLOBAL_FOLDER/cache"');
+  expect(setupTemplate).toContain("path: $(YARN_GLOBAL_FOLDER)/cache");
 });
 
 it("contains no secret-looking literals", () => {

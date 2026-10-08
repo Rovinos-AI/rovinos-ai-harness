@@ -28,6 +28,15 @@ export default [
         "**/*.canary.test.ts",
         "**/*.replay.test.ts",
       ],
+      coverage: {
+        include: ["packages/*/src/**/*.ts"],
+        reportOnFailure: true,
+        thresholds: {
+          "packages/*/src/**/*.ts": {
+            lines: 85,
+          },
+        },
+      },
     },
   },
   {

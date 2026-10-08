@@ -9,7 +9,7 @@ pool:
   vmImage: ubuntu-latest
 
 variables:
-  YARN_CACHE_FOLDER: $(Pipeline.Workspace)/.yarn/cache
+  YARN_GLOBAL_FOLDER: $(Pipeline.Workspace)/.yarn
 
 stages:
   - stage: static
@@ -34,6 +34,7 @@ stages:
               yarn test:unit --reporter=junit
               --outputFile=reports/junit.xml
               --coverage
+              --coverage.reportOnFailure
               --coverage.reporter=cobertura
             displayName: Unit tests
           - task: PublishTestResults@2
