@@ -1,8 +1,19 @@
 # Linting and formatting
 
-`yarn lint` runs ESLint and Prettier. Every enabled ESLint rule has error severity; no rule is
-warning-level. Prettier owns formatting (`printWidth: 100`, double quotes, and trailing commas).
-Markdown remains outside Prettier because it is handled by the documentation lint stage.
+`yarn lint` runs Markdownlint, ESLint (including YAML), ShellCheck, hadolint, EditorConfig
+Checker, cspell, Prettier, and dependency checks. Every enabled ESLint rule has error severity;
+no rule is warning-level. Prettier owns formatting (`printWidth: 100`, double quotes, and trailing
+commas). Markdown remains outside Prettier because it is handled by markdownlint.
+
+Container-based checks use immutable hadolint and EditorConfig Checker images. They fail when
+Docker is unavailable; local development may set `LINT_SKIP_CONTAINERS=1` to skip them with a
+warning. CI must not set this variable. ShellCheck is required and always runs.
+
+Markdownlint starts from its defaults, disables only line-length checking, allows HTML comments
+used as repository markers, and requires language tags on fenced code blocks. YAML is linted by
+the ESLint YAML plugin with two-space indentation; duplicate keys are rejected by its YAML parser.
+cspell checks Markdown and comments/string literals in `packages/*/src`; add new project-specific
+words deliberately to `docs/engineering/project-words.txt`.
 
 ## Rule groups
 

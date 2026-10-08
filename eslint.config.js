@@ -12,6 +12,7 @@ import prettier from "eslint-config-prettier/flat";
 import tseslint from "typescript-eslint";
 import { harnessPlugin } from "@harness/eslint-plugin-harness";
 import { browserRestrictedImports } from "./eslint-browser-boundaries.js";
+import { yamlLintConfiguration } from "./eslint-yaml.js";
 
 const rootDirectory = fileURLToPath(new URL(".", import.meta.url));
 const testFiles = [
@@ -116,6 +117,7 @@ const configuration = [
   ...typescriptOnly(tseslint.configs.stylisticTypeChecked),
   ...typedPluginJavaScript(tseslint.configs.strictTypeChecked),
   ...typedPluginJavaScript(tseslint.configs.stylisticTypeChecked),
+  ...yamlLintConfiguration,
   {
     files: ["**/*.{js,mjs,ts,tsx}"],
     languageOptions: {

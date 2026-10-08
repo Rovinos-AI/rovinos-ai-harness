@@ -2504,16 +2504,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"editorconfig-checker@npm:6.2.0":
-  version: 6.2.0
-  resolution: "editorconfig-checker@npm:6.2.0"
-  bin:
-    ec: dist/index.js
-    editorconfig-checker: dist/index.js
-  checksum: 10c0/be501bbfe12381e5cd95137aede46ed4f4755d0b7a2b7ab2c3f06b34f66fea583713f45f67a28784a070db0db6cd39faa9b78a0fb1385d771429111e40dfb4d9
-  languageName: node
-  linkType: hard
-
 "electron-to-chromium@npm:^1.5.439":
   version: 1.5.451
   resolution: "electron-to-chromium@npm:1.5.451"
@@ -4607,7 +4597,6 @@ __metadata:
     "@vitest/coverage-v8": "npm:3.2.6"
     "@vitest/eslint-plugin": "npm:1.6.27"
     cspell: "npm:10.3.6"
-    editorconfig-checker: "npm:6.2.0"
     eslint: "npm:9.39.2"
     eslint-config-prettier: "npm:10.1.8"
     eslint-plugin-import-x: "npm:4.17.1"

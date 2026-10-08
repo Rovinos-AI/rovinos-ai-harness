@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-FROM ghcr.io/jdx/mise:2026.10.4-debian AS build
+FROM ghcr.io/jdx/mise:2026.10.4-debian@sha256:6fe9c261575dfa1e989e0586997a58d31ad3d3bd6d775225c92439c46ceb0b55 AS build
 
 WORKDIR /app
 COPY mise.toml ./
@@ -19,7 +19,7 @@ RUN mise exec -- yarn workspaces focus @harness/cli --production \
     && cp -a packages/schemas/package.json packages/schemas/dist /out/packages/schemas/ \
     && cp -a packages/cli/dist/. /out/dist/
 
-FROM node:22-slim AS runtime
+FROM node:22-slim@sha256:efd0ab5780c2d9ab1f0f869571a00d5edb17793bff4cce4a2792e3eb0ffc7562 AS runtime
 
 WORKDIR /app
 RUN groupadd --gid 10001 harness \

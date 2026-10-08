@@ -4,6 +4,7 @@
 **Tasks:** 8.1 to 8.6, all size S.
 
 Shared design for this epic:
+
 - The sentinel is a **gate**, not a cleaner: on a hit it drops the payload; it never edits content.
 - It is deliberately independent of the PII detectors. Its only input is the vault's list of raw values for the relevant runs.
 - Scope per payload: spans and logs carry `harness.run.id`, so the sentinel scans against that run's values. Payloads without a run id are scanned against the values of all runs active in this process (plus recently finished ones for a short grace period).
@@ -21,6 +22,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 12.1, 12.2.
 **Implementation guidance:**
+
 1. Extend `VaultReader` with `version(runId: Id): Promise<number>`; the version increases whenever a new entry is added for that run (use the entry count or a per-run counter column; in SQLite reuse `vault_counters` sum).
 2. `VaultRunView(reader, options)`: `valuesFor(runId): Promise<RunValueSet>` caches per run and refreshes when `version` changed since the cached copy. `RunValueSet = { version: number; values: string[]; skippedShort: number }`.
 3. Filter values shorter than `minValueLength` (default 6 characters, configurable via `telemetry.sentinel.minValueLength`) because very short values cause unacceptable false positives; count them in `skippedShort` and expose via a counter metric `harness.sentinel.short_values_skipped` (no attributes).
@@ -29,6 +31,7 @@ Shared design for this epic:
 6. Cache eviction: LRU of at most 64 runs; `forgetRun(runId)` for completed runs after the grace period.
 **Tests to write:** cache hit when version unchanged; refresh when a new value is added; short-value filtering and counter; de-duplication; LRU eviction; stringifying a `RunValueSet` never prints values (canary); `version` monotonic in both vault implementations.
 **Acceptance Criteria:**
+
 - [ ] The sentinel can only read values, never write (interface-level).
 - [ ] Newly added vault values are picked up on the next scan.
 - [ ] Value sets never print their contents.
@@ -44,6 +47,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 8.1.
 **Implementation guidance:**
+
 1. `AhoCorasick.build(patterns: string[]): AhoCorasick`: trie with `Map<number, number>` transitions over UTF-16 code units stored in typed arrays/arrays of node objects; BFS to compute failure links and dictionary (output) links. Reject empty patterns. Enforce `maxTotalPatternChars` (default 1,000,000; throw `sentinel_patterns_too_large`).
 2. `hasMatch(text): boolean` exits on the first match; `findAll(text): { patternIndex: number; start: number; end: number }[]` for diagnostics (tests only; production uses `hasMatch` and never returns matched text).
 3. `SentinelMatcher.forValues(values, variantFn?)`: builds the automaton; when `values` is empty returns a matcher whose `hasMatch` returns `false` immediately without scanning (fast path).
@@ -51,6 +55,7 @@ Shared design for this epic:
 5. Scanning must be linear in text length. Do not use regex for matching.
 **Tests to write:** correctness against a naive `text.includes` oracle with `fast-check` (random patterns and texts, 1,000+ cases); overlapping and nested patterns; unicode surrogate pairs; empty vault fast path (spy that no automaton is built); performance guard (10,000 patterns of 12 chars and a 1 MB text complete under 500 ms in CI, generous budget); pattern-size limit.
 **Acceptance Criteria:**
+
 - [ ] Matches the naive oracle on random inputs.
 - [ ] Linear-time scanning verified by the performance guard.
 - [ ] No match text is ever returned in production APIs.
@@ -66,6 +71,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 8.2, 4.3.
 **Implementation guidance:**
+
 1. `SentinelGate.check({ runId?: Id; text: string }): { ok: true } | { ok: false; reason: "hit" | "error" | "timeout" }`. `text` is a canonical serialization of the payload: span name, all attribute keys and values, link trace ids, resource attributes, joined with `\u0000`.
 2. Matcher selection: if `runId` is present use that run's matcher (cached by `RunValueSet.version`); otherwise use the combined matcher of `ActiveRuns` (runs started in this process, registered by the run loop, kept for `graceMs` = 300000 after termination). If the combined set exceeds `maxCombinedValues` (default 100,000), fall back to per-run only and count `sentinel_scope_reduced`.
 3. Timeout budget `maxScanMs` (default 5) measured with an injected high-resolution clock; exceeding it or any exception returns `ok: false` with `timeout` or `error`.
@@ -74,6 +80,7 @@ Shared design for this epic:
 6. Metrics are not scanned (their attributes are closed enums per CONVENTIONS §5); add a test asserting no metric instrument in the repo uses a non-enum string attribute.
 **Tests to write:** hit drops span and log; scan error and timeout drop (inject failing matcher and slow fake clock); run-scoped vs combined matcher selection; mandatory-gate construction error; counters incremented; value set refresh during a run.
 **Acceptance Criteria:**
+
 - [ ] A payload containing a known raw value is never exported.
 - [ ] Errors and timeouts drop the payload.
 - [ ] The SDK cannot be built without the gate in production mode.
@@ -89,6 +96,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 8.3, 2.2, 7.10.
 **Implementation guidance:**
+
 1. `TripQueue.enqueue({ runId?: Id, entities: { type: Code; count: number }[] })`: entity types come from the vault entry types of the matched values (the matcher exposes `patternIndex`; the gate maps it to the entity type through `RunValueSet`; never expose the value or token).
 2. The run loop calls `recorder.drainTrips()` at each step boundary and appends a `pii_action { boundary: "telemetry_export", action: "blocked", entities }` event for trips belonging to its run. This avoids appending from the telemetry thread and the resulting `seq_conflict`.
 3. Add `telemetry_export` to the boundary enum, `classification.ts`, the `SafeEvent` mapping, and update goldens and docs.
@@ -96,6 +104,7 @@ Shared design for this epic:
 5. Trips without a run id (global scan) are logged and counted only.
 **Tests to write:** trip enqueued on hit; drained into a `pii_action` event by the loop without conflicts (concurrent trip while the loop appends); event contains no values or tokens (canary); global trips are logged only; schema updates covered by existing exhaustiveness tests.
 **Acceptance Criteria:**
+
 - [ ] Trips surface as metadata-only events in the run log.
 - [ ] No `seq_conflict` is caused by sentinel activity.
 - [ ] Alert payloads contain only entity types and counts.
@@ -111,6 +120,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 8.4, 13.7, 13.8, 7.9, 2.10.
 **Implementation guidance:**
+
 1. `canaries.ts` generates unique values per run from a seed: `email` (`c<hex>@example.test`), `phone`, a Luhn-valid card number, an API-key-shaped string, a person name from a fixed list plus hex suffix. Provide encoded variants (percent-encoded, base64) of each for 8.6.
 2. `CanaryHarness` assembles the real pipeline (SQLite event store with AES codec, vault, tokenizer, `PiiToolPort`, allowlist processors with sentinel, logger) with fake model and tools, and captures: exported spans and logs (in-memory exporters), stdout/stderr, CLI outputs for `inspect` and `context`, workspace and offload files, and file bytes of the event-store DB and the vault DB.
 3. Scenarios (each plants canaries via a different path): goal input; tool output; model output echoing a raw value; approval payload; tool exception message and stack; log call with a bad field; a registered span with a deliberately buggy attribute (bypassing registry via test hook); offloaded file; snapshot context; cassette recording.
@@ -119,6 +129,7 @@ Shared design for this epic:
 6. `docs/canary-checklist.md` states the rule: any new sink, boundary, or log path must add a canary scenario in the same PR; add a checkbox to the PR template.
 **Tests to write:** the scenario matrix itself, plus a negative control that deliberately disables the sentinel and a processor and proves the suite fails.
 **Acceptance Criteria:**
+
 - [ ] All scenarios show zero plaintext in every sink.
 - [ ] The negative control fails the suite.
 - [ ] Suite runs in the Azure `gates` stage and blocks release on failure.
@@ -134,6 +145,7 @@ Shared design for this epic:
 **Dependencies:** `fast-check`.
 **Items it depends on:** 8.2, 8.3.
 **Implementation guidance:**
+
 1. Normalize the **scanned text** (`normalizeForScan`): Unicode NFKC, remove zero-width and bidi control characters (`\u200B-\u200F`, `\u202A-\u202E`, `\u2060`, `\uFEFF`), then also produce a second scan string with all whitespace and `-` removed (for digit groupings).
 2. `variantsOf(raw)` returns the de-duplicated set: raw (normalized), lowercased, whitespace and dash stripped, digits-only (when the value has at least 7 digits), percent-encoded (`encodeURIComponent`), `base64` and `base64url` of the UTF-8 bytes **at all three byte alignments** (use the standard trimmed forms of base64 of `raw` with 0, 1, and 2 leading bytes of padding text so embedding at any offset still matches; document the technique), hex of UTF-8 bytes (lowercase and uppercase), and HTML numeric-entity encoding of non-alphanumerics.
 3. Variants multiply patterns (about 12 per value); enforce the pattern-size limit and drop variants shorter than `minValueLength` after transformation.
@@ -141,6 +153,7 @@ Shared design for this epic:
 5. Document known gaps explicitly: arbitrary encryption, compression, steganography, translations, and values split across multiple attributes are not detected.
 **Tests to write:** table tests per transform (value embedded in surrounding text is detected); fuzz with `fast-check`: random PII-like values, random transform chains drawn from the supported list, random prefixes/suffixes, detection rate 100 percent; negative test for unsupported transforms asserting they are **not** claimed (guards documentation honesty); performance guard with variants enabled.
 **Acceptance Criteria:**
+
 - [ ] Every supported transform detected in 100 percent of fuzz cases.
 - [ ] Known gaps documented in `guarantees.md`.
 - [ ] Performance budget still met with variants.

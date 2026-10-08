@@ -4,6 +4,7 @@
 **Tasks:** 5.1 to 5.7, all size S.
 
 Shared design for this epic:
+
 - The app runs in a locked-down iframe (3.1): no network, scripts only, no same-origin. All I/O happens through the host bridge.
 - **Never trust payload strings.** Render with `textContent`/DOM APIs; never use `innerHTML` with payload data. Add a test with an XSS payload.
 - **The app never sees raw sensitive values by default.** It renders tokenized args. Raw values appear only after an explicit, audited human "reveal" (5.4), are held in memory, and are auto-hidden.
@@ -22,8 +23,10 @@ Shared design for this epic:
 **Dependencies:** `esbuild`, `zod` (types and schema only in `schemas`; the shim itself must not import Zod at runtime: use plain TypeScript types and hand-written validation).
 **Items it depends on:** 3.4, 1.1.
 **Implementation guidance:**
+
 1. Move the `AppSpan` Zod schema from the host into `@harness/schemas/src/app-span.ts` (browser-safe) and update 3.4 to import it. The shim uses the inferred **types** only.
 2. API:
+
 ```ts
 interface AppTelemetry {
   readonly active: boolean;
@@ -33,12 +36,14 @@ interface AppTelemetry {
 }
 createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): AppTelemetry
 ```
+
 `SpanAttrs<N>` is a mapped type tied to the schema (`ui.decision` requires `decision`, `ui.error` requires `code`, and so on). Calling `start` with a name not in the manifest is a TypeScript error and a runtime no-op.
 3. Durations use `performance.now()` differences (`now` injectable); offsets are relative to shim creation.
 4. The shim never calls `fetch`, `XMLHttpRequest`, `WebSocket`, or `navigator.sendBeacon` (add a lint test searching the bundle for those identifiers).
 5. Size budget: the minified+gzipped IIFE bundle must be under 4 KB; enforce in a test that builds with esbuild and measures gzip size.
 **Tests to write:** type-level tests (`expectTypeOf`) for per-name attribute requirements; runtime no-op for undeclared names; duration math with fake `now`; bundle-size test; forbidden-identifier scan.
 **Acceptance Criteria:**
+
 - [ ] Apps can only record spans declared in their manifest, with typed attributes.
 - [ ] Bundle under 4 KB gzip with no network APIs.
 - [ ] Host and shim share one schema source.
@@ -54,6 +59,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 **Dependencies:** none.
 **Items it depends on:** 5.1, 3.3.
 **Implementation guidance:**
+
 1. Activation: `active` becomes true only after the host confirms the host-local tool `harness.telemetry.emit` is callable (call it once with an empty batch `{ spans: [] }` during init, with a 2 s timeout). On failure or timeout the shim stays inactive and every method returns immediately.
 2. Batching: flush when 20 spans are pending, every 2 s (timer), and on `pagehide`/`visibilitychange` hidden. Never exceed 50 spans or 14 KiB per call (the host limit is 16 KiB; leave headroom by measuring `JSON.stringify` length).
 3. Backpressure: on a `rate_limited` error back off exponentially (500 ms doubling to 8 s) and keep at most 100 pending spans, dropping the oldest. Keep an integer `dropped` count (exposed via `stats()`, not sent).
@@ -62,6 +68,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 6. Provide `dispose()` clearing timers and flushing once.
 **Tests to write:** activation success and failure paths; batch size and byte limits; timer and visibility flushes with fake timers; backoff schedule; drop-oldest behavior; no thrown errors under bridge failure; trace id parsing (valid, invalid, absent).
 **Acceptance Criteria:**
+
 - [ ] A host without telemetry support leaves the app fully functional.
 - [ ] Batches never exceed host limits.
 - [ ] Transport failures never surface to the app.
@@ -77,6 +84,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 **Dependencies:** `esbuild`, `jsdom` (tests), `@modelcontextprotocol/ext-apps` (`App` class).
 **Items it depends on:** 5.1, 17.4, 3.1.
 **Implementation guidance:**
+
 1. Connect with the SDK app class, receive tool input/result, validate with the shared `ApprovalPayload` schema (import from `@harness/schemas`; the payload schema must be browser-safe). Invalid payload renders an error state and reports `ui.error` code `payload_invalid`.
 2. Layout: heading (`summary`), meta row (tool id, rule id, reason, expiry countdown), arguments viewer (collapsible tree). In strings, tokens matching the token pattern render as pills showing the entity type (`<EMAIL_1>` -> pill "email 1") with the token as the accessible name; never attempt to resolve them here.
 3. Buttons: **Approve**, **Deny**, and **Edit** (only when `editableFields` is non-empty); focus starts on the heading; buttons are real `<button>` elements with visible focus rings; support keyboard shortcuts only through standard focus order.
@@ -85,6 +93,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 6. Expired payloads (`expiresAt` in the past) disable actions and show an expired state.
 **Tests to write:** jsdom rendering tests (all fields shown, token pills, expired state, edit button visibility); XSS payload (`<img src=x onerror=alert(1)>`, `javascript:` strings) renders as text; accessibility checks with `axe-core` in jsdom; build-output scan for external URLs.
 **Acceptance Criteria:**
+
 - [ ] Payload strings can never inject markup.
 - [ ] Built file has no external references.
 - [ ] axe reports no violations on the main states.
@@ -100,6 +109,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 **Dependencies:** none.
 **Items it depends on:** 5.3, 17.4.
 **Implementation guidance:**
+
 1. Tool contracts (Zod, browser-safe): `harness.approvals.resolve { approvalId: Id, decision: "approve"|"deny"|"edit", edits?: { pointer: string, value: JsonValue }[] } -> { ok: boolean, code?: Code }` and `harness.approvals.reveal { approvalId: Id, pointers: string[] (max 20) } -> { values: { pointer: string, value: string }[] }`. The control-plane (18.4) implements them as host-local, app-visibility tools; in this task test with a stub host.
 2. Approve/Deny: single click, disable buttons while pending, show result state; on error code show message by code only and report `ui.error` (`resolve_failed`).
 3. Edit: build one input per `editableFields` pointer, typed by the current value (string, number, boolean) with a JSON textarea fallback for objects; display current tokenized value; submit sends only changed pointers. Client validation is a convenience; the server validates authoritatively (17.4). A string edit containing a raw sensitive value is tokenized server-side.
@@ -107,6 +117,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 5. After a successful decision emit `ui.decision` via the shim (5.5) and show the final state; do not auto-close.
 **Tests to write:** jsdom tests with stub bridge: approve, deny, edit (only changed pointers sent, types preserved), reveal confirm/cancel, auto re-mask with fake timers, buttons disabled while pending, error code handling, no raw value persisted after re-mask (inspect DOM and closure-exposed test hook).
 **Acceptance Criteria:**
+
 - [ ] All three decisions work against the stub host.
 - [ ] Reveal requires explicit confirmation and auto-masks after 30 s.
 - [ ] Revealed values never reach telemetry or persistent storage.
@@ -122,6 +133,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 **Dependencies:** none.
 **Items it depends on:** 5.4, 5.2.
 **Implementation guidance:**
+
 1. `ui.render`: record the time from payload receipt to first paint (`requestAnimationFrame` twice) exactly once per payload.
 2. `ui.decision`: duration from render to the decision click, with `decision` enum; emitted once after a successful resolve.
 3. `ui.error`: `code` from the closed set `payload_invalid | bridge_unavailable | resolve_failed | reveal_failed | csp_blocked | render_failed`. `window.onerror` and `unhandledrejection` handlers emit `render_failed` **without** the message. A `securitypolicyviolation` listener emits `csp_blocked`. Deduplicate: at most one `ui.error` per code per session.
@@ -129,6 +141,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 5. No free text in any attribute, no field names, no payload data.
 **Tests to write:** each span emitted once with correct attributes (capture via fake shim); error dedup; handlers never leak messages (canary in thrown error); interaction aggregation; csp violation event simulation.
 **Acceptance Criteria:**
+
 - [ ] Only the four registered span shapes are emitted.
 - [ ] No message or payload text appears in spans.
 - [ ] Error spans are deduplicated per session.
@@ -144,12 +157,14 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 **Dependencies:** Playwright.
 **Items it depends on:** 5.5, 3.7.
 **Implementation guidance:**
+
 1. Fallbacks: if the bridge does not connect within 3 s, show "Waiting for host..." then an instruction card with the plain-text `fallbackText` and the CLI commands (`harness approvals approve <id>` / `deny <id>`) with copy buttons (clipboard API guarded; selection fallback). If `harness.approvals.resolve` is unavailable, disable buttons and show the same instruction card.
 2. End-to-end tests in the reference host with a real control-plane tool implementation or the stub: approve; deny; edit with invalid then valid value (server validation message by code); reveal flow including the audit event in the event log (`pii_action` with boundary `ui`); expiry; resolve failure; hostile payload with XSS strings and canary values (assert nothing executes and canaries absent from telemetry); fallback rendering when the host drops the bridge.
 3. After each decision assert the run log contains the expected `approval_resolved` event and that resuming completes the run.
 4. Run in the Azure `integration` stage (Chromium); upload Playwright traces on failure.
 **Tests to write:** the Playwright suite above (one test per scenario).
 **Acceptance Criteria:**
+
 - [ ] Full approve, deny, and edit flows work end to end in a real browser.
 - [ ] Fallback instructions appear when the bridge or tools are unavailable.
 - [ ] XSS payloads do not execute and no canary reaches telemetry.
@@ -165,6 +180,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 **Dependencies:** `esbuild`, `jsdom`, `axe-core`, `@modelcontextprotocol/ext-apps`.
 **Items it depends on:** 5.3, 3.8.
 **Implementation guidance:**
+
 1. Components build DOM with `createElement` and `textContent` only (no `innerHTML`), are keyboard accessible, and meet WCAG 2.2 AA contrast in light and dark themes; motion respects `prefers-reduced-motion`.
 2. Theme: read host theme and CSS variables from the host context; fall back to built-in light and dark tokens. Layout adapts to inline, fullscreen, and picture-in-picture display modes and to widths down to 320 px.
 3. All user-visible strings live in one catalog (English now, ready for translation); numbers, dates, and durations format with the host locale.
@@ -172,7 +188,7 @@ createAppTelemetry({ bridge, manifest: { spans: [...] }, now?: () => number }): 
 5. Every view reports the standard UI spans through the shim (5.1, 5.5) and degrades to a text fallback when the bridge is unavailable (5.6).
 **Tests to write:** component tests in jsdom (rendering, keyboard navigation, XSS strings rendered as text); axe checks for every component in light and dark themes; display-mode layouts; string catalog completeness (no literal user-visible strings in views, via a lint test); per-view bundle size and external-URL scans.
 **Acceptance Criteria:**
+
 - [ ] All harness views share one component kit and theme system.
 - [ ] Every view passes accessibility, security, and size checks.
 - [ ] Views follow the host's theme and display mode.
-

@@ -3,7 +3,7 @@
 Specs live next to the code they describe. Read `../CONVENTIONS.md` first.
 
 | Epic | Spec location |
-|---|---|
+| --- | --- |
 | epic-01-foundation | [docs/engineering/tasks/epic-01-foundation.md](../../../docs/engineering/tasks/epic-01-foundation.md) |
 | epic-02-run-loop | [packages/core/epic-02-run-loop.md](../../../packages/core/epic-02-run-loop.md) |
 | epic-03-host-bridge | [packages/host/epic-03-host-bridge.md](../../../packages/host/epic-03-host-bridge.md) |
