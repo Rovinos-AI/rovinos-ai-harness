@@ -34,7 +34,8 @@
     "test:replay": "vitest run --project replay --passWithNoTests",
     "gen:agents": "node scripts/gen-agents-index.mjs",
     "check:agents": "node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs",
-    "check:spdx": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-spdx.ts"
+    "check:spdx": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-spdx.ts",
+    "check:dco": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-dco.ts"
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
@@ -55,6 +56,7 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.1",
     "vitest": "3.2.6",
-    "yaml": "2.9.1"
+    "yaml": "2.9.1",
+    "zod": "4.2.0"
   }
 }

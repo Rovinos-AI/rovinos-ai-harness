@@ -79,6 +79,12 @@ it("runs static checks before unit tests", () => {
       (step) => typeof step.script === "string" && step.script.includes("yarn check:spdx"),
     ),
   ).toBe(true);
+  const dcoStep = staticSteps.find(
+    (step) => typeof step.script === "string" && step.script.includes("yarn check:dco"),
+  );
+  expect(dcoStep?.condition).toBe("eq(variables['Build.Reason'], 'PullRequest')");
+  expect(dcoStep?.env).toEqual({ TARGET_BRANCH: "$(System.PullRequest.TargetBranch)" });
+  expect(staticSteps.some((step) => step.checkout === "self" && step.fetchDepth === 0)).toBe(true);
 });
 
 it("publishes JUnit results after success or failure", () => {
