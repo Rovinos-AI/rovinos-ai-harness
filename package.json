@@ -27,14 +27,14 @@
     "deps:check": "yarn constraints && yarn dedupe --check",
     "lint": "eslint . --max-warnings 0 && prettier --check . && yarn deps:check",
     "lint:fix": "eslint . --fix --max-warnings 0 && prettier --write .",
-    "typecheck": "tsc -p packages/schemas/tsconfig.json && tsc -p packages/schemas/tsconfig.test.json && tsc -p packages/cli/tsconfig.json && tsc -p scripts/ci/tsconfig.json && tsc -p tools/eslint-plugin-harness/tsconfig.json --noEmit",
+    "typecheck": "tsc -p packages/schemas/tsconfig.json && tsc -p packages/schemas/tsconfig.test.json && tsc -p packages/cli/tsconfig.json && tsc -p scripts/tsconfig.json && tsc -p tools/eslint-plugin-harness/tsconfig.json --noEmit",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration --passWithNoTests",
     "test:canary": "vitest run --project canary --passWithNoTests",
     "test:replay": "vitest run --project replay --passWithNoTests",
     "gen:agents": "node scripts/gen-agents-index.mjs",
     "check:agents": "node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs",
-    "check:spdx": "node --experimental-strip-types scripts/check-spdx.ts"
+    "check:spdx": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-spdx.ts"
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",

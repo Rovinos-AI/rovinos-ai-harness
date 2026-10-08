@@ -41,6 +41,16 @@ it("accepts and repairs headers after a shebang", () => {
   );
 });
 
+it("repairs a shebang-only file without a trailing newline", () => {
+  const root = createRoot();
+  const script = join(root, "script.sh");
+  writeFileSync(script, "#!/bin/sh");
+
+  expect(checkSpdx(root)).toEqual(["script.sh"]);
+  expect(checkSpdx(root, true)).toEqual([]);
+  expect(readFileSync(script, "utf8")).toBe("#!/bin/sh\n# SPDX-License-Identifier: Apache-2.0\n");
+});
+
 it("ignores excluded directories and yarn.lock", () => {
   const root = createRoot();
   for (const directory of ["node_modules", "dist", "coverage", "src/__golden__", ".git"]) {
@@ -67,23 +77,26 @@ it("--fix repairs the scanned tree and the CLI accepts --fix", () => {
   writeFileSync(source, "export {};\n");
 
   const script = fileURLToPath(new URL("./check-spdx.ts", import.meta.url));
-  const missing = spawnSync(process.execPath, ["--experimental-strip-types", script], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const missing = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", script],
+    { cwd: root, encoding: "utf8" },
+  );
   expect(missing.status).toBe(1);
   expect(`${missing.stdout}\n${missing.stderr}`).toContain("source.ts");
 
-  const fixed = spawnSync(process.execPath, ["--experimental-strip-types", script, "--fix"], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const fixed = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", script, "--fix"],
+    { cwd: root, encoding: "utf8" },
+  );
 
   expect(fixed.status).toBe(0);
-  const passing = spawnSync(process.execPath, ["--experimental-strip-types", script], {
-    cwd: root,
-    encoding: "utf8",
-  });
+  const passing = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", script],
+    { cwd: root, encoding: "utf8" },
+  );
   expect(passing.status).toBe(0);
   expect(checkSpdx(root)).toEqual([]);
   expect(readFileSync(source, "utf8")).toBe("// SPDX-License-Identifier: Apache-2.0\nexport {};\n");

@@ -1,7 +1,0 @@
-{
-  "extends": "../../packages/schemas/tsconfig.test.json",
-  "compilerOptions": {
-    "rootDir": "../.."
-  },
-  "include": ["./*.test.ts", "../check-spdx.ts", "../check-spdx.test.ts"]
-}

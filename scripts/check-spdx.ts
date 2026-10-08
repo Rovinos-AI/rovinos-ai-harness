@@ -50,7 +50,10 @@ function addHeader(contents: string, header: string): string {
   const newline = contents.includes("\r\n") ? "\r\n" : "\n";
   let insertionPoint = 0;
   if (firstLine.startsWith("#!")) {
-    insertionPoint = firstLineEnd === -1 ? contents.length : firstLineEnd + 1;
+    if (firstLineEnd === -1) {
+      return `${contents}${newline}${header}${newline}`;
+    }
+    insertionPoint = firstLineEnd + 1;
   }
 
   return `${contents.slice(0, insertionPoint)}${header}${newline}${contents.slice(insertionPoint)}`;
