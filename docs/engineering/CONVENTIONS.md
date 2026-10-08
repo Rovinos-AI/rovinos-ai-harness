@@ -6,7 +6,7 @@ Every task file in this folder assumes this document. Task guidance says "see CO
 
 Each task has: Parent, Task Name, Task Description, Expected Inputs, Expected Output, Tests to write, Acceptance Criteria, Dependencies (libraries, tools, services), Items it depends on (other task IDs), and Implementation guidance.
 
-- **Task ID** = `<epic>.<n>`, where `<epic>` equals the GitHub issue number of the parent epic (for example `7.3` belongs to issue #7 "Event store").
+- **Task ID** = `<epic>.<n>`, where `<epic>` equals the GitHub issue number of the parent epic (for example `7.3` belongs to issue #7 "Event store"). A follow-up that changes the outcome of an already completed task uses `<epic>.<n>.<m>` (for example `1.1.1` follows `1.1`), sits right after its parent in the spec, and is a normal task in every other respect.
 - **Size S** = one PR, about one developer-day, one observable "done when". If a task overruns, stop, split it, and note the split in the PR. Do not silently grow scope.
 - "(verify)" next to an external API, package name, or image tag means: confirm against the installed version's types or docs before coding, adapt if different, and record the decision in the PR description.
 - **Every task's acceptance criteria are in addition to the definition of done in §8**, which every task must meet, including zero lint errors and warnings.

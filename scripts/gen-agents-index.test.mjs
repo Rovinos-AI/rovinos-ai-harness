@@ -13,6 +13,7 @@ test("compressIds builds ranges and sorts numerically", () => {
     "2.1-2.3, 2.10, 4.7, 23.1",
   );
   assert.equal(compressIds(["1.9", "1.10"]), "1.9-1.10");
+  assert.equal(compressIds(["1.2", "1.1.1", "1.1", "1.3"]), "1.1, 1.1.1, 1.2-1.3");
 });
 
 test("validateLayers rejects cycles and unknown packages", () => {

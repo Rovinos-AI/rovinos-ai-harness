@@ -126,7 +126,7 @@ Shared design for this epic:
 **Expected Inputs:** Merged changes with changesets; a git tag.
 **Expected Output:** `.changeset/config.json`, `docs/releasing.md`, `release` stage in `azure-pipelines.yml`, `scripts/release/verify-release.ts`, PR dry-run job.
 **Dependencies:** `@changesets/cli`, npm registry token and a container registry service connection (maintainer setup, documented), `cosign` (used in 22.4).
-**Items it depends on:** 21.5, 1.4, 19.7.
+**Items it depends on:** 21.5, 1.4, 19.7, 1.1.1.
 **Implementation guidance:**
 1. Changesets: initialize with `fixed` or `linked` groups for packages released together (decision recorded as an ADR: recommended `linked` for all `@harness/*` packages); CI check `pnpm changeset status --since=origin/main` on PRs requires a changeset for changes under `packages/**` (except docs-only).
 2. Release stage triggers on tags `v*`: run all earlier stages, `pnpm changeset version` verification (the tag must match the version in `package.json`, `verify-release.ts`), build, `pnpm -r publish` (to npm with an automation token from variable groups or Key Vault), build and push images to a registry (GHCR recommended for open source; service connection documented) tagged `vX.Y.Z` and `latest`, create a GitHub Release with notes from the changelog (`GitHubRelease@1` task, verify).

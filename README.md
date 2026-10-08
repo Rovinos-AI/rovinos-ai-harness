@@ -2,7 +2,7 @@
 
 An open source, TypeScript, container-native **agent harness**. It runs LLM agents as durable, resumable state machines over an append-only event log. Tool calls are decided by code-evaluated policy and human approvals, never by the model. Sensitive values are tokenized at every trust boundary. Telemetry is metadata-only by construction.
 
-> **Status: specification stage.** This repository holds the complete build specification (25 epics, 222 tasks) and the agent instructions used to implement it. No runtime code exists yet. This README describes the harness the specs define. Implementation starts at task 1.1 in [`docs/engineering/tasks/epic-01-foundation.md`](docs/engineering/tasks/epic-01-foundation.md). License: [Apache-2.0](LICENSE).
+> **Status: specification stage.** This repository holds the complete build specification (25 epics, 223 tasks) and the agent instructions used to implement it. No runtime code exists yet. This README describes the harness the specs define. Implementation starts at task 1.1 in [`docs/engineering/tasks/epic-01-foundation.md`](docs/engineering/tasks/epic-01-foundation.md). License: [Apache-2.0](LICENSE).
 
 ## Contents
 
@@ -853,7 +853,7 @@ The project states guarantees with their evidence and assumptions, and does not 
 
 ## Build plan
 
-There are 25 epics and 222 tasks. Each task is sized for one PR (about a developer-day) with explicit inputs, outputs, tests, and acceptance criteria. Task ids are `<epic>.<n>`. The chart places every epic on the task-level dependency graph from each task's "Items it depends on": a bar runs from the earliest to the latest dependency depth among the epic's tasks. Depth is the length of the longest dependency chain to that task (the critical path is 27 steps), not calendar time. Long bars show epics whose later tasks wait on other epics.
+There are 25 epics and 223 tasks. Each task is sized for one PR (about a developer-day) with explicit inputs, outputs, tests, and acceptance criteria. Task ids are `<epic>.<n>`. The chart places every epic on the task-level dependency graph from each task's "Items it depends on": a bar runs from the earliest to the latest dependency depth among the epic's tasks. Depth is the length of the longest dependency chain to that task (the critical path is 27 steps), not calendar time. Long bars show epics whose later tasks wait on other epics.
 
 ```mermaid
 gantt
@@ -894,7 +894,7 @@ gantt
 
 | # | Epic | Tasks | Spec |
 |---|---|---|---|
-| 1 | Foundation (monorepo, CI) | 12 | [epic-01](docs/engineering/tasks/epic-01-foundation.md) |
+| 1 | Foundation (monorepo, CI) | 13 | [epic-01](docs/engineering/tasks/epic-01-foundation.md) |
 | 2 | Run loop (resumable state machine) | 14 | [epic-02](packages/core/epic-02-run-loop.md) |
 | 3 | Host bridge (validating app telemetry) | 8 | [epic-03](packages/host/epic-03-host-bridge.md) |
 | 4 | Span allowlist | 7 | [epic-04](packages/telemetry/epic-04-span-allowlist.md) |

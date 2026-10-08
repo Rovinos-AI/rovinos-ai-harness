@@ -1,7 +1,7 @@
 # Epic #1: Foundation (monorepo and Azure Pipelines CI)
 
 **Goal:** a repo where every later task has a place to live and an automated gate. Read `docs/engineering/CONVENTIONS.md` first.
-**Tasks:** 1.1 to 1.12, all size S.
+**Tasks:** 1.1, 1.1.1, and 1.2 to 1.12, all size S.
 
 ---
 
@@ -29,6 +29,34 @@
 - [ ] Lockfile committed; Node version pinned in `.nvmrc`.
 - [ ] `pnpm check:agents` exits 0, and `pnpm test:unit` does not pick up `scripts/*.test.mjs`.
 - [ ] Root `AGENTS.md` no longer says the workspace is missing, and refers to `pnpm gen:agents` / `pnpm check:agents`.
+
+---
+
+## 1.1.1 Yarn and mise toolchain: package management, scripts, and pinned tool versions
+
+**Parent:** #1 Foundation
+**Task Description:** Replace pnpm with Yarn (Berry, 4.x) for tracking, installing, building, and running the workspace, and pin the toolchain (Node, Corepack, Yarn) with mise so every machine, container, and CI agent uses identical versions. This is a follow-up to the completed task 1.1, so every later task builds on Yarn and mise.
+**Expected Inputs:** The pnpm workspace from 1.1 and 1.2 (`pnpm-workspace.yaml`, `pnpm-lock.yaml`, root `package.json` scripts, `packageManager: pnpm@...`); the Dockerfile and compose files from 1.3 if 1.3 has merged first; every spec, `AGENTS.md`, `CONVENTIONS.md`, and README reference to pnpm.
+**Expected Output:** `mise.toml`, `.yarnrc.yml`, `yarn.lock`, `yarn.config.cjs` (Yarn constraints), updated root `package.json` (`workspaces`, `packageManager: "yarn@4.x.y+sha512..."`, scripts including `build`, `start`, `clean`, `deps:check`), removal of `pnpm-workspace.yaml` and `pnpm-lock.yaml`, `.gitignore` entries for Yarn, `scripts/ci/toolchain.test.ts`, `docs/engineering/toolchain.md`, and every pnpm reference in specs, `AGENTS.md` files, `CONVENTIONS.md` (section 2), `CLAUDE.md`, and `README.md` rewritten to the Yarn equivalent.
+**Dependencies:** Yarn 4.x (latest stable at implementation time; verify, and do not adopt the Yarn 6 preview), mise (pin the version used in CI), Corepack (installed explicitly through mise because Node 25 and later no longer bundle it).
+**Items it depends on:** 1.1, 1.2.
+**Implementation guidance:**
+1. **mise (`mise.toml`).** `[tools]`: `node` pinned to an exact 22.x LTS version (it must satisfy `engines.node`), and `"npm:corepack"` pinned to an exact version. `[settings]`: enable Corepack for mise-managed Node (`node.corepack = true`; verify the setting name), and keep `experimental = false`. `[env]`: `NODE_OPTIONS` is not set here (scripts own their flags). Developers run `mise install` once, and `mise` activates the pinned tools in the repo. Document `mise trust` in `docs/engineering/toolchain.md`. Do not duplicate package scripts as mise tasks: `package.json` scripts are the single entry point (`yarn <script>`).
+2. **Yarn version.** Pin it once in `package.json` `packageManager` with Corepack's integrity hash (run `corepack use yarn@4.x.y`). Corepack enforces it; nothing else pins Yarn. Do not commit `.yarn/releases`.
+3. **`.yarnrc.yml`.** `nodeLinker: node-modules` (Plug'n'Play breaks parts of the ESLint, Vitest, and TypeScript tooling and the Docker deploy step; record this as a decision in the PR), `enableTelemetry: false`, `enableGlobalCache: true`, `defaultSemverRangePrefix: ""` (exact versions, matching the pinned versions already used), `npmMinimalAgeGate` set to at least 3 days with an override list kept empty by default (supply-chain guard for brand-new releases; verify the setting name and units in the pinned version), and `enableScripts: false` with an explicit `dependenciesMeta` allowlist for packages that need build scripts (for example native modules such as `better-sqlite3` later).
+4. **Workspaces.** Root `package.json` gets `"workspaces": ["packages/*", "tools/*"]`; internal dependencies keep the `workspace:^` protocol. Remove `pnpm-workspace.yaml`. Generate `yarn.lock` from the current dependency versions with no upgrades (versions in the lockfile must match what `pnpm-lock.yaml` resolved; any difference is listed in the PR).
+5. **Constraints (`yarn.config.cjs`).** Enforce with `yarn constraints`: every workspace has `"type": "module"`, `"license": "Apache-2.0"`, and `"private": true` until 21.6 decides what publishes; internal dependencies use `workspace:^`; a dependency used in several workspaces has one version everywhere (zod, typescript, vitest, `@types/node`); `@types/node` majors match the pinned Node major. `deps:check` runs `yarn constraints && yarn dedupe --check`, and `yarn lint` runs it.
+6. **Scripts (root `package.json`).** Keep every existing script name (`lint`, `lint:fix`, `typecheck`, `test:unit`, `test:integration`, `test:canary`, `test:replay`, `gen:agents`, `check:agents`) so specs only change the runner prefix. Add `build` (`yarn workspaces foreach --all --topological --parallel run build`, verify flags), `start` (build, then run the CLI: `yarn workspace @harness/cli start`, which runs `node dist/bin.js`), `clean` (remove `dist`, `coverage`, `*.tsbuildinfo`), and `deps:check`. Package-level scripts stay in each workspace's `package.json`.
+7. **Command mapping (apply everywhere).** `pnpm install --frozen-lockfile` becomes `yarn install --immutable`; `pnpm <script>` becomes `yarn <script>`; `pnpm -r build` becomes `yarn build`; `pnpm --filter <pkg> <cmd>` becomes `yarn workspace <pkg> <cmd>`; `pnpm dlx` becomes `yarn dlx`; `pnpm audit` becomes `yarn npm audit --all --recursive`; `pnpm licenses list --json` becomes a Yarn-compatible license report (verify: `yarn info --all --recursive --json` fields, or a license plugin) and task 1.7 is updated accordingly; `pnpm deploy --filter @harness/cli --prod /out` becomes a production install of the CLI workspace (`yarn workspaces focus @harness/cli --production` in a pruned copy; verify the plugin is built in for the pinned Yarn); `pnpm changeset` and `pnpm -r publish` (21.6) become `yarn changeset` and `yarn workspaces foreach --all --no-private npm publish`.
+8. **Containers.** If 1.3 has merged, update the Dockerfile build stage to install with Yarn (`corepack enable` honoring `packageManager`, `yarn install --immutable`, `yarn build`, then the production focus step from step 7) and keep the runtime stage unchanged. Otherwise add the equivalent guidance to 1.3's spec so it lands with Yarn.
+9. **Spec and doc updates (same PR).** Rewrite every pnpm reference in `docs/engineering/**`, epic specs, `AGENTS.md` and `TASKS.md` files, `CLAUDE.md`, and `README.md` using step 7; update CONVENTIONS section 2 (tooling: Node via mise, Yarn 4 via Corepack, `nodeLinker: node-modules`) and the Azure Pipelines guidance in 1.4 (install mise at a pinned version, `mise install`, cache the Yarn global cache keyed by `yarn.lock` and `mise.toml`, `yarn install --immutable`). Run `yarn gen:agents` and commit the regenerated blocks.
+10. **CI and dependency updates.** 1.10's Dependabot config keeps the `npm` ecosystem (it supports Yarn Berry lockfiles; verify) and adds an ignore rule so Dependabot never changes `packageManager` without review.
+**Tests to write:** `scripts/ci/toolchain.test.ts` (unit): `mise.toml` pins an exact Node 22.x version that satisfies `engines.node`; `packageManager` is `yarn@4.x.y` with an integrity hash; `.yarnrc.yml` has `nodeLinker: node-modules`, `enableTelemetry: false`, and an age gate; `pnpm-lock.yaml` and `pnpm-workspace.yaml` do not exist; every workspace satisfies the constraints (run `yarn constraints` and assert exit code 0); a repository scan finds no `pnpm` references outside an explicit allowlist (historical PR notes only).
+**Acceptance Criteria:**
+- [ ] Fresh clone: `mise install && yarn install --immutable && yarn lint && yarn typecheck && yarn test:unit && yarn build` exits 0, and `yarn start --version` prints the version.
+- [ ] Node, Corepack, and Yarn versions are pinned in exactly one place each, and the toolchain test proves they agree.
+- [ ] `yarn constraints` and `yarn dedupe --check` pass and run as part of `yarn lint`.
+- [ ] No pnpm files or references remain in the repository, specs, or docs (scan test passes); `yarn check:agents` passes.
 
 ---
 
@@ -68,7 +96,7 @@
 **Expected Inputs:** Workspace; a placeholder `packages/cli` with a `bin` printing the version.
 **Expected Output:** `Dockerfile` (multi-stage), `.dockerignore`, `infra/compose/docker-compose.yml`, minimal `packages/cli` (`src/bin.ts`, `package.json` with `bin.harness`).
 **Dependencies:** Docker, `node:22-slim` base image.
-**Items it depends on:** 1.1.
+**Items it depends on:** 1.1, 1.1.1.
 **Implementation guidance:**
 1. Build stage: `corepack enable`, `pnpm install --frozen-lockfile`, `pnpm -r build`, `pnpm deploy --filter @harness/cli --prod /out` (verify `pnpm deploy` behavior with the workspace).
 2. Runtime stage: copy `/out`, create user uid/gid 10001, `USER 10001`, `WORKDIR /app`, `ENTRYPOINT ["node","dist/bin.js"]`, `HEALTHCHECK` running `node dist/bin.js --version`.
@@ -90,7 +118,7 @@
 **Expected Inputs:** Working scripts from 1.1/1.2.
 **Expected Output:** `azure-pipelines.yml`, `pipelines/templates/node-setup.yml`, `scripts/ci/verify-pipeline.test.ts`.
 **Dependencies:** Azure DevOps project with the GitHub service connection and the Azure Pipelines GitHub app installed (manual, documented in `docs/maintainers/azure-setup.md`); `yaml` npm package for the test.
-**Items it depends on:** 1.1, 1.2.
+**Items it depends on:** 1.1, 1.2, 1.1.1.
 **Implementation guidance:**
 1. `trigger: [main]`, `pr: [main]`, `pool: { vmImage: ubuntu-latest }`.
 2. Template `node-setup.yml`: `NodeTool@0` (22.x), `corepack enable`, `Cache@2` keyed on `pnpm-lock.yaml`, `pnpm install --frozen-lockfile`.
@@ -112,7 +140,7 @@
 **Expected Inputs:** Repo tree; header convention from CONVENTIONS §3.7.
 **Expected Output:** `NOTICE`, `scripts/check-spdx.ts`, `pnpm check:spdx` script, `static` stage step.
 **Dependencies:** `tsx` (or node's type stripping) to run scripts; `fast-glob`.
-**Items it depends on:** 1.1, 1.4.
+**Items it depends on:** 1.1, 1.4, 1.1.1.
 **Implementation guidance:**
 1. `NOTICE` text: project name, `Copyright <YEAR> <COPYRIGHT HOLDER>` where the holder is a placeholder the maintainer replaces (do not invent a legal name; leave `<COPYRIGHT HOLDER>` and open a follow-up note in the PR).
 2. Script globs `**/*.{ts,tsx,js,mjs,cjs,sh,yml,yaml}` excluding `node_modules`, `dist`, `coverage`, `**/__golden__/**`, `pnpm-lock.yaml`.
@@ -134,7 +162,7 @@
 **Expected Inputs:** Git history of the PR branch relative to the target branch.
 **Expected Output:** `scripts/check-dco.ts`, `pnpm check:dco`, `static` stage step (PR builds only), `CONTRIBUTING` snippet in `docs/contributing-dco.md`.
 **Dependencies:** git; `execa` or `node:child_process`.
-**Items it depends on:** 1.1, 1.4.
+**Items it depends on:** 1.1, 1.4, 1.1.1.
 **Implementation guidance:**
 1. Range: `git log --no-merges --format=%H%x1f%an%x1f%ae%x1f%B%x1e origin/${TARGET_BRANCH}..HEAD`; Azure sets `System.PullRequest.TargetBranch` (pass via env). Ensure the checkout step uses `fetchDepth: 0`.
 2. Valid trailer regex: `^Signed-off-by: .+ <[^<>@\s]+@[^<>\s]+>$` (multiline). Require at least one valid trailer per commit; recommend (warn, not fail) that it match the author email.
@@ -155,7 +183,7 @@
 **Expected Inputs:** Installed workspace dependencies; policy file.
 **Expected Output:** `config/license-policy.json`, `scripts/check-licenses.ts`, `pnpm check:licenses`, `static` stage step.
 **Dependencies:** `pnpm licenses list --json` (verify output shape), `spdx-expression-parse`, `spdx-satisfies`.
-**Items it depends on:** 1.1, 1.4.
+**Items it depends on:** 1.1, 1.4, 1.1.1.
 **Implementation guidance:**
 1. Policy JSON: `allow` (Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, BlueOak-1.0.0, Unlicense, CC0-1.0, Python-2.0), `deny` (any `GPL-*`, `AGPL-*`, `LGPL-*`, `SSPL-*`, `BUSL-*`, `CC-BY-NC*`), `exceptions` array of `{ package, version?, reason, expires }`. `config/license-policy.json` is defined by a Zod schema (`LicensePolicy`) and read with `parseJson` (CONVENTIONS 3.10).
 2. Evaluate each package's SPDX expression: `A OR B` passes if any alternative is allowed; `A AND B` requires all allowed; unknown or `UNLICENSED` fails unless excepted.
@@ -176,7 +204,7 @@
 **Expected Inputs:** Compose skeleton (1.3), pipeline (1.4).
 **Expected Output:** `infra/compose/docker-compose.test.yml`, `integration` stage in `azure-pipelines.yml`, `test/smoke.int.test.ts`, `scripts/ci/compose-wait.sh`.
 **Dependencies:** Docker on the Microsoft-hosted agent, docker compose v2.
-**Items it depends on:** 1.3, 1.4.
+**Items it depends on:** 1.3, 1.4, 1.1.1.
 **Implementation guidance:**
 1. Test compose file extends the base file and adds a `smoke` check only; later epics add `postgres`, `otel-collector`, `presidio`, `sample-mcp-server`, `kusto-emulator` services here.
 2. Stage steps: `docker compose -f infra/compose/docker-compose.test.yml up -d --wait`; `pnpm test:integration` with JUnit output; `PublishTestResults@2`; on failure, `docker compose logs --no-color > $(Build.ArtifactStagingDirectory)/compose.log` and `PublishBuildArtifacts@1`; final step `docker compose down -v` with `condition: always()`.
@@ -197,7 +225,7 @@
 **Expected Inputs:** Check names from 1.4; this task spec format (for the issue template).
 **Expected Output:** `.github/CODEOWNERS`, `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/task.yml`, `scripts/github/apply-branch-protection.sh` (supports `--dry-run`), `docs/maintainers/branch-protection.md`.
 **Dependencies:** `gh` CLI (documented, run by a maintainer), `yaml` for tests.
-**Items it depends on:** 1.4, 1.6.
+**Items it depends on:** 1.4, 1.6, 1.1.1.
 **Implementation guidance:**
 1. PR template checklist mirrors CONVENTIONS §8 and asks for the task ID, including the item "`pnpm lint` passes with zero errors and warnings, and any new suppression has a written reason".
 2. Issue template `task.yml` (GitHub issue forms) has inputs matching the task spec fields (Parent, Description, Inputs, Output, Tests, Acceptance, Dependencies, Depends on).
@@ -218,7 +246,7 @@
 **Expected Inputs:** Workspace and Dockerfile.
 **Expected Output:** `.github/dependabot.yml`, `docs/maintainers/dependency-policy.md`.
 **Dependencies:** GitHub Dependabot.
-**Items it depends on:** 1.1, 1.3.
+**Items it depends on:** 1.1, 1.3, 1.1.1.
 **Implementation guidance:**
 1. Ecosystems: `npm` (covers pnpm workspaces; verify) at `/`, `docker` at `/`, weekly schedule.
 2. Group minor and patch updates (`groups`), `open-pull-requests-limit: 5`.
@@ -239,7 +267,7 @@
 **Expected Inputs:** Repository files: specs and docs (Markdown), compose, pipeline, and collector configs (YAML), scripts (shell), Dockerfiles.
 **Expected Output:** `.markdownlint-cli2.yaml`, YAML linting through `eslint-plugin-yml` in the ESLint run, `.shellcheckrc`, `.hadolint.yaml`, `cspell.json` with `docs/engineering/project-words.txt`, `.editorconfig` checks, root scripts `lint:md`, `lint:yaml`, `lint:sh`, `lint:docker`, `lint:spell` included in `pnpm lint`, fixes to existing files.
 **Dependencies:** `markdownlint-cli2`, `eslint-plugin-yml`, ShellCheck, hadolint (pinned container image or binary), `cspell`, `editorconfig-checker` (verify versions and licenses against 1.7).
-**Items it depends on:** 1.2, 1.4.
+**Items it depends on:** 1.2, 1.4, 1.1.1.
 **Implementation guidance:**
 1. Markdown: start from markdownlint defaults; disable only `MD013` (line length; specs use long lines) and allow inline HTML for the comment markers the repo uses (`<!-- BEGIN GENERATED ... -->`, `<!-- test:run -->`, `<!-- claims:allow -->`). Require fenced code blocks to declare a language. Fix existing docs and specs without changing their meaning.
 2. YAML: `eslint-plugin-yml` recommended rules plus consistent indentation and no duplicate keys, covering compose, pipelines, collector configs, and `.github`.
@@ -262,7 +290,7 @@
 **Expected Inputs:** Zod schemas, untrusted text, external JSON Schema documents (for example MCP tool input schemas).
 **Expected Output:** `packages/schemas/src/parse.ts` (`parseJson`, `parseYaml`, `safeParseJson`), `packages/schemas/src/json-schema.ts` (`compileJsonSchema`), `ContractError` (`contract_invalid`, issue paths only), CONVENTIONS rule 3.10, lint wiring from 1.2 step 8.
 **Dependencies:** `zod` (major per CONVENTIONS section 2), `yaml`, `ajv` with JSON Schema 2020-12 support and `ajv-formats` (verify).
-**Items it depends on:** 1.1, 1.2.
+**Items it depends on:** 1.1, 1.2, 1.1.1.
 **Implementation guidance:**
 1. `parseJson(schema, text, { maxBytes })` and `parseYaml(schema, text, { maxBytes })` enforce a size limit before parsing, parse, then validate with the Zod schema and return the inferred type. Failures throw `ContractError` with issue paths and codes only, never the received values.
 2. `compileJsonSchema(jsonSchema, { maxRefDepth, maxBytes })` compiles an **external** JSON Schema (draft 2020-12) once with `ajv`, bounds `$ref` resolution and schema size, disallows remote `$ref` fetching, and returns a validator with the same error shape. It exists only for schemas the harness does not own (MCP tool `inputSchema` and `outputSchema`); harness-owned contracts never use it.

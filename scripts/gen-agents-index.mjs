@@ -14,11 +14,22 @@ const BEGIN = "<!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index
 const END = "<!-- END GENERATED: agents-index -->";
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "coverage", ".claude"]);
 
-/** Compress task ids into ranges: ["2.1","2.2","2.3","4.1"] -> "2.1-2.3, 4.1". */
+function compareIds(a, b) {
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? -1) - (b[index] ?? -1);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Compress task ids into ranges: ["2.1","2.2","2.3","4.1"] -> "2.1-2.3, 4.1".
+ * Follow-up ids (`<epic>.<n>.<m>`, for example "1.1.1") sort after their parent and are never part of a range.
+ */
 export function compressIds(ids) {
-  const parsed = ids
-    .map((id) => id.split(".").map(Number))
-    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const parsed = ids.map((id) => id.split(".").map(Number)).sort(compareIds);
   const out = [];
   let start = null;
   let prev = null;
@@ -28,7 +39,9 @@ export function compressIds(ids) {
     }
   };
   for (const p of parsed) {
-    if (prev && p[0] === prev[0] && p[1] === prev[1] + 1) {
+    const consecutive =
+      p.length === 2 && prev?.length === 2 && p[0] === prev[0] && p[1] === prev[1] + 1;
+    if (consecutive) {
       prev = p;
       continue;
     }
@@ -126,9 +139,9 @@ function buildAgentBlock({ root, dir, files, agentsDirs, layers }) {
   const owned = files.filter((file) => findOwner(file, agentsDirs) === dir).sort();
   const lines = ["## Specs and task ids"];
   for (const file of owned.filter((entry) => /(?:^|\/)epic-[^/]+\.md$/.test(entry))) {
-    const ids = [...readFileSync(join(root, file), "utf8").matchAll(/^## (\d+\.\d+)\b/gm)].map(
-      (match) => match[1],
-    );
+    const ids = [
+      ...readFileSync(join(root, file), "utf8").matchAll(/^## (\d+\.\d+(?:\.\d+)?)\s/gm),
+    ].map((match) => match[1]);
     lines.push(`- [${relative(dir, file)}](./${relative(dir, file)}): tasks ${compressIds(ids)}`);
   }
   for (const file of owned.filter((entry) => entry.endsWith("/TASKS.md") || entry === "TASKS.md")) {
