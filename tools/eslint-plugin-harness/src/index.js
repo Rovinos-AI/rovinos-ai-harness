@@ -117,8 +117,7 @@ const createNoRelativePackages = (layerNames) => {
 };
 
 /** @type {(node: Node) => string | undefined} */
-const identifierName = (node) =>
-  node.type === AST_NODE_TYPES.Identifier ? node.name : undefined;
+const identifierName = (node) => (node.type === AST_NODE_TYPES.Identifier ? node.name : undefined);
 
 /** @type {HarnessRule["create"]} */
 const createSchemaInferredTypes = (context) => {

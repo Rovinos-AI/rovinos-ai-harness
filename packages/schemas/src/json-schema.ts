@@ -285,29 +285,29 @@ function exceedsRefDepth(
   return false;
 }
 
-function pathFromInstancePath(
-  instancePath: string,
-  value: unknown,
-): (string | number)[] {
+function pathFromInstancePath(instancePath: string, value: unknown): (string | number)[] {
   if (instancePath.length === 0) {
     return [];
   }
   let current = value;
-  return instancePath.split("/").slice(1).map((encodedSegment) => {
-    const segment = decodePointerSegment(encodedSegment);
-    if (isUnknownArray(current) && /^(?:0|[1-9]\d*)$/u.test(segment)) {
-      const index = Number(segment);
-      if (Number.isSafeInteger(index)) {
-        current = current[index];
-        return index;
+  return instancePath
+    .split("/")
+    .slice(1)
+    .map((encodedSegment) => {
+      const segment = decodePointerSegment(encodedSegment);
+      if (isUnknownArray(current) && /^(?:0|[1-9]\d*)$/u.test(segment)) {
+        const index = Number(segment);
+        if (Number.isSafeInteger(index)) {
+          current = current[index];
+          return index;
+        }
+      } else if (isRecord(current)) {
+        current = current[segment];
+      } else {
+        current = undefined;
       }
-    } else if (isRecord(current)) {
-      current = current[segment];
-    } else {
-      current = undefined;
-    }
-    return segment;
-  });
+      return segment;
+    });
 }
 
 function issuesFromAjv(
