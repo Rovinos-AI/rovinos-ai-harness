@@ -37,12 +37,12 @@ Shared design for this epic:
 
 **Parent:** #22 Security hardening
 **Task Description:** Fail builds on known high or critical vulnerabilities in dependencies, with expiring exceptions and a nightly rescan.
-**Expected Inputs:** `pnpm-lock.yaml`.
+**Expected Inputs:** `yarn.lock`.
 **Expected Output:** `config/vuln-policy.json`, `scripts/security/check-vulns.ts`, `static` stage step plus nightly schedule job, report artifact.
-**Dependencies:** `pnpm audit` (verify flags and JSON output), `osv-scanner` (pinned).
+**Dependencies:** `yarn npm audit --all --recursive` (verify flags and JSON output), `osv-scanner` (pinned).
 **Items it depends on:** 1.7, 1.4, 1.1.1.
 **Implementation guidance:**
-1. Run `pnpm audit --json --prod` (and a second pass including dev dependencies reported as warnings) and `osv-scanner --lockfile pnpm-lock.yaml --format json`; normalize both outputs into `Finding = { id, aliases, package, version, severity, fixedIn? }`.
+1. Run `yarn npm audit --all --recursive` (and a second pass including dev dependencies reported as warnings) and `osv-scanner --lockfile yarn.lock --format json`; normalize both outputs into `Finding = { id, aliases, package, version, severity, fixedIn? }`.
 2. Policy: fail on `high` and `critical`; `moderate` and below produce warnings. `exceptions: { id | package, reason, expires: ISO date, owner }[]`. An exception whose `expires` is in the past fails the build. Findings matching a valid exception are listed as `accepted` in the report. Policy files (`config/vuln-policy.json`, and `config/image-vuln-policy.json` in 22.4) share one Zod schema and are read with `parseJson`; scanner JSON output is parsed into Zod-validated `Finding`s (CONVENTIONS 3.10).
 3. Merge duplicates across tools by advisory id/alias (GHSA, CVE).
 4. `check-vulns.ts` separates the pure evaluator (`evaluateFindings(findings, policy, now)`) from the tool invocation for testing; the clock is injected.

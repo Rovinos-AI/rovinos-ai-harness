@@ -38,7 +38,7 @@ Shared design for this epic:
 **Parent:** #10 OTel Collector
 **Task Description:** Generate the collector's allowlist processors from the same registry the harness uses, so both sides always agree.
 **Expected Inputs:** Span/log definitions (4.1, 4.3), metric allowlist, resource key allowlist.
-**Expected Output:** `scripts/gen-collector-allowlist.ts`, `infra/collector/allowlist.generated.yaml`, `packages/telemetry/src/metrics.ts` `METRIC_ALLOWLIST` constant, `pnpm gen:collector --check`.
+**Expected Output:** `scripts/gen-collector-allowlist.ts`, `infra/collector/allowlist.generated.yaml`, `packages/telemetry/src/metrics.ts` `METRIC_ALLOWLIST` constant, `yarn gen:collector --check`.
 **Dependencies:** `yaml`.
 **Items it depends on:** 4.6, 4.7, 10.1.
 **Implementation guidance:**

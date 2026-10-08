@@ -107,7 +107,7 @@ Shared design for this epic:
 **Parent:** #8 Leak sentinel
 **Task Description:** Build the end-to-end suite that plants synthetic PII in every input path and asserts no plaintext appears in any observable sink.
 **Expected Inputs:** Full runtime assembled with fakes and capturing sinks.
-**Expected Output:** `test/canary/canaries.ts`, `test/canary/harness.ts` (`CanaryHarness`), `test/canary/pipeline.canary.test.ts`, `docs/canary-checklist.md`, `gates` stage step `pnpm test:canary`, PR template line.
+**Expected Output:** `test/canary/canaries.ts`, `test/canary/harness.ts` (`CanaryHarness`), `test/canary/pipeline.canary.test.ts`, `docs/canary-checklist.md`, `gates` stage step `yarn test:canary`, PR template line.
 **Dependencies:** none.
 **Items it depends on:** 8.4, 13.7, 13.8, 7.9, 2.10.
 **Implementation guidance:**

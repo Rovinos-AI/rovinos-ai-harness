@@ -17,4 +17,4 @@ User and contributor documentation.
 - ADRs live in `docs/decisions/` and are indexed.
 
 ## Testing
-- `pnpm check:docs` (links, mermaid, claims, markdownlint).
+- `yarn check:docs` (links, mermaid, claims, markdownlint).

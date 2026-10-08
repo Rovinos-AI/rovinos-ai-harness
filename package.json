@@ -3,19 +3,30 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*",
+    "tools/*"
+  ],
   "engines": {
     "node": ">=22.12.0"
   },
-  "packageManager": "pnpm@9.15.9",
-  "pnpm": {
-    "overrides": {
-      "@types/node": "$@types/node"
+  "packageManager": "yarn@4.18.1+sha512.b2e1e7524f654f2749d32b4ebcb4622473cb5bcbc485df2007e12a154e50162a4d795526768bc5f5b8f81717bfd79deb2472813d86fb5ae2eb551fa9c872b08f",
+  "dependenciesMeta": {
+    "esbuild": {
+      "built": true
     }
   },
+  "resolutions": {
+    "node-releases": "2.0.57"
+  },
   "scripts": {
-    "build": "tsc -b",
-    "lint": "eslint . --max-warnings 0 && prettier --check .",
-    "lint:fix": "eslint . --fix --max-warnings 0 && prettier --write .",
+    "build": "yarn workspaces foreach --all --topological --parallel run build",
+    "start": "yarn build && yarn workspace @harness/cli start",
+    "clean": "node scripts/clean.mjs",
+    "deps:check": "yarn constraints && yarn dedupe --check",
+    "lint": "yarn build && eslint . --max-warnings 0 && prettier --check . && yarn deps:check",
+    "lint:fix": "yarn build && eslint . --fix --max-warnings 0 && prettier --write .",
     "typecheck": "tsc -b && tsc -p packages/schemas/tsconfig.test.json && tsc -p packages/cli/tsconfig.json && tsc -p scripts/ci/tsconfig.json && tsc -p tools/eslint-plugin-harness/tsconfig.json --noEmit",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration --passWithNoTests",

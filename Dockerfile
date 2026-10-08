@@ -3,14 +3,18 @@ FROM node:22-slim AS build
 
 WORKDIR /app
 RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json yarn.lock .yarnrc.yml ./
 COPY packages/cli/package.json packages/cli/package.json
 COPY packages/schemas/package.json packages/schemas/package.json
 COPY tools/eslint-plugin-harness/package.json tools/eslint-plugin-harness/package.json
-RUN pnpm install --frozen-lockfile
+RUN yarn install --immutable
 COPY . .
-RUN pnpm -r build
-RUN pnpm deploy --filter @harness/cli --prod /out
+RUN yarn build
+RUN yarn workspaces focus @harness/cli --production \
+    && mkdir -p /out/dist /out/packages \
+    && cp -a node_modules /out/node_modules \
+    && cp -a packages/. /out/packages/ \
+    && cp -a packages/cli/dist/. /out/dist/
 
 FROM node:22-slim AS runtime
 

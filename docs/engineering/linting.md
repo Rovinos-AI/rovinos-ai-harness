@@ -1,6 +1,6 @@
 # Linting and formatting
 
-`pnpm lint` runs ESLint and Prettier. Every enabled ESLint rule has error severity; no rule is
+`yarn lint` runs ESLint and Prettier. Every enabled ESLint rule has error severity; no rule is
 warning-level. Prettier owns formatting (`printWidth: 100`, double quotes, and trailing commas).
 Markdown remains outside Prettier because it is handled by the documentation lint stage.
 
