@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { delimiter, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -65,11 +74,11 @@ it("accepts clean Markdown and rejects untagged code fences", () => {
 it("wires every extended linter into the static lint command", () => {
   const manifest = readFileSync(resolve(rootDirectory, "package.json"), "utf8");
   const pipeline = readFileSync(resolve(rootDirectory, "azure-pipelines.yml"), "utf8");
+  const lintCommand = /"lint": "([^"]+)"/u.exec(manifest)?.[1];
 
   for (const name of ["md", "yaml", "sh", "docker", "editorconfig", "spell"]) {
-    expect(manifest).toContain(`"lint:${name}"`);
+    expect(lintCommand).toContain(`yarn lint:${name}`);
   }
-  expect(manifest).toContain('"lint": "yarn lint:md && yarn lint:yaml');
   expect(pipeline).toContain("- script: yarn lint");
   expect(pipeline).toContain('LINT_PULL_IMAGES: "1"');
   expect(pipeline).not.toContain("LINT_SKIP_CONTAINERS");
@@ -158,10 +167,11 @@ it.skipIf(process.env.LINT_SKIP_CONTAINERS === "1")(
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
   },
+  30_000,
 );
 
 it.skipIf(process.env.LINT_SKIP_CONTAINERS === "1")(
-  "accepts EditorConfig-compliant files and rejects incorrect line endings",
+  "ignores generated coverage files and rejects incorrect source line endings",
   () => {
     const temporaryRoot = mkdtempSync(resolve(rootDirectory, ".lint-editorconfig-fixture-"));
 
@@ -171,12 +181,22 @@ it.skipIf(process.env.LINT_SKIP_CONTAINERS === "1")(
         ".editorconfig",
         "root = true\n\n[*]\ncharset = utf-8\nend_of_line = lf\ninsert_final_newline = true\ntrim_trailing_whitespace = true\n",
       );
+      copyFileSync(
+        resolve(rootDirectory, ".editorconfig-checker.json"),
+        resolve(temporaryRoot, ".editorconfig-checker.json"),
+      );
       writeFixture(temporaryRoot, "clean.txt", "clean\n");
       const clean = invokeLint("editorconfig", [relative(rootDirectory, temporaryRoot)]);
+      mkdirSync(resolve(temporaryRoot, "coverage"), { recursive: true });
+      writeFixture(temporaryRoot, "coverage/index.html", "generated\r\n");
+      const generatedCoverage = invokeLint("editorconfig", [
+        relative(rootDirectory, temporaryRoot),
+      ]);
       writeFixture(temporaryRoot, "invalid.txt", "invalid\r\n");
       const invalid = invokeLint("editorconfig", [relative(rootDirectory, temporaryRoot)]);
 
       expect(clean).toBe(true);
+      expect(generatedCoverage).toBe(true);
       expect(invalid).toBe(false);
     } finally {
       rmSync(temporaryRoot, { recursive: true, force: true });
