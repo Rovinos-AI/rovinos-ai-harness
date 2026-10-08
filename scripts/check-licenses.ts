@@ -57,6 +57,7 @@ const installedPackageSchema = z
     name: z.string().min(1),
     version: z.string().min(1),
     license: z.unknown().optional(),
+    licenses: z.array(z.object({ type: z.string().min(1) }).loose()).optional(),
   })
   .loose();
 
@@ -136,7 +137,14 @@ export function evaluateLicenses(
   return violations;
 }
 
-function packageLicense(value: unknown): string {
+function packageLicense(
+  value: unknown,
+  legacyLicenses: readonly { type: string }[] | undefined,
+): string {
+  if (value === undefined) {
+    const legacyTypes = legacyLicenses?.map(({ type }) => type.trim()).filter(Boolean) ?? [];
+    return legacyTypes.length > 0 ? legacyTypes.join(" OR ") : "UNLICENSED";
+  }
   if (typeof value === "string" && value.trim().length > 0) {
     return value;
   }
@@ -149,7 +157,7 @@ function packageLicense(value: unknown): string {
   ) {
     return value.type;
   }
-  return value === undefined ? "UNLICENSED" : "UNKNOWN";
+  return "UNKNOWN";
 }
 
 function packageDirectories(nodeModules: string): string[] {
@@ -174,7 +182,8 @@ function packageDirectories(nodeModules: string): string[] {
   return directories;
 }
 
-async function readInstalledPackages(root: string): Promise<LicensePackage[]> {
+/** Reads installed dependency manifests beneath a project root. */
+export async function readInstalledPackages(root: string): Promise<LicensePackage[]> {
   const pendingNodeModules = [join(root, "node_modules")];
   const packages = new Map<string, LicensePackage>();
 
@@ -205,13 +214,14 @@ async function readInstalledPackage(
   const packageJsonModule: unknown = await import(pathToFileURL(manifestPath).href, {
     with: { type: "json" },
   });
-  const jsonModuleSchema = z.object({ default: z.unknown() }).strict();
-  const parsedManifest = jsonModuleSchema.parse(packageJsonModule).default;
-  const manifest = installedPackageSchema.parse(parsedManifest);
+  const jsonModuleSchema = z
+    .union([installedPackageSchema, z.object({ default: installedPackageSchema }).strict()])
+    .transform((value) => ("name" in value ? value : value.default));
+  const manifest = jsonModuleSchema.parse(packageJsonModule);
   const dependency = LicensePackageSchema.parse({
     name: manifest.name,
     version: manifest.version,
-    license: packageLicense(manifest.license),
+    license: packageLicense(manifest.license, manifest.licenses),
   });
   packages.set(`${dependency.name}@${dependency.version}`, dependency);
 }

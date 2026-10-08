@@ -15,13 +15,11 @@
   "exceptions": [
     {
       "package": "caniuse-lite",
-      "version": "1.0.30001815",
       "reason": "Existing Browserslist tooling dependency declares CC-BY-4.0.",
       "expires": "2027-10-08"
     },
     {
       "package": "spdx-exceptions",
-      "version": "2.5.0",
       "reason": "Existing SPDX parser dependency declares CC-BY-3.0.",
       "expires": "2027-10-08"
     }
