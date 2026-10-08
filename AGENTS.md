@@ -5,7 +5,7 @@ Rovinos AI Harness: an open source, TypeScript, container-native agent harness w
 Instruction precedence: explicit user instructions, then the nearest `AGENTS.md` to the files you edit, then this file. Folder files add rules; they never relax these. This file is always in effect, so folder files do not repeat it.
 
 ## Current state
-The repo holds specs and agent instructions only; there is no pnpm workspace yet. Task 1.1 (`docs/engineering/tasks/epic-01-foundation.md`) creates `package.json`, the workspace, and the root scripts listed under Commands. Until it lands, those commands do not exist: do not invent scripts or stub a workspace outside task 1.1. `docs/progress.json` is empty because no task is complete.
+The pnpm workspace and `@harness/schemas` package are scaffolded; later tasks add the remaining packages and tooling. `docs/progress.json` tracks completed tasks.
 
 ## How to work here
 1. Pick one task id (for example `7.3`). Index: `docs/engineering/tasks/README.md`. Specs sit next to the code (`packages/<name>/epic-*.md`); `epic-01` lives in `docs/engineering/tasks/`, `epic-21` in `docs/`. Each folder's `AGENTS.md` lists the specs and task ids that touch it.
@@ -24,7 +24,7 @@ The repo holds specs and agent instructions only; there is no pnpm workspace yet
 - Repo-wide: `pnpm lint`, `pnpm typecheck`, `pnpm test:unit`, `pnpm test:integration` (needs compose services), `pnpm test:canary`, `pnpm test:replay`.
 - Scope tests to one folder by passing its path, which is forwarded to Vitest: `pnpm test:unit packages/core`, `pnpm test:integration packages/store`.
 - Checks: `pnpm check:spdx`, `pnpm check:dco`, `pnpm check:licenses`, `pnpm lint:telemetry`, `pnpm docs:catalog --check`, `pnpm gen:collector --check`.
-- Agent index: `node scripts/gen-agents-index.mjs` regenerates the generated blocks in folder `AGENTS.md` files and CONVENTIONS section 1; `--check` fails on drift or broken links. Tests: `node --test scripts/*.test.mjs`. Folder `AGENTS.md` files list only extra, folder-specific commands.
+- Agent index: `pnpm gen:agents` regenerates the generated blocks in folder `AGENTS.md` files and CONVENTIONS section 1; `pnpm check:agents` checks for drift and broken links and runs its tests. Folder `AGENTS.md` files list only extra, folder-specific commands.
 
 ## Rules that always apply
 - TypeScript strict. No `any`, no non-null assertions, no `console.*`. Zod at every boundary. Inject `Clock`, `IdGenerator`, randomness.
@@ -41,7 +41,7 @@ The repo holds specs and agent instructions only; there is no pnpm workspace yet
 - Do not weaken a guarantee, remove a negative-control test, or relax a lint rule to make a change pass.
 
 ## Done means
-CONVENTIONS section 8: one task per PR, signed-off commits, `pnpm lint` and `pnpm typecheck` clean (zero errors, zero warnings), the tests the spec lists in the stage it names, SPDX headers, docs updated, task id in `docs/progress.json`, and `node scripts/gen-agents-index.mjs --check` passing.
+CONVENTIONS section 8: one task per PR, signed-off commits, `pnpm lint` and `pnpm typecheck` clean (zero errors and zero warnings), the tests the spec lists in the stage it names, SPDX headers, docs updated, task id in `docs/progress.json`, and `pnpm check:agents` passing.
 
 ## Stop and ask when
 - The task spec is ambiguous or contradicts CONVENTIONS or an `AGENTS.md`.

@@ -9,3 +9,6 @@ coverage/
 docs/api/
 .DS_Store
 .claude/settings.local.json
+.pnpm-store/
+pnpm-debug.log*
+reports/
