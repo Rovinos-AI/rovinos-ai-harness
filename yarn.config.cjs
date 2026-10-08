@@ -1,17 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
 const rootManifest = require("./package.json");
-const nodeMajor = Number.parseInt(rootManifest.engines.node.match(/\d+/)?.[0] ?? "", 10);
+const miseConfig = readFileSync(join(__dirname, "mise.toml"), "utf8");
+const nodeVersion = /^node\s*=\s*"([^"]+)"$/m.exec(miseConfig)?.[1];
 const nodeTypesRange = rootManifest.devDependencies["@types/node"];
-const nodeTypesMajor = Number.parseInt(nodeTypesRange.match(/^\d+/)?.[0] ?? "", 10);
-
-if (nodeMajor !== nodeTypesMajor) {
-  throw new Error("The @types/node major must match the Node major.");
-}
 
 module.exports = {
   async constraints({ Yarn }) {
     const workspaces = Yarn.workspaces();
     const workspaceIdents = new Set(workspaces.map((workspace) => workspace.ident));
+    const rootWorkspace = workspaces.find((workspace) => workspace.ident === rootManifest.name);
+    const nodeVersionMatch = /^(\d+)\.\d+\.\d+$/.exec(nodeVersion ?? "");
+    const nodeTypesMatch = /^(\d+)\.\d+\.\d+$/.exec(nodeTypesRange);
+
+    if (nodeVersionMatch === null || nodeTypesMatch === null) {
+      rootWorkspace?.error("The mise Node and @types/node pins must be exact semantic versions.");
+    } else if (nodeVersionMatch[1] !== nodeTypesMatch[1]) {
+      rootWorkspace?.error(
+        `The @types/node major must match the Node major pinned in mise.toml (${nodeVersionMatch[1]}).`,
+      );
+    }
 
     for (const workspace of workspaces) {
       workspace.set("type", "module");

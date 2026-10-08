@@ -75,6 +75,7 @@ it("pins an exact supported Node and Corepack version through mise", () => {
     throw new TypeError("mise.toml must pin Node and Corepack.");
   }
 
+  expect(mise).not.toMatch(/^node\.corepack\s*=/m);
   expect(nodeVersion).toMatch(/^22\.\d+\.\d+$/);
   expect(corepackVersion).toMatch(/^\d+\.\d+\.\d+$/);
   expect(process.versions.node).toBe(nodeVersion);

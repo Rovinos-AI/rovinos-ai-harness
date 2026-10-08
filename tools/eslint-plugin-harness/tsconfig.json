@@ -3,6 +3,7 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
+    "composite": false,
     "rootDir": "src",
     "outDir": "dist"
   },

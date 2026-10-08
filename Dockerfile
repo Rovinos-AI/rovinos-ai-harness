@@ -1,19 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-FROM node:22-slim AS build
+FROM ghcr.io/jdx/mise:2026.10.4-debian AS build
 
 WORKDIR /app
-RUN corepack enable
+COPY mise.toml ./
+RUN mise install && mise exec -- corepack enable
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY packages/cli/package.json packages/cli/package.json
 COPY packages/schemas/package.json packages/schemas/package.json
 COPY tools/eslint-plugin-harness/package.json tools/eslint-plugin-harness/package.json
-RUN yarn install --immutable
+RUN mise exec -- yarn install --immutable
 COPY . .
-RUN yarn build
-RUN yarn workspaces focus @harness/cli --production \
+RUN mise exec -- yarn build
+RUN mise exec -- yarn workspaces focus @harness/cli --production \
     && mkdir -p /out/dist /out/packages \
     && cp -a node_modules /out/node_modules \
-    && cp -a packages/. /out/packages/ \
+    && mkdir -p /out/packages/cli /out/packages/schemas \
+    && cp -a packages/cli/package.json packages/cli/dist /out/packages/cli/ \
+    && cp -a packages/schemas/package.json packages/schemas/dist /out/packages/schemas/ \
     && cp -a packages/cli/dist/. /out/dist/
 
 FROM node:22-slim AS runtime
