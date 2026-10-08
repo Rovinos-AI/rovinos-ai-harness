@@ -17,7 +17,7 @@ Zod schemas and inferred types shared by every package: events, field classifica
 
 ## Boundaries
 
-- External code: `zod` (4.2 or later), `yaml`, `ajv` (only inside the 1.12 helpers for external JSON Schema), and the standard library. Files marked browser-safe (`app-span.ts`, `approval-tools.ts`, `messages.ts`) must not import Node APIs.
+- External code: `zod` (4.2 or later), `yaml`, `ajv` and `ajv-formats` (only inside the 1.12 helper for external JSON Schema), and the standard library. Files marked browser-safe (`app-span.ts`, `approval-tools.ts`, `messages.ts`) must not import Node APIs.
 
 ## Rules
 
