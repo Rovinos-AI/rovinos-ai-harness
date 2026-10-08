@@ -7,10 +7,10 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
     commit-message:
       prefix: deps
-    labels:
-      - dependencies
     groups:
       minor-and-patch:
         update-types:
@@ -33,10 +33,13 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: deps
-    labels:
-      - dependencies
     groups:
       minor-and-patch:
         update-types:
           - minor
           - patch
+    ignore:
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
+      - dependency-name: ghcr.io/jdx/mise

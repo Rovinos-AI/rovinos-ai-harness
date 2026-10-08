@@ -125,6 +125,23 @@ it("accepts a commit with a valid sign-off trailer", () => {
   });
 });
 
+it("accepts GitHub noreply bot identities but rejects arbitrary author strings", () => {
+  const author = {
+    authorName: "arbitrary-bot[bot]",
+    authorEmail: "12345678+arbitrary-bot[bot]@users.noreply.github.com",
+    committerName: "GitHub",
+    committerEmail: "noreply@github.com",
+    signingKeyFingerprints: ["968479A1AFF927E37D1A566BB5690EEEBB952194"],
+  };
+
+  expect(() => DcoExemptionsSchema.parse({ exemptAuthors: [author] })).not.toThrow();
+  expect(() =>
+    DcoExemptionsSchema.parse({
+      exemptAuthors: [{ ...author, authorEmail: "not-an-email" }],
+    }),
+  ).toThrow();
+});
+
 it("reports an unsigned commit and gives the sign-off repair command", () => {
   const repository = createRepository();
   const sha = commit(repository, "unsigned.txt", "unsigned\n", "unsigned change");
