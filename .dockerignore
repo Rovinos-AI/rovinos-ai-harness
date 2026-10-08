@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+.git
+**/.git
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+*.tsbuildinfo
+**/*.tsbuildinfo
+**/*.test.*
+**/*.int.test.*
+**/*.canary.test.*
+**/*.replay.test.*
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+.claude
+**/.claude
+.pnpm-store
+reports
+data
+**/data
