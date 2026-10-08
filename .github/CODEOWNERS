@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+* @rovinoscr
+/packages/telemetry/ @rovinoscr
+/packages/pii/ @rovinoscr
+/packages/sandbox/ @rovinoscr
+/infra/collector/ @rovinoscr

@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Task
+description: Propose a repository task
+title: "[<task id>] "
+labels: []
+body:
+  - type: input
+    id: parent
+    attributes:
+      label: Parent
+      description: Parent epic or issue.
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs to be done and why?
+    validations:
+      required: true
+  - type: textarea
+    id: inputs
+    attributes:
+      label: Inputs
+      description: Expected inputs and prerequisites.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Expected files, APIs, or other deliverables.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests
+      description: Tests to add or update.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: Acceptance criteria and definition of done.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Libraries, tools, and services required.
+    validations:
+      required: false
+  - type: textarea
+    id: depends-on
+    attributes:
+      label: Depends on
+      description: Related task or issue dependencies.
+    validations:
+      required: false
