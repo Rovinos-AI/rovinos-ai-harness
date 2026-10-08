@@ -31,10 +31,9 @@ export class ContractError extends Error {
   constructor(issues: readonly ContractIssue[]) {
     super("Contract validation failed.");
     this.name = "ContractError";
-    this.issues = issues.map(({ path, code }) => ({
-      path: [...path],
-      code,
-    }));
+    this.issues = issues.map(({ path, code }) =>
+      contractIssueSchema.parse({ path: [...path], code }),
+    );
   }
 }
 
@@ -66,11 +65,17 @@ function withinByteLimit(text: string, maxBytes: number): boolean {
 }
 
 function validate<Schema extends z.ZodType>(schema: Schema, input: unknown): z.infer<Schema> {
-  const result = schema.safeParse(input);
-  if (!result.success) {
-    throw new ContractError(issuesFromZod(result.error));
+  let issues: ContractIssue[];
+  try {
+    const result = schema.safeParse(input);
+    if (result.success) {
+      return result.data;
+    }
+    issues = issuesFromZod(result.error);
+  } catch {
+    throw new ContractError([{ path: [], code: "validation_failed" }]);
   }
-  return result.data;
+  throw new ContractError(issues);
 }
 
 /**

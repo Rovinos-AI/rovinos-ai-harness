@@ -12,6 +12,29 @@ const compileOptionsSchema = z
     maxBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   })
   .strict();
+const schemaMapKeywords = [
+  "$defs",
+  "definitions",
+  "properties",
+  "patternProperties",
+  "dependentSchemas",
+  "dependencies",
+];
+const schemaArrayKeywords = ["allOf", "anyOf", "oneOf", "prefixItems"];
+const singleSchemaKeywords = [
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "contentSchema",
+  "else",
+  "if",
+  "items",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+];
 
 /** Bounds applied when compiling an external JSON Schema. */
 export type CompileJsonSchemaOptions = z.infer<typeof compileOptionsSchema>;
@@ -23,12 +46,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 function isJsonSchema(value: unknown): value is AnySchema {
   return typeof value === "boolean" || isRecord(value);
 }
 
 function isFormatsPlugin(value: unknown): value is (ajv: Ajv2020) => unknown {
   return typeof value === "function";
+}
+
+function schemaChildren(schema: Record<string, unknown>): unknown[] {
+  const children: unknown[] = [];
+  for (const keyword of schemaMapKeywords) {
+    const schemas = schema[keyword];
+    if (isRecord(schemas)) {
+      children.push(...Object.values(schemas).filter(isJsonSchema));
+    }
+  }
+  for (const keyword of schemaArrayKeywords) {
+    const schemas = schema[keyword];
+    if (isUnknownArray(schemas)) {
+      children.push(...schemas.filter(isJsonSchema));
+    }
+  }
+  for (const keyword of singleSchemaKeywords) {
+    const child = schema[keyword];
+    if (isJsonSchema(child)) {
+      children.push(child);
+    }
+  }
+  return children;
 }
 
 function issueFromOptions(error: z.ZodError): ContractIssue[] {
@@ -41,11 +91,11 @@ function issueFromOptions(error: z.ZodError): ContractIssue[] {
 function collectRefs(schema: unknown): string[] {
   const refs: string[] = [];
   const pending: unknown[] = [schema];
-  const visited = new WeakSet<object>();
+  const visited = new Set<unknown>();
 
   while (pending.length > 0) {
     const current = pending.pop();
-    if (Array.isArray(current)) {
+    if (isUnknownArray(current)) {
       if (visited.has(current)) {
         continue;
       }
@@ -56,11 +106,13 @@ function collectRefs(schema: unknown): string[] {
         continue;
       }
       visited.add(current);
-      const ref = current.$ref;
-      if (typeof ref === "string") {
-        refs.push(ref);
+      for (const keyword of ["$ref", "$dynamicRef"]) {
+        const ref = current[keyword];
+        if (typeof ref === "string") {
+          refs.push(ref);
+        }
       }
-      pending.push(...Object.values(current));
+      pending.push(...schemaChildren(current));
     }
   }
   return refs;
@@ -87,7 +139,7 @@ function resolvePointer(root: unknown, ref: string): unknown {
 
   let current = root;
   for (const segment of pointer.split("/").slice(1).map(decodePointerSegment)) {
-    if (Array.isArray(current)) {
+    if (isUnknownArray(current)) {
       const index = Number(segment);
       if (!Number.isSafeInteger(index) || index < 0) {
         return undefined;
@@ -113,10 +165,10 @@ function resolveAnchor(root: unknown, ref: string): unknown {
     return undefined;
   }
   const pending: unknown[] = [root];
-  const visited = new WeakSet<object>();
+  const visited = new Set<unknown>();
   while (pending.length > 0) {
     const current = pending.pop();
-    if (Array.isArray(current)) {
+    if (isUnknownArray(current)) {
       if (visited.has(current)) {
         continue;
       }
@@ -130,31 +182,34 @@ function resolveAnchor(root: unknown, ref: string): unknown {
       if (current.$anchor === anchor || current.$dynamicAnchor === anchor) {
         return current;
       }
-      pending.push(...Object.values(current));
+      pending.push(...schemaChildren(current));
     }
   }
   return undefined;
 }
 
 function resolveRef(root: unknown, ref: string): unknown {
-  return ref.startsWith("#/") || ref === "#"
-    ? resolvePointer(root, ref)
-    : resolveAnchor(root, ref);
+  return ref.startsWith("#/") || ref === "#" ? resolvePointer(root, ref) : resolveAnchor(root, ref);
 }
 
 function exceedsRefDepth(root: unknown, refs: readonly string[], maxRefDepth: number): boolean {
   const pending = refs.map((ref) => ({ ref, depth: 1, ancestors: new Set<string>() }));
+  const processedDepth = new Map<string, number>();
   while (pending.length > 0) {
     const current = pending.pop();
     if (current === undefined) {
       continue;
     }
-    if (current.depth > maxRefDepth) {
-      return true;
-    }
     if (current.ancestors.has(current.ref)) {
       continue;
     }
+    if (current.depth > maxRefDepth) {
+      return true;
+    }
+    if (current.depth <= (processedDepth.get(current.ref) ?? 0)) {
+      continue;
+    }
+    processedDepth.set(current.ref, current.depth);
     const target = resolveRef(root, current.ref);
     if (target === undefined) {
       continue;
@@ -176,7 +231,7 @@ function pathFromInstancePath(instancePath: string): (string | number)[] {
     .slice(1)
     .map(decodePointerSegment)
     .map((segment) => {
-      if (!/^(0|[1-9]\d*)$/u.test(segment)) {
+      if (!/^(?:0|[1-9]\d*)$/u.test(segment)) {
         return segment;
       }
       const index = Number(segment);
@@ -197,7 +252,7 @@ function issuesFromAjv(errors: readonly ErrorObject[] | null | undefined): Contr
  * Compiles a bounded, external JSON Schema using the 2020-12 dialect.
  *
  * @param jsonSchema - External schema, such as an MCP tool schema.
- * @param options - Limits for schema size and local reference depth.
+ * @param options - Limits for schema size and local reference depth; defaults are 1 MiB and 16 refs.
  * @returns A validator that throws {@link ContractError} on invalid values.
  * @throws ContractError for invalid options or schemas, remote references, and size/ref limits.
  */
@@ -212,28 +267,44 @@ export function compileJsonSchema(
   const maxBytes = optionResult.data.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxRefDepth = optionResult.data.maxRefDepth ?? DEFAULT_MAX_REF_DEPTH;
 
-  let serialized: string | undefined;
+  if (!isJsonSchema(jsonSchema)) {
+    throw new ContractError([{ path: [], code: "invalid_json_schema" }]);
+  }
+
+  let serialized: unknown;
   try {
     serialized = JSON.stringify(jsonSchema);
   } catch {
     throw new ContractError([{ path: [], code: "invalid_json_schema" }]);
   }
-  if (serialized === undefined || !isJsonSchema(jsonSchema)) {
+  if (typeof serialized !== "string") {
     throw new ContractError([{ path: [], code: "invalid_json_schema" }]);
   }
   if (new TextEncoder().encode(serialized).byteLength > maxBytes) {
     throw new ContractError([{ path: [], code: "size_limit_exceeded" }]);
   }
 
-  const refs = collectRefs(jsonSchema);
+  let refs: string[];
+  try {
+    refs = collectRefs(jsonSchema);
+  } catch {
+    throw new ContractError([{ path: [], code: "invalid_json_schema" }]);
+  }
   if (refs.some((ref) => !ref.startsWith("#"))) {
     throw new ContractError([{ path: [], code: "remote_ref_disallowed" }]);
   }
-  if (exceedsRefDepth(jsonSchema, refs, maxRefDepth)) {
+  let refDepthExceeded: boolean;
+  try {
+    refDepthExceeded = exceedsRefDepth(jsonSchema, refs, maxRefDepth);
+  } catch {
+    throw new ContractError([{ path: [], code: "invalid_json_schema" }]);
+  }
+  if (refDepthExceeded) {
     throw new ContractError([{ path: [], code: "ref_depth_exceeded" }]);
   }
 
   const ajv = new Ajv2020({ allErrors: true, strict: true, addUsedSchema: false });
+  ajv.addKeyword({ keyword: "$anchor", schemaType: "string", valid: true });
   const formatsPlugin: unknown = addFormats.default;
   if (!isFormatsPlugin(formatsPlugin)) {
     throw new ContractError([{ path: [], code: "invalid_json_schema" }]);
@@ -247,7 +318,13 @@ export function compileJsonSchema(
   }
 
   return (value: unknown): void => {
-    if (!validate(value)) {
+    let valid: boolean;
+    try {
+      valid = validate(value);
+    } catch {
+      throw new ContractError([{ path: [], code: "json_schema_invalid" }]);
+    }
+    if (!valid) {
       throw new ContractError(issuesFromAjv(validate.errors));
     }
   };

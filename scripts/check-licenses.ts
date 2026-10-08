@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Yarn 4 has no `licenses list` command, so report the installed package manifests directly.
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import licensePolicyJson from "../config/license-policy.json" with { type: "json" };
+import { fileURLToPath } from "node:url";
+import { parseJson } from "@harness/schemas";
 import { z } from "zod";
 import parseSpdx from "spdx-expression-parse";
 
@@ -211,13 +212,7 @@ async function readInstalledPackage(
   if (!existsSync(manifestPath)) {
     return;
   }
-  const packageJsonModule: unknown = await import(pathToFileURL(manifestPath).href, {
-    with: { type: "json" },
-  });
-  const jsonModuleSchema = z
-    .union([installedPackageSchema, z.object({ default: installedPackageSchema }).strict()])
-    .transform((value) => ("name" in value ? value : value.default));
-  const manifest = jsonModuleSchema.parse(packageJsonModule);
+  const manifest = parseJson(installedPackageSchema, await readFile(manifestPath, "utf8"));
   const dependency = LicensePackageSchema.parse({
     name: manifest.name,
     version: manifest.version,
@@ -258,7 +253,10 @@ function formatViolations(violations: readonly LicenseViolation[]): string {
 }
 
 async function runCheck(): Promise<void> {
-  const policy = LicensePolicySchema.parse(licensePolicyJson);
+  const policy = parseJson(
+    LicensePolicySchema,
+    readFileSync(fileURLToPath(new URL("../config/license-policy.json", import.meta.url)), "utf8"),
+  );
   const packages = await readInstalledPackages(process.cwd());
   const violations = evaluateLicenses(packages, policy, new Date().toISOString().slice(0, 10));
   if (violations.length > 0) {

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import dcoExemptions from "../config/dco-exemptions.json" with { type: "json" };
 import { afterEach, expect, it } from "vitest";
+import { parseJson } from "@harness/schemas";
 import {
   checkDco,
   DcoExemptionsSchema,
@@ -17,7 +17,10 @@ import {
 const temporaryDirectories: string[] = [];
 const gpgAvailable = spawnSync("gpg", ["--version"], { encoding: "utf8" }).status === 0;
 const noExemptions = DcoExemptionsSchema.parse({ exemptAuthors: [] });
-const configuredExemptions = DcoExemptionsSchema.parse(dcoExemptions);
+const configuredExemptions = parseJson(
+  DcoExemptionsSchema,
+  readFileSync(fileURLToPath(new URL("../config/dco-exemptions.json", import.meta.url)), "utf8"),
+);
 const copilotExemptions: DcoExemptions = DcoExemptionsSchema.parse({
   exemptAuthors: [
     {

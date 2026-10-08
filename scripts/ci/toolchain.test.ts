@@ -4,8 +4,14 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+import { parseJson } from "@harness/schemas";
+import { z } from "zod";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const packageManifestSchema = z.looseObject({
+  engines: z.looseObject({ node: z.string() }),
+  packageManager: z.string(),
+});
 
 function repositoryFiles(directory: string): string[] {
   const ignoredDirectories = new Set([".git", ".yarn", "coverage", "dist", "node_modules"]);
@@ -35,36 +41,16 @@ function satisfiesNodeEngine(version: string, requirement: string): boolean {
   return true;
 }
 
-function readManifest(): unknown {
-  return JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+function readManifest() {
+  return parseJson(packageManifestSchema, readFileSync(join(root, "package.json"), "utf8"));
 }
 
 function getNodeEngine(): string {
-  const manifest = readManifest();
-  if (typeof manifest !== "object" || manifest === null || !("engines" in manifest)) {
-    throw new TypeError("The root manifest must declare Node engine support.");
-  }
-  const engines = manifest.engines;
-  if (typeof engines !== "object" || engines === null || !("node" in engines)) {
-    throw new TypeError("The root manifest must declare a Node engine.");
-  }
-  const node = engines.node;
-  if (typeof node !== "string") {
-    throw new TypeError("The Node engine must be a string.");
-  }
-  return node;
+  return readManifest().engines.node;
 }
 
 function getPackageManager(): string {
-  const manifest = readManifest();
-  if (typeof manifest !== "object" || manifest === null || !("packageManager" in manifest)) {
-    throw new TypeError("The root manifest must pin its package manager.");
-  }
-  const packageManager = manifest.packageManager;
-  if (typeof packageManager !== "string") {
-    throw new TypeError("The package-manager pin must be a string.");
-  }
-  return packageManager;
+  return readManifest().packageManager;
 }
 
 it("pins an exact supported Node and Corepack version through mise", () => {

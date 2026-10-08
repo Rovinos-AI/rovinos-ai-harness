@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
+import { parseYaml } from "@harness/schemas";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const protectionScript = `${repositoryRoot}/scripts/github/apply-branch-protection.sh`;
@@ -84,17 +84,30 @@ describe("task issue form", () => {
   it("contains every task-spec field", () => {
     const formFile = `${repositoryRoot}/.github/ISSUE_TEMPLATE/task.yml`;
     const formText = readFileSync(formFile, "utf8");
-    const form = z
+    const formSchema = z
       .object({
+        name: z.string(),
+        description: z.string(),
+        title: z.string(),
+        labels: z.array(z.string()),
         body: z.array(
-          z.object({
-            attributes: z.object({
-              label: z.string(),
-            }),
-          }),
+          z
+            .object({
+              type: z.enum(["input", "textarea"]),
+              id: z.string(),
+              attributes: z
+                .object({
+                  label: z.string(),
+                  description: z.string(),
+                })
+                .strict(),
+              validations: z.object({ required: z.boolean() }).strict(),
+            })
+            .strict(),
         ),
       })
-      .parse(parse(formText));
+      .strict();
+    const form = parseYaml(formSchema, formText);
 
     expect(form.body.map((field) => field.attributes.label)).toEqual([
       "Parent",
