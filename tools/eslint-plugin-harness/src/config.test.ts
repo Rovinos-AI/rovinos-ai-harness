@@ -128,8 +128,11 @@ describe("ESLint configuration", () => {
   it.each([
     ["child_process", "packages/schemas/src/lint-fixture.js"],
     ["node:child_process", "packages/schemas/src/lint-fixture.js"],
+    ["node:child_process", "packages/schemas/src/index.test.ts"],
+    ["yaml", "packages/schemas/src/index.test.ts"],
     ["fs", "packages/approval-app/src/lint-fixture.js"],
     ["node:fs", "packages/approval-app/src/lint-fixture.js"],
+    ["node:fs", "packages/approval-app/src/lint-fixture.test.js"],
     ["fs/promises", "packages/approval-app/src/lint-fixture.js"],
     ["node:fs/promises", "packages/approval-app/src/lint-fixture.js"],
   ])("restricts %s imports outside approved boundaries", async (moduleName, filename) => {
@@ -155,7 +158,7 @@ describe("ESLint configuration", () => {
           : {};
       expect(parserOptions.project).toBeUndefined();
       expect(parserOptions.projectService).toEqual({
-        allowDefaultProject: ["vitest.workspace.ts"],
+        allowDefaultProject: ["vitest.config.ts"],
         defaultProject: "packages/schemas/tsconfig.test.json",
       });
     }

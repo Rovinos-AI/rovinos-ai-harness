@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+trigger:
+  - main
+
+pr:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  YARN_GLOBAL_FOLDER: $(Pipeline.Workspace)/.yarn
+
+stages:
+  - stage: static
+    jobs:
+      - job: static
+        steps:
+          - template: pipelines/templates/node-setup.yml
+          - script: yarn lint
+            displayName: Lint
+          - script: yarn typecheck
+            displayName: Typecheck
+          - script: yarn check:agents
+            displayName: Check agent index
+
+  - stage: unit
+    dependsOn: static
+    jobs:
+      - job: unit
+        steps:
+          - template: pipelines/templates/node-setup.yml
+          - script: >
+              yarn test:unit --reporter=junit
+              --outputFile=reports/junit.xml
+              --coverage
+              --coverage.reportOnFailure
+              --coverage.reporter=cobertura
+            displayName: Unit tests
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: reports/junit.xml
+              failTaskOnFailedTests: true
+          - task: PublishCodeCoverageResults@2
+            condition: succeededOrFailed()
+            inputs:
+              summaryFileLocation: $(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml

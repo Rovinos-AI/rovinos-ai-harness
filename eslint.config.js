@@ -59,16 +59,11 @@ const domProperties = [
 ];
 
 function restrictedImports({ telemetry = false, childProcess = false, parsers = false } = {}) {
-  const patterns = [];
-  if (!telemetry) {
-    patterns.push(restrictedImportGroups.observability);
-  }
-  if (!childProcess) {
-    patterns.push(restrictedImportGroups.childProcess);
-  }
-  if (!parsers) {
-    patterns.push(restrictedImportGroups.parsers);
-  }
+  const patterns = [
+    ...(!telemetry ? [restrictedImportGroups.observability] : []),
+    ...(!childProcess ? [restrictedImportGroups.childProcess] : []),
+    ...(!parsers ? [restrictedImportGroups.parsers] : []),
+  ];
   return ["error", { patterns }];
 }
 
@@ -265,7 +260,7 @@ const configuration = [
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["vitest.workspace.ts"],
+          allowDefaultProject: ["vitest.config.ts"],
           defaultProject: "packages/schemas/tsconfig.test.json",
         },
         tsconfigRootDir: rootDirectory,
@@ -324,7 +319,7 @@ const configuration = [
     },
   },
   {
-    files: ["eslint.config.js", "vitest.workspace.ts"],
+    files: ["eslint.config.js", "vitest.config.ts"],
     rules: { "import-x/no-default-export": "off" },
   },
   {
@@ -386,8 +381,11 @@ const configuration = [
       "vitest/no-conditional-expect": "error",
       "vitest/valid-title": "error",
       ...Object.fromEntries([...testRules].map((rule) => [rule, "off"])),
-      "no-restricted-properties": "off",
     },
+  },
+  {
+    files: ["scripts/ci/verify-pipeline.test.ts"],
+    rules: { "no-restricted-imports": restrictedImports({ childProcess: true, parsers: true }) },
   },
   {
     files: ["scripts/gen-agents-index.test.mjs"],
