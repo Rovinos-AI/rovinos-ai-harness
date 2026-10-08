@@ -125,6 +125,27 @@ it("bounds local reference depth and rejects remote references", () => {
   }).toThrow(ContractError);
 });
 
+it("bounds reference chains inside embedded resources with nested identifiers", () => {
+  const schema = {
+    $defs: {
+      embedded: {
+        $id: "https://schemas.invalid/embedded",
+        $defs: {
+          first: { $ref: "#/$defs/second" },
+          second: { $ref: "#/$defs/third" },
+          third: { type: "string" },
+        },
+      },
+    },
+    properties: { value: { $ref: "#/$defs/embedded/$defs/first" } },
+  };
+
+  expect(() => compileJsonSchema(schema, { maxRefDepth: 2 })).toThrow(ContractError);
+  expect(() => {
+    compileJsonSchema(schema);
+  }).not.toThrow();
+});
+
 it("supports recursive schemas and leaves example data outside reference checks", () => {
   const validateRecursive = compileJsonSchema(
     {
@@ -172,7 +193,7 @@ it("resolves local anchors and validates boolean JSON Schemas", () => {
   ).toEqual([{ path: [], code: "json_schema_false schema" }]);
 });
 
-it("resolves references through tuple arrays and reports numeric error paths", () => {
+it("resolves references through tuple arrays and distinguishes array indices from keys", () => {
   const validateReference = compileJsonSchema({
     $defs: {
       tuple: {
@@ -186,6 +207,10 @@ it("resolves references through tuple arrays and reports numeric error paths", (
     properties: { value: { $ref: "#/$defs/tuple/prefixItems/0" } },
   });
   const validateArray = compileJsonSchema({ type: "array", items: { type: "integer" } });
+  const validateNumericKey = compileJsonSchema({
+    type: "object",
+    properties: { "0": { type: "integer" } },
+  });
 
   expect(() => {
     validateReference({ value: "sample" });
@@ -195,6 +220,11 @@ it("resolves references through tuple arrays and reports numeric error paths", (
       validateArray(["private-value"]);
     }).issues,
   ).toEqual([{ path: [0], code: "json_schema_type" }]);
+  expect(
+    captureContractError(() => {
+      validateNumericKey({ "0": "private-value" });
+    }).issues,
+  ).toEqual([{ path: ["0"], code: "json_schema_type" }]);
 });
 
 it("bounds the external schema size and keeps compile errors value-free", () => {
@@ -214,7 +244,7 @@ it("bounds the external schema size and keeps compile errors value-free", () => 
   ).toEqual([{ path: [], code: "invalid_json_schema" }]);
 });
 
-it("rejects external schemas that cannot be serialized", () => {
+it("rejects external schemas that cannot be serialized and compiles a stable snapshot", () => {
   const cyclicSchema: Record<string, unknown> = {};
   cyclicSchema.self = cyclicSchema;
   const undefinedSchema: Record<string, unknown> = { toJSON: () => undefined };
@@ -230,6 +260,10 @@ it("rejects external schemas that cannot be serialized", () => {
       return {};
     },
   });
+  const schemaWithToJSON = {
+    properties: { hidden: { type: "string", description: "x".repeat(1000) } },
+    toJSON: () => ({ type: "string" }),
+  };
 
   expect(
     captureContractError(() => {
@@ -241,11 +275,40 @@ it("rejects external schemas that cannot be serialized", () => {
       compileJsonSchema(undefinedSchema);
     }).issues,
   ).toEqual([{ path: [], code: "invalid_json_schema" }]);
-  expect(
-    captureContractError(() => {
-      compileJsonSchema(changingSchema);
-    }).issues,
-  ).toEqual([{ path: [], code: "invalid_json_schema" }]);
+  const validateChangingSchema = compileJsonSchema(changingSchema);
+  const validateToJSONSchema = compileJsonSchema(schemaWithToJSON, { maxBytes: 32 });
+  expect(propertyReads).toBe(1);
+  expect(() => {
+    validateChangingSchema({});
+  }).not.toThrow();
+  expect(() => {
+    validateToJSONSchema("value");
+  }).not.toThrow();
+  expect(() => {
+    validateToJSONSchema({ hidden: "value" });
+  }).toThrow(ContractError);
+});
+
+it("accepts annotation keywords, unknown formats, and type-less nested schemas", () => {
+  const validate = compileJsonSchema({
+    type: "object",
+    "x-display": "Search",
+    properties: {
+      id: { type: "string", format: "ulid" },
+      nested: { properties: { count: { minimum: 1 } } },
+    },
+  });
+
+  expect(() => {
+    validate({ id: "not-validated", nested: { count: 2 } });
+  }).not.toThrow();
+  expect(() => {
+    validate({ id: 42, nested: { count: 2 } });
+  }).toThrow(ContractError);
+  expect(() => {
+    validate({ id: "not-validated", nested: { count: 0 } });
+  }).toThrow(ContractError);
+  expect(() => compileJsonSchema({ type: 5 })).toThrow(ContractError);
 });
 
 it("rejects invalid helper options with value-free errors", () => {

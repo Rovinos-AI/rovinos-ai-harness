@@ -116,34 +116,72 @@ const createNoRelativePackages = (layerNames) => {
   return create;
 };
 
+/** @type {(node: Node) => string | undefined} */
+const identifierName = (node) =>
+  node.type === AST_NODE_TYPES.Identifier ? node.name : undefined;
+
 /** @type {HarnessRule["create"]} */
 const createSchemaInferredTypes = (context) => {
   const schemaNames = new Set();
-  /** @type {{node: Node, schemaName: string}[]} */
+  const exportedNames = new Set();
+  /** @type {{node: Node, schemaName: string, interfaceName: string}[]} */
   const interfaces = [];
 
   return {
-    ExportNamedDeclaration(node) {
-      const declaration = node.declaration;
-      if (declaration === null) {
+    VariableDeclaration(node) {
+      if (
+        node.parent.type !== AST_NODE_TYPES.Program &&
+        node.parent.type !== AST_NODE_TYPES.ExportNamedDeclaration
+      ) {
         return;
       }
-      if (declaration.type === AST_NODE_TYPES.VariableDeclaration) {
+      for (const declarator of node.declarations) {
+        if (
+          declarator.id.type === AST_NODE_TYPES.Identifier &&
+          declarator.id.name.endsWith("Schema")
+        ) {
+          schemaNames.add(declarator.id.name);
+        }
+      }
+    },
+    TSInterfaceDeclaration(node) {
+      if (
+        node.parent.type === AST_NODE_TYPES.Program ||
+        node.parent.type === AST_NODE_TYPES.ExportNamedDeclaration
+      ) {
+        interfaces.push({
+          node,
+          schemaName: `${node.id.name}Schema`,
+          interfaceName: node.id.name,
+        });
+      }
+    },
+    ExportNamedDeclaration(node) {
+      const declaration = node.declaration;
+      if (declaration?.type === AST_NODE_TYPES.VariableDeclaration) {
         for (const declarator of declaration.declarations) {
-          if (
-            declarator.id.type === AST_NODE_TYPES.Identifier &&
-            declarator.id.name.endsWith("Schema")
-          ) {
-            schemaNames.add(declarator.id.name);
+          if (declarator.id.type === AST_NODE_TYPES.Identifier) {
+            exportedNames.add(declarator.id.name);
           }
         }
-      } else if (declaration.type === AST_NODE_TYPES.TSInterfaceDeclaration) {
-        interfaces.push({ node: declaration, schemaName: `${declaration.id.name}Schema` });
+      } else if (declaration?.type === AST_NODE_TYPES.TSInterfaceDeclaration) {
+        exportedNames.add(declaration.id.name);
+      } else if (declaration === null && node.source === null) {
+        for (const specifier of node.specifiers) {
+          const localName = identifierName(specifier.local);
+          if (localName !== undefined) {
+            exportedNames.add(localName);
+          }
+        }
       }
     },
     "Program:exit"() {
-      for (const { node, schemaName } of interfaces) {
-        if (schemaNames.has(schemaName)) {
+      for (const { node, schemaName, interfaceName } of interfaces) {
+        if (
+          schemaNames.has(schemaName) &&
+          exportedNames.has(schemaName) &&
+          exportedNames.has(interfaceName)
+        ) {
           context.report({ node, messageId: "forbidden", data: { schema: schemaName } });
         }
       }

@@ -79,6 +79,14 @@ ruleTester.run("schema-inferred-types", harnessPlugin.rules["schema-inferred-typ
       code: "export const ContractSchema = {}; export interface Contract { readonly id: string; }",
       errors: [{ messageId: "forbidden" }],
     },
+    {
+      code: "const ContractSchema = {}; interface Contract { readonly id: string; } export { ContractSchema, Contract };",
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: "const ContractSchema = {}; interface Contract { readonly id: string; } export { ContractSchema as PublicSchema, Contract as PublicContract };",
+      errors: [{ messageId: "forbidden" }],
+    },
   ],
 });
 
