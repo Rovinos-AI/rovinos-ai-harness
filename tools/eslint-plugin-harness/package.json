@@ -1,0 +1,17 @@
+{
+  "name": "@harness/eslint-plugin-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "peerDependencies": {
+    "eslint": "^9.39.2"
+  },
+  "devDependencies": {
+    "@typescript-eslint/rule-tester": "8.71.1",
+    "@typescript-eslint/utils": "8.71.1",
+    "vitest": "3.2.6"
+  }
+}
