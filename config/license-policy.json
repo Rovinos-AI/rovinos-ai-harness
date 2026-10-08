@@ -1,0 +1,27 @@
+{
+  "allow": [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "BlueOak-1.0.0",
+    "Unlicense",
+    "CC0-1.0",
+    "Python-2.0"
+  ],
+  "deny": ["GPL-*", "AGPL-*", "LGPL-*", "SSPL-*", "BUSL-*", "CC-BY-NC*"],
+  "exceptions": [
+    {
+      "package": "caniuse-lite",
+      "reason": "Existing Browserslist tooling dependency declares CC-BY-4.0.",
+      "expires": "2027-10-08"
+    },
+    {
+      "package": "spdx-exceptions",
+      "reason": "Existing SPDX parser dependency declares CC-BY-3.0.",
+      "expires": "2027-10-08"
+    }
+  ]
+}
