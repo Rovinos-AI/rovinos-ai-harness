@@ -19,6 +19,10 @@
 - [ ] Telemetry follows CONVENTIONS §5.
 - [ ] No unrelated lint rules or tests were weakened or removed.
 
+## How it was tested
+
+- Commands run and results:
+
 ## Decisions and follow-ups
 
 - (verify) decisions:

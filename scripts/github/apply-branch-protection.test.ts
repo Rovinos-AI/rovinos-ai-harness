@@ -10,7 +10,7 @@ const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const protectionScript = `${repositoryRoot}/scripts/github/apply-branch-protection.sh`;
 
 describe("apply-branch-protection.sh", () => {
-  it("prints the required branch-protection payload in dry-run mode", () => {
+  it("prints the branch-protection payload with no required checks by default", () => {
     const result = spawnSync("bash", [protectionScript, "--dry-run"], {
       encoding: "utf8",
     });
@@ -19,17 +19,11 @@ describe("apply-branch-protection.sh", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout).toMatchInlineSnapshot(`
       "{
-        "required_status_checks": {
-          "strict": true,
-          "contexts": [
-            "Azure Pipelines / Rovinos AI Harness CI",
-            "DCO"
-          ]
-        },
+        "required_status_checks": null,
         "required_pull_request_reviews": {
           "required_approving_review_count": 1
         },
-        "enforce_admins": true,
+        "enforce_admins": false,
         "restrictions": null,
         "allow_force_pushes": false,
         "allow_deletions": false,
@@ -37,6 +31,52 @@ describe("apply-branch-protection.sh", () => {
       }
       "
     `);
+  });
+
+  it("prints configured required checks in dry-run mode", () => {
+    const result = spawnSync(
+      "bash",
+      [protectionScript, "--dry-run", "--check", "Azure Pipelines / Rovinos AI Harness CI"],
+      { encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toMatchInlineSnapshot(`
+      "{
+        "required_status_checks": {
+          "strict": true,
+          "contexts": ["Azure Pipelines / Rovinos AI Harness CI"]
+        },
+        "required_pull_request_reviews": {
+          "required_approving_review_count": 1
+        },
+        "enforce_admins": false,
+        "restrictions": null,
+        "allow_force_pushes": false,
+        "allow_deletions": false,
+        "required_conversation_resolution": true
+      }
+      "
+    `);
+  });
+
+  it("requires an explicit mode before changing branch protection", () => {
+    const result = spawnSync("bash", [protectionScript], { encoding: "utf8" });
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects unknown arguments", () => {
+    const result = spawnSync("bash", [protectionScript, "--unknown"], {
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("Usage:");
   });
 });
 

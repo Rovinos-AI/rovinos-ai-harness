@@ -221,19 +221,20 @@
 ## 1.9 Branch protection, CODEOWNERS, PR and issue templates
 
 **Parent:** #1 Foundation
-**Task Description:** Codify repo governance: templates in the repo and a script plus doc that apply branch protection requiring the Azure and DCO checks.
-**Expected Inputs:** Check names from 1.4; this task spec format (for the issue template).
-**Expected Output:** `.github/CODEOWNERS`, `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/task.yml`, `scripts/github/apply-branch-protection.sh` (supports `--dry-run`), `docs/maintainers/branch-protection.md`.
+**Task Description:** Codify repo governance: templates in the repo and a script plus doc that apply branch protection with explicitly configured required checks.
+**Expected Inputs:** Optional GitHub status-check contexts; this task spec format (for the issue template).
+**Expected Output:** `.github/CODEOWNERS`, `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/task.yml`, `scripts/github/apply-branch-protection.sh` (supports `--dry-run` and requires `--apply` for API calls), `docs/maintainers/branch-protection.md`.
 **Dependencies:** `gh` CLI (documented, run by a maintainer), `yaml` for tests.
 **Items it depends on:** 1.4, 1.6, 1.1.1.
 **Implementation guidance:**
 1. PR template checklist mirrors CONVENTIONS §8 and asks for the task ID, including the item "`yarn lint` passes with zero errors and warnings, and any new suppression has a written reason".
 2. Issue template `task.yml` (GitHub issue forms) has inputs matching the task spec fields (Parent, Description, Inputs, Output, Tests, Acceptance, Dependencies, Depends on).
-3. Script calls `gh api -X PUT repos/{owner}/{repo}/branches/main/protection` with required status checks (the exact Azure check name(s) from 1.4 and the DCO check), required PR review count 1, no force pushes, conversation resolution required. `--dry-run` prints the JSON payload without calling.
+3. Script calls `gh api -X PUT 'repos/{owner}/{repo}/branches/main/protection'` only with `--apply`, requires PR review count 1, disables force pushes, and requires conversation resolution. Repeatable `--check <context>` options configure required status checks; without them, `required_status_checks` is `null`. DCO runs within the Azure pipeline and is not a separate status check. `--dry-run` prints the payload without calling.
 4. CODEOWNERS: default owner is the repo owner; add path owners for `packages/telemetry/`, `packages/pii/`, `infra/collector/` (security-sensitive).
 **Tests to write:** `scripts/github/apply-branch-protection.test.ts` (dry-run payload snapshot); YAML parse test for `task.yml` verifying required fields.
 **Acceptance Criteria:**
-- [ ] Dry run prints a payload requiring the named checks.
+- [ ] Dry run prints a payload with no required status checks by default and includes explicitly configured checks.
+- [ ] A bare invocation and unknown arguments exit with usage and status 2; only `--apply` calls GitHub.
 - [ ] Templates render in GitHub (maintainer confirms once).
 - [ ] CODEOWNERS covers the security-sensitive paths.
 
