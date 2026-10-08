@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
@@ -95,12 +96,52 @@ it("publishes JUnit results after success or failure", () => {
 });
 
 it("enforces package source line coverage per file", () => {
-  const workspace = readFileSync(resolve(root, "vitest.workspace.ts"), "utf8");
+  const config = readFileSync(resolve(root, "vitest.config.ts"), "utf8");
 
-  expect(workspace).toContain('include: ["packages/*/src/**/*.ts"]');
-  expect(workspace).toContain("perFile: true");
-  expect(workspace).toMatch(/"packages\/\*\/src\/\*\*\/\*\.ts":\s*\{\s*lines:\s*85/);
-  expect(workspace).toContain("reportOnFailure: true");
+  expect(config).toContain('provider: "v8"');
+  expect(config).toContain('include: ["packages/*/src/**/*.ts"]');
+  expect(config).toContain("perFile: true");
+  expect(config).toContain("lines: 85");
+  expect(config).toContain("reportOnFailure: true");
+});
+
+it("fails when a package source file falls below the coverage floor", () => {
+  const temporaryRoot = mkdtempSync(resolve(root, ".coverage-fixture-"));
+  const sourceDirectory = resolve(temporaryRoot, "packages/coverage-fixture/src");
+  const configPath = resolve(temporaryRoot, "vitest.config.mjs");
+  const rootConfigUrl = new URL("../../vitest.config.ts", import.meta.url).href;
+
+  try {
+    mkdirSync(sourceDirectory, { recursive: true });
+    writeFileSync(
+      resolve(sourceDirectory, "index.ts"),
+      "export function uncovered(): void { return; }\n",
+    );
+    writeFileSync(resolve(sourceDirectory, "index.test.ts"), 'test("fixture", () => {});\n');
+    writeFileSync(
+      configPath,
+      `import rootConfig from ${JSON.stringify(rootConfigUrl)};\n` +
+        `export default { ...rootConfig, root: ${JSON.stringify(temporaryRoot)}, test: { ...rootConfig.test, projects: [{ extends: true, test: { name: "coverage-fixture", globals: true, include: ["packages/coverage-fixture/src/*.test.ts"] } }], coverage: { ...rootConfig.test.coverage, reportsDirectory: ${JSON.stringify(resolve(temporaryRoot, "coverage"))} } } };\n`,
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        resolve(root, "node_modules/vitest/vitest.mjs"),
+        "run",
+        "--config",
+        configPath,
+        "--coverage",
+      ],
+      { cwd: temporaryRoot, encoding: "utf8", timeout: 60_000 },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("Coverage for lines");
+    expect(`${result.stdout}\n${result.stderr}`).toContain("does not meet");
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
 });
 
 it("verifies pinned mise and Yarn toolchain paths", () => {

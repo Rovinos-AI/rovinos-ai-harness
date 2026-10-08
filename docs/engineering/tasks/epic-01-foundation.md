@@ -10,14 +10,14 @@
 **Parent:** #1 Foundation
 **Task Description:** Create the empty monorepo skeleton so `yarn install && yarn test:unit` works, with the four Vitest projects (unit, integration, canary, replay) defined but only the unit project populated.
 **Expected Inputs:** Repo containing `LICENSE`, the specs and `AGENTS.md` files, `CLAUDE.md`, `.gitignore`, `docs/engineering/layers.json`, and the dependency-free agent index generator `scripts/gen-agents-index.mjs` with its `node:test` suite `scripts/gen-agents-index.test.mjs`. Package layout in CONVENTIONS §1.
-**Expected Output:** `package.json` (private, `engines.node >=22`, `packageManager`, and workspaces), `tsconfig.base.json`, `vitest.workspace.ts`, `packages/schemas` with one exported `HARNESS_VERSION` constant and a test, `.editorconfig`, edits to the existing `.gitignore` (add, never drop entries) and root `AGENTS.md`.
+**Expected Output:** `package.json` (private, `engines.node >=22`, `packageManager`, and workspaces), `tsconfig.base.json`, `vitest.config.ts`, `packages/schemas` with one exported `HARNESS_VERSION` constant and a test, `.editorconfig`, edits to the existing `.gitignore` (add, never drop entries) and root `AGENTS.md`.
 **Dependencies:** yarn, Node 22, typescript, vitest, `@vitest/coverage-v8`.
 **Items it depends on:** none.
 **Implementation guidance:**
 1. `package.json` declares workspaces `packages/*` and `tools/*`. Do not create the other packages yet; each later task creates its package with a `package.json` (`name`, `version 0.0.0`, `type module`, `exports`, `scripts.build = tsc -b`).
 2. `tsconfig.base.json` sets every flag listed in CONVENTIONS §2, `target ES2023`, `module NodeNext`, `moduleResolution NodeNext`, `declaration true`, `composite true`, `outDir dist`.
 3. `packages/schemas/package.json` exports `./src/index.ts` during development via `exports: { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } }` and builds with `tsc -b`.
-4. `vitest.workspace.ts` defines four projects named `unit`, `integration`, `canary`, `replay` using `include` globs from CONVENTIONS §6. The unit project excludes the other three patterns.
+4. `vitest.config.ts` defines four projects named `unit`, `integration`, `canary`, `replay` using `include` globs from CONVENTIONS §6. The unit project excludes the other three patterns.
 5. Root scripts: `build`, `lint` (placeholder echoing nothing until 1.2), `typecheck` (`tsc -b --noEmit`), `test:unit`, `test:integration`, `test:canary`, `test:replay` (each `vitest run --project <name> --passWithNoTests` except unit).
 6. Create `packages/schemas/src/testing.ts` exporting `FakeClock` (`now()`, `advance(ms)`) and `SequentialIdGenerator` (deterministic fake ULID-shaped ids) with tests; later tasks extend it.
 7. Root scripts for the agent index: `gen:agents` (`node scripts/gen-agents-index.mjs`) and `check:agents` (`node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs`). Keep the generator as dependency-free `.mjs`; porting it to TypeScript is out of scope. The Vitest `unit` project includes `*.test.ts` only (CONVENTIONS §6), so it must not collect `*.test.mjs`. CI wiring happens in 1.4.

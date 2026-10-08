@@ -260,7 +260,7 @@ const configuration = [
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["vitest.workspace.ts"],
+          allowDefaultProject: ["vitest.config.ts"],
           defaultProject: "packages/schemas/tsconfig.test.json",
         },
         tsconfigRootDir: rootDirectory,
@@ -319,7 +319,7 @@ const configuration = [
     },
   },
   {
-    files: ["eslint.config.js", "vitest.workspace.ts"],
+    files: ["eslint.config.js", "vitest.config.ts"],
     rules: { "import-x/no-default-export": "off" },
   },
   {
