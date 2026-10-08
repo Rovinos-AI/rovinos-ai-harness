@@ -158,7 +158,7 @@ describe("ESLint configuration", () => {
           : {};
       expect(parserOptions.project).toBeUndefined();
       expect(parserOptions.projectService).toEqual({
-        allowDefaultProject: ["vitest.config.ts"],
+        allowDefaultProject: ["vitest.config.ts", "scripts/check-spdx.*"],
         defaultProject: "packages/schemas/tsconfig.test.json",
       });
     }

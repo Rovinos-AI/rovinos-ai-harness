@@ -260,7 +260,7 @@ const configuration = [
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["vitest.config.ts"],
+          allowDefaultProject: ["vitest.config.ts", "scripts/check-spdx.*"],
           defaultProject: "packages/schemas/tsconfig.test.json",
         },
         tsconfigRootDir: rootDirectory,

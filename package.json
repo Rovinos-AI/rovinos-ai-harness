@@ -33,7 +33,8 @@
     "test:canary": "vitest run --project canary --passWithNoTests",
     "test:replay": "vitest run --project replay --passWithNoTests",
     "gen:agents": "node scripts/gen-agents-index.mjs",
-    "check:agents": "node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs"
+    "check:agents": "node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs",
+    "check:spdx": "node --experimental-strip-types scripts/check-spdx.ts"
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",

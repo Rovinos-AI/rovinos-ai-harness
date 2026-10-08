@@ -3,5 +3,5 @@
   "compilerOptions": {
     "rootDir": "../.."
   },
-  "include": ["./*.test.ts"]
+  "include": ["./*.test.ts", "../check-spdx.ts", "../check-spdx.test.ts"]
 }

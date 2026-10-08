@@ -23,6 +23,8 @@ stages:
             displayName: Typecheck
           - script: yarn check:agents
             displayName: Check agent index
+          - script: yarn check:spdx
+            displayName: Check SPDX headers
 
   - stage: unit
     dependsOn: static
