@@ -138,14 +138,14 @@ export function lookupSpanDefinition(name: string): SpanDefinition<any> | undefi
 **Parent:** #4 Span allowlist
 **Task Description:** Add automated guarantees that no registry or `SafeEvent` schema can carry free text, and that the processors drop random strings.
 **Expected Inputs:** Registered spans, log records, `SafeEvent` schemas.
-**Expected Output:** `packages/telemetry/src/registry.lint.test.ts`, `pnpm lint:telemetry` script in the `static` stage, refactor of `safe-event.ts` (7.10) to build field schemas with `attr.*` helpers.
+**Expected Output:** `packages/telemetry/src/registry.lint.test.ts`, `yarn lint:telemetry` script in the `static` stage, refactor of `safe-event.ts` (7.10) to build field schemas with `attr.*` helpers.
 **Dependencies:** `fast-check`.
 **Items it depends on:** 4.2, 4.3, 7.10.
 **Implementation guidance:**
 1. Lint test: iterate `listSpanDefinitions()`, `listLogDefinitions()`, and every `SafeEvent` schema field; assert `isSafeAttr(field)`. Fail with the span or kind name and field name.
 2. Refactor `safe-event.ts` so each field is created via `attr.*` (this makes the check uniform); keep the 7.10 tests green.
 3. Property test with `fast-check`: for each registered span definition, generate arbitrary strings (including unicode, long strings, emails, JWT-like strings) and assign them to every attribute key via a raw `ReadableSpan` stub; run `sanitizeSpan`; assert surviving string attributes always satisfy their attr pattern or enum membership. Same for log records.
-4. Add `pnpm lint:telemetry` running this test file alone; wire into the `static` stage so it fails fast.
+4. Add `yarn lint:telemetry` running this test file alone; wire into the `static` stage so it fails fast.
 **Tests to write:** The lint and property tests above, plus a negative control that registers a deliberately unsafe definition via an internal test hook and asserts the lint fails.
 **Acceptance Criteria:**
 - [ ] Introducing `z.string()` into a safe-event schema fails CI.
@@ -159,7 +159,7 @@ export function lookupSpanDefinition(name: string): SpanDefinition<any> | undefi
 **Parent:** #4 Span allowlist
 **Task Description:** Pin the OpenTelemetry semantic-convention versions the project relies on and generate a documentation catalog of every allowed attribute, kept in sync by CI.
 **Expected Inputs:** Registry contents.
-**Expected Output:** `packages/telemetry/src/semconv.ts`, `scripts/gen-attribute-catalog.ts`, `docs/telemetry/attribute-catalog.md`, `pnpm docs:catalog` and `docs:catalog --check`.
+**Expected Output:** `packages/telemetry/src/semconv.ts`, `scripts/gen-attribute-catalog.ts`, `docs/telemetry/attribute-catalog.md`, `yarn docs:catalog` and `docs:catalog --check`.
 **Dependencies:** `@opentelemetry/semantic-conventions` (exact version, verify).
 **Items it depends on:** 4.1, 4.6.
 **Implementation guidance:**

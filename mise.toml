@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+[tools]
+node = "22.23.3"
+"npm:corepack" = "0.36.0"
+
+[settings]
+experimental = false

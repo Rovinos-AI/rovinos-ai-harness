@@ -132,7 +132,7 @@ flowchart LR
 
 ## Package architecture
 
-All code lives in a pnpm workspace of ESM TypeScript packages under the `@harness/` scope. The import direction is fixed. The canonical allowlist is [`docs/engineering/layers.json`](docs/engineering/layers.json), and a lint rule (task 1.2) enforces it. There are no cycles.
+All code lives in a Yarn workspace of ESM TypeScript packages under the `@harness/` scope. The import direction is fixed. The canonical allowlist is [`docs/engineering/layers.json`](docs/engineering/layers.json), and a lint rule (task 1.2) enforces it. There are no cycles.
 
 ```mermaid
 flowchart BT
@@ -786,7 +786,7 @@ Global flags: `--config`, `--json` (exactly one JSON document on stdout), `--log
 ## Security hardening and supply chain
 
 - **Secret scanning.** gitleaks runs on PR diffs and nightly on full history with redacted output, alongside GitHub push protection.
-- **Dependency gate.** `pnpm audit` plus osv-scanner fail on high and critical findings. Exceptions carry an owner and an expiry date, and expired exceptions fail the build.
+- **Dependency gate.** `yarn npm audit --all --recursive` plus osv-scanner fail on high and critical findings. Exceptions carry an owner and an expiry date, and expired exceptions fail the build.
 - **Semgrep.** Project-specific rules cover shell exec, `eval`, `innerHTML`, `fetch` without an abort signal, `Math.random` for secrets, deprecated crypto, unvalidated `JSON.parse`, hard-coded `http://`, and stray `process.env` secrets. Suppressions require a written reason.
 - **Images and releases.** CycloneDX SBOMs, image scans, and cosign signing by digest with SBOM attestations.
 - **License allowlist.** GPL, AGPL, LGPL, SSPL, BUSL, and non-commercial licenses are denied.
@@ -798,7 +798,7 @@ Global flags: `--config`, `--json` (exactly one JSON document on stdout), `--log
 
 ## Code quality: linting and contracts
 
-- **Zero errors, zero warnings.** `pnpm lint` runs type-aware ESLint (`typescript-eslint` strict and stylistic type-checked presets plus import, Node, promise, regexp (ReDoS), unicorn, Vitest, and JSDoc rules), Prettier, markdownlint, ESLint YAML rules, ShellCheck, hadolint, and cspell. Every rule is an error or off, so there are no warnings to ignore. Passing it is part of every task's definition of done.
+- **Zero errors, zero warnings.** `yarn lint` runs type-aware ESLint (`typescript-eslint` strict and stylistic type-checked presets plus import, Node, promise, regexp (ReDoS), unicorn, Vitest, and JSDoc rules), Prettier, markdownlint, ESLint YAML rules, ShellCheck, hadolint, and cspell. Every rule is an error or off, so there are no warnings to ignore. Passing it is part of every task's definition of done.
 - **Hard bans.** `any`, non-null assertions, type assertions, floating promises, `console.*`, `eval`, TypeScript `enum`, default exports, raw `JSON.parse`, `innerHTML` in browser code, cross-package relative imports, and imports that break the layering in `layers.json`. Size and complexity limits keep functions small.
 - **Suppressions are explicit.** An inline disable needs a written reason, unused disables are errors, and security-critical rules cannot be disabled inline at all.
 - **Schema-first contracts.** Config, events, tool inputs and outputs, MCP payloads, HTTP and webhook bodies, CLI `--json` output, files on disk, and repository policy files each have one Zod schema, and types are `z.infer` of it. External JSON Schema (MCP servers' tool schemas) is validated through one bounded wrapper.
@@ -938,6 +938,6 @@ docs/            documentation; docs/engineering holds CONVENTIONS, task index, 
 tools/           custom ESLint plugin
 ```
 
-Work happens one task per PR, and every task leaves `pnpm lint` and `pnpm typecheck` with zero errors and warnings. The title is `[<task id>] <task name>`, commits are signed off (`git commit -s`), and the PR lists the tests the spec requires. Before you start, read [`AGENTS.md`](AGENTS.md), the nearest folder `AGENTS.md`, CONVENTIONS, and the task spec. This applies to coding agents too, which load [`CLAUDE.md`](CLAUDE.md) and `AGENTS.md`. `node scripts/gen-agents-index.mjs --check` keeps the agent index, task ids, and import boundaries in sync.
+Work happens one task per PR, and every task leaves `yarn lint` and `yarn typecheck` with zero errors and warnings. The title is `[<task id>] <task name>`, commits are signed off (`git commit -s`), and the PR lists the tests the spec requires. Before you start, read [`AGENTS.md`](AGENTS.md), the nearest folder `AGENTS.md`, CONVENTIONS, and the task spec. This applies to coding agents too, which load [`CLAUDE.md`](CLAUDE.md) and `AGENTS.md`. `node scripts/gen-agents-index.mjs --check` keeps the agent index, task ids, and import boundaries in sync.
 
 Licensed under the [Apache License 2.0](LICENSE).

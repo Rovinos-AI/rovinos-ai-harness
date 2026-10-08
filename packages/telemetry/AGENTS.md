@@ -22,7 +22,7 @@ Closed span/log registry, allowlist processors, safe-event projection, leak sent
 - Spans and log records are created only through `defineSpan`/`defineLogRecord`. Never call `tracer.startSpan`, `recordException`, or `console.*` (lint enforces this).
 - Attributes must be built with `attr.*` helpers (Id, Code, enum, int, bool). No free-text strings, ever.
 - The leak sentinel fails closed: error, timeout, or hit means drop the payload.
-- Adding a span, attribute, or metric requires: `pnpm docs:catalog`, `pnpm gen:collector`, and an update to the canary scenarios if it opens a new path.
+- Adding a span, attribute, or metric requires: `yarn docs:catalog`, `yarn gen:collector`, and an update to the canary scenarios if it opens a new path.
 - The logger takes an event Code plus typed fields; there is no message parameter by design.
 
 ## Testing

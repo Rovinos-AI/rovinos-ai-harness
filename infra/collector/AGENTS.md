@@ -11,7 +11,7 @@ OpenTelemetry Collector configs: base, generated allowlist, profiles per backend
 - Configuration only.
 
 ## Rules
-- `allowlist.generated.yaml` and `policy-version.generated.yaml` are generated (`pnpm gen:collector`); CI fails on drift.
+- `allowlist.generated.yaml` and `policy-version.generated.yaml` are generated (`yarn gen:collector`); CI fails on drift.
 - Every production pipeline must include the allowlist processors in order: memory_limiter, filters, transforms, resource, batch.
 - No literal credentials; env substitution only. The collector is the only service on the external network.
 - Pin the collector image in `VERSION`; confirm required components with `scripts/collector/verify-components.sh`.

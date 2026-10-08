@@ -1,9 +1,9 @@
 Dockerfile
 .dockerignore
+yarn.lock
 node_modules/
 dist/
 coverage/
 docs/api/
 *.generated.*
 **/*.md
-pnpm-lock.yaml

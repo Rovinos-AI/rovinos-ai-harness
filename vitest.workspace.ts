@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
+import { fileURLToPath } from "node:url";
+
+const sourceResolution = {
+  resolve: {
+    alias: {
+      "@harness/schemas": fileURLToPath(
+        new URL("./packages/schemas/src/index.ts", import.meta.url),
+      ),
+    },
+  },
+};
+
 export default [
   {
+    ...sourceResolution,
     test: {
       name: "unit",
       include: [
@@ -18,6 +31,7 @@ export default [
     },
   },
   {
+    ...sourceResolution,
     test: {
       name: "integration",
       include: ["**/*.int.test.ts"],

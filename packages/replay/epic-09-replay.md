@@ -126,7 +126,7 @@ Shared design for this epic:
 **Parent:** #9 Replay
 **Task Description:** Commit a representative golden run and wire replay regression tests into the `gates` stage.
 **Expected Inputs:** Scripted scenario using fake providers and tools.
-**Expected Output:** `test/replay/golden/` (cassette, signature file, scenario script), `test/replay/golden.replay.test.ts`, `scripts/replay-golden.ts` (`record` and `update`), `pnpm test:replay` and `pnpm replay:update`, PR-template checkbox, docs `docs/replay-regression.md`.
+**Expected Output:** `test/replay/golden/` (cassette, signature file, scenario script), `test/replay/golden.replay.test.ts`, `scripts/replay-golden.ts` (`record` and `update`), `yarn test:replay` and `yarn replay:update`, PR-template checkbox, docs `docs/replay-regression.md`.
 **Dependencies:** none.
 **Items it depends on:** 9.5, 2.11, 15.5, 17.3.
 **Implementation guidance:**
@@ -134,7 +134,7 @@ Shared design for this epic:
 2. `scripts/replay-golden.ts record` runs the scenario with the real runtime, writes the cassette (via `FileCassetteStore`) and the golden signature; `update` re-records after a deliberate change.
 3. `golden.replay.test.ts`: load the cassette, replay with current code, assert exit-code-0 semantics (empty behavioral diff) and that the replay completes without divergence.
 4. **Mutation check:** a second test injects a deliberate behavior change through a test-only hook (for example swapping tool execution order or altering a policy default) and asserts the replay reports a behavioral difference (exit code 1), proving the gate can fail.
-5. Azure: `pnpm test:replay` runs in the `gates` stage and blocks merges. Add a PR-template checkbox: "If this PR changes agent behavior, I regenerated the golden run with `pnpm replay:update` and explained why in the PR description."
+5. Azure: `yarn test:replay` runs in the `gates` stage and blocks merges. Add a PR-template checkbox: "If this PR changes agent behavior, I regenerated the golden run with `yarn replay:update` and explained why in the PR description."
 **Tests to write:** the golden replay test and the mutation test above; a test that the golden files declare synthetic data and contain no canary patterns.
 **Acceptance Criteria:**
 - [ ] Any harness change that alters recorded behavior fails the PR gate.

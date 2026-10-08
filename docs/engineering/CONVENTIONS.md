@@ -14,7 +14,7 @@ Each task has: Parent, Task Name, Task Description, Expected Inputs, Expected Ou
 
 ## 1. Repository layout
 
-pnpm workspaces. All packages are ESM, TypeScript, scope `@harness/`.
+Yarn 4 workspaces. All packages are ESM, TypeScript, scope `@harness/`.
 
 ```
 packages/
@@ -81,8 +81,8 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 
 ## 2. Tooling
 
-- Node 22 LTS, pnpm 9+, TypeScript 5.x strict (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `verbatimModuleSyntax`), ESM only (`"type": "module"`, `.js` extensions in relative imports).
-- Vitest (workspace with four projects, see §6). Linting: strict type-aware ESLint (`typescript-eslint` strict and stylistic type-checked presets plus the plugins in task 1.2), Prettier, markdownlint, ShellCheck, hadolint, and cspell (task 1.11). Every rule is an error or off; `pnpm lint` runs all of them with zero warnings allowed.
+- Node 22 LTS and Corepack are pinned through mise; Yarn 4 is selected by Corepack from the root `packageManager` field. Yarn uses the `node-modules` linker. Run `mise install` and `yarn install --immutable`. TypeScript 5.x strict (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `verbatimModuleSyntax`), ESM only (`"type": "module"`, `.js` extensions in relative imports).
+- Vitest (workspace with four projects, see §6). Linting: strict type-aware ESLint (`typescript-eslint` strict and stylistic type-checked presets plus the plugins in task 1.2), Prettier, markdownlint, ShellCheck, hadolint, and cspell (task 1.11). Every rule is an error or off; `yarn lint` runs all of them with zero warnings allowed.
 - Zod for every runtime boundary (config, events, tool args/results, model outputs, telemetry). **Zod 4, version 4.2 or later**: the MCP TypeScript SDK v2 requires it and accepts Standard Schema objects. One Zod major across the repo.
 - IDs: ULID (`ulid` package). Time: epoch milliseconds integers.
 - Build: `tsc -b`. No bundler for libraries. The browser shim (`app-telemetry`) is bundled with `esbuild`.
@@ -129,10 +129,10 @@ Vitest workspace projects (defined in task 1.1):
 
 | Project | File pattern | Runs in |
 |---|---|---|
-| unit | `*.test.ts` | `pnpm test:unit` (Azure stage `unit`) |
-| integration | `*.int.test.ts` | `pnpm test:integration` (stage `integration`, needs compose services) |
-| canary | `*.canary.test.ts` | `pnpm test:canary` (stage `gates`) |
-| replay | `*.replay.test.ts` | `pnpm test:replay` (stage `gates`) |
+| unit | `*.test.ts` | `yarn test:unit` (Azure stage `unit`) |
+| integration | `*.int.test.ts` | `yarn test:integration` (stage `integration`, needs compose services) |
+| canary | `*.canary.test.ts` | `yarn test:canary` (stage `gates`) |
+| replay | `*.replay.test.ts` | `yarn test:replay` (stage `gates`) |
 
 Rules: unit tests do no network or disk outside a temp dir and use fake clock/ids. Tests are co-located (`foo.ts` + `foo.test.ts`) except cross-package tests in `test/`. Use table-driven tests for pure logic. Golden files live in `__golden__/` next to the test and are updated only via `UPDATE_GOLDEN=1`. Coverage floor 85% lines for new packages (enforced in task 1.4 once packages exist). Every bug fix adds a regression test.
 
@@ -143,8 +143,8 @@ Rules: unit tests do no network or disk outside a temp dir and use fake clock/id
 ## 8. Definition of done (every task)
 
 - [ ] Acceptance criteria all met; tests listed in the task exist and pass in Azure Pipelines.
-- [ ] `pnpm lint` passes with **zero errors and zero warnings**; no lint rule relaxed; any new suppression uses the `-- <reason>` format and is listed in the PR description.
-- [ ] `pnpm typecheck` passes; SPDX headers present; commits signed off.
+- [ ] `yarn lint` passes with **zero errors and zero warnings**; no lint rule relaxed; any new suppression uses the `-- <reason>` format and is listed in the PR description.
+- [ ] `yarn typecheck` passes; SPDX headers present; commits signed off.
 - [ ] New data contracts follow §3.10 (one Zod schema, inferred types, typed parsing).
 - [ ] Public API documented (TSDoc); `docs/` updated if user-visible.
 - [ ] No `console.*`, no `any`, no new dependency without a license from the allowlist (task 1.7).
