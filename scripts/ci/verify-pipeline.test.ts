@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,7 +66,7 @@ it("runs static checks before unit tests", () => {
       .filter(isRecord)
       .map((stage) => stage.stage)
       .filter((stage): stage is string => typeof stage === "string"),
-  ).toEqual(["static", "unit"]);
+  ).toEqual(["static", "unit", "integration"]);
 
   const staticSteps = readSteps(findStage(stages, "static"));
   expect(
@@ -109,6 +109,53 @@ it("publishes JUnit results after success or failure", () => {
   expect(
     isRecord(publishCoverage?.inputs) ? publishCoverage.inputs.summaryFileLocation : undefined,
   ).toContain("cobertura-coverage.xml");
+});
+
+it("runs integration tests with Compose and always tears down", () => {
+  const stages = readStages(readPipeline());
+  const integrationStage = findStage(stages, "integration");
+  const integrationSteps = readSteps(integrationStage);
+
+  expect(statSync(resolve(root, "scripts/ci/compose-wait.sh")).mode & 0o111).not.toBe(0);
+  expect(integrationStage.dependsOn).toBe("unit");
+  expect(
+    integrationSteps.some(
+      (step) => typeof step.bash === "string" && step.bash.includes("compose-wait.sh"),
+    ),
+  ).toBe(true);
+  const runTests = integrationSteps.find(
+    (step) => typeof step.script === "string" && step.script.includes("yarn test:integration"),
+  );
+  expect(runTests?.script).toContain("--reporter=junit");
+  expect(runTests?.script).toContain("integration-junit.xml");
+  expect(
+    integrationSteps.some(
+      (step) => step.task === "PublishTestResults@2" && step.condition === "succeededOrFailed()",
+    ),
+  ).toBe(true);
+  const collectLogs = integrationSteps.find(
+    (step) => typeof step.bash === "string" && step.bash.includes("logs --no-color"),
+  );
+  expect(collectLogs?.condition).toBe("failed()");
+  expect(collectLogs?.bash).toContain("compose.log");
+  expect(
+    integrationSteps.some(
+      (step) =>
+        step.task === "PublishBuildArtifacts@1" &&
+        step.condition === "failed()" &&
+        isRecord(step.inputs) &&
+        step.inputs.PathtoPublish === "$(Build.ArtifactStagingDirectory)/compose.log",
+    ),
+  ).toBe(true);
+  expect(
+    integrationSteps.some(
+      (step) =>
+        typeof step.bash === "string" &&
+        step.bash.includes("docker compose") &&
+        step.bash.includes("down -v") &&
+        step.condition === "always()",
+    ),
+  ).toBe(true);
 });
 
 it("enforces package source line coverage per file", () => {

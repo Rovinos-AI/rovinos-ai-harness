@@ -58,3 +58,37 @@ stages:
             condition: succeededOrFailed()
             inputs:
               summaryFileLocation: $(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml
+
+  - stage: integration
+    dependsOn: unit
+    jobs:
+      - job: integration
+        steps:
+          - template: pipelines/templates/node-setup.yml
+          - bash: scripts/ci/compose-wait.sh
+            displayName: Start Compose services and wait for health
+          - script: >
+              yarn test:integration --reporter=junit
+              --outputFile=reports/integration-junit.xml
+            displayName: Integration tests
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: reports/integration-junit.xml
+              failTaskOnFailedTests: true
+          - bash: |
+              mkdir -p "$(Build.ArtifactStagingDirectory)"
+              docker compose -f infra/compose/docker-compose.test.yml logs --no-color \
+                > "$(Build.ArtifactStagingDirectory)/compose.log"
+            condition: failed()
+            displayName: Collect Compose logs
+          - task: PublishBuildArtifacts@1
+            condition: failed()
+            inputs:
+              PathtoPublish: $(Build.ArtifactStagingDirectory)/compose.log
+              ArtifactName: compose-logs
+              publishLocation: Container
+          - bash: docker compose -f infra/compose/docker-compose.test.yml down -v
+            condition: always()
+            displayName: Stop Compose services
