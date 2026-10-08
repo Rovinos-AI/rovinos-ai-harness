@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+services:
+  harness:
+    extends:
+      file: docker-compose.yml
+      service: harness
+    healthcheck:
+      test: ["CMD", "node", "dist/bin.js", "--version"]

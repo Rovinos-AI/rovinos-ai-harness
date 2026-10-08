@@ -27,7 +27,7 @@
     "deps:check": "yarn constraints && yarn dedupe --check",
     "lint": "eslint . --max-warnings 0 && prettier --check . && yarn deps:check",
     "lint:fix": "eslint . --fix --max-warnings 0 && prettier --write .",
-    "typecheck": "tsc -p packages/schemas/tsconfig.json && tsc -p packages/schemas/tsconfig.test.json && tsc -p packages/cli/tsconfig.json && tsc -p scripts/tsconfig.json && tsc -p tools/eslint-plugin-harness/tsconfig.json --noEmit",
+    "typecheck": "tsc -p packages/schemas/tsconfig.json && tsc -p packages/schemas/tsconfig.test.json && tsc -p packages/cli/tsconfig.json && tsc -p scripts/tsconfig.json && tsc -p test/tsconfig.json && tsc -p tools/eslint-plugin-harness/tsconfig.json --noEmit",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration --passWithNoTests",
     "test:canary": "vitest run --project canary --passWithNoTests",
