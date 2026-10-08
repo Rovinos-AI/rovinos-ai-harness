@@ -23,7 +23,10 @@ export const DcoExemptionsSchema = z
       z
         .object({
           authorName: z.string().min(1),
-          authorEmail: z.email(),
+          authorEmail: z.union([
+            z.email(),
+            z.literal("49699333+dependabot[bot]@users.noreply.github.com"),
+          ]),
           committerName: z.string().min(1),
           committerEmail: z.email(),
           signingKeyFingerprints: z.array(fingerprintSchema).min(1),

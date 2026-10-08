@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import dcoExemptions from "../config/dco-exemptions.json" with { type: "json" };
 import { afterEach, expect, it } from "vitest";
 import {
   checkDco,
@@ -16,6 +17,7 @@ import {
 const temporaryDirectories: string[] = [];
 const gpgAvailable = spawnSync("gpg", ["--version"], { encoding: "utf8" }).status === 0;
 const noExemptions = DcoExemptionsSchema.parse({ exemptAuthors: [] });
+const configuredExemptions = DcoExemptionsSchema.parse(dcoExemptions);
 const copilotExemptions: DcoExemptions = DcoExemptionsSchema.parse({
   exemptAuthors: [
     {
@@ -209,6 +211,30 @@ it("exempts only the configured identity with a trusted web-flow signature", () 
   expect(
     evaluateDco([{ ...botCommit, signatureStatus: "N" }], copilotExemptions).missingSignOff,
   ).toEqual([botCommit.sha.slice(0, 7)]);
+});
+
+it("accepts Dependabot commits only with the configured GitHub signature", () => {
+  const fingerprint = "968479A1AFF927E37D1A566BB5690EEEBB952194";
+  const dependabotCommit = {
+    sha: "abcdef1234567890",
+    authorName: "dependabot[bot]",
+    authorEmail: "49699333+dependabot[bot]@users.noreply.github.com",
+    committerName: "GitHub",
+    committerEmail: "noreply@github.com",
+    signatureStatus: "G",
+    signingKeyFingerprint: fingerprint,
+    primaryKeyFingerprint: fingerprint,
+    message: "dependency update",
+  };
+
+  expect(evaluateDco([dependabotCommit], configuredExemptions)).toEqual({
+    missingSignOff: [],
+    authorEmailMismatch: [],
+  });
+  expect(
+    evaluateDco([{ ...dependabotCommit, signatureStatus: "N" }], configuredExemptions)
+      .missingSignOff,
+  ).toEqual([dependabotCommit.sha.slice(0, 7)]);
 });
 
 it("warns without failing when the valid trailer uses a different email", () => {

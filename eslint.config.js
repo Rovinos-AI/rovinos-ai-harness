@@ -384,7 +384,7 @@ const configuration = [
     },
   },
   {
-    files: ["scripts/ci/verify-pipeline.test.ts", "scripts/github/apply-branch-protection.test.ts"],
+    files: ["scripts/{ci/verify-pipeline,ci/dependabot,github/apply-branch-protection}.test.ts"],
     rules: { "no-restricted-imports": restrictedImports({ childProcess: true, parsers: true }) },
   },
   {

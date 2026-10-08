@@ -6,6 +6,13 @@
       "committerName": "GitHub",
       "committerEmail": "noreply@github.com",
       "signingKeyFingerprints": ["968479A1AFF927E37D1A566BB5690EEEBB952194"]
+    },
+    {
+      "authorName": "dependabot[bot]",
+      "authorEmail": "49699333+dependabot[bot]@users.noreply.github.com",
+      "committerName": "GitHub",
+      "committerEmail": "noreply@github.com",
+      "signingKeyFingerprints": ["968479A1AFF927E37D1A566BB5690EEEBB952194"]
     }
   ]
 }
