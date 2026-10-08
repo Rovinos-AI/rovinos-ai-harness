@@ -50,7 +50,7 @@ export class SequentialIdGenerator {
     let remaining = this.counter;
     let suffix = "";
     for (let digit = 0; digit < 16; digit += 1) {
-      suffix = CROCKFORD_BASE32[Number(remaining % 32n)] + suffix;
+      suffix = CROCKFORD_BASE32.charAt(Number(remaining % 32n)) + suffix;
       remaining /= 32n;
     }
 

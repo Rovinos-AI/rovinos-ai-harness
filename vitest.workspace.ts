@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { defineWorkspace } from "vitest/config";
-
-export default defineWorkspace([
+export default [
   {
     test: {
       name: "unit",
@@ -32,4 +30,4 @@ export default defineWorkspace([
       include: ["**/*.replay.test.ts"],
     },
   },
-]);
+];

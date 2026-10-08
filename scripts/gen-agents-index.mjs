@@ -14,7 +14,9 @@ const SKIP_DIRS = new Set([".git", "node_modules", "dist", "coverage", ".claude"
 
 /** Compress task ids into ranges: ["2.1","2.2","2.3","4.1"] -> "2.1-2.3, 4.1". */
 export function compressIds(ids) {
-  const parsed = ids.map((id) => id.split(".").map(Number)).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const parsed = ids
+    .map((id) => id.split(".").map(Number))
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const out = [];
   let start = null;
   let prev = null;
@@ -39,14 +41,16 @@ export function validateLayers(layers) {
   const names = Object.keys(layers).filter((k) => !k.startsWith("$"));
   for (const name of names) {
     for (const dep of layers[name]) {
-      if (!names.includes(dep)) throw new Error(`layers.json: ${name} imports unknown package ${dep}`);
+      if (!names.includes(dep))
+        throw new Error(`layers.json: ${name} imports unknown package ${dep}`);
       if (dep === name) throw new Error(`layers.json: ${name} imports itself`);
     }
   }
   const state = new Map();
   const visit = (name, path) => {
     if (state.get(name) === "done") return;
-    if (state.get(name) === "active") throw new Error(`layers.json: cycle ${[...path, name].join(" -> ")}`);
+    if (state.get(name) === "active")
+      throw new Error(`layers.json: cycle ${[...path, name].join(" -> ")}`);
     state.set(name, "active");
     for (const dep of layers[name]) visit(dep, [...path, name]);
     state.set(name, "done");
@@ -55,6 +59,12 @@ export function validateLayers(layers) {
   return names;
 }
 
+/** Replace the generated section of a repository document.
+ * @param text - Existing document contents.
+ * @param body - Regenerated section contents.
+ * @param file - Document path, used in errors.
+ * @returns Updated document contents.
+ */
 export function replaceBlock(text, body, file) {
   const a = text.indexOf(BEGIN);
   const b = text.indexOf(END);
@@ -72,69 +82,100 @@ function walk(dir, out = []) {
   return out;
 }
 
-export function generate(root) {
-  const files = walk(root).map((f) => relative(root, f).split(sep).join("/"));
-  const agentsDirs = files.filter((f) => f.endsWith("AGENTS.md")).map((f) => dirname(f));
-  const layers = JSON.parse(readFileSync(join(root, "docs/engineering/layers.json"), "utf8"));
-  const packages = validateLayers(layers);
-  for (const dir of readdirSync(join(root, "packages"))) {
-    if (statSync(join(root, "packages", dir)).isDirectory() && !packages.includes(dir)) {
-      throw new Error(`layers.json: no entry for packages/${dir}`);
+function verifyPackageLayers(root, packages) {
+  for (const directory of readdirSync(join(root, "packages"))) {
+    if (
+      statSync(join(root, "packages", directory)).isDirectory() &&
+      !packages.includes(directory)
+    ) {
+      throw new Error(`layers.json: no entry for packages/${directory}`);
     }
   }
+}
 
-  // Each spec file belongs to the nearest folder that has an AGENTS.md.
-  const owner = (file) => {
-    let d = dirname(file);
-    while (!agentsDirs.includes(d)) d = d === "." ? null : dirname(d);
-    return d;
-  };
+function findOwner(file, agentsDirs) {
+  let directory = dirname(file);
+  while (!agentsDirs.includes(directory)) {
+    directory = directory === "." ? null : dirname(directory);
+  }
+  return directory;
+}
+
+function buildAgentBlock({ root, dir, files, agentsDirs, layers }) {
+  const owned = files.filter((file) => findOwner(file, agentsDirs) === dir).sort();
+  const lines = ["## Specs and task ids"];
+  for (const file of owned.filter((entry) => /(?:^|\/)epic-[^/]+\.md$/.test(entry))) {
+    const ids = [...readFileSync(join(root, file), "utf8").matchAll(/^## (\d+\.\d+)\b/gm)].map(
+      (match) => match[1],
+    );
+    lines.push(`- [${relative(dir, file)}](./${relative(dir, file)}): tasks ${compressIds(ids)}`);
+  }
+  for (const file of owned.filter((entry) => entry.endsWith("/TASKS.md") || entry === "TASKS.md")) {
+    const match = readFileSync(join(root, file), "utf8").match(/^Task ids: (.+)$/m);
+    if (!match) throw new Error(`${file}: missing "Task ids:" line`);
+    lines.push(
+      `- [${relative(dir, file)}](./${relative(dir, file)}) (specs in other folders): tasks ${match[1]}`,
+    );
+  }
+  if (lines.length === 1) lines.push("- None. See `docs/engineering/tasks/README.md`.");
+  const pkg = dir.match(/^packages\/([^/]+)$/);
+  if (pkg) {
+    const deps = layers[pkg[1]];
+    lines.push("", "## Allowed internal imports");
+    lines.push(
+      deps.length
+        ? `- ${deps.map((dependency) => `\`@harness/${dependency}\``).join(", ")}. Nothing else from \`@harness/*\`.`
+        : "- None (leaf package).",
+    );
+    lines.push(
+      "- Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).",
+    );
+  }
+  const file = `${dir}/AGENTS.md`;
+  return [file, replaceBlock(readFileSync(join(root, file), "utf8"), lines.join("\n"), file)];
+}
+
+/** Generate updates for the repository's task and package-boundary indexes.
+ * @param root - Repository root.
+ * @returns Files and their regenerated contents.
+ */
+export function generate(root) {
+  const files = walk(root).map((file) => relative(root, file).split(sep).join("/"));
+  const agentsDirs = files
+    .filter((file) => file.endsWith("AGENTS.md"))
+    .map((file) => dirname(file));
+  const layers = JSON.parse(readFileSync(join(root, "docs/engineering/layers.json"), "utf8"));
+  const packages = validateLayers(layers);
+  verifyPackageLayers(root, packages);
   const results = new Map();
 
   for (const dir of agentsDirs) {
-    if (dir === ".") continue;
-    const owned = files.filter((f) => owner(f) === dir).sort();
-    const lines = ["## Specs and task ids"];
-    for (const f of owned.filter((f) => /(^|\/)epic-[^/]+\.md$/.test(f))) {
-      const ids = [...readFileSync(join(root, f), "utf8").matchAll(/^## (\d+\.\d+)\b/gm)].map((m) => m[1]);
-      lines.push(`- [${relative(dir, f)}](./${relative(dir, f)}): tasks ${compressIds(ids)}`);
+    if (dir !== ".") {
+      const [file, contents] = buildAgentBlock({ root, dir, files, agentsDirs, layers });
+      results.set(file, contents);
     }
-    for (const f of owned.filter((f) => f.endsWith("/TASKS.md") || f === "TASKS.md")) {
-      const m = readFileSync(join(root, f), "utf8").match(/^Task ids: (.+)$/m);
-      if (!m) throw new Error(`${f}: missing "Task ids:" line`);
-      lines.push(`- [${relative(dir, f)}](./${relative(dir, f)}) (specs in other folders): tasks ${m[1]}`);
-    }
-    if (lines.length === 1) lines.push("- None. See `docs/engineering/tasks/README.md`.");
-    const pkg = dir.match(/^packages\/([^/]+)$/);
-    if (pkg) {
-      const deps = layers[pkg[1]];
-      lines.push("", "## Allowed internal imports");
-      lines.push(
-        deps.length
-          ? `- ${deps.map((d) => `\`@harness/${d}\``).join(", ")}. Nothing else from \`@harness/*\`.`
-          : "- None (leaf package).",
-      );
-      lines.push("- Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).");
-    }
-    const file = `${dir}/AGENTS.md`;
-    results.set(file, replaceBlock(readFileSync(join(root, file), "utf8"), lines.join("\n"), file));
   }
 
   const conv = "docs/engineering/CONVENTIONS.md";
   const table = ["| Package | May import (`@harness/*`) |", "|---|---|"];
-  for (const name of packages) table.push(`| \`${name}\` | ${layers[name].map((d) => `\`${d}\``).join(", ") || "nothing (leaf)"} |`);
+  for (const name of packages)
+    table.push(
+      `| \`${name}\` | ${layers[name].map((d) => `\`${d}\``).join(", ") || "nothing (leaf)"} |`,
+    );
   results.set(conv, replaceBlock(readFileSync(join(root, conv), "utf8"), table.join("\n"), conv));
 
   // Relative links in AGENTS.md / CLAUDE.md must resolve.
   const errors = [];
-  for (const f of files.filter((f) => /(^|\/)(AGENTS|CLAUDE)\.md$/.test(f))) {
-    const text = results.get(f) ?? readFileSync(join(root, f), "utf8");
+  for (const file of files.filter((entry) => /(?:^|\/)(?:AGENTS|CLAUDE)\.md$/.test(entry))) {
+    const text = results.get(file) ?? readFileSync(join(root, file), "utf8");
     const refs = [
-      ...[...text.matchAll(/\]\((\.{1,2}\/[^)#\s]+)/g)].map((m) => m[1]),
-      ...[...text.matchAll(/`(\.{1,2}\/[^`\s]+)`/g)].map((m) => m[1]),
+      ...[...text.matchAll(/\]\(\.{1,2}\/[^)#\s]+/g)].map((match) => match[0].slice(2)),
+      ...[...text.matchAll(/`\.{1,2}\/[^`\s]+`/g)].map((match) => match[0].slice(1, -1)),
     ];
     for (const ref of refs) {
-      if (!existsSync(resolve(root, dirname(f), ref))) errors.push(`${f}: broken reference ${ref}`);
+      if (!existsSync(resolve(root, dirname(file), ref))) {
+        errors.push(`${file}: broken reference ${ref}`);
+      }
     }
   }
   if (errors.length) throw new Error(errors.join("\n"));

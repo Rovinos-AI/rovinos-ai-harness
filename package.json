@@ -9,8 +9,9 @@
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "build": "tsc -b",
-    "lint": "echo 'Lint is configured in task 1.2'",
-    "typecheck": "tsc -b --noEmit && tsc -p packages/schemas/tsconfig.test.json",
+    "lint": "eslint . --max-warnings 0 && prettier --check .",
+    "lint:fix": "eslint . --fix --max-warnings 0 && prettier --write .",
+    "typecheck": "tsc -b --noEmit && tsc -p packages/schemas/tsconfig.test.json && tsc -p tools/eslint-plugin-harness/tsconfig.json --noEmit",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration --passWithNoTests",
     "test:canary": "vitest run --project canary --passWithNoTests",
@@ -19,8 +20,21 @@
     "check:agents": "node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs"
   },
   "devDependencies": {
+    "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
+    "@harness/eslint-plugin-harness": "workspace:^",
     "@vitest/coverage-v8": "3.2.6",
+    "@vitest/eslint-plugin": "1.6.27",
+    "eslint": "9.39.2",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-import-x": "4.17.1",
+    "eslint-plugin-jsdoc": "60.1.0",
+    "eslint-plugin-n": "17.23.1",
+    "eslint-plugin-promise": "7.3.0",
+    "eslint-plugin-regexp": "2.10.0",
+    "eslint-plugin-unicorn": "65.0.0",
+    "prettier": "3.9.9",
     "typescript": "5.9.3",
+    "typescript-eslint": "8.71.1",
     "vitest": "3.2.6"
   }
 }
