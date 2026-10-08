@@ -9,9 +9,12 @@ import { z } from "zod";
 
 const recordSeparator = "\u001e";
 const fieldSeparator = "\u001f";
-const logFormat = `%H${fieldSeparator}%an${fieldSeparator}%ae${fieldSeparator}%cn${fieldSeparator}%ce${fieldSeparator}%G?${fieldSeparator}%GF${fieldSeparator}%GP${fieldSeparator}%B${recordSeparator}`;
+const historyFormat = `%H${fieldSeparator}%an${fieldSeparator}%ae${fieldSeparator}%cn${fieldSeparator}%ce${fieldSeparator}%B${recordSeparator}`;
+const signatureFormat = `%H${fieldSeparator}%G?${fieldSeparator}%GF${fieldSeparator}%GP${recordSeparator}`;
 const signedOffTrailer = /^Signed-off-by: .+ <([^<>@\s]+@[^<>\s]+)>$/gm;
 const fingerprintSchema = z.string().regex(/^[A-F0-9]{40}$/);
+const gpgUnavailableMessage =
+  "GPG is required to verify a commit matching the configured DCO exemption, but gpg is not installed.";
 
 /** Schema for exact, signature-verified identities exempted from DCO sign-off checks. */
 export const DcoExemptionsSchema = z
@@ -66,7 +69,7 @@ export function parseDcoLog(output: string): DcoCommit[] {
       const record = rawRecord.replace(/^\r?\n/, "");
       const separators: number[] = [];
       let offset = 0;
-      for (let index = 0; index < 8; index += 1) {
+      for (let index = 0; index < 5; index += 1) {
         offset = record.indexOf(fieldSeparator, offset);
         if (offset < 0) {
           throw new TypeError("Git returned an invalid DCO history record.");
@@ -74,25 +77,14 @@ export function parseDcoLog(output: string): DcoCommit[] {
         separators.push(offset);
         offset += fieldSeparator.length;
       }
-      const [
-        shaEnd,
-        authorNameEnd,
-        authorEmailEnd,
-        committerNameEnd,
-        committerEmailEnd,
-        signatureStatusEnd,
-        signingFingerprintEnd,
-        primaryFingerprintEnd,
-      ] = separators;
+      const [shaEnd, authorNameEnd, authorEmailEnd, committerNameEnd, committerEmailEnd] =
+        separators;
       if (
         shaEnd === undefined ||
         authorNameEnd === undefined ||
         authorEmailEnd === undefined ||
         committerNameEnd === undefined ||
         committerEmailEnd === undefined ||
-        signatureStatusEnd === undefined ||
-        signingFingerprintEnd === undefined ||
-        primaryFingerprintEnd === undefined ||
         shaEnd <= 0
       ) {
         throw new TypeError("Git returned an invalid DCO history record.");
@@ -103,20 +95,68 @@ export function parseDcoLog(output: string): DcoCommit[] {
         authorEmail: record.slice(authorNameEnd + 1, authorEmailEnd),
         committerName: record.slice(authorEmailEnd + 1, committerNameEnd),
         committerEmail: record.slice(committerNameEnd + 1, committerEmailEnd),
-        signatureStatus: record.slice(committerEmailEnd + 1, signatureStatusEnd),
-        signingKeyFingerprint: record.slice(signatureStatusEnd + 1, signingFingerprintEnd),
-        primaryKeyFingerprint: record.slice(signingFingerprintEnd + 1, primaryFingerprintEnd),
-        message: record.slice(primaryFingerprintEnd + 1),
+        signatureStatus: "",
+        signingKeyFingerprint: "",
+        primaryKeyFingerprint: "",
+        message: record.slice(committerEmailEnd + 1),
       };
     });
 }
 
-function createTrustedGpgHome(exemptions: DcoExemptions): string | undefined {
+function parseDcoSignatures(
+  output: string,
+): Map<
+  string,
+  Pick<DcoCommit, "signatureStatus" | "signingKeyFingerprint" | "primaryKeyFingerprint">
+> {
+  return new Map(
+    output
+      .split(recordSeparator)
+      .filter((record) => record.trim().length > 0)
+      .map((rawRecord) => {
+        const record = rawRecord.replace(/^\r?\n/, "");
+        const shaEnd = record.indexOf(fieldSeparator);
+        const statusEnd = record.indexOf(fieldSeparator, shaEnd + 1);
+        const signingFingerprintEnd = record.indexOf(fieldSeparator, statusEnd + 1);
+        if (shaEnd <= 0 || statusEnd < 0 || signingFingerprintEnd < 0) {
+          throw new TypeError("Git returned an invalid DCO signature record.");
+        }
+        return [
+          record.slice(0, shaEnd),
+          {
+            signatureStatus: record.slice(shaEnd + 1, statusEnd),
+            signingKeyFingerprint: record.slice(statusEnd + 1, signingFingerprintEnd),
+            primaryKeyFingerprint: record.slice(signingFingerprintEnd + 1),
+          },
+        ];
+      }),
+  );
+}
+
+function isExemptionIdentity(commit: DcoCommit, exemptions: DcoExemptions): boolean {
+  return exemptions.exemptAuthors.some(
+    (author) =>
+      commit.authorName === author.authorName &&
+      commit.authorEmail === author.authorEmail &&
+      commit.committerName === author.committerName &&
+      commit.committerEmail === author.committerEmail,
+  );
+}
+
+function createTrustedGpgHome(exemptions: DcoExemptions): string {
   const fingerprints = [
     ...new Set(exemptions.exemptAuthors.flatMap((author) => author.signingKeyFingerprints)),
   ];
   if (fingerprints.length === 0) {
-    return undefined;
+    throw new TypeError("No trusted DCO signing-key fingerprints are configured.");
+  }
+
+  const gpgVersion = spawnSync("gpg", ["--version"], { encoding: "utf8" });
+  if (gpgVersion.error !== undefined) {
+    throw new TypeError(gpgUnavailableMessage);
+  }
+  if (gpgVersion.status !== 0) {
+    throw new TypeError("Could not run gpg to verify the pinned DCO signing key.");
   }
 
   const home = mkdtempSync(join(tmpdir(), "check-dco-gpg-"));
@@ -222,25 +262,45 @@ export function checkDco(
     throw new TypeError("The DCO target branch is invalid.");
   }
 
+  const history = spawnSync(
+    "git",
+    ["log", "--no-merges", `--format=${historyFormat}`, `origin/${branch}..HEAD`],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    },
+  );
+  if (history.status !== 0) {
+    throw new TypeError("Could not read the DCO commit range.");
+  }
+  const commits = parseDcoLog(history.stdout);
+  const commitsToVerify = commits.filter((commit) => isExemptionIdentity(commit, exemptions));
+  if (commitsToVerify.length === 0) {
+    return evaluateDco(commits, exemptions);
+  }
+
   const gpgHome = createTrustedGpgHome(exemptions);
   try {
-    const history = spawnSync(
+    const signatures = spawnSync(
       "git",
-      ["log", "--no-merges", `--format=${logFormat}`, `origin/${branch}..HEAD`],
+      ["log", "--no-walk", `--format=${signatureFormat}`, ...commitsToVerify.map(({ sha }) => sha)],
       {
         cwd: repositoryRoot,
         encoding: "utf8",
-        env: gpgHome === undefined ? process.env : { ...process.env, GNUPGHOME: gpgHome },
+        env: { ...process.env, GNUPGHOME: gpgHome },
       },
     );
-    if (history.status !== 0) {
-      throw new TypeError("Could not read the DCO commit range.");
+    if (signatures.status !== 0) {
+      throw new TypeError("Could not verify DCO commit signatures.");
     }
-    return evaluateDco(parseDcoLog(history.stdout), exemptions);
+    const signaturesBySha = parseDcoSignatures(signatures.stdout);
+    const verifiedCommits = commits.map((commit) => ({
+      ...commit,
+      ...signaturesBySha.get(commit.sha),
+    }));
+    return evaluateDco(verifiedCommits, exemptions);
   } finally {
-    if (gpgHome !== undefined) {
-      rmSync(gpgHome, { recursive: true, force: true });
-    }
+    rmSync(gpgHome, { recursive: true, force: true });
   }
 }
 
@@ -256,7 +316,12 @@ function runCheck(): void {
   let result: DcoResult;
   try {
     result = checkDco(process.cwd(), targetBranch, exemptions);
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === gpgUnavailableMessage) {
+      process.stderr.write(`${gpgUnavailableMessage}\n`);
+      process.exitCode = 2;
+      return;
+    }
     process.stderr.write("DCO check could not read the PR commit range.\n");
     process.exitCode = 2;
     return;

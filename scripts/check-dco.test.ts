@@ -14,6 +14,7 @@ import {
 } from "./check-dco.js";
 
 const temporaryDirectories: string[] = [];
+const gpgAvailable = spawnSync("gpg", ["--version"], { encoding: "utf8" }).status === 0;
 const noExemptions = DcoExemptionsSchema.parse({ exemptAuthors: [] });
 const copilotExemptions: DcoExemptions = DcoExemptionsSchema.parse({
   exemptAuthors: [
@@ -170,7 +171,7 @@ it("rejects malformed sign-off trailers", () => {
   expect(checkDco(repository, "main", noExemptions).missingSignOff).toEqual([sha.slice(0, 7)]);
 });
 
-it("rejects an unsigned commit with the exempt bot's author identity", () => {
+it.skipIf(!gpgAvailable)("rejects an unsigned commit with the exempt bot's author identity", () => {
   const repository = createRepository();
   const sha = commit(
     repository,

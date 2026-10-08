@@ -18,6 +18,11 @@ git push --force-with-lease
 
 Replace `main` with the PR target branch when it differs.
 
+The DCO CI check requires Git and GnuPG (`gpg`) on its runner to verify
+signatures for commits matching the configured bot exemption. Local checks do
+not need GnuPG unless a commit has that exact exempt author and committer
+identity.
+
 The configured `copilot-swe-agent[bot]` exemption applies only to commits with
 its exact configured author identity, the `GitHub <noreply@github.com>`
 committer, and a valid signature from a pinned GitHub web-flow key. The bot
