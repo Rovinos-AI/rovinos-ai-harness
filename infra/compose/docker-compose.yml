@@ -5,6 +5,7 @@ services:
       context: ../..
       dockerfile: Dockerfile
     image: ${HARNESS_IMAGE:-harness:local}
+    init: true
     read_only: true
     tmpfs:
       - /tmp

@@ -9,9 +9,12 @@
     "harness": "./dist/bin.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -b tsconfig.build.json"
+  },
+  "dependencies": {
+    "@harness/schemas": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "26.6.4"
+    "vitest": "3.2.6"
   }
 }

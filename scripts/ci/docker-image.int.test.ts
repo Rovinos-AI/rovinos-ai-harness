@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { HARNESS_VERSION } from "@harness/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -18,14 +19,17 @@ describe("Docker image", () => {
   }, 300_000);
 
   afterAll(() => {
-    if (composeStarted) {
-      runDocker(
-        ["compose", "--project-name", projectName, "--file", composeFile, "down", "--volumes"],
-        composeEnvironment,
-      );
-    }
-    if (imageBuilt) {
-      runDocker(["image", "rm", "--force", imageName]);
+    try {
+      if (composeStarted) {
+        runDocker(
+          ["compose", "--project-name", projectName, "--file", composeFile, "down", "--volumes"],
+          composeEnvironment,
+        );
+      }
+    } finally {
+      if (imageBuilt) {
+        runDocker(["image", "rm", "--force", imageName]);
+      }
     }
   }, 60_000);
 
@@ -35,6 +39,7 @@ describe("Docker image", () => {
 
     const version = runDocker(["run", "--rm", imageName, "--version"]).trim();
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(version).toBe(HARNESS_VERSION);
   });
 
   it("starts healthy with a read-only root filesystem under Compose", () => {
@@ -64,7 +69,9 @@ describe("Docker image", () => {
     expect(runDocker(["inspect", "--format", "{{.State.Health.Status}}", containerId]).trim()).toBe(
       "healthy",
     );
-  }, 30_000);
+    runDocker(["stop", "--time", "2", containerId]);
+    expect(runDocker(["inspect", "--format", "{{.State.ExitCode}}", containerId]).trim()).toBe("0");
+  }, 60_000);
 });
 
 function runDocker(args: string[], environment: NodeJS.ProcessEnv = process.env): string {

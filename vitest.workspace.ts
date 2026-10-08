@@ -9,7 +9,12 @@ export default [
         "scripts/**/*.test.ts",
         "test/**/*.test.ts",
       ],
-      exclude: ["**/*.int.test.ts", "**/*.canary.test.ts", "**/*.replay.test.ts"],
+      exclude: [
+        "**/node_modules/**",
+        "**/*.int.test.ts",
+        "**/*.canary.test.ts",
+        "**/*.replay.test.ts",
+      ],
     },
   },
   {

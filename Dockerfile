@@ -3,15 +3,17 @@ FROM node:22-slim AS build
 
 WORKDIR /app
 RUN corepack enable
-COPY . .
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/cli/package.json packages/cli/package.json
+COPY packages/schemas/package.json packages/schemas/package.json
+COPY tools/eslint-plugin-harness/package.json tools/eslint-plugin-harness/package.json
 RUN pnpm install --frozen-lockfile
+COPY . .
 RUN pnpm -r build
 RUN pnpm deploy --filter @harness/cli --prod /out
 
 FROM node:22-slim AS runtime
 
-ARG HARNESS_VERSION=0.0.0
-ENV HARNESS_VERSION=${HARNESS_VERSION}
 WORKDIR /app
 RUN groupadd --gid 10001 harness \
     && useradd --uid 10001 --gid harness --no-create-home --shell /usr/sbin/nologin harness
