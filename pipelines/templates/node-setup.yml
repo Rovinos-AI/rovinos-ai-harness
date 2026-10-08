@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+steps:
+  - bash: |
+      set -euo pipefail
+      curl -fsSL https://mise.run | MISE_VERSION=v2026.10.4 sh
+      echo "##vso[task.prependpath]$HOME/.local/bin"
+    displayName: Install mise
+
+  - bash: |
+      set -euo pipefail
+      mise trust
+      mise install
+      mise exec -- corepack enable
+      mkdir -p "$YARN_CACHE_FOLDER"
+      echo "##vso[task.prependpath]$(mise where node)/bin"
+    displayName: Install pinned toolchain
+
+  - task: Cache@2
+    inputs:
+      key: '"yarn" | "$(Agent.OS)" | yarn.lock | mise.toml'
+      path: $(YARN_CACHE_FOLDER)
+    displayName: Cache Yarn packages
+
+  - script: yarn install --immutable
+    displayName: Install dependencies

@@ -386,7 +386,7 @@ const configuration = [
       "vitest/no-conditional-expect": "error",
       "vitest/valid-title": "error",
       ...Object.fromEntries([...testRules].map((rule) => [rule, "off"])),
-      "no-restricted-properties": "off",
+      "no-restricted-imports": restrictedImports({ childProcess: true, parsers: true }),
     },
   },
   {

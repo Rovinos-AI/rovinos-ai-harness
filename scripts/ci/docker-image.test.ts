@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { promisify } from "node:util";
 import { afterEach, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -8,17 +9,19 @@ afterEach(() => {
 });
 
 it("removes the image even if Compose teardown fails", async () => {
-  const beforeAll = vi.fn<(callback: () => void) => void>();
-  const afterAll = vi.fn<(callback: () => void) => void>();
-  const test = vi.fn<(name: string, callback: () => void) => void>();
+  const beforeAll = vi.fn<(callback: () => Promise<void>) => void>();
+  const afterAll = vi.fn<(callback: () => Promise<void>) => void>();
+  const test = vi.fn<(name: string, callback: () => Promise<void>) => void>();
   const composeError = new Error("compose_unavailable");
-  const execFileSync = vi.fn((_command: string, args: string[]) => {
+  const runCommand = vi.fn((_command: string, args: string[]) => {
     if (args[0] === "compose") {
-      throw composeError;
+      return Promise.reject(composeError);
     }
-    return "";
+    return Promise.resolve({ stdout: "", stderr: "" });
   });
-  vi.doMock("node:child_process", () => ({ execFileSync }));
+  const execFile = vi.fn();
+  Object.defineProperty(execFile, promisify.custom, { value: runCommand });
+  vi.doMock("node:child_process", () => ({ execFile }));
   vi.doMock("vitest", () => ({
     beforeAll,
     afterAll,
@@ -36,11 +39,11 @@ it("removes the image even if Compose teardown fails", async () => {
   expect(build).toBeDefined();
   expect(startCompose).toBeDefined();
   expect(cleanup).toBeDefined();
-  build?.();
-  expect(() => startCompose?.()).toThrow(composeError);
-  expect(() => cleanup?.()).toThrow(composeError);
+  await build?.();
+  await expect(startCompose?.()).rejects.toBe(composeError);
+  await expect(cleanup?.()).rejects.toBe(composeError);
 
-  expect(execFileSync.mock.calls.at(-1)?.[1]).toEqual([
+  expect(runCommand.mock.calls.at(-1)?.[1]).toEqual([
     "image",
     "rm",
     "--force",
