@@ -11,6 +11,10 @@ export function readHarnessHealthStatus(): string {
     { encoding: "utf8" },
   ).trim();
 
+  if (containerId === "") {
+    throw new Error("harness service is not running; start it with scripts/ci/compose-wait.sh");
+  }
+
   return execFileSync("docker", ["inspect", "--format", "{{.State.Health.Status}}", containerId], {
     encoding: "utf8",
   }).trim();

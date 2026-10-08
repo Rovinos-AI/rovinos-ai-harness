@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,6 +116,7 @@ it("runs integration tests with Compose and always tears down", () => {
   const integrationStage = findStage(stages, "integration");
   const integrationSteps = readSteps(integrationStage);
 
+  expect(statSync(resolve(root, "scripts/ci/compose-wait.sh")).mode & 0o111).not.toBe(0);
   expect(integrationStage.dependsOn).toBe("unit");
   expect(
     integrationSteps.some(
