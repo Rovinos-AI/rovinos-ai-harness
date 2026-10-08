@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+services:
+  harness:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: ${HARNESS_IMAGE:-harness:local}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "dist/bin.js", "--version"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
