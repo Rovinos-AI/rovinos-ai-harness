@@ -38,7 +38,7 @@ An open source, TypeScript, container-native **agent harness**. It runs LLM agen
 ## What makes it different
 
 | Property | How the specs achieve it |
-|---|---|
+| --- | --- |
 | **Event-sourced resumability** | Every model call, tool intent, tool result, approval, and checkpoint is an immutable event. State is a pure fold over the log. Any process can resume any run. A crash-injection suite kills the run at every append boundary and proves that non-idempotent tools execute exactly once. |
 | **The model never decides authority** | A deterministic policy engine evaluates every tool call on tokenized arguments: `allow`, `ask`, or `deny`, where the most restrictive decision wins. `ask` suspends the run durably until a human decides. |
 | **PII tokenization at every boundary** | Detected values become run-scoped tokens (`EMAIL_1` style placeholders) before they reach a model, a tool, the store, or a UI. Raw values exist only in an encrypted, separate vault and in memory at allowlisted tool arguments. |
@@ -192,7 +192,7 @@ flowchart BT
 ```
 
 | Package | Responsibility | Epics |
-|---|---|---|
+| --- | --- | --- |
 | `schemas` | Event envelope and payload schemas, meta/content field classification, primitives (`Id`, `Code`, `Traceparent`), config fragments, messages, browser-safe app schemas | 7, 14, 20 |
 | `crypto` | AES-256-GCM, HKDF, HMAC wrappers over `node:crypto` | 12 |
 | `telemetry` | `defineSpan` registry, allowlist span/log processors, `SafeEvent` projection, leak sentinel, metrics allowlist, cardinality guard, sanctioned logger | 4, 8, 11, 20 |
@@ -240,7 +240,7 @@ Durable suspensions carry a reason: `awaiting_approval`, `awaiting_input`, `awai
 Every event carries a schema version `v`. Readers upcast older versions on read, and a committed schema lock plus legacy-log tests fail CI when a schema changes without a version bump and upcaster. Each event field is classified `meta` (safe for telemetry: ids, enums, counts, timings, codes) or `content` (anything user- or model-derived; this is the default for new fields). A compile-time-exhaustive map enforces the classification. The store keeps meta and content separately, encrypts content, and exports only an explicit `SafeEvent` projection.
 
 | Event | Meta fields (examples) | Content fields |
-|---|---|---|
+| --- | --- | --- |
 | `run_created` | configHash, policyVersion, parentRunId, depth, replayOf, continuationOf, requestedBy | |
 | `run_input` | inputKind | input |
 | `run_status_changed` | from, to, reason | |
@@ -475,7 +475,7 @@ The harness targets MCP protocol revision **2026-07-28** with the TypeScript SDK
 Every human-facing harness UI is an **MCP App**, using the official extension `io.modelcontextprotocol/ui` (ext-apps revision 2026-01-26). Each view is a single-file `ui://harness/<view>/v1` resource with MIME type `text/html;profile=mcp-app`, linked from tools through `_meta.ui.resourceUri`. They run in any MCP Apps host (Claude, VS Code, and others) and in the harness's own reference host, and they all fall back to text, elicitation, or the CLI.
 
 | View | Resource | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | Approval | `ui://harness/approval/v1` | Review a pending tool call with tokenized values, approve, deny, or edit allowed fields; audited, auto-masking reveal |
 | Human input | `ui://harness/input/v1` | Answer an MCP elicitation or agent question: generated form or consent-gated URL |
 | Run console | `ui://harness/runs/v1` | Live list of runs with status, steps, and "needs approval" or "needs input" badges |
@@ -594,7 +594,7 @@ flowchart TB
 Servers and the agent can ask a human for information. The harness implements MCP elicitation as defined in protocol revision **2026-07-28**, where it uses the Multi Round-Trip Requests (MRTR) pattern. Instead of holding a call open, the server answers a tool call with an `InputRequiredResult`, and the client retries the call with the human's answers. That makes every MCP elicitation **durable**: the harness records the request, suspends the run, and retries the call after a human answers, possibly from another process days later. The agent has its own durable question tool, `agent.ask_user`. All sources go through one human-input broker, the same events, and the same channels.
 
 | Source | Mode | How it waits |
-|---|---|---|
+| --- | --- | --- |
 | MCP server returns `input_required` (2026-07-28) | `form` (flat primitive schema) or `url` | Durable: suspend with `awaiting_input`, then retry the tool call with `inputResponses` and the exact opaque `requestState`. Multiple rounds are allowed, up to a limit. |
 | Legacy server on 2025-11-25 (server-initiated `elicitation/create`, `-32042`) | `form` or `url` | Live elicitations wait with a timeout through the SDK's legacy support; URL-required errors suspend durably and retry. |
 | Agent calls `agent.ask_user` | free text or `form` | Durable: suspend with `awaiting_input` until a human answers or the request expires. |
@@ -751,7 +751,7 @@ Reports hold scores, counts, codes, and costs only, never transcripts. Trajector
 ## CLI
 
 | Command | Purpose |
-|---|---|
+| --- | --- |
 | `harness run`, `resume`, `inspect`, `cancel`, `continue` | Start (optionally `--interactive` to answer live elicitations), resume, inspect (content hidden unless `--show-content`), cancel, and continue runs |
 | `harness worker` | Run a queue worker |
 | `harness inputs list/show/answer/decline` | Answer human-input requests from the terminal |
@@ -769,7 +769,7 @@ Reports hold scores, counts, codes, and costs only, never transcripts. Trajector
 Global flags: `--config`, `--json` (exactly one JSON document on stdout), `--log-level`. Errors print codes, never messages.
 
 | Exit code | Meaning |
-|---|---|
+| --- | --- |
 | 0 | OK |
 | 1 | Failure (replay: behavioral difference) |
 | 2 | Usage error |
@@ -893,7 +893,7 @@ gantt
 ```
 
 | # | Epic | Tasks | Spec |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | Foundation (monorepo, CI) | 13 | [epic-01](docs/engineering/tasks/epic-01-foundation.md) |
 | 2 | Run loop (resumable state machine) | 14 | [epic-02](packages/core/epic-02-run-loop.md) |
 | 3 | Host bridge (validating app telemetry) | 8 | [epic-03](packages/host/epic-03-host-bridge.md) |

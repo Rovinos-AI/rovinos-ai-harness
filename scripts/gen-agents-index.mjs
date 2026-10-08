@@ -137,7 +137,8 @@ function findOwner(file, agentsDirs) {
 
 function buildAgentBlock({ root, dir, files, agentsDirs, layers }) {
   const owned = files.filter((file) => findOwner(file, agentsDirs) === dir).sort();
-  const lines = ["## Specs and task ids"];
+  const lines = ["", "## Specs and task ids", ""];
+  const taskListStart = lines.length;
   for (const file of owned.filter((entry) => /(?:^|\/)epic-[^/]+\.md$/.test(entry))) {
     const ids = [
       ...readFileSync(join(root, file), "utf8").matchAll(/^## (\d+\.\d+(?:\.\d+)?)\s/gm),
@@ -153,13 +154,13 @@ function buildAgentBlock({ root, dir, files, agentsDirs, layers }) {
       `- [${relative(dir, file)}](./${relative(dir, file)}) (specs in other folders): tasks ${match[1]}`,
     );
   }
-  if (lines.length === 1) {
+  if (lines.length === taskListStart) {
     lines.push("- None. See `docs/engineering/tasks/README.md`.");
   }
   const pkg = dir.match(/^packages\/([^/]+)$/);
   if (pkg) {
     const deps = layers[pkg[1]];
-    lines.push("", "## Allowed internal imports");
+    lines.push("", "## Allowed internal imports", "");
     lines.push(
       deps.length
         ? `- ${deps.map((dependency) => `\`@harness/${dependency}\``).join(", ")}. Nothing else from \`@harness/*\`.`
@@ -169,6 +170,7 @@ function buildAgentBlock({ root, dir, files, agentsDirs, layers }) {
       "- Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).",
     );
   }
+  lines.push("");
   const file = `${dir}/AGENTS.md`;
   return [file, replaceBlock(readFileSync(join(root, file), "utf8"), lines.join("\n"), file)];
 }
@@ -195,7 +197,7 @@ export function generate(root) {
   }
 
   const conv = "docs/engineering/CONVENTIONS.md";
-  const table = ["| Package | May import (`@harness/*`) |", "|---|---|"];
+  const table = ["| Package | May import (`@harness/*`) |", "| --- | --- |"];
   for (const name of packages) {
     table.push(
       `| \`${name}\` | ${layers[name].map((d) => `\`${d}\``).join(", ") || "nothing (leaf)"} |`,

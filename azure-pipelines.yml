@@ -10,6 +10,7 @@ pool:
 
 variables:
   YARN_GLOBAL_FOLDER: $(Pipeline.Workspace)/.yarn
+  LINT_PULL_IMAGES: "1"
 
 stages:
   - stage: static

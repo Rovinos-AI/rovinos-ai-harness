@@ -71,19 +71,34 @@ it("pins an exact supported Node and Corepack version through mise", () => {
   const mise = readFileSync(join(root, "mise.toml"), "utf8");
   const nodeVersion = /^node = "([^"]+)"$/m.exec(mise)?.[1];
   const corepackVersion = /^"npm:corepack" = "([^"]+)"$/m.exec(mise)?.[1];
-  if (nodeVersion === undefined || corepackVersion === undefined) {
-    throw new TypeError("mise.toml must pin Node and Corepack.");
+  const shellcheckVersion = /^"aqua:koalaman\/shellcheck" = "([^"]+)"$/m.exec(mise)?.[1];
+  if (
+    nodeVersion === undefined ||
+    corepackVersion === undefined ||
+    shellcheckVersion === undefined
+  ) {
+    throw new TypeError("mise.toml must pin Node, Corepack, and ShellCheck.");
   }
 
   expect(mise).not.toMatch(/^node\.corepack\s*=/m);
   expect(nodeVersion).toMatch(/^22\.\d+\.\d+$/);
   expect(corepackVersion).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(shellcheckVersion).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(shellcheckVersion).toBe("0.11.0");
   expect(process.versions.node).toBe(nodeVersion);
   expect(execFileSync("corepack", ["--version"], { cwd: root, encoding: "utf8" }).trim()).toBe(
     corepackVersion,
   );
   expect(satisfiesNodeEngine(nodeVersion, getNodeEngine())).toBe(true);
   expect(existsSync(join(root, ".nvmrc"))).toBe(false);
+});
+
+it("adds the mise-installed ShellCheck binary to the Azure Pipelines path", () => {
+  const pipelineSetup = readFileSync(join(root, "pipelines/templates/node-setup.yml"), "utf8");
+
+  expect(pipelineSetup).toContain('shellcheck_bin="$(mise which shellcheck)"');
+  expect(pipelineSetup).toContain('$(dirname "$shellcheck_bin")');
+  expect(pipelineSetup).toContain("##vso[task.prependpath]");
 });
 
 it("pins Yarn 4 with Corepack's integrity hash", () => {

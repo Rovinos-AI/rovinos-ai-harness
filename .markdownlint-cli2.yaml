@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+ignores:
+  - "**/node_modules/**"
+config:
+  default: true
+  MD013: false
+  MD033:
+    allowed_elements:
+      - "!--"
+  MD040: true

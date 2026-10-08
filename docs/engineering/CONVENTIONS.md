@@ -16,7 +16,7 @@ Each task has: Parent, Task Name, Task Description, Expected Inputs, Expected Ou
 
 Yarn 4 workspaces. All packages are ESM, TypeScript, scope `@harness/`.
 
-```
+```text
 packages/
   schemas/        Zod schemas + inferred types: events, event field classification, config fragments, policies (leaf package: depends on nothing internal)
   crypto/         AES-GCM, HKDF, HMAC helpers (leaf package, created in task 12.2; no internal dependencies)
@@ -55,7 +55,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 | Package | May import (`@harness/*`) |
-|---|---|
+| --- | --- |
 | `schemas` | nothing (leaf) |
 | `crypto` | nothing (leaf) |
 | `app-telemetry` | nothing (leaf) |
@@ -128,7 +128,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 Vitest workspace projects (defined in task 1.1):
 
 | Project | File pattern | Runs in |
-|---|---|---|
+| --- | --- | --- |
 | unit | `*.test.ts` | `yarn test:unit` (Azure stage `unit`) |
 | integration | `*.int.test.ts` | `yarn test:integration` (stage `integration`, needs compose services) |
 | canary | `*.canary.test.ts` | `yarn test:canary` (stage `gates`) |
@@ -160,7 +160,7 @@ Rules: unit tests do no network or disk outside a temp dir and use fake clock/id
 One place pins the external protocols the harness implements. Tasks reference this section instead of repeating versions; bumping a baseline is a deliberate PR that updates this section, the affected specs, and the compatibility tests.
 
 | Area | Baseline |
-|---|---|
+| --- | --- |
 | MCP protocol | Specification revision **2026-07-28** (stateless requests with per-request `_meta` capabilities, `server/discover`, Multi Round-Trip Requests with `InputRequiredResult`, `subscriptions/listen`, `extensions` capability). Legacy peers on **2025-11-25** are supported through SDK version negotiation, never by default for new features. |
 | MCP TypeScript SDK | **v2**: `@modelcontextprotocol/client`, `@modelcontextprotocol/server`, `@modelcontextprotocol/node` (Node HTTP transport). Clients use `versionNegotiation: { mode: "auto" }` (probe `server/discover`, fall back to the 2025 handshake) unless a server config pins an era. Servers use `createMcpHandler` (HTTP, both eras per request) and `serveStdio`. The v1 package `@modelcontextprotocol/sdk` is not used. |
 | MCP Apps | Official extension **`io.modelcontextprotocol/ui`** (ext-apps specification revision **2026-01-26**), package `@modelcontextprotocol/ext-apps` (`App` for views, `AppBridge` for hosts). UI resources use `ui://` URIs with MIME type `text/html;profile=mcp-app`; tools link to them with `_meta.ui.resourceUri`; resources declare `_meta.ui.csp` and `_meta.ui.permissions`. Every harness user interface for humans is an MCP App (approvals, inputs, run console, run inspector, reports), with text, elicitation, and CLI fallbacks. |

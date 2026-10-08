@@ -9,7 +9,8 @@
     "BlueOak-1.0.0",
     "Unlicense",
     "CC0-1.0",
-    "Python-2.0"
+    "Python-2.0",
+    "PSF-2.0"
   ],
   "deny": ["GPL-*", "AGPL-*", "LGPL-*", "SSPL-*", "BUSL-*", "CC-BY-NC*"],
   "exceptions": [
@@ -21,6 +22,16 @@
     {
       "package": "spdx-exceptions",
       "reason": "Existing SPDX parser dependency declares CC-BY-3.0.",
+      "expires": "2027-10-08"
+    },
+    {
+      "package": "@cspell/dict-django",
+      "reason": "CSpell's bundled dictionary dependency; required for its default language dictionaries.",
+      "expires": "2027-10-08"
+    },
+    {
+      "package": "@cspell/dict-en-common-misspellings",
+      "reason": "CSpell's bundled English dictionary dependency; required by its default dictionaries.",
       "expires": "2027-10-08"
     }
   ]

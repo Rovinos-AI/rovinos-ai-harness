@@ -4,6 +4,7 @@
 **Tasks:** 12.1 to 12.9, all size S.
 
 Shared design for this epic:
+
 - **Separation of duties via three narrow interfaces**: `VaultWriter` (put), `VaultResolver` (resolve, used only by the detokenizer and the human UI), `VaultReader` (list raw values for a run, used only by the leak sentinel). A component receives only the interface it needs.
 - The vault lives in its **own database file**, never inside the event store DB, so access can be controlled and purged independently.
 - Raw values never appear in logs, spans, errors, or test snapshots. Use obviously fake values in tests (`alice@example.test`).
@@ -20,19 +21,23 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 7.1.
 **Implementation guidance:**
+
 1. Token format `<TYPE_N>`: `TYPE` is the entity type Code upper-cased with `-`/`.` replaced by `_` (`email` -> `EMAIL`); `N` starts at 1 per `(runId, type)` and increments. Schema `Token = z.string().regex(/^<[A-Z][A-Z0-9_]{0,31}_[1-9][0-9]{0,5}>$/)`. Export `isToken`, `findTokens(text): { token, index }[]` (global scan using the same pattern), and `tokenType(token)`.
 2. Interfaces:
-```ts
-interface VaultWriter { put(runId: Id, entityType: Code, raw: string): Promise<Token>; }
-interface VaultResolver { resolve(runId: Id, token: Token): Promise<string | undefined>; }
-interface VaultReader { listRawValues(runId: Id): Promise<readonly string[]>; }
-interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Promise<{ entries: number }>; }
-```
+
+   ```ts
+   interface VaultWriter { put(runId: Id, entityType: Code, raw: string): Promise<Token>; }
+   interface VaultResolver { resolve(runId: Id, token: Token): Promise<string | undefined>; }
+   interface VaultReader { listRawValues(runId: Id): Promise<readonly string[]>; }
+   interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Promise<{ entries: number }>; }
+   ```
+
 3. `put` is idempotent: the same `(runId, entityType, normalize(entityType, raw))` returns the same token. `normalize`: trim, Unicode NFKC; `email` additionally lower-cased; `phone` strips spaces, dashes and parentheses; default exact after NFKC. Document that normalization affects only token identity, not stored value (store the original trimmed value).
 4. Reject empty values (`vault_value_empty`) and values over 8 KiB (`vault_value_too_large`).
 5. `InMemoryVault` implements all four interfaces.
 **Tests to write:** token regex valid/invalid table; idempotency including normalization cases; numbering per run and type; `resolve` unknown token returns `undefined`; purge removes entries and resets nothing else; size limits; `findTokens` on mixed text including near-miss strings (`<email_1>`, `<EMAIL_0>`).
 **Acceptance Criteria:**
+
 - [ ] Same value tokenizes to the same token within a run, different runs get independent numbering.
 - [ ] Interfaces are separate so consumers can be given least privilege.
 - [ ] No raw value is ever included in an error.
@@ -48,6 +53,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 **Dependencies:** `better-sqlite3`, Node `crypto`.
 **Items it depends on:** 12.1, 7.9.
 **Implementation guidance:**
+
 1. `packages/crypto` (leaf, no internal deps): `aesGcmEncrypt(key, plaintext, aad): Uint8Array` returning `iv(12) || ciphertext || tag(16)`, `aesGcmDecrypt`, `hkdfSha256(masterKey, info, length=32)`, `hmacSha256(key, data)`. Refactor 7.9's `AesGcmContentCodec` to call these; its tests must still pass.
 2. Derive two keys from the provider's key for the vault using HKDF with `info = "harness/vault/enc"` and `"harness/vault/lookup"`.
 3. Schema (migrated with the same migration approach as 7.12, separate migration folder `packages/vault/migrations`): `vault_entries(run_id TEXT, token TEXT, entity_type TEXT, lookup BLOB, value_enc TEXT, key_id TEXT, created_at INTEGER, PRIMARY KEY(run_id, token), UNIQUE(run_id, entity_type, lookup))`, `vault_counters(run_id TEXT, entity_type TEXT, next_n INTEGER, PRIMARY KEY(run_id, entity_type))`.
@@ -57,6 +63,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 7. Enable `PRAGMA secure_delete=ON`.
 **Tests to write:** shared vault conformance suite (write once in `packages/vault/src/conformance.ts`, run against memory and SQLite): idempotency, numbering, resolve, purge; DB file bytes contain no plaintext canary; moving ciphertext to another `(run, token)` fails decryption; concurrent `put` of the same value from two connections yields one token; codec refactor regression tests.
 **Acceptance Criteria:**
+
 - [ ] DB file grep for the canary finds nothing.
 - [ ] Concurrent puts never create duplicate tokens.
 - [ ] 7.9 tests still pass after the refactor.
@@ -72,6 +79,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 **Dependencies:** none.
 **Items it depends on:** 7.9, 20.3.
 **Implementation guidance:**
+
 1. Implements `KeyProvider` from 7.9: `currentKeyId()` and `getKey(keyId)`. Secrets resolve through `SecretResolver` (20.3) to base64 strings that must decode to exactly 32 bytes (`key_invalid_length` otherwise).
 2. Keys are resolved lazily and cached in memory as `Uint8Array`; never logged or serialized. Provide `dispose()` to zero buffers.
 3. Unknown `keyId` throws `key_not_found`. `currentKeyId` must exist in `keys` (`key_current_missing`, validated at construction).
@@ -79,6 +87,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 5. Dev convenience: if config has no `keys` section and `NODE_ENV !== "production"`, generate an ephemeral key with a loud stderr warning (`keys_ephemeral`); in production mode fail startup.
 **Tests to write:** valid key load; wrong length rejected; missing current key; rotation scenario with two keys (old key still readable); production-mode failure without keys; buffers zeroed after `dispose`; `keys generate` output decodes to 32 bytes.
 **Acceptance Criteria:**
+
 - [ ] Old keys remain readable while a new key is current.
 - [ ] Production startup fails without configured keys.
 - [ ] Keys never appear in logs or error messages.
@@ -94,6 +103,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 **Dependencies:** `@azure/keyvault-secrets`, `@azure/identity` (verify current APIs).
 **Items it depends on:** 12.3, 20.3.
 **Implementation guidance:**
+
 1. `akv:<vaultName>/<secretName>[#version]` resolves to `https://<vaultName>.vault.azure.net`. Validate the vault name with `^[a-zA-Z][a-zA-Z0-9-]{2,23}$` and secret name with `^[a-zA-Z0-9-]{1,127}$`.
 2. Use `DefaultAzureCredential`; depend on an injected `SecretClientLike { getSecret(name, opts) }` interface so unit tests use a fake.
 3. In-memory cache with TTL (default 300 s) keyed by `vault/name/version`; return `Secret` objects (20.3) so values never print.
@@ -102,6 +112,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 6. Azure Pipelines (nightly, `LIVE`): use `AzureCLI@2` with a service connection so `DefaultAzureCredential` picks up the Azure CLI login; the test reads a dedicated test secret and skips when `HARNESS_LIVE_AKV` is unset.
 **Tests to write:** fake-client unit tests for resolution, version pin, cache TTL with fake clock, error mapping, validation regexes, key provider round trip; `LIVE` test as described.
 **Acceptance Criteria:**
+
 - [ ] `akv:` refs work in config wherever a `SecretRef` is accepted.
 - [ ] No secret value appears in any output or error.
 - [ ] Live test documented and gated.
@@ -117,6 +128,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 **Dependencies:** none.
 **Items it depends on:** 12.2, 12.3, 7.9.
 **Implementation guidance:**
+
 1. Both adapters expose `reencryptBatch({ targetKeyId, limit, afterCursor })`: select rows where `key_id != target`, decrypt with the row's key, encrypt with the target, update `value_enc`/`content_blob` and `key_id` in one transaction per batch (default 500). Returns `{ processed, nextCursor }`.
 2. The vault's `lookup` HMAC is derived from the key, so rotating keys changes the lookup key. Store `lookup_key_id` per row and keep lookups working by trying each referenced key id for `put` idempotency; during rotation recompute `lookup` with the target key at the same time. Document the invariant.
 3. Rotation is resumable (cursor) and idempotent; running it twice is a no-op.
@@ -125,6 +137,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 6. Emit only counts via the logger (`keys_rotated` with integer counts).
 **Tests to write:** rotate a populated vault and store from key A to B and verify reads; interrupted rotation resumes; concurrent writes during rotation remain readable; retire refused while rows remain and allowed after; idempotent second run; lookup idempotency preserved across rotation.
 **Acceptance Criteria:**
+
 - [ ] After rotation no row references the old key.
 - [ ] Retire is blocked while any row uses the key.
 - [ ] Reads work throughout rotation.
@@ -140,6 +153,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 **Dependencies:** none.
 **Items it depends on:** 12.2, 7.11.
 **Implementation guidance:**
+
 1. Add table `run_meta(run_id TEXT PRIMARY KEY, terminal_at INTEGER)` and `VaultAdmin.markTerminal(runId, ts)`. The run loop calls it on any transition to a terminal status.
 2. `purgeExpired({ vault, clock, purgeAfterDays })`: purge runs whose `terminal_at < now - days*86_400_000`, in batches of 100, returning counts.
 3. `onRunPurged(runId)` from the event-store retention job (7.11) calls `vault.purge(runId)` immediately regardless of the grace period.
@@ -147,6 +161,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 5. A purged run can still be inspected (tokens remain in content) but detokenization returns `undefined`; the UI must handle this (document).
 **Tests to write:** grace period boundaries with fake clock; immediate purge via hook; active runs untouched; counts reported; resolve after purge returns undefined; purge idempotent.
 **Acceptance Criteria:**
+
 - [ ] No raw values remain after purge (DB file canary grep after vacuum).
 - [ ] Retention hook purges the vault in the same job run.
 - [ ] Active runs are never purged.
@@ -162,6 +177,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 **Dependencies:** none.
 **Items it depends on:** 12.1, 7.10, 2.2.
 **Implementation guidance:**
+
 1. `AuditingVaultResolver(inner, onAudit)` implements `VaultResolver` with an extended `resolve(runId, token, ctx: { boundary: "tool_input"|"ui"; toolId?: Code })`. After a successful resolve it calls `onAudit({ boundary, entities: [{ type, count: 1 }] })` where `type` comes from `tokenType(token)`. Aggregate counts per call batch when a caller resolves several tokens (provide `resolveMany`).
 2. The run loop turns audits into `pii_action` events with `action: "detokenized"`; the human UI path uses boundary `ui`.
 3. Audit data never contains tokens, raw values, or argument names.
@@ -169,6 +185,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 5. Update the enum in `events.ts`, `classification.ts`, `SafeEvent` mapping, and golden tests.
 **Tests to write:** audit emitted once per resolve; batch aggregation; failure audited as `blocked`; no token or value in the audit payload (property test with canaries); schema and safe-event mapping updated.
 **Acceptance Criteria:**
+
 - [ ] Every detokenization is observable as a metadata-only event.
 - [ ] Audit payloads cannot contain tokens or values.
 - [ ] Human reveals are distinguishable by boundary `ui`.
@@ -184,12 +201,14 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 **Dependencies:** none.
 **Items it depends on:** 12.3, 12.1.
 **Implementation guidance:**
+
 1. `pseudonymize({ value, scope: "global" | Id, keyProvider, keyId? }): Promise<Pseudonym>`: derive key via HKDF with `info = "harness/pseudonym"`; `mac = HMAC-SHA256(key, scope || 0x00 || normalize(value))`; take the first 16 bytes; encode as lowercase base32 without padding (26 chars); result `p_` + that string (matches the `Code` pattern).
 2. `Pseudonym` schema `^p_[a-z2-7]{26}$`. Provide `attr.pseudonym()` in the telemetry attr helpers so it can be used as a registered attribute (add `harness.user.pseudonym` as an optional attribute only if an owner opts in via config `telemetry.correlation.enabled`, default false).
 3. Document risks: pseudonyms are stable across runs for the same key (linkability), key rotation changes them, low-entropy inputs are safe only because the key is secret, and per-run scope gives unlinkable values.
 4. Never accept a token or raw value as telemetry output; the helper is the only sanctioned way to emit a user correlation attribute.
 **Tests to write:** deterministic for same inputs and key; different key, scope, or value changes output; format regex; not reversible (no raw value in output); per-run scope differs across runs; `attr.pseudonym` registered attribute accepts only the format.
 **Acceptance Criteria:**
+
 - [ ] Output always matches the pseudonym pattern.
 - [ ] Disabled by default; enabling requires explicit config.
 - [ ] Documentation lists the linkability risks.
@@ -205,6 +224,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 **Dependencies:** `pg`, Docker image `postgres:16`.
 **Items it depends on:** 12.2, 12.5, 12.6, 7.6, 8.1.
 **Implementation guidance:**
+
 1. Separation: the vault must use a different database or a different role and schema from the event store. Startup fails with `vault_shares_store_database` when both URLs resolve to the same database and schema. Document recommended grants (the harness role can read and write the vault; analytics roles never get vault access).
 2. Per-scope data keys (both adapters): each scope (23.2) gets a random 32-byte data encryption key stored wrapped (AES-GCM) under the master key from the `KeyProvider` in `vault_scope_keys(scope_id, wrapped_dek, key_id, created_at)`. Values are encrypted with the scope's data key. `purge(scope)` deletes the wrapped key first, then the rows, so leftover ciphertext (Postgres has no `secure_delete`, and backups may keep rows) can no longer be decrypted. Rotation (12.5) re-wraps data keys instead of re-encrypting every value; lookups keep using the HMAC lookup key (record which key id produced each lookup, as in 12.5).
 3. `put`: one transaction: `INSERT ... ON CONFLICT (run_id, entity_type, lookup) DO NOTHING RETURNING token`; when nothing is returned, select the existing token; allocate `next_n` with `UPDATE vault_counters ... RETURNING` under a row lock. `version(runId)` reads the counter sum (8.1).
@@ -212,6 +232,7 @@ interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Prom
 5. Compose test service: reuse the `postgres` service with a second database `harness_vault` created by an init script.
 **Tests to write:** conformance suite on Postgres (integration stage); concurrency; same-database refusal; crypto-shred test (after purge, a copied ciphertext row cannot be decrypted even with the master key); rotation re-wraps data keys and reads still work; SQLite adapter still passes with per-scope keys.
 **Acceptance Criteria:**
+
 - [ ] Two harness instances can share one Postgres vault safely.
 - [ ] Purged scopes are unreadable even from backups (crypto-shredding).
 - [ ] The vault cannot share the event store's database and schema.

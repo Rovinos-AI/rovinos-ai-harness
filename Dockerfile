@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-FROM ghcr.io/jdx/mise:2026.10.4-debian AS build
+FROM ghcr.io/jdx/mise:2026.10.4-debian@sha256:2fb7fa9a4120333531a8a70296d4ea152ffd3e7658dcf29ac75774a7d78dec24 AS build
 
 WORKDIR /app
 COPY mise.toml ./
-RUN mise install && mise exec -- corepack enable
+RUN mise install node npm:corepack
+ENV MISE_AUTO_INSTALL=false
+RUN mise exec -- corepack enable
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY packages/cli/package.json packages/cli/package.json
 COPY packages/schemas/package.json packages/schemas/package.json
@@ -19,7 +21,7 @@ RUN mise exec -- yarn workspaces focus @harness/cli --production \
     && cp -a packages/schemas/package.json packages/schemas/dist /out/packages/schemas/ \
     && cp -a packages/cli/dist/. /out/dist/
 
-FROM node:22-slim AS runtime
+FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS runtime
 
 WORKDIR /app
 RUN groupadd --gid 10001 harness \

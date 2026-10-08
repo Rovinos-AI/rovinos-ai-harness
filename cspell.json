@@ -1,0 +1,14 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "files": ["**/*.md", "packages/*/src/**/*"],
+  "ignorePaths": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "**/*.generated.*"],
+  "dictionaryDefinitions": [
+    {
+      "name": "project-words",
+      "path": "./docs/engineering/project-words.txt",
+      "addWords": true
+    }
+  ],
+  "dictionaries": ["project-words"]
+}

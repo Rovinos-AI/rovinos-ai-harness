@@ -22,6 +22,12 @@ steps:
       mkdir -p "$YARN_GLOBAL_FOLDER/cache"
       echo "##vso[task.prependpath]$(mise where node)/bin"
       echo "##vso[task.prependpath]$(mise where npm:corepack)/bin"
+      shellcheck_bin="$(mise which shellcheck)"
+      if [ ! -x "$shellcheck_bin" ]; then
+        echo "mise did not install the pinned ShellCheck binary."
+        exit 1
+      fi
+      echo "##vso[task.prependpath]$(dirname "$shellcheck_bin")"
     displayName: Install pinned toolchain
 
   - bash: |

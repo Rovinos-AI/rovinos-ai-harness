@@ -4,6 +4,7 @@
 **Tasks:** 18.1 to 18.8, all size S.
 
 Shared design for this epic:
+
 - Package `packages/control-plane` uses the MCP TypeScript SDK v2 server (`@modelcontextprotocol/server`, `@modelcontextprotocol/node`; CONVENTIONS section 10). HTTP uses `createMcpHandler`, which serves MCP 2026-07-28 and 2025-11-25 clients per request; stdio uses `serveStdio`. Started with `harness serve [--stdio | --http]`. The server advertises the MCP Apps extension (`io.modelcontextprotocol/ui`) in `server/discover`.
 - **Metadata by default.** Tool outputs contain statuses, ids, counts, and timings, never message content. Content-bearing outputs exist only in approvals (tokenized args) and in an explicit, audited reveal (18.4).
 - **An agent must never approve its own actions.** Approve/deny/reveal tools are declared app-only (hidden from models by compliant hosts), and when invoked outside an app they require a human confirmation via elicitation (18.2, 18.6), delivered with the Multi Round-Trip Requests pattern: the tool returns an `InputRequiredResult` with an `elicitation/create` request and a sealed `requestState`, and only a retry carrying the human's answer and that exact state proceeds. If neither path is available the call fails closed.
@@ -20,6 +21,7 @@ Shared design for this epic:
 **Dependencies:** `@modelcontextprotocol/server` and `@modelcontextprotocol/node` (v2), `zod` (4.2 or later).
 **Items it depends on:** 2.10, 7.3, 20.2.
 **Implementation guidance:**
+
 1. `list_runs` input `{ status?: RunStatus, limit?: int (1..50, default 20), cursor?: string }` -> structured output `{ runs: { runId, status, createdAt, lastTs, lastSeq, steps, pendingApprovals }[], nextCursor? }`. Use `store.listRuns` and a light fold for counts.
 2. `get_run` input `{ runId: Id }` -> `{ runId, status, steps, usage, lastCheckpoint?, pendingApprovals: { approvalId, toolId, ruleId, expiresAt? }[], recentEvents: SafeEvent[] (last 20) }`. Recent events use `toSafeEvent` so no content can appear.
 3. Define input and output schemas with Zod and register them with the SDK (`outputSchema` + `structuredContent`), plus a short text rendering (counts only) for clients that ignore structured content.
@@ -28,6 +30,7 @@ Shared design for this epic:
 6. Unknown run ids return an MCP tool error with code `run_not_found` (code only).
 **Tests to write:** in-memory client/server pair: both tools with data and pagination; unknown run; outputs validate against schemas; property test with canaries planted in event content asserting no content in any output; CLI starts and stops cleanly.
 **Acceptance Criteria:**
+
 - [ ] Tools return metadata only (verified by canary test).
 - [ ] Structured and text outputs both provided.
 - [ ] `harness serve` works over stdio and loopback HTTP.
@@ -43,6 +46,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 18.1, 17.4, 2.7, 2.13.
 **Implementation guidance:**
+
 1. `approve { approvalId, edits? }` and `deny { approvalId, reason?: Code }` use `validateEdits` (17.4) and `resolveApproval` (2.9). They do not resume the run; `resume_run { runId }` does.
 2. `RunSupervisor`: runs `resumeRun` in-process asynchronously, returns `{ started: true }` immediately, tracks active runs (`Map<Id, AbortController>`), refuses beyond `controlPlane.maxConcurrentRuns` (default 2, `capacity_exceeded`), maps `resume_conflict` to `{ started: false, code }`. Active runs register with `ActiveRuns` for the sentinel (8.3).
 3. `cancel_run { runId }` calls `cancelRun` (2.13); for runs supervised locally also abort the controller.
@@ -51,6 +55,7 @@ Shared design for this epic:
 6. Annotations: `destructiveHint` for `cancel_run`, `idempotentHint` true for `deny`/`cancel_run`.
 **Tests to write:** approve/deny flows via in-memory client with a fake elicitation responder (accept, decline, cancel); no elicitation support fails closed; supervisor concurrency limit and duplicate resume; cancel stops a supervised run (fake slow tool); edits validated before resolve.
 **Acceptance Criteria:**
+
 - [ ] No decision tool succeeds without an app context or a human elicitation confirmation.
 - [ ] Concurrency limits enforced for supervised runs.
 - [ ] Decisions are recorded in the log exactly once.
@@ -66,6 +71,7 @@ Shared design for this epic:
 **Dependencies:** `esbuild`, `@modelcontextprotocol/ext-apps` (`App` class), `jsdom`.
 **Items it depends on:** 18.1, 5.3.
 **Implementation guidance:**
+
 1. Same security posture as 5.3: DOM built with `textContent`, no network, single-file build, build fails on external URLs.
 2. Features: table of runs (status badge, id, age, steps, pending approvals), status filter, refresh every 5 s using the bridge `callTool` for `list_runs` (app-visible copy exposed alongside the model-visible one), detail panel via `get_run`, "needs approval" badge opening the approval view (18.4) in the same iframe.
 3. Metadata only: never request content. Poll pauses when the document is hidden and backs off on errors.
@@ -73,6 +79,7 @@ Shared design for this epic:
 5. Emit the standard UI spans via the shim (`ui.render`, `ui.error`, `ui.interaction`).
 **Tests to write:** jsdom rendering with stub bridge (empty list, long list, filter, pending badge); polling pause/resume with fake timers; axe checks; build-output external URL scan; XSS in run ids/status strings (even though they are ids, test defensively).
 **Acceptance Criteria:**
+
 - [ ] Console renders and updates with metadata only.
 - [ ] Needs-approval runs link to the approval view.
 - [ ] Meets the same security and accessibility checks as the approval app.
@@ -88,6 +95,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 18.2, 5.4, 12.7.
 **Implementation guidance:**
+
 1. Resource: read `packages/approval-app/dist/approval.html` at startup (fail if missing), serve with the MCP Apps HTML MIME type (verify), declaring no CSP domains and no extra permissions.
 2. `harness.approvals.resolve`: validate against `ResolveRequest`; verify the approval exists, is pending, and belongs to a run the token may act on (18.5 scope `approve` and run filter); apply `validateEdits`; call `resolveApproval`; return `{ ok: true }` or `{ ok: false, code }`.
 3. `harness.approvals.reveal`: requires scope `reveal` and config `controlPlane.allowReveal: true` (default false); at most 20 pointers; rate limit 5 per minute per session; if the client supports elicitation and `controlPlane.reveal.requireElicitation` is true (default true), obtain a confirmation first; resolve tokens at the requested pointers through `AuditingVaultResolver` with boundary `ui` (12.7); return values only for pointers present in the stored payload args (never arbitrary pointers into other data).
@@ -95,6 +103,7 @@ Shared design for this epic:
 5. Metadata-only audit logging (token id, tool, outcome code).
 **Tests to write:** resolve success, not found, already resolved, wrong-run token, invalid edits; reveal disabled by default; reveal scope, rate limit, pointer validation, elicitation requirement; audit events emitted with counts only (canary); resource served and MIME type correct; missing build artifact fails startup.
 **Acceptance Criteria:**
+
 - [ ] Reveal is off by default and audited when on.
 - [ ] Tools are unreachable without the right scope and run access.
 - [ ] Approval app resource served from the real build.
@@ -110,6 +119,7 @@ Shared design for this epic:
 **Dependencies:** Node `crypto` (`timingSafeEqual`).
 **Items it depends on:** 18.1, 20.3.
 **Implementation guidance:**
+
 1. Config: `auth.tokens: { id: Code, secret: SecretRef, scopes: ("read"|"read_content"|"approve"|"run"|"reveal"|"admin")[], runIds?: Id[] }[]`, `listen: { host: string (default "127.0.0.1"), port }`, `tls?: { certFile: SecretRef-like path, keyFile }`, `allowedHosts: string[]` (Host header allowlist, default loopback names), `rateLimitPerMinute` (default 120).
 2. Authenticate `Authorization: Bearer <token>`; compare using SHA-256 digests with `timingSafeEqual`; unknown token returns 401 without detail. Tokens are resolved via `SecretResolver` at startup and never logged.
 3. Scopes enforced per tool: `read` (list/get), `read_content` (tokenized run content in the run inspector, 18.8; off unless granted), `approve` (approve/deny/resolve/answer inputs), `run` (start/continue/resume/cancel), `reveal` (reveal), `admin` (all). `runIds` restricts accessible runs.
@@ -118,6 +128,7 @@ Shared design for this epic:
 6. Audit log through the sanctioned logger: `{ tokenId (Code), tool (Code), outcome (Code) }` only.
 **Tests to write:** valid and invalid tokens (including timing-safe path via function-level test), each scope boundary, run filtering, non-loopback without TLS refused, Host/Origin checks table, rate limiting, audit entries contain no secrets (canary), stdio mode unauthenticated but local.
 **Acceptance Criteria:**
+
 - [ ] Remote exposure without TLS is impossible by configuration.
 - [ ] Every tool enforces its scope and run filter.
 - [ ] Tokens and values never appear in logs.
@@ -133,6 +144,7 @@ Shared design for this epic:
 **Dependencies:** none.
 **Items it depends on:** 18.2, 17.4.
 **Implementation guidance:**
+
 1. `review_approval { approvalId }` (model-visible, safe because a human decides): load the payload and, if the request's client capabilities include `elicitation.form`, return an `InputRequiredResult` whose `elicitation/create` request has message = payload `fallbackText` (tokenized) and requested schema `{ decision: enum["approve","deny"], reason?: Code enum }`, with a sealed single-use `requestState` bound as in 18.2. The retry carrying the answer applies the decision.
 2. Outcomes: accept with `approve` -> `approve` logic (18.2, no second confirmation needed since the elicitation is the confirmation); `deny` likewise; user declines or cancels -> no state change, return `{ resolved: false }`.
 3. Clients without elicitation: return a text result with the CLI instructions (`harness approvals approve <id>`) and the console URL if configured, and `resolved: false`.
@@ -140,6 +152,7 @@ Shared design for this epic:
 5. The elicitation message contains only tokenized content; never raw values.
 **Tests to write:** fake client with elicitation (accept/approve, accept/deny, decline, cancel); client without elicitation returns instructions; message contains no canary raw values; edits not offered.
 **Acceptance Criteria:**
+
 - [ ] A text-only client can approve or deny via elicitation.
 - [ ] No state changes unless the human explicitly accepts.
 - [ ] Fallback text points to CLI or app.
@@ -155,14 +168,16 @@ Shared design for this epic:
 **Dependencies:** Playwright, SDK client.
 **Items it depends on:** 18.3, 18.4, 18.5, 18.6.
 **Implementation guidance:**
+
 1. `tools/list` filtering: if the request's client capabilities do not list the `io.modelcontextprotocol/ui` extension with the `text/html;profile=mcp-app` MIME type, omit app-only tools (`harness.approvals.*`, `harness.inputs.*`) and app-visibility copies of list/get tools, and return text content only.
-6. Protocol eras: run the matrix against both a 2026-07-28 client and a 2025-11-25 client (SDK v2 in legacy mode) for every client class.
-2. Matrix of clients: (A) SDK client with no UI and no elicitation; (B) SDK client with elicitation only; (C) reference host as an MCP Apps-capable client. For each, assert: tools listed; read tools work; approval path available (CLI instructions, elicitation, or app); self-approval attempts via the model-visible path fail closed (A) or require human elicitation (B).
-3. Scenario test per client: create a run that suspends for approval (fake model and a policy `ask` rule), resolve using the client's available path, resume, assert completion.
-4. Document the matrix and note unknown behaviors of third-party clients as "unverified".
-5. Run in the Azure `integration` stage (Chromium for client C).
+2. Protocol eras: run the matrix against both a 2026-07-28 client and a 2025-11-25 client (SDK v2 in legacy mode) for every client class.
+3. Matrix of clients: (A) SDK client with no UI and no elicitation; (B) SDK client with elicitation only; (C) reference host as an MCP Apps-capable client. For each, assert: tools listed; read tools work; approval path available (CLI instructions, elicitation, or app); self-approval attempts via the model-visible path fail closed (A) or require human elicitation (B).
+4. Scenario test per client: create a run that suspends for approval (fake model and a policy `ask` rule), resolve using the client's available path, resume, assert completion.
+5. Document the matrix and note unknown behaviors of third-party clients as "unverified".
+6. Run in the Azure `integration` stage (Chromium for client C).
 **Tests to write:** the matrix tests above, including tool-list assertions per capability set.
 **Acceptance Criteria:**
+
 - [ ] Each client class has a working approval path or a clear fail-closed message.
 - [ ] App-only tools are never listed to clients without UI support.
 - [ ] Compatibility matrix documented.
@@ -178,6 +193,7 @@ Shared design for this epic:
 **Dependencies:** `@modelcontextprotocol/ext-apps`.
 **Items it depends on:** 18.3, 5.7, 24.5, 23.2.
 **Implementation guidance:**
+
 1. `get_run_timeline` returns safe events grouped into steps (model call, tool call with policy decision and outcome, approval wait, input wait, checkpoint, compaction, subagent spawn and completion) with durations, token and cost counts, and budget usage. No content.
 2. The view shows the timeline, a step detail panel, budget meters, the subagent tree (links open the child run in the same view), and badges that open the approval (5.3) or input (25.7) view for pending items.
 3. Content is off by default. A "show tokenized content" control calls an app-only tool that requires scope `read_content` (new scope, default off) and returns tokenized content only; raw values still require the audited reveal (18.4).
@@ -185,7 +201,7 @@ Shared design for this epic:
 5. Same security, accessibility, and size checks as other views (5.7).
 **Tests to write:** timeline grouping from fixture logs (each step type); content hidden without the scope; tokenized content with it, never raw; subagent navigation; live update path and fallback; axe and XSS checks.
 **Acceptance Criteria:**
+
 - [ ] A human can follow a run step by step in any MCP Apps host.
 - [ ] Content stays hidden unless a scoped, explicit action shows tokenized content.
 - [ ] The view updates live.
-
