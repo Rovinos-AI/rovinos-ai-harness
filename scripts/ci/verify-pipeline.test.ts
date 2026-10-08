@@ -74,6 +74,11 @@ it("runs static checks before unit tests", () => {
       (step) => typeof step.script === "string" && step.script.includes("yarn check:agents"),
     ),
   ).toBe(true);
+  expect(
+    staticSteps.some(
+      (step) => typeof step.script === "string" && step.script.includes("yarn check:spdx"),
+    ),
+  ).toBe(true);
 });
 
 it("publishes JUnit results after success or failure", () => {
