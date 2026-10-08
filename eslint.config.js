@@ -11,6 +11,7 @@ import vitest from "@vitest/eslint-plugin";
 import prettier from "eslint-config-prettier/flat";
 import tseslint from "typescript-eslint";
 import { harnessPlugin } from "@harness/eslint-plugin-harness";
+import { browserRestrictedImports } from "./eslint-browser-boundaries.js";
 
 const rootDirectory = fileURLToPath(new URL(".", import.meta.url));
 const testFiles = [
@@ -71,18 +72,6 @@ function restrictedImports({ telemetry = false, childProcess = false, parsers = 
   return ["error", { patterns }];
 }
 
-function browserRestrictedImports() {
-  return [
-    "error",
-    {
-      patterns: [
-        ...restrictedImports()[1].patterns,
-        { group: ["node:*"], message: "Browser code cannot import Node.js modules." },
-      ],
-    },
-  ];
-}
-
 function errorizeWarnings(configuration) {
   return configuration.map((entry) => {
     if (!entry.rules) {
@@ -108,6 +97,13 @@ function typescriptOnly(configurations) {
   }));
 }
 
+function typedPluginJavaScript(configurations) {
+  return configurations.map((entry) => ({
+    ...entry,
+    files: ["tools/eslint-plugin-harness/src/index.js"],
+  }));
+}
+
 const configuration = [
   {
     ignores: [
@@ -123,6 +119,8 @@ const configuration = [
   },
   ...typescriptOnly(tseslint.configs.strictTypeChecked),
   ...typescriptOnly(tseslint.configs.stylisticTypeChecked),
+  ...typedPluginJavaScript(tseslint.configs.strictTypeChecked),
+  ...typedPluginJavaScript(tseslint.configs.stylisticTypeChecked),
   {
     files: ["**/*.{js,mjs,ts,tsx}"],
     languageOptions: {
@@ -263,11 +261,11 @@ const configuration = [
     },
   },
   {
-    files: ["**/*.{ts,tsx}"],
+    files: ["**/*.{ts,tsx}", "tools/eslint-plugin-harness/src/index.js"],
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["packages/*/src/*.test.ts", "vitest.workspace.ts"],
+          allowDefaultProject: ["vitest.workspace.ts"],
           defaultProject: "packages/schemas/tsconfig.test.json",
         },
         tsconfigRootDir: rootDirectory,
@@ -331,7 +329,11 @@ const configuration = [
   },
   {
     files: ["tools/eslint-plugin-harness/src/index.js"],
-    rules: { "import-x/no-relative-packages": "off" },
+    rules: {
+      "import-x/no-relative-packages": "off",
+      "@typescript-eslint/explicit-module-boundary-types": "off",
+      "jsdoc/no-types": "off",
+    },
   },
   {
     files: ["scripts/**/*.{js,mjs,ts,tsx}", "packages/sandbox/**/*.{js,mjs,ts,tsx}"],
@@ -369,7 +371,7 @@ const configuration = [
     ],
     rules: {
       "no-restricted-globals": ["error", "process", "require", "Buffer"],
-      "no-restricted-imports": browserRestrictedImports(),
+      "no-restricted-imports": browserRestrictedImports(restrictedImports()[1].patterns),
       "no-restricted-properties": ["error", ...restrictedProperties, ...domProperties],
     },
   },

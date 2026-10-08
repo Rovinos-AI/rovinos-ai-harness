@@ -89,6 +89,7 @@ describe("ESLint configuration", () => {
       "function nested(flag: boolean) { if (flag) { if (flag) { if (flag) { if (flag) { if (flag) { return; } } } } } }",
       "max-depth",
     ],
+    ["unbraced control flow", "function run(flag: boolean) { if (flag) return; }", "curly"],
     ["super-linear regex", "const pattern = /(a+)+$/u;", "regexp/no-super-linear-backtracking"],
     ["untyped JSON parsing", 'JSON.parse("{}");', "no-restricted-properties"],
     [
@@ -113,20 +114,61 @@ describe("ESLint configuration", () => {
       "focused test",
       'import { describe, it } from "vitest";\ndescribe.only("focused", () => { it("runs", () => {}); });',
       "vitest/no-focused-tests",
-      resolve(rootDirectory, "packages/schemas/src/focused.test.ts"),
+      resolve(rootDirectory, "packages/schemas/src/index.test.ts"),
     ],
-  ])("flags %s", async (_name, code, rule, filename?) => {
-    const messages = await lint(code, filename);
-    expect(messages.map((message) => message.ruleId)).toContain(rule);
+  ])(
+    "flags %s",
+    async (_name, code, rule, filename?) => {
+      const messages = await lint(code, filename);
+      expect(messages.map((message) => message.ruleId)).toContain(rule);
+    },
+    15_000,
+  );
+
+  it.each([
+    ["child_process", "packages/schemas/src/lint-fixture.js"],
+    ["node:child_process", "packages/schemas/src/lint-fixture.js"],
+    ["fs", "packages/approval-app/src/lint-fixture.js"],
+    ["node:fs", "packages/approval-app/src/lint-fixture.js"],
+    ["fs/promises", "packages/approval-app/src/lint-fixture.js"],
+    ["node:fs/promises", "packages/approval-app/src/lint-fixture.js"],
+  ])("restricts %s imports outside approved boundaries", async (moduleName, filename) => {
+    const messages = await lint(
+      `import { readFile } from "${moduleName}";`,
+      resolve(rootDirectory, filename),
+    );
+    expect(messages.map((message) => message.ruleId)).toContain("no-restricted-imports");
   });
 
-  it.each(["child_process", "node:child_process"])(
-    "restricts %s imports outside approved boundaries",
-    async (moduleName) => {
-      const messages = await lint(`import { spawn } from "${moduleName}";`, javascriptFixture);
-      expect(messages.map((message) => message.ruleId)).toContain("no-restricted-imports");
-    },
-  );
+  it("uses the shared TypeScript project for nested and co-located tests", async () => {
+    const filenames = [
+      resolve(rootDirectory, "packages/schemas/src/nested/steps/nested.test.ts"),
+      resolve(rootDirectory, "packages/schemas/src/index.test.ts"),
+    ];
+    for (const filename of filenames) {
+      const config: unknown = await eslint.calculateConfigForFile(filename);
+      const parserOptions =
+        isRecord(config) &&
+        isRecord(config.languageOptions) &&
+        isRecord(config.languageOptions.parserOptions)
+          ? config.languageOptions.parserOptions
+          : {};
+      expect(parserOptions.project).toBeUndefined();
+      expect(parserOptions.projectService).toEqual({
+        allowDefaultProject: ["vitest.workspace.ts"],
+        defaultProject: "packages/schemas/tsconfig.test.json",
+      });
+    }
+  });
+
+  it("type-checks the JavaScript package boundary implementation", async () => {
+    const config: unknown = await eslint.calculateConfigForFile(
+      resolve(rootDirectory, "tools/eslint-plugin-harness/src/index.js"),
+    );
+    const rules = isRecord(config) && isRecord(config.rules) ? config.rules : {};
+    expect(firstRuleSetting(rules["@typescript-eslint/strict-boolean-expressions"])).toBe(2);
+    expect(firstRuleSetting(rules["@typescript-eslint/consistent-type-assertions"])).toBe(2);
+  });
 
   it.each([
     ["arrow function", "export const answer = () => 42;"],
