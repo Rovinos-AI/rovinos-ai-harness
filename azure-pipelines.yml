@@ -16,6 +16,8 @@ stages:
     jobs:
       - job: static
         steps:
+          - checkout: self
+            fetchDepth: 0
           - template: pipelines/templates/node-setup.yml
           - script: yarn lint
             displayName: Lint
@@ -25,6 +27,11 @@ stages:
             displayName: Check agent index
           - script: yarn check:spdx
             displayName: Check SPDX headers
+          - script: yarn check:dco
+            displayName: Check DCO sign-offs
+            condition: eq(variables['Build.Reason'], 'PullRequest')
+            env:
+              TARGET_BRANCH: $(System.PullRequest.TargetBranch)
 
   - stage: unit
     dependsOn: static
