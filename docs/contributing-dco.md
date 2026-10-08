@@ -8,11 +8,20 @@ Signed-off-by: Your Name <you@example.com>
 ```
 
 Use `git commit -s -m "Describe the change"` when creating commits. If a branch
-already has unsigned commits, add the trailers with `git rebase --signoff` and
-push the updated branch.
+already has unsigned commits, replay them on the PR target and push the updated
+history:
 
-The configured `copilot-swe-agent[bot]` exemption is limited to commits authored
-by that bot because it cannot provide a human DCO certification. The human
-maintainer who squash-merges the pull request certifies the change; maintainers
-can also require sign-off on web-based commits in the repository settings so the
-squash commit on `main` carries the sign-off.
+```sh
+git rebase --signoff origin/main
+git push --force-with-lease
+```
+
+Replace `main` with the PR target branch when it differs.
+
+The configured `copilot-swe-agent[bot]` exemption applies only to commits with
+its exact configured author identity, the `GitHub <noreply@github.com>`
+committer, and a valid signature from a pinned GitHub web-flow key. The bot
+cannot provide a human DCO certification, so the human maintainer who
+squash-merges the pull request certifies the change. Maintainers can also require
+sign-off on web-based commits in the repository settings so the squash commit
+on `main` carries the sign-off.

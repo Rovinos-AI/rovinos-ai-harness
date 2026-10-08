@@ -15,6 +15,17 @@ import {
 
 const temporaryDirectories: string[] = [];
 const noExemptions = DcoExemptionsSchema.parse({ exemptAuthors: [] });
+const copilotExemptions: DcoExemptions = DcoExemptionsSchema.parse({
+  exemptAuthors: [
+    {
+      authorName: "copilot-swe-agent[bot]",
+      authorEmail: "198982749+Copilot@users.noreply.github.com",
+      committerName: "GitHub",
+      committerEmail: "noreply@github.com",
+      signingKeyFingerprints: ["968479A1AFF927E37D1A566BB5690EEEBB952194"],
+    },
+  ],
+});
 
 function runGit(repository: string, args: string[], env: NodeJS.ProcessEnv = {}): string {
   const result = spawnSync("git", args, {
@@ -60,19 +71,16 @@ function commit(
     name: "Test Author",
     email: "author@example.test",
   },
+  committer: { readonly name: string; readonly email: string } = author,
 ): string {
   writeFileSync(join(repository, path), content);
   runGit(repository, ["add", path]);
-  runGit(repository, [
-    "-c",
-    `user.name=${author.name}`,
-    "-c",
-    `user.email=${author.email}`,
-    "commit",
-    "--quiet",
-    "-m",
-    message,
-  ]);
+  runGit(repository, ["commit", "--quiet", "-m", message], {
+    GIT_AUTHOR_NAME: author.name,
+    GIT_AUTHOR_EMAIL: author.email,
+    GIT_COMMITTER_NAME: committer.name,
+    GIT_COMMITTER_EMAIL: committer.email,
+  });
   return runGit(repository, ["rev-parse", "HEAD"]);
 }
 
@@ -124,7 +132,8 @@ it("reports an unsigned commit and gives the sign-off repair command", () => {
   expect(result.authorEmailMismatch).toEqual([]);
   expect(cli.status).toBe(1);
   expect(cli.output).toContain(sha.slice(0, 7));
-  expect(cli.output).toContain("git rebase --signoff");
+  expect(cli.output).toContain("git rebase --signoff origin/main");
+  expect(cli.output).toContain("git push --force-with-lease");
 });
 
 it("ignores unsigned merge commits", () => {
@@ -161,22 +170,44 @@ it("rejects malformed sign-off trailers", () => {
   expect(checkDco(repository, "main", noExemptions).missingSignOff).toEqual([sha.slice(0, 7)]);
 });
 
-it("exempts configured bot authors and still rejects other unsigned authors", () => {
+it("rejects an unsigned commit with the exempt bot's author identity", () => {
   const repository = createRepository();
-  commit(repository, "bot.txt", "bot\n", "bot change", {
-    name: "copilot-swe-agent[bot]",
-    email: "bot@example.test",
-  });
-  const authorSha = commit(repository, "author.txt", "author\n", "author change");
-  const exemptions: DcoExemptions = DcoExemptionsSchema.parse({
-    exemptAuthors: ["copilot-swe-agent[bot]"],
-  });
+  const sha = commit(
+    repository,
+    "bot.txt",
+    "bot\n",
+    "bot change",
+    {
+      name: "copilot-swe-agent[bot]",
+      email: "198982749+Copilot@users.noreply.github.com",
+    },
+    { name: "GitHub", email: "noreply@github.com" },
+  );
 
-  expect(evaluateDco(parseDcoLog(""), exemptions)).toEqual({
+  expect(checkDco(repository, "main", copilotExemptions).missingSignOff).toEqual([sha.slice(0, 7)]);
+});
+
+it("exempts only the configured identity with a trusted web-flow signature", () => {
+  const fingerprint = "968479A1AFF927E37D1A566BB5690EEEBB952194";
+  const botCommit = {
+    sha: "1234567890abcdef",
+    authorName: "copilot-swe-agent[bot]",
+    authorEmail: "198982749+Copilot@users.noreply.github.com",
+    committerName: "GitHub",
+    committerEmail: "noreply@github.com",
+    signatureStatus: "G",
+    signingKeyFingerprint: fingerprint,
+    primaryKeyFingerprint: fingerprint,
+    message: "bot change",
+  };
+
+  expect(evaluateDco([botCommit], copilotExemptions)).toEqual({
     missingSignOff: [],
     authorEmailMismatch: [],
   });
-  expect(checkDco(repository, "main", exemptions).missingSignOff).toEqual([authorSha.slice(0, 7)]);
+  expect(
+    evaluateDco([{ ...botCommit, signatureStatus: "N" }], copilotExemptions).missingSignOff,
+  ).toEqual([botCommit.sha.slice(0, 7)]);
 });
 
 it("warns without failing when the valid trailer uses a different email", () => {

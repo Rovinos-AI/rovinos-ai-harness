@@ -1,3 +1,11 @@
 {
-  "exemptAuthors": ["copilot-swe-agent[bot]"]
+  "exemptAuthors": [
+    {
+      "authorName": "copilot-swe-agent[bot]",
+      "authorEmail": "198982749+Copilot@users.noreply.github.com",
+      "committerName": "GitHub",
+      "committerEmail": "noreply@github.com",
+      "signingKeyFingerprints": ["968479A1AFF927E37D1A566BB5690EEEBB952194"]
+    }
+  ]
 }
