@@ -62,10 +62,14 @@ export function validateLayers(layers) {
       throw new Error(`layers.json: cycle ${[...path, name].join(" -> ")}`);
     }
     state.set(name, "active");
-    for (const dep of layers[name]) visit(dep, [...path, name]);
+    for (const dep of layers[name]) {
+      visit(dep, [...path, name]);
+    }
     state.set(name, "done");
   };
-  for (const name of names) visit(name, []);
+  for (const name of names) {
+    visit(name, []);
+  }
   return names;
 }
 
@@ -78,16 +82,23 @@ export function validateLayers(layers) {
 export function replaceBlock(text, body, file) {
   const a = text.indexOf(BEGIN);
   const b = text.indexOf(END);
-  if (a === -1 || b === -1 || b < a) throw new Error(`${file}: missing generated block markers`);
+  if (a === -1 || b === -1 || b < a) {
+    throw new Error(`${file}: missing generated block markers`);
+  }
   return `${text.slice(0, a + BEGIN.length)}\n${body}\n${text.slice(b)}`;
 }
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
-    if (SKIP_DIRS.has(entry)) continue;
+    if (SKIP_DIRS.has(entry)) {
+      continue;
+    }
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else out.push(full);
+    if (statSync(full).isDirectory()) {
+      walk(full, out);
+    } else {
+      out.push(full);
+    }
   }
   return out;
 }
@@ -122,12 +133,16 @@ function buildAgentBlock({ root, dir, files, agentsDirs, layers }) {
   }
   for (const file of owned.filter((entry) => entry.endsWith("/TASKS.md") || entry === "TASKS.md")) {
     const match = readFileSync(join(root, file), "utf8").match(/^Task ids: (.+)$/m);
-    if (!match) throw new Error(`${file}: missing "Task ids:" line`);
+    if (!match) {
+      throw new Error(`${file}: missing "Task ids:" line`);
+    }
     lines.push(
       `- [${relative(dir, file)}](./${relative(dir, file)}) (specs in other folders): tasks ${match[1]}`,
     );
   }
-  if (lines.length === 1) lines.push("- None. See `docs/engineering/tasks/README.md`.");
+  if (lines.length === 1) {
+    lines.push("- None. See `docs/engineering/tasks/README.md`.");
+  }
   const pkg = dir.match(/^packages\/([^/]+)$/);
   if (pkg) {
     const deps = layers[pkg[1]];
@@ -189,7 +204,9 @@ export function generate(root) {
       }
     }
   }
-  if (errors.length) throw new Error(errors.join("\n"));
+  if (errors.length) {
+    throw new Error(errors.join("\n"));
+  }
   return results;
 }
 

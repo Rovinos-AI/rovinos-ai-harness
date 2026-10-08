@@ -151,6 +151,12 @@ describe("ESLint configuration", () => {
     }
   });
 
+  it("keeps curly enforcement enabled after Prettier config", async () => {
+    const config: unknown = await eslint.calculateConfigForFile(javascriptFixture);
+    const rules = isRecord(config) && isRecord(config.rules) ? config.rules : {};
+    expect(rules.curly).toEqual([2, "all"]);
+  });
+
   it("resolves no warning-level rules", async () => {
     for (const filename of [
       typescriptFixture,

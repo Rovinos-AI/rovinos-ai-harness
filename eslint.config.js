@@ -59,9 +59,15 @@ const domProperties = [
 
 function restrictedImports({ telemetry = false, childProcess = false, parsers = false } = {}) {
   const patterns = [];
-  if (!telemetry) patterns.push(restrictedImportGroups.observability);
-  if (!childProcess) patterns.push(restrictedImportGroups.childProcess);
-  if (!parsers) patterns.push(restrictedImportGroups.parsers);
+  if (!telemetry) {
+    patterns.push(restrictedImportGroups.observability);
+  }
+  if (!childProcess) {
+    patterns.push(restrictedImportGroups.childProcess);
+  }
+  if (!parsers) {
+    patterns.push(restrictedImportGroups.parsers);
+  }
   return ["error", { patterns }];
 }
 
@@ -79,7 +85,9 @@ function browserRestrictedImports() {
 
 function errorizeWarnings(configuration) {
   return configuration.map((entry) => {
-    if (!entry.rules) return entry;
+    if (!entry.rules) {
+      return entry;
+    }
     const rules = Object.fromEntries(
       Object.entries(entry.rules).map(([name, setting]) => {
         const values = Array.isArray(setting) ? setting : [setting];
@@ -392,7 +400,7 @@ const configuration = [
     ],
     rules: { "no-restricted-properties": ["error", ...domProperties] },
   },
-  prettier,
+  { ...prettier, rules: { ...prettier.rules, curly: ["error", "all"] } },
 ];
 
 export default errorizeWarnings(configuration);
