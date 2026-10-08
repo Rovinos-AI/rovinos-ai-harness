@@ -69,6 +69,12 @@ importers:
         specifier: ^9.39.2
         version: 9.39.2
     devDependencies:
+      '@typescript-eslint/rule-tester':
+        specifier: 8.71.1
+        version: 8.71.1(eslint@9.39.2)(typescript@5.9.3)
+      '@typescript-eslint/utils':
+        specifier: 8.71.1
+        version: 8.71.1(eslint@9.39.2)(typescript@5.9.3)
       vitest:
         specifier: 3.2.6
         version: 3.2.6(@types/node@26.6.4)(yaml@2.9.1)
@@ -533,6 +539,13 @@ packages:
     resolution: {integrity: sha512-Oijc9RUsohHjncg6iGi7gCtjnEjYt9FWv9u6ygK8uKcHK5eLjLAkqERQ9BaytbpceOFdk6kifPCS/zAZE+A99g==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
     peerDependencies:
+      typescript: '>=4.8.4 <6.1.0'
+
+  '@typescript-eslint/rule-tester@8.71.1':
+    resolution: {integrity: sha512-J5QUyV2J2AAFV4T61KiwqGcyxTlmEhhePfzVWoSbK3LWWBeYaJ5E1iz6DVKVM0IF3RqzKIF7JsmOFnKiZu47yA==}
+    engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    peerDependencies:
+      eslint: ^8.57.0 || ^9.0.0 || ^10.0.0
       typescript: '>=4.8.4 <6.1.0'
 
   '@typescript-eslint/scope-manager@8.71.1':
@@ -2003,6 +2016,20 @@ snapshots:
       '@typescript-eslint/tsconfig-utils': 8.71.1(typescript@5.9.3)
       '@typescript-eslint/types': 8.71.1
       debug: 4.4.3
+      typescript: 5.9.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@typescript-eslint/rule-tester@8.71.1(eslint@9.39.2)(typescript@5.9.3)':
+    dependencies:
+      '@typescript-eslint/parser': 8.71.1(eslint@9.39.2)(typescript@5.9.3)
+      '@typescript-eslint/typescript-estree': 8.71.1(typescript@5.9.3)
+      '@typescript-eslint/utils': 8.71.1(eslint@9.39.2)(typescript@5.9.3)
+      ajv: 6.15.0
+      eslint: 9.39.2
+      json-stable-stringify-without-jsonify: 1.0.1
+      lodash.merge: 4.6.2
+      semver: 7.8.5
       typescript: 5.9.3
     transitivePeerDependencies:
       - supports-color

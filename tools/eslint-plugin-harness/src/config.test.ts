@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ESLint, RuleTester } from "eslint";
-import { describe, expect, it } from "vitest";
+import { RuleTester } from "@typescript-eslint/rule-tester";
+import { ESLint } from "eslint";
+import { afterAll, describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { harnessPlugin } from "./index.js";
@@ -12,6 +13,7 @@ const javascriptFixture = resolve(rootDirectory, "packages/schemas/src/lint-fixt
 
 RuleTester.describe = describe;
 RuleTester.it = it;
+RuleTester.afterAll = afterAll;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -29,7 +31,7 @@ const ruleTester = new RuleTester({
   languageOptions: { ecmaVersion: "latest", sourceType: "module" },
 });
 
-ruleTester.run("harness/import-direction", harnessPlugin.rules["import-direction"], {
+ruleTester.run("import-direction", harnessPlugin.rules["import-direction"], {
   valid: [
     {
       code: "import schema from '@harness/schemas';",
@@ -45,7 +47,7 @@ ruleTester.run("harness/import-direction", harnessPlugin.rules["import-direction
   ],
 });
 
-ruleTester.run("harness/no-relative-packages", harnessPlugin.rules["no-relative-packages"], {
+ruleTester.run("no-relative-packages", harnessPlugin.rules["no-relative-packages"], {
   valid: [
     {
       code: "import './sibling.js';",
@@ -118,8 +120,35 @@ describe("ESLint configuration", () => {
     expect(messages.map((message) => message.ruleId)).toContain(rule);
   });
 
+  it.each(["child_process", "node:child_process"])(
+    "restricts %s imports outside approved boundaries",
+    async (moduleName) => {
+      const messages = await lint(`import { spawn } from "${moduleName}";`, javascriptFixture);
+      expect(messages.map((message) => message.ruleId)).toContain("no-restricted-imports");
+    },
+  );
+
+  it.each([
+    ["arrow function", "export const answer = () => 42;"],
+    ["function expression", "export const answer = function () { return 42; };"],
+    ["class expression", "export const Answer = class {};"],
+  ])("requires TSDoc for exported %s", async (_name, code) => {
+    const messages = await lint(code);
+    expect(messages.map((message) => message.ruleId)).toContain("jsdoc/require-jsdoc");
+  });
+
   it("accepts clean code", async () => {
     expect(await lint("export const answer = 42;")).toEqual([]);
+  });
+
+  it("applies generated and build ignores globally", async () => {
+    for (const filename of [
+      "packages/schemas/dist/index.js",
+      "packages/schemas/src/generated.generated.ts",
+      "docs/api/index.js",
+    ]) {
+      expect(await eslint.isPathIgnored(resolve(rootDirectory, filename))).toBe(true);
+    }
   });
 
   it("resolves no warning-level rules", async () => {

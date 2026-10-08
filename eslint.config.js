@@ -35,7 +35,7 @@ const restrictedImportGroups = {
     message: "Use the approved telemetry boundary in packages/telemetry.",
   },
   childProcess: {
-    group: ["node:child_process"],
+    group: ["child_process", "node:child_process"],
     message: "Child processes are restricted to packages/sandbox and scripts.",
   },
   parsers: {
@@ -109,6 +109,8 @@ const configuration = [
       "docs/api/**",
       "**/*.generated.*",
     ],
+  },
+  {
     linterOptions: { reportUnusedDisableDirectives: "error" },
   },
   ...typescriptOnly(tseslint.configs.strictTypeChecked),
@@ -216,7 +218,10 @@ const configuration = [
           publicOnly: true,
           require: {
             FunctionDeclaration: true,
+            FunctionExpression: true,
+            ArrowFunctionExpression: true,
             ClassDeclaration: true,
+            ClassExpression: true,
           },
           contexts: ["TSInterfaceDeclaration", "TSTypeAliasDeclaration"],
         },
@@ -340,7 +345,6 @@ const configuration = [
     files: ["**/*.{js,mjs,ts,tsx}"],
     ignores: [
       "packages/schemas/src/parse.ts",
-      "scripts/gen-agents-index.mjs",
       "**/*.test.{js,mjs,ts,tsx}",
       "**/*.int.test.{js,mjs,ts,tsx}",
       "**/*.canary.test.{js,mjs,ts,tsx}",
