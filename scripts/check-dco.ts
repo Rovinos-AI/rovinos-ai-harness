@@ -23,7 +23,9 @@ export const DcoExemptionsSchema = z
       z
         .object({
           authorName: z.string().min(1),
-          authorEmail: z.email(),
+          authorEmail: z
+            .email()
+            .or(z.string().regex(/^\d+\+[\w-]+(?:\[bot\])?@users\.noreply\.github\.com$/)),
           committerName: z.string().min(1),
           committerEmail: z.email(),
           signingKeyFingerprints: z.array(fingerprintSchema).min(1),
