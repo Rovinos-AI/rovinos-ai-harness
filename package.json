@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "build": "tsc -b",
     "lint": "echo 'Lint is configured in task 1.2'",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -b --noEmit && tsc -p packages/schemas/tsconfig.test.json",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration --passWithNoTests",
     "test:canary": "vitest run --project canary --passWithNoTests",
