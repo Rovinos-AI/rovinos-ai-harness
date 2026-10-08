@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const rootDirectory = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const hadolintImage =
-  "hadolint/hadolint:v2.14.0-debian@sha256:bb143dee5ef4a59958be7d6315c15ce2a239c7fd6c362f66888aabca123a8059";
+  "hadolint/hadolint:v2.14.0-debian@sha256:158cd0184dcaa18bd8ec20b61f4c1cabdf8b32a592d062f57bdcb8e4c1d312e2";
 const editorconfigImage =
-  "ghcr.io/editorconfig-checker/editorconfig-checker:4.0.2@sha256:f997cfb58a878832c587e9e02aa3ba3eb984b7ea7a074f5523df40271fa4e637";
+  "ghcr.io/editorconfig-checker/editorconfig-checker:4.0.2@sha256:2ba6232bfa0058f72f5f7d7816711590aa764afab1542af30b3ecb4553587918";
 const ignoredDirectories = new Set([".git", "node_modules", "dist", "coverage"]);
 
 function findFiles(directory: string, matches: (name: string) => boolean): string[] {
@@ -60,6 +60,29 @@ function checkDockerfileDigests(files: string[]): boolean {
   return valid;
 }
 
+function checkShellStrictMode(files: string[]): boolean {
+  let valid = true;
+
+  for (const file of files) {
+    const lines = readFileSync(resolve(rootDirectory, file), "utf8").split(/\r?\n/u);
+    const commandIndex = lines.findIndex(
+      (line) =>
+        !line.startsWith("#!") &&
+        !line.startsWith("# SPDX-License-Identifier:") &&
+        line.trim() !== "",
+    );
+
+    if (commandIndex < 0 || lines[commandIndex]?.trim() !== "set -euo pipefail") {
+      process.stderr.write(
+        `${file}:${String(commandIndex < 0 ? lines.length + 1 : commandIndex + 1)}: expected "set -euo pipefail" after the shell headers.\n`,
+      );
+      valid = false;
+    }
+  }
+
+  return valid;
+}
+
 function containerSkipped(tool: string): boolean {
   if (process.env.LINT_SKIP_CONTAINERS !== "1") {
     return false;
@@ -69,76 +92,106 @@ function containerSkipped(tool: string): boolean {
   return true;
 }
 
-function lint(mode: string, requestedFiles: string[]): boolean {
+function lintShell(requestedFiles: string[], runner: typeof run): boolean {
+  const shellFiles =
+    requestedFiles.length > 0
+      ? requestedFiles.map((file) => relative(rootDirectory, resolve(rootDirectory, file)))
+      : findFiles(rootDirectory, (name) => name.endsWith(".sh"));
+  return (
+    checkShellStrictMode(shellFiles) &&
+    (shellFiles.length === 0 ||
+      runner("shellcheck", ["--severity=style", ...shellFiles], "ShellCheck"))
+  );
+}
+
+function lintDocker(requestedFiles: string[], runner: typeof run, pullImages: boolean): boolean {
+  const dockerFiles =
+    requestedFiles.length > 0
+      ? requestedFiles.map((file) => relative(rootDirectory, resolve(rootDirectory, file)))
+      : findFiles(rootDirectory, (name) => name.startsWith("Dockerfile"));
+
+  if (!checkDockerfileDigests(dockerFiles)) {
+    return false;
+  }
+  if (dockerFiles.length === 0 || containerSkipped("hadolint")) {
+    return true;
+  }
+
+  return runner(
+    "docker",
+    [
+      "run",
+      "--rm",
+      pullImages ? "--pull=always" : "--pull=never",
+      "--volume",
+      `${rootDirectory}:/repo:ro`,
+      "--workdir",
+      "/repo",
+      hadolintImage,
+      "hadolint",
+      "--config",
+      ".hadolint.yaml",
+      ...dockerFiles,
+    ],
+    "Docker for hadolint",
+  );
+}
+
+function lintEditorconfig(
+  requestedFiles: string[],
+  runner: typeof run,
+  pullImages: boolean,
+): boolean {
+  const directory = resolve(rootDirectory, requestedFiles[0] ?? ".");
+  if (relative(rootDirectory, directory).startsWith("..")) {
+    process.stderr.write("EditorConfig Checker paths must stay inside the repository.\n");
+    return false;
+  }
+  if (containerSkipped("EditorConfig Checker")) {
+    return true;
+  }
+
+  return runner(
+    "docker",
+    [
+      "run",
+      "--rm",
+      pullImages ? "--pull=always" : "--pull=never",
+      "--volume",
+      `${directory}:/check:ro`,
+      "--workdir",
+      "/check",
+      editorconfigImage,
+    ],
+    "Docker for EditorConfig Checker",
+  );
+}
+
+/** Runs one extended lint mode with an injectable process runner. */
+export function lint(
+  mode: string,
+  requestedFiles: string[],
+  options: { runner?: typeof run; pullImages?: boolean } = {},
+): boolean {
+  const runner = options.runner ?? run;
+  const pullImages = options.pullImages ?? process.env.LINT_PULL_IMAGES === "1";
+
   if (mode === "shell") {
-    const shellFiles = findFiles(rootDirectory, (name) => name.endsWith(".sh"));
-    return (
-      shellFiles.length === 0 ||
-      run("shellcheck", ["--severity=style", ...shellFiles], "ShellCheck")
-    );
+    return lintShell(requestedFiles, runner);
   }
 
   if (mode === "docker") {
-    const dockerFiles =
-      requestedFiles.length > 0
-        ? requestedFiles.map((file) => relative(rootDirectory, resolve(rootDirectory, file)))
-        : findFiles(rootDirectory, (name) => name.startsWith("Dockerfile"));
-
-    if (!checkDockerfileDigests(dockerFiles)) {
-      return false;
-    }
-    if (dockerFiles.length === 0 || containerSkipped("hadolint")) {
-      return true;
-    }
-
-    return run(
-      "docker",
-      [
-        "run",
-        "--rm",
-        "--pull=always",
-        "--volume",
-        `${rootDirectory}:/repo:ro`,
-        "--workdir",
-        "/repo",
-        hadolintImage,
-        "hadolint",
-        "--config",
-        ".hadolint.yaml",
-        ...dockerFiles,
-      ],
-      "Docker for hadolint",
-    );
+    return lintDocker(requestedFiles, runner, pullImages);
   }
 
   if (mode === "editorconfig") {
-    const directory = resolve(rootDirectory, requestedFiles[0] ?? ".");
-    if (relative(rootDirectory, directory).startsWith("..")) {
-      process.stderr.write("EditorConfig Checker paths must stay inside the repository.\n");
-      return false;
-    }
-    if (containerSkipped("EditorConfig Checker")) {
-      return true;
-    }
-
-    return run(
-      "docker",
-      [
-        "run",
-        "--rm",
-        "--pull=always",
-        "--volume",
-        `${directory}:/check:ro`,
-        "--workdir",
-        "/check",
-        editorconfigImage,
-      ],
-      "Docker for EditorConfig Checker",
-    );
+    return lintEditorconfig(requestedFiles, runner, pullImages);
   }
 
   process.stderr.write("Usage: lint-extended.ts <shell|docker|editorconfig> [Dockerfile ...]\n");
   return false;
 }
 
-process.exitCode = lint(process.argv[2] ?? "", process.argv.slice(3)) ? 0 : 1;
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = lint(process.argv[2] ?? "", process.argv.slice(3)) ? 0 : 1;
+}

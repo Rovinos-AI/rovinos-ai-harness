@@ -24,17 +24,17 @@ Shared design for this epic:
 1. **Schema change:** add event `run_input { input: JsonValue (content), inputKind: Code (meta) }` recorded by the run loop immediately after `run_created` (update `runLoop` in 2.3 and the CLI in 2.10 to record it; update classification and goldens; update `docs/engineering/CONVENTIONS.md` §4 event list).
 2. Interface:
 
-```ts
-interface ContextStrategy {
-  readonly id: Code; readonly version: Code;
-  build(input: { events: readonly Event[]; budget: { maxTokens: number; reserveOutputTokens: number }; model: ModelRef; counter: TokenCounter }): Promise<ContextResult>;
-}
-type ContextResult = { messages: Message[]; stats: { messageCount: number; estimatedTokens: number; droppedGroups: number; compactedRanges: number; offloadedResults: number }; pinnedSeqs: number[] };
-```
+   ```ts
+   interface ContextStrategy {
+     readonly id: Code; readonly version: Code;
+     build(input: { events: readonly Event[]; budget: { maxTokens: number; reserveOutputTokens: number }; model: ModelRef; counter: TokenCounter }): Promise<ContextResult>;
+   }
+   type ContextResult = { messages: Message[]; stats: { messageCount: number; estimatedTokens: number; droppedGroups: number; compactedRanges: number; offloadedResults: number }; pinnedSeqs: number[] };
+   ```
 
-1. `eventsToTranscript(events): TranscriptGroup[]`: `run_input` -> one user message group (pinned); `model_response` -> assistant message from `content` parts; each following `tool_result` -> tool message with `{ type: "tool_result", callId, result, isError: outcome !== "ok" }`; groups join an assistant message with its tool results (matched by `callId`). A `context_compacted` event removes groups whose seqs fall in `[fromSeq, toSeq]` and inserts a summary message group (role `user`, text `"Summary of earlier work: ..."`), ordered at `fromSeq`.
-2. `StrategyContextPort implements ContextPort` (core): `build(events)` calls the strategy; `snapshot()` returns `{ strategyId, strategyVersion, calibration }`; `restore(snapshot, eventsAfter)` restores calibration only (the transcript is always rebuilt from events).
-3. Provide `NaiveStrategy` (all groups, no limits) replacing core's `NaiveContext`.
+3. `eventsToTranscript(events): TranscriptGroup[]`: `run_input` -> one user message group (pinned); `model_response` -> assistant message from `content` parts; each following `tool_result` -> tool message with `{ type: "tool_result", callId, result, isError: outcome !== "ok" }`; groups join an assistant message with its tool results (matched by `callId`). A `context_compacted` event removes groups whose seqs fall in `[fromSeq, toSeq]` and inserts a summary message group (role `user`, text `"Summary of earlier work: ..."`), ordered at `fromSeq`.
+4. `StrategyContextPort implements ContextPort` (core): `build(events)` calls the strategy; `snapshot()` returns `{ strategyId, strategyVersion, calibration }`; `restore(snapshot, eventsAfter)` restores calibration only (the transcript is always rebuilt from events).
+5. Provide `NaiveStrategy` (all groups, no limits) replacing core's `NaiveContext`.
 **Tests to write:** transcript reconstruction goldens (plain run, tool run, compacted run); atomic group integrity (tool results always follow their call); compaction replaces the exact range; `run_input` pinned; snapshot/restore round trip; run loop integration test still passes.
 **Acceptance Criteria:**
 

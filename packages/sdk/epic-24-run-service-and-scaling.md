@@ -24,23 +24,23 @@ Shared design for this epic:
 
 1. API:
 
-```ts
-const harness = await createHarness({ config | configPath, overrides? });
-harness.startRun({ goal, metadata?, role?, idempotencyKey?, requestedBy? }): Promise<{ runId; status }>;
-harness.continueRun(runId, { goal, metadata? });
-harness.getRun(runId): Promise<RunView>;          // metadata only, like get_run (18.1)
-harness.listRuns(filter): Promise<Page<RunSummary>>;
-harness.resumeRun(runId); harness.cancelRun(runId);
-harness.resolveApproval(approvalId, decision, { edits?, principal });
-harness.answerInput(requestId, { action, content?, principal });   // epic 25
-harness.watch(runId, { fromSeq? }): AsyncIterable<SafeEvent>;     // content-free
-harness.close(): Promise<void>;
-```
+   ```ts
+   const harness = await createHarness({ config | configPath, overrides? });
+   harness.startRun({ goal, metadata?, role?, idempotencyKey?, requestedBy? }): Promise<{ runId; status }>;
+   harness.continueRun(runId, { goal, metadata? });
+   harness.getRun(runId): Promise<RunView>;          // metadata only, like get_run (18.1)
+   harness.listRuns(filter): Promise<Page<RunSummary>>;
+   harness.resumeRun(runId); harness.cancelRun(runId);
+   harness.resolveApproval(approvalId, decision, { edits?, principal });
+   harness.answerInput(requestId, { action, content?, principal });   // epic 25
+   harness.watch(runId, { fromSeq? }): AsyncIterable<SafeEvent>;     // content-free
+   harness.close(): Promise<void>;
+   ```
 
-1. Without a queue configured, `startRun` runs in-process (detached) and returns immediately. With a queue (24.2), it enqueues.
-2. Everything returned is metadata or `SafeEvent`s. Reading content requires an explicit `getRunContent(runId, { reveal: false })` that returns tokenized content only and is documented as sensitive.
-3. Types are exported from `index.ts` with full TSDoc. Anything not exported is internal. Add an API-extractor-style snapshot test of the public surface (a committed `.d.ts` snapshot) so breaking changes are deliberate and require a major changeset (21.6). Every public method validates its input with a Zod schema at the boundary, and exported types are `z.infer` of those schemas (CONVENTIONS 3.10).
-4. Add `sdk` to `docs/engineering/layers.json`: it may import `core` and everything below it, plus `config`.
+2. Without a queue configured, `startRun` runs in-process (detached) and returns immediately. With a queue (24.2), it enqueues.
+3. Everything returned is metadata or `SafeEvent`s. Reading content requires an explicit `getRunContent(runId, { reveal: false })` that returns tokenized content only and is documented as sensitive.
+4. Types are exported from `index.ts` with full TSDoc. Anything not exported is internal. Add an API-extractor-style snapshot test of the public surface (a committed `.d.ts` snapshot) so breaking changes are deliberate and require a major changeset (21.6). Every public method validates its input with a Zod schema at the boundary, and exported types are `z.infer` of those schemas (CONVENTIONS 3.10).
+5. Add `sdk` to `docs/engineering/layers.json`: it may import `core` and everything below it, plus `config`.
 **Tests to write:** each method against the in-memory store and fake ports; public surface snapshot; `watch` yields safe events only (canary); idempotency key returns the same run id; example file type-checks.
 **Acceptance Criteria:**
 

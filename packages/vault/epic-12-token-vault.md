@@ -25,16 +25,16 @@ Shared design for this epic:
 1. Token format `<TYPE_N>`: `TYPE` is the entity type Code upper-cased with `-`/`.` replaced by `_` (`email` -> `EMAIL`); `N` starts at 1 per `(runId, type)` and increments. Schema `Token = z.string().regex(/^<[A-Z][A-Z0-9_]{0,31}_[1-9][0-9]{0,5}>$/)`. Export `isToken`, `findTokens(text): { token, index }[]` (global scan using the same pattern), and `tokenType(token)`.
 2. Interfaces:
 
-```ts
-interface VaultWriter { put(runId: Id, entityType: Code, raw: string): Promise<Token>; }
-interface VaultResolver { resolve(runId: Id, token: Token): Promise<string | undefined>; }
-interface VaultReader { listRawValues(runId: Id): Promise<readonly string[]>; }
-interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Promise<{ entries: number }>; }
-```
+   ```ts
+   interface VaultWriter { put(runId: Id, entityType: Code, raw: string): Promise<Token>; }
+   interface VaultResolver { resolve(runId: Id, token: Token): Promise<string | undefined>; }
+   interface VaultReader { listRawValues(runId: Id): Promise<readonly string[]>; }
+   interface VaultAdmin { purge(runId: Id): Promise<number>; stats(runId: Id): Promise<{ entries: number }>; }
+   ```
 
-1. `put` is idempotent: the same `(runId, entityType, normalize(entityType, raw))` returns the same token. `normalize`: trim, Unicode NFKC; `email` additionally lower-cased; `phone` strips spaces, dashes and parentheses; default exact after NFKC. Document that normalization affects only token identity, not stored value (store the original trimmed value).
-2. Reject empty values (`vault_value_empty`) and values over 8 KiB (`vault_value_too_large`).
-3. `InMemoryVault` implements all four interfaces.
+3. `put` is idempotent: the same `(runId, entityType, normalize(entityType, raw))` returns the same token. `normalize`: trim, Unicode NFKC; `email` additionally lower-cased; `phone` strips spaces, dashes and parentheses; default exact after NFKC. Document that normalization affects only token identity, not stored value (store the original trimmed value).
+4. Reject empty values (`vault_value_empty`) and values over 8 KiB (`vault_value_too_large`).
+5. `InMemoryVault` implements all four interfaces.
 **Tests to write:** token regex valid/invalid table; idempotency including normalization cases; numbering per run and type; `resolve` unknown token returns `undefined`; purge removes entries and resets nothing else; size limits; `findTokens` on mixed text including near-miss strings (`<email_1>`, `<EMAIL_0>`).
 **Acceptance Criteria:**
 

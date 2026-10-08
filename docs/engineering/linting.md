@@ -5,9 +5,10 @@ Checker, cspell, Prettier, and dependency checks. Every enabled ESLint rule has 
 no rule is warning-level. Prettier owns formatting (`printWidth: 100`, double quotes, and trailing
 commas). Markdown remains outside Prettier because it is handled by markdownlint.
 
-Container-based checks use immutable hadolint and EditorConfig Checker images. They fail when
-Docker is unavailable; local development may set `LINT_SKIP_CONTAINERS=1` to skip them with a
-warning. CI must not set this variable. ShellCheck is required and always runs.
+Container-based checks use immutable, multi-architecture hadolint and EditorConfig Checker images.
+By default Docker uses only images already present locally; set `LINT_PULL_IMAGES=1` to explicitly
+pull them. CI sets this flag. Local development may instead set `LINT_SKIP_CONTAINERS=1` to skip
+container checks with a warning. ShellCheck is required and always runs.
 
 Markdownlint starts from its defaults, disables only line-length checking, allows HTML comments
 used as repository markers, and requires language tags on fenced code blocks. YAML is linted by
