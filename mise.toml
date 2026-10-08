@@ -2,6 +2,7 @@
 [tools]
 node = "22.23.3"
 "npm:corepack" = "0.36.0"
+"aqua:koalaman/shellcheck" = "0.11.0"
 
 [settings]
 experimental = false
