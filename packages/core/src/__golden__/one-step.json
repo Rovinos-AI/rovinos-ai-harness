@@ -1,0 +1,50 @@
+[
+  {
+    "type": "run_created",
+    "seq": 0,
+    "configHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "policyVersion": "test.policy"
+  },
+  {
+    "type": "run_status_changed",
+    "seq": 1,
+    "from": "pending",
+    "to": "running",
+    "reason": "start"
+  },
+  {
+    "type": "model_request",
+    "seq": 2,
+    "requestId": "00000000000000000000000000",
+    "provider": "test_provider",
+    "model": "test_model",
+    "messages": {
+      "goal": "test goal",
+      "context": ["prior context"]
+    }
+  },
+  {
+    "type": "model_response",
+    "seq": 3,
+    "requestId": "00000000000000000000000000",
+    "provider": "test_provider",
+    "model": "test_model",
+    "inputTokens": 3,
+    "outputTokens": 5,
+    "finishReason": "stop",
+    "latencyMs": 8,
+    "schemaValid": true,
+    "repairAttempts": 0,
+    "content": "answer",
+    "providerBlobs": {
+      "trace": "opaque"
+    }
+  },
+  {
+    "type": "run_status_changed",
+    "seq": 4,
+    "from": "running",
+    "to": "completed",
+    "reason": "final_answer"
+  }
+]

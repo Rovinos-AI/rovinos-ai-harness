@@ -28,3 +28,17 @@ export {
   RUN_SPAN,
   TOOL_CALL_SPAN,
 } from "./spans.js";
+export { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
+export { modelStep, type ModelStepOptions, type ModelStepResult } from "./steps/model-step.js";
+export type {
+  ContextPort,
+  IdGenerator,
+  ModelCompletion,
+  ModelPort,
+  ModelRequest,
+  ModelToolCall,
+  ModelUsage,
+  NewRunMetadata,
+  RunContext,
+} from "./ports.js";
+export { NaiveContext } from "./context/naive-context.js";
