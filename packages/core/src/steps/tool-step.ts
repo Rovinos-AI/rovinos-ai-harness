@@ -21,6 +21,7 @@ import type {
 } from "../ports.js";
 import type { DanglingIntentAction } from "../resume-policy.js";
 import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
+import { onShutdown } from "../shutdown.js";
 
 /** Inputs needed to execute and record one or more tool calls. */
 export interface ToolStepOptions {
@@ -126,13 +127,11 @@ async function executeWithTimeout(
   }
 }
 
-function latencyMs(clock: Clock, startedAt: number): number {
-  return Math.max(0, Math.floor(clock.now() - startedAt));
-}
+const latencyMs = (clock: Clock, startedAt: number): number =>
+  Math.max(0, Math.floor(clock.now() - startedAt));
 
-function executedArgsHashField(hash?: string): { readonly executedArgsHash?: string } {
-  return hash === undefined ? {} : { executedArgsHash: hash };
-}
+const executedArgsHashField = (hash?: string): { readonly executedArgsHash?: string } =>
+  hash === undefined ? {} : { executedArgsHash: hash };
 
 function recordIntent(
   recorder: RunRecorder,
@@ -160,15 +159,11 @@ async function runToolCall(
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
   const argsHash = hashArgs(call.args);
-  const appendIntent = behavior.appendIntent ?? true;
-  let intentEvent: Event | undefined;
-
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
-    if (appendIntent) {
-      intentEvent = await recordIntent(options.recorder, call, description, argsHash);
-      events.push(intentEvent);
+    if (behavior.appendIntent !== false) {
+      events.push(await recordIntent(options.recorder, call, description, argsHash));
     }
-
+    const intentEvent = events.at(-1);
     if (description === undefined) {
       const result = await options.recorder.record({
         type: "tool_result",
@@ -184,7 +179,6 @@ async function runToolCall(
       events.push(result);
       return result;
     }
-
     const startedAt = options.clock.now();
     let execution: ToolExecutionResult;
     try {
@@ -195,11 +189,9 @@ async function runToolCall(
         description.timeoutMs,
       );
     } catch (error) {
-      if (options.signal.reason === "shutdown") {
-        if (intentEvent !== undefined) {
-          return intentEvent;
-        }
-        throw error;
+      const shutdownIntent = onShutdown(options.signal, intentEvent, error);
+      if (shutdownIntent !== undefined) {
+        return shutdownIntent;
       }
       const timedOut = error instanceof ToolTimeoutError;
       const code = timedOut ? "tool_timeout" : errorCode(error);
@@ -219,7 +211,6 @@ async function runToolCall(
       events.push(result);
       return result;
     }
-
     const result = await options.recorder.record({
       type: "tool_result",
       v: 1,

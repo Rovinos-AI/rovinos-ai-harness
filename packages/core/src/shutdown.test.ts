@@ -107,6 +107,27 @@ describe("installShutdownHandler", () => {
     expect(processLike.exits).toEqual([1]);
   });
 
+  it("still forces exit when timeout logging fails", async () => {
+    vi.useFakeTimers();
+    const processLike = new FakeProcess();
+    installShutdownHandler({
+      processLike,
+      controller: new AbortController(),
+      graceMs: 10,
+      onTimeout: () => undefined,
+      logger: {
+        error: () => {
+          throw new Error("logger failed");
+        },
+      },
+    });
+
+    processLike.emit("SIGTERM");
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processLike.exits).toEqual([1]);
+  });
+
   it("clears the pending timer on uninstall", async () => {
     vi.useFakeTimers();
     const processLike = new FakeProcess();

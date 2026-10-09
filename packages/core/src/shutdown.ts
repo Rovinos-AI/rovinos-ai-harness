@@ -25,6 +25,21 @@ export interface ShutdownHandlerOptions {
 
 const noopLogger: ShutdownLogger = { error: () => undefined };
 
+/** Returns a value only for shutdown aborts, rethrowing the failure when it is absent. */
+export function onShutdown<Result>(
+  signal: AbortSignal,
+  result: Result | undefined,
+  error: unknown,
+): Result | undefined {
+  if (signal.reason !== "shutdown") {
+    return undefined;
+  }
+  if (result === undefined) {
+    throw error;
+  }
+  return result;
+}
+
 /**
  * Aborts the run on the first termination signal and exits if the grace period expires.
  *
@@ -34,6 +49,7 @@ const noopLogger: ShutdownLogger = { error: () => undefined };
  * @returns A function that removes both signal listeners and clears the pending timeout.
  */
 export function installShutdownHandler(options: ShutdownHandlerOptions): () => void {
+  const processLike = options.processLike;
   let installed = true;
   let signalReceived = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -43,25 +59,29 @@ export function installShutdownHandler(options: ShutdownHandlerOptions): () => v
       return;
     }
     signalReceived = true;
-    options.processLike.exitCode = signal === "SIGTERM" ? 143 : 130;
+    processLike.exitCode = signal === "SIGTERM" ? 143 : 130;
     options.controller.abort("shutdown");
     timeout = setTimeout(() => {
       void forceExit();
     }, options.graceMs);
   };
 
-  const handleSigterm = (): void => handleSignal("SIGTERM");
-  const handleSigint = (): void => handleSignal("SIGINT");
-  options.processLike.once("SIGTERM", handleSigterm);
-  options.processLike.once("SIGINT", handleSigint);
+  const handleSigterm = (): void => {
+    handleSignal("SIGTERM");
+  };
+  const handleSigint = (): void => {
+    handleSignal("SIGINT");
+  };
+  processLike.once("SIGTERM", handleSigterm);
+  processLike.once("SIGINT", handleSigint);
 
   const uninstall = (): void => {
     if (!installed) {
       return;
     }
     installed = false;
-    options.processLike.removeListener("SIGTERM", handleSigterm);
-    options.processLike.removeListener("SIGINT", handleSigint);
+    processLike.removeListener("SIGTERM", handleSigterm);
+    processLike.removeListener("SIGINT", handleSigint);
     if (timeout !== undefined) {
       clearTimeout(timeout);
     }
@@ -77,9 +97,13 @@ export function installShutdownHandler(options: ShutdownHandlerOptions): () => v
     } catch {
       // A best-effort checkpoint must not prevent a forced exit.
     }
-    (options.logger ?? noopLogger).error("shutdown_timeout");
-    options.processLike.exitCode = 1;
-    options.processLike.exit(1);
+    try {
+      (options.logger ?? noopLogger).error("shutdown_timeout");
+    } catch {
+      // Logging failure must not prevent a forced exit.
+    }
+    processLike.exitCode = 1;
+    processLike.exit(1);
   };
 
   return uninstall;

@@ -47,7 +47,9 @@ import type {
   ContextPort,
   IdGenerator,
   ModelCompletion,
+  ModelToolCall,
   ModelPort,
+  RunContext,
   ToolExecutionResult,
 } from "./ports.js";
 import {
@@ -95,7 +97,9 @@ class FakeShutdownProcess implements ShutdownProcessLike {
     return this;
   }
 
-  exit(_code: number): void {}
+  exit(code: number): void {
+    this.exitCode = code;
+  }
 
   emit(signal: "SIGINT" | "SIGTERM"): void {
     const listeners = this.listeners.get(signal) ?? [];
@@ -818,12 +822,18 @@ describe("runLoop", () => {
       modelStarted = resolve;
     });
     const model: ModelPort = {
-      complete: vi.fn(async (_request, { signal }) => {
+      complete: async (_request, { signal }: RunContext) => {
         modelStarted();
         return new Promise<ModelCompletion>((resolve, reject) => {
-          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(new Error("model call aborted"));
+            },
+            { once: true },
+          );
         });
-      }),
+      },
     };
     const uninstall = installShutdownHandler({
       processLike,
@@ -883,10 +893,16 @@ describe("runLoop", () => {
           {
             idempotent: false,
             timeoutMs: 60_000,
-            execute: (_call, { signal }) => {
+            execute: (_call: ModelToolCall, { signal }: RunContext) => {
               toolStarted();
               return new Promise<ToolExecutionResult>((_resolve, reject) => {
-                signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+                signal.addEventListener(
+                  "abort",
+                  () => {
+                    reject(new Error("tool call aborted"));
+                  },
+                  { once: true },
+                );
               });
             },
           },
