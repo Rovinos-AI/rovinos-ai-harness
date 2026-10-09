@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { ContentCodec, EncodedSnapshot } from "../codec.js";
 import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "../errors.js";
 import type { RunSummary } from "../types.js";
+import { insertSnapshot } from "./snapshot.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const contentRecordSchema = z.record(z.string(), z.json());
@@ -115,7 +116,7 @@ export function storeError(
     return error;
   }
   const code = errorCode(error);
-  if (code === "23505" && uniqueViolationIsConflict) {
+  if (code === "23505" && uniqueViolationIsConflict && actual !== expected) {
     return new SeqConflictError(expected, actual);
   }
   if (
@@ -397,18 +398,7 @@ export async function appendTransaction(
       lastTs: last.ts,
     });
     if (encodedSnapshot !== undefined) {
-      await client.query(
-        "INSERT INTO snapshots (snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)",
-        [
-          encodedSnapshot.snapshot_id,
-          encodedSnapshot.run_id,
-          encodedSnapshot.at_seq,
-          encodedSnapshot.created_at,
-          encodedSnapshot.meta_json,
-          encodedSnapshot.content_blob,
-          encodedSnapshot.key_id,
-        ],
-      );
+      await insertSnapshot(client, encodedSnapshot);
       await client.query(
         "DELETE FROM snapshots WHERE run_id = $1 AND snapshot_id NOT IN (SELECT snapshot_id FROM snapshots WHERE run_id = $1 ORDER BY at_seq DESC, snapshot_id DESC LIMIT $2)",
         [runId, snapshotKeep],

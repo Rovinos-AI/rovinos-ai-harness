@@ -106,7 +106,7 @@ export class InMemoryEventStore implements EventStore {
     snapshot: Snapshot,
   ): Promise<{ nextSeq: number }> {
     try {
-      const validatedSnapshot = validateSnapshotAppend(runId, events, snapshot);
+      const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
       const encodedSnapshot = await encodeSnapshot(this.codec, validatedSnapshot);
       return this.appendEvents(runId, events, expectedSeq, encodedSnapshot);
     } catch (error) {

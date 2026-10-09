@@ -9,7 +9,7 @@ import {
 } from "@harness/schemas";
 import { z } from "zod";
 import { InvalidEventError, StoreUnavailableError } from "./errors.js";
-import type { SnapshotStoreOptions } from "./types.js";
+import { snapshotStoreOptionsSchema, type SnapshotStoreOptions } from "./types.js";
 
 const contentSchema = z.record(z.string(), z.json());
 
@@ -52,9 +52,6 @@ export interface ContentCodec {
   decode(ctx: ContentCodecContext, blob: string, keyId?: string): Promise<Record<string, unknown>>;
 }
 
-const snapshotOptionsSchema = z
-  .object({ snapshotKeep: z.number().int().min(1).default(5) })
-  .strict();
 const snapshotMetaSchema = z
   .object({
     traceparent: SnapshotSchema.shape.traceparent,
@@ -67,7 +64,7 @@ const snapshotContentSchema = z
 
 /** Validate snapshot retention options and apply the default. */
 export function snapshotKeep(options: SnapshotStoreOptions = {}): number {
-  const parsed = snapshotOptionsSchema.safeParse(options);
+  const parsed = snapshotStoreOptionsSchema.safeParse(options);
   if (!parsed.success) {
     throw new TypeError("Invalid snapshot retention configuration");
   }
@@ -89,6 +86,7 @@ export interface EncodedSnapshot {
 export function validateSnapshotAppend(
   runId: Id,
   events: readonly NewEvent[],
+  expectedSeq: number,
   snapshot: Snapshot,
 ): Snapshot {
   const parsedSnapshot = SnapshotSchema.safeParse(snapshot);
@@ -117,6 +115,10 @@ export function validateSnapshotAppend(
     throw new InvalidEventError([["snapshotId"]]);
   }
   if (checkpoint.atSeq !== parsedSnapshot.data.atSeq) {
+    throw new InvalidEventError([["atSeq"]]);
+  }
+  const checkpointIndex = events.findIndex((event) => event.type === "checkpoint_written");
+  if (checkpointIndex < 0 || parsedSnapshot.data.atSeq > expectedSeq + checkpointIndex) {
     throw new InvalidEventError([["atSeq"]]);
   }
   return parsedSnapshot.data;

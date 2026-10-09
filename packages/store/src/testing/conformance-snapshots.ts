@@ -78,12 +78,12 @@ function registerSnapshotConflict(
       const runId = builders.nextRunId();
       const snapshotId = builders.nextRunId();
       await store.append(runId, [builders.runCreated(runId)], 0);
-      const snapshot = builders.snapshot(runId, snapshotId, 1);
+      const snapshot = builders.snapshot(runId, snapshotId, 0);
 
       await expect(
         store.appendWithSnapshot(
           runId,
-          [builders.checkpointWritten(runId, snapshotId, 1)],
+          [builders.checkpointWritten(runId, snapshotId, 0)],
           0,
           snapshot,
         ),
@@ -137,6 +137,28 @@ function registerSnapshotMismatch(
       await expect(store.head(runId)).resolves.toBe(0);
     });
   });
+
+  it("rejects a snapshot beyond its checkpoint sequence without writing events", async () => {
+    await withStore(factory, async (store) => {
+      const runId = builders.nextRunId();
+      const snapshotId = builders.nextRunId();
+      const snapshot = builders.snapshot(runId, snapshotId, 2);
+
+      await expect(
+        store.appendWithSnapshot(
+          runId,
+          [builders.runCreated(runId), builders.checkpointWritten(runId, snapshotId, 2)],
+          0,
+          snapshot,
+        ),
+      ).rejects.toMatchObject({
+        code: "event_invalid",
+        paths: [["atSeq"]],
+      });
+      await expect(store.latestSnapshot(runId)).resolves.toBeUndefined();
+      await expect(store.head(runId)).resolves.toBe(0);
+    });
+  });
 }
 
 async function appendSnapshots(
@@ -181,7 +203,10 @@ async function assertRetainedSnapshotsCannotBeReused(
         expectedSeq,
         retainedSnapshot,
       ),
-    ).rejects.toBeDefined();
+    ).rejects.toMatchObject({
+      code: "event_invalid",
+      paths: [["snapshotId"]],
+    });
     await expect(store.head(runId)).resolves.toBe(expectedSeq);
   }
 }

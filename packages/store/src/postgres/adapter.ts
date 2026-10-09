@@ -12,7 +12,12 @@ import {
   validateSnapshotAppend,
 } from "../codec.js";
 import { InvalidEventError } from "../errors.js";
-import type { EventStore, ListRunsOptions, RunSummary } from "../types.js";
+import {
+  snapshotStoreOptionsSchema,
+  type EventStore,
+  type ListRunsOptions,
+  type RunSummary,
+} from "../types.js";
 import {
   appendTransaction,
   decodeCursor,
@@ -34,10 +39,9 @@ const connectionStringSchema = z
     (value) =>
       URL.canParse(value) && ["postgres:", "postgresql:"].includes(new URL(value).protocol),
   );
-const optionsSchema = z
-  .object({
+const optionsSchema = snapshotStoreOptionsSchema
+  .extend({
     poolSize: z.number().int().min(1).max(100).default(10),
-    snapshotKeep: z.number().int().min(1).default(5),
     schema: z
       .string()
       .regex(/^[a-z_]\w{0,62}$/i)
@@ -137,7 +141,7 @@ export class PostgresEventStore implements EventStore {
     expectedSeq: number,
     snapshot: Snapshot,
   ): Promise<{ nextSeq: number }> {
-    const validatedSnapshot = validateSnapshotAppend(runId, events, snapshot);
+    const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
     const [encoded, encodedSnapshot] = await Promise.all([
       encodeEvents(this.codec, runId, events, expectedSeq),
       encodeSnapshot(this.codec, validatedSnapshot),

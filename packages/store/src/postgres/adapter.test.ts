@@ -2,7 +2,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { parseJson } from "@harness/schemas";
 import type { ContentCodec } from "../codec.js";
-import { SeqConflictError, StoreUnavailableError } from "../errors.js";
+import { StoreUnavailableError } from "../errors.js";
 import { PostgresEventStore } from "./adapter.js";
 import { createEventBuilders, runEventStoreConformance } from "../testing/index.js";
 import { z } from "zod";
@@ -194,7 +194,10 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   if (query.startsWith("INSERT INTO snapshots")) {
     const snapshotId = text(values[0]);
     if (fakePg.snapshots.some((snapshot) => snapshot.snapshot_id === snapshotId)) {
-      throw Object.assign(new Error("duplicate"), { code: "23505" });
+      throw Object.assign(new Error("duplicate"), {
+        code: "23505",
+        table: "snapshots",
+      });
     }
     fakePg.snapshots.push({
       snapshot_id: snapshotId,
@@ -365,7 +368,7 @@ it("retries initialization after a transient connection failure", async () => {
   await store.close();
 });
 
-it("maps unique violations to sequence conflicts", async () => {
+it("does not map an event insert unique violation to a sequence conflict at the expected head", async () => {
   const builders = createEventBuilders();
   const runId = builders.nextRunId();
   fakePg.shouldFailConnect = false;
@@ -378,7 +381,7 @@ it("maps unique violations to sequence conflicts", async () => {
     return fakeQuery(sql, values);
   };
   await expect(store.append(runId, [builders.runCreated(runId)], 0)).rejects.toBeInstanceOf(
-    SeqConflictError,
+    StoreUnavailableError,
   );
   await store.close();
 });

@@ -28,6 +28,7 @@ import { SQLITE_SCHEMA } from "./schema.sql.js";
 import {
   decodeStoredContent,
   eventFromRow,
+  insertSnapshot,
   parseStoredMeta,
   type EventRow,
   type RunRow,
@@ -265,7 +266,7 @@ export class SqliteEventStore implements EventStore {
     expectedSeq: number,
     snapshot: Snapshot,
   ): Promise<{ nextSeq: number }> {
-    const validatedSnapshot = validateSnapshotAppend(runId, events, snapshot);
+    const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
     const [encoded, encodedSnapshot] = await Promise.all([
       encodeEvents(this.codec, runId, events, expectedSeq),
       encodeSnapshot(this.codec, validatedSnapshot),
@@ -328,15 +329,7 @@ export class SqliteEventStore implements EventStore {
         }
         this.updateRun.run(expectedSeq + validated.length, status, last.ts, runId);
         if (encodedSnapshot !== undefined) {
-          this.insertSnapshot.run(
-            encodedSnapshot.snapshot_id,
-            encodedSnapshot.run_id,
-            encodedSnapshot.at_seq,
-            encodedSnapshot.created_at,
-            encodedSnapshot.meta_json,
-            encodedSnapshot.content_blob,
-            encodedSnapshot.key_id,
-          );
+          insertSnapshot(this.insertSnapshot, encodedSnapshot);
           this.pruneSnapshots.run(runId, runId, this.snapshotKeep);
         }
       });

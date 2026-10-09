@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id, joinEvent, parseJson, type Event as StoredEvent } from "@harness/schemas";
+import type Database from "better-sqlite3";
 import { z } from "zod";
-import type { ContentCodec } from "../codec.js";
-import { StoreUnavailableError } from "../errors.js";
+import type { ContentCodec, EncodedSnapshot } from "../codec.js";
+import { InvalidEventError, StoreUnavailableError } from "../errors.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const contentRecordSchema = z.record(z.string(), z.json());
@@ -34,6 +35,34 @@ export interface RunSummaryRow {
   status: string;
   last_seq: number;
   last_ts: number;
+}
+
+/** Insert a snapshot and normalize primary-key collisions to the store contract. */
+export function insertSnapshot(
+  statement: Database.Statement<[string, Id, number, number, string, string, string | null]>,
+  snapshot: EncodedSnapshot,
+): void {
+  try {
+    statement.run(
+      snapshot.snapshot_id,
+      snapshot.run_id,
+      snapshot.at_seq,
+      snapshot.created_at,
+      snapshot.meta_json,
+      snapshot.content_blob,
+      snapshot.key_id,
+    );
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "SQLITE_CONSTRAINT_PRIMARY" + "KEY"
+    ) {
+      throw new InvalidEventError([["snapshotId"]]);
+    }
+    throw error;
+  }
 }
 
 /** Parse and validate event metadata read from SQLite. */

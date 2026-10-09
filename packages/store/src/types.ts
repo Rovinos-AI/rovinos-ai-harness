@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Event, Id, NewEvent, RunStatus, Snapshot, TraceId } from "@harness/schemas";
+import { z } from "zod";
 
-/** Retention configuration for per-run checkpoint snapshots. */
-export interface SnapshotStoreOptions {
-  /** Maximum number of snapshots to retain per run (default: 5). */
-  snapshotKeep?: number;
-}
+/** Runtime schema for per-run checkpoint snapshot retention configuration. */
+export const snapshotStoreOptionsSchema = z
+  .object({ snapshotKeep: z.number().int().min(1).default(5) })
+  .strict();
+
+/** Snapshot retention options accepted by an EventStore. */
+export type SnapshotStoreOptions = z.input<typeof snapshotStoreOptionsSchema>;
 
 /** Summary of a run derived from its stored events. */
 export interface RunSummary {
