@@ -2,7 +2,7 @@
 // Config discovery follows explicit path, environment path, then the working-directory default.
 import { readFile as readFileFromDisk } from "node:fs/promises";
 import { resolve } from "node:path";
-import { ContractError, parseJson, parseYaml } from "@harness/schemas";
+import { ContractError, HarnessError, parseJson, parseYaml } from "@harness/schemas";
 import { z } from "zod";
 import { HarnessConfigSchema, type HarnessConfig } from "./schema.js";
 
@@ -25,7 +25,7 @@ export interface LoadConfigOptions {
 }
 
 /** Safe error raised when a configuration file or environment override is invalid. */
-export class ConfigError extends Error {
+export class ConfigError extends HarnessError {
   readonly code = "config_invalid";
   readonly issues: readonly string[];
 

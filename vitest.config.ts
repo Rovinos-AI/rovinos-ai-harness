@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Keep the coverage floor in root config so Vitest applies it to every project.
-import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-const sourceResolution = {
+export default defineConfig({
   resolve: {
-    alias: {
-      "@harness/schemas": fileURLToPath(
-        new URL("./packages/schemas/src/index.ts", import.meta.url),
-      ),
+    conditions: ["source", "module", "browser", "development|production"],
+  },
+  ssr: {
+    noExternal: [/^@harness\//],
+    resolve: {
+      conditions: ["source", "node", "development|production"],
     },
   },
-};
-
-export default defineConfig({
   test: {
     coverage: {
       provider: "v8",
@@ -26,7 +24,7 @@ export default defineConfig({
     },
     projects: [
       {
-        ...sourceResolution,
+        extends: true,
         test: {
           name: "unit",
           include: [
@@ -44,19 +42,21 @@ export default defineConfig({
         },
       },
       {
-        ...sourceResolution,
+        extends: true,
         test: {
           name: "integration",
           include: ["**/*.int.test.ts"],
         },
       },
       {
+        extends: true,
         test: {
           name: "canary",
           include: ["**/*.canary.test.ts"],
         },
       },
       {
+        extends: true,
         test: {
           name: "replay",
           include: ["**/*.replay.test.ts"],

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { parse as parseYamlDocument } from "yaml";
 import { z } from "zod";
+import { HarnessError } from "./errors.js";
 
 const DEFAULT_MAX_BYTES = 1_048_576;
 const parseOptionsSchema = z
@@ -19,7 +20,7 @@ const contractIssueSchema = z
 export type ContractIssue = z.infer<typeof contractIssueSchema>;
 
 /** Safe error for invalid contract input; it never retains input values or parser messages. */
-export class ContractError extends Error {
+export class ContractError extends HarnessError {
   readonly code = "contract_invalid";
   readonly issues: readonly ContractIssue[];
 
