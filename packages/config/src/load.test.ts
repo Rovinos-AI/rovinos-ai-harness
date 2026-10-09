@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
+import { HarnessError } from "@harness/schemas";
 import { ConfigError, formatConfigIssues, loadConfig } from "./index.js";
 
 const validYaml = `run:
@@ -134,6 +135,7 @@ describe("loadConfig", () => {
       }),
     );
 
+    expect(error).toBeInstanceOf(HarnessError);
     expect(error.code).toBe("config_invalid");
     expect(error.issues).toContain('store: unknown key "privateKey" (unrecognized_keys)');
     expect(error.message).not.toContain("not-a-secret");
