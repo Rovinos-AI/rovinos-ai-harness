@@ -1,0 +1,248 @@
+// SPDX-License-Identifier: Apache-2.0
+import { z } from "zod";
+import { describe, expect, it } from "vitest";
+import { ConfigError, formatConfigIssues, loadConfig } from "./index.js";
+
+const validYaml = `run:
+  budgets:
+    maxSteps: 12
+store: {}
+models: {}
+policy: {}
+pii: {}
+telemetry: {}
+sandbox: {}
+`;
+const validJson = JSON.stringify({
+  run: { budgets: { maxSteps: 12 } },
+  store: {},
+  models: {},
+  policy: {},
+  pii: {},
+  telemetry: {},
+  sandbox: {},
+});
+
+function reader(contents: string): (path: string) => Promise<string> {
+  return () => Promise.resolve(contents);
+}
+
+function requireConfigError(error: unknown): ConfigError {
+  expect(error).toBeInstanceOf(ConfigError);
+  if (!(error instanceof ConfigError)) {
+    throw new Error("Expected ConfigError.");
+  }
+  return error;
+}
+
+async function expectConfigError(action: Promise<unknown>): Promise<ConfigError> {
+  try {
+    await action;
+  } catch (error) {
+    return requireConfigError(error);
+  }
+  throw new Error("Expected configuration loading to fail.");
+}
+
+describe("loadConfig", () => {
+  it("loads a YAML file and applies schema defaults", async () => {
+    const config = await loadConfig({ env: {}, readFile: reader(validYaml) });
+
+    expect(config.run.budgets).toEqual({
+      maxSteps: 12,
+      maxWallClockMs: 3_600_000,
+    });
+    expect(config.servers).toEqual([]);
+  });
+
+  it("loads JSON files", async () => {
+    const contents = validJson.replace('"maxSteps":12', '"maxSteps":17');
+    const config = await loadConfig({
+      configPath: "harness.config.json",
+      env: {},
+      readFile: reader(contents),
+    });
+
+    expect(config.run.budgets.maxSteps).toBe(17);
+  });
+
+  it("lets an environment override take precedence over the file", async () => {
+    const config = await loadConfig({
+      env: { HARNESS__RUN__BUDGETS__MAXSTEPS: "50" },
+      readFile: reader(validYaml),
+    });
+
+    expect(config.run.budgets.maxSteps).toBe(50);
+  });
+
+  it("applies nested overrides and coerces numeric environment values", async () => {
+    const config = await loadConfig({
+      env: {
+        HARNESS__RUN__BUDGETS__MAX_WALL_CLOCK_MS: "60000",
+        HARNESS__RUN__BUDGETS__MAX_COST_USD: "2.5",
+      },
+      readFile: reader(validYaml),
+    });
+
+    expect(config.run.budgets).toEqual({
+      maxSteps: 12,
+      maxCostUsd: 2.5,
+      maxWallClockMs: 60_000,
+    });
+  });
+
+  it("rejects unknown config keys", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        env: {},
+        readFile: reader(validYaml.replace("store: {}", 'store:\n  privateKey: "not-a-secret"')),
+      }),
+    );
+
+    expect(error.code).toBe("config_invalid");
+    expect(error.issues).toContain("store: known configuration keys (unrecognized_keys)");
+    expect(error.message).not.toContain("privateKey");
+    expect(error.message).not.toContain("not-a-secret");
+  });
+
+  it("reports multiple invalid paths in one error", async () => {
+    const contents = validYaml
+      .replace("maxSteps: 12", "maxSteps: 0")
+      .replace("maxSteps: 0", "maxSteps: 0\n    maxWallClockMs: -1");
+    const error = await expectConfigError(loadConfig({ env: {}, readFile: reader(contents) }));
+
+    expect(error.issues).toHaveLength(2);
+    expect(error.issues).toContain("run.budgets.maxSteps: greater than 0 (too_small)");
+    expect(error.issues).toContain("run.budgets.maxWallClockMs: greater than 0 (too_small)");
+  });
+
+  it("never includes a submitted value in validation errors", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        env: { HARNESS__RUN__BUDGETS__MAXSTEPS: "submitted-private-value" },
+        readFile: reader(validYaml),
+      }),
+    );
+
+    expect(error.message).toContain("run.budgets.maxSteps");
+    expect(error.message).not.toContain("submitted-private-value");
+  });
+
+  it("deeply freezes the returned config", async () => {
+    const config = await loadConfig({
+      env: {},
+      readFile: reader(validYaml),
+    });
+
+    expect(() => {
+      config.run.budgets.maxSteps = 13;
+    }).toThrow(TypeError);
+    expect(() => {
+      config.servers.push({});
+    }).toThrow(TypeError);
+  });
+
+  it("discovers the config path in precedence order", async () => {
+    const paths: string[] = [];
+    const read = (path: string): Promise<string> => {
+      paths.push(path);
+      return Promise.resolve(path.endsWith(".json") ? validJson : validYaml);
+    };
+    const cwd = "/workspace";
+
+    await loadConfig({
+      configPath: "explicit.yaml",
+      cwd,
+      env: { HARNESS_CONFIG: "environment.json" },
+      readFile: read,
+    });
+    await loadConfig({
+      cwd,
+      env: { HARNESS_CONFIG: "environment.json" },
+      readFile: read,
+    });
+    await loadConfig({ cwd, env: {}, readFile: read });
+
+    expect(paths).toEqual([
+      "/workspace/explicit.yaml",
+      "/workspace/environment.json",
+      "/workspace/harness.config.yaml",
+    ]);
+  });
+
+  it("rejects an attempt to override an array with environment variables", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        env: { HARNESS__SERVERS__0__ENDPOINT: "private-value" },
+        readFile: reader(validYaml),
+      }),
+    );
+
+    expect(error.message).toContain("servers");
+    expect(error.message).not.toContain("private-value");
+  });
+
+  it("does not expose file-reader errors", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        env: {},
+        readFile: () => Promise.reject(new Error("private filesystem path")),
+      }),
+    );
+
+    expect(error.issues).toEqual([
+      "configuration: readable YAML or JSON config file (config_file_unavailable)",
+    ]);
+    expect(error.message).not.toContain("private filesystem path");
+  });
+
+  it("formats varied Zod issues without including received values", () => {
+    const results = [
+      z.string().safeParse(null),
+      z.number().min(2).safeParse(1),
+      z.number().max(2).safeParse(3),
+      z.strictObject({}).safeParse({ submittedValue: "private-value" }),
+      z.enum(["expected"]).safeParse("private-value"),
+      z.email().safeParse("private-value"),
+      z.union([z.literal("expected"), z.number()]).safeParse(true),
+    ];
+    const issues = results.flatMap((result) =>
+      result.success ? [] : formatConfigIssues(result.error.issues),
+    );
+    const text = issues.join("\n");
+
+    expect(issues).toHaveLength(7);
+    expect(text).toContain("expected string (invalid_type)");
+    expect(text).toContain("at least 2 (too_small)");
+    expect(text).toContain("at most 2 (too_big)");
+    expect(text).toContain("known configuration keys (unrecognized_keys)");
+    expect(text).toContain("an allowed value (invalid_value)");
+    expect(text).toContain("a valid format (invalid_format)");
+    expect(text).toContain("a valid configuration value (invalid_union)");
+    expect(text).not.toContain("private-value");
+  });
+
+  it("sanitizes YAML parse errors", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        env: {},
+        readFile: reader("run: [private-value"),
+      }),
+    );
+
+    expect(error.message).toContain("valid YAML or JSON (invalid_yaml)");
+    expect(error.message).not.toContain("private-value");
+  });
+
+  it("rejects malformed environment paths without echoing them", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        env: { HARNESS__RUN____MAXSTEPS: "private-value" },
+        readFile: reader(validYaml),
+      }),
+    );
+
+    expect(error.message).toContain("config_env_invalid");
+    expect(error.message).not.toContain("private-value");
+  });
+});
