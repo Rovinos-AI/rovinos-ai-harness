@@ -276,11 +276,7 @@ async function runResumeRace(
       await store.append(runId, [builders.runCreated(runId)], 0);
       const observedHeads = await Promise.all(
         workers.map((worker) =>
-          worker.prepare(
-            iteration,
-            runId,
-            builders.runStatusChanged(runId, "pending", "running"),
-          ),
+          worker.prepare(iteration, runId, builders.runStatusChanged(runId, "pending", "running")),
         ),
       );
 
