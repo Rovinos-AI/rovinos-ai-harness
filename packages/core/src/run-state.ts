@@ -19,15 +19,15 @@ export interface RunState {
     readonly outputTokens: number;
     readonly costMicros: number;
   };
-  readonly pendingToolCalls: Map<ToolIntentEvent["callId"], ToolIntentEvent>;
-  readonly pendingApprovals: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
+  readonly pendingToolCalls: ReadonlyMap<ToolIntentEvent["callId"], ToolIntentEvent>;
+  readonly pendingApprovals: ReadonlyMap<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   readonly lastCheckpoint?: {
     readonly checkpointId: CheckpointWrittenEvent["checkpointId"];
     readonly atSeq: number;
   };
-  readonly segmentId?: Event["segmentId"];
-  readonly startedAt?: number;
-  readonly lastTs?: number;
+  readonly segmentId: Event["segmentId"];
+  readonly startedAt: number;
+  readonly lastTs: number;
 }
 
 interface MutableRunState {
@@ -42,18 +42,18 @@ interface MutableRunState {
   pendingToolCalls: Map<ToolIntentEvent["callId"], ToolIntentEvent>;
   pendingApprovals: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   lastCheckpoint?: NonNullable<RunState["lastCheckpoint"]>;
-  segmentId?: Event["segmentId"];
-  startedAt?: number;
-  lastTs?: number;
+  segmentId: Event["segmentId"];
+  startedAt: number;
+  lastTs: number;
 }
 
-/** Error raised when the event log contains an illegal run-status transition. */
+/** Error raised when the event log is corrupt. */
 export class CorruptLogError extends Error {
   readonly code = "corrupt_log";
 
-  /** Creates an error for an illegal run-status transition in the event log. */
+  /** Creates an error for a corrupt event log. */
   constructor() {
-    super("Run event log contains an invalid status transition.");
+    super("Run event log is corrupt.");
     this.name = "CorruptLogError";
   }
 }
@@ -77,20 +77,22 @@ function applyResponseEvent(
   state: MutableRunState,
   event: Extract<Event, { type: "model_response" }>,
 ): MutableRunState {
-  const costMicros =
-    "costMicros" in event && typeof event.costMicros === "number" ? event.costMicros : 0;
   return {
     ...state,
     steps: state.steps + 1,
     usage: {
       inputTokens: state.usage.inputTokens + event.inputTokens,
       outputTokens: state.usage.outputTokens + event.outputTokens,
-      costMicros: state.usage.costMicros + costMicros,
+      // TODO(2.12): Compute cost from token usage and model pricing when budgets land.
+      costMicros: state.usage.costMicros,
     },
   };
 }
 
 function applyToolIntent(state: MutableRunState, event: ToolIntentEvent): MutableRunState {
+  if (state.pendingToolCalls.has(event.callId)) {
+    throw new CorruptLogError();
+  }
   const pendingToolCalls = new Map(state.pendingToolCalls);
   pendingToolCalls.set(event.callId, event);
   return { ...state, pendingToolCalls };
@@ -100,6 +102,9 @@ function applyToolResult(
   state: MutableRunState,
   event: Extract<Event, { type: "tool_result" }>,
 ): MutableRunState {
+  if (!state.pendingToolCalls.has(event.callId)) {
+    throw new CorruptLogError();
+  }
   const pendingToolCalls = new Map(state.pendingToolCalls);
   pendingToolCalls.delete(event.callId);
   return { ...state, pendingToolCalls };
@@ -109,6 +114,9 @@ function applyApprovalRequest(
   state: MutableRunState,
   event: ApprovalRequestedEvent,
 ): MutableRunState {
+  if (state.pendingApprovals.has(event.approvalId)) {
+    throw new CorruptLogError();
+  }
   const pendingApprovals = new Map(state.pendingApprovals);
   pendingApprovals.set(event.approvalId, event);
   return { ...state, pendingApprovals };
@@ -118,15 +126,21 @@ function applyApprovalResolution(
   state: MutableRunState,
   event: Extract<Event, { type: "approval_resolved" }>,
 ): MutableRunState {
+  if (!state.pendingApprovals.has(event.approvalId)) {
+    throw new CorruptLogError();
+  }
   const pendingApprovals = new Map(state.pendingApprovals);
   pendingApprovals.delete(event.approvalId);
   return { ...state, pendingApprovals };
 }
 
-function applyEvent(state: MutableRunState, event: Event): MutableRunState {
+function applyEvent(state: MutableRunState, event: Event, runId: Event["runId"]): MutableRunState {
+  if (event.seq !== state.nextSeq || event.runId !== runId || event.type === "run_created") {
+    throw new CorruptLogError();
+  }
   const withEnvelope = {
     ...state,
-    nextSeq: event.seq + 1,
+    nextSeq: state.nextSeq + 1,
     segmentId: event.segmentId,
     lastTs: event.ts,
   };
@@ -154,9 +168,6 @@ function applyEvent(state: MutableRunState, event: Event): MutableRunState {
       lastCheckpoint: { checkpointId: event.checkpointId, atSeq: event.atSeq },
     };
   }
-  if (event.type === "run_created" && withEnvelope.startedAt === undefined) {
-    return { ...withEnvelope, startedAt: event.ts };
-  }
   return withEnvelope;
 }
 
@@ -165,20 +176,34 @@ function applyEvent(state: MutableRunState, event: Event): MutableRunState {
  *
  * @param events - Validated events in append order.
  * @returns State derived from the events.
- * @throws {@link CorruptLogError} when a status event is not a legal transition.
+ * @throws {@link CorruptLogError} when the log is empty or contains corrupt events.
  */
 export function foldRunState(events: Iterable<Event>): RunState {
+  const iterator = events[Symbol.iterator]();
+  const first = iterator.next();
+  if (first.done || first.value.type !== "run_created" || first.value.seq !== 0) {
+    throw new CorruptLogError();
+  }
+
+  const runId = first.value.runId;
   let state: MutableRunState = {
     status: "pending",
-    nextSeq: 0,
+    nextSeq: 1,
     steps: 0,
     usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
     pendingToolCalls: new Map(),
     pendingApprovals: new Map(),
+    segmentId: first.value.segmentId,
+    startedAt: first.value.ts,
+    lastTs: first.value.ts,
   };
 
-  for (const event of events) {
-    state = applyEvent(state, event);
+  for (;;) {
+    const next = iterator.next();
+    if (next.done) {
+      break;
+    }
+    state = applyEvent(state, next.value, runId);
   }
 
   return state;

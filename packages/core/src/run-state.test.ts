@@ -4,6 +4,7 @@ import type { Event, RunStatus } from "@harness/schemas";
 import { CorruptLogError, foldRunState, RUN_TRIGGERS, transition, type RunState } from "./index.js";
 
 const id = "00000000000000000000000000";
+const otherRunId = "11111111111111111111111111";
 const hash = "a".repeat(64);
 const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);
@@ -141,6 +142,46 @@ describe("foldRunState", () => {
     );
   });
 
+  test("requires run_created as the first event at sequence zero", () => {
+    expect(() => foldRunState([])).toThrow(CorruptLogError);
+    expect(() => foldRunState([modelResponse(0)])).toThrow(CorruptLogError);
+    expect(() => foldRunState([runCreated(1)])).toThrow(CorruptLogError);
+  });
+
+  test.each([
+    ["a sequence gap", [runCreated(0), modelResponse(2)]],
+    ["a repeated sequence", [runCreated(0), modelResponse(1), modelResponse(1)]],
+    ["a reordered sequence", [runCreated(0), modelResponse(2), modelResponse(1)]],
+  ])("rejects %s", (_description, events) => {
+    expect(() => foldRunState(events)).toThrow(CorruptLogError);
+  });
+
+  test("rejects events from a different run", () => {
+    expect(() => foldRunState([runCreated(0), { ...modelResponse(1), runId: otherRunId }])).toThrow(
+      CorruptLogError,
+    );
+  });
+
+  test("rejects a tool result without a pending intent", () => {
+    expect(() => foldRunState([runCreated(0), toolResult(1)])).toThrow(CorruptLogError);
+  });
+
+  test("rejects a duplicate pending tool intent", () => {
+    expect(() => foldRunState([runCreated(0), toolIntent(1), toolIntent(2)])).toThrow(
+      CorruptLogError,
+    );
+  });
+
+  test("rejects an approval resolution without a pending request", () => {
+    expect(() => foldRunState([runCreated(0), approvalResolved(1)])).toThrow(CorruptLogError);
+  });
+
+  test("rejects a duplicate pending approval request", () => {
+    expect(() => foldRunState([runCreated(0), approvalRequested(1), approvalRequested(2)])).toThrow(
+      CorruptLogError,
+    );
+  });
+
   test("folding the same events produces the same state without changing the log", () => {
     const events = [
       runCreated(0),
@@ -185,17 +226,23 @@ describe("foldRunState", () => {
 
         const extraEvent = Math.floor(random() * 5);
         switch (extraEvent) {
-          case 0:
+          case 0: {
             appendEvent(events, toolIntent(seq));
-            break;
-          case 1:
+            seq += 1;
             appendEvent(events, toolResult(seq));
             break;
-          case 2:
+          }
+          case 1: {
             appendEvent(events, approvalRequested(seq));
+            seq += 1;
+            appendEvent(events, approvalResolved(seq));
+            break;
+          }
+          case 2:
+            appendEvent(events, modelResponse(seq));
             break;
           case 3:
-            appendEvent(events, approvalResolved(seq));
+            appendEvent(events, checkpoint(seq));
             break;
           default:
             appendEvent(events, modelResponse(seq));
