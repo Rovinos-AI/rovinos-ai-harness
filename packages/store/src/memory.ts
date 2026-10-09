@@ -53,6 +53,10 @@ export class InMemoryEventStore implements EventStore {
         validated.push(result.data);
       }
 
+      if (stored.length === 0 && validated[0]?.type !== "run_created") {
+        throw new InvalidEventError([[0, "type"]]);
+      }
+
       this.runs.set(runId, [...stored, ...validated]);
       return Promise.resolve({ nextSeq: expectedSeq + validated.length });
     } catch (error) {

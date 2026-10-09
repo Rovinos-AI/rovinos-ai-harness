@@ -15,7 +15,8 @@ field through a separately reviewed change.
 Major Node Docker image updates are ignored to keep the image aligned with the
 Node version pinned in `mise.toml`. The mise Docker image, its `MISE_VERSION` and
 `MISE_SHA256` pins in `pipelines/templates/node-setup.yml`, and the tools in
-`mise.toml` must be updated manually together in one change.
+`mise.toml` must be updated manually together in one change. The pinned Debian
+packages in the Dockerfile are updated together with the mise base image digest.
 
 The DCO check requires a valid `Signed-off-by` trailer on ordinary commits.
 Dependabot's exemption in `config/dco-exemptions.json` is limited to its exact

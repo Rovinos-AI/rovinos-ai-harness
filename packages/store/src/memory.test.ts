@@ -201,10 +201,15 @@ describe("InMemoryEventStore", () => {
     });
   });
 
-  it("omits runs without a run_created event from summaries", async () => {
+  it("rejects a run that does not start with run_created", async () => {
     const store = new InMemoryEventStore();
-    await store.append(otherRunId, [runStatusChanged(otherRunId, 10, "pending", "running")], 0);
+    await expect(
+      store.append(otherRunId, [runStatusChanged(otherRunId, 10, "pending", "running")], 0),
+    ).rejects.toMatchObject({
+      paths: [[0, "type"]],
+    });
 
+    await expect(store.head(otherRunId)).resolves.toBe(0);
     await expect(store.listRuns({ limit: 10 })).resolves.toEqual({ runs: [] });
   });
 });

@@ -19,6 +19,7 @@ import { SQLITE_SCHEMA } from "./schema.sql.js";
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const contentRecordSchema = z.record(z.string(), z.json());
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
+const READ_PAGE_SIZE = 256;
 
 interface EventRow {
   run_id: string;
@@ -144,6 +145,68 @@ function encodeCursor(createdAt: number, runId: Id): string {
   return Buffer.from(JSON.stringify([createdAt, runId])).toString("base64url");
 }
 
+function parseStoredMeta(metaJson: string): Record<string, unknown> {
+  let storedMeta: Record<string, unknown>;
+  try {
+    storedMeta = parseJson(contentRecordSchema, metaJson);
+  } catch {
+    throw new StoreUnavailableError();
+  }
+  if (Object.keys(storedMeta).some((key) => envelopeKeys.has(key))) {
+    throw new StoreUnavailableError();
+  }
+  return storedMeta;
+}
+
+async function decodeStoredContent(
+  codec: ContentCodec,
+  runId: Id,
+  row: EventRow,
+): Promise<Record<string, unknown>> {
+  try {
+    const decoded = await codec.decode(
+      { runId, seq: row.seq },
+      row.content_blob,
+      row.key_id ?? undefined,
+    );
+    const result = contentRecordSchema.safeParse(decoded);
+    if (!result.success) {
+      throw new StoreUnavailableError();
+    }
+    return result.data;
+  } catch {
+    throw new StoreUnavailableError();
+  }
+}
+
+function eventFromRow(
+  row: EventRow,
+  storedMeta: Record<string, unknown>,
+  content: Record<string, unknown>,
+): StoredEvent {
+  const storedRunId = Id.safeParse(row.run_id);
+  if (!storedRunId.success) {
+    throw new StoreUnavailableError();
+  }
+  try {
+    return joinEvent(
+      {
+        ...storedMeta,
+        runId: storedRunId.data,
+        seq: row.seq,
+        ts: row.ts,
+        type: row.type,
+        traceId: row.trace_id,
+        spanId: row.span_id,
+        segmentId: row.segment_id,
+      },
+      content,
+    );
+  } catch {
+    throw new StoreUnavailableError();
+  }
+}
+
 /** Durable SQLite implementation of the append-only event store. */
 export class SqliteEventStore implements EventStore {
   private readonly db: Database.Database;
@@ -155,7 +218,7 @@ export class SqliteEventStore implements EventStore {
   >;
   private readonly updateRun: Database.Statement<[number, RunStatus, number, Id]>;
   private readonly readEvents: Database.Statement<
-    [Id, number, number | null, number | null],
+    [Id, number, number | null, number | null, number],
     EventRow
   >;
   private readonly getHead: Database.Statement<[Id], { next_seq: number }>;
@@ -201,8 +264,8 @@ export class SqliteEventStore implements EventStore {
     this.updateRun = this.db.prepare<[number, RunStatus, number, Id]>(
       "UPDATE runs SET next_seq = ?, status = ?, last_ts = ? WHERE run_id = ?",
     );
-    this.readEvents = this.db.prepare<[Id, number, number | null, number | null], EventRow>(
-      "SELECT seq, ts, type, trace_id, span_id, segment_id, meta_json, content_blob, key_id FROM events WHERE run_id = ? AND seq >= ? AND (? IS NULL OR seq <= ?) ORDER BY seq",
+    this.readEvents = this.db.prepare<[Id, number, number | null, number | null, number], EventRow>(
+      "SELECT run_id, seq, ts, type, trace_id, span_id, segment_id, meta_json, content_blob, key_id FROM events WHERE run_id = ? AND seq >= ? AND (? IS NULL OR seq <= ?) ORDER BY seq LIMIT ?",
     );
     this.getHead = this.db.prepare<[Id], { next_seq: number }>(
       "SELECT next_seq FROM runs WHERE run_id = ?",
@@ -219,17 +282,11 @@ export class SqliteEventStore implements EventStore {
       ],
       RunSummaryRow
     >(`
-      SELECT runs.run_id, created.ts AS created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
+      SELECT runs.run_id, runs.created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
       FROM runs
-      JOIN events AS created ON created.run_id = runs.run_id AND created.type = 'run_created'
-      WHERE created.global_seq = (
-        SELECT MIN(first_created.global_seq)
-        FROM events AS first_created
-        WHERE first_created.run_id = runs.run_id AND first_created.type = 'run_created'
-      )
-      AND (? IS NULL OR runs.status = ?)
-      AND (? IS NULL OR created.ts < ? OR (created.ts = ? AND runs.run_id > ?))
-      ORDER BY created.ts DESC, runs.run_id ASC
+      WHERE (? IS NULL OR runs.status = ?)
+      AND (? IS NULL OR runs.created_at < ? OR (runs.created_at = ? AND runs.run_id > ?))
+      ORDER BY runs.created_at DESC, runs.run_id ASC
       LIMIT ?
     `);
   }
@@ -257,6 +314,9 @@ export class SqliteEventStore implements EventStore {
           throw new InvalidEventError([[]]);
         }
         if (existingRun === undefined) {
+          if (first.type !== "run_created") {
+            throw new InvalidEventError([[0, "type"]]);
+          }
           this.insertRun.run(runId, first.ts, first.ts);
         }
 
@@ -298,25 +358,17 @@ export class SqliteEventStore implements EventStore {
   async *read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<StoredEvent> {
     const fromSeq = range?.fromSeq ?? 0;
     const toSeq = range?.toSeq ?? null;
+    let nextSeq = fromSeq;
     try {
-      for (const row of this.readEvents.iterate(runId, fromSeq, toSeq, toSeq)) {
-        const storedMeta = parseJson(contentRecordSchema, row.meta_json);
-        const meta = {
-          runId,
-          seq: row.seq,
-          ts: row.ts,
-          type: row.type,
-          traceId: row.trace_id,
-          spanId: row.span_id,
-          segmentId: row.segment_id,
-          ...storedMeta,
-        };
-        const content = await this.codec.decode(
-          { runId, seq: row.seq },
-          row.content_blob,
-          row.key_id ?? undefined,
-        );
-        yield joinEvent(meta, contentRecordSchema.parse(content));
+      let rows = this.readEvents.all(runId, nextSeq, toSeq, toSeq, READ_PAGE_SIZE);
+      while (rows.length !== 0) {
+        for (const row of rows) {
+          const storedMeta = parseStoredMeta(row.meta_json);
+          const content = await decodeStoredContent(this.codec, runId, row);
+          yield eventFromRow(row, storedMeta, content);
+          nextSeq = row.seq + 1;
+        }
+        rows = this.readEvents.all(runId, nextSeq, toSeq, toSeq, READ_PAGE_SIZE);
       }
     } catch (error) {
       throw storeError(error);

@@ -32,6 +32,27 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
   return result;
 }
 
+async function collectIterator(iterator: AsyncIterator<Event>): Promise<Event[]> {
+  const result: Event[] = [];
+  let next = await iterator.next();
+  while (next.done !== true) {
+    result.push(next.value);
+    next = await iterator.next();
+  }
+  return result;
+}
+
+function asyncDecodeCodec(): ContentCodec {
+  const codec = new JsonContentCodec();
+  return {
+    encode: (ctx, content) => codec.encode(ctx, content),
+    async decode(ctx, blob, keyId) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      return codec.decode(ctx, blob, keyId);
+    },
+  };
+}
+
 function runCreated(id: typeof runId, ts: number): NewEvent {
   return {
     runId: id,
@@ -162,6 +183,85 @@ describe("SqliteEventStore", () => {
       ]);
     } finally {
       await reopenedStore.close();
+    }
+  });
+
+  it("allows appends during a multi-page asynchronous read", async () => {
+    const store = new SqliteEventStore(":memory:", asyncDecodeCodec());
+    try {
+      const events = [
+        runCreated(runId, 10),
+        ...Array.from({ length: 256 }, (_, index) => modelRequest(runId, index + 11)),
+      ];
+      await store.append(runId, events, 0);
+
+      const iterator = store.read(runId)[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      if (first.done === true) {
+        throw new Error("Expected the first event");
+      }
+      await store.append(runId, [modelRequest(runId, 300)], 257);
+
+      const remaining = await collectIterator(iterator);
+      expect(first.value.seq).toBe(0);
+      expect(remaining.map(({ seq }) => seq)).toEqual(
+        Array.from({ length: 257 }, (_, index) => index + 1),
+      );
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("allows two reads of one run to interleave with an asynchronous codec", async () => {
+    const store = new SqliteEventStore(":memory:", asyncDecodeCodec());
+    try {
+      await store.append(runId, [runCreated(runId, 10), modelRequest(runId, 11)], 0);
+
+      const firstRead = store.read(runId)[Symbol.asyncIterator]();
+      const secondRead = store.read(runId)[Symbol.asyncIterator]();
+      const [first, second] = await Promise.all([firstRead.next(), secondRead.next()]);
+      expect(first).toMatchObject({ done: false, value: { seq: 0 } });
+      expect(second).toMatchObject({ done: false, value: { seq: 0 } });
+      const [firstRemaining, secondRemaining] = await Promise.all([
+        collectIterator(firstRead),
+        collectIterator(secondRead),
+      ]);
+      expect(firstRemaining.map(({ seq }) => seq)).toEqual([1]);
+      expect(secondRemaining.map(({ seq }) => seq)).toEqual([1]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("rejects non-JSON codec output as corrupt stored content", async () => {
+    const baseCodec = new JsonContentCodec();
+    const codec: ContentCodec = {
+      encode: (ctx, content) => baseCodec.encode(ctx, content),
+      decode: () => Promise.resolve({ invalid: undefined }),
+    };
+    const store = new SqliteEventStore(":memory:", codec);
+    try {
+      await store.append(runId, [runCreated(runId, 10)], 0);
+      await expect(collect(store.read(runId))).rejects.toBeInstanceOf(StoreUnavailableError);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("rejects envelope keys found in persisted metadata", async () => {
+    const path = await temporaryDatabase();
+    const store = new SqliteEventStore(path);
+    const database = new Database(path);
+    try {
+      await store.append(runId, [runCreated(runId, 10)], 0);
+      database
+        .prepare("UPDATE events SET meta_json = ? WHERE run_id = ? AND seq = 0")
+        .run(JSON.stringify({ runId: Id.parse("00000000000000000000000002") }), runId);
+
+      await expect(collect(store.read(runId))).rejects.toBeInstanceOf(StoreUnavailableError);
+    } finally {
+      database.close();
+      await store.close();
     }
   });
 
@@ -323,6 +423,13 @@ describe("SqliteEventStore", () => {
       await expect(store.append(runId, [runCreated(runId, 10)], 1)).rejects.toBeInstanceOf(
         SeqConflictError,
       );
+      const invalidStartId = Id.parse("00000000000000000000000003");
+      await expect(
+        store.append(invalidStartId, [modelRequest(invalidStartId, 10)], 0),
+      ).rejects.toMatchObject({
+        paths: [[0, "type"]],
+      });
+      await expect(store.head(invalidStartId)).resolves.toBe(0);
       await expect(
         store.append(runId, [runCreated(Id.parse("00000000000000000000000002"), 10)], 0),
       ).rejects.toBeInstanceOf(InvalidEventError);
