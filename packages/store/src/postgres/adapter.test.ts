@@ -175,6 +175,20 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     const run = fakePg.runs.get(text(values[0]));
     return { rows: run === undefined ? [] : [{ next_seq: run.next_seq }] };
   }
+  if (query.startsWith("SELECT run_id FROM events WHERE trace_id")) {
+    const traceId = text(values[0]);
+    const firstRunSequences = new Map<string, number>();
+    fakePg.events.forEach((event, globalSeq) => {
+      if (event.trace_id === traceId && !firstRunSequences.has(event.run_id)) {
+        firstRunSequences.set(event.run_id, globalSeq);
+      }
+    });
+    return {
+      rows: [...firstRunSequences.entries()]
+        .sort((first, second) => first[1] - second[1])
+        .map(([run_id]) => ({ run_id })),
+    };
+  }
   if (query.startsWith("SELECT runs.run_id")) {
     const status = values[0] === null ? undefined : text(values[0]);
     const createdAt = values[1] === null ? undefined : number(values[1]);

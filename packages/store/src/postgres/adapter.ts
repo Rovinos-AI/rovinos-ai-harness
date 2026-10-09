@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id, NewEvent } from "@harness/schemas";
+import { Id, TraceId, type Event, type NewEvent } from "@harness/schemas";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { z } from "zod";
 import { JsonContentCodec, type ContentCodec } from "../codec.js";
@@ -191,6 +191,24 @@ export class PostgresEventStore implements EventStore {
         [opts.status ?? null, cursor?.createdAt ?? null, cursor?.runId ?? null, opts.limit + 1],
       );
       return runListPage(result.rows, opts.limit);
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
+  /** {@inheritDoc EventStore.findRunsByTrace} */
+  async findRunsByTrace(traceId: TraceId): Promise<Id[]> {
+    const parsedTraceId = TraceId.safeParse(traceId);
+    if (!parsedTraceId.success) {
+      throw new InvalidEventError([["traceId"]]);
+    }
+    try {
+      await this.ensureInitialized();
+      const result = await this.pool.query<{ run_id: string }>(
+        "SELECT run_id FROM events WHERE trace_id = $1 GROUP BY run_id ORDER BY MIN(global_seq)",
+        [parsedTraceId.data],
+      );
+      return result.rows.map(({ run_id }) => Id.parse(run_id));
     } catch (error) {
       throw storeError(error);
     }

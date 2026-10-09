@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Event, type Event as StoredEvent, type Id, type NewEvent } from "@harness/schemas";
+import {
+  Event,
+  TraceId,
+  type Event as StoredEvent,
+  type Id,
+  type NewEvent,
+} from "@harness/schemas";
 import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "./errors.js";
 import type { EventStore, ListRunsOptions, RunSummary } from "./types.js";
 
@@ -18,6 +24,8 @@ function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): nu
 /** In-memory reference implementation of the append-only event store contract. */
 export class InMemoryEventStore implements EventStore {
   private readonly runs = new Map<Id, StoredEvent[]>();
+  private readonly traceRuns = new Map<TraceId, Map<Id, number>>();
+  private nextGlobalSeq = 0;
 
   /** {@inheritDoc EventStore.append} */
   append(
@@ -58,6 +66,17 @@ export class InMemoryEventStore implements EventStore {
       }
 
       this.runs.set(runId, [...stored, ...validated]);
+      for (const event of validated) {
+        let runs = this.traceRuns.get(event.traceId);
+        if (runs === undefined) {
+          runs = new Map<Id, number>();
+          this.traceRuns.set(event.traceId, runs);
+        }
+        if (!runs.has(runId)) {
+          runs.set(runId, this.nextGlobalSeq);
+        }
+        this.nextGlobalSeq += 1;
+      }
       return Promise.resolve({ nextSeq: expectedSeq + validated.length });
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new StoreUnavailableError());
@@ -141,6 +160,20 @@ export class InMemoryEventStore implements EventStore {
     const runs = summaries.slice(start, end);
     const nextCursor = end < summaries.length ? runs.at(-1)?.runId : undefined;
     return Promise.resolve(nextCursor === undefined ? { runs } : { runs, nextCursor });
+  }
+
+  /** {@inheritDoc EventStore.findRunsByTrace} */
+  findRunsByTrace(traceId: TraceId): Promise<Id[]> {
+    if (!TraceId.safeParse(traceId).success) {
+      return Promise.reject(new InvalidEventError([["traceId"]]));
+    }
+    const runs = this.traceRuns.get(traceId);
+    if (runs === undefined) {
+      return Promise.resolve([]);
+    }
+    return Promise.resolve(
+      [...runs.entries()].sort((left, right) => left[1] - right[1]).map(([runId]) => runId),
+    );
   }
 
   /** {@inheritDoc EventStore.close} */
