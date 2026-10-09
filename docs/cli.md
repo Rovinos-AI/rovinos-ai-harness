@@ -49,4 +49,3 @@ never included in CLI error output.
 | `not_found_or_resolved`, `approval_not_found`, `approval_already_resolved`, `input_not_found`, `input_already_resolved` | `7` |
 | `replay_failed` | `8` |
 | `quota_exceeded` | `9` |
-
