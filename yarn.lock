@@ -1018,6 +1018,15 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@harness/store@workspace:packages/store":
+  version: 0.0.0-use.local
+  resolution: "@harness/store@workspace:packages/store"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+  languageName: unknown
+  linkType: soft
+
 "@humanfs/core@npm:^0.19.2":
   version: 0.19.2
   resolution: "@humanfs/core@npm:0.19.2"
