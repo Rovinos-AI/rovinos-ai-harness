@@ -1052,6 +1052,11 @@ __metadata:
     better-sqlite3: "npm:13.0.3"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
+  peerDependencies:
+    vitest: ^3.2.6
+  peerDependenciesMeta:
+    vitest:
+      optional: true
   languageName: unknown
   linkType: soft
 
