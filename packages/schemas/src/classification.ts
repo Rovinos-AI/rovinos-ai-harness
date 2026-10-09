@@ -81,6 +81,10 @@ function fieldClassFor(type: EventType, key: string): EventFieldClass | undefine
   return Object.entries(EVENT_FIELD_CLASS[type]).find(([field]) => field === key)?.[1];
 }
 
+function isEventType(type: unknown): type is EventType {
+  return typeof type === "string" && Object.hasOwn(EVENT_FIELD_CLASS, type);
+}
+
 /**
  * Splits an event into its always-meta envelope and classified payloads.
  *
@@ -122,8 +126,8 @@ export function joinEvent(meta: Record<string, unknown>, content: Record<string,
     .filter((key) => Object.hasOwn(content, key))
     .map((key) => ({ path: [key], code: "duplicate_field" }));
 
-  if (typeof meta.type === "string" && Object.hasOwn(EVENT_FIELD_CLASS, meta.type)) {
-    const type = meta.type as EventType;
+  if (isEventType(meta.type)) {
+    const type = meta.type;
     for (const key of Object.keys(content)) {
       if (fieldClassFor(type, key) !== "content") {
         issues.push({ path: ["content", key], code: "field_classification_mismatch" });

@@ -113,9 +113,9 @@ describe("EVENT_FIELD_CLASS", () => {
   });
 
   it("keeps the classification map exhaustive at compile time", () => {
-    expectTypeOf(EVENT_FIELD_CLASS).toMatchTypeOf<EventClassificationMap>();
-    void missingPayloadClassification;
-    void extraPayloadClassification;
+    expectTypeOf(EVENT_FIELD_CLASS).toExtend<EventClassificationMap>();
+    expect(missingPayloadClassification).toBeDefined();
+    expect(extraPayloadClassification).toBeDefined();
   });
 
   it("maps all declared event types", () => {
