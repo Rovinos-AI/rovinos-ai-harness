@@ -36,4 +36,9 @@ export class NaiveContext implements ContextPort {
       }),
     );
   }
+
+  /** {@inheritDoc ContextPort.snapshot} */
+  snapshot(): Promise<JsonValue> {
+    return Promise.resolve([]);
+  }
 }

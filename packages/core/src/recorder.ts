@@ -10,7 +10,14 @@ import {
   type Span,
   type SpanContext,
 } from "@opentelemetry/api";
-import { EventSchema, HarnessError, type Event, type Id, type NewEvent } from "@harness/schemas";
+import {
+  EventSchema,
+  HarnessError,
+  type Event,
+  type Id,
+  type NewEvent,
+  type Snapshot,
+} from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
 import type { SpanDefinition, SpanDefinitionShape } from "@harness/telemetry";
 import { RUN_SPAN } from "./spans.js";
@@ -127,6 +134,25 @@ export class RunRecorder {
   }
 
   /**
+   * Atomically appends one checkpoint event with its snapshot.
+   *
+   * @param partial - Checkpoint event payload.
+   * @param snapshot - Snapshot without its recorder-assigned sequence.
+   * @returns The validated checkpoint event with its assigned sequence.
+   * @throws LeaseLostError when another writer has advanced the log.
+   */
+  async recordWithSnapshot(
+    partial: Extract<EventPartial, { type: "checkpoint_written" }>,
+    snapshot: Omit<Snapshot, "atSeq">,
+  ): Promise<Event> {
+    if (this.storedHead !== undefined) {
+      throw new LeaseLostError(this.storedHead);
+    }
+    const spanContext = this.activeSpanContext();
+    return this.enqueue(() => this.appendWithSnapshot(partial, snapshot, spanContext));
+  }
+
+  /**
    * Runs a callback in a registered span and sets its event sequence after recording.
    *
    * @param definition - Registered span definition.
@@ -219,5 +245,42 @@ export class RunRecorder {
     return newEvents.map((event, index) =>
       EventSchema.parse({ ...event, seq: expectedSeq + index }),
     );
+  }
+
+  private async appendWithSnapshot(
+    partial: Extract<EventPartial, { type: "checkpoint_written" }>,
+    snapshot: Omit<Snapshot, "atSeq">,
+    spanContext: SpanContext,
+  ): Promise<Event> {
+    if (this.storedHead !== undefined) {
+      throw new LeaseLostError(this.storedHead);
+    }
+
+    const expectedSeq = this.nextSequence;
+    const newEvent: NewEvent = {
+      ...partial,
+      atSeq: expectedSeq,
+      runId: this.runId,
+      ts: this.clock.now(),
+      traceId: spanContext.traceId,
+      spanId: spanContext.spanId,
+      segmentId: this.segmentId,
+    };
+
+    try {
+      const result = await this.store.appendWithSnapshot(this.runId, [newEvent], expectedSeq, {
+        ...snapshot,
+        atSeq: expectedSeq,
+      });
+      this.nextSequence = result.nextSeq;
+    } catch (error) {
+      if (error instanceof SeqConflictError) {
+        this.storedHead = error.actual;
+        throw new LeaseLostError(error.actual);
+      }
+      throw error;
+    }
+
+    return EventSchema.parse({ ...newEvent, seq: expectedSeq });
   }
 }

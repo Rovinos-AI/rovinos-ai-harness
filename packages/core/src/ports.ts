@@ -96,6 +96,13 @@ export interface ContextPort {
    * @returns Provider-independent messages.
    */
   build(events: readonly Event[]): Promise<JsonValue>;
+
+  /**
+   * Returns a JSON-safe checkpoint of the context implementation's current state.
+   *
+   * @returns The serializable context snapshot.
+   */
+  snapshot(): Promise<JsonValue>;
 }
 
 /** Generates run-scoped identifiers. */

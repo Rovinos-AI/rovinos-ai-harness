@@ -7,12 +7,20 @@ import {
   type RunConfig,
 } from "@harness/schemas";
 import { BudgetTracker, type BudgetViolation } from "./budgets.js";
+import { Checkpointer } from "./checkpoint.js";
 import { foldRunState, type RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
 import { modelStep } from "./steps/model-step.js";
 import { toolStep } from "./steps/tool-step.js";
-import type { ContextPort, IdGenerator, ModelPort, NewRunMetadata, ToolPort } from "./ports.js";
+import type {
+  ContextPort,
+  IdGenerator,
+  ModelCompletion,
+  ModelPort,
+  NewRunMetadata,
+  ToolPort,
+} from "./ports.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata {
@@ -26,6 +34,7 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly signal: AbortSignal;
   /** Per-run limits sourced from the validated run configuration. */
   readonly budgets: RunConfig["budgets"];
+  readonly checkpointEveryEvents?: RunConfig["checkpointEveryEvents"];
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
@@ -35,6 +44,12 @@ export interface RunLoopOptions extends NewRunMetadata {
 export interface RunLoopResult {
   readonly state: RunState;
   readonly events: readonly Event[];
+}
+
+interface RunLoopExecution {
+  readonly runId: Event["runId"];
+  readonly checkpointer: Checkpointer;
+  readonly budgetTracker: BudgetTracker;
 }
 
 class RunAbortedError extends HarnessError {
@@ -72,7 +87,17 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
     }
     events.push(...recorded);
     const runId = last.runId;
-    const ended = await runLoopSteps(options, events, runId, budgetTracker);
+    const checkpointer = new Checkpointer({
+      recorder: options.recorder,
+      runId,
+      context: options.context,
+      ids: options.ids,
+      clock: options.clock,
+      ...(options.checkpointEveryEvents === undefined
+        ? {}
+        : { checkpointEveryEvents: options.checkpointEveryEvents }),
+    });
+    const ended = await runLoopSteps(options, events, { runId, checkpointer, budgetTracker });
     result = { state: foldRunState(events), events };
     return ended;
   });
@@ -112,30 +137,45 @@ async function recordBudgetFailure(
   return failed;
 }
 
+async function recordBudgetFailureAndCheckpoint(
+  recorder: RunRecorder,
+  events: Event[],
+  violation: BudgetViolation,
+  checkpointer: Checkpointer,
+): Promise<Event> {
+  const failed = await recordBudgetFailure(recorder, events, violation);
+  await checkpointAfterStep(checkpointer, events);
+  return failed;
+}
+
 async function runLoopSteps(
   options: RunLoopOptions,
   events: Event[],
-  runId: Event["runId"],
-  budgetTracker: BudgetTracker,
+  execution: RunLoopExecution,
 ): Promise<Event> {
   for (;;) {
     if (options.signal.aborted) {
       throw new RunAbortedError();
     }
     const context = await options.context.build(events.slice());
-    const state = foldRunState(events);
-    const modelBudget = budgetTracker.check(
-      { ...state, steps: state.steps + 1 },
+    const currentState = foldRunState(events);
+    const modelBudget = execution.budgetTracker.check(
+      { ...currentState, steps: currentState.steps + 1 },
       options.clock.now(),
     );
     if (!modelBudget.ok) {
-      return recordBudgetFailure(options.recorder, events, modelBudget);
+      return recordBudgetFailureAndCheckpoint(
+        options.recorder,
+        events,
+        modelBudget,
+        execution.checkpointer,
+      );
     }
     const modelResult = await modelStep({
       recorder: options.recorder,
       model: options.model,
       ids: options.ids,
-      runId,
+      runId: execution.runId,
       messages: { goal: options.goal, context },
       signal: options.signal,
       ...(options.role === undefined ? {} : { role: options.role }),
@@ -143,6 +183,10 @@ async function runLoopSteps(
       ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
     });
     events.push(...modelResult.events);
+    const stepState = await checkpointAfterStep(execution.checkpointer, events);
+    if (stepState.status === "suspended") {
+      return suspendedOutcome(events);
+    }
 
     if (modelResult.outcome === "failed") {
       const failedEvent = modelResult.events.at(-1);
@@ -153,21 +197,14 @@ async function runLoopSteps(
     }
 
     if (modelResult.completion.toolCalls.length > 0) {
-      for (const call of modelResult.completion.toolCalls) {
-        const toolBudget = budgetTracker.check(foldRunState(events), options.clock.now());
-        if (!toolBudget.ok) {
-          return recordBudgetFailure(options.recorder, events, toolBudget);
-        }
-        events.push(
-          ...(await toolStep({
-            recorder: options.recorder,
-            tool: options.tool,
-            clock: options.clock,
-            runId,
-            calls: [call],
-            signal: options.signal,
-          })),
-        );
+      const outcome = await runToolCalls(
+        options,
+        events,
+        execution,
+        modelResult.completion.toolCalls,
+      );
+      if (outcome !== undefined) {
+        return outcome;
       }
       continue;
     }
@@ -180,6 +217,61 @@ async function runLoopSteps(
       reason: "final_answer",
     });
     events.push(finished);
+    await checkpointAfterStep(execution.checkpointer, events);
     return finished;
   }
+}
+
+async function runToolCalls(
+  options: RunLoopOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+  calls: ModelCompletion["toolCalls"],
+): Promise<Event | undefined> {
+  for (const call of calls) {
+    const budget = execution.budgetTracker.check(foldRunState(events), options.clock.now());
+    if (!budget.ok) {
+      return recordBudgetFailureAndCheckpoint(
+        options.recorder,
+        events,
+        budget,
+        execution.checkpointer,
+      );
+    }
+    events.push(
+      ...(await toolStep({
+        recorder: options.recorder,
+        tool: options.tool,
+        clock: options.clock,
+        runId: execution.runId,
+        calls: [call],
+        signal: options.signal,
+      })),
+    );
+    const state = await checkpointAfterStep(execution.checkpointer, events);
+    if (state.status === "suspended") {
+      return suspendedOutcome(events);
+    }
+  }
+  return undefined;
+}
+
+async function checkpointAfterStep(checkpointer: Checkpointer, events: Event[]): Promise<RunState> {
+  const state = foldRunState(events);
+  const checkpoint = await checkpointer.maybeCheckpoint(state);
+  if (checkpoint !== undefined) {
+    events.push(checkpoint);
+    return foldRunState(events);
+  }
+  return state;
+}
+
+function suspendedOutcome(events: readonly Event[]): Event {
+  const event = [...events]
+    .reverse()
+    .find((candidate) => candidate.type === "run_status_changed" && candidate.to === "suspended");
+  if (event === undefined) {
+    throw new Error("Expected a suspension status event.");
+  }
+  return event;
 }

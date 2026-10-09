@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Run config is owned by task 20.1; resume policy is added by task 2.5.
+// Run config is owned by task 20.1; resume policy and checkpoint cadence are added by tasks 2.5 and 2.6.
 import { z } from "zod";
 
 /** Policy for dangling non-idempotent tool intents encountered during resume. */
@@ -7,6 +7,7 @@ export const RunResumePolicySchema = z.enum(["escalate", "fail"]).default("escal
 
 export const RunConfigSchema = z
   .object({
+    checkpointEveryEvents: z.coerce.number().int().positive().default(20),
     resume: z
       .object({
         onNonIdempotent: RunResumePolicySchema,

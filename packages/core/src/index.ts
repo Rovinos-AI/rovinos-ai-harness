@@ -26,6 +26,7 @@ export {
   type Clock,
   type EventPartial,
 } from "./recorder.js";
+export { Checkpointer, NoActiveSpanError, type CheckpointerOptions } from "./checkpoint.js";
 export {
   APPROVAL_WAIT_SPAN,
   CHECKPOINT_SPAN,

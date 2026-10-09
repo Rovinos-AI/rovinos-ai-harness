@@ -21,15 +21,19 @@ import {
   RunConfigSchema,
   SequentialIdGenerator,
   HarnessError,
+  Traceparent,
   type Event,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { InMemoryEventStore, SeqConflictError } from "@harness/store";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";
 import { RunRecorder } from "./recorder.js";
 import { runLoop } from "./loop.js";
+import { Checkpointer } from "./checkpoint.js";
+import { foldRunState } from "./run-state.js";
+import { RUN_SPAN } from "./spans.js";
 import type { ModelCompletion, ModelPort } from "./ports.js";
 
 const runId = "00000000000000000000000000";
@@ -39,21 +43,27 @@ const modelCallId = "22222222222222222222222222";
 const defaultBudgets = RunConfigSchema.parse({}).budgets;
 const goldenPath = fileURLToPath(new URL("./__golden__/one-step.json", import.meta.url));
 let nextSpanId = 0;
+let invalidSpanContext = false;
 
 class TestSpan implements Span {
   private ended = false;
   private recordedExceptions = 0;
   readonly attributes: Record<string, string | number | boolean> = {};
   readonly spanContextValue: SpanContext = {
-    traceId: "a".repeat(32),
-    spanId: (++nextSpanId).toString(16).padStart(16, "0"),
+    traceId: invalidSpanContext ? "0".repeat(32) : "a".repeat(32),
+    spanId: invalidSpanContext ? "0".repeat(16) : (++nextSpanId).toString(16).padStart(16, "0"),
     traceFlags: 1,
   };
 
   constructor(
     readonly name: string,
     readonly parentSpanId: string | undefined,
-  ) {}
+    attributes?: SpanOptions["attributes"],
+  ) {
+    if (attributes !== undefined) {
+      Object.assign(this.attributes, attributes);
+    }
+  }
 
   spanContext(): SpanContext {
     return this.spanContextValue;
@@ -117,9 +127,9 @@ class TestSpan implements Span {
 class TestTracer implements Tracer {
   readonly spans: TestSpan[] = [];
 
-  startSpan(name: string, _options?: SpanOptions, parentContext?: Context): Span {
+  startSpan(name: string, options?: SpanOptions, parentContext?: Context): Span {
     const parent = trace.getSpan(parentContext ?? context.active());
-    const span = new TestSpan(name, parent?.spanContext().spanId);
+    const span = new TestSpan(name, parent?.spanContext().spanId, options?.attributes);
     this.spans.push(span);
     return span;
   }
@@ -296,7 +306,10 @@ describe("runLoop", () => {
       expect(durableTypes.at(-1)).toBe("model_request");
       return complete(request, callContext);
     });
-    const contextPort = { build: vi.fn(() => Promise.resolve(["prior context"])) };
+    const contextPort = {
+      build: vi.fn(() => Promise.resolve(["prior context"])),
+      snapshot: vi.fn(() => Promise.resolve([])),
+    };
     const result = await runLoop({
       recorder,
       clock,
@@ -351,6 +364,162 @@ describe("runLoop", () => {
     }
     const goldenInput: unknown = JSON.parse(await readFile(goldenPath, "utf8"));
     expect(JsonValue.parse(goldenInput)).toEqual(normalizeEvents(result.events));
+  });
+
+  it("writes a traceparent checkpoint at the configured event cadence", async () => {
+    const startingSpanIndex = tracerProvider.spans.length;
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const result = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([completion()]),
+      tool: new FakeToolPort(),
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "checkpoint cadence",
+      configHash,
+      budgets: defaultBudgets,
+      checkpointEveryEvents: 4,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+    });
+
+    const checkpoint = result.events.find(
+      (event): event is Extract<Event, { type: "checkpoint_written" }> =>
+        event.type === "checkpoint_written",
+    );
+    expect(checkpoint).toBeDefined();
+    if (checkpoint === undefined) {
+      throw new Error("Expected a checkpoint event.");
+    }
+    expect(checkpoint.atSeq).toBe(checkpoint.seq);
+    const traceparent = Traceparent.parse(checkpoint.traceparent);
+    expect(checkpoint).toMatchObject({
+      traceId: traceparent.slice(3, 35),
+      spanId: traceparent.slice(36, 52),
+    });
+    await expect(store.latestSnapshot(runId)).resolves.toMatchObject({
+      snapshotId: checkpoint.checkpointId,
+      runId,
+      atSeq: checkpoint.seq,
+      traceparent,
+      context: [],
+      plan: null,
+    });
+    expect(result.events.map(({ type }) => type)).toEqual([
+      "run_created",
+      "run_status_changed",
+      "model_request",
+      "model_response",
+      "checkpoint_written",
+      "run_status_changed",
+    ]);
+    const checkpointSpan = tracerProvider.spans
+      .slice(startingSpanIndex)
+      .find(({ name }) => name === "harness.checkpoint");
+    expect(checkpointSpan?.attributes["harness.event.seq"]).toBe(checkpoint.seq);
+    expect(checkpointSpan?.attributes["harness.checkpoint.reason"]).toBe("cadence");
+  });
+
+  it("forces a checkpoint when the run is suspended before the cadence", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+    let events: Event[] = [];
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      events = await recorder.recordBatch([
+        { type: "run_created", v: 1, configHash, policyVersion: "test.policy" },
+        { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
+        { type: "run_status_changed", v: 1, from: "running", to: "suspended", reason: "shutdown" },
+      ]);
+      const last = events.at(-1);
+      if (last === undefined) {
+        throw new Error("Expected a suspension status event.");
+      }
+      return last;
+    });
+    const state = foldRunState(events);
+    const checkpointer = new Checkpointer({
+      recorder,
+      runId,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      clock,
+      checkpointEveryEvents: 20,
+    });
+
+    const checkpoint = await checkpointer.maybeCheckpoint(state);
+
+    expect(state.status).toBe("suspended");
+    expect(checkpoint).toMatchObject({ type: "checkpoint_written", seq: 3, atSeq: 3 });
+    await expect(store.latestSnapshot(runId)).resolves.toMatchObject({ atSeq: 3 });
+  });
+
+  it("leaves neither checkpoint event nor snapshot when the atomic append conflicts", async () => {
+    const store = new InMemoryEventStore();
+    const recorder = new RunRecorder(store, runId, segmentId, 0, new FakeClock(100));
+    vi.spyOn(store, "appendWithSnapshot").mockRejectedValue(new SeqConflictError(4, 5));
+
+    await expect(
+      runLoop({
+        recorder,
+        clock: new FakeClock(100),
+        model: new FakeModelPort([completion()]),
+        tool: new FakeToolPort(),
+        context: new NaiveContext(),
+        ids: new SequentialIdGenerator(),
+        goal: "checkpoint conflict",
+        configHash,
+        budgets: defaultBudgets,
+        checkpointEveryEvents: 4,
+        policyVersion: "test.policy",
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({ code: "lease_lost" });
+
+    const storedEvents: Event[] = [];
+    for await (const event of store.read(runId)) {
+      storedEvents.push(event);
+    }
+    expect(storedEvents).toHaveLength(4);
+    expect(storedEvents.some(({ type }) => type === "checkpoint_written")).toBe(false);
+    await expect(store.latestSnapshot(runId)).resolves.toBeUndefined();
+    expect(recorder.nextSeq).toBe(4);
+  });
+
+  it("rejects a checkpoint whose active span context is invalid", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+    const result = await runLoop({
+      recorder,
+      clock,
+      model: new FakeModelPort([completion()]),
+      tool: new FakeToolPort(),
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "invalid checkpoint span",
+      configHash,
+      budgets: defaultBudgets,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+    });
+    const checkpointer = new Checkpointer({
+      recorder,
+      runId,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      clock,
+    });
+    invalidSpanContext = true;
+    try {
+      await expect(checkpointer.write(result.state, "manual")).rejects.toMatchObject({
+        code: "no_active_span",
+      });
+    } finally {
+      invalidSpanContext = false;
+    }
   });
 
   it("durably records tool intent and feeds tool results into the next model request", async () => {
@@ -480,7 +649,10 @@ describe("runLoop", () => {
         ],
       ]),
     );
-    const contextPort = { build: vi.fn(() => Promise.resolve([])) };
+    const contextPort = {
+      build: vi.fn(() => Promise.resolve([])),
+      snapshot: vi.fn(() => Promise.resolve([])),
+    };
 
     await expect(
       runLoop({
