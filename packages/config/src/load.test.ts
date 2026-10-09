@@ -56,6 +56,7 @@ describe("loadConfig", () => {
     expect(config.run.budgets).toEqual({
       maxSteps: 12,
       maxWallClockMs: 3_600_000,
+      countSuspendedTime: false,
     });
     expect(config.servers).toEqual([]);
   });
@@ -93,6 +94,7 @@ describe("loadConfig", () => {
       maxSteps: 12,
       maxCostUsd: 2.5,
       maxWallClockMs: 60_000,
+      countSuspendedTime: false,
     });
   });
 
@@ -110,7 +112,17 @@ describe("loadConfig", () => {
       maxSteps: 50,
       maxCostUsd: 2.5,
       maxWallClockMs: 1000,
+      countSuspendedTime: false,
     });
+  });
+
+  it("coerces the suspended-time environment override", async () => {
+    const config = await loadConfig({
+      env: { HARNESS__RUN__BUDGETS__COUNTSUSPENDEDTIME: "true" },
+      readFile: reader(validYaml),
+    });
+
+    expect(config.run.budgets.countSuspendedTime).toBe(true);
   });
 
   it("rejects unknown environment segments with the variable path only", async () => {
@@ -290,7 +302,9 @@ describe("loadConfig", () => {
     });
 
     expect(config).toEqual({
-      run: { budgets: { maxSteps: 200, maxWallClockMs: 3_600_000 } },
+      run: {
+        budgets: { maxSteps: 200, maxWallClockMs: 3_600_000, countSuspendedTime: false },
+      },
       store: {},
       models: {},
       servers: [],
@@ -310,6 +324,7 @@ describe("loadConfig", () => {
     expect(config.run.budgets).toEqual({
       maxSteps: 50,
       maxWallClockMs: 3_600_000,
+      countSuspendedTime: false,
     });
   });
 
@@ -333,7 +348,11 @@ describe("loadConfig", () => {
       readFile: reader("{}"),
     });
 
-    expect(config.run.budgets).toEqual({ maxSteps: 200, maxWallClockMs: 3_600_000 });
+    expect(config.run.budgets).toEqual({
+      maxSteps: 200,
+      maxWallClockMs: 3_600_000,
+      countSuspendedTime: false,
+    });
     expect(config.servers).toEqual([]);
   });
 });
