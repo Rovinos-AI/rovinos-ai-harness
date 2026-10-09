@@ -15,13 +15,7 @@ import {
   type Tracer,
   type TracerProvider,
 } from "@opentelemetry/api";
-import {
-  HarnessError,
-  Id,
-  Sha256Hex,
-  type JsonValue,
-  type RunConfig,
-} from "@harness/schemas";
+import { HarnessError, Id, Sha256Hex, type JsonValue, type RunConfig } from "@harness/schemas";
 import { SqliteEventStore, type EventStore } from "@harness/store";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ContextPort, IdGenerator, ModelPort, ToolPort } from "./ports.js";
@@ -353,18 +347,18 @@ export async function createRuntime(
       withShutdown((signal) =>
         storedGoal(store, runId).then((goal) =>
           resumeRun({
-          store,
-          runId,
-          clock,
-          ids,
-          goal,
-          model,
-          tool,
-          context,
-          signal,
-          budgets: config.run.budgets,
-          checkpointEveryEvents: config.run.checkpointEveryEvents,
-          resumePolicy: config.run.resume.onNonIdempotent,
+            store,
+            runId,
+            clock,
+            ids,
+            goal,
+            model,
+            tool,
+            context,
+            signal,
+            budgets: config.run.budgets,
+            checkpointEveryEvents: config.run.checkpointEveryEvents,
+            resumePolicy: config.run.resume.onNonIdempotent,
           }),
         ),
       ),

@@ -110,7 +110,6 @@ class TestSpan implements Span {
     _exception: Parameters<Span["recordException"]>[0],
     _time?: Parameters<Span["recordException"]>[1],
   ): void {}
-
 }
 
 class TestTracer implements Tracer {
@@ -347,10 +346,7 @@ async function seedPendingApproval(harness: CliHarness): Promise<{
   return { runId, approvalId, events: await readEvents(harness.store, runId) };
 }
 
-function runResult(
-  status: RunLoopResult["status"],
-  events: readonly Event[],
-): RunLoopResult {
+function runResult(status: RunLoopResult["status"], events: readonly Event[]): RunLoopResult {
   const first = events[0];
   if (first === undefined) {
     throw new Error("Expected events for a run result.");
@@ -424,21 +420,15 @@ describe("run, resume, and inspect CLI commands", () => {
     const harness = createHarness(model, config, new FakeToolPort(), shutdown);
     const inputPath = await createFile("input.json", '{"goal":"wait"}');
 
-    const runCode = await main(
-      ["--json", "run", "--input", inputPath],
-      harness.context,
-      [runCommand],
-    );
+    const runCode = await main(["--json", "run", "--input", inputPath], harness.context, [
+      runCommand,
+    ]);
     const runResult = parseJson(RunResultSchema, harness.stdout[0] ?? "");
     const runId = runResult.runId;
     harness.stdout.length = 0;
     harness.stderr.length = 0;
 
-    const inspectCode = await main(
-      ["--json", "inspect", runId],
-      harness.context,
-      [inspectCommand],
-    );
+    const inspectCode = await main(["--json", "inspect", runId], harness.context, [inspectCommand]);
 
     expect(runCode).toBe(ExitCode.suspended);
     expect(inspectCode).toBe(ExitCode.ok);
@@ -466,17 +456,9 @@ describe("run, resume, and inspect CLI commands", () => {
         ],
       ]),
     );
-    const harness = createHarness(
-      new FakeModelPort([completion("finished")]),
-      config,
-      tool,
-    );
+    const harness = createHarness(new FakeModelPort([completion("finished")]), config, tool);
     const { runId, approvalId, events } = await seedPendingApproval(harness);
-    const inspectCode = await main(
-      ["--json", "inspect", runId],
-      harness.context,
-      [inspectCommand],
-    );
+    const inspectCode = await main(["--json", "inspect", runId], harness.context, [inspectCommand]);
     const hidden = harness.stdout.join("");
 
     expect(inspectCode).toBe(ExitCode.ok);
@@ -485,11 +467,9 @@ describe("run, resume, and inspect CLI commands", () => {
     harness.stdout.length = 0;
     harness.stderr.length = 0;
 
-    const revealCode = await main(
-      ["--json", "inspect", runId, "--show-content"],
-      harness.context,
-      [inspectCommand],
-    );
+    const revealCode = await main(["--json", "inspect", runId, "--show-content"], harness.context, [
+      inspectCommand,
+    ]);
     expect(revealCode).toBe(ExitCode.ok);
     expect(harness.stdout.join("")).toContain("<EMAIL_1>");
     expect(harness.stderr[0]).toBe("content_may_be_sensitive\n");

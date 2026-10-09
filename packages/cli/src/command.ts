@@ -19,10 +19,7 @@ export interface CliContext {
   /** Provides the current time without direct clock access in commands. */
   clock: Clock;
   /** Creates a composed run-loop runtime, optionally replacing its ports. */
-  createRuntime?(
-    config: HarnessConfig,
-    overrides?: RuntimeOverrides,
-  ): Promise<Runtime> | Runtime;
+  createRuntime?(config: HarnessConfig, overrides?: RuntimeOverrides): Promise<Runtime> | Runtime;
 }
 
 /** A lazily supplied command registration unit for the harness CLI. */
