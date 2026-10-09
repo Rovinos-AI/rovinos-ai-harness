@@ -454,6 +454,80 @@ describe("runLoop", () => {
     expect(state.status).toBe("suspended");
     expect(checkpoint).toMatchObject({ type: "checkpoint_written", seq: 3, atSeq: 3 });
     await expect(store.latestSnapshot(runId)).resolves.toMatchObject({ atSeq: 3 });
+
+    if (checkpoint === undefined) {
+      throw new Error("Expected a checkpoint event.");
+    }
+    const stateAfterCheckpoint = foldRunState([...events, checkpoint]);
+    await expect(checkpointer.maybeCheckpoint(stateAfterCheckpoint)).resolves.toBeUndefined();
+    const storedEvents: Event[] = [];
+    for await (const event of store.read(runId)) {
+      storedEvents.push(event);
+    }
+    expect(storedEvents.filter(({ type }) => type === "checkpoint_written")).toHaveLength(1);
+  });
+
+  it("checks cadence across multi-event steps and resets after a checkpoint", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+    let events: Event[] = [];
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      events = await recorder.recordBatch([
+        { type: "run_created", v: 1, configHash, policyVersion: "test.policy" },
+        { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
+      ]);
+      const last = events.at(-1);
+      if (last === undefined) {
+        throw new Error("Expected a running status event.");
+      }
+      return last;
+    });
+    const checkpointer = new Checkpointer({
+      recorder,
+      runId,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      clock,
+      checkpointEveryEvents: 20,
+    });
+    const firstCheckpoint = await checkpointer.write(foldRunState(events), "cadence");
+    const stateAfterCheckpoint = foldRunState([...events, firstCheckpoint]);
+    const lastCheckpoint = stateAfterCheckpoint.lastCheckpoint;
+    if (lastCheckpoint === undefined) {
+      throw new Error("Expected the written checkpoint in run state.");
+    }
+    const write = vi.spyOn(checkpointer, "write").mockResolvedValue(firstCheckpoint);
+
+    await expect(
+      checkpointer.maybeCheckpoint({
+        ...stateAfterCheckpoint,
+        nextSeq: lastCheckpoint.atSeq + 1 + 19,
+      }),
+    ).resolves.toBeUndefined();
+    await checkpointer.maybeCheckpoint({
+      ...stateAfterCheckpoint,
+      nextSeq: lastCheckpoint.atSeq + 1 + 21,
+    });
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenLastCalledWith(
+      { ...stateAfterCheckpoint, nextSeq: lastCheckpoint.atSeq + 1 + 21 },
+      "cadence",
+    );
+
+    write.mockClear();
+    await expect(
+      checkpointer.maybeCheckpoint({
+        ...stateAfterCheckpoint,
+        nextSeq: lastCheckpoint.atSeq + 1 + 19,
+      }),
+    ).resolves.toBeUndefined();
+    expect(write).not.toHaveBeenCalled();
+    await checkpointer.maybeCheckpoint({
+      ...stateAfterCheckpoint,
+      nextSeq: lastCheckpoint.atSeq + 1 + 20,
+    });
+    expect(write).toHaveBeenCalledTimes(1);
   });
 
   it("leaves neither checkpoint event nor snapshot when the atomic append conflicts", async () => {

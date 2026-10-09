@@ -100,7 +100,10 @@ export class Checkpointer {
   maybeCheckpoint(state: RunState): Promise<Event | undefined> {
     const afterCheckpoint = state.lastCheckpoint === undefined ? 0 : state.lastCheckpoint.atSeq + 1;
     const eventsSinceCheckpoint = state.nextSeq - afterCheckpoint;
-    if (state.status !== "suspended" && eventsSinceCheckpoint < this.checkpointEveryEvents) {
+    if (
+      eventsSinceCheckpoint <= 0 ||
+      (state.status !== "suspended" && eventsSinceCheckpoint < this.checkpointEveryEvents)
+    ) {
       return Promise.resolve(undefined);
     }
     return this.write(state, state.status === "suspended" ? "suspended" : "cadence");
