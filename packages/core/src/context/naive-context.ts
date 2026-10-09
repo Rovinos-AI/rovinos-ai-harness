@@ -41,4 +41,9 @@ export class NaiveContext implements ContextPort {
   snapshot(): Promise<JsonValue> {
     return Promise.resolve([]);
   }
+
+  /** {@inheritDoc ContextPort.restore} */
+  restore(_snapshot: JsonValue | undefined, _eventsAfterSnapshot: readonly Event[]): Promise<void> {
+    return Promise.resolve();
+  }
 }

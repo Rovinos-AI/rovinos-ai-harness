@@ -11,6 +11,7 @@ import {
   SpanStatusCode,
   type Context,
   type ContextManager,
+  type Link,
   type Span,
   type SpanContext,
   type SpanOptions,
@@ -36,12 +37,12 @@ import {
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";
-import { RunRecorder } from "./recorder.js";
+import { RunRecorder, type EventPartial } from "./recorder.js";
 import { runLoop } from "./loop.js";
 import { Checkpointer } from "./checkpoint.js";
 import { foldRunState } from "./run-state.js";
 import { RUN_SPAN } from "./spans.js";
-import type { ModelCompletion, ModelPort } from "./ports.js";
+import type { ContextPort, IdGenerator, ModelCompletion, ModelPort } from "./ports.js";
 import {
   applyResolvedApprovals,
   ApprovalAlreadyResolvedError,
@@ -52,6 +53,8 @@ import {
   requestApproval,
   resolveApproval,
 } from "./approvals.js";
+import { ResumeConflictError, RunAlreadyTerminalError, resumeRun } from "./resume.js";
+import type { ResumeRunOptions } from "./resume.js";
 
 const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
@@ -67,6 +70,7 @@ class TestSpan implements Span {
   private ended = false;
   private recordedExceptions = 0;
   readonly attributes: Record<string, string | number | boolean> = {};
+  readonly links: Link[] = [];
   readonly spanContextValue: SpanContext = {
     traceId: invalidSpanContext ? "0".repeat(32) : "a".repeat(32),
     spanId: invalidSpanContext ? "0".repeat(16) : (++nextSpanId).toString(16).padStart(16, "0"),
@@ -77,9 +81,13 @@ class TestSpan implements Span {
     readonly name: string,
     readonly parentSpanId: string | undefined,
     attributes?: SpanOptions["attributes"],
+    links?: SpanOptions["links"],
   ) {
     if (attributes !== undefined) {
       Object.assign(this.attributes, attributes);
+    }
+    if (links !== undefined) {
+      this.links.push(...links);
     }
   }
 
@@ -107,11 +115,13 @@ class TestSpan implements Span {
     return this;
   }
 
-  addLink(_link: Parameters<Span["addLink"]>[0]): this {
+  addLink(link: Parameters<Span["addLink"]>[0]): this {
+    this.links.push(link);
     return this;
   }
 
-  addLinks(_links: Parameters<Span["addLinks"]>[0]): this {
+  addLinks(links: Parameters<Span["addLinks"]>[0]): this {
+    this.links.push(...links);
     return this;
   }
 
@@ -147,7 +157,12 @@ class TestTracer implements Tracer {
 
   startSpan(name: string, options?: SpanOptions, parentContext?: Context): Span {
     const parent = trace.getSpan(parentContext ?? context.active());
-    const span = new TestSpan(name, parent?.spanContext().spanId, options?.attributes);
+    const span = new TestSpan(
+      name,
+      parent?.spanContext().spanId,
+      options?.attributes,
+      options?.links,
+    );
     this.spans.push(span);
     return span;
   }
@@ -350,6 +365,50 @@ function normalizeEvents(events: readonly Event[]): JsonValueType {
 }
 
 const tracerProvider = new TestTracerProvider();
+
+async function createRunHistory(
+  store: EventStore,
+  clock: FakeClock,
+  laterEvents: readonly EventPartial[] = [],
+): Promise<Event[]> {
+  const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+  const initialEvents: EventPartial[] = [
+    { type: "run_created", v: 1, configHash, policyVersion: "test.policy" },
+    { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
+    ...laterEvents,
+  ];
+  let events: Event[] = [];
+  await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+    events = await recorder.recordBatch(initialEvents);
+    const last = events.at(-1);
+    if (last === undefined) {
+      throw new Error("Expected a seeded run history.");
+    }
+    return last;
+  });
+  return events;
+}
+
+function createResumeOptions(
+  store: EventStore,
+  clock: FakeClock,
+  overrides: Partial<ResumeRunOptions> = {},
+): ResumeRunOptions {
+  const ids: IdGenerator = new SequentialIdGenerator();
+  return {
+    store,
+    runId,
+    clock,
+    model: new FakeModelPort([completion()]),
+    tool: new FakeToolPort(),
+    context: new NaiveContext(),
+    ids,
+    goal: "resumed goal",
+    signal: new AbortController().signal,
+    budgets: defaultBudgets,
+    ...overrides,
+  };
+}
 
 beforeAll(() => {
   context.setGlobalContextManager(new TestContextManager());
@@ -727,9 +786,11 @@ describe("runLoop", () => {
       expect(durableTypes.at(-1)).toBe("model_request");
       return complete(request, callContext);
     });
+
     const contextPort = {
       build: vi.fn(() => Promise.resolve(["prior context"])),
       snapshot: vi.fn(() => Promise.resolve([])),
+      restore: vi.fn(() => Promise.resolve()),
     };
     const result = await runLoop({
       recorder,
@@ -1149,6 +1210,7 @@ describe("runLoop", () => {
     const contextPort = {
       build: vi.fn(() => Promise.resolve([])),
       snapshot: vi.fn(() => Promise.resolve([])),
+      restore: vi.fn(() => Promise.resolve()),
     };
 
     await expect(
@@ -1465,6 +1527,275 @@ describe("runLoop", () => {
     });
     expect(result.events.find(({ type }) => type === "model_response")).toMatchObject({
       costMicros: 2,
+    });
+  });
+
+  describe("resumeRun", () => {
+    it("resumes after a crash during a model request and restores the event history", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      const prior = await createRunHistory(store, clock, [
+        {
+          type: "model_request",
+          v: 1,
+          requestId: modelCallId,
+          provider: "test_provider",
+          model: "test_model",
+          messages: { goal: "resumed goal" },
+        },
+      ]);
+      const contextPort: ContextPort = new NaiveContext();
+      const restore = vi.spyOn(contextPort, "restore");
+      const result = await resumeRun(createResumeOptions(store, clock, { context: contextPort }));
+
+      expect(result.status).toBe("completed");
+      expect(result.state.steps).toBe(1);
+      expect(result.events.filter(({ type }) => type === "run_created")).toHaveLength(0);
+      expect(
+        result.events
+          .filter((event) => event.type === "run_status_changed")
+          .map((event) => event.reason),
+      ).toEqual(["interrupted", "resumed", "final_answer"]);
+      expect(result.state.segmentId).not.toBe(segmentId);
+      expect(restore).toHaveBeenCalledWith(undefined, prior);
+    });
+
+    it("reruns idempotent dangling calls and escalates non-idempotent calls", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      const idempotentCallId = "44444444444444444444444444";
+      const ambiguousCallId = "55555555555555555555555555";
+      await createRunHistory(store, clock, [
+        {
+          type: "tool_intent",
+          v: 1,
+          callId: idempotentCallId,
+          toolId: "idempotent_tool",
+          idempotent: true,
+          policyDecision: "allow",
+          argsHash: "a".repeat(64),
+          args: { value: 1 },
+        },
+        {
+          type: "tool_intent",
+          v: 1,
+          callId: ambiguousCallId,
+          toolId: "ambiguous_tool",
+          idempotent: false,
+          policyDecision: "allow",
+          argsHash: "b".repeat(64),
+          args: { value: 2 },
+        },
+      ]);
+      const tool = new FakeToolPort(
+        new Map([
+          [
+            "idempotent_tool",
+            {
+              idempotent: true,
+              timeoutMs: 1000,
+              execute: () => Promise.resolve({ outcome: "ok", result: { completed: true } }),
+            },
+          ],
+          [
+            "ambiguous_tool",
+            {
+              idempotent: false,
+              timeoutMs: 1000,
+              execute: () => Promise.resolve({ outcome: "ok", result: { completed: true } }),
+            },
+          ],
+        ]),
+      );
+      const result = await resumeRun(createResumeOptions(store, clock, { tool }));
+      const stored = await readApprovalEvents(store);
+
+      expect(result.status).toBe("suspended");
+      expect(tool.calls.map(({ call }) => call.callId)).toEqual([idempotentCallId]);
+      expect(stored.filter(({ type }) => type === "tool_intent")).toHaveLength(2);
+      expect(stored.filter(({ type }) => type === "tool_result")).toHaveLength(1);
+      expect(result.state.pendingToolCalls.has(ambiguousCallId)).toBe(true);
+      expect(result.state.pendingApprovals.size).toBe(1);
+    });
+
+    it("re-suspends an unresolved approval, then applies its durable decision", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      await createRunHistory(store, clock, [
+        {
+          type: "tool_intent",
+          v: 1,
+          callId: modelCallId,
+          toolId: "approval_tool",
+          idempotent: false,
+          policyDecision: "ask",
+          argsHash: "c".repeat(64),
+          args: { value: 1 },
+        },
+        {
+          type: "approval_requested",
+          v: 1,
+          approvalId,
+          callId: modelCallId,
+          payload: { kind: "approval" },
+        },
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "running",
+          to: "suspended",
+          reason: "awaiting_approval",
+        },
+      ]);
+      const tool = new FakeToolPort(
+        new Map([
+          [
+            "approval_tool",
+            {
+              idempotent: false,
+              timeoutMs: 1000,
+              execute: () => Promise.resolve({ outcome: "ok", result: { approved: true } }),
+            },
+          ],
+        ]),
+      );
+      const options = createResumeOptions(store, clock, { tool });
+      const suspended = await resumeRun(options);
+
+      expect(suspended.status).toBe("suspended");
+      expect(suspended.state.pendingApprovals.size).toBe(1);
+      expect(suspended.events.filter(({ type }) => type === "approval_requested")).toHaveLength(0);
+      await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
+      const resumed = await resumeRun(options);
+      const stored = await readApprovalEvents(store);
+
+      expect(resumed.status).toBe("completed");
+      expect(tool.calls.map(({ call }) => call.callId)).toEqual([modelCallId]);
+      expect(stored.filter(({ type }) => type === "tool_intent")).toHaveLength(1);
+      expect(stored.filter(({ type }) => type === "tool_result")).toHaveLength(1);
+    });
+
+    it("allows exactly one concurrent resumer to claim a run", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      await createRunHistory(store, clock);
+      const readHead = store.head.bind(store);
+      let headReads = 0;
+      let releaseBarrier: (() => void) | undefined;
+      const bothHeadsRead = new Promise<void>((resolve) => {
+        releaseBarrier = resolve;
+      });
+      vi.spyOn(store, "head").mockImplementation(async (requestedRunId) => {
+        const currentHead = await readHead(requestedRunId);
+        headReads += 1;
+        if (headReads === 2) {
+          releaseBarrier?.();
+        }
+        await bothHeadsRead;
+        return currentHead;
+      });
+
+      const attempts = await Promise.allSettled([
+        resumeRun(createResumeOptions(store, clock)),
+        resumeRun(createResumeOptions(store, clock)),
+      ]);
+      const winners = attempts.filter(({ status }) => status === "fulfilled");
+      const losers = attempts.filter(({ status }) => status === "rejected");
+      const loser = losers[0];
+
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(1);
+      if (loser?.status !== "rejected") {
+        throw new Error("Expected one concurrent resume attempt to lose.");
+      }
+      expect(loser.reason).toBeInstanceOf(ResumeConflictError);
+    });
+
+    it("rejects a terminal run", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      await createRunHistory(store, clock, [
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "running",
+          to: "completed",
+          reason: "final_answer",
+        },
+      ]);
+
+      await expect(resumeRun(createResumeOptions(store, clock))).rejects.toBeInstanceOf(
+        RunAlreadyTerminalError,
+      );
+    });
+
+    it("creates a new segment linked to the checkpoint span", async () => {
+      const startingSpanIndex = tracerProvider.spans.length;
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      const history = await createRunHistory(store, clock);
+      const contextPort: ContextPort = new NaiveContext();
+      const recorder = new RunRecorder(store, runId, segmentId, history.length, clock);
+      const checkpointEvents: Event[] = [];
+      await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+        const checkpointer = new Checkpointer({
+          recorder,
+          runId,
+          context: contextPort,
+          ids: new SequentialIdGenerator(),
+          clock,
+        });
+        checkpointEvents.push(await checkpointer.write(foldRunState(history), "cadence"));
+        checkpointEvents.push(
+          ...(await recorder.recordBatch([
+            {
+              type: "model_request",
+              v: 1,
+              requestId: modelCallId,
+              provider: "test_provider",
+              model: "test_model",
+              messages: { goal: "resumed goal" },
+            },
+            {
+              type: "run_status_changed",
+              v: 1,
+              from: "running",
+              to: "suspended",
+              reason: "shutdown",
+            },
+          ])),
+        );
+        const last = checkpointEvents.at(-1);
+        if (last === undefined) {
+          throw new Error("Expected run history with a checkpoint.");
+        }
+        return last;
+      });
+      const snapshot = await store.latestSnapshot(runId);
+      const restore = vi.spyOn(contextPort, "restore");
+      const result = await resumeRun(createResumeOptions(store, clock, { context: contextPort }));
+      const resumedRunSpan = tracerProvider.spans
+        .slice(startingSpanIndex)
+        .find(
+          (span) =>
+            span.name === "harness.run" &&
+            span.attributes["harness.segment.id"] === result.state.segmentId,
+        );
+
+      expect(snapshot).toBeDefined();
+      if (snapshot === undefined || resumedRunSpan === undefined) {
+        throw new Error("Expected the checkpoint snapshot and resumed run span.");
+      }
+      expect(result.state.segmentId).not.toBe(segmentId);
+      expect(resumedRunSpan.links).toHaveLength(1);
+      expect(resumedRunSpan.links[0]?.context).toMatchObject({
+        traceId: snapshot.traceparent.slice(3, 35),
+        spanId: snapshot.traceparent.slice(36, 52),
+      });
+      expect(restore.mock.calls[0]?.[1].map(({ type }) => type)).toEqual([
+        "model_request",
+        "run_status_changed",
+      ]);
     });
   });
 

@@ -41,6 +41,9 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly modelName?: Code;
 }
 
+/** Execution options shared by new runs and resumptions. */
+export type RunLoopExecutionOptions = Omit<RunLoopOptions, "configHash" | "policyVersion">;
+
 /** Final state and ordered events produced by a run. */
 export interface RunLoopResult {
   readonly status: RunState["status"];
@@ -90,17 +93,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
     }
     events.push(...recorded);
     const runId = last.runId;
-    const checkpointer = new Checkpointer({
-      recorder: options.recorder,
-      runId,
-      context: options.context,
-      ids: options.ids,
-      clock: options.clock,
-      ...(options.checkpointEveryEvents === undefined
-        ? {}
-        : { checkpointEveryEvents: options.checkpointEveryEvents }),
-    });
-    const ended = await runLoopSteps(options, events, { runId, checkpointer, budgetTracker });
+    const ended = await continueRunLoop(options, events, runId, budgetTracker);
     const state = foldRunState(events);
     result = {
       status: state.status,
@@ -115,6 +108,35 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
     throw new Error("Expected the run loop to record an outcome.");
   }
   return result;
+}
+
+/**
+ * Continues a run from its already-folded event history within the active run span.
+ *
+ * @param options - Ports and runtime settings for this segment.
+ * @param events - Complete validated history, extended in place by the loop.
+ * @param runId - Identifier of the existing run.
+ * @param budgetTracker - Budget tracker initialized for this run or resume.
+ * @returns The final event produced by the continued loop.
+ */
+export async function continueRunLoop(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  runId: Id,
+  budgetTracker = new BudgetTracker(options.budgets),
+): Promise<Event> {
+  const checkpointer = new Checkpointer({
+    recorder: options.recorder,
+    runId,
+    context: options.context,
+    ids: options.ids,
+    clock: options.clock,
+    ...(options.checkpointEveryEvents === undefined
+      ? {}
+      : { checkpointEveryEvents: options.checkpointEveryEvents }),
+  });
+  const execution = { runId, checkpointer, budgetTracker };
+  return runLoopSteps(options, events, execution);
 }
 
 async function recordBudgetFailure(
@@ -158,7 +180,7 @@ async function recordBudgetFailureAndCheckpoint(
 }
 
 async function runLoopSteps(
-  options: RunLoopOptions,
+  options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<Event> {
@@ -232,7 +254,7 @@ async function runLoopSteps(
 }
 
 async function runToolCalls(
-  options: RunLoopOptions,
+  options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
   calls: ModelCompletion["toolCalls"],

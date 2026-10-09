@@ -50,6 +50,13 @@ export {
   TOOL_CALL_SPAN,
 } from "./spans.js";
 export { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
+export {
+  ResumeConflictError,
+  RunAlreadyTerminalError,
+  RunNotResumableError,
+  resumeRun,
+  type ResumeRunOptions,
+} from "./resume.js";
 export { modelStep, type ModelStepOptions, type ModelStepResult } from "./steps/model-step.js";
 export {
   applyDanglingIntents,
