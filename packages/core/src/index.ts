@@ -32,6 +32,8 @@ export {
   ApprovalEditsRequiredError,
   ApprovalNotFoundError,
   ApprovalRequestStateError,
+  ApprovalResolutionConflictError,
+  ApprovalRunNotSuspendedError,
   applyResolvedApprovals,
   requestApproval,
   resolveApproval,

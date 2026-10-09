@@ -28,6 +28,7 @@ export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freez
   not_found_or_resolved: ExitCode.notFoundOrResolved,
   approval_not_found: ExitCode.notFoundOrResolved,
   approval_already_resolved: ExitCode.notFoundOrResolved,
+  approval_run_not_suspended: ExitCode.notFoundOrResolved,
   input_not_found: ExitCode.notFoundOrResolved,
   input_already_resolved: ExitCode.notFoundOrResolved,
   replay_failed: ExitCode.replayFailed,

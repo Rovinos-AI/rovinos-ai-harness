@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import { SeqConflictError, type EventStore } from "@harness/store";
 import type { Checkpointer } from "./checkpoint.js";
 import { LeaseLostError, RunRecorder, type Clock } from "./recorder.js";
 import { foldRunState, type RunState } from "./run-state.js";
@@ -52,6 +52,28 @@ export class ApprovalAlreadyResolvedError extends HarnessError {
   constructor() {
     super("Approval was already resolved.");
     this.name = "ApprovalAlreadyResolvedError";
+  }
+}
+
+/** Error raised when an approval is requested for a run that is not suspended. */
+export class ApprovalRunNotSuspendedError extends HarnessError {
+  readonly code = "approval_run_not_suspended";
+
+  /** Creates an error for a run that cannot accept an approval resolution. */
+  constructor() {
+    super("Approvals can only be resolved while the run is suspended.");
+    this.name = "ApprovalRunNotSuspendedError";
+  }
+}
+
+/** Error raised when repeated concurrent appends prevent an approval resolution. */
+export class ApprovalResolutionConflictError extends HarnessError {
+  readonly code = "approval_resolution_conflict";
+
+  /** Creates an error for a resolution that could not append after bounded retries. */
+  constructor() {
+    super("Approval resolution conflicted with concurrent run events.");
+    this.name = "ApprovalResolutionConflictError";
   }
 }
 
@@ -182,47 +204,64 @@ export async function resolveApproval(
   if (decision === "edit" && edits === undefined) {
     throw new ApprovalEditsRequiredError();
   }
-  const expectedSeq = await store.head(runId);
-  const { state, lastEvent } = await readState(store, runId);
-  if (!state.approvalRequests.has(approvalId)) {
-    throw new ApprovalNotFoundError();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { state, lastEvent } = await readState(store, runId);
+    const request = pendingApproval(state, approvalId);
+    if (state.status !== "suspended") {
+      throw new ApprovalRunNotSuspendedError();
+    }
+
+    const resolvedAt = Math.floor(clock.now());
+    const recorder = new RunRecorder(store, runId, lastEvent.segmentId, state.nextSeq, {
+      now: () => resolvedAt,
+    });
+    try {
+      const event = await recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () =>
+        recorder.record({
+          type: "approval_resolved",
+          v: 1,
+          approvalId,
+          decision,
+          waitMs: Math.max(0, resolvedAt - request.ts),
+          ...(edits === undefined ? {} : { edits }),
+        }),
+      );
+      if (event.type !== "approval_resolved") {
+        throw new ApprovalNotFoundError();
+      }
+      return event;
+    } catch (error) {
+      if (!(error instanceof LeaseLostError) && !(error instanceof SeqConflictError)) {
+        throw error;
+      }
+      if (attempt === 2) {
+        const { state: latestState } = await readState(store, runId);
+        pendingApproval(latestState, approvalId);
+        if (latestState.status !== "suspended") {
+          throw new ApprovalRunNotSuspendedError();
+        }
+        throw new ApprovalResolutionConflictError();
+      }
+    }
   }
+  throw new ApprovalResolutionConflictError();
+}
+
+function pendingApproval(state: RunState, approvalId: Id): Extract<
+  Event,
+  { type: "approval_requested" }
+> {
   if (state.resolvedApprovals.has(approvalId)) {
     throw new ApprovalAlreadyResolvedError();
+  }
+  if (!state.approvalRequests.has(approvalId)) {
+    throw new ApprovalNotFoundError();
   }
   const request = state.pendingApprovals.get(approvalId);
   if (request === undefined) {
     throw new ApprovalNotFoundError();
   }
-
-  const resolvedAt = Math.floor(clock.now());
-  const recorder = new RunRecorder(store, runId, lastEvent.segmentId, expectedSeq, {
-    now: () => resolvedAt,
-  });
-  try {
-    const event = await recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () =>
-      recorder.record({
-        type: "approval_resolved",
-        v: 1,
-        approvalId,
-        decision,
-        waitMs: Math.max(0, resolvedAt - request.ts),
-        ...(edits === undefined ? {} : { edits }),
-      }),
-    );
-    if (event.type !== "approval_resolved") {
-      throw new ApprovalNotFoundError();
-    }
-    return event;
-  } catch (error) {
-    if (error instanceof LeaseLostError) {
-      const latest = await readState(store, runId);
-      if (latest.state.resolvedApprovals.has(approvalId)) {
-        throw new ApprovalAlreadyResolvedError();
-      }
-    }
-    throw error;
-  }
+  return request;
 }
 
 /**
