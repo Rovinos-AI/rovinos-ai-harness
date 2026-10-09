@@ -30,6 +30,7 @@ export {
 } from "./spans.js";
 export { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
 export { modelStep, type ModelStepOptions, type ModelStepResult } from "./steps/model-step.js";
+export { toolStep, type ToolStepOptions } from "./steps/tool-step.js";
 export type {
   ContextPort,
   IdGenerator,
@@ -40,5 +41,8 @@ export type {
   ModelUsage,
   NewRunMetadata,
   RunContext,
+  ToolDescription,
+  ToolExecutionResult,
+  ToolPort,
 } from "./ports.js";
 export { NaiveContext } from "./context/naive-context.js";
