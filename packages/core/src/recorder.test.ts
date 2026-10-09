@@ -29,6 +29,7 @@ const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
 const hash = "a".repeat(64);
 const finishedSpans: SpySpan[] = [];
+const parentContexts: (Context | undefined)[] = [];
 let nextSpanId = 0;
 
 class SpySpan implements Span {
@@ -103,7 +104,8 @@ class SpySpan implements Span {
 }
 
 class SpyTracer implements Tracer {
-  startSpan(_name: string, options?: SpanOptions): Span {
+  startSpan(_name: string, options?: SpanOptions, parentContext?: Context): Span {
+    parentContexts.push(parentContext);
     return new SpySpan(options?.attributes);
   }
 
@@ -215,6 +217,7 @@ afterAll(() => {
 
 beforeEach(() => {
   finishedSpans.length = 0;
+  parentContexts.length = 0;
   nextSpanId = 0;
 });
 
@@ -336,10 +339,24 @@ describe("RunRecorder", () => {
     expect(recorder.nextSeq).toBe(2);
   });
 
-  it("requires a valid active span before recording", () => {
+  it("rejects when recording without a valid active span", async () => {
     const recorder = makeRecorder(new InMemoryEventStore());
 
-    expect(() => recorder.record(runCreated())).toThrow(SpanContextMissingError);
+    await expect(recorder.record(runCreated())).rejects.toBeInstanceOf(SpanContextMissingError);
+    await expect(recorder.recordBatch([runCreated()])).rejects.toBeInstanceOf(
+      SpanContextMissingError,
+    );
+  });
+
+  it("starts run spans as roots when another span is active", async () => {
+    const recorder = makeRecorder(new InMemoryEventStore());
+    const hostSpan = new SpySpan();
+
+    await context.with(trace.setSpan(ROOT_CONTEXT, hostSpan), () =>
+      recorder.withStepSpan(RUN_SPAN, {}, () => recorder.record(runCreated())),
+    );
+
+    expect(parentContexts).toEqual([ROOT_CONTEXT]);
   });
 
   it("rejects span attributes outside the registered allowlist", async () => {

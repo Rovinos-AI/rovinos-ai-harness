@@ -3,6 +3,7 @@
 import {
   context,
   isSpanContextValid,
+  ROOT_CONTEXT,
   SpanStatusCode,
   trace,
   type AttributeValue,
@@ -12,6 +13,7 @@ import {
 import { EventSchema, HarnessError, type Event, type Id, type NewEvent } from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
 import type { SpanDefinition, SpanDefinitionShape } from "@harness/telemetry";
+import { RUN_SPAN } from "./spans.js";
 
 /** Clock used to timestamp recorded events. */
 export interface Clock {
@@ -93,18 +95,16 @@ export class RunRecorder {
    * @returns The validated event with its assigned sequence.
    * @throws LeaseLostError when another writer has advanced the log.
    */
-  record(partial: EventPartial): Promise<Event> {
+  async record(partial: EventPartial): Promise<Event> {
     if (this.storedHead !== undefined) {
-      return Promise.reject(new LeaseLostError(this.storedHead));
+      throw new LeaseLostError(this.storedHead);
     }
     const spanContext = this.activeSpanContext();
-    return this.enqueue(async () => {
-      const [event] = await this.append([partial], spanContext);
-      if (event === undefined) {
-        throw new SpanContextMissingError();
-      }
-      return event;
-    });
+    const [event] = await this.enqueue(() => this.append([partial], spanContext));
+    if (event === undefined) {
+      throw new SpanContextMissingError();
+    }
+    return event;
   }
 
   /**
@@ -114,15 +114,16 @@ export class RunRecorder {
    * @returns The validated events with their assigned sequences.
    * @throws LeaseLostError when another writer has advanced the log.
    */
-  recordBatch(partials: readonly EventPartial[]): Promise<Event[]> {
+  async recordBatch(partials: readonly EventPartial[]): Promise<Event[]> {
     if (partials.length === 0) {
-      return Promise.resolve([]);
+      return [];
     }
     if (this.storedHead !== undefined) {
-      return Promise.reject(new LeaseLostError(this.storedHead));
+      throw new LeaseLostError(this.storedHead);
     }
     const spanContext = this.activeSpanContext();
-    return this.enqueue(() => this.append(partials, spanContext));
+    const events = await this.enqueue(() => this.append(partials, spanContext));
+    return events;
   }
 
   /**
@@ -147,7 +148,10 @@ export class RunRecorder {
       spanAttrs["harness.segment.id"] = this.segmentId;
     }
 
-    const span = definition.start(spanAttrs);
+    const span = definition.start(
+      spanAttrs,
+      definition.name === RUN_SPAN.name ? { parent: ROOT_CONTEXT } : undefined,
+    );
     const activeContext = trace.setSpan(context.active(), span);
     return context.with(activeContext, async () => {
       try {
