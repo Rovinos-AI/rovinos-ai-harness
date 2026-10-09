@@ -27,6 +27,10 @@ function reader(contents: string): (path: string) => Promise<string> {
   return () => Promise.resolve(contents);
 }
 
+function missingFile(): Error {
+  return Object.assign(new Error("not found"), { code: "ENOENT" });
+}
+
 function requireConfigError(error: unknown): ConfigError {
   expect(error).toBeInstanceOf(ConfigError);
   if (!(error instanceof ConfigError)) {
@@ -91,6 +95,37 @@ describe("loadConfig", () => {
     });
   });
 
+  it("resolves each environment segment against schema keys", async () => {
+    const config = await loadConfig({
+      env: {
+        HARNESS__RUN__BUDGETS__MAXSTEPS: "50",
+        HARNESS__RUN__BUDGETS__MAXWALLCLOCKMS: "1000",
+        HARNESS__RUN__BUDGETS__MAXCOSTUSD: "2.5",
+      },
+      readFile: reader(validYaml),
+    });
+
+    expect(config.run.budgets).toEqual({
+      maxSteps: 50,
+      maxCostUsd: 2.5,
+      maxWallClockMs: 1000,
+    });
+  });
+
+  it("rejects unknown environment segments with the variable path only", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        env: { HARNESS__RUN__BUDGETS__MAXSTEP: "private-value" },
+        readFile: reader(validYaml),
+      }),
+    );
+
+    expect(error.issues[0]).toContain(
+      "HARNESS__RUN__BUDGETS__MAXSTEP: unknown, ambiguous, or unsupported configuration path (config_env_invalid)",
+    );
+    expect(error.message).not.toContain("private-value");
+  });
+
   it("rejects unknown config keys", async () => {
     const error = await expectConfigError(
       loadConfig({
@@ -100,8 +135,7 @@ describe("loadConfig", () => {
     );
 
     expect(error.code).toBe("config_invalid");
-    expect(error.issues).toContain("store: known configuration keys (unrecognized_keys)");
-    expect(error.message).not.toContain("privateKey");
+    expect(error.issues).toContain('store: unknown key "privateKey" (unrecognized_keys)');
     expect(error.message).not.toContain("not-a-secret");
   });
 
@@ -178,7 +212,7 @@ describe("loadConfig", () => {
       }),
     );
 
-    expect(error.message).toContain("servers");
+    expect(error.message).toContain("HARNESS__SERVERS__0__ENDPOINT");
     expect(error.message).not.toContain("private-value");
   });
 
@@ -215,7 +249,7 @@ describe("loadConfig", () => {
     expect(text).toContain("expected string (invalid_type)");
     expect(text).toContain("at least 2 (too_small)");
     expect(text).toContain("at most 2 (too_big)");
-    expect(text).toContain("known configuration keys (unrecognized_keys)");
+    expect(text).toContain('unknown key "submittedValue" (unrecognized_keys)');
     expect(text).toContain("an allowed value (invalid_value)");
     expect(text).toContain("a valid format (invalid_format)");
     expect(text).toContain("a valid configuration value (invalid_union)");
@@ -243,6 +277,61 @@ describe("loadConfig", () => {
     );
 
     expect(error.message).toContain("config_env_invalid");
+    expect(error.message).toContain("HARNESS__RUN____MAXSTEPS");
     expect(error.message).not.toContain("private-value");
+  });
+
+  it("loads defaults when the default config file is missing", async () => {
+    const config = await loadConfig({
+      env: {},
+      readFile: () => Promise.reject(missingFile()),
+    });
+
+    expect(config).toEqual({
+      run: { budgets: { maxSteps: 200, maxWallClockMs: 3_600_000 } },
+      store: {},
+      models: {},
+      servers: [],
+      policy: {},
+      pii: {},
+      telemetry: {},
+      sandbox: {},
+    });
+  });
+
+  it("applies environment overrides when the default config file is missing", async () => {
+    const config = await loadConfig({
+      env: { HARNESS__RUN__BUDGETS__MAXSTEPS: "50" },
+      readFile: () => Promise.reject(missingFile()),
+    });
+
+    expect(config.run.budgets).toEqual({
+      maxSteps: 50,
+      maxWallClockMs: 3_600_000,
+    });
+  });
+
+  it("requires an explicitly selected config file to exist", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        configPath: "required.yaml",
+        env: {},
+        readFile: () => Promise.reject(missingFile()),
+      }),
+    );
+
+    expect(error.issues).toEqual([
+      "configuration: readable YAML or JSON config file (config_file_unavailable)",
+    ]);
+  });
+
+  it("loads an empty file as the default configuration", async () => {
+    const config = await loadConfig({
+      env: {},
+      readFile: reader("{}"),
+    });
+
+    expect(config.run.budgets).toEqual({ maxSteps: 200, maxWallClockMs: 3_600_000 });
+    expect(config.servers).toEqual([]);
   });
 });

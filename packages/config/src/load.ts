@@ -8,7 +8,11 @@ import { HarnessConfigSchema, type HarnessConfig } from "./schema.js";
 
 const unknownValueSchema = z.unknown();
 const blockedPathSegments = new Set(["__proto__", "constructor", "prototype"]);
-const keyAliases = new Map([["maxsteps", "maxSteps"]]);
+
+interface SchemaDefinition {
+  readonly type?: string;
+  readonly innerType?: z.ZodType;
+}
 
 /** A file reader injected by config-loader tests or callers. */
 export type ConfigFileReader = (path: string) => Promise<string>;
@@ -52,7 +56,9 @@ function expectedForIssue(issue: z.core.$ZodIssue): string {
     case "too_big":
       return `${issue.inclusive === false ? "less than" : "at most"} ${String(issue.maximum)}`;
     case "unrecognized_keys":
-      return "known configuration keys";
+      return `${issue.keys.length === 1 ? "unknown key" : "unknown keys"} ${issue.keys
+        .map((key) => JSON.stringify(key))
+        .join(", ")}`;
     case "invalid_value":
       return "an allowed value";
     case "invalid_format":
@@ -89,15 +95,63 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Object.prototype.toString.call(value) === "[object Object]";
 }
 
-function camelCaseSegment(segment: string): string {
-  const lowerCase = segment.toLowerCase();
-  const alias = keyAliases.get(lowerCase);
-  if (alias !== undefined) {
-    return alias;
+function unwrapSchema(schema: z.ZodType): z.ZodType {
+  let current = schema;
+  while (true) {
+    const definition = current.def as SchemaDefinition;
+    if (
+      (definition.type === "default" ||
+        definition.type === "prefault" ||
+        definition.type === "optional" ||
+        definition.type === "nullable") &&
+      definition.innerType !== undefined
+    ) {
+      current = definition.innerType;
+    } else {
+      return current;
+    }
   }
-  return lowerCase.replaceAll(/[_-]+([a-z0-9])/g, (_match, character: string) =>
-    character.toUpperCase(),
-  );
+}
+
+function normalizedSegment(segment: string): string {
+  return segment.toLowerCase().replaceAll(/[_-]/g, "");
+}
+
+function invalidEnvironmentPath(key: string): never {
+  throw new ConfigError([
+    `${key}: unknown, ambiguous, or unsupported configuration path (config_env_invalid)`,
+  ]);
+}
+
+function resolveEnvironmentPath(key: string, segments: readonly string[]): string[] {
+  const resolved: string[] = [];
+  let currentSchema: z.ZodType = HarnessConfigSchema;
+
+  for (const segment of segments) {
+    const schema = unwrapSchema(currentSchema);
+    if (!(schema instanceof z.ZodObject)) {
+      invalidEnvironmentPath(key);
+    }
+
+    const matchingKeys = Object.keys(schema.shape).filter(
+      (knownKey) => normalizedSegment(knownKey) === normalizedSegment(segment),
+    );
+    if (matchingKeys.length !== 1) {
+      invalidEnvironmentPath(key);
+    }
+
+    const matchedKey = matchingKeys[0];
+    if (matchedKey === undefined) {
+      invalidEnvironmentPath(key);
+    }
+    resolved.push(matchedKey);
+    currentSchema = schema.shape[matchedKey];
+  }
+
+  if (unwrapSchema(currentSchema) instanceof z.ZodArray) {
+    invalidEnvironmentPath(key);
+  }
+  return resolved;
 }
 
 function environmentOverrides(
@@ -109,13 +163,17 @@ function environmentOverrides(
     .sort(([left], [right]) => left.split("__").length - right.split("__").length);
 
   for (const [key, value] of entries) {
-    const path = key.slice("HARNESS__".length).split("__").map(camelCaseSegment);
+    const segments = key.slice("HARNESS__".length).split("__");
     if (
-      path.length === 0 ||
-      path.some((segment) => segment.length === 0 || blockedPathSegments.has(segment))
+      segments.length === 0 ||
+      segments.some(
+        (segment) =>
+          segment.length === 0 || blockedPathSegments.has(segment.toLowerCase()),
+      )
     ) {
-      throw new ConfigError(["environment: valid HARNESS__ override path (config_env_invalid)"]);
+      invalidEnvironmentPath(key);
     }
+    const path = resolveEnvironmentPath(key, segments);
 
     let current = root;
     for (const segment of path.slice(0, -1)) {
@@ -130,7 +188,7 @@ function environmentOverrides(
     }
     const leaf = path.at(-1);
     if (leaf === undefined) {
-      throw new ConfigError(["environment: valid HARNESS__ override path (config_env_invalid)"]);
+      invalidEnvironmentPath(key);
     }
     current[leaf] = value;
   }
@@ -168,6 +226,15 @@ function formatContractIssues(error: ContractError): string[] {
   });
 }
 
+function isFileNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
 /**
  * Loads, merges, validates, and deeply freezes a harness configuration.
  *
@@ -182,6 +249,7 @@ function formatContractIssues(error: ContractError): string[] {
  */
 export async function loadConfig(options: LoadConfigOptions = {}): Promise<HarnessConfig> {
   const env = options.env ?? process.env;
+  const explicitPath = options.configPath !== undefined || env.HARNESS_CONFIG !== undefined;
   const configPath = options.configPath ?? env.HARNESS_CONFIG ?? "harness.config.yaml";
   const absolutePath = resolve(options.cwd ?? process.cwd(), configPath);
   const readFile: ConfigFileReader =
@@ -197,9 +265,13 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Harne
     if (error instanceof ContractError) {
       throw new ConfigError(formatContractIssues(error));
     }
-    throw new ConfigError([
-      "configuration: readable YAML or JSON config file (config_file_unavailable)",
-    ]);
+    if (!explicitPath && isFileNotFound(error)) {
+      parsedFile = {};
+    } else {
+      throw new ConfigError([
+        "configuration: readable YAML or JSON config file (config_file_unavailable)",
+      ]);
+    }
   }
 
   const merged = deepMerge(parsedFile, environmentOverrides(env));

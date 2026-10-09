@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+// Placeholder owned by task 20.1.
 import { z } from "zod";
 
 export const RunConfigSchema = z
@@ -9,6 +10,8 @@ export const RunConfigSchema = z
         maxCostUsd: z.coerce.number().positive().optional(),
         maxWallClockMs: z.coerce.number().int().positive().default(3_600_000),
       })
-      .strict(),
+      .strict()
+      .prefault({}),
   })
-  .strict();
+  .strict()
+  .prefault({});

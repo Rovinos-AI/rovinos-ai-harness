@@ -2,4 +2,4 @@
 // Placeholder owned by task 6.1.
 import { z } from "zod";
 
-export const ServerConfigSchema = z.object({}).strict();
+export const ServerConfigSchema = z.object({}).strict().prefault({});

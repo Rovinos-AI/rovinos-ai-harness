@@ -2,4 +2,4 @@
 // Placeholder owned by task 13.1.
 import { z } from "zod";
 
-export const PiiConfigSchema = z.object({}).strict();
+export const PiiConfigSchema = z.object({}).strict().prefault({});
