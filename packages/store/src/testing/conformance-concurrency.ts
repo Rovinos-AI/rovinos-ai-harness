@@ -328,14 +328,18 @@ async function runWriterReader(
     }
   })();
 
-  let shouldContinue = true;
-  while (shouldContinue) {
-    await assertContiguous(readerStore, runId);
-    reads += 1;
-    shouldContinue = !(await Promise.race([
-      writerFinished.then(() => true),
-      immediate().then(() => false),
-    ]));
+  try {
+    let shouldContinue = true;
+    while (shouldContinue) {
+      await assertContiguous(readerStore, runId);
+      reads += 1;
+      shouldContinue = !(await Promise.race([
+        writerFinished.then(() => true),
+        immediate().then(() => false),
+      ]));
+    }
+  } finally {
+    await writer.catch(() => undefined);
   }
   await writer;
   expect(reads).toBeGreaterThan(1);
