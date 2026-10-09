@@ -17,6 +17,11 @@ belongs in `packages/schemas/src/cli/<command>.ts` and is documented alongside t
 successful command in JSON mode writes exactly one newline-terminated JSON document to stdout;
 command text and error codes are sent to stderr.
 
+## `harness serve`
+
+`serve` keeps the process running until SIGINT or SIGTERM, then exits successfully. With `--json`,
+it writes `{"status":"serving"}` once when startup completes.
+
 ## Exit codes
 
 These numeric values are stable for scripts and automation:

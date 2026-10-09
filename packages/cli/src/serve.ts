@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+import { ServeResultSchema } from "@harness/schemas";
 import type { CommandModule } from "./command.js";
 
 /** Keeps the harness container alive until it receives a termination signal. */
 export const serveCommand: CommandModule = {
   name: "serve",
-  register(program) {
+  register(program, ctx) {
     program
       .command("serve")
       .description("Run until the process receives SIGINT or SIGTERM")
       .action(async () => {
+        ctx.out.json(ServeResultSchema, { status: "serving" });
         await waitForShutdown();
       });
   },
