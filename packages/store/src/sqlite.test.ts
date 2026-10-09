@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { JsonContentCodec, type ContentCodec } from "./codec.js";
+import { JsonContentCodec, type ContentCodec, type ContentCodecContext } from "./codec.js";
 import {
   InvalidEventError,
   SeqConflictError,
@@ -149,6 +149,78 @@ describe("JsonContentCodec", () => {
     await expect(
       codec.encode({ runId, seq: 0 }, { toJSON: () => undefined }),
     ).rejects.toMatchObject({ code: "contract_invalid" });
+  });
+});
+
+describe("snapshot content encoding", () => {
+  it("passes snapshot context and plan through the configured codec", async () => {
+    const delegate = new JsonContentCodec();
+    const encodedInputs: { context: ContentCodecContext; content: Record<string, unknown> }[] = [];
+    const decodedInputs: {
+      context: ContentCodecContext;
+      blob: string;
+      keyId: string | undefined;
+    }[] = [];
+    const codec: ContentCodec = {
+      async encode(context, content) {
+        encodedInputs.push({ context, content });
+        return delegate.encode(context, content);
+      },
+      async decode(context, blob, keyId) {
+        decodedInputs.push({ context, blob, keyId });
+        return delegate.decode(context, blob, keyId);
+      },
+    };
+    const store = new SqliteEventStore(":memory:", codec);
+    const snapshotId = Id.parse("00000000000000000000000003");
+    const snapshot = {
+      snapshotId,
+      runId,
+      atSeq: 1,
+      createdAt: 12,
+      traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+      context: { messages: ["synthetic snapshot context"] },
+      plan: ["synthetic snapshot plan"],
+    };
+
+    try {
+      await store.appendWithSnapshot(
+        runId,
+        [
+          runCreated(runId, 10),
+          {
+            runId,
+            ts: 11,
+            v: 1,
+            traceId,
+            spanId,
+            segmentId: runId,
+            type: "checkpoint_written",
+            checkpointId: snapshotId,
+            atSeq: snapshot.atSeq,
+            traceparent: snapshot.traceparent,
+          },
+        ],
+        0,
+        snapshot,
+      );
+
+      expect(encodedInputs).toContainEqual({
+        context: { runId, seq: snapshot.atSeq, purpose: "snapshot" },
+        content: { context: snapshot.context, plan: snapshot.plan },
+      });
+      await expect(store.latestSnapshot(runId)).resolves.toEqual(snapshot);
+      expect(decodedInputs).toHaveLength(1);
+      expect(decodedInputs[0]?.context).toEqual({
+        runId,
+        seq: snapshot.atSeq,
+        purpose: "snapshot",
+      });
+      expect(decodedInputs[0]?.blob.length).toBeGreaterThan(0);
+      expect(decodedInputs[0]?.keyId).toBeUndefined();
+    } finally {
+      await store.close();
+    }
   });
 });
 

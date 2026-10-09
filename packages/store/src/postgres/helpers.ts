@@ -11,7 +11,7 @@ import {
 } from "@harness/schemas";
 import type { PoolClient, QueryResultRow } from "pg";
 import { z } from "zod";
-import type { ContentCodec } from "../codec.js";
+import type { ContentCodec, EncodedSnapshot } from "../codec.js";
 import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "../errors.js";
 import type { RunSummary } from "../types.js";
 
@@ -44,6 +44,16 @@ export const POSTGRES_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS events_trace_id_idx ON events (trace_id);
   CREATE INDEX IF NOT EXISTS runs_status_created_at_idx ON runs (status, created_at);
+  CREATE TABLE IF NOT EXISTS snapshots (
+    snapshot_id text PRIMARY KEY,
+    run_id text NOT NULL,
+    at_seq bigint NOT NULL,
+    created_at bigint NOT NULL,
+    meta_json jsonb NOT NULL,
+    content_blob text NOT NULL,
+    key_id text
+  );
+  CREATE INDEX IF NOT EXISTS snapshots_run_at_seq_idx ON snapshots (run_id, at_seq DESC);
 `;
 
 /** Database representation of one persisted event row. */
@@ -333,13 +343,21 @@ async function insertEventBatches(
   }
 }
 
+/** Arguments for one atomic Postgres event and optional snapshot append. */
+export interface AppendTransactionOptions {
+  runId: Id;
+  encoded: readonly EncodedEvent[];
+  expectedSeq: number;
+  encodedSnapshot?: EncodedSnapshot;
+  snapshotKeep?: number;
+}
+
 /** Append a batch atomically while holding the run's sequence row lock. */
 export async function appendTransaction(
   client: PoolClient,
-  runId: Id,
-  encoded: readonly EncodedEvent[],
-  expectedSeq: number,
+  options: AppendTransactionOptions,
 ): Promise<number> {
+  const { runId, encoded, expectedSeq, encodedSnapshot, snapshotKeep = 5 } = options;
   const first = encoded[0]?.event;
   const last = encoded.at(-1)?.event;
   if (first === undefined || last === undefined) {
@@ -378,6 +396,24 @@ export async function appendTransaction(
       status,
       lastTs: last.ts,
     });
+    if (encodedSnapshot !== undefined) {
+      await client.query(
+        "INSERT INTO snapshots (snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)",
+        [
+          encodedSnapshot.snapshot_id,
+          encodedSnapshot.run_id,
+          encodedSnapshot.at_seq,
+          encodedSnapshot.created_at,
+          encodedSnapshot.meta_json,
+          encodedSnapshot.content_blob,
+          encodedSnapshot.key_id,
+        ],
+      );
+      await client.query(
+        "DELETE FROM snapshots WHERE run_id = $1 AND snapshot_id NOT IN (SELECT snapshot_id FROM snapshots WHERE run_id = $1 ORDER BY at_seq DESC, snapshot_id DESC LIMIT $2)",
+        [runId, snapshotKeep],
+      );
+    }
 
     await client.query("COMMIT");
     transactionStarted = false;

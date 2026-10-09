@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id, NewEvent, RunStatus, TraceId } from "@harness/schemas";
+import type { Event, Id, NewEvent, RunStatus, Snapshot, TraceId } from "@harness/schemas";
+
+/** Retention configuration for per-run checkpoint snapshots. */
+export interface SnapshotStoreOptions {
+  /** Maximum number of snapshots to retain per run (default: 5). */
+  snapshotKeep?: number;
+}
 
 /** Summary of a run derived from its stored events. */
 export interface RunSummary {
@@ -37,6 +43,28 @@ export interface EventStore {
    * @throws InvalidEventError when an event is invalid or belongs to another run.
    */
   append(runId: Id, events: readonly NewEvent[], expectedSeq: number): Promise<{ nextSeq: number }>;
+
+  /**
+   * Validate and append events and their checkpoint snapshot atomically.
+   * @param runId Run identifier to append to.
+   * @param events Events without their store-assigned sequence numbers.
+   * @param expectedSeq Next sequence number the caller expects.
+   * @param snapshot Snapshot associated with exactly one checkpoint_written event.
+   * @returns The next free sequence number after the append.
+   */
+  appendWithSnapshot(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    snapshot: Snapshot,
+  ): Promise<{ nextSeq: number }>;
+
+  /**
+   * Retrieve the retained snapshot with the greatest atSeq for a run.
+   * @param runId Run identifier to inspect.
+   * @returns The latest snapshot, or undefined when none has been written.
+   */
+  latestSnapshot(runId: Id): Promise<Snapshot | undefined>;
 
   /**
    * Read events in sequence order. Both range endpoints are inclusive.

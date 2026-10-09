@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ContractError, parseJson } from "@harness/schemas";
-import type { Id } from "@harness/schemas";
+import {
+  ContractError,
+  Id,
+  SnapshotSchema,
+  parseJson,
+  type NewEvent,
+  type Snapshot,
+} from "@harness/schemas";
 import { z } from "zod";
+import { InvalidEventError, StoreUnavailableError } from "./errors.js";
+import type { SnapshotStoreOptions } from "./types.js";
 
 const contentSchema = z.record(z.string(), z.json());
 
@@ -11,6 +19,8 @@ export interface ContentCodecContext {
   runId: Id;
   /** Event's sequence number. */
   seq: number;
+  /** Set when encoding or decoding snapshot content instead of event content. */
+  purpose?: "snapshot";
 }
 
 /** Encoded event content and optional encryption key identifier. */
@@ -40,6 +50,143 @@ export interface ContentCodec {
    * @returns Content-classified event fields.
    */
   decode(ctx: ContentCodecContext, blob: string, keyId?: string): Promise<Record<string, unknown>>;
+}
+
+const snapshotOptionsSchema = z
+  .object({ snapshotKeep: z.number().int().min(1).default(5) })
+  .strict();
+const snapshotMetaSchema = z
+  .object({
+    traceparent: SnapshotSchema.shape.traceparent,
+    workspaceRef: SnapshotSchema.shape.workspaceRef,
+  })
+  .strict();
+const snapshotContentSchema = z
+  .object({ context: SnapshotSchema.shape.context, plan: SnapshotSchema.shape.plan })
+  .strict();
+
+/** Validate snapshot retention options and apply the default. */
+export function snapshotKeep(options: SnapshotStoreOptions = {}): number {
+  const parsed = snapshotOptionsSchema.safeParse(options);
+  if (!parsed.success) {
+    throw new TypeError("Invalid snapshot retention configuration");
+  }
+  return parsed.data.snapshotKeep;
+}
+
+/** Snapshot fields prepared for insertion alongside its checkpoint event. */
+export interface EncodedSnapshot {
+  snapshot_id: string;
+  run_id: string;
+  at_seq: number;
+  created_at: number;
+  meta_json: string;
+  content_blob: string;
+  key_id: string | null;
+}
+
+/** Validate that a checkpoint batch and snapshot describe the same checkpoint. */
+export function validateSnapshotAppend(
+  runId: Id,
+  events: readonly NewEvent[],
+  snapshot: Snapshot,
+): Snapshot {
+  const parsedSnapshot = SnapshotSchema.safeParse(snapshot);
+  if (!parsedSnapshot.success) {
+    throw new InvalidEventError(
+      parsedSnapshot.error.issues.map(({ path }) =>
+        path.flatMap((part) =>
+          typeof part === "string" || typeof part === "number" ? [part] : [],
+        ),
+      ),
+    );
+  }
+  if (parsedSnapshot.data.runId !== runId) {
+    throw new InvalidEventError([["runId"]]);
+  }
+
+  const checkpoints = events.filter(
+    (event): event is Extract<NewEvent, { type: "checkpoint_written" }> =>
+      event.type === "checkpoint_written",
+  );
+  if (checkpoints.length !== 1) {
+    throw new InvalidEventError([["checkpoint_written"]]);
+  }
+  const checkpoint = checkpoints[0];
+  if (checkpoint?.checkpointId !== parsedSnapshot.data.snapshotId) {
+    throw new InvalidEventError([["snapshotId"]]);
+  }
+  if (checkpoint.atSeq !== parsedSnapshot.data.atSeq) {
+    throw new InvalidEventError([["atSeq"]]);
+  }
+  return parsedSnapshot.data;
+}
+
+/** Encode only snapshot content; identity, trace, and timestamps remain metadata. */
+export async function encodeSnapshot(
+  codec: ContentCodec,
+  snapshot: Snapshot,
+): Promise<EncodedSnapshot> {
+  const encoded = await codec.encode(
+    { runId: snapshot.runId, seq: snapshot.atSeq, purpose: "snapshot" },
+    { context: snapshot.context, plan: snapshot.plan },
+  );
+  const meta = {
+    traceparent: snapshot.traceparent,
+    ...(snapshot.workspaceRef === undefined ? {} : { workspaceRef: snapshot.workspaceRef }),
+  };
+  return {
+    snapshot_id: snapshot.snapshotId,
+    run_id: snapshot.runId,
+    at_seq: snapshot.atSeq,
+    created_at: snapshot.createdAt,
+    meta_json: JSON.stringify(meta),
+    content_blob: encoded.blob,
+    key_id: encoded.keyId ?? null,
+  };
+}
+
+/** Database representation read when retrieving a stored snapshot. */
+export interface SnapshotRow {
+  snapshot_id: string;
+  run_id: string;
+  at_seq: number | string;
+  created_at: number | string;
+  meta_json: unknown;
+  content_blob: string;
+  key_id: string | null;
+}
+
+/** Decode and validate a snapshot row without exposing persisted content on failure. */
+export async function decodeSnapshot(codec: ContentCodec, row: SnapshotRow): Promise<Snapshot> {
+  try {
+    const meta =
+      typeof row.meta_json === "string"
+        ? parseJson(snapshotMetaSchema, row.meta_json)
+        : snapshotMetaSchema.parse(row.meta_json);
+    const atSeq = Number(row.at_seq);
+    const createdAt = Number(row.created_at);
+    if (!Number.isSafeInteger(atSeq) || !Number.isSafeInteger(createdAt)) {
+      throw new StoreUnavailableError();
+    }
+    const content = snapshotContentSchema.parse(
+      await codec.decode(
+        { runId: Id.parse(row.run_id), seq: atSeq, purpose: "snapshot" },
+        row.content_blob,
+        row.key_id ?? undefined,
+      ),
+    );
+    return SnapshotSchema.parse({
+      snapshotId: row.snapshot_id,
+      runId: row.run_id,
+      atSeq,
+      createdAt,
+      ...meta,
+      ...content,
+    });
+  } catch {
+    throw new StoreUnavailableError();
+  }
 }
 
 /** JSON serialization codec for event content when encryption is not configured. */
