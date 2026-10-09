@@ -82,9 +82,10 @@ let invalidSpanContext = false;
 
 class FakeShutdownProcess implements ShutdownProcessLike {
   exitCode: number | undefined = undefined;
+  readonly forcedTerminations: ("SIGINT" | "SIGTERM")[] = [];
   private readonly listeners = new Map<"SIGINT" | "SIGTERM", (() => void)[]>();
 
-  once(signal: "SIGINT" | "SIGTERM", listener: () => void): this {
+  on(signal: "SIGINT" | "SIGTERM", listener: () => void): this {
     this.listeners.set(signal, [...(this.listeners.get(signal) ?? []), listener]);
     return this;
   }
@@ -103,7 +104,10 @@ class FakeShutdownProcess implements ShutdownProcessLike {
 
   emit(signal: "SIGINT" | "SIGTERM"): void {
     const listeners = this.listeners.get(signal) ?? [];
-    this.listeners.set(signal, []);
+    if (listeners.length === 0) {
+      this.forcedTerminations.push(signal);
+      return;
+    }
     for (const listener of listeners) {
       listener();
     }
@@ -812,68 +816,142 @@ describe("approval lifecycle", () => {
 });
 
 describe("runLoop", () => {
-  it("suspends and can resume after SIGTERM interrupts a model call", async () => {
+  it.each([
+    ["SIGTERM", "SIGTERM"],
+    ["SIGTERM", "SIGINT"],
+  ] as const)(
+    "suspends and resumes after %s then %s interrupts a model call",
+    async (signal, repeat) => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      const controller = new AbortController();
+      const processLike = new FakeShutdownProcess();
+      let modelStarted: () => void = () => undefined;
+      const started = new Promise<void>((resolve) => {
+        modelStarted = resolve;
+      });
+      const model: ModelPort = {
+        complete: async (_request, { signal }: RunContext) => {
+          modelStarted();
+          return new Promise<ModelCompletion>((resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                reject(new Error("model call aborted"));
+              },
+              { once: true },
+            );
+          });
+        },
+      };
+      const uninstall = installShutdownHandler({
+        processLike,
+        controller,
+        graceMs: 60_000,
+        onTimeout: () => undefined,
+      });
+      const running = runLoop({
+        recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+        clock,
+        model,
+        tool: new FakeToolPort(),
+        context: new NaiveContext(),
+        ids: new SequentialIdGenerator(),
+        goal: "shutdown during model call",
+        configHash,
+        budgets: defaultBudgets,
+        policyVersion: "test.policy",
+        signal: controller.signal,
+      });
+
+      await started;
+      processLike.emit(signal);
+      processLike.emit(repeat);
+      const result = await running;
+      uninstall();
+
+      expect(result.status).toBe("suspended");
+      expect(result.events.map(({ type }) => type)).toEqual([
+        "run_created",
+        "run_status_changed",
+        "model_request",
+        "run_status_changed",
+        "checkpoint_written",
+      ]);
+      expect(processLike.exitCode).toBe(143);
+      expect(processLike.forcedTerminations).toEqual([]);
+
+      const resumed = await resumeRun(
+        createResumeOptions(store, clock, { model: new FakeModelPort([completion()]) }),
+      );
+      expect(resumed.status).toBe("completed");
+    },
+  );
+
+  it("suspends and checkpoints when shutdown aborts a resumed tool rerun", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
     const controller = new AbortController();
     const processLike = new FakeShutdownProcess();
-    let modelStarted: () => void = () => undefined;
-    const started = new Promise<void>((resolve) => {
-      modelStarted = resolve;
-    });
-    const model: ModelPort = {
-      complete: async (_request, { signal }: RunContext) => {
-        modelStarted();
-        return new Promise<ModelCompletion>((resolve, reject) => {
-          signal.addEventListener(
-            "abort",
-            () => {
-              reject(new Error("model call aborted"));
-            },
-            { once: true },
-          );
-        });
+    await createRunHistory(store, clock, [
+      {
+        type: "tool_intent",
+        v: 1,
+        callId: modelCallId,
+        toolId: "idempotent_tool",
+        idempotent: true,
+        policyDecision: "allow",
+        argsHash: "a".repeat(64),
+        args: { value: 1 },
       },
-    };
+    ]);
+    let toolStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      toolStarted = resolve;
+    });
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "idempotent_tool",
+          {
+            idempotent: true,
+            timeoutMs: 60_000,
+            execute: (_call, { signal }) =>
+              new Promise((_, reject) => {
+                toolStarted();
+                signal.addEventListener("abort", () => reject(new Error("tool aborted")), {
+                  once: true,
+                });
+              }),
+          },
+        ],
+      ]),
+    );
     const uninstall = installShutdownHandler({
       processLike,
       controller,
       graceMs: 60_000,
       onTimeout: () => undefined,
     });
-    const running = runLoop({
-      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
-      clock,
-      model,
-      tool: new FakeToolPort(),
-      context: new NaiveContext(),
-      ids: new SequentialIdGenerator(),
-      goal: "shutdown during model call",
-      configHash,
-      budgets: defaultBudgets,
-      policyVersion: "test.policy",
-      signal: controller.signal,
-    });
 
-    await started;
-    processLike.emit("SIGTERM");
-    const result = await running;
-    uninstall();
+    try {
+      const resuming = resumeRun(
+        createResumeOptions(store, clock, { tool, signal: controller.signal }),
+      );
+      await started;
+      processLike.emit("SIGTERM");
+      const result = await resuming;
+      const stored = await readApprovalEvents(store);
 
-    expect(result.status).toBe("suspended");
-    expect(result.events.map(({ type }) => type)).toEqual([
-      "run_created",
-      "run_status_changed",
-      "model_request",
-      "run_status_changed",
-      "checkpoint_written",
-    ]);
-    expect(processLike.exitCode).toBe(143);
-
-    const resumed = await resumeRun(
-      createResumeOptions(store, clock, { model: new FakeModelPort([completion()]) }),
-    );
-    expect(resumed.status).toBe("completed");
+      expect(result.status).toBe("suspended");
+      expect(result.events.map(({ type }) => type)).toContain("checkpoint_written");
+      expect(stored.filter(({ type }) => type === "tool_intent")).toHaveLength(1);
+      expect(stored.filter(({ type }) => type === "tool_result")).toHaveLength(0);
+      expect(processLike.exitCode).toBe(143);
+      expect(processLike.forcedTerminations).toEqual([]);
+    } finally {
+      uninstall();
+    }
   });
 
   it("leaves a dangling tool intent when SIGINT aborts tool execution", async () => {

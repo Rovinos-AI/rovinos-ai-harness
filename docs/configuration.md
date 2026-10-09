@@ -16,4 +16,6 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 `run.checkpointEveryEvents` defaults to `20` and must be a positive integer. The run loop writes a checkpoint when that many events have accrued since the previous checkpoint, and always writes one before returning a suspended run.
 
+`run.shutdownGraceMs` defaults to `20000` and must be a positive integer. On SIGTERM or SIGINT, the run aborts in-flight work, suspends at a safe point, and writes a checkpoint before exiting with code 143 or 130. If the grace period expires first, the process attempts a best-effort checkpoint and exits with code 1. Set the container's `stop_grace_period` longer than this value so the container runtime does not terminate the process before graceful shutdown can finish.
+
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict placeholders until their owning tasks define those schemas. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.

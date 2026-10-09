@@ -5,9 +5,10 @@ import { installShutdownHandler, type ShutdownProcessLike } from "./index.js";
 class FakeProcess implements ShutdownProcessLike {
   exitCode: number | undefined;
   readonly exits: number[] = [];
+  readonly forcedTerminations: ("SIGINT" | "SIGTERM")[] = [];
   private readonly listeners = new Map<"SIGINT" | "SIGTERM", (() => void)[]>();
 
-  once(signal: "SIGINT" | "SIGTERM", listener: () => void): this {
+  on(signal: "SIGINT" | "SIGTERM", listener: () => void): this {
     const listeners = this.listeners.get(signal) ?? [];
     this.listeners.set(signal, [...listeners, listener]);
     return this;
@@ -23,7 +24,10 @@ class FakeProcess implements ShutdownProcessLike {
 
   emit(signal: "SIGINT" | "SIGTERM"): void {
     const listeners = this.listeners.get(signal) ?? [];
-    this.listeners.set(signal, []);
+    if (listeners.length === 0) {
+      this.forcedTerminations.push(signal);
+      return;
+    }
     for (const listener of listeners) {
       listener();
     }
@@ -62,7 +66,30 @@ describe("installShutdownHandler", () => {
     uninstall();
     processLike.emit("SIGINT");
     expect(processLike.listenerCount("SIGINT")).toBe(0);
+    expect(processLike.forcedTerminations).toEqual(["SIGINT"]);
     expect(processLike.exitCode).toBe(143);
+  });
+
+  it("keeps both listeners installed while ignoring repeated and mixed signals", () => {
+    const processLike = new FakeProcess();
+    const controller = new AbortController();
+    const uninstall = installShutdownHandler({
+      processLike,
+      controller,
+      graceMs: 100,
+      onTimeout: () => undefined,
+    });
+
+    processLike.emit("SIGTERM");
+    processLike.emit("SIGTERM");
+    processLike.emit("SIGINT");
+
+    expect(controller.signal.reason).toBe("shutdown");
+    expect(processLike.exitCode).toBe(143);
+    expect(processLike.listenerCount("SIGTERM")).toBe(1);
+    expect(processLike.listenerCount("SIGINT")).toBe(1);
+    expect(processLike.forcedTerminations).toEqual([]);
+    uninstall();
   });
 
   it("attempts the timeout callback, logs the timeout, and forces exit code one", async () => {
@@ -104,6 +131,28 @@ describe("installShutdownHandler", () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(logger.error).toHaveBeenCalledWith("shutdown_timeout");
+    expect(processLike.exits).toEqual([1]);
+  });
+
+  it("forces exit when the best-effort timeout callback never settles", async () => {
+    vi.useFakeTimers();
+    const processLike = new FakeProcess();
+    const logger = { error: vi.fn() };
+    const onTimeout = vi.fn(() => new Promise<void>(() => undefined));
+    installShutdownHandler({
+      processLike,
+      controller: new AbortController(),
+      graceMs: 10,
+      onTimeout,
+      logger,
+    });
+
+    processLike.emit("SIGTERM");
+    await vi.advanceTimersByTimeAsync(20);
+
+    expect(onTimeout).toHaveBeenCalledOnce();
+    expect(logger.error).toHaveBeenCalledWith("shutdown_timeout");
+    expect(processLike.exitCode).toBe(1);
     expect(processLike.exits).toEqual([1]);
   });
 

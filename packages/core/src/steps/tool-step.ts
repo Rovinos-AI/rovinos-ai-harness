@@ -43,6 +43,7 @@ export interface ResumeToolStepOptions extends Omit<ToolStepOptions, "calls"> {
 interface RunToolCallBehavior {
   readonly appendIntent?: boolean;
   readonly executedArgsHash?: string;
+  readonly existingIntent?: ToolIntentEvent;
 }
 
 class ToolTimeoutError extends Error {}
@@ -163,7 +164,7 @@ async function runToolCall(
     if (behavior.appendIntent !== false) {
       events.push(await recordIntent(options.recorder, call, description, argsHash));
     }
-    const intentEvent = events.at(-1);
+    const intentEvent = events.at(-1) ?? behavior.existingIntent;
     if (description === undefined) {
       const result = await options.recorder.record({
         type: "tool_result",
@@ -189,8 +190,11 @@ async function runToolCall(
         description.timeoutMs,
       );
     } catch (error) {
-      const shutdownIntent = onShutdown(options.signal, intentEvent, error);
-      if (shutdownIntent !== undefined) {
+      const shutdownIntent = onShutdown(options.signal, intentEvent);
+      if (options.signal.reason === "shutdown") {
+        if (shutdownIntent === undefined) {
+          throw error;
+        }
         return shutdownIntent;
       }
       const timedOut = error instanceof ToolTimeoutError;
@@ -322,7 +326,10 @@ async function applyDanglingIntentAction(
     return "escalate";
   }
   await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, { appendIntent: false });
+  return runToolCall(options, callFromIntent(intent), description, {
+    appendIntent: false,
+    existingIntent: intent,
+  });
 }
 
 /**
@@ -375,6 +382,7 @@ export async function applyApprovalDecision(
   }
   return runToolCall(options, call, description, {
     appendIntent: false,
+    existingIntent: intent,
     ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
   });
 }
@@ -454,7 +462,10 @@ export async function resolveDanglingIntentApproval(
     return recordDanglingFailure(options, intent, "unknown_tool");
   }
   await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, { appendIntent: false });
+  return runToolCall(options, callFromIntent(intent), description, {
+    appendIntent: false,
+    existingIntent: intent,
+  });
 }
 
 /**

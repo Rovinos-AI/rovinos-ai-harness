@@ -8,7 +8,7 @@ interface ShutdownLogger {
 
 /** Minimal process interface used by the shutdown handler and injectable in tests. */
 export interface ShutdownProcessLike {
-  once(signal: ShutdownSignal, listener: () => void): unknown;
+  on(signal: ShutdownSignal, listener: () => void): unknown;
   removeListener(signal: ShutdownSignal, listener: () => void): unknown;
   exitCode: number | undefined;
   exit(code: number): never | void;
@@ -25,19 +25,12 @@ export interface ShutdownHandlerOptions {
 
 const noopLogger: ShutdownLogger = { error: () => undefined };
 
-/** Returns a value only for shutdown aborts, rethrowing the failure when it is absent. */
+/** Returns the existing value only when the abort was caused by shutdown. */
 export function onShutdown<Result>(
   signal: AbortSignal,
   result: Result | undefined,
-  error: unknown,
 ): Result | undefined {
-  if (signal.reason !== "shutdown") {
-    return undefined;
-  }
-  if (result === undefined) {
-    throw error;
-  }
-  return result;
+  return signal.reason === "shutdown" ? result : undefined;
 }
 
 /**
@@ -64,6 +57,7 @@ export function installShutdownHandler(options: ShutdownHandlerOptions): () => v
     timeout = setTimeout(() => {
       void forceExit();
     }, options.graceMs);
+    timeout.unref?.();
   };
 
   const handleSigterm = (): void => {
@@ -72,8 +66,8 @@ export function installShutdownHandler(options: ShutdownHandlerOptions): () => v
   const handleSigint = (): void => {
     handleSignal("SIGINT");
   };
-  processLike.once("SIGTERM", handleSigterm);
-  processLike.once("SIGINT", handleSigint);
+  processLike.on("SIGTERM", handleSigterm);
+  processLike.on("SIGINT", handleSigint);
 
   const uninstall = (): void => {
     if (!installed) {
@@ -93,7 +87,21 @@ export function installShutdownHandler(options: ShutdownHandlerOptions): () => v
     }
     uninstall();
     try {
-      await options.onTimeout();
+      let checkpointDeadline: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          Promise.resolve()
+            .then(options.onTimeout)
+            .catch(() => undefined),
+          new Promise<void>((resolve) => {
+            checkpointDeadline = setTimeout(resolve, Math.min(5_000, options.graceMs));
+          }),
+        ]);
+      } finally {
+        if (checkpointDeadline !== undefined) {
+          clearTimeout(checkpointDeadline);
+        }
+      }
     } catch {
       // A best-effort checkpoint must not prevent a forced exit.
     }
