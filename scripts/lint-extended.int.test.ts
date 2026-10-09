@@ -202,6 +202,7 @@ it.skipIf(process.env.LINT_SKIP_CONTAINERS === "1")(
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
   },
+  30_000,
 );
 
 it("accepts project spelling and rejects an unknown word", () => {

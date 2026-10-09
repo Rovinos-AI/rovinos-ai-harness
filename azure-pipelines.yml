@@ -74,6 +74,9 @@ stages:
               yarn test:integration --reporter=junit
               --outputFile=reports/integration-junit.xml
             displayName: Integration tests
+            # The container linter fixtures run on a fresh agent, so they must pull the pinned images.
+            env:
+              LINT_PULL_IMAGES: "1"
           - task: PublishTestResults@2
             condition: succeededOrFailed()
             inputs:
