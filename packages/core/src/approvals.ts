@@ -247,10 +247,10 @@ export async function resolveApproval(
   throw new ApprovalResolutionConflictError();
 }
 
-function pendingApproval(state: RunState, approvalId: Id): Extract<
-  Event,
-  { type: "approval_requested" }
-> {
+function pendingApproval(
+  state: RunState,
+  approvalId: Id,
+): Extract<Event, { type: "approval_requested" }> {
   if (state.resolvedApprovals.has(approvalId)) {
     throw new ApprovalAlreadyResolvedError();
   }

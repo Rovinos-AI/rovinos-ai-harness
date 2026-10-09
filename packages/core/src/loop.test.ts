@@ -599,22 +599,24 @@ describe("approval lifecycle", () => {
     const { recorder, state } = await createApprovalRun(store, clock);
     await requestApprovalForRun(recorder, clock, state);
     await recorder.withStepSpan(RUN_SPAN, {}, async () =>
-      recorder.recordBatch([
-        {
-          type: "run_status_changed",
-          v: 1,
-          from: "suspended",
-          to: "running",
-          reason: "resumed",
-        },
-        { type: "run_status_changed", v: 1, from: "running", to: "failed", reason: "failure" },
-      ]).then((events) => {
-        const lastEvent = events.at(-1);
-        if (lastEvent === undefined) {
-          throw new Error("Expected terminal run status events.");
-        }
-        return lastEvent;
-      }),
+      recorder
+        .recordBatch([
+          {
+            type: "run_status_changed",
+            v: 1,
+            from: "suspended",
+            to: "running",
+            reason: "resumed",
+          },
+          { type: "run_status_changed", v: 1, from: "running", to: "failed", reason: "failure" },
+        ])
+        .then((events) => {
+          const lastEvent = events.at(-1);
+          if (lastEvent === undefined) {
+            throw new Error("Expected terminal run status events.");
+          }
+          return lastEvent;
+        }),
     );
     const headBeforeResolve = await store.head(runId);
 
