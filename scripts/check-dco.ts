@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import dcoExemptions from "../config/dco-exemptions.json" with { type: "json" };
+import { parseJson } from "@harness/schemas";
 import { z } from "zod";
 
 const recordSeparator = "\u001e";
@@ -307,7 +307,10 @@ export function checkDco(
 }
 
 function runCheck(): void {
-  const exemptions = DcoExemptionsSchema.parse(dcoExemptions);
+  const exemptions = parseJson(
+    DcoExemptionsSchema,
+    readFileSync(fileURLToPath(new URL("../config/dco-exemptions.json", import.meta.url)), "utf8"),
+  );
   const targetBranch = process.env.TARGET_BRANCH;
   if (targetBranch === undefined || targetBranch.length === 0) {
     process.stderr.write("DCO check requires the PR target branch.\n");

@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Regenerates the index blocks in every folder AGENTS.md and the dependency table in CONVENTIONS section 1.
 // Inputs: epic-*.md headings, TASKS.md "Task ids:" lines, docs/engineering/layers.json.
-// Usage: node scripts/gen-agents-index.mjs [--check]
-// Dependency-free Node 22 ESM so it runs without installing anything; task 1.1 wires it as `yarn gen:agents` / `yarn check:agents`.
+// Usage: yarn gen:agents or yarn check:agents
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join, relative, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseJson } from "@harness/schemas";
+import { z } from "zod";
 
-const loadModule = createRequire(import.meta.url);
 const BEGIN = "<!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->";
 const END = "<!-- END GENERATED: agents-index -->";
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "coverage", ".claude"]);
+const layersSchema = z.record(z.string(), z.union([z.string(), z.array(z.string())]));
 
 function compareIds(a, b) {
   for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
@@ -184,7 +184,10 @@ export function generate(root) {
   const agentsDirs = files
     .filter((file) => file.endsWith("AGENTS.md"))
     .map((file) => dirname(file));
-  const layers = loadModule(join(root, "docs/engineering/layers.json"));
+  const layers = parseJson(
+    layersSchema,
+    readFileSync(join(root, "docs/engineering/layers.json"), "utf8"),
+  );
   const packages = validateLayers(layers);
   verifyPackageLayers(root, packages);
   const results = new Map();
@@ -241,7 +244,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
   }
   if (check && drift) {
-    process.stderr.write("Run: node scripts/gen-agents-index.mjs\n");
+    process.stderr.write("Run: yarn gen:agents\n");
     process.exitCode = 1;
   }
   if (!check) {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Run: node --test scripts/*.test.mjs
+// Run: yarn check:agents
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve, dirname } from "node:path";
@@ -32,7 +32,7 @@ test("repository index is up to date", () => {
     assert.equal(
       readFileSync(resolve(root, file), "utf8"),
       next,
-      `${file} is stale; run node scripts/gen-agents-index.mjs`,
+      `${file} is stale; run yarn gen:agents`,
     );
   }
 });

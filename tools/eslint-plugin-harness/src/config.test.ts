@@ -4,12 +4,17 @@ import { ESLint } from "eslint";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { harnessPlugin } from "./index.js";
+import { createHarnessPlugin } from "./index.js";
 
 const rootDirectory = fileURLToPath(new URL("../../../", import.meta.url));
 const eslint = new ESLint({ cwd: rootDirectory });
 const typescriptFixture = resolve(rootDirectory, "packages/schemas/src/index.ts");
 const javascriptFixture = resolve(rootDirectory, "packages/schemas/src/lint-fixture.js");
+const harnessPlugin = createHarnessPlugin({
+  schemas: [],
+  telemetry: ["schemas"],
+  store: ["schemas"],
+});
 
 RuleTester.describe = describe;
 RuleTester.it = it;
@@ -58,6 +63,28 @@ ruleTester.run("no-relative-packages", harnessPlugin.rules["no-relative-packages
     {
       code: "import store from '../../store/src/index.js';",
       filename: resolve(rootDirectory, "packages/telemetry/src/layer.js"),
+      errors: [{ messageId: "forbidden" }],
+    },
+  ],
+});
+
+ruleTester.run("schema-inferred-types", harnessPlugin.rules["schema-inferred-types"], {
+  valid: [
+    {
+      code: "export const ContractSchema = {}; export type Contract = z.infer<typeof ContractSchema>;",
+    },
+  ],
+  invalid: [
+    {
+      code: "export const ContractSchema = {}; export interface Contract { readonly id: string; }",
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: "const ContractSchema = {}; interface Contract { readonly id: string; } export { ContractSchema, Contract };",
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: "const ContractSchema = {}; interface Contract { readonly id: string; } export { ContractSchema as PublicSchema, Contract as PublicContract };",
       errors: [{ messageId: "forbidden" }],
     },
   ],

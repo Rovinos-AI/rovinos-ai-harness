@@ -4,9 +4,23 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { parse } from "yaml";
+import { parseYaml } from "@harness/schemas";
+import { z } from "zod";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const pipelineSchema = z.looseObject({
+  pr: z.array(z.string()).optional(),
+  stages: z.array(
+    z.looseObject({
+      stage: z.string(),
+      jobs: z.array(
+        z.looseObject({
+          steps: z.array(z.record(z.string(), z.unknown())).optional(),
+        }),
+      ),
+    }),
+  ),
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -17,7 +31,10 @@ function isUnknownArray(value: unknown): value is unknown[] {
 }
 
 function readPipeline(): Record<string, unknown> {
-  const pipeline: unknown = parse(readFileSync(resolve(root, "azure-pipelines.yml"), "utf8"));
+  const pipeline = parseYaml(
+    pipelineSchema,
+    readFileSync(resolve(root, "azure-pipelines.yml"), "utf8"),
+  );
   if (!isRecord(pipeline)) {
     throw new TypeError("Pipeline YAML must contain an object.");
   }

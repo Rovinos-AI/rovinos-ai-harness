@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { fileURLToPath } from "node:url";
 import comments from "@eslint-community/eslint-plugin-eslint-comments";
 import importX from "eslint-plugin-import-x";
 import jsdoc from "eslint-plugin-jsdoc";
@@ -10,11 +9,11 @@ import unicorn from "eslint-plugin-unicorn";
 import vitest from "@vitest/eslint-plugin";
 import prettier from "eslint-config-prettier/flat";
 import tseslint from "typescript-eslint";
-import { harnessPlugin } from "@harness/eslint-plugin-harness";
 import { browserRestrictedImports } from "./eslint-browser-boundaries.js";
+import { harnessPlugin } from "./eslint-layer-config.js";
 import { yamlLintConfiguration } from "./eslint-yaml.js";
 
-const rootDirectory = fileURLToPath(new URL(".", import.meta.url));
+const rootDirectory = import.meta.dirname;
 const testFiles = [
   "**/*.test.{js,mjs,ts,tsx}",
   "**/*.int.test.{js,mjs,ts,tsx}",
@@ -215,6 +214,7 @@ const configuration = [
       ],
       "harness/import-direction": "error",
       "harness/no-relative-packages": "error",
+      "harness/schema-inferred-types": "error",
       "jsdoc/require-jsdoc": [
         "error",
         {

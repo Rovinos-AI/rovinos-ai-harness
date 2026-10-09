@@ -33,13 +33,11 @@ words deliberately to `docs/engineering/project-words.txt`.
   also reject Node globals/imports and unsafe HTML sinks. Test files use Vitest rules while keeping
   TypeScript safety checks enabled.
 
-The ESLint config and Vitest workspace config must use default exports for their loaders. The
-dependency-free `scripts/gen-agents-index.mjs` retains its JSON parser exception because it runs
-before package dependencies are installed and validates repository indexes. These are
-config-level exceptions, not patterns to copy into application code; task 1.12 supplies the schema
-parsing APIs. The plugin entry point alone opts out of `import-x/no-relative-packages` because it
-loads the canonical layer table outside `packages/`; the custom rule enforces relative boundaries
-inside packages.
+The ESLint config and Vitest workspace config must use default exports for their loaders.
+`scripts/gen-agents-index.mjs` validates `layers.json` through the schema parsing API and is run
+through its Yarn commands, which build `@harness/schemas` first. The root ESLint config also parses
+the canonical layer table through that API and injects it into the plugin; the plugin entry point
+alone opts out of `import-x/no-relative-packages` because it is outside `packages/`.
 
 `packages/schemas/tsconfig.json` is the package tsconfig pattern: extend `tsconfig.base.json`, set
 package-local `rootDir`/`outDir`, and include package source. The lint plugin has a matching config
