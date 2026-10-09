@@ -96,6 +96,9 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       model: completion.model,
       inputTokens: completion.usage.inputTokens,
       outputTokens: completion.usage.outputTokens,
+      ...(completion.usage.costMicros === undefined
+        ? {}
+        : { costMicros: completion.usage.costMicros }),
       finishReason: completion.finishReason,
       latencyMs: completion.latencyMs,
       schemaValid: completion.schemaValid,

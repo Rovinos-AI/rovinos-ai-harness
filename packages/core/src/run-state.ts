@@ -31,6 +31,8 @@ export interface RunState {
   readonly segmentId: Event["segmentId"];
   readonly startedAt: number;
   readonly lastTs: number;
+  readonly suspendedTimeMs: number;
+  readonly suspendedAt?: number;
 }
 
 interface MutableRunState {
@@ -48,6 +50,8 @@ interface MutableRunState {
   segmentId: Event["segmentId"];
   startedAt: number;
   lastTs: number;
+  suspendedTimeMs: number;
+  suspendedAt?: number;
 }
 
 /** Error raised when the event log is corrupt. */
@@ -73,6 +77,20 @@ function applyStatusEvent(
   if (!validFrom || !validTo) {
     throw new CorruptLogError();
   }
+  if (event.from === "running" && event.to === "suspended") {
+    return { ...state, status: event.to, suspendedAt: event.ts };
+  }
+  if (event.from === "suspended") {
+    if (state.suspendedAt === undefined) {
+      throw new CorruptLogError();
+    }
+    const { suspendedAt, ...resumedState } = state;
+    return {
+      ...resumedState,
+      status: event.to,
+      suspendedTimeMs: state.suspendedTimeMs + Math.max(0, event.ts - suspendedAt),
+    };
+  }
   return { ...state, status: event.to };
 }
 
@@ -86,8 +104,7 @@ function applyResponseEvent(
     usage: {
       inputTokens: state.usage.inputTokens + event.inputTokens,
       outputTokens: state.usage.outputTokens + event.outputTokens,
-      // TODO(2.12): Compute cost from token usage and model pricing when budgets land.
-      costMicros: state.usage.costMicros,
+      costMicros: state.usage.costMicros + (event.costMicros ?? 0),
     },
   };
 }
@@ -199,6 +216,7 @@ export function foldRunState(events: Iterable<Event>): RunState {
     segmentId: first.value.segmentId,
     startedAt: first.value.ts,
     lastTs: first.value.ts,
+    suspendedTimeMs: 0,
   };
 
   for (;;) {

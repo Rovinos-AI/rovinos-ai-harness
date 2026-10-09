@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type Event, type JsonValue } from "@harness/schemas";
+import {
+  HarnessError,
+  type Code,
+  type Event,
+  type JsonValue,
+  type RunConfig,
+} from "@harness/schemas";
+import { BudgetTracker, type BudgetViolation } from "./budgets.js";
 import { foldRunState, type RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
@@ -17,6 +24,8 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly ids: IdGenerator;
   readonly goal: JsonValue;
   readonly signal: AbortSignal;
+  /** Per-run limits sourced from the validated run configuration. */
+  readonly budgets: RunConfig["budgets"];
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
@@ -37,7 +46,7 @@ class RunAbortedError extends HarnessError {
 }
 
 /**
- * Runs a new model-driven run until a final answer.
+ * Runs a new model-driven run until a final answer or a configured budget is exceeded.
  *
  * @param options - Ports, recorder, deterministic ID source, and initial run input.
  * @returns The final folded state and all events created by this invocation.
@@ -45,6 +54,7 @@ class RunAbortedError extends HarnessError {
 export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
   const events: Event[] = [];
   let result: RunLoopResult | undefined;
+  const budgetTracker = new BudgetTracker(options.budgets);
   const startEvents: EventPartial[] = [
     {
       type: "run_created",
@@ -62,63 +72,115 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
     }
     events.push(...recorded);
     const runId = last.runId;
-
-    for (;;) {
-      if (options.signal.aborted) {
-        throw new RunAbortedError();
-      }
-      const context = await options.context.build(events.slice());
-      const modelResult = await modelStep({
-        recorder: options.recorder,
-        model: options.model,
-        ids: options.ids,
-        runId,
-        messages: { goal: options.goal, context },
-        signal: options.signal,
-        ...(options.role === undefined ? {} : { role: options.role }),
-        ...(options.provider === undefined ? {} : { provider: options.provider }),
-        ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
-      });
-      events.push(...modelResult.events);
-
-      if (modelResult.outcome === "failed") {
-        result = { state: foldRunState(events), events };
-        const failedEvent = modelResult.events.at(-1);
-        if (failedEvent === undefined) {
-          throw new Error("Expected the model step to record a failure.");
-        }
-        return failedEvent;
-      }
-
-      if (modelResult.completion.toolCalls.length > 0) {
-        events.push(
-          ...(await toolStep({
-            recorder: options.recorder,
-            tool: options.tool,
-            clock: options.clock,
-            runId,
-            calls: modelResult.completion.toolCalls,
-            signal: options.signal,
-          })),
-        );
-        continue;
-      }
-
-      const finished = await options.recorder.record({
-        type: "run_status_changed",
-        v: 1,
-        from: "running",
-        to: "completed",
-        reason: "final_answer",
-      });
-      events.push(finished);
-      result = { state: foldRunState(events), events };
-      return finished;
-    }
+    const ended = await runLoopSteps(options, events, runId, budgetTracker);
+    result = { state: foldRunState(events), events };
+    return ended;
   });
 
   if (result === undefined) {
     throw new Error("Expected the run loop to record an outcome.");
   }
   return result;
+}
+
+async function recordBudgetFailure(
+  recorder: RunRecorder,
+  events: Event[],
+  violation: BudgetViolation,
+): Promise<Event> {
+  events.push(
+    await recorder.record({
+      type: "budget_exceeded",
+      v: 1,
+      budget: violation.budget,
+      limit: violation.limit,
+      observed: violation.observed,
+    }),
+  );
+  const failed = await recorder.record({
+    type: "run_status_changed",
+    v: 1,
+    from: "running",
+    to: "failed",
+    reason: "budget_exceeded",
+  });
+  events.push(failed);
+  return failed;
+}
+
+async function runLoopSteps(
+  options: RunLoopOptions,
+  events: Event[],
+  runId: Event["runId"],
+  budgetTracker: BudgetTracker,
+): Promise<Event> {
+  for (;;) {
+    if (options.signal.aborted) {
+      throw new RunAbortedError();
+    }
+    const context = await options.context.build(events.slice());
+    const state = foldRunState(events);
+    const modelBudget = budgetTracker.check(
+      { ...state, steps: state.steps + 1 },
+      options.clock.now(),
+    );
+    if (!modelBudget.ok) {
+      return recordBudgetFailure(options.recorder, events, modelBudget);
+    }
+    const modelResult = await modelStep({
+      recorder: options.recorder,
+      model: options.model,
+      ids: options.ids,
+      runId,
+      messages: { goal: options.goal, context },
+      signal: options.signal,
+      ...(options.role === undefined ? {} : { role: options.role }),
+      ...(options.provider === undefined ? {} : { provider: options.provider }),
+      ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+    });
+    events.push(...modelResult.events);
+
+    if (modelResult.outcome === "failed") {
+      const failedEvent = modelResult.events.at(-1);
+      if (failedEvent === undefined) {
+        throw new Error("Expected the model step to record a failure.");
+      }
+      return failedEvent;
+    }
+
+    const responseBudget = budgetTracker.check(foldRunState(events), options.clock.now());
+    if (!responseBudget.ok) {
+      return recordBudgetFailure(options.recorder, events, responseBudget);
+    }
+
+    if (modelResult.completion.toolCalls.length > 0) {
+      for (const call of modelResult.completion.toolCalls) {
+        const toolBudget = budgetTracker.check(foldRunState(events), options.clock.now());
+        if (!toolBudget.ok) {
+          return recordBudgetFailure(options.recorder, events, toolBudget);
+        }
+        events.push(
+          ...(await toolStep({
+            recorder: options.recorder,
+            tool: options.tool,
+            clock: options.clock,
+            runId,
+            calls: [call],
+            signal: options.signal,
+          })),
+        );
+      }
+      continue;
+    }
+
+    const finished = await options.recorder.record({
+      type: "run_status_changed",
+      v: 1,
+      from: "running",
+      to: "completed",
+      reason: "final_answer",
+    });
+    events.push(finished);
+    return finished;
+  }
 }

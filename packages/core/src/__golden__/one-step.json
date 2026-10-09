@@ -31,6 +31,7 @@
     "model": "test_model",
     "inputTokens": 3,
     "outputTokens": 5,
+    "costMicros": 12,
     "finishReason": "stop",
     "latencyMs": 8,
     "schemaValid": true,

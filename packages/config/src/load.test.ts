@@ -116,13 +116,16 @@ describe("loadConfig", () => {
     });
   });
 
-  it("coerces the suspended-time environment override", async () => {
+  it.each([
+    ["true", true],
+    ["false", false],
+  ])("coerces the suspended-time environment override %s", async (value, expected) => {
     const config = await loadConfig({
-      env: { HARNESS__RUN__BUDGETS__COUNTSUSPENDEDTIME: "true" },
+      env: { HARNESS__RUN__BUDGETS__COUNT_SUSPENDED_TIME: value },
       readFile: reader(validYaml),
     });
 
-    expect(config.run.budgets.countSuspendedTime).toBe(true);
+    expect(config.run.budgets.countSuspendedTime).toBe(expected);
   });
 
   it("rejects unknown environment segments with the variable path only", async () => {
