@@ -439,6 +439,84 @@ describe("runLoop", () => {
     expect(tool.calls).toHaveLength(1);
   });
 
+  it("stops before the next model call when the run is aborted", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const controller = new AbortController();
+    let toolResults = 0;
+    const append = store.append.bind(store);
+    vi.spyOn(store, "append").mockImplementation(
+      async (appendedRunId, appendedEvents, expectedSeq) => {
+        const result = await append(appendedRunId, appendedEvents, expectedSeq);
+        if (appendedEvents.some(({ type }) => type === "tool_result")) {
+          toolResults += 1;
+          if (toolResults === 3) {
+            controller.abort();
+          }
+        }
+        return result;
+      },
+    );
+    const call = { callId: modelCallId, toolId: "repeating_tool", args: {} };
+    const complete = vi.fn(() => Promise.resolve(completion([call])));
+    const model: ModelPort = {
+      complete,
+    };
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "repeating_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const contextPort = { build: vi.fn(() => Promise.resolve([])) };
+
+    await expect(
+      runLoop({
+        recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+        clock,
+        model,
+        tool,
+        context: contextPort,
+        ids: new SequentialIdGenerator(),
+        goal: "abort after three tool calls",
+        configHash,
+        policyVersion: "test.policy",
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ code: "run_aborted" });
+
+    const recordedTypes: string[] = [];
+    for await (const event of store.read(runId)) {
+      recordedTypes.push(event.type);
+    }
+    expect(recordedTypes).toEqual([
+      "run_created",
+      "run_status_changed",
+      "model_request",
+      "model_response",
+      "tool_intent",
+      "tool_result",
+      "model_request",
+      "model_response",
+      "tool_intent",
+      "tool_result",
+      "model_request",
+      "model_response",
+      "tool_intent",
+      "tool_result",
+    ]);
+    expect(complete).toHaveBeenCalledTimes(3);
+    expect(tool.calls).toHaveLength(3);
+    expect(contextPort.build).toHaveBeenCalledTimes(3);
+    expect(await store.head(runId)).toBe(recordedTypes.length);
+  });
+
   it("denies unknown tools without executing them", async () => {
     const clock = new FakeClock(100);
     const tool = new FakeToolPort();

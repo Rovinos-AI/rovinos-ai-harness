@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Event, JsonValue } from "@harness/schemas";
+import { HarnessError, type Code, type Event, type JsonValue } from "@harness/schemas";
 import { foldRunState, type RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
@@ -26,6 +26,14 @@ export interface RunLoopOptions extends NewRunMetadata {
 export interface RunLoopResult {
   readonly state: RunState;
   readonly events: readonly Event[];
+}
+
+class RunAbortedError extends HarnessError {
+  readonly code = "run_aborted";
+
+  constructor() {
+    super("Run was aborted.");
+  }
 }
 
 /**
@@ -56,6 +64,9 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
     const runId = last.runId;
 
     for (;;) {
+      if (options.signal.aborted) {
+        throw new RunAbortedError();
+      }
       const context = await options.context.build(events.slice());
       const modelResult = await modelStep({
         recorder: options.recorder,
