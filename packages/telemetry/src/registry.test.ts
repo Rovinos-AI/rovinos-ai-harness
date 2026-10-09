@@ -5,6 +5,7 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
+import { HarnessError } from "@harness/schemas";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "node:process";
@@ -13,7 +14,6 @@ import {
   attr,
   defineSpan,
   getAttrMeta,
-  HarnessError,
   isSafeAttr,
   listSpanDefinitions,
   lookupSpanDefinition,
@@ -46,10 +46,18 @@ beforeEach(() => {
 
 function defineTestSpan() {
   return defineSpan("harness.test.operation", {
-    requestId: attr.id(),
-    count: attr.int(),
-    mode: attr.enum(["fast", "safe"]),
+    "harness.request.id": attr.id(),
+    "harness.test.count": attr.int(),
+    "harness.test.mode": attr.enum(["fast", "safe"]),
   });
+}
+
+class X extends HarnessError {
+  readonly code = "x_failed";
+
+  constructor() {
+    super("sensitive error message");
+  }
 }
 
 function invokeStart<Shape extends SpanDefinitionShape, Schema extends z.ZodType>(
@@ -123,14 +131,14 @@ describe("span registry", () => {
     expect(Object.isFrozen(definition.shape)).toBe(true);
     expect(
       definition.schema.parse({
-        requestId: testId,
-        count: 1,
-        mode: "fast",
+        "harness.request.id": testId,
+        "harness.test.count": 1,
+        "harness.test.mode": "fast",
       }),
     ).toEqual({
-      requestId: testId,
-      count: 1,
-      mode: "fast",
+      "harness.request.id": testId,
+      "harness.test.count": 1,
+      "harness.test.mode": "fast",
     });
     expect(getAttrMeta(definition.shape["harness.error.code"])).toEqual({
       kind: "code",
@@ -139,18 +147,18 @@ describe("span registry", () => {
   });
 
   it("rejects an unconstrained attribute, including an optional wrapper", () => {
-    expect(() => defineSpan("harness.test.unsafe", { text: z.string() })).toThrowError(
-      "span_attr_unconstrained",
-    );
     expect(() =>
-      defineSpan("harness.test.optional_unsafe", { text: attr.optional(z.string()) }),
+      defineSpan("harness.test.unsafe", { "harness.test.text": z.string() }),
+    ).toThrowError("span_attr_unconstrained");
+    expect(() =>
+      defineSpan("harness.test.optional_unsafe", { "harness.test.text": attr.optional(z.string()) }),
     ).toThrowError("span_attr_unconstrained");
   });
 
   it("validates one snapshot of accessor-based attribute shapes", () => {
     let reads = 0;
     const changingShape: SpanShape = {};
-    Object.defineProperty(changingShape, "requestId", {
+    Object.defineProperty(changingShape, "harness.request.id", {
       enumerable: true,
       get() {
         reads += 1;
@@ -161,14 +169,20 @@ describe("span registry", () => {
     const definition = defineSpan("harness.test.getter", changingShape);
 
     expect(reads).toBe(1);
-    expect(definition.schema.safeParse({ requestId: testId }).success).toBe(true);
-    expect(definition.schema.safeParse({ requestId: "unbounded" }).success).toBe(false);
+    expect(definition.schema.safeParse({ "harness.request.id": testId }).success).toBe(true);
+    expect(definition.schema.safeParse({ "harness.request.id": "unbounded" }).success).toBe(false);
   });
 
   it("rejects invalid, reserved, and duplicate names or attributes", () => {
-    for (const name of ["mcp.call", "Harness.test", "harness.", "harness." + "a".repeat(60)]) {
+    for (const name of ["mcp.call", "Harness.test", "harness.", "harness." + "a".repeat(57)]) {
       expect(() => defineSpan(name, {})).toThrowError("span_name_invalid");
     }
+
+    const maxLengthName = `harness.${"a".repeat(56)}`;
+    expect(defineSpan(maxLengthName, {}).name).toBe(maxLengthName);
+    expect(() =>
+      defineSpan("harness.test.invalid_attribute", { private: attr.id() }),
+    ).toThrowError("span_attr_name_invalid");
 
     expect(() =>
       defineSpan("harness.test.reserved", { "harness.error.code": attr.code() }),
@@ -181,19 +195,19 @@ describe("span registry", () => {
   it("rejects extra keys and invalid values before creating a span", () => {
     const definition = defineTestSpan();
     const attrs = {
-      requestId: testId,
-      count: 1,
-      mode: "fast",
+      "harness.request.id": testId,
+      "harness.test.count": 1,
+      "harness.test.mode": "fast",
     };
 
     expect(() => invokeStart(definition, { ...attrs, private: "not-allowed" })).toThrowError(
       "span_attr_invalid",
     );
     const invalidValueError = requireRegistryError(
-      captureError(() => invokeStart(definition, { ...attrs, count: 1.5 })),
+      captureError(() => invokeStart(definition, { ...attrs, "harness.test.count": 1.5 })),
     );
     expect(invalidValueError.code).toBe("span_attr_invalid");
-    expect(invalidValueError.issues.map(({ path }) => path)).toEqual([["count"]]);
+    expect(invalidValueError.issues.map(({ path }) => path)).toEqual([["harness.test.count"]]);
     expect(JSON.stringify(invalidValueError.issues)).not.toContain("1.5");
     expect(exporter.getFinishedSpans()).toHaveLength(0);
   });
@@ -201,7 +215,11 @@ describe("span registry", () => {
   it("passes parent context and links to the tracer", () => {
     const definition = defineTestSpan();
     const span = definition.start(
-      { requestId: testId, count: 1, mode: "fast" },
+      {
+        "harness.request.id": testId,
+        "harness.test.count": 1,
+        "harness.test.mode": "fast",
+      },
       {
         parent: ROOT_CONTEXT,
         links: [
@@ -223,17 +241,21 @@ describe("span registry", () => {
   it("converts attribute getter failures to value-free validation errors", () => {
     const definition = defineTestSpan();
     const attrs = new Proxy(
-      { requestId: testId, count: 1, mode: "fast" },
+      {
+        "harness.request.id": testId,
+        "harness.test.count": 1,
+        "harness.test.mode": "fast",
+      },
       {
         get(target, key) {
-          if (key === "count") {
+          if (key === "harness.test.count") {
             throw new Error("sensitive getter value");
           }
-          if (key === "requestId") {
-            return target.requestId;
+          if (key === "harness.request.id") {
+            return target["harness.request.id"];
           }
-          if (key === "mode") {
-            return target.mode;
+          if (key === "harness.test.mode") {
+            return target["harness.test.mode"];
           }
           return undefined;
         },
@@ -246,7 +268,7 @@ describe("span registry", () => {
 
   it("returns definitions in registration order and looks them up by name", () => {
     const first = defineTestSpan();
-    const second = defineSpan("harness.test.second", { enabled: attr.bool() });
+    const second = defineSpan("harness.test.second", { "harness.test.enabled": attr.bool() });
 
     expect(listSpanDefinitions()).toEqual([first, second]);
     expect(lookupSpanDefinition(first.name)).toBe(first);
@@ -256,15 +278,13 @@ describe("span registry", () => {
   it("ends spans after success and on errors without recording messages", async () => {
     const definition = defineTestSpan();
     const attrs: Parameters<typeof definition.start>[0] = {
-      requestId: testId,
-      count: 1,
-      mode: "safe",
+      "harness.request.id": testId,
+      "harness.test.count": 1,
+      "harness.test.mode": "safe",
     };
-    const harnessError = new HarnessError("tool_failed", "sensitive error message");
+    const harnessError = new X();
     const forgedHarnessError = new Error("forged sensitive message");
     Object.setPrototypeOf(forgedHarnessError, HarnessError.prototype);
-    expect(Reflect.set(harnessError, "code", "sensitive error message")).toBe(false);
-
     await expect(withSpan(definition, attrs, () => "done")).resolves.toBe("done");
     await expect(
       withSpan(definition, attrs, () => {
@@ -287,7 +307,7 @@ describe("span registry", () => {
     expect(spans[0]?.ended).toBe(true);
     expect(spans[1]?.status.code).toBe(SpanStatusCode.ERROR);
     expect(spans[1]?.status.message).toBeUndefined();
-    expect(spans[1]?.attributes["harness.error.code"]).toBe("tool_failed");
+    expect(spans[1]?.attributes["harness.error.code"]).toBe("x_failed");
     expect(spans[2]?.status.code).toBe(SpanStatusCode.ERROR);
     expect(spans[2]?.attributes["harness.error.code"]).toBeUndefined();
     expect(spans[3]?.status.code).toBe(SpanStatusCode.ERROR);
@@ -319,9 +339,9 @@ describe("span registry", () => {
     expect(listSpanDefinitions()).toHaveLength(1);
   });
 
-  it("validates error codes before creating a harness error", () => {
-    expect(() => new HarnessError("INVALID CODE")).toThrowError("Harness error code is invalid.");
+  it("registers registry errors as shared harness errors", () => {
     const registryError = new SpanRegistryError("span_duplicate");
+    expect(registryError).toBeInstanceOf(HarnessError);
     expect(registryError.issues).toEqual([]);
     expect(Reflect.set(registryError, "code", "tool_failed")).toBe(false);
   });

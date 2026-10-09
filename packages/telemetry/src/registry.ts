@@ -8,10 +8,10 @@ import {
   SpanStatusCode,
   type SpanOptions,
 } from "@opentelemetry/api";
-import { Code } from "@harness/schemas";
+import { Code, HarnessError } from "@harness/schemas";
 import { z } from "zod";
 import { attr, isSafeAttr } from "./attr.js";
-import { HarnessError, SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
+import { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
 import { getTracer } from "./tracer.js";
 import { env } from "node:process";
 
@@ -48,7 +48,7 @@ export interface SpanDefinition<
   ): Span;
 }
 
-const spanNamePattern = /^harness\.[a-z0-9_.]{1,60}$/u;
+const spanNamePattern = /^harness\.[a-z0-9_.]{1,56}$/u;
 const definitions = new Map<string, SpanDefinition<SpanDefinitionShape>>();
 
 function addErrorCodeAttribute<Shape extends SpanShape>(shape: Shape): Shape & ErrorCodeShape {
@@ -141,6 +141,9 @@ export function defineSpan<const Shape extends SpanShape>(
   }
   if (Object.hasOwn(shapeSnapshot, "harness.error.code")) {
     throw new SpanRegistryError("span_attr_reserved");
+  }
+  if (Object.keys(shapeSnapshot).some((key) => !spanNamePattern.test(key))) {
+    throw new SpanRegistryError("span_attr_name_invalid");
   }
   if (Object.values(shapeSnapshot).some((schema) => !isSafeAttr(schema))) {
     throw new SpanRegistryError("span_attr_unconstrained");
