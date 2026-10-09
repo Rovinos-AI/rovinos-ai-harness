@@ -289,7 +289,7 @@ async function applyDanglingIntentAction(
   options: ResumeToolStepOptions,
   intent: ToolIntentEvent,
   action: DanglingIntentAction,
-): Promise<readonly Event[]> {
+): Promise<readonly Event[] | "escalate"> {
   if (action.callId !== intent.callId) {
     throw new ResumeActionMismatchError();
   }
@@ -297,7 +297,7 @@ async function applyDanglingIntentAction(
     return recordDanglingFailure(options, intent, action.errorCode);
   }
   if (action.kind === "escalate") {
-    throw new ResumeActionMismatchError();
+    return "escalate";
   }
 
   const description = options.tool.describe(intent.toolId);
@@ -305,7 +305,7 @@ async function applyDanglingIntentAction(
     return recordDanglingFailure(options, intent, "unknown_tool");
   }
   if (!intent.idempotent || !description.idempotent) {
-    throw new ResumeActionMismatchError();
+    return "escalate";
   }
   return runToolCall(options, callFromIntent(intent), description, false);
 }
@@ -331,22 +331,12 @@ export async function applyDanglingIntents(
     if (intent === undefined) {
       throw new ResumeActionMismatchError();
     }
-    if (action.kind === "escalate") {
+    const applied = await applyDanglingIntentAction(options, intent, action);
+    if (applied === "escalate") {
       escalations.push(intent);
-      continue;
+    } else {
+      events.push(...applied);
     }
-    if (action.kind === "rerun") {
-      const description = options.tool.describe(intent.toolId);
-      if (description === undefined) {
-        events.push(...(await recordDanglingFailure(options, intent, "unknown_tool")));
-        continue;
-      }
-      if (!intent.idempotent || !description.idempotent) {
-        escalations.push(intent);
-        continue;
-      }
-    }
-    events.push(...(await applyDanglingIntentAction(options, intent, action)));
   }
   if (escalations.length > 0) {
     events.push(...(await requestResumeApprovals(options, escalations)));
