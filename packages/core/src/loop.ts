@@ -88,23 +88,27 @@ async function recordBudgetFailure(
   events: Event[],
   violation: BudgetViolation,
 ): Promise<Event> {
-  events.push(
-    await recorder.record({
+  const recorded = await recorder.recordBatch([
+    {
       type: "budget_exceeded",
       v: 1,
       budget: violation.budget,
       limit: violation.limit,
       observed: violation.observed,
-    }),
-  );
-  const failed = await recorder.record({
-    type: "run_status_changed",
-    v: 1,
-    from: "running",
-    to: "failed",
-    reason: "budget_exceeded",
-  });
-  events.push(failed);
+    },
+    {
+      type: "run_status_changed",
+      v: 1,
+      from: "running",
+      to: "failed",
+      reason: "budget_exceeded",
+    },
+  ]);
+  events.push(...recorded);
+  const failed = recorded.at(-1);
+  if (failed === undefined) {
+    throw new Error("Expected budget failure events.");
+  }
   return failed;
 }
 
@@ -146,11 +150,6 @@ async function runLoopSteps(
         throw new Error("Expected the model step to record a failure.");
       }
       return failedEvent;
-    }
-
-    const responseBudget = budgetTracker.check(foldRunState(events), options.clock.now());
-    if (!responseBudget.ok) {
-      return recordBudgetFailure(options.recorder, events, responseBudget);
     }
 
     if (modelResult.completion.toolCalls.length > 0) {

@@ -722,8 +722,10 @@ describe("runLoop", () => {
     const tool = new FakeToolPort(
       new Map([["budgeted_tool", { idempotent: true, timeoutMs: 1_000, execute }]]),
     );
+    const store = new InMemoryEventStore();
+    const append = vi.spyOn(store, "append");
     const result = await runLoop({
-      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
       clock,
       model: new FakeModelPort([completion([call], "over budget", 2)]),
       tool,
@@ -737,6 +739,9 @@ describe("runLoop", () => {
     });
 
     expect(result.state.status).toBe("failed");
+    expect(result.events.find(({ type }) => type === "model_response")).toMatchObject({
+      costMicros: 2,
+    });
     expect(result.events.at(-2)).toMatchObject({
       type: "budget_exceeded",
       budget: "cost",
@@ -751,21 +756,67 @@ describe("runLoop", () => {
     });
     expect(tool.calls).toEqual([]);
     expect(execute).not.toHaveBeenCalled();
+    const budgetAppendCalls = append.mock.calls.filter(([, appended]) =>
+      appended.some(({ type }) => type === "budget_exceeded"),
+    );
+    expect(budgetAppendCalls).toHaveLength(1);
+    expect(budgetAppendCalls[0]?.[1]).toMatchObject([
+      { type: "budget_exceeded", budget: "cost" },
+      {
+        type: "run_status_changed",
+        from: "running",
+        to: "failed",
+        reason: "budget_exceeded",
+      },
+    ]);
   });
 
-  it("fails when model work crosses the wall-clock budget", async () => {
+  it("completes a final answer even when its response exceeds the cost budget", async () => {
     const clock = new FakeClock(100);
+    const result = await runLoop({
+      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([completion([], "final answer", 2)]),
+      tool: new FakeToolPort(),
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "final answer cost budget goal",
+      configHash,
+      budgets: RunConfigSchema.parse({ budgets: { maxCostUsd: 0.000001 } }).budgets,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+    });
+
+    expect(result.state.status).toBe("completed");
+    expect(result.events.at(-1)).toMatchObject({
+      type: "run_status_changed",
+      from: "running",
+      to: "completed",
+      reason: "final_answer",
+    });
+    expect(result.events.find(({ type }) => type === "model_response")).toMatchObject({
+      costMicros: 2,
+    });
+  });
+
+  it("fails before executing tools when model work crosses the wall-clock budget", async () => {
+    const clock = new FakeClock(100);
+    const call = { callId: modelCallId, toolId: "budgeted_tool", args: {} };
+    const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
+    const tool = new FakeToolPort(
+      new Map([["budgeted_tool", { idempotent: true, timeoutMs: 1_000, execute }]]),
+    );
     const model: ModelPort = {
       complete() {
         clock.advance(11);
-        return Promise.resolve(completion());
+        return Promise.resolve(completion([call]));
       },
     };
     const result = await runLoop({
       recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
       clock,
       model,
-      tool: new FakeToolPort(),
+      tool,
       context: new NaiveContext(),
       ids: new SequentialIdGenerator(),
       goal: "wall-clock budget goal",
@@ -780,6 +831,8 @@ describe("runLoop", () => {
       { type: "budget_exceeded", budget: "wall_clock", limit: 10, observed: 11 },
       { type: "run_status_changed", from: "running", to: "failed", reason: "budget_exceeded" },
     ]);
+    expect(tool.calls).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it.each([
