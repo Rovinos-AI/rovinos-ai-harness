@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
+import { HarnessError } from "./errors.js";
 import { ContractError, parseJson, parseYaml, safeParseJson } from "./parse.js";
 import { compileJsonSchema } from "./json-schema.js";
 
@@ -36,6 +37,13 @@ it("parses JSON and YAML into the inferred schema type", () => {
   expect(json).toEqual({ name: "sample", count: 3 });
   expect(yaml).toEqual(json);
   expectTypeOf(json).toEqualTypeOf<{ name: string; count: number }>();
+});
+
+it("uses the shared harness error base", () => {
+  const error = captureContractError(() => parseJson(valueSchema, "{}"));
+
+  expect(error).toBeInstanceOf(HarnessError);
+  expect(error.name).toBe("ContractError");
 });
 
 it("returns a value-free error for invalid JSON and YAML", () => {

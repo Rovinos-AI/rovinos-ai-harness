@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from "vitest";
-import type { Event, RunStatus } from "@harness/schemas";
+import { HarnessError, type Event, type RunStatus } from "@harness/schemas";
 import { CorruptLogError, foldRunState, RUN_TRIGGERS, transition, type RunState } from "./index.js";
 
 const id = "00000000000000000000000000";
@@ -133,7 +133,9 @@ describe("foldRunState", () => {
   });
 
   test("rejects an illegal status sequence with corrupt_log", () => {
-    expect(new CorruptLogError().code).toBe("corrupt_log");
+    const error = new CorruptLogError();
+    expect(error).toBeInstanceOf(HarnessError);
+    expect(error.code).toBe("corrupt_log");
     expect(() => foldRunState([statusChanged(0, "pending", "completed", "complete")])).toThrow(
       CorruptLogError,
     );

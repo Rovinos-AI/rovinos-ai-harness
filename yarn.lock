@@ -992,6 +992,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@harness/config@workspace:packages/config":
+  version: 0.0.0-use.local
+  resolution: "@harness/config@workspace:packages/config"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.5"
+  languageName: unknown
+  linkType: soft
+
 "@harness/core@workspace:packages/core":
   version: 0.0.0-use.local
   resolution: "@harness/core@workspace:packages/core"
@@ -1037,6 +1047,14 @@ __metadata:
     "@types/node": "npm:22.20.5"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
+
+"@harness/store@workspace:^, @harness/store@workspace:packages/store":
+  version: 0.0.0-use.local
+  resolution: "@harness/store@workspace:packages/store"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+
   languageName: unknown
   linkType: soft
 
@@ -4747,6 +4765,7 @@ __metadata:
     "@eslint-community/eslint-plugin-eslint-comments": "npm:4.8.1"
     "@harness/eslint-plugin-harness": "workspace:^"
     "@harness/schemas": "workspace:^"
+    "@harness/store": "workspace:^"
     "@types/node": "npm:22.20.5"
     "@types/spdx-expression-parse": "npm:4.0.0"
     "@vitest/coverage-v8": "npm:3.2.6"
