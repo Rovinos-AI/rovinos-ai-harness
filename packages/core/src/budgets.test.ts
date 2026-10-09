@@ -32,6 +32,8 @@ function runState(overrides: Partial<RunState> = {}): RunState {
     usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
     pendingToolCalls: new Map(),
     pendingApprovals: new Map(),
+    approvalRequests: new Map(),
+    resolvedApprovals: new Map(),
     segmentId: "00000000000000000000000000",
     startedAt: 100,
     lastTs: 100,

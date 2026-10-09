@@ -35,7 +35,7 @@ These numeric values are stable for scripts and automation:
 | `4` | `policy_denied` | Policy denied an operation, including separation-of-duties denial. |
 | `5` | `suspended` | A run is waiting for approval or human input. |
 | `6` | `budget_exceeded` | A run exceeded its configured budget. |
-| `7` | `not_found_or_resolved` | Approval or input was not found or was already resolved. |
+| `7` | `not_found_or_resolved` | Approval or input was not found, already resolved, or its run is no longer suspended. |
 | `8` | `replay_failed` | Replay failed. |
 | `9` | `quota_exceeded` | The configured quota was exceeded. |
 
@@ -51,6 +51,6 @@ never included in CLI error output.
 | `policy_denied`, `approver_is_requester` | `4` |
 | `suspended` | `5` |
 | `budget_exceeded` | `6` |
-| `not_found_or_resolved`, `approval_not_found`, `approval_already_resolved`, `input_not_found`, `input_already_resolved` | `7` |
+| `not_found_or_resolved`, `approval_not_found`, `approval_already_resolved`, `approval_run_not_suspended`, `input_not_found`, `input_already_resolved` | `7` |
 | `replay_failed` | `8` |
 | `quota_exceeded` | `9` |

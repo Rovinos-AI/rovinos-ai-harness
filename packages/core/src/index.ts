@@ -28,6 +28,20 @@ export {
 } from "./recorder.js";
 export { Checkpointer, NoActiveSpanError, type CheckpointerOptions } from "./checkpoint.js";
 export {
+  ApprovalAlreadyResolvedError,
+  ApprovalEditsRequiredError,
+  ApprovalNotFoundError,
+  ApprovalRequestStateError,
+  ApprovalResolutionConflictError,
+  ApprovalRunNotSuspendedError,
+  applyResolvedApprovals,
+  requestApproval,
+  resolveApproval,
+  type ApprovalDecision,
+  type ApprovalSuspensionResult,
+  type RequestApprovalOptions,
+} from "./approvals.js";
+export {
   APPROVAL_WAIT_SPAN,
   CHECKPOINT_SPAN,
   COMPACTION_SPAN,

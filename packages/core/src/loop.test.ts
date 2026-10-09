@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   context,
@@ -25,7 +27,12 @@ import {
   type Event,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
-import { InMemoryEventStore, SeqConflictError } from "@harness/store";
+import {
+  InMemoryEventStore,
+  SeqConflictError,
+  SqliteEventStore,
+  type EventStore,
+} from "@harness/store";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";
@@ -35,11 +42,22 @@ import { Checkpointer } from "./checkpoint.js";
 import { foldRunState } from "./run-state.js";
 import { RUN_SPAN } from "./spans.js";
 import type { ModelCompletion, ModelPort } from "./ports.js";
+import {
+  applyResolvedApprovals,
+  ApprovalAlreadyResolvedError,
+  ApprovalEditsRequiredError,
+  ApprovalNotFoundError,
+  ApprovalRequestStateError,
+  ApprovalRunNotSuspendedError,
+  requestApproval,
+  resolveApproval,
+} from "./approvals.js";
 
 const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
 const configHash = "a".repeat(64);
 const modelCallId = "22222222222222222222222222";
+const approvalId = "33333333333333333333333333";
 const defaultBudgets = RunConfigSchema.parse({}).budgets;
 const goldenPath = fileURLToPath(new URL("./__golden__/one-step.json", import.meta.url));
 let nextSpanId = 0;
@@ -217,6 +235,61 @@ function completion(
   };
 }
 
+async function createApprovalRun(store: EventStore, clock: FakeClock) {
+  const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+  let events: Event[] = [];
+  await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+    events = await recorder.recordBatch([
+      { type: "run_created", v: 1, configHash, policyVersion: "test.policy" },
+      { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
+      {
+        type: "tool_intent",
+        v: 1,
+        callId: modelCallId,
+        toolId: "approval_tool",
+        idempotent: false,
+        policyDecision: "ask",
+        argsHash: "51221262a85f34235978c8dc712134f6e04b6078190d87ef73bee21422c8af3e",
+        args: { z: 1, a: 3 },
+      },
+    ]);
+    const last = events.at(-1);
+    if (last === undefined) {
+      throw new Error("Expected approval run events.");
+    }
+    return last;
+  });
+  return { recorder, events, state: foldRunState(events) };
+}
+
+async function requestApprovalForRun(
+  recorder: RunRecorder,
+  clock: FakeClock,
+  state: ReturnType<typeof foldRunState>,
+) {
+  return requestApproval(recorder, {
+    approvalId,
+    callId: modelCallId,
+    payload: { prompt: "Approve tool execution?" },
+    state,
+    checkpointer: new Checkpointer({
+      recorder,
+      runId,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      clock,
+    }),
+  });
+}
+
+async function readApprovalEvents(store: EventStore): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of store.read(runId)) {
+    events.push(event);
+  }
+  return events;
+}
+
 class TestToolError extends HarnessError {
   readonly code = "tool_broken";
 
@@ -287,6 +360,354 @@ afterAll(() => {
   context.disable();
 });
 
+describe("approval lifecycle", () => {
+  it("records a request, suspends the run, and forces a checkpoint", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+
+    const result = await requestApprovalForRun(recorder, clock, state);
+    const stored = await readApprovalEvents(store);
+
+    expect(result).toMatchObject({
+      status: "suspended",
+      approvalIds: [approvalId],
+    });
+    expect(result.events.map(({ type }) => type)).toEqual([
+      "approval_requested",
+      "run_status_changed",
+      "checkpoint_written",
+    ]);
+    expect(stored).toMatchObject([
+      { type: "run_created" },
+      { type: "run_status_changed", to: "running" },
+      {
+        type: "tool_intent",
+        callId: modelCallId,
+        argsHash: "51221262a85f34235978c8dc712134f6e04b6078190d87ef73bee21422c8af3e",
+      },
+      {
+        type: "approval_requested",
+        approvalId,
+        callId: modelCallId,
+        payload: { prompt: "Approve tool execution?" },
+      },
+      { type: "run_status_changed", from: "running", to: "suspended", reason: "awaiting_approval" },
+      { type: "checkpoint_written", atSeq: 5 },
+    ]);
+    await expect(store.latestSnapshot(runId)).resolves.toMatchObject({ atSeq: 5 });
+    expect(foldRunState(stored).pendingApprovals.has(approvalId)).toBe(true);
+    await expect(requestApprovalForRun(recorder, clock, state)).rejects.toBeInstanceOf(
+      ApprovalRequestStateError,
+    );
+  });
+
+  it.each(["approve", "deny", "edit"] as const)(
+    "resolves and applies the %s decision from a new recorder",
+    async (decision) => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      const { recorder, state } = await createApprovalRun(store, clock);
+      await requestApprovalForRun(recorder, clock, state);
+      clock.advance(25);
+      const edits = decision === "edit" ? { z: 1, a: 4 } : undefined;
+
+      const resolution = await resolveApproval(store, runId, approvalId, decision, edits, clock);
+      const eventsBeforeResume = await readApprovalEvents(store);
+      expect(foldRunState(eventsBeforeResume).status).toBe("suspended");
+      const lastEvent = eventsBeforeResume.at(-1);
+      if (lastEvent === undefined) {
+        throw new Error("Expected the approval resolution.");
+      }
+      const resumedRecorder = new RunRecorder(
+        store,
+        runId,
+        lastEvent.segmentId,
+        await store.head(runId),
+        clock,
+      );
+      await resumedRecorder.withStepSpan(RUN_SPAN, {}, async () =>
+        resumedRecorder.record({
+          type: "run_status_changed",
+          v: 1,
+          from: "suspended",
+          to: "running",
+          reason: "resumed",
+        }),
+      );
+      const resumedState = foldRunState(await readApprovalEvents(store));
+      const tool = new FakeToolPort(
+        new Map([
+          [
+            "approval_tool",
+            {
+              idempotent: false,
+              timeoutMs: 1_000,
+              execute: () => Promise.resolve({ outcome: "ok", result: { executed: true } }),
+            },
+          ],
+        ]),
+      );
+      const applied = await applyResolvedApprovals(
+        {
+          recorder: resumedRecorder,
+          tool,
+          clock,
+          runId,
+          signal: new AbortController().signal,
+        },
+        resumedState,
+      );
+      const result = applied[0];
+      if (result === undefined) {
+        throw new Error("Expected the approval result.");
+      }
+
+      expect(resolution).toMatchObject({
+        type: "approval_resolved",
+        approvalId,
+        decision,
+        waitMs: 25,
+        ...(edits === undefined ? {} : { edits }),
+      });
+      expect(applied.map(({ type }) => type)).toEqual(["tool_result"]);
+      expect(tool.calls).toHaveLength(decision === "deny" ? 0 : 1);
+      const expectedArgs = decision === "edit" ? { z: 1, a: 4 } : { z: 1, a: 3 };
+      expect(tool.calls.map(({ call }) => call.args)).toEqual(
+        decision === "deny" ? [] : [expectedArgs],
+      );
+      const expectedResult: Record<string, string> = {
+        outcome: decision === "deny" ? "denied" : "ok",
+      };
+      if (decision === "deny") {
+        expectedResult.errorCode = "approval_denied";
+      }
+      if (decision === "edit") {
+        expectedResult.executedArgsHash =
+          "8766e03843f53a53303e4aafafb8dcc5db425524ed73f14934b18b154e4e7953";
+      }
+      expect(result).toMatchObject(expectedResult);
+      const finalState = foldRunState(await readApprovalEvents(store));
+      expect(finalState.pendingApprovals.size).toBe(0);
+      expect(finalState.pendingToolCalls.size).toBe(0);
+      await expect(
+        applyResolvedApprovals(
+          {
+            recorder: resumedRecorder,
+            tool,
+            clock,
+            runId,
+            signal: new AbortController().signal,
+          },
+          finalState,
+        ),
+      ).resolves.toEqual([]);
+    },
+  );
+
+  it("rejects missing and repeated approval resolutions", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    await expect(
+      resolveApproval(store, runId, approvalId, "approve", undefined, clock),
+    ).rejects.toBeInstanceOf(ApprovalNotFoundError);
+    const { recorder, state } = await createApprovalRun(store, clock);
+
+    await expect(
+      resolveApproval(store, runId, approvalId, "approve", undefined, clock),
+    ).rejects.toBeInstanceOf(ApprovalNotFoundError);
+    await expect(
+      resolveApproval(store, runId, approvalId, "edit", undefined, clock),
+    ).rejects.toBeInstanceOf(ApprovalEditsRequiredError);
+    await requestApprovalForRun(recorder, clock, state);
+    await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
+    await expect(
+      resolveApproval(store, runId, approvalId, "deny", undefined, clock),
+    ).rejects.toBeInstanceOf(ApprovalAlreadyResolvedError);
+  });
+
+  it("rejects concurrent duplicate resolutions without retrying a stale head", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+    await requestApprovalForRun(recorder, clock, state);
+
+    const resolutions = await Promise.allSettled([
+      resolveApproval(store, runId, approvalId, "approve", undefined, clock),
+      resolveApproval(store, runId, approvalId, "deny", undefined, clock),
+    ]);
+
+    expect(resolutions.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    expect(
+      resolutions.filter(
+        (result) =>
+          result.status === "rejected" && result.reason instanceof ApprovalAlreadyResolvedError,
+      ),
+    ).toHaveLength(1);
+    expect(
+      (await readApprovalEvents(store)).filter(({ type }) => type === "approval_resolved"),
+    ).toHaveLength(1);
+  });
+
+  it("re-reads and retries after an interleaved append", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+    await requestApprovalForRun(recorder, clock, state);
+    const append = store.append.bind(store);
+    let interleaved = false;
+    vi.spyOn(store, "append").mockImplementation(async (appendRunId, events, expectedSeq) => {
+      if (!interleaved && events.some(({ type }) => type === "approval_resolved")) {
+        interleaved = true;
+        const existing = await readApprovalEvents(store);
+        const lastEvent = existing.at(-1);
+        if (lastEvent === undefined) {
+          throw new Error("Expected a suspended run event.");
+        }
+        await append(
+          appendRunId,
+          [
+            {
+              runId: appendRunId,
+              ts: clock.now(),
+              v: 1,
+              traceId: lastEvent.traceId,
+              spanId: lastEvent.spanId,
+              segmentId: lastEvent.segmentId,
+              type: "pii_action",
+              boundary: "ui",
+              action: "allowed",
+              entities: [],
+            },
+          ],
+          expectedSeq,
+        );
+      }
+      return append(appendRunId, events, expectedSeq);
+    });
+
+    const resolution = await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
+
+    expect(interleaved).toBe(true);
+    expect(resolution).toMatchObject({ type: "approval_resolved", decision: "approve", seq: 7 });
+    expect(foldRunState(await readApprovalEvents(store)).status).toBe("suspended");
+  });
+
+  it("rejects resolution when the run has failed without appending", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+    await requestApprovalForRun(recorder, clock, state);
+    await recorder.withStepSpan(RUN_SPAN, {}, async () =>
+      recorder
+        .recordBatch([
+          {
+            type: "run_status_changed",
+            v: 1,
+            from: "suspended",
+            to: "running",
+            reason: "resumed",
+          },
+          { type: "run_status_changed", v: 1, from: "running", to: "failed", reason: "failure" },
+        ])
+        .then((events) => {
+          const lastEvent = events.at(-1);
+          if (lastEvent === undefined) {
+            throw new Error("Expected terminal run status events.");
+          }
+          return lastEvent;
+        }),
+    );
+    const headBeforeResolve = await store.head(runId);
+
+    await expect(
+      resolveApproval(store, runId, approvalId, "approve", undefined, clock),
+    ).rejects.toBeInstanceOf(ApprovalRunNotSuspendedError);
+    await expect(store.head(runId)).resolves.toBe(headBeforeResolve);
+    expect(foldRunState(await readApprovalEvents(store)).status).toBe("failed");
+  });
+
+  it.each(["approve", "deny"] as const)(
+    "resolves and resumes %s through separate durable SQLite connections",
+    async (decision) => {
+      const directory = await mkdtemp(join(tmpdir(), "harness-approval-resume-"));
+      const databasePath = join(directory, "events.sqlite");
+      const clock = new FakeClock(100);
+      let openStore: SqliteEventStore | undefined;
+      try {
+        openStore = new SqliteEventStore(databasePath);
+        const { recorder, state } = await createApprovalRun(openStore, clock);
+        await requestApprovalForRun(recorder, clock, state);
+        await openStore.close();
+        openStore = undefined;
+
+        openStore = new SqliteEventStore(databasePath);
+        await resolveApproval(openStore, runId, approvalId, decision, undefined, clock);
+        await openStore.close();
+        openStore = undefined;
+
+        openStore = new SqliteEventStore(databasePath);
+        const stored = await readApprovalEvents(openStore);
+        const lastEvent = stored.at(-1);
+        if (lastEvent === undefined) {
+          throw new Error("Expected the durable approval decision.");
+        }
+        const resumedRecorder = new RunRecorder(
+          openStore,
+          runId,
+          lastEvent.segmentId,
+          await openStore.head(runId),
+          clock,
+        );
+        const resumed = await resumedRecorder.withStepSpan(RUN_SPAN, {}, async () =>
+          resumedRecorder.record({
+            type: "run_status_changed",
+            v: 1,
+            from: "suspended",
+            to: "running",
+            reason: "resumed",
+          }),
+        );
+        const resumedState = foldRunState([...stored, resumed]);
+        const tool = new FakeToolPort(
+          new Map([
+            [
+              "approval_tool",
+              {
+                idempotent: false,
+                timeoutMs: 1_000,
+                execute: () => Promise.resolve({ outcome: "ok", result: { executed: true } }),
+              },
+            ],
+          ]),
+        );
+        const applied = await applyResolvedApprovals(
+          {
+            recorder: resumedRecorder,
+            tool,
+            clock,
+            runId,
+            signal: new AbortController().signal,
+          },
+          resumedState,
+        );
+
+        expect(applied[0]).toMatchObject({
+          type: "tool_result",
+          outcome: decision === "approve" ? "ok" : "denied",
+          ...(decision === "deny" ? { errorCode: "approval_denied" } : {}),
+        });
+        expect(tool.calls).toHaveLength(decision === "approve" ? 1 : 0);
+      } finally {
+        if (openStore !== undefined) {
+          await openStore.close();
+        }
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
 describe("runLoop", () => {
   it("completes a scripted one-step run with a deterministic golden event sequence", async () => {
     const startingSpanIndex = tracerProvider.spans.length;
@@ -327,6 +748,8 @@ describe("runLoop", () => {
       modelName: "test_model",
     });
 
+    expect(result.status).toBe("completed");
+    expect(result.approvalIds).toEqual([]);
     expect(result.state.status).toBe("completed");
     expect(result.state.steps).toBe(1);
     expect(result.state.usage).toEqual({ inputTokens: 3, outputTokens: 5, costMicros: 12 });

@@ -37,6 +37,11 @@ export interface ResumeToolStepOptions extends Omit<ToolStepOptions, "calls"> {
   readonly ids: IdGenerator;
 }
 
+interface RunToolCallBehavior {
+  readonly appendIntent?: boolean;
+  readonly executedArgsHash?: string;
+}
+
 class ToolTimeoutError extends Error {}
 
 /** Error raised when a resume action or approval does not identify its intent. */
@@ -123,6 +128,10 @@ function latencyMs(clock: Clock, startedAt: number): number {
   return Math.max(0, Math.floor(clock.now() - startedAt));
 }
 
+function executedArgsHashField(hash?: string): { readonly executedArgsHash?: string } {
+  return hash === undefined ? {} : { executedArgsHash: hash };
+}
+
 function recordIntent(
   recorder: RunRecorder,
   call: ModelToolCall,
@@ -145,10 +154,11 @@ async function runToolCall(
   options: Omit<ToolStepOptions, "calls">,
   call: ModelToolCall,
   description: ReturnType<ToolPort["describe"]>,
-  appendIntent = true,
+  behavior: RunToolCallBehavior = {},
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
   const argsHash = hashArgs(call.args);
+  const appendIntent = behavior.appendIntent ?? true;
 
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
     if (appendIntent) {
@@ -164,6 +174,7 @@ async function runToolCall(
         outcome: "denied",
         errorCode: "unknown_tool",
         latencyMs: 0,
+        ...executedArgsHashField(behavior.executedArgsHash),
         result: null,
       });
       events.push(result);
@@ -192,6 +203,7 @@ async function runToolCall(
         outcome: timedOut ? "timeout" : "error",
         errorCode: code,
         latencyMs: latencyMs(options.clock, startedAt),
+        ...executedArgsHashField(behavior.executedArgsHash),
         result: null,
       });
       events.push(result);
@@ -206,6 +218,7 @@ async function runToolCall(
       outcome: execution.outcome,
       ...(execution.outcome === "error" ? { errorCode: execution.errorCode ?? "tool_failed" } : {}),
       latencyMs: latencyMs(options.clock, startedAt),
+      ...executedArgsHashField(behavior.executedArgsHash),
       result: execution.result,
     } satisfies EventPartial);
     events.push(result);
@@ -307,7 +320,68 @@ async function applyDanglingIntentAction(
   if (!intent.idempotent || !description.idempotent) {
     return "escalate";
   }
-  return runToolCall(options, callFromIntent(intent), description, false);
+  return runToolCall(options, callFromIntent(intent), description, { appendIntent: false });
+}
+
+/**
+ * Applies a resolved approval to its durable intent without appending another intent.
+ *
+ * @param options - Recorder, tool port, clock, and run context.
+ * @param intent - The original durable intent with no result.
+ * @param approval - The approval request for this intent.
+ * @param resolution - The durable approval decision.
+ * @returns Events appended while applying the decision.
+ */
+export async function applyApprovalDecision(
+  options: Omit<ResumeToolStepOptions, "ids">,
+  intent: ToolIntentEvent,
+  approval: ApprovalRequestedEvent,
+  resolution: Extract<Event, { type: "approval_resolved" }>,
+): Promise<readonly Event[]> {
+  if (approval.callId !== intent.callId || resolution.approvalId !== approval.approvalId) {
+    throw new ResumeActionMismatchError();
+  }
+  if (resolution.decision === "deny") {
+    const result = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async () => {
+      const recordedResult = await options.recorder.record({
+        type: "tool_result",
+        v: 1,
+        callId: intent.callId,
+        toolId: intent.toolId,
+        outcome: "denied",
+        errorCode: "approval_denied",
+        latencyMs: 0,
+        result: null,
+      });
+      return recordedResult;
+    });
+    return [result];
+  }
+  let args = intent.args;
+  if (resolution.decision === "edit") {
+    if (resolution.edits === undefined) {
+      throw new ApprovalEditsRequiredError();
+    }
+    args = resolution.edits;
+  }
+  const call: ModelToolCall = { callId: intent.callId, toolId: intent.toolId, args };
+  const editedArgsHash = resolution.decision === "edit" ? hashArgs(args) : intent.argsHash;
+  const executedArgsHash = editedArgsHash === intent.argsHash ? undefined : editedArgsHash;
+  return runToolCall(options, call, options.tool.describe(intent.toolId), {
+    appendIntent: false,
+    ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
+  });
+}
+
+/** Error raised when an edit decision has no replacement arguments. */
+export class ApprovalEditsRequiredError extends HarnessError {
+  readonly code = "approval_edits_required";
+
+  /** Creates an error for an edit decision without replacement arguments. */
+  constructor() {
+    super("An edit approval decision requires replacement arguments.");
+    this.name = "ApprovalEditsRequiredError";
+  }
 }
 
 /**
@@ -370,7 +444,7 @@ export async function resolveDanglingIntentApproval(
   if (description === undefined) {
     return recordDanglingFailure(options, intent, "unknown_tool");
   }
-  return runToolCall(options, callFromIntent(intent), description, false);
+  return runToolCall(options, callFromIntent(intent), description, { appendIntent: false });
 }
 
 /**

@@ -3,6 +3,7 @@ import {
   HarnessError,
   type Code,
   type Event,
+  type Id,
   type JsonValue,
   type RunConfig,
 } from "@harness/schemas";
@@ -42,6 +43,8 @@ export interface RunLoopOptions extends NewRunMetadata {
 
 /** Final state and ordered events produced by a run. */
 export interface RunLoopResult {
+  readonly status: RunState["status"];
+  readonly approvalIds: readonly Id[];
   readonly state: RunState;
   readonly events: readonly Event[];
 }
@@ -98,7 +101,13 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
         : { checkpointEveryEvents: options.checkpointEveryEvents }),
     });
     const ended = await runLoopSteps(options, events, { runId, checkpointer, budgetTracker });
-    result = { state: foldRunState(events), events };
+    const state = foldRunState(events);
+    result = {
+      status: state.status,
+      approvalIds: Array.from(state.pendingApprovals.keys()),
+      state,
+      events,
+    };
     return ended;
   });
 

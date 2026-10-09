@@ -150,6 +150,8 @@ describe("foldRunState", () => {
     ]);
 
     expect(state.pendingApprovals.size).toBe(0);
+    expect(state.approvalRequests.size).toBe(1);
+    expect(state.resolvedApprovals.size).toBe(1);
     expect(state.steps).toBe(1);
     expect(state.usage).toEqual({ inputTokens: 3, outputTokens: 5, costMicros: 0 });
     expect(state.lastCheckpoint).toEqual({ checkpointId: id, atSeq: 3 });
