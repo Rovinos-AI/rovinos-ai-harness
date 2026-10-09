@@ -423,6 +423,12 @@ describe("runLoop", () => {
       context: [
         "tool request",
         {
+          type: "tool_call",
+          callId: modelCallId,
+          toolId: "test_tool",
+          args: call.args,
+        },
+        {
           callId: modelCallId,
           toolId: "test_tool",
           outcome: "ok",

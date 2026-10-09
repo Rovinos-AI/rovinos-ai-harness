@@ -11,6 +11,16 @@ export class NaiveContext implements ContextPort {
         if (event.type === "model_response") {
           return [event.content];
         }
+        if (event.type === "tool_intent") {
+          return [
+            {
+              type: "tool_call",
+              callId: event.callId,
+              toolId: event.toolId,
+              args: event.args,
+            },
+          ];
+        }
         if (event.type === "tool_result") {
           return [
             {

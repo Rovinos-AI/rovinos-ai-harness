@@ -37,6 +37,16 @@ describe("NaiveContext", () => {
       },
       {
         ...envelope(1),
+        type: "tool_intent",
+        callId,
+        toolId: "fake_tool",
+        idempotent: true,
+        policyDecision: "allow",
+        argsHash: "a".repeat(64),
+        args: { input: "tool args" },
+      },
+      {
+        ...envelope(2),
         type: "tool_result",
         callId,
         toolId: "fake_tool",
@@ -45,7 +55,7 @@ describe("NaiveContext", () => {
         result: { output: "tool result" },
       },
       {
-        ...envelope(2),
+        ...envelope(3),
         type: "tool_result",
         callId,
         toolId: "fake_tool",
@@ -55,7 +65,7 @@ describe("NaiveContext", () => {
         result: null,
       },
       {
-        ...envelope(3),
+        ...envelope(4),
         type: "model_response",
         requestId,
         provider: "fake",
@@ -73,6 +83,12 @@ describe("NaiveContext", () => {
 
     await expect(new NaiveContext().build(events)).resolves.toEqual([
       "first answer",
+      {
+        type: "tool_call",
+        callId,
+        toolId: "fake_tool",
+        args: { input: "tool args" },
+      },
       {
         callId,
         toolId: "fake_tool",
