@@ -31,7 +31,7 @@ export {
   type EventFieldClass,
 } from "./classification.js";
 export { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
-export { RunConfigSchema } from "./config/run.js";
+export { RunConfigSchema, type RunConfig } from "./config/run.js";
 export { StoreConfigSchema } from "./config/store.js";
 export { ModelsConfigSchema } from "./config/models.js";
 export { ServerConfigSchema } from "./config/servers.js";

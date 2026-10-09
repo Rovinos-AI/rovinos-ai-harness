@@ -18,6 +18,7 @@ import {
 import {
   FakeClock,
   JsonValue,
+  RunConfigSchema,
   SequentialIdGenerator,
   HarnessError,
   type Event,
@@ -35,6 +36,7 @@ const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
 const configHash = "a".repeat(64);
 const modelCallId = "22222222222222222222222222";
+const defaultBudgets = RunConfigSchema.parse({}).budgets;
 const goldenPath = fileURLToPath(new URL("./__golden__/one-step.json", import.meta.url));
 let nextSpanId = 0;
 
@@ -189,11 +191,12 @@ class TestContextManager implements ContextManager {
 function completion(
   toolCalls: ModelCompletion["toolCalls"] = [],
   content = "answer",
+  costMicros = 12,
 ): ModelCompletion {
   return {
     content,
     toolCalls,
-    usage: { inputTokens: 3, outputTokens: 5, costMicros: 12 },
+    usage: { inputTokens: 3, outputTokens: 5, costMicros },
     finishReason: "stop",
     provider: "test_provider",
     model: "test_model",
@@ -250,6 +253,7 @@ function normalizeEvents(events: readonly Event[]): JsonValueType {
         model: event.model,
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
+        ...(event.costMicros === undefined ? {} : { costMicros: event.costMicros }),
         finishReason: event.finishReason,
         latencyMs: event.latencyMs,
         schemaValid: event.schemaValid,
@@ -302,6 +306,7 @@ describe("runLoop", () => {
       ids,
       goal: "test goal",
       configHash,
+      budgets: defaultBudgets,
       policyVersion: "test.policy",
       signal,
       role: "assistant",
@@ -311,7 +316,7 @@ describe("runLoop", () => {
 
     expect(result.state.status).toBe("completed");
     expect(result.state.steps).toBe(1);
-    expect(result.state.usage).toEqual({ inputTokens: 3, outputTokens: 5, costMicros: 0 });
+    expect(result.state.usage).toEqual({ inputTokens: 3, outputTokens: 5, costMicros: 12 });
     expect(result.events.map(({ type }) => type)).toEqual([
       "run_created",
       "run_status_changed",
@@ -393,6 +398,7 @@ describe("runLoop", () => {
       ids: new SequentialIdGenerator(),
       goal: "tool goal",
       configHash,
+      budgets: defaultBudgets,
       policyVersion: "test.policy",
       signal,
     });
@@ -486,6 +492,7 @@ describe("runLoop", () => {
         ids: new SequentialIdGenerator(),
         goal: "abort after three tool calls",
         configHash,
+        budgets: defaultBudgets,
         policyVersion: "test.policy",
         signal: controller.signal,
       }),
@@ -532,6 +539,7 @@ describe("runLoop", () => {
       ids: new SequentialIdGenerator(),
       goal: "unknown tool goal",
       configHash,
+      budgets: defaultBudgets,
       policyVersion: "test.policy",
       signal: new AbortController().signal,
     });
@@ -593,6 +601,7 @@ describe("runLoop", () => {
       ids: new SequentialIdGenerator(),
       goal: "timeout goal",
       configHash,
+      budgets: defaultBudgets,
       policyVersion: "test.policy",
       signal: new AbortController().signal,
     });
@@ -661,6 +670,7 @@ describe("runLoop", () => {
       ids: new SequentialIdGenerator(),
       goal: "tool error goal",
       configHash,
+      budgets: defaultBudgets,
       policyVersion: "test.policy",
       signal: new AbortController().signal,
     });
@@ -675,6 +685,154 @@ describe("runLoop", () => {
       ["error", "tool_broken"],
       ["error", "tool_failed"],
     ]);
+  });
+
+  it("records a step-budget failure before making a model call beyond the limit", async () => {
+    const clock = new FakeClock(100);
+    const model = new FakeModelPort([
+      completion([{ callId: modelCallId, toolId: "unknown_tool", args: {} }]),
+      completion(),
+    ]);
+    const result = await runLoop({
+      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      clock,
+      model,
+      tool: new FakeToolPort(),
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "step budget goal",
+      configHash,
+      budgets: RunConfigSchema.parse({ budgets: { maxSteps: 1 } }).budgets,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+    });
+
+    expect(result.state.status).toBe("failed");
+    expect(model.requests).toHaveLength(1);
+    expect(result.events.slice(-2)).toMatchObject([
+      { type: "budget_exceeded", budget: "steps", limit: 1, observed: 2 },
+      { type: "run_status_changed", from: "running", to: "failed", reason: "budget_exceeded" },
+    ]);
+  });
+
+  it("fails before executing tools when a model response exceeds the cost budget", async () => {
+    const clock = new FakeClock(100);
+    const call = { callId: modelCallId, toolId: "budgeted_tool", args: {} };
+    const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
+    const tool = new FakeToolPort(
+      new Map([["budgeted_tool", { idempotent: true, timeoutMs: 1_000, execute }]]),
+    );
+    const store = new InMemoryEventStore();
+    const append = vi.spyOn(store, "append");
+    const result = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([completion([call], "over budget", 2)]),
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "cost budget goal",
+      configHash,
+      budgets: RunConfigSchema.parse({ budgets: { maxCostUsd: 0.000001 } }).budgets,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+    });
+
+    expect(result.state.status).toBe("failed");
+    expect(result.events.find(({ type }) => type === "model_response")).toMatchObject({
+      costMicros: 2,
+    });
+    expect(result.events.at(-2)).toMatchObject({
+      type: "budget_exceeded",
+      budget: "cost",
+      limit: 1,
+      observed: 2,
+    });
+    expect(result.events.at(-1)).toMatchObject({
+      type: "run_status_changed",
+      from: "running",
+      to: "failed",
+      reason: "budget_exceeded",
+    });
+    expect(tool.calls).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
+    const budgetAppendCalls = append.mock.calls.filter(([, appended]) =>
+      appended.some(({ type }) => type === "budget_exceeded"),
+    );
+    expect(budgetAppendCalls).toHaveLength(1);
+    expect(budgetAppendCalls[0]?.[1]).toMatchObject([
+      { type: "budget_exceeded", budget: "cost" },
+      {
+        type: "run_status_changed",
+        from: "running",
+        to: "failed",
+        reason: "budget_exceeded",
+      },
+    ]);
+  });
+
+  it("completes a final answer even when its response exceeds the cost budget", async () => {
+    const clock = new FakeClock(100);
+    const result = await runLoop({
+      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([completion([], "final answer", 2)]),
+      tool: new FakeToolPort(),
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "final answer cost budget goal",
+      configHash,
+      budgets: RunConfigSchema.parse({ budgets: { maxCostUsd: 0.000001 } }).budgets,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+    });
+
+    expect(result.state.status).toBe("completed");
+    expect(result.events.at(-1)).toMatchObject({
+      type: "run_status_changed",
+      from: "running",
+      to: "completed",
+      reason: "final_answer",
+    });
+    expect(result.events.find(({ type }) => type === "model_response")).toMatchObject({
+      costMicros: 2,
+    });
+  });
+
+  it("fails before executing tools when model work crosses the wall-clock budget", async () => {
+    const clock = new FakeClock(100);
+    const call = { callId: modelCallId, toolId: "budgeted_tool", args: {} };
+    const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
+    const tool = new FakeToolPort(
+      new Map([["budgeted_tool", { idempotent: true, timeoutMs: 1_000, execute }]]),
+    );
+    const model: ModelPort = {
+      complete() {
+        clock.advance(11);
+        return Promise.resolve(completion([call]));
+      },
+    };
+    const result = await runLoop({
+      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      clock,
+      model,
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "wall-clock budget goal",
+      configHash,
+      budgets: RunConfigSchema.parse({ budgets: { maxWallClockMs: 10 } }).budgets,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+    });
+
+    expect(result.state.status).toBe("failed");
+    expect(result.events.slice(-2)).toMatchObject([
+      { type: "budget_exceeded", budget: "wall_clock", limit: 10, observed: 11 },
+      { type: "run_status_changed", from: "running", to: "failed", reason: "budget_exceeded" },
+    ]);
+    expect(tool.calls).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -702,6 +860,7 @@ describe("runLoop", () => {
       ids: new SequentialIdGenerator(),
       goal: "error goal",
       configHash,
+      budgets: defaultBudgets,
       policyVersion: "test.policy",
       signal: new AbortController().signal,
     });

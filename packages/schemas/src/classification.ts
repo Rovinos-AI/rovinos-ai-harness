@@ -25,6 +25,7 @@ export const EVENT_FIELD_CLASS = {
     model: "meta",
     inputTokens: "meta",
     outputTokens: "meta",
+    costMicros: "meta",
     finishReason: "meta",
     latencyMs: "meta",
     schemaValid: "meta",
