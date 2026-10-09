@@ -6,3 +6,27 @@ services:
       service: harness
     healthcheck:
       test: ["CMD", "node", "dist/bin.js", "--version"]
+  postgres:
+    image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    user: postgres
+    command: ["postgres", "-c", "unix_socket_directories=/var/run/postgresql"]
+    environment:
+      POSTGRES_DB: harness
+      POSTGRES_USER: harness
+      POSTGRES_HOST_AUTH_METHOD: trust
+      PGDATA: /tmp/pgdata
+    ports:
+      - "127.0.0.1:5432:5432"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql:rw,noexec,nosuid,size=16m,uid=999,gid=999,mode=3775
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "harness", "-d", "harness"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
