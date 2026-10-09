@@ -9,7 +9,19 @@ import { z } from "zod";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const pipelineSchema = z.looseObject({
-  pr: z.array(z.string()).optional(),
+  trigger: z
+    .looseObject({
+      batch: z.boolean(),
+      branches: z.looseObject({ include: z.array(z.string()) }),
+    })
+    .optional(),
+  pr: z
+    .looseObject({
+      autoCancel: z.boolean(),
+      drafts: z.boolean(),
+      branches: z.looseObject({ include: z.array(z.string()) }),
+    })
+    .optional(),
   stages: z.array(
     z.looseObject({
       stage: z.string(),
@@ -72,7 +84,8 @@ function readSteps(stage: Record<string, unknown>): Record<string, unknown>[] {
 it("enables pull request validation on main", () => {
   const pipeline = readPipeline();
 
-  expect(pipeline.pr).toEqual(["main"]);
+  expect(pipeline.pr).toEqual({ autoCancel: true, drafts: false, branches: { include: ["main"] } });
+  expect(pipeline.trigger).toEqual({ batch: true, branches: { include: ["main"] } });
 });
 
 it("runs static checks before unit tests", () => {
