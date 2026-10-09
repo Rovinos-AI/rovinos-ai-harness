@@ -3,8 +3,9 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-const sourceResolution = {
+export default defineConfig({
   resolve: {
+    conditions: ["source", "module", "browser", "development|production"],
     alias: {
       "@harness/config": fileURLToPath(new URL("./packages/config/src/index.ts", import.meta.url)),
       "@harness/schemas": fileURLToPath(
@@ -12,9 +13,12 @@ const sourceResolution = {
       ),
     },
   },
-};
-
-export default defineConfig({
+  ssr: {
+    noExternal: [/^@harness\//],
+    resolve: {
+      conditions: ["source", "node", "development|production"],
+    },
+  },
   test: {
     coverage: {
       provider: "v8",
@@ -27,7 +31,7 @@ export default defineConfig({
     },
     projects: [
       {
-        ...sourceResolution,
+        extends: true,
         test: {
           name: "unit",
           include: [
@@ -45,19 +49,21 @@ export default defineConfig({
         },
       },
       {
-        ...sourceResolution,
+        extends: true,
         test: {
           name: "integration",
           include: ["**/*.int.test.ts"],
         },
       },
       {
+        extends: true,
         test: {
           name: "canary",
           include: ["**/*.canary.test.ts"],
         },
       },
       {
+        extends: true,
         test: {
           name: "replay",
           include: ["**/*.replay.test.ts"],

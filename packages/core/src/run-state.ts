@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, RunStatus } from "@harness/schemas";
+import { HarnessError, type Event, type RunStatus } from "@harness/schemas";
 import { RUN_TRIGGERS, transition } from "./state-machine.js";
 
 /** A tool-intent event that has not yet received a result. */
@@ -51,7 +51,7 @@ interface MutableRunState {
 }
 
 /** Error raised when the event log is corrupt. */
-export class CorruptLogError extends Error {
+export class CorruptLogError extends HarnessError {
   readonly code = "corrupt_log";
 
   /** Creates an error for a corrupt event log. */
