@@ -195,6 +195,9 @@ async function runLoopSteps(
 ): Promise<Event> {
   for (;;) {
     if (options.signal.aborted) {
+      if (options.signal.reason === "shutdown") {
+        return suspendForShutdown(options, events, execution);
+      }
       throw new RunAbortedError();
     }
     const context = await options.context.build(events.slice());
@@ -211,6 +214,12 @@ async function runLoopSteps(
         execution.checkpointer,
       );
     }
+    if (options.signal.aborted) {
+      if (options.signal.reason === "shutdown") {
+        return suspendForShutdown(options, events, execution);
+      }
+      throw new RunAbortedError();
+    }
     const modelResult = await modelStep({
       recorder: options.recorder,
       model: options.model,
@@ -223,6 +232,12 @@ async function runLoopSteps(
       ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
     });
     events.push(...modelResult.events);
+    if (
+      modelResult.outcome === "aborted" ||
+      (options.signal.reason === "shutdown" && modelResult.outcome !== "failed")
+    ) {
+      return suspendForShutdown(options, events, execution);
+    }
     const stepState = await checkpointAfterStep(execution.checkpointer, events);
     if (stepState.status === "suspended") {
       return suspendedOutcome(events);
@@ -269,6 +284,12 @@ async function runToolCalls(
   calls: ModelCompletion["toolCalls"],
 ): Promise<Event | undefined> {
   for (const call of calls) {
+    if (options.signal.aborted) {
+      if (options.signal.reason === "shutdown") {
+        return suspendForShutdown(options, events, execution);
+      }
+      throw new RunAbortedError();
+    }
     const budget = execution.budgetTracker.check(foldRunState(events), options.clock.now());
     if (!budget.ok) {
       return recordBudgetFailureAndCheckpoint(
@@ -288,12 +309,32 @@ async function runToolCalls(
         signal: options.signal,
       })),
     );
+    if (options.signal.reason === "shutdown") {
+      return suspendForShutdown(options, events, execution);
+    }
     const state = await checkpointAfterStep(execution.checkpointer, events);
     if (state.status === "suspended") {
       return suspendedOutcome(events);
     }
   }
   return undefined;
+}
+
+async function suspendForShutdown(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+): Promise<Event> {
+  const suspended = await options.recorder.record({
+    type: "run_status_changed",
+    v: 1,
+    from: "running",
+    to: "suspended",
+    reason: "shutdown",
+  });
+  events.push(suspended);
+  await checkpointAfterStep(execution.checkpointer, events);
+  return suspended;
 }
 
 async function checkpointAfterStep(checkpointer: Checkpointer, events: Event[]): Promise<RunState> {

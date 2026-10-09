@@ -51,6 +51,11 @@ export {
 } from "./spans.js";
 export { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
 export {
+  installShutdownHandler,
+  type ShutdownHandlerOptions,
+  type ShutdownProcessLike,
+} from "./shutdown.js";
+export {
   ResumeConflictError,
   RunAwaitingApprovalError,
   RunAlreadyTerminalError,

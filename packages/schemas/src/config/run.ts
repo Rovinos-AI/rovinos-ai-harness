@@ -8,6 +8,7 @@ export const RunResumePolicySchema = z.enum(["escalate", "fail"]).default("escal
 export const RunConfigSchema = z
   .object({
     checkpointEveryEvents: z.coerce.number().int().positive().default(20),
+    shutdownGraceMs: z.coerce.number().int().positive().default(20_000),
     resume: z
       .object({
         onNonIdempotent: RunResumePolicySchema,

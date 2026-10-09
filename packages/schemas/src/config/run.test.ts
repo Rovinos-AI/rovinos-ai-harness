@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { RunConfigSchema } from "./run.js";
 
 describe("RunConfigSchema resume policy", () => {
+  it("defaults the shutdown grace period to twenty seconds and accepts an override", () => {
+    expect(RunConfigSchema.parse({}).shutdownGraceMs).toBe(20_000);
+    expect(RunConfigSchema.parse({ shutdownGraceMs: "5000" }).shutdownGraceMs).toBe(5_000);
+    expect(() => RunConfigSchema.parse({ shutdownGraceMs: 0 })).toThrow();
+  });
+
   it("defaults checkpoint cadence to twenty events and accepts an override", () => {
     expect(RunConfigSchema.parse({}).checkpointEveryEvents).toBe(20);
     expect(RunConfigSchema.parse({ checkpointEveryEvents: "5" }).checkpointEveryEvents).toBe(5);

@@ -161,10 +161,12 @@ async function runToolCall(
   const events: Event[] = [];
   const argsHash = hashArgs(call.args);
   const appendIntent = behavior.appendIntent ?? true;
+  let intentEvent: Event | undefined;
 
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
     if (appendIntent) {
-      events.push(await recordIntent(options.recorder, call, description, argsHash));
+      intentEvent = await recordIntent(options.recorder, call, description, argsHash);
+      events.push(intentEvent);
     }
 
     if (description === undefined) {
@@ -193,6 +195,12 @@ async function runToolCall(
         description.timeoutMs,
       );
     } catch (error) {
+      if (options.signal.reason === "shutdown") {
+        if (intentEvent !== undefined) {
+          return intentEvent;
+        }
+        throw error;
+      }
       const timedOut = error instanceof ToolTimeoutError;
       const code = timedOut ? "tool_timeout" : errorCode(error);
       span.setStatus({ code: SpanStatusCode.ERROR });
