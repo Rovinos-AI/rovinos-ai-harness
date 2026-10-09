@@ -71,6 +71,7 @@ const modelResponseEvent = z
     model: Code,
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
+    costMicros: z.number().int().nonnegative().optional(),
     finishReason: Code,
     latencyMs: z.number().int().nonnegative(),
     schemaValid: z.boolean(),

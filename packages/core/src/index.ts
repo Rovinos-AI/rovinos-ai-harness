@@ -14,6 +14,12 @@ export {
   type ToolIntentEvent,
 } from "./run-state.js";
 export {
+  BudgetTracker,
+  type BudgetCheck,
+  type BudgetKind,
+  type BudgetViolation,
+} from "./budgets.js";
+export {
   LeaseLostError,
   RunRecorder,
   SpanContextMissingError,

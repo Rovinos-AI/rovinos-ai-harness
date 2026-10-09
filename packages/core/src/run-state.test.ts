@@ -5,25 +5,44 @@ import { CorruptLogError, foldRunState, RUN_TRIGGERS, transition, type RunState 
 
 const id = "00000000000000000000000000";
 const otherRunId = "11111111111111111111111111";
+const resumedSegmentId = "22222222222222222222222222";
 const hash = "a".repeat(64);
 const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);
-const envelope = (seq: number, ts = seq + 1) => ({
+const envelope = (seq: number, ts = seq + 1, currentSegmentId = id) => ({
   runId: id,
   seq,
   ts,
   v: 1,
   traceId,
   spanId,
-  segmentId: id,
+  segmentId: currentSegmentId,
 });
 
-function runCreated(seq: number): Event {
-  return { ...envelope(seq), type: "run_created", configHash: hash, policyVersion: "test.policy" };
+function runCreated(seq: number, ts = seq + 1): Event {
+  return {
+    ...envelope(seq, ts),
+    type: "run_created",
+    configHash: hash,
+    policyVersion: "test.policy",
+  };
 }
 
-function statusChanged(seq: number, from: RunStatus, to: RunStatus, reason: string): Event {
-  return { ...envelope(seq), type: "run_status_changed", from, to, reason };
+function statusChanged(
+  seq: number,
+  from: RunStatus,
+  to: RunStatus,
+  reason: string,
+  ts = seq + 1,
+  currentSegmentId = id,
+): Event {
+  return {
+    ...envelope(seq, ts, currentSegmentId),
+    type: "run_status_changed",
+    from,
+    to,
+    reason,
+  };
 }
 
 function toolIntent(seq: number, callId = id): Event {
@@ -65,9 +84,14 @@ function approvalResolved(seq: number, approvalId = id): Event {
   };
 }
 
-function modelResponse(seq: number): Event {
+function modelResponse(
+  seq: number,
+  costMicros?: number,
+  ts = seq + 1,
+  currentSegmentId = id,
+): Event {
   return {
-    ...envelope(seq),
+    ...envelope(seq, ts, currentSegmentId),
     type: "model_response",
     requestId: id,
     provider: "test",
@@ -80,6 +104,7 @@ function modelResponse(seq: number): Event {
     repairAttempts: 0,
     content: {},
     providerBlobs: [],
+    ...(costMicros === undefined ? {} : { costMicros }),
   };
 }
 
@@ -130,6 +155,24 @@ describe("foldRunState", () => {
     expect(state.lastCheckpoint).toEqual({ checkpointId: id, atSeq: 3 });
     expect(state.segmentId).toBe(id);
     expect(state.lastTs).toBe(5);
+  });
+
+  test("accumulates reported costs and suspension time across a resumed segment", () => {
+    const state = foldRunState([
+      runCreated(0, 100),
+      statusChanged(1, "pending", "running", "start", 101),
+      modelResponse(2, 4, 110),
+      statusChanged(3, "running", "suspended", "shutdown", 120),
+      statusChanged(4, "suspended", "running", "resume", 320, resumedSegmentId),
+      modelResponse(5, undefined, 330, resumedSegmentId),
+    ]);
+
+    expect(state.usage).toEqual({ inputTokens: 6, outputTokens: 10, costMicros: 4 });
+    expect(state.steps).toBe(2);
+    expect(state.startedAt).toBe(100);
+    expect(state.suspendedTimeMs).toBe(200);
+    expect(state.suspendedAt).toBeUndefined();
+    expect(state.segmentId).toBe(resumedSegmentId);
   });
 
   test("rejects an illegal status sequence with corrupt_log", () => {

@@ -18,9 +18,15 @@ export const RunConfigSchema = z
         maxSteps: z.coerce.number().int().positive().default(200),
         maxCostUsd: z.coerce.number().positive().optional(),
         maxWallClockMs: z.coerce.number().int().positive().default(3_600_000),
+        countSuspendedTime: z
+          .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
+          .default(false),
       })
       .strict()
       .prefault({}),
   })
   .strict()
   .prefault({});
+
+/** The validated run configuration, including defaults. */
+export type RunConfig = z.infer<typeof RunConfigSchema>;

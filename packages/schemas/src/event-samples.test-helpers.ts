@@ -28,6 +28,7 @@ export const eventSamples = [
     model: "test",
     inputTokens: 1,
     outputTokens: 2,
+    costMicros: 3,
     finishReason: "stop",
     latencyMs: 3,
     schemaValid: true,

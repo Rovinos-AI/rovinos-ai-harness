@@ -164,6 +164,10 @@ describe("CLI main", () => {
     expect(exitCodeForError(errorCode)).toBe(expected);
   });
 
+  it("maps budget_exceeded to exit code 6", () => {
+    expect(exitCodeForError("budget_exceeded")).toBe(6);
+  });
+
   it("uses failure for unmapped and invalid error codes", () => {
     expect(exitCodeForError("unmapped_error")).toBe(ExitCode.failure);
     expect(errorCodeOf(new Error("private message"))).toBe("failure");
