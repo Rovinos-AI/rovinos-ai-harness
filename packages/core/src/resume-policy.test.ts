@@ -13,7 +13,7 @@ const callIds = {
   unknown: "44444444444444444444444444",
 } as const;
 
-function testState() {
+function testState(options: { readonly idempotentToolIntent?: boolean } = {}) {
   const events = [
     {
       runId,
@@ -51,7 +51,8 @@ function testState() {
       type: "tool_intent",
       callId,
       toolId,
-      idempotent: toolId === "idempotent_tool",
+      idempotent:
+        toolId === "idempotent_tool" && (options.idempotentToolIntent ?? true),
       policyDecision: "allow",
       argsHash: "d".repeat(64),
       args: { toolId },
@@ -95,5 +96,13 @@ describe("planDanglingIntents", () => {
       "escalate",
       "fail",
     ]);
+  });
+
+  it("does not rerun when the durable intent declared the tool non-idempotent", () => {
+    const state = testState({ idempotentToolIntent: false });
+    expect(planDanglingIntents(state, toolPort)[0]).toEqual({
+      kind: "escalate",
+      callId: callIds.idempotent_tool,
+    });
   });
 });

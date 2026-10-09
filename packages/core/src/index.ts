@@ -31,8 +31,9 @@ export {
 export { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
 export { modelStep, type ModelStepOptions, type ModelStepResult } from "./steps/model-step.js";
 export {
-  applyDanglingIntentAction,
-  executeApprovedDanglingIntent,
+  applyDanglingIntents,
+  resolveDanglingIntentApproval,
+  ResumeActionMismatchError,
   toolStep,
   type ResumeToolStepOptions,
   type ToolStepOptions,

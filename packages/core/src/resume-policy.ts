@@ -38,7 +38,7 @@ export function planDanglingIntents(
     if (description === undefined) {
       return { kind: "fail", callId: intent.callId, errorCode: "unknown_tool" };
     }
-    if (description.idempotent) {
+    if (intent.idempotent && description.idempotent) {
       return { kind: "rerun", callId: intent.callId };
     }
     if (policy === "fail") {

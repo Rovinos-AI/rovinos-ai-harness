@@ -18,13 +18,19 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { foldRunState, type ToolIntentEvent } from "./run-state.js";
 import { RunRecorder } from "./recorder.js";
 import { planDanglingIntents } from "./resume-policy.js";
-import { applyDanglingIntentAction, executeApprovedDanglingIntent } from "./steps/tool-step.js";
+import {
+  applyDanglingIntents,
+  resolveDanglingIntentApproval,
+  ResumeActionMismatchError,
+} from "./steps/tool-step.js";
 import { FakeToolPort } from "./testing/index.js";
 import { RUN_SPAN } from "./spans.js";
 
 const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
 const callId = "22222222222222222222222222";
+const secondCallId = "33333333333333333333333333";
+const thirdCallId = "44444444444444444444444444";
 const configHash = "a".repeat(64);
 let nextSpanId = 0;
 
@@ -193,6 +199,54 @@ async function createDanglingIntent(
   return { events, intent: last };
 }
 
+async function createMultipleDanglingIntents(
+  recorder: RunRecorder,
+): Promise<Event[]> {
+  let events: Event[] = [];
+  await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+    events = await recorder.recordBatch([
+      { type: "run_created", v: 1, configHash, policyVersion: "test.policy" },
+      { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
+      {
+        type: "tool_intent",
+        v: 1,
+        callId,
+        toolId: "idempotent_tool",
+        idempotent: true,
+        policyDecision: "allow",
+        argsHash: "d".repeat(64),
+        args: { value: 1 },
+      },
+      {
+        type: "tool_intent",
+        v: 1,
+        callId: secondCallId,
+        toolId: "non_idempotent_tool_1",
+        idempotent: false,
+        policyDecision: "allow",
+        argsHash: "e".repeat(64),
+        args: { value: 2 },
+      },
+      {
+        type: "tool_intent",
+        v: 1,
+        callId: thirdCallId,
+        toolId: "non_idempotent_tool_2",
+        idempotent: false,
+        policyDecision: "allow",
+        argsHash: "f".repeat(64),
+        args: { value: 3 },
+      },
+    ]);
+    const last = events.at(-1);
+    if (last === undefined) {
+      throw new Error("Expected dangling intent events.");
+    }
+    return last;
+  });
+  return events;
+}
+
 describe("dangling tool intent resume", () => {
   it("re-runs idempotent calls once with the original callId and no new intent", async () => {
     const store = new InMemoryEventStore();
@@ -216,7 +270,8 @@ describe("dangling tool intent resume", () => {
       throw new Error("Expected a resume action.");
     }
 
-    const recorded = await applyDanglingIntentAction(
+    const state = foldRunState(events);
+    const recorded = await applyDanglingIntents(
       {
         recorder,
         tool,
@@ -225,8 +280,8 @@ describe("dangling tool intent resume", () => {
         signal: new AbortController().signal,
         ids: new SequentialIdGenerator(),
       },
-      intent,
-      action,
+      state,
+      [action],
     );
 
     expect(recorded.map(({ type }) => type)).toEqual(["tool_result"]);
@@ -269,7 +324,11 @@ describe("dangling tool intent resume", () => {
       ids: new SequentialIdGenerator(),
     };
 
-    const approvalEvents = await applyDanglingIntentAction(options, intent, action);
+    const approvalEvents = await applyDanglingIntents(
+      options,
+      foldRunState(events),
+      [action],
+    );
     expect(approvalEvents.map(({ type }) => type)).toEqual([
       "approval_requested",
       "run_status_changed",
@@ -286,8 +345,9 @@ describe("dangling tool intent resume", () => {
     if (request?.type !== "approval_requested") {
       throw new Error("Expected an approval request.");
     }
+    let resolutionEvents: Event[] = [];
     await recorder.withStepSpan(RUN_SPAN, {}, async () => {
-      const recorded = await recorder.recordBatch([
+      resolutionEvents = await recorder.recordBatch([
         {
           type: "approval_resolved",
           v: 1,
@@ -303,14 +363,26 @@ describe("dangling tool intent resume", () => {
           reason: "resumed",
         },
       ]);
-      const last = recorded.at(-1);
+      const last = resolutionEvents.at(-1);
       if (last === undefined) {
         throw new Error("Expected approval resolution events.");
       }
       return last;
     });
+    const resolution = resolutionEvents.find(
+      (event): event is Extract<Event, { type: "approval_resolved" }> =>
+        event.type === "approval_resolved",
+    );
+    if (resolution === undefined) {
+      throw new Error("Expected approval resolution event.");
+    }
 
-    const resultEvents = await executeApprovedDanglingIntent(options, intent);
+    const resultEvents = await resolveDanglingIntentApproval(
+      options,
+      intent,
+      request,
+      resolution,
+    );
     expect(resultEvents.map(({ type }) => type)).toEqual(["tool_result"]);
     expect(resultEvents[0]).toMatchObject({ callId, outcome: "ok" });
     expect(tool.calls).toHaveLength(1);
@@ -319,5 +391,192 @@ describe("dangling tool intent resume", () => {
       stored.push(event);
     }
     expect(stored.filter(({ type }) => type === "tool_intent")).toHaveLength(1);
+  });
+
+  it("escalates a direct rerun when the durable intent declared it non-idempotent", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+    const { events } = await createDanglingIntent(recorder, false);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "resume_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const state = foldRunState(events);
+    const recorded = await applyDanglingIntents(
+      {
+        recorder,
+        tool,
+        clock,
+        runId,
+        signal: new AbortController().signal,
+        ids: new SequentialIdGenerator(),
+      },
+      state,
+      [{ kind: "rerun", callId }],
+    );
+
+    expect(recorded.map(({ type }) => type)).toEqual([
+      "approval_requested",
+      "run_status_changed",
+    ]);
+    expect(tool.calls).toHaveLength(0);
+  });
+
+  it("batches several escalations into one suspension while rerunning idempotent calls", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+    const events = await createMultipleDanglingIntents(recorder);
+    const tool = new FakeToolPort(
+      new Map(
+        [
+          { toolId: "idempotent_tool", idempotent: true },
+          { toolId: "non_idempotent_tool_1", idempotent: false },
+          { toolId: "non_idempotent_tool_2", idempotent: false },
+        ].map(({ toolId, idempotent }) => [
+          toolId,
+          {
+            idempotent,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ] as const),
+      ),
+    );
+    const state = foldRunState(events);
+    const actions = planDanglingIntents(state, tool);
+    await applyDanglingIntents(
+      {
+        recorder,
+        tool,
+        clock,
+        runId,
+        signal: new AbortController().signal,
+        ids: new SequentialIdGenerator(),
+      },
+      state,
+      actions,
+    );
+
+    const stored: Event[] = [];
+    for await (const event of store.read(runId)) {
+      stored.push(event);
+    }
+    const folded = foldRunState(stored);
+    expect(folded.status).toBe("suspended");
+    expect(folded.pendingToolCalls.size).toBe(2);
+    expect(stored.filter((event) => event.type === "approval_requested")).toHaveLength(2);
+    expect(
+      stored.filter((event) => event.type === "run_status_changed" && event.to === "suspended"),
+    ).toHaveLength(1);
+    expect(tool.calls).toHaveLength(1);
+    expect(tool.calls[0]?.call.callId).toBe(callId);
+  });
+
+  it("records a denied approval as one error result without executing the tool", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+    const { events, intent } = await createDanglingIntent(recorder, false);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "resume_tool",
+          {
+            idempotent: false,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const options = {
+      recorder,
+      tool,
+      clock,
+      runId,
+      signal: new AbortController().signal,
+      ids: new SequentialIdGenerator(),
+    };
+    const [requestEvent] = await applyDanglingIntents(
+      options,
+      foldRunState(events),
+      [{ kind: "escalate", callId }],
+    );
+    if (requestEvent?.type !== "approval_requested") {
+      throw new Error("Expected an approval request.");
+    }
+    let resolutionEvents: Event[] = [];
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      resolutionEvents = await recorder.recordBatch([
+        {
+          type: "approval_resolved",
+          v: 1,
+          approvalId: requestEvent.approvalId,
+          decision: "deny",
+          waitMs: 0,
+        },
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "suspended",
+          to: "running",
+          reason: "resumed",
+        },
+      ]);
+      const last = resolutionEvents.at(-1);
+      if (last === undefined) {
+        throw new Error("Expected approval resolution events.");
+      }
+      return last;
+    });
+    const resolution = resolutionEvents.find(
+      (event): event is Extract<Event, { type: "approval_resolved" }> =>
+        event.type === "approval_resolved",
+    );
+    if (resolution === undefined) {
+      throw new Error("Expected approval resolution event.");
+    }
+    await expect(
+      resolveDanglingIntentApproval(
+        options,
+        intent,
+        { ...requestEvent, callId: thirdCallId },
+        resolution,
+      ),
+    ).rejects.toBeInstanceOf(ResumeActionMismatchError);
+    await expect(
+      resolveDanglingIntentApproval(
+        options,
+        intent,
+        requestEvent,
+        { ...resolution, approvalId: thirdCallId },
+      ),
+    ).rejects.toBeInstanceOf(ResumeActionMismatchError);
+
+    const result = await resolveDanglingIntentApproval(options, intent, requestEvent, resolution);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      type: "tool_result",
+      outcome: "error",
+      errorCode: "resume_ambiguous",
+    });
+    expect(tool.calls).toHaveLength(0);
+
+    const stored: Event[] = [];
+    for await (const event of store.read(runId)) {
+      stored.push(event);
+    }
+    expect(foldRunState(stored).pendingToolCalls.size).toBe(0);
+    expect(stored.filter((event) => event.type === "tool_result")).toHaveLength(1);
   });
 });
