@@ -16,7 +16,9 @@ export const serveCommand: CommandModule = {
 
 function waitForShutdown(): Promise<void> {
   return new Promise((resolve) => {
+    const keepAlive = setInterval(() => undefined, 60_000);
     const onShutdown = (): void => {
+      clearInterval(keepAlive);
       process.off("SIGINT", onShutdown);
       process.off("SIGTERM", onShutdown);
       resolve();
