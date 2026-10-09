@@ -87,6 +87,51 @@ describe("CLI main", () => {
     expect(stderr).toEqual(["human output\n"]);
   });
 
+  it("shows human output only when JSON mode is disabled", async () => {
+    const { context, stdout, stderr } = createContext();
+
+    const code = await main(["sample"], context, [sampleCommand]);
+
+    expect(code).toBe(ExitCode.ok);
+    expect(stdout).toEqual(["human output\n"]);
+    expect(stderr).toEqual([]);
+  });
+
+  it("fails JSON mode when the command writes no JSON document", async () => {
+    const { context, stdout, stderr } = createContext();
+    const command: CommandModule = {
+      name: "silent",
+      register(program) {
+        program.command("silent").action(() => undefined);
+      },
+    };
+
+    const code = await main(["--json", "silent"], context, [command]);
+
+    expect(code).toBe(ExitCode.failure);
+    expect(stdout).toEqual([]);
+    expect(stderr).toEqual(["output_invalid\n"]);
+  });
+
+  it("fails JSON mode when a command attempts two documents", async () => {
+    const { context, stdout, stderr } = createContext();
+    const command: CommandModule = {
+      name: "duplicate",
+      register(program, ctx) {
+        program.command("duplicate").action(() => {
+          ctx.out.json(resultSchema, { ok: true });
+          ctx.out.json(resultSchema, { ok: true });
+        });
+      },
+    };
+
+    const code = await main(["--json", "duplicate"], context, [command]);
+
+    expect(code).toBe(ExitCode.failure);
+    expect(stdout).toEqual(['{"ok":true}\n']);
+    expect(stderr).toEqual(["json_output_multiple\n"]);
+  });
+
   it("shows help and returns the usage exit code for unknown commands", async () => {
     const { context, stdout, stderr } = createContext();
 
@@ -145,11 +190,12 @@ describe("CLI main", () => {
   it("uses the static command registry by default", async () => {
     const { context, stdout } = createContext();
 
-    const code = await main(["--help"], context);
+    const code = await main([], context);
 
-    expect(COMMANDS).toEqual([]);
+    expect(COMMANDS.map((command) => command.name)).toEqual(["serve"]);
     expect(code).toBe(ExitCode.ok);
     expect(stdout.join("")).toContain("Usage: harness");
+    expect(stdout.join("")).toContain("serve");
   });
 
   it("keeps standard stream writes in output.ts only", async () => {

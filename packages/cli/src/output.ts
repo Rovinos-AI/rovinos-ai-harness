@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
+import { Code, HarnessError } from "@harness/schemas";
 import type { z } from "zod";
 
 /** Output destinations used by the CLI; injectable for tests. */
@@ -22,12 +22,14 @@ export interface Output {
   error(code: string, hint?: string): void;
   /** Sets the output mode before parsing or executing a command. */
   setJsonMode(enabled: boolean): void;
+  /** Verifies that JSON mode produced exactly one document. */
+  finalize(): void;
 }
 
 /** Safe error raised when a JSON result is invalid or a second document is attempted. */
-export class OutputError extends Error {
+export class OutputError extends HarnessError {
   /** Machine-readable error code. */
-  readonly code: string;
+  override readonly code: string;
 
   /**
    * Creates a value-free output error.
@@ -36,7 +38,6 @@ export class OutputError extends Error {
    */
   constructor(code: string) {
     super(code);
-    this.name = "OutputError";
     this.code = code;
   }
 }
@@ -84,6 +85,9 @@ export function createOutput(writers: OutputWriters = defaultWriters): Output {
       print(`${rows.map((row) => row.join("\t")).join("\n")}\n`);
     },
     json: (schema, value) => {
+      if (!jsonMode) {
+        return;
+      }
       const result = schema.safeParse(value);
       if (!result.success) {
         throw new OutputError("output_invalid");
@@ -101,6 +105,11 @@ export function createOutput(writers: OutputWriters = defaultWriters): Output {
       const parsedHint = hint === undefined ? undefined : Code.safeParse(hint);
       const safeHint = parsedHint?.success === true ? ` ${parsedHint.data}` : "";
       writers.stderr(`${safeCode}${safeHint}\n`);
+    },
+    finalize: () => {
+      if (jsonMode && jsonDocuments !== 1) {
+        throw new OutputError("output_invalid");
+      }
     },
     setJsonMode: (enabled) => {
       jsonMode = enabled;

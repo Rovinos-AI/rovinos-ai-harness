@@ -5,9 +5,10 @@ import { Command, CommanderError } from "commander";
 import type { CliContext, Clock, CommandModule } from "./command.js";
 import { errorCodeOf, exitCodeForError, ExitCode } from "./exit-codes.js";
 import { createOutput, type Output } from "./output.js";
+import { serveCommand } from "./serve.js";
 
-/** Commands are added by the tasks that own them; none are registered yet. */
-export const COMMANDS: CommandModule[] = [];
+/** Static command registry; later epics add their owned commands here. */
+export const COMMANDS: CommandModule[] = [serveCommand];
 
 const systemClock: Clock = { now: () => Date.now() };
 
@@ -75,7 +76,12 @@ export async function main(
     for (const command of commands) {
       command.register(program, cliContext);
     }
-    await program.parseAsync([...argv], { from: "user" });
+    if (argv.length === 0) {
+      program.outputHelp();
+    } else {
+      await program.parseAsync([...argv], { from: "user" });
+    }
+    output.finalize();
     return ExitCode.ok;
   } catch (error) {
     if (error instanceof CommanderError) {

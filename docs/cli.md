@@ -13,9 +13,9 @@ The global options are:
 | `--version` | Show the harness version. |
 
 Each command's JSON result is validated against its Zod contract before output. Its JSON Schema
-belongs in `packages/schemas/src/cli/<command>.ts` and is documented alongside the command. JSON
-mode writes at most one newline-terminated JSON document to stdout; command text and error codes
-are sent to stderr.
+belongs in `packages/schemas/src/cli/<command>.ts` and is documented alongside the command. A
+successful command in JSON mode writes exactly one newline-terminated JSON document to stdout;
+command text and error codes are sent to stderr.
 
 ## Exit codes
 
