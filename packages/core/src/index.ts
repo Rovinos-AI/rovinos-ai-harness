@@ -13,3 +13,18 @@ export {
   type RunState,
   type ToolIntentEvent,
 } from "./run-state.js";
+export {
+  LeaseLostError,
+  RunRecorder,
+  SpanContextMissingError,
+  type Clock,
+  type EventPartial,
+} from "./recorder.js";
+export {
+  APPROVAL_WAIT_SPAN,
+  CHECKPOINT_SPAN,
+  COMPACTION_SPAN,
+  MODEL_CALL_SPAN,
+  RUN_SPAN,
+  TOOL_CALL_SPAN,
+} from "./spans.js";
