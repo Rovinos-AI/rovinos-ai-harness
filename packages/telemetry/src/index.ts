@@ -4,6 +4,7 @@ export { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
 export {
   __resetRegistryForTests,
   defineSpan,
+  ensureTracingFallback,
   listSpanDefinitions,
   lookupSpanDefinition,
   withSpan,

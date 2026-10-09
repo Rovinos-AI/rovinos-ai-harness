@@ -22,6 +22,37 @@ command text and error codes are sent to stderr.
 `serve` keeps the process running until SIGINT or SIGTERM, then exits successfully. With `--json`,
 it writes `{"status":"serving"}` once when startup completes.
 
+## `harness run`
+
+`harness run --input <json-file|-> [--fake-model <script.json>]` starts a run. The input file must
+contain `{"goal":"..."}` and may include `metadata`, a map from `Code` keys to `Code`, number, or
+boolean values. Use `-` to read the input JSON from standard input. Human output is the run ID;
+`--json` returns `{"runId":"...","status":"completed"}` (or the resulting run status).
+
+`--fake-model` reads an array of scripted completions. Each entry requires `content`; `toolCalls`,
+`usage`, `finishReason`, `provider`, `model`, `latencyMs`, `schemaValid`, `repairAttempts`, and
+`providerBlobs` have defaults. For example, `[{"content":"Hello"}]` scripts a single final answer.
+The default data directory is the current working directory; set `HARNESS_DATA_DIR` to change it.
+The SQLite event log is stored as `harness.db` inside that directory. Provider-backed model and tool
+ports are supplied by their owning epics; use `--fake-model` to run without a configured model.
+
+Exit code `0` means completed, `5` means suspended for approval or input, `6` means a budget was
+exceeded, and `1` means the run failed.
+
+## `harness resume`
+
+`harness resume <runId>` resumes a suspended or interrupted run from its durable event log and latest
+checkpoint. The human and JSON output and exit codes match `harness run`. Resolve a pending approval
+through the approval API before resuming.
+
+## `harness inspect`
+
+`harness inspect <runId> [--show-content]` displays the status, step count, token and cost usage,
+last checkpoint, pending approval IDs and tool IDs, and up to the last ten event summaries. By
+default event summaries contain only their type and sequence number. `--show-content` includes the
+stored event content verbatim and writes a `content_may_be_sensitive` warning to stderr. Until PII
+tokenization in tasks 13.4 and 13.7 lands, run goals and event content are stored as provided.
+
 ## Exit codes
 
 These numeric values are stable for scripts and automation:

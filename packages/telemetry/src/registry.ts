@@ -2,12 +2,19 @@
 import {
   type AttributeValue,
   type Attributes,
+  createContextKey,
+  isSpanContextValid,
   type Context,
+  context as otelContext,
   type Link,
   type Span,
   SpanStatusCode,
   type SpanOptions,
+  ROOT_CONTEXT,
+  trace,
 } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { Code, HarnessError } from "@harness/schemas";
 import { z } from "zod";
 import { attr, isSafeAttr } from "./attr.js";
@@ -50,6 +57,8 @@ export interface SpanDefinition<
 
 const spanNamePattern = /^harness\.[a-z0-9_.]{1,56}$/u;
 const definitions = new Map<string, SpanDefinition<SpanDefinitionShape>>();
+const tracingProbeKey = createContextKey("harness.telemetry.context-probe");
+let fallbackTracerInstalled = false;
 
 function addErrorCodeAttribute<Shape extends SpanShape>(shape: Shape): Shape & ErrorCodeShape {
   return Object.assign({}, shape, { "harness.error.code": errorCodeAttribute });
@@ -179,6 +188,29 @@ export function defineSpan<const Shape extends SpanShape>(
   Object.freeze(definition);
   definitions.set(parsedName, definition);
   return definition;
+}
+
+/**
+ * Preserves existing OpenTelemetry globals and installs a no-export fallback if needed.
+ *
+ * @param probe - A throwaway span created through a registered harness definition.
+ */
+export function ensureTracingFallback(probe: Span): void {
+  const tracerIsValid = isSpanContextValid(probe.spanContext());
+  probe.end();
+  if (!tracerIsValid && !fallbackTracerInstalled) {
+    trace.setGlobalTracerProvider(new BasicTracerProvider());
+    fallbackTracerInstalled = true;
+  }
+
+  const marker = {};
+  const contextPropagates = otelContext.with(
+    ROOT_CONTEXT.setValue(tracingProbeKey, marker),
+    () => otelContext.active().getValue(tracingProbeKey) === marker,
+  );
+  if (!contextPropagates) {
+    otelContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  }
 }
 
 /**
