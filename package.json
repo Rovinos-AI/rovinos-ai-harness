@@ -65,7 +65,7 @@
     "eslint-plugin-yml": "3.8.1",
     "markdownlint-cli2": "0.23.3",
     "prettier": "3.9.9",
-    "spdx-expression-parse": "4.0.0",
+    "spdx-expression-parse": "5.0.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.1",
     "vitest": "3.2.6",
