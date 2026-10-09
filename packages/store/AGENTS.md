@@ -6,7 +6,7 @@ EventStore interface and adapters (in-memory, SQLite, Postgres), conformance sui
 
 ## Specs and task ids
 
-- [epic-07-event-store.md](./epic-07-event-store.md): tasks 7.1-7.14
+- [epic-07-event-store.md](./epic-07-event-store.md): tasks 7.1-7.15
 
 ## Allowed internal imports
 

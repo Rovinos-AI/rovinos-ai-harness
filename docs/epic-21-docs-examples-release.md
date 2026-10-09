@@ -137,11 +137,11 @@ Shared design for this epic:
 **Expected Inputs:** Merged changes with changesets; a git tag.
 **Expected Output:** `.changeset/config.json`, `docs/releasing.md`, `release` stage in `azure-pipelines.yml`, `scripts/release/verify-release.ts`, PR dry-run job.
 **Dependencies:** `@changesets/cli`, npm registry token and a container registry service connection (maintainer setup, documented), `cosign` (used in 22.4).
-**Items it depends on:** 21.5, 1.4, 19.7, 1.1.1.
+**Items it depends on:** 21.5, 1.4, 19.7, 1.1.1, 7.15, 21.9.
 **Implementation guidance:**
 
-1. Changesets: initialize with `fixed` or `linked` groups for packages released together (decision recorded as an ADR: recommended `linked` for all `@harness/*` packages); CI check `yarn changeset status --since=origin/main` on PRs requires a changeset for changes under `packages/**` (except docs-only).
-2. Release stage triggers on tags `v*`: run all earlier stages, `yarn changeset version` verification (the tag must match the version in `package.json`, `verify-release.ts`), build, `yarn workspaces foreach --all --no-private npm publish` (to npm with an automation token from variable groups or Key Vault), build and push images to a registry (GHCR recommended for open source; service connection documented) tagged `vX.Y.Z` and `latest`, create a GitHub Release with notes from the changelog (`GitHubRelease@1` task, verify).
+1. Changesets: version only the published packages from 21.9 (the bundled SDK and CLI and the two store adapter packages) as one `linked` group; every other workspace package stays `"private": true` and is never published (decision recorded in the 21.9 ADR); CI check `yarn changeset status --since=origin/main` on PRs requires a changeset for changes under `packages/**` (except docs-only).
+2. Release stage triggers on tags `v*`: run all earlier stages, `yarn changeset version` verification (the tag must match the version in `package.json`, `verify-release.ts`), build, `yarn workspaces foreach --all --no-private npm publish` (which, after 21.9, publishes only the bundled packages under the scope chosen there) (to npm with an automation token from variable groups or Key Vault), build and push images to a registry (GHCR recommended for open source; service connection documented) tagged `vX.Y.Z` and `latest`, create a GitHub Release with notes from the changelog (`GitHubRelease@1` task, verify).
 3. **Provenance note:** npm provenance attestations require a supported CI identity provider; document that Azure Pipelines publishing lacks npm provenance and record the decision (alternative: publish from GitHub Actions) in an ADR.
 4. PRs run the release stage in **dry-run** mode (`yarn pack --dry-run`, `docker build` without push, `verify-release.ts --dry-run`).
 5. Blockers for release: `check-community-files.ts` with `RELEASE=1`, canary and replay gates green, no failing license scan, SBOM and signing steps from 22.4 when available.
@@ -199,3 +199,32 @@ Shared design for this epic:
 - [ ] Every guarantee cites verifiable evidence and its assumptions.
 - [ ] Known gaps and non-claims are explicit.
 - [ ] CI blocks absolute security claims in docs.
+
+---
+
+## 21.9 Publish surface: npm scope and bundled SDK and CLI packages
+
+**Parent:** #21 Docs, examples, and release
+**Task Description:** Decide what is published to npm and under which scope, then make the build produce it: a bundled SDK and a bundled CLI that inline every internal workspace package, plus the separately published store adapters. Must land before 21.6.
+**Expected Inputs:** The workspace packages; 24.1's rule that the SDK is the only stable public API; 7.15's split adapters.
+**Expected Output:** ADR `docs/adr/NNNN-publish-surface.md`; the workspace renamed from `@harness/*` to the chosen scope; a bundler config for `packages/sdk` and `packages/cli`; `scripts/release/check-publish-surface.ts`; `docs/releasing.md` section on the publish surface.
+**Dependencies:** a bundler (`tsup` recommended; verify license against 1.7), `@microsoft/api-extractor` or the bundler's declaration bundling for a single `.d.ts`.
+**Items it depends on:** 7.15, 24.1.
+**Implementation guidance:**
+
+1. **Scope.** `@harness` is owned by another organization on npm (checked 2026-10-09), so the packages can't be published under it. The maintainer confirms the replacement scope in the issue before work starts (recommended: `@rovinos`, unclaimed on 2026-10-09) and creates the npm org. Rename every `@harness/*` package name, import, `layers.json` entry, ESLint boundary rule, doc reference, and Dockerfile reference in one mechanical commit; nothing else changes in that commit.
+2. **Bundling (decision: maintainer, 2026-10-09).** Publish a small surface instead of every internal package:
+   - `<scope>/sdk`: bundles `core`, `schemas`, `config`, `telemetry`, `store` (contract, codec, in-memory store) and the other internals it uses into one ESM build with a single bundled `.d.ts`; no `<scope>/*` runtime dependencies remain.
+   - `<scope>/cli`: bundles its internals the same way and exposes the `harness` binary.
+   - `<scope>/store-sqlite` and `<scope>/store-postgres`: published separately so the native and database drivers stay optional; each declares its driver as a regular dependency and the SDK as a peer dependency, and bundles only adapter-internal helpers.
+   - Every other workspace package stays `"private": true` and is never published.
+3. Third-party runtime dependencies (`zod`, `@opentelemetry/api`, `yaml`, `ajv`, drivers) stay external dependencies, never inlined, so users get a single copy and security updates.
+4. Source maps ship with the bundles so stack traces point at the original sources.
+5. `check-publish-surface.ts` packs each published package (`yarn pack --dry-run`) and fails if a tarball depends on an unpublished workspace package, contains test files or `testing` helpers, or exceeds a size budget; it runs in the PR dry-run of the release stage (21.6).
+6. Record the ADR: options considered (publish every package with linked versions vs. bundle into a few packages), the decision (bundle), the scope, and the adapter split.
+**Tests to write:** `check-publish-surface.ts` unit tests (an unpublished workspace dependency fails, a test file in the tarball fails, a clean tarball passes); a smoke test that installs the packed SDK tarball into a temp project with no workspace and runs a one-step run against the in-memory store and a fake model; the same for the CLI's `--version` and `--help`.
+**Acceptance Criteria:**
+
+- [ ] The npm scope is confirmed and every package uses it.
+- [ ] The packed SDK and CLI install and run outside the workspace with no internal-package dependencies.
+- [ ] Only the SDK, CLI, and two store adapter packages are publishable; the ADR records the decision.
