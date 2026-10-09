@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { EventSchema, type Event, type EventType, type PayloadKeys } from "./events.js";
+import { ContractError } from "./parse.js";
 
 /** Whether an event field is safe metadata or encrypted content. */
 export type EventFieldClass = "meta" | "content";
@@ -76,6 +77,10 @@ export const EVENT_FIELD_CLASS = {
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "v", "traceId", "spanId", "segmentId"]);
 
+function fieldClassFor(type: EventType, key: string): EventFieldClass | undefined {
+  return Object.entries(EVENT_FIELD_CLASS[type]).find(([field]) => field === key)?.[1];
+}
+
 /**
  * Splits an event into its always-meta envelope and classified payloads.
  *
@@ -110,7 +115,39 @@ export function splitEvent(event: Event): {
  * @param meta - Event envelope and meta-classified payload.
  * @param content - Content-classified payload.
  * @returns The validated event.
+ * @throws ContractError when a field is stored in the wrong part or validation fails.
  */
 export function joinEvent(meta: Record<string, unknown>, content: Record<string, unknown>): Event {
-  return EventSchema.parse({ ...content, ...meta });
+  const issues = Object.keys(meta)
+    .filter((key) => Object.hasOwn(content, key))
+    .map((key) => ({ path: [key], code: "duplicate_field" }));
+
+  if (typeof meta.type === "string" && Object.hasOwn(EVENT_FIELD_CLASS, meta.type)) {
+    const type = meta.type as EventType;
+    for (const key of Object.keys(content)) {
+      if (fieldClassFor(type, key) !== "content") {
+        issues.push({ path: ["content", key], code: "field_classification_mismatch" });
+      }
+    }
+    for (const key of Object.keys(meta)) {
+      if (!envelopeKeys.has(key) && fieldClassFor(type, key) !== "meta") {
+        issues.push({ path: ["meta", key], code: "field_classification_mismatch" });
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new ContractError(issues);
+  }
+
+  const result = EventSchema.safeParse({ ...content, ...meta });
+  if (!result.success) {
+    throw new ContractError(
+      result.error.issues.map(({ path, code }) => ({
+        path: path.map((segment) => (typeof segment === "symbol" ? String(segment) : segment)),
+        code,
+      })),
+    );
+  }
+  return result.data;
 }

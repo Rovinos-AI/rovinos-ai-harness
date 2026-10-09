@@ -9,7 +9,7 @@ import {
   splitEvent,
 } from "./index.js";
 import type { NewEvent } from "./index.js";
-import { eventSamples } from "./event-samples.js";
+import { eventSamples } from "./event-samples.test-helpers.js";
 
 test("exports the harness version", () => {
   expect(HARNESS_VERSION).toBe("0.0.0");
