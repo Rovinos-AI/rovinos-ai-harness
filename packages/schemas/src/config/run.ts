@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-// Placeholder owned by task 20.1.
+// Run config is owned by task 20.1; resume policy is added by task 2.5.
 import { z } from "zod";
+
+/** Policy for dangling non-idempotent tool intents encountered during resume. */
+export const RunResumePolicySchema = z.enum(["escalate", "fail"]).default("escalate");
 
 export const RunConfigSchema = z
   .object({
+    resume: z
+      .object({
+        onNonIdempotent: RunResumePolicySchema,
+      })
+      .strict()
+      .prefault({}),
     budgets: z
       .object({
         maxSteps: z.coerce.number().int().positive().default(200),

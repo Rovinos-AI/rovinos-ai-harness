@@ -11,8 +11,16 @@ import {
 } from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
-import { TOOL_CALL_SPAN } from "../spans.js";
-import type { ModelToolCall, RunContext, ToolExecutionResult, ToolPort } from "../ports.js";
+import { APPROVAL_WAIT_SPAN, TOOL_CALL_SPAN } from "../spans.js";
+import type {
+  IdGenerator,
+  ModelToolCall,
+  RunContext,
+  ToolExecutionResult,
+  ToolPort,
+} from "../ports.js";
+import type { DanglingIntentAction } from "../resume-policy.js";
+import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
 
 /** Inputs needed to execute and record one or more tool calls. */
 export interface ToolStepOptions {
@@ -24,7 +32,32 @@ export interface ToolStepOptions {
   readonly signal: AbortSignal;
 }
 
+/** Dependencies for applying a resume action to an unresolved tool intent. */
+export interface ResumeToolStepOptions extends Omit<ToolStepOptions, "calls"> {
+  readonly ids: IdGenerator;
+}
+
 class ToolTimeoutError extends Error {}
+
+/** Error raised when a resume action or approval does not identify its intent. */
+export class ResumeActionMismatchError extends HarnessError {
+  readonly code = "resume_action_mismatch";
+
+  /** Creates an error for a mismatched resume action or approval. */
+  constructor() {
+    super("Resume action or approval does not match its intent.");
+    this.name = "ResumeActionMismatchError";
+  }
+}
+
+class ResumeEventMissingError extends HarnessError {
+  readonly code = "resume_event_missing";
+
+  constructor() {
+    super("Expected a recorded resume event.");
+    this.name = "ResumeEventMissingError";
+  }
+}
 
 function canonicalJson(value: JsonValue): string {
   if (value === null) {
@@ -109,15 +142,18 @@ function recordIntent(
 }
 
 async function runToolCall(
-  options: ToolStepOptions,
+  options: Omit<ToolStepOptions, "calls">,
   call: ModelToolCall,
   description: ReturnType<ToolPort["describe"]>,
+  appendIntent = true,
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
   const argsHash = hashArgs(call.args);
 
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
-    events.push(await recordIntent(options.recorder, call, description, argsHash));
+    if (appendIntent) {
+      events.push(await recordIntent(options.recorder, call, description, argsHash));
+    }
 
     if (description === undefined) {
       const result = await options.recorder.record({
@@ -180,6 +216,161 @@ async function runToolCall(
     return result;
   });
   return events;
+}
+
+async function recordDanglingFailure(
+  options: Omit<ResumeToolStepOptions, "ids">,
+  intent: ToolIntentEvent,
+  code: "unknown_tool" | "resume_ambiguous",
+): Promise<readonly Event[]> {
+  const events: Event[] = [];
+  await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
+    const result = await options.recorder.record({
+      type: "tool_result",
+      v: 1,
+      callId: intent.callId,
+      toolId: intent.toolId,
+      outcome: "error",
+      errorCode: code,
+      latencyMs: 0,
+      result: null,
+    });
+    events.push(result);
+    span.setStatus({ code: SpanStatusCode.ERROR });
+    span.setAttribute("harness.error.code", code);
+    return result;
+  });
+  return events;
+}
+
+async function requestResumeApprovals(
+  options: ResumeToolStepOptions,
+  intents: readonly ToolIntentEvent[],
+): Promise<readonly Event[]> {
+  const events: Event[] = [];
+  await options.recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () => {
+    const batch: EventPartial[] = intents.map((intent) => ({
+      type: "approval_requested",
+      v: 1,
+      approvalId: options.ids.next(),
+      callId: intent.callId,
+      payload: {
+        kind: "resume_ambiguity",
+        callId: intent.callId,
+        toolId: intent.toolId,
+      },
+    }));
+    batch.push({
+      type: "run_status_changed",
+      v: 1,
+      from: "running",
+      to: "suspended",
+      reason: "resume_ambiguity",
+    });
+    const recorded = await options.recorder.recordBatch(batch);
+    events.push(...recorded);
+    const last = recorded.at(-1);
+    if (last === undefined) {
+      throw new ResumeEventMissingError();
+    }
+    return last;
+  });
+  return events;
+}
+
+function callFromIntent(intent: ToolIntentEvent): ModelToolCall {
+  return { callId: intent.callId, toolId: intent.toolId, args: intent.args };
+}
+
+/**
+ * Applies a fail or rerun action without writing another tool intent.
+ */
+async function applyDanglingIntentAction(
+  options: ResumeToolStepOptions,
+  intent: ToolIntentEvent,
+  action: DanglingIntentAction,
+): Promise<readonly Event[] | "escalate"> {
+  if (action.callId !== intent.callId) {
+    throw new ResumeActionMismatchError();
+  }
+  if (action.kind === "fail") {
+    return recordDanglingFailure(options, intent, action.errorCode);
+  }
+  if (action.kind === "escalate") {
+    return "escalate";
+  }
+
+  const description = options.tool.describe(intent.toolId);
+  if (description === undefined) {
+    return recordDanglingFailure(options, intent, "unknown_tool");
+  }
+  if (!intent.idempotent || !description.idempotent) {
+    return "escalate";
+  }
+  return runToolCall(options, callFromIntent(intent), description, false);
+}
+
+/**
+ * Applies dangling-intent actions in event order and batches all escalations
+ * into one suspension transition.
+ *
+ * @param options - Recorder, ports, clock, and approval ID generator.
+ * @param state - Folded run state containing unresolved tool intents.
+ * @param actions - Planned actions corresponding to dangling tool intents.
+ * @returns Events appended while applying the plan.
+ */
+export async function applyDanglingIntents(
+  options: ResumeToolStepOptions,
+  state: RunState,
+  actions: readonly DanglingIntentAction[],
+): Promise<readonly Event[]> {
+  const events: Event[] = [];
+  const escalations: ToolIntentEvent[] = [];
+  for (const action of actions) {
+    const intent = state.pendingToolCalls.get(action.callId);
+    if (intent === undefined) {
+      throw new ResumeActionMismatchError();
+    }
+    const applied = await applyDanglingIntentAction(options, intent, action);
+    if (applied === "escalate") {
+      escalations.push(intent);
+    } else {
+      events.push(...applied);
+    }
+  }
+  if (escalations.length > 0) {
+    events.push(...(await requestResumeApprovals(options, escalations)));
+  }
+  return events;
+}
+
+/**
+ * Resolves a resume-ambiguity approval, executing on approval or recording an
+ * error result on denial.
+ *
+ * @param options - Recorder, ports, and clock.
+ * @param intent - The original durable intent with no result.
+ * @param approval - The approval request for this intent.
+ * @param resolution - The durable approval decision.
+ * @returns Events appended while applying the decision.
+ */
+export async function resolveDanglingIntentApproval(
+  options: Omit<ResumeToolStepOptions, "ids">,
+  intent: ToolIntentEvent,
+  approval: ApprovalRequestedEvent,
+  resolution: Extract<Event, { type: "approval_resolved" }>,
+): Promise<readonly Event[]> {
+  if (approval.callId !== intent.callId || resolution.approvalId !== approval.approvalId) {
+    throw new ResumeActionMismatchError();
+  }
+  if (resolution.decision === "deny") {
+    return recordDanglingFailure(options, intent, "resume_ambiguous");
+  }
+  const description = options.tool.describe(intent.toolId);
+  if (description === undefined) {
+    return recordDanglingFailure(options, intent, "unknown_tool");
+  }
+  return runToolCall(options, callFromIntent(intent), description, false);
 }
 
 /**

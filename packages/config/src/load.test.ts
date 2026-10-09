@@ -306,6 +306,7 @@ describe("loadConfig", () => {
 
     expect(config).toEqual({
       run: {
+        resume: { onNonIdempotent: "escalate" },
         budgets: { maxSteps: 200, maxWallClockMs: 3_600_000, countSuspendedTime: false },
       },
       store: {},
