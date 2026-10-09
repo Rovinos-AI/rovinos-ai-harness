@@ -151,7 +151,9 @@ describe("span registry", () => {
       defineSpan("harness.test.unsafe", { "harness.test.text": z.string() }),
     ).toThrowError("span_attr_unconstrained");
     expect(() =>
-      defineSpan("harness.test.optional_unsafe", { "harness.test.text": attr.optional(z.string()) }),
+      defineSpan("harness.test.optional_unsafe", {
+        "harness.test.text": attr.optional(z.string()),
+      }),
     ).toThrowError("span_attr_unconstrained");
   });
 
@@ -180,9 +182,9 @@ describe("span registry", () => {
 
     const maxLengthName = `harness.${"a".repeat(56)}`;
     expect(defineSpan(maxLengthName, {}).name).toBe(maxLengthName);
-    expect(() =>
-      defineSpan("harness.test.invalid_attribute", { private: attr.id() }),
-    ).toThrowError("span_attr_name_invalid");
+    expect(() => defineSpan("harness.test.invalid_attribute", { private: attr.id() })).toThrowError(
+      "span_attr_name_invalid",
+    );
 
     expect(() =>
       defineSpan("harness.test.reserved", { "harness.error.code": attr.code() }),
