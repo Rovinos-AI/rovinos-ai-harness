@@ -40,7 +40,9 @@ IBANs
 INTEG
 Kata
 LOGR
+MAXCOSTUSD
 MAXSTEPS
+MAXWALLCLOCKMS
 MCPC
 MCPCL
 MRTR
@@ -115,6 +117,7 @@ nosemgrep
 opencontainers
 overclaiming
 pagehide
+prefault
 pids
 pipefail
 prlimit

@@ -9,11 +9,6 @@ import { HarnessConfigSchema, type HarnessConfig } from "./schema.js";
 const unknownValueSchema = z.unknown();
 const blockedPathSegments = new Set(["__proto__", "constructor", "prototype"]);
 
-interface SchemaDefinition {
-  readonly type?: string;
-  readonly innerType?: z.ZodType;
-}
-
 /** A file reader injected by config-loader tests or callers. */
 export type ConfigFileReader = (path: string) => Promise<string>;
 
@@ -95,22 +90,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Object.prototype.toString.call(value) === "[object Object]";
 }
 
-function unwrapSchema(schema: z.ZodType): z.ZodType {
+function unwrapSchema(schema: z.core.$ZodType): z.core.$ZodType {
   let current = schema;
-  while (true) {
-    const definition = current.def as SchemaDefinition;
-    if (
-      (definition.type === "default" ||
-        definition.type === "prefault" ||
-        definition.type === "optional" ||
-        definition.type === "nullable") &&
-      definition.innerType !== undefined
-    ) {
-      current = definition.innerType;
-    } else {
-      return current;
-    }
+  while (
+    current instanceof z.core.$ZodDefault ||
+    current instanceof z.core.$ZodPrefault ||
+    current instanceof z.core.$ZodOptional ||
+    current instanceof z.core.$ZodNullable
+  ) {
+    current = current._zod.def.innerType;
   }
+  return current;
+}
+
+function schemaObjectShape(schema: z.core.$ZodType): z.core.$ZodShape | undefined {
+  const unwrapped = unwrapSchema(schema);
+  return unwrapped instanceof z.core.$ZodObject ? unwrapped._zod.def.shape : undefined;
 }
 
 function normalizedSegment(segment: string): string {
@@ -125,15 +120,15 @@ function invalidEnvironmentPath(key: string): never {
 
 function resolveEnvironmentPath(key: string, segments: readonly string[]): string[] {
   const resolved: string[] = [];
-  let currentSchema: z.ZodType = HarnessConfigSchema;
+  let currentSchema: z.core.$ZodType = HarnessConfigSchema;
 
   for (const segment of segments) {
-    const schema = unwrapSchema(currentSchema);
-    if (!(schema instanceof z.ZodObject)) {
+    const shape = schemaObjectShape(currentSchema);
+    if (shape === undefined) {
       invalidEnvironmentPath(key);
     }
 
-    const matchingKeys = Object.keys(schema.shape).filter(
+    const matchingKeys = Object.keys(shape).filter(
       (knownKey) => normalizedSegment(knownKey) === normalizedSegment(segment),
     );
     if (matchingKeys.length !== 1) {
@@ -145,10 +140,14 @@ function resolveEnvironmentPath(key: string, segments: readonly string[]): strin
       invalidEnvironmentPath(key);
     }
     resolved.push(matchedKey);
-    currentSchema = schema.shape[matchedKey];
+    const childSchema = shape[matchedKey];
+    if (childSchema === undefined) {
+      invalidEnvironmentPath(key);
+    }
+    currentSchema = childSchema;
   }
 
-  if (unwrapSchema(currentSchema) instanceof z.ZodArray) {
+  if (unwrapSchema(currentSchema) instanceof z.core.$ZodArray) {
     invalidEnvironmentPath(key);
   }
   return resolved;
@@ -167,8 +166,7 @@ function environmentOverrides(
     if (
       segments.length === 0 ||
       segments.some(
-        (segment) =>
-          segment.length === 0 || blockedPathSegments.has(segment.toLowerCase()),
+        (segment) => segment.length === 0 || blockedPathSegments.has(segment.toLowerCase()),
       )
     ) {
       invalidEnvironmentPath(key);
@@ -227,12 +225,7 @@ function formatContractIssues(error: ContractError): string[] {
 }
 
 function isFileNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  );
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 /**

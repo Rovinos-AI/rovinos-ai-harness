@@ -115,13 +115,13 @@ describe("loadConfig", () => {
   it("rejects unknown environment segments with the variable path only", async () => {
     const error = await expectConfigError(
       loadConfig({
-        env: { HARNESS__RUN__BUDGETS__MAXSTEP: "private-value" },
+        env: { HARNESS__RUN__BUDGETS__INVALID: "private-value" },
         readFile: reader(validYaml),
       }),
     );
 
     expect(error.issues[0]).toContain(
-      "HARNESS__RUN__BUDGETS__MAXSTEP: unknown, ambiguous, or unsupported configuration path (config_env_invalid)",
+      "HARNESS__RUN__BUDGETS__INVALID: unknown, ambiguous, or unsupported configuration path (config_env_invalid)",
     );
     expect(error.message).not.toContain("private-value");
   });
