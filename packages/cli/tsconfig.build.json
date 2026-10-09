@@ -2,9 +2,13 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../schemas/tsconfig.build.json" }]
+  "references": [
+    { "path": "../schemas/tsconfig.build.json" },
+    { "path": "../config/tsconfig.build.json" }
+  ]
 }
