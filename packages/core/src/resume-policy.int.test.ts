@@ -199,9 +199,7 @@ async function createDanglingIntent(
   return { events, intent: last };
 }
 
-async function createMultipleDanglingIntents(
-  recorder: RunRecorder,
-): Promise<Event[]> {
+async function createMultipleDanglingIntents(recorder: RunRecorder): Promise<Event[]> {
   let events: Event[] = [];
   await recorder.withStepSpan(RUN_SPAN, {}, async () => {
     events = await recorder.recordBatch([
@@ -252,7 +250,7 @@ describe("dangling tool intent resume", () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
     const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
-    const { events, intent } = await createDanglingIntent(recorder, true);
+    const { events } = await createDanglingIntent(recorder, true);
     const tool = new FakeToolPort(
       new Map([
         [
@@ -324,11 +322,7 @@ describe("dangling tool intent resume", () => {
       ids: new SequentialIdGenerator(),
     };
 
-    const approvalEvents = await applyDanglingIntents(
-      options,
-      foldRunState(events),
-      [action],
-    );
+    const approvalEvents = await applyDanglingIntents(options, foldRunState(events), [action]);
     expect(approvalEvents.map(({ type }) => type)).toEqual([
       "approval_requested",
       "run_status_changed",
@@ -377,12 +371,7 @@ describe("dangling tool intent resume", () => {
       throw new Error("Expected approval resolution event.");
     }
 
-    const resultEvents = await resolveDanglingIntentApproval(
-      options,
-      intent,
-      request,
-      resolution,
-    );
+    const resultEvents = await resolveDanglingIntentApproval(options, intent, request, resolution);
     expect(resultEvents.map(({ type }) => type)).toEqual(["tool_result"]);
     expect(resultEvents[0]).toMatchObject({ callId, outcome: "ok" });
     expect(tool.calls).toHaveLength(1);
@@ -424,10 +413,7 @@ describe("dangling tool intent resume", () => {
       [{ kind: "rerun", callId }],
     );
 
-    expect(recorded.map(({ type }) => type)).toEqual([
-      "approval_requested",
-      "run_status_changed",
-    ]);
+    expect(recorded.map(({ type }) => type)).toEqual(["approval_requested", "run_status_changed"]);
     expect(tool.calls).toHaveLength(0);
   });
 
@@ -442,14 +428,17 @@ describe("dangling tool intent resume", () => {
           { toolId: "idempotent_tool", idempotent: true },
           { toolId: "non_idempotent_tool_1", idempotent: false },
           { toolId: "non_idempotent_tool_2", idempotent: false },
-        ].map(({ toolId, idempotent }) => [
-          toolId,
-          {
-            idempotent,
-            timeoutMs: 1_000,
-            execute: () => Promise.resolve({ outcome: "ok", result: null }),
-          },
-        ] as const),
+        ].map(
+          ({ toolId, idempotent }) =>
+            [
+              toolId,
+              {
+                idempotent,
+                timeoutMs: 1_000,
+                execute: () => Promise.resolve({ outcome: "ok", result: null }),
+              },
+            ] as const,
+        ),
       ),
     );
     const state = foldRunState(events);
@@ -507,11 +496,9 @@ describe("dangling tool intent resume", () => {
       signal: new AbortController().signal,
       ids: new SequentialIdGenerator(),
     };
-    const [requestEvent] = await applyDanglingIntents(
-      options,
-      foldRunState(events),
-      [{ kind: "escalate", callId }],
-    );
+    const [requestEvent] = await applyDanglingIntents(options, foldRunState(events), [
+      { kind: "escalate", callId },
+    ]);
     if (requestEvent?.type !== "approval_requested") {
       throw new Error("Expected an approval request.");
     }
@@ -555,12 +542,10 @@ describe("dangling tool intent resume", () => {
       ),
     ).rejects.toBeInstanceOf(ResumeActionMismatchError);
     await expect(
-      resolveDanglingIntentApproval(
-        options,
-        intent,
-        requestEvent,
-        { ...resolution, approvalId: thirdCallId },
-      ),
+      resolveDanglingIntentApproval(options, intent, requestEvent, {
+        ...resolution,
+        approvalId: thirdCallId,
+      }),
     ).rejects.toBeInstanceOf(ResumeActionMismatchError);
 
     const result = await resolveDanglingIntentApproval(options, intent, requestEvent, resolution);

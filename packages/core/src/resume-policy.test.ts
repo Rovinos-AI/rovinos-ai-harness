@@ -51,8 +51,7 @@ function testState(options: { readonly idempotentToolIntent?: boolean } = {}) {
       type: "tool_intent",
       callId,
       toolId,
-      idempotent:
-        toolId === "idempotent_tool" && (options.idempotentToolIntent ?? true),
+      idempotent: toolId === "idempotent_tool" && (options.idempotentToolIntent ?? true),
       policyDecision: "allow",
       argsHash: "d".repeat(64),
       args: { toolId },
