@@ -292,7 +292,6 @@ describe("runLoop", () => {
       expect(durableTypes.at(-1)).toBe("model_request");
       return complete(request, callContext);
     });
-
     const contextPort = { build: vi.fn(() => Promise.resolve(["prior context"])) };
     const result = await runLoop({
       recorder,
