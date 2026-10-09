@@ -26,6 +26,7 @@ export type ModelStepResult =
       readonly completion: ModelCompletion;
       readonly events: readonly Event[];
     }
+  | { readonly outcome: "aborted"; readonly events: readonly Event[] }
   | { readonly outcome: "failed"; readonly code: Code; readonly events: readonly Event[] };
 
 function errorCode(error: unknown): Code {
@@ -60,7 +61,8 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
   let result: ModelStepResult | undefined;
 
   await options.recorder.withStepSpan(MODEL_CALL_SPAN, {}, async (span) => {
-    recorded.push(await options.recorder.record(requestPartial));
+    const requestEvent = await options.recorder.record(requestPartial);
+    recorded.push(requestEvent);
 
     let completion: ModelCompletion;
     try {
@@ -73,6 +75,10 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
         { runId: options.runId, signal: options.signal },
       );
     } catch (error) {
+      if (options.signal.reason === "shutdown") {
+        result = { outcome: "aborted", events: recorded };
+        return requestEvent;
+      }
       const code = errorCode(error);
       span.setStatus({ code: SpanStatusCode.ERROR });
       span.setAttribute("harness.error.code", code);

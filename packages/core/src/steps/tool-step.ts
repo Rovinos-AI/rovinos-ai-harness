@@ -21,6 +21,7 @@ import type {
 } from "../ports.js";
 import type { DanglingIntentAction } from "../resume-policy.js";
 import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
+import { onShutdown } from "../shutdown.js";
 
 /** Inputs needed to execute and record one or more tool calls. */
 export interface ToolStepOptions {
@@ -40,8 +41,8 @@ export interface ResumeToolStepOptions extends Omit<ToolStepOptions, "calls"> {
 }
 
 interface RunToolCallBehavior {
-  readonly appendIntent?: boolean;
   readonly executedArgsHash?: string;
+  readonly existingIntent?: ToolIntentEvent;
 }
 
 class ToolTimeoutError extends Error {}
@@ -126,13 +127,11 @@ async function executeWithTimeout(
   }
 }
 
-function latencyMs(clock: Clock, startedAt: number): number {
-  return Math.max(0, Math.floor(clock.now() - startedAt));
-}
+const latencyMs = (clock: Clock, startedAt: number): number =>
+  Math.max(0, Math.floor(clock.now() - startedAt));
 
-function executedArgsHashField(hash?: string): { readonly executedArgsHash?: string } {
-  return hash === undefined ? {} : { executedArgsHash: hash };
-}
+const executedArgsHashField = (hash?: string): { readonly executedArgsHash?: string } =>
+  hash === undefined ? {} : { executedArgsHash: hash };
 
 function recordIntent(
   recorder: RunRecorder,
@@ -160,13 +159,11 @@ async function runToolCall(
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
   const argsHash = hashArgs(call.args);
-  const appendIntent = behavior.appendIntent ?? true;
-
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
-    if (appendIntent) {
+    if (behavior.existingIntent === undefined) {
       events.push(await recordIntent(options.recorder, call, description, argsHash));
     }
-
+    const intentEvent = events.at(-1) ?? behavior.existingIntent;
     if (description === undefined) {
       const result = await options.recorder.record({
         type: "tool_result",
@@ -182,7 +179,6 @@ async function runToolCall(
       events.push(result);
       return result;
     }
-
     const startedAt = options.clock.now();
     let execution: ToolExecutionResult;
     try {
@@ -193,6 +189,10 @@ async function runToolCall(
         description.timeoutMs,
       );
     } catch (error) {
+      const shutdownIntent = onShutdown(options.signal, intentEvent, error);
+      if (shutdownIntent !== undefined) {
+        return shutdownIntent;
+      }
       const timedOut = error instanceof ToolTimeoutError;
       const code = timedOut ? "tool_timeout" : errorCode(error);
       span.setStatus({ code: SpanStatusCode.ERROR });
@@ -211,7 +211,6 @@ async function runToolCall(
       events.push(result);
       return result;
     }
-
     const result = await options.recorder.record({
       type: "tool_result",
       v: 1,
@@ -323,7 +322,7 @@ async function applyDanglingIntentAction(
     return "escalate";
   }
   await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, { appendIntent: false });
+  return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
 }
 
 /**
@@ -375,7 +374,7 @@ export async function applyApprovalDecision(
     await options.beforeToolExecution?.();
   }
   return runToolCall(options, call, description, {
-    appendIntent: false,
+    existingIntent: intent,
     ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
   });
 }
@@ -455,7 +454,7 @@ export async function resolveDanglingIntentApproval(
     return recordDanglingFailure(options, intent, "unknown_tool");
   }
   await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, { appendIntent: false });
+  return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
 }
 
 /**
