@@ -821,7 +821,7 @@ describe("runLoop", () => {
     ["SIGTERM", "SIGINT"],
   ] as const)(
     "suspends and resumes after %s then %s interrupts a model call",
-    async (signal, repeat) => {
+    async (firstSignal, repeat) => {
       const store = new InMemoryEventStore();
       const clock = new FakeClock(100);
       const controller = new AbortController();
@@ -831,10 +831,10 @@ describe("runLoop", () => {
         modelStarted = resolve;
       });
       const model: ModelPort = {
-        complete: async (_request, { signal }: RunContext) => {
+        complete: async (_request, runContext: RunContext) => {
           modelStarted();
           return new Promise<ModelCompletion>((resolve, reject) => {
-            signal.addEventListener(
+            runContext.signal.addEventListener(
               "abort",
               () => {
                 reject(new Error("model call aborted"));
@@ -865,7 +865,7 @@ describe("runLoop", () => {
       });
 
       await started;
-      processLike.emit(signal);
+      processLike.emit(firstSignal);
       processLike.emit(repeat);
       const result = await running;
       uninstall();
@@ -917,11 +917,15 @@ describe("runLoop", () => {
             idempotent: true,
             timeoutMs: 60_000,
             execute: (_call, { signal }) =>
-              new Promise((_, reject) => {
+              new Promise<ToolExecutionResult>((_resolve, reject) => {
                 toolStarted();
-                signal.addEventListener("abort", () => reject(new Error("tool aborted")), {
-                  once: true,
-                });
+                signal.addEventListener(
+                  "abort",
+                  () => {
+                    reject(new Error("tool aborted"));
+                  },
+                  { once: true },
+                );
               }),
           },
         ],

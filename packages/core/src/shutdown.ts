@@ -25,12 +25,38 @@ export interface ShutdownHandlerOptions {
 
 const noopLogger: ShutdownLogger = { error: () => undefined };
 
+interface UnrefableTimer {
+  unref(): unknown;
+}
+
+function hasUnref(timer: unknown): timer is UnrefableTimer {
+  return (
+    typeof timer === "object" &&
+    timer !== null &&
+    "unref" in timer &&
+    typeof timer.unref === "function"
+  );
+}
+
+function unrefTimer(timer: unknown): void {
+  if (hasUnref(timer)) {
+    timer.unref();
+  }
+}
+
 /** Returns the existing value only when the abort was caused by shutdown. */
 export function onShutdown<Result>(
   signal: AbortSignal,
   result: Result | undefined,
+  error: unknown,
 ): Result | undefined {
-  return signal.reason === "shutdown" ? result : undefined;
+  if (signal.reason !== "shutdown") {
+    return undefined;
+  }
+  if (result === undefined) {
+    throw error;
+  }
+  return result;
 }
 
 /**
@@ -57,7 +83,7 @@ export function installShutdownHandler(options: ShutdownHandlerOptions): () => v
     timeout = setTimeout(() => {
       void forceExit();
     }, options.graceMs);
-    timeout.unref?.();
+    unrefTimer(timeout);
   };
 
   const handleSigterm = (): void => {

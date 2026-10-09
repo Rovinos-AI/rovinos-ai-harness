@@ -41,7 +41,6 @@ export interface ResumeToolStepOptions extends Omit<ToolStepOptions, "calls"> {
 }
 
 interface RunToolCallBehavior {
-  readonly appendIntent?: boolean;
   readonly executedArgsHash?: string;
   readonly existingIntent?: ToolIntentEvent;
 }
@@ -161,7 +160,7 @@ async function runToolCall(
   const events: Event[] = [];
   const argsHash = hashArgs(call.args);
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
-    if (behavior.appendIntent !== false) {
+    if (behavior.existingIntent === undefined) {
       events.push(await recordIntent(options.recorder, call, description, argsHash));
     }
     const intentEvent = events.at(-1) ?? behavior.existingIntent;
@@ -190,11 +189,8 @@ async function runToolCall(
         description.timeoutMs,
       );
     } catch (error) {
-      const shutdownIntent = onShutdown(options.signal, intentEvent);
-      if (options.signal.reason === "shutdown") {
-        if (shutdownIntent === undefined) {
-          throw error;
-        }
+      const shutdownIntent = onShutdown(options.signal, intentEvent, error);
+      if (shutdownIntent !== undefined) {
         return shutdownIntent;
       }
       const timedOut = error instanceof ToolTimeoutError;
@@ -326,10 +322,7 @@ async function applyDanglingIntentAction(
     return "escalate";
   }
   await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, {
-    appendIntent: false,
-    existingIntent: intent,
-  });
+  return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
 }
 
 /**
@@ -381,7 +374,6 @@ export async function applyApprovalDecision(
     await options.beforeToolExecution?.();
   }
   return runToolCall(options, call, description, {
-    appendIntent: false,
     existingIntent: intent,
     ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
   });
@@ -462,10 +454,7 @@ export async function resolveDanglingIntentApproval(
     return recordDanglingFailure(options, intent, "unknown_tool");
   }
   await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, {
-    appendIntent: false,
-    existingIntent: intent,
-  });
+  return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
 }
 
 /**

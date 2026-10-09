@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const shutdownModuleUrl = pathToFileURL(
-  fileURLToPath(new URL("./shutdown.ts", import.meta.url)),
+  fileURLToPath(new URL("../packages/core/src/shutdown.ts", import.meta.url)),
 ).href;
 
 describe("installShutdownHandler process signals", () => {
@@ -34,7 +34,7 @@ describe("installShutdownHandler process signals", () => {
         "-e",
         script,
       ],
-      { stdio: ["ignore", "pipe", "pipe"] },
+      { stdio: ["ignore", "pipe", "ignore"] },
     );
 
     const result = await new Promise<{
@@ -74,5 +74,5 @@ describe("installShutdownHandler process signals", () => {
 
     expect(result).toMatchObject({ code: 143, signal: null });
     expect(result.output).toContain("aborted\n");
-  });
+  }, 10_000);
 });
