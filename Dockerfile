@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-FROM ghcr.io/jdx/mise:2026.10.4-debian@sha256:2fb7fa9a4120333531a8a70296d4ea152ffd3e7658dcf29ac75774a7d78dec24 AS build
+FROM ghcr.io/jdx/mise:2026.10.5-debian@sha256:ac140bcb5d4a989d3f66eb651263915154c33fa65134d63db4f7edf110ce87cc AS build
 
 WORKDIR /app
 COPY mise.toml ./
