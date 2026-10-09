@@ -992,6 +992,15 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@harness/core@workspace:packages/core":
+  version: 0.0.0-use.local
+  resolution: "@harness/core@workspace:packages/core"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+  languageName: unknown
+  linkType: soft
+
 "@harness/eslint-plugin-harness@workspace:^, @harness/eslint-plugin-harness@workspace:tools/eslint-plugin-harness":
   version: 0.0.0-use.local
   resolution: "@harness/eslint-plugin-harness@workspace:tools/eslint-plugin-harness"
