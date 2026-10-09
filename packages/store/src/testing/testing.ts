@@ -5,6 +5,7 @@ import {
   SequentialIdGenerator,
   type NewEvent,
   type RunStatus,
+  type Snapshot,
 } from "@harness/schemas";
 
 /** Deterministic event builders used by EventStore tests. */
@@ -21,6 +22,49 @@ export interface EventStoreTestBuilders {
     from: RunStatus,
     to: RunStatus,
   ): Extract<NewEvent, { type: "run_status_changed" }>;
+  checkpointWritten(
+    runId: Id,
+    checkpointId: Id,
+    atSeq: number,
+  ): Extract<NewEvent, { type: "checkpoint_written" }>;
+  snapshot(runId: Id, snapshotId: Id, atSeq: number): Snapshot;
+}
+
+function checkpointWritten(
+  nextTimestamp: () => number,
+  runId: Id,
+  checkpointId: Id,
+  atSeq: number,
+): Extract<NewEvent, { type: "checkpoint_written" }> {
+  return {
+    runId,
+    ts: nextTimestamp(),
+    v: 1,
+    traceId: "a".repeat(32),
+    spanId: "b".repeat(16),
+    segmentId: runId,
+    type: "checkpoint_written",
+    checkpointId,
+    atSeq,
+    traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+  };
+}
+
+function createSnapshot(
+  nextTimestamp: () => number,
+  runId: Id,
+  snapshotId: Id,
+  atSeq: number,
+): Snapshot {
+  return {
+    snapshotId,
+    runId,
+    atSeq,
+    createdAt: nextTimestamp(),
+    traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+    context: { messages: ["synthetic context"] },
+    plan: ["synthetic plan"],
+  };
 }
 
 /** Creates deterministic event builders for EventStore tests. */
@@ -81,5 +125,8 @@ export function createEventBuilders(): EventStoreTestBuilders {
         reason: "test.transition",
       };
     },
+    checkpointWritten: (runId, checkpointId, atSeq) =>
+      checkpointWritten(nextTimestamp, runId, checkpointId, atSeq),
+    snapshot: (runId, snapshotId, atSeq) => createSnapshot(nextTimestamp, runId, snapshotId, atSeq),
   };
 }

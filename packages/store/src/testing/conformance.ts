@@ -3,6 +3,10 @@ import { type Event, type NewEvent } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { SeqConflictError } from "../errors.js";
 import type { EventStore } from "../types.js";
+import {
+  registerSnapshotConformance,
+  registerSnapshotReopenConformance,
+} from "./conformance-snapshots.js";
 import { createEventBuilders, type EventStoreTestBuilders } from "./testing.js";
 
 /** Factory for a fresh store and its resource cleanup. */
@@ -382,8 +386,10 @@ export function runEventStoreConformance(
     registerStatusSummary(factory, builders);
     registerTraceLookup(factory, builders);
     registerLazyRead(factory, builders);
+    registerSnapshotConformance(factory, builders);
     if (caps.supportsFileReopen) {
       registerFileReopen(factory, builders);
+      registerSnapshotReopenConformance(factory, builders);
     }
   });
 }

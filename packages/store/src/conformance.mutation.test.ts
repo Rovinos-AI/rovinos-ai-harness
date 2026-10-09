@@ -19,6 +19,9 @@ function brokenFactory(): EventStoreFactory {
           throw error;
         }
       },
+      appendWithSnapshot: (runId, events, expectedSeq, snapshot) =>
+        reference.appendWithSnapshot(runId, events, expectedSeq, snapshot),
+      latestSnapshot: (runId) => reference.latestSnapshot(runId),
       read: (runId, range) => reference.read(runId, range),
       head: (runId) => reference.head(runId),
       listRuns: (options) => reference.listRuns(options),

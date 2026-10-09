@@ -6,4 +6,10 @@ export { PostgresEventStore } from "./postgres/adapter.js";
 export { SqliteEventStore } from "./sqlite/adapter.js";
 export type { ContentCodec, ContentCodecContext, EncodedContent } from "./codec.js";
 export type { PostgresEventStoreOptions } from "./postgres/adapter.js";
-export type { EventStore, ListRunsOptions, RunSummary } from "./types.js";
+export {
+  snapshotStoreOptionsSchema,
+  type EventStore,
+  type ListRunsOptions,
+  type RunSummary,
+  type SnapshotStoreOptions,
+} from "./types.js";

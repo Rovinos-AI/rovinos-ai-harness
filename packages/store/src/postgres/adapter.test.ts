@@ -2,7 +2,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { parseJson } from "@harness/schemas";
 import type { ContentCodec } from "../codec.js";
-import { SeqConflictError, StoreUnavailableError } from "../errors.js";
+import { StoreUnavailableError } from "../errors.js";
 import { PostgresEventStore } from "./adapter.js";
 import { createEventBuilders, runEventStoreConformance } from "../testing/index.js";
 import { z } from "zod";
@@ -28,13 +28,32 @@ interface FakeEvent {
   key_id: string | null;
 }
 
+interface FakeSnapshot {
+  snapshot_id: string;
+  run_id: string;
+  at_seq: number;
+  created_at: number;
+  meta_json: Record<string, unknown>;
+  content_blob: string;
+  key_id: string | null;
+}
+
 interface FakeQueryResult {
   rows: unknown[];
 }
 
+let transactionBackup:
+  | {
+      runs: Map<string, FakeRun>;
+      events: FakeEvent[];
+      snapshots: FakeSnapshot[];
+    }
+  | undefined;
+
 const fakePg = vi.hoisted(() => ({
   runs: new Map<string, FakeRun>(),
   events: new Array<FakeEvent>(),
+  snapshots: new Array<FakeSnapshot>(),
   schemaInitialized: false,
   handler: (_sql: string, _values: unknown[]): FakeQueryResult => ({ rows: [] }),
   connectError: new Error("connection refused"),
@@ -93,13 +112,31 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     fakePg.schemaInitialized = true;
     return { rows: [] };
   }
-  if (
-    query === "BEGIN" ||
-    query === "BEGIN ISOLATION LEVEL READ COMMITTED" ||
-    query === "COMMIT" ||
-    query === "ROLLBACK" ||
-    query.startsWith("SELECT pg_advisory_xact_lock")
-  ) {
+  if (query === "BEGIN" || query.startsWith("SELECT pg_advisory_xact_lock")) {
+    return { rows: [] };
+  }
+  if (query === "BEGIN ISOLATION LEVEL READ COMMITTED") {
+    transactionBackup = {
+      runs: structuredClone(fakePg.runs),
+      events: structuredClone(fakePg.events),
+      snapshots: structuredClone(fakePg.snapshots),
+    };
+    return { rows: [] };
+  }
+  if (query === "COMMIT") {
+    transactionBackup = undefined;
+    return { rows: [] };
+  }
+  if (query === "ROLLBACK") {
+    if (transactionBackup !== undefined) {
+      fakePg.runs.clear();
+      for (const [runId, run] of transactionBackup.runs) {
+        fakePg.runs.set(runId, run);
+      }
+      fakePg.events.splice(0, fakePg.events.length, ...transactionBackup.events);
+      fakePg.snapshots.splice(0, fakePg.snapshots.length, ...transactionBackup.snapshots);
+      transactionBackup = undefined;
+    }
     return { rows: [] };
   }
   if (query.startsWith("SELECT to_regclass")) {
@@ -153,6 +190,54 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       run.last_ts = number(values.at(-1));
     }
     return { rows: [] };
+  }
+  if (query.startsWith("INSERT INTO snapshots")) {
+    const snapshotId = text(values[0]);
+    if (fakePg.snapshots.some((snapshot) => snapshot.snapshot_id === snapshotId)) {
+      throw Object.assign(new Error("duplicate"), {
+        code: "23505",
+        table: "snapshots",
+      });
+    }
+    fakePg.snapshots.push({
+      snapshot_id: snapshotId,
+      run_id: text(values[1]),
+      at_seq: number(values[2]),
+      created_at: number(values[3]),
+      meta_json: parseJson(z.record(z.string(), z.json()), text(values[4])),
+      content_blob: text(values[5]),
+      key_id: values[6] === null ? null : text(values[6]),
+    });
+    return { rows: [] };
+  }
+  if (query.startsWith("DELETE FROM snapshots")) {
+    const runId = text(values[0]);
+    const keep = number(values[1]);
+    const ordered = fakePg.snapshots
+      .filter((snapshot) => snapshot.run_id === runId)
+      .sort((first, second) => {
+        const atSeqOrder = second.at_seq - first.at_seq;
+        return atSeqOrder === 0 ? second.snapshot_id.localeCompare(first.snapshot_id) : atSeqOrder;
+      });
+    const retainedIds = new Set(ordered.slice(0, keep).map(({ snapshot_id }) => snapshot_id));
+    fakePg.snapshots.splice(
+      0,
+      fakePg.snapshots.length,
+      ...fakePg.snapshots.filter(
+        (snapshot) => snapshot.run_id !== runId || retainedIds.has(snapshot.snapshot_id),
+      ),
+    );
+    return { rows: [] };
+  }
+  if (query.startsWith("SELECT snapshot_id, run_id, at_seq")) {
+    const runId = text(values[0]);
+    const row = fakePg.snapshots
+      .filter((snapshot) => snapshot.run_id === runId)
+      .sort((first, second) => {
+        const atSeqOrder = second.at_seq - first.at_seq;
+        return atSeqOrder === 0 ? second.snapshot_id.localeCompare(first.snapshot_id) : atSeqOrder;
+      })[0];
+    return { rows: row === undefined ? [] : [row] };
   }
   if (query.startsWith("SELECT run_id, seq, ts, type")) {
     const runId = text(values[0]);
@@ -223,6 +308,8 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
 beforeEach(() => {
   fakePg.runs.clear();
   fakePg.events.length = 0;
+  fakePg.snapshots.length = 0;
+  transactionBackup = undefined;
   fakePg.schemaInitialized = false;
   fakePg.handler = fakeQuery;
   fakePg.connectErrorCode = "ECONNREFUSED";
@@ -281,7 +368,7 @@ it("retries initialization after a transient connection failure", async () => {
   await store.close();
 });
 
-it("maps unique violations to sequence conflicts", async () => {
+it("does not map an event insert unique violation to a sequence conflict at the expected head", async () => {
   const builders = createEventBuilders();
   const runId = builders.nextRunId();
   fakePg.shouldFailConnect = false;
@@ -294,7 +381,7 @@ it("maps unique violations to sequence conflicts", async () => {
     return fakeQuery(sql, values);
   };
   await expect(store.append(runId, [builders.runCreated(runId)], 0)).rejects.toBeInstanceOf(
-    SeqConflictError,
+    StoreUnavailableError,
   );
   await store.close();
 });

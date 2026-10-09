@@ -5,48 +5,39 @@ import {
   Id,
   RunStatus,
   TraceId,
-  joinEvent,
   parseJson,
   splitEvent,
   type Event as StoredEvent,
   type NewEvent,
+  type Snapshot,
 } from "@harness/schemas";
 import { z } from "zod";
-import { JsonContentCodec, type ContentCodec } from "../codec.js";
+import {
+  JsonContentCodec,
+  decodeSnapshot,
+  encodeSnapshot,
+  snapshotKeep,
+  validateSnapshotAppend,
+  type ContentCodec,
+  type EncodedSnapshot,
+  type SnapshotRow,
+} from "../codec.js";
 import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "../errors.js";
-import type { EventStore, ListRunsOptions, RunSummary } from "../types.js";
+import type { EventStore, ListRunsOptions, RunSummary, SnapshotStoreOptions } from "../types.js";
 import { SQLITE_SCHEMA } from "./schema.sql.js";
+import {
+  decodeStoredContent,
+  eventFromRow,
+  insertSnapshot,
+  parseStoredMeta,
+  type EventRow,
+  type RunRow,
+  type RunSummaryRow,
+} from "./serialization.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
-const contentRecordSchema = z.record(z.string(), z.json());
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
 const READ_PAGE_SIZE = 256;
-
-interface EventRow {
-  run_id: string;
-  seq: number;
-  ts: number;
-  type: string;
-  trace_id: string;
-  span_id: string;
-  segment_id: string;
-  meta_json: string;
-  content_blob: string;
-  key_id: string | null;
-}
-
-interface RunRow {
-  next_seq: number;
-  status: string;
-}
-
-interface RunSummaryRow {
-  run_id: string;
-  created_at: number;
-  status: string;
-  last_seq: number;
-  last_ts: number;
-}
 
 interface EncodedEvent {
   event: StoredEvent;
@@ -146,68 +137,6 @@ function encodeCursor(createdAt: number, runId: Id): string {
   return Buffer.from(JSON.stringify([createdAt, runId])).toString("base64url");
 }
 
-function parseStoredMeta(metaJson: string): Record<string, unknown> {
-  let storedMeta: Record<string, unknown>;
-  try {
-    storedMeta = parseJson(contentRecordSchema, metaJson);
-  } catch {
-    throw new StoreUnavailableError();
-  }
-  if (Object.keys(storedMeta).some((key) => envelopeKeys.has(key))) {
-    throw new StoreUnavailableError();
-  }
-  return storedMeta;
-}
-
-async function decodeStoredContent(
-  codec: ContentCodec,
-  runId: Id,
-  row: EventRow,
-): Promise<Record<string, unknown>> {
-  try {
-    const decoded = await codec.decode(
-      { runId, seq: row.seq },
-      row.content_blob,
-      row.key_id ?? undefined,
-    );
-    const result = contentRecordSchema.safeParse(decoded);
-    if (!result.success) {
-      throw new StoreUnavailableError();
-    }
-    return result.data;
-  } catch {
-    throw new StoreUnavailableError();
-  }
-}
-
-function eventFromRow(
-  row: EventRow,
-  storedMeta: Record<string, unknown>,
-  content: Record<string, unknown>,
-): StoredEvent {
-  const storedRunId = Id.safeParse(row.run_id);
-  if (!storedRunId.success) {
-    throw new StoreUnavailableError();
-  }
-  try {
-    return joinEvent(
-      {
-        ...storedMeta,
-        runId: storedRunId.data,
-        seq: row.seq,
-        ts: row.ts,
-        type: row.type,
-        traceId: row.trace_id,
-        spanId: row.span_id,
-        segmentId: row.segment_id,
-      },
-      content,
-    );
-  } catch {
-    throw new StoreUnavailableError();
-  }
-}
-
 /** Durable SQLite implementation of the append-only event store. */
 export class SqliteEventStore implements EventStore {
   private readonly db: Database.Database;
@@ -236,16 +165,29 @@ export class SqliteEventStore implements EventStore {
     ],
     RunSummaryRow
   >;
+  private readonly insertSnapshot: Database.Statement<
+    [string, Id, number, number, string, string, string | null]
+  >;
+  private readonly pruneSnapshots: Database.Statement<[Id, Id, number]>;
+  private readonly latestSnapshotQuery: Database.Statement<[Id], SnapshotRow>;
+  private readonly snapshotKeep: number;
 
   /**
    * Open a SQLite database and initialize its initial schema.
    *
    * @param path Database file path or `:memory:`.
    * @param codec Codec used to store content separately from event metadata.
+   * @param options Snapshot retention configuration.
    */
-  constructor(path: string, codec: ContentCodec = new JsonContentCodec()) {
+  constructor(
+    path: string,
+    codec: ContentCodec = new JsonContentCodec(),
+    options: SnapshotStoreOptions = {},
+  ) {
+    const retainedSnapshotCount = snapshotKeep(options);
     this.db = new Database(path);
     this.codec = codec;
+    this.snapshotKeep = retainedSnapshotCount;
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
     this.db.pragma("busy_timeout = 5000");
@@ -294,6 +236,17 @@ export class SqliteEventStore implements EventStore {
       ORDER BY runs.created_at DESC, runs.run_id ASC
       LIMIT ?
     `);
+    this.insertSnapshot = this.db.prepare<
+      [string, Id, number, number, string, string, string | null]
+    >(
+      "INSERT INTO snapshots (snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    this.pruneSnapshots = this.db.prepare<[Id, Id, number]>(
+      "DELETE FROM snapshots WHERE run_id = ? AND snapshot_id NOT IN (SELECT snapshot_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT ?)",
+    );
+    this.latestSnapshotQuery = this.db.prepare<[Id], SnapshotRow>(
+      "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT 1",
+    );
   }
 
   /** {@inheritDoc EventStore.append} */
@@ -303,6 +256,30 @@ export class SqliteEventStore implements EventStore {
     expectedSeq: number,
   ): Promise<{ nextSeq: number }> {
     const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
+    return this.writeAppend(runId, encoded, expectedSeq);
+  }
+
+  /** {@inheritDoc EventStore.appendWithSnapshot} */
+  async appendWithSnapshot(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    snapshot: Snapshot,
+  ): Promise<{ nextSeq: number }> {
+    const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
+    const [encoded, encodedSnapshot] = await Promise.all([
+      encodeEvents(this.codec, runId, events, expectedSeq),
+      encodeSnapshot(this.codec, validatedSnapshot),
+    ]);
+    return this.writeAppend(runId, encoded, expectedSeq, encodedSnapshot);
+  }
+
+  private writeAppend(
+    runId: Id,
+    encoded: readonly EncodedEvent[],
+    expectedSeq: number,
+    encodedSnapshot?: EncodedSnapshot,
+  ): { nextSeq: number } {
     const validated = encoded.map(({ event }) => event);
 
     try {
@@ -351,6 +328,10 @@ export class SqliteEventStore implements EventStore {
           }
         }
         this.updateRun.run(expectedSeq + validated.length, status, last.ts, runId);
+        if (encodedSnapshot !== undefined) {
+          insertSnapshot(this.insertSnapshot, encodedSnapshot);
+          this.pruneSnapshots.run(runId, runId, this.snapshotKeep);
+        }
       });
       appendTransaction.immediate();
       return { nextSeq: expectedSeq + validated.length };
@@ -387,6 +368,16 @@ export class SqliteEventStore implements EventStore {
       return Promise.resolve(row?.next_seq ?? 0);
     } catch (error) {
       return Promise.reject(storeError(error));
+    }
+  }
+
+  /** {@inheritDoc EventStore.latestSnapshot} */
+  async latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
+    try {
+      const row = this.latestSnapshotQuery.get(runId);
+      return row === undefined ? undefined : await decodeSnapshot(this.codec, row);
+    } catch (error) {
+      throw storeError(error);
     }
   }
 

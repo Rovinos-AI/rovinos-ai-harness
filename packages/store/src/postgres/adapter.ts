@@ -1,10 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, TraceId, type Event, type NewEvent } from "@harness/schemas";
+import { Id, TraceId, type Event, type NewEvent, type Snapshot } from "@harness/schemas";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { z } from "zod";
-import { JsonContentCodec, type ContentCodec } from "../codec.js";
+import {
+  JsonContentCodec,
+  decodeSnapshot,
+  encodeSnapshot,
+  type ContentCodec,
+  type EncodedSnapshot,
+  type SnapshotRow,
+  validateSnapshotAppend,
+} from "../codec.js";
 import { InvalidEventError } from "../errors.js";
-import type { EventStore, ListRunsOptions, RunSummary } from "../types.js";
+import {
+  snapshotStoreOptionsSchema,
+  type EventStore,
+  type ListRunsOptions,
+  type RunSummary,
+} from "../types.js";
 import {
   appendTransaction,
   decodeCursor,
@@ -16,6 +29,7 @@ import {
   runListPage,
   storeError,
   type EventRow,
+  type EncodedEvent,
   type RunSummaryRow,
 } from "./helpers.js";
 
@@ -25,8 +39,8 @@ const connectionStringSchema = z
     (value) =>
       URL.canParse(value) && ["postgres:", "postgresql:"].includes(new URL(value).protocol),
   );
-const optionsSchema = z
-  .object({
+const optionsSchema = snapshotStoreOptionsSchema
+  .extend({
     poolSize: z.number().int().min(1).max(100).default(10),
     schema: z
       .string()
@@ -42,6 +56,7 @@ export type PostgresEventStoreOptions = z.input<typeof optionsSchema>;
 export class PostgresEventStore implements EventStore {
   private readonly pool: Pool;
   private readonly codec: ContentCodec;
+  private readonly snapshotKeep: number;
   private initialized: Promise<void> | undefined;
 
   /**
@@ -68,6 +83,7 @@ export class PostgresEventStore implements EventStore {
     });
     this.pool.on("error", () => undefined);
     this.codec = codec;
+    this.snapshotKeep = parsedOptions.data.snapshotKeep;
   }
 
   private ensureInitialized(): Promise<void> {
@@ -91,7 +107,7 @@ export class PostgresEventStore implements EventStore {
       transactionStarted = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
       const schemaState = await client.query<{ initialized: boolean } & QueryResultRow>(
-        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AS initialized",
+        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AS initialized",
       );
       if (schemaState.rows[0]?.initialized !== true) {
         await client.query(POSTGRES_SCHEMA);
@@ -115,6 +131,30 @@ export class PostgresEventStore implements EventStore {
     expectedSeq: number,
   ): Promise<{ nextSeq: number }> {
     const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
+    return this.appendEncoded(runId, encoded, expectedSeq);
+  }
+
+  /** {@inheritDoc EventStore.appendWithSnapshot} */
+  async appendWithSnapshot(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    snapshot: Snapshot,
+  ): Promise<{ nextSeq: number }> {
+    const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
+    const [encoded, encodedSnapshot] = await Promise.all([
+      encodeEvents(this.codec, runId, events, expectedSeq),
+      encodeSnapshot(this.codec, validatedSnapshot),
+    ]);
+    return this.appendEncoded(runId, encoded, expectedSeq, encodedSnapshot);
+  }
+
+  private async appendEncoded(
+    runId: Id,
+    encoded: readonly EncodedEvent[],
+    expectedSeq: number,
+    encodedSnapshot?: EncodedSnapshot,
+  ): Promise<{ nextSeq: number }> {
     await this.ensureInitialized();
     let client: PoolClient;
     try {
@@ -123,7 +163,15 @@ export class PostgresEventStore implements EventStore {
       throw storeError(error, expectedSeq);
     }
     try {
-      return { nextSeq: await appendTransaction(client, runId, encoded, expectedSeq) };
+      return {
+        nextSeq: await appendTransaction(client, {
+          runId,
+          encoded,
+          expectedSeq,
+          ...(encodedSnapshot === undefined ? {} : { encodedSnapshot }),
+          snapshotKeep: this.snapshotKeep,
+        }),
+      };
     } finally {
       client.release();
     }
@@ -168,6 +216,21 @@ export class PostgresEventStore implements EventStore {
       );
       const row = result.rows[0];
       return row === undefined ? 0 : integer(row.next_seq);
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
+  /** {@inheritDoc EventStore.latestSnapshot} */
+  async latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
+    try {
+      await this.ensureInitialized();
+      const result = await this.pool.query<SnapshotRow & QueryResultRow>(
+        "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = $1 ORDER BY at_seq DESC, snapshot_id DESC LIMIT 1",
+        [runId],
+      );
+      const row = result.rows[0];
+      return row === undefined ? undefined : await decodeSnapshot(this.codec, row);
     } catch (error) {
       throw storeError(error);
     }
@@ -228,10 +291,12 @@ export class PostgresEventStore implements EventStore {
 export function openPostgresEventStore(args: {
   connectionString: string;
   poolSize?: number;
+  snapshotKeep?: number;
   schema?: string;
 }): PostgresEventStore {
   const options: PostgresEventStoreOptions = {
     ...(args.poolSize === undefined ? {} : { poolSize: args.poolSize }),
+    ...(args.snapshotKeep === undefined ? {} : { snapshotKeep: args.snapshotKeep }),
     ...(args.schema === undefined ? {} : { schema: args.schema }),
   };
   return new PostgresEventStore(args.connectionString, options);

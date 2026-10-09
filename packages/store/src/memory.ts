@@ -5,9 +5,19 @@ import {
   type Event as StoredEvent,
   type Id,
   type NewEvent,
+  type Snapshot,
 } from "@harness/schemas";
+import {
+  JsonContentCodec,
+  decodeSnapshot,
+  encodeSnapshot,
+  snapshotKeep,
+  validateSnapshotAppend,
+  type ContentCodec,
+  type EncodedSnapshot,
+} from "./codec.js";
 import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "./errors.js";
-import type { EventStore, ListRunsOptions, RunSummary } from "./types.js";
+import type { EventStore, ListRunsOptions, RunSummary, SnapshotStoreOptions } from "./types.js";
 
 function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): number | undefined {
   if (cursor === undefined) {
@@ -21,11 +31,59 @@ function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): nu
   return cursorIndex + 1;
 }
 
+function validateEventBatch(
+  runId: Id,
+  events: readonly NewEvent[],
+  expectedSeq: number,
+  storedLength: number,
+): StoredEvent[] {
+  if (events.length === 0) {
+    throw new InvalidEventError([[]]);
+  }
+  const validated = events.map((event, index) => {
+    if (event.runId !== runId) {
+      throw new InvalidEventError([["runId"]]);
+    }
+    const result = Event.safeParse({ ...event, seq: expectedSeq + index });
+    if (!result.success) {
+      const paths = result.error.issues.map(({ path }) =>
+        path.flatMap((part) =>
+          typeof part === "string" || typeof part === "number" ? [part] : [],
+        ),
+      );
+      throw new InvalidEventError(paths);
+    }
+    return result.data;
+  });
+  if (storedLength === 0 && validated[0]?.type !== "run_created") {
+    throw new InvalidEventError([[0, "type"]]);
+  }
+  return validated;
+}
+
+function hasDuplicateSnapshot(
+  snapshotsByRun: ReadonlyMap<Id, readonly EncodedSnapshot[]>,
+  snapshotId: Id,
+): boolean {
+  return [...snapshotsByRun.values()].some((snapshots) =>
+    snapshots.some((snapshot) => snapshot.snapshot_id === snapshotId),
+  );
+}
+
 /** In-memory reference implementation of the append-only event store contract. */
 export class InMemoryEventStore implements EventStore {
   private readonly runs = new Map<Id, StoredEvent[]>();
   private readonly traceRuns = new Map<TraceId, Map<Id, number>>();
+  private readonly snapshots = new Map<Id, EncodedSnapshot[]>();
   private nextGlobalSeq = 0;
+  private readonly codec: ContentCodec;
+  private readonly snapshotKeep: number;
+
+  /** Create an in-memory event store with optional snapshot content encoding and retention. */
+  constructor(codec: ContentCodec = new JsonContentCodec(), options: SnapshotStoreOptions = {}) {
+    this.codec = codec;
+    this.snapshotKeep = snapshotKeep(options);
+  }
 
   /** {@inheritDoc EventStore.append} */
   append(
@@ -34,53 +92,80 @@ export class InMemoryEventStore implements EventStore {
     expectedSeq: number,
   ): Promise<{ nextSeq: number }> {
     try {
-      if (events.length === 0) {
-        throw new InvalidEventError([[]]);
-      }
-
-      const stored = this.runs.get(runId) ?? [];
-      if (expectedSeq !== stored.length) {
-        throw new SeqConflictError(expectedSeq, stored.length);
-      }
-
-      const validated: StoredEvent[] = [];
-      for (const [index, event] of events.entries()) {
-        if (event.runId !== runId) {
-          throw new InvalidEventError([["runId"]]);
-        }
-
-        const result = Event.safeParse({ ...event, seq: expectedSeq + index });
-        if (!result.success) {
-          const paths = result.error.issues.map(({ path }) =>
-            path.flatMap((part) =>
-              typeof part === "string" || typeof part === "number" ? [part] : [],
-            ),
-          );
-          throw new InvalidEventError(paths);
-        }
-        validated.push(result.data);
-      }
-
-      if (stored.length === 0 && validated[0]?.type !== "run_created") {
-        throw new InvalidEventError([[0, "type"]]);
-      }
-
-      this.runs.set(runId, [...stored, ...validated]);
-      for (const event of validated) {
-        let runs = this.traceRuns.get(event.traceId);
-        if (runs === undefined) {
-          runs = new Map<Id, number>();
-          this.traceRuns.set(event.traceId, runs);
-        }
-        if (!runs.has(runId)) {
-          runs.set(runId, this.nextGlobalSeq);
-        }
-        this.nextGlobalSeq += 1;
-      }
-      return Promise.resolve({ nextSeq: expectedSeq + validated.length });
+      return Promise.resolve(this.appendEvents(runId, events, expectedSeq));
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new StoreUnavailableError());
     }
+  }
+
+  /** {@inheritDoc EventStore.appendWithSnapshot} */
+  async appendWithSnapshot(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    snapshot: Snapshot,
+  ): Promise<{ nextSeq: number }> {
+    try {
+      const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
+      const encodedSnapshot = await encodeSnapshot(this.codec, validatedSnapshot);
+      return this.appendEvents(runId, events, expectedSeq, encodedSnapshot);
+    } catch (error) {
+      throw error instanceof Error ? error : new StoreUnavailableError();
+    }
+  }
+
+  private appendEvents(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    encodedSnapshot?: EncodedSnapshot,
+  ): { nextSeq: number } {
+    const stored = this.runs.get(runId) ?? [];
+    if (expectedSeq !== stored.length) {
+      throw new SeqConflictError(expectedSeq, stored.length);
+    }
+
+    const validated = validateEventBatch(runId, events, expectedSeq, stored.length);
+
+    const runSnapshots = this.snapshots.get(runId) ?? [];
+    if (
+      encodedSnapshot !== undefined &&
+      hasDuplicateSnapshot(this.snapshots, encodedSnapshot.snapshot_id)
+    ) {
+      throw new InvalidEventError([["snapshotId"]]);
+    }
+
+    this.runs.set(runId, [...stored, ...validated]);
+    this.recordTraceRuns(runId, validated);
+    if (encodedSnapshot !== undefined) {
+      this.snapshots.set(
+        runId,
+        [...runSnapshots, encodedSnapshot]
+          .sort((left, right) => right.at_seq - left.at_seq)
+          .slice(0, this.snapshotKeep),
+      );
+    }
+    return { nextSeq: expectedSeq + validated.length };
+  }
+
+  private recordTraceRuns(runId: Id, events: readonly StoredEvent[]): void {
+    for (const event of events) {
+      let runs = this.traceRuns.get(event.traceId);
+      if (runs === undefined) {
+        runs = new Map<Id, number>();
+        this.traceRuns.set(event.traceId, runs);
+      }
+      if (!runs.has(runId)) {
+        runs.set(runId, this.nextGlobalSeq);
+      }
+      this.nextGlobalSeq += 1;
+    }
+  }
+
+  /** {@inheritDoc EventStore.latestSnapshot} */
+  async latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
+    const latest = this.snapshots.get(runId)?.[0];
+    return latest === undefined ? undefined : decodeSnapshot(this.codec, latest);
   }
 
   /** {@inheritDoc EventStore.read} */
