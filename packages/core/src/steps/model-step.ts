@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code } from "@harness/schemas";
 import type { Event, Id, JsonValue } from "@harness/schemas";
+import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelCompletion, ModelPort } from "../ports.js";
@@ -58,7 +59,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
   const recorded: Event[] = [];
   let result: ModelStepResult | undefined;
 
-  await options.recorder.withStepSpan(MODEL_CALL_SPAN, {}, async () => {
+  await options.recorder.withStepSpan(MODEL_CALL_SPAN, {}, async (span) => {
     recorded.push(await options.recorder.record(requestPartial));
 
     let completion: ModelCompletion;
@@ -73,6 +74,8 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       );
     } catch (error) {
       const code = errorCode(error);
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      span.setAttribute("harness.error.code", code);
       const failed = await options.recorder.record({
         type: "run_status_changed",
         v: 1,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { SequentialIdGenerator } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
-import { FakeModelPort, FakeModelScriptExhaustedError } from "./fake-model.js";
+import { FakeModelPort, FakeModelScriptExhaustedError } from "./index.js";
 import type { ModelCompletion } from "../ports.js";
 
 const completion: ModelCompletion = {

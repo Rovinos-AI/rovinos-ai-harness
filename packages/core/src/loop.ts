@@ -33,6 +33,7 @@ export interface RunLoopResult {
  */
 export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
   const events: Event[] = [];
+  let result: RunLoopResult | undefined;
   const startEvents: EventPartial[] = [
     {
       type: "run_created",
@@ -42,46 +43,55 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
     },
     { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
   ];
-  const runningEvent = await options.recorder.withStepSpan(RUN_SPAN, {}, async () => {
+  await options.recorder.withStepSpan(RUN_SPAN, {}, async () => {
     const recorded = await options.recorder.recordBatch(startEvents);
     const last = recorded.at(-1);
     if (last === undefined) {
       throw new Error("Expected run creation events.");
     }
     events.push(...recorded);
-    return last;
-  });
-  const runId = runningEvent.runId;
+    const runId = last.runId;
 
-  const context = await options.context.build(events.slice());
-  const result = await modelStep({
-    recorder: options.recorder,
-    model: options.model,
-    ids: options.ids,
-    runId,
-    messages: { goal: options.goal, context },
-    signal: options.signal,
-    ...(options.role === undefined ? {} : { role: options.role }),
-    ...(options.provider === undefined ? {} : { provider: options.provider }),
-    ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
-  });
-  events.push(...result.events);
+    const context = await options.context.build(events.slice());
+    const modelResult = await modelStep({
+      recorder: options.recorder,
+      model: options.model,
+      ids: options.ids,
+      runId,
+      messages: { goal: options.goal, context },
+      signal: options.signal,
+      ...(options.role === undefined ? {} : { role: options.role }),
+      ...(options.provider === undefined ? {} : { provider: options.provider }),
+      ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+    });
+    events.push(...modelResult.events);
 
-  if (result.outcome === "failed") {
-    return { state: foldRunState(events), events };
-  }
+    if (modelResult.outcome === "failed") {
+      result = { state: foldRunState(events), events };
+      const failedEvent = modelResult.events.at(-1);
+      if (failedEvent === undefined) {
+        throw new Error("Expected the model step to record a failure.");
+      }
+      return failedEvent;
+    }
 
-  const reason = result.completion.toolCalls.length === 0 ? "final_answer" : "tools_not_supported";
-  const to = result.completion.toolCalls.length === 0 ? "completed" : "failed";
-  const finished = await options.recorder.withStepSpan(RUN_SPAN, {}, () =>
-    options.recorder.record({
+    const reason =
+      modelResult.completion.toolCalls.length === 0 ? "final_answer" : "tools_not_supported";
+    const to = modelResult.completion.toolCalls.length === 0 ? "completed" : "failed";
+    const finished = await options.recorder.record({
       type: "run_status_changed",
       v: 1,
       from: "running",
       to,
       reason,
-    }),
-  );
-  events.push(finished);
-  return { state: foldRunState(events), events };
+    });
+    events.push(finished);
+    result = { state: foldRunState(events), events };
+    return finished;
+  });
+
+  if (result === undefined) {
+    throw new Error("Expected the run loop to record an outcome.");
+  }
+  return result;
 }

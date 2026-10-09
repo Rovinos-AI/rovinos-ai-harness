@@ -41,5 +41,4 @@ export type {
   NewRunMetadata,
   RunContext,
 } from "./ports.js";
-export { FakeModelPort, FakeModelScriptExhaustedError } from "./testing/fake-model.js";
-export { NaiveContext } from "./testing/naive-context.js";
+export { NaiveContext } from "./context/naive-context.js";

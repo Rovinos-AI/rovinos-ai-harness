@@ -6,6 +6,7 @@ import {
   context,
   ROOT_CONTEXT,
   trace,
+  SpanStatusCode,
   type Context,
   type ContextManager,
   type Span,
@@ -23,8 +24,8 @@ import {
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
-import { FakeModelPort } from "./testing/fake-model.js";
-import { NaiveContext } from "./testing/naive-context.js";
+import { FakeModelPort } from "./testing/index.js";
+import { NaiveContext } from "./context/naive-context.js";
 import { RunRecorder } from "./recorder.js";
 import { runLoop } from "./loop.js";
 import type { ModelCompletion, ModelPort } from "./ports.js";
@@ -39,21 +40,31 @@ let nextSpanId = 0;
 class TestSpan implements Span {
   private ended = false;
   private recordedExceptions = 0;
+  readonly attributes: Record<string, string | number | boolean> = {};
   readonly spanContextValue: SpanContext = {
     traceId: "a".repeat(32),
     spanId: (++nextSpanId).toString(16).padStart(16, "0"),
     traceFlags: 1,
   };
 
+  constructor(
+    readonly name: string,
+    readonly parentSpanId: string | undefined,
+  ) {}
+
   spanContext(): SpanContext {
     return this.spanContextValue;
   }
 
-  setAttribute(_key: string, _value: string | number | boolean): this {
+  setAttribute(key: string, value: string | number | boolean): this {
+    this.attributes[key] = value;
     return this;
   }
 
-  setAttributes(_attributes: SpanOptions["attributes"]): this {
+  setAttributes(attributes: SpanOptions["attributes"]): this {
+    if (attributes !== undefined) {
+      Object.assign(this.attributes, attributes);
+    }
     return this;
   }
 
@@ -73,7 +84,10 @@ class TestSpan implements Span {
     return this;
   }
 
-  setStatus(_status: Parameters<Span["setStatus"]>[0]): this {
+  status: Parameters<Span["setStatus"]>[0] = { code: SpanStatusCode.UNSET };
+
+  setStatus(status: Parameters<Span["setStatus"]>[0]): this {
+    this.status = status;
     return this;
   }
 
@@ -98,8 +112,13 @@ class TestSpan implements Span {
 }
 
 class TestTracer implements Tracer {
-  startSpan(_name: string, _options?: SpanOptions, _parentContext?: Context): Span {
-    return new TestSpan();
+  readonly spans: TestSpan[] = [];
+
+  startSpan(name: string, _options?: SpanOptions, parentContext?: Context): Span {
+    const parent = trace.getSpan(parentContext ?? context.active());
+    const span = new TestSpan(name, parent?.spanContext().spanId);
+    this.spans.push(span);
+    return span;
   }
 
   startActiveSpan<F extends (span: Span) => unknown>(name: string, fn: F): ReturnType<F>;
@@ -129,6 +148,10 @@ class TestTracerProvider implements TracerProvider {
 
   getTracer(): Tracer {
     return this.tracer;
+  }
+
+  get spans(): readonly TestSpan[] {
+    return this.tracer.spans;
   }
 }
 
@@ -227,9 +250,11 @@ function normalizeEvents(events: readonly Event[]): JsonValueType {
   });
 }
 
+const tracerProvider = new TestTracerProvider();
+
 beforeAll(() => {
   context.setGlobalContextManager(new TestContextManager());
-  trace.setGlobalTracerProvider(new TestTracerProvider());
+  trace.setGlobalTracerProvider(tracerProvider);
 });
 
 afterAll(() => {
@@ -238,6 +263,7 @@ afterAll(() => {
 
 describe("runLoop", () => {
   it("completes a scripted one-step run with a deterministic golden event sequence", async () => {
+    const startingSpanIndex = tracerProvider.spans.length;
     const store = new InMemoryEventStore();
     const append = vi.spyOn(store, "append");
     const recorder = new RunRecorder(store, runId, segmentId, 0, new FakeClock(100));
@@ -291,6 +317,13 @@ describe("runLoop", () => {
       },
     ]);
     expect(await store.head(runId)).toBe(5);
+    const spans = tracerProvider.spans.slice(startingSpanIndex);
+    const runSpans = spans.filter(({ name }) => name === "harness.run");
+    const modelSpans = spans.filter(({ name }) => name === "harness.model_call");
+    expect(runSpans).toHaveLength(1);
+    expect(modelSpans).toHaveLength(1);
+    expect(modelSpans[0]?.parentSpanId).toBe(runSpans[0]?.spanContextValue.spanId);
+    expect(runSpans[0]?.attributes["harness.event.seq"]).toBe(4);
 
     const actual = `${JSON.stringify(normalizeEvents(result.events), null, 2)}\n`;
     if (process.env.UPDATE_GOLDEN === "1") {
@@ -338,6 +371,7 @@ describe("runLoop", () => {
     [Object.assign(new Error("provider failure"), { code: "Invalid Code" }), "model_failed"],
     [new Error("provider detail"), "model_failed"],
   ])("records a failed status when the model port rejects", async (error, expectedCode) => {
+    const startingSpanIndex = tracerProvider.spans.length;
     const recorder = new RunRecorder(
       new InMemoryEventStore(),
       runId,
@@ -368,5 +402,11 @@ describe("runLoop", () => {
       to: "failed",
       reason: expectedCode,
     });
+    const spans = tracerProvider.spans.slice(startingSpanIndex);
+    const runSpan = spans.find(({ name }) => name === "harness.run");
+    const modelSpan = spans.find(({ name }) => name === "harness.model_call");
+    expect(modelSpan?.status.code).toBe(SpanStatusCode.ERROR);
+    expect(modelSpan?.attributes["harness.error.code"]).toBe(expectedCode);
+    expect(runSpan?.attributes["harness.event.seq"]).toBe(3);
   });
 });
