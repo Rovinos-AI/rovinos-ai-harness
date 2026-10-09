@@ -210,3 +210,53 @@ Shared design for this epic:
 - [ ] The overhead of each safety layer is measured and tracked.
 - [ ] Regressions beyond budget fail the nightly build.
 - [ ] Long runs stay within memory and resume-time budgets.
+
+---
+
+## 24.9 Shared rate-limit store: `RateLimitStore` port with in-process and Postgres backends
+
+**Parent:** #24 Run service and scaling
+**Task Description:** Make rate limits hold across replicas. Today the provider limiter (14.12) and the control plane's per-token limit (18.5) keep their token buckets in process memory, so N replicas allow N times the configured rate and providers still return 429. Introduce one `RateLimitStore` port that both use, with an in-process backend (default, unchanged behavior) and a Postgres backend that needs no new infrastructure.
+**Expected Inputs:** Limit definitions from config (`models.providers[].requestsPerMinute`, `controlPlane.rateLimitPerMinute`), the injected clock, the store's Postgres connection.
+**Expected Output:** `packages/core/src/rate-limit/{types.ts,memory.ts,conformance.ts}` (`RateLimitStore`, `InMemoryRateLimitStore`, conformance suite), `packages/store-postgres/src/rate-limit.ts` (`PostgresRateLimitStore`, table `rate_limit_buckets` via the 7.12 migration runner), config fragment `rateLimits: { backend: "memory" | "postgres" | "redis", onUnavailable: "local" | "deny" }`, 14.12 and 18.5 rewired to the port, docs `docs/deployment/rate-limits.md`.
+**Dependencies:** none new.
+**Items it depends on:** 14.12, 18.5, 24.6, 7.12, 7.15.
+**Implementation guidance:**
+
+1. Port: `take(key: Code, limit: { capacity: int, refillPerSecond: number }, cost = 1): Promise<{ allowed: boolean; retryAfterMs: number; remaining: number }>`. Keys are config-bounded codes (`provider.anthropic`, `cp.token.<tokenId>`); never principal names, prompts, or other content. Token ids are already non-secret config ids (18.5).
+2. Token bucket semantics are identical across backends: refill is computed from the elapsed time since the last update using the injected clock (in-process) or the database's clock (shared backends, so replicas with skewed clocks agree).
+3. Postgres: one row per key, updated with `INSERT ... ON CONFLICT (key) DO UPDATE ... RETURNING` in a single statement, so concurrent replicas never double-spend a token.
+4. Failure handling: when the shared backend is unavailable, `onUnavailable: "local"` (default) falls back to the in-process bucket for that replica and emits `harness.rate_limit.degraded{backend}`, while `"deny"` rejects (429 for the control plane, `provider_rate_limited` for models). Document the trade-off.
+5. Metrics: `harness.rate_limit.denied{key_kind}` where `key_kind` is `provider` or `control_plane`; never the full key.
+6. The conformance suite (in `./testing`, not the main entry) takes a factory and covers: burst up to capacity, refill over time, `retryAfterMs` accuracy, cost greater than 1, and exactly-capacity grants under concurrency from two clients (200 iterations).
+**Tests to write:** conformance against in-memory (unit) and Postgres (integration); 14.12 and 18.5 tests unchanged with the in-memory backend; a two-client Postgres test proving the combined rate across "replicas" stays at the configured limit; degraded fallback and `deny` behavior with an injected failing backend.
+**Acceptance Criteria:**
+
+- [ ] With the Postgres backend, two replicas together never exceed the configured provider or control-plane rate.
+- [ ] Default behavior (in-process backend) is unchanged for single-node deployments.
+- [ ] Keys and metrics contain no content or principal identifiers.
+
+---
+
+## 24.10 Redis/Valkey rate-limit backend for multi-replica deployments
+
+**Parent:** #24 Run service and scaling
+**Task Description:** Add an optional Redis-protocol backend for `RateLimitStore`, for multi-replica deployments where per-request database round trips for rate limiting are undesirable. Redis is optional infrastructure: single-node and Postgres-only deployments never need it, and the event log stays the only source of truth (nothing in Redis is needed for recovery).
+**Expected Inputs:** `rateLimits.backend: "redis"` and `rateLimits.redis: { url: SecretRef, keyPrefix: Code (default "harness"), tls?: boolean }`.
+**Expected Output:** `packages/rate-limit-redis` (`RedisRateLimitStore`), a `valkey` service in `infra/compose/docker-compose.test.yml`, an integration conformance run in the Azure `integration` stage (`TEST_REDIS_URL`), a multi-replica compose example `infra/compose/docker-compose.replicas.yml` (two harness replicas, Postgres, Valkey), docs in `docs/deployment/rate-limits.md`.
+**Dependencies:** a Redis-protocol client (`iovalkey` or `ioredis`; MIT, verify against 1.7); server image `valkey/valkey` pinned by multi-arch index digest. Use Valkey (BSD-3-Clause) for the test and example infrastructure rather than Redis 7.4+ server images, whose licenses (RSALv2, SSPL, AGPL) conflict with the 1.7 license policy. The client works against either server.
+**Items it depends on:** 24.9, 20.3, 22.1.
+**Implementation guidance:**
+
+1. The token bucket runs as one Lua script (`EVALSHA`, loaded at startup with an `EVAL` fallback) so take-and-refill is atomic on the server, and uses the server's `TIME` so replica clock skew doesn't matter. Keys are `<keyPrefix>:rl:<key>` with a TTL of twice the full-refill time, so idle buckets expire.
+2. Connection: lazy connect, bounded reconnect with backoff, command timeout (default 50 ms). Timeouts and connection errors map to the 24.9 unavailable path (`onUnavailable`), never to an unhandled error.
+3. Secrets: the URL (which may include a password) comes from a `SecretRef` (20.3) and never appears in logs, spans, or errors; TLS is supported for managed Redis/Valkey services.
+4. The package declares the client as a dependency and `@harness/core` (or the SDK, after 21.9) as a peer, matching the adapter packaging rule in 21.9, so users without Redis never install the client.
+5. Compose: `valkey` service hardened like Postgres (read-only root, dropped capabilities, loopback-only port, healthcheck `valkey-cli ping`).
+6. Multi-replica example: two `harness serve` replicas sharing Postgres and Valkey, with a short doc showing how to verify the combined provider rate limit holds.
+**Tests to write:** the 24.9 conformance suite against Valkey in the integration stage (including the 200-iteration two-client concurrency case); script-load fallback; timeout and connection-loss paths use `onUnavailable`; a canary test that the connection URL never appears in errors or logs.
+**Acceptance Criteria:**
+
+- [ ] The Redis backend passes the shared `RateLimitStore` conformance suite against Valkey in Azure.
+- [ ] Two replicas sharing Valkey never exceed the configured rate.
+- [ ] Deployments without `rateLimits.backend: "redis"` install and run no Redis client.
