@@ -46,6 +46,16 @@ describe("NaiveContext", () => {
       },
       {
         ...envelope(2),
+        type: "tool_result",
+        callId,
+        toolId: "fake_tool",
+        outcome: "timeout",
+        errorCode: "tool_timeout",
+        latencyMs: 3,
+        result: null,
+      },
+      {
+        ...envelope(3),
         type: "model_response",
         requestId,
         provider: "fake",
@@ -63,7 +73,19 @@ describe("NaiveContext", () => {
 
     await expect(new NaiveContext().build(events)).resolves.toEqual([
       "first answer",
-      { output: "tool result" },
+      {
+        callId,
+        toolId: "fake_tool",
+        outcome: "ok",
+        result: { output: "tool result" },
+      },
+      {
+        callId,
+        toolId: "fake_tool",
+        outcome: "timeout",
+        errorCode: "tool_timeout",
+        result: null,
+      },
       "second answer",
     ]);
   });

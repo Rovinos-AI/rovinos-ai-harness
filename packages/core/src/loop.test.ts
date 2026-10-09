@@ -420,7 +420,15 @@ describe("runLoop", () => {
     });
     expect(model.requests[1]?.request.messages).toEqual({
       goal: "tool goal",
-      context: ["tool request", { value: "tool output" }],
+      context: [
+        "tool request",
+        {
+          callId: modelCallId,
+          toolId: "test_tool",
+          outcome: "ok",
+          result: { value: "tool output" },
+        },
+      ],
     });
     expect(tool.calls).toHaveLength(1);
   });
@@ -466,6 +474,7 @@ describe("runLoop", () => {
 
   it("records timeouts and allows the model to continue", async () => {
     const clock = new FakeClock(100);
+    let executionStopped = false;
     const tool = new FakeToolPort(
       new Map([
         [
@@ -478,6 +487,7 @@ describe("runLoop", () => {
                 signal.addEventListener(
                   "abort",
                   () => {
+                    executionStopped = true;
                     reject(new Error("Aborted."));
                   },
                   { once: true },
@@ -504,6 +514,7 @@ describe("runLoop", () => {
     });
 
     expect(result.state.status).toBe("completed");
+    expect(executionStopped).toBe(true);
     const toolResult = result.events.find(
       (event): event is Extract<Event, { type: "tool_result" }> => event.type === "tool_result",
     );

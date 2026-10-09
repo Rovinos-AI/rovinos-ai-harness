@@ -81,7 +81,7 @@ export interface ToolPort {
    * Executes one model-proposed tool call.
    *
    * @param call - Call identifier, tool identifier, and validated arguments.
-   * @param context - Active run and cancellation signal.
+   * @param context - Active run and cancellation signal; stop work when it aborts.
    * @returns The tool outcome and JSON result.
    */
   execute(call: ModelToolCall, context: RunContext): Promise<ToolExecutionResult>;
