@@ -12,6 +12,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "source": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
     }
   },
   "scripts": {
@@ -20,10 +25,11 @@
   "dependencies": {
     "@harness/schemas": "workspace:^",
     "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/context-async-hooks": "2.12.0",
+    "@opentelemetry/sdk-trace-base": "2.12.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@opentelemetry/sdk-trace-base": "2.12.0",
     "@types/node": "22.20.5",
     "vitest": "3.2.6"
   }

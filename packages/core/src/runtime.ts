@@ -2,17 +2,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  createContextKey,
-  isSpanContextValid,
-  context as otelContext,
-  ROOT_CONTEXT,
-  trace,
-} from "@opentelemetry/api";
-import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { HarnessError, Id, Sha256Hex, type JsonValue, type RunConfig } from "@harness/schemas";
 import { SqliteEventStore, type EventStore } from "@harness/store";
+import { ensureTracingFallback } from "@harness/telemetry";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ContextPort, IdGenerator, ModelPort, ToolPort } from "./ports.js";
 import { resumeRun } from "./resume.js";
@@ -24,8 +16,6 @@ import { RUN_SPAN } from "./spans.js";
 
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const POLICY_VERSION = "default";
-const CONTEXT_PROBE_KEY = createContextKey("harness.runtime.context-probe");
-let fallbackTracerInstalled = false;
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
 export interface RuntimeOverrides {
@@ -56,30 +46,13 @@ export interface Runtime {
 
 const systemClock: Clock = { now: () => Date.now() };
 
-function hasContextPropagation(): boolean {
-  const marker = {};
-  let propagated = false;
-  otelContext.with(ROOT_CONTEXT.setValue(CONTEXT_PROBE_KEY, marker), () => {
-    propagated = otelContext.active().getValue(CONTEXT_PROBE_KEY) === marker;
-  });
-  return propagated;
-}
-
 function ensureTracing(): void {
   const probeIds = new SystemIdGenerator(systemClock);
   const probe = RUN_SPAN.start({
     "harness.run.id": probeIds.next(),
     "harness.segment.id": probeIds.next(),
   });
-  const tracerIsValid = isSpanContextValid(probe.spanContext());
-  probe.end();
-  if (!tracerIsValid && !fallbackTracerInstalled) {
-    trace.setGlobalTracerProvider(new BasicTracerProvider());
-    fallbackTracerInstalled = true;
-  }
-  if (!hasContextPropagation()) {
-    otelContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
-  }
+  ensureTracingFallback(probe);
 }
 
 class SystemIdGenerator implements IdGenerator {

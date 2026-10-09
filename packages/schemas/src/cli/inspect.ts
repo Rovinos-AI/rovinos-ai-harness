@@ -13,6 +13,7 @@ export const InspectEventSchema = z
   })
   .strict();
 
+/** Inferred event summary returned by `harness inspect`. */
 export type InspectEvent = z.infer<typeof InspectEventSchema>;
 
 /** Machine-readable run state returned by `harness inspect`. */
@@ -47,4 +48,5 @@ export const InspectResultSchema = z
   })
   .strict();
 
+/** Inferred machine-readable run state returned by `harness inspect`. */
 export type InspectResult = z.infer<typeof InspectResultSchema>;

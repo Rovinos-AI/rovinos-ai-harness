@@ -1021,8 +1021,6 @@ __metadata:
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@opentelemetry/api": "npm:1.9.1"
-    "@opentelemetry/context-async-hooks": "npm:2.12.0"
-    "@opentelemetry/sdk-trace-base": "npm:2.12.0"
     vitest: "npm:3.2.6"
   languageName: unknown
   linkType: soft
@@ -1078,6 +1076,7 @@ __metadata:
   dependencies:
     "@harness/schemas": "workspace:^"
     "@opentelemetry/api": "npm:1.9.1"
+    "@opentelemetry/context-async-hooks": "npm:2.12.0"
     "@opentelemetry/sdk-trace-base": "npm:2.12.0"
     "@types/node": "npm:22.20.5"
     vitest: "npm:3.2.6"

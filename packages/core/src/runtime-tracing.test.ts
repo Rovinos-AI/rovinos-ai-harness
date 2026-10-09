@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, diag, isSpanContextValid, trace } from "@opentelemetry/api";
-import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { FakeClock, Id, RunConfigSchema, Sha256Hex } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
+import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "./recorder.js";
 import { createRuntime } from "./runtime.js";
@@ -33,14 +32,9 @@ describe("runtime tracing fallback", () => {
     otelContext.disable();
     diag.disable();
 
-    const existingProvider = new BasicTracerProvider({
-      idGenerator: {
-        generateTraceId: () => "a".repeat(32),
-        generateSpanId: () => "b".repeat(16),
-      },
-    });
+    const existingProvider = createTestTracerProvider();
     trace.setGlobalTracerProvider(existingProvider);
-    otelContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+    otelContext.setGlobalContextManager(createTestContextManager());
     const setContextManager = vi.spyOn(otelContext, "setGlobalContextManager");
 
     const runtimeWithProvider = await createRuntime(config, {
@@ -64,6 +58,10 @@ describe("runtime tracing fallback", () => {
       error: (...args: unknown[]) => {
         diagnosticErrors.push(args);
       },
+      warn: () => undefined,
+      info: () => undefined,
+      debug: () => undefined,
+      verbose: () => undefined,
     });
     const setTracerProvider = vi.spyOn(trace, "setGlobalTracerProvider");
     const setFallbackContextManager = vi.spyOn(otelContext, "setGlobalContextManager");

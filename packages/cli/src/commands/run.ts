@@ -6,7 +6,6 @@ import {
   RunInputSchema,
   RunResultSchema,
   parseJson,
-  type FakeModelCompletion,
   type FakeModelScript,
   type RunInput,
   type RunResult,

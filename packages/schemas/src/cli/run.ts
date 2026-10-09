@@ -12,6 +12,7 @@ export const RunInputSchema = z
   })
   .strict();
 
+/** Validated input accepted by `harness run`. */
 export type RunInput = z.infer<typeof RunInputSchema>;
 
 /** Machine-readable result returned by `harness run` and `harness resume`. */
@@ -22,6 +23,7 @@ export const RunResultSchema = z
   })
   .strict();
 
+/** Validated machine-readable result from a run command. */
 export type RunResult = z.infer<typeof RunResultSchema>;
 
 /** The model completion entries accepted by the local fake-model script. */
@@ -60,6 +62,7 @@ export const FakeModelCompletionSchema = z
 /** Script file format accepted by `harness run --fake-model`. */
 export const FakeModelScriptSchema = z.array(FakeModelCompletionSchema);
 
+/** Validated array format for fake-model script files. */
 export type FakeModelScript = z.infer<typeof FakeModelScriptSchema>;
 
 /** A validated scripted model completion. */
