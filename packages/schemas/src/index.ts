@@ -48,8 +48,16 @@ export {
   RunInputSchema,
   RunResultSchema,
   type FakeModelCompletion,
+  type FakeModelScript,
+  type RunInput,
+  type RunResult,
 } from "./cli/run.js";
-export { InspectEventSchema, InspectResultSchema } from "./cli/inspect.js";
+export {
+  InspectEventSchema,
+  InspectResultSchema,
+  type InspectEvent,
+  type InspectResult,
+} from "./cli/inspect.js";
 export { FakeClock, SequentialIdGenerator } from "./testing.js";
 
 /** The current harness version. */

@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  createContextKey,
+  isSpanContextValid,
   context as otelContext,
   ROOT_CONTEXT,
   trace,
-  type Context,
-  type ContextManager,
-  type Span,
-  type SpanContext,
-  type SpanOptions,
-  type Tracer,
-  type TracerProvider,
 } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { HarnessError, Id, Sha256Hex, type JsonValue, type RunConfig } from "@harness/schemas";
 import { SqliteEventStore, type EventStore } from "@harness/store";
 import { NaiveContext } from "./context/naive-context.js";
@@ -24,17 +20,12 @@ import type { Clock } from "./recorder.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import { RunRecorder } from "./recorder.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
+import { RUN_SPAN } from "./spans.js";
 
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const POLICY_VERSION = "default";
-
-function randomHex(byteLength: number): string {
-  let value = randomBytes(byteLength).toString("hex");
-  while (value === "0".repeat(byteLength * 2)) {
-    value = randomBytes(byteLength).toString("hex");
-  }
-  return value;
-}
+const CONTEXT_PROBE_KEY = createContextKey("harness.runtime.context-probe");
+let fallbackTracerInstalled = false;
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
 export interface RuntimeOverrides {
@@ -65,140 +56,30 @@ export interface Runtime {
 
 const systemClock: Clock = { now: () => Date.now() };
 
-class RuntimeSpan implements Span {
-  private ended = false;
-  private readonly value: SpanContext;
-
-  constructor(traceId: string) {
-    this.value = {
-      traceId,
-      spanId: randomHex(8),
-      traceFlags: 1,
-    };
-  }
-
-  spanContext(): SpanContext {
-    return this.value;
-  }
-
-  setAttribute(_key: string, _value: string | number | boolean): this {
-    return this;
-  }
-
-  setAttributes(_attributes: SpanOptions["attributes"]): this {
-    return this;
-  }
-
-  addEvent(
-    _name: Parameters<Span["addEvent"]>[0],
-    _attributesOrStartTime?: Parameters<Span["addEvent"]>[1],
-    _startTime?: Parameters<Span["addEvent"]>[2],
-  ): this {
-    return this;
-  }
-
-  addLink(_link: Parameters<Span["addLink"]>[0]): this {
-    return this;
-  }
-
-  addLinks(_links: Parameters<Span["addLinks"]>[0]): this {
-    return this;
-  }
-
-  setStatus(_status: Parameters<Span["setStatus"]>[0]): this {
-    return this;
-  }
-
-  updateName(_name: string): this {
-    return this;
-  }
-
-  end(): void {
-    this.ended = true;
-  }
-
-  isRecording(): boolean {
-    return !this.ended;
-  }
-
-  recordException(
-    _exception: Parameters<Span["recordException"]>[0],
-    _time?: Parameters<Span["recordException"]>[1],
-  ): void {
-    return;
-  }
-}
-
-class RuntimeTracer implements Tracer {
-  startSpan(_name: string, options?: SpanOptions, parentContext?: Context): Span {
-    const parent = trace.getSpan(parentContext ?? otelContext.active())?.spanContext();
-    const traceId = parent?.traceId ?? randomHex(16);
-    return new RuntimeSpan(traceId);
-  }
-
-  startActiveSpan<F extends (span: Span) => unknown>(name: string, fn: F): ReturnType<F>;
-  startActiveSpan<F extends (span: Span) => unknown>(
-    name: string,
-    options: SpanOptions,
-    fn: F,
-  ): ReturnType<F>;
-  startActiveSpan<F extends (span: Span) => unknown>(
-    name: string,
-    options: SpanOptions,
-    activeContext: Context,
-    fn: F,
-  ): ReturnType<F>;
-  startActiveSpan<F extends (span: Span) => unknown>(
-    _name: string,
-    _optionsOrCallback: SpanOptions | F,
-    _contextOrCallback?: Context | F,
-    _callback?: F,
-  ): ReturnType<F> {
-    throw new Error("The runtime fallback tracer supports registered spans only.");
-  }
-}
-
-class RuntimeTracerProvider implements TracerProvider {
-  private readonly tracer = new RuntimeTracer();
-
-  getTracer(): Tracer {
-    return this.tracer;
-  }
-}
-
-class RuntimeContextManager implements ContextManager {
-  private readonly storage = new AsyncLocalStorage<Context>();
-
-  active(): Context {
-    return this.storage.getStore() ?? ROOT_CONTEXT;
-  }
-
-  with<A extends unknown[], F extends (...args: A) => ReturnType<F>>(
-    activeContext: Context,
-    fn: F,
-    thisArg?: ThisParameterType<F>,
-    ...args: A
-  ): ReturnType<F> {
-    return this.storage.run(activeContext, () => fn.apply(thisArg, args));
-  }
-
-  bind<T>(_activeContext: Context, target: T): T {
-    return target;
-  }
-
-  enable(): this {
-    return this;
-  }
-
-  disable(): this {
-    this.storage.disable();
-    return this;
-  }
+function hasContextPropagation(): boolean {
+  const marker = {};
+  let propagated = false;
+  otelContext.with(ROOT_CONTEXT.setValue(CONTEXT_PROBE_KEY, marker), () => {
+    propagated = otelContext.active().getValue(CONTEXT_PROBE_KEY) === marker;
+  });
+  return propagated;
 }
 
 function ensureTracing(): void {
-  otelContext.setGlobalContextManager(new RuntimeContextManager());
-  trace.setGlobalTracerProvider(new RuntimeTracerProvider());
+  const probeIds = new SystemIdGenerator(systemClock);
+  const probe = RUN_SPAN.start({
+    "harness.run.id": probeIds.next(),
+    "harness.segment.id": probeIds.next(),
+  });
+  const tracerIsValid = isSpanContextValid(probe.spanContext());
+  probe.end();
+  if (!tracerIsValid && !fallbackTracerInstalled) {
+    trace.setGlobalTracerProvider(new BasicTracerProvider());
+    fallbackTracerInstalled = true;
+  }
+  if (!hasContextPropagation()) {
+    otelContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  }
 }
 
 class SystemIdGenerator implements IdGenerator {
@@ -242,6 +123,14 @@ const unavailableTool: ToolPort = {
   execute: () => Promise.reject(new ToolNotConfiguredError()),
 };
 
+class RunInputMissingError extends HarnessError {
+  readonly code = "run_input_missing";
+
+  constructor() {
+    super("The run input is unavailable.");
+  }
+}
+
 const defaultProcessLike: ShutdownProcessLike = {
   on: (signal, listener) => process.on(signal, listener),
   removeListener: (signal, listener) => process.removeListener(signal, listener),
@@ -262,8 +151,7 @@ function configHash(config: RuntimeConfig): ReturnType<typeof Sha256Hex.parse> {
   return Sha256Hex.parse(createHash("sha256").update(JSON.stringify(config)).digest("hex"));
 }
 
-async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue> {
-  let goal: JsonValue = null;
+async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | undefined> {
   for await (const event of store.read(runId)) {
     if (
       event.type === "model_request" &&
@@ -272,10 +160,10 @@ async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue> {
       !Array.isArray(event.messages) &&
       Object.hasOwn(event.messages, "goal")
     ) {
-      goal = event.messages.goal ?? null;
+      return event.messages.goal ?? null;
     }
   }
-  return goal;
+  return undefined;
 }
 
 async function createSqliteStore(dataDir: string): Promise<EventStore> {
@@ -349,8 +237,12 @@ export async function createRuntime(
       }),
     resume: (runId) =>
       withShutdown((signal) =>
-        storedGoal(store, runId).then((goal) =>
-          resumeRun({
+        storedGoal(store, runId).then((goal) => {
+          if (goal === undefined) {
+            // TODO(15.1): A durable run_input event will make this interruption resumable.
+            throw new RunInputMissingError();
+          }
+          return resumeRun({
             store,
             runId,
             clock,
@@ -363,8 +255,8 @@ export async function createRuntime(
             budgets: config.run.budgets,
             checkpointEveryEvents: config.run.checkpointEveryEvents,
             resumePolicy: config.run.resume.onNonIdempotent,
-          }),
-        ),
+          });
+        }),
       ),
     close: () => store.close(),
   };

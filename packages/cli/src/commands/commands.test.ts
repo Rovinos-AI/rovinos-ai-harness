@@ -177,6 +177,14 @@ async function seedPendingApproval(harness: CliHarness): Promise<{
         reason: "start",
       },
       {
+        type: "model_request",
+        v: 1,
+        requestId: harness.ids.next(),
+        provider: "test",
+        model: "script",
+        messages: { goal: "approval test" },
+      },
+      {
         type: "tool_intent",
         v: 1,
         callId,
@@ -466,6 +474,16 @@ describe("run, resume, and inspect CLI commands", () => {
 
     expect(result.status).toBe("completed");
     expect(await readFile(join(temporaryDirectory, "harness.db"))).toBeInstanceOf(Buffer);
+  });
+
+  it("maps a missing original run input to the failure exit code", async () => {
+    const harness = createHarness();
+    const runId = Id.parse("00000000000000000000000000");
+
+    const code = await main(["resume", runId], harness.context, [resumeCommand]);
+
+    expect(code).toBe(ExitCode.failure);
+    expect(harness.stderr).toEqual(["run_input_missing\n"]);
   });
 
   it("uses default CLI context and honors an explicit config path", async () => {

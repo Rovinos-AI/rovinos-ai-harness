@@ -7,6 +7,9 @@ import {
   RunResultSchema,
   parseJson,
   type FakeModelCompletion,
+  type FakeModelScript,
+  type RunInput,
+  type RunResult,
   type JsonValue,
 } from "@harness/schemas";
 import type { ModelCompletion, ModelPort, ModelRequest, RunContext } from "@harness/core";
@@ -32,7 +35,7 @@ class InvalidInputStreamError extends HarnessError {
 class ScriptedModel implements ModelPort {
   private next = 0;
 
-  constructor(private readonly script: readonly FakeModelCompletion[]) {}
+  constructor(private readonly script: FakeModelScript) {}
 
   complete(_request: ModelRequest, _context: RunContext): Promise<ModelCompletion> {
     const completion = this.script[this.next];
@@ -52,7 +55,7 @@ class ScriptedModel implements ModelPort {
   }
 }
 
-async function readInput(path: string): Promise<ReturnType<typeof RunInputSchema.parse>> {
+async function readInput(path: string): Promise<RunInput> {
   let content: string;
   if (path === "-") {
     content = "";
@@ -123,6 +126,7 @@ export const runCommand: CommandModule = {
           model === undefined ? undefined : { model },
         );
         try {
+          // TODO(13.7): Tokenize goal content before it enters the run loop.
           const goal: JsonValue =
             input.metadata === undefined
               ? { goal: input.goal }
@@ -132,7 +136,7 @@ export const runCommand: CommandModule = {
           if (firstEvent === undefined) {
             throw new RunStatusError("run_failed");
           }
-          const output = { runId: firstEvent.runId, status: result.status };
+          const output: RunResult = { runId: firstEvent.runId, status: result.status };
           context.out.json(RunResultSchema, output);
           context.out.print(`${output.runId}\n`);
           throwForRunStatus(result.status, result.events);

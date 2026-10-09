@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, Id, InspectResultSchema, JsonValue, type Event } from "@harness/schemas";
+import {
+  HarnessError,
+  Id,
+  InspectResultSchema,
+  JsonValue,
+  type Event,
+  type InspectEvent,
+  type InspectResult,
+} from "@harness/schemas";
 import type { CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 
@@ -30,7 +38,7 @@ export const inspectCommand: CommandModule = {
       .command("inspect")
       .description("Show run status and a safe summary of its recent events")
       .argument("<runId>", "run identifier")
-      .option("--show-content", "include stored, tokenized event content")
+      .option("--show-content", "include stored event content verbatim")
       .action(async (value: string, options: { readonly showContent?: boolean }) => {
         const runId = Id.parse(value);
         const config = await context.loadConfig();
@@ -42,7 +50,12 @@ export const inspectCommand: CommandModule = {
           }
           const { foldRunState } = await import("@harness/core");
           const state = foldRunState(events);
-          const result = {
+          const eventSummaries: InspectEvent[] = events.slice(-10).map((event) => ({
+            type: event.type,
+            seq: event.seq,
+            ...(options.showContent === true ? { event: JsonValue.parse(event) } : {}),
+          }));
+          const result: InspectResult = {
             runId,
             status: state.status,
             steps: state.steps,
@@ -52,11 +65,7 @@ export const inspectCommand: CommandModule = {
               approvalId: approval.approvalId,
               toolId: state.pendingToolCalls.get(approval.callId)?.toolId ?? "unknown",
             })),
-            events: events.slice(-10).map((event) => ({
-              type: event.type,
-              seq: event.seq,
-              ...(options.showContent === true ? { event: JsonValue.parse(event) } : {}),
-            })),
+            events: eventSummaries,
           };
           const parsed = InspectResultSchema.parse(result);
           if (options.showContent === true) {

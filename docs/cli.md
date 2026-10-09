@@ -50,7 +50,8 @@ through the approval API before resuming.
 `harness inspect <runId> [--show-content]` displays the status, step count, token and cost usage,
 last checkpoint, pending approval IDs and tool IDs, and up to the last ten event summaries. By
 default event summaries contain only their type and sequence number. `--show-content` includes the
-stored tokenized event content and writes a `content_may_be_sensitive` warning to stderr.
+stored event content verbatim and writes a `content_may_be_sensitive` warning to stderr. Until PII
+tokenization in tasks 13.4 and 13.7 lands, run goals and event content are stored as provided.
 
 ## Exit codes
 
