@@ -33,7 +33,7 @@ These numeric values are stable for scripts and automation:
 | `2` | `usage` | Invalid arguments or unknown command. |
 | `3` | `config_invalid` | Configuration is invalid. |
 | `4` | `policy_denied` | Policy denied an operation, including separation-of-duties denial. |
-| `5` | `suspended` | A run is waiting for approval or human input. |
+| `5` | `suspended` | A run is waiting for approval or human input, including a resume blocked by unresolved approvals. |
 | `6` | `budget_exceeded` | A run exceeded its configured budget. |
 | `7` | `not_found_or_resolved` | Approval or input was not found, already resolved, or its run is no longer suspended. |
 | `8` | `replay_failed` | Replay failed. |
@@ -49,7 +49,7 @@ never included in CLI error output.
 | --- | --- |
 | `config_invalid` | `3` |
 | `policy_denied`, `approver_is_requester` | `4` |
-| `suspended` | `5` |
+| `suspended`, `run_awaiting_approval` | `5` |
 | `budget_exceeded` | `6` |
 | `not_found_or_resolved`, `approval_not_found`, `approval_already_resolved`, `approval_run_not_suspended`, `input_not_found`, `input_already_resolved` | `7` |
 | `replay_failed` | `8` |

@@ -24,6 +24,7 @@ export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freez
   policy_denied: ExitCode.policyDenied,
   approver_is_requester: ExitCode.policyDenied,
   suspended: ExitCode.suspended,
+  run_awaiting_approval: ExitCode.suspended,
   budget_exceeded: ExitCode.budgetExceeded,
   not_found_or_resolved: ExitCode.notFoundOrResolved,
   approval_not_found: ExitCode.notFoundOrResolved,

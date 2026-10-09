@@ -168,7 +168,7 @@ async function recordBudgetFailure(
   return failed;
 }
 
-async function recordBudgetFailureAndCheckpoint(
+export async function recordBudgetFailureAndCheckpoint(
   recorder: RunRecorder,
   events: Event[],
   violation: BudgetViolation,

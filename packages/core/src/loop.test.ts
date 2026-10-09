@@ -53,7 +53,12 @@ import {
   requestApproval,
   resolveApproval,
 } from "./approvals.js";
-import { ResumeConflictError, RunAlreadyTerminalError, resumeRun } from "./resume.js";
+import {
+  ResumeConflictError,
+  RunAlreadyTerminalError,
+  RunAwaitingApprovalError,
+  resumeRun,
+} from "./resume.js";
 import type { ResumeRunOptions } from "./resume.js";
 
 const runId = "00000000000000000000000000";
@@ -1660,11 +1665,10 @@ describe("runLoop", () => {
         ]),
       );
       const options = createResumeOptions(store, clock, { tool });
-      const suspended = await resumeRun(options);
+      const headBeforeBlockedResume = await store.head(runId);
+      await expect(resumeRun(options)).rejects.toBeInstanceOf(RunAwaitingApprovalError);
+      await expect(store.head(runId)).resolves.toBe(headBeforeBlockedResume);
 
-      expect(suspended.status).toBe("suspended");
-      expect(suspended.state.pendingApprovals.size).toBe(1);
-      expect(suspended.events.filter(({ type }) => type === "approval_requested")).toHaveLength(0);
       await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
       const resumed = await resumeRun(options);
       const stored = await readApprovalEvents(store);
@@ -1673,6 +1677,153 @@ describe("runLoop", () => {
       expect(tool.calls.map(({ call }) => call.callId)).toEqual([modelCallId]);
       expect(stored.filter(({ type }) => type === "tool_intent")).toHaveLength(1);
       expect(stored.filter(({ type }) => type === "tool_result")).toHaveLength(1);
+    });
+
+    it.each(["approve", "deny"] as const)(
+      "applies a %s decision for a resume-ambiguity approval",
+      async (decision) => {
+        const store = new InMemoryEventStore();
+        const clock = new FakeClock(100);
+        await createRunHistory(store, clock, [
+          {
+            type: "tool_intent",
+            v: 1,
+            callId: modelCallId,
+            toolId: "ambiguous_tool",
+            idempotent: false,
+            policyDecision: "allow",
+            argsHash: "d".repeat(64),
+            args: { value: 1 },
+          },
+        ]);
+        const execute = vi.fn(() =>
+          Promise.resolve({ outcome: "ok" as const, result: { approved: true } }),
+        );
+        const tool = new FakeToolPort(
+          new Map([
+            ["ambiguous_tool", { idempotent: false, timeoutMs: 1_000, execute }],
+          ]),
+        );
+        const options = createResumeOptions(store, clock, { tool });
+        const requested = await resumeRun(options);
+        const approval = requested.state.pendingApprovals.values().next().value;
+        if (approval === undefined) {
+          throw new Error("Expected the resume-ambiguity approval.");
+        }
+
+        expect(approval.payload).toMatchObject({ kind: "resume_ambiguity" });
+        await resolveApproval(store, runId, approval.approvalId, decision, undefined, clock);
+        const resumed = await resumeRun(options);
+        const result = (await readApprovalEvents(store)).find(
+          (event) => event.type === "tool_result" && event.callId === modelCallId,
+        );
+
+        expect(resumed.status).toBe("completed");
+        expect(result).toMatchObject(
+          decision === "deny"
+            ? { outcome: "error", errorCode: "resume_ambiguous" }
+            : { outcome: "ok" },
+        );
+        expect(execute).toHaveBeenCalledTimes(decision === "deny" ? 0 : 1);
+      },
+    );
+
+    it("checks the wall-clock budget before rerunning a dangling tool", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      await createRunHistory(store, clock, [
+        {
+          type: "tool_intent",
+          v: 1,
+          callId: modelCallId,
+          toolId: "idempotent_tool",
+          idempotent: true,
+          policyDecision: "allow",
+          argsHash: "e".repeat(64),
+          args: { value: 1 },
+        },
+      ]);
+      clock.advance(11);
+      const execute = vi.fn(() =>
+        Promise.resolve({ outcome: "ok" as const, result: { completed: true } }),
+      );
+      const tool = new FakeToolPort(
+        new Map([["idempotent_tool", { idempotent: true, timeoutMs: 1_000, execute }]]),
+      );
+      const options = createResumeOptions(store, clock, {
+        tool,
+        budgets: RunConfigSchema.parse({ budgets: { maxWallClockMs: 10 } }).budgets,
+      });
+
+      const result = await resumeRun(options);
+
+      expect(result.status).toBe("failed");
+      const budgetFailureIndex = result.events.findIndex(
+        ({ type }) => type === "budget_exceeded",
+      );
+      expect(result.events.slice(budgetFailureIndex, budgetFailureIndex + 2)).toMatchObject([
+        { type: "budget_exceeded", budget: "wall_clock", limit: 10, observed: 11 },
+        { type: "run_status_changed", from: "running", to: "failed", reason: "budget_exceeded" },
+      ]);
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it("checks the wall-clock budget before executing an approved tool", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      await createRunHistory(store, clock, [
+        {
+          type: "tool_intent",
+          v: 1,
+          callId: modelCallId,
+          toolId: "approval_tool",
+          idempotent: false,
+          policyDecision: "ask",
+          argsHash: "f".repeat(64),
+          args: { value: 1 },
+        },
+        {
+          type: "approval_requested",
+          v: 1,
+          approvalId,
+          callId: modelCallId,
+          payload: { kind: "approval" },
+        },
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "running",
+          to: "suspended",
+          reason: "awaiting_approval",
+        },
+      ]);
+      clock.advance(11);
+      await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
+      const execute = vi.fn(() =>
+        Promise.resolve({ outcome: "ok" as const, result: { approved: true } }),
+      );
+      const tool = new FakeToolPort(
+        new Map([["approval_tool", { idempotent: false, timeoutMs: 1_000, execute }]]),
+      );
+      const options = createResumeOptions(store, clock, {
+        tool,
+        budgets: RunConfigSchema.parse({
+          budgets: { maxWallClockMs: 10, countSuspendedTime: true },
+        }).budgets,
+      });
+
+      const result = await resumeRun(options);
+
+      expect(result.status).toBe("failed");
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: "budget_exceeded",
+          budget: "wall_clock",
+          limit: 10,
+          observed: 11,
+        }),
+      );
+      expect(execute).not.toHaveBeenCalled();
     });
 
     it("allows exactly one concurrent resumer to claim a run", async () => {

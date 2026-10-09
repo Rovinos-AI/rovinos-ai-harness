@@ -52,6 +52,7 @@ export {
 export { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
 export {
   ResumeConflictError,
+  RunAwaitingApprovalError,
   RunAlreadyTerminalError,
   RunNotResumableError,
   resumeRun,

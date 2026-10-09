@@ -8,6 +8,7 @@ import { APPROVAL_WAIT_SPAN } from "./spans.js";
 import {
   applyApprovalDecision,
   ApprovalEditsRequiredError,
+  resolveDanglingIntentApproval,
   type ResumeToolStepOptions,
 } from "./steps/tool-step.js";
 
@@ -285,7 +286,16 @@ export async function applyResolvedApprovals(
     if (intent === undefined || intent.seq >= approval.seq) {
       continue;
     }
-    events.push(...(await applyApprovalDecision(options, intent, approval, resolution)));
+    const isResumeAmbiguity =
+      typeof approval.payload === "object" &&
+      approval.payload !== null &&
+      !Array.isArray(approval.payload) &&
+      approval.payload.kind === "resume_ambiguity";
+    const applied = await (isResumeAmbiguity
+      ? resolveDanglingIntentApproval(options, intent, approval, resolution)
+      : applyApprovalDecision(options, intent, approval, resolution));
+    events.push(...applied);
+    options.onEvents?.(applied);
   }
   return events;
 }

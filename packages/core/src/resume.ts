@@ -3,8 +3,14 @@ import { HarnessError, type Event, type Id, type Snapshot } from "@harness/schem
 import type { Link } from "@opentelemetry/api";
 import type { EventStore } from "@harness/store";
 import { applyResolvedApprovals } from "./approvals.js";
+import { BudgetTracker } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
-import { continueRunLoop, type RunLoopExecutionOptions, type RunLoopResult } from "./loop.js";
+import {
+  continueRunLoop,
+  recordBudgetFailureAndCheckpoint,
+  type RunLoopExecutionOptions,
+  type RunLoopResult,
+} from "./loop.js";
 import { LeaseLostError, RunRecorder, type EventPartial } from "./recorder.js";
 import { planDanglingIntents, type ResumePolicy } from "./resume-policy.js";
 import { foldRunState, type RunState } from "./run-state.js";
@@ -41,6 +47,17 @@ export class RunNotResumableError extends HarnessError {
   constructor() {
     super("Only running or suspended runs can be resumed.");
     this.name = "RunNotResumableError";
+  }
+}
+
+/** Error raised when a suspended run is waiting only for unresolved approvals. */
+export class RunAwaitingApprovalError extends HarnessError {
+  readonly code = "run_awaiting_approval";
+
+  /** Creates the awaiting-approval resume error. */
+  constructor() {
+    super("The run cannot progress until its pending approval is resolved.");
+    this.name = "RunAwaitingApprovalError";
   }
 }
 
@@ -107,6 +124,17 @@ function withoutApprovalIntents(state: RunState): RunState {
   return { ...state, pendingToolCalls };
 }
 
+function hasResolvedApprovalToApply(state: RunState): boolean {
+  for (const resolution of state.resolvedApprovals.values()) {
+    const approval = state.approvalRequests.get(resolution.approvalId);
+    const intent = approval === undefined ? undefined : state.pendingToolCalls.get(approval.callId);
+    if (approval !== undefined && intent !== undefined && intent.seq < approval.seq) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function resultForResume(events: readonly Event[], firstNewEvent: number): RunLoopResult {
   const state = foldRunState(events);
   return {
@@ -148,6 +176,14 @@ async function readResumeHistory(options: ResumeRunOptions): Promise<{
   if (state.nextSeq !== head) {
     throw new ResumeConflictError();
   }
+  if (
+    state.status === "suspended" &&
+    state.pendingApprovals.size > 0 &&
+    withoutApprovalIntents(state).pendingToolCalls.size === 0 &&
+    !hasResolvedApprovalToApply(state)
+  ) {
+    throw new RunAwaitingApprovalError();
+  }
   return { events, snapshot, state, head };
 }
 
@@ -185,14 +221,22 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
   const { options, recorder, events, snapshot, eventsAfterSnapshot, checkpointer } = execution;
   await options.context.restore(snapshot?.context, eventsAfterSnapshot);
 
+  const budgetTracker = new BudgetTracker(options.budgets);
+  const beforeToolExecution = async (): Promise<void> => {
+    const violation = budgetTracker.check(foldRunState(events), options.clock.now());
+    if (!violation.ok) {
+      await recordBudgetFailureAndCheckpoint(recorder, events, violation, checkpointer);
+      throw new ResumeBudgetExceededError();
+    }
+  };
   const danglingState = withoutApprovalIntents(foldRunState(events));
   const actions = planDanglingIntents(
     danglingState,
     options.tool,
     options.resumePolicy ?? "escalate",
   );
-  events.push(
-    ...(await applyDanglingIntents(
+  try {
+    await applyDanglingIntents(
       {
         recorder,
         tool: options.tool,
@@ -200,27 +244,38 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
         runId: options.runId,
         ids: options.ids,
         signal: options.signal,
+        beforeToolExecution,
+        onEvents: (recorded) => events.push(...recorded),
       },
       danglingState,
       actions,
-    )),
-  );
+    );
 
-  let resumedState = foldRunState(events);
-  events.push(
-    ...(await applyResolvedApprovals(
+    const resumedState = foldRunState(events);
+    await applyResolvedApprovals(
       {
         recorder,
         tool: options.tool,
         clock: options.clock,
         runId: options.runId,
         signal: options.signal,
+        beforeToolExecution,
+        onEvents: (recorded) => events.push(...recorded),
       },
       resumedState,
-    )),
-  );
-  resumedState = foldRunState(events);
+    );
+  } catch (error) {
+    if (error instanceof ResumeBudgetExceededError) {
+      const failed = events.at(-1);
+      if (failed === undefined) {
+        throw new Error("Expected the budget failure event.");
+      }
+      return failed;
+    }
+    throw error;
+  }
 
+  let resumedState = foldRunState(events);
   if (resumedState.pendingApprovals.size > 0 && resumedState.status === "running") {
     events.push(
       await recorder.record({
@@ -240,6 +295,8 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
   }
   return continueRunLoop({ ...options, recorder }, events, options.runId);
 }
+
+class ResumeBudgetExceededError extends Error {}
 
 async function claimAndContinue(execution: ResumeExecution): Promise<Event> {
   try {
