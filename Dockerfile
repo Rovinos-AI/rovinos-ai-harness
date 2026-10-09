@@ -1,4 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
+# Collect every workspace manifest (paths preserved) so `yarn install --immutable` sees all workspaces the lockfile
+# lists. Adding a package then needs no Dockerfile change. This layer only changes when a manifest changes.
+FROM ghcr.io/jdx/mise:2026.10.4-debian@sha256:2fb7fa9a4120333531a8a70296d4ea152ffd3e7658dcf29ac75774a7d78dec24 AS manifests
+WORKDIR /src
+COPY packages packages
+COPY tools tools
+RUN mkdir -p /manifests \
+    && find packages tools -name package.json -not -path "*/node_modules/*" -exec cp --parents {} /manifests/ \;
+
 FROM ghcr.io/jdx/mise:2026.10.4-debian@sha256:2fb7fa9a4120333531a8a70296d4ea152ffd3e7658dcf29ac75774a7d78dec24 AS build
 
 WORKDIR /app
@@ -7,18 +16,18 @@ RUN mise install node npm:corepack
 ENV MISE_AUTO_INSTALL=false
 RUN mise exec -- corepack enable
 COPY package.json yarn.lock .yarnrc.yml ./
-COPY packages/cli/package.json packages/cli/package.json
-COPY packages/schemas/package.json packages/schemas/package.json
-COPY tools/eslint-plugin-harness/package.json tools/eslint-plugin-harness/package.json
+COPY --from=manifests /manifests/ ./
 RUN mise exec -- yarn install --immutable
 COPY . .
 RUN mise exec -- yarn build
 RUN mise exec -- yarn workspaces focus @harness/cli --production \
     && mkdir -p /out/dist /out/packages \
     && cp -a node_modules /out/node_modules \
-    && mkdir -p /out/packages/cli /out/packages/schemas \
-    && cp -a packages/cli/package.json packages/cli/dist /out/packages/cli/ \
-    && cp -a packages/schemas/package.json packages/schemas/dist /out/packages/schemas/ \
+    && for package in packages/*/; do \
+         if [ -d "${package}dist" ]; then \
+           mkdir -p "/out/${package}" && cp -a "${package}package.json" "${package}dist" "/out/${package}"; \
+         fi; \
+       done \
     && cp -a packages/cli/dist/. /out/dist/
 
 FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS runtime
