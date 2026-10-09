@@ -10,7 +10,6 @@ pool:
 
 variables:
   YARN_GLOBAL_FOLDER: $(Pipeline.Workspace)/.yarn
-  LINT_PULL_IMAGES: "1"
 
 stages:
   - stage: static
@@ -22,6 +21,9 @@ stages:
           - template: pipelines/templates/node-setup.yml
           - script: yarn lint
             displayName: Lint
+            # Scoped to this step so unit tests never inherit it; they must not depend on the environment.
+            env:
+              LINT_PULL_IMAGES: "1"
           - script: yarn typecheck
             displayName: Typecheck
           - script: yarn check:agents
@@ -72,6 +74,9 @@ stages:
               yarn test:integration --reporter=junit
               --outputFile=reports/integration-junit.xml
             displayName: Integration tests
+            # The container linter fixtures run on a fresh agent, so they must pull the pinned images.
+            env:
+              LINT_PULL_IMAGES: "1"
           - task: PublishTestResults@2
             condition: succeededOrFailed()
             inputs:

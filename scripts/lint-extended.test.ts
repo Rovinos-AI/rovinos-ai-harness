@@ -37,7 +37,9 @@ it("builds extended lint commands through the injected runner", () => {
     ).toBe(true);
     expect(calls.at(-1)?.args).toContain("--pull=always");
 
-    expect(lint("editorconfig", [relative(rootDirectory, temporaryRoot)], { runner })).toBe(true);
+    expect(
+      lint("editorconfig", [relative(rootDirectory, temporaryRoot)], { runner, pullImages: false }),
+    ).toBe(true);
     expect(calls.at(-1)?.args).toContain("--pull=never");
     expect(calls.at(-1)?.args).toContain(
       "ghcr.io/editorconfig-checker/editorconfig-checker:4.0.2@sha256:2ba6232bfa0058f72f5f7d7816711590aa764afab1542af30b3ecb4553587918",
