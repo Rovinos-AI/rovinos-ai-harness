@@ -999,6 +999,13 @@ __metadata:
     "@harness/schemas": "workspace:^"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
+
+"@harness/core@workspace:packages/core":
+  version: 0.0.0-use.local
+  resolution: "@harness/core@workspace:packages/core"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
   languageName: unknown
   linkType: soft
 
