@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll } from "vitest";
-import { SqliteEventStore, runEventStoreConformance } from "./index.js";
-import type { EventStoreFactory } from "./conformance.js";
+import { SqliteEventStore } from "./index.js";
+import { runEventStoreConformance, type EventStoreFactory } from "./testing/index.js";
 
 let directory: string | undefined;
 

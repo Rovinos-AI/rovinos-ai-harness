@@ -6,9 +6,8 @@ import {
   InMemoryEventStore,
   SeqConflictError,
   StoreUnavailableError,
-  runEventStoreConformance,
 } from "./index.js";
-import type { EventStoreFactory } from "./conformance.js";
+import { runEventStoreConformance, type EventStoreFactory } from "./testing/index.js";
 
 const runId = Id.parse("00000000000000000000000001");
 const otherRunId = Id.parse("00000000000000000000000002");
@@ -18,8 +17,6 @@ const memoryFactory: EventStoreFactory = () => {
   const store = new InMemoryEventStore();
   return Promise.resolve({ store, cleanup: () => store.close() });
 };
-
-runEventStoreConformance("InMemoryEventStore", memoryFactory, { supportsFileReopen: false });
 
 function runCreated(id: typeof runId, ts: number, configHash = "a".repeat(64)): NewEvent {
   return {
@@ -75,6 +72,8 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
 }
 
 describe("InMemoryEventStore", () => {
+  runEventStoreConformance("InMemoryEventStore", memoryFactory, { supportsFileReopen: false });
+
   it("appends events and reads them in assigned sequence order", async () => {
     const store = new InMemoryEventStore();
 

@@ -12,6 +12,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "source": "./src/testing/index.ts",
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "scripts": {
@@ -21,6 +26,14 @@
     "@harness/schemas": "workspace:^",
     "better-sqlite3": "13.0.3",
     "zod": "4.6.5"
+  },
+  "peerDependencies": {
+    "vitest": "^3.2.6"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",

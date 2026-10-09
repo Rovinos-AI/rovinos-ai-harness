@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { type Event, type NewEvent } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
-import { SeqConflictError } from "./errors.js";
-import type { EventStore } from "./types.js";
+import { SeqConflictError } from "../errors.js";
+import type { EventStore } from "../types.js";
 import { createEventBuilders, type EventStoreTestBuilders } from "./testing.js";
 
 /** Factory for a fresh store and its resource cleanup. */
@@ -268,8 +268,8 @@ function registerLazyRead(factory: EventStoreFactory, builders: EventStoreTestBu
       ];
       await store.append(runId, events, 0);
 
-      const iterator = store.read(runId)[Symbol.asyncIterator]();
       const startedAt = performance.now();
+      const iterator = store.read(runId)[Symbol.asyncIterator]();
       for (let seq = 0; seq < 10; seq += 1) {
         const result = await iterator.next();
         expect(result.done).toBe(false);

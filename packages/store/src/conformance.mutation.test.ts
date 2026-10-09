@@ -2,9 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryEventStore, SeqConflictError } from "./index.js";
 import type { EventStore } from "./types.js";
-import { assertStaleConflictConformance } from "./conformance.js";
-import type { EventStoreFactory } from "./conformance.js";
-import { createEventBuilders } from "./testing.js";
+import { assertStaleConflictConformance, type EventStoreFactory } from "./testing/conformance.js";
+import { createEventBuilders } from "./testing/testing.js";
 
 function brokenFactory(): EventStoreFactory {
   return () => {
