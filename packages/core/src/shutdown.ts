@@ -25,11 +25,11 @@ export interface ShutdownHandlerOptions {
 
 const noopLogger: ShutdownLogger = { error: () => undefined };
 
-interface UnrefableTimer {
+interface TimerWithUnref {
   unref(): unknown;
 }
 
-function hasUnref(timer: unknown): timer is UnrefableTimer {
+function hasUnref(timer: unknown): timer is TimerWithUnref {
   return (
     typeof timer === "object" &&
     timer !== null &&
