@@ -34,7 +34,7 @@ Shared design for this epic:
    export function lookupSpanDefinition(name: string): SpanDefinition<any> | undefined;
    ```
 
-3. `defineSpan` throws `span_name_invalid` unless `name` matches `^harness\.[a-z0-9_.]{1,60}$` (the `mcp.*`/`gen_ai.*` span names are registered through an explicit `defineSemconvSpan` exception added in 4.7), throws `span_attr_unconstrained` if any shape member is not a safe attr, throws `span_duplicate` if the name exists. The schema is `z.object(shape).strict()`.
+3. `defineSpan` throws `span_name_invalid` unless `name` matches `^harness\.[a-z0-9_.]{1,56}$`, keeping the full name within the 64-character `Code` limit. It throws `span_attr_name_invalid` unless every attribute key matches the same pattern; future semantic-convention exceptions belong to the explicit path planned for 4.7. It throws `span_attr_unconstrained` if any shape member is not a safe attr, and `span_duplicate` if the name exists. The schema is `z.object(shape).strict()`.
 4. `start(attrs)` parses attrs with the schema (throws `span_attr_invalid` with issue paths only), then `getTracer().startSpan(name, { attributes, links })`. `getTracer()` uses `trace.getTracer("@harness/telemetry")`.
 5. Provide `withSpan(def, attrs, fn)` that ends the span in `finally`, sets status `ERROR` with no message on throw, and sets attribute `harness.error.code` only if the thrown error is a `HarnessError` and the definition declares that attribute (it is declared as optional on every span by `defineSpan` automatically: add `harness.error.code: attr.optional(attr.code())`).
 6. Export a `__resetRegistryForTests()` available only under `process.env.NODE_ENV === "test"`.
