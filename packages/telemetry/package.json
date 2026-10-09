@@ -25,6 +25,6 @@
   "devDependencies": {
     "@opentelemetry/sdk-trace-base": "2.11.0",
     "@types/node": "22.20.5",
-    "vitest": "3.2.6"
+    "vitest": "5.0.3"
   }
 }
