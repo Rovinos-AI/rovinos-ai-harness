@@ -145,6 +145,14 @@ it("runs integration tests with Compose and always tears down", () => {
   );
   expect(runTests?.script).toContain("--reporter=junit");
   expect(runTests?.script).toContain("integration-junit.xml");
+  expect(runTests?.env).toMatchObject({
+    TEST_POSTGRES_URL: "postgresql://harness@127.0.0.1:5432/harness",
+  });
+  expect(
+    integrationSteps.some(
+      (step) => typeof step.script === "string" && step.script.includes("yarn build:schemas"),
+    ),
+  ).toBe(true);
   expect(
     integrationSteps.some(
       (step) => step.task === "PublishTestResults@2" && step.condition === "succeededOrFailed()",

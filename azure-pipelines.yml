@@ -70,12 +70,15 @@ stages:
           - template: pipelines/templates/node-setup.yml
           - bash: scripts/ci/compose-wait.sh
             displayName: Start Compose services and wait for health
+          - script: yarn build:schemas
+            displayName: Build schemas for worker-thread tests
           - script: >
               yarn test:integration --reporter=junit
               --outputFile=reports/integration-junit.xml
             displayName: Integration tests
             # The container linter fixtures run on a fresh agent, so they must pull the pinned images.
             env:
+              TEST_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness
               LINT_PULL_IMAGES: "1"
           - task: PublishTestResults@2
             condition: succeededOrFailed()
