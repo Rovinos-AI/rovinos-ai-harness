@@ -93,10 +93,11 @@ function rejectWorkerChannels(channels: WorkerChannels, error: Error): void {
   }
 }
 
-function receiveWorkerMessage(message: unknown, channels: WorkerChannels): void {
+function receiveWorkerMessage(message: unknown, channels: WorkerChannels, worker: Worker): void {
   const parsed = eventStoreWorkerMessageSchema.safeParse(message);
   if (!parsed.success) {
-    channels.opened.reject(new Error("Invalid concurrency worker message"));
+    rejectWorkerChannels(channels, new Error("Invalid concurrency worker message"));
+    void worker.terminate().catch(() => undefined);
     return;
   }
   const value = parsed.data;
@@ -138,7 +139,7 @@ function createWorkerSession(options: WorkerSessionOptions): WorkerSession {
     result: new Map(),
   };
   worker.on("message", (message: unknown) => {
-    receiveWorkerMessage(message, channels);
+    receiveWorkerMessage(message, channels, worker);
   });
   worker.on("error", (error) => {
     rejectWorkerChannels(channels, error);
