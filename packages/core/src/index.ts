@@ -30,7 +30,18 @@ export {
 } from "./spans.js";
 export { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
 export { modelStep, type ModelStepOptions, type ModelStepResult } from "./steps/model-step.js";
-export { toolStep, type ToolStepOptions } from "./steps/tool-step.js";
+export {
+  applyDanglingIntentAction,
+  executeApprovedDanglingIntent,
+  toolStep,
+  type ResumeToolStepOptions,
+  type ToolStepOptions,
+} from "./steps/tool-step.js";
+export {
+  planDanglingIntents,
+  type DanglingIntentAction,
+  type ResumePolicy,
+} from "./resume-policy.js";
 export type {
   ContextPort,
   IdGenerator,

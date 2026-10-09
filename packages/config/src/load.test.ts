@@ -290,7 +290,10 @@ describe("loadConfig", () => {
     });
 
     expect(config).toEqual({
-      run: { budgets: { maxSteps: 200, maxWallClockMs: 3_600_000 } },
+      run: {
+        resume: { onNonIdempotent: "escalate" },
+        budgets: { maxSteps: 200, maxWallClockMs: 3_600_000 },
+      },
       store: {},
       models: {},
       servers: [],
