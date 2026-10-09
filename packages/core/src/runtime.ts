@@ -26,7 +26,7 @@ import { RunRecorder } from "./recorder.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const POLICY_VERSION = "unconfigured";
+const POLICY_VERSION = "default";
 
 function randomHex(byteLength: number): string {
   let value = randomBytes(byteLength).toString("hex");
@@ -124,7 +124,9 @@ class RuntimeSpan implements Span {
   recordException(
     _exception: Parameters<Span["recordException"]>[0],
     _time?: Parameters<Span["recordException"]>[1],
-  ): void {}
+  ): void {
+    return;
+  }
 }
 
 class RuntimeTracer implements Tracer {
@@ -215,7 +217,7 @@ class SystemIdGenerator implements IdGenerator {
   }
 }
 
-class UnconfiguredModelError extends HarnessError {
+class ModelNotConfiguredError extends HarnessError {
   readonly code = "model_not_configured";
 
   constructor() {
@@ -223,7 +225,7 @@ class UnconfiguredModelError extends HarnessError {
   }
 }
 
-class UnconfiguredToolError extends HarnessError {
+class ToolNotConfiguredError extends HarnessError {
   readonly code = "tool_not_configured";
 
   constructor() {
@@ -231,13 +233,13 @@ class UnconfiguredToolError extends HarnessError {
   }
 }
 
-const unconfiguredModel: ModelPort = {
-  complete: () => Promise.reject(new UnconfiguredModelError()),
+const missingModelPort: ModelPort = {
+  complete: () => Promise.reject(new ModelNotConfiguredError()),
 };
 
 const unavailableTool: ToolPort = {
   describe: () => undefined,
-  execute: () => Promise.reject(new UnconfiguredToolError()),
+  execute: () => Promise.reject(new ToolNotConfiguredError()),
 };
 
 const defaultProcessLike: ShutdownProcessLike = {
@@ -251,6 +253,8 @@ const defaultProcessLike: ShutdownProcessLike = {
       process.exitCode = code;
     }
   },
+  // The shutdown grace deadline must force termination if the active operation does not flush.
+  // eslint-disable-next-line n/no-process-exit -- shutdown deadline is the final safety bound
   exit: (code) => process.exit(code),
 };
 
@@ -274,6 +278,11 @@ async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue> {
   return goal;
 }
 
+async function createSqliteStore(dataDir: string): Promise<EventStore> {
+  await mkdir(dataDir, { recursive: true });
+  return new SqliteEventStore(join(dataDir, "harness.db"));
+}
+
 /**
  * Builds a runtime from validated configuration. Until the provider-owning
  * epics land, model and tool ports must be supplied through overrides.
@@ -290,13 +299,8 @@ export async function createRuntime(
   const clock = overrides.clock ?? systemClock;
   const ids = overrides.ids ?? new SystemIdGenerator(clock);
   const dataDir = overrides.dataDir ?? process.env.HARNESS_DATA_DIR ?? process.cwd();
-  const store =
-    overrides.store ??
-    (await (async () => {
-      await mkdir(dataDir, { recursive: true });
-      return new SqliteEventStore(join(dataDir, "harness.db"));
-    })());
-  const model = overrides.model ?? unconfiguredModel;
+  const store = overrides.store ?? (await createSqliteStore(dataDir));
+  const model = overrides.model ?? missingModelPort;
   const tool = overrides.tool ?? unavailableTool;
   const context = overrides.context ?? new NaiveContext();
   const withShutdown = async <Result>(

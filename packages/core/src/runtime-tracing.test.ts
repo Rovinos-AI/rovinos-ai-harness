@@ -53,7 +53,9 @@ it("records valid span context when no OpenTelemetry provider is configured", as
   span.recordException(new Error("synthetic"));
   span.end();
   expect(span.isRecording()).toBe(false);
-  expect(() => trace.getTracer("test").startActiveSpan("test", () => undefined)).toThrow();
+  expect(() => {
+    trace.getTracer("test").startActiveSpan("test", () => undefined);
+  }).toThrow();
 
   const noModel = await createRuntime(
     { run: RunConfigSchema.parse({}) },

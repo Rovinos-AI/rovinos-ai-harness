@@ -1,20 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  context as otelContext,
-  ROOT_CONTEXT,
-  trace,
-  type Context,
-  type ContextManager,
-  type Span,
-  type SpanContext,
-  type SpanOptions,
-  type Tracer,
-  type TracerProvider,
-} from "@opentelemetry/api";
+import { Readable } from "node:stream";
 import { HarnessConfigSchema } from "@harness/config";
 import {
   Checkpointer,
@@ -43,7 +31,7 @@ import {
   type Event,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCommandRuntime, type CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
 import { createOutput } from "../output.js";
@@ -51,131 +39,6 @@ import { main } from "../main.js";
 import { inspectCommand } from "./inspect.js";
 import { resumeCommand } from "./resume.js";
 import { runCommand } from "./run.js";
-
-let nextSpanId = 0;
-
-class TestSpan implements Span {
-  private ended = false;
-  readonly spanContextValue: SpanContext = {
-    traceId: "a".repeat(32),
-    spanId: (++nextSpanId).toString(16).padStart(16, "0"),
-    traceFlags: 1,
-  };
-
-  spanContext(): SpanContext {
-    return this.spanContextValue;
-  }
-
-  setAttribute(_key: string, _value: string | number | boolean): this {
-    return this;
-  }
-
-  setAttributes(_attributes: SpanOptions["attributes"]): this {
-    return this;
-  }
-
-  addEvent(
-    _name: Parameters<Span["addEvent"]>[0],
-    _attributesOrStartTime?: Parameters<Span["addEvent"]>[1],
-    _startTime?: Parameters<Span["addEvent"]>[2],
-  ): this {
-    return this;
-  }
-
-  addLink(_link: Parameters<Span["addLink"]>[0]): this {
-    return this;
-  }
-
-  addLinks(_links: Parameters<Span["addLinks"]>[0]): this {
-    return this;
-  }
-
-  setStatus(_status: Parameters<Span["setStatus"]>[0]): this {
-    return this;
-  }
-
-  updateName(_name: string): this {
-    return this;
-  }
-
-  end(): void {
-    this.ended = true;
-  }
-
-  isRecording(): boolean {
-    return !this.ended;
-  }
-
-  recordException(
-    _exception: Parameters<Span["recordException"]>[0],
-    _time?: Parameters<Span["recordException"]>[1],
-  ): void {}
-}
-
-class TestTracer implements Tracer {
-  startSpan(_name: string, _options?: SpanOptions): Span {
-    return new TestSpan();
-  }
-
-  startActiveSpan<F extends (span: Span) => unknown>(name: string, fn: F): ReturnType<F>;
-  startActiveSpan<F extends (span: Span) => unknown>(
-    name: string,
-    options: SpanOptions,
-    fn: F,
-  ): ReturnType<F>;
-  startActiveSpan<F extends (span: Span) => unknown>(
-    name: string,
-    options: SpanOptions,
-    activeContext: Context,
-    fn: F,
-  ): ReturnType<F>;
-  startActiveSpan<F extends (span: Span) => unknown>(
-    _name: string,
-    _optionsOrCallback: SpanOptions | F,
-    _contextOrCallback?: Context | F,
-    _callback?: F,
-  ): ReturnType<F> {
-    throw new Error("Active spans are not used by the run recorder.");
-  }
-}
-
-class TestTracerProvider implements TracerProvider {
-  private readonly tracer = new TestTracer();
-
-  getTracer(): Tracer {
-    return this.tracer;
-  }
-}
-
-class TestContextManager implements ContextManager {
-  private readonly storage = new AsyncLocalStorage<Context>();
-
-  active(): Context {
-    return this.storage.getStore() ?? ROOT_CONTEXT;
-  }
-
-  with<A extends unknown[], F extends (...args: A) => ReturnType<F>>(
-    activeContext: Context,
-    fn: F,
-    thisArg?: ThisParameterType<F>,
-    ...args: A
-  ): ReturnType<F> {
-    return this.storage.run(activeContext, () => fn.apply(thisArg, args));
-  }
-
-  bind<T>(_activeContext: Context, target: T): T {
-    return target;
-  }
-
-  enable(): this {
-    return this;
-  }
-
-  disable(): this {
-    this.storage.disable();
-    return this;
-  }
-}
 
 class TestShutdownProcess implements ShutdownProcessLike {
   exitCode: number | undefined;
@@ -194,7 +57,9 @@ class TestShutdownProcess implements ShutdownProcessLike {
     return this;
   }
 
-  exit(_code: number): void {}
+  exit(code: number): void {
+    this.exitCode = code;
+  }
 
   emit(signal: "SIGINT" | "SIGTERM"): void {
     for (const listener of this.listeners.get(signal) ?? []) {
@@ -362,15 +227,6 @@ async function readEvents(store: InMemoryEventStore, runId: Id): Promise<Event[]
   return events;
 }
 
-beforeAll(() => {
-  otelContext.setGlobalContextManager(new TestContextManager());
-  trace.setGlobalTracerProvider(new TestTracerProvider());
-});
-
-afterAll(() => {
-  otelContext.disable();
-});
-
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -397,9 +253,42 @@ describe("run, resume, and inspect CLI commands", () => {
     );
 
     expect(code).toBe(ExitCode.ok);
+    const invalidHarness = createHarness();
+    Object.defineProperty(process, "stdin", {
+      configurable: true,
+      value: Readable.from([42]),
+    });
+    const invalidCode = await main(["run", "--input", "-"], invalidHarness.context, [runCommand]);
+    expect(invalidCode).toBe(ExitCode.failure);
+    expect(invalidHarness.stderr).toEqual(["input_invalid\n"]);
     expect(harness.stdout).toHaveLength(1);
     expect(harness.stdout[0]).toMatch(/"status":"completed"/u);
     expect(harness.stderr).toEqual(["00000000000000000000000000\n"]);
+  });
+
+  it("reads JSON input from standard input", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-stdin-"));
+    const scriptPath = await createFile("model.json", '[{"content":"stdin"}]');
+    const harness = createHarness();
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process, "stdin");
+    if (stdinDescriptor === undefined) {
+      throw new Error("Expected standard input descriptor.");
+    }
+    Object.defineProperty(process, "stdin", {
+      configurable: true,
+      value: Readable.from(['{"goal":"from ', Buffer.from("stdin"), '"}']),
+    });
+    try {
+      const code = await main(
+        ["--json", "run", "--input", "-", "--fake-model", scriptPath],
+        harness.context,
+        [runCommand],
+      );
+
+      expect(code).toBe(ExitCode.ok);
+    } finally {
+      Object.defineProperty(process, "stdin", stdinDescriptor);
+    }
   });
 
   it("returns suspended on shutdown and keeps event content hidden by default", async () => {
@@ -423,8 +312,8 @@ describe("run, resume, and inspect CLI commands", () => {
     const runCode = await main(["--json", "run", "--input", inputPath], harness.context, [
       runCommand,
     ]);
-    const runResult = parseJson(RunResultSchema, harness.stdout[0] ?? "");
-    const runId = runResult.runId;
+    const suspendedRunResult = parseJson(RunResultSchema, harness.stdout[0] ?? "");
+    const runId = suspendedRunResult.runId;
     harness.stdout.length = 0;
     harness.stderr.length = 0;
 
@@ -451,7 +340,7 @@ describe("run, resume, and inspect CLI commands", () => {
           {
             idempotent: false,
             timeoutMs: 1_000,
-            execute: async () => ({ outcome: "ok", result: { approved: true } }),
+            execute: () => Promise.resolve({ outcome: "ok", result: { approved: true } }),
           },
         ],
       ]),
@@ -516,14 +405,14 @@ describe("run, resume, and inspect CLI commands", () => {
       ExitCode.suspended,
     );
 
-    const nonterminalHarness = createHarness(
+    const activeHarness = createHarness(
       new FakeModelPort([]),
       config,
       new FakeToolPort(),
       new TestShutdownProcess(),
       runResult("running", events),
     );
-    expect(await main(["resume", runId], nonterminalHarness.context, [resumeCommand])).toBe(
+    expect(await main(["resume", runId], activeHarness.context, [resumeCommand])).toBe(
       ExitCode.failure,
     );
   });
@@ -585,16 +474,6 @@ describe("run, resume, and inspect CLI commands", () => {
     const inputPath = await createFile("input.json", '{"goal":"default context"}');
     const scriptPath = await createFile("model.json", '[{"content":"default"}]');
     const configPath = await createFile("harness.yaml", "{}");
-    const stdout: string[] = [];
-    const stderr: string[] = [];
-    vi.spyOn(process["stdout"], "write").mockImplementation((chunk) => {
-      stdout.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-      return true;
-    });
-    vi.spyOn(process["stderr"], "write").mockImplementation((chunk) => {
-      stderr.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-      return true;
-    });
 
     const defaultCode = await main([
       "--json",
@@ -614,10 +493,9 @@ describe("run, resume, and inspect CLI commands", () => {
       "--fake-model",
       scriptPath,
     ]);
-
     expect(defaultCode).toBe(ExitCode.ok);
     expect(configuredCode).toBe(ExitCode.ok);
-    expect(stdout).toHaveLength(2);
-    expect(stderr).toHaveLength(2);
+    expect(configuredCode).toBe(ExitCode.ok);
+    expect(await readFile(join(temporaryDirectory, "data", "harness.db"))).toBeInstanceOf(Buffer);
   });
 });

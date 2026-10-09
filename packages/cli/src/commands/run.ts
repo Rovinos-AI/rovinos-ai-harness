@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import {
   FakeModelScriptSchema,
   HarnessError,
-  JsonValue,
   RunInputSchema,
   RunResultSchema,
   parseJson,
   type FakeModelCompletion,
+  type JsonValue,
 } from "@harness/schemas";
 import type { ModelCompletion, ModelPort, ModelRequest, RunContext } from "@harness/core";
 import type { CommandModule } from "../command.js";
@@ -18,6 +18,14 @@ class ScriptedModelError extends HarnessError {
 
   constructor() {
     super("The fake model script is exhausted.");
+  }
+}
+
+class InvalidInputStreamError extends HarnessError {
+  override readonly code = "input_invalid";
+
+  constructor() {
+    super("Input stream contains an unsupported chunk.");
   }
 }
 
@@ -48,8 +56,15 @@ async function readInput(path: string): Promise<ReturnType<typeof RunInputSchema
   let content: string;
   if (path === "-") {
     content = "";
-    for await (const chunk of process.stdin) {
-      content += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    for await (const inputChunk of process.stdin) {
+      const chunk: unknown = inputChunk;
+      if (typeof chunk === "string") {
+        content += chunk;
+      } else if (Buffer.isBuffer(chunk)) {
+        content += chunk.toString("utf8");
+      } else {
+        throw new InvalidInputStreamError();
+      }
     }
   } else {
     content = await readFile(path, { encoding: "utf8" });
