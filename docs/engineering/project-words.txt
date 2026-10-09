@@ -171,3 +171,8 @@ vulns
 xact
 xdev
 dpkg
+EVALSHA
+iovalkey
+ioredis
+valkey
+Valkey

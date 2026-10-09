@@ -369,3 +369,27 @@ interface EventStore {
 - [ ] Subscribers see every event exactly once and in order.
 - [ ] Cross-process appends are delivered on SQLite (polling) and Postgres (notify).
 - [ ] Notifications contain ids only.
+
+---
+
+## 7.15 Split the SQLite and Postgres adapters into separate packages
+
+**Parent:** #7 Event store
+**Task Description:** Move each durable adapter into its own workspace package so installing one database driver never forces the other (`better-sqlite3` compiles a native addon on install; `pg` is only needed for Postgres).
+**Expected Inputs:** `packages/store` with the in-memory store, the `EventStore` contract, the codec, the conformance suites, and both adapters.
+**Expected Output:** `packages/store-sqlite` (`SqliteEventStore`, depends on `better-sqlite3`) and `packages/store-postgres` (`PostgresEventStore`, depends on `pg`); `packages/store` keeps the contract, errors, codec, the in-memory store, and the `./testing` conformance suites, and depends on neither driver; `docs/engineering/layers.json` entries for both new packages; updated imports, Dockerfile, and docs.
+**Dependencies:** none new.
+**Items it depends on:** 7.6, 7.8.
+**Implementation guidance:**
+
+1. Move `src/sqlite/**` and its tests to `packages/store-sqlite`, and `src/postgres/**` plus `postgres.int.test.ts` to `packages/store-postgres`. Both depend on `@harness/store` for the contract, errors, codec, and `./testing` suites (dev dependency for the suites).
+2. `@harness/store` drops `better-sqlite3`, `pg`, and their types from `dependencies`; a test asserts its manifest lists neither driver.
+3. Shared helpers used by both adapters (row serialization, snapshot validation, error mapping) stay in `@harness/store` and are exported for adapter packages only (document them as adapter-internal in TSDoc; never part of the public SDK surface).
+4. Move each adapter's conformance invocation with it: `packages/store-sqlite` runs both suites in the unit project; `packages/store-postgres` runs them in the integration project against the Compose Postgres.
+5. Update `layers.json`, the Dockerfile copy step (generic since #273), and any consumer imports; `yarn check:agents` regenerates the index blocks.
+**Tests to write:** existing adapter and conformance tests pass from their new packages; a manifest test that `@harness/store` has no database driver dependency; `yarn workspaces focus @harness/store --production` installs no native addon.
+**Acceptance Criteria:**
+
+- [ ] Installing `@harness/store` alone pulls in neither `better-sqlite3` nor `pg`.
+- [ ] Each adapter package passes both conformance suites (SQLite in unit, Postgres in integration).
+- [ ] No behavior change; all existing tests pass.
