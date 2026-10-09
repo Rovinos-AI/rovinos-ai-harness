@@ -1,75 +1,82 @@
 // SPDX-License-Identifier: Apache-2.0
 /** Source executed by each resume-race worker thread. */
 export const concurrencyWorkerSource = `
-const { parentPort, workerData } = require("node:worker_threads");
-let requestId = 0;
-const pending = new Map();
+const { parentPort, threadId, workerData } = require("node:worker_threads");
+let store;
+let activeIteration;
 let releaseStart;
-const start = new Promise((resolve) => {
-  releaseStart = resolve;
-});
 
 parentPort.on("message", (message) => {
-  if (message.kind === "start") {
+  if (message.kind === "start" && message.iteration === activeIteration) {
     releaseStart();
-    return;
-  }
-  if (message.kind !== "response") {
-    return;
-  }
-  const waiting = pending.get(message.requestId);
-  if (waiting === undefined) {
-    return;
-  }
-  pending.delete(message.requestId);
-  if (message.ok) {
-    waiting.resolve(message.value);
-  } else {
-    waiting.reject({ code: message.code });
+  } else if (message.kind === "run") {
+    void run(message);
   }
 });
-
-function request(kind, values = {}) {
-  const id = ++requestId;
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    parentPort.postMessage({ kind, requestId: id, workerIndex: workerData.workerIndex, ...values });
-  });
-}
 
 function errorCode(error) {
   if (typeof error === "object" && error !== null && "code" in error) {
     const code = error.code;
-    if (typeof code === "string") {
+    if (typeof code === "string" && /^[a-z0-9_.-]{1,64}$/.test(code)) {
       return code;
     }
   }
   return "store_error";
 }
 
-(async () => {
+async function run(message) {
+  activeIteration = message.iteration;
   try {
-    await request("open");
-    const runId = workerData.runId;
-    const expectedSeq = await request("head", { runId });
-    parentPort.postMessage({ kind: "ready", workerIndex: workerData.workerIndex, expectedSeq });
+    const expectedSeq = await store.head(message.runId);
+    const start = new Promise((resolve) => {
+      releaseStart = resolve;
+    });
+    parentPort.postMessage({
+      kind: "ready",
+      iteration: message.iteration,
+      workerIndex: workerData.workerIndex,
+      expectedSeq,
+      threadId,
+    });
     await start;
-    const result = await request("append", { runId, expectedSeq });
+    const result = await store.append(message.runId, [message.event], expectedSeq);
     parentPort.postMessage({
       kind: "result",
+      iteration: message.iteration,
       workerIndex: workerData.workerIndex,
+      threadId,
       outcome: "fulfilled",
       nextSeq: result.nextSeq,
     });
   } catch (error) {
     parentPort.postMessage({
       kind: "result",
+      iteration: message.iteration,
       workerIndex: workerData.workerIndex,
+      threadId,
       outcome: "rejected",
       code: errorCode(error),
     });
   } finally {
-    parentPort.close();
+    activeIteration = undefined;
+  }
+}
+
+(async () => {
+  try {
+    const workerModule = await import(workerData.worker.module);
+    const openStore = workerModule[workerData.worker.exportName];
+    if (typeof openStore !== "function") {
+      throw new Error("Worker event-store opener is missing");
+    }
+    store = await openStore(workerData.worker.args);
+    parentPort.postMessage({
+      kind: "opened",
+      workerIndex: workerData.workerIndex,
+      threadId,
+    });
+  } catch (error) {
+    parentPort.postMessage({ kind: "open_error", workerIndex: workerData.workerIndex, code: errorCode(error) });
   }
 })();
 `;

@@ -1,21 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id as IdType, NewEvent } from "@harness/schemas";
-import { Worker } from "node:worker_threads";
+import type { Event, Id as IdType, JsonValue, NewEvent } from "@harness/schemas";
+import { threadId, Worker } from "node:worker_threads";
 import { describe, expect, it } from "vitest";
-import { concurrencyWorkerSource } from "./testing/concurrency-worker.js";
+import { concurrencyWorkerSource } from "./concurrency-worker.js";
 import {
   eventStoreWorkerMessageSchema,
-  workerResponseSchema,
-  type WorkerRequest,
+  type WorkerReady,
   type WorkerResult,
-} from "./testing/concurrency-protocol.js";
-import type { EventStore } from "./types.js";
-import { createEventBuilders } from "./testing/testing.js";
+} from "./concurrency-protocol.js";
+import type { EventStore } from "../types.js";
+import { createEventBuilders } from "./testing.js";
+
+/** Module a worker imports to open its own connection to the shared event store. */
+export interface WorkerOpenDescriptor {
+  /** File URL to an ESM module exporting an event-store opener. */
+  module: string;
+  /** Name of the opener export in {@link module}. */
+  exportName: string;
+  /** JSON arguments passed to the opener. */
+  args: JsonValue;
+  /** Optional ESM loader URL used for source TypeScript modules. */
+  loader?: string;
+}
 
 /** Factory that opens independent connections to the same event store. */
 export interface MultiEventStoreFactory {
   /** Open a new connection to the shared database. */
   open(): Promise<EventStore>;
+  /** Worker entry point for opening and using its own connection. */
+  worker: WorkerOpenDescriptor;
   /** Close all opened connections and remove adapter-specific test resources. */
   cleanup(): Promise<void>;
 }
@@ -25,31 +38,39 @@ export type MultiEventStoreFactoryCreator = () =>
   MultiEventStoreFactory | Promise<MultiEventStoreFactory>;
 
 interface WorkerSession {
-  ready: Promise<number>;
-  result: Promise<WorkerResult>;
-  release(): void;
+  opened: Promise<number>;
+  prepare(iteration: number, runId: IdType, event: NewEvent): Promise<WorkerReady>;
+  release(iteration: number): void;
+  result(iteration: number): Promise<WorkerResult>;
   terminate(): Promise<number>;
 }
 
-type StoreSlots = Map<0 | 1, EventStore>;
-interface WorkerSessionOptions {
-  factory: MultiEventStoreFactory;
-  workerIndex: 0 | 1;
-  runId: IdType;
-  event: NewEvent;
-  stores: StoreSlots;
+interface Channel<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: Error): void;
 }
 
 interface WorkerChannels {
-  ready: {
-    promise: Promise<number>;
-    resolve(expectedSeq: number): void;
-    reject(error: Error): void;
-  };
-  result: {
-    promise: Promise<WorkerResult>;
-    resolve(result: WorkerResult): void;
-  };
+  opened: Channel<number>;
+  ready: Map<number, Channel<WorkerReady>>;
+  result: Map<number, Channel<WorkerResult>>;
+}
+
+interface WorkerSessionOptions {
+  workerIndex: 0 | 1;
+  worker: WorkerOpenDescriptor;
+}
+
+function createChannel<T>(): Channel<T> {
+  let resolveChannel: (value: T) => void = () => undefined;
+  let rejectChannel: (error: Error) => void = () => undefined;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolveChannel = resolve;
+    rejectChannel = reject;
+  });
+  void promise.catch(() => undefined);
+  return { promise, resolve: resolveChannel, reject: rejectChannel };
 }
 
 function errorCode(error: unknown): string {
@@ -62,132 +83,91 @@ function errorCode(error: unknown): string {
   return "store_error";
 }
 
-function createWorkerChannels(): WorkerChannels {
-  let resolveReady: (expectedSeq: number) => void = () => undefined;
-  let rejectReady: (error: Error) => void = () => undefined;
-  let resolveResult: (result: WorkerResult) => void = () => undefined;
-  const ready = new Promise<number>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
-  });
-  const result = new Promise<WorkerResult>((resolve) => {
-    resolveResult = resolve;
-  });
-  void ready.catch(() => undefined);
-
-  return {
-    ready: { promise: ready, resolve: resolveReady, reject: rejectReady },
-    result: { promise: result, resolve: resolveResult },
-  };
-}
-
-async function replyToWorkerRequest(
-  worker: Worker,
-  request: WorkerRequest,
-  options: WorkerSessionOptions,
-): Promise<void> {
-  try {
-    let response: unknown;
-    if (request.kind === "open") {
-      options.stores.set(options.workerIndex, await options.factory.open());
-      response = true;
-    } else {
-      const store = options.stores.get(options.workerIndex);
-      if (store === undefined) {
-        throw new Error("Concurrency worker has no open store");
-      }
-      response =
-        request.kind === "head"
-          ? await store.head(request.runId)
-          : await store.append(request.runId, [options.event], request.expectedSeq);
-    }
-    worker.postMessage(
-      workerResponseSchema.parse({
-        kind: "response",
-        requestId: request.requestId,
-        ok: true,
-        value: response,
-      }),
-    );
-  } catch (error) {
-    worker.postMessage(
-      workerResponseSchema.parse({
-        kind: "response",
-        requestId: request.requestId,
-        ok: false,
-        code: errorCode(error),
-      }),
-    );
+function rejectWorkerChannels(channels: WorkerChannels, error: Error): void {
+  channels.opened.reject(error);
+  for (const channel of channels.ready.values()) {
+    channel.reject(error);
+  }
+  for (const channel of channels.result.values()) {
+    channel.reject(error);
   }
 }
 
-function handleWorkerMessage(
-  worker: Worker,
-  message: unknown,
-  options: WorkerSessionOptions,
-  channels: WorkerChannels,
-): void {
+function receiveWorkerMessage(message: unknown, channels: WorkerChannels): void {
   const parsed = eventStoreWorkerMessageSchema.safeParse(message);
   if (!parsed.success) {
-    channels.ready.reject(new Error("Invalid concurrency worker message"));
-    channels.result.resolve({
-      kind: "result",
-      workerIndex: options.workerIndex,
-      outcome: "rejected",
-      code: "worker_message_invalid",
-    });
-    void worker.terminate();
+    channels.opened.reject(new Error("Invalid concurrency worker message"));
     return;
   }
   const value = parsed.data;
-  if (value.kind === "ready") {
-    channels.ready.resolve(value.expectedSeq);
-  } else if (value.kind === "result") {
-    if (value.outcome === "rejected") {
-      channels.ready.reject(new Error("Concurrency worker failed before reading the head"));
-    }
-    channels.result.resolve(value);
+  if (value.kind === "opened") {
+    channels.opened.resolve(value.threadId);
+  } else if (value.kind === "open_error") {
+    channels.opened.reject(new Error(value.code));
+  } else if (value.kind === "ready") {
+    channels.ready.get(value.iteration)?.resolve(value);
   } else {
-    void replyToWorkerRequest(worker, value, options);
+    channels.result.get(value.iteration)?.resolve(value);
+    if (value.outcome === "rejected") {
+      channels.ready.get(value.iteration)?.reject(new Error(value.code));
+    }
   }
 }
 
-/** Keep adapter handles on their owning thread while workers exercise independent connections. */
 function createWorkerSession(options: WorkerSessionOptions): WorkerSession {
+  const execArgv =
+    options.worker.loader === undefined
+      ? undefined
+      : [
+          "--experimental-transform-types",
+          "--disable-warning=ExperimentalWarning",
+          "--experimental-loader",
+          options.worker.loader,
+        ];
   const worker = new Worker(concurrencyWorkerSource, {
     eval: true,
-    workerData: { workerIndex: options.workerIndex, runId: options.runId },
+    ...(execArgv === undefined ? {} : { execArgv }),
+    workerData: {
+      workerIndex: options.workerIndex,
+      worker: options.worker,
+    },
   });
-  const channels = createWorkerChannels();
+  const channels: WorkerChannels = {
+    opened: createChannel<number>(),
+    ready: new Map(),
+    result: new Map(),
+  };
   worker.on("message", (message: unknown) => {
-    handleWorkerMessage(worker, message, options, channels);
+    receiveWorkerMessage(message, channels);
   });
   worker.on("error", (error) => {
-    channels.ready.reject(error);
-    channels.result.resolve({
-      kind: "result",
-      workerIndex: options.workerIndex,
-      outcome: "rejected",
-      code: "worker_error",
-    });
+    rejectWorkerChannels(channels, error);
   });
   worker.on("exit", (code) => {
     if (code !== 0) {
-      channels.ready.reject(new Error("Concurrency worker exited unexpectedly"));
-      channels.result.resolve({
-        kind: "result",
-        workerIndex: options.workerIndex,
-        outcome: "rejected",
-        code: "worker_exit",
-      });
+      rejectWorkerChannels(channels, new Error("Concurrency worker exited unexpectedly"));
     }
   });
 
   return {
-    ready: channels.ready.promise,
-    result: channels.result.promise,
-    release() {
-      worker.postMessage({ kind: "start" });
+    opened: channels.opened.promise,
+    prepare(iteration, runId, event) {
+      const ready = createChannel<WorkerReady>();
+      const result = createChannel<WorkerResult>();
+      channels.ready.set(iteration, ready);
+      channels.result.set(iteration, result);
+      worker.postMessage({ kind: "run", iteration, runId, event });
+      return ready.promise;
+    },
+    release(iteration) {
+      worker.postMessage({ kind: "start", iteration });
+    },
+    result(iteration) {
+      const channel = channels.result.get(iteration);
+      if (channel === undefined) {
+        return Promise.reject(new Error("Concurrency worker has no pending result"));
+      }
+      return channel.promise;
     },
     terminate() {
       return worker.terminate();
@@ -266,8 +246,11 @@ async function runAppendRace(
     ]);
 
     expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
-    const rejected = outcomes.find(({ status }) => status === "rejected");
-    expect(rejected).toMatchObject({ status: "rejected", reason: { code: "seq_conflict" } });
+    const rejected = outcomes.filter(({ status }) => status === "rejected");
+    expect(rejected).toHaveLength(1);
+    expect(errorCode(rejected[0]?.status === "rejected" ? rejected[0].reason : undefined)).toBe(
+      "seq_conflict",
+    );
     const finalEvents = await assertContiguous(firstStore, runId);
     expect(finalEvents).toHaveLength(expectedSeq + 1);
   }
@@ -278,38 +261,47 @@ async function runResumeRace(
   builders: ReturnType<typeof createEventBuilders>,
 ): Promise<void> {
   const store = await factory.open();
-  const runId = builders.nextRunId();
-  await store.append(runId, [builders.runCreated(runId)], 0);
-  const stores: StoreSlots = new Map();
   const workers = [
-    createWorkerSession({
-      factory,
-      workerIndex: 0,
-      runId,
-      event: builders.runStatusChanged(runId, "pending", "running"),
-      stores,
-    }),
-    createWorkerSession({
-      factory,
-      workerIndex: 1,
-      runId,
-      event: builders.runStatusChanged(runId, "pending", "running"),
-      stores,
-    }),
+    createWorkerSession({ workerIndex: 0, worker: factory.worker }),
+    createWorkerSession({ workerIndex: 1, worker: factory.worker }),
   ];
 
   try {
-    const observedHeads = await Promise.all(workers.map(({ ready }) => ready));
-    expect(observedHeads).toEqual([1, 1]);
-    for (const worker of workers) {
-      worker.release();
+    const workerThreadIds = await Promise.all(workers.map(({ opened }) => opened));
+    expect(workerThreadIds.every((workerId) => workerId !== threadId)).toBe(true);
+    expect(new Set(workerThreadIds).size).toBe(2);
+
+    for (let iteration = 0; iteration < 200; iteration += 1) {
+      const runId = builders.nextRunId();
+      await store.append(runId, [builders.runCreated(runId)], 0);
+      const observedHeads = await Promise.all(
+        workers.map((worker) =>
+          worker.prepare(
+            iteration,
+            runId,
+            builders.runStatusChanged(runId, "pending", "running"),
+          ),
+        ),
+      );
+
+      expect(observedHeads.map(({ expectedSeq }) => expectedSeq)).toEqual([1, 1]);
+      expect(observedHeads.map(({ threadId: observedThreadId }) => observedThreadId)).toEqual(
+        workerThreadIds,
+      );
+      for (const worker of workers) {
+        worker.release(iteration);
+      }
+      const results = await Promise.all(workers.map((worker) => worker.result(iteration)));
+      expect(results.map(({ workerIndex }) => workerIndex)).toEqual([0, 1]);
+      expect(results.filter(({ outcome }) => outcome === "fulfilled")).toHaveLength(1);
+      const rejected = results.filter(
+        (result): result is Extract<WorkerResult, { outcome: "rejected" }> =>
+          result.outcome === "rejected",
+      );
+      expect(rejected).toHaveLength(1);
+      expect(["seq_conflict", "store_unavailable"]).toContain(rejected[0]?.code);
+      expect((await assertContiguous(store, runId)).map(({ seq }) => seq)).toEqual([0, 1]);
     }
-    const results = await Promise.all(workers.map(({ result }) => result));
-    expect(results.filter(({ outcome }) => outcome === "fulfilled")).toHaveLength(1);
-    expect(results.filter(({ outcome }) => outcome === "rejected")).toEqual([
-      expect.objectContaining({ outcome: "rejected", code: "seq_conflict" }),
-    ]);
-    expect((await assertContiguous(store, runId)).map(({ seq }) => seq)).toEqual([0, 1]);
   } finally {
     await Promise.all(workers.map((worker) => worker.terminate()));
   }
@@ -367,9 +359,9 @@ export function runConcurrencyConformance(
       await withFactory(multiFactory, (factory) => runAppendRace(factory, builders));
     });
 
-    it("allows exactly one worker to resume a run", async () => {
+    it("allows exactly one worker to resume a run in 200 real races", async () => {
       await withFactory(multiFactory, (factory) => runResumeRace(factory, builders));
-    });
+    }, 60_000);
 
     it("keeps reader observations contiguous while a writer appends 1,000 events", async () => {
       await withFactory(multiFactory, (factory) => runWriterReader(factory, builders));

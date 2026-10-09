@@ -11,6 +11,12 @@ const sqliteMultiFactory: MultiEventStoreFactoryCreator = async () => {
   const stores: SqliteEventStore[] = [];
 
   return {
+    worker: {
+      module: new URL("./testing/sqlite-worker-open.ts", import.meta.url).href,
+      exportName: "openSqliteEventStore",
+      args: { path },
+      loader: new URL("./testing/worker-loader.mjs", import.meta.url).href,
+    },
     open() {
       const store = new SqliteEventStore(path);
       stores.push(store);
