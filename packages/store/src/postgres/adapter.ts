@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Event, Id, NewEvent } from "@harness/schemas";
-import { Pool, type PoolClient } from "pg";
+import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { z } from "zod";
 import { JsonContentCodec, type ContentCodec } from "../codec.js";
 import { InvalidEventError } from "../errors.js";
@@ -76,13 +76,38 @@ export class PostgresEventStore implements EventStore {
   }
 
   private ensureInitialized(): Promise<void> {
-    this.initialized ??= this.pool
-      .query(POSTGRES_SCHEMA)
-      .then(() => undefined)
-      .catch((error: unknown) => {
-        throw storeError(error);
-      });
+    this.initialized ??= this.initialize();
     return this.initialized;
+  }
+
+  private async initialize(): Promise<void> {
+    let client: PoolClient;
+    try {
+      client = await this.pool.connect();
+    } catch (error) {
+      throw storeError(error);
+    }
+    let transactionStarted = false;
+    try {
+      await client.query("BEGIN");
+      transactionStarted = true;
+      await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
+      const schemaState = await client.query<{ initialized: boolean } & QueryResultRow>(
+        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AS initialized",
+      );
+      if (schemaState.rows[0]?.initialized !== true) {
+        await client.query(POSTGRES_SCHEMA);
+      }
+      await client.query("COMMIT");
+      transactionStarted = false;
+    } catch (error) {
+      if (transactionStarted) {
+        await client.query("ROLLBACK").catch(() => undefined);
+      }
+      throw storeError(error);
+    } finally {
+      client.release();
+    }
   }
 
   /** {@inheritDoc EventStore.append} */
@@ -160,11 +185,11 @@ export class PostgresEventStore implements EventStore {
       const cursor = opts.cursor === undefined ? undefined : decodeCursor(opts.cursor);
       const result = await this.pool.query<RunSummaryRow>(
         `SELECT runs.run_id, runs.created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
-         FROM runs
-         WHERE ($1::text IS NULL OR runs.status = $1)
-         AND ($2::bigint IS NULL OR runs.created_at < $2 OR (runs.created_at = $2 AND runs.run_id > $3))
-         ORDER BY runs.created_at DESC, runs.run_id ASC
-         LIMIT $4`,
+        FROM runs
+        WHERE ($1::text IS NULL OR runs.status = $1)
+        AND ($2::bigint IS NULL OR runs.created_at < $2 OR (runs.created_at = $2 AND runs.run_id > $3))
+        ORDER BY runs.created_at DESC, runs.run_id ASC
+        LIMIT $4`,
         [opts.status ?? null, cursor?.createdAt ?? null, cursor?.runId ?? null, opts.limit + 1],
       );
       return runListPage(result.rows, opts.limit);
@@ -189,5 +214,9 @@ export function openPostgresEventStore(args: {
   poolSize?: number;
   schema?: string;
 }): PostgresEventStore {
-  return new PostgresEventStore(args.connectionString, args);
+  const options: PostgresEventStoreOptions = {
+    ...(args.poolSize === undefined ? {} : { poolSize: args.poolSize }),
+    ...(args.schema === undefined ? {} : { schema: args.schema }),
+  };
+  return new PostgresEventStore(args.connectionString, options);
 }

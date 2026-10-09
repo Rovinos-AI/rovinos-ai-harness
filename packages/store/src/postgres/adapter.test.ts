@@ -35,6 +35,7 @@ interface FakeQueryResult {
 const fakePg = vi.hoisted(() => ({
   runs: new Map<string, FakeRun>(),
   events: new Array<FakeEvent>(),
+  schemaInitialized: false,
   handler: (_sql: string, _values: unknown[]): FakeQueryResult => ({ rows: [] }),
   connectError: new Error("connection refused"),
   connectErrorCode: "ECONNREFUSED",
@@ -89,14 +90,20 @@ function number(value: unknown): number {
 function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   const query = sql.replaceAll(/\s+/g, " ").trim();
   if (query.startsWith("CREATE TABLE") || query.startsWith("CREATE INDEX")) {
+    fakePg.schemaInitialized = true;
     return { rows: [] };
   }
   if (
+    query === "BEGIN" ||
     query === "BEGIN ISOLATION LEVEL READ COMMITTED" ||
     query === "COMMIT" ||
-    query === "ROLLBACK"
+    query === "ROLLBACK" ||
+    query.startsWith("SELECT pg_advisory_xact_lock")
   ) {
     return { rows: [] };
+  }
+  if (query.startsWith("SELECT to_regclass")) {
+    return { rows: [{ initialized: fakePg.schemaInitialized }] };
   }
   if (query.startsWith("INSERT INTO runs")) {
     const runId = text(values[0]);
@@ -116,8 +123,9 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     const run = fakePg.runs.get(text(values[0]));
     return { rows: run === undefined ? [] : [{ next_seq: run.next_seq, status: run.status }] };
   }
-  if (query.startsWith("INSERT INTO events")) {
-    for (let offset = 0; offset < values.length; offset += 10) {
+  if (query.startsWith("WITH inserted_events AS")) {
+    const eventValues = values.length - 3;
+    for (let offset = 0; offset < eventValues; offset += 10) {
       const runId = text(values[offset]);
       const seq = number(values[offset + 1]);
       if (fakePg.events.some((event) => event.run_id === runId && event.seq === seq)) {
@@ -137,14 +145,11 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
         key_id: values[offset + 9] === null ? null : text(values[offset + 9]),
       });
     }
-    return { rows: [] };
-  }
-  if (query.startsWith("UPDATE runs")) {
-    const run = fakePg.runs.get(text(values[3]));
+    const run = fakePg.runs.get(text(values[0]));
     if (run !== undefined) {
-      run.next_seq = number(values[0]);
-      run.status = text(values[1]);
-      run.last_ts = number(values[2]);
+      run.next_seq = number(values.at(-3));
+      run.status = text(values.at(-2));
+      run.last_ts = number(values.at(-1));
     }
     return { rows: [] };
   }
@@ -203,6 +208,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
 beforeEach(() => {
   fakePg.runs.clear();
   fakePg.events.length = 0;
+  fakePg.schemaInitialized = false;
   fakePg.handler = fakeQuery;
   fakePg.connectErrorCode = "ECONNREFUSED";
   fakePg.shouldFailConnect = false;
@@ -226,18 +232,28 @@ it("rejects invalid connection and pool configuration", () => {
   ).toThrow("Invalid Postgres event-store configuration");
 });
 
+it("skips schema DDL when another pool already initialized the schema", async () => {
+  const runId = createEventBuilders().nextRunId();
+  const first = new PostgresEventStore("postgresql://harness@localhost/harness");
+  const second = new PostgresEventStore("postgresql://harness@localhost/harness");
+  await expect(Promise.all([first.head(runId), second.head(runId)])).resolves.toEqual([0, 0]);
+  await Promise.all([first.close(), second.close()]);
+});
+
 it("maps connection failures and unique violations to typed store errors", async () => {
   const builders = createEventBuilders();
   const runId = builders.nextRunId();
-  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  const failedStore = new PostgresEventStore("postgresql://harness@localhost/harness");
   fakePg.shouldFailConnect = true;
-  await expect(store.append(runId, [builders.runCreated(runId)], 0)).rejects.toBeInstanceOf(
+  await expect(failedStore.append(runId, [builders.runCreated(runId)], 0)).rejects.toBeInstanceOf(
     StoreUnavailableError,
   );
+  await failedStore.close();
   fakePg.shouldFailConnect = false;
   fakePg.connectErrorCode = "23505";
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
   fakePg.handler = (sql, values) => {
-    if (sql.includes("INSERT INTO events")) {
+    if (sql.includes("WITH inserted_events")) {
       throw Object.assign(new Error("duplicate"), { code: "23505" });
     }
     return fakeQuery(sql, values);

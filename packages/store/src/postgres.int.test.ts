@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Pool } from "pg";
+import { randomBytes } from "node:crypto";
 import { afterAll, expect, it } from "vitest";
 import { PostgresEventStore, openPostgresEventStore } from "./postgres/adapter.js";
 import {
@@ -14,11 +15,26 @@ const connectionString =
 const schemaIds = createEventBuilders();
 const stores = new Set<PostgresEventStore>();
 const adminPools = new Set<Pool>();
+const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+function uniqueSchema(): string {
+  let value = BigInt(`0x${randomBytes(16).toString("hex")}`);
+  const characters: string[] = [];
+  for (let index = 0; index < 26; index += 1) {
+    const character = ulidAlphabet[Number(value & 31n)];
+    if (character === undefined) {
+      throw new Error("Unable to create a schema identifier");
+    }
+    characters.push(character);
+    value >>= 5n;
+  }
+  return `t_${characters.reverse().join("")}`;
+}
 
 async function createSchema(): Promise<{ admin: Pool; schema: string }> {
   const admin = new Pool({ connectionString, max: 1 });
   adminPools.add(admin);
-  const schema = `t_${schemaIds.nextRunId()}`;
+  const schema = uniqueSchema();
   try {
     await admin.query(`CREATE SCHEMA "${schema}"`);
     return { admin, schema };
@@ -79,8 +95,9 @@ const postgresMultiFactory: MultiEventStoreFactoryCreator = async () => {
     open: () => Promise.resolve(open()),
     async cleanup() {
       try {
-        await Promise.all([...factoryStores].map(closeStore));
+        const openedStores = [...factoryStores];
         factoryStores.clear();
+        await Promise.all(openedStores.map(closeStore));
       } finally {
         await dropSchema(admin, schema);
       }

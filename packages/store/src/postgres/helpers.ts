@@ -18,7 +18,7 @@ import type { RunSummary } from "../types.js";
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const contentRecordSchema = z.record(z.string(), z.json());
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
-export const READ_PAGE_SIZE = 256;
+export const READ_PAGE_SIZE = 1_024;
 
 export const POSTGRES_SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -95,12 +95,17 @@ function errorCode(error: unknown): string | undefined {
 }
 
 /** Convert driver conflicts and connectivity failures to the store error contract. */
-export function storeError(error: unknown, expected = 0, actual = expected): Error {
+export function storeError(
+  error: unknown,
+  expected = 0,
+  actual = expected,
+  uniqueViolationIsConflict = false,
+): Error {
   if (error instanceof SeqConflictError || error instanceof InvalidEventError) {
     return error;
   }
   const code = errorCode(error);
-  if (code === "23505") {
+  if (code === "23505" && uniqueViolationIsConflict) {
     return new SeqConflictError(expected, actual);
   }
   if (
@@ -269,6 +274,20 @@ function batchPlaceholders(offset: number): string {
   }).join(", ")})`;
 }
 
+function nextStatus(currentStatus: string, encoded: readonly EncodedEvent[]): RunStatus {
+  const parsed = RunStatus.safeParse(currentStatus);
+  if (!parsed.success) {
+    throw new StoreUnavailableError();
+  }
+  let status = parsed.data;
+  for (const { event } of encoded) {
+    if (event.type === "run_status_changed") {
+      status = event.to;
+    }
+  }
+  return status;
+}
+
 /** Append a batch atomically while holding the run's sequence row lock. */
 export async function appendTransaction(
   client: PoolClient,
@@ -307,6 +326,8 @@ export async function appendTransaction(
       throw new InvalidEventError([[0, "type"]]);
     }
 
+    const status = nextStatus(run.status, encoded);
+
     const values: (number | string | null)[] = [];
     const valueRows = encoded.map(({ event, meta, blob, keyId }, index) => {
       values.push(
@@ -323,25 +344,19 @@ export async function appendTransaction(
       );
       return batchPlaceholders(index * 10);
     });
+    const updateOffset = values.length;
+    values.push(expectedSeq + encoded.length, status, last.ts);
     await client.query(
-      `INSERT INTO events (run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id) VALUES ${valueRows.join(", ")}`,
+      `WITH inserted_events AS (
+        INSERT INTO events (run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id)
+        VALUES ${valueRows.join(", ")}
+        RETURNING run_id
+      )
+      UPDATE runs SET next_seq = $${(updateOffset + 1).toString()}, status = $${(updateOffset + 2).toString()}, last_ts = $${(updateOffset + 3).toString()}
+      WHERE run_id IN (SELECT run_id FROM inserted_events)`,
       values,
     );
 
-    const parsedStatus = RunStatus.safeParse(run.status);
-    if (!parsedStatus.success) {
-      throw new StoreUnavailableError();
-    }
-    let status = parsedStatus.data;
-    for (const { event } of encoded) {
-      if (event.type === "run_status_changed") {
-        status = event.to;
-      }
-    }
-    await client.query(
-      "UPDATE runs SET next_seq = $1, status = $2, last_ts = $3 WHERE run_id = $4",
-      [expectedSeq + encoded.length, status, last.ts, runId],
-    );
     await client.query("COMMIT");
     transactionStarted = false;
     return expectedSeq + encoded.length;
@@ -349,6 +364,6 @@ export async function appendTransaction(
     if (transactionStarted) {
       await client.query("ROLLBACK").catch(() => undefined);
     }
-    throw storeError(error, expectedSeq, actualSeq);
+    throw storeError(error, expectedSeq, actualSeq, true);
   }
 }

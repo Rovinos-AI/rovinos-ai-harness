@@ -9,7 +9,7 @@ services:
   postgres:
     image: postgres:16
     user: postgres
-    command: ["postgres", "-c", "unix_socket_directories=/tmp"]
+    command: ["postgres", "-c", "unix_socket_directories=/var/run/postgresql"]
     environment:
       POSTGRES_DB: harness
       POSTGRES_USER: harness
@@ -20,6 +20,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+      - /var/run/postgresql:rw,noexec,nosuid,size=16m,uid=999,gid=999,mode=3775
     cap_drop:
       - ALL
     security_opt:
