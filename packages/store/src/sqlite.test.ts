@@ -6,7 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { JsonContentCodec, type ContentCodec } from "./codec.js";
-import { InvalidEventError, SeqConflictError, SqliteEventStore, StoreUnavailableError } from "./index.js";
+import {
+  InvalidEventError,
+  SeqConflictError,
+  SqliteEventStore,
+  StoreUnavailableError,
+} from "./index.js";
 
 const runId = Id.parse("00000000000000000000000001");
 const traceId = "a".repeat(32);
@@ -57,12 +62,7 @@ function modelRequest(id: typeof runId, ts: number, text = "synthetic prompt"): 
   };
 }
 
-function runStatusChanged(
-  id: typeof runId,
-  ts: number,
-  from: RunStatus,
-  to: RunStatus,
-): NewEvent {
+function runStatusChanged(id: typeof runId, ts: number, from: RunStatus, to: RunStatus): NewEvent {
   return {
     runId: id,
     ts,
@@ -77,7 +77,9 @@ function runStatusChanged(
   };
 }
 
-function storedRows(path: string): { meta_json: string; content_blob: string; key_id: string | null }[] {
+function storedRows(
+  path: string,
+): { meta_json: string; content_blob: string; key_id: string | null }[] {
   const database = new Database(path);
   try {
     return database
@@ -92,7 +94,9 @@ function storedRows(path: string): { meta_json: string; content_blob: string; ke
 
 afterEach(async () => {
   await Promise.all(
-    databaseDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+    databaseDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -109,7 +113,7 @@ describe("JsonContentCodec", () => {
 
   it("rejects cyclic values and malformed or non-object blobs safely", async () => {
     const codec = new JsonContentCodec();
-    const cyclic: { self?: object } = {};
+    const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
 
     await expect(codec.encode({ runId, seq: 0 }, cyclic)).rejects.toMatchObject({

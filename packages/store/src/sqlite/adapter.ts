@@ -53,6 +53,70 @@ interface EncodedEvent {
   keyId: string | null;
 }
 
+async function encodeEvents(
+  codec: ContentCodec,
+  runId: Id,
+  events: readonly NewEvent[],
+  expectedSeq: number,
+): Promise<EncodedEvent[]> {
+  if (events.length === 0) {
+    throw new InvalidEventError([[]]);
+  }
+
+  const validated: StoredEvent[] = [];
+  for (const [index, event] of events.entries()) {
+    if (event.runId !== runId) {
+      throw new InvalidEventError([["runId"]]);
+    }
+
+    const result = Event.safeParse({ ...event, seq: expectedSeq + index });
+    if (!result.success) {
+      const paths = result.error.issues.map(({ path }) =>
+        path.flatMap((part) =>
+          typeof part === "string" || typeof part === "number" ? [part] : [],
+        ),
+      );
+      throw new InvalidEventError(paths);
+    }
+    validated.push(result.data);
+  }
+
+  return Promise.all(
+    validated.map(async (event) => {
+      const parts = splitEvent(event);
+      const content = await codec.encode({ runId, seq: event.seq }, parts.content);
+      const meta = Object.fromEntries(
+        Object.entries(parts.meta).filter(([key]) => !envelopeKeys.has(key)),
+      );
+      return {
+        event,
+        metaJson: JSON.stringify(meta),
+        blob: content.blob,
+        keyId: content.keyId ?? null,
+      };
+    }),
+  );
+}
+
+function runListPage(
+  rows: readonly RunSummaryRow[],
+  limit: number,
+): { runs: RunSummary[]; nextCursor?: string } {
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const runs = page.map((row) => ({
+    runId: Id.parse(row.run_id),
+    createdAt: row.created_at,
+    status: RunStatus.parse(row.status),
+    lastSeq: row.last_seq,
+    lastTs: row.last_ts,
+  }));
+  const last = page.at(-1);
+  const nextCursor =
+    hasMore && last !== undefined ? encodeCursor(last.created_at, last.run_id) : undefined;
+  return nextCursor === undefined ? { runs } : { runs, nextCursor };
+}
+
 function storeError(error: unknown): Error {
   if (
     typeof error === "object" &&
@@ -90,10 +154,21 @@ export class SqliteEventStore implements EventStore {
     [Id, number, number, string, string, string, string, string, string, string | null]
   >;
   private readonly updateRun: Database.Statement<[number, RunStatus, number, Id]>;
-  private readonly readEvents: Database.Statement<[Id, number, number | null, number | null], EventRow>;
+  private readonly readEvents: Database.Statement<
+    [Id, number, number | null, number | null],
+    EventRow
+  >;
   private readonly getHead: Database.Statement<[Id], { next_seq: number }>;
   private readonly listRunsQuery: Database.Statement<
-    [RunStatus | null, RunStatus | null, number | null, number | null, number | null, Id | null, number],
+    [
+      RunStatus | null,
+      RunStatus | null,
+      number | null,
+      number | null,
+      number | null,
+      Id | null,
+      number,
+    ],
     RunSummaryRow
   >;
 
@@ -126,17 +201,22 @@ export class SqliteEventStore implements EventStore {
     this.updateRun = this.db.prepare<[number, RunStatus, number, Id]>(
       "UPDATE runs SET next_seq = ?, status = ?, last_ts = ? WHERE run_id = ?",
     );
-    this.readEvents = this.db.prepare<
-      [Id, number, number | null, number | null],
-      EventRow
-    >(
+    this.readEvents = this.db.prepare<[Id, number, number | null, number | null], EventRow>(
       "SELECT seq, ts, type, trace_id, span_id, segment_id, meta_json, content_blob, key_id FROM events WHERE run_id = ? AND seq >= ? AND (? IS NULL OR seq <= ?) ORDER BY seq",
     );
     this.getHead = this.db.prepare<[Id], { next_seq: number }>(
       "SELECT next_seq FROM runs WHERE run_id = ?",
     );
     this.listRunsQuery = this.db.prepare<
-      [RunStatus | null, RunStatus | null, number | null, number | null, number | null, Id | null, number],
+      [
+        RunStatus | null,
+        RunStatus | null,
+        number | null,
+        number | null,
+        number | null,
+        Id | null,
+        number,
+      ],
       RunSummaryRow
     >(`
       SELECT runs.run_id, created.ts AS created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
@@ -160,43 +240,8 @@ export class SqliteEventStore implements EventStore {
     events: readonly NewEvent[],
     expectedSeq: number,
   ): Promise<{ nextSeq: number }> {
-    if (events.length === 0) {
-      throw new InvalidEventError([[]]);
-    }
-
-    const validated: StoredEvent[] = [];
-    for (const [index, event] of events.entries()) {
-      if (event.runId !== runId) {
-        throw new InvalidEventError([["runId"]]);
-      }
-
-      const result = Event.safeParse({ ...event, seq: expectedSeq + index });
-      if (!result.success) {
-        const paths = result.error.issues.map(({ path }) =>
-          path.flatMap((part) =>
-            typeof part === "string" || typeof part === "number" ? [part] : [],
-          ),
-        );
-        throw new InvalidEventError(paths);
-      }
-      validated.push(result.data);
-    }
-
-    const encoded: EncodedEvent[] = await Promise.all(
-      validated.map(async (event) => {
-        const parts = splitEvent(event);
-        const content = await this.codec.encode({ runId, seq: event.seq }, parts.content);
-        const meta = Object.fromEntries(
-          Object.entries(parts.meta).filter(([key]) => !envelopeKeys.has(key)),
-        );
-        return {
-          event,
-          metaJson: JSON.stringify(meta),
-          blob: content.blob,
-          keyId: content.keyId ?? null,
-        };
-      }),
-    );
+    const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
+    const validated = encoded.map(({ event }) => event);
 
     try {
       const appendTransaction = this.db.transaction(() => {
@@ -250,10 +295,7 @@ export class SqliteEventStore implements EventStore {
   }
 
   /** {@inheritDoc EventStore.read} */
-  async *read(
-    runId: Id,
-    range?: { fromSeq?: number; toSeq?: number },
-  ): AsyncIterable<StoredEvent> {
+  async *read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<StoredEvent> {
     const fromSeq = range?.fromSeq ?? 0;
     const toSeq = range?.toSeq ?? null;
     try {
@@ -282,25 +324,23 @@ export class SqliteEventStore implements EventStore {
   }
 
   /** {@inheritDoc EventStore.head} */
-  async head(runId: Id): Promise<number> {
+  head(runId: Id): Promise<number> {
     try {
       const row = this.getHead.get(runId);
-      return row?.next_seq ?? 0;
+      return Promise.resolve(row?.next_seq ?? 0);
     } catch (error) {
-      throw storeError(error);
+      return Promise.reject(storeError(error));
     }
   }
 
   /** {@inheritDoc EventStore.listRuns} */
-  async listRuns(
-    opts: ListRunsOptions,
-  ): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
+  listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
     if (!Number.isInteger(opts.limit) || opts.limit < 1) {
-      throw new InvalidEventError([["limit"]]);
+      return Promise.reject(new InvalidEventError([["limit"]]));
     }
 
-    const cursor = opts.cursor === undefined ? undefined : decodeCursor(opts.cursor);
     try {
+      const cursor = opts.cursor === undefined ? undefined : decodeCursor(opts.cursor);
       const rows = this.listRunsQuery.all(
         opts.status ?? null,
         opts.status ?? null,
@@ -310,30 +350,19 @@ export class SqliteEventStore implements EventStore {
         cursor?.runId ?? null,
         opts.limit + 1,
       );
-      const hasMore = rows.length > opts.limit;
-      const page = rows.slice(0, opts.limit);
-      const runs = page.map((row) => ({
-        runId: Id.parse(row.run_id),
-        createdAt: row.created_at,
-        status: RunStatus.parse(row.status),
-        lastSeq: row.last_seq,
-        lastTs: row.last_ts,
-      }));
-      const last = page.at(-1);
-      const nextCursor =
-        hasMore && last !== undefined ? encodeCursor(last.created_at, last.run_id) : undefined;
-      return nextCursor === undefined ? { runs } : { runs, nextCursor };
+      return Promise.resolve(runListPage(rows, opts.limit));
     } catch (error) {
-      throw storeError(error);
+      return Promise.reject(storeError(error));
     }
   }
 
   /** {@inheritDoc EventStore.close} */
-  async close(): Promise<void> {
+  close(): Promise<void> {
     try {
       this.db.close();
+      return Promise.resolve();
     } catch (error) {
-      throw storeError(error);
+      return Promise.reject(storeError(error));
     }
   }
 }

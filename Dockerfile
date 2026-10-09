@@ -11,6 +11,9 @@ RUN mkdir -p /manifests \
 FROM ghcr.io/jdx/mise:2026.10.4-debian@sha256:2fb7fa9a4120333531a8a70296d4ea152ffd3e7658dcf29ac75774a7d78dec24 AS build
 
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential=12.12 python3=3.13.5-1 \
+    && rm -rf /var/lib/apt/lists/*
 COPY mise.toml ./
 RUN mise install node npm:corepack
 ENV MISE_AUTO_INSTALL=false
