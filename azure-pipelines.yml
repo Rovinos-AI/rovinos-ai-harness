@@ -1,9 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
+# Pushes to main that land close together share one build.
 trigger:
-  - main
+  batch: true
+  branches:
+    include:
+      - main
 
+# Draft PRs don't build: Copilot PRs stay drafts through their review and fix rounds and are
+# marked ready right before merge, so each PR runs CI when it is ready (and again only if fixed).
 pr:
-  - main
+  autoCancel: true
+  drafts: false
+  branches:
+    include:
+      - main
 
 pool:
   vmImage: ubuntu-latest
