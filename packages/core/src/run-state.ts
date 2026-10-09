@@ -20,7 +20,10 @@ export interface RunState {
     readonly costMicros: number;
   };
   readonly pendingToolCalls: ReadonlyMap<ToolIntentEvent["callId"], ToolIntentEvent>;
-  readonly pendingApprovals: ReadonlyMap<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
+  readonly pendingApprovals: ReadonlyMap<
+    ApprovalRequestedEvent["approvalId"],
+    ApprovalRequestedEvent
+  >;
   readonly lastCheckpoint?: {
     readonly checkpointId: CheckpointWrittenEvent["checkpointId"];
     readonly atSeq: number;
@@ -181,7 +184,7 @@ function applyEvent(state: MutableRunState, event: Event, runId: Event["runId"])
 export function foldRunState(events: Iterable<Event>): RunState {
   const iterator = events[Symbol.iterator]();
   const first = iterator.next();
-  if (first.done || first.value.type !== "run_created" || first.value.seq !== 0) {
+  if (first.done === true || first.value.type !== "run_created" || first.value.seq !== 0) {
     throw new CorruptLogError();
   }
 
@@ -200,7 +203,7 @@ export function foldRunState(events: Iterable<Event>): RunState {
 
   for (;;) {
     const next = iterator.next();
-    if (next.done) {
+    if (next.done === true) {
       break;
     }
     state = applyEvent(state, next.value, runId);
