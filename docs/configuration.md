@@ -14,4 +14,6 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 `run.budgets.maxSteps` defaults to `200`, and `run.budgets.maxWallClockMs` defaults to `3600000`. Both must be positive integers. `run.budgets.maxCostUsd` is optional and must be a positive number when supplied. Reported model costs are accumulated as integer micro-dollars; responses without cost metadata do not count toward the cost budget. `run.budgets.countSuspendedTime` defaults to `false`; suspended intervals between `suspended` and `running` status events are excluded from the wall-clock budget unless it is set to `true`. The run start time and usage are recovered from the event log, so budgets do not reset on resume.
 
+`run.checkpointEveryEvents` defaults to `20` and must be a positive integer. The run loop writes a checkpoint when that many events have accrued since the previous checkpoint, and always writes one before returning a suspended run.
+
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict placeholders until their owning tasks define those schemas. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.

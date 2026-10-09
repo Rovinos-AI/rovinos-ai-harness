@@ -34,7 +34,10 @@ export const APPROVAL_WAIT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpa
 /** Span for writing a checkpoint. */
 export const CHECKPOINT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.checkpoint",
-  commonAttributes,
+  {
+    ...commonAttributes,
+    "harness.checkpoint.reason": attr.optional(attr.code()),
+  },
 );
 
 /** Span for compacting run context. */

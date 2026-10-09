@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type RunStatus } from "@harness/schemas";
+import { HarnessError, type Event, type JsonValue, type RunStatus } from "@harness/schemas";
 import { RUN_TRIGGERS, transition } from "./state-machine.js";
 
 /** A tool-intent event that has not yet received a result. */
@@ -13,6 +13,7 @@ type CheckpointWrittenEvent = Extract<Event, { type: "checkpoint_written" }>;
 export interface RunState {
   readonly status: RunStatus;
   readonly nextSeq: number;
+  readonly plan?: JsonValue;
   readonly steps: number;
   readonly usage: {
     readonly inputTokens: number;
