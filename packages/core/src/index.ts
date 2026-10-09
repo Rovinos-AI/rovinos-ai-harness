@@ -92,3 +92,9 @@ export type {
   ToolPort,
 } from "./ports.js";
 export { NaiveContext } from "./context/naive-context.js";
+export {
+  createRuntime,
+  type Runtime,
+  type RuntimeConfig,
+  type RuntimeOverrides,
+} from "./runtime.js";

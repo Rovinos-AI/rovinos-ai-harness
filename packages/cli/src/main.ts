@@ -6,9 +6,12 @@ import type { CliContext, Clock, CommandModule } from "./command.js";
 import { errorCodeOf, exitCodeForError, ExitCode } from "./exit-codes.js";
 import { createOutput, type Output } from "./output.js";
 import { serveCommand } from "./serve.js";
+import { inspectCommand } from "./commands/inspect.js";
+import { resumeCommand } from "./commands/resume.js";
+import { runCommand } from "./commands/run.js";
 
 /** Static command registry; later epics add their owned commands here. */
-export const COMMANDS: CommandModule[] = [serveCommand];
+export const COMMANDS: CommandModule[] = [serveCommand, runCommand, resumeCommand, inspectCommand];
 
 const systemClock: Clock = { now: () => Date.now() };
 
@@ -20,6 +23,10 @@ function createDefaultContext(program: Command, out: Output): CliContext {
     },
     out,
     clock: systemClock,
+    createRuntime: async (config, overrides) => {
+      const { createRuntime } = await import("@harness/core");
+      return createRuntime(config, overrides);
+    },
   };
 }
 

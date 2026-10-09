@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@harness/config": "workspace:^",
+    "@harness/core": "workspace:^",
     "@harness/schemas": "workspace:^",
     "commander": "15.0.0",
     "zod": "4.6.5"

@@ -42,6 +42,14 @@ export { PiiConfigSchema } from "./config/pii.js";
 export { TelemetryConfigSchema } from "./config/telemetry.js";
 export { SandboxConfigSchema } from "./config/sandbox.js";
 export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
+export {
+  FakeModelCompletionSchema,
+  FakeModelScriptSchema,
+  RunInputSchema,
+  RunResultSchema,
+  type FakeModelCompletion,
+} from "./cli/run.js";
+export { InspectEventSchema, InspectResultSchema } from "./cli/inspect.js";
 export { FakeClock, SequentialIdGenerator } from "./testing.js";
 
 /** The current harness version. */
