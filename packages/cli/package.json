@@ -15,7 +15,10 @@
     "start": "node dist/bin.js"
   },
   "dependencies": {
-    "@harness/schemas": "workspace:^"
+    "@harness/config": "workspace:^",
+    "@harness/schemas": "workspace:^",
+    "commander": "15.0.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "vitest": "3.2.6"

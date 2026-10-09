@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: Apache-2.0
+import { Code } from "@harness/schemas";
+
+/** Stable process exit codes exposed by the harness CLI. */
+export const ExitCode = {
+  ok: 0,
+  failure: 1,
+  usage: 2,
+  configInvalid: 3,
+  policyDenied: 4,
+  suspended: 5,
+  budgetExceeded: 6,
+  notFoundOrResolved: 7,
+  replayFailed: 8,
+  quotaExceeded: 9,
+} as const;
+
+/** Numeric exit-code type returned by {@link ExitCode}. */
+export type ExitCode = (typeof ExitCode)[keyof typeof ExitCode];
+
+/** The only mapping from harness error codes to CLI exit codes. */
+export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freeze({
+  config_invalid: ExitCode.configInvalid,
+  policy_denied: ExitCode.policyDenied,
+  approver_is_requester: ExitCode.policyDenied,
+  suspended: ExitCode.suspended,
+  budget_exceeded: ExitCode.budgetExceeded,
+  not_found_or_resolved: ExitCode.notFoundOrResolved,
+  approval_not_found: ExitCode.notFoundOrResolved,
+  approval_already_resolved: ExitCode.notFoundOrResolved,
+  input_not_found: ExitCode.notFoundOrResolved,
+  input_already_resolved: ExitCode.notFoundOrResolved,
+  replay_failed: ExitCode.replayFailed,
+  quota_exceeded: ExitCode.quotaExceeded,
+});
+
+/**
+ * Returns a safe error code without exposing an exception message or value.
+ *
+ * @param error - A thrown value from command execution.
+ * @returns A valid harness code, or `failure` when none is available.
+ */
+export function errorCodeOf(error: unknown): string {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return "failure";
+  }
+  const code: unknown = error.code;
+  return typeof code === "string" && Code.safeParse(code).success ? code : "failure";
+}
+
+/**
+ * Maps a harness error code to its stable process exit code.
+ *
+ * @param code - A validated harness error code.
+ * @returns The mapped exit code, or failure for an unlisted code.
+ */
+export function exitCodeForError(code: string): ExitCode {
+  return (
+    Object.entries(ERROR_EXIT_CODES).find(([errorCode]) => errorCode === code)?.[1] ??
+    ExitCode.failure
+  );
+}

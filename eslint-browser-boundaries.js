@@ -25,3 +25,24 @@ export function browserRestrictedImports(restrictedPatterns) {
     },
   ];
 }
+
+/** Creates CLI output stream restrictions and permits the output boundary. */
+export function cliOutputConfiguration(restrictedProperties) {
+  const streamProperties = ["stdout", "stderr"].map((property) => ({
+    object: "process",
+    property,
+    message: "Write CLI output only through packages/cli/src/output.ts.",
+  }));
+  return [
+    {
+      files: ["packages/cli/src/**/*.{ts,tsx}"],
+      rules: {
+        "no-restricted-properties": ["error", ...restrictedProperties, ...streamProperties],
+      },
+    },
+    {
+      files: ["packages/cli/src/output.ts"],
+      rules: { "no-restricted-properties": ["error", ...restrictedProperties] },
+    },
+  ];
+}

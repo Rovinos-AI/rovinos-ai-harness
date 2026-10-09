@@ -39,6 +39,7 @@ export { PolicyConfigSchema } from "./config/policy.js";
 export { PiiConfigSchema } from "./config/pii.js";
 export { TelemetryConfigSchema } from "./config/telemetry.js";
 export { SandboxConfigSchema } from "./config/sandbox.js";
+export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
 export { FakeClock, SequentialIdGenerator } from "./testing.js";
 
 /** The current harness version. */

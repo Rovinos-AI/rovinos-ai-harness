@@ -985,14 +985,17 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@harness/cli@workspace:packages/cli"
   dependencies:
+    "@harness/config": "workspace:^"
     "@harness/schemas": "workspace:^"
+    commander: "npm:15.0.0"
     vitest: "npm:3.2.6"
+    zod: "npm:4.6.5"
   bin:
     harness: ./dist/bin.js
   languageName: unknown
   linkType: soft
 
-"@harness/config@workspace:packages/config":
+"@harness/config@workspace:^, @harness/config@workspace:packages/config":
   version: 0.0.0-use.local
   resolution: "@harness/config@workspace:packages/config"
   dependencies:
@@ -2361,7 +2364,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"commander@npm:^15.0.0":
+"commander@npm:15.0.0, commander@npm:^15.0.0":
   version: 15.0.0
   resolution: "commander@npm:15.0.0"
   checksum: 10c0/539229c171914ea1ccd45ee5f10d924289a12a684ea3a7a44147abe54003c35ed6de9ae4ad198d88c29fdf403dca0428451a388234e6dc01b6faa978fb207206
