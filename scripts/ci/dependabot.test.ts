@@ -122,7 +122,7 @@ it("configures weekly grouped updates and review gates", () => {
             "dependency-name": "node",
             "update-types": ["version-update:semver-major"],
           },
-          { "dependency-name": "ghcr.io/jdx/mise" },
+          { "dependency-name": "jdx/mise" },
         ],
       },
     ],
