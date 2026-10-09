@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id, NewEvent, RunStatus } from "@harness/schemas";
+import type { Event, Id, NewEvent, RunStatus, TraceId } from "@harness/schemas";
 
 /** Summary of a run derived from its stored events. */
 export interface RunSummary {
@@ -59,6 +59,15 @@ export interface EventStore {
    * @returns The selected run summaries and an optional cursor for the next page.
    */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }>;
+
+  /**
+   * Resolve a trace to all runs that contain it, ordered by first event appearance.
+   * Replay uses this to resolve trace input and identify related runs.
+   * @param traceId Trace identifier to search for.
+   * @returns Matching run identifiers, or an empty array when none match.
+   * @throws InvalidEventError when traceId is invalid.
+   */
+  findRunsByTrace(traceId: TraceId): Promise<Id[]>;
 
   /** Release resources held by the store. */
   close(): Promise<void>;

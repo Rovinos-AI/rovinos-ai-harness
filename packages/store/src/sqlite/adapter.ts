@@ -4,6 +4,7 @@ import {
   Event,
   Id,
   RunStatus,
+  TraceId,
   joinEvent,
   parseJson,
   splitEvent,
@@ -222,6 +223,7 @@ export class SqliteEventStore implements EventStore {
     EventRow
   >;
   private readonly getHead: Database.Statement<[Id], { next_seq: number }>;
+  private readonly findRunsByTraceQuery: Database.Statement<[TraceId], { run_id: string }>;
   private readonly listRunsQuery: Database.Statement<
     [
       RunStatus | null,
@@ -269,6 +271,9 @@ export class SqliteEventStore implements EventStore {
     );
     this.getHead = this.db.prepare<[Id], { next_seq: number }>(
       "SELECT next_seq FROM runs WHERE run_id = ?",
+    );
+    this.findRunsByTraceQuery = this.db.prepare<[TraceId], { run_id: string }>(
+      "SELECT run_id FROM events WHERE trace_id = ? GROUP BY run_id ORDER BY MIN(global_seq)",
     );
     this.listRunsQuery = this.db.prepare<
       [
@@ -403,6 +408,21 @@ export class SqliteEventStore implements EventStore {
         opts.limit + 1,
       );
       return Promise.resolve(runListPage(rows, opts.limit));
+    } catch (error) {
+      return Promise.reject(storeError(error));
+    }
+  }
+
+  /** {@inheritDoc EventStore.findRunsByTrace} */
+  findRunsByTrace(traceId: TraceId): Promise<Id[]> {
+    const parsedTraceId = TraceId.safeParse(traceId);
+    if (!parsedTraceId.success) {
+      return Promise.reject(new InvalidEventError([["traceId"]]));
+    }
+    try {
+      return Promise.resolve(
+        this.findRunsByTraceQuery.all(parsedTraceId.data).map(({ run_id }) => Id.parse(run_id)),
+      );
     } catch (error) {
       return Promise.reject(storeError(error));
     }

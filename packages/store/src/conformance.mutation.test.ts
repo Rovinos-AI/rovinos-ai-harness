@@ -22,6 +22,7 @@ function brokenFactory(): EventStoreFactory {
       read: (runId, range) => reference.read(runId, range),
       head: (runId) => reference.head(runId),
       listRuns: (options) => reference.listRuns(options),
+      findRunsByTrace: (traceId) => reference.findRunsByTrace(traceId),
       close: () => reference.close(),
     };
     return Promise.resolve({ store, cleanup: () => reference.close() });

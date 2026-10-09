@@ -25,6 +25,13 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
   return result;
 }
 
+let traceLookupId = 0;
+
+function nextTraceLookupId(): string {
+  traceLookupId += 1;
+  return traceLookupId.toString(16).padStart(32, "0");
+}
+
 async function withStore<T>(
   factory: EventStoreFactory,
   run: (store: EventStore) => Promise<T>,
@@ -258,6 +265,60 @@ function registerStatusSummary(factory: EventStoreFactory, builders: EventStoreT
   });
 }
 
+function registerTraceLookup(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
+  it("finds the run containing a trace", async () => {
+    await withStore(factory, async (store) => {
+      const runId = builders.nextRunId();
+      const traceId = nextTraceLookupId();
+      await store.append(runId, [{ ...builders.runCreated(runId), traceId }], 0);
+
+      await expect(store.findRunsByTrace(traceId)).resolves.toEqual([runId]);
+    });
+  });
+
+  it("returns no runs for an unknown trace", async () => {
+    await withStore(factory, async (store) => {
+      await expect(store.findRunsByTrace("f".repeat(32))).resolves.toEqual([]);
+    });
+  });
+
+  it("returns runs sharing a trace in order of first appearance", async () => {
+    await withStore(factory, async (store) => {
+      const firstRunId = builders.nextRunId();
+      const secondRunId = builders.nextRunId();
+      const sharedTraceId = nextTraceLookupId();
+      await store.append(
+        firstRunId,
+        [{ ...builders.runCreated(firstRunId), traceId: nextTraceLookupId() }],
+        0,
+      );
+      await store.append(
+        secondRunId,
+        [{ ...builders.runCreated(secondRunId), traceId: sharedTraceId }],
+        0,
+      );
+      await store.append(
+        firstRunId,
+        [{ ...builders.modelRequest(firstRunId), traceId: sharedTraceId }],
+        1,
+      );
+
+      await expect(store.findRunsByTrace(sharedTraceId)).resolves.toEqual([
+        secondRunId,
+        firstRunId,
+      ]);
+    });
+  });
+
+  it("rejects an invalid trace identifier", async () => {
+    await withStore(factory, async (store) => {
+      await expect(store.findRunsByTrace("invalid")).rejects.toMatchObject({
+        code: "event_invalid",
+      });
+    });
+  });
+}
+
 function registerLazyRead(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
   it("reads the first 10 of 5,000 events quickly", async () => {
     await withStore(factory, async (store) => {
@@ -319,6 +380,7 @@ export function runEventStoreConformance(
     registerLargeContent(factory, builders);
     registerRunListing(factory, builders);
     registerStatusSummary(factory, builders);
+    registerTraceLookup(factory, builders);
     registerLazyRead(factory, builders);
     if (caps.supportsFileReopen) {
       registerFileReopen(factory, builders);

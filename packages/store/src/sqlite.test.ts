@@ -169,6 +169,25 @@ describe("SqliteEventStore", () => {
     }
   });
 
+  it("uses the trace index for trace-to-run lookups", async () => {
+    const path = await temporaryDatabase();
+    const store = new SqliteEventStore(path);
+    const database = new Database(path);
+    try {
+      await store.append(runId, [runCreated(runId, 10)], 0);
+      const plan = database
+        .prepare<[string], { detail: string }>(
+          "EXPLAIN QUERY PLAN SELECT run_id FROM events WHERE trace_id = ? GROUP BY run_id ORDER BY MIN(global_seq)",
+        )
+        .all(traceId);
+
+      expect(plan.some(({ detail }) => detail.includes("events_trace_id_idx"))).toBe(true);
+    } finally {
+      database.close();
+      await store.close();
+    }
+  });
+
   it("persists events across reopening the database", async () => {
     const path = await temporaryDatabase();
     const firstStore = new SqliteEventStore(path);
