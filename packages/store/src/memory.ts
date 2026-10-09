@@ -3,6 +3,18 @@ import { Event, type Event as StoredEvent, type Id, type NewEvent } from "@harne
 import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "./errors.js";
 import type { EventStore, ListRunsOptions, RunSummary } from "./types.js";
 
+function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): number | undefined {
+  if (cursor === undefined) {
+    return 0;
+  }
+
+  const cursorIndex = summaries.findIndex((summary) => summary.runId === cursor);
+  if (cursorIndex === -1) {
+    return undefined;
+  }
+  return cursorIndex + 1;
+}
+
 /** In-memory reference implementation of the append-only event store contract. */
 export class InMemoryEventStore implements EventStore {
   private readonly runs = new Map<Id, StoredEvent[]>();
@@ -78,6 +90,10 @@ export class InMemoryEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.listRuns} */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
+    if (!Number.isInteger(opts.limit) || opts.limit < 1) {
+      return Promise.reject(new InvalidEventError([["limit"]]));
+    }
+
     const summaries: RunSummary[] = [];
     for (const [runId, events] of this.runs) {
       const created = events.find((event) => event.type === "run_created");
@@ -112,12 +128,12 @@ export class InMemoryEventStore implements EventStore {
       return left.runId.localeCompare(right.runId);
     });
 
-    const cursorIndex =
-      opts.cursor === undefined
-        ? -1
-        : summaries.findIndex((summary) => summary.runId === opts.cursor);
-    const start = Math.max(0, cursorIndex + 1);
-    const end = start + Math.max(0, opts.limit);
+    const start = startAfterCursor(summaries, opts.cursor);
+    if (start === undefined) {
+      return Promise.reject(new InvalidEventError([["cursor"]]));
+    }
+
+    const end = start + opts.limit;
     const runs = summaries.slice(start, end);
     const nextCursor = end < summaries.length ? runs.at(-1)?.runId : undefined;
     return Promise.resolve(nextCursor === undefined ? { runs } : { runs, nextCursor });

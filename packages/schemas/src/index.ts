@@ -8,6 +8,7 @@ export {
   type ParseOptions,
   type SafeParseJsonResult,
 } from "./parse.js";
+export { HarnessError } from "./errors.js";
 export {
   compileJsonSchema,
   type CompileJsonSchemaOptions,

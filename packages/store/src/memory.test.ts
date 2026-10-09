@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, type Event, type NewEvent, type RunStatus } from "@harness/schemas";
+import { Id, type Event, type HarnessError, type NewEvent, type RunStatus } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
-import type { HarnessError } from "./index.js";
 import {
   InvalidEventError,
   InMemoryEventStore,
@@ -180,10 +179,26 @@ describe("InMemoryEventStore", () => {
     await expect(store.listRuns({ status: "completed", limit: 2 })).resolves.toMatchObject({
       runs: [expect.objectContaining({ runId, status: "completed" })],
     });
-    await expect(store.listRuns({ limit: 1, cursor: "unknown" })).resolves.toMatchObject({
-      runs: [expect.objectContaining({ status: "pending", createdAt: 20, lastSeq: 0, lastTs: 20 })],
-    });
     await expect(store.close()).resolves.toBeUndefined();
+  });
+
+  it("rejects unknown run-list cursors", async () => {
+    const store = new InMemoryEventStore();
+    await store.append(runId, [runCreated(runId, 10)], 0);
+
+    await expect(store.listRuns({ limit: 1, cursor: "stale-cursor" })).rejects.toMatchObject({
+      paths: [["cursor"]],
+      message: "Event input is invalid",
+    });
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])("rejects invalid run-list limit %s", async (limit) => {
+    const store = new InMemoryEventStore();
+
+    await expect(store.listRuns({ limit })).rejects.toMatchObject({
+      paths: [["limit"]],
+      message: "Event input is invalid",
+    });
   });
 
   it("omits runs without a run_created event from summaries", async () => {
