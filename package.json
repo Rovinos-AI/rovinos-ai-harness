@@ -34,7 +34,7 @@
     "lint:docker": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/lint-extended.ts docker",
     "lint:editorconfig": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/lint-extended.ts editorconfig",
     "lint:spell": "cspell --config cspell.json --no-progress \"**/*.md\" \"packages/*/src/**/*\"",
-    "typecheck": "tsc -p packages/schemas/tsconfig.json && tsc -p packages/schemas/tsconfig.test.json && tsc -p packages/core/tsconfig.json && tsc -p packages/cli/tsconfig.json && tsc -p scripts/tsconfig.json && tsc -p test/tsconfig.json && tsc -p tools/eslint-plugin-harness/tsconfig.json --noEmit",
+    "typecheck": "tsc -p packages/schemas/tsconfig.json && tsc -p packages/schemas/tsconfig.test.json && tsc -p packages/config/tsconfig.json && tsc -p packages/core/tsconfig.json && tsc -p packages/cli/tsconfig.json && tsc -p scripts/tsconfig.json && tsc -p test/tsconfig.json && tsc -p tools/eslint-plugin-harness/tsconfig.json --noEmit",
     "test:unit": "yarn build:schemas && vitest run --project unit",
     "test:integration": "vitest run --project integration --passWithNoTests",
     "test:canary": "vitest run --project canary --passWithNoTests",
