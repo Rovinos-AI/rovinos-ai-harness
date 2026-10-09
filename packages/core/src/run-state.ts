@@ -25,6 +25,14 @@ export interface RunState {
     ApprovalRequestedEvent["approvalId"],
     ApprovalRequestedEvent
   >;
+  readonly approvalRequests: ReadonlyMap<
+    ApprovalRequestedEvent["approvalId"],
+    ApprovalRequestedEvent
+  >;
+  readonly resolvedApprovals: ReadonlyMap<
+    ApprovalRequestedEvent["approvalId"],
+    Extract<Event, { type: "approval_resolved" }>
+  >;
   readonly lastCheckpoint?: {
     readonly checkpointId: CheckpointWrittenEvent["checkpointId"];
     readonly atSeq: number;
@@ -47,6 +55,11 @@ interface MutableRunState {
   };
   pendingToolCalls: Map<ToolIntentEvent["callId"], ToolIntentEvent>;
   pendingApprovals: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
+  approvalRequests: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
+  resolvedApprovals: Map<
+    ApprovalRequestedEvent["approvalId"],
+    Extract<Event, { type: "approval_resolved" }>
+  >;
   lastCheckpoint?: NonNullable<RunState["lastCheckpoint"]>;
   segmentId: Event["segmentId"];
   startedAt: number;
@@ -140,7 +153,11 @@ function applyApprovalRequest(
   }
   const pendingApprovals = new Map(state.pendingApprovals);
   pendingApprovals.set(event.approvalId, event);
-  return { ...state, pendingApprovals };
+  const approvalRequests = new Map(state.approvalRequests);
+  approvalRequests.set(event.approvalId, event);
+  const resolvedApprovals = new Map(state.resolvedApprovals);
+  resolvedApprovals.delete(event.approvalId);
+  return { ...state, pendingApprovals, approvalRequests, resolvedApprovals };
 }
 
 function applyApprovalResolution(
@@ -152,7 +169,9 @@ function applyApprovalResolution(
   }
   const pendingApprovals = new Map(state.pendingApprovals);
   pendingApprovals.delete(event.approvalId);
-  return { ...state, pendingApprovals };
+  const resolvedApprovals = new Map(state.resolvedApprovals);
+  resolvedApprovals.set(event.approvalId, event);
+  return { ...state, pendingApprovals, resolvedApprovals };
 }
 
 function applyEvent(state: MutableRunState, event: Event, runId: Event["runId"]): MutableRunState {
@@ -214,6 +233,8 @@ export function foldRunState(events: Iterable<Event>): RunState {
     usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
     pendingToolCalls: new Map(),
     pendingApprovals: new Map(),
+    approvalRequests: new Map(),
+    resolvedApprovals: new Map(),
     segmentId: first.value.segmentId,
     startedAt: first.value.ts,
     lastTs: first.value.ts,
