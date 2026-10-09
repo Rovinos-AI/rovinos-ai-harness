@@ -115,7 +115,7 @@ export function storeError(
   ) {
     return new StoreUnavailableError();
   }
-  return error instanceof Error ? error : new StoreUnavailableError();
+  return new StoreUnavailableError();
 }
 
 /** Convert a Postgres integer representation while rejecting unsafe values. */
@@ -274,6 +274,8 @@ function batchPlaceholders(offset: number): string {
   }).join(", ")})`;
 }
 
+const MAX_EVENTS_PER_INSERT = 5_000;
+
 function nextStatus(currentStatus: string, encoded: readonly EncodedEvent[]): RunStatus {
   const parsed = RunStatus.safeParse(currentStatus);
   if (!parsed.success) {
@@ -286,6 +288,49 @@ function nextStatus(currentStatus: string, encoded: readonly EncodedEvent[]): Ru
     }
   }
   return status;
+}
+
+async function insertEventBatches(
+  client: PoolClient,
+  encoded: readonly EncodedEvent[],
+  options: { runId: Id; expectedSeq: number; status: RunStatus; lastTs: number },
+): Promise<void> {
+  const { runId, expectedSeq, status, lastTs } = options;
+  for (let offset = 0; offset < encoded.length; offset += MAX_EVENTS_PER_INSERT) {
+    const batch = encoded.slice(offset, offset + MAX_EVENTS_PER_INSERT);
+    const values: (number | string | null)[] = [];
+    const valueRows = batch.map(({ event, meta, blob, keyId }, index) => {
+      values.push(
+        runId,
+        event.seq,
+        event.ts,
+        event.type,
+        event.traceId,
+        event.spanId,
+        event.segmentId,
+        meta,
+        blob,
+        keyId,
+      );
+      return batchPlaceholders(index * 10);
+    });
+    const insert = `INSERT INTO events (run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id)
+      VALUES ${valueRows.join(", ")}`;
+    if (offset + batch.length === encoded.length) {
+      const updateOffset = values.length;
+      values.push(expectedSeq + encoded.length, status, lastTs);
+      await client.query(
+        `WITH inserted_events AS (${insert}
+          RETURNING run_id
+        )
+        UPDATE runs SET next_seq = $${(updateOffset + 1).toString()}, status = $${(updateOffset + 2).toString()}, last_ts = $${(updateOffset + 3).toString()}
+        WHERE run_id IN (SELECT run_id FROM inserted_events)`,
+        values,
+      );
+    } else {
+      await client.query(insert, values);
+    }
+  }
 }
 
 /** Append a batch atomically while holding the run's sequence row lock. */
@@ -327,35 +372,12 @@ export async function appendTransaction(
     }
 
     const status = nextStatus(run.status, encoded);
-
-    const values: (number | string | null)[] = [];
-    const valueRows = encoded.map(({ event, meta, blob, keyId }, index) => {
-      values.push(
-        runId,
-        event.seq,
-        event.ts,
-        event.type,
-        event.traceId,
-        event.spanId,
-        event.segmentId,
-        meta,
-        blob,
-        keyId,
-      );
-      return batchPlaceholders(index * 10);
+    await insertEventBatches(client, encoded, {
+      runId,
+      expectedSeq,
+      status,
+      lastTs: last.ts,
     });
-    const updateOffset = values.length;
-    values.push(expectedSeq + encoded.length, status, last.ts);
-    await client.query(
-      `WITH inserted_events AS (
-        INSERT INTO events (run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id)
-        VALUES ${valueRows.join(", ")}
-        RETURNING run_id
-      )
-      UPDATE runs SET next_seq = $${(updateOffset + 1).toString()}, status = $${(updateOffset + 2).toString()}, last_ts = $${(updateOffset + 3).toString()}
-      WHERE run_id IN (SELECT run_id FROM inserted_events)`,
-      values,
-    );
 
     await client.query("COMMIT");
     transactionStarted = false;

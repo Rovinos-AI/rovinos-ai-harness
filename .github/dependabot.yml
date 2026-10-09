@@ -42,5 +42,8 @@ updates:
       - dependency-name: node
         update-types:
           - version-update:semver-major
+      - dependency-name: postgres
+        update-types:
+          - version-update:semver-major
       # Dependabot names registry images without the host (see PR #261), so match "jdx/mise".
       - dependency-name: jdx/mise

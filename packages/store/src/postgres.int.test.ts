@@ -118,6 +118,28 @@ afterAll(async () => {
 runEventStoreConformance("PostgresEventStore", postgresFactory, { supportsFileReopen: false });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
 
+it("appends batches larger than PostgreSQL's bind-parameter limit", async () => {
+  const { store, cleanup } = await postgresFactory();
+  const runId = schemaIds.nextRunId();
+  const builders = createEventBuilders();
+  const events = [
+    builders.runCreated(runId),
+    ...Array.from({ length: 6_999 }, () => builders.modelRequest(runId)),
+  ];
+  try {
+    await expect(store.append(runId, events, 0)).resolves.toEqual({ nextSeq: 7_000 });
+    await expect(store.head(runId)).resolves.toBe(7_000);
+    let count = 0;
+    for await (const event of store.read(runId)) {
+      count += 1;
+      expect(event.seq).toBe(count - 1);
+    }
+    expect(count).toBe(7_000);
+  } finally {
+    await cleanup();
+  }
+});
+
 it("drops the per-test schema after cleanup", async () => {
   const { admin, schema } = await createSchema();
   const store = openPostgresEventStore({ connectionString, schema });

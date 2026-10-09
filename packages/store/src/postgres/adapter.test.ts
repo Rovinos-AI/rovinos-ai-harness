@@ -123,8 +123,9 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     const run = fakePg.runs.get(text(values[0]));
     return { rows: run === undefined ? [] : [{ next_seq: run.next_seq, status: run.status }] };
   }
-  if (query.startsWith("WITH inserted_events AS")) {
-    const eventValues = values.length - 3;
+  if (query.startsWith("WITH inserted_events AS") || query.startsWith("INSERT INTO events")) {
+    const updatesRun = query.startsWith("WITH inserted_events AS");
+    const eventValues = values.length - (updatesRun ? 3 : 0);
     for (let offset = 0; offset < eventValues; offset += 10) {
       const runId = text(values[offset]);
       const seq = number(values[offset + 1]);
@@ -146,7 +147,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       });
     }
     const run = fakePg.runs.get(text(values[0]));
-    if (run !== undefined) {
+    if (updatesRun && run !== undefined) {
       run.next_seq = number(values.at(-3));
       run.status = text(values.at(-2));
       run.last_ts = number(values.at(-1));
@@ -240,15 +241,35 @@ it("skips schema DDL when another pool already initialized the schema", async ()
   await Promise.all([first.close(), second.close()]);
 });
 
-it("maps connection failures and unique violations to typed store errors", async () => {
+it.each(["ENOTFOUND", "EAI_AGAIN"])(
+  "maps %s connection failures to typed store errors",
+  async (code) => {
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    const failedStore = new PostgresEventStore("postgresql://harness@localhost/harness");
+    fakePg.connectErrorCode = code;
+    fakePg.shouldFailConnect = true;
+    await expect(failedStore.append(runId, [builders.runCreated(runId)], 0)).rejects.toBeInstanceOf(
+      StoreUnavailableError,
+    );
+    await failedStore.close();
+  },
+);
+
+it("retries initialization after a transient connection failure", async () => {
+  const runId = createEventBuilders().nextRunId();
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  fakePg.shouldFailConnect = true;
+  await expect(store.head(runId)).rejects.toBeInstanceOf(StoreUnavailableError);
+
+  fakePg.shouldFailConnect = false;
+  await expect(store.head(runId)).resolves.toBe(0);
+  await store.close();
+});
+
+it("maps unique violations to sequence conflicts", async () => {
   const builders = createEventBuilders();
   const runId = builders.nextRunId();
-  const failedStore = new PostgresEventStore("postgresql://harness@localhost/harness");
-  fakePg.shouldFailConnect = true;
-  await expect(failedStore.append(runId, [builders.runCreated(runId)], 0)).rejects.toBeInstanceOf(
-    StoreUnavailableError,
-  );
-  await failedStore.close();
   fakePg.shouldFailConnect = false;
   fakePg.connectErrorCode = "23505";
   const store = new PostgresEventStore("postgresql://harness@localhost/harness");

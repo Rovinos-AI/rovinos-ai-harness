@@ -36,12 +36,7 @@ const optionsSchema = z
   .strict();
 
 /** Options for a Postgres event-store connection. */
-export interface PostgresEventStoreOptions {
-  /** Maximum number of concurrent connections in the pool. */
-  poolSize?: number;
-  /** Isolated schema used for the store; must be created by the caller. */
-  schema?: string;
-}
+export type PostgresEventStoreOptions = z.input<typeof optionsSchema>;
 
 /** Durable Postgres implementation of the append-only event store. */
 export class PostgresEventStore implements EventStore {
@@ -76,7 +71,10 @@ export class PostgresEventStore implements EventStore {
   }
 
   private ensureInitialized(): Promise<void> {
-    this.initialized ??= this.initialize();
+    this.initialized ??= this.initialize().catch((error: unknown) => {
+      this.initialized = undefined;
+      throw error;
+    });
     return this.initialized;
   }
 
