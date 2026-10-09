@@ -19,12 +19,13 @@ import {
   FakeClock,
   JsonValue,
   SequentialIdGenerator,
+  HarnessError,
   type Event,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
-import { FakeModelPort } from "./testing/index.js";
+import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";
 import { RunRecorder } from "./recorder.js";
 import { runLoop } from "./loop.js";
@@ -185,9 +186,12 @@ class TestContextManager implements ContextManager {
   }
 }
 
-function completion(toolCalls: ModelCompletion["toolCalls"] = []): ModelCompletion {
+function completion(
+  toolCalls: ModelCompletion["toolCalls"] = [],
+  content = "answer",
+): ModelCompletion {
   return {
-    content: "answer",
+    content,
     toolCalls,
     usage: { inputTokens: 3, outputTokens: 5, costMicros: 12 },
     finishReason: "stop",
@@ -198,6 +202,14 @@ function completion(toolCalls: ModelCompletion["toolCalls"] = []): ModelCompleti
     repairAttempts: 0,
     providerBlobs: { trace: "opaque" },
   };
+}
+
+class TestToolError extends HarnessError {
+  readonly code = "tool_broken";
+
+  constructor() {
+    super("Synthetic tool failure.");
+  }
 }
 
 function normalizeEvents(events: readonly Event[]): JsonValueType {
@@ -266,7 +278,8 @@ describe("runLoop", () => {
     const startingSpanIndex = tracerProvider.spans.length;
     const store = new InMemoryEventStore();
     const append = vi.spyOn(store, "append");
-    const recorder = new RunRecorder(store, runId, segmentId, 0, new FakeClock(100));
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
     const ids = new SequentialIdGenerator();
     const signal = new AbortController().signal;
     const model = new FakeModelPort([completion()]);
@@ -282,7 +295,9 @@ describe("runLoop", () => {
     const contextPort = { build: vi.fn(() => Promise.resolve(["prior context"])) };
     const result = await runLoop({
       recorder,
+      clock,
       model,
+      tool: new FakeToolPort(),
       context: contextPort,
       ids,
       goal: "test goal",
@@ -333,34 +348,238 @@ describe("runLoop", () => {
     expect(JsonValue.parse(goldenInput)).toEqual(normalizeEvents(result.events));
   });
 
-  it("fails when a model response requests unsupported tools", async () => {
-    const recorder = new RunRecorder(
-      new InMemoryEventStore(),
-      runId,
-      segmentId,
-      0,
-      new FakeClock(100),
+  it("durably records tool intent and feeds tool results into the next model request", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+    const signal = new AbortController().signal;
+    let intentWasDurable = false;
+    const call = {
+      callId: modelCallId,
+      toolId: "test_tool",
+      args: { z: 1, a: { z: 2, a: 3 } },
+    };
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "test_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1000,
+            execute: async () => {
+              const types: string[] = [];
+              for await (const event of store.read(runId)) {
+                types.push(event.type);
+              }
+              intentWasDurable = types.at(-1) === "tool_intent";
+              expect(intentWasDurable).toBe(true);
+              clock.advance(7);
+              return { outcome: "ok", result: { value: "tool output" } };
+            },
+          },
+        ],
+      ]),
     );
+    const model = new FakeModelPort([
+      completion([call], "tool request"),
+      completion([], "final answer"),
+    ]);
     const result = await runLoop({
       recorder,
-      model: new FakeModelPort([
-        completion([{ callId: modelCallId, toolId: "test_tool", args: { value: 1 } }]),
-      ]),
+      clock,
+      model,
+      tool,
       context: new NaiveContext(),
       ids: new SequentialIdGenerator(),
       goal: "tool goal",
       configHash,
       policyVersion: "test.policy",
+      signal,
+    });
+
+    expect(intentWasDurable).toBe(true);
+    expect(result.state.status).toBe("completed");
+    expect(result.events.map(({ type }) => type)).toEqual([
+      "run_created",
+      "run_status_changed",
+      "model_request",
+      "model_response",
+      "tool_intent",
+      "tool_result",
+      "model_request",
+      "model_response",
+      "run_status_changed",
+    ]);
+    expect(result.events.find(({ type }) => type === "tool_result")).toMatchObject({
+      outcome: "ok",
+      result: { value: "tool output" },
+      latencyMs: 7,
+    });
+    expect(result.events.find(({ type }) => type === "tool_intent")).toMatchObject({
+      argsHash: "e634af6ecfc23845fdae9c393661c63b99ad304d3f05a08faab28727c785d718",
+    });
+    expect(model.requests[1]?.request.messages).toEqual({
+      goal: "tool goal",
+      context: ["tool request", { value: "tool output" }],
+    });
+    expect(tool.calls).toHaveLength(1);
+  });
+
+  it("denies unknown tools without executing them", async () => {
+    const clock = new FakeClock(100);
+    const tool = new FakeToolPort();
+    const result = await runLoop({
+      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([
+        completion([{ callId: modelCallId, toolId: "unknown_tool", args: {} }]),
+        completion(),
+      ]),
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "unknown tool goal",
+      configHash,
+      policyVersion: "test.policy",
       signal: new AbortController().signal,
     });
 
-    expect(result.state.status).toBe("failed");
-    expect(result.events.at(-1)).toMatchObject({
-      type: "run_status_changed",
-      from: "running",
-      to: "failed",
-      reason: "tools_not_supported",
+    expect(result.state.status).toBe("completed");
+    expect(tool.calls).toEqual([]);
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool_intent",
+        toolId: "unknown_tool",
+        idempotent: false,
+        policyDecision: "deny",
+      }),
+    );
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool_result",
+        toolId: "unknown_tool",
+        outcome: "denied",
+        errorCode: "unknown_tool",
+      }),
+    );
+  });
+
+  it("records timeouts and allows the model to continue", async () => {
+    const clock = new FakeClock(100);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "slow_tool",
+          {
+            idempotent: false,
+            timeoutMs: 1,
+            execute: (_call, { signal }) =>
+              new Promise<never>((_resolve, reject) => {
+                signal.addEventListener(
+                  "abort",
+                  () => {
+                    reject(new Error("Aborted."));
+                  },
+                  { once: true },
+                );
+              }),
+          },
+        ],
+      ]),
+    );
+    const result = await runLoop({
+      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([
+        completion([{ callId: modelCallId, toolId: "slow_tool", args: {} }]),
+        completion(),
+      ]),
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "timeout goal",
+      configHash,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
     });
+
+    expect(result.state.status).toBe("completed");
+    const toolResult = result.events.find(
+      (event): event is Extract<Event, { type: "tool_result" }> => event.type === "tool_result",
+    );
+    expect(toolResult).toMatchObject({
+      outcome: "timeout",
+      errorCode: "tool_timeout",
+      result: null,
+    });
+    expect(toolResult?.latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("maps returned tool errors and thrown errors to stable result codes", async () => {
+    const clock = new FakeClock(100);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "returned_error",
+          {
+            idempotent: true,
+            timeoutMs: 1000,
+            execute: () =>
+              Promise.resolve({
+                outcome: "error",
+                errorCode: "tool_rejected",
+                result: { reason: "rejected" },
+              }),
+          },
+        ],
+        [
+          "harness_error",
+          {
+            idempotent: true,
+            timeoutMs: 1000,
+            execute: () => Promise.reject(new TestToolError()),
+          },
+        ],
+        [
+          "unknown_error",
+          {
+            idempotent: true,
+            timeoutMs: 1000,
+            execute: () => Promise.reject(new Error("Synthetic failure.")),
+          },
+        ],
+      ]),
+    );
+    const result = await runLoop({
+      recorder: new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([
+        completion([
+          { callId: modelCallId, toolId: "returned_error", args: {} },
+          { callId: "33333333333333333333333333", toolId: "harness_error", args: {} },
+          { callId: "44444444444444444444444444", toolId: "unknown_error", args: {} },
+        ]),
+        completion(),
+      ]),
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "tool error goal",
+      configHash,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+    });
+
+    expect(result.state.status).toBe("completed");
+    expect(
+      result.events
+        .filter((event) => event.type === "tool_result")
+        .map((event) => [event.outcome, event.errorCode]),
+    ).toEqual([
+      ["error", "tool_rejected"],
+      ["error", "tool_broken"],
+      ["error", "tool_failed"],
+    ]);
   });
 
   it.each([
@@ -372,13 +591,8 @@ describe("runLoop", () => {
     [new Error("provider detail"), "model_failed"],
   ])("records a failed status when the model port rejects", async (error, expectedCode) => {
     const startingSpanIndex = tracerProvider.spans.length;
-    const recorder = new RunRecorder(
-      new InMemoryEventStore(),
-      runId,
-      segmentId,
-      0,
-      new FakeClock(100),
-    );
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(new InMemoryEventStore(), runId, segmentId, 0, clock);
     const model: ModelPort = {
       complete() {
         return Promise.reject(error);
@@ -386,7 +600,9 @@ describe("runLoop", () => {
     };
     const result = await runLoop({
       recorder,
+      clock,
       model,
+      tool: new FakeToolPort(),
       context: new NaiveContext(),
       ids: new SequentialIdGenerator(),
       goal: "error goal",

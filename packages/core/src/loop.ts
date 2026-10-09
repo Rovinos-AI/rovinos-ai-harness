@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Code, Event, JsonValue } from "@harness/schemas";
 import { foldRunState, type RunState } from "./run-state.js";
-import type { EventPartial, RunRecorder } from "./recorder.js";
+import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
 import { modelStep } from "./steps/model-step.js";
-import type { ContextPort, IdGenerator, ModelPort, NewRunMetadata } from "./ports.js";
+import { toolStep } from "./steps/tool-step.js";
+import type { ContextPort, IdGenerator, ModelPort, NewRunMetadata, ToolPort } from "./ports.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata {
   readonly recorder: RunRecorder;
+  readonly clock: Clock;
   readonly model: ModelPort;
+  readonly tool: ToolPort;
   readonly context: ContextPort;
   readonly ids: IdGenerator;
   readonly goal: JsonValue;
@@ -26,7 +29,7 @@ export interface RunLoopResult {
 }
 
 /**
- * Runs a new model-driven run until a final answer or an unsupported tool call.
+ * Runs a new model-driven run until a final answer.
  *
  * @param options - Ports, recorder, deterministic ID source, and initial run input.
  * @returns The final folded state and all events created by this invocation.
@@ -52,42 +55,55 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
     events.push(...recorded);
     const runId = last.runId;
 
-    const context = await options.context.build(events.slice());
-    const modelResult = await modelStep({
-      recorder: options.recorder,
-      model: options.model,
-      ids: options.ids,
-      runId,
-      messages: { goal: options.goal, context },
-      signal: options.signal,
-      ...(options.role === undefined ? {} : { role: options.role }),
-      ...(options.provider === undefined ? {} : { provider: options.provider }),
-      ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
-    });
-    events.push(...modelResult.events);
+    for (;;) {
+      const context = await options.context.build(events.slice());
+      const modelResult = await modelStep({
+        recorder: options.recorder,
+        model: options.model,
+        ids: options.ids,
+        runId,
+        messages: { goal: options.goal, context },
+        signal: options.signal,
+        ...(options.role === undefined ? {} : { role: options.role }),
+        ...(options.provider === undefined ? {} : { provider: options.provider }),
+        ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+      });
+      events.push(...modelResult.events);
 
-    if (modelResult.outcome === "failed") {
-      result = { state: foldRunState(events), events };
-      const failedEvent = modelResult.events.at(-1);
-      if (failedEvent === undefined) {
-        throw new Error("Expected the model step to record a failure.");
+      if (modelResult.outcome === "failed") {
+        result = { state: foldRunState(events), events };
+        const failedEvent = modelResult.events.at(-1);
+        if (failedEvent === undefined) {
+          throw new Error("Expected the model step to record a failure.");
+        }
+        return failedEvent;
       }
-      return failedEvent;
-    }
 
-    const reason =
-      modelResult.completion.toolCalls.length === 0 ? "final_answer" : "tools_not_supported";
-    const to = modelResult.completion.toolCalls.length === 0 ? "completed" : "failed";
-    const finished = await options.recorder.record({
-      type: "run_status_changed",
-      v: 1,
-      from: "running",
-      to,
-      reason,
-    });
-    events.push(finished);
-    result = { state: foldRunState(events), events };
-    return finished;
+      if (modelResult.completion.toolCalls.length > 0) {
+        events.push(
+          ...(await toolStep({
+            recorder: options.recorder,
+            tool: options.tool,
+            clock: options.clock,
+            runId,
+            calls: modelResult.completion.toolCalls,
+            signal: options.signal,
+          })),
+        );
+        continue;
+      }
+
+      const finished = await options.recorder.record({
+        type: "run_status_changed",
+        v: 1,
+        from: "running",
+        to: "completed",
+        reason: "final_answer",
+      });
+      events.push(finished);
+      result = { state: foldRunState(events), events };
+      return finished;
+    }
   });
 
   if (result === undefined) {

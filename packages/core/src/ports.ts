@@ -54,6 +54,39 @@ export interface ModelPort {
   complete(request: ModelRequest, context: RunContext): Promise<ModelCompletion>;
 }
 
+/** Declares the retry and timeout behavior of a tool. */
+export interface ToolDescription {
+  readonly idempotent: boolean;
+  readonly timeoutMs: number;
+}
+
+/** Result returned after a tool execution. */
+export interface ToolExecutionResult {
+  readonly outcome: "ok" | "error";
+  readonly result: JsonValue;
+  readonly errorCode?: Code;
+}
+
+/** Tool executor used by the run loop. */
+export interface ToolPort {
+  /**
+   * Returns execution metadata for a known tool.
+   *
+   * @param toolId - Tool identifier from the model response.
+   * @returns Tool metadata, or undefined when the tool is unknown.
+   */
+  describe(toolId: Code): ToolDescription | undefined;
+
+  /**
+   * Executes one model-proposed tool call.
+   *
+   * @param call - Call identifier, tool identifier, and validated arguments.
+   * @param context - Active run and cancellation signal.
+   * @returns The tool outcome and JSON result.
+   */
+  execute(call: ModelToolCall, context: RunContext): Promise<ToolExecutionResult>;
+}
+
 /** Builds provider messages from the durable run history. */
 export interface ContextPort {
   /**
