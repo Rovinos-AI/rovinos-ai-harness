@@ -6,6 +6,7 @@ import { defineConfig } from "vitest/config";
 const sourceResolution = {
   resolve: {
     alias: {
+      "@harness/config": fileURLToPath(new URL("./packages/config/src/index.ts", import.meta.url)),
       "@harness/schemas": fileURLToPath(
         new URL("./packages/schemas/src/index.ts", import.meta.url),
       ),

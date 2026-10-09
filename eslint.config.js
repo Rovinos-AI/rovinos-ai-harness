@@ -9,7 +9,7 @@ import unicorn from "eslint-plugin-unicorn";
 import vitest from "@vitest/eslint-plugin";
 import prettier from "eslint-config-prettier/flat";
 import tseslint from "typescript-eslint";
-import { browserRestrictedImports } from "./eslint-browser-boundaries.js";
+import { browserRestrictedImports, cliOutputConfiguration } from "./eslint-browser-boundaries.js";
 import { harnessPlugin } from "./eslint-layer-config.js";
 import { yamlLintConfiguration } from "./eslint-yaml.js";
 
@@ -405,4 +405,4 @@ const configuration = [
   { ...prettier, rules: { ...prettier.rules, curly: ["error", "all"] } },
 ];
 
-export default errorizeWarnings(configuration);
+export default errorizeWarnings(configuration.concat(cliOutputConfiguration(restrictedProperties)));
