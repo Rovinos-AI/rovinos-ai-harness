@@ -103,6 +103,14 @@ export interface ContextPort {
    * @returns The serializable context snapshot.
    */
   snapshot(): Promise<JsonValue>;
+
+  /**
+   * Restores strategy state from a checkpoint and the later events.
+   *
+   * @param snapshot - Saved context state, or undefined when no checkpoint exists.
+   * @param eventsAfterSnapshot - Events after the checkpoint, or all events without one.
+   */
+  restore(snapshot: JsonValue | undefined, eventsAfterSnapshot: readonly Event[]): Promise<void>;
 }
 
 /** Generates run-scoped identifiers. */

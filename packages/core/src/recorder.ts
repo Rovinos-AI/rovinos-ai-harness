@@ -7,6 +7,7 @@ import {
   SpanStatusCode,
   trace,
   type AttributeValue,
+  type Link,
   type Span,
   type SpanContext,
 } from "@opentelemetry/api";
@@ -164,6 +165,7 @@ export class RunRecorder {
     definition: SpanDefinition<SpanDefinitionShape>,
     attrs: Readonly<Record<string, AttributeValue>>,
     fn: (span: Span) => Event | Promise<Event>,
+    links?: readonly Link[],
   ): Promise<Event> {
     const spanAttrs: Record<string, unknown> = {
       ...attrs,
@@ -176,7 +178,9 @@ export class RunRecorder {
 
     const span = definition.start(
       spanAttrs,
-      definition.name === RUN_SPAN.name ? { parent: ROOT_CONTEXT } : undefined,
+      definition.name === RUN_SPAN.name
+        ? { parent: ROOT_CONTEXT, ...(links === undefined ? {} : { links: [...links] }) }
+        : undefined,
     );
     const activeContext = trace.setSpan(context.active(), span);
     return context.with(activeContext, async () => {
