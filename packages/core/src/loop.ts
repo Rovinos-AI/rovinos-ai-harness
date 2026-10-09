@@ -168,6 +168,15 @@ async function recordBudgetFailure(
   return failed;
 }
 
+/**
+ * Records a budget failure and writes a checkpoint when the configured cadence requires one.
+ *
+ * @param recorder - Recorder for the active run segment.
+ * @param events - Complete event history, extended with the failure and optional checkpoint.
+ * @param violation - Budget limit exceeded by the folded run state.
+ * @param checkpointer - Checkpointer associated with the active run.
+ * @returns The run-status event that marks the run failed.
+ */
 export async function recordBudgetFailureAndCheckpoint(
   recorder: RunRecorder,
   events: Event[],

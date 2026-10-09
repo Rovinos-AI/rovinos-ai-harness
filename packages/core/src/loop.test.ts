@@ -1700,9 +1700,7 @@ describe("runLoop", () => {
           Promise.resolve({ outcome: "ok" as const, result: { approved: true } }),
         );
         const tool = new FakeToolPort(
-          new Map([
-            ["ambiguous_tool", { idempotent: false, timeoutMs: 1_000, execute }],
-          ]),
+          new Map([["ambiguous_tool", { idempotent: false, timeoutMs: 1_000, execute }]]),
         );
         const options = createResumeOptions(store, clock, { tool });
         const requested = await resumeRun(options);
@@ -1758,9 +1756,7 @@ describe("runLoop", () => {
       const result = await resumeRun(options);
 
       expect(result.status).toBe("failed");
-      const budgetFailureIndex = result.events.findIndex(
-        ({ type }) => type === "budget_exceeded",
-      );
+      const budgetFailureIndex = result.events.findIndex(({ type }) => type === "budget_exceeded");
       expect(result.events.slice(budgetFailureIndex, budgetFailureIndex + 2)).toMatchObject([
         { type: "budget_exceeded", budget: "wall_clock", limit: 10, observed: 11 },
         { type: "run_status_changed", from: "running", to: "failed", reason: "budget_exceeded" },
