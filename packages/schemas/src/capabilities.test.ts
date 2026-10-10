@@ -28,7 +28,7 @@ describe("lookupCapabilities", () => {
         forcedToolChoice: true,
         parallelToolCalls: true,
         maxContextTokens: 100,
-        opaqueRoundTrip: false,
+        opaqueRoundTrip: true,
       },
       source: "config",
     });

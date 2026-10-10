@@ -55,6 +55,25 @@ Optional `flags` supports `i`, `m`, `s`, and `u`; global Unicode scanning is
 always enabled. Optional `validator` is `luhn` or `mod97` (IBAN-style rotation
 of the first four characters).
 
+Tool arguments remain tokenized unless a `pii.detokenize` entry explicitly
+allows the destination tool and argument pointers. JSON Pointers use RFC 6901
+escaping; a `*` segment selects array elements only. Unresolvable tokens fail
+closed by default; `onUnresolvable: leave` preserves their token text instead.
+Every resolution is audited with entity types and counts, not values. For example:
+
+```yaml
+pii:
+  detokenize:
+    - toolId: mail.send
+      args:
+        - /to
+        - /attachments/*/name
+      onUnresolvable: fail
+```
+
+The `*` segment traverses arrays only; for example, `/headers/*` does nothing
+when `headers` is an object.
+
 The conservative safety screen rejects unbounded quantifiers, quantified
 groups, alternation, look-around assertions, backreferences, and Unicode property escapes.
 It permits fixed atom repetitions up to 256 and at most one optional or

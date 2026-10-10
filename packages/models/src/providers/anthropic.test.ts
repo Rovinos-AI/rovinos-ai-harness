@@ -13,6 +13,7 @@ import {
 } from "../contract.js";
 import { ProviderError } from "../errors.js";
 import { ProviderResultSchema } from "../types.js";
+import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { AnthropicAdapter } from "./anthropic.js";
 
 const requestId = "00000000000000000000000000";
@@ -140,6 +141,15 @@ function fixtureFactory(
 runProviderContract("Anthropic Messages API contract", fixtureFactory, fixtures);
 
 describe("AnthropicAdapter", () => {
+  it("exposes capability overrides to the gateway", () => {
+    const adapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      capabilities: { forcedToolChoice: false },
+    });
+
+    expect(adapter.capabilities).toEqual({ forcedToolChoice: false });
+  });
+
   it.each([
     [500, "provider_unavailable"],
     [429, "provider_rate_limited"],
@@ -300,6 +310,47 @@ describe("AnthropicAdapter", () => {
         block.type === "tool_result",
     );
     expect(resultBlock).toMatchObject({ tool_use_id: "toolu_fixture" });
+  });
+
+  it("does not replay a forced synthetic tool call from opaque Anthropic content", async () => {
+    const providerResult = await makeRequest({
+      ...responseBody,
+      content: [
+        { type: "thinking", thinking: "private reasoning", signature: "sig_fixture" },
+        { type: "text", text: "structured result" },
+        {
+          type: "tool_use",
+          id: "toolu_emit_result",
+          name: "emit_result",
+          input: { answer: "ok" },
+        },
+      ],
+    }).adapter.complete(baseRequest, context());
+    const enforced = enforceToolOutput(
+      providerResult.parts,
+      z.object({ answer: z.string() }).strict(),
+    );
+    const next = makeRequest({ ...responseBody, content: [] });
+    await next.adapter.complete(
+      {
+        ...baseRequest,
+        messages: [...baseRequest.messages, { role: "assistant", parts: enforced.parts }],
+      },
+      context(),
+    );
+
+    const body = z.object({ messages: JsonValue }).parse(next.getRequestBody());
+    expect(JSON.stringify(body.messages)).not.toContain("emit_result");
+    expect(body.messages).toMatchObject([
+      { role: "user" },
+      {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "private reasoning", signature: "sig_fixture" },
+          { type: "text", text: "structured result" },
+        ],
+      },
+    ]);
   });
 
   it("does not mutate opaque history when merging assistant turns on repeated requests", async () => {

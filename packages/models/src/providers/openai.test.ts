@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ModelRequestSchema, parseJson } from "@harness/schemas";
-import type { JsonValue, ModelRequest, Part } from "@harness/schemas";
+import { JsonValue, ModelRequestSchema, parseJson } from "@harness/schemas";
+import type { ModelRequest, Part } from "@harness/schemas";
 import { MockAgent, fetch as undiciFetch } from "undici";
 import type { RequestInit as UndiciRequestInit } from "undici";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { runProviderContract, type ProviderContractFixture } from "../contract.js";
 import { ProviderResultSchema } from "../types.js";
+import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { OpenAIAdapter } from "./openai.js";
 import { fromChatResponse, toChatRequest } from "./chat-completions-mapper.js";
 
@@ -187,6 +189,7 @@ describe("OpenAI Chat Completions mapper", () => {
         },
       ],
     });
+
     const serialized = JSON.stringify(nextRequest);
     const parsed = parseJson(ModelRequestSchema, serialized);
     const mapped = toChatRequest(parsed, {
@@ -200,6 +203,104 @@ describe("OpenAI Chat Completions mapper", () => {
       tool_call_id: "call_openai_1",
       content: '{"found":true}',
     });
+  });
+
+  it("does not replay a forced synthetic tool call from opaque OpenAI messages", async () => {
+    const dispatcher = new MockAgent();
+    dispatcher.disableNetConnect();
+    const origin = "https://openai.test";
+    const syntheticMessage = {
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: "call_emit",
+          type: "function",
+          function: { name: "emit_result", arguments: '{"answer":"ok"}' },
+        },
+        {
+          id: "call_lookup",
+          type: "function",
+          function: { name: "lookup", arguments: '{"key":"value"}' },
+        },
+      ],
+    };
+    let secondRequest: JsonValue | undefined;
+    const pool = dispatcher.get(origin);
+    pool.intercept({ path: /.*/, method: "POST" }).reply(() => ({
+      statusCode: 200,
+      data: completion(syntheticMessage, "tool_calls"),
+      responseOptions: { headers: { "content-type": "application/json" } },
+    }));
+    pool.intercept({ path: /.*/, method: "POST" }).reply((options) => {
+      if (typeof options.body === "string") {
+        secondRequest = parseJson(JsonValue, options.body);
+      }
+      return {
+        statusCode: 200,
+        data: completion(textMessage),
+        responseOptions: { headers: { "content-type": "application/json" } },
+      };
+    });
+    const adapter = new OpenAIAdapter({
+      apiKey: { reveal: () => "test-key" },
+      fetch: mockFetch(dispatcher),
+      baseURL: origin,
+    });
+    const ids = [id, "00000000000000000000000001"];
+    const providerResult = await adapter.complete(request, {
+      signal: new AbortController().signal,
+      ids: { next: () => ids.shift() ?? id },
+      clock: { now: () => 0 },
+    });
+    const enforced = enforceToolOutput(
+      providerResult.parts,
+      z.object({ answer: z.string() }).strict(),
+    );
+
+    try {
+      await adapter.complete(
+        {
+          ...request,
+          messages: [
+            ...request.messages,
+            { role: "assistant", parts: enforced.parts },
+            {
+              role: "tool",
+              parts: [
+                {
+                  type: "tool_result",
+                  callId: "00000000000000000000000001",
+                  result: { found: true },
+                  isError: false,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          signal: new AbortController().signal,
+          ids: { next: () => id },
+          clock: { now: () => 0 },
+        },
+      );
+
+      expect(secondRequest).toBeDefined();
+      expect(JSON.stringify(secondRequest)).not.toContain("emit_result");
+      expect(secondRequest).toMatchObject({
+        messages: [
+          {},
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [{ id: "call_lookup" }],
+          },
+          { role: "tool", tool_call_id: "call_lookup" },
+        ],
+      });
+    } finally {
+      await dispatcher.close();
+    }
   });
 
   it.each([false, true])(
