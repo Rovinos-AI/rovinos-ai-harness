@@ -1017,6 +1017,7 @@ __metadata:
   resolution: "@harness/cli@workspace:packages/cli"
   dependencies:
     "@harness/config": "workspace:^"
+    "@harness/context": "workspace:^"
     "@harness/core": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"

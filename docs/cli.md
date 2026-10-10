@@ -60,6 +60,35 @@ is the run ID; `--json` returns `{"runId":"...","status":"cancelled"}`. Cancella
 `0`; a run that is already terminal reports `run_already_terminal`, and repeated append conflicts
 report `cancel_conflict`; both exit with code `1`.
 
+## `harness context`
+
+`harness context <runId> [--strategy naive|sliding_window|summarizing] [--max-tokens N]
+[--reserve-output N] [--model provider/model] [--show-content] [--json]` re-derives context
+from the stored event log without appending events or calling models. Summarizing uses only
+already-recorded compactions; it does not create a new summary.
+Context inspection currently supports SQLite only. SQLite is loaded into an in-memory read-only
+snapshot without directory creation, schema initialization, metadata writes, or sidecar creation.
+If a WAL or rollback-journal sidecar exists, inspection fails rather than returning a potentially
+stale or inconsistent snapshot.
+
+Defaults are `naive`, 8,192 maximum tokens, and 1,024 reserved output tokens. The model reference
+defaults to the first configured routing default, or `heuristic/default` when none is configured.
+Token estimates use the offline heuristic counter; they are not provider-reported usage.
+
+Human output summarizes the strategy and version, message/token counts versus the available budget,
+retained/dropped groups, compacted ranges, offloaded handles and byte sizes, and pinned sequences.
+JSON output contains metadata: strategy and version, model and budget,
+message count, estimated tokens, reconstructed group count, retained and dropped groups,
+all recorded compaction sequence ranges, retained offload handles and byte sizes, and pinned
+sequences. Neither offload previews nor summaries nor message text are included by default.
+The JSON contract is `ContextInspectionSchema` in `packages/schemas/src/cli/context.ts`.
+
+`--show-content` additionally includes the built messages as stored, without detokenization,
+and writes `content_may_be_sensitive` to stderr. It assumes the stored run was tokenized at its
+storage boundaries; legacy or externally supplied logs may still contain sensitive content.
+Unknown strategies list the registered identifiers and exit with code `2`; invalid model
+references and token counts also exit with code `2`. Missing runs report `run_not_found` (code `1`).
+
 ## Exit codes
 
 These numeric values are stable for scripts and automation:
@@ -68,7 +97,7 @@ These numeric values are stable for scripts and automation:
 | --- | --- | --- |
 | `0` | `ok` | Command completed successfully. |
 | `1` | `failure` | Unhandled or unmapped failure, including cancellation of an already-terminal run. |
-| `2` | `usage` | Invalid arguments or unknown command. |
+| `2` | `usage` | Invalid arguments, unknown command, or unknown context strategy. |
 | `3` | `config_invalid` | Configuration is invalid. |
 | `4` | `policy_denied` | Policy denied an operation, including separation-of-duties denial. |
 | `5` | `suspended` | A run is waiting for approval or human input, including a resume blocked by unresolved approvals. |
@@ -85,6 +114,7 @@ never included in CLI error output.
 
 | Error code | Exit code |
 | --- | --- |
+| `usage` | `2` |
 | `run_already_terminal`, `cancel_conflict` | `1` |
 | `config_invalid` | `3` |
 | `policy_denied`, `approver_is_requester` | `4` |

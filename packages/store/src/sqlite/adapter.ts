@@ -26,11 +26,11 @@ import {
 import { InvalidEventError, SeqConflictError } from "../errors.js";
 import {
   systemClock,
+  sqliteStoreOptionsSchema,
   type Clock,
   type EventStore,
   type ListRunsOptions,
   type RunSummary,
-  type SnapshotStoreOptions,
 } from "../types.js";
 import { SQLITE_SCHEMA } from "./schema.sql.js";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
@@ -38,12 +38,15 @@ import {
   decodeStoredContent,
   eventFromRow,
   initializeEncryptionMetadata,
+  validateEncryptionMetadata,
   insertSnapshot,
   parseStoredMeta,
+  runListPage,
   type EventRow,
   type RunRow,
   type RunSummaryRow,
 } from "./serialization.js";
+import { openReadOnlyDatabase } from "./read-only.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
@@ -101,25 +104,6 @@ async function encodeEvents(
   );
 }
 
-function runListPage(
-  rows: readonly RunSummaryRow[],
-  limit: number,
-): { runs: RunSummary[]; nextCursor?: string } {
-  const hasMore = rows.length > limit;
-  const page = rows.slice(0, limit);
-  const runs = page.map((row) => ({
-    runId: Id.parse(row.run_id),
-    createdAt: row.created_at,
-    status: RunStatus.parse(row.status),
-    lastSeq: row.last_seq,
-    lastTs: row.last_ts,
-  }));
-  const last = page.at(-1);
-  const nextCursor =
-    hasMore && last !== undefined ? encodeCursor(last.created_at, last.run_id) : undefined;
-  return nextCursor === undefined ? { runs } : { runs, nextCursor };
-}
-
 function decodeCursor(cursor: string): { createdAt: number; runId: Id } {
   try {
     const decoded = Buffer.from(cursor, "base64url").toString("utf8");
@@ -128,10 +112,6 @@ function decodeCursor(cursor: string): { createdAt: number; runId: Id } {
   } catch {
     throw new InvalidEventError([["cursor"]]);
   }
-}
-
-function encodeCursor(createdAt: number, runId: Id): string {
-  return Buffer.from(JSON.stringify([createdAt, runId])).toString("base64url");
 }
 
 /** Durable SQLite implementation of the append-only event store. */
@@ -175,26 +155,30 @@ export class SqliteEventStore implements EventStore {
    *
    * @param path Database file path or `:memory:`.
    * @param codec Codec used to store content separately from event metadata.
-   * @param options Snapshot retention configuration.
+   * @param options Snapshot retention and read-only configuration; read-only opens an existing database without initialization.
    * @param clock Clock supplying timestamps for sink-cursor updates.
    */
   constructor(
     path: string,
     codec: ContentCodec = new JsonContentCodec(),
-    options: SnapshotStoreOptions = {},
+    options: z.input<typeof sqliteStoreOptionsSchema> = {},
     clock: Clock = systemClock,
   ) {
-    const retainedSnapshotCount = snapshotKeep(options);
-    this.db = new Database(path);
+    const parsedOptions = sqliteStoreOptionsSchema.parse(options);
+    this.db = parsedOptions.readOnly ? openReadOnlyDatabase(path) : new Database(path);
     this.codec = codec;
-    this.snapshotKeep = retainedSnapshotCount;
+    this.snapshotKeep = snapshotKeep({ snapshotKeep: parsedOptions.snapshotKeep });
     try {
-      this.db.pragma("journal_mode = WAL");
-      this.db.pragma("synchronous = NORMAL");
+      if (!parsedOptions.readOnly) {
+        this.db.pragma("journal_mode = WAL");
+        this.db.pragma("synchronous = NORMAL");
+        this.db.exec(SQLITE_SCHEMA);
+        initializeEncryptionMetadata(this.db, this.codec.encrypted);
+      } else {
+        validateEncryptionMetadata(this.db, this.codec.encrypted);
+      }
       this.db.pragma("busy_timeout = 5000");
       this.db.pragma("foreign_keys = ON");
-      this.db.exec(SQLITE_SCHEMA);
-      initializeEncryptionMetadata(this.db, this.codec.encrypted);
       this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
     } catch (error) {
       this.db.close();

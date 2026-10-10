@@ -19,6 +19,8 @@ import type { CancelRunResult } from "./cancel.js";
 export interface RuntimeOverrides {
   readonly store?: EventStore;
   readonly dataDir?: string;
+  /** Open existing SQLite storage without schema initialization or writes. */
+  readonly readOnlyStore?: boolean;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly model?: ModelPort;

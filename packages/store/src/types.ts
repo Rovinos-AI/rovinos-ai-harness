@@ -10,6 +10,11 @@ export const snapshotStoreOptionsSchema = z
 /** Snapshot retention options accepted by an EventStore. */
 export type SnapshotStoreOptions = z.input<typeof snapshotStoreOptionsSchema>;
 
+/** SQLite-specific snapshot and offline inspection options. */
+export const sqliteStoreOptionsSchema = snapshotStoreOptionsSchema.extend({
+  readOnly: z.boolean().default(false),
+});
+
 /** Source of epoch-millisecond timestamps used for store metadata. */
 export interface Clock {
   /** Return the current epoch time in milliseconds. */

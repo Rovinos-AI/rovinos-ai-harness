@@ -287,9 +287,11 @@ async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | und
   return undefined;
 }
 
-async function createSqliteStore(dataDir: string): Promise<EventStore> {
-  await mkdir(dataDir, { recursive: true });
-  return new SqliteEventStore(join(dataDir, "harness.db"));
+async function createSqliteStore(dataDir: string, readOnly: boolean): Promise<EventStore> {
+  if (!readOnly) {
+    await mkdir(dataDir, { recursive: true });
+  }
+  return new SqliteEventStore(join(dataDir, "harness.db"), undefined, { readOnly });
 }
 
 function composeRuntime(options: RuntimeComposition): Runtime {
@@ -390,7 +392,8 @@ export async function createRuntime(
     })) ??
     missingModelPort;
   const dataDir = overrides.dataDir ?? process.env.HARNESS_DATA_DIR ?? process.cwd();
-  const store = overrides.store ?? (await createSqliteStore(dataDir));
+  const store =
+    overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
   const tool = overrides.tool ?? unavailableTool;
   const context = overrides.context ?? new NaiveContext();
   return composeRuntime({ config, overrides, clock, ids, store, model, tool, context });
