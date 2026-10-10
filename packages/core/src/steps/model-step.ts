@@ -3,7 +3,7 @@ import { Code, type Event, type Id, type Message, type ToolSpec } from "@harness
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
-import type { IdGenerator, ModelCompletion, ModelPort, RunContext } from "../ports.js";
+import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
 
 /** Inputs needed to perform one recorded model call. */
 export interface ModelStepOptions {
@@ -19,6 +19,15 @@ export interface ModelStepOptions {
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
+}
+
+/** Selects request messages and model-visible tool specifications for the model step. */
+export function modelToolOptions(
+  tool: ToolPort,
+  messages: Message[],
+): Pick<ModelStepOptions, "messages" | "tools"> {
+  const tools = tool.getToolSpecs?.();
+  return { messages, ...(tools === undefined ? {} : { tools }) };
 }
 
 /** Result of one model step, including events appended by the step. */
