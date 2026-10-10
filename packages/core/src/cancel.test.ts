@@ -88,7 +88,7 @@ function competingEvent(seq: number): {
   readonly requestId: ReturnType<typeof Id.parse>;
   readonly provider: "test";
   readonly model: "test";
-  readonly messages: null;
+  readonly messages: [];
   readonly runId: ReturnType<typeof Id.parse>;
   readonly ts: number;
   readonly traceId: string;
@@ -101,7 +101,7 @@ function competingEvent(seq: number): {
     requestId: Id.parse(String(seq).padStart(26, "0")),
     provider: "test",
     model: "test",
-    messages: null,
+    messages: [],
     runId,
     ts: 101 + seq,
     traceId: "a".repeat(32),

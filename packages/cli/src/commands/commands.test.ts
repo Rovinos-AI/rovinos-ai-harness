@@ -71,8 +71,7 @@ class TestShutdownProcess implements ShutdownProcessLike {
 
 const config = HarnessConfigSchema.parse({});
 const completion = (content: string): ModelCompletion => ({
-  content,
-  toolCalls: [],
+  parts: [{ type: "text", text: content }],
   usage: { inputTokens: 2, outputTokens: 3 },
   finishReason: "stop",
   provider: "test",
@@ -80,6 +79,7 @@ const completion = (content: string): ModelCompletion => ({
   latencyMs: 1,
   schemaValid: true,
   repairAttempts: 0,
+  fallbackDepth: 0,
   providerBlobs: null,
 });
 
@@ -183,7 +183,7 @@ async function seedPendingApproval(harness: CliHarness): Promise<{
         requestId: harness.ids.next(),
         provider: "test",
         model: "script",
-        messages: { goal: "approval test" },
+        messages: [{ role: "user", parts: [{ type: "text", text: "approval test" }] }],
       },
       {
         type: "tool_intent",
@@ -338,7 +338,10 @@ describe("run, resume, and inspect CLI commands", () => {
     const resumeCode = await main(["--json", "resume", runId], harness.context, [resumeCommand]);
 
     expect(resumeCode).toBe(ExitCode.ok);
-    expect(requests.at(-1)?.messages).toMatchObject({ goal: { goal: "wait" } });
+    expect(requests.at(-1)?.messages).toContainEqual({
+      role: "user",
+      parts: [{ type: "text", text: '{"goal":"wait"}' }],
+    });
   });
 
   it("shows pending approvals, warns before exposing content, and resumes after approval", async () => {
