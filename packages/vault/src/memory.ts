@@ -7,6 +7,7 @@ import {
   type VaultAdmin,
   type VaultReader,
   type VaultResolver,
+  type VaultResolveContext,
   type VaultWriter,
 } from "./types.js";
 
@@ -67,7 +68,11 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
   }
 
   /** Resolve a token only within its owning run. */
-  resolve(runId: Id, token: TokenValue): Promise<string | undefined> {
+  resolve(
+    runId: Id,
+    token: TokenValue,
+    _context: VaultResolveContext,
+  ): Promise<string | undefined> {
     return Promise.resolve(this.entries.get(runId)?.get(token)?.rawValue);
   }
 
