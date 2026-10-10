@@ -60,14 +60,17 @@ export interface ChatCompletionLike {
   } | null;
 }
 
-function providerCallIdByCallId(messages: ModelRequest["messages"]): Map<string, string> {
+function providerCallIdByCallId(
+  messages: ModelRequest["messages"],
+  provider: string,
+): Map<string, string> {
   const ids = new Map<string, string>();
   for (const message of messages) {
     if (message.role !== "assistant") {
       continue;
     }
     for (const part of message.parts) {
-      if (part.type !== "opaque" || part.provider !== "openai") {
+      if (part.type !== "opaque" || part.provider !== provider) {
         continue;
       }
       const blob = OpaqueBlobSchema.safeParse(part.blob);
@@ -96,9 +99,10 @@ function assistantContent(parts: ModelRequest["messages"][number]["parts"], hasT
 function assistantMessage(
   requestMessage: ModelRequest["messages"][number],
   callIds: ReadonlyMap<string, string>,
+  provider: string,
 ): ChatCompletionAssistantMessageParam {
   for (const part of requestMessage.parts) {
-    if (part.type !== "opaque" || part.provider !== "openai") {
+    if (part.type !== "opaque" || part.provider !== provider) {
       continue;
     }
     const blob = OpaqueBlobSchema.safeParse(part.blob);
@@ -130,13 +134,16 @@ function assistantMessage(
   };
 }
 
-function mapMessages(messages: ModelRequest["messages"]): ChatCompletionMessageParam[] {
-  const callIds = providerCallIdByCallId(messages);
+function mapMessages(
+  messages: ModelRequest["messages"],
+  provider: string,
+): ChatCompletionMessageParam[] {
+  const callIds = providerCallIdByCallId(messages, provider);
   const mapped: ChatCompletionMessageParam[] = [];
 
   for (const message of messages) {
     if (message.role === "assistant") {
-      mapped.push(assistantMessage(message, callIds));
+      mapped.push(assistantMessage(message, callIds, provider));
     } else if (message.role === "system" || message.role === "user") {
       mapped.push({ role: message.role, content: textContent(message.parts) });
     } else {
@@ -220,11 +227,12 @@ function mapOutputFormat(
 export function toChatRequest(
   request: ModelRequest,
   quirks: ChatCompletionsQuirks,
+  provider = "openai",
 ): ChatCompletionCreateParamsNonStreaming {
   const tools = mapTools(request);
   return {
     model: request.model.model,
-    messages: mapMessages(request.messages),
+    messages: mapMessages(request.messages, provider),
     ...tools,
     ...mapToolChoice(request),
     ...(tools.tools === undefined ? {} : { parallel_tool_calls: quirks.parallelToolCalls }),
@@ -299,6 +307,7 @@ function mapFinishReason(reason: string | null, invalidArguments: boolean): stri
 export function fromChatResponse(
   response: ChatCompletionLike,
   ids: { readonly next: () => Id },
+  provider = "openai",
 ): {
   readonly parts: ModelRequest["messages"][number]["parts"];
   readonly usage: { readonly inputTokens: number; readonly outputTokens: number };
@@ -325,7 +334,7 @@ export function fromChatResponse(
 
   parts.push({
     type: "opaque",
-    provider: "openai",
+    provider: Code.parse(provider),
     blob: JsonValue.parse({
       message: choice.message,
       openaiCallIdByCallId: mappedCalls.openaiCallIdByCallId,

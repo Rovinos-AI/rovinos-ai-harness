@@ -77,8 +77,12 @@ export { StoreConfigSchema } from "./config/store.js";
 export {
   ModelEnforcementConfigSchema,
   ModelRetryConfigSchema,
+  ModelProviderConfigSchema,
+  ModelRoutingConfigSchema,
   ModelsConfigSchema,
   type ModelEnforcementConfig,
+  type ModelProviderConfig,
+  type ModelRoutingConfig,
   type ModelRetryConfig,
   type ModelsConfig,
 } from "./config/models.js";

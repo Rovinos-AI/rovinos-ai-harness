@@ -87,6 +87,7 @@ function makeRequest(
   body: unknown = responseBody,
   status = 200,
   headers: Record<string, string> = {},
+  provider = "anthropic",
 ): {
   readonly adapter: AnthropicAdapter;
   readonly getRequestBody: () => JsonValue | undefined;
@@ -109,6 +110,7 @@ function makeRequest(
   return {
     adapter: new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
+      provider,
       fetch,
       baseURL: "https://provider.test",
     }),
@@ -310,6 +312,34 @@ describe("AnthropicAdapter", () => {
         block.type === "tool_result",
     );
     expect(resultBlock).toMatchObject({ tool_use_id: "toolu_fixture" });
+  });
+
+  it("round-trips opaque parts under a configured provider id", async () => {
+    const provider = "anthropic-custom";
+    const response = makeRequest(responseBody, 200, {}, provider);
+    const request: ModelRequest = {
+      ...baseRequest,
+      model: { provider, model: "claude-sonnet-5-5" },
+      messages: [
+        {
+          role: "assistant",
+          parts: [
+            {
+              type: "opaque",
+              provider,
+              blob: { content: rawContent, toolUseIdByCallId: {} },
+            },
+          ],
+        },
+      ],
+    };
+
+    await response.adapter.complete(request, context());
+
+    const body = response.getRequestBody();
+    expect(body).toMatchObject({
+      messages: [{ role: "assistant", content: rawContent }],
+    });
   });
 
   it("does not replay a forced synthetic tool call from opaque Anthropic content", async () => {

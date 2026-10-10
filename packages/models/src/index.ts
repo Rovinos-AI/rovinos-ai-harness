@@ -17,6 +17,12 @@ export {
 } from "./gateway.js";
 export { AdapterRegistry } from "./registry.js";
 export {
+  createRoutingModelGateway,
+  RoutingModelGateway,
+  RoutingProviderUnknownError,
+  type ModelRoutingConfig,
+} from "./routing.js";
+export {
   DeadlineExceededError,
   abortableSleep,
   withRetries,

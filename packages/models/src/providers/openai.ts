@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lookupCapabilities, type Capabilities, type ModelRequest } from "@harness/schemas";
+import {
+  lookupCapabilities,
+  type Capabilities,
+  type Code,
+  type ModelRequest,
+} from "@harness/schemas";
 import OpenAI, {
   APIConnectionError,
   APIConnectionTimeoutError,
@@ -25,6 +30,7 @@ export interface OpenAISecret {
 /** OpenAI adapter construction options. */
 export interface OpenAIAdapterOptions {
   readonly apiKey: OpenAISecret;
+  readonly provider?: Code;
   readonly fetch?: typeof fetch;
   readonly baseURL?: string;
   readonly capabilities?: Partial<Capabilities>;
@@ -32,7 +38,7 @@ export interface OpenAIAdapterOptions {
 
 /** OpenAI Chat Completions provider adapter. */
 export class OpenAIAdapter implements ProviderAdapter {
-  readonly provider = "openai";
+  readonly provider: Code;
   readonly capabilities: Partial<Capabilities>;
   private readonly client: OpenAI;
 
@@ -42,6 +48,7 @@ export class OpenAIAdapter implements ProviderAdapter {
    * @param options - Secret API key, optional injected fetch, base URL, and capability overrides.
    */
   constructor(options: OpenAIAdapterOptions) {
+    this.provider = options.provider ?? "openai";
     this.client = new OpenAI({
       apiKey: options.apiKey.reveal(),
       maxRetries: 0,
@@ -57,13 +64,17 @@ export class OpenAIAdapter implements ProviderAdapter {
     const capabilities = lookupCapabilities(request.model, this.capabilities).capabilities;
     try {
       const response = await this.client.chat.completions.create(
-        toChatRequest(request, {
-          structuredOutput: capabilities.structuredOutput,
-          parallelToolCalls: capabilities.parallelToolCalls,
-        }),
+        toChatRequest(
+          request,
+          {
+            structuredOutput: capabilities.structuredOutput,
+            parallelToolCalls: capabilities.parallelToolCalls,
+          },
+          this.provider,
+        ),
         { signal: context.signal },
       );
-      const mapped = fromChatResponse(response, context.ids);
+      const mapped = fromChatResponse(response, context.ids, this.provider);
       return {
         ...mapped,
         latencyMs: Math.max(0, context.clock.now() - startedAt),

@@ -19,6 +19,8 @@ export interface AnthropicApiKey {
 export interface AnthropicAdapterOptions {
   /** API key secret resolved by the host. */
   readonly apiKey: AnthropicApiKey;
+  /** Configured provider code used to identify opaque response parts. */
+  readonly provider?: Code;
   /** Optional fetch implementation, primarily used for deterministic tests. */
   readonly fetch?: ClientOptions["fetch"];
   /** Optional API base URL, primarily used for testing or a compatible endpoint. */
@@ -46,14 +48,19 @@ function readToolUseId(blob: JsonValue, callId: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function findToolUseId(request: ModelRequest, messageIndex: number, callId: string): string {
+function findToolUseId(
+  request: ModelRequest,
+  messageIndex: number,
+  callId: string,
+  provider: string,
+): string {
   for (let index = messageIndex - 1; index >= 0; index -= 1) {
     const message = request.messages[index];
     if (message?.role !== "assistant") {
       continue;
     }
     const opaque = message.parts.find(
-      (part) => part.type === "opaque" && part.provider === "anthropic",
+      (part) => part.type === "opaque" && part.provider === provider,
     );
     if (opaque?.type === "opaque") {
       const toolUseId = readToolUseId(opaque.blob, callId);
@@ -65,14 +72,18 @@ function findToolUseId(request: ModelRequest, messageIndex: number, callId: stri
   return `toolu_${callId}`;
 }
 
-function buildMessageContent(request: ModelRequest, messageIndex: number): JsonValue[] {
+function buildMessageContent(
+  request: ModelRequest,
+  messageIndex: number,
+  provider: string,
+): JsonValue[] {
   const message = request.messages[messageIndex];
   if (message === undefined) {
     return [];
   }
   if (message.role === "assistant") {
     const opaque = message.parts.find(
-      (part) => part.type === "opaque" && part.provider === "anthropic",
+      (part) => part.type === "opaque" && part.provider === provider,
     );
     if (opaque?.type === "opaque") {
       if (
@@ -101,7 +112,7 @@ function buildMessageContent(request: ModelRequest, messageIndex: number): JsonV
     } else if (part.type === "tool_result") {
       blocks.push({
         type: "tool_result",
-        tool_use_id: findToolUseId(request, messageIndex, part.callId),
+        tool_use_id: findToolUseId(request, messageIndex, part.callId, provider),
         content: typeof part.result === "string" ? part.result : JSON.stringify(part.result),
         is_error: part.isError,
       });
@@ -110,14 +121,14 @@ function buildMessageContent(request: ModelRequest, messageIndex: number): JsonV
   return blocks;
 }
 
-function buildMessages(request: ModelRequest) {
+function buildMessages(request: ModelRequest, provider: string) {
   const messages: { role: "assistant" | "user"; content: JsonValue[] }[] = [];
   for (const [index, message] of request.messages.entries()) {
     if (message.role === "system") {
       continue;
     }
     const role = message.role === "assistant" ? "assistant" : "user";
-    const content = buildMessageContent(request, index);
+    const content = buildMessageContent(request, index, provider);
     const previous = messages.at(-1);
     if (previous?.role === role) {
       previous.content.push(...content);
@@ -128,7 +139,7 @@ function buildMessages(request: ModelRequest) {
   return messages;
 }
 
-function buildRequest(request: ModelRequest): JsonValue {
+function buildRequest(request: ModelRequest, provider: string): JsonValue {
   // The Messages API requires max_tokens, so do not silently choose a limit for callers.
   if (request.maxOutputTokens === undefined) {
     throw new ProviderError("provider_bad_request");
@@ -140,7 +151,7 @@ function buildRequest(request: ModelRequest): JsonValue {
         part.type === "text" ? [{ type: "text" as const, text: part.text }] : [],
       ),
     );
-  const messages = buildMessages(request);
+  const messages = buildMessages(request, provider);
   // Tool IDs are already validated Codes; send names unchanged for round trips.
   const tools =
     request.toolChoice !== "none" && request.tools !== undefined
@@ -209,7 +220,7 @@ function mapError(error: unknown, signal: AbortSignal): never {
 
 /** Anthropic Messages API adapter with provider-specific content preserved verbatim. */
 export class AnthropicAdapter implements ProviderAdapter {
-  readonly provider = "anthropic";
+  readonly provider: Code;
   readonly capabilities: Partial<Capabilities>;
   private readonly client: Anthropic;
 
@@ -219,6 +230,7 @@ export class AnthropicAdapter implements ProviderAdapter {
    * @param options - The resolved API key, capability overrides, and optional SDK transport.
    */
   constructor(options: AnthropicAdapterOptions) {
+    this.provider = options.provider ?? "anthropic";
     this.capabilities = options.capabilities ?? {};
     this.client = new Anthropic({
       apiKey: options.apiKey.reveal(),
@@ -232,7 +244,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
     const startedAt = context.clock.now();
     let response: Message;
-    const params = buildRequest(request);
+    const params = buildRequest(request, this.provider);
     try {
       // Use raw post so opaque blocks (including future block types) pass through verbatim.
       response = await this.client.post<Message>("/v1/messages", {
@@ -266,7 +278,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       const content = JsonValue.parse(response.content);
       parts.push({
         type: "opaque",
-        provider: "anthropic",
+        provider: this.provider,
         blob: { content, toolUseIdByCallId },
       });
 

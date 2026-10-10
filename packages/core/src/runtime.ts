@@ -1,29 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHash, randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
-import {
-  HarnessError,
-  Id,
-  Sha256Hex,
-  type Event,
-  type JsonValue,
-  type RunConfig,
-} from "@harness/schemas";
+import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { SqliteEventStore, type EventStore } from "@harness/store";
 import { ensureTracingFallback } from "@harness/telemetry";
-import { cancelRun, type CancelRunResult } from "./cancel.js";
+import { cancelRun } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
-import type { ContextPort, IdGenerator, ModelPort, ToolPort } from "./ports.js";
-import { LeaseLostError, RunRecorder, type Clock } from "./recorder.js";
+import type { ModelPort, ToolPort } from "./ports.js";
+import { LeaseLostError, RunRecorder } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
+import { createConfiguredModelPort } from "./runtime-model.js";
 import { RUN_SPAN } from "./spans.js";
 import { foldRunState } from "./run-state.js";
-
-const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+import { configHash, SystemIdGenerator, systemClock } from "./runtime-ids.js";
+import type {
+  Runtime,
+  RuntimeComposition,
+  RuntimeConfig,
+  RuntimeOverrides,
+} from "./runtime-config.js";
 const POLICY_VERSION = "default";
 const CANCEL_REQUESTED = "cancel_requested";
 const CANCEL_MONITOR_DEGRADED = "cancel_monitor_degraded";
@@ -32,36 +30,7 @@ const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
-/** Runtime dependencies that can be replaced by tests or embedding applications. */
-export interface RuntimeOverrides {
-  readonly store?: EventStore;
-  readonly dataDir?: string;
-  readonly clock?: Clock;
-  readonly ids?: IdGenerator;
-  readonly model?: ModelPort;
-  readonly tool?: ToolPort;
-  readonly context?: ContextPort;
-  readonly processLike?: ShutdownProcessLike;
-}
-
-/** Runtime configuration required by the currently implemented run loop. */
-export interface RuntimeConfig {
-  readonly run: RunConfig;
-}
-
-/** Composed run-loop operations and their shared dependencies. */
-export interface Runtime {
-  readonly store: EventStore;
-  readonly clock: Clock;
-  readonly ids: IdGenerator;
-  run(goal: JsonValue): Promise<RunLoopResult>;
-  resume(runId: Id): Promise<RunLoopResult>;
-  /** Requests durable cancellation and reports if the run was already terminal. */
-  cancel(runId: Id): Promise<CancelRunResult>;
-  close(): Promise<void>;
-}
-
-const systemClock: Clock = { now: () => Date.now() };
+export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
 
 function ensureTracing(): void {
   const probeIds = new SystemIdGenerator(systemClock);
@@ -70,22 +39,6 @@ function ensureTracing(): void {
     "harness.segment.id": probeIds.next(),
   });
   ensureTracingFallback(probe);
-}
-
-class SystemIdGenerator implements IdGenerator {
-  constructor(private readonly clock: Clock) {}
-
-  next(): Id {
-    const timestamp = BigInt(Math.max(0, Math.floor(this.clock.now())));
-    const random = BigInt(`0x${randomBytes(10).toString("hex")}`);
-    let value = (timestamp << 80n) | random;
-    let encoded = "";
-    for (let index = 0; index < 26; index += 1) {
-      encoded = `${ULID_ALPHABET[Number(value & 31n)] ?? "0"}${encoded}`;
-      value >>= 5n;
-    }
-    return Id.parse(encoded);
-  }
 }
 
 class ModelNotConfiguredError extends HarnessError {
@@ -136,10 +89,6 @@ const defaultProcessLike: ShutdownProcessLike = {
   // eslint-disable-next-line n/no-process-exit -- shutdown deadline is the final safety bound
   exit: (code) => process.exit(code),
 };
-
-function configHash(config: RuntimeConfig): ReturnType<typeof Sha256Hex.parse> {
-  return Sha256Hex.parse(createHash("sha256").update(JSON.stringify(config)).digest("hex"));
-}
 
 async function readEvents(store: EventStore, runId: Id, fromSeq = 0): Promise<Event[]> {
   const events: Event[] = [];
@@ -343,30 +292,8 @@ async function createSqliteStore(dataDir: string): Promise<EventStore> {
   return new SqliteEventStore(join(dataDir, "harness.db"));
 }
 
-/**
- * Builds a runtime from validated configuration. Until the provider-owning
- * epics land, model and tool ports must be supplied through overrides.
- * Supply an already composed tool override: Offloading( Pii( Policy( Tools ) ) ).
- * Future policy authorization runs in prepare on tokenized arguments, before
- * PII execution detokenizes allowlisted pointers. Binary output must be a validated
- * numeric byte array and must use the outer offloader; it never produces previews.
- *
- * @param config - Validated harness configuration with run-loop settings.
- * @param overrides - Optional stores, ports, and deterministic test dependencies.
- * @returns Run, resume, and store operations sharing the composed dependencies.
- */
-export async function createRuntime(
-  config: RuntimeConfig,
-  overrides: RuntimeOverrides = {},
-): Promise<Runtime> {
-  ensureTracing();
-  const clock = overrides.clock ?? systemClock;
-  const ids = overrides.ids ?? new SystemIdGenerator(clock);
-  const dataDir = overrides.dataDir ?? process.env.HARNESS_DATA_DIR ?? process.cwd();
-  const store = overrides.store ?? (await createSqliteStore(dataDir));
-  const model = overrides.model ?? missingModelPort;
-  const tool = overrides.tool ?? unavailableTool;
-  const context = overrides.context ?? new NaiveContext();
+function composeRuntime(options: RuntimeComposition): Runtime {
+  const { config, overrides, clock, ids, store, model, tool, context } = options;
   return {
     store,
     clock,
@@ -431,4 +358,40 @@ export async function createRuntime(
     cancel: (runId) => cancelRun(store, runId, clock, ids),
     close: () => store.close(),
   };
+}
+
+/**
+ * Builds a runtime from validated config with injectable ports.
+ * Supply a composed tool port: Offloading(Pii(Policy(Tools))); policy uses tokenized arguments.
+ * Binary results use the outer offloader and are never returned as previews.
+ *
+ * @param config - Validated run and model configuration.
+ * @param overrides - Optional stores, ports, and deterministic test dependencies.
+ * @returns Shared run, resume, cancellation, and store operations.
+ */
+export async function createRuntime(
+  config: RuntimeConfig,
+  overrides: RuntimeOverrides = {},
+): Promise<Runtime> {
+  ensureTracing();
+  const clock = overrides.clock ?? systemClock;
+  const ids = overrides.ids ?? new SystemIdGenerator(clock);
+  const model =
+    overrides.model ??
+    (await createConfiguredModelPort(config.models, {
+      ids,
+      clock,
+      ...(overrides.providerAdapters === undefined
+        ? {}
+        : { providerAdapters: overrides.providerAdapters }),
+      ...(overrides.secretResolver === undefined
+        ? {}
+        : { secretResolver: overrides.secretResolver }),
+    })) ??
+    missingModelPort;
+  const dataDir = overrides.dataDir ?? process.env.HARNESS_DATA_DIR ?? process.cwd();
+  const store = overrides.store ?? (await createSqliteStore(dataDir));
+  const tool = overrides.tool ?? unavailableTool;
+  const context = overrides.context ?? new NaiveContext();
+  return composeRuntime({ config, overrides, clock, ids, store, model, tool, context });
 }
