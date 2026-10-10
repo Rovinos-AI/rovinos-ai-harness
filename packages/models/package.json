@@ -25,6 +25,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.131.0",
     "@harness/schemas": "workspace:^",
+    "openai": "6.33.0",
     "zod": "4.6.5"
   },
   "peerDependencies": {
@@ -40,6 +41,7 @@
     }
   },
   "devDependencies": {
+    "ajv": "8.20.0",
     "undici": "8.11.2",
     "vitest": "3.2.6"
   }

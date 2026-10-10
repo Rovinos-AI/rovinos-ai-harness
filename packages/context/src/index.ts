@@ -18,3 +18,9 @@ export {
 } from "./types.js";
 export { eventsToTranscript } from "./transcript.js";
 export { NaiveStrategy } from "./strategies/naive.js";
+export {
+  CalibrationSnapshotSchema,
+  CalibratingTokenCounter,
+  HeuristicTokenCounter,
+  type CalibrationSnapshot,
+} from "./token-counter.js";

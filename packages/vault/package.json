@@ -5,7 +5,8 @@
   "type": "module",
   "license": "Apache-2.0",
   "files": [
-    "dist"
+    "dist",
+    "migrations"
   ],
   "exports": {
     ".": {
@@ -18,10 +19,13 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
+    "@harness/crypto": "workspace:^",
     "@harness/schemas": "workspace:^",
+    "better-sqlite3": "13.0.3",
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
     "vitest": "3.2.6"
   }
 }
