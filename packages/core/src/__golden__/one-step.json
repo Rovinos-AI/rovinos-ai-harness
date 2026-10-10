@@ -33,6 +33,15 @@
             "text": "test goal"
           }
         ]
+      },
+      {
+        "role": "user",
+        "parts": [
+          {
+            "type": "text",
+            "text": "Current plan: {\"items\":[],\"notes\":\"\"}"
+          }
+        ]
       }
     ]
   },

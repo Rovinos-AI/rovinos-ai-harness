@@ -1106,7 +1106,13 @@ describe("runLoop", () => {
         request: {
           requestId: "00000000000000000000000000",
           model: { provider: "test_provider", model: "test_model" },
-          messages: [{ role: "user", parts: [{ type: "text", text: "test goal" }] }],
+          messages: [
+            { role: "user", parts: [{ type: "text", text: "test goal" }] },
+            {
+              role: "user",
+              parts: [{ type: "text", text: 'Current plan: {"items":[],"notes":""}' }],
+            },
+          ],
           tools: [
             {
               toolId: "read_offloaded",
@@ -1176,7 +1182,7 @@ describe("runLoop", () => {
       traceparent,
       context: {
         strategyId: "naive",
-        strategyVersion: "v2",
+        strategyVersion: "v3",
         calibration: null,
       },
       plan: null,
@@ -1540,6 +1546,10 @@ describe("runLoop", () => {
             isError: false,
           },
         ],
+      },
+      {
+        role: "user",
+        parts: [{ type: "text", text: 'Current plan: {"items":[],"notes":""}' }],
       },
     ]);
     expect(tool.calls).toHaveLength(1);

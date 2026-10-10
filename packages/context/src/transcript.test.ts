@@ -253,9 +253,13 @@ describe("NaiveStrategy", () => {
       counter: { count },
     });
 
-    expect(result.messages).toHaveLength(4);
+    expect(result.messages).toHaveLength(5);
+    expect(result.messages.at(-1)).toMatchObject({
+      role: "user",
+      parts: [{ type: "text", text: 'Current plan: {"items":[],"notes":""}' }],
+    });
     expect(result.stats).toEqual({
-      messageCount: 4,
+      messageCount: 5,
       estimatedTokens: 9,
       droppedGroups: 0,
       compactedRanges: 1,
@@ -263,7 +267,7 @@ describe("NaiveStrategy", () => {
     });
     expect(result.pinnedSeqs).toEqual([0, 0]);
     expect(strategy.id).toBe("naive");
-    expect(strategy.version).toBe("v2");
+    expect(strategy.version).toBe("v3");
     expect(count).toHaveBeenCalledWith(result.messages, { provider: "test", model: "test" });
   });
 });

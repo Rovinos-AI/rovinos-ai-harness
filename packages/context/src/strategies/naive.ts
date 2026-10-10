@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Code } from "@harness/schemas";
 import { OffloadedStub } from "../offload.js";
+import { derivePlan, renderPlanMessage } from "../plan.js";
 import { ContextResultSchema, type ContextResult, type ContextStrategy } from "../types.js";
 import { eventsToTranscript } from "../transcript.js";
 
@@ -9,12 +10,15 @@ import { eventsToTranscript } from "../transcript.js";
  */
 export class NaiveStrategy implements ContextStrategy {
   readonly id: Code = "naive";
-  readonly version: Code = "v2";
+  readonly version: Code = "v3";
 
   /** {@inheritDoc ContextStrategy.build} */
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
     const groups = eventsToTranscript(input.events);
-    const messages = groups.flatMap((group) => group.messages);
+    const messages = [
+      ...groups.flatMap((group) => group.messages),
+      renderPlanMessage(derivePlan(input.events)),
+    ];
     const offloadedResults = messages.reduce(
       (count, message) =>
         count +

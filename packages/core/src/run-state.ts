@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type JsonValue, type RunStatus } from "@harness/schemas";
+import { derivePlan } from "@harness/context";
 import { RUN_TRIGGERS, transition } from "./state-machine.js";
 import type { ModelToolCall } from "./ports.js";
 
@@ -279,6 +280,7 @@ export function foldRunState(events: Iterable<Event>): RunState {
   }
 
   const runId = first.value.runId;
+  const eventHistory: Event[] = [first.value];
   let state: MutableRunState = {
     status: "pending",
     nextSeq: 1,
@@ -299,8 +301,10 @@ export function foldRunState(events: Iterable<Event>): RunState {
     if (next.done === true) {
       break;
     }
+    eventHistory.push(next.value);
     state = applyEvent(state, next.value, runId);
   }
 
-  return state;
+  const plan = derivePlan(eventHistory);
+  return plan === undefined ? state : { ...state, plan };
 }

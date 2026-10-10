@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import type { Event, Message, ModelRef, Part } from "@harness/schemas";
+import { Id, type Event, type Message, type ModelRef, type Part } from "@harness/schemas";
 import { SlidingWindowStrategy } from "./sliding-window.js";
 import type { ContextStrategyInput, TokenCounter } from "../types.js";
 import { HeuristicTokenCounter } from "../token-counter.js";
+import type { Plan } from "../plan.js";
 
 const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
 const callId = "22222222222222222222222222";
+const planCallId = Id.parse("44444444444444444444444444");
 const model: ModelRef = { provider: "test", model: "test" };
 const counter: TokenCounter = { count: (messages) => messages.length };
 const strategy = new SlidingWindowStrategy();
@@ -66,6 +68,30 @@ function toolResult(seq: number, result: Extract<Event, { type: "tool_result" }>
   };
 }
 
+function planUpdate(seq: number, plan: Plan): Event[] {
+  return [
+    {
+      ...envelope(seq),
+      type: "tool_intent",
+      callId: planCallId,
+      toolId: "update_plan",
+      idempotent: true,
+      policyDecision: "allow",
+      argsHash: "c".repeat(64),
+      args: { plan },
+    },
+    {
+      ...envelope(seq + 1),
+      type: "tool_result",
+      callId: planCallId,
+      toolId: "update_plan",
+      outcome: "ok",
+      latencyMs: 0,
+      result: plan,
+    },
+  ];
+}
+
 function compactedSummary(seq: number, fromSeq: number, toSeq: number): Event {
   return {
     ...envelope(seq),
@@ -99,21 +125,31 @@ describe("SlidingWindowStrategy", () => {
   it("keeps the full transcript when it fits and does not add a marker", async () => {
     const result = await build(
       [runInput(0), modelResponse(1, "first"), modelResponse(2, "last")],
-      3,
+      4,
     );
 
-    expect(result.messages.map(messageText)).toEqual(["goal", "first", "last"]);
-    expect(result.stats).toMatchObject({ estimatedTokens: 3, droppedGroups: 0 });
+    expect(result.messages.map(messageText)).toEqual([
+      "goal",
+      "first",
+      "last",
+      'Current plan: {"items":[],"notes":""}',
+    ]);
+    expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 0 });
     expect(result.messages.some((message) => messageText(message).includes("omitted"))).toBe(false);
 
     const heuristicResult = await strategy.build({
       events: [runInput(0), modelResponse(1, "a"), modelResponse(2, "b")],
-      budget: { maxTokens: 17, reserveOutputTokens: 0 },
+      budget: { maxTokens: 64, reserveOutputTokens: 0 },
       model,
       counter: new HeuristicTokenCounter(),
     });
 
-    expect(heuristicResult.messages.map(messageText)).toEqual(["goal", "a", "b"]);
+    expect(heuristicResult.messages.map(messageText)).toEqual([
+      "goal",
+      "a",
+      "b",
+      'Current plan: {"items":[],"notes":""}',
+    ]);
     expect(heuristicResult.stats.droppedGroups).toBe(0);
   });
 
@@ -125,7 +161,7 @@ describe("SlidingWindowStrategy", () => {
         modelResponse(2, "middle"),
         modelResponse(3, "newest"),
       ],
-      4,
+      5,
       1,
     );
 
@@ -133,9 +169,10 @@ describe("SlidingWindowStrategy", () => {
       "goal",
       "[2 earlier steps omitted]",
       "newest",
+      'Current plan: {"items":[],"notes":""}',
     ]);
-    expect(result.stats).toMatchObject({ estimatedTokens: 3, droppedGroups: 2 });
-    expect(result.stats.estimatedTokens).toBeLessThanOrEqual(3);
+    expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 2 });
+    expect(result.stats.estimatedTokens).toBeLessThanOrEqual(4);
   });
 
   it("always retains run input and pinned summary groups", async () => {
@@ -148,7 +185,7 @@ describe("SlidingWindowStrategy", () => {
         modelResponse(4, "middle"),
         modelResponse(5, "newest"),
       ],
-      4,
+      5,
     );
 
     expect(result.messages.map(messageText)).toEqual([
@@ -156,6 +193,7 @@ describe("SlidingWindowStrategy", () => {
       "Summary of earlier work: summary",
       "[2 earlier steps omitted]",
       "newest",
+      'Current plan: {"items":[],"notes":""}',
     ]);
     expect(result.pinnedSeqs).toEqual([0, 1]);
     expect(result.stats.compactedRanges).toBe(1);
@@ -172,13 +210,14 @@ describe("SlidingWindowStrategy", () => {
         toolResult(2, { value: "found" }),
         modelResponse(3, "newest"),
       ],
-      3,
+      4,
     );
 
     expect(result.messages.map(messageText)).toEqual([
       "goal",
       "[1 earlier steps omitted]",
       "newest",
+      'Current plan: {"items":[],"notes":""}',
     ]);
     expect(result.messages.some((message) => message.role === "tool")).toBe(false);
     expect(result.stats.droppedGroups).toBe(1);
@@ -193,11 +232,12 @@ describe("SlidingWindowStrategy", () => {
         ]),
         toolResult(2, { $offloaded: { handle: "wf_test", bytes: 1, preview: "x" } }),
       ],
-      3,
+      4,
     );
 
     expect(result.stats.offloadedResults).toBe(1);
     expect(result.stats.droppedGroups).toBe(0);
+    expect(result.messages.at(-1)).toMatchObject({ role: "user" });
   });
 
   it("throws when pinned groups alone exceed the available budget", async () => {
@@ -207,7 +247,7 @@ describe("SlidingWindowStrategy", () => {
   });
 
   it("throws rather than exceeding budget when the required marker cannot fit", async () => {
-    await expect(build([runInput(0), modelResponse(1, "recent")], 1)).rejects.toMatchObject({
+    await expect(build([runInput(0), modelResponse(1, "recent")], 2)).rejects.toMatchObject({
       code: "context_marker_exceeds_budget",
     });
   });
@@ -215,12 +255,52 @@ describe("SlidingWindowStrategy", () => {
   it("returns the same result for the same input", async () => {
     const events = [runInput(0), modelResponse(1, "old"), modelResponse(2, "new")];
 
-    await expect(build(events, 3)).resolves.toEqual(await build(events, 3));
+    await expect(build(events, 4)).resolves.toEqual(await build(events, 4));
+  });
+
+  it("keeps the deterministic plan message last and counts it as pinned", async () => {
+    const currentPlan: Plan = {
+      items: [{ id: "task.one", text: "do it", status: "doing" }],
+      notes: "keep",
+    };
+    const result = await build(
+      [
+        runInput(0),
+        modelResponse(1, "oldest"),
+        modelResponse(2, "middle"),
+        modelResponse(3, "newest"),
+        ...planUpdate(4, currentPlan),
+      ],
+      4,
+    );
+
+    expect(result.messages.map(messageText)).toEqual([
+      "goal",
+      "[2 earlier steps omitted]",
+      "newest",
+      `Current plan: ${JSON.stringify(currentPlan)}`,
+    ]);
+    expect(result.messages.at(-1)?.role).toBe("user");
+    expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 2 });
+  });
+
+  it("does not exceed budget when the pinned plan leaves no room for the omission marker", async () => {
+    await expect(
+      build(
+        [
+          runInput(0),
+          modelResponse(1, "old"),
+          modelResponse(2, "new"),
+          ...planUpdate(3, { items: [], notes: "" }),
+        ],
+        2,
+      ),
+    ).rejects.toMatchObject({ code: "context_marker_exceeds_budget" });
   });
 
   it("keeps its strategy identity and version stable", () => {
     expect(strategy.id).toBe("sliding_window");
-    expect(strategy.version).toBe("v1");
+    expect(strategy.version).toBe("v2");
   });
 
   it("estimates each group in linear time", async () => {
@@ -241,7 +321,7 @@ describe("SlidingWindowStrategy", () => {
 
     const result = await strategy.build({
       events,
-      budget: { maxTokens: 8, reserveOutputTokens: 0 },
+      budget: { maxTokens: 9, reserveOutputTokens: 0 },
       model,
       counter: countingCounter,
     });
@@ -253,7 +333,7 @@ describe("SlidingWindowStrategy", () => {
   it("drops another group when the final full count includes non-additive overhead", async () => {
     const nonAdditiveCounter: TokenCounter = {
       count: (messages) =>
-        messages.length === 4 &&
+        messages.length === 5 &&
         !messages.some((message) => messageText(message).includes("omitted"))
           ? 6
           : messages.length,
@@ -266,7 +346,7 @@ describe("SlidingWindowStrategy", () => {
         modelResponse(2, "middle"),
         modelResponse(3, "new"),
       ],
-      budget: { maxTokens: 4, reserveOutputTokens: 0 },
+      budget: { maxTokens: 5, reserveOutputTokens: 0 },
       model,
       counter: nonAdditiveCounter,
     });
@@ -276,7 +356,8 @@ describe("SlidingWindowStrategy", () => {
       "[1 earlier steps omitted]",
       "middle",
       "new",
+      'Current plan: {"items":[],"notes":""}',
     ]);
-    expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 1 });
+    expect(result.stats).toMatchObject({ estimatedTokens: 5, droppedGroups: 1 });
   });
 });

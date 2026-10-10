@@ -41,12 +41,13 @@ describe("StrategyContextPort", () => {
 
     await expect(context.build([input])).resolves.toEqual([
       { role: "user", parts: [{ type: "text", text: "goal" }] },
+      { role: "user", parts: [{ type: "text", text: 'Current plan: {"items":[],"notes":""}' }] },
     ]);
     expect(build.mock.calls[0]?.[0]).not.toHaveProperty("calibration");
     const snapshot = await context.snapshot();
     expect(snapshot).toEqual({
       strategyId: "naive",
-      strategyVersion: "v2",
+      strategyVersion: "v3",
       calibration,
     });
 
@@ -54,6 +55,7 @@ describe("StrategyContextPort", () => {
     await expect(context.snapshot()).resolves.toEqual(snapshot);
     await expect(context.build([input])).resolves.toEqual([
       { role: "user", parts: [{ type: "text", text: "goal" }] },
+      { role: "user", parts: [{ type: "text", text: 'Current plan: {"items":[],"notes":""}' }] },
     ]);
   });
 
