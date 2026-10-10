@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: Apache-2.0
+// A failed preparation remains explicit; sanitized null must never become executable.
+import {
+  HarnessError,
+  toPiiActionEventPayload,
+  type Code,
+  type Event,
+  type Part,
+} from "@harness/schemas";
+import type { ModelCompletion, ModelToolCall, RunContext, ToolPort } from "../ports.js";
+import type { RunRecorder } from "../recorder.js";
+
+/** Internal preparation outcome, retained until the tool loop consumes it. */
+export interface PreparedToolCall {
+  readonly call: ModelToolCall;
+  readonly errorCode?: Code;
+}
+
+const preparationCodes = new Set([
+  "pii_blocked",
+  "pii_depth_exceeded",
+  "pii_input_too_large",
+  "pii_input_invalid",
+  "pii_key_contains_pii",
+  "pii_detector_failed",
+  "pii_detector_invalid_output",
+  "pii_vault_failed",
+]);
+
+/** Preserves recorder failures across fail-closed boundary handling. */
+export class SummaryRecordingError extends HarnessError {
+  readonly code = "pii_summary_record_failed";
+  constructor(readonly failure: unknown) {
+    super("PII summary recording failed");
+  }
+}
+
+/** Builds a summary sink whose failures must not be mistaken for PII failures. */
+export function toolRunContext(
+  context: RunContext,
+  recorder: RunRecorder,
+  events: Event[],
+): RunContext {
+  return {
+    ...context,
+    recordPiiAction: async (summary) => {
+      try {
+        events.push(
+          await recorder.record({
+            type: "pii_action",
+            v: 1,
+            ...toPiiActionEventPayload(summary),
+          }),
+        );
+      } catch (error) {
+        throw new SummaryRecordingError(error);
+      }
+    },
+  };
+}
+
+/** Prepares once, scrubbing failed arguments and retaining a closed denial code. */
+export async function prepareToolCall(
+  tool: ToolPort,
+  call: ModelToolCall,
+  context: RunContext,
+): Promise<PreparedToolCall> {
+  if (tool.prepare === undefined) {
+    return { call };
+  }
+
+  try {
+    return { call: await tool.prepare(call, context) };
+  } catch (error) {
+    if (error instanceof SummaryRecordingError) {
+      throw error.failure;
+    }
+    const errorCode =
+      error instanceof HarnessError && preparationCodes.has(error.code)
+        ? error.code
+        : "pii_prepare_failed";
+    return { call: { ...call, args: null }, errorCode };
+  }
+}
+
+/** Sanitizes completion tool arguments once and drops opaque duplicate provider data. */
+export async function prepareCompletion(
+  completion: ModelCompletion,
+  tool: ToolPort | undefined,
+  context: RunContext,
+): Promise<{ completion: ModelCompletion; preparedCalls: PreparedToolCall[] }> {
+  const preparedCalls: PreparedToolCall[] = [];
+  const parts: Part[] = [];
+  for (const part of completion.parts) {
+    if (part.type !== "tool_call") {
+      parts.push(part);
+      continue;
+    }
+    const call = { callId: part.callId, toolId: part.toolId, args: part.args };
+    const prepared = tool === undefined ? { call } : await prepareToolCall(tool, call, context);
+    preparedCalls.push(prepared);
+    // Failed calls are not durable recovery input: null must never execute after a crash.
+    if (prepared.errorCode === undefined) {
+      parts.push({ type: "tool_call", ...prepared.call });
+    }
+  }
+  return {
+    completion: {
+      ...completion,
+      parts,
+      providerBlobs: tool?.prepare === undefined ? completion.providerBlobs : null,
+    },
+    preparedCalls,
+  };
+}
