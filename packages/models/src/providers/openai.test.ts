@@ -5,6 +5,7 @@ import { MockAgent, fetch as undiciFetch } from "undici";
 import type { RequestInit as UndiciRequestInit } from "undici";
 import { describe, expect, it } from "vitest";
 import { runProviderContract, type ProviderContractFixture } from "../contract.js";
+import { ProviderResultSchema } from "../types.js";
 import { OpenAIAdapter } from "./openai.js";
 import { fromChatResponse, toChatRequest } from "./chat-completions-mapper.js";
 
@@ -201,40 +202,96 @@ describe("OpenAI Chat Completions mapper", () => {
     });
   });
 
-  it("returns a text-less recoverable result for invalid tool arguments", () => {
-    const result = fromChatResponse(
-      {
-        choices: [
-          {
-            finish_reason: "tool_calls",
-            message: {
-              role: "assistant",
-              content: "discard this text",
-              tool_calls: [
-                {
-                  id: "call_broken",
-                  type: "function",
-                  function: { name: "lookup", arguments: "{invalid" },
-                },
-              ],
+  it.each([false, true])(
+    "returns only an opaque recoverable result for invalid arguments (mixed: %s)",
+    (mixed) => {
+      const toolCalls = [
+        {
+          id: "call_broken",
+          type: "function",
+          function: { name: "lookup", arguments: "{invalid" },
+        },
+      ];
+      if (mixed) {
+        toolCalls.unshift(...rawToolMessage.tool_calls);
+        toolCalls.push(...rawToolMessage.tool_calls);
+      }
+      const message = {
+        role: "assistant" as const,
+        content: "discard this text",
+        tool_calls: toolCalls,
+      };
+      const result = fromChatResponse(
+        {
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message,
             },
+          ],
+        },
+        { next: () => id },
+      );
+      const opaque = result.parts.find((part) => part.type === "opaque");
+
+      expect(result.parts).toHaveLength(1);
+      expect(result.finishReason).toBe("tool_args_invalid");
+      expect(opaque).toMatchObject({
+        type: "opaque",
+        blob: { message },
+      });
+      expect(ProviderResultSchema.safeParse({ ...result, latencyMs: 0 }).success).toBe(true);
+    },
+  );
+
+  it.each(["Invalid Name", "", "a".repeat(65)])(
+    "returns a recoverable result for invalid tool name %j",
+    (name) => {
+      const message = {
+        ...rawToolMessage,
+        tool_calls: [
+          ...rawToolMessage.tool_calls,
+          {
+            id: "call_invalid_name",
+            type: "function",
+            function: { name, arguments: "{}" },
+          },
+        ],
+      };
+      const result = fromChatResponse(
+        { choices: [{ finish_reason: "tool_calls", message }] },
+        { next: () => id },
+      );
+
+      expect(result.parts).toHaveLength(1);
+      expect(result.parts[0]).toMatchObject({ type: "opaque", blob: { message } });
+      expect(result.finishReason).toBe("tool_args_invalid");
+      expect(ProviderResultSchema.safeParse({ ...result, latencyMs: 0 }).success).toBe(true);
+    },
+  );
+
+  it.each([
+    { result: "done", content: "done" },
+    { result: { found: true }, content: '{"found":true}' },
+    { result: null, content: "null" },
+    { result: 42, content: "42" },
+    { result: false, content: "false" },
+    { result: ["done"], content: '["done"]' },
+  ])("maps tool result $result to $content", ({ result, content }) => {
+    const mapped = toChatRequest(
+      {
+        ...request,
+        messages: [
+          {
+            role: "tool",
+            parts: [{ type: "tool_result", callId: id, result, isError: false }],
           },
         ],
       },
-      { next: () => id },
+      { structuredOutput: "native", parallelToolCalls: true },
     );
-    const opaque = result.parts.find((part) => part.type === "opaque");
 
-    expect(result.parts).toHaveLength(1);
-    expect(result.finishReason).toBe("tool_args_invalid");
-    expect(opaque).toMatchObject({
-      type: "opaque",
-      blob: {
-        message: {
-          tool_calls: [{ function: { arguments: "{invalid" } }],
-        },
-      },
-    });
+    expect(mapped.messages).toEqual([{ role: "tool", tool_call_id: `call_${id}`, content }]);
   });
 
   it("maps multiple function calls, usage, and finish reasons", () => {
@@ -330,6 +387,23 @@ describe("OpenAI Chat Completions mapper", () => {
     ]);
     expect(mapped.tools).toBeUndefined();
     expect(mapped.response_format).toBeUndefined();
+  });
+
+  it.each([
+    {},
+    { tools: [] },
+    {
+      tools: [{ toolId: "lookup", description: "Lookup a value", inputSchema: { type: "object" } }],
+      toolChoice: "none" as const,
+    },
+  ])("omits parallel_tool_calls when tools are omitted: %j", (options) => {
+    const mapped = toChatRequest(
+      { ...request, ...options },
+      { structuredOutput: "native", parallelToolCalls: true },
+    );
+
+    expect(mapped).not.toHaveProperty("tools");
+    expect(mapped).not.toHaveProperty("parallel_tool_calls");
   });
 
   it("returns an empty normalized response when the provider returns no choices", () => {

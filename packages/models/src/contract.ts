@@ -126,7 +126,7 @@ async function assertAbortCompletion(
   didFetch: () => boolean,
 ): Promise<void> {
   const startedAt = performance.now();
-  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  await new Promise<void>((resolve) => setImmediate(resolve));
   controller.abort();
   const error = await completion.then(
     () => undefined,
@@ -247,6 +247,7 @@ async function runProviderScenario(
  *
  * Abort scenarios must reject with an `AbortError` or a `ProviderError` whose
  * code is `provider_timeout`, and must settle before the delayed response.
+ * The suite yields one event-loop turn before aborting so SDK setup reaches fetch.
  */
 export function runProviderContract(
   name: string,

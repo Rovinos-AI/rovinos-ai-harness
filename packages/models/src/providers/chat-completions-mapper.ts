@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
+  Code,
   JsonValue,
   parseJson,
   type Capabilities,
@@ -144,7 +145,7 @@ function mapMessages(messages: ModelRequest["messages"]): ChatCompletionMessageP
           mapped.push({
             role: "tool",
             tool_call_id: callIds.get(part.callId) ?? `call_${part.callId}`,
-            content: JSON.stringify(part.result),
+            content: typeof part.result === "string" ? part.result : JSON.stringify(part.result),
           });
         }
       }
@@ -213,12 +214,13 @@ export function toChatRequest(
   request: ModelRequest,
   quirks: ChatCompletionsQuirks,
 ): ChatCompletionCreateParamsNonStreaming {
+  const tools = mapTools(request);
   return {
     model: request.model.model,
     messages: mapMessages(request.messages),
-    ...mapTools(request),
+    ...tools,
     ...mapToolChoice(request),
-    parallel_tool_calls: quirks.parallelToolCalls,
+    ...(tools.tools === undefined ? {} : { parallel_tool_calls: quirks.parallelToolCalls }),
     ...(request.maxOutputTokens === undefined
       ? {}
       : { max_completion_tokens: request.maxOutputTokens }),
@@ -244,6 +246,11 @@ function mapToolCalls(
       continue;
     }
     let args;
+    const toolId = Code.safeParse(toolCall.function.name);
+    if (!toolId.success) {
+      invalidArguments = true;
+      continue;
+    }
     try {
       args = parseJson(JsonValue, toolCall.function.arguments);
     } catch {
@@ -252,7 +259,7 @@ function mapToolCalls(
     }
     const callId = ids.next();
     openaiCallIdByCallId[callId] = toolCall.id;
-    parts.push({ type: "tool_call", callId, toolId: toolCall.function.name, args });
+    parts.push({ type: "tool_call", callId, toolId: toolId.data, args });
   }
   return { parts, openaiCallIdByCallId, invalidArguments };
 }
@@ -303,7 +310,7 @@ export function fromChatResponse(
   }
 
   const mappedCalls = mapToolCalls(choice.message.tool_calls ?? [], ids);
-  const parts = mappedCalls.parts;
+  const parts = mappedCalls.invalidArguments ? [] : mappedCalls.parts;
 
   if (!mappedCalls.invalidArguments && choice.message.content !== null) {
     parts.unshift({ type: "text", text: choice.message.content });
