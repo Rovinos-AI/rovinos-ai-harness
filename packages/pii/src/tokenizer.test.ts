@@ -14,6 +14,7 @@ import type { PiiDetectorRegistry } from "./tokenizer.js";
 
 const runA = "A".repeat(26);
 const runB = "B".repeat(26);
+const resolveContext = { boundary: "tool_input" } as const;
 const context = { boundary: "model_input", destination: "hosted" } as const;
 
 function emailDetector(text: string): Detection[] {
@@ -124,12 +125,12 @@ describe("Tokenizer.tokenizeText", () => {
     expect(firstA.text).toBe("<EMAIL_1>");
     expect(firstB.text).toBe("<EMAIL_1>");
     expect(repeatedA.text).toBe(firstA.text);
-    expect(await vault.resolve(runA, "<EMAIL_1>")).toBe("alice@example.test");
-    expect(await vault.resolve(runB, "<EMAIL_1>")).toBe("bob@example.test");
+    expect(await vault.resolve(runA, "<EMAIL_1>", resolveContext)).toBe("alice@example.test");
+    expect(await vault.resolve(runB, "<EMAIL_1>", resolveContext)).toBe("bob@example.test");
     expect(sharedA.text).toBe("<EMAIL_2>");
     expect(sharedB.text).toBe("<EMAIL_2>");
-    expect(await vault.resolve(runA, "<EMAIL_2>")).toBe("shared@example.test");
-    expect(await vault.resolve(runB, "<EMAIL_2>")).toBe("shared@example.test");
+    expect(await vault.resolve(runA, "<EMAIL_2>", resolveContext)).toBe("shared@example.test");
+    expect(await vault.resolve(runB, "<EMAIL_2>", resolveContext)).toBe("shared@example.test");
     await expect(vault.stats(runA)).resolves.toEqual({ entries: 2 });
     await expect(vault.stats(runB)).resolves.toEqual({ entries: 2 });
   });
