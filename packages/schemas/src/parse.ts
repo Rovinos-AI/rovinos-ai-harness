@@ -47,9 +47,12 @@ export type SafeParseJsonResult<Schema extends z.ZodType> =
   | { readonly success: false; readonly error: ContractError };
 
 function issuesFromZod(error: z.ZodError): ContractIssue[] {
-  return error.issues.map(({ path, code }) => ({
-    path: path.map((segment) => (typeof segment === "symbol" ? String(segment) : segment)),
-    code,
+  return error.issues.map((issue) => ({
+    path: issue.path.map((segment) => (typeof segment === "symbol" ? String(segment) : segment)),
+    code:
+      issue.code === "custom" && typeof issue.params?.errorCode === "string"
+        ? issue.params.errorCode
+        : issue.code,
   }));
 }
 

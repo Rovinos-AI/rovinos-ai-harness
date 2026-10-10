@@ -48,6 +48,20 @@ export {
   type EventFieldClass,
 } from "./classification.js";
 export { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
+export {
+  DestinationSchema,
+  PiiActionSchema,
+  PiiBoundarySchema,
+  PiiEntitySchema,
+  PiiPolicySchema,
+  PiiRuleSchema,
+  type Destination,
+  type PiiAction,
+  type PiiBoundary,
+  type PiiEntity,
+  type PiiPolicy,
+  type PiiRule,
+} from "./pii-policy.js";
 export { SnapshotSchema, type Snapshot } from "./snapshot.js";
 export { RunConfigSchema, type RunConfig } from "./config/run.js";
 export { RunResumePolicySchema } from "./config/run.js";
@@ -55,7 +69,7 @@ export { StoreConfigSchema } from "./config/store.js";
 export { ModelsConfigSchema } from "./config/models.js";
 export { ServerConfigSchema } from "./config/servers.js";
 export { PolicyConfigSchema } from "./config/policy.js";
-export { PiiConfigSchema } from "./config/pii.js";
+export { PiiConfigSchema, type PiiConfig } from "./config/pii.js";
 export { TelemetryConfigSchema } from "./config/telemetry.js";
 export { SandboxConfigSchema } from "./config/sandbox.js";
 export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
