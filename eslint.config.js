@@ -121,7 +121,6 @@ const configuration = [
     files: ["**/*.{js,mjs,ts,tsx}"],
     languageOptions: {
       ecmaVersion: "latest",
-      sourceType: "module",
       globals: {
         Buffer: "readonly",
         console: "readonly",
@@ -213,6 +212,7 @@ const configuration = [
         "no-restricted-globals",
       ],
       "harness/import-direction": "error",
+      "harness/metric-registry-only": "error",
       "harness/no-relative-packages": "error",
       "harness/schema-inferred-types": "error",
       "jsdoc/require-jsdoc": [

@@ -10,6 +10,8 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { ReadableSpan, Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { lookupSpanDefinition } from "../registry.js";
 import { countDroppedTelemetry } from "../metrics.js";
+import { Id, type TelemetryConfig } from "@harness/schemas";
+import { assertSentinelGate, type SentinelGate } from "../sentinel/gate.js";
 import { sanitizeAttributes, sanitizeResourceAttributes } from "./sanitize-attributes.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -175,7 +177,18 @@ export function sanitizeSpan(span: ReadableSpan): ReadableSpan | undefined {
 
 /** Sanitizes finished spans before forwarding them to the next processor. */
 export class AllowlistSpanProcessor implements SpanProcessor {
-  constructor(private readonly next: SpanProcessor) {}
+  private readonly pending = new Set<Promise<void>>();
+
+  constructor(
+    private readonly next: SpanProcessor,
+    private readonly options: {
+      readonly gate?: SentinelGate;
+      readonly telemetry?: TelemetryConfig;
+      readonly nodeEnv?: string;
+    } = {},
+  ) {
+    assertSentinelGate(options.gate, options.telemetry, options.nodeEnv);
+  }
 
   /** Delegates span start notifications to the next processor. */
   onStart(span: Span, parentContext: Context): void {
@@ -188,23 +201,77 @@ export class AllowlistSpanProcessor implements SpanProcessor {
 
   /** Forwards only a sanitized span; malformed spans are counted and dropped. */
   onEnd(span: ReadableSpan): void {
+    this.track(this.processSpan(span));
+  }
+
+  /** Flushes the downstream processor. */
+  async forceFlush(): Promise<void> {
+    await this.drain();
+    await this.next.forceFlush();
+  }
+
+  /** Shuts down the downstream processor. */
+  async shutdown(): Promise<void> {
+    await this.drain();
+    await this.next.shutdown();
+  }
+
+  private async processSpan(span: ReadableSpan): Promise<void> {
     try {
       const sanitized = sanitizeSpan(span);
-      if (sanitized !== undefined) {
-        this.next.onEnd(sanitized);
+      if (sanitized === undefined) {
+        return;
       }
+      if (this.options.gate !== undefined) {
+        const runId = Id.safeParse(sanitized.attributes["harness.run.id"]);
+        const result = await this.options.gate.check({
+          ...(runId.success ? { runId: runId.data } : {}),
+          text: serializeSpan(sanitized),
+        });
+        if (!result.ok) {
+          countDroppedTelemetry("leak_sentinel");
+          return;
+        }
+      }
+      this.next.onEnd(sanitized);
     } catch {
       countDroppedTelemetry("processor_error");
     }
   }
 
-  /** Flushes the downstream processor. */
-  forceFlush(): Promise<void> {
-    return this.next.forceFlush();
+  private track(task: Promise<void>): void {
+    this.pending.add(task);
+    void task.then(() => this.pending.delete(task));
   }
 
-  /** Shuts down the downstream processor. */
-  shutdown(): Promise<void> {
-    return this.next.shutdown();
+  private async drain(): Promise<void> {
+    while (this.pending.size > 0) {
+      await Promise.all(this.pending);
+    }
   }
+}
+
+function serializeSpan(span: ReadableSpan): string {
+  const fields = [span.name];
+  appendAttributes(fields, span.attributes);
+  for (const { context } of span.links) {
+    fields.push(context.traceId, context.spanId);
+  }
+  appendAttributes(fields, span.resource.attributes);
+  return fields.join("\u0000");
+}
+
+function appendAttributes(fields: string[], attributes: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(attributes).sort(([left], [right]) =>
+    left < right ? -1 : Number(left > right),
+  )) {
+    fields.push(key, canonicalValue(value));
+  }
+}
+
+function canonicalValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(value);
 }

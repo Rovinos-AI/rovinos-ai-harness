@@ -15,6 +15,12 @@ describe("TelemetryConfigSchema", () => {
     });
   });
 
+  it("accepts an explicit development-only sentinel disable setting", () => {
+    expect(TelemetryConfigSchema.parse({ sentinel: { enabled: false } })).toEqual({
+      sentinel: { minValueLength: 6, enabled: false },
+    });
+  });
+
   it("rejects non-positive, fractional, and unknown values", () => {
     expect(TelemetryConfigSchema.safeParse({ sentinel: { minValueLength: 0 } }).success).toBe(
       false,
