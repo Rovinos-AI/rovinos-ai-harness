@@ -29,7 +29,8 @@ import {
 } from "./enforce/index.js";
 import { enforceNativeOutput, withNativeOutputSchema } from "./enforce/rung-native.js";
 import { enforceToolOutput, withForcedOutputTool } from "./enforce/rung-tool.js";
-import { lowerForProvider, schemaHash } from "./json-schema.js";
+import { enforcePromptOutput, withPromptOutput } from "./enforce/rung-prompt.js";
+import { lowerForProvider, schemaHash, toJsonSchema } from "./json-schema.js";
 
 /** Dependencies injected into every provider adapter call by the gateway. */
 export interface ModelGatewayDependencies {
@@ -52,7 +53,7 @@ export interface ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType>
 
 /** Gateway enforcement configuration. */
 export interface ModelGatewayOptions {
-  /** Highest rung on the native (1) < tool (2) ladder; "native" forbids selecting the tool rung. */
+  /** Highest rung on the native (1) < tool (2) < prompt (3) ladder. */
   readonly maxRung?: EnforcementRung;
 }
 
@@ -81,27 +82,44 @@ function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
     throw new OutputWithToolsUnsupportedError();
   }
 
-  if (providerSchemaRules(request.model.provider) === undefined) {
-    throw new EnforcementRungUnavailableError();
+  const schemaRules = providerSchemaRules(request.model.provider);
+  let rung: EnforcementRung | undefined;
+  if (schemaRules === undefined) {
+    rung = maxRung === "native" || maxRung === "tool" ? undefined : "prompt";
+  } else {
+    rung = selectEnforcementRung(capabilities, maxRung);
   }
-  const rung = selectEnforcementRung(capabilities, maxRung);
   if (rung === undefined) {
     throw new EnforcementRungUnavailableError();
   }
 
-  const lowered = lowerForProvider(outputSchema, request.model.provider);
+  const schema =
+    schemaRules === undefined
+      ? toJsonSchema(outputSchema)
+      : lowerForProvider(outputSchema, request.model.provider).schema;
   const output = {
     name: request.output?.name ?? "result",
-    schema: lowered.schema,
-    schemaHash: schemaHash(lowered.schema),
+    schema,
+    schemaHash: schemaHash(schema),
   };
   return {
-    request:
-      rung === "native"
-        ? withNativeOutputSchema(request, output)
-        : withForcedOutputTool(request, output),
+    request: prepareRequestForRung(request, output, rung),
     rung,
   };
+}
+
+function prepareRequestForRung(
+  request: ModelRequest,
+  output: NonNullable<ModelRequest["output"]>,
+  rung: EnforcementRung,
+): ModelRequest {
+  if (rung === "native") {
+    return withNativeOutputSchema(request, output);
+  }
+  if (rung === "tool") {
+    return withForcedOutputTool(request, output);
+  }
+  return withPromptOutput(request, output);
 }
 
 function enforceProviderOutput<OutputSchema extends z.ZodType>(
@@ -122,8 +140,15 @@ function enforceProviderOutput<OutputSchema extends z.ZodType>(
       result: enforceNativeOutput(parts, outputSchema),
     };
   }
-  const enforced = enforceToolOutput(parts, outputSchema);
-  return { parts: enforced.parts, result: enforced.result };
+  if (rung === "tool") {
+    const enforced = enforceToolOutput(parts, outputSchema);
+    return { parts: enforced.parts, result: enforced.result };
+  }
+  const hasToolCall = parts.some((part) => part.type === "tool_call");
+  return {
+    parts: hasToolCall ? parts.filter((part) => part.type !== "tool_call") : parts,
+    result: enforcePromptOutput(parts, outputSchema),
+  };
 }
 
 /** Minimal provider-selecting model port implementation. */
