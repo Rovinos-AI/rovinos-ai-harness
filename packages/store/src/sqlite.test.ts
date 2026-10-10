@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
 import { Id, type Event, type NewEvent, type RunStatus } from "@harness/schemas";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -452,18 +453,54 @@ describe("SqliteEventStore", () => {
     }
   });
 
-  it("encrypts content at rest and rejects opening with plaintext configuration", async () => {
+  it("encrypts event and snapshot content at rest", async () => {
     const path = await temporaryDatabase();
     const store = new SqliteEventStore(path, encryptionCodec);
     const canary = "synthetic-content-canary";
-    await store.append(runId, [runCreated(runId, 10), modelRequest(runId, 11, canary)], 0);
-    await store.close();
+    const snapshotId = Id.parse("00000000000000000000000002");
+    const snapshot = {
+      snapshotId,
+      runId,
+      atSeq: 1,
+      createdAt: 12,
+      traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+      context: { messages: [canary] },
+      plan: [canary],
+    };
+    await store.appendWithSnapshot(
+      runId,
+      [
+        runCreated(runId, 10),
+        modelRequest(runId, 11, canary),
+        {
+          runId,
+          ts: 12,
+          v: 1,
+          traceId,
+          spanId,
+          segmentId: runId,
+          type: "checkpoint_written",
+          checkpointId: snapshotId,
+          atSeq: 1,
+          traceparent: snapshot.traceparent,
+        },
+      ],
+      0,
+      snapshot,
+    );
 
     const databaseBytes = await readFile(path);
     expect(databaseBytes.includes(Buffer.from(canary, "utf8"))).toBe(false);
+    const walPath = `${path}-wal`;
+    if (existsSync(walPath)) {
+      expect((await readFile(walPath)).includes(Buffer.from(canary, "utf8"))).toBe(false);
+    }
     expect(storedRows(path)[1]?.content_blob).not.toContain(canary);
     expect(storedRows(path)[1]?.key_id).toBe(encryptionKeyId);
+    await expect(store.latestSnapshot(runId)).resolves.toEqual(snapshot);
+    await store.close();
 
+    expect((await readFile(path)).includes(Buffer.from(canary, "utf8"))).toBe(false);
     const reopened = new SqliteEventStore(path, encryptionCodec);
     try {
       await expect(collect(reopened.read(runId))).resolves.toMatchObject([
@@ -472,14 +509,37 @@ describe("SqliteEventStore", () => {
           seq: 1,
           messages: [{ role: "user", parts: [{ type: "text", text: canary }] }],
         },
+        { seq: 2 },
       ]);
+      await expect(reopened.latestSnapshot(runId)).resolves.toEqual(snapshot);
     } finally {
       await reopened.close();
     }
+  });
+
+  it("rejects encrypted configuration for an existing plaintext store with rows", async () => {
+    const path = await temporaryDatabase();
+    const store = new SqliteEventStore(path);
+    await store.append(runId, [runCreated(runId, 10)], 0);
+    await store.close();
 
     let mismatch: unknown;
     try {
-      new SqliteEventStore(path);
+      new SqliteEventStore(path, encryptionCodec);
+    } catch (error) {
+      mismatch = error;
+    }
+    expect(mismatch).toMatchObject({ code: "store_encryption_mismatch" });
+  });
+
+  it("rejects encrypted configuration for an empty plaintext-initialized store", async () => {
+    const path = await temporaryDatabase();
+    const store = new SqliteEventStore(path);
+    await store.close();
+
+    let mismatch: unknown;
+    try {
+      new SqliteEventStore(path, encryptionCodec);
     } catch (error) {
       mismatch = error;
     }

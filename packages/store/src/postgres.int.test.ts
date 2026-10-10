@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import type { KeyProvider } from "@harness/schemas";
 import { afterAll, expect, it } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
+import { JsonContentCodec, type ContentCodec } from "./codec.js";
 import { PostgresEventStore, openPostgresEventStore } from "./postgres/adapter.js";
 import {
   createEventBuilders,
@@ -74,21 +75,25 @@ async function closeStore(store: PostgresEventStore): Promise<void> {
   await store.close();
 }
 
-const postgresFactory: EventStoreFactory = async () => {
-  const { admin, schema } = await createSchema();
-  const store = new PostgresEventStore(connectionString, { schema }, contentCodec);
-  stores.add(store);
-  return {
-    store,
-    async cleanup() {
-      try {
-        await closeStore(store);
-      } finally {
-        await dropSchema(admin, schema);
-      }
-    },
+function postgresFactory(codec: ContentCodec): EventStoreFactory {
+  return async () => {
+    const { admin, schema } = await createSchema();
+    const store = new PostgresEventStore(connectionString, { schema }, codec);
+    stores.add(store);
+    return {
+      store,
+      async cleanup() {
+        try {
+          await closeStore(store);
+        } finally {
+          await dropSchema(admin, schema);
+        }
+      },
+    };
   };
-};
+}
+const plaintextPostgresFactory = postgresFactory(new JsonContentCodec());
+const encryptedPostgresFactory = postgresFactory(contentCodec);
 
 const postgresMultiFactory: MultiEventStoreFactoryCreator = async () => {
   const { admin, schema } = await createSchema();
@@ -130,11 +135,16 @@ afterAll(async () => {
   );
 });
 
-runEventStoreConformance("PostgresEventStore", postgresFactory, { supportsFileReopen: false });
+runEventStoreConformance("PostgresEventStore plaintext", plaintextPostgresFactory, {
+  supportsFileReopen: false,
+});
+runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactory, {
+  supportsFileReopen: false,
+});
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
 
 it("appends batches larger than PostgreSQL's bind-parameter limit", async () => {
-  const { store, cleanup } = await postgresFactory();
+  const { store, cleanup } = await plaintextPostgresFactory();
   const runId = schemaIds.nextRunId();
   const builders = createEventBuilders();
   const events = [

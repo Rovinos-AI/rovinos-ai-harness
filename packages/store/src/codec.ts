@@ -17,6 +17,13 @@ import {
 import { snapshotStoreOptionsSchema, type SnapshotStoreOptions } from "./types.js";
 
 const contentSchema = z.record(z.string(), z.json());
+export const MAX_CONTENT_BYTES = 1_048_576;
+
+function validateContentSize(blob: string): void {
+  if (Buffer.byteLength(blob, "utf8") > MAX_CONTENT_BYTES) {
+    throw new ContractError([{ path: [], code: "size_limit_exceeded" }]);
+  }
+}
 
 /** Context binding a content encoding to its event. */
 export interface ContentCodecContext {
@@ -218,6 +225,7 @@ export class JsonContentCodec implements ContentCodec {
       if (typeof blob !== "string") {
         throw new ContractError([{ path: [], code: "json_encode_failed" }]);
       }
+      validateContentSize(blob);
       return { blob };
     });
   }
@@ -228,6 +236,8 @@ export class JsonContentCodec implements ContentCodec {
     blob: string,
     _keyId?: string,
   ): Promise<Record<string, unknown>> {
-    return Promise.resolve().then(() => parseJson(contentSchema, blob));
+    return Promise.resolve().then(() =>
+      parseJson(contentSchema, blob, { maxBytes: MAX_CONTENT_BYTES }),
+    );
   }
 }

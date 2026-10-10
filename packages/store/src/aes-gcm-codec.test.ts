@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, type KeyProvider } from "@harness/schemas";
+import { ContractError, Id, type KeyProvider } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
+import { JsonContentCodec, MAX_CONTENT_BYTES } from "./codec.js";
 import { ContentEncryptFailedError, KeyNotFoundError } from "./errors.js";
 
 const runId = Id.parse("00000000000000000000000001");
@@ -34,6 +35,30 @@ function provider(keys: ReadonlyMap<string, Uint8Array> = new Map([[keyId, key]]
 }
 
 describe("AesGcmContentCodec", () => {
+  it.each([
+    ["JSON", new JsonContentCodec()],
+    ["AES-GCM", new AesGcmContentCodec(provider())],
+  ])("%s codec round-trips content at the byte limit and rejects limit+1", async (_, codec) => {
+    const context = { runId, seq: 3 };
+    const emptyContent = { value: "" };
+    const baseBytes = Buffer.byteLength(JSON.stringify(emptyContent), "utf8");
+    const atLimit = { value: "x".repeat(MAX_CONTENT_BYTES - baseBytes) };
+    const encoded = await codec.encode(context, atLimit);
+
+    await expect(codec.decode(context, encoded.blob, encoded.keyId)).resolves.toEqual(atLimit);
+
+    const overLimit = { value: `${atLimit.value}x` };
+    const error = await codec.encode(context, overLimit).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ContractError);
+    expect(error).toMatchObject({
+      code: "contract_invalid",
+      issues: [{ path: [], code: "size_limit_exceeded" }],
+    });
+  });
+
   it("round-trips content with the active key identifier", async () => {
     const codec = new AesGcmContentCodec(provider());
     const content = { messages: [{ text: "synthetic content" }] };

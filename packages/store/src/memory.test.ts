@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id, type Event, type HarnessError, type NewEvent, type RunStatus } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
+import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import {
   InvalidEventError,
   InMemoryEventStore,
@@ -15,6 +16,15 @@ const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);
 const memoryFactory: EventStoreFactory = () => {
   const store = new InMemoryEventStore();
+  return Promise.resolve({ store, cleanup: () => store.close() });
+};
+const encryptedMemoryFactory: EventStoreFactory = () => {
+  const store = new InMemoryEventStore(
+    new AesGcmContentCodec({
+      currentKeyId: () => "memory-conformance-key",
+      getKey: () => Promise.resolve(new Uint8Array(32).fill(13)),
+    }),
+  );
   return Promise.resolve({ store, cleanup: () => store.close() });
 };
 
@@ -73,6 +83,9 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
 
 describe("InMemoryEventStore", () => {
   runEventStoreConformance("InMemoryEventStore", memoryFactory, { supportsFileReopen: false });
+  runEventStoreConformance("InMemoryEventStore encrypted", encryptedMemoryFactory, {
+    supportsFileReopen: false,
+  });
 
   it("appends events and reads them in assigned sequence order", async () => {
     const store = new InMemoryEventStore();

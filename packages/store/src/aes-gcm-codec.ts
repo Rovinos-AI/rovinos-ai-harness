@@ -12,7 +12,12 @@ import {
   ContentEncryptFailedError,
   KeyNotFoundError,
 } from "./errors.js";
-import type { ContentCodec, ContentCodecContext, EncodedContent } from "./codec.js";
+import {
+  MAX_CONTENT_BYTES,
+  type ContentCodec,
+  type ContentCodecContext,
+  type EncodedContent,
+} from "./codec.js";
 import { JsonContentCodec } from "./codec.js";
 
 const IV_LENGTH = 12;
@@ -109,7 +114,9 @@ export class AesGcmContentCodec implements ContentCodec {
       decipher.setAAD(additionalData(context));
       decipher.setAuthTag(authTag);
       plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      return parseJson(contentSchema, plaintext.toString("utf8"));
+      return parseJson(contentSchema, plaintext.toString("utf8"), {
+        maxBytes: MAX_CONTENT_BYTES,
+      });
     } catch {
       throw new ContentDecryptFailedError();
     } finally {
