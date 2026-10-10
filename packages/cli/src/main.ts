@@ -2,6 +2,7 @@
 import { CompositeSecretResolver, loadConfig, type HarnessConfig } from "@harness/config";
 import { HARNESS_VERSION } from "@harness/schemas";
 import { Command, CommanderError } from "commander";
+import { dirname, resolve } from "node:path";
 import type { CliContext, Clock, CommandModule } from "./command.js";
 import { errorCodeOf, exitCodeForError, ExitCode } from "./exit-codes.js";
 import { createOutput, type Output } from "./output.js";
@@ -36,6 +37,15 @@ function createDefaultContext(program: Command, out: Output): CliContext {
       const { createRuntime } = await import("@harness/core");
       return createRuntime(config, {
         ...overrides,
+        roleConfigDirectory:
+          overrides?.roleConfigDirectory ??
+          dirname(
+            resolve(
+              program.opts<{ config?: string }>().config ??
+                process.env.HARNESS_CONFIG ??
+                "harness.config.yaml",
+            ),
+          ),
         secretResolver: overrides?.secretResolver ?? new CompositeSecretResolver(),
       });
     },

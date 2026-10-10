@@ -5,6 +5,7 @@ import {
   PiiConfigSchema,
   PolicyConfigSchema,
   RunConfigSchema,
+  RolesConfigSchema,
   SandboxConfigSchema,
   ServerConfigSchema,
   StoreConfigSchema,
@@ -15,6 +16,7 @@ import {
 export const HarnessConfigSchema = z
   .object({
     run: RunConfigSchema,
+    roles: RolesConfigSchema,
     store: StoreConfigSchema,
     models: ModelsConfigSchema,
     servers: z.array(ServerConfigSchema).default([]),

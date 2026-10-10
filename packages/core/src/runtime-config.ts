@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   ModelsConfigSchema,
+  type RolesConfig,
   type Id,
   type JsonValue,
   type ModelsConfig,
@@ -19,6 +20,8 @@ import type { CancelRunResult } from "./cancel.js";
 export interface RuntimeOverrides {
   readonly store?: EventStore;
   readonly dataDir?: string;
+  /** Directory used to resolve role prompt and result-schema references. */
+  readonly roleConfigDirectory?: string;
   /** Open existing SQLite storage without schema initialization or writes. */
   readonly readOnlyStore?: boolean;
   readonly clock?: Clock;
@@ -38,6 +41,7 @@ export interface RuntimeOverrides {
 export interface RuntimeConfig {
   readonly run: RunConfig;
   readonly models?: ModelsConfig;
+  readonly roles?: RolesConfig;
 }
 
 /** Composed run-loop operations and their shared dependencies. */

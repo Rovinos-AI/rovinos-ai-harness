@@ -2,7 +2,8 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { createStrategyRegistry } from "@harness/context";
+import { HarnessError, Code, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { SqliteEventStore, type EventStore } from "@harness/store";
 import { ensureTracingFallback } from "@harness/telemetry";
 import { cancelRun } from "./cancel.js";
@@ -13,9 +14,11 @@ import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
+import { RoleRegistry } from "./roles.js";
 import { RUN_SPAN } from "./spans.js";
 import { foldRunState } from "./run-state.js";
 import { configHash, SystemIdGenerator, systemClock } from "./runtime-ids.js";
+import { parseRuntimeModelsConfig } from "./runtime-config.js";
 import type {
   Runtime,
   RuntimeComposition,
@@ -28,9 +31,34 @@ const CANCEL_MONITOR_DEGRADED = "cancel_monitor_degraded";
 const CANCEL_POLL_INTERVAL_MS = 25;
 const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
+const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
+
+async function validateRuntimeRoles(
+  config: RuntimeConfig,
+  roleConfigDirectory: string,
+  tool: ToolPort,
+): Promise<void> {
+  const models = parseRuntimeModelsConfig(config.models);
+  const contextStrategies = new Set(
+    Array.from(
+      createStrategyRegistry({ provider: "default", model: "default" }).keys(),
+      (strategyId) => Code.parse(strategyId),
+    ),
+  );
+  await RoleRegistry.create({
+    ...(config.roles === undefined ? {} : { roles: config.roles }),
+    models,
+    registeredTools: tool.getToolSpecs?.().map((spec) => spec.toolId) ?? [],
+    contextStrategies,
+    configDirectory: roleConfigDirectory,
+    onWarning: (warning) => {
+      roleConfigLogger.warn(warning.code);
+    },
+  });
+}
 
 function ensureTracing(): void {
   const probeIds = new SystemIdGenerator(systemClock);
@@ -392,9 +420,10 @@ export async function createRuntime(
     })) ??
     missingModelPort;
   const dataDir = overrides.dataDir ?? process.env.HARNESS_DATA_DIR ?? process.cwd();
-  const store =
-    overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
   const tool = overrides.tool ?? unavailableTool;
   const context = overrides.context ?? new NaiveContext();
+  await validateRuntimeRoles(config, overrides.roleConfigDirectory ?? process.cwd(), tool);
+  const store =
+    overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
   return composeRuntime({ config, overrides, clock, ids, store, model, tool, context });
 }

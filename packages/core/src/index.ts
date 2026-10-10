@@ -108,3 +108,13 @@ export {
   type RuntimeConfig,
   type RuntimeOverrides,
 } from "./runtime.js";
+export {
+  BUILTIN_ROLE_DEFAULTS,
+  RoleRegistry,
+  RoleRegistryError,
+  resolveRole,
+  type ResolvedRole,
+  type RoleRegistryOptions,
+  type RoleRegistryWarning,
+  type RoleSchemaLoader,
+} from "./roles.js";
