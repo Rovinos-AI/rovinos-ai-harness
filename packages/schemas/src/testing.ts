@@ -88,7 +88,6 @@ export const eventSamples = [
   { ...envelope, type: "subagent_completed", childRunId: id, outcome: "completed" },
 ] satisfies Event[];
 
-
 const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const ID_SUFFIX_CAPACITY = 32n ** 16n;
 

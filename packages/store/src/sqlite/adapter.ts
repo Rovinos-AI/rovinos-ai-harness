@@ -427,12 +427,7 @@ export class SqliteEventStore implements EventStore {
   }
 
   /** {@inheritDoc EventStore.fetchOutbox} */
-  async fetchOutbox(
-    sinkId: Code,
-    limit: number,
-  ): Promise<{ events: StoredEvent[]; cursor: number }> {
-    return this.outbox.fetch(sinkId, limit);
-  }
+  fetchOutbox: EventStore["fetchOutbox"] = (sinkId, limit) => this.outbox.fetch(sinkId, limit);
 
   /** {@inheritDoc EventStore.ackOutbox} */
   ackOutbox(sinkId: Code, cursor: number): Promise<void> {

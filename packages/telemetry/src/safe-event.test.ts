@@ -273,7 +273,7 @@ describe("SafeEvent projection", () => {
 
   it("never exports canaries from any classified content field", () => {
     for (const [index, sample] of eventSamples.entries()) {
-      const canary = `CANARY_${sample.type}_${index}`;
+      const canary = `CANARY_${sample.type}_${index.toString()}`;
       const contentFields = Object.entries(EVENT_FIELD_CLASS[sample.type])
         .filter(([, classification]) => classification === "content")
         .map(([field]) => field);
