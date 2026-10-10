@@ -78,11 +78,6 @@ type SemanticEvent =
       readonly errorCode?: string;
     };
 
-const scriptedCalls = new Map<JsonValue, Id>([
-  ["non-idempotent request", nonIdempotentCallId],
-  ["idempotent request", idempotentCallId],
-]);
-
 function idsAfter(offset: number): IdGenerator {
   const ids = new SequentialIdGenerator();
   for (let index = 0; index < offset; index += 1) {
@@ -296,14 +291,14 @@ function hasUnrecordedProposedCall(events: readonly Event[]): Id | undefined {
     if (event.type !== "model_response") {
       continue;
     }
-    const expectedCallId = scriptedCalls.get(event.content);
-    if (
-      expectedCallId !== undefined &&
-      !events.some(
-        (candidate) => candidate.type === "tool_intent" && candidate.callId === expectedCallId,
-      )
-    ) {
-      return expectedCallId;
+    for (const call of event.toolCalls ?? []) {
+      if (
+        !events.some(
+          (candidate) => candidate.type === "tool_intent" && candidate.callId === call.callId,
+        )
+      ) {
+        return call.callId;
+      }
     }
   }
   return undefined;
@@ -425,8 +420,8 @@ class PreIntentExecutionStore implements EventStore {
 }
 
 async function runCrashMatrix(reference: Reference, brokenOrdering = false): Promise<void> {
-  let sawResumeAmbiguity = false;
   for (const mode of ["before_commit", "after_commit"] as const) {
+    let sawResumeAmbiguity = false;
     for (let crashAt = 1; crashAt <= reference.appendCount; crashAt += 1) {
       const directory = await mkdtemp(join(tmpdir(), "harness-crash-matrix-"));
       const database = new SqliteEventStore(join(directory, "events.sqlite"));
@@ -482,25 +477,9 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
           resumedStatus = "already_terminal";
         }
         const finalEvents = await readEvents(store, runId);
-        const missingCallId = hasUnrecordedProposedCall(finalEvents);
-        if (missingCallId !== undefined) {
-          // TODO(2.11): model_response does not persist toolCalls; resume cannot recover a proposal
-          // after its response is committed but before the corresponding tool_intent is durable.
-          expect(semanticEvents(finalEvents)).not.toEqual(reference.semantic);
-          if (missingCallId === nonIdempotentCallId) {
-            expect(scenario.counts.nonIdempotent).toBe(0);
-          } else {
-            expect(scenario.counts.idempotent).toBe(0);
-          }
-          continue;
-        }
-        if (hasUnrecordedFinalStatus(finalEvents) || hasReplayedFinalResponse(finalEvents)) {
-          // TODO(2.11): a final model_response is not itself a durable completion decision.
-          expect(semanticEvents(finalEvents)).not.toEqual(reference.semantic);
-          expect(["completed", "failed"]).toContain(resumedStatus);
-          expect(scenario.counts).toEqual({ nonIdempotent: 1, idempotent: 1 });
-          continue;
-        }
+        expect(hasUnrecordedProposedCall(finalEvents)).toBeUndefined();
+        expect(hasUnrecordedFinalStatus(finalEvents)).toBe(false);
+        expect(hasReplayedFinalResponse(finalEvents)).toBe(false);
         if (danglingIntent(finalEvents, nonIdempotentCallId)) {
           sawResumeAmbiguity = true;
           expect(resumedStatus).toBe("suspended");
@@ -511,26 +490,17 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
               approval?.type === "approval_requested" ? approval.payload : undefined,
             ),
           ).toBe(true);
-          const executions = scenario.counts.nonIdempotent;
-          expect([0, 1]).toContain(executions);
           const boundary = reference.boundaries[crashAt - 1];
-          if (
+          const crashedAfterEffect =
             mode === "before_commit" &&
             boundary?.eventTypes.includes("tool_result") === true &&
-            boundary.callIds.includes(nonIdempotentCallId)
-          ) {
-            expect(executions).toBe(1);
-          }
-          if (
+            boundary.callIds.includes(nonIdempotentCallId);
+          const crashedBeforeEffect =
             mode === "after_commit" &&
             boundary?.eventTypes.includes("tool_intent") === true &&
-            boundary.callIds.includes(nonIdempotentCallId)
-          ) {
-            expect(executions).toBe(0);
-          }
-          if (executions > 0) {
-            expect(executions).toBe(1);
-          }
+            boundary.callIds.includes(nonIdempotentCallId);
+          expect(crashedAfterEffect || crashedBeforeEffect).toBe(true);
+          expect(scenario.counts.nonIdempotent).toBe(crashedAfterEffect ? 1 : 0);
           continue;
         }
         expect(
@@ -552,7 +522,7 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
 }
 
 describe("SQLite crash-injection matrix", () => {
-  it("resumes each append boundary in both modes and documents the model-tool durability gap", async () => {
+  it("resumes each append boundary in both modes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-crash-reference-"));
     try {
       const reference = await discoverReference(directory);

@@ -16,4 +16,14 @@ describe("Event", () => {
       false,
     );
   });
+
+  it("accepts legacy model responses without tool calls", () => {
+    const modelResponse = eventSamples.find(({ type }) => type === "model_response");
+    if (modelResponse?.type !== "model_response") {
+      throw new Error("Missing model_response sample.");
+    }
+    const { toolCalls, ...legacyResponse } = modelResponse;
+    expect(toolCalls).toBeDefined();
+    expect(Event.parse(legacyResponse)).toEqual(legacyResponse);
+  });
 });
