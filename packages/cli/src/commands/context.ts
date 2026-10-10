@@ -128,6 +128,7 @@ export const contextCommand: CommandModule = {
           throw new ContextCommandError("usage");
         }
         const runtime = await createCommandRuntime(context, config, {
+          readOnlyStore: true,
           model: {
             complete: () => Promise.reject(new ContextCommandError("context_model_call_forbidden")),
           },

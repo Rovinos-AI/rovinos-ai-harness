@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessConfigSchema } from "@harness/config";
-import type { RuntimeOverrides } from "@harness/core";
+import { createRuntime as composeRuntime, type RuntimeOverrides } from "@harness/core";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ContextInspectionSchema, Event as EventSchema, parseJson } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { main } from "../main.js";
@@ -162,6 +166,7 @@ describe("harness context", () => {
       expect(test.modelCall).not.toHaveBeenCalled();
       expect(test.close).toHaveBeenCalledOnce();
       const override = test.createRuntime.mock.calls[0]?.[1];
+      expect(override?.readOnlyStore).toBe(true);
       await expect(
         override?.model?.complete(
           {
@@ -277,5 +282,35 @@ describe("harness context", () => {
     expect(result.pinnedSeqs).toEqual([1, 2]);
     expect(result.estimatedTokens).toBeLessThanOrEqual(45);
     expect(test.append).not.toHaveBeenCalled();
+  });
+
+  it("inspects SQLite without initialization writes or creating missing storage", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "context-read-only-"));
+    try {
+      const test = await harness();
+      const path = join(directory, "harness.db");
+      const store = new SqliteEventStore(path);
+      const events = [];
+      for await (const stored of test.store.read(runId)) {
+        events.push(stored);
+      }
+      await store.append(
+        runId,
+        events.map(({ seq: _seq, ...value }) => value),
+        0,
+      );
+      await store.close();
+      const before = await readFile(path);
+      test.context.createRuntime = (config, overrides) =>
+        composeRuntime(config, { ...overrides, dataDir: directory });
+      expect(await main(["context", runId, "--json"], test.context)).toBe(0);
+      expect(await readFile(path)).toEqual(before);
+      test.context.createRuntime = (config, overrides) =>
+        composeRuntime(config, { ...overrides, dataDir: join(directory, "missing") });
+      expect(await main(["context", runId], test.context)).toBe(1);
+      expect(existsSync(join(directory, "missing"))).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

@@ -66,6 +66,7 @@ report `cancel_conflict`; both exit with code `1`.
 [--reserve-output N] [--model provider/model] [--show-content] [--json]` re-derives context
 from the stored event log without appending events or calling models. Summarizing uses only
 already-recorded compactions; it does not create a new summary.
+SQLite is opened read-only without directory creation, schema initialization, or metadata writes.
 
 Defaults are `naive`, 8,192 maximum tokens, and 1,024 reserved output tokens. The model reference
 defaults to the first configured routing default, or `heuristic/default` when none is configured.

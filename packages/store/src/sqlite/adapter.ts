@@ -26,11 +26,11 @@ import {
 import { InvalidEventError, SeqConflictError } from "../errors.js";
 import {
   systemClock,
+  sqliteStoreOptionsSchema,
   type Clock,
   type EventStore,
   type ListRunsOptions,
   type RunSummary,
-  type SnapshotStoreOptions,
 } from "../types.js";
 import { SQLITE_SCHEMA } from "./schema.sql.js";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
@@ -175,26 +175,28 @@ export class SqliteEventStore implements EventStore {
    *
    * @param path Database file path or `:memory:`.
    * @param codec Codec used to store content separately from event metadata.
-   * @param options Snapshot retention configuration.
+   * @param options Snapshot retention and read-only configuration; read-only opens an existing database without initialization.
    * @param clock Clock supplying timestamps for sink-cursor updates.
    */
   constructor(
     path: string,
     codec: ContentCodec = new JsonContentCodec(),
-    options: SnapshotStoreOptions = {},
+    options: z.input<typeof sqliteStoreOptionsSchema> = {},
     clock: Clock = systemClock,
   ) {
-    const retainedSnapshotCount = snapshotKeep(options);
-    this.db = new Database(path);
+    const parsedOptions = sqliteStoreOptionsSchema.parse(options);
+    this.db = new Database(path, { readonly: parsedOptions.readOnly });
     this.codec = codec;
-    this.snapshotKeep = retainedSnapshotCount;
+    this.snapshotKeep = snapshotKeep({ snapshotKeep: parsedOptions.snapshotKeep });
     try {
-      this.db.pragma("journal_mode = WAL");
-      this.db.pragma("synchronous = NORMAL");
+      if (!parsedOptions.readOnly) {
+        this.db.pragma("journal_mode = WAL");
+        this.db.pragma("synchronous = NORMAL");
+        this.db.exec(SQLITE_SCHEMA);
+        initializeEncryptionMetadata(this.db, this.codec.encrypted);
+      }
       this.db.pragma("busy_timeout = 5000");
       this.db.pragma("foreign_keys = ON");
-      this.db.exec(SQLITE_SCHEMA);
-      initializeEncryptionMetadata(this.db, this.codec.encrypted);
       this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
     } catch (error) {
       this.db.close();

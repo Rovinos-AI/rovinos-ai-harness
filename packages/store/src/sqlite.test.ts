@@ -40,6 +40,27 @@ async function temporaryDatabase(): Promise<string> {
   return join(directory, "events.sqlite");
 }
 
+describe("read-only SQLite inspection", () => {
+  it("reads existing events without changing database bytes or allowing writes", async () => {
+    const path = await temporaryDatabase();
+    const writer = new SqliteEventStore(path);
+    await writer.append(runId, [runCreated(runId, 1)], 0);
+    await writer.close();
+    const before = await readFile(path);
+    const reader = new SqliteEventStore(path, undefined, { readOnly: true });
+    expect(await collect(reader.read(runId))).toHaveLength(1);
+    await expect(reader.append(runId, [modelRequest(runId, 2)], 1)).rejects.toThrow();
+    await reader.close();
+    expect(await readFile(path)).toEqual(before);
+  });
+
+  it("does not create a missing database in read-only mode", async () => {
+    const path = await temporaryDatabase();
+    expect(() => new SqliteEventStore(path, undefined, { readOnly: true })).toThrow();
+    expect(existsSync(path)).toBe(false);
+  });
+});
+
 async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
   const result: Event[] = [];
   for await (const event of events) {
