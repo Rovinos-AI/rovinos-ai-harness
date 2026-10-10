@@ -78,6 +78,17 @@ const modelResponseEvent = z
     repairAttempts: z.number().int().nonnegative(),
     content: JsonValue,
     providerBlobs: JsonValue,
+    toolCalls: z
+      .array(
+        z
+          .object({
+            callId: Id,
+            toolId: Code,
+            args: JsonValue,
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
 

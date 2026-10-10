@@ -32,6 +32,7 @@ export const EVENT_FIELD_CLASS = {
     repairAttempts: "meta",
     content: "content",
     providerBlobs: "content",
+    toolCalls: "content",
   },
   tool_intent: {
     callId: "meta",

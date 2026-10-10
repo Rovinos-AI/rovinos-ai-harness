@@ -111,6 +111,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       repairAttempts: completion.repairAttempts,
       content: completion.content,
       providerBlobs: completion.providerBlobs,
+      ...(completion.toolCalls.length === 0 ? {} : { toolCalls: [...completion.toolCalls] }),
     });
     recorded.push(response);
     result = { outcome: "response", completion, events: recorded };
