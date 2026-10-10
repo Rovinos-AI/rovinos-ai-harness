@@ -302,6 +302,38 @@ describe("AnthropicAdapter", () => {
     expect(resultBlock).toMatchObject({ tool_use_id: "toolu_fixture" });
   });
 
+  it("does not mutate opaque history when merging assistant turns on repeated requests", async () => {
+    const request: ModelRequest = {
+      ...baseRequest,
+      messages: [
+        ...baseRequest.messages,
+        {
+          role: "assistant",
+          parts: [
+            {
+              type: "opaque",
+              provider: "anthropic",
+              blob: { content: structuredClone(rawContent) },
+            },
+          ],
+        },
+        { role: "assistant", parts: [{ type: "text", text: "continuation" }] },
+      ],
+    };
+    const original = JSON.stringify(request);
+    const first = makeRequest();
+    await first.adapter.complete(request, context());
+    const second = makeRequest();
+    await second.adapter.complete(request, context());
+    expect(JSON.stringify(request)).toBe(original);
+    expect(second.getRequestBody()).toEqual(first.getRequestBody());
+    const body = z.object({ messages: JsonValue }).parse(first.getRequestBody());
+    expect(body.messages).toEqual([
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+      { role: "assistant", content: [...rawContent, { type: "text", text: "continuation" }] },
+    ]);
+  });
+
   it("uses the deterministic tool id when provider-specific history is absent", async () => {
     const callId = "00000000000000000000000001";
     const request: ModelRequest = {

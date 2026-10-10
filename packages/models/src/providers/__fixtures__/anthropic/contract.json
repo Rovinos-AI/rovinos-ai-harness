@@ -67,7 +67,9 @@
         "type": "message",
         "role": "assistant",
         "model": "claude-sonnet-5-5",
-        "content": [{ "type": "tool_use", "id": "toolu_fixture", "name": "lookup", "input": { "query": "x" } }],
+        "content": [
+          { "type": "tool_use", "id": "toolu_fixture", "name": "lookup", "input": { "query": "x" } }
+        ],
         "stop_reason": "tool_use",
         "stop_sequence": null,
         "usage": { "input_tokens": 2, "output_tokens": 3 }
@@ -75,12 +77,24 @@
     },
     "expected": {
       "parts": [
-        { "type": "tool_call", "callId": "00000000000000000000000000", "toolId": "lookup", "args": { "query": "x" } },
+        {
+          "type": "tool_call",
+          "callId": "00000000000000000000000000",
+          "toolId": "lookup",
+          "args": { "query": "x" }
+        },
         {
           "type": "opaque",
           "provider": "anthropic",
           "blob": {
-            "content": [{ "type": "tool_use", "id": "toolu_fixture", "name": "lookup", "input": { "query": "x" } }],
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_fixture",
+                "name": "lookup",
+                "input": { "query": "x" }
+              }
+            ],
             "toolUseIdByCallId": { "00000000000000000000000000": "toolu_fixture" }
           }
         }
@@ -129,7 +143,10 @@
     "httpResponse": {
       "status": 429,
       "headers": { "retry-after": "2" },
-      "body": { "type": "error", "error": { "type": "rate_limit_error", "message": "rate limited" } }
+      "body": {
+        "type": "error",
+        "error": { "type": "rate_limit_error", "message": "rate limited" }
+      }
     },
     "expected": { "retryAfterMs": 2000, "status": 429 }
   },
@@ -157,7 +174,10 @@
     },
     "httpResponse": {
       "status": 401,
-      "body": { "type": "error", "error": { "type": "authentication_error", "message": "unauthorized" } }
+      "body": {
+        "type": "error",
+        "error": { "type": "authentication_error", "message": "unauthorized" }
+      }
     },
     "expected": { "status": 401 }
   },

@@ -121,7 +121,7 @@ function buildMessages(request: ModelRequest) {
     if (previous?.role === role) {
       previous.content.push(...content);
     } else {
-      messages.push({ role, content });
+      messages.push({ role, content: [...content] });
     }
   }
   return messages;
