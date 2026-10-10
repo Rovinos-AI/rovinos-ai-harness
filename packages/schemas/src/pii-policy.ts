@@ -76,6 +76,10 @@ export const PiiPolicySchema = z
   })
   .strict()
   .superRefine((policy, context) => {
+    if (policy.defaultAction === "allow") {
+      addPolicyIssue(context, "pii_policy_default_allow", ["defaultAction"]);
+    }
+
     policy.rules.forEach((rule, ruleIndex) => {
       if (rule.action !== "allow") {
         return;

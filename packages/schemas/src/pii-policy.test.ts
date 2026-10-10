@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { ContractError, parseYaml } from "./parse.js";
 import { PiiConfigSchema } from "./config/pii.js";
 import { PiiPolicySchema } from "./pii-policy.js";
+
+function hasIssueMessage(
+  result: ReturnType<typeof PiiPolicySchema.safeParse>,
+  message: string,
+): boolean {
+  return !result.success && result.error.issues.some((issue) => issue.message === message);
+}
 
 describe("PiiPolicySchema", () => {
   it("defaults the action to tokenize and rules to an empty list", () => {
@@ -10,6 +18,13 @@ describe("PiiPolicySchema", () => {
       defaultAction: "tokenize",
       rules: [],
     });
+  });
+
+  it("rejects a globally permissive default action", () => {
+    const result = PiiPolicySchema.safeParse({ defaultAction: "allow" });
+
+    expect(result.success).toBe(false);
+    expect(hasIssueMessage(result, "pii_policy_default_allow")).toBe(true);
   });
 
   it("accepts the built-in entities and constrained custom names", () => {
@@ -82,9 +97,7 @@ describe("PiiPolicySchema", () => {
     });
 
     expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.map((issue) => issue.params?.errorCode)).toContain(code);
-    }
+    expect(hasIssueMessage(result, code)).toBe(true);
   });
 
   it.each(["api_key", "credit_card"])("only allows %s for explicit tool destinations", (entity) => {
@@ -101,11 +114,7 @@ describe("PiiPolicySchema", () => {
       });
 
       expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues.map((issue) => issue.params?.errorCode)).toContain(
-          "pii_policy_secret_allow_destination",
-        );
-      }
+      expect(hasIssueMessage(result, "pii_policy_secret_allow_destination")).toBe(true);
     }
 
     expect(
@@ -135,19 +144,6 @@ describe("PiiPolicySchema", () => {
     ).toBe(true);
   });
 
-  it("rejects allow rules that apply to every entity", () => {
-    const result = PiiPolicySchema.safeParse({
-      rules: [
-        {
-          entities: "*",
-          boundaries: ["tool_input"],
-          destinations: [{ tool: "tool.payment" }],
-          action: "allow",
-        },
-      ],
-    });
-  });
-
   it("preserves policy validation codes when parsing YAML", () => {
     let error: unknown;
     try {
@@ -165,12 +161,14 @@ describe("PiiPolicySchema", () => {
     }
 
     expect(error).toBeInstanceOf(ContractError);
-    if (error instanceof ContractError) {
-      expect(error.issues).toContainEqual({
-        path: ["rules", 0, "boundaries"],
-        code: "pii_policy_storage_allow",
-      });
-    }
+    expect(error).toMatchObject({
+      issues: [
+        {
+          path: ["rules", 0, "boundaries"],
+          code: "pii_policy_storage_allow",
+        },
+      ],
+    });
   });
 
   it("rejects allow rules that apply to every entity", () => {
@@ -186,29 +184,15 @@ describe("PiiPolicySchema", () => {
     });
 
     expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.map((issue) => issue.params?.errorCode)).toContain(
-        "pii_policy_allow_all_entities",
-      );
-    }
+    expect(hasIssueMessage(result, "pii_policy_allow_all_entities")).toBe(true);
   });
 
-  it("round-trips the example policy shape from YAML", () => {
-    const parsed = parseYaml(
-      PiiConfigSchema,
-      `defaultAction: tokenize
-rules:
-  - entities: [api_key, credit_card]
-    boundaries: "*"
-    destinations:
-      - tool: tool.payment
-    action: block
-  - entities: [email, phone]
-    boundaries: [tool_output, ui]
-    destinations: "*"
-    action: redact
-`,
+  it("round-trips the example policy YAML", async () => {
+    const yaml = await readFile(
+      new URL("../../../examples/pii-policy.yaml", import.meta.url),
+      "utf8",
     );
+    const parsed = parseYaml(PiiConfigSchema, yaml);
 
     expect(PiiPolicySchema.parse(parsed)).toEqual(parsed);
   });

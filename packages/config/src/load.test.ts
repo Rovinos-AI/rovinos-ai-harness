@@ -315,7 +315,7 @@ describe("loadConfig", () => {
       models: {},
       servers: [],
       policy: {},
-      pii: {},
+      pii: { defaultAction: "tokenize", rules: [] },
       telemetry: {},
       sandbox: {},
     });
