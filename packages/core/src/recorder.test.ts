@@ -421,5 +421,6 @@ function runCreatedEvent(): Event {
     type: "run_created",
     configHash: hash,
     policyVersion: "test.policy",
+    depth: 0,
   };
 }

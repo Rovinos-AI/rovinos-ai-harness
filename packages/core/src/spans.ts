@@ -11,6 +11,8 @@ const commonAttributes = {
 export const RUN_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan("harness.run", {
   ...commonAttributes,
   "harness.segment.id": attr.id(),
+  "harness.run.parent_id": attr.optional(attr.id()),
+  "harness.run.depth": attr.optional(attr.int()),
 });
 
 /** Span for one model call. */

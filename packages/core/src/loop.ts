@@ -8,6 +8,7 @@ import {
   type Message,
   type RunConfig,
 } from "@harness/schemas";
+import type { Context, Link } from "@opentelemetry/api";
 import { activeRuns } from "@harness/telemetry";
 import { BudgetTracker } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
@@ -41,6 +42,14 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly modelName?: Code;
   /** Optional summarization compaction, checked before every model call. */
   readonly compaction?: CompactionRuntimeOptions;
+  /** Parent run and tool call for a child run. */
+  readonly parentRunId?: Id;
+  readonly parentCallId?: Id;
+  /** Run nesting depth; roots default to zero. */
+  readonly depth?: number;
+  /** Parent context and link for a child run's root span. */
+  readonly rootSpanParent?: Context;
+  readonly rootSpanLinks?: readonly Link[];
 }
 
 /** Execution options shared by new runs and resumptions. */
@@ -83,28 +92,44 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
       v: 1,
       configHash: options.configHash,
       policyVersion: options.policyVersion,
+      ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
+      ...(options.parentCallId === undefined ? {} : { parentCallId: options.parentCallId }),
+      depth: options.depth ?? 0,
     },
     { type: "run_input", v: 1, input: options.goal, inputKind: "initial" },
     { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
   ];
-  await options.recorder.withStepSpan(RUN_SPAN, {}, async () => {
-    const recorded = await options.recorder.recordBatch(startEvents);
-    const last = recorded.at(-1);
-    if (last === undefined) {
-      throw new Error("Expected run creation events.");
-    }
-    events.push(...recorded);
-    const runId = last.runId;
-    const ended = await continueRunLoop(options, events, runId, budgetTracker);
-    const state = foldRunState(events);
-    result = {
-      status: state.status,
-      approvalIds: Array.from(state.pendingApprovals.keys()),
-      state,
-      events,
-    };
-    return ended;
-  });
+  await options.recorder.withStepSpan(
+    RUN_SPAN,
+    {
+      ...(options.parentRunId === undefined
+        ? {}
+        : { "harness.run.parent_id": options.parentRunId }),
+      "harness.run.depth": options.depth ?? 0,
+    },
+    async () => {
+      const recorded = await options.recorder.recordBatch(startEvents);
+      const last = recorded.at(-1);
+      if (last === undefined) {
+        throw new Error("Expected run creation events.");
+      }
+      events.push(...recorded);
+      const runId = last.runId;
+      const ended = await continueRunLoop(options, events, runId, budgetTracker);
+      const state = foldRunState(events);
+      result = {
+        status: state.status,
+        approvalIds: Array.from(state.pendingApprovals.keys()),
+        state,
+        events,
+      };
+      return ended;
+    },
+    {
+      ...(options.rootSpanLinks === undefined ? {} : { links: options.rootSpanLinks }),
+      ...(options.rootSpanParent === undefined ? {} : { parentContext: options.rootSpanParent }),
+    },
+  );
 
   if (result === undefined) {
     throw new Error("Expected the run loop to record an outcome.");
@@ -325,6 +350,7 @@ async function runToolCalls(
         calls: [call],
         preparedCalls: [prepared],
         signal: options.signal,
+        depth: options.depth ?? 0,
       })),
     );
     const stopped = await suspendIfShutdown(options, events, execution);

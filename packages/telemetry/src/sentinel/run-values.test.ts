@@ -36,11 +36,7 @@ describe("VaultRunView", () => {
     const childId = Id.parse("C".repeat(26));
     const version = vi.fn().mockResolvedValue(3);
     const listRawValues = vi.fn().mockResolvedValue(["shared-canary-value"]);
-    const view = new VaultRunView(
-      { version, listRawValues },
-      {},
-      () => rootId,
-    );
+    const view = new VaultRunView({ version, listRawValues }, {}, () => rootId);
 
     await expect(view.valuesFor(childId)).resolves.toMatchObject({
       version: 3,

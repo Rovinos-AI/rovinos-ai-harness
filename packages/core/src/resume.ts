@@ -344,9 +344,9 @@ export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResul
   await activeRuns.track(
     options.runId,
     () =>
-      recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), [
-        previousSegmentLink(events, snapshot?.traceparent),
-      ]),
+      recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), {
+        links: [previousSegmentLink(events, snapshot?.traceparent)],
+      }),
     () => isTerminalRunState(foldRunState(events)),
   );
 

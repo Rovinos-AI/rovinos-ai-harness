@@ -25,6 +25,7 @@ export {
   SpanContextMissingError,
   type Clock,
   type EventPartial,
+  type StepSpanOptions,
 } from "./recorder.js";
 export { cancelRun, type CancelRunResult } from "./cancel.js";
 export { Checkpointer, NoActiveSpanError, type CheckpointerOptions } from "./checkpoint.js";
@@ -119,3 +120,14 @@ export {
   type RoleSchemaLoader,
 } from "./roles.js";
 export { RunScopeConflictError, RunScopeRegistry } from "./subagent/scope.js";
+export { AgentSpawnInputSchema, AgentSpawnTool } from "./subagent/spawn-tool.js";
+export {
+  restrictToolPort,
+  SubagentError,
+  SubagentSupervisor,
+  type SubagentErrorCode,
+  type SubagentRunRequest,
+  type SubagentRunner,
+  type SubagentSpawnInput,
+  type SubagentSupervisorOptions,
+} from "./subagent/supervisor.js";

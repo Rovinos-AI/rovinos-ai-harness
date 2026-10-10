@@ -19,6 +19,7 @@ export interface ToolStepOptions {
   readonly calls: readonly ModelToolCall[];
   readonly preparedCalls?: readonly PreparedToolCall[];
   readonly signal: AbortSignal;
+  readonly depth?: number;
 }
 
 /** Dependencies for applying a resume action to an unresolved tool intent. */
@@ -156,7 +157,16 @@ function executedArgsHashFor(
 }
 
 function executionContext(options: Omit<ToolStepOptions, "calls">, events: Event[]) {
-  return toolRunContext({ runId: options.runId, signal: options.signal }, options.recorder, events);
+  return toolRunContext(
+    {
+      runId: options.runId,
+      signal: options.signal,
+      toolRegistry: options.tool,
+      ...(options.depth === undefined ? {} : { depth: options.depth }),
+    },
+    options.recorder,
+    events,
+  );
 }
 
 function recordDeniedResult(

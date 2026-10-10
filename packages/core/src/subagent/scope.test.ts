@@ -8,7 +8,8 @@ const rootId = Id.parse("11111111111111111111111111");
 
 describe("RunScopeRegistry", () => {
   it("uses the run itself as the default root scope", () => {
-    expect(new RunScopeRegistry().scopeOf(runId)).toBe(runId);
+    const scopeOf = new RunScopeRegistry().scopeOf;
+    expect(scopeOf(runId)).toBe(runId);
   });
 
   it("resolves child runs to their registered root scope", () => {
@@ -23,7 +24,11 @@ describe("RunScopeRegistry", () => {
     const scopes = new RunScopeRegistry();
     scopes.register(runId, rootId);
 
-    expect(() => scopes.register(runId, rootId)).not.toThrow();
-    expect(() => scopes.register(runId, runId)).toThrow(RunScopeConflictError);
+    expect(() => {
+      scopes.register(runId, rootId);
+    }).not.toThrow();
+    expect(() => {
+      scopes.register(runId, runId);
+    }).toThrow(RunScopeConflictError);
   });
 });

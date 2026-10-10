@@ -12,7 +12,7 @@ const envelope = { runId: id, seq: 0, ts: 1, v: 1, traceId, spanId, segmentId: i
 
 /** Synthetic valid examples used by event schema and classification tests. */
 export const eventSamples = [
-  { ...envelope, type: "run_created", configHash: sha256, policyVersion: "policy.v1" },
+  { ...envelope, type: "run_created", configHash: sha256, policyVersion: "policy.v1", depth: 0 },
   { ...envelope, type: "run_input", input: "hello", inputKind: "initial" },
   { ...envelope, type: "run_status_changed", from: "pending", to: "running", reason: "started" },
   {

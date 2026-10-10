@@ -91,6 +91,7 @@ export function createEventBuilders(): EventStoreTestBuilders {
         type: "run_created",
         configHash: "c".repeat(64),
         policyVersion: "policy.v1",
+        depth: 0,
         ...(parentRunId === undefined ? {} : { parentRunId }),
       };
     },

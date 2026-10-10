@@ -128,6 +128,7 @@ function runCreated(id: typeof runId, ts: number): NewEvent {
     type: "run_created",
     configHash: "a".repeat(64),
     policyVersion: "policy.v1",
+    depth: 0,
   };
 }
 

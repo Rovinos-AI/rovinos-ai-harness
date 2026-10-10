@@ -39,6 +39,7 @@ function runCreated(id: typeof runId, ts: number, configHash = "a".repeat(64)): 
     type: "run_created",
     configHash,
     policyVersion: "policy.v1",
+    depth: 0,
   };
 }
 
