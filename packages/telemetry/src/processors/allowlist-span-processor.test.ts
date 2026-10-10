@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ROOT_CONTEXT, SpanKind, SpanStatusCode, type Context } from "@opentelemetry/api";
+import { ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, type Context } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import type { ReadableSpan, Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+  type ReadableSpan,
+  type Span,
+  type SpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { attr } from "../attr.js";
 import { defineSpan, __resetRegistryForTests } from "../registry.js";
 import { AllowlistSpanProcessor, sanitizeSpan } from "./allowlist-span-processor.js";
@@ -62,6 +69,24 @@ function makeReadableSpan(overrides: Partial<ReadableSpan> = {}): ReadableSpan {
     droppedLinksCount: 3,
     ...overrides,
   };
+}
+
+function withMalformedField(field: string, value: unknown): ReadableSpan {
+  const span = makeReadableSpan();
+  Object.defineProperty(span, field, { value });
+  return span;
+}
+
+function withMalformedAttribute(value: unknown): ReadableSpan {
+  const span = makeReadableSpan();
+  Object.defineProperty(span, "attributes", {
+    value: {
+      "harness.request.id": "00000000000000000000000000",
+      "harness.test.count": value,
+      "harness.test.mode": "fast",
+    },
+  });
+  return span;
 }
 
 function createNextProcessor() {
@@ -178,6 +203,18 @@ describe("sanitizeSpan", () => {
     expect(sanitized?.resource).not.toBe(input.resource);
   });
 
+  it("drops invalid values from allowlisted resource attributes", () => {
+    defineTestSpan();
+    const resource = resourceFromAttributes({ "service.version": "1.0.0" });
+    Object.defineProperty(resource, "attributes", {
+      value: { ...resource.attributes, "service.name": ["not a scalar"] },
+    });
+
+    const sanitized = sanitizeSpan(makeReadableSpan({ resource }));
+
+    expect(sanitized?.resource.attributes).toEqual({ "service.version": "1.0.0" });
+  });
+
   it("drops malformed span data and counts processor errors", () => {
     defineTestSpan();
     const malformed = Object.defineProperty(makeReadableSpan(), "attributes", {
@@ -188,6 +225,11 @@ describe("sanitizeSpan", () => {
 
     expect(sanitizeSpan(malformed)).toBeUndefined();
     expect(metricMocks.record).toHaveBeenCalledWith("processor_error");
+  });
+
+  it("has the public sanitized-span return type", () => {
+    expectTypeOf(sanitizeSpan).returns.toEqualTypeOf<ReadableSpan | undefined>();
+    expect(sanitizeSpan).toBeTypeOf("function");
   });
 });
 
@@ -240,6 +282,135 @@ describe("AllowlistSpanProcessor", () => {
     }).not.toThrow();
     expect(next.onEnd).not.toHaveBeenCalled();
     expect(metricMocks.record.mock.calls).toEqual([["unregistered_span"], ["processor_error"]]);
+  });
+
+  it.each([
+    { name: "null attributes", span: withMalformedField("attributes", null) },
+    { name: "non-function spanContext", span: withMalformedField("spanContext", null) },
+    {
+      name: "invalid spanContext result",
+      span: withMalformedField("spanContext", () => ({
+        traceId: "bad",
+        spanId: "bad",
+        traceFlags: 0,
+      })),
+    },
+    { name: "invalid parent context", span: withMalformedField("parentSpanContext", {}) },
+    { name: "invalid kind", span: withMalformedField("kind", "internal") },
+    { name: "missing status", span: withMalformedField("status", undefined) },
+    { name: "invalid status code", span: withMalformedField("status", { code: "ERROR" }) },
+    { name: "non-array links", span: withMalformedField("links", {}) },
+    { name: "invalid link context", span: withMalformedField("links", [{ context: {} }]) },
+    { name: "non-array events", span: withMalformedField("events", null) },
+    { name: "missing resource", span: withMalformedField("resource", undefined) },
+    { name: "short start time", span: withMalformedField("startTime", [1]) },
+    { name: "invalid end time", span: withMalformedField("endTime", "invalid") },
+    { name: "missing duration", span: withMalformedField("duration", undefined) },
+    { name: "invalid ended flag", span: withMalformedField("ended", "true") },
+    {
+      name: "missing instrumentation scope",
+      span: withMalformedField("instrumentationScope", undefined),
+    },
+    { name: "invalid dropped count", span: withMalformedField("droppedLinksCount", -1) },
+    {
+      name: "throwing attribute ownKeys proxy",
+      span: withMalformedField(
+        "attributes",
+        new Proxy(
+          {},
+          {
+            ownKeys() {
+              throw new Error("untrusted proxy");
+            },
+          },
+        ),
+      ),
+    },
+    ...(
+      [
+        { name: "array", value: ["unsafe"] },
+        { name: "object", value: { unsafe: true } },
+        { name: "NaN", value: Number.NaN },
+        { name: "Infinity", value: Number.POSITIVE_INFINITY },
+        { name: "bigint", value: 1n },
+      ] satisfies { name: string; value: unknown }[]
+    ).map(({ name, value }) => ({
+      name: `invalid ${name} attribute value`,
+      span: withMalformedAttribute(value),
+    })),
+  ])("does not throw or forward malformed input: $name", ({ span }) => {
+    defineTestSpan();
+    const next = createNextProcessor();
+    const processor = new AllowlistSpanProcessor(next);
+
+    expect(() => {
+      processor.onEnd(span);
+    }).not.toThrow();
+
+    const forwarded = vi.mocked(next.onEnd).mock.calls.map(([value]) => value);
+    expect(forwarded.length).toBeLessThanOrEqual(1);
+    for (const output of forwarded) {
+      expect(
+        Object.keys(output.attributes).every((key) =>
+          ["harness.request.id", "harness.test.count", "harness.test.mode"].includes(key),
+        ),
+      ).toBe(true);
+      expect(
+        Object.values(output.attributes).every(
+          (value) =>
+            typeof value === "string" ||
+            typeof value === "boolean" ||
+            (typeof value === "number" && Number.isFinite(value)),
+        ),
+      ).toBe(true);
+      expect(output.events).toEqual([]);
+      expect(output.status.message).toBeUndefined();
+      expect(
+        output.links.every((link) => Object.keys(link).every((key) => key === "context")),
+      ).toBe(true);
+      expect(
+        Object.values(output.resource.attributes).every(
+          (value) =>
+            typeof value === "string" ||
+            typeof value === "boolean" ||
+            (typeof value === "number" && Number.isFinite(value)),
+        ),
+      ).toBe(true);
+      expect(output.startTime).toHaveLength(2);
+      expect(output.endTime).toHaveLength(2);
+      expect(output.duration).toHaveLength(2);
+    }
+  });
+
+  it("sends only sanitized spans through the real SDK exporter pipeline", async () => {
+    const exporter = new InMemorySpanExporter();
+    const allowlist = new AllowlistSpanProcessor(new SimpleSpanProcessor(exporter));
+    const provider = new BasicTracerProvider({ spanProcessors: [allowlist] });
+    trace.setGlobalTracerProvider(provider);
+    const definition = defineTestSpan();
+
+    try {
+      const span = definition.start({
+        "harness.request.id": "00000000000000000000000000",
+        "harness.test.count": 3,
+        "harness.test.mode": "fast",
+      });
+      span.setAttribute("harness.unregistered.attribute", "must not be exported");
+      span.addEvent("exception", { "exception.message": "must not be exported" });
+      span.setStatus({ code: SpanStatusCode.ERROR, message: "must not be exported" });
+      span.end();
+
+      const [exported] = exporter.getFinishedSpans();
+      expect(exported?.attributes).toEqual({
+        "harness.request.id": "00000000000000000000000000",
+        "harness.test.count": 3,
+        "harness.test.mode": "fast",
+      });
+      expect(exported?.events).toEqual([]);
+      expect(exported?.status).toEqual({ code: SpanStatusCode.ERROR });
+    } finally {
+      await provider.shutdown();
+    }
   });
 
   it("contains downstream processor failures and counts them", () => {

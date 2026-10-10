@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Attributes, Context } from "@opentelemetry/api";
+import {
+  isSpanContextValid,
+  SpanKind,
+  SpanStatusCode,
+  type Attributes,
+  type Context,
+  type SpanContext,
+} from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { ReadableSpan, Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { lookupSpanDefinition } from "../registry.js";
@@ -19,6 +26,111 @@ function isAttributeValue(value: unknown): value is string | number | boolean {
     typeof value === "string" ||
     typeof value === "boolean" ||
     (typeof value === "number" && Number.isFinite(value))
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSpanContext(value: unknown): value is SpanContext {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const { traceId, spanId, traceFlags } = value;
+  return (
+    typeof traceId === "string" &&
+    typeof spanId === "string" &&
+    typeof traceFlags === "number" &&
+    isSpanContextValid({ traceId, spanId, traceFlags })
+  );
+}
+
+function isSpanLink(value: unknown): value is ReadableSpan["links"][number] {
+  return isRecord(value) && isSpanContext(value.context);
+}
+
+function isInstrumentationScope(value: unknown): value is ReadableSpan["instrumentationScope"] {
+  return isRecord(value) && typeof value.name === "string";
+}
+
+function isHrTime(value: unknown): value is ReadableSpan["startTime"] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every((component: unknown) => typeof component === "number" && Number.isFinite(component))
+  );
+}
+
+function copyHrTime(value: unknown): ReadableSpan["startTime"] {
+  if (!isHrTime(value)) {
+    throw new TypeError("Span time is malformed.");
+  }
+  return [value[0], value[1]];
+}
+
+function isStatusCode(value: unknown): value is SpanStatusCode {
+  return (
+    value === SpanStatusCode.UNSET || value === SpanStatusCode.OK || value === SpanStatusCode.ERROR
+  );
+}
+
+function isSpanKind(value: unknown): value is SpanKind {
+  return (
+    value === SpanKind.INTERNAL ||
+    value === SpanKind.SERVER ||
+    value === SpanKind.CLIENT ||
+    value === SpanKind.PRODUCER ||
+    value === SpanKind.CONSUMER
+  );
+}
+
+function isNonnegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isSpanIdentityValid(span: ReadableSpan): boolean {
+  return (
+    typeof span.name === "string" &&
+    isSpanKind(span.kind) &&
+    isRecord(span.attributes) &&
+    typeof span.spanContext === "function" &&
+    (span.parentSpanContext === undefined || isSpanContext(span.parentSpanContext))
+  );
+}
+
+function areSpanTimesValid(span: ReadableSpan): boolean {
+  return isHrTime(span.startTime) && isHrTime(span.endTime) && isHrTime(span.duration);
+}
+
+function isSpanPayloadValid(span: ReadableSpan): boolean {
+  return (
+    isRecord(span.status) &&
+    isStatusCode(span.status.code) &&
+    Array.isArray(span.links) &&
+    span.links.every(isSpanLink) &&
+    Array.isArray(span.events)
+  );
+}
+
+function isSpanMetadataValid(span: ReadableSpan): boolean {
+  return (
+    typeof span.ended === "boolean" &&
+    isRecord(span.resource) &&
+    isRecord(span.resource.attributes) &&
+    isInstrumentationScope(span.instrumentationScope) &&
+    isNonnegativeInteger(span.droppedAttributesCount) &&
+    isNonnegativeInteger(span.droppedEventsCount) &&
+    isNonnegativeInteger(span.droppedLinksCount)
+  );
+}
+
+function isReadableSpanValid(span: ReadableSpan): boolean {
+  return (
+    isSpanIdentityValid(span) &&
+    areSpanTimesValid(span) &&
+    isSpanPayloadValid(span) &&
+    isSpanMetadataValid(span)
   );
 }
 
@@ -43,7 +155,7 @@ function isSuccessfulParse(
 }
 
 function sanitizeAttributes(
-  span: ReadableSpan,
+  sourceAttributes: Record<string, unknown>,
   shape: unknown,
   droppedReasons: TelemetryDropReason[],
 ): Attributes {
@@ -52,7 +164,7 @@ function sanitizeAttributes(
   }
 
   const attributes: Attributes = {};
-  for (const [key, value] of Object.entries(span.attributes)) {
+  for (const [key, value] of Object.entries(sourceAttributes)) {
     if (!Object.hasOwn(shape, key)) {
       droppedReasons.push("unregistered_attr");
       continue;
@@ -75,11 +187,11 @@ function sanitizeAttributes(
   return attributes;
 }
 
-function sanitizeResource(span: ReadableSpan) {
+function sanitizeResource(sourceAttributes: Record<string, unknown>) {
   const attributes: Attributes = {};
   for (const key of resourceAttributeNames) {
-    const value = span.resource.attributes[key];
-    if (value !== undefined) {
+    const value: unknown = sourceAttributes[key];
+    if (isAttributeValue(value)) {
       attributes[key] = value;
     }
   }
@@ -94,6 +206,10 @@ function sanitizeResource(span: ReadableSpan) {
  */
 export function sanitizeSpan(span: ReadableSpan): ReadableSpan | undefined {
   try {
+    if (!isReadableSpanValid(span)) {
+      throw new TypeError("Readable span is malformed.");
+    }
+
     const definition = lookupSpanDefinition(span.name);
     if (definition === undefined) {
       countDroppedTelemetry("unregistered_span");
@@ -101,12 +217,15 @@ export function sanitizeSpan(span: ReadableSpan): ReadableSpan | undefined {
     }
 
     const droppedReasons: TelemetryDropReason[] = [];
-    const attributes = sanitizeAttributes(span, definition.shape, droppedReasons);
+    const attributes = sanitizeAttributes(span.attributes, definition.shape, droppedReasons);
     if (span.events.length > 0) {
       droppedReasons.push("event_stripped");
     }
 
     const spanContext = span.spanContext();
+    if (!isSpanContext(spanContext)) {
+      throw new TypeError("Span context is malformed.");
+    }
     const sanitized: ReadableSpan = {
       name: span.name,
       kind: span.kind,
@@ -114,15 +233,15 @@ export function sanitizeSpan(span: ReadableSpan): ReadableSpan | undefined {
       ...(span.parentSpanContext === undefined
         ? {}
         : { parentSpanContext: span.parentSpanContext }),
-      startTime: [span.startTime[0], span.startTime[1]],
-      endTime: [span.endTime[0], span.endTime[1]],
+      startTime: copyHrTime(span.startTime),
+      endTime: copyHrTime(span.endTime),
       status: { code: span.status.code },
       attributes,
       links: span.links.map(({ context }) => ({ context })),
       events: [],
-      duration: [span.duration[0], span.duration[1]],
+      duration: copyHrTime(span.duration),
       ended: span.ended,
-      resource: sanitizeResource(span),
+      resource: sanitizeResource(span.resource.attributes),
       instrumentationScope: span.instrumentationScope,
       droppedAttributesCount: span.droppedAttributesCount,
       droppedEventsCount: span.droppedEventsCount,
