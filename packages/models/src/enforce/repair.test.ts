@@ -22,7 +22,11 @@ describe("bounded repair requests", () => {
       if (result.valid) {
         throw new Error("Expected the synthetic output to fail validation.");
       }
-      const repaired = appendRepairMessages(request, [{ type: "text", text: canary }], result.issues);
+      const repaired = appendRepairMessages(
+        request,
+        [{ type: "text", text: canary }],
+        result.issues,
+      );
       const repairMessage = repaired.messages.at(-1);
       expect(repairMessage).toMatchObject({
         role: "user",
@@ -42,10 +46,14 @@ describe("bounded repair requests", () => {
   );
 
   it("formats unusual property names and value-free fallback descriptors", () => {
-    const result = appendRepairMessages(request, [], [
-      { path: ["field.with.dots"], code: "invalid_json" },
-      { path: ["field.with.dots"], code: "too_small" },
-    ]);
+    const result = appendRepairMessages(
+      request,
+      [],
+      [
+        { path: ["field.with.dots"], code: "invalid_json" },
+        { path: ["field.with.dots"], code: "too_small" },
+      ],
+    );
     expect(result.messages.at(-1)).toMatchObject({
       role: "user",
       parts: [

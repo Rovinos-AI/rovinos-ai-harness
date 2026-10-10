@@ -15,7 +15,12 @@ import {
 } from "@harness/schemas";
 import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { z } from "zod";
-import { ProviderResultSchema, type Clock, type IdGenerator } from "./types.js";
+import {
+  ProviderResultSchema,
+  type Clock,
+  type IdGenerator,
+  type ProviderAdapter,
+} from "./types.js";
 import type { AdapterRegistry } from "./registry.js";
 import { ModelOutputInvalidError, ProviderError } from "./errors.js";
 import { prepareMessagesForProvider } from "./blobs.js";
@@ -181,9 +186,7 @@ export class ModelGateway {
     this.random = dependencies.random ?? Math.random;
     this.sleep = dependencies.sleep ?? abortableSleep;
     this.maxConcurrent = dependencies.maxConcurrent ?? 4;
-    this.maxRepairs = ModelEnforcementConfigSchema.parse(
-      dependencies.enforcement ?? {},
-    ).maxRepairs;
+    this.maxRepairs = ModelEnforcementConfigSchema.parse(dependencies.enforcement ?? {}).maxRepairs;
     if (!Number.isSafeInteger(this.maxConcurrent) || this.maxConcurrent < 1) {
       throw new RangeError("maxConcurrent must be a positive integer.");
     }
@@ -198,6 +201,48 @@ export class ModelGateway {
         new TokenBucketRateLimiter(requestsPerMinute, dependencies.clock, this.sleep),
       );
     }
+  }
+
+  private completeWithRetries(
+    adapter: ProviderAdapter,
+    options: {
+      readonly request: ModelRequest;
+      readonly context: ModelGatewayContext;
+      readonly limiter: TokenBucketRateLimiter | undefined;
+      readonly semaphore: Semaphore;
+      readonly onAttempt: () => void;
+    },
+  ) {
+    const { request, context, limiter, semaphore, onAttempt } = options;
+    return withRetries({
+      policy: this.retryPolicy,
+      clock: this.dependencies.clock,
+      random: this.random,
+      sleep: this.sleep,
+      signal: context.signal,
+      ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+      prepareAttempt: async (signal, lastError) => {
+        if (limiter !== undefined) {
+          await limiter.acquire(signal, context.deadlineTs, lastError);
+        }
+        return semaphore.acquire(signal);
+      },
+      operation: (signal) => {
+        onAttempt();
+        return adapter.complete(
+          {
+            ...request,
+            messages: prepareMessagesForProvider(request.messages, adapter.provider),
+          },
+          {
+            signal,
+            ids: this.dependencies.ids,
+            clock: this.dependencies.clock,
+            ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+          },
+        );
+      },
+    });
   }
 
   /**
@@ -232,36 +277,16 @@ export class ModelGateway {
     let aggregateUsage: ModelUsage | undefined;
     let aggregateLatencyMs = 0;
     let currentRequest = prepared.request;
-    while (true) {
+    for (;;) {
       setActiveSpanAttribute("harness.model.repair_attempts", repairAttempts);
-      const adapterResult = await withRetries({
-        policy: this.retryPolicy,
-        clock: this.dependencies.clock,
-        random: this.random,
-        sleep: this.sleep,
-        signal: context.signal,
-        ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-        prepareAttempt: async (signal, lastError) => {
-          if (limiter !== undefined) {
-            await limiter.acquire(signal, context.deadlineTs, lastError);
-          }
-          return semaphore.acquire(signal);
-        },
-        operation: (signal) => {
+      const adapterResult = await this.completeWithRetries(adapter, {
+        request: currentRequest,
+        context,
+        limiter,
+        semaphore,
+        onAttempt: () => {
           attempts += 1;
           setActiveSpanAttribute("harness.model.attempts", attempts);
-          return adapter.complete(
-            {
-              ...currentRequest,
-              messages: prepareMessagesForProvider(currentRequest.messages, adapter.provider),
-            },
-            {
-              signal,
-              ids: this.dependencies.ids,
-              clock: this.dependencies.clock,
-              ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-            },
-          );
         },
       });
       const parsedResult = ProviderResultSchema.safeParse(adapterResult);
@@ -274,7 +299,7 @@ export class ModelGateway {
 
       const enforced = enforceProviderOutput(result.parts, context.outputSchema, prepared.rung);
       const enforcement = prepared.result ?? enforced.result;
-      if (enforcement?.valid === false) {
+      if (enforcement !== undefined && "issues" in enforcement) {
         if (repairAttempts >= this.maxRepairs) {
           throw new ModelOutputInvalidError(repairAttempts, enforcement.issues);
         }

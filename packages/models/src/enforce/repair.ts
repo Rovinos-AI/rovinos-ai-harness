@@ -5,9 +5,9 @@ import type { EnforcementIssue } from "./index.js";
 function pathText(path: readonly (string | number)[]): string {
   return path.reduce<string>((result, segment) => {
     if (typeof segment === "number") {
-      return `${result}[${segment}]`;
+      return `${result}[${String(segment)}]`;
     }
-    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(segment)) {
+    if (/^[\w$]+$/u.test(segment)) {
       return `${result}.${segment}`;
     }
     return `${result}[${JSON.stringify(segment)}]`;
@@ -36,7 +36,9 @@ export function appendRepairMessages(
   previousOutput: readonly Part[],
   issues: readonly EnforcementIssue[],
 ): ModelRequest {
-  const descriptions = issues.map((issue) => `${pathText(issue.path)}: expected ${expectedText(issue)}`);
+  const descriptions = issues.map(
+    (issue) => `${pathText(issue.path)}: expected ${expectedText(issue)}`,
+  );
   return {
     ...request,
     messages: [

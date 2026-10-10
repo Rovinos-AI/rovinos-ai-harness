@@ -13,7 +13,9 @@ export const EnforcementIssueSchema = z
   .object({
     path: z.array(z.union([z.string(), z.number()])),
     code: Code,
-    expected: z.enum(["array", "boolean", "integer", "null", "number", "object", "string"]).optional(),
+    expected: z
+      .enum(["array", "boolean", "integer", "null", "number", "object", "string"])
+      .optional(),
   })
   .strict();
 
