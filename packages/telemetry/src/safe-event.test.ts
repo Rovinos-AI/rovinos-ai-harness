@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Event } from "@harness/schemas";
+import { EVENT_FIELD_CLASS, Event, eventSamples } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { SafeEvent, safeEventSchemas, toSafeEvent } from "./safe-event.js";
 import { z } from "zod";
@@ -16,6 +16,24 @@ const envelope = {
 
 function validEvent(value: Record<string, unknown>): Event {
   return Event.parse({ ...envelope, ...value });
+}
+
+function canaryValue(value: unknown, canary: string): unknown {
+  if (Array.isArray(value)) {
+    return value.length === 0 ? [canary] : value.map((item) => canaryValue(item, canary));
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value);
+    return entries.length === 0
+      ? { canary }
+      : Object.fromEntries(
+          entries.map(([key, nested]) => [
+            key,
+            key === "role" || key === "type" ? nested : canaryValue(nested, canary),
+          ]),
+        );
+  }
+  return canary;
 }
 
 const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown> }[] = [
@@ -253,49 +271,35 @@ describe("SafeEvent projection", () => {
     expect(toSafeEvent(noParentCallId, "sanitizer.v1")).not.toHaveProperty("parentCallId");
   });
 
-  it("never exports canary strings from randomized content fields", () => {
-    let state = 0x13579bdf;
-    const nextCanary = (): string => {
-      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
-      return `CANARY_${state.toString(16)}`;
-    };
-    for (let index = 0; index < 100; index += 1) {
-      const canary = nextCanary();
-      const events = [
-        validEvent({
-          type: "model_response",
-          requestId: "00000000000000000000000002",
-          provider: "provider.test",
-          model: "model.test",
-          inputTokens: index,
-          outputTokens: index,
-          finishReason: "stop",
-          latencyMs: index,
-          schemaValid: true,
-          repairAttempts: 0,
-          content: [{ type: "text", text: canary }],
-          providerBlobs: { canary },
+  it("never exports canaries from any classified content field", () => {
+    for (const [index, sample] of eventSamples.entries()) {
+      const canary = `CANARY_${sample.type}_${index}`;
+      const contentFields = Object.entries(EVENT_FIELD_CLASS[sample.type])
+        .filter(([, classification]) => classification === "content")
+        .map(([field]) => field);
+      const injected = Object.fromEntries(
+        contentFields.map((field) => {
+          const baseValue = Object.entries(sample).find(([key]) => key === field)?.[1];
+          return [field, canaryValue(baseValue, canary)];
         }),
-        validEvent({
-          type: "tool_result",
-          callId: "00000000000000000000000002",
-          toolId: "tool.test",
-          outcome: "ok",
-          latencyMs: index,
-          result: { canary },
-        }),
-        validEvent({
-          type: "approval_resolved",
-          approvalId: "00000000000000000000000002",
-          decision: "approve",
-          waitMs: index,
-          edits: { canary },
-        }),
-      ];
-      for (const event of events) {
-        expect(JSON.stringify(toSafeEvent(event, "sanitizer.v1"))).not.toContain(canary);
-      }
+      );
+      const event = Event.parse({ ...sample, ...injected });
+
+      expect(JSON.stringify(toSafeEvent(event, "sanitizer.v1"))).not.toContain(canary);
     }
+  });
+
+  it("rejects negative repair-attempt counts in parsed SafeEvents", () => {
+    const modelResponse = mappedEvents.find(({ event }) => event.type === "model_response");
+    if (modelResponse === undefined) {
+      throw new Error("The model response mapping is missing");
+    }
+    expect(
+      SafeEvent.safeParse({
+        ...toSafeEvent(modelResponse.event, "sanitizer.v1"),
+        repairAttempts: -1,
+      }).success,
+    ).toBe(false);
   });
 
   it("keeps every safe-event string field constrained and rejects unknown fields", () => {

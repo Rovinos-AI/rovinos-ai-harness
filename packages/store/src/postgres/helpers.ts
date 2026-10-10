@@ -48,8 +48,11 @@ export const POSTGRES_SCHEMA = `
     meta jsonb NOT NULL,
     content_blob text NOT NULL,
     key_id text,
+    tx_id xid8 NOT NULL DEFAULT pg_current_xact_id(),
     UNIQUE (run_id, seq)
   );
+  ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS tx_id xid8 NOT NULL DEFAULT pg_current_xact_id();
   CREATE INDEX IF NOT EXISTS events_trace_id_idx ON events (trace_id);
   CREATE INDEX IF NOT EXISTS runs_status_created_at_idx ON runs (status, created_at);
   CREATE TABLE IF NOT EXISTS snapshots (
@@ -409,10 +412,6 @@ export async function appendTransaction(
       throw new InvalidEventError([[0, "type"]]);
     }
 
-    // Hold the outbox lock through commit so a later cursor cannot skip a late lower-sequence commit.
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtext(current_schema()), hashtext('events_outbox'))",
-    );
     const status = nextStatus(run.status, encoded);
     await insertEventBatches(client, encoded, {
       runId,

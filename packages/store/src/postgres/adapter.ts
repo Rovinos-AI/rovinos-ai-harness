@@ -80,6 +80,7 @@ export class PostgresEventStore implements EventStore {
    * @param connectionString Postgres connection URL.
    * @param options Pool size and schema selection.
    * @param codec Codec used to store content separately from event metadata.
+   * @param clock Clock supplying timestamps for sink-cursor updates.
    */
   constructor(
     connectionString: string,
@@ -124,7 +125,7 @@ export class PostgresEventStore implements EventStore {
       transactionStarted = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
       const schemaState = await client.query<{ initialized: boolean } & QueryResultRow>(
-        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AND to_regclass('sink_cursors') IS NOT NULL AND to_regclass('store_metadata') IS NOT NULL AS initialized",
+        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AND to_regclass('sink_cursors') IS NOT NULL AND to_regclass('store_metadata') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'events' AND column_name = 'tx_id') AS initialized",
       );
       if (schemaState.rows[0]?.initialized !== true) {
         await client.query(POSTGRES_SCHEMA);
@@ -332,7 +333,7 @@ export class PostgresEventStore implements EventStore {
       const lastAcked =
         cursorResult.rows[0] === undefined ? 0 : integer(cursorResult.rows[0].cursor);
       const result = await this.pool.query<EventRow & { global_seq: number | string }>(
-        "SELECT global_seq, run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id FROM events WHERE global_seq > $1 ORDER BY global_seq LIMIT $2",
+        "SELECT global_seq, run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id FROM events WHERE global_seq > $1 AND tx_id < pg_snapshot_xmin(pg_current_snapshot()) ORDER BY global_seq LIMIT $2",
         [lastAcked, limit],
       );
       const events: Event[] = [];

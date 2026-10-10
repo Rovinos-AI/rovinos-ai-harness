@@ -176,6 +176,7 @@ export class SqliteEventStore implements EventStore {
    * @param path Database file path or `:memory:`.
    * @param codec Codec used to store content separately from event metadata.
    * @param options Snapshot retention configuration.
+   * @param clock Clock supplying timestamps for sink-cursor updates.
    */
   constructor(
     path: string,

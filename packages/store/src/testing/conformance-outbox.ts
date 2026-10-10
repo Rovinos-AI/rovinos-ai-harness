@@ -57,12 +57,9 @@ function registerOutbox(factory: EventStoreFactory, builders: EventStoreTestBuil
       const baseline = await advanceOutboxToEnd(store);
       const firstRunId = builders.nextRunId();
       const secondRunId = builders.nextRunId();
-      await store.append(
-        firstRunId,
-        [builders.runCreated(firstRunId), builders.modelRequest(firstRunId)],
-        0,
-      );
+      await store.append(firstRunId, [builders.runCreated(firstRunId)], 0);
       await store.append(secondRunId, [builders.runCreated(secondRunId)], 0);
+      await store.append(firstRunId, [builders.modelRequest(firstRunId)], 1);
 
       const firstSink = nextOutboxSinkId();
       const secondSink = nextOutboxSinkId();
@@ -72,7 +69,7 @@ function registerOutbox(factory: EventStoreFactory, builders: EventStoreTestBuil
       const firstBatch = await store.fetchOutbox(firstSink, 2);
       expect(firstBatch.events.map(({ runId, seq }) => [runId, seq])).toEqual([
         [firstRunId, 0],
-        [firstRunId, 1],
+        [secondRunId, 0],
       ]);
       expect(firstBatch.cursor).toBeGreaterThan(baseline);
       await expect(store.fetchOutbox(firstSink, 2)).resolves.toEqual(firstBatch);
@@ -81,14 +78,19 @@ function registerOutbox(factory: EventStoreFactory, builders: EventStoreTestBuil
       await store.ackOutbox(firstSink, baseline);
       const remainingFirst = await store.fetchOutbox(firstSink, 2);
       expect(remainingFirst.events.map(({ runId, seq }) => [runId, seq])).toEqual([
-        [secondRunId, 0],
+        [firstRunId, 1],
       ]);
+      await store.ackOutbox(firstSink, remainingFirst.cursor);
+      await expect(store.fetchOutbox(firstSink, 2)).resolves.toEqual({
+        events: [],
+        cursor: remainingFirst.cursor,
+      });
 
       const independentSecond = await store.fetchOutbox(secondSink, 10);
       expect(independentSecond.events.map(({ runId, seq }) => [runId, seq])).toEqual([
         [firstRunId, 0],
-        [firstRunId, 1],
         [secondRunId, 0],
+        [firstRunId, 1],
       ]);
       await store.ackOutbox(secondSink, independentSecond.cursor);
       await expect(store.fetchOutbox(secondSink, 10)).resolves.toMatchObject({
@@ -107,18 +109,32 @@ function registerOutboxFileReopen(
     const first = await factory();
     const baseline = await advanceOutboxToEnd(first.store);
     const runId: Id = builders.nextRunId();
+    const secondRunId = builders.nextRunId();
     const sinkId = nextOutboxSinkId();
-    await first.store.append(runId, [builders.runCreated(runId), builders.modelRequest(runId)], 0);
+    await first.store.append(runId, [builders.runCreated(runId)], 0);
+    await first.store.append(secondRunId, [builders.runCreated(secondRunId)], 0);
+    await first.store.append(runId, [builders.modelRequest(runId)], 1);
+    await first.store.append(secondRunId, [builders.modelRequest(secondRunId)], 1);
     await first.store.ackOutbox(sinkId, baseline);
-    const firstBatch = await first.store.fetchOutbox(sinkId, 1);
+    const firstBatch = await first.store.fetchOutbox(sinkId, 2);
+    expect(firstBatch.events.map(({ runId: eventRunId, seq }) => [eventRunId, seq])).toEqual([
+      [runId, 0],
+      [secondRunId, 0],
+    ]);
     await first.store.ackOutbox(sinkId, firstBatch.cursor);
     await first.cleanup();
 
     await withStore(factory, async (store) => {
-      const resumed = await store.fetchOutbox(sinkId, 10);
+      const resumed = await store.fetchOutbox(sinkId, 2);
       expect(resumed.events.map(({ runId: eventRunId, seq }) => [eventRunId, seq])).toEqual([
         [runId, 1],
+        [secondRunId, 1],
       ]);
+      await store.ackOutbox(sinkId, resumed.cursor);
+      await expect(store.fetchOutbox(sinkId, 2)).resolves.toEqual({
+        events: [],
+        cursor: resumed.cursor,
+      });
     });
   });
 }

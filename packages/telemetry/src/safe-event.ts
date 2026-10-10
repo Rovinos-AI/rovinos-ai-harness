@@ -22,7 +22,7 @@ const modelCall = z
     outputTokens: attr.nonnegativeInt(),
     latencyMs: attr.nonnegativeInt(),
     schemaValid: attr.bool(),
-    repairAttempts: attr.int(),
+    repairAttempts: attr.nonnegativeInt(),
     finishReason: attr.code(),
   })
   .strict();

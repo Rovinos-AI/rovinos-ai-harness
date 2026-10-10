@@ -60,6 +60,7 @@ export class SqliteOutboxReader {
     }
     try {
       const lastAcked = this.getCursor.get(parsedSinkId.data)?.cursor ?? 0;
+      // SQLite serializes writers, so this ordered scan needs no transaction-visibility filter.
       const rows = this.readBatch.all(lastAcked, limit);
       const events: StoredEvent[] = [];
       for (const row of rows) {
