@@ -2,7 +2,13 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AnthropicAdapter, OpenAIAdapter, prepareMessagesForProvider } from "@harness/models";
+import {
+  AdapterRegistry,
+  AnthropicAdapter,
+  ModelGateway,
+  OpenAIAdapter,
+  prepareMessagesForProvider,
+} from "@harness/models";
 import { Id, JsonValue, parseJson } from "@harness/schemas";
 import type { KeyProvider, Message, NewEvent, Part } from "@harness/schemas";
 import { AesGcmContentCodec, SqliteEventStore } from "@harness/store";
@@ -180,13 +186,24 @@ describe("model response rehydration", () => {
   });
 
   it("round-trips the OpenAI raw assistant message through encrypted SQLite", async () => {
-    const rawMessage = { role: "assistant", content: "synthetic answer", refusal: null };
+    const rawMessage = {
+      role: "assistant",
+      content: null,
+      refusal: null,
+      tool_calls: [
+        {
+          id: "call_provider_tool_id",
+          type: "function",
+          function: { name: "lookup", arguments: "{\"key\":\"synthetic\"}" },
+        },
+      ],
+    };
     const response = {
       id: "chatcmpl_synthetic",
       object: "chat.completion",
       created: 1,
       model: "gpt-test",
-      choices: [{ index: 0, message: rawMessage, finish_reason: "stop" }],
+      choices: [{ index: 0, message: rawMessage, finish_reason: "tool_calls" }],
       usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
     };
     const requestBodies: z.infer<typeof OpenAIRequestSchema>[] = [];
@@ -261,19 +278,6 @@ describe("model response rehydration", () => {
       context(),
     );
     const storedParts = await persistAndReadResponse("anthropic", completion.parts);
-    const prepared = prepareMessagesForProvider(
-      [
-        ...initialMessages(),
-        { role: "assistant", parts: storedParts },
-        {
-          role: "tool",
-          parts: [
-            { type: "tool_result", callId: toolCallId, result: { found: true }, isError: false },
-          ],
-        },
-      ],
-      "openai",
-    );
     const requestBodies: z.infer<typeof OpenAIRequestSchema>[] = [];
     const openai = new OpenAIAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
@@ -304,7 +308,23 @@ describe("model response rehydration", () => {
       baseURL: "https://provider.test/v1",
     });
 
-    await openai.complete(conversationRequest("openai", prepared), context());
+    const gateway = new ModelGateway(new AdapterRegistry([openai]), {
+      ids: { next: () => toolCallId },
+      clock: { now: () => 1 },
+    });
+    await gateway.complete(
+      conversationRequest("openai", [
+        ...initialMessages(),
+        { role: "assistant", parts: storedParts },
+        {
+          role: "tool",
+          parts: [
+            { type: "tool_result", callId: toolCallId, result: { found: true }, isError: false },
+          ],
+        },
+      ]),
+      { runId, signal: new AbortController().signal },
+    );
 
     const body = requestBodies.at(-1);
     const assistantMessage = body?.messages.find(({ role }) => role === "assistant");

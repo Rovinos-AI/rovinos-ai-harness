@@ -12,6 +12,7 @@ import { setActiveSpanAttribute } from "@harness/telemetry";
 import { ProviderResultSchema, type Clock, type IdGenerator } from "./types.js";
 import type { AdapterRegistry } from "./registry.js";
 import { ProviderError } from "./errors.js";
+import { prepareMessagesForProvider } from "./blobs.js";
 import { TokenBucketRateLimiter } from "./resilience/limiter.js";
 import { abortableSleep, withRetries, type Random, type Sleep } from "./resilience/retry.js";
 import { Semaphore } from "./resilience/semaphore.js";
@@ -101,12 +102,15 @@ export class ModelGateway {
       operation: (signal) => {
         attempts += 1;
         setActiveSpanAttribute("harness.model.attempts", attempts);
-        return adapter.complete(request, {
-          signal,
-          ids: this.dependencies.ids,
-          clock: this.dependencies.clock,
-          ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-        });
+        return adapter.complete(
+          { ...request, messages: prepareMessagesForProvider(request.messages, adapter.provider) },
+          {
+            signal,
+            ids: this.dependencies.ids,
+            clock: this.dependencies.clock,
+            ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+          },
+        );
       },
     });
     const parsedResult = ProviderResultSchema.safeParse(adapterResult);
