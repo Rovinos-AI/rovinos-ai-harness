@@ -323,7 +323,6 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
 }
 
 async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | undefined> {
-  let legacyGoal: JsonValue | undefined;
   for await (const event of store.read(runId)) {
     if (event.type === "run_input") {
       return event.input;
@@ -332,11 +331,11 @@ async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | und
       const goalMessage = event.messages.find(({ role }) => role === "user");
       const goalPart = goalMessage?.parts.find((part) => part.type === "text");
       if (goalPart?.type === "text") {
-        legacyGoal ??= goalPart.text;
+        return goalPart.text;
       }
     }
   }
-  return legacyGoal;
+  return undefined;
 }
 
 async function createSqliteStore(dataDir: string): Promise<EventStore> {

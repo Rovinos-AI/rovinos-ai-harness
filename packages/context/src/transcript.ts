@@ -34,6 +34,9 @@ function removeCompactedGroups(
   for (let index = groups.length - 1; index >= 0; index -= 1) {
     const group = groups[index];
     if (group?.seqs.some((seq) => seq >= fromSeq && seq <= toSeq) === true) {
+      if (group.pinned) {
+        continue;
+      }
       groups.splice(index, 1);
       removedGroups.add(group);
     }
@@ -47,6 +50,8 @@ function removeCompactedGroups(
 
 /**
  * Reconstructs ordered, atomic transcript groups from durable run events.
+ * Orphan tool results and assistant groups with unanswered tool calls are omitted so providers
+ * never receive an invalid tool turn; pending calls are handled by run resumption.
  *
  * @param events - Validated events from one run, in any sequence order.
  * @returns Transcript groups ordered by their earliest sequence.
@@ -76,13 +81,7 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
       }
     } else if (event.type === "tool_result") {
       const group = groupsByCallId.get(event.callId);
-      if (group === undefined) {
-        groups.push({
-          seqs: [event.seq],
-          messages: [toolResultMessage(event)],
-          pinned: false,
-        });
-      } else {
+      if (group !== undefined) {
         group.seqs.push(event.seq);
         group.messages.push(toolResultMessage(event));
         groupsByCallId.delete(event.callId);
@@ -102,8 +101,17 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
             ],
           },
         ],
+        // Summaries remain available to budgeted strategies as durable context.
         pinned: true,
       });
+    }
+  }
+
+  const unansweredGroups = new Set(groupsByCallId.values());
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const group = groups[index];
+    if (group !== undefined && unansweredGroups.has(group)) {
+      groups.splice(index, 1);
     }
   }
 

@@ -106,6 +106,23 @@ describe("eventsToTranscript", () => {
         modelResponse(4, [{ type: "text", text: "next" }]),
       ],
     ],
+    [
+      "straddling-tool-compaction",
+      [
+        runInput(0, "keep the goal"),
+        modelResponse(1, [{ type: "tool_call", callId, toolId: "lookup", args: { query: "x" } }]),
+        {
+          ...envelope(2),
+          type: "context_compacted",
+          fromSeq: 1,
+          toSeq: 1,
+          strategy: "summary",
+          strategyVersion: "v1",
+          summary: "tool call was compacted",
+        },
+        toolResult(3, { value: "found" }),
+      ],
+    ],
   ] as const)("matches the %s transcript golden", async (name, events) => {
     expect(eventsToTranscript(events)).toEqual(await readGolden(name));
   });
@@ -120,9 +137,12 @@ describe("eventsToTranscript", () => {
     expect(group?.seqs).toEqual([1, 3]);
     expect(group?.messages.map(({ role }) => role)).toEqual(["assistant", "tool"]);
     expect(group?.messages[1]?.parts).toMatchObject([{ isError: true }]);
-    expect(eventsToTranscript([toolResult(5, null)])).toMatchObject([
-      { seqs: [5], messages: [{ role: "tool" }], pinned: false },
-    ]);
+    expect(eventsToTranscript([toolResult(5, null)])).toEqual([]);
+    expect(
+      eventsToTranscript([
+        modelResponse(1, [{ type: "tool_call", callId, toolId: "lookup", args: { query: "x" } }]),
+      ]),
+    ).toEqual([]);
   });
 
   it("replaces only intersecting groups and removes a whole atomic tool group", () => {
@@ -159,8 +179,8 @@ describe("eventsToTranscript", () => {
       {
         ...envelope(1),
         type: "context_compacted",
-        fromSeq: 1,
-        toSeq: 1,
+        fromSeq: 0,
+        toSeq: 0,
         strategy: "summary",
         strategyVersion: "v1",
         summary: { outcome: "done" },
@@ -174,7 +194,7 @@ describe("eventsToTranscript", () => {
         messages: [{ parts: [{ text: '{"goal":"goal"}' }] }],
       },
       {
-        seqs: [1],
+        seqs: [0],
         pinned: true,
         messages: [{ parts: [{ text: 'Summary of earlier work: {"outcome":"done"}' }] }],
       },
@@ -210,9 +230,10 @@ describe("NaiveStrategy", () => {
     const result = await strategy.build({
       events: [
         runInput(0, "goal"),
-        toolResult(1, { $offloaded: { handle: "wf_1" } }),
+        modelResponse(1, [{ type: "tool_call", callId, toolId: "lookup", args: { query: "x" } }]),
+        toolResult(2, { $offloaded: { handle: "wf_1" } }),
         {
-          ...envelope(2),
+          ...envelope(3),
           type: "context_compacted",
           fromSeq: 0,
           toSeq: 0,
@@ -226,15 +247,15 @@ describe("NaiveStrategy", () => {
       counter: { count },
     });
 
-    expect(result.messages).toHaveLength(2);
+    expect(result.messages).toHaveLength(4);
     expect(result.stats).toEqual({
-      messageCount: 2,
+      messageCount: 4,
       estimatedTokens: 9,
       droppedGroups: 0,
       compactedRanges: 1,
       offloadedResults: 1,
     });
-    expect(result.pinnedSeqs).toEqual([0]);
+    expect(result.pinnedSeqs).toEqual([0, 0]);
     expect(strategy.id).toBe("naive");
     expect(strategy.version).toBe("v1");
     expect(count).toHaveBeenCalledWith(result.messages, { provider: "test", model: "test" });
