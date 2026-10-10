@@ -143,14 +143,16 @@ describe("model response rehydration", () => {
       usage: { input_tokens: 1, output_tokens: 2 },
     };
     const requestBodies: z.infer<typeof AnthropicRequestSchema>[] = [];
-    const fetch: typeof globalThis.fetch = async (_input, init) => {
+    const fetch: typeof globalThis.fetch = (_input, init) => {
       if (typeof init?.body === "string") {
         requestBodies.push(parseJson(AnthropicRequestSchema, init.body));
       }
-      return new Response(JSON.stringify(response), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return Promise.resolve(
+        new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
     };
     const adapter = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
@@ -188,14 +190,16 @@ describe("model response rehydration", () => {
       usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
     };
     const requestBodies: z.infer<typeof OpenAIRequestSchema>[] = [];
-    const fetch: typeof globalThis.fetch = async (_input, init) => {
+    const fetch: typeof globalThis.fetch = (_input, init) => {
       if (typeof init?.body === "string") {
         requestBodies.push(parseJson(OpenAIRequestSchema, init.body));
       }
-      return new Response(JSON.stringify(response), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return Promise.resolve(
+        new Response(JSON.stringify(response), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
     };
     const adapter = new OpenAIAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
@@ -243,11 +247,13 @@ describe("model response rehydration", () => {
     };
     const anthropic = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
-      fetch: async () =>
-        new Response(JSON.stringify(anthropicResponse), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
+      fetch: () =>
+        Promise.resolve(
+          new Response(JSON.stringify(anthropicResponse), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        ),
       baseURL: "https://provider.test",
     });
     const completion = await anthropic.complete(
@@ -261,7 +267,9 @@ describe("model response rehydration", () => {
         { role: "assistant", parts: storedParts },
         {
           role: "tool",
-          parts: [{ type: "tool_result", callId: toolCallId, result: { found: true }, isError: false }],
+          parts: [
+            { type: "tool_result", callId: toolCallId, result: { found: true }, isError: false },
+          ],
         },
       ],
       "openai",
@@ -269,22 +277,28 @@ describe("model response rehydration", () => {
     const requestBodies: z.infer<typeof OpenAIRequestSchema>[] = [];
     const openai = new OpenAIAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
-      fetch: async (_input, init) => {
+      fetch: (_input, init) => {
         if (typeof init?.body === "string") {
           requestBodies.push(parseJson(OpenAIRequestSchema, init.body));
         }
-        return new Response(
-          JSON.stringify({
-            id: "chatcmpl_tool_synthetic",
-            object: "chat.completion",
-            created: 1,
-            model: "gpt-test",
-            choices: [
-              { index: 0, message: { role: "assistant", content: "synthetic done" }, finish_reason: "stop" },
-            ],
-            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "chatcmpl_tool_synthetic",
+              object: "chat.completion",
+              created: 1,
+              model: "gpt-test",
+              choices: [
+                {
+                  index: 0,
+                  message: { role: "assistant", content: "synthetic done" },
+                  finish_reason: "stop",
+                },
+              ],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
         );
       },
       baseURL: "https://provider.test/v1",
