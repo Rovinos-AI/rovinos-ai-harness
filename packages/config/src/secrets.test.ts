@@ -204,18 +204,21 @@ describe("inline config secrets", () => {
     {
       name: "maxOutputTokens",
       additions: { models: { maxOutputTokens: 4096 } },
+      path: "models.maxOutputTokens",
       value: "4096",
       inline: false,
     },
     {
       name: "tokenizer",
       additions: { policy: { tokenizer: "cl100k_base" } },
+      path: "policy.tokenizer",
       value: "cl100k_base",
       inline: false,
     },
     {
       name: "auth token reference",
       additions: { auth: { tokens: [{ secret: "env:X" }] } },
+      path: "auth.tokens.0.secret",
       value: "env:X",
       inline: false,
     },
@@ -230,9 +233,7 @@ describe("inline config secrets", () => {
       );
 
       expect(error.issues.some((issue) => issue.includes("secret_inline"))).toBe(inline);
-      if (inline && path !== undefined) {
-        expect(error.issues).toContain(`${path}: a SecretRef (secret_inline)`);
-      }
+      expect(error.issues.includes(`${path}: a SecretRef (secret_inline)`)).toBe(inline);
       expect(error.message).not.toContain(value);
     },
   );

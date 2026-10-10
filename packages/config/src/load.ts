@@ -99,8 +99,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasSecretKeySegment(key: string): boolean {
   const segments = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .replaceAll(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replaceAll(/([A-Z])([A-Z][a-z])/g, "$1 $2")
     .split(/[\s_-]+/)
     .map((segment) => segment.toLowerCase());
   return (
@@ -109,45 +109,80 @@ function hasSecretKeySegment(key: string): boolean {
   );
 }
 
+type ConfigContainer = Record<string, unknown> | unknown[];
+
+interface InlineSecretScanState {
+  readonly visited: WeakSet<ConfigContainer>;
+  readonly active: WeakSet<ConfigContainer>;
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function configContainer(value: unknown): ConfigContainer | undefined {
+  if (isUnknownArray(value)) {
+    return value;
+  }
+  if (isRecord(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+function inlineSecretChildIssues(
+  key: string,
+  child: unknown,
+  path: readonly (string | number)[],
+  state: InlineSecretScanState,
+): string[] {
+  const childPath = [...path, key];
+  const childPathText = childPath.map(String).join(".");
+  const issues =
+    hasSecretKeySegment(key) &&
+    typeof child === "string" &&
+    !SecretRefSchema.safeParse(child).success
+      ? [`${childPathText}: a SecretRef (secret_inline)`]
+      : [];
+  return [...issues, ...inlineSecretIssues(child, childPath, state)];
+}
+
+function containerChildrenIssues(
+  container: ConfigContainer,
+  path: readonly (string | number)[],
+  state: InlineSecretScanState,
+): string[] {
+  if (isUnknownArray(container)) {
+    return container.flatMap((child, index) => inlineSecretIssues(child, [...path, index], state));
+  }
+  return Object.entries(container).flatMap(([key, child]) =>
+    inlineSecretChildIssues(key, child, path, state),
+  );
+}
+
 function inlineSecretIssues(
   value: unknown,
   path: readonly (string | number)[] = [],
-  visited = new WeakSet<object>(),
-  active = new WeakSet<object>(),
+  state: InlineSecretScanState = {
+    visited: new WeakSet<ConfigContainer>(),
+    active: new WeakSet<ConfigContainer>(),
+  },
 ): string[] {
-  if (typeof value !== "object" || value === null) {
+  const container = configContainer(value);
+  if (container === undefined) {
     return [];
   }
   const pathText = path.length === 0 ? "configuration" : path.map(String).join(".");
-  if (active.has(value)) {
+  if (state.active.has(container)) {
     return [`${pathText}: acyclic configuration value (config_cycle)`];
   }
-  if (visited.has(value)) {
+  if (state.visited.has(container)) {
     return [];
   }
-  visited.add(value);
-  active.add(value);
-
-  const issues: string[] = [];
-  if (Array.isArray(value)) {
-    value.forEach((child, index) => {
-      issues.push(...inlineSecretIssues(child, [...path, index], visited, active));
-    });
-  } else if (isRecord(value)) {
-    for (const [key, child] of Object.entries(value)) {
-      const childPath = [...path, key];
-      const childPathText = childPath.map(String).join(".");
-      if (
-        hasSecretKeySegment(key) &&
-        typeof child === "string" &&
-        !SecretRefSchema.safeParse(child).success
-      ) {
-        issues.push(`${childPathText}: a SecretRef (secret_inline)`);
-      }
-      issues.push(...inlineSecretIssues(child, childPath, visited, active));
-    }
-  }
-  active.delete(value);
+  state.visited.add(container);
+  state.active.add(container);
+  const issues = containerChildrenIssues(container, path, state);
+  state.active.delete(container);
   return issues;
 }
 
