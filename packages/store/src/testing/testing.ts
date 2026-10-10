@@ -106,7 +106,7 @@ export function createEventBuilders(): EventStoreTestBuilders {
         requestId: nextId(),
         provider: "test",
         model: "test",
-        messages: [{ content }],
+        messages: [{ role: "user", parts: [{ type: "text", text: content }] }],
         ...(options.role === undefined ? {} : { role: options.role }),
         ...(options.schemaHash === undefined ? {} : { schemaHash: options.schemaHash }),
       };

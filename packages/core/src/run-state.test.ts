@@ -2,6 +2,7 @@
 import { describe, expect, test } from "vitest";
 import { HarnessError, type Event, type RunStatus } from "@harness/schemas";
 import { CorruptLogError, foldRunState, RUN_TRIGGERS, transition, type RunState } from "./index.js";
+import { planLastModelResponseRecovery } from "./run-state.js";
 
 const id = "00000000000000000000000000";
 const otherRunId = "11111111111111111111111111";
@@ -102,7 +103,8 @@ function modelResponse(
     latencyMs: 1,
     schemaValid: true,
     repairAttempts: 0,
-    content: {},
+    fallbackDepth: 0,
+    content: [],
     providerBlobs: [],
     ...(costMicros === undefined ? {} : { costMicros }),
   };
@@ -138,6 +140,70 @@ describe("foldRunState", () => {
     expect(state.nextSeq).toBe(3);
     expect(state.startedAt).toBe(1);
     expect(state.lastTs).toBe(3);
+  });
+
+  describe("planLastModelResponseRecovery", () => {
+    test("recovers tool-call parts that do not yet have a tool intent", () => {
+      const call = { callId: otherRunId, toolId: "test.tool", args: { value: "synthetic" } };
+      const response = {
+        ...modelResponse(1),
+        content: [{ type: "tool_call" as const, ...call }],
+      };
+
+      expect(planLastModelResponseRecovery([runCreated(0), response])).toEqual({
+        kind: "tool_calls",
+        calls: [call],
+      });
+    });
+
+    test("completes a response with no tool-call parts or terminal status", () => {
+      expect(planLastModelResponseRecovery([runCreated(0), modelResponse(1)])).toEqual({
+        kind: "final_answer",
+      });
+    });
+
+    test("does not recover proposals that already have a tool intent", () => {
+      const response = {
+        ...modelResponse(1),
+        content: [
+          { type: "tool_call" as const, callId: otherRunId, toolId: "test.tool", args: {} },
+        ],
+      };
+
+      expect(
+        planLastModelResponseRecovery([runCreated(0), response, toolIntent(2, otherRunId)]),
+      ).toEqual({ kind: "none" });
+      expect(
+        planLastModelResponseRecovery([runCreated(0), modelResponse(1), toolIntent(2)]),
+      ).toEqual({ kind: "none" });
+    });
+
+    test("does not recover a response followed by a new request or terminal status", () => {
+      const response = modelResponse(1);
+      const request = {
+        ...envelope(2),
+        type: "model_request" as const,
+        requestId: id,
+        provider: "test",
+        model: "test",
+        messages: [],
+      };
+
+      expect(planLastModelResponseRecovery([runCreated(0), response, request])).toEqual({
+        kind: "none",
+      });
+      expect(
+        planLastModelResponseRecovery([
+          runCreated(0),
+          response,
+          statusChanged(2, "running", "completed", "final_answer"),
+        ]),
+      ).toEqual({ kind: "none" });
+    });
+
+    test("does not recover when the event history has no model response", () => {
+      expect(planLastModelResponseRecovery([runCreated(0)])).toEqual({ kind: "none" });
+    });
   });
 
   test("tracks approval lifecycle, model usage, checkpoint, and the current segment", () => {

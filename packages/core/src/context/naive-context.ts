@@ -1,34 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, JsonValue } from "@harness/schemas";
+import type { Event, JsonValue, Message } from "@harness/schemas";
 import type { ContextPort } from "../ports.js";
 
 /** Basic context builder that retains model outputs and tool results in order. */
 export class NaiveContext implements ContextPort {
   /** {@inheritDoc ContextPort.build} */
-  build(events: readonly Event[]): Promise<JsonValue> {
+  build(events: readonly Event[]): Promise<Message[]> {
     return Promise.resolve(
-      events.flatMap((event) => {
+      events.flatMap<Message>((event): Message[] => {
         if (event.type === "model_response") {
-          return [event.content];
-        }
-        if (event.type === "tool_intent") {
-          return [
-            {
-              type: "tool_call",
-              callId: event.callId,
-              toolId: event.toolId,
-              args: event.args,
-            },
-          ];
+          return [{ role: "assistant", parts: event.content }];
         }
         if (event.type === "tool_result") {
           return [
             {
-              callId: event.callId,
-              toolId: event.toolId,
-              outcome: event.outcome,
-              ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
-              result: event.result,
+              role: "tool",
+              parts: [
+                {
+                  type: "tool_result",
+                  isError: event.outcome !== "ok",
+                  callId: event.callId,
+                  result: event.result,
+                },
+              ],
             },
           ];
         }

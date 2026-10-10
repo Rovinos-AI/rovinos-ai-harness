@@ -95,7 +95,7 @@ function modelRequest(id: typeof runId, ts: number, text = "synthetic prompt"): 
     requestId: id,
     provider: "test",
     model: "test",
-    messages: [{ content: text }],
+    messages: [{ role: "user", parts: [{ type: "text", text }] }],
   };
 }
 

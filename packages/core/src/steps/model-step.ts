@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code } from "@harness/schemas";
-import type { Event, Id, JsonValue } from "@harness/schemas";
+import type { Event, Id, Message } from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
@@ -12,7 +12,7 @@ export interface ModelStepOptions {
   readonly model: ModelPort;
   readonly ids: IdGenerator;
   readonly runId: Id;
-  readonly messages: JsonValue;
+  readonly messages: Message[];
   readonly signal: AbortSignal;
   readonly role?: Code;
   readonly provider?: Code;
@@ -69,6 +69,10 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       completion = await options.model.complete(
         {
           requestId,
+          model: {
+            provider: options.provider ?? "unknown",
+            model: options.modelName ?? "unknown",
+          },
           messages: options.messages,
           ...(role === undefined ? {} : { role }),
         },
@@ -109,9 +113,10 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       latencyMs: completion.latencyMs,
       schemaValid: completion.schemaValid,
       repairAttempts: completion.repairAttempts,
-      content: completion.content,
+      ...(completion.rungUsed === undefined ? {} : { rungUsed: completion.rungUsed }),
+      fallbackDepth: completion.fallbackDepth,
+      content: completion.parts,
       providerBlobs: completion.providerBlobs,
-      ...(completion.toolCalls.length === 0 ? {} : { toolCalls: [...completion.toolCalls] }),
     });
     recorded.push(response);
     result = { outcome: "response", completion, events: recorded };

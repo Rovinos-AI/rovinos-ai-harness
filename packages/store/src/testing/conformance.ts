@@ -203,7 +203,9 @@ function registerLargeContent(factory: EventStoreFactory, builders: EventStoreTe
     await withStore(factory, async (store) => {
       const runId = builders.nextRunId();
       const content = "x".repeat(
-        1024 * 1024 - JSON.stringify({ messages: [{ content: "" }] }).length,
+        1024 * 1024 -
+          JSON.stringify({ messages: [{ role: "user", parts: [{ type: "text", text: "" }] }] })
+            .length,
       );
       const events = [builders.runCreated(runId), builders.modelRequest(runId, content)];
       await store.append(runId, events, 0);
