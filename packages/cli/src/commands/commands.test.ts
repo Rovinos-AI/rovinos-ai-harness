@@ -280,35 +280,30 @@ describe("run, resume, and inspect CLI commands", () => {
   it("runs configured routing without --fake-model and resolves provider secrets", async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-routing-"));
     const inputPath = await createFile("input.json", '{"goal":"say hello"}');
-    const routedConfig = HarnessConfigSchema.parse({
-      models: {
-        providers: [
-          {
-            id: "local-openai",
-            kind: "openai",
-            apiKey: "env:MODEL_TEST_API_KEY",
-            baseUrl: "https://provider.example/v1",
+    const configPath = await createFile(
+      "harness.json",
+      JSON.stringify({
+        models: {
+          providers: [
+            {
+              id: "local-openai",
+              kind: "openai",
+              apiKey: "env:MODEL_TEST_API_KEY",
+              baseUrl: "https://provider.example/v1",
+            },
+          ],
+          routing: {
+            default: [{ provider: "local-openai", model: "gpt-4o-mini" }],
           },
-        ],
-        routing: {
-          default: [{ provider: "local-openai", model: "gpt-4o-mini" }],
         },
-      },
-    });
-    const stdout: string[] = [];
-    const stderr: string[] = [];
-    const out = createOutput({
-      stdout: (text) => stdout.push(text),
-      stderr: (text) => stderr.push(text),
-    });
-    const ids = createIds();
-    const clock = new FakeClock(1_000);
-    const store = new InMemoryEventStore();
-    const resolveSecret = vi.fn((_reference: string) =>
-      Promise.resolve({ reveal: () => "synthetic-test-key" }),
+      }),
     );
+    vi.stubEnv("HARNESS_DATA_DIR", temporaryDirectory);
+    vi.stubEnv("MODEL_TEST_API_KEY", "synthetic-test-key");
     const requestBodies: JsonValue[] = [];
+    let authorizationHeader: string | null = null;
     vi.stubGlobal("fetch", (_input: RequestInfo | URL, init?: RequestInit) => {
+      authorizationHeader = new Headers(init?.headers).get("authorization");
       if (typeof init?.body === "string") {
         requestBodies.push(parseJson(JsonValue, init.body));
       }
@@ -332,28 +327,11 @@ describe("run, resume, and inspect CLI commands", () => {
         ),
       );
     });
-    const context: CliContext = {
-      loadConfig: () => Promise.resolve(routedConfig),
-      out,
-      clock,
-      createRuntime: (runtimeConfig, runtimeOverrides) =>
-        createRuntime(runtimeConfig, {
-          ...(runtimeOverrides ?? {}),
-          store,
-          ids,
-          clock,
-          context: new NaiveContext(),
-          tool: new FakeToolPort(),
-          secretResolver: { resolve: resolveSecret },
-        }),
-    };
 
-    const code = await main(["--json", "run", "--input", inputPath], context, [runCommand]);
+    const code = await main(["--config", configPath, "--json", "run", "--input", inputPath]);
 
     expect(code).toBe(ExitCode.ok);
-    expect(stdout.join("")).toContain('"status":"completed"');
-    expect(stderr).toEqual(["00000000000000000000000000\n"]);
-    expect(resolveSecret).toHaveBeenCalledWith("env:MODEL_TEST_API_KEY");
+    expect(authorizationHeader).toContain(process.env.MODEL_TEST_API_KEY ?? "");
     expect(requestBodies[0]).toMatchObject({
       model: "gpt-4o-mini",
       max_completion_tokens: 4096,
