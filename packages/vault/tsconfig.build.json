@@ -7,5 +7,8 @@
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test-helpers.ts"],
-  "references": [{ "path": "../schemas/tsconfig.build.json" }]
+  "references": [
+    { "path": "../crypto/tsconfig.build.json" },
+    { "path": "../schemas/tsconfig.build.json" }
+  ]
 }

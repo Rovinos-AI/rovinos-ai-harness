@@ -7,6 +7,7 @@ import {
   registerSnapshotConformance,
   registerSnapshotReopenConformance,
 } from "./conformance-snapshots.js";
+import { registerOutboxConformance } from "./conformance-outbox.js";
 import { createEventBuilders, type EventStoreTestBuilders } from "./testing.js";
 
 /** Factory for a fresh store and its resource cleanup. */
@@ -387,6 +388,7 @@ export function runEventStoreConformance(
     registerRunListing(factory, builders);
     registerStatusSummary(factory, builders);
     registerTraceLookup(factory, builders);
+    registerOutboxConformance(factory, builders, caps.supportsFileReopen);
     registerLazyRead(factory, builders);
     registerSnapshotConformance(factory, builders);
     if (caps.supportsFileReopen) {
