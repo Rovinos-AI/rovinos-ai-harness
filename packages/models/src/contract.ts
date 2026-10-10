@@ -126,6 +126,8 @@ async function assertAbortCompletion(
   didFetch: () => boolean,
 ): Promise<void> {
   const startedAt = performance.now();
+  // SDK-backed adapters may dispatch fetch in a microtask after complete() is called.
+  await new Promise<void>((resolve) => setImmediate(resolve));
   controller.abort();
   const error = await completion.then(
     () => undefined,

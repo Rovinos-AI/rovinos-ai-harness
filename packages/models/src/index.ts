@@ -9,6 +9,11 @@ export {
 export { ModelGateway, type ModelGatewayDependencies } from "./gateway.js";
 export { AdapterRegistry } from "./registry.js";
 export {
+  AnthropicAdapter,
+  type AnthropicAdapterOptions,
+  type AnthropicApiKey,
+} from "./providers/anthropic.js";
+export {
   ProviderResultSchema,
   type ProviderAdapter,
   type ProviderContext,
