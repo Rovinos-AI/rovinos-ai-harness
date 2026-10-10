@@ -1056,6 +1056,7 @@ __metadata:
   resolution: "@harness/models@workspace:packages/models"
   dependencies:
     "@harness/schemas": "workspace:^"
+    ajv: "npm:8.20.0"
     openai: "npm:6.33.0"
     undici: "npm:8.11.2"
     vitest: "npm:3.2.6"
