@@ -144,7 +144,7 @@ Shared design for this epic:
 ## 15.6 Pinned items and a plan kept outside the conversation
 
 **Parent:** #15 Context strategy
-**Task Description:** Give the model a durable plan and notes via built-in tools whose state is derived from the log, and always include it in context.
+**Task Description:** Give the model a durable plan and notes via built-in tools whose state is derived from the log, and include it in context when present.
 **Expected Inputs:** `update_plan` tool calls, events.
 **Expected Output:** `packages/context/src/plan.ts` (`PlanSchema`, `derivePlan`), `packages/context/src/builtin-tools.ts` (`update_plan`, `read_plan`), strategy integration (pinned plan message).
 **Dependencies:** none.
@@ -154,10 +154,10 @@ Shared design for this epic:
 1. `Plan = { items: { id: Code, text: string(max 500), status: "todo"|"doing"|"done" }[] (max 50), notes: string (max 4000) }`.
 2. `update_plan({ plan: Plan })` replaces the plan; `read_plan()` returns it. Both are idempotent tools executed in-process (no sandbox).
 3. `derivePlan(events)`: fold over `tool_intent` events with `toolId === "update_plan"` whose matching `tool_result` has `outcome === "ok"`; latest wins. Pure; no new event types.
-4. Strategies append a pinned message at the end of the context: role `user`, text `"Current plan: ..."` rendered from `derivePlan` (render deterministically). Include its token cost in the pinned total.
+4. When a plan exists, strategies append a pinned message at the end of the context: role `user`, text `"Current plan: ..."` rendered from `derivePlan` (render deterministically). Include its token cost in the pinned total.
 5. `RunState.plan` (2.6 snapshot) is populated from `derivePlan` at checkpoint time for fast inspection.
 6. Plan text is model-written content, so it flows through the PII boundary like other content; no special handling.
-**Tests to write:** derive from a sequence of updates; failed tool call does not change the plan; invalid plan rejected by the tool; plan message present in every strategy output and never dropped; size limits.
+**Tests to write:** derive from a sequence of updates; failed tool call does not change the plan; invalid plan rejected by the tool; plan message present in every strategy output when a plan exists and never dropped; no plan message when no plan exists; size limits.
 **Acceptance Criteria:**
 
 - [ ] Plan survives compaction and sliding-window dropping.

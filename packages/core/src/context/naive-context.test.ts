@@ -122,7 +122,7 @@ describe("NaiveContext", () => {
     ]);
   });
 
-  it("returns no messages when the history has no model responses or tool results", async () => {
+  it("does not add a plan when the history has no successful plan update", async () => {
     const event: Event = {
       ...envelope(0),
       type: "run_created",

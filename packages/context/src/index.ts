@@ -17,6 +17,25 @@ export {
   type TranscriptGroup,
 } from "./types.js";
 export { eventsToTranscript } from "./transcript.js";
+export {
+  PlanSchema,
+  UpdatePlanInputSchema,
+  createPlanReducerState,
+  derivePlan,
+  planReducer,
+  type Plan,
+  type PlanReducerState,
+} from "./plan.js";
+export {
+  PlanToolPort,
+  READ_PLAN_TOOL_SPEC,
+  UPDATE_PLAN_TOOL_SPEC,
+  type PlanToolCall,
+  type PlanToolDescription,
+  type PlanToolExecutionResult,
+  type PlanToolPortLike,
+  type PlanToolRunContext,
+} from "./builtin-tools.js";
 export { NaiveStrategy } from "./strategies/naive.js";
 export {
   ContextMarkerExceedsBudgetError,
