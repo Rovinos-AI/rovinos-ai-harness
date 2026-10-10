@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 export { attr, getAttrMeta, isSafeAttr, type AttrMeta } from "./attr.js";
 export { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
+export { AllowlistSpanProcessor, sanitizeSpan } from "./processors/allowlist-span-processor.js";
 export {
   __resetRegistryForTests,
   defineSpan,

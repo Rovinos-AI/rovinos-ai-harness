@@ -63,3 +63,5 @@ characters. Rewrite rejected expressions using fixed-width atoms rather than
 disabling the screen. Unsafe patterns fail with `pii_pattern_unsafe`; invalid
 configuration or regex syntax fails with `pii_pattern_invalid`. Errors never
 contain the submitted pattern or detected value.
+
+See [Secret references](./secrets.md) for environment, file, and Key Vault reference forms and resolver behavior.
