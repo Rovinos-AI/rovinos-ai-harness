@@ -72,6 +72,14 @@ export { ModelsConfigSchema } from "./config/models.js";
 export { ServerConfigSchema } from "./config/servers.js";
 export { PolicyConfigSchema } from "./config/policy.js";
 export { PiiConfigSchema, type PiiConfig } from "./config/pii.js";
+export {
+  CustomDetectorSchema,
+  DetectionSchema,
+  DetectorTextSchema,
+  TOKEN_TYPE_MAX_LENGTH,
+  type CustomDetector,
+  type Detection,
+} from "./pii-detection.js";
 export { TelemetryConfigSchema } from "./config/telemetry.js";
 export { SandboxConfigSchema } from "./config/sandbox.js";
 export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
