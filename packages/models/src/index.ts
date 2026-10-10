@@ -2,6 +2,7 @@
 export {
   ProviderError,
   ProviderErrorCodeSchema,
+  ModelOutputInvalidError,
   ProviderNotRegisteredError,
   type ProviderErrorCode,
   type ProviderErrorOptions,

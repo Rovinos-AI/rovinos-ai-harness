@@ -3,7 +3,7 @@ import { Code, HarnessError, type Capabilities, type JsonValue, type Part } from
 import { z } from "zod";
 
 /** Structured-output enforcement rung supported by this gateway. */
-export const EnforcementRungSchema = z.enum(["native", "tool"]);
+export const EnforcementRungSchema = z.enum(["native", "tool", "prompt"]);
 
 /** Inferred structured-output enforcement rung. */
 export type EnforcementRung = z.infer<typeof EnforcementRungSchema>;
@@ -13,6 +13,9 @@ export const EnforcementIssueSchema = z
   .object({
     path: z.array(z.union([z.string(), z.number()])),
     code: Code,
+    expected: z
+      .enum(["array", "boolean", "integer", "null", "number", "object", "string"])
+      .optional(),
   })
   .strict();
 
@@ -68,6 +71,21 @@ export function parseEnforcementResult<Schema extends z.ZodType>(
   return createEnforcementResultSchema(outputSchema).parse(result);
 }
 
+/** Reduces Zod issues to value-free paths, codes, and expected type descriptors. */
+export function enforcementIssuesFromError(error: z.ZodError): EnforcementIssue[] {
+  return error.issues.map((issue) => {
+    const expected =
+      issue.code === "invalid_type" && "expected" in issue
+        ? EnforcementIssueSchema.shape.expected.unwrap().safeParse(issue.expected)
+        : undefined;
+    return EnforcementIssueSchema.parse({
+      path: issue.path,
+      code: Code.parse(issue.code),
+      ...(expected?.success === true ? { expected: expected.data } : {}),
+    });
+  });
+}
+
 /** Raised when structured output is requested alongside real model tools. */
 export class OutputWithToolsUnsupportedError extends HarnessError {
   /** Stable rejection code for unsupported output/tool combinations. */
@@ -98,10 +116,13 @@ export function selectEnforcementRung(
   if (capabilities.structuredOutput === "native") {
     return "native";
   }
-  if (capabilities.forcedToolChoice && maxRung !== "native") {
+  if (maxRung === "native") {
+    return undefined;
+  }
+  if (capabilities.forcedToolChoice) {
     return "tool";
   }
-  return undefined;
+  return maxRung === "tool" ? undefined : "prompt";
 }
 
 /** Strips tool-call parts with the synthetic structured-output tool id. */

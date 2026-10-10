@@ -13,10 +13,19 @@ export const ModelRetryConfigSchema = z
   .strict()
   .prefault({});
 
+/** Structured-output repair policy, owned by model task 14.10. */
+export const ModelEnforcementConfigSchema = z
+  .object({
+    maxRepairs: z.coerce.number().int().nonnegative().default(2),
+  })
+  .strict()
+  .prefault({});
+
 /** Models configuration fields consumed by the model gateway. */
 export const ModelsConfigSchema = z
   .object({
     retry: ModelRetryConfigSchema,
+    enforcement: ModelEnforcementConfigSchema,
     maxConcurrent: z.coerce.number().int().positive().default(4),
   })
   .strict()
@@ -24,5 +33,7 @@ export const ModelsConfigSchema = z
 
 /** Inferred retry policy after applying defaults. */
 export type ModelRetryConfig = z.infer<typeof ModelRetryConfigSchema>;
+/** Inferred structured-output enforcement policy after applying defaults. */
+export type ModelEnforcementConfig = z.infer<typeof ModelEnforcementConfigSchema>;
 /** Inferred model gateway configuration after applying defaults. */
 export type ModelsConfig = z.infer<typeof ModelsConfigSchema>;

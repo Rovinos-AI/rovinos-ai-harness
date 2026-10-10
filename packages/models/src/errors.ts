@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
+import { HarnessError, type JsonValue } from "@harness/schemas";
 import { z } from "zod";
+import type { EnforcementIssue } from "./enforce/index.js";
+import { redactIssuePath } from "./enforce/repair.js";
 
 /**
  * Closed taxonomy of provider failures understood by the model gateway.
@@ -79,5 +81,26 @@ export class ProviderNotRegisteredError extends HarnessError {
   /** @param provider - Provider code that has no registered adapter. */
   constructor(provider: string) {
     super(`No adapter is registered for provider ${provider}.`);
+  }
+}
+
+/** Raised when structured output remains invalid after the configured repair limit. */
+export class ModelOutputInvalidError extends HarnessError {
+  /** Stable structured-output failure code. */
+  readonly code = "model_output_invalid";
+  /** Number of repair calls made after the initial invalid response. */
+  readonly repairAttempts: number;
+  /** Paths reported by the final value-free validation result. */
+  readonly issuePaths: readonly (readonly (string | number)[])[];
+
+  /**
+   * @param repairAttempts - Number of repair calls made.
+   * @param issues - Value-free issues from the final validation attempt.
+   * @param schema - Lowered output schema used to redact model-provided path segments.
+   */
+  constructor(repairAttempts: number, issues: readonly EnforcementIssue[], schema?: JsonValue) {
+    super("Model output did not match the requested schema.");
+    this.repairAttempts = repairAttempts;
+    this.issuePaths = issues.map(({ path }) => redactIssuePath(path, schema));
   }
 }

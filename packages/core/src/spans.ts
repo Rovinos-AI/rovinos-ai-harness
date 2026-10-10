@@ -19,6 +19,7 @@ export const MODEL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   {
     ...commonAttributes,
     "harness.model.attempts": attr.optional(attr.int()),
+    "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
   },
 );
 
