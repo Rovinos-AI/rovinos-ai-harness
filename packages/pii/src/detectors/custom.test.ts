@@ -79,8 +79,15 @@ custom:
     { name: "invalid", pattern: "[" },
     { name: "invalid", pattern: "abc", flags: "ii" },
     { name: "invalid", pattern: "" },
+    { name: "a".repeat(26), pattern: "abc" },
   ])("rejects invalid configuration with a closed code", (config) => {
     expect(() => createCustomDetector(config)).toThrow(new PiiDetectorError("pii_pattern_invalid"));
+  });
+
+  it("accepts names whose resulting token type fits the vault limit", () => {
+    expect(createCustomDetector({ name: "a".repeat(25), pattern: "abc" }).id).toBe(
+      `custom_${"a".repeat(25)}`,
+    );
   });
 
   it.each(["(?:ab)\\d{2}", "(ab)\\d{2}", "[+*?()]{2}", "\\+\\d{2}", "a{1,3}", "ab?", "a{2,2}"])(

@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
 import {
   creditCardDetector,
+  createCustomDetector,
   emailDetector,
   ibanDetector,
   ipDetector,
@@ -32,11 +33,17 @@ const cases = [
       "202-555-0199",
       "(202) 555-0199",
       "(202)555-0199",
-      "1234567",
       "+44 20 7946 0958",
-      "02079460958",
+      "020 7946 0958",
     ],
-    negative: ["123456", "1234567890123456", "+0123456789", "123--456-7890", "abc1234567890def"],
+    negative: [
+      "123456",
+      "1234567",
+      "1234567890123456",
+      "+0123456789",
+      "123--456-7890",
+      "abc1234567890def",
+    ],
   },
   {
     detector: creditCardDetector,
@@ -80,7 +87,7 @@ const cases = [
     positive: [
       "AKIA" + "A".repeat(16),
       "ghp_" + "a".repeat(36),
-      "eyJ0ZXN0.e30.c2ln",
+      "eyJ0ZXN0.eyJwYXlsb2Fk.c2lnYXR1cmU",
       "-----BEGIN RSA PRIVATE KEY-----",
       "-----BEGIN PRIVATE KEY-----",
     ],
@@ -89,6 +96,9 @@ const cases = [
       "ghp_" + "a".repeat(35),
       "e30..c2ln",
       "e30.e30",
+      "v1.2.3",
+      "example.com.au",
+      "file.test.ts",
       "-----BEGIN PUBLIC KEY-----",
     ],
   },
@@ -168,7 +178,7 @@ describe("punctuation boundaries", () => {
     { detector: ipDetector, value: "192.0.2.1" },
     { detector: secretsDetector, value: "AKIA" + "A".repeat(16) },
     { detector: secretsDetector, value: "ghp_" + "a".repeat(36) },
-    { detector: secretsDetector, value: "eyJ0ZXN0.e30.c2ln" },
+    { detector: secretsDetector, value: "eyJ0ZXN0.eyJwYXlsb2Fk.c2lnYXR1cmU" },
   ])("does not include a sentence period for $detector.id", ({ detector, value }) => {
     const text = `😀 ${value}.`;
     expect(detector.detect(text)).toEqual([
@@ -220,6 +230,33 @@ describe("punctuation boundaries", () => {
     for (const { detector } of cases) {
       expect(detector.detect("<EMAIL_1> <CUSTOM_ID_123456>")).toEqual([]);
     }
+    expect(
+      createCustomDetector({ name: "single_digit", pattern: "\\d{1}" }).detect("<EMAIL_1>"),
+    ).toEqual([]);
     expect(ipDetector.detect("id192.0.2.1other")).toEqual([]);
+  });
+
+  it.each([
+    "version v1.2.3 and example.com.au file.test.ts",
+    "on 2024-01-15 12:30",
+    "order 1234567 shipped",
+    "range 10.4.2-1",
+  ])("leaves everyday prose unchanged: %s", (text) => {
+    expect(secretsDetector.detect(text)).toEqual([]);
+    expect(phoneDetector.detect(text)).toEqual([]);
+    expect(creditCardDetector.detect(text)).toEqual([]);
+  });
+
+  it("detects adjacent cards and phones without merging candidates", () => {
+    const cards = "4111111111111111 4012888888881881";
+    expect(
+      creditCardDetector.detect(cards).map(({ start, end }) => cards.slice(start, end)),
+    ).toEqual(["4111111111111111", "4012888888881881"]);
+
+    const phones = "202-555-0199 303-555-0199";
+    expect(phoneDetector.detect(phones).map(({ start, end }) => phones.slice(start, end))).toEqual([
+      "202-555-0199",
+      "303-555-0199",
+    ]);
   });
 });

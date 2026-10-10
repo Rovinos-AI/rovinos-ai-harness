@@ -74,6 +74,7 @@ export {
   CustomDetectorSchema,
   DetectionSchema,
   DetectorTextSchema,
+  TOKEN_TYPE_MAX_LENGTH,
   type CustomDetector,
   type Detection,
 } from "./pii-detection.js";

@@ -2,6 +2,9 @@
 import { z } from "zod";
 import { Code } from "./primitives.js";
 
+/** Maximum characters in the uppercase entity-type segment of a vault token. */
+export const TOKEN_TYPE_MAX_LENGTH = 32;
+
 /** A detected range in the original text, measured in UTF-16 code units. */
 export const DetectionSchema = z
   .object({
@@ -20,7 +23,7 @@ export type Detection = z.infer<typeof DetectionSchema>;
 /** Custom detector configuration; runtime compilation additionally screens regex safety. */
 export const CustomDetectorSchema = z
   .object({
-    name: z.string().regex(/^[a-z0-9_]{1,40}$/u),
+    name: z.string().regex(/^[a-z0-9_]{1,25}$/u),
     pattern: z.string().min(1).max(1024),
     flags: z
       .string()

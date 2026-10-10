@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { candidateDetector } from "./types.js";
+import { validateText } from "./types.js";
+import type { Detection, Detector } from "./types.js";
 
 /** Validate decimal digits using Luhn without numeric precision loss. */
 export function luhn(value: string): boolean {
@@ -23,10 +24,77 @@ export function luhn(value: string): boolean {
   return sum % 10 === 0;
 }
 
+function isWordCharacter(value: string): boolean {
+  return /[\p{L}\p{N}_]/u.test(value);
+}
+
+function validCard(value: string): boolean {
+  return /^\d(?:[ -]?\d){12,18}$/u.test(value) && luhn(value);
+}
+
 /** Card candidates require 13–19 digits and a valid Luhn checksum. */
-export const creditCardDetector = candidateDetector(
-  "credit_card",
-  "credit_card",
-  /\d[\d -]*/gu,
-  (value) => value.length <= 37 && /^\d(?:[ -]?\d){12,18}$/u.test(value) && luhn(value),
-);
+export const creditCardDetector: Detector = {
+  id: "credit_card",
+  entityTypes: ["credit_card"],
+  detect(text) {
+    validateText(text);
+    const detections: Detection[] = [];
+    for (const match of text.matchAll(/\d[\d -]*/gu)) {
+      const candidate = match[0].trim();
+      const start = match.index + match[0].indexOf(candidate);
+      const digitCount = candidate.replaceAll(/\D/gu, "").length;
+      if (digitCount <= 19) {
+        if (
+          validCard(candidate) &&
+          !isWordCharacter(text[start - 1] ?? "") &&
+          !isWordCharacter(text[start + candidate.length] ?? "")
+        ) {
+          detections.push({
+            entityType: "credit_card",
+            start,
+            end: start + candidate.length,
+            confidence: 1,
+            detectorId: "credit_card",
+          });
+        }
+        continue;
+      }
+
+      const groups = [...candidate.matchAll(/\d+/gu)];
+      for (let first = 0; first < groups.length; first++) {
+        let digits = 0;
+        for (let last = first; last < groups.length; last++) {
+          const group = groups[last];
+          if (group === undefined || group.index === undefined) {
+            break;
+          }
+          digits += group[0].length;
+          if (digits > 19) {
+            break;
+          }
+          const firstGroup = groups[first];
+          if (firstGroup === undefined || firstGroup.index === undefined || digits < 13) {
+            continue;
+          }
+          const valueStart = start + firstGroup.index;
+          const value = candidate.slice(firstGroup.index, group.index + group[0].length);
+          const end = valueStart + value.length;
+          if (
+            validCard(value) &&
+            !isWordCharacter(text[valueStart - 1] ?? "") &&
+            !isWordCharacter(text[end] ?? "")
+          ) {
+            detections.push({
+              entityType: "credit_card",
+              start: valueStart,
+              end,
+              confidence: 1,
+              detectorId: "credit_card",
+            });
+          }
+        }
+      }
+    }
+    return detections;
+  },
+};

@@ -2,6 +2,7 @@
 // Conservative subset: fixed/bounded atom repetitions, no repeated groups or alternation.
 import { CustomDetectorSchema } from "@harness/schemas";
 import type { CustomDetector } from "@harness/schemas";
+import { findTokens } from "@harness/vault";
 import { luhn } from "./credit-card.js";
 import { mod97 } from "./iban.js";
 import { PiiDetectorError, validateText } from "./types.js";
@@ -81,15 +82,25 @@ export function createCustomDetector(config: CustomDetector): Detector {
     entityTypes: [id],
     detect(text) {
       validateText(text);
+      const tokenRanges = findTokens(text).map(({ index, token }) => ({
+        start: index,
+        end: index + token.length,
+      }));
       const detections: Detection[] = [];
       for (const match of text.matchAll(compiled)) {
         const value = match[0];
         const valid = validator === "luhn" ? luhn(value) : validator !== "mod97" || mod97(value);
-        if (value.length > 0 && valid) {
+        const start = match.index;
+        const end = start + value.length;
+        if (
+          value.length > 0 &&
+          valid &&
+          !tokenRanges.some((token) => start < token.end && end > token.start)
+        ) {
           detections.push({
             entityType: id,
-            start: match.index,
-            end: match.index + value.length,
+            start,
+            end,
             confidence: 1,
             detectorId: id,
           });
