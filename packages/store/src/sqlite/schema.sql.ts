@@ -44,4 +44,9 @@ export const SQLITE_SCHEMA = `
     cursor INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS store_metadata (
+    metadata_key TEXT PRIMARY KEY,
+    metadata_value TEXT NOT NULL
+  );
 `;

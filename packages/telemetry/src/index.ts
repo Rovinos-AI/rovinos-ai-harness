@@ -2,6 +2,7 @@
 export { attr, getAttrMeta, isSafeAttr, type AttrMeta } from "./attr.js";
 export { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
 export { SafeEvent, toSafeEvent, type SafeEvent as SafeEventType } from "./safe-event.js";
+export { AllowlistSpanProcessor, sanitizeSpan } from "./processors/allowlist-span-processor.js";
 export {
   __resetRegistryForTests,
   defineSpan,

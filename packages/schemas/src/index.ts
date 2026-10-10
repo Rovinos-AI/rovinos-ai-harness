@@ -48,6 +48,7 @@ export {
   type EventFieldClass,
 } from "./classification.js";
 export { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
+export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
 export {
   DestinationSchema,
   PiiActionSchema,
@@ -63,6 +64,7 @@ export {
   type PiiRule,
 } from "./pii-policy.js";
 export { SnapshotSchema, type Snapshot } from "./snapshot.js";
+export { KEY_PROVIDER_KEY_BYTES, type KeyProvider } from "./key-provider.js";
 export { RunConfigSchema, type RunConfig } from "./config/run.js";
 export { RunResumePolicySchema } from "./config/run.js";
 export { StoreConfigSchema } from "./config/store.js";

@@ -37,6 +37,7 @@ import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js"
 import {
   decodeStoredContent,
   eventFromRow,
+  initializeEncryptionMetadata,
   insertSnapshot,
   parseStoredMeta,
   type EventRow,
@@ -186,12 +187,18 @@ export class SqliteEventStore implements EventStore {
     this.db = new Database(path);
     this.codec = codec;
     this.snapshotKeep = retainedSnapshotCount;
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = NORMAL");
-    this.db.pragma("busy_timeout = 5000");
-    this.db.pragma("foreign_keys = ON");
-    this.db.exec(SQLITE_SCHEMA);
-    this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
+    try {
+      this.db.pragma("journal_mode = WAL");
+      this.db.pragma("synchronous = NORMAL");
+      this.db.pragma("busy_timeout = 5000");
+      this.db.pragma("foreign_keys = ON");
+      this.db.exec(SQLITE_SCHEMA);
+      initializeEncryptionMetadata(this.db, this.codec.encrypted);
+      this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
 
     this.insertRun = this.db.prepare<[Id, number, number]>(
       "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES (?, ?, 'pending', 0, ?)",

@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-export { InvalidEventError, SeqConflictError, StoreUnavailableError } from "./errors.js";
+export {
+  ContentDecryptFailedError,
+  ContentEncryptFailedError,
+  InvalidEventError,
+  KeyNotFoundError,
+  SeqConflictError,
+  StoreEncryptionMismatchError,
+  StoreUnavailableError,
+} from "./errors.js";
+export { AesGcmContentCodec } from "./aes-gcm-codec.js";
 export { JsonContentCodec } from "./codec.js";
 export { InMemoryEventStore } from "./memory.js";
 export { PostgresEventStore } from "./postgres/adapter.js";

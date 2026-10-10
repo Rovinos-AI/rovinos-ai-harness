@@ -304,6 +304,19 @@ describe("loadConfig", () => {
     expect(error.message).not.toContain("private-value");
   });
 
+  it("rejects cyclic YAML aliases with a sanitized ConfigError", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        env: {},
+        readFile: reader("self: &self\n  child: *self\n"),
+      }),
+    );
+
+    expect(error.code).toBe("config_invalid");
+    expect(error.issues).toContain("self.child: acyclic configuration value (config_cycle)");
+    expect(error.message).not.toContain("RangeError");
+  });
+
   it("rejects malformed environment paths without echoing them", async () => {
     const error = await expectConfigError(
       loadConfig({
