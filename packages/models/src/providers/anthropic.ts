@@ -6,6 +6,7 @@ import Anthropic, {
 } from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
 import { Code, JsonValue } from "@harness/schemas";
+import type { Capabilities } from "@harness/schemas";
 import type { ModelRequest, Part } from "@harness/schemas";
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
@@ -24,6 +25,8 @@ export interface AnthropicAdapterOptions {
   readonly fetch?: ClientOptions["fetch"];
   /** Optional API base URL, primarily used for testing or a compatible endpoint. */
   readonly baseURL?: string;
+  /** Optional provider capability overrides used by the gateway's enforcement ladder. */
+  readonly capabilities?: Partial<Capabilities>;
 }
 
 function readOpaqueContent(value: JsonValue): JsonValue[] {
@@ -209,14 +212,16 @@ function mapError(error: unknown, signal: AbortSignal): never {
 /** Anthropic Messages API adapter with provider-specific content preserved verbatim. */
 export class AnthropicAdapter implements ProviderAdapter {
   readonly provider = "anthropic";
+  readonly capabilities: Partial<Capabilities>;
   private readonly client: Anthropic;
 
   /**
    * Creates an adapter with SDK retries disabled and injectable network transport.
    *
-   * @param options - The resolved API key and optional SDK transport overrides.
+   * @param options - The resolved API key, capability overrides, and optional SDK transport.
    */
   constructor(options: AnthropicAdapterOptions) {
+    this.capabilities = options.capabilities ?? {};
     this.client = new Anthropic({
       apiKey: options.apiKey.reveal(),
       maxRetries: 0,

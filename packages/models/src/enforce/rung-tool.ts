@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, JsonValue, type ModelRequest, type Part } from "@harness/schemas";
 import type { z } from "zod";
-import { EnforcementIssueSchema, type EnforcementResult, stripSyntheticToolCall } from "./index.js";
+import {
+  EnforcementIssueSchema,
+  parseEnforcementResult,
+  stripSyntheticToolCall,
+  type EnforcementResult,
+} from "./index.js";
 
 const SYNTHETIC_TOOL_ID = Code.parse("emit_result");
 
@@ -30,7 +35,7 @@ export function enforceToolOutput<Schema extends z.ZodType>(
   outputSchema: Schema,
 ): {
   readonly parts: Part[];
-  readonly result: EnforcementResult<z.output<Schema>>;
+  readonly result: EnforcementResult<Schema>;
 } {
   const calls = parts.filter(
     (part) => part.type === "tool_call" && part.toolId === SYNTHETIC_TOOL_ID,
@@ -39,11 +44,11 @@ export function enforceToolOutput<Schema extends z.ZodType>(
   if (calls.length !== 1 || calls[0]?.type !== "tool_call") {
     return {
       parts: withoutSyntheticCall,
-      result: {
+      result: parseEnforcementResult(outputSchema, {
         valid: false,
         issues: [EnforcementIssueSchema.parse({ path: [], code: Code.parse("invalid_type") })],
         rungUsed: "tool",
-      },
+      }),
     };
   }
 
@@ -51,13 +56,13 @@ export function enforceToolOutput<Schema extends z.ZodType>(
   if (!parsed.success) {
     return {
       parts: withoutSyntheticCall,
-      result: {
+      result: parseEnforcementResult(outputSchema, {
         valid: false,
         issues: parsed.error.issues.map(({ path, code }) =>
           EnforcementIssueSchema.parse({ path, code: Code.parse(code) }),
         ),
         rungUsed: "tool",
-      },
+      }),
     };
   }
 
@@ -65,19 +70,23 @@ export function enforceToolOutput<Schema extends z.ZodType>(
   if (!jsonValue.success) {
     return {
       parts: withoutSyntheticCall,
-      result: {
+      result: parseEnforcementResult(outputSchema, {
         valid: false,
         issues: jsonValue.error.issues.map(({ path, code }) =>
           EnforcementIssueSchema.parse({ path, code: Code.parse(code) }),
         ),
         rungUsed: "tool",
-      },
+      }),
     };
   }
 
   return {
     parts: [...withoutSyntheticCall, { type: "text", text: canonicalJson(jsonValue.data) }],
-    result: { value: parsed.data, valid: true, rungUsed: "tool" },
+    result: parseEnforcementResult(outputSchema, {
+      value: parsed.data,
+      valid: true,
+      rungUsed: "tool",
+    }),
   };
 }
 

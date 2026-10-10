@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import { lookupCapabilities } from "@harness/schemas";
+import { z } from "zod";
 import {
+  createEnforcementResultSchema,
   OutputWithToolsUnsupportedError,
+  parseEnforcementResult,
   selectEnforcementRung,
   stripSyntheticToolCall,
 } from "./index.js";
@@ -46,5 +49,20 @@ describe("structured-output enforcement selection", () => {
 
   it("uses a stable typed error for output requests with tools", () => {
     expect(new OutputWithToolsUnsupportedError().code).toBe("output_with_tools_unsupported");
+  });
+
+  it("validates enforcement results against the requested output schema", () => {
+    const outputSchema = z.object({ answer: z.string() });
+    const resultSchema = createEnforcementResultSchema(outputSchema);
+    const result = parseEnforcementResult(outputSchema, {
+      value: { answer: "ok" },
+      valid: true,
+      rungUsed: "native",
+    });
+
+    expect(resultSchema.parse(result)).toEqual(result);
+    expect(
+      resultSchema.safeParse({ value: { answer: 42 }, valid: true, rungUsed: "native" }).success,
+    ).toBe(false);
   });
 });

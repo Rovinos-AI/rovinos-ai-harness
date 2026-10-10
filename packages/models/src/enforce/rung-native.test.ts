@@ -46,4 +46,25 @@ describe("native structured output", () => {
       issues: [{ path: [], code: "invalid_type" }],
     });
   });
+
+  it("rejects tool calls returned despite native structured output", () => {
+    expect(
+      enforceNativeOutput(
+        [
+          { type: "text", text: '{"answer":"ok"}' },
+          {
+            type: "tool_call",
+            callId: "00000000000000000000000000",
+            toolId: "lookup",
+            args: {},
+          },
+        ],
+        outputSchema,
+      ),
+    ).toEqual({
+      valid: false,
+      issues: [{ path: [], code: "unexpected_tool_call" }],
+      rungUsed: "native",
+    });
+  });
 });

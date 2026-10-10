@@ -40,9 +40,12 @@ export {
   type ProviderSchemaRule,
 } from "./provider-schema-rules.js";
 export {
+  createEnforcementResultSchema,
   EnforcementIssueSchema,
   EnforcementRungSchema,
+  EnforcementRungUnavailableError,
   OutputWithToolsUnsupportedError,
+  parseEnforcementResult,
   selectEnforcementRung,
   type EnforcementIssue,
   type EnforcementResult,

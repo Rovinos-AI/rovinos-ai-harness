@@ -54,6 +54,140 @@ describe("forced-tool structured output", () => {
     ]);
   });
 
+  it("removes the matching synthetic call from provider blobs without changing other content", () => {
+    const response = enforceToolOutput(
+      [
+        resultCall,
+        {
+          type: "opaque",
+          provider: "anthropic",
+          blob: {
+            content: [
+              { type: "thinking", thinking: "keep" },
+              { type: "tool_use", id: "toolu_emit", name: "emit_result", input: { answer: "ok" } },
+              { type: "tool_use", id: "toolu_lookup", name: "lookup", input: {} },
+            ],
+            toolUseIdByCallId: {
+              [resultCall.callId]: "toolu_emit",
+              "00000000000000000000000002": "toolu_lookup",
+            },
+          },
+        },
+        {
+          type: "opaque",
+          provider: "openai",
+          blob: {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_emit",
+                  type: "function",
+                  function: { name: "emit_result", arguments: "{}" },
+                },
+                {
+                  id: "call_lookup",
+                  type: "function",
+                  function: { name: "lookup", arguments: "{}" },
+                },
+              ],
+            },
+            openaiCallIdByCallId: {
+              [resultCall.callId]: "call_emit",
+              "00000000000000000000000002": "call_lookup",
+            },
+          },
+        },
+      ],
+      outputSchema,
+    );
+
+    expect(response.parts).toEqual([
+      {
+        type: "opaque",
+        provider: "anthropic",
+        blob: {
+          content: [
+            { type: "thinking", thinking: "keep" },
+            { type: "tool_use", id: "toolu_lookup", name: "lookup", input: {} },
+          ],
+          toolUseIdByCallId: { "00000000000000000000000002": "toolu_lookup" },
+        },
+      },
+      {
+        type: "opaque",
+        provider: "openai",
+        blob: {
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "call_lookup",
+                type: "function",
+                function: { name: "lookup", arguments: "{}" },
+              },
+            ],
+          },
+          openaiCallIdByCallId: { "00000000000000000000000002": "call_lookup" },
+        },
+      },
+      { type: "text", text: '{"answer":"ok"}' },
+    ]);
+  });
+
+  it("strips raw synthetic calls even when the adapter could not normalize their arguments", () => {
+    const response = enforceToolOutput(
+      [
+        {
+          type: "opaque",
+          provider: "anthropic",
+          blob: {
+            content: [{ type: "tool_use", id: "toolu_emit", name: "emit_result", input: {} }],
+            toolUseIdByCallId: {},
+          },
+        },
+        {
+          type: "opaque",
+          provider: "openai",
+          blob: {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_emit",
+                  type: "function",
+                  function: { name: "emit_result", arguments: "{invalid" },
+                },
+              ],
+            },
+            openaiCallIdByCallId: {},
+          },
+        },
+      ],
+      outputSchema,
+    );
+
+    expect(response.result).toMatchObject({ valid: false });
+    expect(response.parts).toEqual([
+      {
+        type: "opaque",
+        provider: "anthropic",
+        blob: { content: [], toolUseIdByCallId: {} },
+      },
+      {
+        type: "opaque",
+        provider: "openai",
+        blob: {
+          message: { role: "assistant", content: null, tool_calls: [] },
+          openaiCallIdByCallId: {},
+        },
+      },
+    ]);
+  });
+
   it("canonicalizes nested JSON values", () => {
     const schema = z.object({
       nested: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])),

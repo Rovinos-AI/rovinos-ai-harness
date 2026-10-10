@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, lookupCapabilities } from "@harness/schemas";
+import { lookupCapabilities } from "@harness/schemas";
 import type { Capabilities, Id, JsonValue, ModelRequest, ModelResponse } from "@harness/schemas";
 import type { z } from "zod";
 import type { Clock, IdGenerator } from "./types.js";
 import type { AdapterRegistry } from "./registry.js";
 import { ProviderError } from "./errors.js";
 import { ProviderResultSchema } from "./types.js";
+import { providerSchemaRules } from "./provider-schema-rules.js";
 import {
+  EnforcementRungUnavailableError,
   OutputWithToolsUnsupportedError,
   selectEnforcementRung,
   type EnforcementResult,
@@ -31,20 +33,20 @@ export interface ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType>
 
 /** Gateway enforcement configuration. */
 export interface ModelGatewayOptions {
-  /** Highest enforcement rung that the gateway may select. */
+  /** Highest rung on the native (1) < tool (2) ladder; "native" forbids selecting the tool rung. */
   readonly maxRung?: EnforcementRung;
 }
 
 /** Provider completion with optional structured-output validation details. */
-export type ModelGatewayResponse<Output = unknown> = ModelResponse & {
+export type ModelGatewayResponse<OutputSchema extends z.ZodType = z.ZodType> = ModelResponse & {
   readonly providerBlobs: JsonValue;
-  readonly enforcement?: EnforcementResult<Output>;
+  readonly enforcement?: EnforcementResult<OutputSchema>;
 };
 
-interface PreparedEnforcement<Output> {
+interface PreparedEnforcement<OutputSchema extends z.ZodType> {
   readonly request: ModelRequest;
   readonly rung?: EnforcementRung;
-  readonly result?: EnforcementResult<Output>;
+  readonly result?: EnforcementResult<OutputSchema>;
 }
 
 function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
@@ -52,7 +54,7 @@ function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
   outputSchema: OutputSchema | undefined,
   capabilities: Capabilities,
   maxRung?: EnforcementRung,
-): PreparedEnforcement<z.output<OutputSchema>> {
+): PreparedEnforcement<OutputSchema> {
   if (outputSchema === undefined) {
     return { request };
   }
@@ -60,16 +62,12 @@ function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
     throw new OutputWithToolsUnsupportedError();
   }
 
+  if (providerSchemaRules(request.model.provider) === undefined) {
+    throw new EnforcementRungUnavailableError();
+  }
   const rung = selectEnforcementRung(capabilities, maxRung);
   if (rung === undefined) {
-    // Prompt-based rung 3 is implemented separately; do not report an unvalidated value as valid.
-    return {
-      request,
-      result: {
-        valid: false,
-        issues: [{ path: [], code: Code.parse("rung_unavailable") }],
-      },
-    };
+    throw new EnforcementRungUnavailableError();
   }
 
   const lowered = lowerForProvider(outputSchema, request.model.provider);
@@ -93,13 +91,17 @@ function enforceProviderOutput<OutputSchema extends z.ZodType>(
   rung: EnforcementRung | undefined,
 ): {
   readonly parts: ModelResponse["parts"];
-  readonly result?: EnforcementResult<z.output<OutputSchema>>;
+  readonly result?: EnforcementResult<OutputSchema>;
 } {
   if (outputSchema === undefined || rung === undefined) {
     return { parts };
   }
   if (rung === "native") {
-    return { parts, result: enforceNativeOutput(parts, outputSchema) };
+    const hasToolCall = parts.some((part) => part.type === "tool_call");
+    return {
+      parts: hasToolCall ? parts.filter((part) => part.type !== "tool_call") : parts,
+      result: enforceNativeOutput(parts, outputSchema),
+    };
   }
   const enforced = enforceToolOutput(parts, outputSchema);
   return { parts: enforced.parts, result: enforced.result };
@@ -127,7 +129,7 @@ export class ModelGateway {
   async complete<OutputSchema extends z.ZodType = z.ZodType>(
     request: ModelRequest,
     context: ModelGatewayContext<OutputSchema>,
-  ): Promise<ModelGatewayResponse<z.output<OutputSchema>>> {
+  ): Promise<ModelGatewayResponse<OutputSchema>> {
     const adapter = this.registry.get(request.model.provider);
     const prepared =
       context.outputSchema === undefined

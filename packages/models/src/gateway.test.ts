@@ -7,6 +7,7 @@ import { ModelGateway } from "./gateway.js";
 import * as ModelExports from "./index.js";
 import { AdapterRegistry } from "./registry.js";
 import type { ProviderAdapter } from "./types.js";
+import { FakeProvider } from "./testing/fake-provider.js";
 
 const request: ModelRequest = {
   requestId: "00000000000000000000000000",
@@ -188,6 +189,45 @@ describe("ModelGateway", () => {
     });
   });
 
+  it("rejects native output that also contains tool calls", async () => {
+    const adapter: ProviderAdapter = {
+      provider: "openai",
+      complete: () =>
+        Promise.resolve({
+          parts: [
+            { type: "text", text: '{"answer":"ok"}' },
+            {
+              type: "tool_call",
+              callId: request.requestId,
+              toolId: "lookup",
+              args: {},
+            },
+          ],
+          usage: { inputTokens: 0, outputTokens: 0 },
+          finishReason: "tool_calls",
+          latencyMs: 0,
+        }),
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema: z.object({ answer: z.string() }),
+      },
+    );
+
+    expect(completion.parts).toEqual([{ type: "text", text: '{"answer":"ok"}' }]);
+    expect(completion.enforcement).toMatchObject({
+      valid: false,
+      issues: [{ code: "unexpected_tool_call" }],
+    });
+  });
+
   it("rejects structured output combined with real tools", async () => {
     const adapter: ProviderAdapter = {
       provider: "openai",
@@ -214,8 +254,29 @@ describe("ModelGateway", () => {
     ).rejects.toMatchObject({ code: "output_with_tools_unsupported" });
   });
 
-  it("does not exceed the configured maximum rung", async () => {
-    const complete = vi.fn((_request: ModelRequest) =>
+  it("does not call a provider when maxRung disallows its only rung", async () => {
+    const provider = new FakeProvider("anthropic", []);
+    const gateway = new ModelGateway(
+      new AdapterRegistry([provider]),
+      { ids: { next: () => request.requestId }, clock: { now: () => 0 } },
+      { maxRung: "native" },
+    );
+
+    await expect(
+      gateway.complete(
+        { ...request, model: { provider: "anthropic", model: "model-a" } },
+        {
+          runId: request.requestId,
+          signal: new AbortController().signal,
+          outputSchema: z.object({ answer: z.string() }),
+        },
+      ),
+    ).rejects.toMatchObject({ code: "rung_unavailable" });
+    expect(provider.requests).toEqual([]);
+  });
+
+  it("treats providers without schema rules as having no available rung", async () => {
+    const complete = vi.fn(() =>
       Promise.resolve({
         parts: [{ type: "text" as const, text: '{"answer":"ok"}' }],
         usage: { inputTokens: 0, outputTokens: 0 },
@@ -223,25 +284,26 @@ describe("ModelGateway", () => {
         latencyMs: 0,
       }),
     );
-    const gateway = new ModelGateway(
-      new AdapterRegistry([{ provider: "anthropic", complete }]),
-      { ids: { next: () => request.requestId }, clock: { now: () => 0 } },
-      { maxRung: "native" },
-    );
-    const completion = await gateway.complete(
-      { ...request, model: { provider: "anthropic", model: "model-a" } },
-      {
-        runId: request.requestId,
-        signal: new AbortController().signal,
-        outputSchema: z.object({ answer: z.string() }),
-      },
-    );
-
-    expect(complete.mock.calls[0]?.[0].model.provider).toBe("anthropic");
-    expect(complete.mock.calls[0]?.[0].output).toBeUndefined();
-    expect(completion).toMatchObject({
-      schemaValid: false,
-      enforcement: { valid: false, issues: [{ code: "rung_unavailable" }] },
+    const adapter: ProviderAdapter = {
+      provider: "sample",
+      capabilities: { structuredOutput: "native" },
+      complete,
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
     });
+
+    await expect(
+      gateway.complete(
+        { ...request, model: { provider: "sample", model: "model-a" } },
+        {
+          runId: request.requestId,
+          signal: new AbortController().signal,
+          outputSchema: z.object({ answer: z.string() }),
+        },
+      ),
+    ).rejects.toMatchObject({ code: "rung_unavailable" });
+    expect(complete).not.toHaveBeenCalled();
   });
 });
