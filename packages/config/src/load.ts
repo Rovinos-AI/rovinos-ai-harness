@@ -14,7 +14,7 @@ import { HarnessConfigSchema, type HarnessConfig } from "./schema.js";
 
 const unknownValueSchema = z.unknown();
 const blockedPathSegments = new Set(["__proto__", "constructor", "prototype"]);
-const secretKeyPattern = /api[-_]?key|token|password|secret|credential/i;
+const secretKeySegments = new Set(["password", "secret", "token", "credential", "credentials"]);
 
 /** A file reader injected by config-loader tests or callers. */
 export type ConfigFileReader = (path: string) => Promise<string>;
@@ -97,23 +97,58 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Object.prototype.toString.call(value) === "[object Object]";
 }
 
-function inlineSecretIssues(value: unknown, path: readonly (string | number)[] = []): string[] {
-  if (Array.isArray(value)) {
-    return value.flatMap((child, index) => inlineSecretIssues(child, [...path, index]));
-  }
-  if (!isRecord(value)) {
+function hasSecretKeySegment(key: string): boolean {
+  const segments = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .split(/[\s_-]+/)
+    .map((segment) => segment.toLowerCase());
+  return (
+    segments.some((segment) => secretKeySegments.has(segment)) ||
+    (segments.includes("api") && segments.includes("key"))
+  );
+}
+
+function inlineSecretIssues(
+  value: unknown,
+  path: readonly (string | number)[] = [],
+  visited = new WeakSet<object>(),
+  active = new WeakSet<object>(),
+): string[] {
+  if (typeof value !== "object" || value === null) {
     return [];
   }
+  const pathText = path.length === 0 ? "configuration" : path.map(String).join(".");
+  if (active.has(value)) {
+    return [`${pathText}: acyclic configuration value (config_cycle)`];
+  }
+  if (visited.has(value)) {
+    return [];
+  }
+  visited.add(value);
+  active.add(value);
 
-  return Object.entries(value).flatMap(([key, child]) => {
-    const childPath = [...path, key];
-    const pathText = childPath.map(String).join(".");
-    const issue =
-      secretKeyPattern.test(key) && !SecretRefSchema.safeParse(child).success
-        ? [`${pathText}: a SecretRef (secret_inline)`]
-        : [];
-    return [...issue, ...inlineSecretIssues(child, childPath)];
-  });
+  const issues: string[] = [];
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => {
+      issues.push(...inlineSecretIssues(child, [...path, index], visited, active));
+    });
+  } else if (isRecord(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      const childPath = [...path, key];
+      const childPathText = childPath.map(String).join(".");
+      if (
+        hasSecretKeySegment(key) &&
+        typeof child === "string" &&
+        !SecretRefSchema.safeParse(child).success
+      ) {
+        issues.push(`${childPathText}: a SecretRef (secret_inline)`);
+      }
+      issues.push(...inlineSecretIssues(child, childPath, visited, active));
+    }
+  }
+  active.delete(value);
+  return issues;
 }
 
 function assertNoInlineSecrets(value: unknown): void {
@@ -301,11 +336,10 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Harne
   }
 
   const merged = deepMerge(parsedFile, environmentOverrides(env));
+  assertNoInlineSecrets(merged);
   const result = HarnessConfigSchema.safeParse(merged);
   if (!result.success) {
-    assertNoInlineSecrets(merged);
     throw new ConfigError(formatConfigIssues(result.error.issues));
   }
-  assertNoInlineSecrets(result.data);
   return deepFreeze(result.data);
 }

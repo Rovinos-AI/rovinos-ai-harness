@@ -21,6 +21,20 @@ const validConfig = JSON.stringify({
   sandbox: {},
 });
 
+function configWith(additions: Record<string, unknown>): string {
+  return JSON.stringify({
+    run: { budgets: { maxSteps: 12 } },
+    store: {},
+    models: {},
+    servers: [],
+    policy: {},
+    pii: {},
+    telemetry: {},
+    sandbox: {},
+    ...additions,
+  });
+}
+
 function requireConfigError(error: unknown): ConfigError {
   if (error instanceof ConfigError) {
     return error;
@@ -165,6 +179,64 @@ describe("CompositeSecretResolver", () => {
 });
 
 describe("inline config secrets", () => {
+  it.each([
+    {
+      name: "apiKey",
+      additions: { apiKey: "sk-live-x" },
+      path: "apiKey",
+      value: "sk-live-x",
+      inline: true,
+    },
+    {
+      name: "password",
+      additions: { password: "hunter2" },
+      path: "password",
+      value: "hunter2",
+      inline: true,
+    },
+    {
+      name: "nested auth token secret",
+      additions: { auth: { tokens: [{ secret: "plain" }] } },
+      path: "auth.tokens.0.secret",
+      value: "plain",
+      inline: true,
+    },
+    {
+      name: "maxOutputTokens",
+      additions: { models: { maxOutputTokens: 4096 } },
+      value: "4096",
+      inline: false,
+    },
+    {
+      name: "tokenizer",
+      additions: { policy: { tokenizer: "cl100k_base" } },
+      value: "cl100k_base",
+      inline: false,
+    },
+    {
+      name: "auth token reference",
+      additions: { auth: { tokens: [{ secret: "env:X" }] } },
+      value: "env:X",
+      inline: false,
+    },
+  ])(
+    "classifies $name without echoing submitted values",
+    async ({ additions, path, value, inline }) => {
+      const error = requireConfigError(
+        await loadConfig({
+          env: {},
+          readFile: () => Promise.resolve(configWith(additions)),
+        }).catch((caught: unknown) => caught),
+      );
+
+      expect(error.issues.some((issue) => issue.includes("secret_inline"))).toBe(inline);
+      if (inline && path !== undefined) {
+        expect(error.issues).toContain(`${path}: a SecretRef (secret_inline)`);
+      }
+      expect(error.message).not.toContain(value);
+    },
+  );
+
   it("rejects nested and array inline values without echoing any submitted secret", async () => {
     const inlineValues = ["apiKeyValue-secret", "bearerToken-secret", "databasePassword-secret"];
     const contents = JSON.stringify({
