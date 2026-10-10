@@ -13,6 +13,8 @@ import {
 } from "../index.js";
 
 // Synthetic identifier fixtures only; keys are assembled rather than usable credentials.
+const jwt = `${"eyJ" + "a".repeat(5)}.${"eyJ" + "b".repeat(5)}.${"c".repeat(8)}`;
+
 const cases = [
   {
     detector: emailDetector,
@@ -87,7 +89,7 @@ const cases = [
     positive: [
       "AKIA" + "A".repeat(16),
       "ghp_" + "a".repeat(36),
-      "eyJ0ZXN0.eyJwYXlsb2Fk.c2lnYXR1cmU",
+      jwt,
       "-----BEGIN RSA PRIVATE KEY-----",
       "-----BEGIN PRIVATE KEY-----",
     ],
@@ -178,7 +180,7 @@ describe("punctuation boundaries", () => {
     { detector: ipDetector, value: "192.0.2.1" },
     { detector: secretsDetector, value: "AKIA" + "A".repeat(16) },
     { detector: secretsDetector, value: "ghp_" + "a".repeat(36) },
-    { detector: secretsDetector, value: "eyJ0ZXN0.eyJwYXlsb2Fk.c2lnYXR1cmU" },
+    { detector: secretsDetector, value: jwt },
   ])("does not include a sentence period for $detector.id", ({ detector, value }) => {
     const text = `😀 ${value}.`;
     expect(detector.detect(text)).toEqual([

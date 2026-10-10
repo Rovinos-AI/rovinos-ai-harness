@@ -6,7 +6,9 @@ import { z } from "zod";
 /** Runtime schema for the stable placeholder token format. */
 export const Token = z
   .string()
-  .regex(new RegExp(`^<[A-Z][A-Z0-9_]{0,${TOKEN_TYPE_MAX_LENGTH - 1}}_[1-9]\\d{0,5}>$`, "u"));
+  .regex(
+    new RegExp(`^<[A-Z][A-Z0-9_]{0,${String(TOKEN_TYPE_MAX_LENGTH - 1)}}_[1-9]\\d{0,5}>$`, "u"),
+  );
 
 /** A run-scoped placeholder for a sensitive value. */
 export type Token = z.infer<typeof Token>;
@@ -17,7 +19,7 @@ export function tokenTypeName(entityType: Code): string {
 }
 
 const TOKEN_PATTERN = new RegExp(
-  `^<[A-Z][A-Z0-9_]{0,${TOKEN_TYPE_MAX_LENGTH - 1}}_[1-9]\\d{0,5}>$`,
+  `^<[A-Z][A-Z0-9_]{0,${String(TOKEN_TYPE_MAX_LENGTH - 1)}}_[1-9]\\d{0,5}>$`,
   "u",
 );
 
@@ -29,7 +31,7 @@ export function isToken(value: unknown): value is Token {
 /** Find valid tokens in text and return their UTF-16 offsets. */
 export function findTokens(text: string): { token: Token; index: number }[] {
   const pattern = new RegExp(
-    `<[A-Z][A-Z0-9_]{0,${TOKEN_TYPE_MAX_LENGTH - 1}}_[1-9]\\d{0,5}>`,
+    `<[A-Z][A-Z0-9_]{0,${String(TOKEN_TYPE_MAX_LENGTH - 1)}}_[1-9]\\d{0,5}>`,
     "gu",
   );
   const found: { token: Token; index: number }[] = [];

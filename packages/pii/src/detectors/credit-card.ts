@@ -32,6 +32,59 @@ function validCard(value: string): boolean {
   return /^\d(?:[ -]?\d){12,18}$/u.test(value) && luhn(value);
 }
 
+function appendDetection(
+  detections: Detection[],
+  text: string,
+  start: number,
+  value: string,
+): void {
+  const end = start + value.length;
+  if (
+    validCard(value) &&
+    !isWordCharacter(text[start - 1] ?? "") &&
+    !isWordCharacter(text[end] ?? "")
+  ) {
+    detections.push({
+      entityType: "credit_card",
+      start,
+      end,
+      confidence: 1,
+      detectorId: "credit_card",
+    });
+  }
+}
+
+function appendGroupedDetections(
+  detections: Detection[],
+  text: string,
+  candidateStart: number,
+  candidate: string,
+): void {
+  const groups = [...candidate.matchAll(/\d+/gu)];
+  for (let first = 0; first < groups.length; first++) {
+    const firstGroup = groups[first];
+    if (firstGroup === undefined) {
+      continue;
+    }
+    let digits = 0;
+    for (let last = first; last < groups.length; last++) {
+      const group = groups[last];
+      if (group === undefined) {
+        break;
+      }
+      digits += group[0].length;
+      if (digits > 19) {
+        break;
+      }
+      if (digits >= 13) {
+        const valueStart = candidateStart + firstGroup.index;
+        const value = candidate.slice(firstGroup.index, group.index + group[0].length);
+        appendDetection(detections, text, valueStart, value);
+      }
+    }
+  }
+}
+
 /** Card candidates require 13–19 digits and a valid Luhn checksum. */
 export const creditCardDetector: Detector = {
   id: "credit_card",
@@ -44,56 +97,10 @@ export const creditCardDetector: Detector = {
       const start = match.index + match[0].indexOf(candidate);
       const digitCount = candidate.replaceAll(/\D/gu, "").length;
       if (digitCount <= 19) {
-        if (
-          validCard(candidate) &&
-          !isWordCharacter(text[start - 1] ?? "") &&
-          !isWordCharacter(text[start + candidate.length] ?? "")
-        ) {
-          detections.push({
-            entityType: "credit_card",
-            start,
-            end: start + candidate.length,
-            confidence: 1,
-            detectorId: "credit_card",
-          });
-        }
+        appendDetection(detections, text, start, candidate);
         continue;
       }
-
-      const groups = [...candidate.matchAll(/\d+/gu)];
-      for (let first = 0; first < groups.length; first++) {
-        let digits = 0;
-        for (let last = first; last < groups.length; last++) {
-          const group = groups[last];
-          if (group === undefined || group.index === undefined) {
-            break;
-          }
-          digits += group[0].length;
-          if (digits > 19) {
-            break;
-          }
-          const firstGroup = groups[first];
-          if (firstGroup === undefined || firstGroup.index === undefined || digits < 13) {
-            continue;
-          }
-          const valueStart = start + firstGroup.index;
-          const value = candidate.slice(firstGroup.index, group.index + group[0].length);
-          const end = valueStart + value.length;
-          if (
-            validCard(value) &&
-            !isWordCharacter(text[valueStart - 1] ?? "") &&
-            !isWordCharacter(text[end] ?? "")
-          ) {
-            detections.push({
-              entityType: "credit_card",
-              start: valueStart,
-              end,
-              confidence: 1,
-              detectorId: "credit_card",
-            });
-          }
-        }
-      }
+      appendGroupedDetections(detections, text, start, candidate);
     }
     return detections;
   },

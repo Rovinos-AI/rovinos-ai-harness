@@ -7,9 +7,7 @@ const keys = candidateDetector("secrets", "api_key", /[\w.-]+/gu, (candidate) =>
   if (/^(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36})$/u.test(value)) {
     return value;
   }
-  return /^eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}$/u.test(value)
-    ? value
-    : false;
+  return /^eyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]{8,}$/u.test(value) ? value : false;
 });
 
 const privateKeys = candidateDetector(
