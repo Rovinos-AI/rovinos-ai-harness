@@ -20,11 +20,17 @@ export {
 export { TokenBucketRateLimiter } from "./resilience/limiter.js";
 export { Semaphore } from "./resilience/semaphore.js";
 export {
+  AnthropicAdapter,
+  type AnthropicAdapterOptions,
+  type AnthropicApiKey,
+} from "./providers/anthropic.js";
+export {
   ProviderResultSchema,
   type ProviderAdapter,
   type ProviderContext,
   type ProviderResult,
 } from "./types.js";
+export { OpenAIAdapter, type OpenAIAdapterOptions, type OpenAISecret } from "./providers/openai.js";
 export {
   JsonSchemaError,
   lowerForProvider,

@@ -23,8 +23,10 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
     "@harness/schemas": "workspace:^",
     "@harness/telemetry": "workspace:^",
+    "openai": "6.33.0",
     "zod": "4.6.5"
   },
   "peerDependencies": {

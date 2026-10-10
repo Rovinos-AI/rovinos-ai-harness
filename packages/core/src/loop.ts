@@ -170,6 +170,38 @@ async function recordBudgetFailure(
   return failed;
 }
 
+async function requestModel(
+  options: RunLoopExecutionOptions,
+  runId: Id,
+  messages: Message[],
+  deadlineTs: number,
+): Promise<ModelStepResult> {
+  const estimatedTokens = options.context.estimate?.(messages);
+  const result = await modelStep({
+    recorder: options.recorder,
+    model: options.model,
+    ids: options.ids,
+    runId,
+    messages,
+    signal: options.signal,
+    deadlineTs,
+    ...(options.role === undefined ? {} : { role: options.role }),
+    ...(options.provider === undefined ? {} : { provider: options.provider }),
+    ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+  });
+  if (result.outcome === "response" && estimatedTokens !== undefined) {
+    options.context.observeModelResponse?.(
+      {
+        provider: result.completion.provider,
+        model: result.completion.model,
+      },
+      estimatedTokens,
+      result.completion.usage.inputTokens,
+    );
+  }
+  return result;
+}
+
 /**
  * Records a budget failure and writes a checkpoint when the configured cadence requires one.
  *
@@ -223,18 +255,12 @@ async function runLoopSteps(
     if (prepared.event !== undefined) {
       return prepared.event;
     }
-    const modelResult = await modelStep({
-      recorder: options.recorder,
-      model: options.model,
-      ids: options.ids,
-      runId: execution.runId,
-      messages: prepared.context,
-      signal: options.signal,
-      deadlineTs: prepared.deadlineTs,
-      ...(options.role === undefined ? {} : { role: options.role }),
-      ...(options.provider === undefined ? {} : { provider: options.provider }),
-      ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
-    });
+    const modelResult = await requestModel(
+      options,
+      execution.runId,
+      prepared.context,
+      prepared.deadlineTs,
+    );
     events.push(...modelResult.events);
     const stoppedAfterModel = await suspendAfterModel(options, events, execution, modelResult);
     if (stoppedAfterModel !== undefined) {
