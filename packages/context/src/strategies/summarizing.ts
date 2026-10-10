@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  ModelRefSchema,
-  type Code,
-  type Event,
-  type ModelRef,
-} from "@harness/schemas";
+import { ModelRefSchema, type Code, type Event, type ModelRef } from "@harness/schemas";
 import { derivePlan, renderPlanMessage } from "../plan.js";
 import { eventsToTranscript } from "../transcript.js";
 import {
@@ -25,7 +20,7 @@ export interface SummarizingStrategyOptions {
 }
 
 /**
- * Rebuilds compacted context purely from events and requests compaction before the budget is tight.
+ * Rebuilds compacted context purely from events and requests compaction before the budget is full.
  */
 export class SummarizingStrategy implements ContextStrategy {
   readonly id: Code = "summarizing";
@@ -35,7 +30,7 @@ export class SummarizingStrategy implements ContextStrategy {
   private readonly model: ModelRef;
 
   /**
-   * Creates a replayable summarization strategy.
+   * Creates a summarization strategy that supports deterministic rebuilds.
    *
    * @param model - Model reference used by the token counter for trigger estimates.
    * @param options - Optional trigger threshold.
@@ -50,7 +45,7 @@ export class SummarizingStrategy implements ContextStrategy {
   }
 
   /**
-   * Returns whether the unwindowed transcript exceeds the configured fraction of available tokens.
+   * Returns whether the complete transcript exceeds the configured fraction of available tokens.
    *
    * @param events - Event history to estimate.
    * @param budget - Maximum context and reserved output tokens.

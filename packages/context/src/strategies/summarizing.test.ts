@@ -52,14 +52,18 @@ describe("SummarizingStrategy", () => {
     const strategy = new SummarizingStrategy(model);
     const counter = (estimate: number): TokenCounter => ({ count: () => estimate });
 
-    expect(strategy.needsCompaction(events, { maxTokens: 100, reserveOutputTokens: 0 }, counter(74)))
-      .toBe(false);
-    expect(strategy.needsCompaction(events, { maxTokens: 100, reserveOutputTokens: 0 }, counter(75)))
-      .toBe(false);
-    expect(strategy.needsCompaction(events, { maxTokens: 100, reserveOutputTokens: 0 }, counter(76)))
-      .toBe(true);
-    expect(strategy.needsCompaction(events, { maxTokens: 100, reserveOutputTokens: 20 }, counter(61)))
-      .toBe(true);
+    expect(
+      strategy.needsCompaction(events, { maxTokens: 100, reserveOutputTokens: 0 }, counter(74)),
+    ).toBe(false);
+    expect(
+      strategy.needsCompaction(events, { maxTokens: 100, reserveOutputTokens: 0 }, counter(75)),
+    ).toBe(false);
+    expect(
+      strategy.needsCompaction(events, { maxTokens: 100, reserveOutputTokens: 0 }, counter(76)),
+    ).toBe(true);
+    expect(
+      strategy.needsCompaction(events, { maxTokens: 100, reserveOutputTokens: 20 }, counter(61)),
+    ).toBe(true);
   });
 
   it("uses the sliding-window fallback and never invokes a summarizer while building", async () => {

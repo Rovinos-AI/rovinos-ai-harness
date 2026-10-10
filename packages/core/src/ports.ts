@@ -14,6 +14,7 @@ import type {
   Sha256Hex,
   ToolSpec,
 } from "@harness/schemas";
+import type { TranscriptGroup } from "@harness/context";
 
 /** Provider-neutral request contract shared with the model gateway. */
 export type ModelRequest = SharedModelRequest;
@@ -136,6 +137,20 @@ export interface ContextPort {
    * @param eventsAfterSnapshot - Events after the checkpoint, or all events without one.
    */
   restore(snapshot: JsonValue | undefined, eventsAfterSnapshot: readonly Event[]): Promise<void>;
+}
+
+/** Summarizes tokenized transcript groups for durable compaction. */
+export interface Summarizer {
+  /**
+   * Summarizes groups while preserving identifiers and tokens.
+   *
+   * @param input - Groups to summarize and the run goal.
+   * @returns Summary text and provider usage.
+   */
+  summarize(input: {
+    readonly groups: readonly TranscriptGroup[];
+    readonly goal: string;
+  }): Promise<{ readonly text: string; readonly usage: ModelUsage }>;
 }
 
 /** Generates run-scoped identifiers. */

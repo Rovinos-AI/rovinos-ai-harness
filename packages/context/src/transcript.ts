@@ -27,10 +27,13 @@ function toolResultMessage(event: Extract<Event, { type: "tool_result" }>): Mess
 function removeCompactedGroups(
   groups: TranscriptGroup[],
   groupsByCallId: Map<string, TranscriptGroup>,
-  summaryGroups: Set<TranscriptGroup>,
-  fromSeq: number,
-  toSeq: number,
+  range: {
+    readonly summaryGroups: Set<TranscriptGroup>;
+    readonly fromSeq: number;
+    readonly toSeq: number;
+  },
 ): void {
+  const { summaryGroups, fromSeq, toSeq } = range;
   const removedGroups = new Set<TranscriptGroup>();
   for (let index = groups.length - 1; index >= 0; index -= 1) {
     const group = groups[index];
@@ -90,7 +93,11 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
         groupsByCallId.delete(event.callId);
       }
     } else if (event.type === "context_compacted") {
-      removeCompactedGroups(groups, groupsByCallId, summaryGroups, event.fromSeq, event.toSeq);
+      removeCompactedGroups(groups, groupsByCallId, {
+        summaryGroups,
+        fromSeq: event.fromSeq,
+        toSeq: event.toSeq,
+      });
       const summaryGroup: TranscriptGroup = {
         seqs: [event.fromSeq],
         messages: [

@@ -66,6 +66,13 @@ export {
 } from "./resume.js";
 export { modelStep, type ModelStepOptions, type ModelStepResult } from "./steps/model-step.js";
 export {
+  compactionStep,
+  ModelPortSummarizer,
+  SummarizerResponseError,
+  type CompactionStepOptions,
+  type CompactionRuntimeOptions,
+} from "./steps/compaction-step.js";
+export {
   applyDanglingIntents,
   resolveDanglingIntentApproval,
   ResumeActionMismatchError,
@@ -88,6 +95,7 @@ export type {
   ModelUsage,
   NewRunMetadata,
   RunContext,
+  Summarizer,
   ToolDescription,
   ToolExecutionResult,
   ToolPort,

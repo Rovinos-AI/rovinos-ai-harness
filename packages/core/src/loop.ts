@@ -15,10 +15,12 @@ import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from 
 import type { RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
-import { modelStep, modelToolOptions, type ModelStepResult } from "./steps/model-step.js";
+import type { ModelStepResult } from "./steps/model-step.js";
+import { requestModel } from "./steps/request-model.js";
 import { toolStep } from "./steps/tool-step.js";
 import type { PreparedToolCall } from "./steps/prepare-tool.js";
 import type { ContextPort, IdGenerator, ModelPort, NewRunMetadata, ToolPort } from "./ports.js";
+import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata {
@@ -36,6 +38,8 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
+  /** Optional summarization compaction, checked before every model call. */
+  readonly compaction?: CompactionRuntimeOptions;
 }
 
 /** Execution options shared by new runs and resumptions. */
@@ -177,39 +181,6 @@ export async function recordBudgetFailureAndCheckpoint(
   return failed;
 }
 
-async function requestModel(
-  options: RunLoopExecutionOptions,
-  runId: Id,
-  messages: Message[],
-  deadlineTs: number,
-): Promise<ModelStepResult> {
-  const estimatedTokens = options.context.estimate?.(messages);
-  const result = await modelStep({
-    recorder: options.recorder,
-    model: options.model,
-    tool: options.tool,
-    ids: options.ids,
-    runId,
-    ...modelToolOptions(options.tool, messages),
-    signal: options.signal,
-    deadlineTs,
-    ...(options.role === undefined ? {} : { role: options.role }),
-    ...(options.provider === undefined ? {} : { provider: options.provider }),
-    ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
-  });
-  if (result.outcome === "response" && estimatedTokens !== undefined) {
-    options.context.observeModelResponse?.(
-      {
-        provider: result.completion.provider,
-        model: result.completion.model,
-      },
-      estimatedTokens,
-      result.completion.usage.inputTokens,
-    );
-  }
-  return result;
-}
-
 async function recoverInterruptedModelResponse(
   options: RunLoopExecutionOptions,
   events: Event[],
@@ -244,47 +215,73 @@ async function runLoopSteps(
     if (aborted !== undefined) {
       return aborted;
     }
+    await compactBeforeModelCall({
+      recorder: options.recorder,
+      events,
+      compaction: options.compaction,
+      model: options.model,
+      ids: options.ids,
+      runId: execution.runId,
+      signal: options.signal,
+      modelRef: {
+        provider: options.provider ?? "unknown",
+        model: options.modelName ?? "unknown",
+      },
+      goal: options.goal,
+    });
     const prepared = await prepareModelStep(options, events, execution);
     if (prepared.event !== undefined) {
       return prepared.event;
     }
     const modelResult = await requestModel(
-      options,
-      execution.runId,
-      prepared.context,
-      prepared.deadlineTs,
+      {
+        recorder: options.recorder,
+        model: options.model,
+        tool: options.tool,
+        ids: options.ids,
+        runId: execution.runId,
+        messages: prepared.context,
+        signal: options.signal,
+        deadlineTs: prepared.deadlineTs,
+        ...(options.role === undefined ? {} : { role: options.role }),
+        ...(options.provider === undefined ? {} : { provider: options.provider }),
+        ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+      },
+      options.context,
     );
     events.push(...modelResult.events);
     const stoppedAfterModel = await suspendAfterModel(options, events, execution, modelResult);
     if (stoppedAfterModel !== undefined) {
       return stoppedAfterModel;
     }
-    const stepState = await checkpointAfterStep(execution.checkpointer, events);
-    if (stepState.status === "suspended") {
-      return suspendedOutcome(events);
+    const next = await finishModelStep(options, events, execution, modelResult);
+    if (next !== undefined) {
+      return next;
     }
-    if (modelResult.outcome === "failed") {
-      const failedEvent = modelResult.events.at(-1);
-      if (failedEvent === undefined) {
-        throw new Error("Expected the model step to record a failure.");
-      }
-      return failedEvent;
-    }
-    if (modelResult.outcome === "aborted") {
-      return suspendedOutcome(events);
-    }
-    const toolCalls = modelResult.preparedCalls;
-    if (toolCalls.length > 0) {
-      const outcome = await runToolCalls(options, events, execution, toolCalls);
-      if (outcome !== undefined) {
-        return outcome;
-      }
-      continue;
-    }
-
-    const finished = await recordFinalAnswer(options, events, execution);
-    return finished;
   }
+}
+
+async function finishModelStep(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+  modelResult: ModelStepResult,
+): Promise<Event | undefined> {
+  const stepState = await checkpointAfterStep(execution.checkpointer, events);
+  if (stepState.status === "suspended" || modelResult.outcome === "aborted") {
+    return suspendedOutcome(events);
+  }
+  if (modelResult.outcome === "failed") {
+    const failedEvent = modelResult.events.at(-1);
+    if (failedEvent === undefined) {
+      throw new Error("Expected the model step to record a failure.");
+    }
+    return failedEvent;
+  }
+  if (modelResult.preparedCalls.length > 0) {
+    return runToolCalls(options, events, execution, modelResult.preparedCalls);
+  }
+  return recordFinalAnswer(options, events, execution);
 }
 
 async function recordFinalAnswer(
