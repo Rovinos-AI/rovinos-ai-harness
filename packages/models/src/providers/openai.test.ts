@@ -490,6 +490,38 @@ describe("OpenAI Chat Completions mapper", () => {
     expect(mapped.response_format).toBeUndefined();
   });
 
+  it("requests JSON mode when structured output is prompt-enforced", () => {
+    const mapped = toChatRequest(
+      {
+        ...request,
+        output: {
+          name: "answer",
+          schema: { type: "object" },
+          schemaHash: "b".repeat(64),
+        },
+      },
+      { structuredOutput: "json_mode", parallelToolCalls: false },
+    );
+
+    expect(mapped.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("omits JSON mode for array-root output schemas", () => {
+    const mapped = toChatRequest(
+      {
+        ...request,
+        output: {
+          name: "answer",
+          schema: { type: "array", items: { type: "string" } },
+          schemaHash: "b".repeat(64),
+        },
+      },
+      { structuredOutput: "json_mode", parallelToolCalls: false },
+    );
+
+    expect(mapped.response_format).toBeUndefined();
+  });
+
   it.each([
     {},
     { tools: [] },
