@@ -62,6 +62,13 @@ export interface VaultReader {
    * @returns A detached readonly list of original trimmed values.
    */
   listRawValues(runId: Id): Promise<readonly string[]>;
+
+  /**
+   * Return a version that increases when a new entry is added to the run.
+   * @param runId Run to inspect.
+   * @returns The monotonically increasing run value version.
+   */
+  version(runId: Id): Promise<number>;
 }
 
 /** Performs administrative operations on one run's vault data. */

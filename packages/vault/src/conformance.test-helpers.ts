@@ -75,5 +75,28 @@ export function runVaultConformance(name: string, createVault: VaultFactory): vo
         await harness.cleanup();
       }
     });
+
+    it("increments the run version only for new entries and preserves it across purge", async () => {
+      const harness = await createVault();
+      try {
+        await expect(harness.vault.version(runId)).resolves.toBe(0);
+        await harness.vault.put(runId, "email", "alice@example.test");
+        const firstVersion = await harness.vault.version(runId);
+        expect(firstVersion).toBeGreaterThan(0);
+
+        await harness.vault.put(runId, "email", "alice@example.test");
+        await expect(harness.vault.version(runId)).resolves.toBe(firstVersion);
+
+        await harness.vault.put(runId, "email", "bob@example.test");
+        const secondVersion = await harness.vault.version(runId);
+        expect(secondVersion).toBeGreaterThan(firstVersion);
+
+        await harness.vault.purge(runId);
+        await harness.vault.put(runId, "email", "carol@example.test");
+        await expect(harness.vault.version(runId)).resolves.toBeGreaterThan(secondVersion);
+      } finally {
+        await harness.cleanup();
+      }
+    });
   });
 }

@@ -80,7 +80,7 @@ export {
   type CustomDetector,
   type Detection,
 } from "./pii-detection.js";
-export { TelemetryConfigSchema } from "./config/telemetry.js";
+export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
 export { SandboxConfigSchema } from "./config/sandbox.js";
 export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
 export {

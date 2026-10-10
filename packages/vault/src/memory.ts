@@ -78,6 +78,16 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
     );
   }
 
+  /** Return a monotonic version for entries ever added to a run. */
+  version(runId: Id): Promise<number> {
+    const counters = this.counters.get(runId);
+    let version = 0;
+    for (const nextNumber of counters?.values() ?? []) {
+      version += nextNumber;
+    }
+    return Promise.resolve(version);
+  }
+
   /** Purge entries but preserve counters so token numbers are never reused. */
   purge(runId: Id): Promise<number> {
     const removed = this.entries.get(runId)?.size ?? 0;

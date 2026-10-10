@@ -263,6 +263,20 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     return Promise.all(rows.map((row) => this.decryptEntry(runId, row)));
   }
 
+  /** Return a monotonic version for entries ever added to a run. */
+  version(runId: Id): Promise<number> {
+    try {
+      const row = this.db
+        .prepare<[Id], { version: number }>(
+          "SELECT COALESCE(SUM(next_n - 1), 0) AS version FROM vault_counters WHERE run_id = ?",
+        )
+        .get(runId);
+      return Promise.resolve(row?.version ?? 0);
+    } catch {
+      return Promise.reject(new VaultOperationError("vault_unavailable"));
+    }
+  }
+
   /** Remove a run's encrypted entries without resetting token numbering. */
   purge(runId: Id): Promise<number> {
     try {
