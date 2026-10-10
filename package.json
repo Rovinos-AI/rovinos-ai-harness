@@ -50,6 +50,7 @@
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
+    "@harness/core": "workspace:^",
     "@harness/eslint-plugin-harness": "workspace:^",
     "@harness/models": "workspace:^",
     "@harness/schemas": "workspace:^",

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   HarnessError,
+  type Code,
   type Event,
   type Id,
   type NewEvent,
@@ -95,6 +96,14 @@ export class CrashingEventStore implements EventStore {
 
   findRunsByTrace(traceId: TraceId): Promise<Id[]> {
     return this.inner.findRunsByTrace(traceId);
+  }
+
+  fetchOutbox(sinkId: Code, limit: number): Promise<{ events: Event[]; cursor: number }> {
+    return this.inner.fetchOutbox(sinkId, limit);
+  }
+
+  ackOutbox(sinkId: Code, cursor: number): Promise<void> {
+    return this.inner.ackOutbox(sinkId, cursor);
   }
 
   close(): Promise<void> {
