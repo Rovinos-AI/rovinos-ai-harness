@@ -261,10 +261,6 @@ function lowerOneOf(
   if (!Array.isArray(child) || !rules.allowedKeywords.includes("anyOf") || "anyOf" in schema) {
     throw new JsonSchemaError("schema_provider_unsupported");
   }
-  const code = droppedCode("oneOf");
-  if (code !== undefined) {
-    dropped.add(code);
-  }
   return child.map((entry) => lowerSchemaNode(entry, rules, dropped));
 }
 
@@ -287,13 +283,22 @@ function lowerSchemaNode(
     return schema;
   }
 
+  const schemaWithEnum = { ...schema };
+  if ("const" in schemaWithEnum) {
+    const constValue = schemaWithEnum.const;
+    schemaWithEnum.enum = Array.isArray(schemaWithEnum.enum)
+      ? schemaWithEnum.enum.filter((value) => canonicalJson(value) === canonicalJson(constValue))
+      : [constValue];
+    delete schemaWithEnum.const;
+  }
+
   const lowered: Record<string, JsonValue> = {};
-  for (const [keyword, child] of Object.entries(schema)) {
+  for (const [keyword, child] of Object.entries(schemaWithEnum)) {
     if (keyword === "propertyNames" && isTrivialPropertyNames(child)) {
       continue;
     }
     if (keyword === "oneOf") {
-      lowered.anyOf = lowerOneOf(child, schema, rules, dropped);
+      lowered.anyOf = lowerOneOf(child, schemaWithEnum, rules, dropped);
       continue;
     }
     const supportedPattern =

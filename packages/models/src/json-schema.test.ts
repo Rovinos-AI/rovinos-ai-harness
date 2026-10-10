@@ -408,7 +408,7 @@ describe("provider schema lowering", () => {
         value: { anyOf: [{ type: "string" }, { type: "number" }] },
       },
     });
-    expect(lowered.dropped).toEqual(["custom_constraint", "one_of"]);
+    expect(lowered.dropped).toEqual(["custom_constraint"]);
   });
 
   it("normalizes nullable optional schemas and recursively lowers schema-valued keywords", () => {
@@ -586,6 +586,101 @@ describe("provider schema lowering", () => {
           }).not.toThrow();
         }
       }
+    }
+  });
+
+  it("preserves union discriminators and literals in provider schemas", () => {
+    const schema = z.object({
+      action: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("a"), x: z.number() }),
+        z.object({ kind: z.literal("b"), y: z.string() }),
+      ]),
+    });
+    const openUnion: JsonSchema = {
+      type: "object",
+      properties: {
+        action: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                kind: { type: "string", enum: ["a"] },
+                x: { type: "number" },
+              },
+              required: ["kind", "x"],
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { type: "string", enum: ["b"] },
+                y: { type: "string" },
+              },
+              required: ["kind", "y"],
+            },
+          ],
+        },
+      },
+      required: ["action"],
+    };
+    const strictUnion: JsonSchema = {
+      type: "object",
+      properties: {
+        action: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                kind: { type: "string", enum: ["a"] },
+                x: { type: "number" },
+              },
+              required: ["kind", "x"],
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { type: "string", enum: ["b"] },
+                y: { type: "string" },
+              },
+              required: ["kind", "y"],
+              additionalProperties: false,
+            },
+          ],
+        },
+      },
+      required: ["action"],
+      additionalProperties: false,
+    };
+    const goldenByProvider: Record<ProviderId, JsonSchema> = {
+      anthropic: openUnion,
+      azure_openai: strictUnion,
+      bedrock: openUnion,
+      openai: strictUnion,
+      vertex: openUnion,
+    };
+
+    for (const [provider, expected] of Object.entries(goldenByProvider)) {
+      const lowered = lowerForProvider(schema, provider);
+      expect(lowered.schema).toEqual(expected);
+      expect(lowered.dropped).toEqual([]);
+      const validate = compileJsonSchema(lowered.schema);
+      expect(() => {
+        validate({ action: { kind: "a", x: 1 } });
+      }).not.toThrow();
+      expect(() => {
+        validate({ action: { kind: "c", x: 1 } });
+      }).toThrow();
+    }
+
+    for (const provider of Object.keys(goldenByProvider)) {
+      expect(lowerForProvider(z.literal("active"), provider).schema).toEqual({
+        type: "string",
+        enum: ["active"],
+      });
+      expect(lowerForProvider(z.array(z.literal("active")), provider).schema).toEqual({
+        type: "array",
+        items: { type: "string", enum: ["active"] },
+      });
     }
   });
 });
