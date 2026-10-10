@@ -18,7 +18,7 @@ import {
 import { findTokens, isToken, type VaultWriter } from "@harness/vault";
 import { resolveOverlaps } from "./detectors/overlaps.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
-import { assertJsonSize } from "./json-size.js";
+import { assertJsonSize, JsonSizeTracker } from "./json-size.js";
 import { evaluatePiiPolicy } from "./policy.js";
 
 const MAX_JSON_DEPTH = 64;
@@ -104,11 +104,7 @@ export class Tokenizer {
     value: JsonValue,
     context: { readonly boundary: PiiBoundary; readonly destination: Destination },
   ): Promise<{ value: JsonValue; actions: PiiActionSummary[] }> {
-    const parsed = JsonValueSchema.safeParse(this.copyJson(value));
-    if (!parsed.success) {
-      throw new PiiTokenizerError("pii_input_invalid");
-    }
-    const validated = parsed.data;
+    const validated = this.copyJson(value);
     assertJsonSize(validated);
 
     const counts = createActionCounts();
@@ -130,11 +126,20 @@ export class Tokenizer {
     };
   }
 
-  private copyJson(value: JsonValue, depth = 0, ancestors = new Set<JsonContainer>()): JsonValue {
+  private copyJson(
+    value: JsonValue,
+    depth = 0,
+    ancestors = new Set<JsonContainer>(),
+    size = new JsonSizeTracker(),
+  ): JsonValue {
     if (depth > MAX_JSON_DEPTH) {
       throw new PiiTokenizerError("pii_depth_exceeded");
     }
     if (typeof value !== "object" || value === null) {
+      if (!JsonValueSchema.safeParse(value).success) {
+        throw new PiiTokenizerError("pii_input_invalid");
+      }
+      size.addValue(value);
       return value;
     }
     if (ancestors.has(value)) {
@@ -146,13 +151,14 @@ export class Tokenizer {
     } catch {
       throw new PiiTokenizerError("pii_input_invalid");
     }
+    size.addContainer(copy);
     ancestors.add(value);
     const result = Array.isArray(copy)
-      ? copy.map((child) => this.copyJson(child, depth + 1, ancestors))
+      ? copy.map((child) => this.copyJson(child, depth + 1, ancestors, size))
       : Object.fromEntries(
           Object.entries(copy).map(([key, child]) => [
             key,
-            this.copyJson(child, depth + 1, ancestors),
+            this.copyJson(child, depth + 1, ancestors, size),
           ]),
         );
     ancestors.delete(value);

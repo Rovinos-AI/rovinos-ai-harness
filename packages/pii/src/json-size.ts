@@ -9,9 +9,22 @@ export function assertJsonSize(value: JsonValue): void {
   new JsonSizeTracker().addValue(value);
 }
 
-class JsonSizeTracker {
+/** Incremental serialized-size budget shared while copying JSON subtrees. */
+export class JsonSizeTracker {
   private bytes = 0;
   private stringUnits = 0;
+
+  /** Account for container delimiters, separators, and object keys. */
+  addContainer(value: JsonValue[] | Readonly<Record<string, JsonValue>>): void {
+    const keys = Object.keys(value);
+    this.addBytes(2 + Math.max(0, keys.length - 1));
+    if (!Array.isArray(value)) {
+      for (const key of keys) {
+        this.addString(key);
+        this.addBytes(1);
+      }
+    }
+  }
 
   addValue(value: JsonValue): void {
     if (typeof value === "string") {

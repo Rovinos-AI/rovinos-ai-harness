@@ -198,6 +198,30 @@ describe("Tokenizer.tokenizeText", () => {
 });
 
 describe("Tokenizer.tokenizeJson", () => {
+  it("preserves and scans own __proto__ properties", async () => {
+    const input = Object.fromEntries([["__proto__", "alice@example.test"]]);
+    await expect(createTokenizer("block").tokenizeJson(runA, input, context)).rejects.toMatchObject(
+      {
+        code: "pii_blocked",
+        entities: [{ type: "email", count: 1 }],
+      },
+    );
+    const result = await createTokenizer().tokenizeJson(runA, input, context);
+    expect(result.value).toEqual(Object.fromEntries([["__proto__", "<EMAIL_1>"]]));
+  });
+
+  it("bounds copying of shared subtrees before detection", async () => {
+    let input: JsonValue = "alice@example.test";
+    for (let index = 0; index < 30; index++) {
+      input = [input, input];
+    }
+    const detect = vi.fn(emailDetector);
+    await expect(
+      createTokenizer("tokenize", new InMemoryVault(), detect).tokenizeJson(runA, input, context),
+    ).rejects.toMatchObject({ code: "pii_input_too_large" });
+    expect(detect).not.toHaveBeenCalled();
+  });
+
   it("preserves JSON structure, leaves safe keys untouched, and summarizes string values", async () => {
     const tokenizer = createTokenizer();
     const input: JsonValue = {
