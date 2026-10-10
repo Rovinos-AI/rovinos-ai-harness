@@ -59,6 +59,7 @@ describe("loadConfig", () => {
       countSuspendedTime: false,
     });
     expect(config.servers).toEqual([]);
+    expect(config.roles).toEqual([]);
   });
 
   it("loads JSON files", async () => {
@@ -343,6 +344,7 @@ describe("loadConfig", () => {
         resume: { onNonIdempotent: "escalate" },
         budgets: { maxSteps: 200, maxWallClockMs: 3_600_000, countSuspendedTime: false },
       },
+      roles: [],
       store: {},
       models: {
         enforcement: { maxRepairs: 2 },

@@ -86,6 +86,17 @@ export {
   type ModelRetryConfig,
   type ModelsConfig,
 } from "./config/models.js";
+export {
+  RoleBudgetsSchema,
+  RoleConfigSchema,
+  RoleSystemPromptSchema,
+  RoleToolPatternSchema,
+  RolesConfigSchema,
+  type RoleBudgets,
+  type RoleConfig,
+  type RoleToolPattern,
+  type RolesConfig,
+} from "./config/roles.js";
 export { ServerConfigSchema } from "./config/servers.js";
 export { PolicyConfigSchema } from "./config/policy.js";
 export {
