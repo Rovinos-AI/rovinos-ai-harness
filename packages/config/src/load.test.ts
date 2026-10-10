@@ -344,7 +344,15 @@ describe("loadConfig", () => {
         budgets: { maxSteps: 200, maxWallClockMs: 3_600_000, countSuspendedTime: false },
       },
       store: {},
-      models: {},
+      models: {
+        retry: {
+          maxAttempts: 3,
+          baseDelayMs: 500,
+          maxDelayMs: 20_000,
+          timeoutMs: 120_000,
+        },
+        maxConcurrent: 4,
+      },
       servers: [],
       policy: {},
       pii: { defaultAction: "tokenize", rules: [] },
