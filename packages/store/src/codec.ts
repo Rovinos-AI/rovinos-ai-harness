@@ -8,7 +8,12 @@ import {
   type Snapshot,
 } from "@harness/schemas";
 import { z } from "zod";
-import { InvalidEventError, StoreUnavailableError } from "./errors.js";
+import {
+  ContentDecryptFailedError,
+  InvalidEventError,
+  KeyNotFoundError,
+  StoreUnavailableError,
+} from "./errors.js";
 import { snapshotStoreOptionsSchema, type SnapshotStoreOptions } from "./types.js";
 
 const contentSchema = z.record(z.string(), z.json());
@@ -33,6 +38,8 @@ export interface EncodedContent {
 
 /** Encodes and decodes event content independently of event metadata. */
 export interface ContentCodec {
+  /** Whether this codec encrypts persisted content. */
+  readonly encrypted: boolean;
   /**
    * Encode content for an event.
    *
@@ -186,13 +193,19 @@ export async function decodeSnapshot(codec: ContentCodec, row: SnapshotRow): Pro
       ...meta,
       ...content,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof ContentDecryptFailedError || error instanceof KeyNotFoundError) {
+      throw error;
+    }
     throw new StoreUnavailableError();
   }
 }
 
 /** JSON serialization codec for event content when encryption is not configured. */
 export class JsonContentCodec implements ContentCodec {
+  /** Identifies this codec as plaintext for store metadata checks. */
+  readonly encrypted = false;
+
   /** {@inheritDoc ContentCodec.encode} */
   encode(_ctx: ContentCodecContext, content: Record<string, unknown>): Promise<EncodedContent> {
     return Promise.resolve().then(() => {

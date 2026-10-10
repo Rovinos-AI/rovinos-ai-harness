@@ -31,6 +31,68 @@ export class StoreUnavailableError extends HarnessError {
   }
 }
 
+/** Raised when encrypted content cannot be authenticated or decoded. */
+export class ContentDecryptFailedError extends HarnessError {
+  /** Stable error code. */
+  readonly code = "content_decrypt_failed";
+
+  /** Create a decryption error without exposing cryptographic details. */
+  constructor() {
+    super("Content decryption failed");
+  }
+}
+
+/** Raised when the requested historical content key is unavailable. */
+export class KeyNotFoundError extends HarnessError {
+  /** Stable error code. */
+  readonly code = "key_not_found";
+
+  /** Create a key lookup error without exposing key material or provider details. */
+  constructor() {
+    super("Content key not found");
+  }
+}
+
+/** Raised when content encryption setup or encryption fails. */
+export class ContentEncryptFailedError extends HarnessError {
+  /** Stable error code. */
+  readonly code = "content_encrypt_failed";
+
+  /** Create an encryption error without exposing cryptographic details. */
+  constructor() {
+    super("Content encryption failed");
+  }
+}
+
+/** Raised when a database is opened with a different encryption configuration. */
+export class StoreEncryptionMismatchError extends HarnessError {
+  /** Stable error code. */
+  readonly code = "store_encryption_mismatch";
+
+  /** Create an encryption-configuration mismatch error. */
+  constructor() {
+    super("Store encryption configuration mismatch");
+  }
+}
+
+/** Identify typed errors that Postgres must preserve rather than normalize. */
+export function isPreservedStoreError(
+  error: unknown,
+): error is
+  | SeqConflictError
+  | InvalidEventError
+  | ContentDecryptFailedError
+  | KeyNotFoundError
+  | StoreEncryptionMismatchError {
+  return (
+    error instanceof SeqConflictError ||
+    error instanceof InvalidEventError ||
+    error instanceof ContentDecryptFailedError ||
+    error instanceof KeyNotFoundError ||
+    error instanceof StoreEncryptionMismatchError
+  );
+}
+
 /** Raised when event validation fails; only schema paths are retained. */
 export class InvalidEventError extends HarnessError {
   /** Stable error code. */

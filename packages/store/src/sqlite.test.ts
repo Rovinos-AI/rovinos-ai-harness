@@ -1,19 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
 import { Id, type Event, type NewEvent, type RunStatus } from "@harness/schemas";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, type ContentCodec, type ContentCodecContext } from "./codec.js";
 import {
+  ContentDecryptFailedError,
   InvalidEventError,
+  KeyNotFoundError,
   SeqConflictError,
   SqliteEventStore,
+  StoreEncryptionMismatchError,
   StoreUnavailableError,
 } from "./index.js";
 
 const runId = Id.parse("00000000000000000000000001");
+const encryptionKeyId = "sqlite-test-key";
+const encryptionKey = new Uint8Array(32).fill(21);
+const encryptionCodec = new AesGcmContentCodec({
+  currentKeyId: () => encryptionKeyId,
+  getKey: (keyId) => {
+    if (keyId !== encryptionKeyId) {
+      return Promise.reject(new KeyNotFoundError());
+    }
+    return Promise.resolve(Uint8Array.from(encryptionKey));
+  },
+});
 const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);
 const databaseDirectories: string[] = [];
@@ -45,6 +60,7 @@ async function collectIterator(iterator: AsyncIterator<Event>): Promise<Event[]>
 function asyncDecodeCodec(): ContentCodec {
   const codec = new JsonContentCodec();
   return {
+    encrypted: false,
     encode: (ctx, content) => codec.encode(ctx, content),
     async decode(ctx, blob, keyId) {
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -162,6 +178,7 @@ describe("snapshot content encoding", () => {
       keyId: string | undefined;
     }[] = [];
     const codec: ContentCodec = {
+      encrypted: false,
       async encode(context, content) {
         encodedInputs.push({ context, content });
         return delegate.encode(context, content);
@@ -327,6 +344,7 @@ describe("SqliteEventStore", () => {
   it("rejects non-JSON codec output as corrupt stored content", async () => {
     const baseCodec = new JsonContentCodec();
     const codec: ContentCodec = {
+      encrypted: false,
       encode: (ctx, content) => baseCodec.encode(ctx, content),
       decode: () => Promise.resolve({ invalid: undefined }),
     };
@@ -434,9 +452,69 @@ describe("SqliteEventStore", () => {
     }
   });
 
+  it("encrypts content at rest and rejects opening with plaintext configuration", async () => {
+    const path = await temporaryDatabase();
+    const store = new SqliteEventStore(path, encryptionCodec);
+    const canary = "synthetic-content-canary";
+    await store.append(runId, [runCreated(runId, 10), modelRequest(runId, 11, canary)], 0);
+    await store.close();
+
+    const databaseBytes = await readFile(path);
+    expect(databaseBytes.includes(Buffer.from(canary, "utf8"))).toBe(false);
+    expect(storedRows(path)[1]?.content_blob).not.toContain(canary);
+    expect(storedRows(path)[1]?.key_id).toBe(encryptionKeyId);
+
+    const reopened = new SqliteEventStore(path, encryptionCodec);
+    try {
+      await expect(collect(reopened.read(runId))).resolves.toMatchObject([
+        { seq: 0 },
+        { seq: 1, messages: [{ content: canary }] },
+      ]);
+    } finally {
+      await reopened.close();
+    }
+
+    let mismatch: unknown;
+    try {
+      new SqliteEventStore(path);
+    } catch (error) {
+      mismatch = error;
+    }
+    expect(mismatch).toBeInstanceOf(StoreEncryptionMismatchError);
+    expect(mismatch).toMatchObject({ code: "store_encryption_mismatch" });
+  });
+
+  it("preserves typed content decryption and missing-key failures on read", async () => {
+    const path = await temporaryDatabase();
+    const store = new SqliteEventStore(path, encryptionCodec);
+    await store.append(runId, [runCreated(runId, 10)], 0);
+    const database = new Database(path);
+    try {
+      database.prepare("UPDATE events SET content_blob = ? WHERE seq = 0").run("tampered");
+      await expect(collect(store.read(runId))).rejects.toBeInstanceOf(ContentDecryptFailedError);
+    } finally {
+      database.close();
+      await store.close();
+    }
+
+    const missingKeyCodec = new AesGcmContentCodec({
+      currentKeyId: () => encryptionKeyId,
+      getKey: () => Promise.reject(new KeyNotFoundError()),
+    });
+    const missingKeyStore = new SqliteEventStore(path, missingKeyCodec);
+    try {
+      await expect(collect(missingKeyStore.read(runId))).rejects.toMatchObject({
+        code: "key_not_found",
+      });
+    } finally {
+      await missingKeyStore.close();
+    }
+  });
+
   it("persists custom codec key identifiers and updates run status", async () => {
     const codec = new JsonContentCodec();
     const customCodec: ContentCodec = {
+      encrypted: false,
       async encode(ctx, content) {
         const encoded = await codec.encode(ctx, content);
         return { ...encoded, keyId: "synthetic-key" };

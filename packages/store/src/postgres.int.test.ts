@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Pool } from "pg";
 import { randomBytes } from "node:crypto";
+import type { KeyProvider } from "@harness/schemas";
 import { afterAll, expect, it } from "vitest";
+import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { PostgresEventStore, openPostgresEventStore } from "./postgres/adapter.js";
 import {
   createEventBuilders,
@@ -16,6 +18,19 @@ const schemaIds = createEventBuilders();
 const stores = new Set<PostgresEventStore>();
 const adminPools = new Set<Pool>();
 const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const conformanceKeyId = "postgres-conformance-key";
+const conformanceKey = new Uint8Array(32).fill(12);
+const contentCodec = new AesGcmContentCodec({
+  currentKeyId: () => conformanceKeyId,
+  getKey: (keyId) => {
+    if (keyId !== conformanceKeyId) {
+      return Promise.reject(
+        Object.assign(new Error("Synthetic key not found"), { code: "key_not_found" }),
+      );
+    }
+    return Promise.resolve(Uint8Array.from(conformanceKey));
+  },
+} satisfies KeyProvider);
 
 function uniqueSchema(): string {
   let value = BigInt(`0x${randomBytes(16).toString("hex")}`);
@@ -61,7 +76,7 @@ async function closeStore(store: PostgresEventStore): Promise<void> {
 
 const postgresFactory: EventStoreFactory = async () => {
   const { admin, schema } = await createSchema();
-  const store = new PostgresEventStore(connectionString, { schema });
+  const store = new PostgresEventStore(connectionString, { schema }, contentCodec);
   stores.add(store);
   return {
     store,
@@ -137,6 +152,33 @@ it("appends batches larger than PostgreSQL's bind-parameter limit", async () => 
     expect(count).toBe(7_000);
   } finally {
     await cleanup();
+  }
+});
+
+it("rejects reopening an encrypted Postgres store without its codec", async () => {
+  const { admin, schema } = await createSchema();
+  const runId = schemaIds.nextRunId();
+  const encryptedStore = new PostgresEventStore(connectionString, { schema }, contentCodec);
+  stores.add(encryptedStore);
+  try {
+    await encryptedStore.append(
+      runId,
+      [schemaIds.runCreated(runId), schemaIds.modelRequest(runId, "synthetic encrypted content")],
+      0,
+    );
+    await closeStore(encryptedStore);
+
+    const plaintextStore = new PostgresEventStore(connectionString, { schema });
+    stores.add(plaintextStore);
+    await expect(plaintextStore.head(runId)).rejects.toMatchObject({
+      code: "store_encryption_mismatch",
+    });
+    await closeStore(plaintextStore);
+  } finally {
+    if (stores.has(encryptedStore)) {
+      await closeStore(encryptedStore);
+    }
+    await dropSchema(admin, schema);
   }
 });
 

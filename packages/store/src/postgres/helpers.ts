@@ -12,7 +12,14 @@ import {
 import type { PoolClient, QueryResultRow } from "pg";
 import { z } from "zod";
 import type { ContentCodec, EncodedSnapshot } from "../codec.js";
-import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "../errors.js";
+import {
+  ContentDecryptFailedError,
+  InvalidEventError,
+  KeyNotFoundError,
+  SeqConflictError,
+  StoreUnavailableError,
+  isPreservedStoreError,
+} from "../errors.js";
 import type { RunSummary } from "../types.js";
 import { insertSnapshot } from "./snapshot.js";
 
@@ -55,6 +62,10 @@ export const POSTGRES_SCHEMA = `
     key_id text
   );
   CREATE INDEX IF NOT EXISTS snapshots_run_at_seq_idx ON snapshots (run_id, at_seq DESC);
+  CREATE TABLE IF NOT EXISTS store_metadata (
+    metadata_key text PRIMARY KEY,
+    metadata_value text NOT NULL
+  );
 `;
 
 /** Database representation of one persisted event row. */
@@ -112,7 +123,7 @@ export function storeError(
   actual = expected,
   uniqueViolationIsConflict = false,
 ): Error {
-  if (error instanceof SeqConflictError || error instanceof InvalidEventError) {
+  if (isPreservedStoreError(error)) {
     return error;
   }
   const code = errorCode(error);
@@ -207,7 +218,10 @@ async function decodeStoredContent(
       throw new StoreUnavailableError();
     }
     return parsed.data;
-  } catch {
+  } catch (error) {
+    if (error instanceof ContentDecryptFailedError || error instanceof KeyNotFoundError) {
+      throw error;
+    }
     throw new StoreUnavailableError();
   }
 }
