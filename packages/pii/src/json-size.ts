@@ -26,6 +26,11 @@ export class JsonSizeTracker {
     }
   }
 
+  /** Account for an array's delimiters and separators before copying its elements. */
+  addArrayContainer(length: number): void {
+    this.addBytes(2 + Math.max(0, length - 1));
+  }
+
   addValue(value: JsonValue): void {
     if (typeof value === "string") {
       this.addString(value);

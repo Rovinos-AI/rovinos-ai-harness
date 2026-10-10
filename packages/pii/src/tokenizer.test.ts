@@ -311,6 +311,30 @@ describe("Tokenizer.tokenizeJson", () => {
     expect(detect).not.toHaveBeenCalled();
   });
 
+  it("does not invoke custom array iterators while taking the JSON snapshot", async () => {
+    const input: JsonValue[] = ["alice@example.test"];
+    const iterator = vi.fn(() => {
+      throw new Error("alice@example.test");
+    });
+    Object.defineProperty(input, Symbol.iterator, { value: iterator });
+
+    const result = await createTokenizer().tokenizeJson(runA, input, context);
+
+    expect(result.value).toEqual(["<EMAIL_1>"]);
+    expect(iterator).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized sparse arrays before detection", async () => {
+    const input: JsonValue[] = [];
+    input.length = 2 * 1024 * 1024 + 1;
+    const detect = vi.fn(emailDetector);
+
+    await expect(
+      createTokenizer("tokenize", new InMemoryVault(), detect).tokenizeJson(runA, input, context),
+    ).rejects.toMatchObject({ code: "pii_input_too_large" });
+    expect(detect).not.toHaveBeenCalled();
+  });
+
   it("preserves JSON structure, leaves safe keys untouched, and summarizes string values", async () => {
     const tokenizer = createTokenizer();
     const input: JsonValue = {

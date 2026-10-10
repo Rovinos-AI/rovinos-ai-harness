@@ -148,8 +148,10 @@ export class Tokenizer {
     if (ancestors.has(value)) {
       throw new PiiTokenizerError("pii_input_invalid");
     }
-    const copy = snapshotJsonContainer(value);
-    size.addContainer(copy);
+    const copy = snapshotJsonContainer(value, size);
+    if (!Array.isArray(copy)) {
+      size.addContainer(copy);
+    }
     ancestors.add(value);
     const result = Array.isArray(copy)
       ? copy.map((child) => this.copyJson(child, depth + 1, ancestors, size))
@@ -349,20 +351,39 @@ function compareOrdinal(left: string, right: string): number {
   return left > right ? 1 : 0;
 }
 
-function snapshotJsonContainer(value: JsonContainer): JsonContainer {
+function snapshotJsonContainer(value: JsonContainer, size: JsonSizeTracker): JsonContainer {
   try {
     if (isJsonArray(value)) {
       if (Reflect.getPrototypeOf(value) !== Array.prototype) {
         throw new PiiTokenizerError("pii_input_invalid");
       }
-      return [...value];
+      const length = Reflect.get(value, "length");
+      if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) {
+        throw new PiiTokenizerError("pii_input_invalid");
+      }
+      size.addArrayContainer(length);
+      const copy: JsonValue[] = [];
+      for (let index = 0; index < length; index += 1) {
+        if (!Object.hasOwn(value, index)) {
+          throw new PiiTokenizerError("pii_input_invalid");
+        }
+        const child = value[index];
+        if (child === undefined) {
+          throw new PiiTokenizerError("pii_input_invalid");
+        }
+        copy.push(child);
+      }
+      return copy;
     }
     const prototype = Reflect.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new PiiTokenizerError("pii_input_invalid");
     }
     return Object.fromEntries(Object.entries(value));
-  } catch {
+  } catch (error) {
+    if (error instanceof PiiTokenizerError) {
+      throw error;
+    }
     throw new PiiTokenizerError("pii_input_invalid");
   }
 }
