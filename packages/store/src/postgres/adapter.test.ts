@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { beforeEach, expect, it, vi } from "vitest";
-import { parseJson } from "@harness/schemas";
+import { parseJson, type KeyProvider } from "@harness/schemas";
+import { AesGcmContentCodec } from "../aes-gcm-codec.js";
 import type { ContentCodec } from "../codec.js";
 import { StoreUnavailableError } from "../errors.js";
 import { PostgresEventStore } from "./adapter.js";
@@ -55,6 +56,7 @@ const fakePg = vi.hoisted(() => ({
   events: new Array<FakeEvent>(),
   snapshots: new Array<FakeSnapshot>(),
   schemaInitialized: false,
+  encryptionValue: "",
   handler: (_sql: string, _values: unknown[]): FakeQueryResult => ({ rows: [] }),
   connectError: new Error("connection refused"),
   connectErrorCode: "ECONNREFUSED",
@@ -141,6 +143,18 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   }
   if (query.startsWith("SELECT to_regclass")) {
     return { rows: [{ initialized: fakePg.schemaInitialized }] };
+  }
+  if (query.startsWith("SELECT metadata_value FROM store_metadata")) {
+    return {
+      rows: fakePg.encryptionValue === "" ? [] : [{ metadata_value: fakePg.encryptionValue }],
+    };
+  }
+  if (query.startsWith("SELECT (SELECT COUNT(*) FROM events)")) {
+    return { rows: [{ count: String(fakePg.events.length + fakePg.snapshots.length) }] };
+  }
+  if (query.startsWith("INSERT INTO store_metadata")) {
+    fakePg.encryptionValue = text(values[1]);
+    return { rows: [] };
   }
   if (query.startsWith("INSERT INTO runs")) {
     const runId = text(values[0]);
@@ -311,15 +325,35 @@ beforeEach(() => {
   fakePg.snapshots.length = 0;
   transactionBackup = undefined;
   fakePg.schemaInitialized = false;
+  fakePg.encryptionValue = "";
   fakePg.handler = fakeQuery;
   fakePg.connectErrorCode = "ECONNREFUSED";
   fakePg.shouldFailConnect = false;
 });
 
+const conformanceKeyId = "postgres-mock-conformance-key";
+const conformanceKey = new Uint8Array(32).fill(13);
+const keyProvider: KeyProvider = {
+  currentKeyId: () => conformanceKeyId,
+  getKey: (keyId) => {
+    if (keyId !== conformanceKeyId) {
+      return Promise.reject(
+        Object.assign(new Error("Synthetic key not found"), { code: "key_not_found" }),
+      );
+    }
+    return Promise.resolve(Uint8Array.from(conformanceKey));
+  },
+};
+const contentCodec = new AesGcmContentCodec(keyProvider);
+
 runEventStoreConformance(
   "MockPostgresEventStore",
   () => {
-    const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+    const store = new PostgresEventStore(
+      "postgresql://harness@localhost/harness",
+      {},
+      contentCodec,
+    );
     return Promise.resolve({ store, cleanup: () => store.close() });
   },
   { supportsFileReopen: false },
@@ -390,6 +424,7 @@ it("maps malformed stored content to an unavailable-store error", async () => {
   const builders = createEventBuilders();
   const runId = builders.nextRunId();
   const codec: ContentCodec = {
+    encrypted: false,
     encode: () => Promise.resolve({ blob: "encoded" }),
     decode: () => Promise.reject(new Error("decode failure")),
   };
