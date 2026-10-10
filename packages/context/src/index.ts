@@ -18,7 +18,11 @@ export {
 } from "./types.js";
 export { eventsToTranscript } from "./transcript.js";
 export { NaiveStrategy } from "./strategies/naive.js";
-export { SlidingWindowStrategy } from "./strategies/sliding-window.js";
+export {
+  ContextMarkerExceedsBudgetError,
+  ContextPinnedExceedsBudgetError,
+  SlidingWindowStrategy,
+} from "./strategies/sliding-window.js";
 export {
   CalibrationSnapshotSchema,
   CalibratingTokenCounter,

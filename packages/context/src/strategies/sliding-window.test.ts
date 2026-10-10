@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Event, Message, ModelRef, Part } from "@harness/schemas";
 import { SlidingWindowStrategy } from "./sliding-window.js";
 import type { ContextStrategyInput, TokenCounter } from "../types.js";
+import { HeuristicTokenCounter } from "../token-counter.js";
 
 const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
@@ -104,6 +105,16 @@ describe("SlidingWindowStrategy", () => {
     expect(result.messages.map(messageText)).toEqual(["goal", "first", "last"]);
     expect(result.stats).toMatchObject({ estimatedTokens: 3, droppedGroups: 0 });
     expect(result.messages.some((message) => messageText(message).includes("omitted"))).toBe(false);
+
+    const heuristicResult = await strategy.build({
+      events: [runInput(0), modelResponse(1, "a"), modelResponse(2, "b")],
+      budget: { maxTokens: 17, reserveOutputTokens: 0 },
+      model,
+      counter: new HeuristicTokenCounter(),
+    });
+
+    expect(heuristicResult.messages.map(messageText)).toEqual(["goal", "a", "b"]);
+    expect(heuristicResult.stats.droppedGroups).toBe(0);
   });
 
   it("drops the oldest groups, accounts for the marker, and subtracts the output reserve", async () => {
@@ -119,8 +130,8 @@ describe("SlidingWindowStrategy", () => {
     );
 
     expect(result.messages.map(messageText)).toEqual([
-      "[2 earlier steps omitted]",
       "goal",
+      "[2 earlier steps omitted]",
       "newest",
     ]);
     expect(result.stats).toMatchObject({ estimatedTokens: 3, droppedGroups: 2 });
@@ -141,9 +152,9 @@ describe("SlidingWindowStrategy", () => {
     );
 
     expect(result.messages.map(messageText)).toEqual([
-      "[2 earlier steps omitted]",
       "goal",
       "Summary of earlier work: summary",
+      "[2 earlier steps omitted]",
       "newest",
     ]);
     expect(result.pinnedSeqs).toEqual([0, 1]);
@@ -165,8 +176,8 @@ describe("SlidingWindowStrategy", () => {
     );
 
     expect(result.messages.map(messageText)).toEqual([
-      "[1 earlier steps omitted]",
       "goal",
+      "[1 earlier steps omitted]",
       "newest",
     ]);
     expect(result.messages.some((message) => message.role === "tool")).toBe(false);
@@ -205,5 +216,67 @@ describe("SlidingWindowStrategy", () => {
     const events = [runInput(0), modelResponse(1, "old"), modelResponse(2, "new")];
 
     await expect(build(events, 3)).resolves.toEqual(await build(events, 3));
+  });
+
+  it("keeps its strategy identity and version stable", () => {
+    expect(strategy.id).toBe("sliding_window");
+    expect(strategy.version).toBe("v1");
+  });
+
+  it("estimates each group in linear time", async () => {
+    const groupCount = 1000;
+    let countCalls = 0;
+    const countingCounter: TokenCounter = {
+      count: (messages) => {
+        countCalls += 1;
+        return messages.length;
+      },
+    };
+    const events = [
+      runInput(0),
+      ...Array.from({ length: groupCount }, (_, index) =>
+        modelResponse(index + 1, `response-${String(index)}`),
+      ),
+    ];
+
+    const result = await strategy.build({
+      events,
+      budget: { maxTokens: 8, reserveOutputTokens: 0 },
+      model,
+      counter: countingCounter,
+    });
+
+    expect(result.stats.droppedGroups).toBe(groupCount - 6);
+    expect(countCalls).toBeLessThan(3 * groupCount);
+  });
+
+  it("drops another group when the final full count includes non-additive overhead", async () => {
+    const nonAdditiveCounter: TokenCounter = {
+      count: (messages) =>
+        messages.length === 4 &&
+        !messages.some((message) => messageText(message).includes("omitted"))
+          ? 6
+          : messages.length,
+    };
+
+    const result = await strategy.build({
+      events: [
+        runInput(0),
+        modelResponse(1, "old"),
+        modelResponse(2, "middle"),
+        modelResponse(3, "new"),
+      ],
+      budget: { maxTokens: 4, reserveOutputTokens: 0 },
+      model,
+      counter: nonAdditiveCounter,
+    });
+
+    expect(result.messages.map(messageText)).toEqual([
+      "goal",
+      "[1 earlier steps omitted]",
+      "middle",
+      "new",
+    ]);
+    expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 1 });
   });
 });
