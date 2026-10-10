@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { parseJson, type Event, type Part } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
@@ -153,7 +153,12 @@ describe("eventsToTranscript", () => {
       ],
     ],
   ] as const)("matches the %s transcript golden", async (name, events) => {
-    expect(eventsToTranscript(events)).toEqual(await readGolden(name));
+    const transcript = eventsToTranscript(events);
+    if (process.env.UPDATE_GOLDEN === "1") {
+      const path = fileURLToPath(new URL(`./__golden__/${name}.json`, import.meta.url));
+      await writeFile(path, `${JSON.stringify(transcript, null, 2)}\n`, "utf8");
+    }
+    expect(transcript).toEqual(await readGolden(name));
   });
 
   it("matches tool results by call id and keeps calls and results in one group", () => {
@@ -196,7 +201,7 @@ describe("eventsToTranscript", () => {
     const transcript = eventsToTranscript(events);
 
     expect(transcript).toHaveLength(3);
-    expect(transcript.map(({ seqs }) => seqs)).toEqual([[0], [1], [5]]);
+    expect(transcript.map(({ seqs }) => seqs)).toEqual([[0], [2], [5]]);
     expect(transcript[1]?.messages[0]?.parts).toEqual([
       { type: "text", text: "Summary of earlier work: older" },
     ]);
@@ -234,7 +239,7 @@ describe("eventsToTranscript", () => {
     ]);
   });
 
-  it("renders JSON inputs and summaries and pins each reconstructed input", () => {
+  it("renders JSON inputs and summaries while pinning the reconstructed input", () => {
     const transcript = eventsToTranscript([
       runInput(0, { goal: "goal" }),
       {
@@ -255,8 +260,8 @@ describe("eventsToTranscript", () => {
         messages: [{ parts: [{ text: '{"goal":"goal"}' }] }],
       },
       {
-        seqs: [0],
-        pinned: true,
+        seqs: [1],
+        pinned: false,
         messages: [{ parts: [{ text: 'Summary of earlier work: {"outcome":"done"}' }] }],
       },
     ]);
@@ -327,7 +332,7 @@ describe("NaiveStrategy", () => {
       compactedRanges: 1,
       offloadedResults: 1,
     });
-    expect(result.pinnedSeqs).toEqual([0, 0]);
+    expect(result.pinnedSeqs).toEqual([0]);
     expect(strategy.id).toBe("naive");
     expect(strategy.version).toBe("v3");
     expect(count).toHaveBeenCalledWith(result.messages, { provider: "test", model: "test" });

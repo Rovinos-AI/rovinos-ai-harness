@@ -162,6 +162,9 @@ const contextCompactedEvent = z
     strategy: Code,
     strategyVersion: Code,
     summary: JsonValue,
+    inputTokens: z.number().int().nonnegative().optional(),
+    outputTokens: z.number().int().nonnegative().optional(),
+    costMicros: z.number().int().nonnegative().optional(),
   })
   .strict();
 

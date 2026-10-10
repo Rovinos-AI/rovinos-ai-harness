@@ -69,7 +69,32 @@ export class ModelPortSummarizer implements Summarizer {
             parts: [
               {
                 type: "text",
-                text: `Goal:\n${input.goal}\n\nTranscript groups:\n${JSON.stringify(input.groups)}`,
+                text: `Goal:\n${input.goal}\n\nTranscript groups:\n${JSON.stringify(
+                  input.groups.map((group) => ({
+                    seqs: group.seqs,
+                    messages: group.messages.map((message) => ({
+                      role: message.role,
+                      parts: message.parts.flatMap((part) => {
+                        switch (part.type) {
+                          case "text":
+                            return [{ type: part.type, text: part.text }];
+                          case "tool_call":
+                            return [{ type: part.type, toolId: part.toolId, args: part.args }];
+                          case "tool_result":
+                            return [
+                              {
+                                type: part.type,
+                                outcome: part.isError ? "error" : "ok",
+                                result: part.result,
+                              },
+                            ];
+                          case "opaque":
+                            return [];
+                        }
+                      }),
+                    })),
+                  })),
+                )}`,
               },
             ],
           },
@@ -99,6 +124,7 @@ export interface CompactionStepOptions {
   readonly goal: string;
   readonly sanitizeSummary: (text: string) => Promise<string>;
   readonly keepRecentGroups?: number;
+  readonly signal?: AbortSignal;
 }
 
 function sourceGroups(
@@ -114,9 +140,16 @@ function sourceGroups(
     undefined,
   );
   const startSeq = previousCompactedTo === undefined ? 0 : previousCompactedTo + 1;
-  const eligible = eventsToTranscript(events).filter(
+  const transcript = eventsToTranscript(events);
+  const eligible = transcript.filter(
     (group) => !group.pinned && group.seqs.every((seq) => seq >= startSeq),
   );
+  if (
+    previousCompactedTo !== undefined &&
+    !eligible.some((group) => group.seqs.some((seq) => seq > startSeq))
+  ) {
+    return undefined;
+  }
   const groups = eligible.slice(0, Math.max(0, eligible.length - keepRecentGroups));
   if (groups.length === 0) {
     return undefined;
@@ -147,11 +180,28 @@ export async function compactionStep(options: CompactionStepOptions): Promise<Ev
   if (source === undefined) {
     return undefined;
   }
-  return options.recorder.withStepSpan(COMPACTION_SPAN, {}, async () => {
-    const summary = await options.summarizer.summarize({
+  options.signal?.throwIfAborted();
+  let summary: Awaited<ReturnType<Summarizer["summarize"]>>;
+  try {
+    summary = await options.summarizer.summarize({
       groups: source.groups,
       goal: options.goal,
     });
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+    if (
+      options.signal?.aborted === true ||
+      (error instanceof Error && error.name === "AbortError") ||
+      code === "deadline_exceeded" ||
+      code === "run_aborted"
+    ) {
+      throw error;
+    }
+    return undefined;
+  }
+  options.signal?.throwIfAborted();
+  return options.recorder.withStepSpan(COMPACTION_SPAN, {}, async () => {
     const tokenizedSummary = await options.sanitizeSummary(summary.text);
     return options.recorder.record({
       type: "context_compacted",
@@ -161,6 +211,9 @@ export async function compactionStep(options: CompactionStepOptions): Promise<Ev
       strategy: options.strategy.id,
       strategyVersion: options.strategy.version,
       summary: JsonValue.parse(tokenizedSummary),
+      inputTokens: summary.usage.inputTokens,
+      outputTokens: summary.usage.outputTokens,
+      ...(summary.usage.costMicros === undefined ? {} : { costMicros: summary.usage.costMicros }),
     });
   });
 }
@@ -183,6 +236,7 @@ export async function compactBeforeModelCall(options: {
   readonly ids: IdGenerator;
   readonly runId: Id;
   readonly signal: AbortSignal;
+  readonly deadlineTs?: number;
   readonly modelRef: ModelRef;
   readonly goal: JsonValue;
 }): Promise<void> {
@@ -195,6 +249,7 @@ export async function compactBeforeModelCall(options: {
     new ModelPortSummarizer(options.model, options.ids, options.modelRef, {
       runId: options.runId,
       signal: options.signal,
+      ...(options.deadlineTs === undefined ? {} : { deadlineTs: options.deadlineTs }),
     });
   const event = await compactionStep({
     recorder: options.recorder,
@@ -205,6 +260,7 @@ export async function compactBeforeModelCall(options: {
     counter: compaction.counter,
     goal: typeof options.goal === "string" ? options.goal : JSON.stringify(options.goal),
     sanitizeSummary: compaction.sanitizeSummary,
+    signal: options.signal,
     ...(compaction.keepRecentGroups === undefined
       ? {}
       : { keepRecentGroups: compaction.keepRecentGroups }),

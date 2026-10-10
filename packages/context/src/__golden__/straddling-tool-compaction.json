@@ -1,22 +1,36 @@
 [
   {
-    "seqs": [0],
+    "seqs": [
+      0
+    ],
     "messages": [
       {
         "role": "user",
-        "parts": [{ "type": "text", "text": "keep the goal" }]
+        "parts": [
+          {
+            "type": "text",
+            "text": "keep the goal"
+          }
+        ]
       }
     ],
     "pinned": true
   },
   {
-    "seqs": [1],
+    "seqs": [
+      2
+    ],
     "messages": [
       {
         "role": "user",
-        "parts": [{ "type": "text", "text": "Summary of earlier work: tool call was compacted" }]
+        "parts": [
+          {
+            "type": "text",
+            "text": "Summary of earlier work: tool call was compacted"
+          }
+        ]
       }
     ],
-    "pinned": true
+    "pinned": false
   }
 ]

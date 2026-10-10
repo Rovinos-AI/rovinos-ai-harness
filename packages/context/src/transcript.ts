@@ -99,7 +99,7 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
         toSeq: event.toSeq,
       });
       const summaryGroup: TranscriptGroup = {
-        seqs: [event.fromSeq],
+        seqs: [event.toSeq + 1],
         messages: [
           {
             role: "user",
@@ -111,8 +111,7 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
             ],
           },
         ],
-        // Summaries remain available to budgeted strategies as durable context.
-        pinned: true,
+        pinned: false,
       };
       groups.push(summaryGroup);
       summaryGroups.add(summaryGroup);

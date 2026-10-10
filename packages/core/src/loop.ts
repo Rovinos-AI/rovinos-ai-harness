@@ -215,6 +215,10 @@ async function runLoopSteps(
     if (aborted !== undefined) {
       return aborted;
     }
+    const preflight = await preflightModelStep(options, events, execution);
+    if (preflight.event !== undefined) {
+      return preflight.event;
+    }
     await compactBeforeModelCall({
       recorder: options.recorder,
       events,
@@ -228,6 +232,7 @@ async function runLoopSteps(
         model: options.modelName ?? "unknown",
       },
       goal: options.goal,
+      deadlineTs: preflight.deadlineTs,
     });
     const prepared = await prepareModelStep(options, events, execution);
     if (prepared.event !== undefined) {
@@ -299,6 +304,32 @@ async function recordFinalAnswer(
   events.push(finished);
   await checkpointAfterStep(execution.checkpointer, events);
   return finished;
+}
+
+async function preflightModelStep(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+): Promise<{ readonly deadlineTs: number; readonly event?: Event }> {
+  const state = foldRunState(events);
+  const deadlineTs = execution.budgetTracker.deadlineTs(state);
+  const budget = execution.budgetTracker.check(
+    { ...state, steps: state.steps + 1 },
+    options.clock.now(),
+  );
+  if (!budget.ok) {
+    return {
+      deadlineTs,
+      event: await recordBudgetFailureAndCheckpoint(
+        options.recorder,
+        events,
+        budget,
+        execution.checkpointer,
+      ),
+    };
+  }
+  const stopped = await suspendIfShutdown(options, events, execution);
+  return stopped === undefined ? { deadlineTs } : { deadlineTs, event: stopped };
 }
 
 async function prepareModelStep(
