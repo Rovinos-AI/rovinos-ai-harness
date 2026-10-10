@@ -538,6 +538,83 @@ describe("ModelGateway", () => {
     });
   });
 
+  it("falls back to prompt validation when native output and forced tools are unavailable", async () => {
+    const fake = new FakeProvider("openai", [
+      {
+        parts: [{ type: "text", text: 'Answer: {"answer":"ok"}' }],
+        usage: { inputTokens: 2, outputTokens: 3 },
+        finishReason: "stop",
+        latencyMs: 7,
+      },
+    ]);
+    const adapter: ProviderAdapter = {
+      provider: "openai",
+      capabilities: { structuredOutput: "none", forcedToolChoice: false },
+      complete: (providerRequest, providerContext) =>
+        fake.complete(providerRequest, providerContext),
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema: z.object({ answer: z.string() }).strict(),
+      },
+    );
+
+    expect(fake.requests[0]?.messages[0]?.parts).toEqual([
+      {
+        type: "text",
+        text: expect.stringContaining('"properties":{"answer":{"type":"string"}}'),
+      },
+    ]);
+    expect(completion).toMatchObject({
+      schemaValid: true,
+      rungUsed: "prompt",
+      enforcement: { valid: true, value: { answer: "ok" }, rungUsed: "prompt" },
+    });
+  });
+
+  it("returns a safe validation failure for invalid prompt output", async () => {
+    const fake = new FakeProvider("openai", [
+      {
+        parts: [{ type: "text", text: '{"answer":"private response"}' }],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+        latencyMs: 0,
+      },
+    ]);
+    const adapter: ProviderAdapter = {
+      provider: "openai",
+      capabilities: { structuredOutput: "none", forcedToolChoice: false },
+      complete: (providerRequest, providerContext) =>
+        fake.complete(providerRequest, providerContext),
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema: z.object({ answer: z.number() }).strict(),
+      },
+    );
+
+    expect(completion).toMatchObject({
+      schemaValid: false,
+      rungUsed: "prompt",
+      enforcement: { valid: false, issues: [{ code: "invalid_type" }], rungUsed: "prompt" },
+    });
+    expect(JSON.stringify(completion.enforcement)).not.toContain("private response");
+  });
+
   it("rejects native output that also contains tool calls", async () => {
     const adapter: ProviderAdapter = {
       provider: "openai",

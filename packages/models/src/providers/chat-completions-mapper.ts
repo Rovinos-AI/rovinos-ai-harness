@@ -188,7 +188,13 @@ function mapOutputFormat(
   request: ModelRequest,
   quirks: ChatCompletionsQuirks,
 ): Pick<ChatCompletionCreateParamsNonStreaming, "response_format"> {
-  if (request.output === undefined || quirks.structuredOutput !== "native") {
+  if (request.output === undefined) {
+    return {};
+  }
+  if (quirks.structuredOutput === "json_mode") {
+    return { response_format: { type: "json_object" } };
+  }
+  if (quirks.structuredOutput !== "native") {
     return {};
   }
   return {

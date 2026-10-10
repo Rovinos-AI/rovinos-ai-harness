@@ -15,10 +15,14 @@ describe("structured-output enforcement selection", () => {
     [{ structuredOutput: "native", forcedToolChoice: false }, undefined, "native"],
     [{ structuredOutput: "tool", forcedToolChoice: true }, undefined, "tool"],
     [{ structuredOutput: "none", forcedToolChoice: true }, undefined, "tool"],
-    [{ structuredOutput: "json_mode", forcedToolChoice: false }, undefined, undefined],
+    [{ structuredOutput: "json_mode", forcedToolChoice: false }, undefined, "prompt"],
+    [{ structuredOutput: "none", forcedToolChoice: false }, undefined, "prompt"],
+    [{ structuredOutput: "tool", forcedToolChoice: false }, undefined, "prompt"],
     [{ structuredOutput: "native", forcedToolChoice: false }, "native", "native"],
     [{ structuredOutput: "tool", forcedToolChoice: true }, "native", undefined],
     [{ structuredOutput: "tool", forcedToolChoice: true }, "tool", "tool"],
+    [{ structuredOutput: "none", forcedToolChoice: false }, "tool", undefined],
+    [{ structuredOutput: "none", forcedToolChoice: false }, "prompt", "prompt"],
   ] as const)("selects the available capped rung", (capabilityOverrides, maxRung, expected) => {
     const capabilities = lookupCapabilities(
       { provider: "openai", model: "test" },

@@ -3,7 +3,7 @@ import { Code, HarnessError, type Capabilities, type JsonValue, type Part } from
 import { z } from "zod";
 
 /** Structured-output enforcement rung supported by this gateway. */
-export const EnforcementRungSchema = z.enum(["native", "tool"]);
+export const EnforcementRungSchema = z.enum(["native", "tool", "prompt"]);
 
 /** Inferred structured-output enforcement rung. */
 export type EnforcementRung = z.infer<typeof EnforcementRungSchema>;
@@ -98,10 +98,13 @@ export function selectEnforcementRung(
   if (capabilities.structuredOutput === "native") {
     return "native";
   }
-  if (capabilities.forcedToolChoice && maxRung !== "native") {
+  if (maxRung === "native") {
+    return undefined;
+  }
+  if (capabilities.forcedToolChoice) {
     return "tool";
   }
-  return undefined;
+  return maxRung === "tool" ? undefined : "prompt";
 }
 
 /** Strips tool-call parts with the synthetic structured-output tool id. */

@@ -29,6 +29,7 @@ import {
 } from "./enforce/index.js";
 import { enforceNativeOutput, withNativeOutputSchema } from "./enforce/rung-native.js";
 import { enforceToolOutput, withForcedOutputTool } from "./enforce/rung-tool.js";
+import { enforcePromptOutput, withPromptOutput } from "./enforce/rung-prompt.js";
 import { lowerForProvider, schemaHash } from "./json-schema.js";
 
 /** Dependencies injected into every provider adapter call by the gateway. */
@@ -52,7 +53,7 @@ export interface ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType>
 
 /** Gateway enforcement configuration. */
 export interface ModelGatewayOptions {
-  /** Highest rung on the native (1) < tool (2) ladder; "native" forbids selecting the tool rung. */
+  /** Highest rung on the native (1) < tool (2) < prompt (3) ladder. */
   readonly maxRung?: EnforcementRung;
 }
 
@@ -99,7 +100,9 @@ function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
     request:
       rung === "native"
         ? withNativeOutputSchema(request, output)
-        : withForcedOutputTool(request, output),
+        : rung === "tool"
+          ? withForcedOutputTool(request, output)
+          : withPromptOutput(request, output),
     rung,
   };
 }
@@ -122,8 +125,11 @@ function enforceProviderOutput<OutputSchema extends z.ZodType>(
       result: enforceNativeOutput(parts, outputSchema),
     };
   }
-  const enforced = enforceToolOutput(parts, outputSchema);
-  return { parts: enforced.parts, result: enforced.result };
+  if (rung === "tool") {
+    const enforced = enforceToolOutput(parts, outputSchema);
+    return { parts: enforced.parts, result: enforced.result };
+  }
+  return { parts, result: enforcePromptOutput(parts, outputSchema) };
 }
 
 /** Minimal provider-selecting model port implementation. */
