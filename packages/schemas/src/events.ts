@@ -40,6 +40,15 @@ const runCreatedEvent = z
   })
   .strict();
 
+const runInputEvent = z
+  .object({
+    ...eventEnvelopeShape,
+    type: z.literal("run_input"),
+    input: JsonValue,
+    inputKind: Code,
+  })
+  .strict();
+
 const runStatusChangedEvent = z
   .object({
     ...eventEnvelopeShape,
@@ -198,6 +207,7 @@ const subagentCompletedEvent = z
 /** Strict discriminated union of the canonical event schemas. */
 export const EventSchema = z.discriminatedUnion("type", [
   runCreatedEvent,
+  runInputEvent,
   runStatusChangedEvent,
   modelRequestEvent,
   modelResponseEvent,
