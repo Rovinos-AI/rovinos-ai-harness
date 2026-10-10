@@ -83,12 +83,12 @@ function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
   }
 
   const schemaRules = providerSchemaRules(request.model.provider);
-  const rung =
-    schemaRules === undefined
-      ? maxRung === "native" || maxRung === "tool"
-        ? undefined
-        : "prompt"
-      : selectEnforcementRung(capabilities, maxRung);
+  let rung: EnforcementRung | undefined;
+  if (schemaRules === undefined) {
+    rung = maxRung === "native" || maxRung === "tool" ? undefined : "prompt";
+  } else {
+    rung = selectEnforcementRung(capabilities, maxRung);
+  }
   if (rung === undefined) {
     throw new EnforcementRungUnavailableError();
   }
