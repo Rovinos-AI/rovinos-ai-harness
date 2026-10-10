@@ -1,0 +1,32 @@
+[
+  {
+    "seqs": [0],
+    "messages": [
+      {
+        "role": "user",
+        "parts": [{ "type": "text", "text": "continue" }]
+      }
+    ],
+    "pinned": true
+  },
+  {
+    "seqs": [1],
+    "messages": [
+      {
+        "role": "user",
+        "parts": [{ "type": "text", "text": "Summary of earlier work: completed the setup" }]
+      }
+    ],
+    "pinned": true
+  },
+  {
+    "seqs": [4],
+    "messages": [
+      {
+        "role": "assistant",
+        "parts": [{ "type": "text", "text": "next" }]
+      }
+    ],
+    "pinned": false
+  }
+]

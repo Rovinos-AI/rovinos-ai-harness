@@ -10,6 +10,7 @@ export type EventFieldClass = "meta" | "content";
  */
 export const EVENT_FIELD_CLASS = {
   run_created: { configHash: "meta", policyVersion: "meta", parentRunId: "meta" },
+  run_input: { input: "content", inputKind: "meta" },
   run_status_changed: { from: "meta", to: "meta", reason: "meta" },
   model_request: {
     requestId: "meta",
