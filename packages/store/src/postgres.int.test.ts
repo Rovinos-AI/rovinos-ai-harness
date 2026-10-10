@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Pool } from "pg";
 import { randomBytes } from "node:crypto";
-import type { KeyProvider } from "@harness/schemas";
+import { Code, type KeyProvider } from "@harness/schemas";
 import { afterAll, expect, it } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, type ContentCodec } from "./codec.js";
 import { PostgresEventStore, openPostgresEventStore } from "./postgres/adapter.js";
+import { encodeEvents } from "./postgres/helpers.js";
 import {
   createEventBuilders,
   runConcurrencyConformance,
@@ -142,6 +143,68 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
   supportsFileReopen: false,
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
+
+it("hides later committed outbox rows until earlier transactions finish", async () => {
+  const { admin, schema } = await createSchema();
+  const store = new PostgresEventStore(connectionString, { schema });
+  stores.add(store);
+  const client = await admin.connect();
+  const sinkId = Code.parse("test.outbox.visibility");
+  const firstRunId = schemaIds.nextRunId();
+  const secondRunId = schemaIds.nextRunId();
+  const encoded = await encodeEvents(
+    new JsonContentCodec(),
+    firstRunId,
+    [schemaIds.runCreated(firstRunId)],
+    0,
+  );
+  const first = encoded[0];
+  if (first === undefined) {
+    throw new Error("The first outbox event was not encoded");
+  }
+
+  let transactionOpen = false;
+  try {
+    await store.fetchOutbox(sinkId, 10);
+    await client.query("SELECT set_config('search_path', quote_ident($1), false)", [schema]);
+    await client.query("BEGIN");
+    transactionOpen = true;
+    await client.query(
+      "INSERT INTO events (run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)",
+      [
+        first.event.runId,
+        first.event.seq,
+        first.event.ts,
+        first.event.type,
+        first.event.traceId,
+        first.event.spanId,
+        first.event.segmentId,
+        first.meta,
+        first.blob,
+        first.keyId,
+      ],
+    );
+
+    await store.append(secondRunId, [schemaIds.runCreated(secondRunId)], 0);
+    await expect(store.fetchOutbox(sinkId, 10)).resolves.toEqual({ events: [], cursor: 0 });
+
+    await client.query("COMMIT");
+    transactionOpen = false;
+    const visible = await store.fetchOutbox(sinkId, 10);
+    expect(visible.events.map(({ runId, seq }) => [runId, seq])).toEqual([
+      [firstRunId, 0],
+      [secondRunId, 0],
+    ]);
+    expect(visible.cursor).toBeGreaterThan(0);
+  } finally {
+    if (transactionOpen) {
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
+    client.release();
+    await closeStore(store);
+    await dropSchema(admin, schema);
+  }
+});
 
 it("appends batches larger than PostgreSQL's bind-parameter limit", async () => {
   const { store, cleanup } = await plaintextPostgresFactory();

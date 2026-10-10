@@ -995,6 +995,7 @@ __metadata:
     "@harness/config": "workspace:^"
     "@harness/core": "workspace:^"
     "@harness/schemas": "workspace:^"
+    "@harness/store": "workspace:^"
     commander: "npm:15.0.0"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
@@ -5060,6 +5061,7 @@ __metadata:
   resolution: "rovinos-ai-harness@workspace:."
   dependencies:
     "@eslint-community/eslint-plugin-eslint-comments": "npm:4.8.1"
+    "@harness/core": "workspace:^"
     "@harness/eslint-plugin-harness": "workspace:^"
     "@harness/models": "workspace:^"
     "@harness/schemas": "workspace:^"
