@@ -492,9 +492,8 @@ describe("SqliteEventStore", () => {
     const databaseBytes = await readFile(path);
     expect(databaseBytes.includes(Buffer.from(canary, "utf8"))).toBe(false);
     const walPath = `${path}-wal`;
-    if (existsSync(walPath)) {
-      expect((await readFile(walPath)).includes(Buffer.from(canary, "utf8"))).toBe(false);
-    }
+    const walBytes = existsSync(walPath) ? await readFile(walPath) : undefined;
+    expect(walBytes?.includes(Buffer.from(canary, "utf8"))).not.toBe(true);
     expect(storedRows(path)[1]?.content_blob).not.toContain(canary);
     expect(storedRows(path)[1]?.key_id).toBe(encryptionKeyId);
     await expect(store.latestSnapshot(runId)).resolves.toEqual(snapshot);
