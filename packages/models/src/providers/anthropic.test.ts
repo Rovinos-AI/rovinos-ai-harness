@@ -62,17 +62,14 @@ function adapterFor(
     } else {
       url = input.url;
     }
-    const response = await fetch(
-      url,
-      {
-        ...(init?.method === undefined ? {} : { method: init.method }),
-        ...(init?.headers === undefined
-          ? {}
-          : { headers: Object.fromEntries(new Headers(init.headers)) }),
-        ...(typeof init?.body === "string" ? { body: init.body } : {}),
-        ...(init?.signal === undefined ? {} : { signal: init.signal }),
-      },
-    );
+    const response = await fetch(url, {
+      ...(init?.method === undefined ? {} : { method: init.method }),
+      ...(init?.headers === undefined
+        ? {}
+        : { headers: Object.fromEntries(new Headers(init.headers)) }),
+      ...(typeof init?.body === "string" ? { body: init.body } : {}),
+      ...(init?.signal === undefined ? {} : { signal: init.signal }),
+    });
     return new Response(await response.text(), {
       status: response.status,
       headers: Object.fromEntries(response.headers),
@@ -89,9 +86,15 @@ function makeRequest(
   body: unknown = responseBody,
   status = 200,
   headers: Record<string, string> = {},
-): { readonly adapter: AnthropicAdapter; readonly getRequestBody: () => JsonValue | undefined } {
+): {
+  readonly adapter: AnthropicAdapter;
+  readonly getRequestBody: () => JsonValue | undefined;
+  readonly getRequestCount: () => number;
+} {
   let requestBody: JsonValue | undefined;
+  let requestCount = 0;
   const fetch: NonNullable<ClientOptions["fetch"]> = (_input, init) => {
+    requestCount += 1;
     if (typeof init?.body === "string") {
       requestBody = JsonValue.parse(JSON.parse(init.body));
     }
@@ -109,6 +112,7 @@ function makeRequest(
       baseURL: "https://provider.test",
     }),
     getRequestBody: () => requestBody,
+    getRequestCount: () => requestCount,
   };
 }
 
@@ -136,6 +140,107 @@ function fixtureFactory(
 runProviderContract("Anthropic Messages API contract", fixtureFactory, fixtures);
 
 describe("AnthropicAdapter", () => {
+  it.each([
+    [500, "provider_unavailable"],
+    [429, "provider_rate_limited"],
+  ] as const)("does not retry HTTP %i", async (status, code) => {
+    const call = makeRequest(
+      { type: "error", error: { type: "api_error", message: "synthetic failure" } },
+      status,
+    );
+    const error = await call.adapter.complete(baseRequest, context()).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({ code, status });
+    expect(call.getRequestCount()).toBe(1);
+  });
+
+  it("maps an invalid response tool name to a detail-free provider error", async () => {
+    const call = makeRequest({
+      ...responseBody,
+      content: [{ type: "tool_use", id: "toolu_fixture", name: "get-Weather", input: {} }],
+    });
+    const error = await call.adapter.complete(baseRequest, context()).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({ code: "provider_unknown", message: "provider_unknown" });
+    expect(error).not.toHaveProperty("cause");
+    expect(error).not.toHaveProperty("issues");
+    expect(error).not.toHaveProperty("status");
+  });
+
+  it("merges adjacent same-role turns and preserves parallel tool-result order", async () => {
+    const callIds = [requestId, "00000000000000000000000001"];
+    const content = callIds.map((callId) => ({
+      type: "tool_use",
+      id: `toolu_${callId}`,
+      name: "lookup",
+      input: {},
+    }));
+    const call = makeRequest();
+    await call.adapter.complete(
+      {
+        ...baseRequest,
+        messages: [
+          ...baseRequest.messages,
+          { role: "user", parts: [{ type: "text", text: "also look up another record" }] },
+          { role: "assistant", parts: [{ type: "text", text: "checking" }] },
+          {
+            role: "assistant",
+            parts: [
+              {
+                type: "opaque",
+                provider: "anthropic",
+                blob: {
+                  content,
+                  toolUseIdByCallId: Object.fromEntries(
+                    callIds.map((callId) => [callId, `toolu_${callId}`]),
+                  ),
+                },
+              },
+            ],
+          },
+          ...callIds.map((callId, index) => ({
+            role: "tool" as const,
+            parts: [
+              {
+                type: "tool_result" as const,
+                callId,
+                result: `result ${String(index)}`,
+                isError: false,
+              },
+            ],
+          })),
+        ],
+      },
+      context(),
+    );
+    const body = z.object({ messages: JsonValue }).parse(call.getRequestBody());
+    expect(body.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "hello" },
+          { type: "text", text: "also look up another record" },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "checking" }, ...content] },
+      {
+        role: "user",
+        content: callIds.map((callId, index) => ({
+          type: "tool_result",
+          tool_use_id: `toolu_${callId}`,
+          content: `result ${String(index)}`,
+          is_error: false,
+        })),
+      },
+    ]);
+  });
+
   it("round-trips thinking blocks, signatures, and Anthropic tool ids through JSON", async () => {
     const first = makeRequest();
     const firstResult = await first.adapter.complete(baseRequest, context());
@@ -152,7 +257,9 @@ describe("AnthropicAdapter", () => {
         { role: "assistant", parts: persistedResult.parts },
         {
           role: "tool",
-          parts: [{ type: "tool_result", callId: call.callId, result: { found: true }, isError: false }],
+          parts: [
+            { type: "tool_result", callId: call.callId, result: { found: true }, isError: false },
+          ],
         },
       ],
     };
@@ -186,7 +293,11 @@ describe("AnthropicAdapter", () => {
       return;
     }
     const resultBlock = toolResult.content.find(
-      (block) => typeof block === "object" && block !== null && "type" in block && block.type === "tool_result",
+      (block) =>
+        typeof block === "object" &&
+        block !== null &&
+        "type" in block &&
+        block.type === "tool_result",
     );
     expect(resultBlock).toMatchObject({ tool_use_id: "toolu_fixture" });
   });

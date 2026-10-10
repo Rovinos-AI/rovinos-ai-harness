@@ -120,6 +120,10 @@ function createContractAdapter(
   );
 }
 
+/**
+ * Yields one event-loop turn before aborting so SDK adapters can dispatch fetch
+ * from their startup microtasks; the assertion then exercises in-flight cancellation.
+ */
 async function assertAbortCompletion(
   completion: Promise<unknown>,
   controller: AbortController,
@@ -248,6 +252,8 @@ async function runProviderScenario(
  *
  * Abort scenarios must reject with an `AbortError` or a `ProviderError` whose
  * code is `provider_timeout`, and must settle before the delayed response.
+ * The suite yields one event-loop turn before aborting to allow SDK startup
+ * microtasks to dispatch fetch and exercise in-flight cancellation.
  */
 export function runProviderContract(
   name: string,

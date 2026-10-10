@@ -64,10 +64,7 @@ function findToolUseId(request: ModelRequest, messageIndex: number, callId: stri
   return `toolu_${callId}`;
 }
 
-function buildMessageContent(
-  request: ModelRequest,
-  messageIndex: number,
-): JsonValue[] {
+function buildMessageContent(request: ModelRequest, messageIndex: number): JsonValue[] {
   const message = request.messages[messageIndex];
   if (message === undefined) {
     return [];
@@ -112,6 +109,24 @@ function buildMessageContent(
   return blocks;
 }
 
+function buildMessages(request: ModelRequest) {
+  const messages: { role: "assistant" | "user"; content: JsonValue[] }[] = [];
+  for (const [index, message] of request.messages.entries()) {
+    if (message.role === "system") {
+      continue;
+    }
+    const role = message.role === "assistant" ? "assistant" : "user";
+    const content = buildMessageContent(request, index);
+    const previous = messages.at(-1);
+    if (previous?.role === role) {
+      previous.content.push(...content);
+    } else {
+      messages.push({ role, content });
+    }
+  }
+  return messages;
+}
+
 function buildRequest(request: ModelRequest): JsonValue {
   // The Messages API requires max_tokens, so do not silently choose a limit for callers.
   if (request.maxOutputTokens === undefined) {
@@ -124,18 +139,8 @@ function buildRequest(request: ModelRequest): JsonValue {
         part.type === "text" ? [{ type: "text" as const, text: part.text }] : [],
       ),
     );
-  const messages = request.messages
-    .flatMap((message, index) => {
-      if (message.role === "system") {
-        return [];
-      }
-      return [
-        {
-          role: message.role === "assistant" ? "assistant" : "user",
-          content: buildMessageContent(request, index),
-        },
-      ];
-    });
+  const messages = buildMessages(request);
+  // Tool IDs are already validated Codes; send names unchanged for round trips.
   const tools =
     request.toolChoice !== "none" && request.tools !== undefined
       ? request.tools.map((tool) => ({
@@ -196,7 +201,8 @@ function mapError(error: unknown, signal: AbortSignal): never {
     throw new ProviderError("provider_unknown");
   }
   const headers: unknown = error.headers;
-  const retryAfter = headers instanceof Headers ? headers.get("retry-after") ?? undefined : undefined;
+  const retryAfter =
+    headers instanceof Headers ? (headers.get("retry-after") ?? undefined) : undefined;
   mapStatusError(status, retryAfter);
 }
 
@@ -225,6 +231,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     let response: Message;
     const params = buildRequest(request);
     try {
+      // Use raw post so opaque blocks (including future block types) pass through verbatim.
       response = await this.client.post<Message>("/v1/messages", {
         body: params,
         signal: context.signal,
@@ -235,44 +242,48 @@ export class AnthropicAdapter implements ProviderAdapter {
       }
       mapError(error, context.signal);
     }
-    const toolUseIdByCallId: Record<string, string> = {};
-    const parts: Part[] = [];
-    for (const block of response.content) {
-      if (block.type === "text") {
-        parts.push({ type: "text", text: block.text });
-      } else if (block.type === "tool_use") {
-        const callId = context.ids.next();
-        toolUseIdByCallId[callId] = block.id;
-        parts.push({
-          type: "tool_call",
-          callId,
-          toolId: Code.parse(block.name),
-          args: JsonValue.parse(block.input),
-        });
+    try {
+      const toolUseIdByCallId: Record<string, string> = {};
+      const parts: Part[] = [];
+      for (const block of response.content) {
+        if (block.type === "text") {
+          parts.push({ type: "text", text: block.text });
+        } else if (block.type === "tool_use") {
+          const callId = context.ids.next();
+          toolUseIdByCallId[callId] = block.id;
+          parts.push({
+            type: "tool_call",
+            callId,
+            toolId: Code.parse(block.name),
+            args: JsonValue.parse(block.input),
+          });
+        }
       }
+
+      const content = JsonValue.parse(response.content);
+      parts.push({
+        type: "opaque",
+        provider: "anthropic",
+        blob: { content, toolUseIdByCallId },
+      });
+
+      return {
+        parts,
+        usage: {
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+        },
+        finishReason:
+          response.stop_reason === "end_turn" ||
+          response.stop_reason === "tool_use" ||
+          response.stop_reason === "max_tokens" ||
+          response.stop_reason === "stop_sequence"
+            ? response.stop_reason
+            : "other",
+        latencyMs: Math.max(0, context.clock.now() - startedAt),
+      };
+    } catch {
+      throw new ProviderError("provider_unknown");
     }
-
-    const content = JsonValue.parse(response.content);
-    parts.push({
-      type: "opaque",
-      provider: "anthropic",
-      blob: { content, toolUseIdByCallId },
-    });
-
-    return {
-      parts,
-      usage: {
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-      },
-      finishReason:
-        response.stop_reason === "end_turn" ||
-        response.stop_reason === "tool_use" ||
-        response.stop_reason === "max_tokens" ||
-        response.stop_reason === "stop_sequence"
-          ? response.stop_reason
-          : "other",
-      latencyMs: Math.max(0, context.clock.now() - startedAt),
-    };
   }
 }
