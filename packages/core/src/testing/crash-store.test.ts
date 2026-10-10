@@ -66,8 +66,10 @@ function checkpointAppend() {
 
 async function events(store: EventStore): Promise<number> {
   let count = 0;
-  for await (const _event of store.read(runId)) {
-    count += 1;
+  for await (const event of store.read(runId)) {
+    if (event.seq >= 0) {
+      count += 1;
+    }
   }
   return count;
 }
@@ -99,11 +101,7 @@ describe("CrashingEventStore", () => {
         SimulatedCrash,
       );
       const saved = await store.latestSnapshot(runId);
-      if (mode === "before_commit") {
-        expect(saved).toBeUndefined();
-      } else {
-        expect(saved).toMatchObject({ atSeq: 1 });
-      }
+      expect(saved?.atSeq).toBe(mode === "before_commit" ? undefined : 1);
       expect(store.appendCalls).toBe(1);
       await inner.close();
     },

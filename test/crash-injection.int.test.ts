@@ -138,7 +138,7 @@ function createScenario(): Scenario {
     repairAttempts: 0,
     providerBlobs: null,
   });
-  const modelOptions: FakeModelOptions = {
+  const fakeOptions: FakeModelOptions = {
     responseIndex: (request) => Math.min(positionFromRequest(request), 2),
   };
   const model = new FakeModelPort(
@@ -147,7 +147,7 @@ function createScenario(): Scenario {
       completion("idempotent request", [replayableCall]),
       completion("final answer"),
     ],
-    modelOptions,
+    fakeOptions,
   );
   const definitions = new Map<string, FakeToolDefinition>([
     [
@@ -155,9 +155,9 @@ function createScenario(): Scenario {
       {
         idempotent: false,
         timeoutMs: 1_000,
-        execute: async () => {
+        execute: () => {
           counts.nonIdempotent += 1;
-          return { outcome: "ok", result: { effect: "written" } };
+          return Promise.resolve({ outcome: "ok", result: { effect: "written" } });
         },
       },
     ],
@@ -166,9 +166,9 @@ function createScenario(): Scenario {
       {
         idempotent: true,
         timeoutMs: 1_000,
-        execute: async () => {
+        execute: () => {
           counts.idempotent += 1;
-          return { outcome: "ok", result: { effect: "safe" } };
+          return Promise.resolve({ outcome: "ok", result: { effect: "safe" } });
         },
       },
     ],
@@ -326,6 +326,15 @@ function hasReplayedFinalResponse(events: readonly Event[]): boolean {
   );
 }
 
+function isResumeAmbiguityPayload(payload: JsonValue | undefined): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    !Array.isArray(payload) &&
+    payload.kind === "resume_ambiguity"
+  );
+}
+
 async function discoverReference(directory: string): Promise<Reference> {
   const database = new SqliteEventStore(join(directory, "reference.sqlite"));
   const boundaries = new BoundaryRecordingStore(database);
@@ -440,7 +449,7 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
         }
         crashed = true;
       }
-      expect(crashed, `${mode} append ${crashAt} was not reached`).toBe(true);
+      expect(crashed, `${mode} append ${String(crashAt)} was not reached`).toBe(true);
 
       const initialEvents = await readEvents(store, runId);
       const inputExists = initialEvents.some((event) => event.type === "model_request");
@@ -495,12 +504,13 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
         if (danglingIntent(finalEvents, nonIdempotentCallId)) {
           sawResumeAmbiguity = true;
           expect(resumedStatus).toBe("suspended");
-          expect(finalEvents).toContainEqual(
-            expect.objectContaining({
-              type: "approval_requested",
-              payload: expect.objectContaining({ kind: "resume_ambiguity" }),
-            }),
-          );
+          const approval = finalEvents.find((event) => event.type === "approval_requested");
+          expect(approval?.type).toBe("approval_requested");
+          expect(
+            isResumeAmbiguityPayload(
+              approval?.type === "approval_requested" ? approval.payload : undefined,
+            ),
+          ).toBe(true);
           const executions = scenario.counts.nonIdempotent;
           expect([0, 1]).toContain(executions);
           const boundary = reference.boundaries[crashAt - 1];
@@ -525,9 +535,9 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
         }
         expect(
           resumedStatus === "already_terminal" ? "completed" : resumedStatus,
-          `${mode} append ${crashAt}`,
+          `${mode} append ${String(crashAt)}`,
         ).toBe("completed");
-        expect(semanticEvents(finalEvents), `${mode} append ${crashAt}`).toEqual(
+        expect(semanticEvents(finalEvents), `${mode} append ${String(crashAt)}`).toEqual(
           reference.semantic,
         );
         expect(scenario.counts.nonIdempotent).toBe(1);
