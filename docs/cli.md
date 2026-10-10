@@ -57,7 +57,8 @@ tokenization in tasks 13.4 and 13.7 lands, run goals and event content are store
 
 `harness cancel <runId>` appends a cancellation request for a running or suspended run. Human output
 is the run ID; `--json` returns `{"runId":"...","status":"cancelled"}`. Cancellation exits with code
-`0`; a run that is already terminal reports `run_already_terminal` and exits with code `1`.
+`0`; a run that is already terminal reports `run_already_terminal`, and repeated append conflicts
+report `cancel_conflict`; both exit with code `1`.
 
 ## Exit codes
 
@@ -84,7 +85,7 @@ never included in CLI error output.
 
 | Error code | Exit code |
 | --- | --- |
-| `run_already_terminal` | `1` |
+| `run_already_terminal`, `cancel_conflict` | `1` |
 | `config_invalid` | `3` |
 | `policy_denied`, `approver_is_requester` | `4` |
 | `suspended`, `run_awaiting_approval` | `5` |

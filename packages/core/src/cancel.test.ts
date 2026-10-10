@@ -188,7 +188,7 @@ describe("cancelRun", () => {
 
     await expect(
       cancelRun(store, runId, new FakeClock(200), new SequentialIdGenerator()),
-    ).rejects.toMatchObject({ code: "lease_lost" });
+    ).rejects.toMatchObject({ code: "cancel_conflict" });
     expect(conflicts).toBe(3);
     expect(
       (await readEvents(store)).some(

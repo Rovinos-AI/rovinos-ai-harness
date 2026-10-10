@@ -25,8 +25,10 @@ import { foldRunState } from "./run-state.js";
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const POLICY_VERSION = "default";
 const CANCEL_REQUESTED = "cancel_requested";
-// A separate process can only signal this worker through the durable event log.
+const CANCEL_MONITOR_DEGRADED = "cancel_monitor_degraded";
 const CANCEL_POLL_INTERVAL_MS = 25;
+const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
+// TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
 export interface RuntimeOverrides {
@@ -167,12 +169,12 @@ async function cancelledResult(
   };
 }
 
-function waitForWatcher(signal: AbortSignal): Promise<boolean> {
+function waitForWatcher(signal: AbortSignal, delayMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       signal.removeEventListener("abort", abort);
       resolve(!signal.aborted);
-    }, CANCEL_POLL_INTERVAL_MS);
+    }, delayMs);
     const abort = (): void => {
       clearTimeout(timer);
       signal.removeEventListener("abort", abort);
@@ -191,12 +193,14 @@ interface CancellationTailOptions {
   readonly fromSeq: number;
   readonly controller: AbortController;
   readonly onCursor: (nextSeq: number) => void;
+  readonly onCancellation: () => void;
 }
 
 async function inspectCancellationTail(options: CancellationTailOptions): Promise<boolean> {
   for (const event of await inspectTail(options.store, options.runId, options.fromSeq)) {
     options.onCursor(event.seq + 1);
     if (event.type === "run_status_changed" && event.to === "cancelled") {
+      options.onCancellation();
       options.controller.abort(CANCEL_REQUESTED);
       return true;
     }
@@ -211,26 +215,32 @@ interface CancellationWatchOptions extends Omit<CancellationTailOptions, "fromSe
 
 async function watchCancellation(options: CancellationWatchOptions): Promise<void> {
   let nextSeq = options.firstSeq;
-  while (await waitForWatcher(options.stopSignal)) {
-    const cancelled = await inspectCancellationTail({
-      ...options,
-      fromSeq: nextSeq,
-      onCursor: (value) => {
-        nextSeq = value;
-        options.onCursor(value);
-      },
-    });
-    if (cancelled) {
+  let delayMs = CANCEL_POLL_INTERVAL_MS;
+  while (!options.stopSignal.aborted) {
+    if (!(await waitForWatcher(options.stopSignal, delayMs))) {
       return;
     }
-  }
-}
-
-class CancellationMonitorError extends HarnessError {
-  override readonly code = "cancel_monitor_failed";
-
-  constructor() {
-    super("Cancellation monitor failed.");
+    try {
+      const cancelled = await inspectCancellationTail({
+        ...options,
+        fromSeq: nextSeq,
+        onCursor: (value) => {
+          nextSeq = value;
+          options.onCursor(value);
+        },
+      });
+      delayMs = CANCEL_POLL_INTERVAL_MS;
+      if (cancelled) {
+        return;
+      }
+    } catch {
+      try {
+        diag.error(CANCEL_MONITOR_DEGRADED);
+      } catch {
+        // A diagnostic logger failure must not disable cooperative cancellation.
+      }
+      delayMs = Math.min(delayMs * 2, CANCEL_POLL_MAX_INTERVAL_MS);
+    }
   }
 }
 
@@ -247,7 +257,7 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
   const controller = new AbortController();
   const stopWatcher = new AbortController();
   const cursor = { nextSeq: options.firstNewSeq };
-  let watcherFailure: Error | undefined;
+  let cancellationObserved = false;
   let running: Promise<RunLoopResult> | undefined;
   const uninstall = installShutdownHandler({
     processLike: options.processLike,
@@ -266,9 +276,9 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
     onCursor: (nextSeq) => {
       cursor.nextSeq = nextSeq;
     },
-  }).catch((error: unknown) => {
-    watcherFailure = error instanceof Error ? error : new CancellationMonitorError();
-    controller.abort(watcherFailure);
+    onCancellation: () => {
+      cancellationObserved = true;
+    },
   });
 
   try {
@@ -286,12 +296,12 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
           onCursor: (nextSeq) => {
             cursor.nextSeq = nextSeq;
           },
+          onCancellation: () => {
+            cancellationObserved = true;
+          },
         });
       }
-      if (watcherFailure !== undefined) {
-        throw watcherFailure;
-      }
-      if (controller.signal.reason === CANCEL_REQUESTED) {
+      if (cancellationObserved) {
         const cancelled = await cancelledResult(options.store, options.runId, options.firstNewSeq);
         if (cancelled !== undefined) {
           return cancelled;
@@ -299,10 +309,7 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
       }
       throw error;
     }
-    if (watcherFailure !== undefined) {
-      throw watcherFailure;
-    }
-    if (controller.signal.reason === CANCEL_REQUESTED) {
+    if (cancellationObserved) {
       return (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
     }
     return result;

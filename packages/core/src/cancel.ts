@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id } from "@harness/schemas";
+import { HarnessError, type Event, type Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { IdGenerator } from "./ports.js";
 import { foldRunState } from "./run-state.js";
@@ -10,6 +10,14 @@ import { RUN_SPAN } from "./spans.js";
 export type CancelRunResult = "cancelled" | "already_terminal";
 
 const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
+
+class CancelConflictError extends HarnessError {
+  override readonly code = "cancel_conflict";
+
+  constructor() {
+    super("The run changed repeatedly while cancellation was being requested.");
+  }
+}
 
 async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
   const events: Event[] = [];
@@ -27,7 +35,7 @@ async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
  * @param clock - Clock used to timestamp the cancellation event.
  * @param ids - Generator used for the cancellation segment identifier.
  * @returns Whether cancellation was appended or the run was already terminal.
- * @throws LeaseLostError when the live worker keeps advancing the log.
+ * @throws CancelConflictError when the log keeps advancing during cancellation.
  */
 export async function cancelRun(
   store: EventStore,
@@ -35,11 +43,9 @@ export async function cancelRun(
   clock: Clock,
   ids: IdGenerator,
 ): Promise<CancelRunResult> {
-  let actualHead = 0;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const [events, head] = await Promise.all([readEvents(store, runId), store.head(runId)]);
     const state = foldRunState(events);
-    actualHead = head;
     if (terminalStatuses.has(state.status)) {
       return "already_terminal";
     }
@@ -60,11 +66,13 @@ export async function cancelRun(
       );
       return "cancelled";
     } catch (error) {
-      if (!(error instanceof LeaseLostError) || attempt === 2) {
+      if (!(error instanceof LeaseLostError)) {
         throw error;
       }
-      actualHead = error.storedHead;
+      if (attempt === 2) {
+        throw new CancelConflictError();
+      }
     }
   }
-  throw new LeaseLostError(actualHead);
+  throw new CancelConflictError();
 }
