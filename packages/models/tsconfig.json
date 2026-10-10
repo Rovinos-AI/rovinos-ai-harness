@@ -1,9 +1,9 @@
 {
-  "extends": "./tsconfig.build.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": false,
     "customConditions": ["source"],
     "noEmit": true
   },
-  "exclude": []
+  "include": ["src/**/*.ts"]
 }

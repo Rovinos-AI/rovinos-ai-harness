@@ -4,13 +4,8 @@
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
-    "types": ["node"]
+    "skipLibCheck": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts"],
-  "references": [
-    {
-      "path": "../schemas/tsconfig.build.json"
-    }
-  ]
+  "exclude": ["src/**/*.test.ts"]
 }
