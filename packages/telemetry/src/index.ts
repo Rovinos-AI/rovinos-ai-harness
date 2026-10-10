@@ -35,7 +35,11 @@ export { ActiveRuns, activeRuns, type ActiveRunsOptions } from "./sentinel/activ
 export {
   assertSentinelGate,
   SentinelGate,
+  SentinelGateInputSchema,
+  SentinelGateResultSchema,
   SentinelRequiredError,
+  SentinelTripSchema,
+  type SentinelGateInput,
   type SentinelGateOptions,
   type SentinelGateResult,
   type SentinelMatcherLike,

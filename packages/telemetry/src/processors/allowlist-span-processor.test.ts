@@ -493,6 +493,43 @@ describe("AllowlistSpanProcessor", () => {
     expect(metricMocks.record).toHaveBeenCalledWith("leak_sentinel");
   });
 
+  it.each([
+    {
+      result: "error",
+      gateOptions: {
+        matcherForValues: () => ({
+          hasMatch: () => {
+            throw new Error("matcher failed");
+          },
+        }),
+      },
+    },
+    {
+      result: "timeout",
+      gateOptions: { now: (() => {
+        let calls = 0;
+        return () => (calls++ === 0 ? 0 : 6);
+      })() },
+    },
+  ])("drops a span when the sentinel returns $result", async ({ gateOptions }) => {
+    defineTestSpan();
+    const next = createNextProcessor();
+    const activeRuns = new ActiveRuns();
+    activeRuns.register(runId);
+    const gate = new SentinelGate(
+      new VaultRunView({ version: async () => 1, listRawValues: async () => ["known-value"] }),
+      activeRuns,
+      gateOptions,
+    );
+    const processor = new AllowlistSpanProcessor(next, { gate });
+
+    processor.onEnd(makeReadableSpan());
+    await processor.forceFlush();
+
+    expect(next.onEnd).not.toHaveBeenCalled();
+    expect(metricMocks.record).toHaveBeenCalledWith("leak_sentinel");
+  });
+
   it("requires a sentinel gate outside the explicit development opt-out", () => {
     const next = createNextProcessor();
 

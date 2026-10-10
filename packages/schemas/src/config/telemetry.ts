@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Sentinel configuration is owned by task 8.1.
+// Sentinel value filtering is owned by task 8.1; gate configuration is owned by task 8.3.
 import { z } from "zod";
 
 const TelemetrySentinelConfigSchema = z

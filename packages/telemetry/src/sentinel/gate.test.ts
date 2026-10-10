@@ -43,6 +43,8 @@ describe("SentinelGate", () => {
     expect(matcherForValues).toHaveBeenCalledWith(["known-raw-value"]);
     expect(enqueueTrip).toHaveBeenCalledWith({ runId: firstRun, reason: "hit" });
     expect(JSON.stringify(enqueueTrip.mock.calls)).not.toContain("known-raw-value");
+    expect(gate.drainTrips()).toEqual([{ runId: firstRun, reason: "hit" }]);
+    expect(gate.drainTrips()).toEqual([]);
   });
 
   it("uses and caches a combined matcher for active and grace-period runs", async () => {
@@ -124,6 +126,7 @@ describe("SentinelGate", () => {
         },
       }),
     });
+
     await expect(failingGate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({
       ok: false,
       reason: "error",
@@ -137,6 +140,27 @@ describe("SentinelGate", () => {
       ok: false,
       reason: "timeout",
     });
+  });
+
+  it("fails closed when timing itself errors and retains a trip if the hook throws", async () => {
+    const gate = new SentinelGate(
+      new VaultRunView(createReader(new Map([[firstRun, ["known-value"]]]))),
+      new ActiveRuns(),
+      {
+        now: () => {
+          throw new Error("clock failed");
+        },
+        onTrip: () => {
+          throw new Error("trip hook failed");
+        },
+      },
+    );
+
+    await expect(gate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({
+      ok: false,
+      reason: "error",
+    });
+    expect(gate.drainTrips()).toEqual([{ runId: firstRun, reason: "error" }]);
   });
 
   it("fails closed when vault reads exceed the timeout", async () => {
