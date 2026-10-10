@@ -9,12 +9,7 @@ import {
   type PiiAction,
 } from "@harness/schemas";
 import { InMemoryVault, type VaultWriter } from "@harness/vault";
-import {
-  PiiBlockedError,
-  PiiTokenizerError,
-  toPiiActionEvent,
-  Tokenizer,
-} from "./index.js";
+import { PiiBlockedError, PiiTokenizerError, toPiiActionEvent, Tokenizer } from "./index.js";
 import type { PiiDetectorRegistry } from "./tokenizer.js";
 
 const runA = "A".repeat(26);
@@ -499,9 +494,7 @@ describe("Tokenizer.tokenizeJson", () => {
     ["class instance", classContainer],
     ["custom-prototype object", customPrototypeContainer],
   ])("rejects a %s as invalid JSON", async (_name, value) => {
-    await expect(
-      createTokenizer().tokenizeJson(runA, value, context),
-    ).rejects.toMatchObject({
+    await expect(createTokenizer().tokenizeJson(runA, value, context)).rejects.toMatchObject({
       code: "pii_input_invalid",
       message: "pii_input_invalid",
     });
