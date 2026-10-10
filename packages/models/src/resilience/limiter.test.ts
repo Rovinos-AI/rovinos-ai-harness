@@ -51,26 +51,22 @@ describe("TokenBucketRateLimiter", () => {
     const cancel = new Error("cancelled");
     let now = 0;
     const delays: number[] = [];
-    const limiter = new TokenBucketRateLimiter(
-      1,
-      { now: () => now },
-      (delay, signal) => {
-        delays.push(delay);
-        if (delays.length === 1) {
-          return new Promise<void>((_resolve, reject) => {
-            signal.addEventListener(
-              "abort",
-              () => {
-                reject(new Error("sleep aborted"));
-              },
-              { once: true },
-            );
-          });
-        }
-        now += delay;
-        return Promise.resolve();
-      },
-    );
+    const limiter = new TokenBucketRateLimiter(1, { now: () => now }, (delay, signal) => {
+      delays.push(delay);
+      if (delays.length === 1) {
+        return new Promise<void>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(new Error("sleep aborted"));
+            },
+            { once: true },
+          );
+        });
+      }
+      now += delay;
+      return Promise.resolve();
+    });
     await limiter.acquire(controller.signal);
     const waiting = limiter.acquire(controller.signal);
     controller.abort(cancel);
