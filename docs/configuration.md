@@ -18,7 +18,7 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 `run.shutdownGraceMs` defaults to `20000` and must be a positive integer. On SIGTERM or SIGINT, the run aborts in-flight work, suspends at a safe point, and writes a checkpoint before exiting with code 143 or 130. If the grace period expires first, the process attempts a best-effort checkpoint and exits with code 1. Set the container's `stop_grace_period` longer than this value so the container runtime does not terminate the process before graceful shutdown can finish.
 
-Store, model, server, policy, PII, telemetry, and sandbox fragments are strict placeholders until their owning tasks define those schemas. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
+Store, model, server, policy, telemetry, and sandbox fragments are strict placeholders until their owning tasks define those schemas. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
 
 ## PII detectors and custom identifiers
 
@@ -54,6 +54,22 @@ in PII policy rules. Custom matches preserve the exact original substring.
 Optional `flags` supports `i`, `m`, `s`, and `u`; global Unicode scanning is
 always enabled. Optional `validator` is `luhn` or `mod97` (IBAN-style rotation
 of the first four characters).
+
+Tool arguments remain tokenized unless a `pii.detokenize` entry explicitly
+allows the destination tool and argument pointers. JSON Pointers use RFC 6901
+escaping; a `*` segment selects array elements only. Unresolvable tokens fail
+closed by default; `onUnresolvable: leave` preserves their token text instead.
+Every resolution is audited with entity types and counts, not values. For example:
+
+```yaml
+pii:
+  detokenize:
+    - toolId: mail.send
+      args:
+        - /to
+        - /attachments/*/name
+      onUnresolvable: fail
+```
 
 The conservative safety screen rejects unbounded quantifiers, quantified
 groups, alternation, look-around assertions, backreferences, and Unicode property escapes.
