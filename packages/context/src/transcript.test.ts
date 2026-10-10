@@ -231,7 +231,13 @@ describe("NaiveStrategy", () => {
       events: [
         runInput(0, "goal"),
         modelResponse(1, [{ type: "tool_call", callId, toolId: "lookup", args: { query: "x" } }]),
-        toolResult(2, { $offloaded: { handle: "wf_1" } }),
+        toolResult(2, {
+          $offloaded: {
+            handle: "wf_00000000000000000000000000",
+            bytes: 20,
+            preview: "sample",
+          },
+        }),
         {
           ...envelope(3),
           type: "context_compacted",

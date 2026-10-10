@@ -18,3 +18,27 @@ export {
 } from "./types.js";
 export { eventsToTranscript } from "./transcript.js";
 export { NaiveStrategy } from "./strategies/naive.js";
+export {
+  InMemoryWorkspace,
+  OffloadedHandleSchema,
+  OffloadedStub,
+  OffloadingToolOptionsSchema,
+  OffloadingToolPort,
+  READ_OFFLOADED_TOOL_SPEC,
+  ReadOffloadedInputSchema,
+  ReadOffloadedResultSchema,
+  WorkspaceFileNotFoundError,
+  WorkspacePathError,
+  type OffloadIdGenerator,
+  type OffloadedHandle,
+  type OffloadedStub as OffloadedStubValue,
+  type OffloadingToolOptions,
+  type OffloadRunContext,
+  type OffloadToolCall,
+  type OffloadToolDescription,
+  type OffloadToolExecutionResult,
+  type OffloadToolPortLike,
+  type ReadOffloadedResult,
+  type WorkspacePort,
+  type WorkspaceReadRange,
+} from "./offload.js";
