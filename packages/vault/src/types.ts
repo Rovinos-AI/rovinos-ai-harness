@@ -1,7 +1,45 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type Id } from "@harness/schemas";
+import { Code, HarnessError, Id } from "@harness/schemas";
 import type { Token } from "./token.js";
 import { z } from "zod";
+
+/** Context identifying the trust boundary for a detokenization. */
+export const VaultResolveContextSchema = z
+  .object({
+    boundary: z.enum(["tool_input", "ui"]),
+    toolId: Code.optional(),
+  })
+  .strict();
+
+/** Inferred context required when resolving a token. */
+export type VaultResolveContext = z.infer<typeof VaultResolveContextSchema>;
+
+/** Metadata emitted after a token resolution attempt. */
+export const VaultAuditSchema = z
+  .object({
+    runId: Id,
+    boundary: z.enum(["tool_input", "ui"]),
+    action: z.enum(["detokenized", "blocked"]),
+    toolId: Code.optional(),
+    /**
+     * Entity types inferred from token prefixes. Token prefixes normalize `-` and
+     * `.` to `_`, so distinct entity codes can share an audit type.
+     */
+    entities: z
+      .array(
+        z
+          .object({
+            type: Code,
+            count: z.number().int().positive(),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
+/** Inferred metadata-only vault audit record. */
+export type VaultAudit = z.infer<typeof VaultAuditSchema>;
 
 const vaultValueErrorCodeSchema = z.enum([
   "vault_value_empty",
@@ -46,12 +84,13 @@ export interface VaultWriter {
 /** Resolves a run-scoped token to its raw value. */
 export interface VaultResolver {
   /**
-   * Resolve a token.
+   * Resolve a token at a named trust boundary.
    * @param runId Run that owns the token.
    * @param token Token to resolve.
+   * @param context Boundary and optional tool identity for the resolution.
    * @returns The original trimmed value, or undefined when unknown.
    */
-  resolve(runId: Id, token: Token): Promise<string | undefined>;
+  resolve(runId: Id, token: Token, context: VaultResolveContext): Promise<string | undefined>;
 }
 
 /** Reads raw values for leak detection within one run. */
@@ -62,6 +101,13 @@ export interface VaultReader {
    * @returns A detached readonly list of original trimmed values.
    */
   listRawValues(runId: Id): Promise<readonly string[]>;
+
+  /**
+   * Return a monotonic version that increases when an entry is added or removed by purge.
+   * @param runId Run to inspect.
+   * @returns The monotonically increasing run value version.
+   */
+  version(runId: Id): Promise<number>;
 }
 
 /** Performs administrative operations on one run's vault data. */

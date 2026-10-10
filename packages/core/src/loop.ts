@@ -13,7 +13,7 @@ import { Checkpointer } from "./checkpoint.js";
 import { foldRunState, planLastModelResponseRecovery, type RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
-import { modelStep, type ModelStepResult } from "./steps/model-step.js";
+import { modelStep, modelToolOptions, type ModelStepResult } from "./steps/model-step.js";
 import { toolStep } from "./steps/tool-step.js";
 import type {
   ContextPort,
@@ -182,7 +182,7 @@ async function requestModel(
     model: options.model,
     ids: options.ids,
     runId,
-    messages,
+    ...modelToolOptions(options.tool, messages),
     signal: options.signal,
     deadlineTs,
     ...(options.role === undefined ? {} : { role: options.role }),

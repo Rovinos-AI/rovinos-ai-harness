@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Code } from "@harness/schemas";
+import { OffloadedStub } from "../offload.js";
 import { ContextResultSchema, type ContextResult, type ContextStrategy } from "../types.js";
 import { eventsToTranscript } from "../transcript.js";
 
@@ -8,7 +9,7 @@ import { eventsToTranscript } from "../transcript.js";
  */
 export class NaiveStrategy implements ContextStrategy {
   readonly id: Code = "naive";
-  readonly version: Code = "v1";
+  readonly version: Code = "v2";
 
   /** {@inheritDoc ContextStrategy.build} */
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
@@ -18,12 +19,7 @@ export class NaiveStrategy implements ContextStrategy {
       (count, message) =>
         count +
         message.parts.filter(
-          (part) =>
-            part.type === "tool_result" &&
-            typeof part.result === "object" &&
-            part.result !== null &&
-            !Array.isArray(part.result) &&
-            Object.hasOwn(part.result, "$offloaded"),
+          (part) => part.type === "tool_result" && OffloadedStub.safeParse(part.result).success,
         ).length,
       0,
     );
