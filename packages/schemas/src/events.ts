@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
 import { JsonValue } from "./json.js";
+import { MessageSchema, PartSchema } from "./messages.js";
 import { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
 
 /** Supported run lifecycle states. */
@@ -58,7 +59,7 @@ const modelRequestEvent = z
     model: Code,
     role: Code.optional(),
     schemaHash: Sha256Hex.optional(),
-    messages: JsonValue,
+    messages: z.array(MessageSchema),
   })
   .strict();
 
@@ -76,7 +77,9 @@ const modelResponseEvent = z
     latencyMs: z.number().int().nonnegative(),
     schemaValid: z.boolean(),
     repairAttempts: z.number().int().nonnegative(),
-    content: JsonValue,
+    rungUsed: Code.optional(),
+    fallbackDepth: z.number().int().nonnegative(),
+    content: z.array(PartSchema),
     providerBlobs: JsonValue,
   })
   .strict();

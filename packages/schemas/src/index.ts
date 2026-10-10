@@ -16,6 +16,23 @@ export {
 } from "./json-schema.js";
 export { JsonValue } from "./json.js";
 export {
+  MessageSchema,
+  ModelRequestSchema,
+  ModelResponseSchema,
+  ModelRefSchema,
+  ModelUsageSchema,
+  PartSchema,
+  ToolSpecSchema,
+  type Message,
+  type ModelRequest,
+  type ModelResponse,
+  type ModelRef,
+  type ModelUsage,
+  type Part,
+  type ToolSpec,
+} from "./messages.js";
+export { CapabilitiesSchema, lookupCapabilities, type Capabilities } from "./capabilities.js";
+export {
   Event,
   EventEnvelopeSchema,
   EventSchema,

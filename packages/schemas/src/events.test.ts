@@ -12,8 +12,13 @@ describe("Event", () => {
   it("rejects malformed envelope values, unknown types, and non-JSON content", () => {
     expect(Event.safeParse({ ...eventSamples[0], seq: -1 }).success).toBe(false);
     expect(Event.safeParse({ ...eventSamples[0], type: "unknown" }).success).toBe(false);
-    expect(Event.safeParse({ ...eventSamples[2], messages: { value: undefined } }).success).toBe(
-      false,
-    );
+    expect(
+      Event.safeParse({ ...eventSamples[2], messages: [{ role: "user", parts: [{}] }] }).success,
+    ).toBe(false);
+    const responseSample = eventSamples.find(({ type }) => type === "model_response");
+    expect(
+      responseSample?.type === "model_response" &&
+        Event.safeParse({ ...responseSample, content: [{ type: "text" }] }).success,
+    ).toBe(false);
   });
 });

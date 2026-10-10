@@ -18,7 +18,7 @@ export const eventSamples = [
     requestId: id,
     provider: "test",
     model: "test",
-    messages: [],
+    messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
   },
   {
     ...envelope,
@@ -33,7 +33,8 @@ export const eventSamples = [
     latencyMs: 3,
     schemaValid: true,
     repairAttempts: 0,
-    content: {},
+    fallbackDepth: 0,
+    content: [{ type: "text", text: "hello" }],
     providerBlobs: [],
   },
   {

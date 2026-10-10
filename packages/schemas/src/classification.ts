@@ -30,6 +30,8 @@ export const EVENT_FIELD_CLASS = {
     latencyMs: "meta",
     schemaValid: "meta",
     repairAttempts: "meta",
+    rungUsed: "meta",
+    fallbackDepth: "meta",
     content: "content",
     providerBlobs: "content",
   },
