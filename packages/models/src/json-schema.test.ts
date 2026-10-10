@@ -673,14 +673,18 @@ describe("provider schema lowering", () => {
     }
 
     for (const provider of Object.keys(goldenByProvider)) {
-      expect(lowerForProvider(z.literal("active"), provider).schema).toEqual({
+      const literal = lowerForProvider(z.literal("active"), provider);
+      expect(literal.schema).toEqual({
         type: "string",
         enum: ["active"],
       });
-      expect(lowerForProvider(z.array(z.literal("active")), provider).schema).toEqual({
+      expect(literal.dropped).toEqual([]);
+      const literalArray = lowerForProvider(z.array(z.literal("active")), provider);
+      expect(literalArray.schema).toEqual({
         type: "array",
         items: { type: "string", enum: ["active"] },
       });
+      expect(literalArray.dropped).toEqual([]);
     }
   });
 });
