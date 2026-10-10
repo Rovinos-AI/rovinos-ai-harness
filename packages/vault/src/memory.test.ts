@@ -2,8 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryVault, VaultValueError } from "./index.js";
 
-const runId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-const anotherRunId = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
+const runId = "A".repeat(26);
+const anotherRunId = "B".repeat(26);
 
 describe("InMemoryVault", () => {
   it("reuses tokens by run, type, and normalized value while storing the trimmed original", async () => {

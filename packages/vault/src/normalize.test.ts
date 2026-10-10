@@ -4,7 +4,7 @@ import { normalize } from "./normalize.js";
 
 describe("normalize", () => {
   it("trims and applies Unicode NFKC", () => {
-    expect(normalize("name", "  Ａｌｉｃｅ  ")).toBe("Alice");
+    expect(normalize("name", "  １２３  ")).toBe("123");
   });
 
   it("lowercases email identities", () => {
