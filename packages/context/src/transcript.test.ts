@@ -201,7 +201,7 @@ describe("eventsToTranscript", () => {
     const transcript = eventsToTranscript(events);
 
     expect(transcript).toHaveLength(3);
-    expect(transcript.map(({ seqs }) => seqs)).toEqual([[0], [2], [5]]);
+    expect(transcript.map(({ seqs }) => seqs)).toEqual([[0], [1], [5]]);
     expect(transcript[1]?.messages[0]?.parts).toEqual([
       { type: "text", text: "Summary of earlier work: older" },
     ]);
@@ -260,8 +260,8 @@ describe("eventsToTranscript", () => {
         messages: [{ parts: [{ text: '{"goal":"goal"}' }] }],
       },
       {
-        seqs: [1],
-        pinned: false,
+        seqs: [0],
+        pinned: true,
         messages: [{ parts: [{ text: 'Summary of earlier work: {"outcome":"done"}' }] }],
       },
     ]);
@@ -332,7 +332,7 @@ describe("NaiveStrategy", () => {
       compactedRanges: 1,
       offloadedResults: 1,
     });
-    expect(result.pinnedSeqs).toEqual([0]);
+    expect(result.pinnedSeqs).toEqual([0, 0]);
     expect(strategy.id).toBe("naive");
     expect(strategy.version).toBe("v3");
     expect(count).toHaveBeenCalledWith(result.messages, { provider: "test", model: "test" });

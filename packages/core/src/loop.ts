@@ -9,7 +9,7 @@ import {
   type RunConfig,
 } from "@harness/schemas";
 import { activeRuns } from "@harness/telemetry";
-import { BudgetTracker, type BudgetViolation } from "./budgets.js";
+import { BudgetTracker } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
 import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from "./run-state.js";
 import type { RunState } from "./run-state.js";
@@ -17,6 +17,7 @@ import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
 import type { ModelStepResult } from "./steps/model-step.js";
 import { requestModel } from "./steps/request-model.js";
+import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { toolStep } from "./steps/tool-step.js";
 import type { PreparedToolCall } from "./steps/prepare-tool.js";
 import type { ContextPort, IdGenerator, ModelPort, NewRunMetadata, ToolPort } from "./ports.js";
@@ -141,46 +142,6 @@ export async function continueRunLoop(
   return activeRuns.track(runId, () => runLoopSteps(options, events, execution), isTerminal);
 }
 
-/**
- * Records a budget failure and writes a checkpoint when the configured cadence requires one.
- *
- * @param recorder - Recorder for the active run segment.
- * @param events - Complete event history, extended with the failure and optional checkpoint.
- * @param violation - Budget limit exceeded by the folded run state.
- * @param checkpointer - Checkpointer associated with the active run.
- * @returns The run-status event that marks the run failed.
- */
-export async function recordBudgetFailureAndCheckpoint(
-  recorder: RunRecorder,
-  events: Event[],
-  violation: BudgetViolation,
-  checkpointer: Checkpointer,
-): Promise<Event> {
-  const recorded = await recorder.recordBatch([
-    {
-      type: "budget_exceeded",
-      v: 1,
-      budget: violation.budget,
-      limit: violation.limit,
-      observed: violation.observed,
-    },
-    {
-      type: "run_status_changed",
-      v: 1,
-      from: "running",
-      to: "failed",
-      reason: "budget_exceeded",
-    },
-  ]);
-  events.push(...recorded);
-  const failed = recorded.at(-1);
-  if (failed === undefined) {
-    throw new Error("Expected budget failure events.");
-  }
-  await checkpointAfterStep(checkpointer, events);
-  return failed;
-}
-
 async function recoverInterruptedModelResponse(
   options: RunLoopExecutionOptions,
   events: Event[],
@@ -215,7 +176,13 @@ async function runLoopSteps(
     if (aborted !== undefined) {
       return aborted;
     }
-    const preflight = await preflightModelStep(options, events, execution);
+    const preflight = await preflightModelBudget({
+      budgetTracker: execution.budgetTracker,
+      checkpointer: execution.checkpointer,
+      events,
+      now: options.clock.now(),
+      recorder: options.recorder,
+    });
     if (preflight.event !== undefined) {
       return preflight.event;
     }
@@ -306,58 +273,26 @@ async function recordFinalAnswer(
   return finished;
 }
 
-async function preflightModelStep(
-  options: RunLoopExecutionOptions,
-  events: Event[],
-  execution: RunLoopExecution,
-): Promise<{ readonly deadlineTs: number; readonly event?: Event }> {
-  const state = foldRunState(events);
-  const deadlineTs = execution.budgetTracker.deadlineTs(state);
-  const budget = execution.budgetTracker.check(
-    { ...state, steps: state.steps + 1 },
-    options.clock.now(),
-  );
-  if (!budget.ok) {
-    return {
-      deadlineTs,
-      event: await recordBudgetFailureAndCheckpoint(
-        options.recorder,
-        events,
-        budget,
-        execution.checkpointer,
-      ),
-    };
-  }
-  const stopped = await suspendIfShutdown(options, events, execution);
-  return stopped === undefined ? { deadlineTs } : { deadlineTs, event: stopped };
-}
-
 async function prepareModelStep(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<{ readonly context: Message[]; readonly deadlineTs: number; readonly event?: Event }> {
   const context = await options.context.build(events.slice());
-  const state = foldRunState(events);
-  const deadlineTs = execution.budgetTracker.deadlineTs(state);
-  const budget = execution.budgetTracker.check(
-    { ...state, steps: state.steps + 1 },
-    options.clock.now(),
-  );
-  if (!budget.ok) {
-    return {
-      context,
-      deadlineTs,
-      event: await recordBudgetFailureAndCheckpoint(
-        options.recorder,
-        events,
-        budget,
-        execution.checkpointer,
-      ),
-    };
+  const preflight = await preflightModelBudget({
+    budgetTracker: execution.budgetTracker,
+    checkpointer: execution.checkpointer,
+    events,
+    now: options.clock.now(),
+    recorder: options.recorder,
+  });
+  if (preflight.event !== undefined) {
+    return { context, ...preflight };
   }
   const stopped = await suspendIfShutdown(options, events, execution);
-  return stopped === undefined ? { context, deadlineTs } : { context, deadlineTs, event: stopped };
+  return stopped === undefined
+    ? { context, deadlineTs: preflight.deadlineTs }
+    : { context, ...preflight, event: stopped };
 }
 
 async function runToolCalls(

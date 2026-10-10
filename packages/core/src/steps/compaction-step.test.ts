@@ -198,9 +198,7 @@ describe("compactionStep", () => {
     expect(
       summaries[1]?.some((group) =>
         group.messages.some((message) =>
-          message.parts.some(
-            (part) => part.type === "text" && part.text.includes("first summary"),
-          ),
+          message.parts.some((part) => part.type === "text" && part.text.includes("first summary")),
         ),
       ),
     ).toBe(true);

@@ -1,8 +1,6 @@
 [
   {
-    "seqs": [
-      0
-    ],
+    "seqs": [0],
     "messages": [
       {
         "role": "user",
@@ -17,9 +15,7 @@
     "pinned": true
   },
   {
-    "seqs": [
-      2
-    ],
+    "seqs": [1],
     "messages": [
       {
         "role": "user",
@@ -31,6 +27,6 @@
         ]
       }
     ],
-    "pinned": false
+    "pinned": true
   }
 ]

@@ -8,6 +8,7 @@ import {
   type Id,
   type ModelRef,
   type ModelUsage,
+  type Part,
 } from "@harness/schemas";
 import {
   eventsToTranscript,
@@ -23,6 +24,55 @@ import { COMPACTION_SPAN } from "../spans.js";
 const DEFAULT_KEEP_RECENT_GROUPS = 6;
 const SUMMARIZATION_INSTRUCTION =
   "Summarize the transcript while preserving the goal, decisions made, open tasks, key facts and identifiers, tokens verbatim (for example <EMAIL_1>), tool outcomes, and errors encountered. Do not invent facts or expand tokens.";
+
+function summarizerPart(part: Part): Record<string, unknown> | undefined {
+  switch (part.type) {
+    case "text":
+      return { type: part.type, text: part.text };
+    case "tool_call":
+      return { type: part.type, toolId: part.toolId, args: part.args };
+    case "tool_result":
+      return {
+        type: part.type,
+        outcome: part.isError ? "error" : "ok",
+        result: part.result,
+      };
+    case "opaque":
+      return undefined;
+  }
+}
+
+function isAbortOrDeadlineError(error: unknown): boolean {
+  if (error instanceof Error && error.name === "AbortError") {
+    return true;
+  }
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  return error.code === "deadline_exceeded" || error.code === "run_aborted";
+}
+
+async function summarizeOrSkip(options: {
+  readonly summarizer: Summarizer;
+  readonly groups: readonly TranscriptGroup[];
+  readonly goal: string;
+  readonly signal?: AbortSignal;
+}): Promise<Awaited<ReturnType<Summarizer["summarize"]>> | undefined> {
+  options.signal?.throwIfAborted();
+  try {
+    const summary = await options.summarizer.summarize({
+      groups: options.groups,
+      goal: options.goal,
+    });
+    options.signal?.throwIfAborted();
+    return summary;
+  } catch (error) {
+    if (options.signal?.aborted === true || isAbortOrDeadlineError(error)) {
+      throw error;
+    }
+    return undefined;
+  }
+}
 
 /** Error raised when a summarizer produces no textual content. */
 export class SummarizerResponseError extends HarnessError {
@@ -75,22 +125,8 @@ export class ModelPortSummarizer implements Summarizer {
                     messages: group.messages.map((message) => ({
                       role: message.role,
                       parts: message.parts.flatMap((part) => {
-                        switch (part.type) {
-                          case "text":
-                            return [{ type: part.type, text: part.text }];
-                          case "tool_call":
-                            return [{ type: part.type, toolId: part.toolId, args: part.args }];
-                          case "tool_result":
-                            return [
-                              {
-                                type: part.type,
-                                outcome: part.isError ? "error" : "ok",
-                                result: part.result,
-                              },
-                            ];
-                          case "opaque":
-                            return [];
-                        }
+                        const summarized = summarizerPart(part);
+                        return summarized === undefined ? [] : [summarized];
                       }),
                     })),
                   })),
@@ -141,22 +177,39 @@ function sourceGroups(
   );
   const startSeq = previousCompactedTo === undefined ? 0 : previousCompactedTo + 1;
   const transcript = eventsToTranscript(events);
-  const eligible = transcript.filter(
-    (group) => !group.pinned && group.seqs.every((seq) => seq >= startSeq),
-  );
-  if (
-    previousCompactedTo !== undefined &&
-    !eligible.some((group) => group.seqs.some((seq) => seq > startSeq))
-  ) {
-    return undefined;
-  }
+  const previousCompaction =
+    previousCompactedTo === undefined
+      ? undefined
+      : [...events]
+          .reverse()
+          .find(
+            (event): event is Extract<Event, { type: "context_compacted" }> =>
+              event.type === "context_compacted" && event.toSeq === previousCompactedTo,
+          );
+  const previousSummary =
+    previousCompaction === undefined
+      ? undefined
+      : transcript.find(
+          (group) =>
+            group.pinned &&
+            group.seqs.length === 1 &&
+            group.seqs[0] === previousCompaction.fromSeq &&
+            group.messages.some((message) =>
+              message.parts.some(
+                (part) => part.type === "text" && part.text.startsWith("Summary of earlier work: "),
+              ),
+            ),
+        );
+  const eligible = transcript.filter((group) => {
+    return !group.pinned && group.seqs.every((seq) => seq >= startSeq);
+  });
   const groups = eligible.slice(0, Math.max(0, eligible.length - keepRecentGroups));
   if (groups.length === 0) {
     return undefined;
   }
   const seqs = groups.flatMap((group) => group.seqs);
   return {
-    groups,
+    groups: [...(previousSummary === undefined ? [] : [previousSummary]), ...groups],
     fromSeq: previousCompactedTo === undefined ? Math.min(...seqs) : startSeq,
     toSeq: Math.max(...seqs),
   };
@@ -180,27 +233,15 @@ export async function compactionStep(options: CompactionStepOptions): Promise<Ev
   if (source === undefined) {
     return undefined;
   }
-  options.signal?.throwIfAborted();
-  let summary: Awaited<ReturnType<Summarizer["summarize"]>>;
-  try {
-    summary = await options.summarizer.summarize({
-      groups: source.groups,
-      goal: options.goal,
-    });
-  } catch (error) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
-    if (
-      options.signal?.aborted === true ||
-      (error instanceof Error && error.name === "AbortError") ||
-      code === "deadline_exceeded" ||
-      code === "run_aborted"
-    ) {
-      throw error;
-    }
+  const summary = await summarizeOrSkip({
+    summarizer: options.summarizer,
+    groups: source.groups,
+    goal: options.goal,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  if (summary === undefined) {
     return undefined;
   }
-  options.signal?.throwIfAborted();
   return options.recorder.withStepSpan(COMPACTION_SPAN, {}, async () => {
     const tokenizedSummary = await options.sanitizeSummary(summary.text);
     return options.recorder.record({

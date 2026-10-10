@@ -6,12 +6,8 @@ import { activeRuns } from "@harness/telemetry";
 import { applyResolvedApprovals } from "./approvals.js";
 import { BudgetTracker } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
-import {
-  continueRunLoop,
-  recordBudgetFailureAndCheckpoint,
-  type RunLoopExecutionOptions,
-  type RunLoopResult,
-} from "./loop.js";
+import { continueRunLoop, type RunLoopExecutionOptions, type RunLoopResult } from "./loop.js";
+import { recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { LeaseLostError, RunRecorder, type EventPartial } from "./recorder.js";
 import { planDanglingIntents, type ResumePolicy } from "./resume-policy.js";
 import { foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
