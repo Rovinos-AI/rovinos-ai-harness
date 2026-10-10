@@ -44,7 +44,7 @@ class ScriptedModel implements ModelPort {
     }
 
     const { content, toolCalls, ...metadata } = completion;
-    const text = typeof content === "string" ? content : (JSON.stringify(content) ?? "");
+    const text = typeof content === "string" ? content : JSON.stringify(content);
     return Promise.resolve({
       ...metadata,
       parts: [

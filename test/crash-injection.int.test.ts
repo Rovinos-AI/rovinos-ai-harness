@@ -123,12 +123,15 @@ function createScenario(): Scenario {
   };
   const completion = (
     content: string,
-    toolCalls: readonly { readonly callId: Id; readonly toolId: string; readonly args: JsonValue }[] =
-      [],
+    toolCalls: readonly {
+      readonly callId: Id;
+      readonly toolId: string;
+      readonly args: JsonValue;
+    }[] = [],
   ): ModelCompletion => ({
     parts: [
       { type: "text", text: content },
-      ...toolCalls.map((call): Part => ({ type: "tool_call", ...call })),
+      ...toolCalls.map((toolCall): Part => ({ type: "tool_call", ...toolCall })),
     ],
     usage: { inputTokens: 1, outputTokens: 1 },
     finishReason: "stop",

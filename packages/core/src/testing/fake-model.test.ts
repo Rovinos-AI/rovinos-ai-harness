@@ -48,9 +48,7 @@ describe("FakeModelPort", () => {
     const model = new FakeModelPort([completion], {
       responseIndex: (request) =>
         request.messages.some((message) =>
-          message.parts.some(
-            (part) => part.type === "text" && part.text === "position:0",
-          ),
+          message.parts.some((part) => part.type === "text" && part.text === "position:0"),
         )
           ? 0
           : 1,

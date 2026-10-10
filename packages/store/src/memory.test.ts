@@ -112,16 +112,7 @@ describe("InMemoryEventStore", () => {
       throw new Error("Expected an event object");
     }
     const messages = returnedRequest.messages;
-    if (
-      !Array.isArray(messages) ||
-      typeof messages[0] !== "object" ||
-      messages[0] === null ||
-      Array.isArray(messages[0])
-    ) {
-      throw new Error("Expected a nested message object");
-    }
-    const firstMessage = messages[0];
-    const firstPart = firstMessage.parts[0];
+    const firstPart = messages[0]?.parts[0];
     if (firstPart?.type !== "text") {
       throw new Error("Expected a text part");
     }
@@ -129,18 +120,10 @@ describe("InMemoryEventStore", () => {
 
     const secondRead = await collect(store.read(runId));
     const secondRequest = secondRead[1];
-    if (secondRequest?.type !== "model_request" || !Array.isArray(secondRequest.messages)) {
+    if (secondRequest?.type !== "model_request") {
       throw new Error("Expected a stored model request");
     }
-    const secondMessage = secondRequest.messages[0];
-    if (
-      typeof secondMessage !== "object" ||
-      secondMessage === null ||
-      Array.isArray(secondMessage)
-    ) {
-      throw new Error("Expected a stored message object");
-    }
-    expect(secondMessage.parts[0]).toEqual({ type: "text", text: "synthetic" });
+    expect(secondRequest.messages[0]?.parts[0]).toEqual({ type: "text", text: "synthetic" });
   });
 
   it("rejects empty, cross-run, and invalid batches atomically", async () => {

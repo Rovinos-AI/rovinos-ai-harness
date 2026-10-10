@@ -10,7 +10,7 @@ import {
 } from "@harness/schemas";
 import { BudgetTracker, type BudgetViolation } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
-import { foldRunState, type RunState } from "./run-state.js";
+import { foldRunState, planLastModelResponseRecovery, type RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
 import { modelStep, type ModelStepResult } from "./steps/model-step.js";
@@ -140,51 +140,6 @@ export async function continueRunLoop(
   return runLoopSteps(options, events, execution);
 }
 
-async function recoverLastModelResponse(
-  options: RunLoopExecutionOptions,
-  events: Event[],
-  execution: RunLoopExecution,
-): Promise<Event | undefined> {
-  const responseIndex = events.findLastIndex((event) => event.type === "model_response");
-  const response = events[responseIndex];
-  if (response?.type !== "model_response") {
-    return undefined;
-  }
-  const eventsAfterResponse = events.slice(responseIndex + 1);
-  if (
-    eventsAfterResponse.some(
-      (event) =>
-        event.type === "model_request" ||
-        (event.type === "run_status_changed" &&
-          (event.to === "completed" || event.to === "failed" || event.to === "cancelled")),
-    )
-  ) {
-    return undefined;
-  }
-
-  const toolCalls = response.content.flatMap((part) =>
-    part.type === "tool_call"
-      ? [{ callId: part.callId, toolId: part.toolId, args: part.args }]
-      : [],
-  );
-  const recordedCallIds = new Set(
-    events.flatMap((event) => (event.type === "tool_intent" ? [event.callId] : [])),
-  );
-  const unrecordedCalls = toolCalls.filter((call) => !recordedCallIds.has(call.callId));
-  if (unrecordedCalls.length > 0) {
-    return runToolCalls(options, events, execution, unrecordedCalls);
-  }
-
-  const hasToolIntentAfterResponse = eventsAfterResponse.some(
-    (event) => event.type === "tool_intent",
-  );
-  if (toolCalls.length > 0 || hasToolIntentAfterResponse) {
-    return undefined;
-  }
-
-  return recordFinalAnswer(options, events, execution);
-}
-
 async function recordBudgetFailure(
   recorder: RunRecorder,
   events: Event[],
@@ -234,12 +189,27 @@ export async function recordBudgetFailureAndCheckpoint(
   return failed;
 }
 
+async function recoverInterruptedModelResponse(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+): Promise<Event | undefined> {
+  const recovery = planLastModelResponseRecovery(events);
+  if (recovery.kind === "final_answer") {
+    return recordFinalAnswer(options, events, execution);
+  }
+  if (recovery.kind === "tool_calls") {
+    return runToolCalls(options, events, execution, recovery.calls);
+  }
+  return undefined;
+}
+
 async function runLoopSteps(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<Event> {
-  const recovered = await recoverLastModelResponse(options, events, execution);
+  const recovered = await recoverInterruptedModelResponse(options, events, execution);
   if (recovered !== undefined) {
     return recovered;
   }
@@ -347,7 +317,7 @@ async function prepareModelStep(
 }
 
 function goalText(goal: JsonValue): string {
-  return typeof goal === "string" ? goal : (JSON.stringify(goal) ?? "");
+  return typeof goal === "string" ? goal : JSON.stringify(goal);
 }
 
 async function runToolCalls(
