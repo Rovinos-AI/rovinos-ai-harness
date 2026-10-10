@@ -53,6 +53,12 @@ default event summaries contain only their type and sequence number. `--show-con
 stored event content verbatim and writes a `content_may_be_sensitive` warning to stderr. Until PII
 tokenization in tasks 13.4 and 13.7 lands, run goals and event content are stored as provided.
 
+## `harness cancel`
+
+`harness cancel <runId>` appends a cancellation request for a running or suspended run. Human output
+is the run ID; `--json` returns `{"runId":"...","status":"cancelled"}`. Cancellation exits with code
+`0`; a run that is already terminal reports `run_already_terminal` and exits with code `1`.
+
 ## Exit codes
 
 These numeric values are stable for scripts and automation:
@@ -60,7 +66,7 @@ These numeric values are stable for scripts and automation:
 | Code | Name | Meaning |
 | --- | --- | --- |
 | `0` | `ok` | Command completed successfully. |
-| `1` | `failure` | Unhandled or unmapped failure. |
+| `1` | `failure` | Unhandled or unmapped failure, including cancellation of an already-terminal run. |
 | `2` | `usage` | Invalid arguments or unknown command. |
 | `3` | `config_invalid` | Configuration is invalid. |
 | `4` | `policy_denied` | Policy denied an operation, including separation-of-duties denial. |
@@ -78,6 +84,7 @@ never included in CLI error output.
 
 | Error code | Exit code |
 | --- | --- |
+| `run_already_terminal` | `1` |
 | `config_invalid` | `3` |
 | `policy_denied`, `approver_is_requester` | `4` |
 | `suspended`, `run_awaiting_approval` | `5` |

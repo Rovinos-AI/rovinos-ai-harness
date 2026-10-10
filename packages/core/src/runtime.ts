@@ -2,20 +2,31 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { HarnessError, Id, Sha256Hex, type JsonValue, type RunConfig } from "@harness/schemas";
+import {
+  HarnessError,
+  Id,
+  Sha256Hex,
+  type Event,
+  type JsonValue,
+  type RunConfig,
+} from "@harness/schemas";
 import { SqliteEventStore, type EventStore } from "@harness/store";
 import { ensureTracingFallback } from "@harness/telemetry";
+import { cancelRun, type CancelRunResult } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ContextPort, IdGenerator, ModelPort, ToolPort } from "./ports.js";
+import { LeaseLostError, RunRecorder, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
-import type { Clock } from "./recorder.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
-import { RunRecorder } from "./recorder.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 import { RUN_SPAN } from "./spans.js";
+import { foldRunState } from "./run-state.js";
 
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const POLICY_VERSION = "default";
+const CANCEL_REQUESTED = "cancel_requested";
+// A separate process can only signal this worker through the durable event log.
+const CANCEL_POLL_INTERVAL_MS = 25;
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
 export interface RuntimeOverrides {
@@ -41,6 +52,8 @@ export interface Runtime {
   readonly ids: IdGenerator;
   run(goal: JsonValue): Promise<RunLoopResult>;
   resume(runId: Id): Promise<RunLoopResult>;
+  /** Requests durable cancellation and reports if the run was already terminal. */
+  cancel(runId: Id): Promise<CancelRunResult>;
   close(): Promise<void>;
 }
 
@@ -124,6 +137,182 @@ function configHash(config: RuntimeConfig): ReturnType<typeof Sha256Hex.parse> {
   return Sha256Hex.parse(createHash("sha256").update(JSON.stringify(config)).digest("hex"));
 }
 
+async function readEvents(store: EventStore, runId: Id, fromSeq = 0): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of store.read(runId, { fromSeq })) {
+    events.push(event);
+  }
+  return events;
+}
+
+async function inspectTail(store: EventStore, runId: Id, fromSeq: number): Promise<Event[]> {
+  return readEvents(store, runId, fromSeq);
+}
+
+async function cancelledResult(
+  store: EventStore,
+  runId: Id,
+  firstNewSeq: number,
+): Promise<RunLoopResult | undefined> {
+  const events = await readEvents(store, runId);
+  const state = foldRunState(events);
+  if (state.status !== "cancelled") {
+    return undefined;
+  }
+  return {
+    status: state.status,
+    approvalIds: Array.from(state.pendingApprovals.keys()),
+    state,
+    events: events.filter((event) => event.seq >= firstNewSeq),
+  };
+}
+
+function waitForWatcher(signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve(!signal.aborted);
+    }, CANCEL_POLL_INTERVAL_MS);
+    const abort = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      resolve(false);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) {
+      abort();
+    }
+  });
+}
+
+interface CancellationTailOptions {
+  readonly store: EventStore;
+  readonly runId: Id;
+  readonly fromSeq: number;
+  readonly controller: AbortController;
+  readonly onCursor: (nextSeq: number) => void;
+}
+
+async function inspectCancellationTail(options: CancellationTailOptions): Promise<boolean> {
+  for (const event of await inspectTail(options.store, options.runId, options.fromSeq)) {
+    options.onCursor(event.seq + 1);
+    if (event.type === "run_status_changed" && event.to === "cancelled") {
+      options.controller.abort(CANCEL_REQUESTED);
+      return true;
+    }
+  }
+  return false;
+}
+
+interface CancellationWatchOptions extends Omit<CancellationTailOptions, "fromSeq"> {
+  readonly firstSeq: number;
+  readonly stopSignal: AbortSignal;
+}
+
+async function watchCancellation(options: CancellationWatchOptions): Promise<void> {
+  let nextSeq = options.firstSeq;
+  while (await waitForWatcher(options.stopSignal)) {
+    const cancelled = await inspectCancellationTail({
+      ...options,
+      fromSeq: nextSeq,
+      onCursor: (value) => {
+        nextSeq = value;
+        options.onCursor(value);
+      },
+    });
+    if (cancelled) {
+      return;
+    }
+  }
+}
+
+class CancellationMonitorError extends HarnessError {
+  override readonly code = "cancel_monitor_failed";
+
+  constructor() {
+    super("Cancellation monitor failed.");
+  }
+}
+
+interface RunControlOptions {
+  readonly store: EventStore;
+  readonly runId: Id;
+  readonly firstNewSeq: number;
+  readonly processLike: ShutdownProcessLike;
+  readonly graceMs: number;
+  readonly operation: (signal: AbortSignal) => Promise<RunLoopResult>;
+}
+
+async function withRunControl(options: RunControlOptions): Promise<RunLoopResult> {
+  const controller = new AbortController();
+  const stopWatcher = new AbortController();
+  const cursor = { nextSeq: options.firstNewSeq };
+  let watcherFailure: Error | undefined;
+  let running: Promise<RunLoopResult> | undefined;
+  const uninstall = installShutdownHandler({
+    processLike: options.processLike,
+    controller,
+    graceMs: options.graceMs,
+    onTimeout: async () => {
+      await running;
+    },
+  });
+  const watcher = watchCancellation({
+    store: options.store,
+    runId: options.runId,
+    firstSeq: options.firstNewSeq,
+    controller,
+    stopSignal: stopWatcher.signal,
+    onCursor: (nextSeq) => {
+      cursor.nextSeq = nextSeq;
+    },
+  }).catch((error: unknown) => {
+    watcherFailure = error instanceof Error ? error : new CancellationMonitorError();
+    controller.abort(watcherFailure);
+  });
+
+  try {
+    running = options.operation(controller.signal);
+    let result: RunLoopResult;
+    try {
+      result = await running;
+    } catch (error) {
+      if (error instanceof LeaseLostError) {
+        await inspectCancellationTail({
+          store: options.store,
+          runId: options.runId,
+          fromSeq: cursor.nextSeq,
+          controller,
+          onCursor: (nextSeq) => {
+            cursor.nextSeq = nextSeq;
+          },
+        });
+      }
+      if (watcherFailure !== undefined) {
+        throw watcherFailure;
+      }
+      if (controller.signal.reason === CANCEL_REQUESTED) {
+        const cancelled = await cancelledResult(options.store, options.runId, options.firstNewSeq);
+        if (cancelled !== undefined) {
+          return cancelled;
+        }
+      }
+      throw error;
+    }
+    if (watcherFailure !== undefined) {
+      throw watcherFailure;
+    }
+    if (controller.signal.reason === CANCEL_REQUESTED) {
+      return (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
+    }
+    return result;
+  } finally {
+    stopWatcher.abort();
+    uninstall();
+    await watcher;
+  }
+}
+
 async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | undefined> {
   for await (const event of store.read(runId)) {
     if (
@@ -164,53 +353,47 @@ export async function createRuntime(
   const model = overrides.model ?? missingModelPort;
   const tool = overrides.tool ?? unavailableTool;
   const context = overrides.context ?? new NaiveContext();
-  const withShutdown = async <Result>(
-    operation: (signal: AbortSignal) => Promise<Result>,
-  ): Promise<Result> => {
-    const controller = new AbortController();
-    let running: Promise<Result> | undefined;
-    const uninstall = installShutdownHandler({
-      processLike: overrides.processLike ?? defaultProcessLike,
-      controller,
-      graceMs: config.run.shutdownGraceMs,
-      onTimeout: async () => {
-        await running;
-      },
-    });
-    try {
-      running = operation(controller.signal);
-      return await running;
-    } finally {
-      uninstall();
-    }
-  };
-
   return {
     store,
     clock,
     ids,
-    run: (goal) =>
-      withShutdown(async (signal) => {
-        const runId = ids.next();
-        const recorder = new RunRecorder(store, runId, ids.next(), 0, clock);
-        return runLoop({
-          recorder,
-          clock,
-          model,
-          tool,
-          context,
-          ids,
-          goal,
-          signal,
-          budgets: config.run.budgets,
-          checkpointEveryEvents: config.run.checkpointEveryEvents,
-          configHash: configHash(config),
-          policyVersion: POLICY_VERSION,
-        });
-      }),
-    resume: (runId) =>
-      withShutdown((signal) =>
-        storedGoal(store, runId).then((goal) => {
+    run: (goal) => {
+      const runId = ids.next();
+      return withRunControl({
+        store,
+        runId,
+        firstNewSeq: 0,
+        processLike: overrides.processLike ?? defaultProcessLike,
+        graceMs: config.run.shutdownGraceMs,
+        operation: async (signal) => {
+          const recorder = new RunRecorder(store, runId, ids.next(), 0, clock);
+          return runLoop({
+            recorder,
+            clock,
+            model,
+            tool,
+            context,
+            ids,
+            goal,
+            signal,
+            budgets: config.run.budgets,
+            checkpointEveryEvents: config.run.checkpointEveryEvents,
+            configHash: configHash(config),
+            policyVersion: POLICY_VERSION,
+          });
+        },
+      });
+    },
+    resume: async (runId) => {
+      const firstNewSeq = await store.head(runId);
+      return withRunControl({
+        store,
+        runId,
+        firstNewSeq,
+        processLike: overrides.processLike ?? defaultProcessLike,
+        graceMs: config.run.shutdownGraceMs,
+        operation: async (signal) => {
+          const goal = await storedGoal(store, runId);
           if (goal === undefined) {
             // TODO(15.1): A durable run_input event will make this interruption resumable.
             throw new RunInputMissingError();
@@ -229,8 +412,10 @@ export async function createRuntime(
             checkpointEveryEvents: config.run.checkpointEveryEvents,
             resumePolicy: config.run.resume.onNonIdempotent,
           });
-        }),
-      ),
+        },
+      });
+    },
+    cancel: (runId) => cancelRun(store, runId, clock, ids),
     close: () => store.close(),
   };
 }

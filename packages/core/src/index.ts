@@ -26,6 +26,7 @@ export {
   type Clock,
   type EventPartial,
 } from "./recorder.js";
+export { cancelRun, type CancelRunResult } from "./cancel.js";
 export { Checkpointer, NoActiveSpanError, type CheckpointerOptions } from "./checkpoint.js";
 export {
   ApprovalAlreadyResolvedError,

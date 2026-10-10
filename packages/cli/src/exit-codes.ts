@@ -21,6 +21,7 @@ export type ExitCode = (typeof ExitCode)[keyof typeof ExitCode];
 /** The only mapping from harness error codes to CLI exit codes. */
 export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freeze({
   run_input_missing: ExitCode.failure,
+  run_already_terminal: ExitCode.failure,
   config_invalid: ExitCode.configInvalid,
   policy_denied: ExitCode.policyDenied,
   approver_is_requester: ExitCode.policyDenied,

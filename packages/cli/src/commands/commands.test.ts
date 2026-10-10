@@ -36,6 +36,7 @@ import { createCommandRuntime, type CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
 import { createOutput } from "../output.js";
 import { main } from "../main.js";
+import { cancelCommand } from "./cancel.js";
 import { inspectCommand } from "./inspect.js";
 import { resumeCommand } from "./resume.js";
 import { runCommand } from "./run.js";
@@ -423,6 +424,27 @@ describe("run, resume, and inspect CLI commands", () => {
     expect(await main(["resume", runId], activeHarness.context, [resumeCommand])).toBe(
       ExitCode.failure,
     );
+  });
+
+  it("cancels a suspended run and returns failure for an already-terminal run", async () => {
+    const harness = createHarness();
+    const { runId } = await seedPendingApproval(harness);
+
+    const cancelCode = await main(["--json", "cancel", runId], harness.context, [cancelCommand]);
+
+    expect(cancelCode).toBe(ExitCode.ok);
+    expect(parseJson(RunResultSchema, harness.stdout.join(""))).toEqual({
+      runId,
+      status: "cancelled",
+    });
+    harness.stdout.length = 0;
+    harness.stderr.length = 0;
+
+    const alreadyTerminalCode = await main(["cancel", runId], harness.context, [cancelCommand]);
+
+    expect(alreadyTerminalCode).toBe(ExitCode.failure);
+    expect(harness.stderr).toEqual(["run_already_terminal\n"]);
+    expect(harness.stdout).toEqual([]);
   });
 
   it("maps a budget failure and a generic model failure to their stable exit codes", async () => {
