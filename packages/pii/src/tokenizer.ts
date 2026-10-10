@@ -202,6 +202,7 @@ export class Tokenizer {
 
     const replacements: Replacement[] = [];
     for (const item of resolvePolicyOverlaps(evaluated)) {
+      addCount(counts.actions, item.action, item.entityType);
       if (item.action !== "allow" && item.action !== "block") {
         replacements.push({
           start: item.detection.start,
@@ -230,7 +231,6 @@ export class Tokenizer {
       boundary: context.boundary,
       destination: context.destination,
     });
-    addCount(counts.actions, action, entity.data);
     if (isKey && action !== "allow") {
       counts.keys.set(entity.data, (counts.keys.get(entity.data) ?? 0) + 1);
     }

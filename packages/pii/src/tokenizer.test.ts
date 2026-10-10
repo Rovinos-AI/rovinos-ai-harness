@@ -187,6 +187,9 @@ describe("Tokenizer.tokenizeText", () => {
 
     expect(result.text).toBe("<EMAIL_1>");
     expect(result.text).not.toContain("alice@example.test");
+    expect(result.actions).toEqual([
+      { boundary: "model_input", action: "tokenize", entities: [{ type: "email", count: 1 }] },
+    ]);
   });
 
   it("exports a converter that produces a valid pii_action event payload", () => {
