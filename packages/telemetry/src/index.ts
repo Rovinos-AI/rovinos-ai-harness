@@ -25,3 +25,9 @@ export {
   type SpanDefinitionShape,
   type SpanShape,
 } from "./registry.js";
+export {
+  RunValueSet,
+  VaultRunView,
+  type VaultRunReader,
+  type VaultRunViewOptions,
+} from "./sentinel/run-values.js";

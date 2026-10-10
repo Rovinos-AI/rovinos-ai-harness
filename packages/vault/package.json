@@ -25,6 +25,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@harness/telemetry": "workspace:^",
     "@types/better-sqlite3": "9.6.0",
     "vitest": "3.2.6"
   }

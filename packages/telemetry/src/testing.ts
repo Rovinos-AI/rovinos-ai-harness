@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import type { Id } from "@harness/schemas";
+import type { VaultRunReader } from "./sentinel/run-values.js";
 
 /** Creates a no-export tracer provider with deterministic identifiers for tests. */
 export function createTestTracerProvider(): BasicTracerProvider {
@@ -15,4 +17,26 @@ export function createTestTracerProvider(): BasicTracerProvider {
 /** Creates an enabled async-local context manager for tests. */
 export function createTestContextManager(): AsyncLocalStorageContextManager {
   return new AsyncLocalStorageContextManager().enable();
+}
+
+/** Read-only vault fixture backed by a fixed map of run IDs to raw values. */
+export class StaticVaultReader implements VaultRunReader {
+  private readonly valuesByRun: ReadonlyMap<Id, readonly string[]>;
+
+  /** @param valuesByRun Values returned for each requested run. */
+  constructor(valuesByRun: ReadonlyMap<Id, readonly string[]>) {
+    this.valuesByRun = new Map(
+      [...valuesByRun].map(([runId, values]) => [runId, Object.freeze([...values])]),
+    );
+  }
+
+  /** Return the fixture's detached value list. */
+  listRawValues(runId: Id): Promise<readonly string[]> {
+    return Promise.resolve([...(this.valuesByRun.get(runId) ?? [])]);
+  }
+
+  /** Return the fixed number of fixture values for this run. */
+  version(runId: Id): Promise<number> {
+    return Promise.resolve(this.valuesByRun.get(runId)?.length ?? 0);
+  }
 }
