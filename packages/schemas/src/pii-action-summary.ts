@@ -28,11 +28,16 @@ export type PiiActionSummary = z.infer<typeof PiiActionSummarySchema>;
 export function toPiiActionEventPayload(
   summary: PiiActionSummary,
 ): Pick<Extract<Event, { type: "pii_action" }>, "boundary" | "action" | "entities"> {
+  const validated = PiiActionSummarySchema.parse(summary);
   const actions = {
     tokenize: "tokenized",
     redact: "redacted",
     block: "blocked",
     allow: "allowed",
   } as const;
-  return { ...summary, action: actions[summary.action] };
+  return {
+    boundary: validated.boundary,
+    action: actions[validated.action],
+    entities: validated.entities.map(({ type, count }) => ({ type, count })),
+  };
 }

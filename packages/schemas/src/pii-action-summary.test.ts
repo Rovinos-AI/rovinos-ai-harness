@@ -44,6 +44,25 @@ describe("PiiActionSummarySchema", () => {
     });
   });
 
+  it("rejects extra content-bearing fields before event conversion", () => {
+    const entity: { type: "email"; count: number; value: string } = {
+      type: "email",
+      count: 1,
+      value: "alice@example.test",
+    };
+    const summary: {
+      boundary: "model_input";
+      action: "tokenize";
+      entities: (typeof entity)[];
+    } = {
+      boundary: "model_input",
+      action: "tokenize",
+      entities: [entity],
+    };
+
+    expect(() => toPiiActionEventPayload(summary)).toThrow();
+  });
+
   it.each([
     { boundary: "unknown", action: "tokenize", entities: [{ type: "email", count: 1 }] },
     { boundary: "model_input", action: "unknown", entities: [{ type: "email", count: 1 }] },
