@@ -99,7 +99,7 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(sanitized?.attributes).toEqual({ "harness.test.code": "safe_code" });
     expect(sanitized?.severityText).toBeUndefined();
     expect(sanitized?.spanContext).toEqual(spanContext);
-    expect(sanitized?.resource.attributes).toEqual({});
+    expect(sanitized?.resource.attributes).toEqual({ "service.name": "harness" });
     expect(sanitized?.instrumentationScope).toEqual({ name: "@harness/telemetry" });
     expect(sanitized?.hrTime).not.toBe(input.hrTime);
     expect(input.body).toBe("sensitive free-form body");
@@ -108,7 +108,7 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(sanitized?.body).toBe(definition.name);
   });
 
-  it("drops unregistered records and resolves registered names from the body", () => {
+  it("drops unregistered records and records without a registered event name", () => {
     const definition = defineTestLogRecord();
     const next = createNextProcessor();
     const processor = new AllowlistLogRecordProcessor(next);
@@ -116,9 +116,40 @@ describe("AllowlistLogRecordProcessor", () => {
     processor.onEmit(makeSdkLogRecord({ eventName: "harness.test.missing" }));
     processor.onEmit(makeSdkLogRecord({ eventName: "", body: definition.name }));
 
-    expect(next.onEmit).toHaveBeenCalledTimes(1);
-    expect(next.onEmit.mock.calls[0]?.[0].body).toBe(definition.name);
-    expect(metricMocks.record).toHaveBeenCalledWith("unregistered_log_record");
+    expect(next.onEmit).not.toHaveBeenCalled();
+    expect(metricMocks.record.mock.calls).toEqual([
+      ["unregistered_log_record"],
+      ["unregistered_log_record"],
+    ]);
+  });
+
+  it("preserves allowlisted resource attributes and drops all others", () => {
+    defineTestLogRecord();
+    const next = createNextProcessor();
+    const processor = new AllowlistLogRecordProcessor(next);
+
+    processor.onEmit(
+      makeSdkLogRecord({
+        resource: resourceFromAttributes({
+          "service.name": "harness",
+          "service.version": "1.0.0",
+          "harness.policy.version": "2",
+          "telemetry.sdk.name": "opentelemetry",
+          "telemetry.sdk.language": "nodejs",
+          "telemetry.sdk.version": "2.12.0",
+          "host.name": "private-host",
+        }),
+      }),
+    );
+
+    expect(next.onEmit.mock.calls[0]?.[0].resource.attributes).toEqual({
+      "service.name": "harness",
+      "service.version": "1.0.0",
+      "harness.policy.version": "2",
+      "telemetry.sdk.name": "opentelemetry",
+      "telemetry.sdk.language": "nodejs",
+      "telemetry.sdk.version": "2.12.0",
+    });
   });
 
   it("drops malformed records and contains downstream processor errors", () => {

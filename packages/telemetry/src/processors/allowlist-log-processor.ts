@@ -6,7 +6,7 @@ import type { LogRecordProcessor, SdkLogRecord } from "@opentelemetry/sdk-logs";
 import { Code } from "@harness/schemas";
 import { countDroppedTelemetry } from "../metrics.js";
 import { lookupLogDefinition, type LogRecordDefinition } from "../log-registry.js";
-import { sanitizeAttributes } from "./sanitize-attributes.js";
+import { sanitizeAttributes, sanitizeResourceAttributes } from "./sanitize-attributes.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -43,18 +43,10 @@ function isSeverityNumber(value: unknown): value is SeverityNumber {
 
 function lookupDefinition(record: Record<string, unknown>): LogRecordDefinition | undefined {
   const eventName = Code.safeParse(record.eventName);
-  if (eventName.success) {
-    const definition = lookupLogDefinition(eventName.data);
-    if (definition !== undefined) {
-      return definition;
-    }
-  }
-
-  const body = Code.safeParse(record.body);
-  if (!body.success) {
+  if (!eventName.success) {
     return undefined;
   }
-  return lookupLogDefinition(body.data) ?? lookupLogDefinition(`harness.safe.${body.data}`);
+  return lookupLogDefinition(eventName.data);
 }
 
 function sanitizedCopy(
@@ -84,7 +76,7 @@ function sanitizedCopy(
     hrTime: [record.hrTime[0], record.hrTime[1]],
     hrTimeObserved: [record.hrTimeObserved[0], record.hrTimeObserved[1]],
     ...(spanContext === undefined ? {} : { spanContext }),
-    resource: resourceFromAttributes({}),
+    resource: resourceFromAttributes(sanitizeResourceAttributes(record.resource.attributes)),
     instrumentationScope: { name: "@harness/telemetry" },
     attributes,
     ...(severityNumber === undefined ? {} : { severityNumber }),

@@ -6,6 +6,15 @@ interface AttributeDefinition {
   readonly shape: unknown;
 }
 
+const resourceAttributeNames = [
+  "service.name",
+  "service.version",
+  "harness.policy.version",
+  "telemetry.sdk.name",
+  "telemetry.sdk.language",
+  "telemetry.sdk.version",
+] as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -70,6 +79,27 @@ export function sanitizeAttributes(definition: AttributeDefinition, attrs: unkno
     }
 
     sanitized[key] = parsed.data;
+  }
+  return sanitized;
+}
+
+/**
+ * Copies only the resource attributes allowlisted for spans and log records.
+ *
+ * @param sourceAttributes - Untrusted resource attributes.
+ * @returns A new set containing only allowlisted scalar resource attributes.
+ */
+export function sanitizeResourceAttributes(sourceAttributes: unknown): Attributes {
+  if (!isRecord(sourceAttributes)) {
+    throw new TypeError("Telemetry resource attributes are malformed.");
+  }
+
+  const sanitized: Attributes = {};
+  for (const key of resourceAttributeNames) {
+    const value: unknown = sourceAttributes[key];
+    if (isAttributeValue(value)) {
+      sanitized[key] = value;
+    }
   }
   return sanitized;
 }

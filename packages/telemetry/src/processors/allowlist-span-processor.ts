@@ -11,24 +11,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { ReadableSpan, Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { lookupSpanDefinition } from "../registry.js";
 import { countDroppedTelemetry } from "../metrics.js";
-import { sanitizeAttributes } from "./sanitize-attributes.js";
-
-const resourceAttributeNames = [
-  "service.name",
-  "service.version",
-  "harness.policy.version",
-  "telemetry.sdk.name",
-  "telemetry.sdk.language",
-  "telemetry.sdk.version",
-] as const;
-
-function isAttributeValue(value: unknown): value is string | number | boolean {
-  return (
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  );
-}
+import { sanitizeAttributes, sanitizeResourceAttributes } from "./sanitize-attributes.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -135,17 +118,6 @@ function isReadableSpanValid(span: ReadableSpan): boolean {
   );
 }
 
-function sanitizeResource(sourceAttributes: Record<string, unknown>) {
-  const attributes: Attributes = {};
-  for (const key of resourceAttributeNames) {
-    const value: unknown = sourceAttributes[key];
-    if (isAttributeValue(value)) {
-      attributes[key] = value;
-    }
-  }
-  return resourceFromAttributes(attributes);
-}
-
 /**
  * Rebuilds a finished span using only attributes registered for its span name.
  *
@@ -188,7 +160,7 @@ export function sanitizeSpan(span: ReadableSpan): ReadableSpan | undefined {
       events: [],
       duration: copyHrTime(span.duration),
       ended: span.ended,
-      resource: sanitizeResource(span.resource.attributes),
+      resource: resourceFromAttributes(sanitizeResourceAttributes(span.resource.attributes)),
       instrumentationScope: span.instrumentationScope,
       droppedAttributesCount: span.droppedAttributesCount,
       droppedEventsCount: span.droppedEventsCount,
