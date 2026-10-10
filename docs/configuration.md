@@ -20,6 +20,8 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict schemas owned by their respective packages. `telemetry.sentinel.minValueLength` defaults to `6` and controls the minimum length of vault values included in leak-sentinel scans; shorter values are counted and skipped. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
 
+`models.enforcement.maxRepairs` defaults to `2` and limits structured-output repair calls after an invalid model response. When the limit is exhausted, the gateway throws `model_output_invalid` with the final issue paths only.
+
 ## PII detectors and custom identifiers
 
 `@harness/pii` exports synchronous detectors for email, phone, credit cards,

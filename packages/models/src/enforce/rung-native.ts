@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, safeParseJson, type ModelRequest, type Part } from "@harness/schemas";
+import { Code, JsonValue, safeParseJson, type ModelRequest, type Part } from "@harness/schemas";
 import type { z } from "zod";
-import { EnforcementIssueSchema, parseEnforcementResult, type EnforcementResult } from "./index.js";
+import {
+  EnforcementIssueSchema,
+  enforcementIssuesFromError,
+  parseEnforcementResult,
+  type EnforcementResult,
+} from "./index.js";
 
 /** Prepares a provider request with the schema lowered for native output. */
 export function withNativeOutputSchema(
@@ -34,13 +39,24 @@ export function enforceNativeOutput<Schema extends z.ZodType>(
     });
   }
 
-  const parsed = safeParseJson(outputSchema, textParts[0].text);
+  const json = safeParseJson(JsonValue, textParts[0].text);
+  if (!json.success) {
+    return parseEnforcementResult(outputSchema, {
+      valid: false,
+      issues: [
+        EnforcementIssueSchema.parse({
+          path: [],
+          code: Code.parse(json.error.issues[0]?.code ?? "invalid_json"),
+        }),
+      ],
+      rungUsed: "native",
+    });
+  }
+  const parsed = outputSchema.safeParse(json.data);
   if (!parsed.success) {
     return parseEnforcementResult(outputSchema, {
       valid: false,
-      issues: parsed.error.issues.map(({ path, code }) =>
-        EnforcementIssueSchema.parse({ path, code: Code.parse(code) }),
-      ),
+      issues: enforcementIssuesFromError(parsed.error),
       rungUsed: "native",
     });
   }

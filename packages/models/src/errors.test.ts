@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import { HarnessError } from "@harness/schemas";
-import { ProviderError, ProviderErrorCodeSchema, ProviderNotRegisteredError } from "./errors.js";
+import {
+  ModelOutputInvalidError,
+  ProviderError,
+  ProviderErrorCodeSchema,
+  ProviderNotRegisteredError,
+} from "./errors.js";
 
 describe("provider errors", () => {
   it.each([
@@ -44,5 +49,18 @@ describe("provider errors", () => {
 
     expect(error).toBeInstanceOf(HarnessError);
     expect(error.code).toBe("provider_not_registered");
+  });
+
+  it("retains only bounded repair count and issue paths on invalid model output", () => {
+    const error = new ModelOutputInvalidError(2, [
+      { path: ["answer"], code: "invalid_type", expected: "number" },
+    ]);
+
+    expect(error).toMatchObject({
+      code: "model_output_invalid",
+      repairAttempts: 2,
+      issuePaths: [["answer"]],
+    });
+    expect(JSON.stringify(error)).not.toContain("expected");
   });
 });

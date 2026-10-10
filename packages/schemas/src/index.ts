@@ -74,8 +74,10 @@ export { RunConfigSchema, type RunConfig } from "./config/run.js";
 export { RunResumePolicySchema } from "./config/run.js";
 export { StoreConfigSchema } from "./config/store.js";
 export {
+  ModelEnforcementConfigSchema,
   ModelRetryConfigSchema,
   ModelsConfigSchema,
+  type ModelEnforcementConfig,
   type ModelRetryConfig,
   type ModelsConfig,
 } from "./config/models.js";

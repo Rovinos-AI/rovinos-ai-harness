@@ -13,6 +13,7 @@ export const EnforcementIssueSchema = z
   .object({
     path: z.array(z.union([z.string(), z.number()])),
     code: Code,
+    expected: z.enum(["array", "boolean", "integer", "null", "number", "object", "string"]).optional(),
   })
   .strict();
 
@@ -66,6 +67,21 @@ export function parseEnforcementResult<Schema extends z.ZodType>(
   result: unknown,
 ): EnforcementResult<Schema> {
   return createEnforcementResultSchema(outputSchema).parse(result);
+}
+
+/** Reduces Zod issues to value-free paths, codes, and expected type descriptors. */
+export function enforcementIssuesFromError(error: z.ZodError): EnforcementIssue[] {
+  return error.issues.map((issue) => {
+    const expected =
+      issue.code === "invalid_type" && "expected" in issue
+        ? EnforcementIssueSchema.shape.expected.unwrap().safeParse(issue.expected)
+        : undefined;
+    return EnforcementIssueSchema.parse({
+      path: issue.path,
+      code: Code.parse(issue.code),
+      ...(expected?.success === true ? { expected: expected.data } : {}),
+    });
+  });
 }
 
 /** Raised when structured output is requested alongside real model tools. */
