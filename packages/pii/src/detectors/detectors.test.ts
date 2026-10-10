@@ -201,6 +201,21 @@ describe("punctuation boundaries", () => {
     });
   });
 
+  it.each([" and ", " USD ", "; "])("detects both IBANs around %s", (separator) => {
+    const first = "GB82 WEST 1234 5698 7654 32";
+    const second = "DE89370400440532013000";
+    const text = first + separator + second;
+    expect(ibanDetector.detect(text).map(({ start, end }) => text.slice(start, end))).toEqual([
+      first,
+      second,
+    ]);
+  });
+
+  it("rejects interrupted IBAN candidates", () => {
+    expect(ibanDetector.detect("GB82 WEST  1234 5698 7654 32")).toEqual([]);
+    expect(ibanDetector.detect("GB82 WEST /1234 5698 7654 32")).toEqual([]);
+  });
+
   it("does not detect inside existing tokens or alphanumeric identifiers", () => {
     for (const { detector } of cases) {
       expect(detector.detect("<EMAIL_1> <CUSTOM_ID_123456>")).toEqual([]);

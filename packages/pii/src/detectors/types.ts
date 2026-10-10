@@ -43,7 +43,7 @@ export function candidateDetector(
   id: Code,
   entityType: Code,
   pattern: RegExp,
-  validate: (value: string) => boolean | string,
+  validate: (value: string, start: number, text: string) => boolean | string,
 ): Detector {
   return {
     id,
@@ -53,9 +53,9 @@ export function candidateDetector(
       const detections: Detection[] = [];
       for (const match of text.matchAll(pattern)) {
         const candidate = match[0].trim();
-        const validation = validate(candidate);
+        const start = match.index + match[0].indexOf(candidate);
+        const validation = validate(candidate, start, text);
         const value = typeof validation === "string" ? validation : candidate;
-        const start = match.index + match[0].indexOf(value);
         const end = start + value.length;
         if (
           value.length > 0 &&
