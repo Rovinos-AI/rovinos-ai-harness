@@ -30,6 +30,15 @@ describe("provider errors", () => {
     expect(error).toMatchObject({ retryAfterMs: 250, status: 429 });
   });
 
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    "rejects invalid retry delays: %s",
+    (retryAfterMs) => {
+      expect(() => new ProviderError("provider_rate_limited", { retryAfterMs })).toThrow(
+        RangeError,
+      );
+    },
+  );
+
   it("uses a stable code for missing provider registrations", () => {
     const error = new ProviderNotRegisteredError("unknown");
 

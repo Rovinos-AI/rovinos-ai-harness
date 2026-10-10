@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
 import type { ModelRequest } from "@harness/schemas";
+import { ProviderError } from "./errors.js";
 import { ModelGateway } from "./gateway.js";
 import * as ModelExports from "./index.js";
 import { AdapterRegistry } from "./registry.js";
@@ -47,5 +48,40 @@ describe("ModelGateway", () => {
       fallbackDepth: 0,
       providerBlobs: null,
     });
+  });
+
+  it("maps invalid adapter output to provider_unknown without metadata", async () => {
+    const adapter: ProviderAdapter = {
+      provider: "sample",
+      complete: () =>
+        Promise.resolve({
+          parts: [],
+          usage: { inputTokens: -1, outputTokens: 0 },
+          finishReason: "stop",
+          latencyMs: 0,
+        }),
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+
+    const error = await gateway
+      .complete(request, {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+      })
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+    expect(error).toBeInstanceOf(ProviderError);
+    if (!(error instanceof ProviderError)) {
+      return;
+    }
+    expect(error.code).toBe("provider_unknown");
+    expect(error).not.toHaveProperty("retryAfterMs");
+    expect(error).not.toHaveProperty("status");
   });
 });

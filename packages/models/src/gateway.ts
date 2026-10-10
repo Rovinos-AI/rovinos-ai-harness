@@ -2,6 +2,8 @@
 import type { Id, JsonValue, ModelRequest, ModelResponse } from "@harness/schemas";
 import type { Clock, IdGenerator } from "./types.js";
 import type { AdapterRegistry } from "./registry.js";
+import { ProviderError } from "./errors.js";
+import { ProviderResultSchema } from "./types.js";
 
 /** Dependencies injected into every provider adapter call by the gateway. */
 export interface ModelGatewayDependencies {
@@ -32,11 +34,16 @@ export class ModelGateway {
     context: { readonly runId: Id; readonly signal: AbortSignal },
   ): Promise<ModelResponse & { readonly providerBlobs: JsonValue }> {
     const adapter = this.registry.get(request.model.provider);
-    const result = await adapter.complete(request, {
+    const adapterResult = await adapter.complete(request, {
       signal: context.signal,
       ids: this.dependencies.ids,
       clock: this.dependencies.clock,
     });
+    const parsedResult = ProviderResultSchema.safeParse(adapterResult);
+    if (!parsedResult.success) {
+      throw new ProviderError("provider_unknown");
+    }
+    const result = parsedResult.data;
 
     return {
       parts: result.parts,

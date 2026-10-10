@@ -1047,6 +1047,14 @@ __metadata:
     undici: "npm:8.11.2"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
+  peerDependencies:
+    undici: ^8.11.2
+    vitest: ^3.2.6
+  peerDependenciesMeta:
+    undici:
+      optional: true
+    vitest:
+      optional: true
   languageName: unknown
   linkType: soft
 

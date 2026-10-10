@@ -26,6 +26,18 @@
     "@harness/schemas": "workspace:^",
     "zod": "4.6.5"
   },
+  "peerDependencies": {
+    "undici": "^8.11.2",
+    "vitest": "^3.2.6"
+  },
+  "peerDependenciesMeta": {
+    "undici": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "undici": "8.11.2",
     "vitest": "3.2.6"

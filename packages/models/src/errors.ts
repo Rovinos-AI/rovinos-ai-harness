@@ -2,7 +2,19 @@
 import { HarnessError } from "@harness/schemas";
 import { z } from "zod";
 
-/** Closed taxonomy of provider failures understood by the model gateway. */
+/**
+ * Closed taxonomy of provider failures understood by the model gateway.
+ *
+ * | Code | Retryable | Typical HTTP status |
+ * | --- | --- | --- |
+ * | `provider_rate_limited` | Yes | 429 |
+ * | `provider_timeout` | Yes | 408, 504 |
+ * | `provider_unavailable` | Yes | 5xx |
+ * | `provider_bad_request` | No | 400 |
+ * | `provider_auth` | No | 401, 403 |
+ * | `provider_content_filtered` | No | 400, 403 |
+ * | `provider_unknown` | No | Other or unclassified |
+ */
 export const ProviderErrorCodeSchema = z.enum([
   "provider_rate_limited",
   "provider_timeout",
@@ -35,9 +47,9 @@ export class ProviderError extends HarnessError {
   /** Whether the gateway may retry this failure. */
   readonly retryable: boolean;
   /** Provider-requested retry delay in milliseconds, when supplied. */
-  readonly retryAfterMs?: number;
+  declare readonly retryAfterMs?: number;
   /** HTTP status returned by the provider, when available. */
-  readonly status?: number;
+  declare readonly status?: number;
 
   /**
    * @param code - Normalized provider failure code.
@@ -48,6 +60,9 @@ export class ProviderError extends HarnessError {
     this.code = code;
     this.retryable = RETRYABLE_CODES.has(code);
     if (options.retryAfterMs !== undefined) {
+      if (!Number.isFinite(options.retryAfterMs) || options.retryAfterMs < 0) {
+        throw new RangeError("retryAfterMs must be finite and nonnegative.");
+      }
       this.retryAfterMs = options.retryAfterMs;
     }
     if (options.status !== undefined) {

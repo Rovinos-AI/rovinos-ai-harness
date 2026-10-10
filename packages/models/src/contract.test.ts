@@ -21,10 +21,48 @@ function fixture(
   scenario: ProviderContractFixture["scenario"],
   status: number,
 ): ProviderContractFixture {
+  const textParts: Part[] = [{ type: "text", text: "answer" }];
+  const toolParts: Part[] = [{ type: "tool_call", callId: id, toolId: "tool", args: {} }];
+  let expected: ProviderContractFixture["expected"];
+  switch (scenario) {
+    case "text_only":
+      expected = {
+        parts: textParts,
+        usage: { inputTokens: 2, outputTokens: 3 },
+        finishReason: "stop",
+      };
+      break;
+    case "tool_call":
+      expected = {
+        parts: toolParts,
+        usage: { inputTokens: 2, outputTokens: 3 },
+        finishReason: "stop",
+      };
+      break;
+    case "usage_mapping":
+      expected = { usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" };
+      break;
+    case "error_429":
+      expected = { retryAfterMs: 2_000, status };
+      break;
+    case "error_500":
+    case "error_401":
+      expected = { status };
+      break;
+    case "abort_signal":
+      expected = undefined;
+      break;
+  }
+
   return {
     scenario,
     request,
-    httpResponse: { status, body: { response: "fixture" } },
+    httpResponse: {
+      status,
+      ...(scenario === "error_429" ? { headers: { "retry-after": "2" } } : {}),
+      body: { response: "fixture" },
+    },
+    ...(expected === undefined ? {} : { expected }),
   };
 }
 
@@ -59,7 +97,11 @@ class FakeHttpProvider implements ProviderAdapter {
       signal: context.signal,
     });
     if (response.status === 429) {
-      throw new ProviderError("provider_rate_limited", { status: response.status });
+      const retryAfter = response.headers.get("retry-after");
+      throw new ProviderError("provider_rate_limited", {
+        status: response.status,
+        ...(retryAfter === null ? {} : { retryAfterMs: Number(retryAfter) * 1_000 }),
+      });
     }
     if (response.status >= 500) {
       throw new ProviderError("provider_unavailable", { status: response.status });
@@ -93,6 +135,27 @@ describe("provider contract fixture format", () => {
         httpResponse: { status: 700, body: {} },
       }).success,
     ).toBe(false);
+  });
+
+  it("requires every contract scenario exactly once", () => {
+    expect(() => {
+      runProviderContract(
+        "missing scenario",
+        () => {
+          throw new Error("The adapter factory should not be called.");
+        },
+        fixtures.slice(1),
+      );
+    }).toThrow("Provider contract fixtures are missing");
+    expect(() => {
+      runProviderContract(
+        "duplicate scenario",
+        () => {
+          throw new Error("The adapter factory should not be called.");
+        },
+        [...fixtures, fixture("text_only", 200)],
+      );
+    }).toThrow("must not contain duplicate");
   });
 });
 
