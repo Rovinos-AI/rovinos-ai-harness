@@ -3,11 +3,11 @@ import type { Event, JsonValue, Message } from "@harness/schemas";
 import { TranscriptSchema, type TranscriptGroup } from "./types.js";
 
 function inputText(input: JsonValue): string {
-  return typeof input === "string" ? input : (JSON.stringify(input) ?? "null");
+  return typeof input === "string" ? input : JSON.stringify(input);
 }
 
 function summaryText(summary: JsonValue): string {
-  return typeof summary === "string" ? summary : (JSON.stringify(summary) ?? "null");
+  return typeof summary === "string" ? summary : JSON.stringify(summary);
 }
 
 function toolResultMessage(event: Extract<Event, { type: "tool_result" }>): Message {
@@ -22,6 +22,27 @@ function toolResultMessage(event: Extract<Event, { type: "tool_result" }>): Mess
       },
     ],
   };
+}
+
+function removeCompactedGroups(
+  groups: TranscriptGroup[],
+  groupsByCallId: Map<string, TranscriptGroup>,
+  fromSeq: number,
+  toSeq: number,
+): void {
+  const removedGroups = new Set<TranscriptGroup>();
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const group = groups[index];
+    if (group?.seqs.some((seq) => seq >= fromSeq && seq <= toSeq) === true) {
+      groups.splice(index, 1);
+      removedGroups.add(group);
+    }
+  }
+  for (const [callId, group] of groupsByCallId) {
+    if (removedGroups.has(group)) {
+      groupsByCallId.delete(callId);
+    }
+  }
 }
 
 /**
@@ -67,20 +88,7 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
         groupsByCallId.delete(event.callId);
       }
     } else if (event.type === "context_compacted") {
-      for (let index = groups.length - 1; index >= 0; index -= 1) {
-        const group = groups[index];
-        if (
-          group !== undefined &&
-          group.seqs.some((seq) => seq >= event.fromSeq && seq <= event.toSeq)
-        ) {
-          groups.splice(index, 1);
-          for (const [callId, pendingGroup] of groupsByCallId) {
-            if (pendingGroup === group) {
-              groupsByCallId.delete(callId);
-            }
-          }
-        }
-      }
+      removeCompactedGroups(groups, groupsByCallId, event.fromSeq, event.toSeq);
       groups.push({
         seqs: [event.fromSeq],
         messages: [

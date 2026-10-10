@@ -22,27 +22,27 @@ function runInput(seq: number, input: string): Event {
   };
 }
 
-function createContextPort(calibration: JsonValue) {
-  return new StrategyContextPort(
-    new NaiveStrategy(),
-    {
-      budget: { maxTokens: 100, reserveOutputTokens: 10 },
-      model: { provider: "test", model: "test" },
-      counter: { count: vi.fn(() => 2) },
-      calibration,
-    },
-  );
+function createContextPort(calibration: JsonValue, strategy = new NaiveStrategy()) {
+  return new StrategyContextPort(strategy, {
+    budget: { maxTokens: 100, reserveOutputTokens: 10 },
+    model: { provider: "test", model: "test" },
+    counter: { count: vi.fn(() => 2) },
+    calibration,
+  });
 }
 
 describe("StrategyContextPort", () => {
   it("builds from supplied events and round-trips strategy calibration", async () => {
     const calibration = { "test/test": 1.5 };
-    const context = createContextPort(calibration);
+    const strategy = new NaiveStrategy();
+    const build = vi.spyOn(strategy, "build");
+    const context = createContextPort(calibration, strategy);
     const input = runInput(0, "goal");
 
     await expect(context.build([input])).resolves.toEqual([
       { role: "user", parts: [{ type: "text", text: "goal" }] },
     ]);
+    expect(build.mock.calls[0]?.[0]).not.toHaveProperty("calibration");
     const snapshot = await context.snapshot();
     expect(snapshot).toEqual({
       strategyId: "naive",

@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  HarnessError,
-  type Event,
-  type JsonValue,
-  type Message,
-} from "@harness/schemas";
+import { HarnessError, type Event, type JsonValue, type Message } from "@harness/schemas";
 import {
   ContextSnapshotSchema,
   type ContextStrategy,
@@ -31,23 +26,26 @@ class ContextSnapshotError extends HarnessError {
  */
 export class StrategyContextPort implements ContextPort {
   private calibration: JsonValue;
+  private readonly buildOptions: Omit<ContextStrategyInput, "events">;
 
   constructor(
     private readonly strategy: ContextStrategy,
-    private readonly options: StrategyContextPortOptions,
+    options: StrategyContextPortOptions,
   ) {
-    this.calibration = options.calibration ?? null;
+    const { calibration, ...buildOptions } = options;
+    this.calibration = calibration ?? null;
+    this.buildOptions = buildOptions;
   }
 
   /** {@inheritDoc ContextPort.build} */
   async build(events: readonly Event[]): Promise<Message[]> {
-    const result = await this.strategy.build({ ...this.options, events });
+    const result = await this.strategy.build({ ...this.buildOptions, events });
     return result.messages;
   }
 
   /** {@inheritDoc ContextPort.snapshot} */
-  async snapshot(): Promise<JsonValue> {
-    return ContextSnapshotSchema.parse({
+  snapshot(): Promise<JsonValue> {
+    return ContextSnapshotSchema.parseAsync({
       strategyId: this.strategy.id,
       strategyVersion: this.strategy.version,
       calibration: this.calibration,
@@ -55,15 +53,16 @@ export class StrategyContextPort implements ContextPort {
   }
 
   /** {@inheritDoc ContextPort.restore} */
-  async restore(snapshot: JsonValue | undefined, _eventsAfterSnapshot: readonly Event[]): Promise<void> {
+  restore(snapshot: JsonValue | undefined, _eventsAfterSnapshot: readonly Event[]): Promise<void> {
     if (snapshot === undefined) {
       this.calibration = null;
-      return;
+      return Promise.resolve();
     }
     const result = ContextSnapshotSchema.safeParse(snapshot);
     if (!result.success) {
-      throw new ContextSnapshotError();
+      return Promise.reject(new ContextSnapshotError());
     }
     this.calibration = result.data.calibration;
+    return Promise.resolve();
   }
 }

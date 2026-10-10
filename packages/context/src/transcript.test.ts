@@ -76,10 +76,7 @@ async function readGolden(name: string): Promise<TranscriptGroup[]> {
 
 describe("eventsToTranscript", () => {
   it.each([
-    [
-      "plain-run",
-      [runInput(0, "hello"), modelResponse(1, [{ type: "text", text: "answer" }])],
-    ],
+    ["plain-run", [runInput(0, "hello"), modelResponse(1, [{ type: "text", text: "answer" }])]],
     [
       "tool-run",
       [
@@ -116,9 +113,7 @@ describe("eventsToTranscript", () => {
   it("matches tool results by call id and keeps calls and results in one group", () => {
     const events: Event[] = [
       toolResult(3, { value: "found" }, "timeout"),
-      modelResponse(1, [
-        { type: "tool_call", callId, toolId: "lookup", args: { query: "x" } },
-      ]),
+      modelResponse(1, [{ type: "tool_call", callId, toolId: "lookup", args: { query: "x" } }]),
     ];
     const [group] = eventsToTranscript(events);
 
@@ -176,12 +171,12 @@ describe("eventsToTranscript", () => {
       {
         seqs: [0],
         pinned: true,
-        messages: [{ parts: [{ text: "{\"goal\":\"goal\"}" }] }],
+        messages: [{ parts: [{ text: '{"goal":"goal"}' }] }],
       },
       {
         seqs: [1],
         pinned: true,
-        messages: [{ parts: [{ text: "Summary of earlier work: {\"outcome\":\"done\"}" }] }],
+        messages: [{ parts: [{ text: 'Summary of earlier work: {"outcome":"done"}' }] }],
       },
     ]);
     expect(eventsToTranscript([])).toEqual([]);

@@ -27,7 +27,7 @@ export class NaiveStrategy implements ContextStrategy {
         ).length,
       0,
     );
-    return ContextResultSchema.parse({
+    return ContextResultSchema.parseAsync({
       messages,
       stats: {
         messageCount: messages.length,
