@@ -4,11 +4,13 @@ import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
+import { prepareCompletion, toolRunContext, type PreparedToolCall } from "./prepare-tool.js";
 
 /** Inputs needed to perform one recorded model call. */
 export interface ModelStepOptions {
   readonly recorder: RunRecorder;
   readonly model: ModelPort;
+  readonly tool?: ToolPort;
   readonly ids: IdGenerator;
   readonly runId: Id;
   readonly messages: Message[];
@@ -35,6 +37,7 @@ export type ModelStepResult =
   | {
       readonly outcome: "response";
       readonly completion: ModelCompletion;
+      readonly preparedCalls: readonly PreparedToolCall[];
       readonly events: readonly Event[];
     }
   | { readonly outcome: "aborted"; readonly events: readonly Event[] }
@@ -118,28 +121,20 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       return failed;
     }
 
-    const response = await options.recorder.record({
-      type: "model_response",
-      v: 1,
-      requestId,
-      provider: completion.provider,
-      model: completion.model,
-      inputTokens: completion.usage.inputTokens,
-      outputTokens: completion.usage.outputTokens,
-      ...(completion.usage.costMicros === undefined
-        ? {}
-        : { costMicros: completion.usage.costMicros }),
-      finishReason: completion.finishReason,
-      latencyMs: completion.latencyMs,
-      schemaValid: completion.schemaValid,
-      repairAttempts: completion.repairAttempts,
-      ...(completion.rungUsed === undefined ? {} : { rungUsed: completion.rungUsed }),
-      fallbackDepth: completion.fallbackDepth,
-      content: completion.parts,
-      providerBlobs: completion.providerBlobs,
-    });
+    const prepared = await prepareCompletion(
+      completion,
+      options.tool,
+      toolRunContext(modelRunContext(options), options.recorder, recorded),
+    );
+    completion = prepared.completion;
+    const response = await options.recorder.record(responsePayload(requestId, completion));
     recorded.push(response);
-    result = { outcome: "response", completion, events: recorded };
+    result = {
+      outcome: "response",
+      completion,
+      preparedCalls: prepared.preparedCalls,
+      events: recorded,
+    };
     return response;
   });
 
@@ -147,4 +142,27 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
     throw new Error("Expected the model step to record an outcome.");
   }
   return result;
+}
+
+function responsePayload(requestId: Id, completion: ModelCompletion): EventPartial {
+  return {
+    type: "model_response",
+    v: 1,
+    requestId,
+    provider: completion.provider,
+    model: completion.model,
+    inputTokens: completion.usage.inputTokens,
+    outputTokens: completion.usage.outputTokens,
+    ...(completion.usage.costMicros === undefined
+      ? {}
+      : { costMicros: completion.usage.costMicros }),
+    finishReason: completion.finishReason,
+    latencyMs: completion.latencyMs,
+    schemaValid: completion.schemaValid,
+    repairAttempts: completion.repairAttempts,
+    ...(completion.rungUsed === undefined ? {} : { rungUsed: completion.rungUsed }),
+    fallbackDepth: completion.fallbackDepth,
+    content: completion.parts,
+    providerBlobs: completion.providerBlobs,
+  };
 }

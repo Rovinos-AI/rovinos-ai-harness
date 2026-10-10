@@ -14,7 +14,7 @@ export type DanglingIntentAction =
   | {
       readonly kind: "fail";
       readonly callId: ToolIntentEvent["callId"];
-      readonly errorCode: "unknown_tool" | "resume_ambiguous";
+      readonly errorCode: "unknown_tool" | "resume_ambiguous" | "pii_blocked";
     };
 
 /**
@@ -37,6 +37,9 @@ export function planDanglingIntents(
     const description = toolPort.describe(intent.toolId);
     if (description === undefined) {
       return { kind: "fail", callId: intent.callId, errorCode: "unknown_tool" };
+    }
+    if (intent.policyDecision === "deny") {
+      return { kind: "fail", callId: intent.callId, errorCode: "pii_blocked" };
     }
     if (intent.idempotent && description.idempotent) {
       return { kind: "rerun", callId: intent.callId };

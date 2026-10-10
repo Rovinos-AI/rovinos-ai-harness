@@ -3,18 +3,19 @@
 import { z } from "zod";
 import {
   HarnessError,
-  Id,
   JsonValue,
   ToolSpecSchema,
+  ToolBinaryPayloadSchema,
   type Code,
   type Id as IdValue,
   type JsonValue as JsonValueType,
   type ToolSpec,
+  type PiiActionSummary,
 } from "@harness/schemas";
+import { SystemOffloadIdGenerator } from "./offload-id.js";
 
 const MAX_READ_BYTES = 16 * 1024;
 const OFFLOAD_DIRECTORY = ".harness/offload/";
-const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** Validates an offload handle. */
 export const OffloadedHandleSchema = z
@@ -41,7 +42,6 @@ export const OffloadedStub = z
 /** Inferred offloaded result stub. */
 export type OffloadedStub = z.infer<typeof OffloadedStub>;
 
-/** Result of one bounded read from an offloaded file. */
 export const ReadOffloadedResultSchema = z
   .object({
     data: z.string(),
@@ -85,9 +85,7 @@ export interface WorkspacePort {
    */
   write(path: string, data: Uint8Array): Promise<void>;
 
-  /**
-   * Reads bytes from an offload path, optionally selecting a byte range.
-   *
+  /** Reads bytes from an offload path, optionally selecting a byte range.
    * @param path - Workspace-relative path below `.harness/offload/`.
    * @param range - Optional byte offset and length.
    * @returns A copy of the requested bytes.
@@ -113,10 +111,12 @@ export interface OffloadToolCall {
 export interface OffloadRunContext {
   readonly runId: IdValue;
   readonly signal: AbortSignal;
+  readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
 }
 
 /** Result returned by a tool execution. */
 export interface OffloadToolExecutionResult {
+  readonly binary?: boolean;
   readonly outcome: "ok" | "error";
   readonly result: JsonValueType;
   readonly errorCode?: Code;
@@ -130,6 +130,8 @@ export interface OffloadToolDescription {
 
 /** Tool port shape accepted by {@link OffloadingToolPort}. */
 export interface OffloadToolPortLike {
+  /** Sanitizes arguments before durable recording. */
+  prepare?(call: OffloadToolCall, context: OffloadRunContext): Promise<OffloadToolCall>;
   /** Returns metadata for a registered tool. */
   describe(toolId: Code): OffloadToolDescription | undefined;
 
@@ -232,24 +234,6 @@ export const READ_OFFLOADED_TOOL_SPEC: ToolSpec = ToolSpecSchema.parse({
   description: "Read a page of a large tool result stored in the run workspace.",
   inputSchema: JsonValue.parse(z.toJSONSchema(ReadOffloadedInputSchema)),
 });
-
-class SystemOffloadIdGenerator implements OffloadIdGenerator {
-  next(): IdValue {
-    const timestamp = BigInt(Math.max(0, Math.floor(Date.now())));
-    const random = globalThis.crypto.getRandomValues(new Uint8Array(10));
-    let randomValue = 0n;
-    for (const byte of random) {
-      randomValue = (randomValue << 8n) | BigInt(byte);
-    }
-    let value = (timestamp << 80n) | randomValue;
-    let encoded = "";
-    for (let index = 0; index < 26; index += 1) {
-      encoded = `${ULID_ALPHABET[Number(value & 31n)] ?? "0"}${encoded}`;
-      value >>= 5n;
-    }
-    return Id.parse(encoded);
-  }
-}
 
 function offloadPath(handle: string): string {
   return `${OFFLOAD_DIRECTORY}${OffloadedHandleSchema.parse(handle)}.json`;
@@ -448,10 +432,7 @@ export class OffloadingToolPort implements OffloadToolPortLike {
 
   /**
    * Wraps an executor with workspace offloading for large tool results.
-   *
-   * PII tokenization must be applied by `inner` before this decorator so that
-   * offload files and previews contain tokenized content only.
-   *
+   * PII tokenization must be applied by `inner` before this decorator.
    * @param inner - Tool port that performs PII tokenization before returning results.
    * @param workspace - Workspace used to persist and page offloaded results.
    * @param options - Byte threshold and preview character limit.
@@ -485,6 +466,11 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     ];
   }
 
+  /** Forwards preparation to the inner boundary. */
+  async prepare(call: OffloadToolCall, context: OffloadRunContext): Promise<OffloadToolCall> {
+    return this.inner.prepare?.(call, context) ?? call;
+  }
+
   /** {@inheritDoc OffloadToolPortLike.execute} */
   async execute(
     call: OffloadToolCall,
@@ -495,25 +481,31 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     }
 
     const execution = await this.inner.execute(call, context);
+    if (execution.binary === true && !ToolBinaryPayloadSchema.safeParse(execution.result).success) {
+      return toolError("pii_input_invalid");
+    }
     const serialized = JSON.stringify(execution.result);
     const data = new TextEncoder().encode(serialized);
-    if (serialized.length <= this.options.thresholdBytes) {
+    if (execution.binary !== true && serialized.length <= this.options.thresholdBytes) {
       return execution;
     }
 
     const handle = `wf_${this.ids.next()}`;
-    const path = offloadPath(handle);
-    await this.workspace.write(path, data);
+    await this.workspace.write(offloadPath(handle), data);
     const validatedHandle = OffloadedHandleSchema.parse(handle);
     this.knownSizes.set(validatedHandle, data.byteLength);
 
     return {
-      ...execution,
+      outcome: execution.outcome,
+      ...(execution.errorCode === undefined ? {} : { errorCode: execution.errorCode }),
       result: OffloadedStub.parse({
         $offloaded: {
           handle: validatedHandle,
           bytes: data.byteLength,
-          preview: Array.from(serialized).slice(0, this.options.previewChars).join(""),
+          preview:
+            execution.binary === true
+              ? ""
+              : Array.from(serialized).slice(0, this.options.previewChars).join(""),
         },
       }),
     };

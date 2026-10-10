@@ -52,6 +52,7 @@ import type {
   ModelToolCall,
   ModelPort,
   RunContext,
+  ToolPort,
   ToolExecutionResult,
 } from "./ports.js";
 import {
@@ -533,8 +534,24 @@ describe("approval lifecycle", () => {
       await requestApprovalForRun(recorder, clock, state);
       clock.advance(25);
       const edits = decision === "edit" ? { z: 1, a: 4 } : undefined;
+      const editTool: ToolPort | undefined =
+        decision === "edit"
+          ? {
+              describe: () => ({ idempotent: false, timeoutMs: 1_000 }),
+              prepare: (call) => Promise.resolve(call),
+              execute: () => Promise.resolve({ outcome: "ok", result: null }),
+            }
+          : undefined;
 
-      const resolution = await resolveApproval(store, runId, approvalId, decision, edits, clock);
+      const resolution = await resolveApproval(
+        store,
+        runId,
+        approvalId,
+        decision,
+        edits,
+        clock,
+        editTool,
+      );
       const eventsBeforeResume = await readApprovalEvents(store);
       expect(foldRunState(eventsBeforeResume).status).toBe("suspended");
       const lastEvent = eventsBeforeResume.at(-1);

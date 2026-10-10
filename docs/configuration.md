@@ -101,3 +101,32 @@ Tokens are run-scoped. Independent runs may use the same token string; resolve
 each token only with its owning run ID. Existing tokens are not scanned again.
 Action summaries use policy verbs; convert them with
 `toPiiActionEventPayload` before recording canonical `pii_action` events.
+
+## PII tool boundary composition
+
+Task 13.7 adds `PiiToolPort` with structural tool ports (no reverse dependency on core).
+Pass an already composed tool override to `createRuntime`:
+`Offloading( Pii( Policy( Tools ) ) )`. The runtime does not automatically install
+PII protection. Future policy decorators decide on tokenized arguments during
+`prepare`, before `PiiToolPort.execute` resolves the configured argument pointers.
+Policy authorization must not inspect the raw argument copy passed to execution.
+
+Preparation runs before the durable model response and tool intent. Provider blobs
+are omitted when preparation is enabled because opaque blobs can duplicate tool
+arguments. Preparation failure records null arguments and a denied tool result;
+failed calls are excluded from durable model-response recovery input. Input and
+output summaries go through `RunRecorder`. Results are tokenized before previews,
+files, or events are written. Detector coverage is not a complete detection guarantee.
+
+Binary execution results use `binary: true` and a JSON numeric byte array validated
+by `ToolBinaryPayloadSchema` (integers from 0 through 255). Only this representation
+bypasses tokenization; flagged text or objects fail with `pii_input_invalid`.
+The outer offloader always offloads binary output, even below its configured
+threshold, with an empty preview. Oversized unflagged output still fails with
+`pii_input_too_large`. Binary tools must use the composed outer offloader.
+
+Canary checklist for this boundary: integration tests cover every recorded event
+(including model responses and checkpoints), allowlisted raw execution, both
+boundary summaries, blocked input, detector/vault failures, tokenized offload
+files and previews, oversized text rejection, validated binary offloading without
+previews, rejected textual binary flags, and an unprotected negative control.
