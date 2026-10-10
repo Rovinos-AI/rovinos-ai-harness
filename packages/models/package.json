@@ -39,6 +39,7 @@
     }
   },
   "devDependencies": {
+    "ajv": "8.20.0",
     "undici": "8.11.2",
     "vitest": "3.2.6"
   }
