@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Placeholder owned by task 13.1.
-import { z } from "zod";
+// PII configuration is owned by task 13.1.
+import { PiiPolicySchema } from "../pii-policy.js";
 
-export const PiiConfigSchema = z.object({}).strict().prefault({});
+export const PiiConfigSchema = PiiPolicySchema.prefault({});
+
+/** Validated PII configuration. */
+export type PiiConfig = import("../pii-policy.js").PiiPolicy;
