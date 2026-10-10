@@ -10,6 +10,34 @@ const jsonSchemaErrorCodeSchema = z.enum([
   "schema_provider_unsupported",
   "schema_recursive_unsupported",
 ]);
+const schemaMapKeywords = [
+  "$defs",
+  "definitions",
+  "dependencies",
+  "dependentSchemas",
+  "patternProperties",
+  "properties",
+];
+const schemaArrayKeywords = ["allOf", "anyOf", "oneOf", "prefixItems"];
+const schemaSingleKeywords = [
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "contentSchema",
+  "else",
+  "if",
+  "items",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+];
+const schemaBearingKeywords = new Set([
+  ...schemaMapKeywords,
+  ...schemaArrayKeywords,
+  ...schemaSingleKeywords,
+]);
 
 /** JSON Schema object produced by the Zod conversion and lowering helpers. */
 export type JsonSchema = z.infer<typeof jsonSchemaSchema>;
@@ -41,12 +69,59 @@ function parseJsonSchema(value: unknown): JsonSchema {
   }
 }
 
-function containsReference(value: JsonValue): boolean {
-  if (Array.isArray(value)) {
-    return value.some(containsReference);
+function isSchemaNode(value: JsonValue): boolean {
+  return typeof value === "boolean" || isJsonObject(value);
+}
+
+function nullableConstraint(
+  schema: Record<string, JsonValue>,
+  type: JsonValue | undefined,
+): JsonValue | undefined {
+  const typeAllowsNull =
+    type === undefined || type === "null" || (Array.isArray(type) && type.includes("null"));
+  if ("const" in schema) {
+    return schema.const === null && typeAllowsNull ? schema : { anyOf: [schema, { type: "null" }] };
   }
-  if (isJsonObject(value)) {
-    return "$ref" in value || Object.values(value).some(containsReference);
+  const enumValues = schema.enum;
+  if (Array.isArray(enumValues)) {
+    return enumValues.includes(null) && typeAllowsNull
+      ? schema
+      : { anyOf: [schema, { type: "null" }] };
+  }
+  return undefined;
+}
+
+function containsReference(value: JsonValue): boolean {
+  if (!isJsonObject(value)) {
+    return false;
+  }
+  if ("$ref" in value) {
+    return true;
+  }
+
+  for (const keyword of schemaMapKeywords) {
+    const children = value[keyword];
+    if (
+      isJsonObject(children) &&
+      Object.values(children).some((child) => isSchemaNode(child) && containsReference(child))
+    ) {
+      return true;
+    }
+  }
+  for (const keyword of schemaArrayKeywords) {
+    const children = value[keyword];
+    if (
+      Array.isArray(children) &&
+      children.some((child) => isSchemaNode(child) && containsReference(child))
+    ) {
+      return true;
+    }
+  }
+  for (const keyword of schemaSingleKeywords) {
+    const child = value[keyword];
+    if (child !== undefined && isSchemaNode(child) && containsReference(child)) {
+      return true;
+    }
   }
   return false;
 }
@@ -101,8 +176,12 @@ function nullableSchema(schema: JsonValue): JsonValue {
   }
 
   const type = schema.type;
-  if (type === "null" || schema.const === null) {
+  if (type === "null") {
     return schema;
+  }
+  const constrained = nullableConstraint(schema, type);
+  if (constrained !== undefined) {
+    return constrained;
   }
   if (typeof type === "string") {
     return { ...schema, type: [type, "null"] };
@@ -114,10 +193,6 @@ function nullableSchema(schema: JsonValue): JsonValue {
     return { ...schema, type: [...type, "null"] };
   }
 
-  const enumValues = schema.enum;
-  if (Array.isArray(enumValues) && enumValues.includes(null)) {
-    return schema;
-  }
   const anyOf = schema.anyOf;
   if (Array.isArray(anyOf) && anyOf.some(isNullSchema)) {
     return schema;
@@ -152,25 +227,55 @@ function lowerKeywordValue(
   rules: ProviderSchemaRule,
   dropped: Set<string>,
 ): JsonValue {
-  if (keyword === "properties" && isJsonObject(value)) {
-    const properties: Record<string, JsonValue> = {};
-    for (const [name, propertySchema] of Object.entries(value)) {
-      properties[name] = lowerSchemaNode(propertySchema, rules, dropped);
+  if (schemaMapKeywords.includes(keyword) && isJsonObject(value)) {
+    const schemas: Record<string, JsonValue> = {};
+    for (const [name, child] of Object.entries(value)) {
+      schemas[name] = isSchemaNode(child) ? lowerSchemaNode(child, rules, dropped) : child;
     }
-    return properties;
+    return schemas;
   }
-  if (keyword === "anyOf" && Array.isArray(value)) {
-    return value.map((entry) => lowerSchemaNode(entry, rules, dropped));
+  if (schemaArrayKeywords.includes(keyword) && Array.isArray(value)) {
+    return value.map((child) => {
+      if (!isSchemaNode(child)) {
+        return child;
+      }
+      return lowerSchemaNode(child, rules, dropped);
+    });
   }
-  if (
-    (keyword === "additionalProperties" || keyword === "items") &&
-    (isJsonObject(value) || Array.isArray(value))
-  ) {
-    return Array.isArray(value)
-      ? value.map((entry) => lowerSchemaNode(entry, rules, dropped))
-      : lowerSchemaNode(value, rules, dropped);
+  if (schemaSingleKeywords.includes(keyword) && isSchemaNode(value)) {
+    return lowerSchemaNode(value, rules, dropped);
   }
   return value;
+}
+
+function isTrivialPropertyNames(schema: JsonValue): boolean {
+  return isJsonObject(schema) && schema.type === "string" && Object.keys(schema).length === 1;
+}
+
+function lowerOneOf(
+  child: JsonValue,
+  schema: Record<string, JsonValue>,
+  rules: ProviderSchemaRule,
+  dropped: Set<string>,
+): JsonValue[] {
+  if (!Array.isArray(child) || !rules.allowedKeywords.includes("anyOf") || "anyOf" in schema) {
+    throw new JsonSchemaError("schema_provider_unsupported");
+  }
+  const code = droppedCode("oneOf");
+  if (code !== undefined) {
+    dropped.add(code);
+  }
+  return child.map((entry) => lowerSchemaNode(entry, rules, dropped));
+}
+
+function recordDroppedKeyword(keyword: string, dropped: Set<string>): void {
+  if (schemaBearingKeywords.has(keyword)) {
+    throw new JsonSchemaError("schema_provider_unsupported");
+  }
+  const code = droppedCode(keyword);
+  if (code !== undefined) {
+    dropped.add(code);
+  }
 }
 
 function lowerSchemaNode(
@@ -184,30 +289,28 @@ function lowerSchemaNode(
 
   const lowered: Record<string, JsonValue> = {};
   for (const [keyword, child] of Object.entries(schema)) {
+    if (keyword === "propertyNames" && isTrivialPropertyNames(child)) {
+      continue;
+    }
+    if (keyword === "oneOf") {
+      lowered.anyOf = lowerOneOf(child, schema, rules, dropped);
+      continue;
+    }
     const supportedPattern =
       keyword !== "pattern" || (typeof child === "string" && idCodePatterns.has(child));
     if (!rules.allowedKeywords.includes(keyword) || !supportedPattern) {
-      const code = droppedCode(keyword);
-      if (code !== undefined) {
-        dropped.add(code);
-      }
+      recordDroppedKeyword(keyword, dropped);
       continue;
     }
     lowered[keyword] = lowerKeywordValue(keyword, child, rules, dropped);
   }
-  return lowerObject(
-    lowered,
-    rules.requireAllProperties,
-    rules.requireAdditionalPropertiesFalse,
-    dropped,
-  );
+  return lowerObject(lowered, rules.requireAllProperties, rules.requireAdditionalPropertiesFalse);
 }
 
 function lowerObject(
   schema: Record<string, JsonValue>,
   requireAllProperties: boolean,
   requireAdditionalPropertiesFalse: boolean,
-  dropped: Set<string>,
 ): Record<string, JsonValue> {
   if (!isObjectSchema(schema)) {
     return schema;
@@ -231,23 +334,32 @@ function lowerObject(
     result.required = Object.keys(loweredProperties).sort();
   }
   if (requireAdditionalPropertiesFalse) {
-    if (result.additionalProperties !== undefined && result.additionalProperties !== false) {
-      const code = droppedCode("additionalProperties");
-      if (code !== undefined) {
-        dropped.add(code);
-      }
+    if (
+      (result.additionalProperties !== undefined && result.additionalProperties !== false) ||
+      (!isJsonObject(properties) && result.additionalProperties !== false)
+    ) {
+      throw new JsonSchemaError("schema_provider_unsupported");
     }
     result.additionalProperties = false;
   }
   return result;
 }
 
+function compareOrdinal(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
 function canonicalJson(value: JsonValue, parentKey?: string): string {
   if (Array.isArray(value)) {
-    const items =
-      parentKey === "required"
-        ? [...value].sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)))
-        : value;
+    const items = ["required", "type"].includes(parentKey ?? "")
+      ? [...value].sort((left, right) => compareOrdinal(canonicalJson(left), canonicalJson(right)))
+      : value;
     return `[${items.map((entry) => canonicalJson(entry)).join(",")}]`;
   }
   if (isJsonObject(value)) {
@@ -290,6 +402,9 @@ export function lowerForProvider(
   }
 
   const jsonSchema = schema instanceof z.ZodType ? toJsonSchema(schema) : parseJsonSchema(schema);
+  if (containsReference(jsonSchema)) {
+    throw new JsonSchemaError("schema_recursive_unsupported");
+  }
   const dropped = new Set<string>();
   const lowered = lowerSchemaNode(jsonSchema, rules, dropped);
   return {
