@@ -3,8 +3,9 @@ import { isSpanContextValid, type SpanContext, type Context } from "@opentelemet
 import type { SeverityNumber } from "@opentelemetry/api-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
-import { Code } from "@harness/schemas";
+import { Code, Id, type TelemetryConfig } from "@harness/schemas";
 import { countDroppedTelemetry } from "../metrics.js";
+import { assertSentinelGate, type SentinelGate } from "../sentinel/gate.js";
 import { lookupLogDefinition, type LogRecordDefinition } from "../log-registry.js";
 import { sanitizeAttributes, sanitizeResourceAttributes } from "./sanitize-attributes.js";
 
@@ -99,10 +100,25 @@ function sanitizedCopy(
  * @param next - The downstream log-record processor or exporter processor.
  */
 export class AllowlistLogRecordProcessor implements LogRecordProcessor {
-  constructor(private readonly next: LogRecordProcessor) {}
+  private readonly pending = new Set<Promise<void>>();
+
+  constructor(
+    private readonly next: LogRecordProcessor,
+    private readonly options: {
+      readonly gate?: SentinelGate;
+      readonly telemetry?: TelemetryConfig;
+      readonly nodeEnv?: string;
+    } = {},
+  ) {
+    assertSentinelGate(options.gate, options.telemetry, options.nodeEnv);
+  }
 
   /** Sanitizes log records before forwarding them; malformed and unregistered records are dropped. */
   onEmit(record: ReadWriteLogRecord, context?: Context): void {
+    this.track(this.processRecord(record, context));
+  }
+
+  private async processRecord(record: ReadWriteLogRecord, context?: Context): Promise<void> {
     try {
       const input: unknown = record;
       if (!isRecord(input)) {
@@ -113,19 +129,69 @@ export class AllowlistLogRecordProcessor implements LogRecordProcessor {
         countDroppedTelemetry("unregistered_log_record");
         return;
       }
-      this.next.onEmit(sanitizedCopy(input, definition), context);
+      const sanitized = sanitizedCopy(input, definition);
+      if (this.options.gate !== undefined) {
+        const runId = Id.safeParse(sanitized.attributes["harness.run.id"]);
+        const result = await this.options.gate.check({
+          ...(runId.success ? { runId: runId.data } : {}),
+          text: serializeLogRecord(sanitized),
+        });
+        if (!result.ok) {
+          countDroppedTelemetry("leak_sentinel");
+          return;
+        }
+      }
+      this.next.onEmit(sanitized, context);
     } catch {
       countDroppedTelemetry("processor_error");
     }
   }
 
   /** Flushes the downstream processor. */
-  forceFlush(): Promise<void> {
-    return this.next.forceFlush();
+  async forceFlush(): Promise<void> {
+    await this.drain();
+    await this.next.forceFlush();
   }
 
   /** Shuts down the downstream processor. */
-  shutdown(): Promise<void> {
-    return this.next.shutdown();
+  async shutdown(): Promise<void> {
+    await this.drain();
+    await this.next.shutdown();
   }
+
+  private track(task: Promise<void>): void {
+    this.pending.add(task);
+    void task.then(() => this.pending.delete(task));
+  }
+
+  private async drain(): Promise<void> {
+    while (this.pending.size > 0) {
+      await Promise.all(this.pending);
+    }
+  }
+}
+
+function serializeLogRecord(record: ReadWriteLogRecord): string {
+  const fields = [record.eventName ?? "", record.body === undefined ? "" : String(record.body)];
+  appendAttributes(fields, record.attributes);
+  if (record.spanContext !== undefined) {
+    fields.push(record.spanContext.traceId, record.spanContext.spanId);
+  }
+  appendAttributes(fields, record.resource.attributes);
+  return fields.join("\u0000");
+}
+
+function appendAttributes(fields: string[], attributes: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(attributes).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    fields.push(key, canonicalValue(value));
+  }
+}
+
+function canonicalValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(value) ?? String(value);
 }

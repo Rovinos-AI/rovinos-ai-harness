@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, type Context } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
+import { Id, type TelemetryConfig } from "@harness/schemas";
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
@@ -13,6 +14,9 @@ import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { attr } from "../attr.js";
 import { defineSpan, __resetRegistryForTests } from "../registry.js";
 import { AllowlistSpanProcessor, sanitizeSpan } from "./allowlist-span-processor.js";
+import { ActiveRuns } from "../sentinel/active-runs.js";
+import { SentinelGate, SentinelRequiredError } from "../sentinel/gate.js";
+import { VaultRunView } from "../sentinel/run-values.js";
 
 const metricMocks = vi.hoisted(() => ({
   record: vi.fn<(reason: string) => void>(),
@@ -27,12 +31,17 @@ const context = {
   spanId: "2222222222222222",
   traceFlags: 1,
 };
+const disabledTelemetry: TelemetryConfig = {
+  sentinel: { minValueLength: 6, enabled: false },
+};
+const runId = Id.parse("A".repeat(26));
 
 function defineTestSpan() {
   return defineSpan("harness.test.operation", {
     "harness.request.id": attr.id(),
     "harness.test.count": attr.int(),
     "harness.test.mode": attr.enum(["fast", "safe"]),
+    "harness.run.id": attr.optional(attr.id()),
   });
 }
 
@@ -242,7 +251,7 @@ describe("AllowlistSpanProcessor", () => {
   it("delegates lifecycle methods and sends only sanitized spans downstream", async () => {
     const definition = defineTestSpan();
     const next = createNextProcessor();
-    const processor = new AllowlistSpanProcessor(next);
+    const processor = new AllowlistSpanProcessor(next, { telemetry: disabledTelemetry });
     const input = makeReadableSpan();
     const startSpan = definition.start({
       "harness.request.id": "00000000000000000000000000",
@@ -264,9 +273,9 @@ describe("AllowlistSpanProcessor", () => {
     expect(vi.mocked(next.shutdown)).toHaveBeenCalledOnce();
   });
 
-  it("drops unregistered and malformed spans without throwing into the SDK", () => {
+  it("drops unregistered and malformed spans without throwing into the SDK", async () => {
     const next = createNextProcessor();
-    const processor = new AllowlistSpanProcessor(next);
+    const processor = new AllowlistSpanProcessor(next, { telemetry: disabledTelemetry });
     defineTestSpan();
     const malformed = Object.defineProperty(makeReadableSpan(), "name", {
       get() {
@@ -280,6 +289,7 @@ describe("AllowlistSpanProcessor", () => {
     expect(() => {
       processor.onEnd(malformed);
     }).not.toThrow();
+    await processor.forceFlush();
     expect(next.onEnd).not.toHaveBeenCalled();
     expect(metricMocks.record.mock.calls).toEqual([["unregistered_span"], ["processor_error"]]);
   });
@@ -338,14 +348,15 @@ describe("AllowlistSpanProcessor", () => {
       name: `invalid ${name} attribute value`,
       span: withMalformedAttribute(value),
     })),
-  ])("does not throw or forward malformed input: $name", ({ span }) => {
+  ])("does not throw or forward malformed input: $name", async ({ span }) => {
     defineTestSpan();
     const next = createNextProcessor();
-    const processor = new AllowlistSpanProcessor(next);
+    const processor = new AllowlistSpanProcessor(next, { telemetry: disabledTelemetry });
 
     expect(() => {
       processor.onEnd(span);
     }).not.toThrow();
+    await processor.forceFlush();
 
     const forwarded = vi.mocked(next.onEnd).mock.calls.map(([value]) => value);
     expect(forwarded.length).toBeLessThanOrEqual(1);
@@ -384,7 +395,9 @@ describe("AllowlistSpanProcessor", () => {
 
   it("sends only sanitized spans through the real SDK exporter pipeline", async () => {
     const exporter = new InMemorySpanExporter();
-    const allowlist = new AllowlistSpanProcessor(new SimpleSpanProcessor(exporter));
+    const allowlist = new AllowlistSpanProcessor(new SimpleSpanProcessor(exporter), {
+      telemetry: disabledTelemetry,
+    });
     const provider = new BasicTracerProvider({ spanProcessors: [allowlist] });
     trace.setGlobalTracerProvider(provider);
     const definition = defineTestSpan();
@@ -399,6 +412,7 @@ describe("AllowlistSpanProcessor", () => {
       span.addEvent("exception", { "exception.message": "must not be exported" });
       span.setStatus({ code: SpanStatusCode.ERROR, message: "must not be exported" });
       span.end();
+      await provider.forceFlush();
 
       const [exported] = exporter.getFinishedSpans();
       expect(exported?.attributes).toEqual({
@@ -413,17 +427,18 @@ describe("AllowlistSpanProcessor", () => {
     }
   });
 
-  it("contains downstream processor failures and counts them", () => {
+  it("contains downstream processor failures and counts them", async () => {
     defineTestSpan();
     const next = createNextProcessor();
     vi.mocked(next.onEnd).mockImplementation(() => {
       throw new Error("downstream failure");
     });
-    const processor = new AllowlistSpanProcessor(next);
+    const processor = new AllowlistSpanProcessor(next, { telemetry: disabledTelemetry });
 
     expect(() => {
       processor.onEnd(makeReadableSpan());
     }).not.toThrow();
+    await processor.forceFlush();
     expect(metricMocks.record).toHaveBeenCalledWith("processor_error");
   });
 
@@ -432,7 +447,7 @@ describe("AllowlistSpanProcessor", () => {
     vi.mocked(next.onStart).mockImplementation(() => {
       throw new Error("downstream start failure");
     });
-    const processor = new AllowlistSpanProcessor(next);
+    const processor = new AllowlistSpanProcessor(next, { telemetry: disabledTelemetry });
     const startSpan = defineTestSpan().start({
       "harness.request.id": "00000000000000000000000000",
       "harness.test.count": 1,
@@ -444,5 +459,50 @@ describe("AllowlistSpanProcessor", () => {
       Reflect.apply(onStart, processor, [startSpan, ROOT_CONTEXT]);
     }).not.toThrow();
     expect(metricMocks.record).toHaveBeenCalledWith("processor_error");
+  });
+
+  it("drops a span when the sentinel hits its sanitized resource values", async () => {
+    defineTestSpan();
+    const next = createNextProcessor();
+    const canary = "private-service-name";
+    const activeRuns = new ActiveRuns();
+    activeRuns.register(runId);
+    const gate = new SentinelGate(
+      new VaultRunView({
+        version: async () => 1,
+        listRawValues: async () => [canary],
+      }),
+      activeRuns,
+    );
+    const processor = new AllowlistSpanProcessor(next, { gate });
+
+    processor.onEnd(
+      makeReadableSpan({
+        attributes: {
+          "harness.request.id": "00000000000000000000000000",
+          "harness.test.count": 3,
+          "harness.test.mode": "fast",
+          "harness.run.id": runId,
+        },
+        resource: resourceFromAttributes({ "service.name": canary }),
+      }),
+    );
+    await processor.forceFlush();
+
+    expect(next.onEnd).not.toHaveBeenCalled();
+    expect(metricMocks.record).toHaveBeenCalledWith("leak_sentinel");
+  });
+
+  it("requires a sentinel gate outside the explicit development opt-out", () => {
+    const next = createNextProcessor();
+
+    expect(() => new AllowlistSpanProcessor(next)).toThrow(SentinelRequiredError);
+    expect(
+      () =>
+        new AllowlistSpanProcessor(next, {
+          telemetry: disabledTelemetry,
+          nodeEnv: "production",
+        }),
+    ).toThrow(SentinelRequiredError);
   });
 });

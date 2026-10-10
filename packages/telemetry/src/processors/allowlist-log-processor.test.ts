@@ -2,11 +2,15 @@
 import { ROOT_CONTEXT, type Context, type SpanContext } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
+import { Id, type TelemetryConfig } from "@harness/schemas";
 import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { attr } from "../attr.js";
 import { __resetLogRegistryForTests, defineLogRecord } from "../log-registry.js";
 import { AllowlistLogRecordProcessor } from "./allowlist-log-processor.js";
+import { ActiveRuns } from "../sentinel/active-runs.js";
+import { SentinelGate, SentinelRequiredError } from "../sentinel/gate.js";
+import { VaultRunView } from "../sentinel/run-values.js";
 
 const metricMocks = vi.hoisted(() => ({
   record: vi.fn<(reason: string) => void>(),
@@ -21,11 +25,16 @@ const spanContext: SpanContext = {
   spanId: "2222222222222222",
   traceFlags: 1,
 };
+const disabledTelemetry: TelemetryConfig = {
+  sentinel: { minValueLength: 6, enabled: false },
+};
+const runId = Id.parse("A".repeat(26));
 
 function defineTestLogRecord() {
   return defineLogRecord("harness.test.log_record", {
     "harness.test.code": attr.code(),
     "harness.test.count": attr.nonnegativeInt(),
+    "harness.run.id": attr.optional(attr.id()),
   });
 }
 
@@ -73,10 +82,10 @@ describe("AllowlistLogRecordProcessor", () => {
     metricMocks.record.mockClear();
   });
 
-  it("forwards a fresh record with a registered body and only valid allowlisted attributes", () => {
+  it("forwards a fresh record with a registered body and only valid allowlisted attributes", async () => {
     const definition = defineTestLogRecord();
     const next = createNextProcessor();
-    const processor = new AllowlistLogRecordProcessor(next);
+    const processor = new AllowlistLogRecordProcessor(next, { telemetry: disabledTelemetry });
     const input = makeSdkLogRecord({
       attributes: {
         "harness.test.code": "safe_code",
@@ -90,6 +99,7 @@ describe("AllowlistLogRecordProcessor", () => {
     });
 
     processor.onEmit(input, ROOT_CONTEXT);
+    await processor.forceFlush();
 
     const sanitized = vi.mocked(next.onEmit).mock.calls[0]?.[0];
     expect(sanitized).toBeDefined();
@@ -108,13 +118,14 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(sanitized?.body).toBe(definition.name);
   });
 
-  it("drops unregistered records and records without a registered event name", () => {
+  it("drops unregistered records and records without a registered event name", async () => {
     const definition = defineTestLogRecord();
     const next = createNextProcessor();
-    const processor = new AllowlistLogRecordProcessor(next);
+    const processor = new AllowlistLogRecordProcessor(next, { telemetry: disabledTelemetry });
 
     processor.onEmit(makeSdkLogRecord({ eventName: "harness.test.missing" }));
     processor.onEmit(makeSdkLogRecord({ eventName: "", body: definition.name }));
+    await processor.forceFlush();
 
     expect(next.onEmit).not.toHaveBeenCalled();
     expect(metricMocks.record.mock.calls).toEqual([
@@ -123,10 +134,10 @@ describe("AllowlistLogRecordProcessor", () => {
     ]);
   });
 
-  it("preserves allowlisted resource attributes and drops all others", () => {
+  it("preserves allowlisted resource attributes and drops all others", async () => {
     defineTestLogRecord();
     const next = createNextProcessor();
-    const processor = new AllowlistLogRecordProcessor(next);
+    const processor = new AllowlistLogRecordProcessor(next, { telemetry: disabledTelemetry });
 
     processor.onEmit(
       makeSdkLogRecord({
@@ -141,6 +152,7 @@ describe("AllowlistLogRecordProcessor", () => {
         }),
       }),
     );
+    await processor.forceFlush();
 
     expect(next.onEmit.mock.calls[0]?.[0].resource.attributes).toEqual({
       "service.name": "harness",
@@ -152,10 +164,10 @@ describe("AllowlistLogRecordProcessor", () => {
     });
   });
 
-  it("drops malformed records and contains downstream processor errors", () => {
+  it("drops malformed records and contains downstream processor errors", async () => {
     defineTestLogRecord();
     const next = createNextProcessor();
-    const processor = new AllowlistLogRecordProcessor(next);
+    const processor = new AllowlistLogRecordProcessor(next, { telemetry: disabledTelemetry });
     const malformed = Object.defineProperty(makeSdkLogRecord(), "attributes", {
       get() {
         throw new Error("sensitive attributes");
@@ -165,18 +177,20 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(() => {
       processor.onEmit(malformed);
     }).not.toThrow();
+    await processor.forceFlush();
     vi.mocked(next.onEmit).mockImplementation(() => {
       throw new Error("downstream failure");
     });
     expect(() => {
       processor.onEmit(makeSdkLogRecord());
     }).not.toThrow();
+    await processor.forceFlush();
     expect(metricMocks.record.mock.calls).toEqual([["processor_error"], ["processor_error"]]);
   });
 
   it("delegates lifecycle methods and exposes the OpenTelemetry interface", async () => {
     const next = createNextProcessor();
-    const processor = new AllowlistLogRecordProcessor(next);
+    const processor = new AllowlistLogRecordProcessor(next, { telemetry: disabledTelemetry });
 
     await processor.forceFlush();
     await processor.shutdown();
@@ -184,5 +198,47 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(next.forceFlush).toHaveBeenCalledOnce();
     expect(next.shutdown).toHaveBeenCalledOnce();
     expectTypeOf(processor).toExtend<LogRecordProcessor>();
+  });
+
+  it("drops a log whose sanitized resource values contain a known raw value", async () => {
+    defineTestLogRecord();
+    const next = createNextProcessor();
+    const canary = "private-service-name";
+    const activeRuns = new ActiveRuns();
+    activeRuns.register(runId);
+    const gate = new SentinelGate(
+      new VaultRunView({ version: async () => 1, listRawValues: async () => [canary] }),
+      activeRuns,
+    );
+    const processor = new AllowlistLogRecordProcessor(next, { gate });
+
+    processor.onEmit(
+      makeSdkLogRecord({
+        resource: resourceFromAttributes({ "service.name": canary }),
+        attributes: {
+          "harness.test.code": "safe_code",
+          "harness.test.count": 2,
+          "harness.run.id": runId,
+        },
+      }),
+      ROOT_CONTEXT,
+    );
+    await processor.forceFlush();
+
+    expect(next.onEmit).not.toHaveBeenCalled();
+    expect(metricMocks.record).toHaveBeenCalledWith("leak_sentinel");
+  });
+
+  it("requires a sentinel gate outside the explicit development opt-out", () => {
+    const next = createNextProcessor();
+
+    expect(() => new AllowlistLogRecordProcessor(next)).toThrow(SentinelRequiredError);
+    expect(
+      () =>
+        new AllowlistLogRecordProcessor(next, {
+          telemetry: disabledTelemetry,
+          nodeEnv: "production",
+        }),
+    ).toThrow(SentinelRequiredError);
   });
 });

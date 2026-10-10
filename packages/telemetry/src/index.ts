@@ -31,3 +31,14 @@ export {
   type VaultRunReader,
   type VaultRunViewOptions,
 } from "./sentinel/run-values.js";
+export { ActiveRuns, activeRuns, type ActiveRunsOptions } from "./sentinel/active-runs.js";
+export {
+  assertSentinelGate,
+  SentinelGate,
+  SentinelRequiredError,
+  type SentinelGateOptions,
+  type SentinelGateResult,
+  type SentinelMatcherLike,
+  type SentinelTrip,
+} from "./sentinel/gate.js";
+export { createTelemetrySdk, type TelemetrySdk, type TelemetrySdkOptions } from "./sdk.js";

@@ -8,6 +8,7 @@ import {
   type Message,
   type RunConfig,
 } from "@harness/schemas";
+import { activeRuns } from "@harness/telemetry";
 import { BudgetTracker, type BudgetViolation } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
 import { foldRunState, planLastModelResponseRecovery, type RunState } from "./run-state.js";
@@ -138,7 +139,12 @@ export async function continueRunLoop(
       : { checkpointEveryEvents: options.checkpointEveryEvents }),
   });
   const execution = { runId, checkpointer, budgetTracker };
-  return runLoopSteps(options, events, execution);
+  activeRuns.register(runId);
+  try {
+    return await runLoopSteps(options, events, execution);
+  } finally {
+    activeRuns.terminate(runId);
+  }
 }
 
 async function recordBudgetFailure(

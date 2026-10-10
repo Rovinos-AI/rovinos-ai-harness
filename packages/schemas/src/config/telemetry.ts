@@ -5,6 +5,7 @@ import { z } from "zod";
 const TelemetrySentinelConfigSchema = z
   .object({
     minValueLength: z.number().int().min(1).default(6),
+    enabled: z.boolean().optional(),
   })
   .strict()
   .prefault({});
