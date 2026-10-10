@@ -11,7 +11,8 @@ import {
 import { activeRuns } from "@harness/telemetry";
 import { BudgetTracker, type BudgetViolation } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
-import { foldRunState, planLastModelResponseRecovery, type RunState } from "./run-state.js";
+import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from "./run-state.js";
+import type { RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
 import { modelStep, modelToolOptions, type ModelStepResult } from "./steps/model-step.js";
@@ -138,13 +139,24 @@ export async function continueRunLoop(
       : { checkpointEveryEvents: options.checkpointEveryEvents }),
   });
   const execution = { runId, checkpointer, budgetTracker };
-  return activeRuns.track(runId, () => runLoopSteps(options, events, execution));
+  const isTerminal = () => isTerminalRunState(foldRunState(events));
+  return activeRuns.track(runId, () => runLoopSteps(options, events, execution), isTerminal);
 }
 
-async function recordBudgetFailure(
+/**
+ * Records a budget failure and writes a checkpoint when the configured cadence requires one.
+ *
+ * @param recorder - Recorder for the active run segment.
+ * @param events - Complete event history, extended with the failure and optional checkpoint.
+ * @param violation - Budget limit exceeded by the folded run state.
+ * @param checkpointer - Checkpointer associated with the active run.
+ * @returns The run-status event that marks the run failed.
+ */
+export async function recordBudgetFailureAndCheckpoint(
   recorder: RunRecorder,
   events: Event[],
   violation: BudgetViolation,
+  checkpointer: Checkpointer,
 ): Promise<Event> {
   const recorded = await recorder.recordBatch([
     {
@@ -167,6 +179,7 @@ async function recordBudgetFailure(
   if (failed === undefined) {
     throw new Error("Expected budget failure events.");
   }
+  await checkpointAfterStep(checkpointer, events);
   return failed;
 }
 
@@ -200,26 +213,6 @@ async function requestModel(
     );
   }
   return result;
-}
-
-/**
- * Records a budget failure and writes a checkpoint when the configured cadence requires one.
- *
- * @param recorder - Recorder for the active run segment.
- * @param events - Complete event history, extended with the failure and optional checkpoint.
- * @param violation - Budget limit exceeded by the folded run state.
- * @param checkpointer - Checkpointer associated with the active run.
- * @returns The run-status event that marks the run failed.
- */
-export async function recordBudgetFailureAndCheckpoint(
-  recorder: RunRecorder,
-  events: Event[],
-  violation: BudgetViolation,
-  checkpointer: Checkpointer,
-): Promise<Event> {
-  const failed = await recordBudgetFailure(recorder, events, violation);
-  await checkpointAfterStep(checkpointer, events);
-  return failed;
 }
 
 async function recoverInterruptedModelResponse(

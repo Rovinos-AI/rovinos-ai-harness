@@ -20,6 +20,7 @@ import {
 } from "@opentelemetry/api";
 import {
   FakeClock,
+  Id,
   JsonValue,
   RunConfigSchema,
   SequentialIdGenerator,
@@ -35,6 +36,7 @@ import {
   type EventStore,
 } from "@harness/store";
 import { CalibratingTokenCounter, HeuristicTokenCounter, NaiveStrategy } from "@harness/context";
+import { activeRuns } from "@harness/telemetry";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";
@@ -1273,6 +1275,41 @@ describe("runLoop", () => {
 
     expect(resumed.status).toBe("completed");
     expect(calibrationAtResume).toEqual(savedCalibration);
+  });
+
+  it("keeps suspended runs registered through resume until completion", async () => {
+    const lifecycleRunId = Id.parse("66666666666666666666666666");
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const controller = new AbortController();
+    const model: ModelPort = {
+      complete: () => {
+        controller.abort("shutdown");
+        return Promise.resolve(completion());
+      },
+    };
+
+    const suspended = await runLoop({
+      recorder: new RunRecorder(store, lifecycleRunId, segmentId, 0, clock),
+      clock,
+      model,
+      tool: new FakeToolPort(),
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "retain suspended run",
+      configHash,
+      budgets: defaultBudgets,
+      policyVersion: "test.policy",
+      signal: controller.signal,
+    });
+
+    expect(suspended.status).toBe("suspended");
+    expect(activeRuns.runIds()).toContain(lifecycleRunId);
+
+    const resumed = await resumeRun(createResumeOptions(store, clock, { runId: lifecycleRunId }));
+
+    expect(resumed.status).toBe("completed");
+    expect(activeRuns.runIds()).toContain(lifecycleRunId);
   });
 
   it("forces a checkpoint when the run is suspended before the cadence", async () => {

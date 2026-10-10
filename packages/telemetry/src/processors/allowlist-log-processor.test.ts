@@ -232,6 +232,39 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(metricMocks.record).toHaveBeenCalledWith("leak_sentinel");
   });
 
+  it("serializes log attributes in locale-independent ordinal order", async () => {
+    defineLogRecord("harness.test.canonical_order", {
+      "harness.test.a_": attr.enum(["first"]),
+      "harness.test.aa": attr.enum(["second"]),
+    });
+    const next = createNextProcessor();
+    const gate = new SentinelGate(
+      new VaultRunView({
+        version: () => Promise.resolve(0),
+        listRawValues: () => Promise.resolve([]),
+      }),
+      new ActiveRuns(),
+    );
+    const check = vi.spyOn(gate, "check");
+    const processor = new AllowlistLogRecordProcessor(next, { gate });
+
+    processor.onEmit(
+      makeSdkLogRecord({
+        eventName: "harness.test.canonical_order",
+        attributes: { "harness.test.aa": "second", "harness.test.a_": "first" },
+      }),
+    );
+    await processor.forceFlush();
+
+    const captured = check.mock.calls[0]?.[0];
+    if (captured === undefined) {
+      throw new Error("Expected the gate to inspect the log record.");
+    }
+    expect(captured.text.indexOf("harness.test.a_")).toBeLessThan(
+      captured.text.indexOf("harness.test.aa"),
+    );
+  });
+
   it("requires a sentinel gate outside the explicit development opt-out", () => {
     const next = createNextProcessor();
 

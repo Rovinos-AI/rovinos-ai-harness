@@ -508,8 +508,9 @@ describe("AllowlistSpanProcessor", () => {
       result: "timeout",
       gateOptions: {
         now: (() => {
+          const times = [0, 0, 0, 6];
           let calls = 0;
-          return () => (calls++ === 0 ? 0 : 6);
+          return () => times[calls++] ?? 6;
         })(),
       },
     },
@@ -533,6 +534,39 @@ describe("AllowlistSpanProcessor", () => {
 
     expect(next.onEnd).not.toHaveBeenCalled();
     expect(metricMocks.record).toHaveBeenCalledWith("leak_sentinel");
+  });
+
+  it("serializes span attributes in locale-independent ordinal order", async () => {
+    const definition = defineSpan("harness.test.canonical_order", {
+      "harness.test.a_": attr.enum(["first"]),
+      "harness.test.aa": attr.enum(["second"]),
+    });
+    const next = createNextProcessor();
+    const gate = new SentinelGate(
+      new VaultRunView({
+        version: () => Promise.resolve(0),
+        listRawValues: () => Promise.resolve([]),
+      }),
+      new ActiveRuns(),
+    );
+    const check = vi.spyOn(gate, "check");
+    const processor = new AllowlistSpanProcessor(next, { gate });
+
+    processor.onEnd(
+      makeReadableSpan({
+        name: definition.name,
+        attributes: { "harness.test.aa": "second", "harness.test.a_": "first" },
+      }),
+    );
+    await processor.forceFlush();
+
+    const captured = check.mock.calls[0]?.[0];
+    if (captured === undefined) {
+      throw new Error("Expected the gate to inspect the span.");
+    }
+    expect(captured.text.indexOf("harness.test.a_")).toBeLessThan(
+      captured.text.indexOf("harness.test.aa"),
+    );
   });
 
   it("requires a sentinel gate outside the explicit development opt-out", () => {

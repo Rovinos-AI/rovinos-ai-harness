@@ -309,3 +309,8 @@ export function foldRunState(events: Iterable<Event>): RunState {
   const { planState, ...runState } = state;
   return planState.plan === undefined ? runState : { ...runState, plan: planState.plan };
 }
+
+/** Whether the folded run has reached a terminal status. */
+export function isTerminalRunState(state: RunState): boolean {
+  return state.status === "completed" || state.status === "failed" || state.status === "cancelled";
+}

@@ -42,6 +42,24 @@ describe("ActiveRuns", () => {
     expect(runs.runIds()).toEqual([]);
   });
 
+  it("retains suspended operations and terminates them after a terminal result", async () => {
+    const runs = new ActiveRuns({ graceMs: 0 });
+
+    await runs.track(
+      firstRun,
+      () => Promise.resolve("suspended"),
+      () => false,
+    );
+    expect(runs.runIds()).toEqual([firstRun]);
+
+    await runs.track(
+      firstRun,
+      () => Promise.resolve("completed"),
+      () => true,
+    );
+    expect(runs.runIds()).toEqual([]);
+  });
+
   it("rejects invalid grace periods", () => {
     expect(() => new ActiveRuns({ graceMs: -1 })).toThrow();
   });

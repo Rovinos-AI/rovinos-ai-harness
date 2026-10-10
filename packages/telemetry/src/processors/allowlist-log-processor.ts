@@ -183,7 +183,7 @@ function serializeLogRecord(record: ReadWriteLogRecord): string {
 
 function appendAttributes(fields: string[], attributes: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(attributes).sort(([left], [right]) =>
-    left.localeCompare(right),
+    left < right ? -1 : Number(left > right),
   )) {
     fields.push(key, canonicalValue(value));
   }

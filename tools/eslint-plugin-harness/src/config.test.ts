@@ -90,6 +90,64 @@ ruleTester.run("schema-inferred-types", harnessPlugin.rules["schema-inferred-typ
   ],
 });
 
+ruleTester.run("metric-registry-only", harnessPlugin.rules["metric-registry-only"], {
+  valid: [
+    {
+      code: 'meter.createCounter<NoMetricAttributes>("harness.test.count");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+    },
+    {
+      code: 'meter.createCounter<TelemetryDropAttributes>("harness.telemetry.dropped");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+    },
+    {
+      code: 'meter.createCounter("harness.test.count");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.test.ts"),
+    },
+    {
+      code: "values.add(value);",
+      filename: resolve(rootDirectory, "packages/core/src/loop.ts"),
+    },
+  ],
+  invalid: [
+    {
+      code: 'meter.createCounter("harness.test.count");',
+      filename: resolve(rootDirectory, "packages/core/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: 'meter["createHistogram"]("harness.test.latency");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/new-metric.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: 'meter.createCounter("harness.test.count");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: 'meter.createCounter<{ readonly freeText: string }>("harness.test.count");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: "const counterFactory = meter.createCounter;",
+      filename: resolve(rootDirectory, "packages/core/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: "const { createCounter } = meter;",
+      filename: resolve(rootDirectory, "packages/core/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+    {
+      code: 'createCounter("harness.test.count");',
+      filename: resolve(rootDirectory, "packages/core/src/metrics.ts"),
+      errors: [{ messageId: "forbidden" }],
+    },
+  ],
+});
+
 describe("ESLint configuration", () => {
   async function lint(code: string, filename = typescriptFixture) {
     const [result] = await eslint.lintText(code, { filePath: filename });
@@ -136,6 +194,12 @@ describe("ESLint configuration", () => {
       "import store from '../../store/src/index.js';",
       "harness/no-relative-packages",
       resolve(rootDirectory, "packages/telemetry/src/lint-fixture.js"),
+    ],
+    [
+      "metric instrument outside the central registry",
+      'meter.createCounter("harness.test.count");',
+      "harness/metric-registry-only",
+      typescriptFixture,
     ],
     [
       "focused test",

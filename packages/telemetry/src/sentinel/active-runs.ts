@@ -32,13 +32,25 @@ export class ActiveRuns {
     this.runs.set(runId, undefined);
   }
 
-  /** Register a run for the duration of an asynchronous run-loop operation. */
-  async track<T>(runId: Id, operation: () => Promise<T>): Promise<T> {
+  /** Track an operation, retaining its run unless the completion predicate says it is terminal. */
+  async track<T>(
+    runId: Id,
+    operation: () => Promise<T>,
+    isTerminal: () => boolean = () => true,
+  ): Promise<T> {
     this.register(runId);
     try {
       return await operation();
     } finally {
-      this.terminate(runId);
+      let terminal = false;
+      try {
+        terminal = isTerminal();
+      } catch {
+        terminal = false;
+      }
+      if (terminal) {
+        this.terminate(runId);
+      }
     }
   }
 

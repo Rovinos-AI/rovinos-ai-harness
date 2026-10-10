@@ -9,6 +9,7 @@ import type { VaultRunView } from "./run-values.js";
 const SentinelGateOptionsSchema = z
   .object({
     maxCombinedValues: z.number().int().positive().default(100_000),
+    maxPrepareMs: z.number().positive().default(250),
     maxScanMs: z.number().positive().default(5),
   })
   .strict();
@@ -57,6 +58,7 @@ export interface SentinelMatcherLike {
 /** Options for building a fail-closed export gate. */
 export interface SentinelGateOptions {
   readonly maxCombinedValues?: number;
+  readonly maxPrepareMs?: number;
   readonly maxScanMs?: number;
   readonly now?: () => number;
   readonly matcherForValues?: (values: readonly string[]) => SentinelMatcherLike;
@@ -68,12 +70,15 @@ interface CachedMatcher {
   readonly matcher: SentinelMatcherLike;
 }
 
+class SentinelPreparationTimeoutError extends Error {}
+
 /**
  * Selects cached run-scoped or active-run matchers and rejects any scan that hits,
  * errors, or exceeds its budget.
  */
 export class SentinelGate {
   private readonly maxCombinedValues: number;
+  private readonly maxPrepareMs: number;
   private readonly maxScanMs: number;
   private readonly now: () => number;
   private readonly matcherForValues: (values: readonly string[]) => SentinelMatcherLike;
@@ -86,18 +91,20 @@ export class SentinelGate {
   /**
    * @param values Versioned, read-only vault values.
    * @param runs Registry of process-local active and recently finished runs.
-   * @param options Scan budget, matcher and metadata-only trip hook.
+   * @param options Preparation and scan budgets, matcher and metadata-only trip hook.
    */
   constructor(
     private readonly values: VaultRunView,
     private readonly runs: ActiveRuns = activeRuns,
     options: SentinelGateOptions = {},
   ) {
-    const { maxCombinedValues, maxScanMs } = SentinelGateOptionsSchema.parse({
+    const { maxCombinedValues, maxPrepareMs, maxScanMs } = SentinelGateOptionsSchema.parse({
       maxCombinedValues: options.maxCombinedValues,
+      maxPrepareMs: options.maxPrepareMs,
       maxScanMs: options.maxScanMs,
     });
     this.maxCombinedValues = maxCombinedValues;
+    this.maxPrepareMs = maxPrepareMs;
     this.maxScanMs = maxScanMs;
     this.now = options.now ?? (() => performance.now());
     this.matcherForValues =
@@ -107,38 +114,77 @@ export class SentinelGate {
 
   /** Check canonicalized sanitized text against the relevant vault values. */
   async check(input: SentinelGateInput): Promise<SentinelGateResult> {
-    let startedAt = 0;
     let runId: Id | undefined;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const request = SentinelGateInputSchema.parse(input);
       runId = request.runId;
-      startedAt = this.now();
-      const timedOut = new Promise<SentinelGateResult>((resolve) => {
-        timeout = setTimeout(() => {
-          resolve({ ok: false, reason: "timeout" });
-        }, this.maxScanMs);
-      });
-      const scan = Promise.resolve().then(async (): Promise<SentinelGateResult> => {
-        const matcher =
-          request.runId === undefined
-            ? await this.globalMatcher()
-            : await this.runMatcher(request.runId);
-        return matcher.hasMatch(request.text) ? { ok: false, reason: "hit" } : { ok: true };
-      });
-      const result = await Promise.race([scan, timedOut]);
-      if ((!result.ok && result.reason === "timeout") || this.now() - startedAt > this.maxScanMs) {
-        this.enqueueTrip(runId, "timeout");
-        return { ok: false, reason: "timeout" };
+      let matcher: SentinelMatcherLike;
+      try {
+        matcher = await this.prepareMatcher(request);
+      } catch (error) {
+        const reason = error instanceof SentinelPreparationTimeoutError ? "timeout" : "error";
+        this.enqueueTrip(runId, reason);
+        return { ok: false, reason };
       }
-      if (!result.ok) {
-        this.enqueueTrip(runId, result.reason);
-        return result;
+
+      const scanStartedAt = this.now();
+      let matched: boolean;
+      try {
+        matched = matcher.hasMatch(request.text);
+      } catch {
+        const reason = this.scanStatus(scanStartedAt) === "timeout" ? "timeout" : "error";
+        this.enqueueTrip(runId, reason);
+        return { ok: false, reason };
       }
-      return result;
+      const scanStatus = this.scanStatus(scanStartedAt);
+      if (scanStatus !== "ok") {
+        const reason = scanStatus === "timeout" ? "timeout" : "error";
+        this.enqueueTrip(runId, reason);
+        return { ok: false, reason };
+      }
+      if (matched) {
+        this.enqueueTrip(runId, "hit");
+        return { ok: false, reason: "hit" };
+      }
+      return { ok: true };
     } catch {
       this.enqueueTrip(runId, "error");
       return { ok: false, reason: "error" };
+    }
+  }
+
+  /** Drain queued metadata-only trip notifications for the run loop. */
+  drainTrips(): readonly SentinelTrip[] {
+    return this.trips.splice(0).map((trip) => ({ ...trip }));
+  }
+
+  private async prepareMatcher(request: SentinelGateInput): Promise<SentinelMatcherLike> {
+    const startedAt = this.now();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const matcher = await Promise.race([
+        request.runId === undefined ? this.globalMatcher() : this.runMatcher(request.runId),
+        new Promise<undefined>((resolve) => {
+          timeout = setTimeout(() => {
+            resolve(undefined);
+          }, this.maxPrepareMs);
+        }),
+      ]);
+      if (matcher === undefined || this.now() - startedAt > this.maxPrepareMs) {
+        throw new SentinelPreparationTimeoutError();
+      }
+      return matcher;
+    } catch (error) {
+      let timedOut: boolean;
+      try {
+        timedOut = this.now() - startedAt > this.maxPrepareMs;
+      } catch {
+        throw error;
+      }
+      if (timedOut) {
+        throw new SentinelPreparationTimeoutError();
+      }
+      throw error;
     } finally {
       if (timeout !== undefined) {
         clearTimeout(timeout);
@@ -146,9 +192,12 @@ export class SentinelGate {
     }
   }
 
-  /** Drain queued metadata-only trip notifications for the run loop. */
-  drainTrips(): readonly SentinelTrip[] {
-    return this.trips.splice(0).map((trip) => ({ ...trip }));
+  private scanStatus(startedAt: number): "ok" | "timeout" | "error" {
+    try {
+      return this.now() - startedAt > this.maxScanMs ? "timeout" : "ok";
+    } catch {
+      return "error";
+    }
   }
 
   private async runMatcher(runId: Id): Promise<SentinelMatcherLike> {
@@ -186,11 +235,13 @@ export class SentinelGate {
     }
     const combined = [...new Set(valueSets.flatMap(({ valueSet }) => [...valueSet.values]))];
     if (combined.length > this.maxCombinedValues) {
-      countSentinelScopeReduced();
       const matchers = await Promise.all(valueSets.map(({ runId }) => this.runMatcher(runId)));
-      return {
-        hasMatch: (text) => matchers.some((matcher) => matcher.hasMatch(text)),
+      const matcher = {
+        hasMatch: (text: string) => matchers.some((runMatcher) => runMatcher.hasMatch(text)),
       };
+      this.combinedMatcher = { key, matcher };
+      countSentinelScopeReduced();
+      return matcher;
     }
     const matcher = this.matcherForValues(combined);
     this.combinedMatcher = { key, matcher };

@@ -105,6 +105,7 @@ describe("SentinelGate", () => {
       ok: false,
       reason: "hit",
     });
+    await expect(gate.check({ text: "safe" })).resolves.toEqual({ ok: true });
     expect(countSentinelScopeReduced).toHaveBeenCalledOnce();
     expect(matcherForValues).toHaveBeenCalledTimes(2);
   });
@@ -142,9 +143,10 @@ describe("SentinelGate", () => {
       reason: "error",
     });
 
+    const clockValues = [0, 0, 10, 16];
     let clockCalls = 0;
     const slowClockGate = new SentinelGate(values, new ActiveRuns(), {
-      now: () => (clockCalls++ === 0 ? 0 : 6),
+      now: () => clockValues[clockCalls++] ?? 16,
     });
     await expect(slowClockGate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({
       ok: false,
@@ -179,10 +181,88 @@ describe("SentinelGate", () => {
       listRawValues: () => Promise.resolve([]),
     };
     const gate = new SentinelGate(new VaultRunView(slowReader), new ActiveRuns(), {
-      maxScanMs: 1,
+      maxPrepareMs: 1,
     });
 
     await expect(gate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({
+      ok: false,
+      reason: "timeout",
+    });
+  });
+
+  it("does not charge slow vault preparation to the scan budget", async () => {
+    const slowReader: VaultRunReader = {
+      version: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return 1;
+      },
+      listRawValues: () => Promise.resolve(["known-value"]),
+    };
+    const gate = new SentinelGate(new VaultRunView(slowReader), new ActiveRuns(), {
+      maxPrepareMs: 100,
+      maxScanMs: 5,
+      matcherForValues: () => ({ hasMatch: () => false }),
+    });
+
+    await expect(gate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({ ok: true });
+  });
+
+  it("classifies over-budget matcher preparation failures as timeouts", async () => {
+    let now = 0;
+    const gate = new SentinelGate(
+      new VaultRunView(createReader(new Map([[firstRun, ["known-value"]]]))),
+      new ActiveRuns(),
+      {
+        maxPrepareMs: 5,
+        now: () => now,
+        matcherForValues: () => {
+          now = 6;
+          throw new Error("slow matcher build failed");
+        },
+      },
+    );
+
+    await expect(gate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({
+      ok: false,
+      reason: "timeout",
+    });
+  });
+
+  it("times out a slow scan and a slow scan that throws", async () => {
+    let now = 0;
+    const slowGate = new SentinelGate(
+      new VaultRunView(createReader(new Map([[firstRun, ["known-value"]]]))),
+      new ActiveRuns(),
+      {
+        now: () => now,
+        matcherForValues: () => ({
+          hasMatch: () => {
+            now = 6;
+            return false;
+          },
+        }),
+      },
+    );
+    await expect(slowGate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({
+      ok: false,
+      reason: "timeout",
+    });
+
+    now = 0;
+    const slowThrowGate = new SentinelGate(
+      new VaultRunView(createReader(new Map([[firstRun, ["known-value"]]]))),
+      new ActiveRuns(),
+      {
+        now: () => now,
+        matcherForValues: () => ({
+          hasMatch: () => {
+            now = 6;
+            throw new Error("slow matcher failure");
+          },
+        }),
+      },
+    );
+    await expect(slowThrowGate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({
       ok: false,
       reason: "timeout",
     });

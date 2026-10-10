@@ -119,6 +119,24 @@ const createNoRelativePackages = (layerNames) => {
 /** @type {(node: Node) => string | undefined} */
 const identifierName = (node) => (node.type === AST_NODE_TYPES.Identifier ? node.name : undefined);
 
+/**
+ * @param {Node} node
+ * @param {boolean} computed
+ * @returns {string | undefined}
+ */
+const propertyName = (node, computed) => {
+  if (computed && node.type === AST_NODE_TYPES.Literal) {
+    return typeof node.value === "string" ? node.value : undefined;
+  }
+  return identifierName(node);
+};
+
+/** @type {(node: Node) => string | undefined} */
+const memberPropertyName = (node) =>
+  node.type === AST_NODE_TYPES.MemberExpression
+    ? propertyName(node.property, node.computed)
+    : undefined;
+
 /** @type {HarnessRule["create"]} */
 const createSchemaInferredTypes = (context) => {
   const schemaNames = new Set();
@@ -188,11 +206,78 @@ const createSchemaInferredTypes = (context) => {
   };
 };
 
+/** @type {HarnessRule["create"]} */
+const createMetricRegistryOnly = (context) => {
+  const segments = context.filename.split(path.sep);
+  const isRegistry =
+    segments.at(-1) === "metrics.ts" &&
+    segments.at(-2) === "src" &&
+    segments.at(-3) === "telemetry" &&
+    segments.at(-4) === "packages";
+  const isMetricTest = segments.at(-1) === "metrics.test.ts";
+  if (isMetricTest) {
+    return {};
+  }
+  const instrumentFactories = new Set([
+    "createCounter",
+    "createGauge",
+    "createHistogram",
+    "createObservableCounter",
+    "createObservableGauge",
+    "createObservableUpDownCounter",
+    "createUpDownCounter",
+  ]);
+  return {
+    CallExpression(node) {
+      const property =
+        node.callee.type === AST_NODE_TYPES.MemberExpression
+          ? memberPropertyName(node.callee)
+          : identifierName(node.callee);
+      if (typeof property !== "string" || !instrumentFactories.has(property)) {
+        return;
+      }
+      if (!isRegistry) {
+        context.report({ node, messageId: "forbidden" });
+        return;
+      }
+      const attributesType = node.typeArguments?.params[0];
+      const attributesTypeName =
+        attributesType?.type === AST_NODE_TYPES.TSTypeReference
+          ? identifierName(attributesType.typeName)
+          : undefined;
+      if (
+        attributesTypeName !== "NoMetricAttributes" &&
+        attributesTypeName !== "TelemetryDropAttributes"
+      ) {
+        context.report({ node, messageId: "forbidden" });
+      }
+    },
+    VariableDeclarator(node) {
+      const initializer = node.init;
+      const memberName =
+        initializer?.type === AST_NODE_TYPES.MemberExpression
+          ? memberPropertyName(initializer)
+          : undefined;
+      const memberFactory = memberName !== undefined && instrumentFactories.has(memberName);
+      const destructuredFactory =
+        node.id.type === AST_NODE_TYPES.ObjectPattern &&
+        node.id.properties.some(
+          (property) =>
+            property.type === AST_NODE_TYPES.Property &&
+            instrumentFactories.has(propertyName(property.key, property.computed) ?? ""),
+        );
+      if (memberFactory || destructuredFactory) {
+        context.report({ node, messageId: "forbidden" });
+      }
+    },
+  };
+};
+
 /**
  * Creates the lint rules using the validated package-layer configuration.
  *
  * @param {PackageLayers} packageLayers - The internal package dependency map.
- * @returns {{meta: {name: string}, rules: {"import-direction": HarnessRule, "no-relative-packages": HarnessRule, "schema-inferred-types": HarnessRule}}}
+ * @returns {{meta: {name: string}, rules: {"import-direction": HarnessRule, "no-relative-packages": HarnessRule, "schema-inferred-types": HarnessRule, "metric-registry-only": HarnessRule}}}
  */
 export const createHarnessPlugin = (packageLayers) => {
   const layerNames = new Set(Object.keys(packageLayers).filter((name) => !name.startsWith("$")));
@@ -233,6 +318,18 @@ export const createHarnessPlugin = (packageLayers) => {
     },
     create: createSchemaInferredTypes,
   };
+  /** @type {HarnessRule} */
+  const metricRegistryOnly = {
+    meta: {
+      type: "problem",
+      docs: { description: "centralize metric instruments and writes in the typed registry" },
+      schema: [],
+      messages: {
+        forbidden: "Declare metric instruments only in packages/telemetry/src/metrics.ts.",
+      },
+    },
+    create: createMetricRegistryOnly,
+  };
 
   return {
     meta: { name: "@harness/eslint-plugin-harness" },
@@ -240,6 +337,7 @@ export const createHarnessPlugin = (packageLayers) => {
       "import-direction": importDirection,
       "no-relative-packages": noRelativePackages,
       "schema-inferred-types": schemaInferredTypes,
+      "metric-registry-only": metricRegistryOnly,
     },
   };
 };
