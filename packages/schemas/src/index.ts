@@ -81,7 +81,14 @@ export {
 } from "./config/models.js";
 export { ServerConfigSchema } from "./config/servers.js";
 export { PolicyConfigSchema } from "./config/policy.js";
-export { PiiConfigSchema, type PiiConfig } from "./config/pii.js";
+export {
+  JsonPointerSchema,
+  PiiConfigSchema,
+  PiiDetokenizeRuleSchema,
+  type JsonPointer,
+  type PiiConfig,
+  type PiiDetokenizeRule,
+} from "./config/pii.js";
 export {
   CustomDetectorSchema,
   DetectionSchema,

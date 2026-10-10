@@ -46,7 +46,7 @@ describe("StrategyContextPort", () => {
     const snapshot = await context.snapshot();
     expect(snapshot).toEqual({
       strategyId: "naive",
-      strategyVersion: "v2",
+      strategyVersion: "v3",
       calibration,
     });
 
