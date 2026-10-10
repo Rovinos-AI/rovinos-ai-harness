@@ -82,9 +82,14 @@ function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
     throw new OutputWithToolsUnsupportedError();
   }
 
-  const rung = selectEnforcementRung(capabilities, maxRung);
   const schemaRules = providerSchemaRules(request.model.provider);
-  if (rung === undefined || (schemaRules === undefined && rung !== "prompt")) {
+  const rung =
+    schemaRules === undefined
+      ? maxRung === "native" || maxRung === "tool"
+        ? undefined
+        : "prompt"
+      : selectEnforcementRung(capabilities, maxRung);
+  if (rung === undefined) {
     throw new EnforcementRungUnavailableError();
   }
 

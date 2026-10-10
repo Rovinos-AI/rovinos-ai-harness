@@ -650,6 +650,36 @@ describe("ModelGateway", () => {
     });
   });
 
+  it("uses prompt validation instead of unsupported native schema lowering", async () => {
+    const adapter: ProviderAdapter = {
+      provider: "unknown_provider",
+      capabilities: { structuredOutput: "native" },
+      complete: () =>
+        Promise.resolve({
+          parts: [{ type: "text", text: '{"answer":"ok"}' }],
+          usage: { inputTokens: 0, outputTokens: 0 },
+          finishReason: "stop",
+          latencyMs: 0,
+        }),
+    };
+    const gateway = new ModelGateway(
+      new AdapterRegistry([adapter]),
+      { ids: { next: () => request.requestId }, clock: { now: () => 0 } },
+      { maxRung: "prompt" },
+    );
+
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "unknown_provider", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema: z.object({ answer: z.string() }),
+      },
+    );
+
+    expect(completion.rungUsed).toBe("prompt");
+  });
+
   it("strips unexpected tool calls returned by the prompt rung", async () => {
     const adapter: ProviderAdapter = {
       provider: "openai",
@@ -776,7 +806,7 @@ describe("ModelGateway", () => {
     expect(provider.requests).toEqual([]);
   });
 
-  it("rejects native structured output when the provider has no schema rules", async () => {
+  it("rejects prompt fallback when maxRung disallows unsupported provider schemas", async () => {
     const complete = vi.fn(() =>
       Promise.resolve({
         parts: [{ type: "text" as const, text: '{"answer":"ok"}' }],
@@ -790,10 +820,14 @@ describe("ModelGateway", () => {
       capabilities: { structuredOutput: "native" },
       complete,
     };
-    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
-      ids: { next: () => request.requestId },
-      clock: { now: () => 0 },
-    });
+    const gateway = new ModelGateway(
+      new AdapterRegistry([adapter]),
+      {
+        ids: { next: () => request.requestId },
+        clock: { now: () => 0 },
+      },
+      { maxRung: "native" },
+    );
 
     await expect(
       gateway.complete(
