@@ -71,7 +71,8 @@ describe("SummarizingStrategy", () => {
       throw new Error("build must not summarize");
     });
     const strategy = new SummarizingStrategy(model);
-    const result = await strategy.build(input({ count: () => 3 }));
+    const buildInput = { ...input({ count: () => 3 }), summarizer: { summarize } };
+    const result = await strategy.build(buildInput);
 
     expect(result.messages).toHaveLength(2);
     expect(summarize).not.toHaveBeenCalled();
