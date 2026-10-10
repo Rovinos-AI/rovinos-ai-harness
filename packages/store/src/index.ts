@@ -8,6 +8,7 @@ export type { ContentCodec, ContentCodecContext, EncodedContent } from "./codec.
 export type { PostgresEventStoreOptions } from "./postgres/adapter.js";
 export {
   snapshotStoreOptionsSchema,
+  type Clock,
   type EventStore,
   type ListRunsOptions,
   type RunSummary,

@@ -38,4 +38,10 @@ export const SQLITE_SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS snapshots_run_at_seq_idx ON snapshots (run_id, at_seq DESC);
+
+  CREATE TABLE IF NOT EXISTS sink_cursors (
+    sink_id TEXT PRIMARY KEY,
+    cursor INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
 `;

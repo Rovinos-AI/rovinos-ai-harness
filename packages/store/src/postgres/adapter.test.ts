@@ -16,6 +16,7 @@ interface FakeRun {
 }
 
 interface FakeEvent {
+  global_seq: number;
   run_id: string;
   seq: number;
   ts: number;
@@ -46,6 +47,7 @@ let transactionBackup:
   | {
       runs: Map<string, FakeRun>;
       events: FakeEvent[];
+      sinkCursors: Map<string, number>;
       snapshots: FakeSnapshot[];
     }
   | undefined;
@@ -53,6 +55,7 @@ let transactionBackup:
 const fakePg = vi.hoisted(() => ({
   runs: new Map<string, FakeRun>(),
   events: new Array<FakeEvent>(),
+  sinkCursors: new Map<string, number>(),
   snapshots: new Array<FakeSnapshot>(),
   schemaInitialized: false,
   handler: (_sql: string, _values: unknown[]): FakeQueryResult => ({ rows: [] }),
@@ -119,6 +122,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     transactionBackup = {
       runs: structuredClone(fakePg.runs),
       events: structuredClone(fakePg.events),
+      sinkCursors: structuredClone(fakePg.sinkCursors),
       snapshots: structuredClone(fakePg.snapshots),
     };
     return { rows: [] };
@@ -134,6 +138,10 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
         fakePg.runs.set(runId, run);
       }
       fakePg.events.splice(0, fakePg.events.length, ...transactionBackup.events);
+      fakePg.sinkCursors.clear();
+      for (const [sinkId, cursor] of transactionBackup.sinkCursors) {
+        fakePg.sinkCursors.set(sinkId, cursor);
+      }
       fakePg.snapshots.splice(0, fakePg.snapshots.length, ...transactionBackup.snapshots);
       transactionBackup = undefined;
     }
@@ -171,6 +179,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       }
       const meta = parseJson(z.record(z.string(), z.json()), text(values[offset + 7]));
       fakePg.events.push({
+        global_seq: fakePg.events.length + 1,
         run_id: runId,
         seq,
         ts: number(values[offset + 2]),
@@ -274,6 +283,29 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
         .map(([run_id]) => ({ run_id })),
     };
   }
+  if (query.startsWith("SELECT cursor FROM sink_cursors")) {
+    const cursor = fakePg.sinkCursors.get(text(values[0]));
+    return { rows: cursor === undefined ? [] : [{ cursor }] };
+  }
+  if (query.startsWith("INSERT INTO sink_cursors")) {
+    const sinkId = text(values[0]);
+    const cursor = number(values[1]);
+    const previous = fakePg.sinkCursors.get(sinkId) ?? 0;
+    if (cursor > previous) {
+      fakePg.sinkCursors.set(sinkId, cursor);
+    }
+    return { rows: [] };
+  }
+  if (query.startsWith("SELECT global_seq, run_id, seq, ts, type")) {
+    const cursor = number(values[0]);
+    const limit = number(values[1]);
+    return {
+      rows: fakePg.events
+        .filter(({ global_seq }) => global_seq > cursor)
+        .sort((first, second) => first.global_seq - second.global_seq)
+        .slice(0, limit),
+    };
+  }
   if (query.startsWith("SELECT runs.run_id")) {
     const status = values[0] === null ? undefined : text(values[0]);
     const createdAt = values[1] === null ? undefined : number(values[1]);
@@ -308,6 +340,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
 beforeEach(() => {
   fakePg.runs.clear();
   fakePg.events.length = 0;
+  fakePg.sinkCursors.clear();
   fakePg.snapshots.length = 0;
   transactionBackup = undefined;
   fakePg.schemaInitialized = false;

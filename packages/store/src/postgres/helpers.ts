@@ -55,6 +55,11 @@ export const POSTGRES_SCHEMA = `
     key_id text
   );
   CREATE INDEX IF NOT EXISTS snapshots_run_at_seq_idx ON snapshots (run_id, at_seq DESC);
+  CREATE TABLE IF NOT EXISTS sink_cursors (
+    sink_id text PRIMARY KEY,
+    cursor bigint NOT NULL,
+    updated_at bigint NOT NULL
+  );
 `;
 
 /** Database representation of one persisted event row. */
@@ -390,6 +395,10 @@ export async function appendTransaction(
       throw new InvalidEventError([[0, "type"]]);
     }
 
+    // Hold the outbox lock through commit so a later cursor cannot skip a late lower-sequence commit.
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext(current_schema()), hashtext('events_outbox'))",
+    );
     const status = nextStatus(run.status, encoded);
     await insertEventBatches(client, encoded, {
       runId,

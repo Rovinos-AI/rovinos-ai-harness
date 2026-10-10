@@ -8,6 +8,7 @@ import {
   parseJson,
   splitEvent,
   type Event as StoredEvent,
+  type Code,
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
@@ -22,9 +23,17 @@ import {
   type EncodedSnapshot,
   type SnapshotRow,
 } from "../codec.js";
-import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "../errors.js";
-import type { EventStore, ListRunsOptions, RunSummary, SnapshotStoreOptions } from "../types.js";
+import { InvalidEventError, SeqConflictError } from "../errors.js";
+import {
+  systemClock,
+  type Clock,
+  type EventStore,
+  type ListRunsOptions,
+  type RunSummary,
+  type SnapshotStoreOptions,
+} from "../types.js";
 import { SQLITE_SCHEMA } from "./schema.sql.js";
+import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
 import {
   decodeStoredContent,
   eventFromRow,
@@ -110,19 +119,6 @@ function runListPage(
   return nextCursor === undefined ? { runs } : { runs, nextCursor };
 }
 
-function storeError(error: unknown): Error {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof error.code === "string" &&
-    error.code.startsWith("SQLITE_BUSY")
-  ) {
-    return new StoreUnavailableError();
-  }
-  return error instanceof Error ? error : new StoreUnavailableError();
-}
-
 function decodeCursor(cursor: string): { createdAt: number; runId: Id } {
   try {
     const decoded = Buffer.from(cursor, "base64url").toString("utf8");
@@ -171,6 +167,7 @@ export class SqliteEventStore implements EventStore {
   private readonly pruneSnapshots: Database.Statement<[Id, Id, number]>;
   private readonly latestSnapshotQuery: Database.Statement<[Id], SnapshotRow>;
   private readonly snapshotKeep: number;
+  private readonly outbox: SqliteOutboxReader;
 
   /**
    * Open a SQLite database and initialize its initial schema.
@@ -183,6 +180,7 @@ export class SqliteEventStore implements EventStore {
     path: string,
     codec: ContentCodec = new JsonContentCodec(),
     options: SnapshotStoreOptions = {},
+    clock: Clock = systemClock,
   ) {
     const retainedSnapshotCount = snapshotKeep(options);
     this.db = new Database(path);
@@ -193,6 +191,7 @@ export class SqliteEventStore implements EventStore {
     this.db.pragma("busy_timeout = 5000");
     this.db.pragma("foreign_keys = ON");
     this.db.exec(SQLITE_SCHEMA);
+    this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
 
     this.insertRun = this.db.prepare<[Id, number, number]>(
       "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES (?, ?, 'pending', 0, ?)",
@@ -417,6 +416,19 @@ export class SqliteEventStore implements EventStore {
     } catch (error) {
       return Promise.reject(storeError(error));
     }
+  }
+
+  /** {@inheritDoc EventStore.fetchOutbox} */
+  async fetchOutbox(
+    sinkId: Code,
+    limit: number,
+  ): Promise<{ events: StoredEvent[]; cursor: number }> {
+    return this.outbox.fetch(sinkId, limit);
+  }
+
+  /** {@inheritDoc EventStore.ackOutbox} */
+  ackOutbox(sinkId: Code, cursor: number): Promise<void> {
+    return this.outbox.ack(sinkId, cursor);
   }
 
   /** {@inheritDoc EventStore.close} */
