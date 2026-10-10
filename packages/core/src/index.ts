@@ -118,3 +118,4 @@ export {
   type RoleRegistryWarning,
   type RoleSchemaLoader,
 } from "./roles.js";
+export { RunScopeConflictError, RunScopeRegistry } from "./subagent/scope.js";
