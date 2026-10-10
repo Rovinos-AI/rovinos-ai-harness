@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Code, type KeyProvider } from "@harness/schemas";
+import type { VaultRunReader } from "@harness/telemetry";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryVault } from "./memory.js";
 import { runVaultConformance } from "./conformance.test-helpers.js";
@@ -52,6 +53,16 @@ runVaultConformance("SqliteVault conformance", () => {
 });
 
 describe("SqliteVault", () => {
+  it("satisfies the telemetry read-only reader interface", () => {
+    const memoryReader: VaultRunReader = new InMemoryVault();
+    const sqliteVault = new SqliteVault(":memory:", keyProvider);
+    const sqliteReader: VaultRunReader = sqliteVault;
+
+    expect(memoryReader).toBeInstanceOf(InMemoryVault);
+    expect(sqliteReader).toBe(sqliteVault);
+    sqliteVault.close();
+  });
+
   it("resolves the migration relative to the compiled module location", async () => {
     const compiledModule = new URL("../dist/sqlite.js", import.meta.url);
     const migrationPath = new URL("../migrations/sqlite/0001_init.sql", compiledModule);

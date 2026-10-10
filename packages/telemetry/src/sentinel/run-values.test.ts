@@ -2,8 +2,13 @@
 import { inspect } from "node:util";
 import { Id } from "@harness/schemas";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { countSkippedShortValues } from "../metrics.js";
 import { StaticVaultReader } from "../testing.js";
 import { RunValueSet, VaultRunView, type VaultRunReader } from "./run-values.js";
+
+vi.mock("../metrics.js", () => ({
+  countSkippedShortValues: vi.fn(),
+}));
 
 const runId = Id.parse("A".repeat(26));
 
@@ -58,6 +63,26 @@ describe("VaultRunView", () => {
       values: ["long-value"],
       skippedShort: 3,
     });
+    expect(countSkippedShortValues).toHaveBeenCalledOnce();
+    expect(countSkippedShortValues).toHaveBeenCalledWith(3);
+  });
+
+  it("counts only newly skipped short values when refreshing", async () => {
+    let version = 1;
+    let rawValues = ["x", "y", "z"];
+    const reader: VaultRunReader = {
+      version: () => Promise.resolve(version),
+      listRawValues: () => Promise.resolve(rawValues),
+    };
+    const view = new VaultRunView(reader);
+
+    await view.valuesFor(runId);
+    version = 2;
+    rawValues = ["x", "y", "z", "long-value"];
+    await view.valuesFor(runId);
+
+    expect(countSkippedShortValues).toHaveBeenCalledOnce();
+    expect(countSkippedShortValues).toHaveBeenCalledWith(3);
   });
 
   it("accepts a configured minimum length", async () => {

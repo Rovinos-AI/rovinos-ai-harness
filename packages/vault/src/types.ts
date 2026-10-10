@@ -64,7 +64,7 @@ export interface VaultReader {
   listRawValues(runId: Id): Promise<readonly string[]>;
 
   /**
-   * Return a version that increases when a new entry is added to the run.
+   * Return a monotonic version that increases when an entry is added or removed by purge.
    * @param runId Run to inspect.
    * @returns The monotonically increasing run value version.
    */

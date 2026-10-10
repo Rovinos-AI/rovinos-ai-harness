@@ -13,7 +13,7 @@ const MAX_CACHED_RUNS = 64;
 export interface VaultRunReader {
   /** List raw values owned by a run. */
   listRawValues(runId: Id): Promise<readonly string[]>;
-  /** Return a version that changes when a new run value is added. */
+  /** Return a monotonic version that changes when run values are added or purged. */
   version(runId: Id): Promise<number>;
 }
 
@@ -114,8 +114,9 @@ export class VaultRunView {
     }
 
     const valueSet = new RunValueSet(version, [...uniqueValues], skippedShort);
-    if (skippedShort > 0) {
-      countSkippedShortValues(skippedShort);
+    const newlySkippedShort = Math.max(0, skippedShort - (cached?.valueSet.skippedShort ?? 0));
+    if (newlySkippedShort > 0) {
+      countSkippedShortValues(newlySkippedShort);
     }
     this.touch(runId, { version, valueSet });
     this.evictOverflow();

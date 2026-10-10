@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
+import { VaultRunView, type VaultRunReader } from "@harness/telemetry";
 import type { VaultAdmin, VaultReader, VaultResolver, VaultWriter } from "./types.js";
 
 type Vault = VaultWriter & VaultResolver & VaultReader & VaultAdmin;
@@ -63,8 +64,16 @@ export function runVaultConformance(name: string, createVault: VaultFactory): vo
       const harness = await createVault();
       try {
         const token = await harness.vault.put(runId, "email", "alice@example.test");
+        const reader: VaultRunReader = harness.vault;
+        const view = new VaultRunView(reader);
+        await expect(view.valuesFor(runId)).resolves.toMatchObject({
+          values: ["alice@example.test"],
+        });
+        const versionBeforePurge = await harness.vault.version(runId);
         await expect(harness.vault.resolve(runId, "<EMAIL_2>")).resolves.toBeUndefined();
         await expect(harness.vault.purge(runId)).resolves.toBe(1);
+        await expect(harness.vault.version(runId)).resolves.toBeGreaterThan(versionBeforePurge);
+        await expect(view.valuesFor(runId)).resolves.toMatchObject({ values: [] });
         await expect(harness.vault.purge(runId)).resolves.toBe(0);
         await expect(harness.vault.resolve(runId, token)).resolves.toBeUndefined();
         await expect(harness.vault.stats(runId)).resolves.toEqual({ entries: 0 });
@@ -92,8 +101,10 @@ export function runVaultConformance(name: string, createVault: VaultFactory): vo
         expect(secondVersion).toBeGreaterThan(firstVersion);
 
         await harness.vault.purge(runId);
+        const purgedVersion = await harness.vault.version(runId);
+        expect(purgedVersion).toBeGreaterThan(secondVersion);
         await harness.vault.put(runId, "email", "carol@example.test");
-        await expect(harness.vault.version(runId)).resolves.toBeGreaterThan(secondVersion);
+        await expect(harness.vault.version(runId)).resolves.toBeGreaterThan(purgedVersion);
       } finally {
         await harness.cleanup();
       }
