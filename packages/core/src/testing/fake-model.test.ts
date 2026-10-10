@@ -2,11 +2,10 @@
 import { SequentialIdGenerator } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { FakeModelPort, FakeModelScriptExhaustedError } from "./index.js";
-import type { ModelCompletion } from "../ports.js";
+import type { ModelCompletion, ModelRequest } from "../ports.js";
 
 const completion: ModelCompletion = {
-  content: "answer",
-  toolCalls: [],
+  parts: [{ type: "text", text: "answer" }],
   usage: { inputTokens: 1, outputTokens: 2 },
   finishReason: "stop",
   provider: "fake",
@@ -14,15 +13,17 @@ const completion: ModelCompletion = {
   latencyMs: 0,
   schemaValid: true,
   repairAttempts: 0,
+  fallbackDepth: 0,
   providerBlobs: null,
 };
 
 describe("FakeModelPort", () => {
   it("returns scripted responses and captures requests and context", async () => {
     const model = new FakeModelPort([completion]);
-    const request = {
+    const request: ModelRequest = {
       requestId: new SequentialIdGenerator().next(),
-      messages: ["input"],
+      model: { provider: "fake", model: "script" },
+      messages: [{ role: "user", parts: [{ type: "text", text: "input" }] }],
     };
     const context = { runId: request.requestId, signal: new AbortController().signal };
 
@@ -34,6 +35,7 @@ describe("FakeModelPort", () => {
     const model = new FakeModelPort([]);
     const request = {
       requestId: new SequentialIdGenerator().next(),
+      model: { provider: "fake", model: "script" },
       messages: [],
     };
 
@@ -45,16 +47,16 @@ describe("FakeModelPort", () => {
   it("returns the same scripted response when a conversation position is replayed", async () => {
     const model = new FakeModelPort([completion], {
       responseIndex: (request) =>
-        typeof request.messages === "object" &&
-        request.messages !== null &&
-        !Array.isArray(request.messages) &&
-        typeof request.messages.position === "number"
-          ? request.messages.position
-          : 0,
+        request.messages.some((message) =>
+          message.parts.some((part) => part.type === "text" && part.text === "position:0"),
+        )
+          ? 0
+          : 1,
     });
     const request = {
       requestId: new SequentialIdGenerator().next(),
-      messages: { position: 0 },
+      model: { provider: "fake", model: "script" },
+      messages: [{ role: "user" as const, parts: [{ type: "text" as const, text: "position:0" }] }],
     };
     const context = { runId: request.requestId, signal: new AbortController().signal };
 

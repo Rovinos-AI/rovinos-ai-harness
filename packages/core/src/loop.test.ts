@@ -280,13 +280,15 @@ class TestContextManager implements ContextManager {
 }
 
 function completion(
-  toolCalls: ModelCompletion["toolCalls"] = [],
+  toolCalls: readonly ModelToolCall[] = [],
   content = "answer",
   costMicros = 12,
 ): ModelCompletion {
   return {
-    content,
-    toolCalls,
+    parts: [
+      { type: "text", text: content },
+      ...toolCalls.map((toolCall) => ({ type: "tool_call" as const, ...toolCall })),
+    ],
     usage: { inputTokens: 3, outputTokens: 5, costMicros },
     finishReason: "stop",
     provider: "test_provider",
@@ -294,6 +296,7 @@ function completion(
     latencyMs: 8,
     schemaValid: true,
     repairAttempts: 0,
+    fallbackDepth: 0,
     providerBlobs: { trace: "opaque" },
   };
 }
@@ -404,6 +407,8 @@ function normalizeEvents(events: readonly Event[]): JsonValueType {
         latencyMs: event.latencyMs,
         schemaValid: event.schemaValid,
         repairAttempts: event.repairAttempts,
+        ...(event.rungUsed === undefined ? {} : { rungUsed: event.rungUsed }),
+        fallbackDepth: event.fallbackDepth,
         content: event.content,
         providerBlobs: event.providerBlobs,
       };
@@ -1042,7 +1047,11 @@ describe("runLoop", () => {
     });
 
     const contextPort = {
-      build: vi.fn(() => Promise.resolve(["prior context"])),
+      build: vi.fn(() =>
+        Promise.resolve([
+          { role: "assistant" as const, parts: [{ type: "text" as const, text: "prior context" }] },
+        ]),
+      ),
       snapshot: vi.fn(() => Promise.resolve([])),
       restore: vi.fn(() => Promise.resolve()),
     };
@@ -1081,7 +1090,11 @@ describe("runLoop", () => {
       {
         request: {
           requestId: "00000000000000000000000000",
-          messages: { goal: "test goal", context: ["prior context"] },
+          model: { provider: "test_provider", model: "test_model" },
+          messages: [
+            { role: "user", parts: [{ type: "text", text: "test goal" }] },
+            { role: "assistant", parts: [{ type: "text", text: "prior context" }] },
+          ],
           role: "assistant",
         },
         context: { runId, signal },
@@ -1405,24 +1418,27 @@ describe("runLoop", () => {
     expect(result.events.find(({ type }) => type === "tool_intent")).toMatchObject({
       argsHash: "e634af6ecfc23845fdae9c393661c63b99ad304d3f05a08faab28727c785d718",
     });
-    expect(model.requests[1]?.request.messages).toEqual({
-      goal: "tool goal",
-      context: [
-        "tool request",
-        {
-          type: "tool_call",
-          callId: modelCallId,
-          toolId: "test_tool",
-          args: call.args,
-        },
-        {
-          callId: modelCallId,
-          toolId: "test_tool",
-          outcome: "ok",
-          result: { value: "tool output" },
-        },
-      ],
-    });
+    expect(model.requests[1]?.request.messages).toEqual([
+      { role: "user", parts: [{ type: "text", text: "tool goal" }] },
+      {
+        role: "assistant",
+        parts: [
+          { type: "text", text: "tool request" },
+          { type: "tool_call", callId: modelCallId, toolId: "test_tool", args: call.args },
+        ],
+      },
+      {
+        role: "tool",
+        parts: [
+          {
+            type: "tool_result",
+            callId: modelCallId,
+            result: { value: "tool output" },
+            isError: false,
+          },
+        ],
+      },
+    ]);
     expect(tool.calls).toHaveLength(1);
   });
 
@@ -1795,7 +1811,7 @@ describe("runLoop", () => {
           requestId: modelCallId,
           provider: "test_provider",
           model: "test_model",
-          messages: { goal: "resumed goal" },
+          messages: [{ role: "user", parts: [{ type: "text", text: "resumed goal" }] }],
         },
       ]);
       const contextPort: ContextPort = new NaiveContext();
@@ -2150,7 +2166,7 @@ describe("runLoop", () => {
               requestId: modelCallId,
               provider: "test_provider",
               model: "test_model",
-              messages: { goal: "resumed goal" },
+              messages: [{ role: "user", parts: [{ type: "text", text: "resumed goal" }] }],
             },
             {
               type: "run_status_changed",

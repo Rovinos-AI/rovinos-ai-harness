@@ -18,10 +18,26 @@
     "requestId": "00000000000000000000000000",
     "provider": "test_provider",
     "model": "test_model",
-    "messages": {
-      "goal": "test goal",
-      "context": ["prior context"]
-    }
+    "messages": [
+      {
+        "role": "user",
+        "parts": [
+          {
+            "type": "text",
+            "text": "test goal"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "text",
+            "text": "prior context"
+          }
+        ]
+      }
+    ]
   },
   {
     "type": "model_response",
@@ -36,7 +52,13 @@
     "latencyMs": 8,
     "schemaValid": true,
     "repairAttempts": 0,
-    "content": "answer",
+    "fallbackDepth": 0,
+    "content": [
+      {
+        "type": "text",
+        "text": "answer"
+      }
+    ],
     "providerBlobs": {
       "trace": "opaque"
     }

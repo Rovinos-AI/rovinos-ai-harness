@@ -12,18 +12,23 @@ describe("Event", () => {
   it("rejects malformed envelope values, unknown types, and non-JSON content", () => {
     expect(Event.safeParse({ ...eventSamples[0], seq: -1 }).success).toBe(false);
     expect(Event.safeParse({ ...eventSamples[0], type: "unknown" }).success).toBe(false);
-    expect(Event.safeParse({ ...eventSamples[2], messages: { value: undefined } }).success).toBe(
-      false,
-    );
+    expect(
+      Event.safeParse({ ...eventSamples[2], messages: [{ role: "user", parts: [{}] }] }).success,
+    ).toBe(false);
+    const responseSample = eventSamples.find(({ type }) => type === "model_response");
+    expect(
+      responseSample?.type === "model_response" &&
+        Event.safeParse({ ...responseSample, content: [{ type: "text" }] }).success,
+    ).toBe(false);
   });
 
-  it("accepts legacy model responses without tool calls", () => {
+  it("defaults legacy model responses without fallback depth to zero", () => {
     const modelResponse = eventSamples.find(({ type }) => type === "model_response");
     if (modelResponse?.type !== "model_response") {
       throw new Error("Missing model_response sample.");
     }
-    const { toolCalls, ...legacyResponse } = modelResponse;
-    expect(toolCalls).toBeDefined();
-    expect(Event.parse(legacyResponse)).toEqual(legacyResponse);
+    const legacyResponse = { ...modelResponse };
+    Reflect.deleteProperty(legacyResponse, "fallbackDepth");
+    expect(Event.parse(legacyResponse)).toMatchObject({ fallbackDepth: 0 });
   });
 });
