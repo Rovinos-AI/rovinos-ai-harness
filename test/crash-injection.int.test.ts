@@ -8,6 +8,7 @@ import {
   RunConfigSchema,
   SequentialIdGenerator,
   type Event,
+  type Code,
   type JsonValue,
   type NewEvent,
   type Part,
@@ -273,6 +274,14 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.findRunsByTrace(traceId);
   }
 
+  fetchOutbox(sinkId: Code, limit: number) {
+    return this.inner.fetchOutbox(sinkId, limit);
+  }
+
+  ackOutbox(sinkId: Code, cursor: number) {
+    return this.inner.ackOutbox(sinkId, cursor);
+  }
+
   close() {
     return this.inner.close();
   }
@@ -438,6 +447,14 @@ class PreIntentExecutionStore implements EventStore {
 
   findRunsByTrace(traceId: Parameters<EventStore["findRunsByTrace"]>[0]) {
     return this.inner.findRunsByTrace(traceId);
+  }
+
+  fetchOutbox(sinkId: Code, limit: number) {
+    return this.inner.fetchOutbox(sinkId, limit);
+  }
+
+  ackOutbox(sinkId: Code, cursor: number) {
+    return this.inner.ackOutbox(sinkId, cursor);
   }
 
   close() {

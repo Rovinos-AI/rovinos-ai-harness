@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
+  Code,
   Event,
   TraceId,
   type Event as StoredEvent,
@@ -17,7 +18,12 @@ import {
   type EncodedSnapshot,
 } from "./codec.js";
 import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "./errors.js";
-import type { EventStore, ListRunsOptions, RunSummary, SnapshotStoreOptions } from "./types.js";
+import {
+  type EventStore,
+  type ListRunsOptions,
+  type RunSummary,
+  type SnapshotStoreOptions,
+} from "./types.js";
 
 function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): number | undefined {
   if (cursor === undefined) {
@@ -75,6 +81,8 @@ export class InMemoryEventStore implements EventStore {
   private readonly runs = new Map<Id, StoredEvent[]>();
   private readonly traceRuns = new Map<TraceId, Map<Id, number>>();
   private readonly snapshots = new Map<Id, EncodedSnapshot[]>();
+  private readonly outboxEvents: { globalSeq: number; event: StoredEvent }[] = [];
+  private readonly sinkCursors = new Map<string, number>();
   private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -158,6 +166,10 @@ export class InMemoryEventStore implements EventStore {
       if (!runs.has(runId)) {
         runs.set(runId, this.nextGlobalSeq);
       }
+      this.outboxEvents.push({
+        globalSeq: this.nextGlobalSeq + 1,
+        event: structuredClone(event),
+      });
       this.nextGlobalSeq += 1;
     }
   }
@@ -259,6 +271,41 @@ export class InMemoryEventStore implements EventStore {
     return Promise.resolve(
       [...runs.entries()].sort((left, right) => left[1] - right[1]).map(([runId]) => runId),
     );
+  }
+
+  /** {@inheritDoc EventStore.fetchOutbox} */
+  fetchOutbox(sinkId: Code, limit: number): Promise<{ events: StoredEvent[]; cursor: number }> {
+    const parsedSinkId = Code.safeParse(sinkId);
+    if (!parsedSinkId.success) {
+      return Promise.reject(new InvalidEventError([["sinkId"]]));
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      return Promise.reject(new InvalidEventError([["limit"]]));
+    }
+    const lastAcked = this.sinkCursors.get(parsedSinkId.data) ?? 0;
+    const batch = this.outboxEvents
+      .filter(({ globalSeq }) => globalSeq > lastAcked)
+      .slice(0, limit);
+    return Promise.resolve({
+      events: batch.map(({ event }) => structuredClone(event)),
+      cursor: batch.at(-1)?.globalSeq ?? lastAcked,
+    });
+  }
+
+  /** {@inheritDoc EventStore.ackOutbox} */
+  ackOutbox(sinkId: Code, cursor: number): Promise<void> {
+    const parsedSinkId = Code.safeParse(sinkId);
+    if (!parsedSinkId.success) {
+      return Promise.reject(new InvalidEventError([["sinkId"]]));
+    }
+    if (!Number.isSafeInteger(cursor) || cursor < 0) {
+      return Promise.reject(new InvalidEventError([["cursor"]]));
+    }
+    const previous = this.sinkCursors.get(parsedSinkId.data) ?? 0;
+    if (cursor > previous) {
+      this.sinkCursors.set(parsedSinkId.data, cursor);
+    }
+    return Promise.resolve();
   }
 
   /** {@inheritDoc EventStore.close} */
