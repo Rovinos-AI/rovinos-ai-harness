@@ -1099,7 +1099,7 @@ describe("runLoop", () => {
           messages: [{ role: "user", parts: [{ type: "text", text: "test goal" }] }],
           role: "assistant",
         },
-        context: { runId, signal },
+        context: { runId, signal, deadlineTs: 3_600_100 },
       },
     ]);
     expect(await store.head(runId)).toBe(6);

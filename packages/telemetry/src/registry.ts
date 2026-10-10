@@ -57,6 +57,7 @@ export interface SpanDefinition<
 
 const spanNamePattern = /^harness\.[a-z0-9_.]{1,56}$/u;
 const definitions = new Map<string, SpanDefinition<SpanDefinitionShape>>();
+const activeSpanDefinitions = new WeakMap<Span, SpanDefinition<SpanDefinitionShape>>();
 const tracingProbeKey = createContextKey("harness.telemetry.context-probe");
 let fallbackTracerInstalled = false;
 
@@ -182,7 +183,9 @@ export function defineSpan<const Shape extends SpanShape>(
       if (opts?.links !== undefined) {
         options.links = opts.links;
       }
-      return getTracer().startSpan(parsedName, options, opts?.parent);
+      const span = getTracer().startSpan(parsedName, options, opts?.parent);
+      activeSpanDefinitions.set(span, definition);
+      return span;
     },
   };
   Object.freeze(definition);
@@ -251,6 +254,29 @@ export function lookupSpanDefinition(
   name: string,
 ): SpanDefinition<SpanDefinitionShape> | undefined {
   return definitions.get(name);
+}
+
+/**
+ * Sets an attribute on the active span only when a registered span defines its schema.
+ *
+ * @param name - Registered span attribute name.
+ * @param value - Attribute value validated against the registered schema.
+ */
+export function setActiveSpanAttribute(name: string, value: AttributeValue): void {
+  const span = trace.getActiveSpan();
+  if (span === undefined) {
+    return;
+  }
+  const definition = activeSpanDefinitions.get(span);
+  const shape: unknown = definition?.shape;
+  const schema = isSpanShape(shape) ? shape[name] : undefined;
+  if (schema === undefined) {
+    return;
+  }
+  if (!schema.safeParse(value).success) {
+    throw new SpanRegistryError("span_attr_invalid", [{ path: [name], code: "invalid_value" }]);
+  }
+  span.setAttribute(name, value);
 }
 
 /** Clears the span registry for isolated unit tests. */
