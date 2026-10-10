@@ -5,6 +5,7 @@ import type {
   Id,
   JsonValue,
   Message,
+  ModelRef,
   ModelRequest as SharedModelRequest,
   ModelResponse,
   ModelUsage as SharedModelUsage,
@@ -86,6 +87,23 @@ export interface ContextPort {
    * @returns Provider-independent messages.
    */
   build(events: readonly Event[]): Promise<Message[]>;
+
+  /**
+   * Estimates the exact messages about to be sent, when the port has a token counter.
+   *
+   * @param messages - Complete provider-neutral request messages.
+   * @returns The estimate used for the request, or undefined when unavailable.
+   */
+  estimate?(messages: readonly Message[]): number;
+
+  /**
+   * Observes provider usage for the most recently built model context, when supported.
+   *
+   * @param model - Provider and model that produced the usage.
+   * @param estimated - Estimate computed before the request was sent.
+   * @param actualInputTokens - Input-token count reported by the provider.
+   */
+  observeModelResponse?(model: ModelRef, estimated: number, actualInputTokens: number): void;
 
   /**
    * Returns a JSON-safe checkpoint of the context implementation's current state.
