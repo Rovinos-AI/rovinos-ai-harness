@@ -3,9 +3,13 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
+    "types": ["node"],
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test-helpers.ts"],
-  "references": [{ "path": "../schemas/tsconfig.build.json" }]
+  "references": [
+    { "path": "../schemas/tsconfig.build.json" },
+    { "path": "../vault/tsconfig.build.json" }
+  ]
 }
