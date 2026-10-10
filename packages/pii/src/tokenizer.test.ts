@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
 import {
+  EventSchema,
   PiiActionSummarySchema,
   PiiPolicySchema,
   type Detection,
@@ -8,7 +9,12 @@ import {
   type PiiAction,
 } from "@harness/schemas";
 import { InMemoryVault, type VaultWriter } from "@harness/vault";
-import { PiiBlockedError, PiiTokenizerError, Tokenizer } from "./index.js";
+import {
+  PiiBlockedError,
+  PiiTokenizerError,
+  toPiiActionEvent,
+  Tokenizer,
+} from "./index.js";
 import type { PiiDetectorRegistry } from "./tokenizer.js";
 
 const runA = "A".repeat(26);
@@ -103,7 +109,12 @@ describe("Tokenizer.tokenizeText", () => {
 
     expect(first.text).toBe("<EMAIL_1> <EMAIL_9>");
     expect(second).toEqual({ text: first.text, actions: [] });
-    expect(detect.mock.calls.map(([text]) => text)).toEqual(["alice@example.test ", " "]);
+    expect(detect).toHaveBeenCalledTimes(2);
+    expect(detect.mock.calls.every(([text]) => !text.includes("<EMAIL_9>"))).toBe(true);
+    expect(detect.mock.calls.map(([text]) => text.length)).toEqual([
+      "alice@example.test <EMAIL_9>".length,
+      first.text.length,
+    ]);
   });
 
   it("uses independent token mappings per run, including for identical values", async () => {
@@ -128,7 +139,7 @@ describe("Tokenizer.tokenizeText", () => {
     await expect(vault.stats(runB)).resolves.toEqual({ entries: 2 });
   });
 
-  it("processes token-heavy text without inspecting token contents", async () => {
+  it("detects token-heavy text once without inspecting token contents", async () => {
     const detect = vi.fn(emailDetector);
     const result = await createTokenizer("tokenize", new InMemoryVault(), detect).tokenizeText(
       runA,
@@ -136,8 +147,72 @@ describe("Tokenizer.tokenizeText", () => {
       context,
     );
     expect(result.text).toBe("<EMAIL_9> <EMAIL_1> ".repeat(1000));
-    expect(detect.mock.calls.every(([text]) => !text.includes("<EMAIL_9>"))).toBe(true);
+    expect(detect).toHaveBeenCalledTimes(1);
+    expect(detect.mock.calls[0]?.[0]).not.toContain("<EMAIL_9>");
     expect(result.actions).toMatchObject([{ entities: [{ type: "email", count: 1000 }] }]);
+  });
+
+  it("uses the strictest policy action for overlapping detections and replaces their union", async () => {
+    const text = "prefix alice@example.test suffix";
+    const policy = PiiPolicySchema.parse({
+      defaultAction: "tokenize",
+      rules: [
+        {
+          entities: ["custom_org_id"],
+          boundaries: ["model_input"],
+          destinations: ["hosted"],
+          action: "allow",
+        },
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["hosted"],
+          action: "tokenize",
+        },
+      ],
+    });
+    const tokenizer = new Tokenizer({
+      detectors: {
+        detect: (input) => [
+          {
+            entityType: "custom_org_id",
+            start: 0,
+            end: input.length,
+            confidence: 1,
+            detectorId: "test.custom",
+          },
+          ...emailDetector(input),
+        ],
+      },
+      policy,
+      vault: new InMemoryVault(),
+    });
+
+    const result = await tokenizer.tokenizeText(runA, text, context);
+
+    expect(result.text).toBe("<EMAIL_1>");
+    expect(result.text).not.toContain("alice@example.test");
+  });
+
+  it("exports a converter that produces a valid pii_action event payload", () => {
+    const summary = PiiActionSummarySchema.parse({
+      boundary: "model_input",
+      action: "tokenize",
+      entities: [{ type: "email", count: 1 }],
+    });
+    const event = EventSchema.parse({
+      runId: "A".repeat(26),
+      segmentId: "B".repeat(26),
+      seq: 0,
+      ts: 0,
+      v: 1,
+      traceId: "1".repeat(32),
+      spanId: "2".repeat(16),
+      type: "pii_action",
+      ...toPiiActionEvent(summary),
+    });
+
+    expect(event).toMatchObject({ type: "pii_action", action: "tokenized" });
   });
 
   it("aggregates all blocked detections and does not write any values", async () => {
@@ -400,5 +475,20 @@ describe("Tokenizer.tokenizeJson", () => {
     await expect(createTokenizer().tokenizeJson(runA, cyclic, context)).rejects.toBeInstanceOf(
       PiiTokenizerError,
     );
+  });
+
+  it.each([
+    ["Date", new Date()],
+    ["Map", new Map()],
+    ["Set", new Set()],
+    ["class instance", new (class { readonly value = "safe"; })()],
+    ["custom-prototype object", Object.create({ inherited: true }) as object],
+  ])("rejects a %s as invalid JSON", async (_name, value) => {
+    await expect(
+      createTokenizer().tokenizeJson(runA, value as JsonValue, context),
+    ).rejects.toMatchObject({
+      code: "pii_input_invalid",
+      message: "pii_input_invalid",
+    });
   });
 });
