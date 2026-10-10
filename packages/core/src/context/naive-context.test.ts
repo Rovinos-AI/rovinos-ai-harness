@@ -32,7 +32,11 @@ describe("NaiveContext", () => {
         latencyMs: 0,
         schemaValid: true,
         repairAttempts: 0,
-        content: "first answer",
+        fallbackDepth: 0,
+        content: [
+          { type: "text", text: "first answer" },
+          { type: "tool_call", callId, toolId: "fake_tool", args: { input: "tool args" } },
+        ],
         providerBlobs: null,
       },
       {
@@ -76,33 +80,32 @@ describe("NaiveContext", () => {
         latencyMs: 0,
         schemaValid: true,
         repairAttempts: 0,
-        content: "second answer",
+        fallbackDepth: 0,
+        content: [{ type: "text", text: "second answer" }],
         providerBlobs: null,
       },
     ];
 
     await expect(new NaiveContext().build(events)).resolves.toEqual([
-      "first answer",
       {
-        type: "tool_call",
-        callId,
-        toolId: "fake_tool",
-        args: { input: "tool args" },
+        role: "assistant",
+        parts: [
+          { type: "text", text: "first answer" },
+          { type: "tool_call", callId, toolId: "fake_tool", args: { input: "tool args" } },
+        ],
       },
       {
-        callId,
-        toolId: "fake_tool",
-        outcome: "ok",
-        result: { output: "tool result" },
+        role: "tool",
+        parts: [{ type: "tool_result", callId, isError: false, result: { output: "tool result" } }],
       },
       {
-        callId,
-        toolId: "fake_tool",
-        outcome: "timeout",
-        errorCode: "tool_timeout",
-        result: null,
+        role: "tool",
+        parts: [{ type: "tool_result", callId, isError: true, result: null }],
       },
-      "second answer",
+      {
+        role: "assistant",
+        parts: [{ type: "text", text: "second answer" }],
+      },
     ]);
   });
 

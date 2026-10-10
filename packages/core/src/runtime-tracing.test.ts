@@ -15,15 +15,20 @@ import { RunRecorder } from "./recorder.js";
 import { createRuntime } from "./runtime.js";
 import { RUN_SPAN } from "./spans.js";
 import { FakeModelPort } from "./testing/fake-model.js";
-import type { ModelPort, RunContext, ToolExecutionResult, ToolPort } from "./ports.js";
+import type {
+  ModelCompletion,
+  ModelPort,
+  RunContext,
+  ToolExecutionResult,
+  ToolPort,
+} from "./ports.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
 
 const config = { run: RunConfigSchema.parse({}) };
 
-function completion() {
+function completion(): ModelCompletion {
   return {
-    content: "answer",
-    toolCalls: [],
+    parts: [{ type: "text", text: "answer" }],
     usage: { inputTokens: 1, outputTokens: 1 },
     finishReason: "stop",
     provider: "test",
@@ -31,8 +36,9 @@ function completion() {
     latencyMs: 0,
     schemaValid: true,
     repairAttempts: 0,
+    fallbackDepth: 0,
     providerBlobs: null,
-  } as const;
+  };
 }
 
 class TestShutdownProcess implements ShutdownProcessLike {
@@ -201,8 +207,10 @@ describe("runtime tracing fallback", () => {
     const model = new FakeModelPort([
       {
         ...completion(),
-        toolCalls: [
+        parts: [
+          ...completion().parts,
           {
+            type: "tool_call",
             callId: Id.parse("22222222222222222222222222"),
             toolId: "slow_tool",
             args: {},
@@ -276,8 +284,10 @@ describe("runtime tracing fallback", () => {
     const model = new FakeModelPort([
       {
         ...completion(),
-        toolCalls: [
+        parts: [
+          ...completion().parts,
           {
+            type: "tool_call",
             callId: Id.parse("22222222222222222222222222"),
             toolId: "slow_tool",
             args: {},
@@ -365,8 +375,10 @@ describe("runtime tracing fallback", () => {
         }
         return {
           ...completion(),
-          toolCalls: [
+          parts: [
+            ...completion().parts,
             {
+              type: "tool_call",
               callId: Id.parse("22222222222222222222222222"),
               toolId: "slow_tool",
               args: {},
@@ -441,7 +453,7 @@ describe("runtime tracing fallback", () => {
               requestId: Id.parse("33333333333333333333333333"),
               provider: "other_worker",
               model: "other_worker",
-              messages: null,
+              messages: [],
               runId,
               ts: 1_001,
               traceId: "a".repeat(32),

@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Event, Id, JsonValue, Sha256Hex } from "@harness/schemas";
+import type {
+  Code,
+  Event,
+  Id,
+  JsonValue,
+  Message,
+  ModelRequest as SharedModelRequest,
+  ModelResponse,
+  ModelUsage as SharedModelUsage,
+  Part,
+  Sha256Hex,
+} from "@harness/schemas";
 
-/** Identifies the model request and the messages sent to a provider. */
-export interface ModelRequest {
-  readonly requestId: Id;
-  readonly messages: JsonValue;
-  readonly role?: Code;
-}
+/** Provider-neutral request contract shared with the model gateway. */
+export type ModelRequest = SharedModelRequest;
 
 /** Identifies the active run and cancellation signal for an operation. */
 export interface RunContext {
@@ -15,30 +22,13 @@ export interface RunContext {
 }
 
 /** A tool invocation proposed by the model. */
-export interface ModelToolCall {
-  readonly callId: Id;
-  readonly toolId: Code;
-  readonly args: JsonValue;
-}
+export type ModelToolCall = Omit<Extract<Part, { type: "tool_call" }>, "type">;
 
 /** Token and optional cost usage reported by a model provider. */
-export interface ModelUsage {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly costMicros?: number;
-}
+export type ModelUsage = SharedModelUsage;
 
 /** Provider-agnostic completion returned by a model port. */
-export interface ModelCompletion {
-  readonly content: JsonValue;
-  readonly toolCalls: readonly ModelToolCall[];
-  readonly usage: ModelUsage;
-  readonly finishReason: Code;
-  readonly provider: Code;
-  readonly model: Code;
-  readonly latencyMs: number;
-  readonly schemaValid: boolean;
-  readonly repairAttempts: number;
+export interface ModelCompletion extends ModelResponse {
   readonly providerBlobs: JsonValue;
 }
 
@@ -95,7 +85,7 @@ export interface ContextPort {
    * @param events - Events recorded so far.
    * @returns Provider-independent messages.
    */
-  build(events: readonly Event[]): Promise<JsonValue>;
+  build(events: readonly Event[]): Promise<Message[]>;
 
   /**
    * Returns a JSON-safe checkpoint of the context implementation's current state.

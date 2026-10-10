@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+defaultAction: tokenize
+rules:
+  - entities: [api_key, credit_card]
+    boundaries: "*"
+    destinations:
+      - tool: tool.payment
+    action: block
+  - entities: [email, phone]
+    boundaries: [tool_output, ui]
+    destinations: "*"
+    action: redact

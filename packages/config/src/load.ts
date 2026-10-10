@@ -86,7 +86,11 @@ export function formatConfigIssues(issues: readonly z.core.$ZodIssue[]): string[
   return issues.map((issue) => {
     const pathSegments = issue.path.map(String);
     const path = pathSegments.length === 0 ? "configuration" : pathSegments.join(".");
-    return `${path}: ${expectedForIssue(issue)} (${issue.code})`;
+    const code =
+      issue.code === "custom" && typeof issue.params?.errorCode === "string"
+        ? issue.params.errorCode
+        : issue.code;
+    return `${path}: ${expectedForIssue(issue)} (${code})`;
   });
 }
 

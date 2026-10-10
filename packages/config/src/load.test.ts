@@ -179,6 +179,25 @@ describe("loadConfig", () => {
     expect(error.message).not.toContain("submitted-private-value");
   });
 
+  it("preserves stable PII policy codes without exposing submitted values", async () => {
+    const contents = validYaml.replace(
+      "pii: {}",
+      `pii:
+  rules:
+    - entities: [email]
+      boundaries: [storage]
+      destinations:
+        - tool: private-destination
+      action: allow`,
+    );
+    const error = await expectConfigError(loadConfig({ env: {}, readFile: reader(contents) }));
+
+    expect(error.issues).toContain(
+      "pii.rules.0.boundaries: a valid configuration value (pii_policy_storage_allow)",
+    );
+    expect(error.message).not.toContain("private-destination");
+  });
+
   it("deeply freezes the returned config", async () => {
     const config = await loadConfig({
       env: {},
@@ -328,7 +347,7 @@ describe("loadConfig", () => {
       models: {},
       servers: [],
       policy: {},
-      pii: {},
+      pii: { defaultAction: "tokenize", rules: [] },
       telemetry: {},
       sandbox: {},
     });

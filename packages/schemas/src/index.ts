@@ -16,6 +16,23 @@ export {
 } from "./json-schema.js";
 export { JsonValue } from "./json.js";
 export {
+  MessageSchema,
+  ModelRequestSchema,
+  ModelResponseSchema,
+  ModelRefSchema,
+  ModelUsageSchema,
+  PartSchema,
+  ToolSpecSchema,
+  type Message,
+  type ModelRequest,
+  type ModelResponse,
+  type ModelRef,
+  type ModelUsage,
+  type Part,
+  type ToolSpec,
+} from "./messages.js";
+export { CapabilitiesSchema, lookupCapabilities, type Capabilities } from "./capabilities.js";
+export {
   Event,
   EventEnvelopeSchema,
   EventSchema,
@@ -32,6 +49,20 @@ export {
 } from "./classification.js";
 export { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
+export {
+  DestinationSchema,
+  PiiActionSchema,
+  PiiBoundarySchema,
+  PiiEntitySchema,
+  PiiPolicySchema,
+  PiiRuleSchema,
+  type Destination,
+  type PiiAction,
+  type PiiBoundary,
+  type PiiEntity,
+  type PiiPolicy,
+  type PiiRule,
+} from "./pii-policy.js";
 export { SnapshotSchema, type Snapshot } from "./snapshot.js";
 export { RunConfigSchema, type RunConfig } from "./config/run.js";
 export { RunResumePolicySchema } from "./config/run.js";
@@ -39,7 +70,7 @@ export { StoreConfigSchema } from "./config/store.js";
 export { ModelsConfigSchema } from "./config/models.js";
 export { ServerConfigSchema } from "./config/servers.js";
 export { PolicyConfigSchema } from "./config/policy.js";
-export { PiiConfigSchema } from "./config/pii.js";
+export { PiiConfigSchema, type PiiConfig } from "./config/pii.js";
 export { TelemetryConfigSchema } from "./config/telemetry.js";
 export { SandboxConfigSchema } from "./config/sandbox.js";
 export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
