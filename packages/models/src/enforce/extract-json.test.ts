@@ -17,6 +17,13 @@ describe("extractJson", () => {
     });
   });
 
+  it("skips balanced non-JSON brace groups in prose", () => {
+    expect(extractJson('Here is the result {see below}: {"a":1}')).toEqual({
+      ok: true,
+      value: { a: 1 },
+    });
+  });
+
   it("ignores nested braces inside strings", () => {
     expect(extractJson('{"answer":"{nested}"}')).toEqual({
       ok: true,

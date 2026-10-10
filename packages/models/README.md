@@ -9,9 +9,12 @@ Pass a Zod schema as `outputSchema` in the gateway call context to validate a st
 The gateway selects native structured output when available, otherwise a forced `emit_result` tool
 when forced tool choice is supported. The completion includes `schemaValid`, `rungUsed`, and an
 `enforcement` result containing either the typed value or value-free validation issues. The
-`maxRung` gateway option can cap selection at `native` or `tool`. Requests combining `outputSchema`
-with real tools fail with `output_with_tools_unsupported`; providers without either supported rung
-throw `rung_unavailable` for the later prompt fallback task before a provider call is made.
+`maxRung` gateway option can cap selection at `native`, `tool`, or `prompt`. If native output and
+forced tool choice are unavailable, the gateway prompts for JSON and validates the extracted value.
+Providers without schema-lowering rules use the Zod schema's JSON Schema conversion for this prompt
+rung. JSON mode is requested only for object-root schemas. Requests combining `outputSchema` with
+real tools fail with `output_with_tools_unsupported`; `rung_unavailable` is returned when the
+configured maximum rung disallows all available options.
 
 Gateway resilience is configured with `models.retry` (`maxAttempts: 3`,
 `baseDelayMs: 500`, `maxDelayMs: 20000`, `timeoutMs: 120000`). Optional

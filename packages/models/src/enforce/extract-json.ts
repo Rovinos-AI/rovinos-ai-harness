@@ -7,20 +7,11 @@ export type ExtractJsonResult =
   | { readonly ok: false; readonly code: "no_json" | "invalid_json" };
 
 type JsonScanResult =
-  | { readonly kind: "candidate"; readonly text: string }
-  | { readonly kind: "no_json" | "invalid_json" };
+  | { readonly kind: "candidate"; readonly start: number; readonly text: string }
+  | { readonly kind: "invalid_json"; readonly start: number }
+  | { readonly kind: "no_json" };
 
-interface JsonScannerState {
-  readonly stack: readonly string[];
-  readonly start: number;
-  readonly inString: boolean;
-  readonly escaped: boolean;
-}
-
-interface JsonScanStep {
-  readonly state: JsonScannerState;
-  readonly result?: JsonScanResult;
-}
+const MAX_CANDIDATES = 32;
 
 function stripCodeFence(text: string): string {
   const trimmed = text.trim();
@@ -43,72 +34,72 @@ function isMatchingPair(opening: string | undefined, closing: string): boolean {
   return (closing === "}" && opening === "{") || (closing === "]" && opening === "[");
 }
 
-function consumeStringCharacter(state: JsonScannerState, character: string): JsonScannerState {
-  if (state.escaped) {
-    return { ...state, escaped: false };
-  }
-  if (character === "\\") {
-    return { ...state, escaped: true };
-  }
-  return character === '"' ? { ...state, inString: false } : state;
-}
+function findBalancedJson(text: string, offset: number): JsonScanResult {
+  const stack: string[] = [];
+  let start = -1;
+  let inString = false;
+  let escaped = false;
 
-function scanCharacter(
-  text: string,
-  index: number,
-  character: string,
-  state: JsonScannerState,
-): JsonScanStep {
-  if (state.start === -1) {
-    return isOpening(character)
-      ? { state: { ...state, start: index, stack: [character] } }
-      : { state };
-  }
-  if (state.inString) {
-    return { state: consumeStringCharacter(state, character) };
-  }
-  if (character === '"') {
-    return { state: { ...state, inString: true } };
-  }
-  if (isOpening(character)) {
-    return { state: { ...state, stack: [...state.stack, character] } };
-  }
-  if (character !== "}" && character !== "]") {
-    return { state };
-  }
-
-  const opening = state.stack[state.stack.length - 1];
-  if (!isMatchingPair(opening, character)) {
-    return { state, result: { kind: "invalid_json" } };
-  }
-  const stack = state.stack.slice(0, -1);
-  const nextState = { ...state, stack };
-  return stack.length === 0
-    ? {
-        state: nextState,
-        result: { kind: "candidate", text: text.slice(state.start, index + 1) },
+  for (let index = offset; index < text.length; index += 1) {
+    const character = text.charAt(index);
+    if (start === -1) {
+      if (isOpening(character)) {
+        start = index;
+        stack.push(character);
       }
-    : { state: nextState };
-}
-
-function findBalancedJson(text: string): JsonScanResult {
-  let state: JsonScannerState = { stack: [], start: -1, inString: false, escaped: false };
-  for (let index = 0; index < text.length; index += 1) {
-    const step = scanCharacter(text, index, text.charAt(index), state);
-    state = step.state;
-    if (step.result !== undefined) {
-      return step.result;
+      continue;
+    }
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (isOpening(character)) {
+      stack.push(character);
+      continue;
+    }
+    if (character !== "}" && character !== "]") {
+      continue;
+    }
+    if (!isMatchingPair(stack[stack.length - 1], character)) {
+      return { kind: "invalid_json", start };
+    }
+    stack.pop();
+    if (stack.length === 0) {
+      return { kind: "candidate", start, text: text.slice(start, index + 1) };
     }
   }
-  return { kind: state.start === -1 ? "no_json" : "invalid_json" };
+  return start === -1 ? { kind: "no_json" } : { kind: "invalid_json", start };
 }
 
 /** Extracts and parses the first balanced JSON object or array in model text. */
 export function extractJson(text: string): ExtractJsonResult {
-  const scanned = findBalancedJson(stripCodeFence(text));
-  if (scanned.kind !== "candidate") {
-    return { ok: false, code: scanned.kind };
+  const candidateText = stripCodeFence(text);
+  let offset = 0;
+  let foundCandidate = false;
+
+  for (let attempt = 0; attempt < MAX_CANDIDATES; attempt += 1) {
+    const scanned = findBalancedJson(candidateText, offset);
+    if (scanned.kind === "no_json") {
+      return { ok: false, code: foundCandidate ? "invalid_json" : "no_json" };
+    }
+    foundCandidate = true;
+    if (scanned.kind === "candidate") {
+      const parsed = safeParseJson(JsonValue, scanned.text);
+      if (parsed.success) {
+        return { ok: true, value: parsed.data };
+      }
+    }
+    offset = scanned.start + 1;
   }
-  const parsed = safeParseJson(JsonValue, scanned.text);
-  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, code: "invalid_json" };
+  return { ok: false, code: "invalid_json" };
 }

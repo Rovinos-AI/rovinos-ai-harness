@@ -30,7 +30,7 @@ import {
 import { enforceNativeOutput, withNativeOutputSchema } from "./enforce/rung-native.js";
 import { enforceToolOutput, withForcedOutputTool } from "./enforce/rung-tool.js";
 import { enforcePromptOutput, withPromptOutput } from "./enforce/rung-prompt.js";
-import { lowerForProvider, schemaHash } from "./json-schema.js";
+import { lowerForProvider, schemaHash, toJsonSchema } from "./json-schema.js";
 
 /** Dependencies injected into every provider adapter call by the gateway. */
 export interface ModelGatewayDependencies {
@@ -82,19 +82,20 @@ function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
     throw new OutputWithToolsUnsupportedError();
   }
 
-  if (providerSchemaRules(request.model.provider) === undefined) {
-    throw new EnforcementRungUnavailableError();
-  }
   const rung = selectEnforcementRung(capabilities, maxRung);
-  if (rung === undefined) {
+  const schemaRules = providerSchemaRules(request.model.provider);
+  if (rung === undefined || (schemaRules === undefined && rung !== "prompt")) {
     throw new EnforcementRungUnavailableError();
   }
 
-  const lowered = lowerForProvider(outputSchema, request.model.provider);
+  const schema =
+    schemaRules === undefined
+      ? toJsonSchema(outputSchema)
+      : lowerForProvider(outputSchema, request.model.provider).schema;
   const output = {
     name: request.output?.name ?? "result",
-    schema: lowered.schema,
-    schemaHash: schemaHash(lowered.schema),
+    schema,
+    schemaHash: schemaHash(schema),
   };
   return {
     request: prepareRequestForRung(request, output, rung),
@@ -138,7 +139,11 @@ function enforceProviderOutput<OutputSchema extends z.ZodType>(
     const enforced = enforceToolOutput(parts, outputSchema);
     return { parts: enforced.parts, result: enforced.result };
   }
-  return { parts, result: enforcePromptOutput(parts, outputSchema) };
+  const hasToolCall = parts.some((part) => part.type === "tool_call");
+  return {
+    parts: hasToolCall ? parts.filter((part) => part.type !== "tool_call") : parts,
+    result: enforcePromptOutput(parts, outputSchema),
+  };
 }
 
 /** Minimal provider-selecting model port implementation. */

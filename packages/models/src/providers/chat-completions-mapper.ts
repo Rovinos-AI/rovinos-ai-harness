@@ -191,7 +191,8 @@ function mapOutputFormat(
   if (request.output === undefined) {
     return {};
   }
-  if (quirks.structuredOutput === "json_mode") {
+  const schema = z.record(z.string(), JsonValue).safeParse(request.output.schema);
+  if (quirks.structuredOutput === "json_mode" && schema.success && schema.data.type === "object") {
     return { response_format: { type: "json_object" } };
   }
   if (quirks.structuredOutput !== "native") {
