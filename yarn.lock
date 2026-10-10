@@ -1052,6 +1052,7 @@ __metadata:
   resolution: "@harness/pii@workspace:packages/pii"
   dependencies:
     "@harness/schemas": "workspace:^"
+    "@harness/vault": "workspace:^"
     vitest: "npm:3.2.6"
   languageName: unknown
   linkType: soft
@@ -1103,7 +1104,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@harness/vault@workspace:packages/vault":
+"@harness/vault@workspace:^, @harness/vault@workspace:packages/vault":
   version: 0.0.0-use.local
   resolution: "@harness/vault@workspace:packages/vault"
   dependencies:
