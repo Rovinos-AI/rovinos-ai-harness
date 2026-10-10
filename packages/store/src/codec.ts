@@ -8,10 +8,22 @@ import {
   type Snapshot,
 } from "@harness/schemas";
 import { z } from "zod";
-import { InvalidEventError, StoreUnavailableError } from "./errors.js";
+import {
+  ContentDecryptFailedError,
+  InvalidEventError,
+  KeyNotFoundError,
+  StoreUnavailableError,
+} from "./errors.js";
 import { snapshotStoreOptionsSchema, type SnapshotStoreOptions } from "./types.js";
 
 const contentSchema = z.record(z.string(), z.json());
+export const MAX_CONTENT_BYTES = 1_048_576;
+
+function validateContentSize(blob: string): void {
+  if (Buffer.byteLength(blob, "utf8") > MAX_CONTENT_BYTES) {
+    throw new ContractError([{ path: [], code: "size_limit_exceeded" }]);
+  }
+}
 
 /** Context binding a content encoding to its event. */
 export interface ContentCodecContext {
@@ -33,6 +45,8 @@ export interface EncodedContent {
 
 /** Encodes and decodes event content independently of event metadata. */
 export interface ContentCodec {
+  /** Whether this codec encrypts persisted content. */
+  readonly encrypted: boolean;
   /**
    * Encode content for an event.
    *
@@ -186,13 +200,19 @@ export async function decodeSnapshot(codec: ContentCodec, row: SnapshotRow): Pro
       ...meta,
       ...content,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof ContentDecryptFailedError || error instanceof KeyNotFoundError) {
+      throw error;
+    }
     throw new StoreUnavailableError();
   }
 }
 
 /** JSON serialization codec for event content when encryption is not configured. */
 export class JsonContentCodec implements ContentCodec {
+  /** Identifies this codec as plaintext for store metadata checks. */
+  readonly encrypted = false;
+
   /** {@inheritDoc ContentCodec.encode} */
   encode(_ctx: ContentCodecContext, content: Record<string, unknown>): Promise<EncodedContent> {
     return Promise.resolve().then(() => {
@@ -205,6 +225,7 @@ export class JsonContentCodec implements ContentCodec {
       if (typeof blob !== "string") {
         throw new ContractError([{ path: [], code: "json_encode_failed" }]);
       }
+      validateContentSize(blob);
       return { blob };
     });
   }
@@ -215,6 +236,8 @@ export class JsonContentCodec implements ContentCodec {
     blob: string,
     _keyId?: string,
   ): Promise<Record<string, unknown>> {
-    return Promise.resolve().then(() => parseJson(contentSchema, blob));
+    return Promise.resolve().then(() =>
+      parseJson(contentSchema, blob, { maxBytes: MAX_CONTENT_BYTES }),
+    );
   }
 }

@@ -3,7 +3,39 @@ import { Id, joinEvent, parseJson, type Event as StoredEvent } from "@harness/sc
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { ContentCodec, EncodedSnapshot } from "../codec.js";
-import { InvalidEventError, StoreUnavailableError } from "../errors.js";
+import {
+  ContentDecryptFailedError,
+  InvalidEventError,
+  KeyNotFoundError,
+  StoreEncryptionMismatchError,
+  StoreUnavailableError,
+} from "../errors.js";
+
+/** Initialize or validate the durable content-encryption mode for a SQLite database. */
+export function initializeEncryptionMetadata(db: Database.Database, encrypted: boolean): void {
+  const encryptionValue = encrypted ? "true" : "false";
+  const readMetadata = db.prepare<[string], { metadata_value: string }>(
+    "SELECT metadata_value FROM store_metadata WHERE metadata_key = ?",
+  );
+  const insertMetadata = db.prepare<[string, string]>(
+    "INSERT INTO store_metadata (metadata_key, metadata_value) VALUES (?, ?)",
+  );
+  const contentCount = db.prepare<[], { count: number }>(
+    "SELECT (SELECT COUNT(*) FROM events) + (SELECT COUNT(*) FROM snapshots) AS count",
+  );
+
+  db.transaction(() => {
+    const stored = readMetadata.get("encrypted");
+    if (stored === undefined) {
+      if (encrypted && (contentCount.get()?.count ?? 0) > 0) {
+        throw new StoreEncryptionMismatchError();
+      }
+      insertMetadata.run("encrypted", encryptionValue);
+    } else if (stored.metadata_value !== encryptionValue) {
+      throw new StoreEncryptionMismatchError();
+    }
+  }).immediate();
+}
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const contentRecordSchema = z.record(z.string(), z.json());
@@ -96,7 +128,10 @@ export async function decodeStoredContent(
       throw new StoreUnavailableError();
     }
     return result.data;
-  } catch {
+  } catch (error) {
+    if (error instanceof ContentDecryptFailedError || error instanceof KeyNotFoundError) {
+      throw error;
+    }
     throw new StoreUnavailableError();
   }
 }
