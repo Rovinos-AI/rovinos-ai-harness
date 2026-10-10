@@ -44,7 +44,13 @@ export class Semaphore {
     }
   }
 
-  private acquire(signal: AbortSignal): Promise<() => void> {
+  /**
+   * Acquires a permit held until the returned release function is called.
+   *
+   * @param signal - Cancellation signal for acquiring the permit.
+   * @returns An idempotent permit release function.
+   */
+  acquire(signal: AbortSignal): Promise<() => void> {
     signal.throwIfAborted();
     if (this.active < this.maxConcurrent) {
       this.active += 1;

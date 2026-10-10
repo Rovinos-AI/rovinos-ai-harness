@@ -63,11 +63,7 @@ export interface RetryOptions<T> extends RetryDependencies {
   readonly signal: AbortSignal;
   readonly deadlineTs?: number;
   readonly onAttempt?: (attempt: number) => void;
-  readonly scheduleAttempt?: (
-    signal: AbortSignal,
-    lastError: unknown,
-    operation: () => Promise<T>,
-  ) => Promise<T>;
+  readonly prepareAttempt?: (signal: AbortSignal, lastError: unknown) => Promise<() => void>;
   readonly operation: (signal: AbortSignal, lastError: unknown) => Promise<T>;
 }
 
@@ -78,9 +74,8 @@ async function runScheduledAttempt<T>(
 ): Promise<T> {
   checkDeadline(options.deadlineTs, options.clock, lastError);
   options.signal.throwIfAborted();
-  const operation = (): Promise<T> => runAttempt(options, attempt, lastError);
-  if (options.scheduleAttempt === undefined) {
-    return operation();
+  if (options.prepareAttempt === undefined) {
+    return runAttempt(options, attempt, lastError);
   }
   const deadlineSignal =
     options.deadlineTs === undefined
@@ -91,7 +86,29 @@ async function runScheduledAttempt<T>(
       ? options.signal
       : AbortSignal.any([options.signal, deadlineSignal]);
   try {
-    return await options.scheduleAttempt(signal, lastError, operation);
+    const release = await options.prepareAttempt(signal, lastError);
+    const state = { started: false };
+    try {
+      return await runAttempt(
+        {
+          ...options,
+          operation: async (attemptSignal, error) => {
+            state.started = true;
+            try {
+              return await options.operation(attemptSignal, error);
+            } finally {
+              release();
+            }
+          },
+        },
+        attempt,
+        lastError,
+      );
+    } finally {
+      if (!state.started) {
+        release();
+      }
+    }
   } catch (error) {
     options.signal.throwIfAborted();
     if (deadlineSignal?.aborted === true) {

@@ -92,11 +92,11 @@ export class ModelGateway {
       sleep: this.sleep,
       signal: context.signal,
       ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-      scheduleAttempt: async (signal, lastError, operation) => {
+      prepareAttempt: async (signal, lastError) => {
         if (limiter !== undefined) {
           await limiter.acquire(signal, context.deadlineTs, lastError);
         }
-        return semaphore.run(signal, operation);
+        return semaphore.acquire(signal);
       },
       operation: (signal) => {
         attempts += 1;

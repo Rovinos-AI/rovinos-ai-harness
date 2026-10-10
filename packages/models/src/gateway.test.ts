@@ -12,8 +12,21 @@ import type { ProviderAdapter, ProviderContext } from "./types.js";
 import { abortableSleep } from "./resilience/retry.js";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
+
+function useFakeClock(): void {
+  vi.useFakeTimers();
+  vi.setSystemTime(0);
+  vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
+    const controller = new AbortController();
+    setTimeout(() => {
+      controller.abort(new Error("timeout"));
+    }, delay);
+    return controller.signal;
+  });
+}
 
 const request: ModelRequest = {
   requestId: "00000000000000000000000000",
@@ -169,8 +182,7 @@ describe("ModelGateway", () => {
   });
 
   it("starts the provider timeout only after a long limiter wait", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
+    useFakeClock();
     const complete = vi.fn(async (_request: ModelRequest, adapterContext: ProviderContext) => {
       await abortableSleep(500, adapterContext.signal);
       return {
@@ -206,8 +218,7 @@ describe("ModelGateway", () => {
   });
 
   it("cancels a limiter wait without calling the provider again", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
+    useFakeClock();
     const complete = vi.fn(() =>
       Promise.resolve({
         parts: [],
@@ -230,6 +241,81 @@ describe("ModelGateway", () => {
     controller.abort(cancelled);
 
     await expect(second).rejects.toBe(cancelled);
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it("holds concurrency permits until timed-out adapter calls settle", async () => {
+    useFakeClock();
+    let active = 0;
+    let peak = 0;
+    const complete = vi.fn(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      active -= 1;
+      return {
+        parts: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+        latencyMs: 50,
+      };
+    });
+    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => Date.now() },
+      maxConcurrent: 1,
+      retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 3, timeoutMs: 10 }),
+      random: () => 0,
+    });
+    const result = gateway
+      .complete(request, {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+      })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(complete).toHaveBeenCalledOnce();
+    expect(active).toBe(1);
+    await vi.advanceTimersByTimeAsync(101);
+
+    expect(await result).toMatchObject({ code: "provider_timeout" });
+    expect(complete).toHaveBeenCalledTimes(3);
+    expect(peak).toBe(1);
+    expect(active).toBe(0);
+  });
+
+  it("stops semaphore waiting at the run deadline without a provider call", async () => {
+    useFakeClock();
+    const complete = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      return {
+        parts: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+        latencyMs: 50,
+      };
+    });
+    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => Date.now() },
+      maxConcurrent: 1,
+    });
+    const runContext = { runId: request.requestId, signal: new AbortController().signal };
+    const first = gateway.complete(request, runContext);
+    await vi.advanceTimersByTimeAsync(0);
+    const second = gateway
+      .complete(request, { ...runContext, deadlineTs: 10 })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(await second).toMatchObject({ code: "deadline_exceeded" });
+    expect(complete).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(40);
+    await first;
     expect(complete).toHaveBeenCalledOnce();
   });
 
