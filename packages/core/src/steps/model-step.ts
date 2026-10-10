@@ -30,8 +30,6 @@ export interface ModelStepOptions {
   readonly modelName?: Code;
 }
 
-const DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
-
 /** Selects request messages and model-visible tool specifications for the model step. */
 export function modelToolOptions(
   tool: ToolPort,
@@ -105,7 +103,6 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
             model: options.modelName ?? "unknown",
           },
           messages: options.messages,
-          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
           ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
           ...(role === undefined ? {} : { role }),
         }),

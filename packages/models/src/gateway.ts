@@ -349,10 +349,17 @@ export class ModelGateway {
   ): Promise<ModelGatewayResponse<OutputSchema>> {
     const adapter = this.registry.get(request.model.provider);
     const protocolProvider = adapter.protocolProvider ?? adapter.provider;
+    const effectiveRequest =
+      request.maxOutputTokens === undefined
+        ? {
+            ...request,
+            maxOutputTokens: adapter.maxOutputTokens ?? 4_096,
+          }
+        : request;
     const prepared =
       context.outputSchema === undefined
-        ? { request }
-        : prepareEnforcementRequest(request, context.outputSchema, {
+        ? { request: effectiveRequest }
+        : prepareEnforcementRequest(effectiveRequest, context.outputSchema, {
             protocolProvider,
             capabilities: lookupCapabilities(
               { ...request.model, provider: protocolProvider },
@@ -366,7 +373,14 @@ export class ModelGateway {
       semaphore = new Semaphore(this.maxConcurrent);
       this.semaphores.set(adapter.provider, semaphore);
     }
-    return this.completePrepared({ request, context, adapter, prepared, limiter, semaphore });
+    return this.completePrepared({
+      request: effectiveRequest,
+      context,
+      adapter,
+      prepared,
+      limiter,
+      semaphore,
+    });
   }
 }
 

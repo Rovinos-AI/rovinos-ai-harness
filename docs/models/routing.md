@@ -49,5 +49,6 @@ is explicitly set.
 
 Routing targets are checked against configured provider ids during runtime
 construction. An unknown id fails startup with `routing_provider_unknown`.
-Runtime-generated requests include a validated `maxOutputTokens` limit of 4096,
-including for providers whose APIs require an explicit output-token limit.
+Each provider can set `maxOutputTokens` to a positive integer; it defaults to
+4096. When a request omits its own limit, the gateway fills in the selected
+provider's configured value, including after a fallback switch.

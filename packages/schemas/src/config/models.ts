@@ -31,6 +31,7 @@ export const ModelProviderConfigSchema = z
     kind: z.enum(["anthropic", "openai", "openai_compatible"]),
     apiKey: SecretRefSchema.optional(),
     baseUrl: z.url().optional(),
+    maxOutputTokens: z.number().int().positive().default(4_096),
     requestsPerMinute: z.number().int().positive().optional(),
     capabilities: CapabilitiesSchema.partial().strict().optional(),
     trust: z.enum(["hosted", "local"]).default("hosted"),

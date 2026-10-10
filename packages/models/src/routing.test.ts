@@ -70,6 +70,34 @@ describe("RoutingModelGateway", () => {
     });
   });
 
+  it("uses the selected provider's output-token limit after fallback", async () => {
+    const primaryComplete = vi.fn((_request: ModelRequest) =>
+      Promise.reject(new ProviderError("provider_unavailable")),
+    );
+    const secondaryComplete = vi.fn((_request: ModelRequest) => Promise.resolve(result));
+    const gateway = createRoutingModelGateway(
+      [
+        { ...adapter("primary", primaryComplete), maxOutputTokens: 128 },
+        { ...adapter("secondary", secondaryComplete), maxOutputTokens: 768 },
+      ],
+      dependencies,
+      routing({
+        default: [
+          { provider: "primary", model: "model-one" },
+          { provider: "secondary", model: "model-two" },
+        ],
+      }),
+    );
+
+    await gateway.complete(request, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+    });
+
+    expect(primaryComplete.mock.calls[0]?.[0].maxOutputTokens).toBe(128);
+    expect(secondaryComplete.mock.calls[0]?.[0].maxOutputTokens).toBe(768);
+  });
+
   it("does not fall back for errors outside fallbackOn", async () => {
     const primary = adapter("primary", () => Promise.reject(new ProviderError("provider_auth")));
     const secondaryComplete = vi.fn((_request: ModelRequest) => Promise.resolve(result));

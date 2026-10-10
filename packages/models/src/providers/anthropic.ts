@@ -21,6 +21,8 @@ export interface AnthropicAdapterOptions {
   readonly apiKey: AnthropicApiKey;
   /** Configured provider code used to identify opaque response parts. */
   readonly provider?: Code;
+  /** Default maximum response-token count. */
+  readonly maxOutputTokens?: number;
   /** Optional fetch implementation, primarily used for deterministic tests. */
   readonly fetch?: ClientOptions["fetch"];
   /** Optional API base URL, primarily used for testing or a compatible endpoint. */
@@ -222,6 +224,7 @@ function mapError(error: unknown, signal: AbortSignal): never {
 export class AnthropicAdapter implements ProviderAdapter {
   readonly provider: Code;
   readonly protocolProvider = "anthropic" as const;
+  readonly maxOutputTokens: number;
   readonly capabilities: Partial<Capabilities>;
   private readonly client: Anthropic;
 
@@ -232,6 +235,7 @@ export class AnthropicAdapter implements ProviderAdapter {
    */
   constructor(options: AnthropicAdapterOptions) {
     this.provider = options.provider ?? "anthropic";
+    this.maxOutputTokens = options.maxOutputTokens ?? 4_096;
     this.capabilities = options.capabilities ?? {};
     this.client = new Anthropic({
       apiKey: options.apiKey.reveal(),

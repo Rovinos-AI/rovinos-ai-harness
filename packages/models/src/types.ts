@@ -42,6 +42,8 @@ export interface ProviderAdapter {
   readonly provider: Code;
   /** Built-in protocol identity used for capability and schema-rule lookup. */
   readonly protocolProvider?: "anthropic" | "openai";
+  /** Default maximum response-token count used when the request does not specify one. */
+  readonly maxOutputTokens?: number;
   readonly capabilities?: Partial<Capabilities>;
 
   /**

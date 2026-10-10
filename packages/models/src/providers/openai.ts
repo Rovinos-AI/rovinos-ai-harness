@@ -31,6 +31,7 @@ export interface OpenAISecret {
 export interface OpenAIAdapterOptions {
   readonly apiKey: OpenAISecret;
   readonly provider?: Code;
+  readonly maxOutputTokens?: number;
   readonly fetch?: typeof fetch;
   readonly baseURL?: string;
   readonly capabilities?: Partial<Capabilities>;
@@ -40,6 +41,7 @@ export interface OpenAIAdapterOptions {
 export class OpenAIAdapter implements ProviderAdapter {
   readonly provider: Code;
   readonly protocolProvider = "openai" as const;
+  readonly maxOutputTokens: number;
   readonly capabilities: Partial<Capabilities>;
   private readonly client: OpenAI;
 
@@ -50,6 +52,7 @@ export class OpenAIAdapter implements ProviderAdapter {
    */
   constructor(options: OpenAIAdapterOptions) {
     this.provider = options.provider ?? "openai";
+    this.maxOutputTokens = options.maxOutputTokens ?? 4_096;
     this.client = new OpenAI({
       apiKey: options.apiKey.reveal(),
       maxRetries: 0,

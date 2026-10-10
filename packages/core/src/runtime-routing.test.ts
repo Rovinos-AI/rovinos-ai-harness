@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, expect, it, vi } from "vitest";
-import { ModelsConfigSchema, RunConfigSchema } from "@harness/schemas";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { JsonValue, ModelsConfigSchema, RunConfigSchema, parseJson } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { ProviderError } from "@harness/models";
 import { createRuntime } from "./runtime.js";
@@ -15,6 +15,10 @@ const models = ModelsConfigSchema.parse({
       { provider: "second", model: "second-model" },
     ],
   },
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("createRuntime model routing", () => {
@@ -133,6 +137,60 @@ describe("createRuntime model routing", () => {
         model: "second-model",
         fallbackDepth: 1,
       });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("sends the configured output-token limit on an Anthropic runtime request", async () => {
+    const requestBodies: JsonValue[] = [];
+    vi.stubGlobal("fetch", (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof init?.body === "string") {
+        requestBodies.push(parseJson(JsonValue, init.body));
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "message-test",
+            type: "message",
+            role: "assistant",
+            model: "claude-test",
+            content: [{ type: "text", text: "completed" }],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: { input_tokens: 3, output_tokens: 2 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        models: ModelsConfigSchema.parse({
+          retry: { maxAttempts: 1 },
+          providers: [
+            {
+              id: "anthropic",
+              kind: "anthropic",
+              apiKey: "env:ANTHROPIC_API_KEY",
+              maxOutputTokens: 713,
+            },
+          ],
+          routing: { default: [{ provider: "anthropic", model: "claude-test" }] },
+        }),
+      },
+      {
+        store: new InMemoryEventStore(),
+        secretResolver: { resolve: () => Promise.resolve({ reveal: () => "synthetic-key" }) },
+      },
+    );
+
+    try {
+      const result = await runtime.run("test goal");
+
+      expect(result.status).toBe("completed");
+      expect(requestBodies[0]).toMatchObject({ max_tokens: 713, model: "claude-test" });
     } finally {
       await runtime.close();
     }

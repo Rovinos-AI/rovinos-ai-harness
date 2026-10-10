@@ -79,6 +79,7 @@ async function configuredAdapter(
   const options = {
     apiKey,
     provider: provider.id,
+    maxOutputTokens: provider.maxOutputTokens,
     ...(provider.baseUrl === undefined ? {} : { baseURL: provider.baseUrl }),
     ...(capabilities === undefined ? {} : { capabilities }),
   };

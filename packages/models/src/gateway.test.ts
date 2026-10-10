@@ -115,7 +115,7 @@ describe("ModelGateway", () => {
     });
 
     const call = complete.mock.calls[0];
-    expect(call?.[0]).toEqual(request);
+    expect(call?.[0]).toEqual({ ...request, maxOutputTokens: 4_096 });
     expect(call?.[1].ids).toBe(ids);
     expect(call?.[1].clock).toBe(clock);
     expect(call?.[1].signal).not.toBe(signal);
@@ -542,26 +542,42 @@ describe("ModelGateway", () => {
   });
 
   it("uses built-in protocol behavior for a custom adapter id", async () => {
-    const complete = vi.fn((_request: ModelRequest) =>
-      Promise.resolve({
-        parts: [{ type: "text" as const, text: '{"answer":"ok"}' }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-        finishReason: "stop",
-        latencyMs: 1,
-      }),
-    );
-    const adapter: ProviderAdapter = {
-      provider: "local-openai",
-      protocolProvider: "openai",
-      complete,
-    };
+    let requestBody: JsonValue | undefined;
+    const adapter = new OpenAIAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      provider: "openai_eu",
+      fetch: (_input, init) => {
+        if (typeof init?.body === "string") {
+          requestBody = parseJson(JsonValue, init.body);
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "completion-test",
+              object: "chat.completion",
+              created: 1,
+              model: "gpt-test",
+              choices: [
+                {
+                  index: 0,
+                  message: { role: "assistant", content: '{"answer":"ok"}' },
+                  finish_reason: "stop",
+                },
+              ],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      },
+    });
     const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
     });
 
     const completion = await gateway.complete(
-      { ...request, model: { provider: "local-openai", model: "gpt-test" } },
+      { ...request, model: { provider: "openai_eu", model: "gpt-test" } },
       {
         runId: request.requestId,
         signal: new AbortController().signal,
@@ -569,11 +585,18 @@ describe("ModelGateway", () => {
       },
     );
 
-    expect(complete.mock.calls[0]?.[0].output?.schema).toMatchObject({
-      additionalProperties: false,
-      required: ["answer"],
+    expect(requestBody).toMatchObject({
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          schema: {
+            additionalProperties: false,
+            required: ["answer"],
+          },
+        },
+      },
     });
-    expect(completion).toMatchObject({ provider: "local-openai", rungUsed: "native" });
+    expect(completion).toMatchObject({ provider: "openai_eu", rungUsed: "native" });
   });
 
   it("throws a value-free error when native output remains invalid after the repair limit", async () => {

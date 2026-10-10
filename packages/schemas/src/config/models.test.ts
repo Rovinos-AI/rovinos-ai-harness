@@ -128,4 +128,24 @@ describe("ModelsConfigSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("defaults provider output limits and requires positive integer overrides", () => {
+    expect(
+      ModelsConfigSchema.parse({
+        providers: [{ id: "anthropic", kind: "anthropic" }],
+      }).providers[0]?.maxOutputTokens,
+    ).toBe(4_096);
+    expect(
+      ModelsConfigSchema.parse({
+        providers: [{ id: "anthropic", kind: "anthropic", maxOutputTokens: 512 }],
+      }).providers[0]?.maxOutputTokens,
+    ).toBe(512);
+    for (const maxOutputTokens of [0, -1, 1.5]) {
+      expect(() =>
+        ModelsConfigSchema.parse({
+          providers: [{ id: "anthropic", kind: "anthropic", maxOutputTokens }],
+        }),
+      ).toThrow();
+    }
+  });
 });
