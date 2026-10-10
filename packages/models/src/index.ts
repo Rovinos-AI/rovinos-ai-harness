@@ -7,7 +7,13 @@ export {
   type ProviderErrorOptions,
 } from "./errors.js";
 export { prepareMessagesForProvider } from "./blobs.js";
-export { ModelGateway, type ModelGatewayDependencies } from "./gateway.js";
+export {
+  ModelGateway,
+  type ModelGatewayContext,
+  type ModelGatewayDependencies,
+  type ModelGatewayOptions,
+  type ModelGatewayResponse,
+} from "./gateway.js";
 export { AdapterRegistry } from "./registry.js";
 export {
   DeadlineExceededError,
@@ -45,3 +51,15 @@ export {
   type ProviderId,
   type ProviderSchemaRule,
 } from "./provider-schema-rules.js";
+export {
+  createEnforcementResultSchema,
+  EnforcementIssueSchema,
+  EnforcementRungSchema,
+  EnforcementRungUnavailableError,
+  OutputWithToolsUnsupportedError,
+  parseEnforcementResult,
+  selectEnforcementRung,
+  type EnforcementIssue,
+  type EnforcementResult,
+  type EnforcementRung,
+} from "./enforce/index.js";

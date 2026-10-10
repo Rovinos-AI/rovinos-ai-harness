@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, ModelUsageSchema, PartSchema } from "@harness/schemas";
-import type { Id, ModelRequest, ModelUsage, Part } from "@harness/schemas";
+import type { Capabilities, Id, ModelRequest, ModelUsage, Part } from "@harness/schemas";
 import { z } from "zod";
 
 /** Clock used by provider adapters for deterministic elapsed-time measurements. */
@@ -40,6 +40,7 @@ export type ProviderResult = z.infer<typeof ProviderResultSchema>;
 /** Translates one provider's wire format to and from normalized model types. */
 export interface ProviderAdapter {
   readonly provider: Code;
+  readonly capabilities?: Partial<Capabilities>;
 
   /**
    * Completes a request without retries, repairs, or output-schema enforcement.
