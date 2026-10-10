@@ -221,6 +221,7 @@ function mapError(error: unknown, signal: AbortSignal): never {
 /** Anthropic Messages API adapter with provider-specific content preserved verbatim. */
 export class AnthropicAdapter implements ProviderAdapter {
   readonly provider: Code;
+  readonly protocolProvider = "anthropic" as const;
   readonly capabilities: Partial<Capabilities>;
   private readonly client: Anthropic;
 

@@ -104,6 +104,11 @@ describe("ModelsConfigSchema", () => {
     ).toThrow();
     expect(() =>
       ModelsConfigSchema.parse({
+        providers: [{ id: "remote", kind: "openai_compatible", baseUrl: "HTTPS://model.example" }],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      ModelsConfigSchema.parse({
         providers: [
           {
             id: "local",

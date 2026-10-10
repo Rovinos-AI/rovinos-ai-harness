@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type JsonValue } from "@harness/schemas";
+import { HarnessError, type JsonValue, type ModelUsage } from "@harness/schemas";
 import { z } from "zod";
 import type { EnforcementIssue } from "./enforce/index.js";
 import { redactIssuePath } from "./enforce/repair.js";
@@ -40,6 +40,42 @@ const RETRYABLE_CODES: ReadonlySet<ProviderErrorCode> = new Set([
 export interface ProviderErrorOptions {
   readonly retryAfterMs?: number;
   readonly status?: number;
+}
+
+/** Accounting metadata retained when a gateway fails after completed provider calls. */
+export interface ModelFailureMetadata {
+  readonly usage?: ModelUsage;
+  readonly latencyMs?: number;
+  readonly repairAttempts?: number;
+}
+
+/** Attaches accumulated accounting metadata to an existing gateway error. */
+export function attachModelFailureMetadata<T>(error: T, metadata: ModelFailureMetadata): T {
+  if (typeof error !== "object" || error === null || !Object.isExtensible(error)) {
+    return error;
+  }
+  if (metadata.usage !== undefined) {
+    Object.defineProperty(error, "usage", {
+      value: metadata.usage,
+      configurable: true,
+      enumerable: true,
+    });
+  }
+  if (metadata.latencyMs !== undefined) {
+    Object.defineProperty(error, "latencyMs", {
+      value: metadata.latencyMs,
+      configurable: true,
+      enumerable: true,
+    });
+  }
+  if (metadata.repairAttempts !== undefined) {
+    Object.defineProperty(error, "repairAttempts", {
+      value: metadata.repairAttempts,
+      configurable: true,
+      enumerable: true,
+    });
+  }
+  return error;
 }
 
 /** A normalized provider failure with stable retryability and status metadata. */
@@ -90,6 +126,10 @@ export class ModelOutputInvalidError extends HarnessError {
   readonly code = "model_output_invalid";
   /** Number of repair calls made after the initial invalid response. */
   readonly repairAttempts: number;
+  /** Usage reported by completed provider calls before validation failed. */
+  declare readonly usage?: ModelUsage;
+  /** Latency of completed provider calls before validation failed. */
+  declare readonly latencyMs?: number;
   /** Paths reported by the final value-free validation result. */
   readonly issuePaths: readonly (readonly (string | number)[])[];
 
@@ -97,10 +137,22 @@ export class ModelOutputInvalidError extends HarnessError {
    * @param repairAttempts - Number of repair calls made.
    * @param issues - Value-free issues from the final validation attempt.
    * @param schema - Lowered output schema used to redact model-provided path segments.
+   * @param metadata - Usage and latency accumulated before validation failed.
    */
-  constructor(repairAttempts: number, issues: readonly EnforcementIssue[], schema?: JsonValue) {
+  constructor(
+    repairAttempts: number,
+    issues: readonly EnforcementIssue[],
+    schema?: JsonValue,
+    metadata: Pick<ModelFailureMetadata, "usage" | "latencyMs"> = {},
+  ) {
     super("Model output did not match the requested schema.");
     this.repairAttempts = repairAttempts;
     this.issuePaths = issues.map(({ path }) => redactIssuePath(path, schema));
+    if (metadata.usage !== undefined) {
+      this.usage = metadata.usage;
+    }
+    if (metadata.latencyMs !== undefined) {
+      this.latencyMs = metadata.latencyMs;
+    }
   }
 }

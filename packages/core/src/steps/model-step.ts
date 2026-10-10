@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type Event, type Id, type Message, type ToolSpec } from "@harness/schemas";
+import {
+  Code,
+  ModelRequestSchema,
+  type Event,
+  type Id,
+  type Message,
+  type ToolSpec,
+} from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
@@ -22,6 +29,8 @@ export interface ModelStepOptions {
   readonly provider?: Code;
   readonly modelName?: Code;
 }
+
+const DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
 
 /** Selects request messages and model-visible tool specifications for the model step. */
 export function modelToolOptions(
@@ -89,16 +98,17 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
     let completion: ModelCompletion;
     try {
       completion = await options.model.complete(
-        {
+        ModelRequestSchema.parse({
           requestId,
           model: {
             provider: options.provider ?? "unknown",
             model: options.modelName ?? "unknown",
           },
           messages: options.messages,
+          maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
           ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
           ...(role === undefined ? {} : { role }),
-        },
+        }),
         modelRunContext(options),
       );
     } catch (error) {

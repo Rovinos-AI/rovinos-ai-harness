@@ -22,7 +22,7 @@ import {
   type ProviderAdapter,
 } from "./types.js";
 import type { AdapterRegistry } from "./registry.js";
-import { ModelOutputInvalidError, ProviderError } from "./errors.js";
+import { attachModelFailureMetadata, ModelOutputInvalidError, ProviderError } from "./errors.js";
 import { prepareMessagesForProvider } from "./blobs.js";
 import { TokenBucketRateLimiter } from "./resilience/limiter.js";
 import { abortableSleep, withRetries, type Random, type Sleep } from "./resilience/retry.js";
@@ -78,11 +78,25 @@ interface PreparedEnforcement {
   readonly rung?: EnforcementRung;
 }
 
+interface ProviderEnforcement {
+  readonly protocolProvider: string;
+  readonly capabilities: Capabilities;
+  readonly maxRung?: EnforcementRung;
+}
+
+interface PreparedCompletionOptions<OutputSchema extends z.ZodType> {
+  readonly request: ModelRequest;
+  readonly context: ModelGatewayContext<OutputSchema>;
+  readonly adapter: ProviderAdapter;
+  readonly prepared: PreparedEnforcement;
+  readonly limiter: TokenBucketRateLimiter | undefined;
+  readonly semaphore: Semaphore;
+}
+
 function prepareEnforcementRequest(
   request: ModelRequest,
   outputSchema: z.ZodType | undefined,
-  capabilities: Capabilities,
-  maxRung?: EnforcementRung,
+  provider: ProviderEnforcement,
 ): PreparedEnforcement {
   if (outputSchema === undefined) {
     return { request };
@@ -91,12 +105,12 @@ function prepareEnforcementRequest(
     throw new OutputWithToolsUnsupportedError();
   }
 
-  const schemaRules = providerSchemaRules(request.model.provider);
+  const schemaRules = providerSchemaRules(provider.protocolProvider);
   let rung: EnforcementRung | undefined;
   if (schemaRules === undefined) {
-    rung = maxRung === "native" || maxRung === "tool" ? undefined : "prompt";
+    rung = provider.maxRung === "native" || provider.maxRung === "tool" ? undefined : "prompt";
   } else {
-    rung = selectEnforcementRung(capabilities, maxRung);
+    rung = selectEnforcementRung(provider.capabilities, provider.maxRung);
   }
   if (rung === undefined) {
     throw new EnforcementRungUnavailableError();
@@ -105,7 +119,7 @@ function prepareEnforcementRequest(
   const schema =
     schemaRules === undefined
       ? toJsonSchema(outputSchema)
-      : lowerForProvider(outputSchema, request.model.provider).schema;
+      : lowerForProvider(outputSchema, provider.protocolProvider).schema;
   const output = {
     name: request.output?.name ?? "result",
     schema,
@@ -244,6 +258,84 @@ export class ModelGateway {
     });
   }
 
+  private async completePrepared<OutputSchema extends z.ZodType>(
+    options: PreparedCompletionOptions<OutputSchema>,
+  ): Promise<ModelGatewayResponse<OutputSchema>> {
+    const { request, context, adapter, prepared, limiter, semaphore } = options;
+    let attempts = 0;
+    let repairAttempts = 0;
+    let aggregateUsage: ModelUsage | undefined;
+    let aggregateLatencyMs = 0;
+    let currentRequest = prepared.request;
+    try {
+      for (;;) {
+        setActiveSpanAttribute("harness.model.repair_attempts", repairAttempts);
+        const adapterResult = await this.completeWithRetries(adapter, {
+          request: currentRequest,
+          context,
+          limiter,
+          semaphore,
+          onAttempt: () => {
+            attempts += 1;
+            setActiveSpanAttribute("harness.model.attempts", attempts);
+          },
+        });
+        const parsedResult = ProviderResultSchema.safeParse(adapterResult);
+        if (!parsedResult.success) {
+          throw new ProviderError("provider_unknown");
+        }
+        const result = parsedResult.data;
+        aggregateUsage = aggregateModelUsage(aggregateUsage, result.usage);
+        aggregateLatencyMs += result.latencyMs;
+
+        const enforced = enforceProviderOutput(result.parts, context.outputSchema, prepared.rung);
+        const enforcement = enforced.result;
+        if (enforcement !== undefined && "issues" in enforcement) {
+          if (repairAttempts >= this.maxRepairs) {
+            throw new ModelOutputInvalidError(
+              repairAttempts,
+              enforcement.issues,
+              currentRequest.output?.schema,
+              { usage: aggregateUsage, latencyMs: aggregateLatencyMs },
+            );
+          }
+          currentRequest = appendRepairMessages(
+            currentRequest,
+            result.parts,
+            enforcement.issues,
+            enforcement.rungUsed,
+          );
+          repairAttempts += 1;
+          continue;
+        }
+
+        return {
+          parts: enforced.parts,
+          usage: aggregateUsage,
+          finishReason: result.finishReason,
+          provider: adapter.provider,
+          model: request.model.model,
+          latencyMs: aggregateLatencyMs,
+          schemaValid: enforcement?.valid ?? true,
+          repairAttempts,
+          ...(enforcement === undefined ? {} : { enforcement }),
+          ...(enforcement?.rungUsed === undefined ? {} : { rungUsed: enforcement.rungUsed }),
+          fallbackDepth: 0,
+          providerBlobs: null,
+        };
+      }
+    } catch (error) {
+      if (aggregateUsage === undefined) {
+        throw error;
+      }
+      throw attachModelFailureMetadata(error, {
+        usage: aggregateUsage,
+        latencyMs: aggregateLatencyMs,
+        repairAttempts,
+      });
+    }
+  }
+
   /**
    * Completes a request through the adapter selected by its provider code.
    *
@@ -256,81 +348,25 @@ export class ModelGateway {
     context: ModelGatewayContext<OutputSchema>,
   ): Promise<ModelGatewayResponse<OutputSchema>> {
     const adapter = this.registry.get(request.model.provider);
+    const protocolProvider = adapter.protocolProvider ?? adapter.provider;
     const prepared =
       context.outputSchema === undefined
         ? { request }
-        : prepareEnforcementRequest(
-            request,
-            context.outputSchema,
-            lookupCapabilities(request.model, adapter.capabilities).capabilities,
-            this.options.maxRung,
-          );
+        : prepareEnforcementRequest(request, context.outputSchema, {
+            protocolProvider,
+            capabilities: lookupCapabilities(
+              { ...request.model, provider: protocolProvider },
+              adapter.capabilities,
+            ).capabilities,
+            ...(this.options.maxRung === undefined ? {} : { maxRung: this.options.maxRung }),
+          });
     const limiter = this.limiters.get(adapter.provider);
     let semaphore = this.semaphores.get(adapter.provider);
     if (semaphore === undefined) {
       semaphore = new Semaphore(this.maxConcurrent);
       this.semaphores.set(adapter.provider, semaphore);
     }
-    let attempts = 0;
-    let repairAttempts = 0;
-    let aggregateUsage: ModelUsage | undefined;
-    let aggregateLatencyMs = 0;
-    let currentRequest = prepared.request;
-    for (;;) {
-      setActiveSpanAttribute("harness.model.repair_attempts", repairAttempts);
-      const adapterResult = await this.completeWithRetries(adapter, {
-        request: currentRequest,
-        context,
-        limiter,
-        semaphore,
-        onAttempt: () => {
-          attempts += 1;
-          setActiveSpanAttribute("harness.model.attempts", attempts);
-        },
-      });
-      const parsedResult = ProviderResultSchema.safeParse(adapterResult);
-      if (!parsedResult.success) {
-        throw new ProviderError("provider_unknown");
-      }
-      const result = parsedResult.data;
-      aggregateUsage = aggregateModelUsage(aggregateUsage, result.usage);
-      aggregateLatencyMs += result.latencyMs;
-
-      const enforced = enforceProviderOutput(result.parts, context.outputSchema, prepared.rung);
-      const enforcement = enforced.result;
-      if (enforcement !== undefined && "issues" in enforcement) {
-        if (repairAttempts >= this.maxRepairs) {
-          throw new ModelOutputInvalidError(
-            repairAttempts,
-            enforcement.issues,
-            currentRequest.output?.schema,
-          );
-        }
-        currentRequest = appendRepairMessages(
-          currentRequest,
-          result.parts,
-          enforcement.issues,
-          enforcement.rungUsed,
-        );
-        repairAttempts += 1;
-        continue;
-      }
-
-      return {
-        parts: enforced.parts,
-        usage: aggregateUsage,
-        finishReason: result.finishReason,
-        provider: adapter.provider,
-        model: request.model.model,
-        latencyMs: aggregateLatencyMs,
-        schemaValid: enforcement?.valid ?? true,
-        repairAttempts,
-        ...(enforcement === undefined ? {} : { enforcement }),
-        ...(enforcement?.rungUsed === undefined ? {} : { rungUsed: enforcement.rungUsed }),
-        fallbackDepth: 0,
-        providerBlobs: null,
-      };
-    }
+    return this.completePrepared({ request, context, adapter, prepared, limiter, semaphore });
   }
 }
 

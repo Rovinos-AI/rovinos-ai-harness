@@ -39,6 +39,7 @@ export interface OpenAIAdapterOptions {
 /** OpenAI Chat Completions provider adapter. */
 export class OpenAIAdapter implements ProviderAdapter {
   readonly provider: Code;
+  readonly protocolProvider = "openai" as const;
   readonly capabilities: Partial<Capabilities>;
   private readonly client: OpenAI;
 
@@ -61,7 +62,10 @@ export class OpenAIAdapter implements ProviderAdapter {
   /** {@inheritDoc ProviderAdapter.complete} */
   async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
     const startedAt = context.clock.now();
-    const capabilities = lookupCapabilities(request.model, this.capabilities).capabilities;
+    const capabilities = lookupCapabilities(
+      { ...request.model, provider: this.protocolProvider },
+      this.capabilities,
+    ).capabilities;
     try {
       const response = await this.client.chat.completions.create(
         toChatRequest(

@@ -1126,6 +1126,7 @@ describe("runLoop", () => {
           requestId: "00000000000000000000000000",
           model: { provider: "test_provider", model: "test_model" },
           messages: [{ role: "user", parts: [{ type: "text", text: "test goal" }] }],
+          maxOutputTokens: 4096,
           tools: [
             {
               toolId: "read_offloaded",

@@ -48,7 +48,7 @@ export const ModelProviderConfigSchema = z
     if (provider.baseUrl !== undefined) {
       const host = new URL(provider.baseUrl).hostname;
       const isLoopback = host === "localhost" || host === "127.0.0.1" || host === "[::1]";
-      const isHttps = provider.baseUrl.startsWith("https://");
+      const isHttps = new URL(provider.baseUrl).protocol === "https:";
       if (!isHttps && !isLoopback && provider.trust !== "local") {
         context.addIssue({
           code: "custom",

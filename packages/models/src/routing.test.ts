@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
 import { ModelsConfigSchema, type ModelRequest } from "@harness/schemas";
+import { z } from "zod";
 import { ModelOutputInvalidError, ProviderError } from "./errors.js";
 import { createRoutingModelGateway, RoutingProviderUnknownError } from "./routing.js";
 import type { ModelRoutingConfig } from "./routing.js";
@@ -202,6 +203,181 @@ describe("RoutingModelGateway", () => {
     });
 
     expect(secondaryComplete).toHaveBeenCalledOnce();
+  });
+
+  it("adds failed repair usage and latency to the successful fallback response", async () => {
+    const invalidResult: ProviderResult = {
+      parts: [{ type: "text", text: '{"answer":"invalid"}' }],
+      usage: { inputTokens: 2, outputTokens: 4, costMicros: 3 },
+      finishReason: "stop",
+      latencyMs: 7,
+    };
+    const primaryComplete = vi.fn(() => Promise.resolve(invalidResult));
+    const fallbackComplete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: '{"answer":42}' }],
+        usage: { inputTokens: 3, outputTokens: 5, costMicros: 5 },
+        finishReason: "stop",
+        latencyMs: 2,
+      }),
+    );
+    const gateway = createRoutingModelGateway(
+      [adapter("primary", primaryComplete), adapter("secondary", fallbackComplete)],
+      { ...dependencies, enforcement: { maxRepairs: 1 } },
+      routing({
+        default: [
+          { provider: "primary", model: "model-one" },
+          { provider: "secondary", model: "model-two" },
+        ],
+      }),
+    );
+
+    const response = await gateway.complete(request, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+      outputSchema: z.object({ answer: z.number() }),
+    });
+
+    expect(primaryComplete).toHaveBeenCalledTimes(2);
+    expect(response).toMatchObject({
+      provider: "secondary",
+      model: "model-two",
+      fallbackDepth: 1,
+      usage: { inputTokens: 7, outputTokens: 13, costMicros: 11 },
+      latencyMs: 16,
+      repairAttempts: 1,
+    });
+  });
+
+  it("retains usage when a later repair call fails after an earlier response", async () => {
+    let primaryCalls = 0;
+    const primary = adapter("primary", () => {
+      primaryCalls += 1;
+      return primaryCalls === 1
+        ? Promise.resolve({
+            parts: [{ type: "text" as const, text: '{"answer":"invalid"}' }],
+            usage: { inputTokens: 2, outputTokens: 3 },
+            finishReason: "stop",
+            latencyMs: 4,
+          })
+        : Promise.reject(new ProviderError("provider_unavailable"));
+    });
+    const secondary = adapter("secondary", () =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: '{"answer":42}' }],
+        usage: { inputTokens: 5, outputTokens: 6 },
+        finishReason: "stop",
+        latencyMs: 7,
+      }),
+    );
+    const gateway = createRoutingModelGateway(
+      [primary, secondary],
+      { ...dependencies, enforcement: { maxRepairs: 1 } },
+      routing({
+        default: [
+          { provider: "primary", model: "model-one" },
+          { provider: "secondary", model: "model-two" },
+        ],
+      }),
+    );
+
+    const response = await gateway.complete(request, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+      outputSchema: z.object({ answer: z.number() }),
+    });
+
+    expect(response).toMatchObject({
+      usage: { inputTokens: 7, outputTokens: 9 },
+      latencyMs: 11,
+      repairAttempts: 1,
+      fallbackDepth: 1,
+    });
+  });
+
+  it("attaches accumulated usage when the final candidate also fails", async () => {
+    const primary = adapter("primary", () =>
+      Promise.reject(
+        new ModelOutputInvalidError(0, [{ path: ["answer"], code: "invalid_type" }], undefined, {
+          usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+          latencyMs: 5,
+        }),
+      ),
+    );
+    const finalError = new ProviderError("provider_unavailable");
+    const secondary = adapter("secondary", () => Promise.reject(finalError));
+    const gateway = createRoutingModelGateway(
+      [primary, secondary],
+      dependencies,
+      routing({
+        default: [
+          { provider: "primary", model: "model-one" },
+          { provider: "secondary", model: "model-two" },
+        ],
+      }),
+    );
+
+    await expect(
+      gateway.complete(request, {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({
+      code: "provider_unavailable",
+      usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+      latencyMs: 5,
+    });
+  });
+
+  it("never falls back after a deadline even when it is configured", async () => {
+    const primaryComplete = vi.fn(() => Promise.reject(new ProviderError("provider_unavailable")));
+    const secondaryComplete = vi.fn(() => Promise.resolve(result));
+    const gateway = createRoutingModelGateway(
+      [adapter("primary", primaryComplete), adapter("secondary", secondaryComplete)],
+      dependencies,
+      routing({
+        default: [
+          { provider: "primary", model: "model-one" },
+          { provider: "secondary", model: "model-two" },
+        ],
+        fallbackOn: ["deadline_exceeded", "provider_unavailable"],
+      }),
+    );
+
+    await expect(
+      gateway.complete(request, {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        deadlineTs: 0,
+      }),
+    ).rejects.toMatchObject({ code: "deadline_exceeded" });
+    expect(primaryComplete).not.toHaveBeenCalled();
+    expect(secondaryComplete).not.toHaveBeenCalled();
+  });
+
+  it("never falls back after run cancellation even when cancellation is configured", async () => {
+    const controller = new AbortController();
+    const cancelled = Object.assign(new Error("cancelled"), { code: "run_cancelled" });
+    controller.abort(cancelled);
+    const primaryComplete = vi.fn(() => Promise.reject(new ProviderError("provider_unavailable")));
+    const secondaryComplete = vi.fn(() => Promise.resolve(result));
+    const gateway = createRoutingModelGateway(
+      [adapter("primary", primaryComplete), adapter("secondary", secondaryComplete)],
+      dependencies,
+      routing({
+        default: [
+          { provider: "primary", model: "model-one" },
+          { provider: "secondary", model: "model-two" },
+        ],
+        fallbackOn: ["run_cancelled", "provider_unavailable"],
+      }),
+    );
+
+    await expect(
+      gateway.complete(request, { runId: request.requestId, signal: controller.signal }),
+    ).rejects.toBe(cancelled);
+    expect(primaryComplete).not.toHaveBeenCalled();
+    expect(secondaryComplete).not.toHaveBeenCalled();
   });
 
   it("rejects configured routes that reference unknown providers at construction", () => {

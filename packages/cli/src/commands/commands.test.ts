@@ -25,6 +25,7 @@ import {
   FakeClock,
   Event as EventSchema,
   Id,
+  JsonValue,
   RunResultSchema,
   Sha256Hex,
   parseJson,
@@ -239,6 +240,7 @@ async function readEvents(store: InMemoryEventStore, runId: Id): Promise<Event[]
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   if (temporaryDirectory !== "") {
     await rm(temporaryDirectory, { recursive: true, force: true });
     temporaryDirectory = "";
@@ -273,6 +275,89 @@ describe("run, resume, and inspect CLI commands", () => {
     expect(harness.stdout).toHaveLength(1);
     expect(harness.stdout[0]).toMatch(/"status":"completed"/u);
     expect(harness.stderr).toEqual(["00000000000000000000000000\n"]);
+  });
+
+  it("runs configured routing without --fake-model and resolves provider secrets", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-routing-"));
+    const inputPath = await createFile("input.json", '{"goal":"say hello"}');
+    const routedConfig = HarnessConfigSchema.parse({
+      models: {
+        providers: [
+          {
+            id: "local-openai",
+            kind: "openai",
+            apiKey: "env:MODEL_TEST_API_KEY",
+            baseUrl: "https://provider.example/v1",
+          },
+        ],
+        routing: {
+          default: [{ provider: "local-openai", model: "gpt-4o-mini" }],
+        },
+      },
+    });
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const out = createOutput({
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+    });
+    const ids = createIds();
+    const clock = new FakeClock(1_000);
+    const store = new InMemoryEventStore();
+    const resolveSecret = vi.fn((_reference: string) =>
+      Promise.resolve({ reveal: () => "synthetic-test-key" }),
+    );
+    const requestBodies: JsonValue[] = [];
+    vi.stubGlobal("fetch", (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof init?.body === "string") {
+        requestBodies.push(parseJson(JsonValue, init.body));
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "completion-test",
+            object: "chat.completion",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: "hello" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+    const context: CliContext = {
+      loadConfig: () => Promise.resolve(routedConfig),
+      out,
+      clock,
+      createRuntime: (runtimeConfig, runtimeOverrides) =>
+        createRuntime(runtimeConfig, {
+          ...(runtimeOverrides ?? {}),
+          store,
+          ids,
+          clock,
+          context: new NaiveContext(),
+          tool: new FakeToolPort(),
+          secretResolver: { resolve: resolveSecret },
+        }),
+    };
+
+    const code = await main(["--json", "run", "--input", inputPath], context, [runCommand]);
+
+    expect(code).toBe(ExitCode.ok);
+    expect(stdout.join("")).toContain('"status":"completed"');
+    expect(stderr).toEqual(["00000000000000000000000000\n"]);
+    expect(resolveSecret).toHaveBeenCalledWith("env:MODEL_TEST_API_KEY");
+    expect(requestBodies[0]).toMatchObject({
+      model: "gpt-4o-mini",
+      max_completion_tokens: 4096,
+    });
   });
 
   it("reads JSON input from standard input", async () => {

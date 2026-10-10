@@ -42,9 +42,12 @@ On a provider switch the gateway removes foreign opaque provider data from
 conversation messages, while retaining normalized text and tool calls. The
 response reports the selected provider/model and its zero-based `fallbackDepth`.
 Provider credentials must use `env:`, `file:`, or `akv:` secret references;
-configured references are resolved by the CLI's secret resolver at runtime.
+the CLI resolves `env:` and `file:` references at runtime. `akv:` references
+are validated but cannot be resolved until Key Vault support is implemented.
 Remote provider URLs use HTTPS unless the endpoint is loopback or `trust: local`
 is explicitly set.
 
 Routing targets are checked against configured provider ids during runtime
 construction. An unknown id fails startup with `routing_provider_unknown`.
+Runtime-generated requests include a validated `maxOutputTokens` limit of 4096,
+including for providers whose APIs require an explicit output-token limit.

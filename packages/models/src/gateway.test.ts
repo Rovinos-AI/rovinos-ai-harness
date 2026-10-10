@@ -541,6 +541,41 @@ describe("ModelGateway", () => {
     });
   });
 
+  it("uses built-in protocol behavior for a custom adapter id", async () => {
+    const complete = vi.fn((_request: ModelRequest) =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: '{"answer":"ok"}' }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const adapter: ProviderAdapter = {
+      provider: "local-openai",
+      protocolProvider: "openai",
+      complete,
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "local-openai", model: "gpt-test" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema: z.object({ answer: z.string() }).strict(),
+      },
+    );
+
+    expect(complete.mock.calls[0]?.[0].output?.schema).toMatchObject({
+      additionalProperties: false,
+      required: ["answer"],
+    });
+    expect(completion).toMatchObject({ provider: "local-openai", rungUsed: "native" });
+  });
+
   it("throws a value-free error when native output remains invalid after the repair limit", async () => {
     const complete = vi.fn(() =>
       Promise.resolve({

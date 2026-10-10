@@ -2,11 +2,17 @@
 import {
   Code,
   HarnessError,
+  ModelUsageSchema,
   type ModelRequest,
+  type ModelUsage,
   type ModelRoutingConfigSchema,
 } from "@harness/schemas";
 import type { z } from "zod";
-import { ModelOutputInvalidError } from "./errors.js";
+import {
+  attachModelFailureMetadata,
+  ModelOutputInvalidError,
+  type ModelFailureMetadata,
+} from "./errors.js";
 import {
   ModelGateway,
   type ModelGatewayContext,
@@ -51,6 +57,68 @@ function errorCode(error: unknown): string | undefined {
   return undefined;
 }
 
+function failureMetadata(error: unknown): ModelFailureMetadata {
+  if (typeof error !== "object" || error === null) {
+    return {};
+  }
+  const metadata: {
+    usage?: ModelUsage;
+    latencyMs?: number;
+    repairAttempts?: number;
+  } = {};
+  if ("usage" in error) {
+    const usage = ModelUsageSchema.safeParse(error.usage);
+    if (usage.success) {
+      metadata.usage = usage.data;
+    }
+  }
+  if ("latencyMs" in error && typeof error.latencyMs === "number") {
+    metadata.latencyMs = error.latencyMs;
+  }
+  if ("repairAttempts" in error && typeof error.repairAttempts === "number") {
+    metadata.repairAttempts = error.repairAttempts;
+  }
+  return metadata;
+}
+
+function aggregateUsage(previous: ModelUsage | undefined, next: ModelUsage | undefined) {
+  if (next === undefined) {
+    return previous;
+  }
+  let costMicros: number | undefined;
+  if (previous === undefined) {
+    costMicros = next.costMicros;
+  } else if (previous.costMicros !== undefined && next.costMicros !== undefined) {
+    costMicros = previous.costMicros + next.costMicros;
+  }
+  return {
+    inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
+    outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
+    ...(costMicros === undefined ? {} : { costMicros }),
+  };
+}
+
+function shouldFallback(options: {
+  readonly error: unknown;
+  readonly code: string | undefined;
+  readonly signal: AbortSignal;
+  readonly hasNext: boolean;
+  readonly fallbackOn: readonly string[];
+}): boolean {
+  const { error, code, signal, hasNext, fallbackOn } = options;
+  if (
+    !hasNext ||
+    signal.aborted ||
+    (error instanceof Error && error.name === "AbortError") ||
+    code === "deadline_exceeded" ||
+    code === "cancelled" ||
+    code === "run_cancelled"
+  ) {
+    return false;
+  }
+  return code !== undefined && fallbackOn.includes(code);
+}
+
 /** Routes model requests through ordered provider/model candidates and fallback policy. */
 export class RoutingModelGateway {
   private readonly gateway: ModelGateway;
@@ -89,25 +157,46 @@ export class RoutingModelGateway {
     context: ModelGatewayContext<OutputSchema>,
   ): Promise<ModelGatewayResponse<OutputSchema>> {
     const candidates = requestCandidates(request, this.routing);
-    for (const [index, model] of candidates.slice(0, -1).entries()) {
+    let accumulatedUsage: ModelUsage | undefined;
+    let accumulatedLatencyMs = 0;
+    let accumulatedRepairAttempts = 0;
+    for (const [index, model] of candidates.entries()) {
       try {
         const result = await this.gateway.complete({ ...request, model }, context);
-        return { ...result, fallbackDepth: index };
+        return {
+          ...result,
+          usage: aggregateUsage(accumulatedUsage, result.usage) ?? result.usage,
+          latencyMs: accumulatedLatencyMs + result.latencyMs,
+          repairAttempts: accumulatedRepairAttempts + result.repairAttempts,
+          fallbackDepth: index,
+        };
       } catch (error) {
+        const metadata = failureMetadata(error);
+        accumulatedUsage = aggregateUsage(accumulatedUsage, metadata.usage);
+        accumulatedLatencyMs += metadata.latencyMs ?? 0;
+        accumulatedRepairAttempts += metadata.repairAttempts ?? 0;
         const code = errorCode(error);
         if (
-          index === candidates.length - 1 ||
-          code === undefined ||
-          !this.routing.fallbackOn.includes(code)
+          !shouldFallback({
+            error,
+            code,
+            signal: context.signal,
+            hasNext: index < candidates.length - 1,
+            fallbackOn: this.routing.fallbackOn,
+          })
         ) {
-          throw error;
+          if (accumulatedUsage === undefined) {
+            throw error;
+          }
+          throw attachModelFailureMetadata(error, {
+            usage: accumulatedUsage,
+            latencyMs: accumulatedLatencyMs,
+            repairAttempts: accumulatedRepairAttempts,
+          });
         }
       }
     }
-    const fallbackDepth = candidates.length - 1;
-    const finalModel = candidates.at(-1) ?? request.model;
-    const result = await this.gateway.complete({ ...request, model: finalModel }, context);
-    return { ...result, fallbackDepth };
+    throw new Error("Expected at least one model routing candidate.");
   }
 }
 
