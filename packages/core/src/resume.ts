@@ -2,6 +2,7 @@
 import { HarnessError, type Event, type Id, type Snapshot } from "@harness/schemas";
 import type { Link } from "@opentelemetry/api";
 import type { EventStore } from "@harness/store";
+import { activeRuns } from "@harness/telemetry";
 import { applyResolvedApprovals } from "./approvals.js";
 import { BudgetTracker } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
@@ -13,7 +14,7 @@ import {
 } from "./loop.js";
 import { LeaseLostError, RunRecorder, type EventPartial } from "./recorder.js";
 import { planDanglingIntents, type ResumePolicy } from "./resume-policy.js";
-import { foldRunState, type RunState } from "./run-state.js";
+import { foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
 import { RUN_SPAN } from "./spans.js";
 import { applyDanglingIntents } from "./steps/tool-step.js";
 
@@ -344,9 +345,14 @@ export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResul
     recorder,
     checkpointer,
   };
-  await recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), [
-    previousSegmentLink(events, snapshot?.traceparent),
-  ]);
+  await activeRuns.track(
+    options.runId,
+    () =>
+      recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), [
+        previousSegmentLink(events, snapshot?.traceparent),
+      ]),
+    () => isTerminalRunState(foldRunState(events)),
+  );
 
   return resultForResume(events, newEventStart);
 }

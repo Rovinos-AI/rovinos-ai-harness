@@ -7,6 +7,7 @@ import {
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
+import type { TelemetryConfig } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { listLogDefinitions } from "./log-registry.js";
 import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
@@ -127,7 +128,9 @@ describe("SafeEvent log projection", () => {
 
   it("uses the allowlist processor before the real log exporter", async () => {
     const exporter = new InMemoryLogRecordExporter();
-    const processor = new AllowlistLogRecordProcessor(new SimpleLogRecordProcessor({ exporter }));
+    const processor = new AllowlistLogRecordProcessor(new SimpleLogRecordProcessor({ exporter }), {
+      telemetry: { sentinel: { minValueLength: 6, enabled: false } } satisfies TelemetryConfig,
+    });
     const provider = new LoggerProvider({
       resource: resourceFromAttributes({
         "service.name": "harness",
