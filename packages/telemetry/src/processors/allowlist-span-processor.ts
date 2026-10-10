@@ -10,7 +10,8 @@ import {
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { ReadableSpan, Span, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { lookupSpanDefinition } from "../registry.js";
-import { countDroppedTelemetry, type TelemetryDropReason } from "../metrics.js";
+import { countDroppedTelemetry } from "../metrics.js";
+import { sanitizeAttributes } from "./sanitize-attributes.js";
 
 const resourceAttributeNames = [
   "service.name",
@@ -134,59 +135,6 @@ function isReadableSpanValid(span: ReadableSpan): boolean {
   );
 }
 
-function isSafeParser(value: unknown): value is { safeParse(input: unknown): unknown } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "safeParse" in value &&
-    typeof value.safeParse === "function"
-  );
-}
-
-function isSuccessfulParse(
-  value: unknown,
-): value is { success: true; data: unknown } | { success: false } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "success" in value &&
-    (value.success === false || (value.success === true && "data" in value))
-  );
-}
-
-function sanitizeAttributes(
-  sourceAttributes: Record<string, unknown>,
-  shape: unknown,
-  droppedReasons: TelemetryDropReason[],
-): Attributes {
-  if (typeof shape !== "object" || shape === null) {
-    throw new TypeError("Span definition shape is malformed.");
-  }
-
-  const attributes: Attributes = {};
-  for (const [key, value] of Object.entries(sourceAttributes)) {
-    if (!Object.hasOwn(shape, key)) {
-      droppedReasons.push("unregistered_attr");
-      continue;
-    }
-
-    const schema: unknown = Reflect.get(shape, key);
-    if (!isSafeParser(schema)) {
-      droppedReasons.push("invalid_attr");
-      continue;
-    }
-
-    const parsed: unknown = schema.safeParse(value);
-    if (!isSuccessfulParse(parsed) || !parsed.success || !isAttributeValue(parsed.data)) {
-      droppedReasons.push("invalid_attr");
-      continue;
-    }
-
-    attributes[key] = parsed.data;
-  }
-  return attributes;
-}
-
 function sanitizeResource(sourceAttributes: Record<string, unknown>) {
   const attributes: Attributes = {};
   for (const key of resourceAttributeNames) {
@@ -216,10 +164,9 @@ export function sanitizeSpan(span: ReadableSpan): ReadableSpan | undefined {
       return undefined;
     }
 
-    const droppedReasons: TelemetryDropReason[] = [];
-    const attributes = sanitizeAttributes(span.attributes, definition.shape, droppedReasons);
+    const attributes = sanitizeAttributes(definition, span.attributes);
     if (span.events.length > 0) {
-      droppedReasons.push("event_stripped");
+      countDroppedTelemetry("event_stripped");
     }
 
     const spanContext = span.spanContext();
@@ -248,9 +195,6 @@ export function sanitizeSpan(span: ReadableSpan): ReadableSpan | undefined {
       droppedLinksCount: span.droppedLinksCount,
     };
 
-    for (const reason of droppedReasons) {
-      countDroppedTelemetry(reason);
-    }
     return sanitized;
   } catch {
     countDroppedTelemetry("processor_error");
