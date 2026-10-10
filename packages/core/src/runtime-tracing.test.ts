@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, diag, isSpanContextValid, trace } from "@opentelemetry/api";
-import { FakeClock, Id, RunConfigSchema, SequentialIdGenerator, Sha256Hex } from "@harness/schemas";
+import {
+  FakeClock,
+  Id,
+  RunConfigSchema,
+  SequentialIdGenerator,
+  Sha256Hex,
+  type Event as HarnessEvent,
+} from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { describe, expect, it, vi } from "vitest";
@@ -56,8 +63,8 @@ class TestShutdownProcess implements ShutdownProcessLike {
   }
 }
 
-async function readRunEvents(store: EventStore, runId: ReturnType<typeof Id.parse>): Promise<Event[]> {
-  const events: Event[] = [];
+async function readRunEvents(store: InMemoryEventStore, runId: Id): Promise<HarnessEvent[]> {
+  const events: HarnessEvent[] = [];
   for await (const event of store.read(runId)) {
     events.push(event);
   }
@@ -250,8 +257,7 @@ describe("runtime tracing fallback", () => {
     vi.spyOn(store, "read").mockImplementation((runId, range) =>
       (async function* () {
         for await (const event of read(runId, range)) {
-          const isCancellation =
-            event.type === "run_status_changed" && event.to === "cancelled";
+          const isCancellation = event.type === "run_status_changed" && event.to === "cancelled";
           yield event;
           if (isCancellation) {
             signalCancellationObserved();
@@ -310,6 +316,17 @@ describe("runtime tracing fallback", () => {
   it("continues after transient monitor read failures and detects a later cancellation", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(1_000);
+    const diagnosticWarnings: unknown[][] = [];
+    diag.disable();
+    diag.setLogger({
+      error: () => undefined,
+      warn: (...args: unknown[]) => {
+        diagnosticWarnings.push(args);
+      },
+      info: () => undefined,
+      debug: () => undefined,
+      verbose: () => undefined,
+    });
     let readAttempts = 0;
     let signalReadsRecovered: () => void = () => undefined;
     let releaseFirstCompletion: () => void = () => undefined;
@@ -362,9 +379,13 @@ describe("runtime tracing fallback", () => {
       describe: () => ({ idempotent: false, timeoutMs: 60_000 }),
       execute: (_call, { signal }) =>
         new Promise<ToolExecutionResult>((_resolve, reject) => {
-          signal.addEventListener("abort", () => reject(new Error("tool cancelled")), {
-            once: true,
-          });
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(new Error("tool cancelled"));
+            },
+            { once: true },
+          );
           signalToolStarted();
         }),
     };
@@ -382,6 +403,10 @@ describe("runtime tracing fallback", () => {
     const firstResult = await firstRun;
     expect(firstResult.status).toBe("completed");
     expect(readAttempts).toBe(3);
+    expect(diagnosticWarnings).toEqual([
+      ["harness.core", "cancel_monitor_degraded"],
+      ["harness.core", "cancel_monitor_degraded"],
+    ]);
 
     const secondRun = runtime.run("second");
     await toolStarted;
@@ -397,6 +422,7 @@ describe("runtime tracing fallback", () => {
     expect((await secondRun).status).toBe("cancelled");
     expect(readAttempts).toBeGreaterThan(3);
     await runtime.close();
+    diag.disable();
   });
 
   it("does not treat a different worker's append conflict as cancellation", async () => {

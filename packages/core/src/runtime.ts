@@ -2,6 +2,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { diag } from "@opentelemetry/api";
 import {
   HarnessError,
   Id,
@@ -28,6 +29,7 @@ const CANCEL_REQUESTED = "cancel_requested";
 const CANCEL_MONITOR_DEGRADED = "cancel_monitor_degraded";
 const CANCEL_POLL_INTERVAL_MS = 25;
 const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
+const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
@@ -235,7 +237,7 @@ async function watchCancellation(options: CancellationWatchOptions): Promise<voi
       }
     } catch {
       try {
-        diag.error(CANCEL_MONITOR_DEGRADED);
+        cancellationMonitorLogger.warn(CANCEL_MONITOR_DEGRADED);
       } catch {
         // A diagnostic logger failure must not disable cooperative cancellation.
       }
@@ -257,7 +259,7 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
   const controller = new AbortController();
   const stopWatcher = new AbortController();
   const cursor = { nextSeq: options.firstNewSeq };
-  let cancellationObserved = false;
+  const cancellation = { observed: false };
   let running: Promise<RunLoopResult> | undefined;
   const uninstall = installShutdownHandler({
     processLike: options.processLike,
@@ -277,7 +279,7 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
       cursor.nextSeq = nextSeq;
     },
     onCancellation: () => {
-      cancellationObserved = true;
+      cancellation.observed = true;
     },
   });
 
@@ -297,11 +299,11 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
             cursor.nextSeq = nextSeq;
           },
           onCancellation: () => {
-            cancellationObserved = true;
+            cancellation.observed = true;
           },
         });
       }
-      if (cancellationObserved) {
+      if (cancellation.observed) {
         const cancelled = await cancelledResult(options.store, options.runId, options.firstNewSeq);
         if (cancelled !== undefined) {
           return cancelled;
@@ -309,7 +311,7 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
       }
       throw error;
     }
-    if (cancellationObserved) {
+    if (cancellation.observed) {
       return (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
     }
     return result;
