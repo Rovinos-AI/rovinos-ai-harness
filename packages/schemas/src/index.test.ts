@@ -25,6 +25,7 @@ test("exports the event schema, classification, and split/join API", () => {
   const typedNewEvent: NewEvent = newEvent;
 
   expect(EVENT_FIELD_CLASS.run_created.configHash).toBe("meta");
+  expect(EVENT_FIELD_CLASS.run_input).toEqual({ input: "content", inputKind: "meta" });
   expect(RunStatus.parse("running")).toBe("running");
   expect(joinEvent(parts.meta, parts.content)).toEqual(sample);
   expect(seq).toBe(0);

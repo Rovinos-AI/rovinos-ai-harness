@@ -7,6 +7,7 @@ const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
 const requestId = "22222222222222222222222222";
 const callId = "33333333333333333333333333";
+const secondCallId = "44444444444444444444444444";
 const envelope = (seq: number) => ({
   runId,
   seq,
@@ -36,6 +37,12 @@ describe("NaiveContext", () => {
         content: [
           { type: "text", text: "first answer" },
           { type: "tool_call", callId, toolId: "fake_tool", args: { input: "tool args" } },
+          {
+            type: "tool_call",
+            callId: secondCallId,
+            toolId: "fake_tool",
+            args: { input: "other" },
+          },
         ],
         providerBlobs: null,
       },
@@ -61,7 +68,7 @@ describe("NaiveContext", () => {
       {
         ...envelope(3),
         type: "tool_result",
-        callId,
+        callId: secondCallId,
         toolId: "fake_tool",
         outcome: "timeout",
         errorCode: "tool_timeout",
@@ -92,6 +99,12 @@ describe("NaiveContext", () => {
         parts: [
           { type: "text", text: "first answer" },
           { type: "tool_call", callId, toolId: "fake_tool", args: { input: "tool args" } },
+          {
+            type: "tool_call",
+            callId: secondCallId,
+            toolId: "fake_tool",
+            args: { input: "other" },
+          },
         ],
       },
       {
@@ -100,7 +113,7 @@ describe("NaiveContext", () => {
       },
       {
         role: "tool",
-        parts: [{ type: "tool_result", callId, isError: true, result: null }],
+        parts: [{ type: "tool_result", callId: secondCallId, isError: true, result: null }],
       },
       {
         role: "assistant",

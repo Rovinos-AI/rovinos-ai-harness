@@ -6,15 +6,21 @@
     "policyVersion": "test.policy"
   },
   {
-    "type": "run_status_changed",
+    "type": "run_input",
     "seq": 1,
+    "input": "test goal",
+    "inputKind": "initial"
+  },
+  {
+    "type": "run_status_changed",
+    "seq": 2,
     "from": "pending",
     "to": "running",
     "reason": "start"
   },
   {
     "type": "model_request",
-    "seq": 2,
+    "seq": 3,
     "requestId": "00000000000000000000000000",
     "provider": "test_provider",
     "model": "test_model",
@@ -27,21 +33,12 @@
             "text": "test goal"
           }
         ]
-      },
-      {
-        "role": "assistant",
-        "parts": [
-          {
-            "type": "text",
-            "text": "prior context"
-          }
-        ]
       }
     ]
   },
   {
     "type": "model_response",
-    "seq": 3,
+    "seq": 4,
     "requestId": "00000000000000000000000000",
     "provider": "test_provider",
     "model": "test_model",
@@ -65,7 +62,7 @@
   },
   {
     "type": "run_status_changed",
-    "seq": 4,
+    "seq": 5,
     "from": "running",
     "to": "completed",
     "reason": "final_answer"
