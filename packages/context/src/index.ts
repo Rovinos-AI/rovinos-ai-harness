@@ -17,6 +17,7 @@ export {
   type TranscriptGroup,
 } from "./types.js";
 export { eventsToTranscript } from "./transcript.js";
+export { createStrategyRegistry } from "./registry.js";
 export {
   PlanSchema,
   UpdatePlanInputSchema,

@@ -107,6 +107,7 @@ export {
 export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
 export { SandboxConfigSchema } from "./config/sandbox.js";
 export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
+export { ContextInspectionSchema, type ContextInspection } from "./cli/context.js";
 export {
   FakeModelCompletionSchema,
   FakeModelScriptSchema,
