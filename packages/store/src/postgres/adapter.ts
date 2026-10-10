@@ -11,7 +11,7 @@ import {
   type SnapshotRow,
   validateSnapshotAppend,
 } from "../codec.js";
-import { InvalidEventError } from "../errors.js";
+import { InvalidEventError, StoreEncryptionMismatchError } from "../errors.js";
 import {
   snapshotStoreOptionsSchema,
   type EventStore,
@@ -107,10 +107,30 @@ export class PostgresEventStore implements EventStore {
       transactionStarted = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
       const schemaState = await client.query<{ initialized: boolean } & QueryResultRow>(
-        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AS initialized",
+        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AND to_regclass('store_metadata') IS NOT NULL AS initialized",
       );
       if (schemaState.rows[0]?.initialized !== true) {
         await client.query(POSTGRES_SCHEMA);
+      }
+      const encryptionState = await client.query<{ metadata_value: string } & QueryResultRow>(
+        "SELECT metadata_value FROM store_metadata WHERE metadata_key = $1",
+        ["encrypted"],
+      );
+      const expectedEncryption = this.codec.encrypted ? "true" : "false";
+      const storedEncryption = encryptionState.rows[0]?.metadata_value;
+      if (storedEncryption === undefined) {
+        const contentCount = await client.query<{ count: string } & QueryResultRow>(
+          "SELECT (SELECT COUNT(*) FROM events) + (SELECT COUNT(*) FROM snapshots) AS count",
+        );
+        if (expectedEncryption === "true" && Number(contentCount.rows[0]?.count ?? "0") !== 0) {
+          throw new StoreEncryptionMismatchError();
+        }
+        await client.query(
+          "INSERT INTO store_metadata (metadata_key, metadata_value) VALUES ($1, $2) ON CONFLICT (metadata_key) DO NOTHING",
+          ["encrypted", expectedEncryption],
+        );
+      } else if (storedEncryption !== expectedEncryption) {
+        throw new StoreEncryptionMismatchError();
       }
       await client.query("COMMIT");
       transactionStarted = false;

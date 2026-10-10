@@ -84,6 +84,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
       configHash: options.configHash,
       policyVersion: options.policyVersion,
     },
+    { type: "run_input", v: 1, input: options.goal, inputKind: "initial" },
     { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
   ];
   await options.recorder.withStepSpan(RUN_SPAN, {}, async () => {
@@ -227,10 +228,7 @@ async function runLoopSteps(
       model: options.model,
       ids: options.ids,
       runId: execution.runId,
-      messages: [
-        { role: "user", parts: [{ type: "text", text: goalText(options.goal) }] },
-        ...prepared.context,
-      ],
+      messages: prepared.context,
       signal: options.signal,
       ...(options.role === undefined ? {} : { role: options.role }),
       ...(options.provider === undefined ? {} : { provider: options.provider }),
@@ -314,10 +312,6 @@ async function prepareModelStep(
   }
   const stopped = await suspendIfShutdown(options, events, execution);
   return stopped === undefined ? { context } : { context, event: stopped };
-}
-
-function goalText(goal: JsonValue): string {
-  return typeof goal === "string" ? goal : JSON.stringify(goal);
 }
 
 async function runToolCalls(

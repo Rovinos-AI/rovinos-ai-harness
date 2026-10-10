@@ -38,4 +38,9 @@ export const SQLITE_SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS snapshots_run_at_seq_idx ON snapshots (run_id, at_seq DESC);
+
+  CREATE TABLE IF NOT EXISTS store_metadata (
+    metadata_key TEXT PRIMARY KEY,
+    metadata_value TEXT NOT NULL
+  );
 `;
