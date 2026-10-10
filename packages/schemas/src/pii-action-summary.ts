@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { Code } from "./primitives.js";
 import { PiiActionSchema, PiiBoundarySchema } from "./pii-policy.js";
+import type { Event } from "./events.js";
 
 export const PiiActionSummarySchema = z
   .object({
@@ -22,3 +23,16 @@ export const PiiActionSummarySchema = z
 
 /** Metadata-only PII action summary; contains entity counts and no detected values. */
 export type PiiActionSummary = z.infer<typeof PiiActionSummarySchema>;
+
+/** Convert policy action summaries to the canonical pii_action event payload. */
+export function toPiiActionEventPayload(
+  summary: PiiActionSummary,
+): Pick<Extract<Event, { type: "pii_action" }>, "boundary" | "action" | "entities"> {
+  const actions = {
+    tokenize: "tokenized",
+    redact: "redacted",
+    block: "blocked",
+    allow: "allowed",
+  } as const;
+  return { ...summary, action: actions[summary.action] };
+}

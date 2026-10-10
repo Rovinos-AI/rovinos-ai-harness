@@ -6,6 +6,7 @@ type PiiTokenizerErrorCode =
   | "pii_depth_exceeded"
   | "pii_input_too_large"
   | "pii_input_invalid"
+  | "pii_key_contains_pii"
   | "pii_detector_failed"
   | "pii_detector_invalid_output"
   | "pii_vault_failed";
@@ -18,10 +19,12 @@ interface EntityCount {
 /** Safe tokenizer failure; its message and code never include input values. */
 export class PiiTokenizerError extends HarnessError {
   readonly code: PiiTokenizerErrorCode;
+  readonly entities: readonly EntityCount[];
 
-  constructor(code: PiiTokenizerErrorCode) {
+  constructor(code: PiiTokenizerErrorCode, entities: readonly EntityCount[] = []) {
     super(code);
     this.code = code;
+    this.entities = entities.map(({ type, count }) => ({ type, count }));
   }
 }
 

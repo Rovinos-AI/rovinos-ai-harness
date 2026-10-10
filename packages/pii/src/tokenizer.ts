@@ -39,6 +39,7 @@ interface TextPlan {
 interface ActionCounts {
   readonly actions: Map<PiiAction, Map<Code, number>>;
   readonly blocked: Map<Code, number>;
+  readonly keys: Map<Code, number>;
 }
 
 interface EntityCount {
@@ -91,7 +92,7 @@ export class Tokenizer {
   }
 
   /**
-   * Apply policy recursively to JSON string values, leaving object keys unchanged.
+   * Apply policy to JSON strings; reject disallowed PII in keys rather than rewriting them.
    *
    * @param runId - Run that owns generated tokens.
    * @param value - JSON value to inspect.
@@ -103,15 +104,19 @@ export class Tokenizer {
     value: JsonValue,
     context: { readonly boundary: PiiBoundary; readonly destination: Destination },
   ): Promise<{ value: JsonValue; actions: PiiActionSummary[] }> {
-    this.assertJsonDepth(value);
-    if (!JsonValueSchema.safeParse(value).success) {
+    const parsed = JsonValueSchema.safeParse(this.copyJson(value));
+    if (!parsed.success) {
       throw new PiiTokenizerError("pii_input_invalid");
     }
-    assertJsonSize(value);
+    const validated = parsed.data;
+    assertJsonSize(validated);
 
     const counts = createActionCounts();
     const plans: TextPlan[] = [];
-    await this.collectPlans(value, context, counts, plans);
+    await this.collectPlans(validated, context, counts, plans);
+    if (counts.keys.size > 0) {
+      throw new PiiTokenizerError("pii_key_contains_pii", toEntityCounts(counts.keys));
+    }
     this.throwIfBlocked(counts);
 
     const strings: string[] = [];
@@ -120,43 +125,38 @@ export class Tokenizer {
     }
     let stringIndex = 0;
     return {
-      value: this.rebuildJson(value, strings, () => stringIndex++),
+      value: this.rebuildJson(validated, strings, () => stringIndex++),
       actions: summarizeActions(context.boundary, counts.actions),
     };
   }
 
-  private assertJsonDepth(value: JsonValue): void {
-    const ancestors = new Set<JsonContainer>();
-    const stack: {
-      readonly value: JsonValue;
-      readonly depth: number;
-      readonly leave?: JsonContainer;
-    }[] = [{ value, depth: 0 }];
-    while (stack.length > 0) {
-      const item = stack.pop();
-      if (item === undefined) {
-        continue;
-      }
-      if (item.leave !== undefined) {
-        ancestors.delete(item.leave);
-        continue;
-      }
-      if (item.depth > MAX_JSON_DEPTH) {
-        throw new PiiTokenizerError("pii_depth_exceeded");
-      }
-      if (typeof item.value !== "object" || item.value === null) {
-        continue;
-      }
-      if (ancestors.has(item.value)) {
-        throw new PiiTokenizerError("pii_input_invalid");
-      }
-      ancestors.add(item.value);
-      stack.push({ value: null, depth: item.depth, leave: item.value });
-      const children = Array.isArray(item.value) ? item.value : Object.values(item.value);
-      for (const child of [...children].reverse()) {
-        stack.push({ value: child, depth: item.depth + 1 });
-      }
+  private copyJson(value: JsonValue, depth = 0, ancestors = new Set<JsonContainer>()): JsonValue {
+    if (depth > MAX_JSON_DEPTH) {
+      throw new PiiTokenizerError("pii_depth_exceeded");
     }
+    if (typeof value !== "object" || value === null) {
+      return value;
+    }
+    if (ancestors.has(value)) {
+      throw new PiiTokenizerError("pii_input_invalid");
+    }
+    let copy: JsonContainer;
+    try {
+      copy = Array.isArray(value) ? [...value] : Object.fromEntries(Object.entries(value));
+    } catch {
+      throw new PiiTokenizerError("pii_input_invalid");
+    }
+    ancestors.add(value);
+    const result = Array.isArray(copy)
+      ? copy.map((child) => this.copyJson(child, depth + 1, ancestors))
+      : Object.fromEntries(
+          Object.entries(copy).map(([key, child]) => [
+            key,
+            this.copyJson(child, depth + 1, ancestors),
+          ]),
+        );
+    ancestors.delete(value);
+    return result;
   }
 
   private async collectPlans(
@@ -176,7 +176,8 @@ export class Tokenizer {
       return;
     }
     if (typeof value === "object" && value !== null) {
-      for (const child of Object.values(value)) {
+      for (const [key, child] of Object.entries(value)) {
+        await this.planText(key, context, counts, true);
         await this.collectPlans(child, context, counts, plans);
       }
     }
@@ -186,6 +187,7 @@ export class Tokenizer {
     text: string,
     context: { readonly boundary: PiiBoundary; readonly destination: Destination },
     counts: ActionCounts,
+    isKey = false,
   ): Promise<TextPlan> {
     const tokens = findTokens(text).map(({ index, token }) => ({
       start: index,
@@ -223,6 +225,9 @@ export class Tokenizer {
         destination: context.destination,
       });
       addCount(counts.actions, action, entity.data);
+      if (isKey && action !== "allow") {
+        counts.keys.set(entity.data, (counts.keys.get(entity.data) ?? 0) + 1);
+      }
       if (action === "block") {
         counts.blocked.set(entity.data, (counts.blocked.get(entity.data) ?? 0) + 1);
       } else if (action !== "allow") {
@@ -340,7 +345,7 @@ export class Tokenizer {
 }
 
 function createActionCounts(): ActionCounts {
-  return { actions: new Map(), blocked: new Map() };
+  return { actions: new Map(), blocked: new Map(), keys: new Map() };
 }
 
 function addCount(
@@ -355,7 +360,7 @@ function addCount(
 
 function toEntityCounts(counts: ReadonlyMap<Code, number>): EntityCount[] {
   return [...counts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareOrdinal(left, right))
     .map(([type, count]) => ({ type, count }));
 }
 
@@ -364,7 +369,7 @@ function summarizeActions(
   counts: ReadonlyMap<PiiAction, Map<Code, number>>,
 ): PiiActionSummary[] {
   return [...counts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => compareOrdinal(left, right))
     .map(([action, entities]) =>
       PiiActionSummarySchema.parse({
         boundary,
@@ -372,4 +377,11 @@ function summarizeActions(
         entities: toEntityCounts(entities),
       }),
     );
+}
+
+function compareOrdinal(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  return left > right ? 1 : 0;
 }

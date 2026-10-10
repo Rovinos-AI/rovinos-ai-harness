@@ -1,8 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { PiiActionSummarySchema } from "./pii-action-summary.js";
+import { PiiActionSummarySchema, toPiiActionEventPayload } from "./pii-action-summary.js";
+import { EventSchema } from "./events.js";
 
 describe("PiiActionSummarySchema", () => {
+  it.each([
+    ["tokenize", "tokenized"],
+    ["redact", "redacted"],
+    ["block", "blocked"],
+    ["allow", "allowed"],
+  ] as const)("converts %s summaries to canonical %s events", (action, expected) => {
+    const summary = PiiActionSummarySchema.parse({
+      boundary: "model_input",
+      action,
+      entities: [{ type: "email", count: 1 }],
+    });
+    const event = EventSchema.parse({
+      runId: "A".repeat(26),
+      segmentId: "B".repeat(26),
+      seq: 0,
+      ts: 0,
+      v: 1,
+      traceId: "1".repeat(32),
+      spanId: "2".repeat(16),
+      type: "pii_action",
+      ...toPiiActionEventPayload(summary),
+    });
+    expect(event).toMatchObject({ action: expected, entities: summary.entities });
+    expect(summary.action).toBe(action);
+  });
+
   it("accepts action summaries with positive entity counts", () => {
     expect(
       PiiActionSummarySchema.parse({

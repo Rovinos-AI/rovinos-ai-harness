@@ -198,10 +198,10 @@ describe("Tokenizer.tokenizeText", () => {
 });
 
 describe("Tokenizer.tokenizeJson", () => {
-  it("preserves JSON structure, leaves keys untouched, and summarizes all string values", async () => {
+  it("preserves JSON structure, leaves safe keys untouched, and summarizes string values", async () => {
     const tokenizer = createTokenizer();
     const input: JsonValue = {
-      "alice@example.test": ["first alice@example.test", { contact: "bob@example.test" }],
+      contacts: ["first alice@example.test", { contact: "bob@example.test" }],
       enabled: true,
       count: 3,
       absent: null,
@@ -209,7 +209,7 @@ describe("Tokenizer.tokenizeJson", () => {
     const result = await tokenizer.tokenizeJson(runA, input, context);
 
     expect(result.value).toEqual({
-      "alice@example.test": ["first <EMAIL_1>", { contact: "<EMAIL_2>" }],
+      contacts: ["first <EMAIL_1>", { contact: "<EMAIL_2>" }],
       enabled: true,
       count: 3,
       absent: null,
@@ -218,11 +218,87 @@ describe("Tokenizer.tokenizeJson", () => {
       { boundary: "model_input", action: "tokenize", entities: [{ type: "email", count: 2 }] },
     ]);
     expect(input).toEqual({
-      "alice@example.test": ["first alice@example.test", { contact: "bob@example.test" }],
+      contacts: ["first alice@example.test", { contact: "bob@example.test" }],
       enabled: true,
       count: 3,
       absent: null,
     });
+  });
+
+  it.each(["tokenize", "redact", "block"] as const)(
+    "rejects %s PII in keys with counts only and no vault writes",
+    async (action) => {
+      const vault = new InMemoryVault();
+      const tokenizer = createTokenizer(action, vault);
+      const input = {
+        contact: "value@example.test",
+        nested: { "alice@example.test": null, "bob@example.test": true },
+      };
+
+      const error = await tokenizer
+        .tokenizeJson(runA, input, context)
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(PiiTokenizerError);
+      expect(error).toMatchObject({
+        code: "pii_key_contains_pii",
+        message: "pii_key_contains_pii",
+        entities: [{ type: "email", count: 2 }],
+      });
+      expect(JSON.stringify(error)).not.toContain("@example.test");
+      await expect(vault.stats(runA)).resolves.toEqual({ entries: 0 });
+    },
+  );
+
+  it("preserves allow-policy keys and counts their detections", async () => {
+    await expect(
+      createTokenizer("allow").tokenizeJson(runA, { "alice@example.test": null }, context),
+    ).resolves.toEqual({
+      value: { "alice@example.test": null },
+      actions: [
+        { boundary: "model_input", action: "allow", entities: [{ type: "email", count: 1 }] },
+      ],
+    });
+  });
+
+  it("normalizes throwing getters and proxies to value-free input errors", async () => {
+    const getter: Record<string, JsonValue> = {};
+    Object.defineProperty(getter, "email", {
+      enumerable: true,
+      get() {
+        throw new Error("alice@example.test");
+      },
+    });
+    const proxy = new Proxy<Record<string, JsonValue>>(
+      {},
+      {
+        ownKeys() {
+          throw new Error("bob@example.test");
+        },
+      },
+    );
+    for (const input of [getter, proxy]) {
+      await expect(createTokenizer().tokenizeJson(runA, input, context)).rejects.toMatchObject({
+        code: "pii_input_invalid",
+        message: "pii_input_invalid",
+      });
+    }
+  });
+
+  it("reads caller accessors once and uses an independent validated copy", async () => {
+    const input: Record<string, JsonValue> = {};
+    const get = vi.fn(() => "alice@example.test");
+    const detect = vi.fn((text: string) => {
+      Object.defineProperty(input, "email", { value: "bob@example.test", configurable: true });
+      return emailDetector(text);
+    });
+    Object.defineProperty(input, "email", { enumerable: true, configurable: true, get });
+
+    await expect(
+      createTokenizer("tokenize", new InMemoryVault(), detect).tokenizeJson(runA, input, context),
+    ).resolves.toMatchObject({ value: { email: "<EMAIL_1>" } });
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(detect.mock.calls.map(([text]) => text)).toEqual(["email", "alice@example.test"]);
   });
 
   it("aggregates block decisions across the complete JSON value before writing", async () => {
