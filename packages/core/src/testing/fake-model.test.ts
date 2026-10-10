@@ -41,4 +41,25 @@ describe("FakeModelPort", () => {
       model.complete(request, { runId: request.requestId, signal: new AbortController().signal }),
     ).rejects.toBeInstanceOf(FakeModelScriptExhaustedError);
   });
+
+  it("returns the same scripted response when a conversation position is replayed", async () => {
+    const model = new FakeModelPort([completion], {
+      responseIndex: (request) =>
+        typeof request.messages === "object" &&
+        request.messages !== null &&
+        !Array.isArray(request.messages) &&
+        typeof request.messages.position === "number"
+          ? request.messages.position
+          : 0,
+    });
+    const request = {
+      requestId: new SequentialIdGenerator().next(),
+      messages: { position: 0 },
+    };
+    const context = { runId: request.requestId, signal: new AbortController().signal };
+
+    await expect(model.complete(request, context)).resolves.toBe(completion);
+    await expect(model.complete(request, context)).resolves.toBe(completion);
+    expect(model.requests).toHaveLength(2);
+  });
 });

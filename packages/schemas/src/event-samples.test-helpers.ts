@@ -35,6 +35,7 @@ export const eventSamples = [
     repairAttempts: 0,
     content: {},
     providerBlobs: [],
+    toolCalls: [{ callId: id, toolId: "test.tool", args: { value: "synthetic" } }],
   },
   {
     ...envelope,
