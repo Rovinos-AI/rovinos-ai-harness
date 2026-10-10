@@ -174,6 +174,7 @@ async function requestModel(
   options: RunLoopExecutionOptions,
   runId: Id,
   messages: Message[],
+  deadlineTs: number,
 ): Promise<ModelStepResult> {
   const estimatedTokens = options.context.estimate?.(messages);
   const result = await modelStep({
@@ -183,6 +184,7 @@ async function requestModel(
     runId,
     messages,
     signal: options.signal,
+    deadlineTs,
     ...(options.role === undefined ? {} : { role: options.role }),
     ...(options.provider === undefined ? {} : { provider: options.provider }),
     ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
@@ -253,7 +255,12 @@ async function runLoopSteps(
     if (prepared.event !== undefined) {
       return prepared.event;
     }
-    const modelResult = await requestModel(options, execution.runId, prepared.context);
+    const modelResult = await requestModel(
+      options,
+      execution.runId,
+      prepared.context,
+      prepared.deadlineTs,
+    );
     events.push(...modelResult.events);
     const stoppedAfterModel = await suspendAfterModel(options, events, execution, modelResult);
     if (stoppedAfterModel !== undefined) {
@@ -312,9 +319,10 @@ async function prepareModelStep(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
-): Promise<{ readonly context: Message[]; readonly event?: Event }> {
+): Promise<{ readonly context: Message[]; readonly deadlineTs: number; readonly event?: Event }> {
   const context = await options.context.build(events.slice());
   const state = foldRunState(events);
+  const deadlineTs = execution.budgetTracker.deadlineTs(state);
   const budget = execution.budgetTracker.check(
     { ...state, steps: state.steps + 1 },
     options.clock.now(),
@@ -322,6 +330,7 @@ async function prepareModelStep(
   if (!budget.ok) {
     return {
       context,
+      deadlineTs,
       event: await recordBudgetFailureAndCheckpoint(
         options.recorder,
         events,
@@ -331,7 +340,7 @@ async function prepareModelStep(
     };
   }
   const stopped = await suspendIfShutdown(options, events, execution);
-  return stopped === undefined ? { context } : { context, event: stopped };
+  return stopped === undefined ? { context, deadlineTs } : { context, deadlineTs, event: stopped };
 }
 
 async function runToolCalls(

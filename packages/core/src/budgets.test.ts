@@ -69,6 +69,7 @@ describe("BudgetTracker", () => {
   it("allows wall-clock usage equal to the limit and rejects one millisecond over", () => {
     const tracker = new BudgetTracker(configuredBudgets({ maxWallClockMs: 10 }));
 
+    expect(tracker.deadlineTs(runState())).toBe(110);
     expect(tracker.check(runState(), 110)).toEqual({ ok: true });
     expect(tracker.check(runState(), 111)).toEqual({
       ok: false,
@@ -81,6 +82,7 @@ describe("BudgetTracker", () => {
   it("subtracts completed and ongoing suspension intervals by default", () => {
     const tracker = new BudgetTracker(configuredBudgets({ maxWallClockMs: 10 }));
 
+    expect(tracker.deadlineTs(runState({ suspendedTimeMs: 100 }))).toBe(210);
     expect(tracker.check(runState({ suspendedTimeMs: 100 }), 210)).toEqual({ ok: true });
     expect(tracker.check(runState({ suspendedTimeMs: 100 }), 211)).toMatchObject({
       ok: false,
@@ -95,6 +97,7 @@ describe("BudgetTracker", () => {
       configuredBudgets({ maxWallClockMs: 10, maxCostUsd: 0.000001, countSuspendedTime: true }),
     );
 
+    expect(tracker.deadlineTs(runState({ suspendedTimeMs: 100 }))).toBe(110);
     expect(tracker.check(runState({ suspendedTimeMs: 100 }), 210)).toMatchObject({
       ok: false,
       budget: "wall_clock",
