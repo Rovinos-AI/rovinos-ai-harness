@@ -8,6 +8,7 @@ export {
   ensureTracingFallback,
   listSpanDefinitions,
   lookupSpanDefinition,
+  setActiveSpanAttribute,
   withSpan,
   type SpanDefinition,
   type SpanDefinitionShape,

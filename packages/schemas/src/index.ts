@@ -68,7 +68,12 @@ export { KEY_PROVIDER_KEY_BYTES, type KeyProvider } from "./key-provider.js";
 export { RunConfigSchema, type RunConfig } from "./config/run.js";
 export { RunResumePolicySchema } from "./config/run.js";
 export { StoreConfigSchema } from "./config/store.js";
-export { ModelsConfigSchema } from "./config/models.js";
+export {
+  ModelRetryConfigSchema,
+  ModelsConfigSchema,
+  type ModelRetryConfig,
+  type ModelsConfig,
+} from "./config/models.js";
 export { ServerConfigSchema } from "./config/servers.js";
 export { PolicyConfigSchema } from "./config/policy.js";
 export { PiiConfigSchema, type PiiConfig } from "./config/pii.js";

@@ -20,6 +20,7 @@ export interface ProviderContext {
   readonly signal: AbortSignal;
   readonly ids: IdGenerator;
   readonly clock: Clock;
+  readonly deadlineTs?: number;
 }
 
 /** Provider-neutral completion returned by an adapter. */

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api";
+import { context, ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
@@ -17,6 +18,7 @@ import {
   isSafeAttr,
   listSpanDefinitions,
   lookupSpanDefinition,
+  setActiveSpanAttribute,
   SpanRegistryError,
   withSpan,
   type SpanDefinition,
@@ -33,10 +35,12 @@ const provider = new BasicTracerProvider({
 
 beforeAll(() => {
   trace.setGlobalTracerProvider(provider);
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
 });
 
 afterAll(async () => {
   await provider.shutdown();
+  context.disable();
 });
 
 beforeEach(() => {
@@ -238,6 +242,30 @@ describe("span registry", () => {
 
     span.end();
     expect(exporter.getFinishedSpans()[0]?.links).toHaveLength(1);
+  });
+
+  it("sets only schema-validated attributes on the active span", () => {
+    const definition = defineSpan("harness.test.active", {
+      "harness.test.attempts": attr.optional(attr.int()),
+    });
+    const span = definition.start({});
+    const activeContext = trace.setSpan(context.active(), span);
+
+    context.with(activeContext, () => {
+      setActiveSpanAttribute("harness.test.attempts", 2);
+      expect(() => {
+        setActiveSpanAttribute("harness.test.attempts", "invalid");
+      }).toThrowError("span_attr_invalid");
+    });
+    span.end();
+
+    expect(exporter.getFinishedSpans()[0]?.attributes["harness.test.attempts"]).toBe(2);
+  });
+
+  it("does nothing when there is no active span", () => {
+    expect(() => {
+      setActiveSpanAttribute("harness.test.attempts", 1);
+    }).not.toThrow();
   });
 
   it("converts attribute getter failures to value-free validation errors", () => {

@@ -3,6 +3,11 @@
 `ProviderError.retryable` indicates whether gateway resilience policies may retry the failure.
 `retryAfterMs` carries a provider-requested delay when present; `status` carries the HTTP status.
 
+Gateway resilience is configured with `models.retry` (`maxAttempts: 3`,
+`baseDelayMs: 500`, `maxDelayMs: 20000`, `timeoutMs: 120000`). Optional
+`models.maxConcurrent` defaults to 4. Provider request rates are supplied to the
+gateway by provider code through `requestsPerMinute`; bursts are capped at ten.
+
 | Code | Retryable | Typical HTTP status |
 | --- | --- | --- |
 | `provider_rate_limited` | Yes | 429 |

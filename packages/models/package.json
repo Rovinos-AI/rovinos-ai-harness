@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@harness/schemas": "workspace:^",
+    "@harness/telemetry": "workspace:^",
     "zod": "4.6.5"
   },
   "peerDependencies": {
