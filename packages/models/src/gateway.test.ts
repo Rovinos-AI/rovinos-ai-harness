@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ModelRetryConfigSchema, type ModelRequest } from "@harness/schemas";
+import { JsonValue, ModelRetryConfigSchema, parseJson, type ModelRequest } from "@harness/schemas";
 import { attr, defineSpan, withSpan } from "@harness/telemetry";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { context, trace } from "@opentelemetry/api";
@@ -13,6 +13,8 @@ import { FakeProvider } from "./testing/fake-provider.js";
 import type { ProviderAdapter, ProviderContext } from "./types.js";
 import { abortableSleep } from "./resilience/retry.js";
 import { toJsonSchema } from "./json-schema.js";
+import { AnthropicAdapter } from "./providers/anthropic.js";
+import { OpenAIAdapter } from "./providers/openai.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -586,6 +588,172 @@ describe("ModelGateway", () => {
       usage: { inputTokens: 13, outputTokens: 16, costMicros: 22 },
       latencyMs: 26,
     });
+  });
+
+  it.each(["anthropic", "openai"] as const)(
+    "repairs tool-rung output with a structurally valid %s conversation",
+    async (provider) => {
+      const requestBodies: JsonValue[] = [];
+      let calls = 0;
+      const responseFetch: typeof fetch = (_input, init) => {
+        if (typeof init?.body === "string") {
+          requestBodies.push(parseJson(JsonValue, init.body));
+        }
+        calls += 1;
+        const input = calls === 1 ? { answer: "invalid" } : { answer: 1 };
+        const body =
+          provider === "anthropic"
+            ? {
+                id: `message-${String(calls)}`,
+                type: "message",
+                role: "assistant",
+                model: "claude-test",
+                content: [
+                  {
+                    type: "tool_use",
+                    id: calls === 1 ? "toolu_invalid" : "toolu_valid",
+                    name: "emit_result",
+                    input,
+                  },
+                ],
+                stop_reason: "tool_use",
+                stop_sequence: null,
+                usage: { input_tokens: 2, output_tokens: 3 },
+              }
+            : {
+                id: `completion-${String(calls)}`,
+                object: "chat.completion",
+                created: 1,
+                model: "gpt-test",
+                choices: [
+                  {
+                    index: 0,
+                    message: {
+                      role: "assistant",
+                      content: null,
+                      tool_calls: [
+                        {
+                          id: calls === 1 ? "call_invalid" : "call_valid",
+                          type: "function",
+                          function: { name: "emit_result", arguments: JSON.stringify(input) },
+                        },
+                      ],
+                    },
+                    finish_reason: "tool_calls",
+                  },
+                ],
+                usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
+              };
+        return Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      };
+      const adapter =
+        provider === "anthropic"
+          ? new AnthropicAdapter({
+              apiKey: { reveal: () => "synthetic-test-key" },
+              fetch: responseFetch,
+              baseURL: "https://provider.test",
+            })
+          : new OpenAIAdapter({
+              apiKey: { reveal: () => "synthetic-test-key" },
+              fetch: responseFetch,
+              baseURL: "https://provider.test/v1",
+              capabilities: { structuredOutput: "none", forcedToolChoice: true },
+            });
+      const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+        ids: { next: () => request.requestId },
+        clock: { now: () => 0 },
+      });
+      const completion = await gateway.complete(
+        {
+          ...request,
+          model: { provider, model: provider === "anthropic" ? "claude-test" : "gpt-test" },
+          maxOutputTokens: 32,
+        },
+        {
+          runId: request.requestId,
+          signal: new AbortController().signal,
+          outputSchema: z.object({ answer: z.number() }),
+        },
+      );
+
+      expect(completion).toMatchObject({ schemaValid: true, repairAttempts: 1 });
+      expect(requestBodies).toHaveLength(2);
+      if (provider === "anthropic") {
+        expect(requestBodies[1]).toMatchObject({
+          messages: [
+            { role: "user" },
+            {
+              role: "assistant",
+              content: [{ type: "tool_use", id: "toolu_invalid", name: "emit_result" }],
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "toolu_invalid",
+                  is_error: true,
+                  content: expect.stringContaining("$.answer: expected number"),
+                },
+              ],
+            },
+          ],
+          tool_choice: { type: "tool", name: "emit_result" },
+        });
+      } else {
+        expect(requestBodies[1]).toMatchObject({
+          messages: [
+            { role: "user" },
+            {
+              role: "assistant",
+              tool_calls: [{ id: "call_invalid", function: { name: "emit_result" } }],
+            },
+            {
+              role: "tool",
+              tool_call_id: "call_invalid",
+              content: expect.stringContaining("$.answer: expected number"),
+            },
+          ],
+          tool_choice: { type: "function", function: { name: "emit_result" } },
+        });
+      }
+    },
+  );
+
+  it("omits aggregate cost when any completed repair attempt does not report cost", async () => {
+    let calls = 0;
+    const complete = vi.fn(() => {
+      calls += 1;
+      return Promise.resolve({
+        parts: [{ type: "text" as const, text: calls === 1 ? '{"answer":"bad"}' : '{"answer":1}' }],
+        usage:
+          calls === 1
+            ? { inputTokens: 1, outputTokens: 1 }
+            : { inputTokens: 2, outputTokens: 3, costMicros: 7 },
+        finishReason: "stop",
+        latencyMs: 1,
+      });
+    });
+    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "openai", complete }]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema: z.object({ answer: z.number() }),
+      },
+    );
+
+    expect(completion.usage).toEqual({ inputTokens: 3, outputTokens: 4 });
+    expect(completion.usage).not.toHaveProperty("costMicros");
   });
 
   it("stops after the configured number of repair calls and reports final issue paths", async () => {

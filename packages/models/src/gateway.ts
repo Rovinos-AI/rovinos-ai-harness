@@ -73,10 +73,9 @@ export type ModelGatewayResponse<OutputSchema extends z.ZodType = z.ZodType> = M
   readonly enforcement?: EnforcementResult<OutputSchema>;
 };
 
-interface PreparedEnforcement<OutputSchema extends z.ZodType> {
+interface PreparedEnforcement {
   readonly request: ModelRequest;
   readonly rung?: EnforcementRung;
-  readonly result?: EnforcementResult<OutputSchema>;
 }
 
 function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
@@ -84,7 +83,7 @@ function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
   outputSchema: OutputSchema | undefined,
   capabilities: Capabilities,
   maxRung?: EnforcementRung,
-): PreparedEnforcement<OutputSchema> {
+): PreparedEnforcement {
   if (outputSchema === undefined) {
     return { request };
   }
@@ -298,12 +297,17 @@ export class ModelGateway {
       aggregateLatencyMs += result.latencyMs;
 
       const enforced = enforceProviderOutput(result.parts, context.outputSchema, prepared.rung);
-      const enforcement = prepared.result ?? enforced.result;
+      const enforcement = enforced.result;
       if (enforcement !== undefined && "issues" in enforcement) {
         if (repairAttempts >= this.maxRepairs) {
           throw new ModelOutputInvalidError(repairAttempts, enforcement.issues);
         }
-        currentRequest = appendRepairMessages(currentRequest, result.parts, enforcement.issues);
+        currentRequest = appendRepairMessages(
+          currentRequest,
+          result.parts,
+          enforcement.issues,
+          enforcement.rungUsed,
+        );
         repairAttempts += 1;
         continue;
       }
@@ -328,9 +332,11 @@ export class ModelGateway {
 
 function aggregateModelUsage(previous: ModelUsage | undefined, next: ModelUsage): ModelUsage {
   const costMicros =
-    previous?.costMicros === undefined && next.costMicros === undefined
-      ? undefined
-      : (previous?.costMicros ?? 0) + (next.costMicros ?? 0);
+    previous === undefined
+      ? next.costMicros
+      : previous.costMicros === undefined || next.costMicros === undefined
+        ? undefined
+        : previous.costMicros + next.costMicros;
   return {
     inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
