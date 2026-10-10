@@ -102,7 +102,8 @@ function modelResponse(
     latencyMs: 1,
     schemaValid: true,
     repairAttempts: 0,
-    content: {},
+    fallbackDepth: 0,
+    content: [],
     providerBlobs: [],
     ...(costMicros === undefined ? {} : { costMicros }),
   };

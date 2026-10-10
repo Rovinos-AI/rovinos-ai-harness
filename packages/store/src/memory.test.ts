@@ -44,7 +44,7 @@ function modelRequest(id: typeof runId, ts: number): NewEvent {
     requestId: id,
     provider: "test",
     model: "test",
-    messages: [{ content: "synthetic" }],
+    messages: [{ role: "user", parts: [{ type: "text", text: "synthetic" }] }],
   };
 }
 
@@ -120,7 +120,7 @@ describe("InMemoryEventStore", () => {
     ) {
       throw new Error("Expected a nested message object");
     }
-    messages[0].content = "changed";
+    messages[0].parts[0] = { type: "text", text: "changed" };
 
     const secondRead = await collect(store.read(runId));
     const secondRequest = secondRead[1];
@@ -135,7 +135,7 @@ describe("InMemoryEventStore", () => {
     ) {
       throw new Error("Expected a stored message object");
     }
-    expect(secondMessage.content).toBe("synthetic");
+    expect(secondMessage.parts[0]).toEqual({ type: "text", text: "synthetic" });
   });
 
   it("rejects empty, cross-run, and invalid batches atomically", async () => {

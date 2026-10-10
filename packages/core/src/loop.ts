@@ -5,6 +5,7 @@ import {
   type Event,
   type Id,
   type JsonValue,
+  type Message,
   type RunConfig,
 } from "@harness/schemas";
 import { BudgetTracker, type BudgetViolation } from "./budgets.js";
@@ -17,7 +18,7 @@ import { toolStep } from "./steps/tool-step.js";
 import type {
   ContextPort,
   IdGenerator,
-  ModelCompletion,
+  ModelToolCall,
   ModelPort,
   NewRunMetadata,
   ToolPort,
@@ -207,7 +208,10 @@ async function runLoopSteps(
       model: options.model,
       ids: options.ids,
       runId: execution.runId,
-      messages: { goal: options.goal, context: prepared.context },
+      messages: [
+        { role: "user", parts: [{ type: "text", text: goalText(options.goal) }] },
+        ...prepared.context,
+      ],
       signal: options.signal,
       ...(options.role === undefined ? {} : { role: options.role }),
       ...(options.provider === undefined ? {} : { provider: options.provider }),
@@ -232,13 +236,13 @@ async function runLoopSteps(
     if (modelResult.outcome === "aborted") {
       return suspendedOutcome(events);
     }
-    if (modelResult.completion.toolCalls.length > 0) {
-      const outcome = await runToolCalls(
-        options,
-        events,
-        execution,
-        modelResult.completion.toolCalls,
-      );
+    const toolCalls = modelResult.completion.parts.flatMap((part) =>
+      part.type === "tool_call"
+        ? [{ callId: part.callId, toolId: part.toolId, args: part.args }]
+        : [],
+    );
+    if (toolCalls.length > 0) {
+      const outcome = await runToolCalls(options, events, execution, toolCalls);
       if (outcome !== undefined) {
         return outcome;
       }
@@ -262,7 +266,7 @@ async function prepareModelStep(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
-): Promise<{ readonly context: JsonValue; readonly event?: Event }> {
+): Promise<{ readonly context: Message[]; readonly event?: Event }> {
   const context = await options.context.build(events.slice());
   const state = foldRunState(events);
   const budget = execution.budgetTracker.check(
@@ -284,11 +288,15 @@ async function prepareModelStep(
   return stopped === undefined ? { context } : { context, event: stopped };
 }
 
+function goalText(goal: JsonValue): string {
+  return typeof goal === "string" ? goal : (JSON.stringify(goal) ?? "");
+}
+
 async function runToolCalls(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
-  calls: ModelCompletion["toolCalls"],
+  calls: readonly ModelToolCall[],
 ): Promise<Event | undefined> {
   for (const call of calls) {
     const aborted = await suspendIfShutdown(options, events, execution);

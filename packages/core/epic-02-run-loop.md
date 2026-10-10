@@ -70,10 +70,10 @@ Shared design for this epic:
 **Items it depends on:** 2.1, 2.2.
 **Implementation guidance:**
 
-1. `ModelPort.complete(req: { requestId: Id; messages: JsonValue; role?: Code }, ctx: { runId: Id; signal: AbortSignal }): Promise<{ content: JsonValue; toolCalls: {callId: Id; toolId: Code; args: JsonValue}[]; usage: {inputTokens:number; outputTokens:number; costMicros?: number}; finishReason: Code; provider: Code; model: Code; latencyMs: number; schemaValid: boolean; repairAttempts: number; providerBlobs: JsonValue }>`. The gateway (14.x) will implement it; keep it provider-agnostic.
-2. `ContextPort.build(events: readonly Event[]): Promise<JsonValue>` returns the messages to send. `NaiveContext` returns all `model_response.content` and tool results in order (replaced in epic 15).
+1. `ModelPort.complete(req: ModelRequest, ctx: { runId: Id; signal: AbortSignal }): Promise<ModelResponse & { providerBlobs: JsonValue }>` uses the normalized contracts from `@harness/schemas`; `ModelRequest` includes the model reference, optional role/tools/output/tool choice, and normalized messages.
+2. `ContextPort.build(events: readonly Event[]): Promise<Message[]>` returns normalized conversation messages. `NaiveContext` retains assistant parts and appends tool results in order (replaced in epic 15).
 3. Model step: record `model_request` (before the call), call the port inside `harness.model_call`, record `model_response` with all meta fields. On port error record `tool`-style failure as `run_status_changed running->failed` with reason from the error `code`.
-4. `runLoop`: on entry record `run_created` (new runs) then `run_status_changed pending->running`; loop: build context -> model step -> if `toolCalls` is empty complete (`running->completed`, reason `final_answer`) else (tool handling arrives in 2.4) fail with reason `tools_not_supported` for now.
+4. `runLoop`: on entry record `run_created` (new runs) then `run_status_changed pending->running`; loop: build context -> model step -> if the response has no `tool_call` parts complete (`running->completed`, reason `final_answer`), otherwise execute those calls.
 5. `FakeModelPort` takes a script array of responses and records requests for assertions.
 **Tests to write:** one-step run completes with the expected event sequence (golden file `__golden__/one-step.json`); model error produces `failed`; requests captured contain the built context; usage totals folded correctly.
 **Acceptance Criteria:**

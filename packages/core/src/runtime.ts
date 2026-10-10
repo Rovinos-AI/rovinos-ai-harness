@@ -324,14 +324,12 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
 
 async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | undefined> {
   for await (const event of store.read(runId)) {
-    if (
-      event.type === "model_request" &&
-      typeof event.messages === "object" &&
-      event.messages !== null &&
-      !Array.isArray(event.messages) &&
-      Object.hasOwn(event.messages, "goal")
-    ) {
-      return event.messages.goal ?? null;
+    if (event.type === "model_request") {
+      const goalMessage = event.messages.find(({ role }) => role === "user");
+      const goalPart = goalMessage?.parts.find((part) => part.type === "text");
+      if (goalPart?.type === "text") {
+        return goalPart.text;
+      }
     }
   }
   return undefined;

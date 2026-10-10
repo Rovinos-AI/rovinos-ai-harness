@@ -131,7 +131,8 @@ describe("BudgetTracker", () => {
         latencyMs: 1,
         schemaValid: true,
         repairAttempts: 0,
-        content: null,
+        fallbackDepth: 0,
+        content: [],
         providerBlobs: null,
       },
       {
@@ -161,7 +162,8 @@ describe("BudgetTracker", () => {
         latencyMs: 1,
         schemaValid: true,
         repairAttempts: 0,
-        content: null,
+        fallbackDepth: 0,
+        content: [],
         providerBlobs: null,
       },
     ] satisfies Event[]);

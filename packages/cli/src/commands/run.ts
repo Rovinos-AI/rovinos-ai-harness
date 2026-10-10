@@ -39,18 +39,20 @@ class ScriptedModel implements ModelPort {
   complete(_request: ModelRequest, _context: RunContext): Promise<ModelCompletion> {
     const completion = this.script[this.next];
     this.next += 1;
-    return completion === undefined
-      ? Promise.reject(new ScriptedModelError())
-      : Promise.resolve({
-          ...completion,
-          usage: {
-            inputTokens: completion.usage.inputTokens,
-            outputTokens: completion.usage.outputTokens,
-            ...(completion.usage.costMicros === undefined
-              ? {}
-              : { costMicros: completion.usage.costMicros }),
-          },
-        });
+    if (completion === undefined) {
+      return Promise.reject(new ScriptedModelError());
+    }
+
+    const { content, toolCalls, ...metadata } = completion;
+    const text = typeof content === "string" ? content : (JSON.stringify(content) ?? "");
+    return Promise.resolve({
+      ...metadata,
+      parts: [
+        { type: "text", text },
+        ...toolCalls.map((toolCall) => ({ type: "tool_call" as const, ...toolCall })),
+      ],
+      fallbackDepth: 0,
+    });
   }
 }
 
