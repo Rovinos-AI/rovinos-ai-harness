@@ -23,6 +23,7 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
+    "@harness/context": "workspace:^",
     "@harness/schemas": "workspace:^",
     "@harness/store": "workspace:^",
     "@harness/telemetry": "workspace:^",

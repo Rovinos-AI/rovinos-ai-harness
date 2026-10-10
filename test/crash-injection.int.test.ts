@@ -8,6 +8,7 @@ import {
   RunConfigSchema,
   SequentialIdGenerator,
   type Event,
+  type Code,
   type JsonValue,
   type NewEvent,
   type Part,
@@ -273,6 +274,14 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.findRunsByTrace(traceId);
   }
 
+  fetchOutbox(sinkId: Code, limit: number) {
+    return this.inner.fetchOutbox(sinkId, limit);
+  }
+
+  ackOutbox(sinkId: Code, cursor: number) {
+    return this.inner.ackOutbox(sinkId, cursor);
+  }
+
   close() {
     return this.inner.close();
   }
@@ -440,6 +449,14 @@ class PreIntentExecutionStore implements EventStore {
     return this.inner.findRunsByTrace(traceId);
   }
 
+  fetchOutbox(sinkId: Code, limit: number) {
+    return this.inner.fetchOutbox(sinkId, limit);
+  }
+
+  ackOutbox(sinkId: Code, cursor: number) {
+    return this.inner.ackOutbox(sinkId, cursor);
+  }
+
   close() {
     return this.inner.close();
   }
@@ -473,17 +490,14 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
       expect(crashed, `${mode} append ${String(crashAt)} was not reached`).toBe(true);
 
       const initialEvents = await readEvents(store, runId);
-      const inputExists = initialEvents.some((event) => event.type === "model_request");
+      const inputExists = initialEvents.some((event) => event.type === "run_input");
       const freshRuntime = await createRuntime(config, {
         ...modelOptions(scenario, store, idsAfter(100)),
         clock,
       });
       try {
         if (!inputExists) {
-          // TODO(15.1): these points can resume directly once run_input is durable.
-          await expect(freshRuntime.resume(runId)).rejects.toMatchObject({
-            code: "run_input_missing",
-          });
+          expect(initialEvents).toEqual([]);
           expect(scenario.counts).toEqual({ nonIdempotent: 0, idempotent: 0 });
           const result = await freshRuntime.run(goal);
           const restartedEvents = await readEvents(store, idAt(100));

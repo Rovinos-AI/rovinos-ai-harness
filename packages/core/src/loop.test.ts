@@ -374,6 +374,14 @@ function normalizeEvents(events: readonly Event[]): JsonValueType {
         policyVersion: event.policyVersion,
       };
     }
+    if (event.type === "run_input") {
+      return {
+        type: event.type,
+        seq: event.seq,
+        input: event.input,
+        inputKind: event.inputKind,
+      };
+    }
     if (event.type === "run_status_changed") {
       return {
         type: event.type,
@@ -878,6 +886,7 @@ describe("runLoop", () => {
       expect(result.status).toBe("suspended");
       expect(result.events.map(({ type }) => type)).toEqual([
         "run_created",
+        "run_input",
         "run_status_changed",
         "model_request",
         "run_status_changed",
@@ -1046,15 +1055,8 @@ describe("runLoop", () => {
       return complete(request, callContext);
     });
 
-    const contextPort = {
-      build: vi.fn(() =>
-        Promise.resolve([
-          { role: "assistant" as const, parts: [{ type: "text" as const, text: "prior context" }] },
-        ]),
-      ),
-      snapshot: vi.fn(() => Promise.resolve([])),
-      restore: vi.fn(() => Promise.resolve()),
-    };
+    const contextPort = new NaiveContext();
+    const build = vi.spyOn(contextPort, "build");
     const result = await runLoop({
       recorder,
       clock,
@@ -1079,35 +1081,33 @@ describe("runLoop", () => {
     expect(result.state.usage).toEqual({ inputTokens: 3, outputTokens: 5, costMicros: 12 });
     expect(result.events.map(({ type }) => type)).toEqual([
       "run_created",
+      "run_input",
       "run_status_changed",
       "model_request",
       "model_response",
       "run_status_changed",
     ]);
-    expect(contextPort.build).toHaveBeenCalledWith(result.events.slice(0, 2));
-    expect(append.mock.calls.map(([, , expectedSeq]) => expectedSeq)).toEqual([0, 2, 3, 4]);
+    expect(build).toHaveBeenCalledWith(result.events.slice(0, 3));
+    expect(append.mock.calls.map(([, , expectedSeq]) => expectedSeq)).toEqual([0, 3, 4, 5]);
     expect(model.requests).toEqual([
       {
         request: {
           requestId: "00000000000000000000000000",
           model: { provider: "test_provider", model: "test_model" },
-          messages: [
-            { role: "user", parts: [{ type: "text", text: "test goal" }] },
-            { role: "assistant", parts: [{ type: "text", text: "prior context" }] },
-          ],
+          messages: [{ role: "user", parts: [{ type: "text", text: "test goal" }] }],
           role: "assistant",
         },
         context: { runId, signal },
       },
     ]);
-    expect(await store.head(runId)).toBe(5);
+    expect(await store.head(runId)).toBe(6);
     const spans = tracerProvider.spans.slice(startingSpanIndex);
     const runSpans = spans.filter(({ name }) => name === "harness.run");
     const modelSpans = spans.filter(({ name }) => name === "harness.model_call");
     expect(runSpans).toHaveLength(1);
     expect(modelSpans).toHaveLength(1);
     expect(modelSpans[0]?.parentSpanId).toBe(runSpans[0]?.spanContextValue.spanId);
-    expect(runSpans[0]?.attributes["harness.event.seq"]).toBe(4);
+    expect(runSpans[0]?.attributes["harness.event.seq"]).toBe(5);
 
     const actual = `${JSON.stringify(normalizeEvents(result.events), null, 2)}\n`;
     if (process.env.UPDATE_GOLDEN === "1") {
@@ -1155,11 +1155,16 @@ describe("runLoop", () => {
       runId,
       atSeq: checkpoint.seq,
       traceparent,
-      context: [],
+      context: {
+        strategyId: "naive",
+        strategyVersion: "v1",
+        calibration: null,
+      },
       plan: null,
     });
     expect(result.events.map(({ type }) => type)).toEqual([
       "run_created",
+      "run_input",
       "run_status_changed",
       "model_request",
       "model_response",
@@ -1307,10 +1312,10 @@ describe("runLoop", () => {
     for await (const event of store.read(runId)) {
       storedEvents.push(event);
     }
-    expect(storedEvents).toHaveLength(4);
+    expect(storedEvents).toHaveLength(5);
     expect(storedEvents.some(({ type }) => type === "checkpoint_written")).toBe(false);
     await expect(store.latestSnapshot(runId)).resolves.toBeUndefined();
-    expect(recorder.nextSeq).toBe(4);
+    expect(recorder.nextSeq).toBe(5);
   });
 
   it("rejects a checkpoint whose active span context is invalid", async () => {
@@ -1401,6 +1406,7 @@ describe("runLoop", () => {
     expect(result.state.status).toBe("completed");
     expect(result.events.map(({ type }) => type)).toEqual([
       "run_created",
+      "run_input",
       "run_status_changed",
       "model_request",
       "model_response",
@@ -1505,6 +1511,7 @@ describe("runLoop", () => {
     }
     expect(recordedTypes).toEqual([
       "run_created",
+      "run_input",
       "run_status_changed",
       "model_request",
       "model_response",
@@ -2289,6 +2296,6 @@ describe("runLoop", () => {
     const modelSpan = spans.find(({ name }) => name === "harness.model_call");
     expect(modelSpan?.status.code).toBe(SpanStatusCode.ERROR);
     expect(modelSpan?.attributes["harness.error.code"]).toBe(expectedCode);
-    expect(runSpan?.attributes["harness.event.seq"]).toBe(3);
+    expect(runSpan?.attributes["harness.event.seq"]).toBe(4);
   });
 });
