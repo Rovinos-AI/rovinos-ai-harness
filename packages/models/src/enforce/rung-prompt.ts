@@ -2,7 +2,12 @@
 import { Code, type ModelRequest, type Part } from "@harness/schemas";
 import type { z } from "zod";
 import { extractJson } from "./extract-json.js";
-import { EnforcementIssueSchema, parseEnforcementResult, type EnforcementResult } from "./index.js";
+import {
+  EnforcementIssueSchema,
+  enforcementIssuesFromError,
+  parseEnforcementResult,
+  type EnforcementResult,
+} from "./index.js";
 
 /** Adds a schema-specific JSON instruction to the request's system messages. */
 export function withPromptOutput(
@@ -61,9 +66,7 @@ export function enforcePromptOutput<Schema extends z.ZodType>(
   if (!parsed.success) {
     return parseEnforcementResult(outputSchema, {
       valid: false,
-      issues: parsed.error.issues.map(({ path, code }) =>
-        EnforcementIssueSchema.parse({ path, code: Code.parse(code) }),
-      ),
+      issues: enforcementIssuesFromError(parsed.error),
       rungUsed: "prompt",
     });
   }

@@ -3,6 +3,7 @@ import { Code, JsonValue, type ModelRequest, type Part } from "@harness/schemas"
 import type { z } from "zod";
 import {
   EnforcementIssueSchema,
+  enforcementIssuesFromError,
   parseEnforcementResult,
   stripSyntheticToolCall,
   type EnforcementResult,
@@ -58,9 +59,7 @@ export function enforceToolOutput<Schema extends z.ZodType>(
       parts: withoutSyntheticCall,
       result: parseEnforcementResult(outputSchema, {
         valid: false,
-        issues: parsed.error.issues.map(({ path, code }) =>
-          EnforcementIssueSchema.parse({ path, code: Code.parse(code) }),
-        ),
+        issues: enforcementIssuesFromError(parsed.error),
         rungUsed: "tool",
       }),
     };
@@ -72,9 +71,7 @@ export function enforceToolOutput<Schema extends z.ZodType>(
       parts: withoutSyntheticCall,
       result: parseEnforcementResult(outputSchema, {
         valid: false,
-        issues: jsonValue.error.issues.map(({ path, code }) =>
-          EnforcementIssueSchema.parse({ path, code: Code.parse(code) }),
-        ),
+        issues: enforcementIssuesFromError(jsonValue.error),
         rungUsed: "tool",
       }),
     };

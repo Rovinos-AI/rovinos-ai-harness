@@ -345,6 +345,7 @@ describe("loadConfig", () => {
       },
       store: {},
       models: {
+        enforcement: { maxRepairs: 2 },
         retry: {
           maxAttempts: 3,
           baseDelayMs: 500,

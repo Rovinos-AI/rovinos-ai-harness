@@ -2,19 +2,27 @@
 import {
   Code,
   lookupCapabilities,
+  ModelEnforcementConfigSchema,
   ModelRetryConfigSchema,
   type Capabilities,
   type Id,
   type JsonValue,
   type ModelRequest,
   type ModelResponse,
+  type ModelUsage,
+  type ModelEnforcementConfig,
   type ModelRetryConfig,
 } from "@harness/schemas";
 import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { z } from "zod";
-import { ProviderResultSchema, type Clock, type IdGenerator } from "./types.js";
+import {
+  ProviderResultSchema,
+  type Clock,
+  type IdGenerator,
+  type ProviderAdapter,
+} from "./types.js";
 import type { AdapterRegistry } from "./registry.js";
-import { ProviderError } from "./errors.js";
+import { ModelOutputInvalidError, ProviderError } from "./errors.js";
 import { prepareMessagesForProvider } from "./blobs.js";
 import { TokenBucketRateLimiter } from "./resilience/limiter.js";
 import { abortableSleep, withRetries, type Random, type Sleep } from "./resilience/retry.js";
@@ -31,12 +39,14 @@ import { enforceNativeOutput, withNativeOutputSchema } from "./enforce/rung-nati
 import { enforceToolOutput, withForcedOutputTool } from "./enforce/rung-tool.js";
 import { enforcePromptOutput, withPromptOutput } from "./enforce/rung-prompt.js";
 import { lowerForProvider, schemaHash, toJsonSchema } from "./json-schema.js";
+import { appendRepairMessages } from "./enforce/repair.js";
 
 /** Dependencies injected into every provider adapter call by the gateway. */
 export interface ModelGatewayDependencies {
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly retryPolicy?: ModelRetryConfig;
+  readonly enforcement?: ModelEnforcementConfig;
   readonly random?: Random;
   readonly sleep?: Sleep;
   readonly requestsPerMinute?: Readonly<Partial<Record<Code, number>>>;
@@ -63,18 +73,17 @@ export type ModelGatewayResponse<OutputSchema extends z.ZodType = z.ZodType> = M
   readonly enforcement?: EnforcementResult<OutputSchema>;
 };
 
-interface PreparedEnforcement<OutputSchema extends z.ZodType> {
+interface PreparedEnforcement {
   readonly request: ModelRequest;
   readonly rung?: EnforcementRung;
-  readonly result?: EnforcementResult<OutputSchema>;
 }
 
-function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
+function prepareEnforcementRequest(
   request: ModelRequest,
-  outputSchema: OutputSchema | undefined,
+  outputSchema: z.ZodType | undefined,
   capabilities: Capabilities,
   maxRung?: EnforcementRung,
-): PreparedEnforcement<OutputSchema> {
+): PreparedEnforcement {
   if (outputSchema === undefined) {
     return { request };
   }
@@ -157,6 +166,7 @@ export class ModelGateway {
   private readonly random: Random;
   private readonly sleep: Sleep;
   private readonly maxConcurrent: number;
+  private readonly maxRepairs: number;
   private readonly limiters = new Map<Code, TokenBucketRateLimiter>();
   private readonly semaphores = new Map<Code, Semaphore>();
 
@@ -175,6 +185,7 @@ export class ModelGateway {
     this.random = dependencies.random ?? Math.random;
     this.sleep = dependencies.sleep ?? abortableSleep;
     this.maxConcurrent = dependencies.maxConcurrent ?? 4;
+    this.maxRepairs = ModelEnforcementConfigSchema.parse(dependencies.enforcement ?? {}).maxRepairs;
     if (!Number.isSafeInteger(this.maxConcurrent) || this.maxConcurrent < 1) {
       throw new RangeError("maxConcurrent must be a positive integer.");
     }
@@ -189,6 +200,48 @@ export class ModelGateway {
         new TokenBucketRateLimiter(requestsPerMinute, dependencies.clock, this.sleep),
       );
     }
+  }
+
+  private completeWithRetries(
+    adapter: ProviderAdapter,
+    options: {
+      readonly request: ModelRequest;
+      readonly context: ModelGatewayContext;
+      readonly limiter: TokenBucketRateLimiter | undefined;
+      readonly semaphore: Semaphore;
+      readonly onAttempt: () => void;
+    },
+  ) {
+    const { request, context, limiter, semaphore, onAttempt } = options;
+    return withRetries({
+      policy: this.retryPolicy,
+      clock: this.dependencies.clock,
+      random: this.random,
+      sleep: this.sleep,
+      signal: context.signal,
+      ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+      prepareAttempt: async (signal, lastError) => {
+        if (limiter !== undefined) {
+          await limiter.acquire(signal, context.deadlineTs, lastError);
+        }
+        return semaphore.acquire(signal);
+      },
+      operation: (signal) => {
+        onAttempt();
+        return adapter.complete(
+          {
+            ...request,
+            messages: prepareMessagesForProvider(request.messages, adapter.provider),
+          },
+          {
+            signal,
+            ids: this.dependencies.ids,
+            clock: this.dependencies.clock,
+            ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+          },
+        );
+      },
+    });
   }
 
   /**
@@ -219,58 +272,78 @@ export class ModelGateway {
       this.semaphores.set(adapter.provider, semaphore);
     }
     let attempts = 0;
-    const adapterResult = await withRetries({
-      policy: this.retryPolicy,
-      clock: this.dependencies.clock,
-      random: this.random,
-      sleep: this.sleep,
-      signal: context.signal,
-      ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-      prepareAttempt: async (signal, lastError) => {
-        if (limiter !== undefined) {
-          await limiter.acquire(signal, context.deadlineTs, lastError);
+    let repairAttempts = 0;
+    let aggregateUsage: ModelUsage | undefined;
+    let aggregateLatencyMs = 0;
+    let currentRequest = prepared.request;
+    for (;;) {
+      setActiveSpanAttribute("harness.model.repair_attempts", repairAttempts);
+      const adapterResult = await this.completeWithRetries(adapter, {
+        request: currentRequest,
+        context,
+        limiter,
+        semaphore,
+        onAttempt: () => {
+          attempts += 1;
+          setActiveSpanAttribute("harness.model.attempts", attempts);
+        },
+      });
+      const parsedResult = ProviderResultSchema.safeParse(adapterResult);
+      if (!parsedResult.success) {
+        throw new ProviderError("provider_unknown");
+      }
+      const result = parsedResult.data;
+      aggregateUsage = aggregateModelUsage(aggregateUsage, result.usage);
+      aggregateLatencyMs += result.latencyMs;
+
+      const enforced = enforceProviderOutput(result.parts, context.outputSchema, prepared.rung);
+      const enforcement = enforced.result;
+      if (enforcement !== undefined && "issues" in enforcement) {
+        if (repairAttempts >= this.maxRepairs) {
+          throw new ModelOutputInvalidError(
+            repairAttempts,
+            enforcement.issues,
+            currentRequest.output?.schema,
+          );
         }
-        return semaphore.acquire(signal);
-      },
-      operation: (signal) => {
-        attempts += 1;
-        setActiveSpanAttribute("harness.model.attempts", attempts);
-        return adapter.complete(
-          {
-            ...prepared.request,
-            messages: prepareMessagesForProvider(prepared.request.messages, adapter.provider),
-          },
-          {
-            signal,
-            ids: this.dependencies.ids,
-            clock: this.dependencies.clock,
-            ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-          },
+        currentRequest = appendRepairMessages(
+          currentRequest,
+          result.parts,
+          enforcement.issues,
+          enforcement.rungUsed,
         );
-      },
-    });
-    const parsedResult = ProviderResultSchema.safeParse(adapterResult);
-    if (!parsedResult.success) {
-      throw new ProviderError("provider_unknown");
+        repairAttempts += 1;
+        continue;
+      }
+
+      return {
+        parts: enforced.parts,
+        usage: aggregateUsage,
+        finishReason: result.finishReason,
+        provider: adapter.provider,
+        model: request.model.model,
+        latencyMs: aggregateLatencyMs,
+        schemaValid: enforcement?.valid ?? true,
+        repairAttempts,
+        ...(enforcement === undefined ? {} : { enforcement }),
+        ...(enforcement?.rungUsed === undefined ? {} : { rungUsed: enforcement.rungUsed }),
+        fallbackDepth: 0,
+        providerBlobs: null,
+      };
     }
-    const result = parsedResult.data;
-
-    const enforced = enforceProviderOutput(result.parts, context.outputSchema, prepared.rung);
-    const enforcement = prepared.result ?? enforced.result;
-
-    return {
-      parts: enforced.parts,
-      usage: result.usage,
-      finishReason: result.finishReason,
-      provider: adapter.provider,
-      model: request.model.model,
-      latencyMs: result.latencyMs,
-      schemaValid: enforcement?.valid ?? true,
-      repairAttempts: 0,
-      ...(enforcement === undefined ? {} : { enforcement }),
-      ...(enforcement?.rungUsed === undefined ? {} : { rungUsed: enforcement.rungUsed }),
-      fallbackDepth: 0,
-      providerBlobs: null,
-    };
   }
+}
+
+function aggregateModelUsage(previous: ModelUsage | undefined, next: ModelUsage): ModelUsage {
+  let costMicros: number | undefined;
+  if (previous === undefined) {
+    costMicros = next.costMicros;
+  } else if (previous.costMicros !== undefined && next.costMicros !== undefined) {
+    costMicros = previous.costMicros + next.costMicros;
+  }
+  return {
+    inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
+    outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
+    ...(costMicros === undefined ? {} : { costMicros }),
+  };
 }
