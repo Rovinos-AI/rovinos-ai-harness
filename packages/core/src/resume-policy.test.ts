@@ -13,7 +13,12 @@ const callIds = {
   unknown: "44444444444444444444444444",
 } as const;
 
-function testState(options: { readonly idempotentToolIntent?: boolean } = {}) {
+function testState(
+  options: {
+    readonly idempotentToolIntent?: boolean;
+    readonly denied?: boolean;
+  } = {},
+) {
   const events = [
     {
       runId,
@@ -52,7 +57,7 @@ function testState(options: { readonly idempotentToolIntent?: boolean } = {}) {
       callId,
       toolId,
       idempotent: toolId === "idempotent_tool" && (options.idempotentToolIntent ?? true),
-      policyDecision: "allow",
+      policyDecision: options.denied === true ? "deny" : "allow",
       argsHash: "d".repeat(64),
       args: { toolId },
     })),
@@ -74,6 +79,24 @@ const toolPort: ToolPort = {
 };
 
 describe("planDanglingIntents", () => {
+  it("never reruns denied intents, even with null arguments and idempotent metadata", () => {
+    const actions = planDanglingIntents(testState({ denied: true }), toolPort);
+    expect(actions[0]).toEqual({
+      kind: "fail",
+      callId: callIds.idempotent_tool,
+      errorCode: "pii_blocked",
+    });
+    expect(actions[1]).toEqual({
+      kind: "fail",
+      callId: callIds.non_idempotent_tool,
+      errorCode: "pii_blocked",
+    });
+    expect(actions[2]).toEqual({
+      kind: "fail",
+      callId: callIds.unknown,
+      errorCode: "unknown_tool",
+    });
+  });
   it.each(["escalate", "fail"] as const)(
     "plans idempotent and unknown calls with %s policy",
     (policy) => {

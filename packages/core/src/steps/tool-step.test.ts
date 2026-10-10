@@ -14,12 +14,13 @@ import {
 } from "@opentelemetry/api";
 import { FakeClock, SequentialIdGenerator, type Event } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { RunRecorder, type EventPartial } from "../recorder.js";
 import { planDanglingIntents } from "../resume-policy.js";
 import { foldRunState, type ApprovalRequestedEvent, type ToolIntentEvent } from "../run-state.js";
 import { RUN_SPAN } from "../spans.js";
 import { FakeToolPort, type FakeToolDefinition } from "../testing/index.js";
+import type { ToolPort } from "../ports.js";
 import { applyDanglingIntents, resolveDanglingIntentApproval, toolStep } from "./tool-step.js";
 
 const runId = "00000000000000000000000000";
@@ -232,6 +233,90 @@ function resumeOptions(
 }
 
 describe("tool-step resume handling", () => {
+  it("prepares direct tool calls inside their tool-call span without an ambient span", async () => {
+    const { recorder } = createRecorder();
+    await createRun(recorder, []);
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      prepare: async (call, runContext) => {
+        await runContext.recordPiiAction?.({
+          boundary: "tool_input",
+          action: "tokenize",
+          entities: [{ type: "email", count: 1 }],
+        });
+        return { ...call, args: "<EMAIL_1>" };
+      },
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+    };
+
+    const events = await toolStep({
+      recorder,
+      tool,
+      clock: new FakeClock(100),
+      runId,
+      calls: [{ callId: callIds.idempotent, toolId: "prepared", args: "synthetic@example.test" }],
+      signal: new AbortController().signal,
+    });
+
+    expect(events.map(({ type }) => type)).toEqual(["pii_action", "tool_intent", "tool_result"]);
+    expect(new Set(events.map(({ spanId }) => spanId)).size).toBe(1);
+  });
+
+  it("does not record in-flight or late PII summaries after a tool timeout result", async () => {
+    const { recorder, store } = createRecorder();
+    await createRun(recorder, []);
+    const append = store.append.bind(store);
+    vi.spyOn(store, "append").mockImplementation(async (appendRunId, events, expectedSeq) => {
+      if (events.some(({ type }) => type === "pii_action")) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return append(appendRunId, events, expectedSeq);
+    });
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: true, timeoutMs: 10 }),
+      execute: async (_call, runContext) => {
+        const summary = runContext.recordPiiAction?.({
+          boundary: "tool_output",
+          action: "tokenize",
+          entities: [{ type: "email", count: 1 }],
+        });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await runContext.recordPiiAction?.({
+          boundary: "tool_output",
+          action: "tokenize",
+          entities: [{ type: "email", count: 1 }],
+        });
+        await summary;
+        return { outcome: "ok", result: null };
+      },
+    };
+
+    const events = await toolStep({
+      recorder,
+      tool,
+      clock: new FakeClock(100),
+      runId,
+      calls: [{ callId: callIds.idempotent, toolId: "late", args: null }],
+      signal: new AbortController().signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    const stored: Event[] = [];
+    for await (const event of store.read(runId)) {
+      stored.push(event);
+    }
+    const resultIndex = stored.findIndex(
+      (event) => event.type === "tool_result" && event.callId === callIds.idempotent,
+    );
+    expect(events).toMatchObject([
+      { type: "tool_intent" },
+      { type: "pii_action" },
+      { type: "tool_result", outcome: "timeout" },
+    ]);
+    expect(stored.findIndex((event) => event.type === "pii_action")).toBeLessThan(resultIndex);
+    expect(stored.slice(resultIndex + 1).some((event) => event.type === "pii_action")).toBe(false);
+  });
+
   it("records known and unknown calls around execution", async () => {
     const { recorder, store } = createRecorder();
     await createRun(recorder, []);

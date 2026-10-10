@@ -346,6 +346,10 @@ async function createSqliteStore(dataDir: string): Promise<EventStore> {
 /**
  * Builds a runtime from validated configuration. Until the provider-owning
  * epics land, model and tool ports must be supplied through overrides.
+ * Supply an already composed tool override: Offloading( Pii( Policy( Tools ) ) ).
+ * Future policy authorization runs in prepare on tokenized arguments, before
+ * PII execution detokenizes allowlisted pointers. Binary output must be a validated
+ * numeric byte array and must use the outer offloader; it never produces previews.
  *
  * @param config - Validated harness configuration with run-loop settings.
  * @param overrides - Optional stores, ports, and deterministic test dependencies.

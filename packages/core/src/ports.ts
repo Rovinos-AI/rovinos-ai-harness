@@ -10,6 +10,7 @@ import type {
   ModelResponse,
   ModelUsage as SharedModelUsage,
   Part,
+  PiiActionSummary,
   Sha256Hex,
   ToolSpec,
 } from "@harness/schemas";
@@ -23,6 +24,8 @@ export interface RunContext {
   readonly signal: AbortSignal;
   /** Epoch-millisecond wall-clock deadline computed from run budgets. */
   readonly deadlineTs?: number;
+  /** Durable metadata-only PII summary sink supplied by the loop. */
+  readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
 }
 
 /** A tool invocation proposed by the model. */
@@ -56,6 +59,8 @@ export interface ToolDescription {
 
 /** Result returned after a tool execution. */
 export interface ToolExecutionResult {
+  /** True only for a ToolBinaryPayloadSchema byte array; outer offloading is required. */
+  readonly binary?: boolean;
   readonly outcome: "ok" | "error";
   readonly result: JsonValue;
   readonly errorCode?: Code;
@@ -63,6 +68,8 @@ export interface ToolExecutionResult {
 
 /** Tool executor used by the run loop. */
 export interface ToolPort {
+  /** Sanitizes arguments before any durable model response or tool intent is recorded. */
+  prepare?(call: ModelToolCall, context: RunContext): Promise<ModelToolCall>;
   /**
    * Returns model-visible specifications for registered tools, when available.
    *

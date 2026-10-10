@@ -15,6 +15,7 @@ export {
   type JsonSchemaValidator,
 } from "./json-schema.js";
 export { JsonValue } from "./json.js";
+export { ToolBinaryPayloadSchema, type ToolBinaryPayload } from "./tool-binary.js";
 export {
   MessageSchema,
   ModelRequestSchema,

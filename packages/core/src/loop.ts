@@ -15,14 +15,8 @@ import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
 import { modelStep, modelToolOptions, type ModelStepResult } from "./steps/model-step.js";
 import { toolStep } from "./steps/tool-step.js";
-import type {
-  ContextPort,
-  IdGenerator,
-  ModelToolCall,
-  ModelPort,
-  NewRunMetadata,
-  ToolPort,
-} from "./ports.js";
+import type { PreparedToolCall } from "./steps/prepare-tool.js";
+import type { ContextPort, IdGenerator, ModelPort, NewRunMetadata, ToolPort } from "./ports.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata {
@@ -180,6 +174,7 @@ async function requestModel(
   const result = await modelStep({
     recorder: options.recorder,
     model: options.model,
+    tool: options.tool,
     ids: options.ids,
     runId,
     ...modelToolOptions(options.tool, messages),
@@ -232,7 +227,12 @@ async function recoverInterruptedModelResponse(
     return recordFinalAnswer(options, events, execution);
   }
   if (recovery.kind === "tool_calls") {
-    return runToolCalls(options, events, execution, recovery.calls);
+    return runToolCalls(
+      options,
+      events,
+      execution,
+      recovery.calls.map((call) => ({ call })),
+    );
   }
   return undefined;
 }
@@ -280,11 +280,7 @@ async function runLoopSteps(
     if (modelResult.outcome === "aborted") {
       return suspendedOutcome(events);
     }
-    const toolCalls = modelResult.completion.parts.flatMap((part) =>
-      part.type === "tool_call"
-        ? [{ callId: part.callId, toolId: part.toolId, args: part.args }]
-        : [],
-    );
+    const toolCalls = modelResult.preparedCalls;
     if (toolCalls.length > 0) {
       const outcome = await runToolCalls(options, events, execution, toolCalls);
       if (outcome !== undefined) {
@@ -347,9 +343,10 @@ async function runToolCalls(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
-  calls: readonly ModelToolCall[],
+  calls: readonly PreparedToolCall[],
 ): Promise<Event | undefined> {
-  for (const call of calls) {
+  for (const prepared of calls) {
+    const call = prepared.call;
     const aborted = await suspendIfShutdown(options, events, execution);
     if (aborted !== undefined) {
       return aborted;
@@ -370,6 +367,7 @@ async function runToolCalls(
         clock: options.clock,
         runId: execution.runId,
         calls: [call],
+        preparedCalls: [prepared],
         signal: options.signal,
       })),
     );
