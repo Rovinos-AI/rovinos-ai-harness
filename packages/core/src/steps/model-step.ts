@@ -117,6 +117,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       fallbackDepth: completion.fallbackDepth,
       content: completion.parts,
       providerBlobs: completion.providerBlobs,
+      ...(completion.toolCalls.length === 0 ? {} : { toolCalls: [...completion.toolCalls] }),
     });
     recorded.push(response);
     result = { outcome: "response", completion, events: recorded };

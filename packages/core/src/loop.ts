@@ -140,6 +140,47 @@ export async function continueRunLoop(
   return runLoopSteps(options, events, execution);
 }
 
+async function recoverLastModelResponse(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+): Promise<Event | undefined> {
+  const responseIndex = events.findLastIndex((event) => event.type === "model_response");
+  const response = events[responseIndex];
+  if (response?.type !== "model_response") {
+    return undefined;
+  }
+  const eventsAfterResponse = events.slice(responseIndex + 1);
+  if (
+    eventsAfterResponse.some(
+      (event) =>
+        event.type === "model_request" ||
+        (event.type === "run_status_changed" &&
+          (event.to === "completed" || event.to === "failed" || event.to === "cancelled")),
+    )
+  ) {
+    return undefined;
+  }
+
+  const recordedCallIds = new Set(
+    events.flatMap((event) => (event.type === "tool_intent" ? [event.callId] : [])),
+  );
+  const unrecordedCalls =
+    response.toolCalls?.filter((call) => !recordedCallIds.has(call.callId)) ?? [];
+  if (unrecordedCalls.length > 0) {
+    return runToolCalls(options, events, execution, unrecordedCalls);
+  }
+
+  const hasToolIntentAfterResponse = eventsAfterResponse.some(
+    (event) => event.type === "tool_intent",
+  );
+  if ((response.toolCalls?.length ?? 0) > 0 || hasToolIntentAfterResponse) {
+    return undefined;
+  }
+
+  return recordFinalAnswer(options, events, execution);
+}
+
 async function recordBudgetFailure(
   recorder: RunRecorder,
   events: Event[],
@@ -194,6 +235,10 @@ async function runLoopSteps(
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<Event> {
+  const recovered = await recoverLastModelResponse(options, events, execution);
+  if (recovered !== undefined) {
+    return recovered;
+  }
   for (;;) {
     const aborted = await suspendIfShutdown(options, events, execution);
     if (aborted !== undefined) {
@@ -249,17 +294,26 @@ async function runLoopSteps(
       continue;
     }
 
-    const finished = await options.recorder.record({
-      type: "run_status_changed",
-      v: 1,
-      from: "running",
-      to: "completed",
-      reason: "final_answer",
-    });
-    events.push(finished);
-    await checkpointAfterStep(execution.checkpointer, events);
+    const finished = await recordFinalAnswer(options, events, execution);
     return finished;
   }
+}
+
+async function recordFinalAnswer(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+): Promise<Event> {
+  const finished = await options.recorder.record({
+    type: "run_status_changed",
+    v: 1,
+    from: "running",
+    to: "completed",
+    reason: "final_answer",
+  });
+  events.push(finished);
+  await checkpointAfterStep(execution.checkpointer, events);
+  return finished;
 }
 
 async function prepareModelStep(

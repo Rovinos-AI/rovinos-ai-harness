@@ -81,6 +81,17 @@ const modelResponseEvent = z
     fallbackDepth: z.number().int().nonnegative(),
     content: z.array(PartSchema),
     providerBlobs: JsonValue,
+    toolCalls: z
+      .array(
+        z
+          .object({
+            callId: Id,
+            toolId: Code,
+            args: JsonValue,
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict();
 

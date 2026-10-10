@@ -36,6 +36,7 @@ export const eventSamples = [
     fallbackDepth: 0,
     content: [{ type: "text", text: "hello" }],
     providerBlobs: [],
+    toolCalls: [{ callId: id, toolId: "test.tool", args: { value: "synthetic" } }],
   },
   {
     ...envelope,

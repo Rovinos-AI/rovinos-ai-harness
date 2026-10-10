@@ -7,6 +7,11 @@ export interface CapturedModelRequest {
   readonly context: RunContext;
 }
 
+/** Optional deterministic selector for the scripted response at a conversation position. */
+export interface FakeModelOptions {
+  readonly responseIndex?: (request: ModelRequest) => number;
+}
+
 /** Error raised when the fake model script has no completion left. */
 export class FakeModelScriptExhaustedError extends Error {
   /** Stable failure code. */
@@ -27,15 +32,20 @@ export class FakeModelPort implements ModelPort {
   /**
    * Creates a fake model that returns scripted completions in order.
    *
-   * @param script - Completions returned by successive calls.
+   * @param script - Completions returned at the selected conversation positions.
+   * @param options - Optional selector that derives a position from request history.
    */
-  constructor(private readonly script: readonly ModelCompletion[]) {}
+  constructor(
+    private readonly script: readonly ModelCompletion[],
+    private readonly options: FakeModelOptions = {},
+  ) {}
 
   /** {@inheritDoc ModelPort.complete} */
   complete(request: ModelRequest, context: RunContext): Promise<ModelCompletion> {
     this.requests.push({ request, context });
-    const response = this.script[this.nextResponse];
+    const selectedIndex = this.options.responseIndex?.(request) ?? this.nextResponse;
     this.nextResponse += 1;
+    const response = this.script[selectedIndex];
     if (response === undefined) {
       return Promise.reject(new FakeModelScriptExhaustedError());
     }
