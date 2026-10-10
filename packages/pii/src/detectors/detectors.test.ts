@@ -166,6 +166,9 @@ describe("punctuation boundaries", () => {
   it.each([
     { detector: emailDetector, value: "alice@example.test" },
     { detector: ipDetector, value: "192.0.2.1" },
+    { detector: secretsDetector, value: "AKIA" + "A".repeat(16) },
+    { detector: secretsDetector, value: "ghp_" + "a".repeat(36) },
+    { detector: secretsDetector, value: "eyJ0ZXN0.e30.c2ln" },
   ])("does not include a sentence period for $detector.id", ({ detector, value }) => {
     const text = `😀 ${value}.`;
     expect(detector.detect(text)).toEqual([
@@ -178,6 +181,17 @@ describe("punctuation boundaries", () => {
       },
     ]);
   });
+
+  it.each(["GB82 WEST 1234 5698 7654 32", "GB82WEST12345698765432", "gb82west12345698765432"])(
+    "stops a valid IBAN before following prose: %s",
+    (value) => {
+      const text = `😀 ${value} USD PAYMENT`;
+      const detected = ibanDetector.detect(text);
+      expect(detected).toHaveLength(1);
+      expect(detected[0]).toMatchObject({ start: 3, end: 3 + value.length });
+      expect(text.slice(detected[0]?.start, detected[0]?.end)).toBe(value);
+    },
+  );
 
   it("ends URL credentials before paths and handles quoted JSON", () => {
     const value = "https://" + "fixture:synthetic@" + "host.test";

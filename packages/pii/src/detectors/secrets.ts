@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { candidateDetector } from "./types.js";
+import { candidateDetector, stripTrailingPeriods } from "./types.js";
 import type { Detector } from "./types.js";
 
-const keys = candidateDetector("secrets", "api_key", /[\w.-]+/gu, (value) => {
+const keys = candidateDetector("secrets", "api_key", /[\w.-]+/gu, (candidate) => {
+  const value = stripTrailingPeriods(candidate);
   if (/^(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36})$/u.test(value)) {
-    return true;
+    return value;
   }
   const segments = value.split(".");
-  return segments.length === 3 && segments.every((segment) => /^[\w-]+$/u.test(segment));
+  return segments.length === 3 && segments.every((segment) => /^[\w-]+$/u.test(segment))
+    ? value
+    : false;
 });
 
 const privateKeys = candidateDetector(

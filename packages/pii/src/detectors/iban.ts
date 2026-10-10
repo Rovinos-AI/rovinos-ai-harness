@@ -111,12 +111,21 @@ export function mod97(value: string): boolean {
 export const ibanDetector = candidateDetector(
   "iban",
   "iban",
-  /[A-Z]{2}\d{2}[A-Z0-9]*(?: [A-Z0-9]{1,4})*/gu,
+  /[A-Z]{2}\d{2}[A-Z0-9]*(?: [A-Z0-9]{1,4})*/giu,
   (value) => {
-    if (value.length > 42) {
+    const length = countryLengths[value.slice(0, 2).toUpperCase()];
+    if (length === undefined) {
       return false;
     }
-    const compact = value.replaceAll(" ", "");
-    return compact.length === countryLengths[compact.slice(0, 2)] && mod97(compact);
+    let end = 0;
+    let characters = 0;
+    while (end < value.length && characters < length) {
+      if (value[end] !== " ") {
+        characters++;
+      }
+      end++;
+    }
+    const candidate = value.slice(0, end);
+    return characters === length && mod97(candidate) ? candidate : false;
   },
 );

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { candidateDetector } from "./types.js";
+import { candidateDetector, stripTrailingPeriods } from "./types.js";
 
 function validEmail(value: string): boolean {
   if (value.length > 254) {
@@ -31,11 +31,7 @@ export const emailDetector = candidateDetector(
   "email",
   /[\w!#$%&'*+/=?^`{|}~.@-]+/giu,
   (candidate) => {
-    let end = candidate.length;
-    while (candidate[end - 1] === ".") {
-      end--;
-    }
-    const value = candidate.slice(0, end);
+    const value = stripTrailingPeriods(candidate);
     return validEmail(value) ? value : false;
   },
 );

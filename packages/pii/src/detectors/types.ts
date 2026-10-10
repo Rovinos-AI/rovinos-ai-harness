@@ -29,6 +29,15 @@ export function validateText(text: string): void {
   }
 }
 
+/** Remove sentence-final periods without retrying a regex at each offset. */
+export function stripTrailingPeriods(value: string): string {
+  let end = value.length;
+  while (value[end - 1] === ".") {
+    end--;
+  }
+  return value.slice(0, end);
+}
+
 /** Build an internal candidate scanner with deterministic confidence. */
 export function candidateDetector(
   id: Code,
