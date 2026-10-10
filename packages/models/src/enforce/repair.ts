@@ -6,10 +6,7 @@ function schemaObject(value: JsonValue | undefined): Record<string, JsonValue> |
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
 }
 
-function schemaChildren(
-  schema: JsonValue | undefined,
-  key: string,
-): JsonValue[] {
+function schemaChildren(schema: JsonValue | undefined, key: string): JsonValue[] {
   const object = schemaObject(schema);
   const children: JsonValue[] = [];
   const direct = object?.[key];
@@ -36,9 +33,7 @@ function pathText(path: readonly (string | number)[], schema: JsonValue | undefi
           Array.isArray(value) ? [value] : [],
         );
         return [
-          ...prefixItems.flatMap((items) =>
-            items[segment] === undefined ? [] : [items[segment]],
-          ),
+          ...prefixItems.flatMap((items) => (items[segment] === undefined ? [] : [items[segment]])),
           ...schemaChildren(candidate, "items"),
         ];
       });
@@ -83,25 +78,17 @@ function repairMessages(
   rung: EnforcementRung | undefined,
   descriptions: readonly string[],
 ): ModelRequest["messages"] {
-  const messages: ModelRequest["messages"] = [
-    { role: "assistant", parts: [...previousOutput] },
-  ];
+  const messages: ModelRequest["messages"] = [{ role: "assistant", parts: [...previousOutput] }];
   const toolCalls = previousOutput.filter((part) => part.type === "tool_call");
   if (rung === "tool" && toolCalls.length > 0) {
     messages.push({
       role: "tool",
-      parts: toolCalls.flatMap((part) =>
-        part.type === "tool_call"
-          ? [
-              {
-                type: "tool_result" as const,
-                callId: part.callId,
-                result: descriptions.join("\n"),
-                isError: true,
-              },
-            ]
-          : [],
-      ),
+      parts: toolCalls.map((part) => ({
+        type: "tool_result" as const,
+        callId: part.callId,
+        result: descriptions.join("\n"),
+        isError: true,
+      })),
     });
     return messages;
   }

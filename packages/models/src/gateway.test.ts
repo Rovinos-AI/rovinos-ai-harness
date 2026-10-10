@@ -39,6 +39,48 @@ const request: ModelRequest = {
   messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
 };
 
+function expectAnthropicRepairBody(body: JsonValue | undefined): void {
+  expect(body).toMatchObject({
+    messages: [
+      { role: "user" },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "toolu_invalid", name: "emit_result" }],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_invalid",
+            is_error: true,
+            content: "$.answer: expected number",
+          },
+        ],
+      },
+    ],
+    tool_choice: { type: "tool", name: "emit_result" },
+  });
+}
+
+function expectOpenAiRepairBody(body: JsonValue | undefined): void {
+  expect(body).toMatchObject({
+    messages: [
+      { role: "user" },
+      {
+        role: "assistant",
+        tool_calls: [{ id: "call_invalid", function: { name: "emit_result" } }],
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_invalid",
+        content: "$.answer: expected number",
+      },
+    ],
+    tool_choice: { type: "function", function: { name: "emit_result" } },
+  });
+}
+
 describe("ModelGateway", () => {
   it("selects the request provider and maps its result to a ModelPort completion", async () => {
     expect(ModelExports.ModelGateway).toBe(ModelGateway);
@@ -683,45 +725,9 @@ describe("ModelGateway", () => {
 
       expect(completion).toMatchObject({ schemaValid: true, repairAttempts: 1 });
       expect(requestBodies).toHaveLength(2);
-      if (provider === "anthropic") {
-        expect(requestBodies[1]).toMatchObject({
-          messages: [
-            { role: "user" },
-            {
-              role: "assistant",
-              content: [{ type: "tool_use", id: "toolu_invalid", name: "emit_result" }],
-            },
-            {
-              role: "user",
-              content: [
-                {
-                  type: "tool_result",
-                  tool_use_id: "toolu_invalid",
-                  is_error: true,
-                  content: expect.stringContaining("$.answer: expected number"),
-                },
-              ],
-            },
-          ],
-          tool_choice: { type: "tool", name: "emit_result" },
-        });
-      } else {
-        expect(requestBodies[1]).toMatchObject({
-          messages: [
-            { role: "user" },
-            {
-              role: "assistant",
-              tool_calls: [{ id: "call_invalid", function: { name: "emit_result" } }],
-            },
-            {
-              role: "tool",
-              tool_call_id: "call_invalid",
-              content: expect.stringContaining("$.answer: expected number"),
-            },
-          ],
-          tool_choice: { type: "function", function: { name: "emit_result" } },
-        });
-      }
+      const assertRepairBody =
+        provider === "anthropic" ? expectAnthropicRepairBody : expectOpenAiRepairBody;
+      assertRepairBody(requestBodies[1]);
     },
   );
 

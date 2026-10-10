@@ -78,9 +78,9 @@ interface PreparedEnforcement {
   readonly rung?: EnforcementRung;
 }
 
-function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
+function prepareEnforcementRequest(
   request: ModelRequest,
-  outputSchema: OutputSchema | undefined,
+  outputSchema: z.ZodType | undefined,
   capabilities: Capabilities,
   maxRung?: EnforcementRung,
 ): PreparedEnforcement {
@@ -331,12 +331,12 @@ export class ModelGateway {
 }
 
 function aggregateModelUsage(previous: ModelUsage | undefined, next: ModelUsage): ModelUsage {
-  const costMicros =
-    previous === undefined
-      ? next.costMicros
-      : previous.costMicros === undefined || next.costMicros === undefined
-        ? undefined
-        : previous.costMicros + next.costMicros;
+  let costMicros: number | undefined;
+  if (previous === undefined) {
+    costMicros = next.costMicros;
+  } else if (previous.costMicros !== undefined && next.costMicros !== undefined) {
+    costMicros = previous.costMicros + next.costMicros;
+  }
   return {
     inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
