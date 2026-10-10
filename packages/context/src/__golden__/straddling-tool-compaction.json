@@ -1,0 +1,22 @@
+[
+  {
+    "seqs": [0],
+    "messages": [
+      {
+        "role": "user",
+        "parts": [{ "type": "text", "text": "keep the goal" }]
+      }
+    ],
+    "pinned": true
+  },
+  {
+    "seqs": [1],
+    "messages": [
+      {
+        "role": "user",
+        "parts": [{ "type": "text", "text": "Summary of earlier work: tool call was compacted" }]
+      }
+    ],
+    "pinned": true
+  }
+]

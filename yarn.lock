@@ -1013,10 +1013,21 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@harness/context@workspace:^, @harness/context@workspace:packages/context":
+  version: 0.0.0-use.local
+  resolution: "@harness/context@workspace:packages/context"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.5"
+  languageName: unknown
+  linkType: soft
+
 "@harness/core@workspace:^, @harness/core@workspace:packages/core":
   version: 0.0.0-use.local
   resolution: "@harness/core@workspace:packages/core"
   dependencies:
+    "@harness/context": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"

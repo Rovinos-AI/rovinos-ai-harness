@@ -1,0 +1,41 @@
+[
+  {
+    "seqs": [0],
+    "messages": [
+      {
+        "role": "user",
+        "parts": [{ "type": "text", "text": "use a tool" }]
+      }
+    ],
+    "pinned": true
+  },
+  {
+    "seqs": [1, 3],
+    "messages": [
+      {
+        "role": "assistant",
+        "parts": [
+          { "type": "text", "text": "working" },
+          {
+            "type": "tool_call",
+            "callId": "22222222222222222222222222",
+            "toolId": "lookup",
+            "args": { "query": "x" }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "parts": [
+          {
+            "type": "tool_result",
+            "callId": "22222222222222222222222222",
+            "result": { "value": "found" },
+            "isError": false
+          }
+        ]
+      }
+    ],
+    "pinned": false
+  }
+]
