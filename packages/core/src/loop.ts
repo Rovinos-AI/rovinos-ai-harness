@@ -162,11 +162,15 @@ async function recoverLastModelResponse(
     return undefined;
   }
 
+  const toolCalls = response.content.flatMap((part) =>
+    part.type === "tool_call"
+      ? [{ callId: part.callId, toolId: part.toolId, args: part.args }]
+      : [],
+  );
   const recordedCallIds = new Set(
     events.flatMap((event) => (event.type === "tool_intent" ? [event.callId] : [])),
   );
-  const unrecordedCalls =
-    response.toolCalls?.filter((call) => !recordedCallIds.has(call.callId)) ?? [];
+  const unrecordedCalls = toolCalls.filter((call) => !recordedCallIds.has(call.callId));
   if (unrecordedCalls.length > 0) {
     return runToolCalls(options, events, execution, unrecordedCalls);
   }
@@ -174,7 +178,7 @@ async function recoverLastModelResponse(
   const hasToolIntentAfterResponse = eventsAfterResponse.some(
     (event) => event.type === "tool_intent",
   );
-  if ((response.toolCalls?.length ?? 0) > 0 || hasToolIntentAfterResponse) {
+  if (toolCalls.length > 0 || hasToolIntentAfterResponse) {
     return undefined;
   }
 

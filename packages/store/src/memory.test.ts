@@ -120,7 +120,12 @@ describe("InMemoryEventStore", () => {
     ) {
       throw new Error("Expected a nested message object");
     }
-    messages[0].parts[0] = { type: "text", text: "changed" };
+    const firstMessage = messages[0];
+    const firstPart = firstMessage.parts[0];
+    if (firstPart?.type !== "text") {
+      throw new Error("Expected a text part");
+    }
+    firstPart.text = "changed";
 
     const secondRead = await collect(store.read(runId));
     const secondRequest = secondRead[1];

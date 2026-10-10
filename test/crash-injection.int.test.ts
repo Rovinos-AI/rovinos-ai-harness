@@ -10,6 +10,7 @@ import {
   type Event,
   type JsonValue,
   type NewEvent,
+  type Part,
 } from "@harness/schemas";
 import {
   createRuntime,
@@ -69,7 +70,7 @@ interface AppendBoundary {
 }
 
 type SemanticEvent =
-  | { readonly type: "model_response"; readonly content: JsonValue }
+  | { readonly type: "model_response"; readonly content: ModelCompletion["parts"] }
   | {
       readonly type: "tool_result";
       readonly toolId: string;
@@ -91,19 +92,21 @@ function idAt(offset: number): Id {
 }
 
 function positionFromRequest(request: ModelRequest): number {
-  if (
-    typeof request.messages !== "object" ||
-    request.messages === null ||
-    Array.isArray(request.messages)
-  ) {
-    return 0;
+  for (const message of request.messages) {
+    for (const part of message.parts) {
+      if (part.type !== "text") {
+        continue;
+      }
+      const match = /^position:(\d+)$/.exec(part.text);
+      if (match !== null) {
+        const position = Number(match[1]);
+        if (Number.isSafeInteger(position)) {
+          return position;
+        }
+      }
+    }
   }
-  const context = request.messages.context;
-  if (typeof context !== "object" || context === null || Array.isArray(context)) {
-    return 0;
-  }
-  const position = context.position;
-  return typeof position === "number" && Number.isSafeInteger(position) ? position : 0;
+  return 0;
 }
 
 function createScenario(): Scenario {
@@ -119,11 +122,14 @@ function createScenario(): Scenario {
     args: { value: "synthetic" },
   };
   const completion = (
-    content: JsonValue,
-    toolCalls: ModelCompletion["toolCalls"] = [],
+    content: string,
+    toolCalls: readonly { readonly callId: Id; readonly toolId: string; readonly args: JsonValue }[] =
+      [],
   ): ModelCompletion => ({
-    content,
-    toolCalls,
+    parts: [
+      { type: "text", text: content },
+      ...toolCalls.map((call): Part => ({ type: "tool_call", ...call })),
+    ],
     usage: { inputTokens: 1, outputTokens: 1 },
     finishReason: "stop",
     provider: "fake",
@@ -131,6 +137,7 @@ function createScenario(): Scenario {
     latencyMs: 1,
     schemaValid: true,
     repairAttempts: 0,
+    fallbackDepth: 0,
     providerBlobs: null,
   });
   const fakeOptions: FakeModelOptions = {
@@ -171,9 +178,17 @@ function createScenario(): Scenario {
   const tool = new FakeToolPort(definitions);
   const context: ContextPort = {
     build: (events) =>
-      Promise.resolve({
-        position: events.filter((event) => event.type === "model_response").length,
-      }),
+      Promise.resolve([
+        {
+          role: "user",
+          parts: [
+            {
+              type: "text",
+              text: `position:${String(events.filter((event) => event.type === "model_response").length)}`,
+            },
+          ],
+        },
+      ]),
     snapshot: () => Promise.resolve(null),
     restore: () => Promise.resolve(),
   };
@@ -291,13 +306,16 @@ function hasUnrecordedProposedCall(events: readonly Event[]): Id | undefined {
     if (event.type !== "model_response") {
       continue;
     }
-    for (const call of event.toolCalls ?? []) {
+    for (const part of event.content) {
+      if (part.type !== "tool_call") {
+        continue;
+      }
       if (
         !events.some(
-          (candidate) => candidate.type === "tool_intent" && candidate.callId === call.callId,
+          (candidate) => candidate.type === "tool_intent" && candidate.callId === part.callId,
         )
       ) {
-        return call.callId;
+        return part.callId;
       }
     }
   }
@@ -306,7 +324,9 @@ function hasUnrecordedProposedCall(events: readonly Event[]): Id | undefined {
 
 function hasUnrecordedFinalStatus(events: readonly Event[]): boolean {
   const finalAnswerRecorded = events.some(
-    (event) => event.type === "model_response" && event.content === "final answer",
+    (event) =>
+      event.type === "model_response" &&
+      event.content.some((part) => part.type === "text" && part.text === "final answer"),
   );
   const completed = events.some(
     (event) => event.type === "run_status_changed" && event.to === "completed",
@@ -316,8 +336,11 @@ function hasUnrecordedFinalStatus(events: readonly Event[]): boolean {
 
 function hasReplayedFinalResponse(events: readonly Event[]): boolean {
   return (
-    events.filter((event) => event.type === "model_response" && event.content === "final answer")
-      .length > 1
+    events.filter(
+      (event) =>
+        event.type === "model_response" &&
+        event.content.some((part) => part.type === "text" && part.text === "final answer"),
+    ).length > 1
   );
 }
 

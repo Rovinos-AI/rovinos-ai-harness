@@ -47,16 +47,18 @@ describe("FakeModelPort", () => {
   it("returns the same scripted response when a conversation position is replayed", async () => {
     const model = new FakeModelPort([completion], {
       responseIndex: (request) =>
-        typeof request.messages === "object" &&
-        request.messages !== null &&
-        !Array.isArray(request.messages) &&
-        typeof request.messages.position === "number"
-          ? request.messages.position
-          : 0,
+        request.messages.some((message) =>
+          message.parts.some(
+            (part) => part.type === "text" && part.text === "position:0",
+          ),
+        )
+          ? 0
+          : 1,
     });
     const request = {
       requestId: new SequentialIdGenerator().next(),
-      messages: { position: 0 },
+      model: { provider: "fake", model: "script" },
+      messages: [{ role: "user" as const, parts: [{ type: "text" as const, text: "position:0" }] }],
     };
     const context = { runId: request.requestId, signal: new AbortController().signal };
 

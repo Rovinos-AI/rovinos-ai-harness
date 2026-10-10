@@ -78,20 +78,9 @@ const modelResponseEvent = z
     schemaValid: z.boolean(),
     repairAttempts: z.number().int().nonnegative(),
     rungUsed: Code.optional(),
-    fallbackDepth: z.number().int().nonnegative(),
+    fallbackDepth: z.number().int().nonnegative().default(0),
     content: z.array(PartSchema),
     providerBlobs: JsonValue,
-    toolCalls: z
-      .array(
-        z
-          .object({
-            callId: Id,
-            toolId: Code,
-            args: JsonValue,
-          })
-          .strict(),
-      )
-      .optional(),
   })
   .strict();
 

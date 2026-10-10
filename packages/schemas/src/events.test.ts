@@ -22,13 +22,13 @@ describe("Event", () => {
     ).toBe(false);
   });
 
-  it("accepts legacy model responses without tool calls", () => {
+  it("defaults legacy model responses without fallback depth to zero", () => {
     const modelResponse = eventSamples.find(({ type }) => type === "model_response");
     if (modelResponse?.type !== "model_response") {
       throw new Error("Missing model_response sample.");
     }
-    const { toolCalls, ...legacyResponse } = modelResponse;
-    expect(toolCalls).toBeDefined();
-    expect(Event.parse(legacyResponse)).toEqual(legacyResponse);
+    const legacyResponse = { ...modelResponse };
+    Reflect.deleteProperty(legacyResponse, "fallbackDepth");
+    expect(Event.parse(legacyResponse)).toMatchObject({ fallbackDepth: 0 });
   });
 });
