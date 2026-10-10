@@ -1,43 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, JsonValue, Message } from "@harness/schemas";
-import type { ContextPort } from "../ports.js";
+import { NaiveStrategy } from "@harness/context";
+import type { TokenCounter } from "@harness/context";
+import type { ModelRef } from "@harness/schemas";
+import { StrategyContextPort } from "./context-port.js";
 
-/** Basic context builder that retains model outputs and tool results in order. */
-export class NaiveContext implements ContextPort {
-  /** {@inheritDoc ContextPort.build} */
-  build(events: readonly Event[]): Promise<Message[]> {
-    return Promise.resolve(
-      events.flatMap<Message>((event): Message[] => {
-        if (event.type === "model_response") {
-          return [{ role: "assistant", parts: event.content }];
-        }
-        if (event.type === "tool_result") {
-          return [
-            {
-              role: "tool",
-              parts: [
-                {
-                  type: "tool_result",
-                  isError: event.outcome !== "ok",
-                  callId: event.callId,
-                  result: event.result,
-                },
-              ],
-            },
-          ];
-        }
-        return [];
-      }),
-    );
-  }
+const defaultModel: ModelRef = { provider: "default", model: "default" };
+const defaultCounter: TokenCounter = { count: () => 0 };
 
-  /** {@inheritDoc ContextPort.snapshot} */
-  snapshot(): Promise<JsonValue> {
-    return Promise.resolve([]);
-  }
-
-  /** {@inheritDoc ContextPort.restore} */
-  restore(_snapshot: JsonValue | undefined, _eventsAfterSnapshot: readonly Event[]): Promise<void> {
-    return Promise.resolve();
+/** Basic strategy-backed context port retained for existing core integrations. */
+export class NaiveContext extends StrategyContextPort {
+  constructor() {
+    super(new NaiveStrategy(), {
+      budget: { maxTokens: Number.MAX_SAFE_INTEGER, reserveOutputTokens: 0 },
+      model: defaultModel,
+      counter: defaultCounter,
+    });
   }
 }

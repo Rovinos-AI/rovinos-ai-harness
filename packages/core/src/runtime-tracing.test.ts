@@ -178,6 +178,43 @@ describe("runtime tracing fallback", () => {
     await runtime.close();
   });
 
+  it("stops reading legacy history after finding the first model-request goal", async () => {
+    const store = new InMemoryEventStore();
+    const runtime = await createRuntime(config, {
+      store,
+      model: new FakeModelPort([completion()]),
+    });
+    const completed = await runtime.run("legacy goal");
+    const runId = completed.events[0]?.runId;
+    if (runId === undefined) {
+      throw new Error("Expected the completed run to include its run id.");
+    }
+
+    const read = store.read.bind(store);
+    let intercepted = false;
+    let readPastRequest = false;
+    vi.spyOn(store, "read").mockImplementation((requestedRunId, range) =>
+      (async function* () {
+        for await (const event of read(requestedRunId, range)) {
+          if (!intercepted && range === undefined && event.type === "run_input") {
+            continue;
+          }
+          if (!intercepted && range === undefined && event.type === "model_request") {
+            intercepted = true;
+            yield event;
+            readPastRequest = true;
+            throw new Error("Legacy goal scan continued after its first model request.");
+          }
+          yield event;
+        }
+      })(),
+    );
+
+    await expect(runtime.resume(runId)).rejects.toMatchObject({ code: "run_already_terminal" });
+    expect(readPastRequest).toBe(false);
+    await runtime.close();
+  });
+
   it("aborts an in-flight tool when another process records cancellation", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(1_000);
