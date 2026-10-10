@@ -288,16 +288,33 @@ describe("OffloadingToolPort", () => {
     expect(pages.map(({ data }) => data).join("")).toBe(serialized);
   });
 
-  it("can read an existing handle after constructing a new decorator", async () => {
+  it("pages persisted files with bounded reads after constructing a new decorator", async () => {
     const workspace = new InMemoryWorkspace();
     const handle = "wf_00000000000000000000000000";
-    await workspace.write(`.harness/offload/${handle}.json`, new TextEncoder().encode("saved"));
+    const serialized = JSON.stringify("saved".repeat(10_000));
+    await workspace.write(`.harness/offload/${handle}.json`, new TextEncoder().encode(serialized));
+    const read = vi.spyOn(workspace, "read");
     const port = new OffloadingToolPort(fakePort(null).inner, workspace);
+    const first = await port.execute(call("read_offloaded", { handle }), context);
+    const firstPage = ReadOffloadedResultSchema.parse(first.result);
 
-    await expect(port.execute(call("read_offloaded", { handle }), context)).resolves.toMatchObject({
-      outcome: "ok",
-      result: { data: "saved", totalBytes: 5 },
-    });
+    expect(first.outcome).toBe("ok");
+    expect(firstPage.data).toBe(serialized.slice(0, 16 * 1024));
+    expect(firstPage.totalBytes).toBe(new TextEncoder().encode(serialized).byteLength);
+    expect(read.mock.calls.length).toBeGreaterThan(2);
+    expect(
+      read.mock.calls.every(([, range]) => range !== undefined && range.length <= 16 * 1024),
+    ).toBe(true);
+
+    const readsAfterFirstPage = read.mock.calls.length;
+    const second = await port.execute(
+      call("read_offloaded", { handle, offset: 16 * 1024 }),
+      context,
+    );
+    expect(ReadOffloadedResultSchema.parse(second.result).data).toBe(
+      serialized.slice(16 * 1024, 32 * 1024),
+    );
+    expect(read.mock.calls).toHaveLength(readsAfterFirstPage + 1);
   });
 
   it("does not offload the paging tool's own response", async () => {

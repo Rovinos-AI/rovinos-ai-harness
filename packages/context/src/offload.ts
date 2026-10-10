@@ -89,6 +89,7 @@ export interface WorkspacePort {
    * @param path - Workspace-relative path below `.harness/offload/`.
    * @param range - Optional byte offset and length.
    * @returns A copy of the requested bytes.
+   * @throws WorkspaceFileNotFoundError when the file does not exist; ranges beyond EOF return empty bytes.
    */
   read(path: string, range?: WorkspaceReadRange): Promise<Uint8Array>;
 }
@@ -288,31 +289,56 @@ function incompleteUtf8TailStart(bytes: Uint8Array): number {
 interface LoadedOffloadPage {
   readonly page: Uint8Array;
   readonly totalBytes: number;
-  readonly completeFile: Uint8Array | undefined;
 }
 
 interface LoadOffloadPageOptions {
   readonly workspace: WorkspacePort;
   readonly handle: OffloadedHandle;
-  readonly knownSize: number | undefined;
+  readonly knownSizes: Map<OffloadedHandle, number>;
   readonly offset: number;
   readonly length: number;
 }
 
+async function hasWorkspaceByte(
+  workspace: WorkspacePort,
+  path: string,
+  offset: number,
+): Promise<boolean> {
+  return (await workspace.read(path, { offset, length: 1 })).byteLength > 0;
+}
+
+async function findWorkspaceFileSize(workspace: WorkspacePort, path: string): Promise<number> {
+  let lowerBound = 0;
+  let upperBound = 1;
+  while (await hasWorkspaceByte(workspace, path, upperBound)) {
+    if (upperBound === Number.MAX_SAFE_INTEGER) {
+      throw new RangeError("Workspace file exceeds the supported size.");
+    }
+    lowerBound = upperBound + 1;
+    upperBound = Math.min(upperBound * 2, Number.MAX_SAFE_INTEGER);
+  }
+
+  while (lowerBound < upperBound) {
+    const midpoint = Math.floor((lowerBound + upperBound) / 2);
+    if (await hasWorkspaceByte(workspace, path, midpoint)) {
+      lowerBound = midpoint + 1;
+    } else {
+      upperBound = midpoint;
+    }
+  }
+  return lowerBound;
+}
+
 async function loadOffloadPage(options: LoadOffloadPageOptions): Promise<LoadedOffloadPage> {
-  const { workspace, handle, knownSize, offset, length } = options;
-  if (knownSize === undefined) {
-    const completeFile = await workspace.read(offloadPath(handle));
-    return {
-      page: completeFile.slice(offset, offset + length),
-      totalBytes: completeFile.byteLength,
-      completeFile,
-    };
+  const { workspace, handle, knownSizes, offset, length } = options;
+  let totalBytes = knownSizes.get(handle);
+  if (totalBytes === undefined) {
+    totalBytes = await findWorkspaceFileSize(workspace, offloadPath(handle));
+    knownSizes.set(handle, totalBytes);
   }
   return {
     page: await workspace.read(offloadPath(handle), { offset, length }),
-    totalBytes: knownSize,
-    completeFile: undefined,
+    totalBytes,
   };
 }
 
@@ -321,12 +347,11 @@ interface CompleteUtf8PageOptions {
   readonly handle: OffloadedHandle;
   readonly offset: number;
   readonly length: number;
-  readonly completeFile: Uint8Array | undefined;
   readonly page: Uint8Array;
 }
 
 async function completeUtf8Page(options: CompleteUtf8PageOptions): Promise<Uint8Array> {
-  const { workspace, handle, completeFile, offset, length, page } = options;
+  const { workspace, handle, offset, length, page } = options;
   const boundedPage = page.byteLength > MAX_READ_BYTES ? page.slice(0, MAX_READ_BYTES) : page;
   const incompleteTailStart = incompleteUtf8TailStart(boundedPage);
   if (incompleteTailStart === boundedPage.byteLength) {
@@ -344,16 +369,10 @@ async function completeUtf8Page(options: CompleteUtf8PageOptions): Promise<Uint8
     return boundedPage.slice(0, incompleteTailStart);
   }
 
-  const remaining =
-    completeFile === undefined
-      ? await workspace.read(offloadPath(handle), {
-          offset: offset + boundedPage.byteLength,
-          length: remainingLength,
-        })
-      : completeFile.slice(
-          offset + boundedPage.byteLength,
-          offset + boundedPage.byteLength + remainingLength,
-        );
+  const remaining = await workspace.read(offloadPath(handle), {
+    offset: offset + boundedPage.byteLength,
+    length: remainingLength,
+  });
   if (remaining.byteLength !== remainingLength) {
     return boundedPage.slice(0, incompleteTailStart);
   }
@@ -366,7 +385,7 @@ async function completeUtf8Page(options: CompleteUtf8PageOptions): Promise<Uint8
 
 async function readOffloaded(
   workspace: WorkspacePort,
-  knownSizes: ReadonlyMap<OffloadedHandle, number>,
+  knownSizes: Map<OffloadedHandle, number>,
   call: OffloadToolCall,
 ): Promise<OffloadToolExecutionResult> {
   const input = ReadOffloadedInputSchema.safeParse(call.args);
@@ -382,7 +401,7 @@ async function readOffloaded(
     loaded = await loadOffloadPage({
       workspace,
       handle,
-      knownSize: knownSizes.get(handle),
+      knownSizes,
       offset,
       length,
     });
@@ -401,7 +420,6 @@ async function readOffloaded(
     handle,
     offset,
     length,
-    completeFile: loaded.completeFile,
     page: loaded.page,
   });
   const nextOffset = offset + page.byteLength;
