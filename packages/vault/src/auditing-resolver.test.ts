@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { AuditingVaultResolver } from "./auditing-resolver.js";
+import { AuditingVaultResolver, vaultAuditToPiiAction } from "./auditing-resolver.js";
 import { InMemoryVault } from "./memory.js";
-import type { VaultResolver } from "./types.js";
+import type { VaultAudit, VaultResolver } from "./types.js";
 
 const runId = "00000000000000000000000001";
 const context = { boundary: "tool_input" as const, toolId: "mail.send" };
@@ -27,6 +27,24 @@ describe("AuditingVaultResolver", () => {
     const payload = JSON.stringify(onAudit.mock.calls[0]);
     expect(payload).not.toContain(token);
     expect(payload).not.toContain("alice@example.test");
+  });
+
+  it("maps a vault audit to recorder event fields", () => {
+    const audit: VaultAudit = {
+      runId,
+      boundary: "tool_input",
+      action: "detokenized",
+      toolId: "mail.send",
+      entities: [{ type: "email", count: 1 }],
+    };
+
+    expect(vaultAuditToPiiAction(audit)).toEqual({
+      type: "pii_action",
+      boundary: "tool_input",
+      action: "detokenized",
+      toolId: "mail.send",
+      entities: [{ type: "email", count: 1 }],
+    });
   });
 
   it("aggregates entity counts in one audit per batch and distinguishes UI reveals", async () => {
@@ -113,9 +131,52 @@ describe("AuditingVaultResolver", () => {
     await expect(resolver.resolveMany(runId, [token, "<EMAIL_2>"], context)).rejects.toThrow(
       "resolver unavailable",
     );
-    expect(onAudit).toHaveBeenCalledTimes(1);
+    expect(onAudit).toHaveBeenCalledTimes(2);
     expect(onAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "detokenized", entities: [{ type: "email", count: 1 }] }),
     );
+    expect(onAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "blocked", entities: [{ type: "email", count: 1 }] }),
+    );
+    expect(JSON.stringify(onAudit.mock.calls)).not.toContain("resolver unavailable");
+  });
+
+  it("keeps canary values and token strings out of audits across varied batches and boundaries", async () => {
+    const entityTypes = ["email", "phone", "a-b", "person_name"] as const;
+    const batchSizes = [1, 2, 4] as const;
+
+    for (const boundary of ["tool_input", "ui"] as const) {
+      for (const batchSize of batchSizes) {
+        const inner = new InMemoryVault();
+        const stored = await Promise.all(
+          entityTypes.map(async (entityType, index) => {
+            const canary = `PII_CANARY_${boundary}_${String(batchSize)}_${entityType}_${String(index)}`;
+            return {
+              canary,
+              token: await inner.put(runId, entityType, canary),
+            };
+          }),
+        );
+        const onAudit = vi.fn();
+        const resolver = new AuditingVaultResolver(inner, onAudit);
+        const resolveContext =
+          boundary === "tool_input" ? { boundary, toolId: "test.tool" } : { boundary };
+
+        await resolver.resolveMany(
+          runId,
+          stored.slice(0, batchSize).map(({ token }) => token),
+          resolveContext,
+        );
+
+        const auditPayloads = onAudit.mock.calls.map(([audit]) => JSON.stringify(audit));
+        expect(auditPayloads).toHaveLength(1);
+        for (const auditPayload of auditPayloads) {
+          for (const { canary, token } of stored) {
+            expect(auditPayload).not.toContain(canary);
+            expect(auditPayload).not.toContain(token);
+          }
+        }
+      }
+    }
   });
 });

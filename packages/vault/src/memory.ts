@@ -71,7 +71,7 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
   resolve(
     runId: Id,
     token: TokenValue,
-    _context?: VaultResolveContext,
+    _context: VaultResolveContext,
   ): Promise<string | undefined> {
     return Promise.resolve(this.entries.get(runId)?.get(token)?.rawValue);
   }

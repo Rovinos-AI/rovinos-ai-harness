@@ -21,6 +21,10 @@ export const VaultAuditSchema = z
     boundary: z.enum(["tool_input", "ui"]),
     action: z.enum(["detokenized", "blocked"]),
     toolId: Code.optional(),
+    /**
+     * Entity types inferred from token prefixes. Token prefixes normalize `-` and
+     * `.` to `_`, so distinct entity codes can share an audit type.
+     */
     entities: z
       .array(
         z

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Id } from "@harness/schemas";
+import type { Code, Event, Id } from "@harness/schemas";
 import type { Token } from "./token.js";
 import { tokenType } from "./token.js";
 import {
@@ -73,6 +73,10 @@ export class AuditingVaultResolver implements VaultResolver {
         counts.set(action, actionCounts);
       } catch (error) {
         values.push(undefined);
+        const type = tokenType(token).toLowerCase();
+        const actionCounts = counts.get("blocked") ?? new Map<Code, number>();
+        actionCounts.set(type, (actionCounts.get(type) ?? 0) + 1);
+        counts.set("blocked", actionCounts);
         if (!resolutionFailed) {
           resolutionFailure = error;
           resolutionFailed = true;
@@ -97,4 +101,26 @@ export class AuditingVaultResolver implements VaultResolver {
 
     return values;
   }
+}
+
+/** Pii-action event fields ready to pass to the run recorder. */
+export type VaultAuditPiiAction = Pick<
+  Extract<Event, { type: "pii_action" }>,
+  "type" | "action" | "boundary" | "toolId" | "entities"
+>;
+
+/**
+ * Convert a validated vault audit into the payload fields recorded as a `pii_action`.
+ *
+ * @param audit - Metadata-only audit emitted by {@link AuditingVaultResolver}.
+ * @returns Event fields without recorder-assigned envelope metadata.
+ */
+export function vaultAuditToPiiAction(audit: VaultAudit): VaultAuditPiiAction {
+  return {
+    type: "pii_action",
+    action: audit.action,
+    boundary: audit.boundary,
+    ...(audit.toolId === undefined ? {} : { toolId: audit.toolId }),
+    entities: audit.entities,
+  };
 }

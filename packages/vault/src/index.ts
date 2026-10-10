@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-export { AuditingVaultResolver, type VaultAuditHandler } from "./auditing-resolver.js";
+export {
+  AuditingVaultResolver,
+  vaultAuditToPiiAction,
+  type VaultAuditHandler,
+  type VaultAuditPiiAction,
+} from "./auditing-resolver.js";
 export { InMemoryVault } from "./memory.js";
 export { normalize } from "./normalize.js";
 export { findTokens, isToken, Token, tokenType, tokenTypeName } from "./token.js";
