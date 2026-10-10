@@ -71,7 +71,8 @@ const piiAction = z
     ...commonFields,
     kind: z.literal("pii_action"),
     boundary: attr.enum(["model_input", "tool_input", "tool_output", "storage", "ui"]),
-    action: attr.enum(["tokenized", "redacted", "blocked", "allowed"]),
+    action: attr.enum(["tokenized", "redacted", "blocked", "allowed", "detokenized"]),
+    toolId: attr.optional(attr.code()),
     entities: z.array(z.object({ type: attr.code(), count: attr.nonnegativeInt() }).strict()),
   })
   .strict();
@@ -245,6 +246,7 @@ function projectPiiAction(
     kind: "pii_action",
     boundary: event.boundary,
     action: event.action,
+    ...(event.toolId === undefined ? {} : { toolId: event.toolId }),
     entities: event.entities.map(({ type, count }) => ({ type, count })),
   });
 }
