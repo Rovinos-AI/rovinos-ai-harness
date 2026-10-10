@@ -33,10 +33,11 @@ export class SlidingWindowStrategy implements ContextStrategy {
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
     const groups = eventsToTranscript(input.events);
     const pinnedGroups = groups.filter((group) => group.pinned);
-    const planMessage = renderPlanMessage(derivePlan(input.events));
+    const plan = derivePlan(input.events);
+    const planMessages = plan === undefined ? [] : [renderPlanMessage(plan)];
     const availableTokens = input.budget.maxTokens - input.budget.reserveOutputTokens;
-    const pinnedMessages = [...pinnedGroups.flatMap((group) => group.messages), planMessage];
-    const fullMessages = [...groups.flatMap((group) => group.messages), planMessage];
+    const pinnedMessages = [...pinnedGroups.flatMap((group) => group.messages), ...planMessages];
+    const fullMessages = [...groups.flatMap((group) => group.messages), ...planMessages];
     const fullEstimate = input.counter.count(fullMessages, input.model);
 
     if (fullEstimate <= availableTokens) {
@@ -71,20 +72,23 @@ export class SlidingWindowStrategy implements ContextStrategy {
     }
 
     let droppedGroups = nonPinnedGroups.length - retainedGroups.size;
-    let messages = renderMessages(groups, retainedGroups, droppedGroups, planMessage);
+    let messages = renderMessages(groups, retainedGroups, droppedGroups, planMessages);
     let estimatedTokens = input.counter.count(messages, input.model);
 
     while (estimatedTokens > availableTokens) {
       const oldestRetainedGroup = nonPinnedGroups.find((group) => retainedGroups.has(group));
       if (oldestRetainedGroup === undefined) {
         if (droppedGroups > 0) {
+          if (plan !== undefined) {
+            throw new ContextPinnedExceedsBudgetError();
+          }
           throw new ContextMarkerExceedsBudgetError();
         }
         throw new ContextPinnedExceedsBudgetError();
       }
       retainedGroups.delete(oldestRetainedGroup);
       droppedGroups += 1;
-      messages = renderMessages(groups, retainedGroups, droppedGroups, planMessage);
+      messages = renderMessages(groups, retainedGroups, droppedGroups, planMessages);
       estimatedTokens = input.counter.count(messages, input.model);
     }
 
@@ -131,7 +135,7 @@ function renderMessages(
   groups: ReturnType<typeof eventsToTranscript>,
   retainedGroups: ReadonlySet<(typeof groups)[number]>,
   droppedGroups: number,
-  planMessage: Message,
+  planMessages: readonly Message[],
 ): Message[] {
   let markerInserted = false;
   const messages: Message[] = [];
@@ -147,7 +151,7 @@ function renderMessages(
   if (!markerInserted && droppedGroups > 0) {
     messages.push(...createMarker(droppedGroups));
   }
-  messages.push(planMessage);
+  messages.push(...planMessages);
   return messages;
 }
 

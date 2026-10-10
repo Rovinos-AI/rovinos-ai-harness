@@ -17,7 +17,15 @@ export {
   type TranscriptGroup,
 } from "./types.js";
 export { eventsToTranscript } from "./transcript.js";
-export { PlanSchema, UpdatePlanInputSchema, derivePlan, type Plan } from "./plan.js";
+export {
+  PlanSchema,
+  UpdatePlanInputSchema,
+  createPlanReducerState,
+  derivePlan,
+  planReducer,
+  type Plan,
+  type PlanReducerState,
+} from "./plan.js";
 export {
   PlanToolPort,
   READ_PLAN_TOOL_SPEC,

@@ -9,7 +9,14 @@ import {
   type JsonValue as JsonValueType,
   type ToolSpec,
 } from "@harness/schemas";
-import { derivePlan, PlanSchema, UpdatePlanInputSchema, type Plan } from "./plan.js";
+import {
+  createPlanReducerState,
+  planReducer,
+  PlanSchema,
+  UpdatePlanInputSchema,
+  type Plan,
+  type PlanReducerState,
+} from "./plan.js";
 
 const ReadPlanInputSchema = z.object({}).strict();
 const TOOL_TIMEOUT_MS = 1000;
@@ -79,7 +86,7 @@ function toolError(errorCode: Code): PlanToolExecutionResult {
  * Adds in-process plan tools to an executor and restores their state from prior events.
  */
 export class PlanToolPort implements PlanToolPortLike {
-  private plan: Plan;
+  private readonly plans = new Map<Id, Plan>();
 
   /**
    * Wraps an executor with built-in plan tools.
@@ -91,7 +98,16 @@ export class PlanToolPort implements PlanToolPortLike {
     private readonly inner: PlanToolPortLike,
     events: readonly Event[] = [],
   ) {
-    this.plan = derivePlan(events) ?? emptyPlan();
+    const planStates = new Map<Id, PlanReducerState>();
+    for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
+      const state = planReducer(planStates.get(event.runId) ?? createPlanReducerState(), event);
+      planStates.set(event.runId, state);
+    }
+    for (const [runId, state] of planStates) {
+      if (state.plan !== undefined) {
+        this.plans.set(runId, state.plan);
+      }
+    }
   }
 
   /** {@inheritDoc PlanToolPortLike.describe} */
@@ -118,14 +134,17 @@ export class PlanToolPort implements PlanToolPortLike {
       if (!input.success) {
         return toolError("invalid_plan");
       }
-      this.plan = input.data.plan;
-      return { outcome: "ok", result: JsonValue.parse(this.plan) };
+      this.plans.set(context.runId, input.data.plan);
+      return { outcome: "ok", result: JsonValue.parse(input.data.plan) };
     }
     if (call.toolId === "read_plan") {
       if (!ReadPlanInputSchema.safeParse(call.args).success) {
         return toolError("invalid_arguments");
       }
-      return { outcome: "ok", result: JsonValue.parse(this.plan) };
+      return {
+        outcome: "ok",
+        result: JsonValue.parse(this.plans.get(context.runId) ?? emptyPlan()),
+      };
     }
     return this.inner.execute(call, context);
   }

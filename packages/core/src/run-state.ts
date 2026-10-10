@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type JsonValue, type RunStatus } from "@harness/schemas";
-import { derivePlan } from "@harness/context";
+import { createPlanReducerState, planReducer, type PlanReducerState } from "@harness/context";
 import { RUN_TRIGGERS, transition } from "./state-machine.js";
 import type { ModelToolCall } from "./ports.js";
 
@@ -49,6 +49,7 @@ export interface RunState {
 interface MutableRunState {
   status: RunStatus;
   nextSeq: number;
+  planState: PlanReducerState;
   steps: number;
   usage: {
     inputTokens: number;
@@ -234,6 +235,7 @@ function applyEvent(state: MutableRunState, event: Event, runId: Event["runId"])
   }
   const withEnvelope = {
     ...state,
+    planState: planReducer(state.planState, event),
     nextSeq: state.nextSeq + 1,
     segmentId: event.segmentId,
     lastTs: event.ts,
@@ -280,10 +282,10 @@ export function foldRunState(events: Iterable<Event>): RunState {
   }
 
   const runId = first.value.runId;
-  const eventHistory: Event[] = [first.value];
   let state: MutableRunState = {
     status: "pending",
     nextSeq: 1,
+    planState: createPlanReducerState(),
     steps: 0,
     usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
     pendingToolCalls: new Map(),
@@ -301,10 +303,9 @@ export function foldRunState(events: Iterable<Event>): RunState {
     if (next.done === true) {
       break;
     }
-    eventHistory.push(next.value);
     state = applyEvent(state, next.value, runId);
   }
 
-  const plan = derivePlan(eventHistory);
-  return plan === undefined ? state : { ...state, plan };
+  const { planState, ...runState } = state;
+  return planState.plan === undefined ? runState : { ...runState, plan: planState.plan };
 }

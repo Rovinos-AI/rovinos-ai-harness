@@ -128,13 +128,8 @@ describe("SlidingWindowStrategy", () => {
       4,
     );
 
-    expect(result.messages.map(messageText)).toEqual([
-      "goal",
-      "first",
-      "last",
-      'Current plan: {"items":[],"notes":""}',
-    ]);
-    expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 0 });
+    expect(result.messages.map(messageText)).toEqual(["goal", "first", "last"]);
+    expect(result.stats).toMatchObject({ estimatedTokens: 3, droppedGroups: 0 });
     expect(result.messages.some((message) => messageText(message).includes("omitted"))).toBe(false);
 
     const heuristicResult = await strategy.build({
@@ -144,12 +139,7 @@ describe("SlidingWindowStrategy", () => {
       counter: new HeuristicTokenCounter(),
     });
 
-    expect(heuristicResult.messages.map(messageText)).toEqual([
-      "goal",
-      "a",
-      "b",
-      'Current plan: {"items":[],"notes":""}',
-    ]);
+    expect(heuristicResult.messages.map(messageText)).toEqual(["goal", "a", "b"]);
     expect(heuristicResult.stats.droppedGroups).toBe(0);
   });
 
@@ -161,7 +151,7 @@ describe("SlidingWindowStrategy", () => {
         modelResponse(2, "middle"),
         modelResponse(3, "newest"),
       ],
-      5,
+      4,
       1,
     );
 
@@ -169,10 +159,9 @@ describe("SlidingWindowStrategy", () => {
       "goal",
       "[2 earlier steps omitted]",
       "newest",
-      'Current plan: {"items":[],"notes":""}',
     ]);
-    expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 2 });
-    expect(result.stats.estimatedTokens).toBeLessThanOrEqual(4);
+    expect(result.stats).toMatchObject({ estimatedTokens: 3, droppedGroups: 2 });
+    expect(result.stats.estimatedTokens).toBeLessThanOrEqual(3);
   });
 
   it("always retains run input and pinned summary groups", async () => {
@@ -185,7 +174,7 @@ describe("SlidingWindowStrategy", () => {
         modelResponse(4, "middle"),
         modelResponse(5, "newest"),
       ],
-      5,
+      4,
     );
 
     expect(result.messages.map(messageText)).toEqual([
@@ -193,7 +182,6 @@ describe("SlidingWindowStrategy", () => {
       "Summary of earlier work: summary",
       "[2 earlier steps omitted]",
       "newest",
-      'Current plan: {"items":[],"notes":""}',
     ]);
     expect(result.pinnedSeqs).toEqual([0, 1]);
     expect(result.stats.compactedRanges).toBe(1);
@@ -210,14 +198,13 @@ describe("SlidingWindowStrategy", () => {
         toolResult(2, { value: "found" }),
         modelResponse(3, "newest"),
       ],
-      4,
+      3,
     );
 
     expect(result.messages.map(messageText)).toEqual([
       "goal",
       "[1 earlier steps omitted]",
       "newest",
-      'Current plan: {"items":[],"notes":""}',
     ]);
     expect(result.messages.some((message) => message.role === "tool")).toBe(false);
     expect(result.stats.droppedGroups).toBe(1);
@@ -237,7 +224,7 @@ describe("SlidingWindowStrategy", () => {
 
     expect(result.stats.offloadedResults).toBe(1);
     expect(result.stats.droppedGroups).toBe(0);
-    expect(result.messages.at(-1)).toMatchObject({ role: "user" });
+    expect(result.messages.at(-1)).toMatchObject({ role: "tool" });
   });
 
   it("throws when pinned groups alone exceed the available budget", async () => {
@@ -247,7 +234,7 @@ describe("SlidingWindowStrategy", () => {
   });
 
   it("throws rather than exceeding budget when the required marker cannot fit", async () => {
-    await expect(build([runInput(0), modelResponse(1, "recent")], 2)).rejects.toMatchObject({
+    await expect(build([runInput(0), modelResponse(1, "recent")], 1)).rejects.toMatchObject({
       code: "context_marker_exceeds_budget",
     });
   });
@@ -284,18 +271,39 @@ describe("SlidingWindowStrategy", () => {
     expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 2 });
   });
 
-  it("does not exceed budget when the pinned plan leaves no room for the omission marker", async () => {
+  it("rejects when a large pinned plan and omission marker exceed the budget", async () => {
+    const largePlan: Plan = { items: [], notes: "x".repeat(1000) };
+    const weightedCounter: TokenCounter = {
+      count: (messages) =>
+        messages.reduce(
+          (total, message) =>
+            total +
+            Math.max(
+              1,
+              Math.ceil(
+                message.parts
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("").length / 100,
+              ),
+            ),
+          0,
+        ),
+    };
+
     await expect(
-      build(
-        [
+      strategy.build({
+        events: [
           runInput(0),
           modelResponse(1, "old"),
           modelResponse(2, "new"),
-          ...planUpdate(3, { items: [], notes: "" }),
+          ...planUpdate(3, largePlan),
         ],
-        2,
-      ),
-    ).rejects.toMatchObject({ code: "context_marker_exceeds_budget" });
+        budget: { maxTokens: 12, reserveOutputTokens: 0 },
+        model,
+        counter: weightedCounter,
+      }),
+    ).rejects.toMatchObject({ code: "context_pinned_exceeds_budget" });
   });
 
   it("keeps its strategy identity and version stable", () => {
@@ -326,14 +334,14 @@ describe("SlidingWindowStrategy", () => {
       counter: countingCounter,
     });
 
-    expect(result.stats.droppedGroups).toBe(groupCount - 6);
+    expect(result.stats.droppedGroups).toBe(groupCount - 7);
     expect(countCalls).toBeLessThan(3 * groupCount);
   });
 
   it("drops another group when the final full count includes non-additive overhead", async () => {
     const nonAdditiveCounter: TokenCounter = {
       count: (messages) =>
-        messages.length === 5 &&
+        messages.length === 4 &&
         !messages.some((message) => messageText(message).includes("omitted"))
           ? 6
           : messages.length,
@@ -356,8 +364,7 @@ describe("SlidingWindowStrategy", () => {
       "[1 earlier steps omitted]",
       "middle",
       "new",
-      'Current plan: {"items":[],"notes":""}',
     ]);
-    expect(result.stats).toMatchObject({ estimatedTokens: 5, droppedGroups: 1 });
+    expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 1 });
   });
 });

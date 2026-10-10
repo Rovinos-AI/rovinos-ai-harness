@@ -15,9 +15,10 @@ export class NaiveStrategy implements ContextStrategy {
   /** {@inheritDoc ContextStrategy.build} */
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
     const groups = eventsToTranscript(input.events);
+    const plan = derivePlan(input.events);
     const messages = [
       ...groups.flatMap((group) => group.messages),
-      renderPlanMessage(derivePlan(input.events)),
+      ...(plan === undefined ? [] : [renderPlanMessage(plan)]),
     ];
     const offloadedResults = messages.reduce(
       (count, message) =>

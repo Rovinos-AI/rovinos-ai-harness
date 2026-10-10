@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
 import { Id, JsonValue, type Event } from "@harness/schemas";
-import { derivePlan, PlanSchema, renderPlanMessage } from "./plan.js";
+import {
+  createPlanReducerState,
+  derivePlan,
+  planReducer,
+  PlanSchema,
+  renderPlanMessage,
+} from "./plan.js";
 
 const runId = Id.parse("00000000000000000000000000");
 const segmentId = Id.parse("11111111111111111111111111");
@@ -81,6 +87,17 @@ describe("PlanSchema", () => {
 });
 
 describe("derivePlan", () => {
+  it("applies plan events incrementally without mutating prior reducer states", () => {
+    const initial = createPlanReducerState();
+    const pending = planReducer(initial, updateIntent(1, firstCallId, { plan }));
+    const completed = planReducer(pending, toolResult(2, firstCallId));
+
+    expect(initial.pendingUpdates.size).toBe(0);
+    expect(pending.pendingUpdates.size).toBe(1);
+    expect(completed.pendingUpdates.size).toBe(0);
+    expect(completed.plan).toEqual(plan);
+  });
+
   it("derives the latest successful update even when events arrive out of order", () => {
     const events = [
       toolResult(4, secondCallId),
@@ -112,7 +129,7 @@ describe("derivePlan", () => {
     expect(derivePlan([toolResult(1, firstCallId)])).toBeUndefined();
   });
 
-  it("renders a deterministic user message, including an empty plan when absent", () => {
+  it("renders a deterministic user message for a plan", () => {
     const message = renderPlanMessage(plan);
 
     expect(message).toEqual({
@@ -125,9 +142,5 @@ describe("derivePlan", () => {
       ],
     });
     expect(renderPlanMessage(plan)).toEqual(message);
-    expect(renderPlanMessage(undefined).parts[0]).toEqual({
-      type: "text",
-      text: 'Current plan: {"items":[],"notes":""}',
-    });
   });
 });

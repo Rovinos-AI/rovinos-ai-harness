@@ -9,15 +9,17 @@ import {
 } from "./builtin-tools.js";
 
 const runId = Id.parse("00000000000000000000000000");
+const otherRunId = Id.parse("33333333333333333333333333");
+const thirdRunId = Id.parse("44444444444444444444444444");
 const callId = Id.parse("11111111111111111111111111");
 const segmentId = Id.parse("22222222222222222222222222");
 const context = { runId, signal: new AbortController().signal };
 const plan = { items: [{ id: "task.one", text: "Do work", status: "todo" }], notes: "" };
 
-function eventsWithPlan(): Event[] {
+function eventsWithPlan(restoredPlan = plan, eventRunId = runId): Event[] {
   return [
     {
-      runId,
+      runId: eventRunId,
       seq: 0,
       ts: 0,
       v: 1,
@@ -30,10 +32,10 @@ function eventsWithPlan(): Event[] {
       idempotent: true,
       policyDecision: "allow",
       argsHash: "c".repeat(64),
-      args: { plan },
+      args: { plan: restoredPlan },
     },
     {
-      runId,
+      runId: eventRunId,
       seq: 1,
       ts: 1,
       v: 1,
@@ -45,7 +47,7 @@ function eventsWithPlan(): Event[] {
       toolId: "update_plan",
       outcome: "ok",
       latencyMs: 0,
-      result: plan,
+      result: restoredPlan,
     },
   ];
 }
@@ -108,6 +110,43 @@ describe("PlanToolPort", () => {
       port.execute({ callId, toolId: "sample_tool", args: {} }, context),
     ).resolves.toEqual({ outcome: "ok", result: "delegated" });
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("isolates restored and in-process plans by run ID", async () => {
+    const otherPlan = { items: [], notes: "other run" };
+    const updatedPlan = { items: [], notes: "updated run" };
+    const { inner } = fakePort();
+    const port = new PlanToolPort(inner, [
+      ...eventsWithPlan(),
+      ...eventsWithPlan(otherPlan, otherRunId),
+    ]);
+    const otherContext = { ...context, runId: otherRunId };
+    const thirdContext = { ...context, runId: thirdRunId };
+
+    await expect(port.execute({ callId, toolId: "read_plan", args: {} }, context)).resolves.toEqual(
+      {
+        outcome: "ok",
+        result: plan,
+      },
+    );
+    await expect(
+      port.execute({ callId, toolId: "read_plan", args: {} }, otherContext),
+    ).resolves.toEqual({ outcome: "ok", result: otherPlan });
+    await expect(
+      port.execute({ callId, toolId: "update_plan", args: { plan: updatedPlan } }, context),
+    ).resolves.toMatchObject({ outcome: "ok" });
+    await expect(port.execute({ callId, toolId: "read_plan", args: {} }, context)).resolves.toEqual(
+      {
+        outcome: "ok",
+        result: updatedPlan,
+      },
+    );
+    await expect(
+      port.execute({ callId, toolId: "read_plan", args: {} }, otherContext),
+    ).resolves.toEqual({ outcome: "ok", result: otherPlan });
+    await expect(
+      port.execute({ callId, toolId: "read_plan", args: {} }, thirdContext),
+    ).resolves.toEqual({ outcome: "ok", result: { items: [], notes: "" } });
   });
 
   it("provides built-in specs when the inner port does not expose any", () => {

@@ -119,14 +119,10 @@ describe("NaiveContext", () => {
         role: "assistant",
         parts: [{ type: "text", text: "second answer" }],
       },
-      {
-        role: "user",
-        parts: [{ type: "text", text: 'Current plan: {"items":[],"notes":""}' }],
-      },
     ]);
   });
 
-  it("still provides a pinned plan when the history has no model responses or tool results", async () => {
+  it("does not add a plan when the history has no successful plan update", async () => {
     const event: Event = {
       ...envelope(0),
       type: "run_created",
@@ -134,11 +130,6 @@ describe("NaiveContext", () => {
       policyVersion: "test.policy",
     };
 
-    await expect(new NaiveContext().build([event])).resolves.toEqual([
-      {
-        role: "user",
-        parts: [{ type: "text", text: 'Current plan: {"items":[],"notes":""}' }],
-      },
-    ]);
+    await expect(new NaiveContext().build([event])).resolves.toEqual([]);
   });
 });
