@@ -92,6 +92,7 @@ export type {
   ToolExecutionResult,
   ToolPort,
 } from "./ports.js";
+export { StrategyContextPort, type StrategyContextPortOptions } from "./context/context-port.js";
 export { NaiveContext } from "./context/naive-context.js";
 export {
   createRuntime,

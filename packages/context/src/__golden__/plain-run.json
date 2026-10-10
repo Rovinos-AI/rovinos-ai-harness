@@ -1,0 +1,22 @@
+[
+  {
+    "seqs": [0],
+    "messages": [
+      {
+        "role": "user",
+        "parts": [{ "type": "text", "text": "hello" }]
+      }
+    ],
+    "pinned": true
+  },
+  {
+    "seqs": [1],
+    "messages": [
+      {
+        "role": "assistant",
+        "parts": [{ "type": "text", "text": "answer" }]
+      }
+    ],
+    "pinned": false
+  }
+]
