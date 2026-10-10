@@ -194,7 +194,7 @@ describe("model response rehydration", () => {
         {
           id: "call_provider_tool_id",
           type: "function",
-          function: { name: "lookup", arguments: "{\"key\":\"synthetic\"}" },
+          function: { name: "lookup", arguments: '{"key":"synthetic"}' },
         },
       ],
     };
