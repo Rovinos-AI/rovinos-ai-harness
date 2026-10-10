@@ -1037,6 +1037,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@harness/crypto@workspace:^, @harness/crypto@workspace:packages/crypto":
+  version: 0.0.0-use.local
+  resolution: "@harness/crypto@workspace:packages/crypto"
+  dependencies:
+    vitest: "npm:3.2.6"
+  languageName: unknown
+  linkType: soft
+
 "@harness/eslint-plugin-harness@workspace:^, @harness/eslint-plugin-harness@workspace:tools/eslint-plugin-harness":
   version: 0.0.0-use.local
   resolution: "@harness/eslint-plugin-harness@workspace:tools/eslint-plugin-harness"
@@ -1098,6 +1106,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@harness/store@workspace:packages/store"
   dependencies:
+    "@harness/crypto": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@types/better-sqlite3": "npm:9.6.0"
     "@types/pg": "npm:8.23.1"
@@ -1132,7 +1141,10 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@harness/vault@workspace:packages/vault"
   dependencies:
+    "@harness/crypto": "workspace:^"
     "@harness/schemas": "workspace:^"
+    "@types/better-sqlite3": "npm:9.6.0"
+    better-sqlite3: "npm:13.0.3"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   languageName: unknown
