@@ -13,29 +13,23 @@ import type {
 } from "openai/resources/chat/completions";
 import { z } from "zod";
 
-const FunctionCallSchema = z
-  .object({
-    id: z.string(),
-    type: z.literal("function"),
-    function: z.object({ name: z.string(), arguments: z.string() }).passthrough(),
-  })
-  .passthrough();
+const FunctionCallSchema = z.looseObject({
+  id: z.string(),
+  type: z.literal("function"),
+  function: z.looseObject({ name: z.string(), arguments: z.string() }),
+});
 
-const AssistantMessageSchema = z
-  .object({
-    role: z.literal("assistant"),
-    content: z.string().nullable(),
-    tool_calls: z.array(FunctionCallSchema).nullish(),
-    refusal: z.string().nullable().optional(),
-  })
-  .passthrough();
+const AssistantMessageSchema = z.looseObject({
+  role: z.literal("assistant"),
+  content: z.string().nullable(),
+  tool_calls: z.array(FunctionCallSchema).nullish(),
+  refusal: z.string().nullable().optional(),
+});
 
-const OpaqueBlobSchema = z
-  .object({
-    message: AssistantMessageSchema,
-    openaiCallIdByCallId: z.record(z.string(), z.string()),
-  })
-  .passthrough();
+const OpaqueBlobSchema = z.looseObject({
+  message: AssistantMessageSchema,
+  openaiCallIdByCallId: z.record(z.string(), z.string()),
+});
 
 /** Provider quirks that affect the shared Chat Completions request mapper. */
 export interface ChatCompletionsQuirks {
@@ -50,11 +44,13 @@ export interface ChatCompletionLike {
     readonly message: {
       readonly role: "assistant";
       readonly content: string | null;
-      readonly tool_calls?: readonly {
-        readonly id: string;
-        readonly type: string;
-        readonly function?: { readonly name: string; readonly arguments: string };
-      }[] | null;
+      readonly tool_calls?:
+        | readonly {
+            readonly id: string;
+            readonly type: string;
+            readonly function?: { readonly name: string; readonly arguments: string };
+          }[]
+        | null;
     };
   }[];
   readonly usage?: {
@@ -85,10 +81,15 @@ function providerCallIdByCallId(messages: ModelRequest["messages"]): Map<string,
 }
 
 function textContent(parts: ModelRequest["messages"][number]["parts"]): string {
-  return parts
-    .filter((part) => part.type === "text")
-    .map((part) => (part.type === "text" ? part.text : ""))
-    .join("");
+  return parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+}
+
+function assistantContent(parts: ModelRequest["messages"][number]["parts"], hasToolCalls: boolean) {
+  const content = textContent(parts);
+  if (content.length > 0) {
+    return content;
+  }
+  return hasToolCalls ? null : "";
 }
 
 function assistantMessage(
@@ -123,8 +124,81 @@ function assistantMessage(
   );
   return {
     role: "assistant",
-    content: textContent(requestMessage.parts) || (toolCalls.length > 0 ? null : ""),
+    content: assistantContent(requestMessage.parts, toolCalls.length > 0),
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+  };
+}
+
+function mapMessages(messages: ModelRequest["messages"]): ChatCompletionMessageParam[] {
+  const callIds = providerCallIdByCallId(messages);
+  const mapped: ChatCompletionMessageParam[] = [];
+
+  for (const message of messages) {
+    if (message.role === "assistant") {
+      mapped.push(assistantMessage(message, callIds));
+    } else if (message.role === "system" || message.role === "user") {
+      mapped.push({ role: message.role, content: textContent(message.parts) });
+    } else {
+      for (const part of message.parts) {
+        if (part.type === "tool_result") {
+          mapped.push({
+            role: "tool",
+            tool_call_id: callIds.get(part.callId) ?? `call_${part.callId}`,
+            content: JSON.stringify(part.result),
+          });
+        }
+      }
+    }
+  }
+  return mapped;
+}
+
+function mapTools(request: ModelRequest): Pick<ChatCompletionCreateParamsNonStreaming, "tools"> {
+  const tools =
+    request.tools?.map((tool) => ({
+      type: "function" as const,
+      function: {
+        name: tool.toolId,
+        description: tool.description,
+        parameters: z.record(z.string(), JsonValue).parse(tool.inputSchema),
+      },
+    })) ?? [];
+  return tools.length > 0 && request.toolChoice !== "none" ? { tools } : {};
+}
+
+function mapToolChoice(
+  request: ModelRequest,
+): Pick<ChatCompletionCreateParamsNonStreaming, "tool_choice"> {
+  if (request.toolChoice === undefined) {
+    return {};
+  }
+  if (typeof request.toolChoice === "string") {
+    return { tool_choice: request.toolChoice };
+  }
+  return {
+    tool_choice: {
+      type: "function",
+      function: { name: request.toolChoice.forced },
+    },
+  };
+}
+
+function mapOutputFormat(
+  request: ModelRequest,
+  quirks: ChatCompletionsQuirks,
+): Pick<ChatCompletionCreateParamsNonStreaming, "response_format"> {
+  if (request.output === undefined || quirks.structuredOutput !== "native") {
+    return {};
+  }
+  return {
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: request.output.name,
+        schema: z.record(z.string(), JsonValue).parse(request.output.schema),
+        strict: true,
+      },
+    },
   };
 }
 
@@ -139,65 +213,66 @@ export function toChatRequest(
   request: ModelRequest,
   quirks: ChatCompletionsQuirks,
 ): ChatCompletionCreateParamsNonStreaming {
-  const callIds = providerCallIdByCallId(request.messages);
-  const messages: ChatCompletionMessageParam[] = [];
-
-  for (const message of request.messages) {
-    if (message.role === "assistant") {
-      messages.push(assistantMessage(message, callIds));
-    } else if (message.role === "system" || message.role === "user") {
-      messages.push({ role: message.role, content: textContent(message.parts) });
-    } else {
-      for (const part of message.parts) {
-        if (part.type === "tool_result") {
-          messages.push({
-            role: "tool",
-            tool_call_id: callIds.get(part.callId) ?? `call_${part.callId}`,
-            content: JSON.stringify(part.result),
-          });
-        }
-      }
-    }
-  }
-
-  const tools =
-    request.tools?.map((tool) => ({
-      type: "function" as const,
-      function: {
-        name: tool.toolId,
-        description: tool.description,
-        parameters: z.record(z.string(), JsonValue).parse(tool.inputSchema),
-      },
-    })) ?? [];
-
   return {
     model: request.model.model,
-    messages,
-    ...(tools.length > 0 && request.toolChoice !== "none" ? { tools } : {}),
-    ...(request.toolChoice === undefined ? {} : {
-      tool_choice:
-        typeof request.toolChoice === "string"
-          ? request.toolChoice
-          : { type: "function" as const, function: { name: request.toolChoice.forced } },
-    }),
+    messages: mapMessages(request.messages),
+    ...mapTools(request),
+    ...mapToolChoice(request),
     parallel_tool_calls: quirks.parallelToolCalls,
     ...(request.maxOutputTokens === undefined
       ? {}
       : { max_completion_tokens: request.maxOutputTokens }),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-    ...(request.output === undefined || quirks.structuredOutput !== "native"
-      ? {}
-      : {
-          response_format: {
-            type: "json_schema" as const,
-            json_schema: {
-              name: request.output.name,
-              schema: z.record(z.string(), JsonValue).parse(request.output.schema),
-              strict: true,
-            },
-          },
-        }),
+    ...mapOutputFormat(request, quirks),
   };
+}
+
+function mapToolCalls(
+  toolCalls: NonNullable<ChatCompletionLike["choices"][number]["message"]["tool_calls"]>,
+  ids: { readonly next: () => Id },
+): {
+  readonly parts: ModelRequest["messages"][number]["parts"];
+  readonly openaiCallIdByCallId: Record<string, string>;
+  readonly invalidArguments: boolean;
+} {
+  const parts: ModelRequest["messages"][number]["parts"] = [];
+  const openaiCallIdByCallId: Record<string, string> = {};
+  let invalidArguments = false;
+
+  for (const toolCall of toolCalls) {
+    if (toolCall.function === undefined) {
+      continue;
+    }
+    let args;
+    try {
+      args = parseJson(JsonValue, toolCall.function.arguments);
+    } catch {
+      invalidArguments = true;
+      continue;
+    }
+    const callId = ids.next();
+    openaiCallIdByCallId[callId] = toolCall.id;
+    parts.push({ type: "tool_call", callId, toolId: toolCall.function.name, args });
+  }
+  return { parts, openaiCallIdByCallId, invalidArguments };
+}
+
+function mapFinishReason(reason: string | null, invalidArguments: boolean): string {
+  if (invalidArguments) {
+    return "tool_args_invalid";
+  }
+  switch (reason) {
+    case "stop":
+    case "tool_calls":
+    case "length":
+      return reason;
+    case "content_filter":
+      return "provider_content_filtered";
+    case null:
+      return "other";
+    default:
+      return reason;
+  }
 }
 
 /**
@@ -227,27 +302,10 @@ export function fromChatResponse(
     };
   }
 
-  let invalidToolArguments = false;
-  const openaiCallIdByCallId: Record<string, string> = {};
-  const parts: ModelRequest["messages"][number]["parts"] = [];
-  const toolCalls = choice.message.tool_calls ?? [];
-  for (const toolCall of toolCalls) {
-    if (toolCall.function === undefined) {
-      continue;
-    }
-    let args;
-    try {
-      args = parseJson(JsonValue, toolCall.function.arguments);
-    } catch {
-      invalidToolArguments = true;
-      continue;
-    }
-    const callId = ids.next();
-    openaiCallIdByCallId[callId] = toolCall.id;
-    parts.push({ type: "tool_call", callId, toolId: toolCall.function.name, args });
-  }
+  const mappedCalls = mapToolCalls(choice.message.tool_calls ?? [], ids);
+  const parts = mappedCalls.parts;
 
-  if (!invalidToolArguments && choice.message.content !== null) {
+  if (!mappedCalls.invalidArguments && choice.message.content !== null) {
     parts.unshift({ type: "text", text: choice.message.content });
   }
 
@@ -256,21 +314,16 @@ export function fromChatResponse(
     provider: "openai",
     blob: JsonValue.parse({
       message: choice.message,
-      openaiCallIdByCallId,
+      openaiCallIdByCallId: mappedCalls.openaiCallIdByCallId,
     }),
   });
 
-  const finishReason = invalidToolArguments
-    ? "tool_args_invalid"
-    : choice.finish_reason === "content_filter"
-      ? "provider_content_filtered"
-      : (choice.finish_reason ?? "other");
   return {
     parts,
     usage: {
       inputTokens: response.usage?.prompt_tokens ?? 0,
       outputTokens: response.usage?.completion_tokens ?? 0,
     },
-    finishReason,
+    finishReason: mapFinishReason(choice.finish_reason, mappedCalls.invalidArguments),
   };
 }

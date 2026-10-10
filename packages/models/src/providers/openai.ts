@@ -6,9 +6,15 @@ import OpenAI, {
   APIError,
   APIUserAbortError,
 } from "openai";
+import { z } from "zod";
 import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
 import { ProviderError } from "../errors.js";
 import { fromChatResponse, toChatRequest } from "./chat-completions-mapper.js";
+
+const OpenAIErrorMetadataSchema = z.object({
+  status: z.number().optional(),
+  headers: z.instanceof(Headers).nullish(),
+});
 
 /** Secret-value interface accepted at the API-key integration boundary. */
 export interface OpenAISecret {
@@ -68,7 +74,46 @@ export class OpenAIAdapter implements ProviderAdapter {
   }
 }
 
-function mapOpenAIError(error: unknown): ProviderError | unknown {
+function retryAfterMs(headers: Headers | null | undefined): number | undefined {
+  const value = headers?.get("retry-after");
+  if (value === null || value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined;
+}
+
+function mapStatusError(
+  status: number | undefined,
+  headers: Headers | null | undefined,
+): ProviderError {
+  switch (status) {
+    case 429: {
+      const delay = retryAfterMs(headers);
+      return new ProviderError("provider_rate_limited", {
+        status,
+        ...(delay === undefined ? {} : { retryAfterMs: delay }),
+      });
+    }
+    case 408:
+    case 504:
+      return new ProviderError("provider_timeout", { status });
+    case 401:
+    case 403:
+      return new ProviderError("provider_auth", { status });
+    case 400:
+      return new ProviderError("provider_bad_request", { status });
+    case undefined:
+      return new ProviderError("provider_unknown");
+    default:
+      if (status >= 500) {
+        return new ProviderError("provider_unavailable", { status });
+      }
+      return new ProviderError("provider_unknown", { status });
+  }
+}
+
+function mapOpenAIError(error: unknown): unknown {
   if (error instanceof APIUserAbortError || error instanceof APIConnectionTimeoutError) {
     return new ProviderError("provider_timeout");
   }
@@ -79,28 +124,8 @@ function mapOpenAIError(error: unknown): ProviderError | unknown {
     return error;
   }
 
-  const status = error.status;
-  if (status === 429) {
-    const retryAfter = error.headers?.get("retry-after");
-    const seconds = retryAfter === null || retryAfter === undefined ? Number.NaN : Number(retryAfter);
-    return new ProviderError("provider_rate_limited", {
-      status,
-      ...(Number.isFinite(seconds) && seconds >= 0 ? { retryAfterMs: seconds * 1_000 } : {}),
-    });
-  }
-  if (status === 408 || status === 504) {
-    return new ProviderError("provider_timeout", { status });
-  }
-  if (status === 401 || status === 403) {
-    return new ProviderError("provider_auth", { status });
-  }
-  if (status === 400) {
-    return new ProviderError("provider_bad_request", { status });
-  }
-  if (status !== undefined && status >= 500) {
-    return new ProviderError("provider_unavailable", { status });
-  }
-  return new ProviderError("provider_unknown", {
-    ...(status === undefined ? {} : { status }),
-  });
+  const metadata = OpenAIErrorMetadataSchema.safeParse(error);
+  return metadata.success
+    ? mapStatusError(metadata.data.status, metadata.data.headers)
+    : new ProviderError("provider_unknown");
 }

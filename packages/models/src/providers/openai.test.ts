@@ -1,18 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  JsonValue,
-  ModelRequestSchema,
-  parseJson,
-  type ModelRequest,
-  type Part,
-} from "@harness/schemas";
+import { ModelRequestSchema, parseJson } from "@harness/schemas";
+import type { JsonValue, ModelRequest, Part } from "@harness/schemas";
 import { MockAgent, fetch as undiciFetch } from "undici";
 import type { RequestInit as UndiciRequestInit } from "undici";
 import { describe, expect, it } from "vitest";
-import {
-  runProviderContract,
-  type ProviderContractFixture,
-} from "../contract.js";
+import { runProviderContract, type ProviderContractFixture } from "../contract.js";
 import { OpenAIAdapter } from "./openai.js";
 import { fromChatResponse, toChatRequest } from "./chat-completions-mapper.js";
 
@@ -39,7 +31,7 @@ const request: ModelRequest = {
 
 function completion(message: JsonValue, finishReason = "stop") {
   return {
-    id: "chatcmpl-fixture",
+    id: "openai-result-fixture",
     object: "chat.completion",
     created: 1,
     model: "gpt-4o-mini",
@@ -52,10 +44,7 @@ function fixture(
   scenario: ProviderContractFixture["scenario"],
   status: number,
 ): ProviderContractFixture {
-  const response =
-    scenario === "tool_call"
-      ? completion(rawToolMessage)
-      : completion(textMessage);
+  const response = scenario === "tool_call" ? completion(rawToolMessage) : completion(textMessage);
   const expectedParts: Part[] =
     scenario === "tool_call"
       ? [
@@ -68,18 +57,36 @@ function fixture(
         ]
       : [
           { type: "text", text: "answer" },
-          { type: "opaque", provider: "openai", blob: { message: textMessage, openaiCallIdByCallId: {} } },
+          {
+            type: "opaque",
+            provider: "openai",
+            blob: { message: textMessage, openaiCallIdByCallId: {} },
+          },
         ];
-  const expected =
-    scenario === "text_only" || scenario === "tool_call"
-      ? { parts: expectedParts, usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" }
-      : scenario === "usage_mapping"
-        ? { usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" }
-        : scenario === "error_429"
-          ? { retryAfterMs: 2_000, status }
-          : scenario === "error_500" || scenario === "error_401"
-            ? { status }
-            : undefined;
+  let expected: ProviderContractFixture["expected"];
+  switch (scenario) {
+    case "text_only":
+    case "tool_call":
+      expected = {
+        parts: expectedParts,
+        usage: { inputTokens: 2, outputTokens: 3 },
+        finishReason: "stop",
+      };
+      break;
+    case "usage_mapping":
+      expected = { usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" };
+      break;
+    case "error_429":
+      expected = { retryAfterMs: 2_000, status };
+      break;
+    case "error_500":
+    case "error_401":
+      expected = { status };
+      break;
+    case "abort_signal":
+      expected = undefined;
+      break;
+  }
 
   return {
     scenario,
@@ -116,11 +123,11 @@ function toUndiciRequestInit(init: RequestInit | undefined): UndiciRequestInit {
   };
 }
 
-async function toWebResponse(
-  response: Awaited<ReturnType<typeof undiciFetch>>,
-): Promise<Response> {
+async function toWebResponse(response: Awaited<ReturnType<typeof undiciFetch>>): Promise<Response> {
   const headers = new Headers();
-  response.headers.forEach((value, name) => headers.append(name, value));
+  response.headers.forEach((value, name) => {
+    headers.append(name, value);
+  });
   return new Response(await response.arrayBuffer(), {
     status: response.status,
     statusText: response.statusText,
@@ -134,6 +141,16 @@ function adaptFetch(fetchRequest: typeof undiciFetch): typeof fetch {
       input instanceof Request ? input.url : input.toString(),
       toUndiciRequestInit(init),
     );
+    return toWebResponse(response);
+  };
+}
+
+function mockFetch(dispatcher: MockAgent): typeof fetch {
+  return async (input, init) => {
+    const response = await undiciFetch(input instanceof Request ? input.url : input.toString(), {
+      ...toUndiciRequestInit(init),
+      dispatcher,
+    });
     return toWebResponse(response);
   };
 }
@@ -258,7 +275,9 @@ describe("OpenAI Chat Completions mapper", () => {
     const params = toChatRequest(
       {
         ...request,
-        tools: [{ toolId: "lookup", description: "Lookup a value", inputSchema: { type: "object" } }],
+        tools: [
+          { toolId: "lookup", description: "Lookup a value", inputSchema: { type: "object" } },
+        ],
         toolChoice: { forced: "lookup" },
         output: {
           name: "answer",
@@ -314,9 +333,7 @@ describe("OpenAI Chat Completions mapper", () => {
   });
 
   it("returns an empty normalized response when the provider returns no choices", () => {
-    expect(
-      fromChatResponse({ choices: [], usage }, { next: () => id }),
-    ).toEqual({
+    expect(fromChatResponse({ choices: [], usage }, { next: () => id })).toEqual({
       parts: [],
       usage: { inputTokens: 2, outputTokens: 3 },
       finishReason: "other",
@@ -325,6 +342,38 @@ describe("OpenAI Chat Completions mapper", () => {
 });
 
 describe("OpenAI adapter request behavior", () => {
+  it.each([
+    { status: 400, code: "provider_bad_request" },
+    { status: 403, code: "provider_auth" },
+    { status: 408, code: "provider_timeout" },
+    { status: 404, code: "provider_unknown" },
+  ])("maps HTTP $status to $code", async ({ status, code }) => {
+    const dispatcher = new MockAgent();
+    dispatcher.disableNetConnect();
+    const origin = "https://openai.test";
+    dispatcher
+      .get(origin)
+      .intercept({ path: /.*/, method: "POST" })
+      .reply(status, { error: { message: "fixture failure", type: "invalid_request_error" } });
+    const adapter = new OpenAIAdapter({
+      apiKey: { reveal: () => "test-key" },
+      fetch: mockFetch(dispatcher),
+      baseURL: origin,
+    });
+
+    try {
+      await expect(
+        adapter.complete(request, {
+          signal: new AbortController().signal,
+          ids: { next: () => id },
+          clock: { now: () => 0 },
+        }),
+      ).rejects.toMatchObject({ code, status });
+    } finally {
+      await dispatcher.close();
+    }
+  });
+
   it("sends requests through the injected fetch without SDK retries", async () => {
     const dispatcher = new MockAgent();
     dispatcher.disableNetConnect();
@@ -343,13 +392,7 @@ describe("OpenAI adapter request behavior", () => {
       });
     const adapter = new OpenAIAdapter({
       apiKey: { reveal: () => "test-key" },
-      fetch: async (input, init) => {
-        const response = await undiciFetch(
-          input instanceof Request ? input.url : input.toString(),
-          { ...toUndiciRequestInit(init), dispatcher },
-        );
-        return toWebResponse(response);
-      },
+      fetch: mockFetch(dispatcher),
       baseURL: origin,
     });
 
