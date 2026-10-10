@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from "vitest";
 import { HarnessError, type Event, type RunStatus } from "@harness/schemas";
+import type { Plan } from "@harness/context";
 import { CorruptLogError, foldRunState, RUN_TRIGGERS, transition, type RunState } from "./index.js";
 import { planLastModelResponseRecovery } from "./run-state.js";
 
@@ -69,6 +70,32 @@ function toolResult(seq: number, callId = id): Event {
     latencyMs: 1,
     result: null,
   };
+}
+
+function planUpdate(seq: number, plan: Plan, outcome: "ok" | "error"): Event[] {
+  const callId = otherRunId;
+  return [
+    {
+      ...envelope(seq),
+      type: "tool_intent",
+      callId,
+      toolId: "update_plan",
+      idempotent: true,
+      policyDecision: "allow",
+      argsHash: hash,
+      args: { plan },
+    },
+    {
+      ...envelope(seq + 1),
+      type: "tool_result",
+      callId,
+      toolId: "update_plan",
+      outcome,
+      ...(outcome === "error" ? { errorCode: "invalid_plan" } : {}),
+      latencyMs: 1,
+      result: plan,
+    },
+  ];
 }
 
 function approvalRequested(seq: number, approvalId = id): Event {
@@ -140,6 +167,24 @@ describe("foldRunState", () => {
     expect(state.nextSeq).toBe(3);
     expect(state.startedAt).toBe(1);
     expect(state.lastTs).toBe(3);
+  });
+
+  test("derives the latest successful plan for checkpoint snapshots", () => {
+    const firstPlan: Plan = {
+      items: [{ id: "task.first", text: "first", status: "todo" }],
+      notes: "",
+    };
+    const failedPlan: Plan = {
+      items: [{ id: "task.failed", text: "failed", status: "done" }],
+      notes: "",
+    };
+    const events = [
+      runCreated(0),
+      ...planUpdate(1, firstPlan, "ok"),
+      ...planUpdate(3, failedPlan, "error"),
+    ];
+
+    expect(foldRunState(events).plan).toEqual(firstPlan);
   });
 
   describe("planLastModelResponseRecovery", () => {

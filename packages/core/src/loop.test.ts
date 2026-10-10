@@ -1176,7 +1176,7 @@ describe("runLoop", () => {
       traceparent,
       context: {
         strategyId: "naive",
-        strategyVersion: "v2",
+        strategyVersion: "v3",
         calibration: null,
       },
       plan: null,

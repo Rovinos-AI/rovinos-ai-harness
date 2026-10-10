@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import type { Event, Message, ModelRef, Part } from "@harness/schemas";
+import { Id, type Event, type Message, type ModelRef, type Part } from "@harness/schemas";
 import { SlidingWindowStrategy } from "./sliding-window.js";
 import type { ContextStrategyInput, TokenCounter } from "../types.js";
 import { HeuristicTokenCounter } from "../token-counter.js";
+import type { Plan } from "../plan.js";
 
 const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
 const callId = "22222222222222222222222222";
+const planCallId = Id.parse("44444444444444444444444444");
 const model: ModelRef = { provider: "test", model: "test" };
 const counter: TokenCounter = { count: (messages) => messages.length };
 const strategy = new SlidingWindowStrategy();
@@ -66,6 +68,30 @@ function toolResult(seq: number, result: Extract<Event, { type: "tool_result" }>
   };
 }
 
+function planUpdate(seq: number, plan: Plan): Event[] {
+  return [
+    {
+      ...envelope(seq),
+      type: "tool_intent",
+      callId: planCallId,
+      toolId: "update_plan",
+      idempotent: true,
+      policyDecision: "allow",
+      argsHash: "c".repeat(64),
+      args: { plan },
+    },
+    {
+      ...envelope(seq + 1),
+      type: "tool_result",
+      callId: planCallId,
+      toolId: "update_plan",
+      outcome: "ok",
+      latencyMs: 0,
+      result: plan,
+    },
+  ];
+}
+
 function compactedSummary(seq: number, fromSeq: number, toSeq: number): Event {
   return {
     ...envelope(seq),
@@ -99,7 +125,7 @@ describe("SlidingWindowStrategy", () => {
   it("keeps the full transcript when it fits and does not add a marker", async () => {
     const result = await build(
       [runInput(0), modelResponse(1, "first"), modelResponse(2, "last")],
-      3,
+      4,
     );
 
     expect(result.messages.map(messageText)).toEqual(["goal", "first", "last"]);
@@ -108,7 +134,7 @@ describe("SlidingWindowStrategy", () => {
 
     const heuristicResult = await strategy.build({
       events: [runInput(0), modelResponse(1, "a"), modelResponse(2, "b")],
-      budget: { maxTokens: 17, reserveOutputTokens: 0 },
+      budget: { maxTokens: 64, reserveOutputTokens: 0 },
       model,
       counter: new HeuristicTokenCounter(),
     });
@@ -193,11 +219,12 @@ describe("SlidingWindowStrategy", () => {
         ]),
         toolResult(2, { $offloaded: { handle: "wf_test", bytes: 1, preview: "x" } }),
       ],
-      3,
+      4,
     );
 
     expect(result.stats.offloadedResults).toBe(1);
     expect(result.stats.droppedGroups).toBe(0);
+    expect(result.messages.at(-1)).toMatchObject({ role: "tool" });
   });
 
   it("throws when pinned groups alone exceed the available budget", async () => {
@@ -215,12 +242,73 @@ describe("SlidingWindowStrategy", () => {
   it("returns the same result for the same input", async () => {
     const events = [runInput(0), modelResponse(1, "old"), modelResponse(2, "new")];
 
-    await expect(build(events, 3)).resolves.toEqual(await build(events, 3));
+    await expect(build(events, 4)).resolves.toEqual(await build(events, 4));
+  });
+
+  it("keeps the deterministic plan message last and counts it as pinned", async () => {
+    const currentPlan: Plan = {
+      items: [{ id: "task.one", text: "do it", status: "doing" }],
+      notes: "keep",
+    };
+    const result = await build(
+      [
+        runInput(0),
+        modelResponse(1, "oldest"),
+        modelResponse(2, "middle"),
+        modelResponse(3, "newest"),
+        ...planUpdate(4, currentPlan),
+      ],
+      4,
+    );
+
+    expect(result.messages.map(messageText)).toEqual([
+      "goal",
+      "[2 earlier steps omitted]",
+      "newest",
+      `Current plan: ${JSON.stringify(currentPlan)}`,
+    ]);
+    expect(result.messages.at(-1)?.role).toBe("user");
+    expect(result.stats).toMatchObject({ estimatedTokens: 4, droppedGroups: 2 });
+  });
+
+  it("rejects when a large pinned plan and omission marker exceed the budget", async () => {
+    const largePlan: Plan = { items: [], notes: "x".repeat(1000) };
+    const weightedCounter: TokenCounter = {
+      count: (messages) =>
+        messages.reduce(
+          (total, message) =>
+            total +
+            Math.max(
+              1,
+              Math.ceil(
+                message.parts
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("").length / 100,
+              ),
+            ),
+          0,
+        ),
+    };
+
+    await expect(
+      strategy.build({
+        events: [
+          runInput(0),
+          modelResponse(1, "old"),
+          modelResponse(2, "new"),
+          ...planUpdate(3, largePlan),
+        ],
+        budget: { maxTokens: 12, reserveOutputTokens: 0 },
+        model,
+        counter: weightedCounter,
+      }),
+    ).rejects.toMatchObject({ code: "context_pinned_exceeds_budget" });
   });
 
   it("keeps its strategy identity and version stable", () => {
     expect(strategy.id).toBe("sliding_window");
-    expect(strategy.version).toBe("v1");
+    expect(strategy.version).toBe("v2");
   });
 
   it("estimates each group in linear time", async () => {
@@ -241,12 +329,12 @@ describe("SlidingWindowStrategy", () => {
 
     const result = await strategy.build({
       events,
-      budget: { maxTokens: 8, reserveOutputTokens: 0 },
+      budget: { maxTokens: 9, reserveOutputTokens: 0 },
       model,
       counter: countingCounter,
     });
 
-    expect(result.stats.droppedGroups).toBe(groupCount - 6);
+    expect(result.stats.droppedGroups).toBe(groupCount - 7);
     expect(countCalls).toBeLessThan(3 * groupCount);
   });
 
@@ -266,7 +354,7 @@ describe("SlidingWindowStrategy", () => {
         modelResponse(2, "middle"),
         modelResponse(3, "new"),
       ],
-      budget: { maxTokens: 4, reserveOutputTokens: 0 },
+      budget: { maxTokens: 5, reserveOutputTokens: 0 },
       model,
       counter: nonAdditiveCounter,
     });
