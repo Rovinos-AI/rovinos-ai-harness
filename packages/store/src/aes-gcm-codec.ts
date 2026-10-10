@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { aesGcmDecrypt, aesGcmEncrypt } from "@harness/crypto";
 import {
   ContractError,
   KEY_PROVIDER_KEY_BYTES,
@@ -77,11 +77,8 @@ export class AesGcmContentCodec implements ContentCodec {
     try {
       const encoded = await jsonCodec.encode(context, content);
       plaintext = Buffer.from(encoded.blob, "utf8");
-      const iv = randomBytes(IV_LENGTH);
-      const cipher = createCipheriv("aes-256-gcm", key, iv);
-      cipher.setAAD(additionalData(context));
-      const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-      const blob = Buffer.concat([iv, ciphertext, cipher.getAuthTag()]).toString("base64");
+      const encrypted = aesGcmEncrypt(key, plaintext, additionalData(context));
+      const blob = Buffer.from(encrypted).toString("base64");
       return { blob, keyId };
     } catch (error) {
       if (error instanceof ContractError) {
@@ -104,17 +101,11 @@ export class AesGcmContentCodec implements ContentCodec {
       throw new ContentDecryptFailedError();
     }
     const key = await this.loadKey(keyId, true);
-    let plaintext: Buffer | undefined;
+    let plaintext: Uint8Array | undefined;
     try {
       const encoded = decodeBlob(blob);
-      const iv = encoded.subarray(0, IV_LENGTH);
-      const authTag = encoded.subarray(encoded.length - AUTH_TAG_LENGTH);
-      const ciphertext = encoded.subarray(IV_LENGTH, encoded.length - AUTH_TAG_LENGTH);
-      const decipher = createDecipheriv("aes-256-gcm", key, iv);
-      decipher.setAAD(additionalData(context));
-      decipher.setAuthTag(authTag);
-      plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      return parseJson(contentSchema, plaintext.toString("utf8"), {
+      plaintext = aesGcmDecrypt(key, encoded, additionalData(context));
+      return parseJson(contentSchema, new TextDecoder().decode(plaintext), {
         maxBytes: MAX_CONTENT_BYTES,
       });
     } catch {
