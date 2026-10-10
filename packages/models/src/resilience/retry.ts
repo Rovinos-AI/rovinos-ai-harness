@@ -63,7 +63,42 @@ export interface RetryOptions<T> extends RetryDependencies {
   readonly signal: AbortSignal;
   readonly deadlineTs?: number;
   readonly onAttempt?: (attempt: number) => void;
+  readonly scheduleAttempt?: (
+    signal: AbortSignal,
+    lastError: unknown,
+    operation: () => Promise<T>,
+  ) => Promise<T>;
   readonly operation: (signal: AbortSignal, lastError: unknown) => Promise<T>;
+}
+
+async function runScheduledAttempt<T>(
+  options: RetryOptions<T>,
+  attempt: number,
+  lastError: unknown,
+): Promise<T> {
+  checkDeadline(options.deadlineTs, options.clock, lastError);
+  options.signal.throwIfAborted();
+  const operation = (): Promise<T> => runAttempt(options, attempt, lastError);
+  if (options.scheduleAttempt === undefined) {
+    return operation();
+  }
+  const deadlineSignal =
+    options.deadlineTs === undefined
+      ? undefined
+      : AbortSignal.timeout(Math.max(0, options.deadlineTs - options.clock.now()));
+  const signal =
+    deadlineSignal === undefined
+      ? options.signal
+      : AbortSignal.any([options.signal, deadlineSignal]);
+  try {
+    return await options.scheduleAttempt(signal, lastError, operation);
+  } catch (error) {
+    options.signal.throwIfAborted();
+    if (deadlineSignal?.aborted === true) {
+      throw new DeadlineExceededError(error);
+    }
+    throw error;
+  }
 }
 
 function checkDeadline(
@@ -177,9 +212,7 @@ export async function withRetries<T>(options: RetryOptions<T>): Promise<T> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= parsedPolicy.data.maxAttempts; attempt += 1) {
     try {
-      const result = await runAttempt(options, attempt, lastError);
-      checkDeadline(options.deadlineTs, options.clock, lastError);
-      return result;
+      return await runScheduledAttempt(options, attempt, lastError);
     } catch (error) {
       if (options.signal.aborted) {
         throw options.signal.reason;

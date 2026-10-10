@@ -92,19 +92,20 @@ export class ModelGateway {
       sleep: this.sleep,
       signal: context.signal,
       ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-      operation: async (signal, lastError) => {
+      scheduleAttempt: async (signal, lastError, operation) => {
         if (limiter !== undefined) {
           await limiter.acquire(signal, context.deadlineTs, lastError);
         }
-        return semaphore.run(signal, async () => {
-          attempts += 1;
-          setActiveSpanAttribute("harness.model.attempts", attempts);
-          return adapter.complete(request, {
-            signal,
-            ids: this.dependencies.ids,
-            clock: this.dependencies.clock,
-            ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-          });
+        return semaphore.run(signal, operation);
+      },
+      operation: (signal) => {
+        attempts += 1;
+        setActiveSpanAttribute("harness.model.attempts", attempts);
+        return adapter.complete(request, {
+          signal,
+          ids: this.dependencies.ids,
+          clock: this.dependencies.clock,
+          ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
         });
       },
     });

@@ -28,6 +28,19 @@ afterEach(() => {
 });
 
 describe("withRetries", () => {
+  it("returns a successful response that resolves just after the deadline", async () => {
+    let now = 0;
+    const operation = vi.fn(() => {
+      now = 11;
+      return Promise.resolve("paid response");
+    });
+
+    await expect(
+      withRetries(retryOptions({ clock: { now: () => now }, deadlineTs: 10, operation })),
+    ).resolves.toBe("paid response");
+    expect(operation).toHaveBeenCalledOnce();
+  });
+
   it("uses full-jitter exponential backoff and respects the attempt limit", async () => {
     const delays: number[] = [];
     let calls = 0;

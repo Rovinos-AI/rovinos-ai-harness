@@ -7,6 +7,10 @@ Gateway resilience is configured with `models.retry` (`maxAttempts: 3`,
 `baseDelayMs: 500`, `maxDelayMs: 20000`, `timeoutMs: 120000`). Optional
 `models.maxConcurrent` defaults to 4. Provider request rates are supplied to the
 gateway by provider code through `requestsPerMinute`; bursts are capped at ten.
+Rate-limit and concurrency waits use run cancellation and the run deadline;
+`timeoutMs` starts when the adapter call begins. Successful responses are returned
+even when the injected clock has passed the deadline; the run budget is enforced
+at the next step boundary.
 
 | Code | Retryable | Typical HTTP status |
 | --- | --- | --- |

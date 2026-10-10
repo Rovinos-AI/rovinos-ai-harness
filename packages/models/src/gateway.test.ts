@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelRetryConfigSchema, type ModelRequest } from "@harness/schemas";
+import { attr, defineSpan, withSpan } from "@harness/telemetry";
+import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import { context, trace } from "@opentelemetry/api";
 import { ProviderError } from "./errors.js";
 import { ModelGateway } from "./gateway.js";
 import * as ModelExports from "./index.js";
 import { AdapterRegistry } from "./registry.js";
 import type { ProviderAdapter, ProviderContext } from "./types.js";
+import { abortableSleep } from "./resilience/retry.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const request: ModelRequest = {
   requestId: "00000000000000000000000000",
@@ -55,10 +63,18 @@ describe("ModelGateway", () => {
   });
 
   it("retries retryable provider failures under the configured policy", async () => {
+    const provider = createTestTracerProvider();
+    trace.setGlobalTracerProvider(provider);
+    context.setGlobalContextManager(createTestContextManager());
+    const definition = defineSpan("harness.model_call", {
+      "harness.run.id": attr.id(),
+      "harness.event.seq": attr.optional(attr.int()),
+      "harness.model.attempts": attr.optional(attr.int()),
+    });
     let calls = 0;
     const complete = vi.fn((_request: ModelRequest, _context: ProviderContext) => {
       calls += 1;
-      if (calls === 1) {
+      if (calls < 3) {
         return Promise.reject(new ProviderError("provider_unavailable"));
       }
       return Promise.resolve({
@@ -71,22 +87,38 @@ describe("ModelGateway", () => {
     const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
-      retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 2 }),
+      retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 3 }),
       random: () => 0,
       sleep: () => Promise.resolve(),
     });
 
-    const completion = await gateway.complete(request, {
-      runId: request.requestId,
-      signal: new AbortController().signal,
-      deadlineTs: 10_000,
-    });
+    try {
+      await withSpan(definition, { "harness.run.id": request.requestId }, async (span) => {
+        const recordedAttribute = vi.spyOn(span, "setAttribute");
+        const completion = await context.with(trace.setSpan(context.active(), span), () =>
+          gateway.complete(request, {
+            runId: request.requestId,
+            signal: new AbortController().signal,
+            deadlineTs: 10_000,
+          }),
+        );
 
-    expect(complete).toHaveBeenCalledTimes(2);
-    const call = complete.mock.calls[1];
-    expect(call?.[1].deadlineTs).toBe(10_000);
-    expect(call?.[1].signal.aborted).toBe(false);
-    expect(completion.parts).toEqual([{ type: "text", text: "answer" }]);
+        expect(complete).toHaveBeenCalledTimes(3);
+        const call = complete.mock.calls[2];
+        expect(call?.[1].deadlineTs).toBe(10_000);
+        expect(call?.[1].signal.aborted).toBe(false);
+        expect(completion.parts).toEqual([{ type: "text", text: "answer" }]);
+        expect(recordedAttribute.mock.calls).toEqual([
+          ["harness.model.attempts", 1],
+          ["harness.model.attempts", 2],
+          ["harness.model.attempts", 3],
+        ]);
+      });
+    } finally {
+      await provider.shutdown();
+      trace.disable();
+      context.disable();
+    }
   });
 
   it("fails fast for non-retryable provider failures", async () => {
@@ -134,6 +166,98 @@ describe("ModelGateway", () => {
 
     expect(delays).toEqual([60_000]);
     expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts the provider timeout only after a long limiter wait", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const complete = vi.fn(async (_request: ModelRequest, adapterContext: ProviderContext) => {
+      await abortableSleep(500, adapterContext.signal);
+      return {
+        parts: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+        latencyMs: 500,
+      };
+    });
+    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => Date.now() },
+      requestsPerMinute: { sample: 1 },
+      retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 1, timeoutMs: 1_000 }),
+    });
+    const runContext = {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+      deadlineTs: 120_000,
+    };
+    const first = gateway.complete(request, runContext);
+    await vi.advanceTimersByTimeAsync(500);
+    await first;
+
+    const second = gateway.complete(request, runContext);
+    const result = second.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(59_499);
+    expect(complete).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(501);
+    expect(await result).toMatchObject({ finishReason: "stop" });
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(complete.mock.calls[1]?.[1].signal.aborted).toBe(false);
+  });
+
+  it("cancels a limiter wait without calling the provider again", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+        latencyMs: 0,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => Date.now() },
+      requestsPerMinute: { sample: 1 },
+    });
+    const controller = new AbortController();
+    const runContext = { runId: request.requestId, signal: controller.signal };
+    await gateway.complete(request, runContext);
+    const second = gateway.complete(request, runContext);
+    await vi.advanceTimersByTimeAsync(0);
+    const cancelled = new Error("cancelled");
+    controller.abort(cancelled);
+
+    await expect(second).rejects.toBe(cancelled);
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it("does not wait for a limiter token that would reach the run deadline", async () => {
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+        latencyMs: 0,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      requestsPerMinute: { sample: 1 },
+    });
+    const runContext = {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+      deadlineTs: 60_000,
+    };
+    await gateway.complete(request, runContext);
+
+    await expect(gateway.complete(request, runContext)).rejects.toMatchObject({
+      code: "deadline_exceeded",
+    });
+    expect(complete).toHaveBeenCalledOnce();
   });
 
   it("maps invalid adapter output to provider_unknown without metadata", async () => {

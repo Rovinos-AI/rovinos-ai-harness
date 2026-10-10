@@ -1057,6 +1057,7 @@ __metadata:
   dependencies:
     "@harness/schemas": "workspace:^"
     "@harness/telemetry": "workspace:^"
+    "@opentelemetry/api": "npm:1.9.1"
     undici: "npm:8.11.2"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
