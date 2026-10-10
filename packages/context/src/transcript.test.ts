@@ -202,6 +202,38 @@ describe("eventsToTranscript", () => {
     ]);
   });
 
+  it("lets a nested compaction supersede an earlier summary without removing the goal", () => {
+    const transcript = eventsToTranscript([
+      runInput(0, "keep the goal"),
+      modelResponse(1, [{ type: "text", text: "earlier work" }]),
+      {
+        ...envelope(2),
+        type: "context_compacted",
+        fromSeq: 1,
+        toSeq: 1,
+        strategy: "summarizing",
+        strategyVersion: "v1",
+        summary: "first summary",
+      },
+      modelResponse(3, [{ type: "text", text: "later work" }]),
+      {
+        ...envelope(4),
+        type: "context_compacted",
+        fromSeq: 1,
+        toSeq: 3,
+        strategy: "summarizing",
+        strategyVersion: "v1",
+        summary: "replacement summary",
+      },
+    ]);
+
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0]?.messages[0]?.parts).toEqual([{ type: "text", text: "keep the goal" }]);
+    expect(transcript[1]?.messages[0]?.parts).toEqual([
+      { type: "text", text: "Summary of earlier work: replacement summary" },
+    ]);
+  });
+
   it("renders JSON inputs and summaries and pins each reconstructed input", () => {
     const transcript = eventsToTranscript([
       runInput(0, { goal: "goal" }),

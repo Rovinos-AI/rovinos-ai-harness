@@ -43,6 +43,10 @@ export {
   SlidingWindowStrategy,
 } from "./strategies/sliding-window.js";
 export {
+  SummarizingStrategy,
+  type SummarizingStrategyOptions,
+} from "./strategies/summarizing.js";
+export {
   InMemoryWorkspace,
   OffloadedHandleSchema,
   OffloadedStub,

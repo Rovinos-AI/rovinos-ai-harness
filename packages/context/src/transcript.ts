@@ -27,6 +27,7 @@ function toolResultMessage(event: Extract<Event, { type: "tool_result" }>): Mess
 function removeCompactedGroups(
   groups: TranscriptGroup[],
   groupsByCallId: Map<string, TranscriptGroup>,
+  summaryGroups: Set<TranscriptGroup>,
   fromSeq: number,
   toSeq: number,
 ): void {
@@ -34,11 +35,12 @@ function removeCompactedGroups(
   for (let index = groups.length - 1; index >= 0; index -= 1) {
     const group = groups[index];
     if (group?.seqs.some((seq) => seq >= fromSeq && seq <= toSeq) === true) {
-      if (group.pinned) {
+      if (group.pinned && !summaryGroups.has(group)) {
         continue;
       }
       groups.splice(index, 1);
       removedGroups.add(group);
+      summaryGroups.delete(group);
     }
   }
   for (const [callId, group] of groupsByCallId) {
@@ -59,6 +61,7 @@ function removeCompactedGroups(
 export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] {
   const groups: TranscriptGroup[] = [];
   const groupsByCallId = new Map<string, TranscriptGroup>();
+  const summaryGroups = new Set<TranscriptGroup>();
 
   for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
     if (event.type === "run_input") {
@@ -87,8 +90,8 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
         groupsByCallId.delete(event.callId);
       }
     } else if (event.type === "context_compacted") {
-      removeCompactedGroups(groups, groupsByCallId, event.fromSeq, event.toSeq);
-      groups.push({
+      removeCompactedGroups(groups, groupsByCallId, summaryGroups, event.fromSeq, event.toSeq);
+      const summaryGroup: TranscriptGroup = {
         seqs: [event.fromSeq],
         messages: [
           {
@@ -103,7 +106,9 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
         ],
         // Summaries remain available to budgeted strategies as durable context.
         pinned: true,
-      });
+      };
+      groups.push(summaryGroup);
+      summaryGroups.add(summaryGroup);
     }
   }
 
