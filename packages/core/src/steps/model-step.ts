@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
-import type { Event, Id, Message } from "@harness/schemas";
+import { Code, type Event, type Id, type Message, type ToolSpec } from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
-import type { IdGenerator, ModelCompletion, ModelPort, RunContext } from "../ports.js";
+import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
 
 /** Inputs needed to perform one recorded model call. */
 export interface ModelStepOptions {
@@ -13,12 +12,22 @@ export interface ModelStepOptions {
   readonly ids: IdGenerator;
   readonly runId: Id;
   readonly messages: Message[];
+  readonly tools?: readonly ToolSpec[];
   readonly signal: AbortSignal;
   /** Epoch-millisecond deadline from the run's wall-clock budget. */
   readonly deadlineTs?: number;
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
+}
+
+/** Selects request messages and model-visible tool specifications for the model step. */
+export function modelToolOptions(
+  tool: ToolPort,
+  messages: Message[],
+): Pick<ModelStepOptions, "messages" | "tools"> {
+  const tools = tool.getToolSpecs?.();
+  return { messages, ...(tools === undefined ? {} : { tools }) };
 }
 
 /** Result of one model step, including events appended by the step. */
@@ -84,6 +93,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
             model: options.modelName ?? "unknown",
           },
           messages: options.messages,
+          ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
           ...(role === undefined ? {} : { role }),
         },
         modelRunContext(options),

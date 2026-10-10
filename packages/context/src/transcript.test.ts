@@ -231,7 +231,13 @@ describe("NaiveStrategy", () => {
       events: [
         runInput(0, "goal"),
         modelResponse(1, [{ type: "tool_call", callId, toolId: "lookup", args: { query: "x" } }]),
-        toolResult(2, { $offloaded: { handle: "wf_1" } }),
+        toolResult(2, {
+          $offloaded: {
+            handle: "wf_00000000000000000000000000",
+            bytes: 20,
+            preview: "sample",
+          },
+        }),
         {
           ...envelope(3),
           type: "context_compacted",
@@ -257,7 +263,7 @@ describe("NaiveStrategy", () => {
     });
     expect(result.pinnedSeqs).toEqual([0, 0]);
     expect(strategy.id).toBe("naive");
-    expect(strategy.version).toBe("v1");
+    expect(strategy.version).toBe("v2");
     expect(count).toHaveBeenCalledWith(result.messages, { provider: "test", model: "test" });
   });
 });
