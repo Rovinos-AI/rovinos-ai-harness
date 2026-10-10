@@ -63,6 +63,7 @@ export {
   type PiiPolicy,
   type PiiRule,
 } from "./pii-policy.js";
+export { PiiActionSummarySchema, type PiiActionSummary } from "./pii-action-summary.js";
 export { SnapshotSchema, type Snapshot } from "./snapshot.js";
 export { KEY_PROVIDER_KEY_BYTES, type KeyProvider } from "./key-provider.js";
 export { RunConfigSchema, type RunConfig } from "./config/run.js";
