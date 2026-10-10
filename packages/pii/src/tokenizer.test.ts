@@ -128,6 +128,18 @@ describe("Tokenizer.tokenizeText", () => {
     await expect(vault.stats(runB)).resolves.toEqual({ entries: 2 });
   });
 
+  it("processes token-heavy text without inspecting token contents", async () => {
+    const detect = vi.fn(emailDetector);
+    const result = await createTokenizer("tokenize", new InMemoryVault(), detect).tokenizeText(
+      runA,
+      "<EMAIL_9> alice@example.test ".repeat(1000),
+      context,
+    );
+    expect(result.text).toBe("<EMAIL_9> <EMAIL_1> ".repeat(1000));
+    expect(detect.mock.calls.every(([text]) => !text.includes("<EMAIL_9>"))).toBe(true);
+    expect(result.actions).toMatchObject([{ entities: [{ type: "email", count: 1000 }] }]);
+  });
+
   it("aggregates all blocked detections and does not write any values", async () => {
     const vault = new InMemoryVault();
     const tokenizer = createTokenizer("block", vault);

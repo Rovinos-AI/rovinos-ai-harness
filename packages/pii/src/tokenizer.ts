@@ -215,10 +215,7 @@ export class Tokenizer {
     }
     const replacements: Replacement[] = [];
     for (const detection of resolved) {
-      if (
-        detection.end > text.length ||
-        tokens.some((token) => detection.start < token.end && detection.end > token.start)
-      ) {
+      if (detection.end > text.length) {
         throw new PiiTokenizerError("pii_detector_invalid_output");
       }
       const entity = PiiEntitySchema.safeParse(detection.entityType);
