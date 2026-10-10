@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ModelRefSchema, type JsonValue, type Message, type ModelRef } from "@harness/schemas";
 import { z } from "zod";
+import type { TokenCounter } from "./types.js";
 
 const DEFAULT_SAFETY_FACTOR = 1.15;
 const CALIBRATION_ALPHA = 0.3;
@@ -20,18 +21,6 @@ export const CalibrationSnapshotSchema = z.array(CalibrationSnapshotEntrySchema)
 /** Inferred calibration state persisted with a context snapshot. */
 export type CalibrationSnapshot = z.infer<typeof CalibrationSnapshotSchema>;
 
-/** Counts normalized messages for a model. */
-export interface TokenCounter {
-  /**
-   * Estimates the input-token count for the supplied messages.
-   *
-   * @param messages - Normalized messages sent to the model.
-   * @param model - Provider and model used for the request.
-   * @returns The estimated input-token count.
-   */
-  count(messages: readonly Message[], model: ModelRef): number;
-}
-
 /** Conservative character-based token estimate, replaceable by an exact tokenizer. */
 export class HeuristicTokenCounter implements TokenCounter {
   private readonly safetyFactor: number;
@@ -48,29 +37,46 @@ export class HeuristicTokenCounter implements TokenCounter {
   /** {@inheritDoc TokenCounter.count} */
   count(messages: readonly Message[], _model: ModelRef): number {
     let totalCharacters = 0;
+    let weightedCharacters = 0;
     let toolCallPartCount = 0;
 
     for (const message of messages) {
       for (const part of message.parts) {
         switch (part.type) {
           case "text":
-            totalCharacters += part.text.length;
+            [totalCharacters, weightedCharacters] = addText(
+              part.text,
+              totalCharacters,
+              weightedCharacters,
+            );
             break;
           case "tool_call":
-            totalCharacters += serializedLength(part.args);
+            [totalCharacters, weightedCharacters] = addText(
+              JSON.stringify(part.args),
+              totalCharacters,
+              weightedCharacters,
+            );
             toolCallPartCount += 1;
             break;
           case "tool_result":
-            totalCharacters += serializedLength(part.result);
+            [totalCharacters, weightedCharacters] = addText(
+              JSON.stringify(part.result),
+              totalCharacters,
+              weightedCharacters,
+            );
             break;
           case "opaque":
-            totalCharacters += serializedLength(part);
+            [totalCharacters, weightedCharacters] = addText(
+              JSON.stringify(part),
+              totalCharacters,
+              weightedCharacters,
+            );
             break;
         }
       }
     }
 
-    const estimate = Math.ceil(totalCharacters / 3.5) + 4 * messages.length + 8 * toolCallPartCount;
+    const estimate = Math.ceil(weightedCharacters / 3.5) + 4 * messages.length + 8 * toolCallPartCount;
     return Math.max(Math.ceil(estimate * this.safetyFactor), Math.ceil(totalCharacters / 4));
   }
 }
@@ -106,17 +112,19 @@ export class CalibratingTokenCounter implements TokenCounter {
       !Number.isFinite(estimated) ||
       estimated <= 0 ||
       !Number.isFinite(actualInputTokens) ||
-      actualInputTokens < 0
+      actualInputTokens <= 0
     ) {
       return;
     }
 
     const key = modelKey(modelRef);
-    const observedRatio = clamp(actualInputTokens / estimated);
     const previousRatio = this.ratios.get(key)?.ratio ?? 1;
+    const correctedRatio = clamp(previousRatio * clamp(actualInputTokens / estimated));
     this.ratios.set(key, {
       model: modelRef,
-      ratio: clamp(previousRatio * (1 - CALIBRATION_ALPHA) + observedRatio * CALIBRATION_ALPHA),
+      ratio: clamp(
+        previousRatio * (1 - CALIBRATION_ALPHA) + correctedRatio * CALIBRATION_ALPHA,
+      ),
     });
   }
 
@@ -158,6 +166,17 @@ function clamp(ratio: number): number {
   return Math.min(MAX_CALIBRATION_RATIO, Math.max(MIN_CALIBRATION_RATIO, ratio));
 }
 
-function serializedLength(value: JsonValue): number {
-  return JSON.stringify(value).length;
+const nonLatinScriptCharacter =
+  /[^\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{N}\p{P}\p{Z}]/u;
+
+function addText(
+  text: string,
+  totalCharacters: number,
+  weightedCharacters: number,
+): [number, number] {
+  for (const character of text) {
+    totalCharacters += 1;
+    weightedCharacters += nonLatinScriptCharacter.test(character) ? 3.5 : 1;
+  }
+  return [totalCharacters, weightedCharacters];
 }

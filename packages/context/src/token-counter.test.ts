@@ -4,17 +4,24 @@ import type { Message, ModelRef } from "@harness/schemas";
 import {
   CalibratingTokenCounter,
   HeuristicTokenCounter,
-  type TokenCounter,
 } from "./token-counter.js";
+import type { TokenCounter } from "./types.js";
 
 const model: ModelRef = { provider: "openai", model: "gpt-4o" };
 
 describe("HeuristicTokenCounter", () => {
-  it("estimates fixed text samples with the documented overhead", () => {
+  it("estimates Latin, CJK, and emoji samples with script-aware weighting", () => {
     const counter = new HeuristicTokenCounter();
-    const messages: Message[] = [{ role: "user", parts: [{ type: "text", text: "hello" }] }];
+    const messages = (text: string): Message[] => [
+      { role: "user", parts: [{ type: "text", text }] },
+    ];
 
-    expect(counter.count(messages, model)).toBe(7);
+    expect(counter.count(messages("hello"), model)).toBe(7);
+    expect(counter.count(messages("こんにちは"), model)).toBe(11);
+    expect(counter.count(messages("😀"), model)).toBe(6);
+    expect(counter.count(messages("こんにちは"), model)).toBeGreaterThanOrEqual(
+      Array.from("こんにちは").length,
+    );
   });
 
   it("counts serialized tool and opaque payloads and tool-call overhead", () => {
@@ -69,7 +76,7 @@ describe("CalibratingTokenCounter", () => {
     const initialError = Math.abs(counter.count(messages, model) - 150);
 
     for (let index = 0; index < 20; index += 1) {
-      counter.observe(model, 100, 150);
+      counter.observe(model, counter.count(messages, model), 150);
     }
 
     expect(Math.abs(counter.count(messages, model) - 150)).toBeLessThan(initialError);
@@ -104,14 +111,25 @@ describe("CalibratingTokenCounter", () => {
     expect(restored.count(messages, otherModel)).toBe(85);
   });
 
-  it("ignores observations without a positive finite estimate", () => {
+  it("ignores observations without positive finite estimates and actual counts", () => {
     const counter = new CalibratingTokenCounter(inner);
 
     counter.observe(model, 0, 100);
     counter.observe(model, Number.NaN, 100);
     counter.observe(model, 100, Number.NaN);
+    counter.observe(model, 100, 0);
 
     expect(counter.count(messages, model)).toBe(100);
+  });
+
+  it("does not let a zero usage observation change existing calibration", () => {
+    const counter = new CalibratingTokenCounter(inner);
+    counter.observe(model, 100, 150);
+    const snapshot = counter.snapshot();
+
+    counter.observe(model, counter.count(messages, model), 0);
+
+    expect(counter.snapshot()).toEqual(snapshot);
   });
 });
 

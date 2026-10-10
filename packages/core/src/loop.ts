@@ -223,6 +223,7 @@ async function runLoopSteps(
     if (prepared.event !== undefined) {
       return prepared.event;
     }
+    const estimatedTokens = options.context.estimate?.(prepared.context);
     const modelResult = await modelStep({
       recorder: options.recorder,
       model: options.model,
@@ -235,6 +236,16 @@ async function runLoopSteps(
       ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
     });
     events.push(...modelResult.events);
+    if (modelResult.outcome === "response" && estimatedTokens !== undefined) {
+      options.context.observeModelResponse?.(
+        {
+          provider: modelResult.completion.provider,
+          model: modelResult.completion.model,
+        },
+        estimatedTokens,
+        modelResult.completion.usage.inputTokens,
+      );
+    }
     const stoppedAfterModel = await suspendAfterModel(options, events, execution, modelResult);
     if (stoppedAfterModel !== undefined) {
       return stoppedAfterModel;
