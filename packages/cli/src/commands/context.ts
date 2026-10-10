@@ -89,6 +89,36 @@ async function inspection(input: {
   });
 }
 
+function humanSummary(result: Awaited<ReturnType<typeof inspection>>): string {
+  const compactedRanges =
+    result.compactedRanges.length === 0
+      ? "none"
+      : result.compactedRanges
+          .map(({ fromSeq, toSeq }) => `${String(fromSeq)}-${String(toSeq)}`)
+          .join(", ");
+  const offloadedHandles =
+    result.offloadedHandles.length === 0
+      ? "none"
+      : result.offloadedHandles
+          .map(({ handle, bytes }) => `${handle} (${String(bytes)} bytes)`)
+          .join(", ");
+  const pinnedSeqs = result.pinnedSeqs.length === 0 ? "none" : result.pinnedSeqs.join(", ");
+  const availableTokens = Math.max(0, result.maxTokens - result.reserveOutputTokens);
+  return [
+    `Strategy: ${result.strategy} ${result.strategyVersion}`,
+    `Messages: ${String(result.messageCount)}`,
+    `Estimated tokens: ${String(result.estimatedTokens)} / ${String(availableTokens)} available (max ${String(result.maxTokens)}, reserve ${String(result.reserveOutputTokens)})`,
+    `Groups: ${String(result.retainedGroups)} retained, ${String(result.droppedGroups)} dropped`,
+    `Compacted ranges: ${compactedRanges}`,
+    `Offloaded handles: ${offloadedHandles}`,
+    `Pinned sequences: ${pinnedSeqs}`,
+    ...(result.messages === undefined
+      ? []
+      : ["Messages content:", JSON.stringify(result.messages, null, 2)]),
+    "",
+  ].join("\n");
+}
+
 /** Registers read-only inspection of a stored run with any built-in context strategy. */
 export const contextCommand: CommandModule = {
   name: "context",
@@ -164,7 +194,9 @@ export const contextCommand: CommandModule = {
             context.out.error("content_may_be_sensitive");
           }
           context.out.json(ContextInspectionSchema, result);
-          context.out.print(`${JSON.stringify(result, null, 2)}\n`);
+          if (program.opts<{ json?: boolean }>().json !== true) {
+            context.out.print(humanSummary(result));
+          }
         } finally {
           await runtime.close();
         }

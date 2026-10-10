@@ -66,13 +66,18 @@ report `cancel_conflict`; both exit with code `1`.
 [--reserve-output N] [--model provider/model] [--show-content] [--json]` re-derives context
 from the stored event log without appending events or calling models. Summarizing uses only
 already-recorded compactions; it does not create a new summary.
-SQLite is opened read-only without directory creation, schema initialization, or metadata writes.
+Context inspection currently supports SQLite only. SQLite is loaded into an in-memory read-only
+snapshot without directory creation, schema initialization, metadata writes, or sidecar creation.
+If a WAL or rollback-journal sidecar exists, inspection fails rather than returning a potentially
+stale or inconsistent snapshot.
 
 Defaults are `naive`, 8,192 maximum tokens, and 1,024 reserved output tokens. The model reference
 defaults to the first configured routing default, or `heuristic/default` when none is configured.
 Token estimates use the offline heuristic counter; they are not provider-reported usage.
 
-Human output and JSON output contain metadata: strategy and version, model and budget,
+Human output summarizes the strategy and version, message/token counts versus the available budget,
+retained/dropped groups, compacted ranges, offloaded handles and byte sizes, and pinned sequences.
+JSON output contains metadata: strategy and version, model and budget,
 message count, estimated tokens, reconstructed group count, retained and dropped groups,
 all recorded compaction sequence ranges, retained offload handles and byte sizes, and pinned
 sequences. Neither offload previews nor summaries nor message text are included by default.

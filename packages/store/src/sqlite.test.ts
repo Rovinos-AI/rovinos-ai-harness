@@ -2,9 +2,9 @@
 import Database from "better-sqlite3";
 import { Id, type Event, type NewEvent, type RunStatus } from "@harness/schemas";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, type ContentCodec, type ContentCodecContext } from "./codec.js";
@@ -41,17 +41,43 @@ async function temporaryDatabase(): Promise<string> {
 }
 
 describe("read-only SQLite inspection", () => {
-  it("reads existing events without changing database bytes or allowing writes", async () => {
+  it("reads existing events without changing database files or allowing writes", async () => {
     const path = await temporaryDatabase();
     const writer = new SqliteEventStore(path);
     await writer.append(runId, [runCreated(runId, 1)], 0);
     await writer.close();
     const before = await readFile(path);
+    const directory = dirname(path);
+    const filesBefore = (await readdir(directory)).sort();
     const reader = new SqliteEventStore(path, undefined, { readOnly: true });
     expect(await collect(reader.read(runId))).toHaveLength(1);
     await expect(reader.append(runId, [modelRequest(runId, 2)], 1)).rejects.toThrow();
     await reader.close();
     expect(await readFile(path)).toEqual(before);
+    expect((await readdir(directory)).sort()).toEqual(filesBefore);
+    expect(existsSync(`${path}-wal`)).toBe(false);
+    expect(existsSync(`${path}-shm`)).toBe(false);
+  });
+
+  it("rejects a database with a WAL rather than inspecting a stale main-file snapshot", async () => {
+    const path = await temporaryDatabase();
+    const writer = new SqliteEventStore(path);
+    await writer.append(runId, [runCreated(runId, 1)], 0);
+    expect(existsSync(`${path}-wal`)).toBe(true);
+    expect(() => new SqliteEventStore(path, undefined, { readOnly: true })).toThrow(
+      StoreUnavailableError,
+    );
+    await writer.close();
+  });
+
+  it("validates encryption mode without writing metadata in read-only mode", async () => {
+    const path = await temporaryDatabase();
+    const writer = new SqliteEventStore(path);
+    await writer.append(runId, [runCreated(runId, 1)], 0);
+    await writer.close();
+    expect(() => new SqliteEventStore(path, encryptionCodec, { readOnly: true })).toThrow(
+      StoreEncryptionMismatchError,
+    );
   });
 
   it("does not create a missing database in read-only mode", async () => {

@@ -38,12 +38,15 @@ import {
   decodeStoredContent,
   eventFromRow,
   initializeEncryptionMetadata,
+  validateEncryptionMetadata,
   insertSnapshot,
   parseStoredMeta,
+  runListPage,
   type EventRow,
   type RunRow,
   type RunSummaryRow,
 } from "./serialization.js";
+import { openReadOnlyDatabase } from "./read-only.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
@@ -101,25 +104,6 @@ async function encodeEvents(
   );
 }
 
-function runListPage(
-  rows: readonly RunSummaryRow[],
-  limit: number,
-): { runs: RunSummary[]; nextCursor?: string } {
-  const hasMore = rows.length > limit;
-  const page = rows.slice(0, limit);
-  const runs = page.map((row) => ({
-    runId: Id.parse(row.run_id),
-    createdAt: row.created_at,
-    status: RunStatus.parse(row.status),
-    lastSeq: row.last_seq,
-    lastTs: row.last_ts,
-  }));
-  const last = page.at(-1);
-  const nextCursor =
-    hasMore && last !== undefined ? encodeCursor(last.created_at, last.run_id) : undefined;
-  return nextCursor === undefined ? { runs } : { runs, nextCursor };
-}
-
 function decodeCursor(cursor: string): { createdAt: number; runId: Id } {
   try {
     const decoded = Buffer.from(cursor, "base64url").toString("utf8");
@@ -128,10 +112,6 @@ function decodeCursor(cursor: string): { createdAt: number; runId: Id } {
   } catch {
     throw new InvalidEventError([["cursor"]]);
   }
-}
-
-function encodeCursor(createdAt: number, runId: Id): string {
-  return Buffer.from(JSON.stringify([createdAt, runId])).toString("base64url");
 }
 
 /** Durable SQLite implementation of the append-only event store. */
@@ -185,7 +165,7 @@ export class SqliteEventStore implements EventStore {
     clock: Clock = systemClock,
   ) {
     const parsedOptions = sqliteStoreOptionsSchema.parse(options);
-    this.db = new Database(path, { readonly: parsedOptions.readOnly });
+    this.db = parsedOptions.readOnly ? openReadOnlyDatabase(path) : new Database(path);
     this.codec = codec;
     this.snapshotKeep = snapshotKeep({ snapshotKeep: parsedOptions.snapshotKeep });
     try {
@@ -194,6 +174,8 @@ export class SqliteEventStore implements EventStore {
         this.db.pragma("synchronous = NORMAL");
         this.db.exec(SQLITE_SCHEMA);
         initializeEncryptionMetadata(this.db, this.codec.encrypted);
+      } else {
+        validateEncryptionMetadata(this.db, this.codec.encrypted);
       }
       this.db.pragma("busy_timeout = 5000");
       this.db.pragma("foreign_keys = ON");

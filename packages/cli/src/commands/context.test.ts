@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessConfigSchema } from "@harness/config";
 import { createRuntime as composeRuntime, type RuntimeOverrides } from "@harness/core";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,12 +110,18 @@ describe("harness context", () => {
     const test = await harness();
     expect(await main(["context", runId], test.context)).toBe(0);
     const output = test.stdout.join("");
-    expect(output).toContain('"messageCount": 5');
+    expect(output).toMatch(/^Strategy: naive v\d+/mu);
+    expect(output).toContain("Messages: 5");
+    expect(output).toContain("Estimated tokens:");
+    expect(output).toContain("Groups: 4 retained, 0 dropped");
+    expect(output).toContain("Compacted ranges: 2-2");
+    expect(output).toContain(`Offloaded handles: ${handle} (10000 bytes)`);
+    expect(output).toContain("Pinned sequences: 1, 2");
     expect(output).toContain(handle);
-    expect(output).toContain('"bytes": 10000');
+    expect(output).not.toContain("{");
     expect(output).not.toContain("tokenized");
     expect(output).not.toContain("<EMAIL");
-    expect(test.stderr).toEqual([]);
+    expect(test.stderr.join("")).not.toMatch(/^\s*\{/mu);
     expect(test.append).not.toHaveBeenCalled();
     expect(test.modelCall).not.toHaveBeenCalled();
     expect(test.close).toHaveBeenCalledOnce();
@@ -145,6 +151,7 @@ describe("harness context", () => {
         ),
       ).toBe(0);
       expect(test.stdout).toHaveLength(1);
+      expect(test.stderr).toEqual([]);
       const result = parseJson(ContextInspectionSchema, test.stdout.join(""));
       expect(result).toMatchObject({
         runId,
@@ -162,6 +169,7 @@ describe("harness context", () => {
       });
       expect(result.messages).toBeUndefined();
       expect(test.stderr.join("")).not.toContain("tokenized");
+      expect(test.stderr.join("")).not.toMatch(/^\s*\{/mu);
       expect(test.append).not.toHaveBeenCalled();
       expect(test.modelCall).not.toHaveBeenCalled();
       expect(test.close).toHaveBeenCalledOnce();
@@ -301,10 +309,12 @@ describe("harness context", () => {
       );
       await store.close();
       const before = await readFile(path);
+      const filesBefore = (await readdir(directory)).sort();
       test.context.createRuntime = (config, overrides) =>
         composeRuntime(config, { ...overrides, dataDir: directory });
       expect(await main(["context", runId, "--json"], test.context)).toBe(0);
       expect(await readFile(path)).toEqual(before);
+      expect((await readdir(directory)).sort()).toEqual(filesBefore);
       test.context.createRuntime = (config, overrides) =>
         composeRuntime(config, { ...overrides, dataDir: join(directory, "missing") });
       expect(await main(["context", runId], test.context)).toBe(1);

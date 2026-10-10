@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, joinEvent, parseJson, type Event as StoredEvent } from "@harness/schemas";
+import { Id, RunStatus, joinEvent, parseJson, type Event as StoredEvent } from "@harness/schemas";
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { ContentCodec, EncodedSnapshot } from "../codec.js";
@@ -10,6 +10,7 @@ import {
   StoreEncryptionMismatchError,
   StoreUnavailableError,
 } from "../errors.js";
+import type { RunSummary } from "../types.js";
 
 /** Initialize or validate the durable content-encryption mode for a SQLite database. */
 export function initializeEncryptionMetadata(db: Database.Database, encrypted: boolean): void {
@@ -35,6 +36,24 @@ export function initializeEncryptionMetadata(db: Database.Database, encrypted: b
       throw new StoreEncryptionMismatchError();
     }
   }).immediate();
+}
+
+/** Validate encryption mode without writing metadata when opening a read-only store. */
+export function validateEncryptionMetadata(db: Database.Database, encrypted: boolean): void {
+  const readMetadata = db.prepare<[string], { metadata_value: string }>(
+    "SELECT metadata_value FROM store_metadata WHERE metadata_key = ?",
+  );
+  const contentCount = db.prepare<[], { count: number }>(
+    "SELECT (SELECT COUNT(*) FROM events) + (SELECT COUNT(*) FROM snapshots) AS count",
+  );
+  const stored = readMetadata.get("encrypted");
+  if (stored === undefined) {
+    if (encrypted && (contentCount.get()?.count ?? 0) > 0) {
+      throw new StoreEncryptionMismatchError();
+    }
+  } else if (stored.metadata_value !== String(encrypted)) {
+    throw new StoreEncryptionMismatchError();
+  }
 }
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
@@ -67,6 +86,28 @@ export interface RunSummaryRow {
   status: string;
   last_seq: number;
   last_ts: number;
+}
+
+/** Convert a SQLite run-list page into the event-store result and opaque cursor. */
+export function runListPage(
+  rows: readonly RunSummaryRow[],
+  limit: number,
+): { runs: RunSummary[]; nextCursor?: string } {
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const runs = page.map((row) => ({
+    runId: Id.parse(row.run_id),
+    createdAt: row.created_at,
+    status: RunStatus.parse(row.status),
+    lastSeq: row.last_seq,
+    lastTs: row.last_ts,
+  }));
+  const last = page.at(-1);
+  const nextCursor =
+    hasMore && last !== undefined
+      ? Buffer.from(JSON.stringify([last.created_at, last.run_id])).toString("base64url")
+      : undefined;
+  return nextCursor === undefined ? { runs } : { runs, nextCursor };
 }
 
 /** Insert a snapshot and normalize primary-key collisions to the store contract. */
