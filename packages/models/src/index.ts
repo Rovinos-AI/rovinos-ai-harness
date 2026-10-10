@@ -6,7 +6,13 @@ export {
   type ProviderErrorCode,
   type ProviderErrorOptions,
 } from "./errors.js";
-export { ModelGateway, type ModelGatewayDependencies } from "./gateway.js";
+export {
+  ModelGateway,
+  type ModelGatewayContext,
+  type ModelGatewayDependencies,
+  type ModelGatewayOptions,
+  type ModelGatewayResponse,
+} from "./gateway.js";
 export { AdapterRegistry } from "./registry.js";
 export {
   AnthropicAdapter,
@@ -33,3 +39,12 @@ export {
   type ProviderId,
   type ProviderSchemaRule,
 } from "./provider-schema-rules.js";
+export {
+  EnforcementIssueSchema,
+  EnforcementRungSchema,
+  OutputWithToolsUnsupportedError,
+  selectEnforcementRung,
+  type EnforcementIssue,
+  type EnforcementResult,
+  type EnforcementRung,
+} from "./enforce/index.js";

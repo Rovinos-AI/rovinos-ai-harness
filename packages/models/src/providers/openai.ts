@@ -33,8 +33,8 @@ export interface OpenAIAdapterOptions {
 /** OpenAI Chat Completions provider adapter. */
 export class OpenAIAdapter implements ProviderAdapter {
   readonly provider = "openai";
+  readonly capabilities: Partial<Capabilities>;
   private readonly client: OpenAI;
-  private readonly capabilities: Partial<Capabilities>;
 
   /**
    * Creates an OpenAI adapter with SDK retries disabled.

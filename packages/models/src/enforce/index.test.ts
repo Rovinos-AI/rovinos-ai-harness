@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: Apache-2.0
+import { describe, expect, it } from "vitest";
+import { lookupCapabilities } from "@harness/schemas";
+import {
+  OutputWithToolsUnsupportedError,
+  selectEnforcementRung,
+  stripSyntheticToolCall,
+} from "./index.js";
+
+describe("structured-output enforcement selection", () => {
+  it.each([
+    [{ structuredOutput: "native", forcedToolChoice: false }, undefined, "native"],
+    [{ structuredOutput: "tool", forcedToolChoice: true }, undefined, "tool"],
+    [{ structuredOutput: "none", forcedToolChoice: true }, undefined, "tool"],
+    [{ structuredOutput: "json_mode", forcedToolChoice: false }, undefined, undefined],
+    [{ structuredOutput: "native", forcedToolChoice: false }, "native", "native"],
+    [{ structuredOutput: "tool", forcedToolChoice: true }, "native", undefined],
+    [{ structuredOutput: "tool", forcedToolChoice: true }, "tool", "tool"],
+  ] as const)("selects the available capped rung", (capabilityOverrides, maxRung, expected) => {
+    const capabilities = lookupCapabilities(
+      { provider: "openai", model: "test" },
+      capabilityOverrides,
+    ).capabilities;
+    expect(selectEnforcementRung(capabilities, maxRung)).toBe(expected);
+  });
+
+  it("strips only the synthetic result-tool call", () => {
+    const parts = [
+      { type: "text" as const, text: "keep" },
+      {
+        type: "tool_call" as const,
+        callId: "00000000000000000000000000",
+        toolId: "emit_result",
+        args: {},
+      },
+      {
+        type: "tool_call" as const,
+        callId: "00000000000000000000000001",
+        toolId: "other",
+        args: {},
+      },
+    ];
+
+    expect(stripSyntheticToolCall(parts)).toEqual([parts[0], parts[2]]);
+  });
+
+  it("uses a stable typed error for output requests with tools", () => {
+    expect(new OutputWithToolsUnsupportedError().code).toBe("output_with_tools_unsupported");
+  });
+});
