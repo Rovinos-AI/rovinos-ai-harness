@@ -2,7 +2,7 @@
 import { ROOT_CONTEXT, type Context, type SpanContext } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import type { LogRecordProcessor, SdkLogRecord } from "@opentelemetry/sdk-logs";
+import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { attr } from "../attr.js";
 import { __resetLogRegistryForTests, defineLogRecord } from "../log-registry.js";
@@ -29,8 +29,8 @@ function defineTestLogRecord() {
   });
 }
 
-function makeSdkLogRecord(overrides: Partial<SdkLogRecord> = {}): SdkLogRecord {
-  const record: SdkLogRecord = {
+function makeSdkLogRecord(overrides: Partial<ReadWriteLogRecord> = {}): ReadWriteLogRecord {
+  const record: ReadWriteLogRecord = {
     hrTime: [1, 2],
     hrTimeObserved: [3, 4],
     spanContext,
@@ -61,7 +61,7 @@ function makeSdkLogRecord(overrides: Partial<SdkLogRecord> = {}): SdkLogRecord {
 
 function createNextProcessor() {
   return {
-    onEmit: vi.fn<(record: SdkLogRecord, context?: Context) => void>(),
+    onEmit: vi.fn<(record: ReadWriteLogRecord, context?: Context) => void>(),
     forceFlush: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     shutdown: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   } satisfies LogRecordProcessor;

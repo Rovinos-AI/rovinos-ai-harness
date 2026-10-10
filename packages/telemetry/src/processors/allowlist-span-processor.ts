@@ -3,7 +3,6 @@ import {
   isSpanContextValid,
   SpanKind,
   SpanStatusCode,
-  type Attributes,
   type Context,
   type SpanContext,
 } from "@opentelemetry/api";

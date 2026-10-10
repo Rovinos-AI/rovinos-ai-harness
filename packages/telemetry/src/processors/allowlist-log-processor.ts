@@ -2,7 +2,7 @@
 import { isSpanContextValid, type SpanContext, type Context } from "@opentelemetry/api";
 import type { SeverityNumber } from "@opentelemetry/api-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import type { LogRecordProcessor, SdkLogRecord } from "@opentelemetry/sdk-logs";
+import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import { Code } from "@harness/schemas";
 import { countDroppedTelemetry } from "../metrics.js";
 import { lookupLogDefinition, type LogRecordDefinition } from "../log-registry.js";
@@ -52,7 +52,7 @@ function lookupDefinition(record: Record<string, unknown>): LogRecordDefinition 
 function sanitizedCopy(
   record: Record<string, unknown>,
   definition: LogRecordDefinition,
-): SdkLogRecord {
+): ReadWriteLogRecord {
   if (
     !isHrTime(record.hrTime) ||
     !isHrTime(record.hrTimeObserved) ||
@@ -72,7 +72,7 @@ function sanitizedCopy(
   const severityNumber = isSeverityNumber(record.severityNumber)
     ? record.severityNumber
     : undefined;
-  const sanitized: SdkLogRecord = {
+  const sanitized: ReadWriteLogRecord = {
     hrTime: [record.hrTime[0], record.hrTime[1]],
     hrTimeObserved: [record.hrTimeObserved[0], record.hrTimeObserved[1]],
     ...(spanContext === undefined ? {} : { spanContext }),
@@ -102,7 +102,7 @@ export class AllowlistLogRecordProcessor implements LogRecordProcessor {
   constructor(private readonly next: LogRecordProcessor) {}
 
   /** Sanitizes log records before forwarding them; malformed and unregistered records are dropped. */
-  onEmit(record: SdkLogRecord, context?: Context): void {
+  onEmit(record: ReadWriteLogRecord, context?: Context): void {
     try {
       const input: unknown = record;
       if (!isRecord(input)) {
