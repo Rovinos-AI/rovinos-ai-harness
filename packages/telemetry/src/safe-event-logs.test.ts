@@ -6,6 +6,7 @@ import {
   LoggerProvider,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import { describe, expect, it, vi } from "vitest";
 import { listLogDefinitions } from "./log-registry.js";
 import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
@@ -87,7 +88,7 @@ const events = [
 describe("SafeEvent log projection", () => {
   it.each(events)("registers and emits every SafeEvent kind with its mapped fields", (event) => {
     const emit = vi.fn<(record: LogRecord) => void>();
-    const logger = { emit } satisfies Logger;
+    const logger = { emit, enabled: () => true } satisfies Logger;
 
     emitSafeEvent(logger, event);
 
@@ -110,7 +111,7 @@ describe("SafeEvent log projection", () => {
 
   it("omits absent optional fields and aggregates PII entity counts", () => {
     const emit = vi.fn<(record: LogRecord) => void>();
-    const logger = { emit } satisfies Logger;
+    const logger = { emit, enabled: () => true } satisfies Logger;
     const event = SafeEvent.parse({
       ...common,
       kind: "tool_call",
@@ -126,8 +127,19 @@ describe("SafeEvent log projection", () => {
 
   it("uses the allowlist processor before the real log exporter", async () => {
     const exporter = new InMemoryLogRecordExporter();
-    const processor = new AllowlistLogRecordProcessor(new SimpleLogRecordProcessor(exporter));
-    const provider = new LoggerProvider({ processors: [processor] });
+    const processor = new AllowlistLogRecordProcessor(new SimpleLogRecordProcessor({ exporter }));
+    const provider = new LoggerProvider({
+      resource: resourceFromAttributes({
+        "service.name": "harness",
+        "service.version": "1.0.0",
+        "harness.policy.version": "2",
+        "telemetry.sdk.name": "opentelemetry",
+        "telemetry.sdk.language": "nodejs",
+        "telemetry.sdk.version": "2.12.0",
+        "host.name": "private-host",
+      }),
+      processors: [processor],
+    });
     const logger = provider.getLogger("@harness/telemetry");
 
     try {
@@ -147,7 +159,14 @@ describe("SafeEvent log projection", () => {
         traceId: common.traceId,
         spanId: common.spanId,
       });
-      expect(exported?.resource.attributes).toEqual({});
+      expect(exported?.resource.attributes).toEqual({
+        "service.name": "harness",
+        "service.version": "1.0.0",
+        "harness.policy.version": "2",
+        "telemetry.sdk.name": "opentelemetry",
+        "telemetry.sdk.language": "nodejs",
+        "telemetry.sdk.version": "2.12.0",
+      });
       expect(JSON.stringify(exported)).not.toContain("sensitive free-form body");
     } finally {
       await provider.shutdown();
@@ -160,7 +179,10 @@ describe("SafeEvent log projection", () => {
         .map(({ name }) => name)
         .sort(),
     ).toEqual(events.map(({ kind }) => `harness.safe.${kind}`).sort());
-    const logger = { emit: vi.fn<(record: LogRecord) => void>() } satisfies Logger;
+    const logger = {
+      emit: vi.fn<(record: LogRecord) => void>(),
+      enabled: () => true,
+    } satisfies Logger;
     expect(() => {
       Reflect.apply(emitSafeEvent, undefined, [logger, {}]);
     }).toThrow();
