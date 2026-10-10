@@ -468,7 +468,10 @@ describe("SqliteEventStore", () => {
     try {
       await expect(collect(reopened.read(runId))).resolves.toMatchObject([
         { seq: 0 },
-        { seq: 1, messages: [{ content: canary }] },
+        {
+          seq: 1,
+          messages: [{ role: "user", parts: [{ type: "text", text: canary }] }],
+        },
       ]);
     } finally {
       await reopened.close();
