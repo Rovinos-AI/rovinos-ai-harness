@@ -1039,6 +1039,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@harness/models@workspace:packages/models":
+  version: 0.0.0-use.local
+  resolution: "@harness/models@workspace:packages/models"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.5"
+  languageName: unknown
+  linkType: soft
+
 "@harness/pii@workspace:packages/pii":
   version: 0.0.0-use.local
   resolution: "@harness/pii@workspace:packages/pii"
