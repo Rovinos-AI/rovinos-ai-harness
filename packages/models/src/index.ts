@@ -6,6 +6,7 @@ export {
   type ProviderErrorCode,
   type ProviderErrorOptions,
 } from "./errors.js";
+export { prepareMessagesForProvider } from "./blobs.js";
 export {
   ModelGateway,
   type ModelGatewayContext,

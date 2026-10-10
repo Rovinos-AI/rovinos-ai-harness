@@ -43,6 +43,7 @@ const providerDefaults: ReadonlyMap<string, Capabilities> = new Map([
       structuredOutput: "native",
       forcedToolChoice: true,
       parallelToolCalls: true,
+      opaqueRoundTrip: true,
     },
   ],
 ]);

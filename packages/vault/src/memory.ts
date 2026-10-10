@@ -7,6 +7,7 @@ import {
   type VaultAdmin,
   type VaultReader,
   type VaultResolver,
+  type VaultResolveContext,
   type VaultWriter,
 } from "./types.js";
 
@@ -24,6 +25,7 @@ interface Entry {
 export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, VaultAdmin {
   private readonly entries = new Map<Id, Map<TokenValue, Entry>>();
   private readonly counters = new Map<Id, Map<string, number>>();
+  private readonly purgeEpochs = new Map<Id, number>();
 
   /** Store a trimmed value or return the matching token already in the run. */
   put(runId: Id, entityType: Code, raw: string): Promise<TokenValue> {
@@ -67,7 +69,11 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
   }
 
   /** Resolve a token only within its owning run. */
-  resolve(runId: Id, token: TokenValue): Promise<string | undefined> {
+  resolve(
+    runId: Id,
+    token: TokenValue,
+    _context: VaultResolveContext,
+  ): Promise<string | undefined> {
     return Promise.resolve(this.entries.get(runId)?.get(token)?.rawValue);
   }
 
@@ -78,10 +84,23 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
     );
   }
 
-  /** Purge entries but preserve counters so token numbers are never reused. */
+  /** Return a monotonic version for entries ever added to or purged from a run. */
+  version(runId: Id): Promise<number> {
+    const counters = this.counters.get(runId);
+    let version = this.purgeEpochs.get(runId) ?? 0;
+    for (const nextNumber of counters?.values() ?? []) {
+      version += nextNumber;
+    }
+    return Promise.resolve(version);
+  }
+
+  /** Purge entries, advance the version, and preserve counters so token numbers are never reused. */
   purge(runId: Id): Promise<number> {
     const removed = this.entries.get(runId)?.size ?? 0;
     this.entries.delete(runId);
+    if (removed > 0) {
+      this.purgeEpochs.set(runId, (this.purgeEpochs.get(runId) ?? 0) + 1);
+    }
     return Promise.resolve(removed);
   }
 

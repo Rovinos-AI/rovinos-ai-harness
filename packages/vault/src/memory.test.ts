@@ -14,7 +14,9 @@ describe("InMemoryVault", () => {
 
     expect(first).toBe("<EMAIL_1>");
     expect(sameIdentity).toBe(first);
-    await expect(vault.resolve(runId, first)).resolves.toBe("Alice@Example.test");
+    await expect(vault.resolve(runId, first, { boundary: "ui" })).resolves.toBe(
+      "Alice@Example.test",
+    );
   });
 
   it("numbers independently by run and entity type", async () => {
@@ -35,8 +37,8 @@ describe("InMemoryVault", () => {
     expect(dotted).toBe("<A_B_2>");
     await expect(vault.put(runId, "a-b", "first value")).resolves.toBe(hyphenated);
     await expect(vault.put(runId, "a.b", "second value")).resolves.toBe(dotted);
-    await expect(vault.resolve(runId, hyphenated)).resolves.toBe("first value");
-    await expect(vault.resolve(runId, dotted)).resolves.toBe("second value");
+    await expect(vault.resolve(runId, hyphenated, { boundary: "ui" })).resolves.toBe("first value");
+    await expect(vault.resolve(runId, dotted, { boundary: "ui" })).resolves.toBe("second value");
   });
 
   it("serializes concurrent duplicate puts to one token", async () => {
@@ -53,8 +55,8 @@ describe("InMemoryVault", () => {
     const vault = new InMemoryVault();
     const token = await vault.put(runId, "email", "alice@example.test");
 
-    await expect(vault.resolve(runId, "<EMAIL_2>")).resolves.toBeUndefined();
-    await expect(vault.resolve(anotherRunId, token)).resolves.toBeUndefined();
+    await expect(vault.resolve(runId, "<EMAIL_2>", { boundary: "ui" })).resolves.toBeUndefined();
+    await expect(vault.resolve(anotherRunId, token, { boundary: "ui" })).resolves.toBeUndefined();
   });
 
   it("lists detached values and reports zero entries for unknown runs", async () => {
@@ -75,7 +77,7 @@ describe("InMemoryVault", () => {
     await expect(vault.purge(runId)).resolves.toBe(1);
     await expect(vault.purge(runId)).resolves.toBe(0);
     await expect(vault.stats(runId)).resolves.toEqual({ entries: 0 });
-    await expect(vault.resolve(runId, token)).resolves.toBeUndefined();
+    await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBeUndefined();
     await expect(vault.put(runId, "email", "alice@example.test")).resolves.toBe("<EMAIL_2>");
   });
 

@@ -356,7 +356,7 @@ describe("loadConfig", () => {
       servers: [],
       policy: {},
       pii: { defaultAction: "tokenize", rules: [] },
-      telemetry: {},
+      telemetry: { sentinel: { minValueLength: 6 } },
       sandbox: {},
     });
   });

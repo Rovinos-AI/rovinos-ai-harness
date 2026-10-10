@@ -9,8 +9,8 @@ import { ProviderError } from "./errors.js";
 import { ModelGateway } from "./gateway.js";
 import * as ModelExports from "./index.js";
 import { AdapterRegistry } from "./registry.js";
-import type { ProviderAdapter, ProviderContext } from "./types.js";
 import { FakeProvider } from "./testing/fake-provider.js";
+import type { ProviderAdapter, ProviderContext } from "./types.js";
 import { abortableSleep } from "./resilience/retry.js";
 
 afterEach(() => {
@@ -59,7 +59,7 @@ describe("ModelGateway", () => {
     });
 
     const call = complete.mock.calls[0];
-    expect(call?.[0]).toBe(request);
+    expect(call?.[0]).toEqual(request);
     expect(call?.[1].ids).toBe(ids);
     expect(call?.[1].clock).toBe(clock);
     expect(call?.[1].signal).not.toBe(signal);
@@ -75,6 +75,59 @@ describe("ModelGateway", () => {
       fallbackDepth: 0,
       providerBlobs: null,
     });
+  });
+
+  it("removes foreign opaque parts and retains normalized assistant parts", async () => {
+    const provider = new FakeProvider("sample", [
+      {
+        parts: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+        latencyMs: 0,
+      },
+    ]);
+    const gateway = new ModelGateway(new AdapterRegistry([provider]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    const requestWithForeignBlobs: ModelRequest = {
+      ...request,
+      messages: [
+        {
+          role: "assistant",
+          parts: [
+            { type: "text", text: "continue" },
+            { type: "tool_call", callId: request.requestId, toolId: "lookup", args: {} },
+            { type: "opaque", provider: "other", blob: { raw: true } },
+          ],
+        },
+        {
+          role: "user",
+          parts: [{ type: "opaque", provider: "other", blob: { raw: true } }],
+        },
+      ],
+    };
+
+    await gateway.complete(requestWithForeignBlobs, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+    });
+
+    expect(provider.requests[0]?.messages).toEqual([
+      {
+        role: "assistant",
+        parts: [
+          { type: "text", text: "continue" },
+          { type: "tool_call", callId: request.requestId, toolId: "lookup", args: {} },
+        ],
+      },
+      { role: "user", parts: [] },
+    ]);
+    expect(
+      provider.requests[0]?.messages.flatMap(({ parts }) =>
+        parts.filter((part) => part.type === "opaque" && part.provider !== provider.provider),
+      ),
+    ).toEqual([]);
   });
 
   it("retries retryable provider failures under the configured policy", async () => {

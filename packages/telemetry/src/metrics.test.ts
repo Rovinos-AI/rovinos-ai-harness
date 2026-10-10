@@ -2,7 +2,7 @@
 import { metrics } from "@opentelemetry/api";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TelemetryDropReason } from "./metrics.js";
-import { countDroppedTelemetry } from "./metrics.js";
+import { countDroppedTelemetry, countSkippedShortValues } from "./metrics.js";
 
 const meter = metrics.getMeter("@harness/telemetry");
 const counter = meter.createCounter("harness.telemetry.dropped");
@@ -12,6 +12,7 @@ const add = vi.spyOn(counter, "add");
 
 const dropReasons: readonly TelemetryDropReason[] = [
   "unregistered_span",
+  "unregistered_log_record",
   "unregistered_attr",
   "invalid_attr",
   "event_stripped",
@@ -42,5 +43,13 @@ describe("countDroppedTelemetry", () => {
     expect(() => {
       countDroppedTelemetry("processor_error");
     }).not.toThrow();
+  });
+
+  it("counts skipped short sentinel values without attributes", () => {
+    countSkippedShortValues(3);
+
+    expect(getMeter).toHaveBeenCalledWith("@harness/telemetry");
+    expect(createCounter).toHaveBeenCalledWith("harness.sentinel.short_values_skipped");
+    expect(add).toHaveBeenCalledWith(3);
   });
 });

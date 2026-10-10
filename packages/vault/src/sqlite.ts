@@ -14,6 +14,7 @@ import {
   type VaultReader,
   type VaultResolver,
   type VaultWriter,
+  type VaultResolveContext,
 } from "./types.js";
 
 const MAX_VALUE_BYTES = 8 * 1024;
@@ -24,6 +25,10 @@ const MIGRATIONS = [
   {
     version: "0001_init",
     path: fileURLToPath(new URL("../migrations/sqlite/0001_init.sql", import.meta.url)),
+  },
+  {
+    version: "0002_purge_epochs",
+    path: fileURLToPath(new URL("../migrations/sqlite/0002_purge_epochs.sql", import.meta.url)),
   },
 ] as const;
 
@@ -234,7 +239,11 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
   }
 
   /** Resolve a token only within its owning run. */
-  async resolve(runId: Id, token: TokenValue): Promise<string | undefined> {
+  async resolve(
+    runId: Id,
+    token: TokenValue,
+    _context: VaultResolveContext,
+  ): Promise<string | undefined> {
     let row: VaultEntryRow | undefined;
     try {
       row = this.db
@@ -263,11 +272,37 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     return Promise.all(rows.map((row) => this.decryptEntry(runId, row)));
   }
 
-  /** Remove a run's encrypted entries without resetting token numbering. */
+  /** Return a monotonic version for entries ever added to or purged from a run. */
+  version(runId: Id): Promise<number> {
+    try {
+      const row = this.db
+        .prepare<[Id, Id], { version: number }>(
+          "SELECT COALESCE(SUM(next_n - 1), 0) + COALESCE((SELECT purge_epoch FROM vault_purge_epochs WHERE run_id = ?), 0) AS version FROM vault_counters WHERE run_id = ?",
+        )
+        .get(runId, runId);
+      return Promise.resolve(row?.version ?? 0);
+    } catch {
+      return Promise.reject(new VaultOperationError("vault_unavailable"));
+    }
+  }
+
+  /** Remove a run's encrypted entries, advance its version, and preserve token numbering. */
   purge(runId: Id): Promise<number> {
     try {
-      const result = this.db.prepare<[Id]>("DELETE FROM vault_entries WHERE run_id = ?").run(runId);
-      return Promise.resolve(result.changes);
+      const purge = this.db.transaction(() => {
+        const result = this.db
+          .prepare<[Id]>("DELETE FROM vault_entries WHERE run_id = ?")
+          .run(runId);
+        if (result.changes > 0) {
+          this.db
+            .prepare<[Id]>(
+              "INSERT INTO vault_purge_epochs (run_id, purge_epoch) VALUES (?, 1) ON CONFLICT(run_id) DO UPDATE SET purge_epoch = vault_purge_epochs.purge_epoch + 1",
+            )
+            .run(runId);
+        }
+        return result.changes;
+      });
+      return Promise.resolve(purge.immediate());
     } catch {
       return Promise.reject(new VaultOperationError("vault_unavailable"));
     }
