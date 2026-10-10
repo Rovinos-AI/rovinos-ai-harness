@@ -28,6 +28,17 @@ export class BudgetTracker {
   constructor(private readonly budgets: RunConfig["budgets"]) {}
 
   /**
+   * Returns the absolute wall-clock deadline while preserving excluded suspension time.
+   *
+   * @param state - State folded from the run's complete event log.
+   * @returns Epoch milliseconds when the wall-clock budget expires.
+   */
+  deadlineTs(state: RunState): number {
+    const excludedSuspensionMs = this.budgets.countSuspendedTime ? 0 : state.suspendedTimeMs;
+    return state.startedAt + this.budgets.maxWallClockMs + excludedSuspensionMs;
+  }
+
+  /**
    * Returns the first exceeded budget without changing the state or tracker.
    *
    * @param state - State folded from the run's complete event log.

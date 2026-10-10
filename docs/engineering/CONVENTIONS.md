@@ -19,7 +19,7 @@ Yarn 4 workspaces. All packages are ESM, TypeScript, scope `@harness/`.
 ```text
 packages/
   schemas/        Zod schemas + inferred types: events, event field classification, config fragments, policies (leaf package: depends on nothing internal)
-  crypto/         AES-GCM, HKDF, HMAC helpers (leaf package, created in task 12.2; no internal dependencies)
+  crypto/         AES-GCM, HKDF, HMAC helpers (leaf package with no internal dependencies)
   telemetry/      span/log registry, allowlist processors, safe-event projection, leak-sentinel hook, sanctioned logger
   store/          EventStore interface, SQLite + Postgres adapters, conformance suite, snapshots, outbox
   vault/          token vault interface + implementations, key providers

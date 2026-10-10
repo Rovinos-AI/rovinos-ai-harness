@@ -34,9 +34,11 @@ import {
   SqliteEventStore,
   type EventStore,
 } from "@harness/store";
+import { CalibratingTokenCounter, HeuristicTokenCounter, NaiveStrategy } from "@harness/context";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";
+import { StrategyContextPort } from "./context/context-port.js";
 import { RunRecorder, type EventPartial } from "./recorder.js";
 import { runLoop } from "./loop.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
@@ -1097,7 +1099,7 @@ describe("runLoop", () => {
           messages: [{ role: "user", parts: [{ type: "text", text: "test goal" }] }],
           role: "assistant",
         },
-        context: { runId, signal },
+        context: { runId, signal, deadlineTs: 3_600_100 },
       },
     ]);
     expect(await store.head(runId)).toBe(6);
@@ -1176,6 +1178,84 @@ describe("runLoop", () => {
       .find(({ name }) => name === "harness.checkpoint");
     expect(checkpointSpan?.attributes["harness.event.seq"]).toBe(checkpoint.seq);
     expect(checkpointSpan?.attributes["harness.checkpoint.reason"]).toBe("cadence");
+  });
+
+  it("calibrates after a model response and restores calibration when resumed", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const controller = new AbortController();
+    const modelRef = { provider: "test_provider", model: "test_model" };
+    const resumeToolCall = { callId: modelCallId, toolId: "resume_tool", args: {} };
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "resume_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const counter = new CalibratingTokenCounter(new HeuristicTokenCounter());
+    const contextPort = new StrategyContextPort(new NaiveStrategy(), {
+      budget: { maxTokens: 1_000, reserveOutputTokens: 100 },
+      model: modelRef,
+      counter,
+    });
+    const initialModel: ModelPort = {
+      complete: () => {
+        controller.abort("shutdown");
+        return Promise.resolve({
+          ...completion([resumeToolCall]),
+          usage: { inputTokens: 150, outputTokens: 5 },
+        });
+      },
+    };
+    const suspended = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model: initialModel,
+      tool,
+      context: contextPort,
+      ids: new SequentialIdGenerator(),
+      goal: "calibration resume",
+      configHash,
+      budgets: defaultBudgets,
+      policyVersion: "test.policy",
+      signal: controller.signal,
+    });
+
+    expect(suspended.status).toBe("suspended");
+    const savedSnapshot = await store.latestSnapshot(runId);
+    const savedCalibration = counter.snapshot();
+    expect(savedSnapshot?.context).toMatchObject({ calibration: savedCalibration });
+    expect(savedCalibration[0]?.ratio).toBeGreaterThan(1);
+
+    const resumedCounter = new CalibratingTokenCounter(new HeuristicTokenCounter());
+    const resumedContext = new StrategyContextPort(new NaiveStrategy(), {
+      budget: { maxTokens: 1_000, reserveOutputTokens: 100 },
+      model: modelRef,
+      counter: resumedCounter,
+    });
+    let calibrationAtResume: ReturnType<typeof resumedCounter.snapshot> = [];
+    const resumedModel: ModelPort = {
+      complete: () => {
+        calibrationAtResume = resumedCounter.snapshot();
+        return Promise.resolve(completion());
+      },
+    };
+    const resumed = await resumeRun(
+      createResumeOptions(store, clock, {
+        context: resumedContext,
+        model: resumedModel,
+        tool,
+      }),
+    );
+
+    expect(resumed.status).toBe("completed");
+    expect(calibrationAtResume).toEqual(savedCalibration);
   });
 
   it("forces a checkpoint when the run is suspended before the cadence", async () => {
