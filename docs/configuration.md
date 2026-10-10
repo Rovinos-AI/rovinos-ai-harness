@@ -73,7 +73,8 @@ string values are processed without changing structure. Keys remain unchanged:
 detected PII in a key with `tokenize`, `redact`, or `block` policy fails the
 operation with `pii_key_contains_pii` and per-type counts only, before vault
 writes. Keys whose detections are explicitly allowed pass through unchanged.
-JSON is limited to depth 64 and 2 MiB of serialized UTF-8.
+JSON is limited to depth 64, 2 MiB of serialized UTF-8, and 1,024 string
+values and object keys per input.
 
 Tokens are run-scoped. Independent runs may use the same token string; resolve
 each token only with its owning run ID. Existing tokens are not scanned again.

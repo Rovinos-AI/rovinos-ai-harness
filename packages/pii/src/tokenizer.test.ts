@@ -335,6 +335,16 @@ describe("Tokenizer.tokenizeJson", () => {
     expect(detect).not.toHaveBeenCalled();
   });
 
+  it("rejects excessive JSON string counts before detection", async () => {
+    const input: JsonValue[] = Array.from({ length: 1025 }, () => "safe");
+    const detect = vi.fn(emailDetector);
+
+    await expect(
+      createTokenizer("tokenize", new InMemoryVault(), detect).tokenizeJson(runA, input, context),
+    ).rejects.toMatchObject({ code: "pii_input_too_large" });
+    expect(detect).not.toHaveBeenCalled();
+  });
+
   it("preserves JSON structure, leaves safe keys untouched, and summarizes string values", async () => {
     const tokenizer = createTokenizer();
     const input: JsonValue = {

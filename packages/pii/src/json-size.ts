@@ -3,6 +3,7 @@ import type { JsonValue } from "@harness/schemas";
 import { PiiTokenizerError } from "./errors.js";
 
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
+const MAX_JSON_STRINGS = 1024;
 
 /** Reject JSON whose UTF-8 serialized size exceeds the tokenizer limit. */
 export function assertJsonSize(value: JsonValue): void {
@@ -13,6 +14,7 @@ export function assertJsonSize(value: JsonValue): void {
 export class JsonSizeTracker {
   private bytes = 0;
   private stringUnits = 0;
+  private stringCount = 0;
 
   /** Account for container delimiters, separators, and object keys. */
   addContainer(value: JsonValue[] | Readonly<Record<string, JsonValue>>): void {
@@ -63,6 +65,10 @@ export class JsonSizeTracker {
   }
 
   private addString(value: string): void {
+    if (this.stringCount >= MAX_JSON_STRINGS) {
+      throw new PiiTokenizerError("pii_input_too_large");
+    }
+    this.stringCount += 1;
     if (value.length > MAX_JSON_BYTES - this.stringUnits) {
       throw new PiiTokenizerError("pii_input_too_large");
     }
