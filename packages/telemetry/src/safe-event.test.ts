@@ -194,6 +194,11 @@ const unexportedEvents = [
     args: "TOOL_INTENT_CANARY",
   }),
   validEvent({
+    type: "run_input",
+    input: "RUN_INPUT_CANARY",
+    inputKind: "initial",
+  }),
+  validEvent({
     type: "approval_requested",
     approvalId: "00000000000000000000000002",
     callId: "00000000000000000000000002",

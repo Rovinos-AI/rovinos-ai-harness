@@ -139,7 +139,10 @@ type SafeEventEnvelope = Pick<Event, "runId" | "seq" | "ts" | "traceId" | "spanI
 
 type UnexportedEvent = Extract<
   Event,
-  { type: "model_request" | "tool_intent" | "approval_requested" | "context_compacted" }
+  {
+    type:
+      "run_input" | "model_request" | "tool_intent" | "approval_requested" | "context_compacted";
+  }
 >;
 
 function createEnvelope(event: Event, policyVersion: EventCode): SafeEventEnvelope {
@@ -154,7 +157,9 @@ function createEnvelope(event: Event, policyVersion: EventCode): SafeEventEnvelo
 }
 
 function isUnexportedEvent(event: Event): event is UnexportedEvent {
+  // run_input carries the user's goal (content); only its inputKind is meta, so it is not exported.
   return (
+    event.type === "run_input" ||
     event.type === "model_request" ||
     event.type === "tool_intent" ||
     event.type === "approval_requested" ||
