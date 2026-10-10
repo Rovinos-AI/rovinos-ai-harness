@@ -20,4 +20,48 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict placeholders until their owning tasks define those schemas. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
 
+## PII detectors and custom identifiers
+
+`@harness/pii` exports synchronous detectors for email, phone, credit cards,
+IBANs, IPv4/IPv6, AWS/GitHub keys, JWT-shaped strings, private-key opening
+markers, and URL credentials. Credit cards require Luhn validation; IBANs
+require a known country length and mod-97 validation. Detection is imperfect:
+these are simplified formats, not comprehensive coverage of sensitive text.
+JWT detection checks shape, not signature or authenticity. Private-key detection
+marks the opening header, not the entire PEM body.
+
+Detector results contain only entity codes, confidence, detector IDs, and
+UTF-16 offsets (`start` inclusive, `end` exclusive). Slice the original text
+with these offsets; do not convert them to Unicode code-point offsets.
+`resolveOverlaps` returns sorted, non-overlapping ranges, preferring length,
+then confidence, then lexically lower detector ID. Overlap chains are resolved
+in start order against the last retained range; discarded ranges are not restored.
+
+No national-ID patterns are built in. Configure an application-specific
+custom entry, then compile it once with `createCustomDetector`. For example,
+this synthetic format can be replaced with the bounded format appropriate
+to your jurisdiction:
+
+```yaml
+pii:
+  custom:
+    - name: national_id_example
+      pattern: '\bID-\d{8}\b'
+```
+
+The resulting entity code is `custom_national_id_example`; select that code
+in PII policy rules. Custom matches preserve the exact original substring.
+Optional `flags` supports `i`, `m`, `s`, and `u`; global Unicode scanning is
+always enabled. Optional `validator` is `luhn` or `mod97` (IBAN-style rotation
+of the first four characters).
+
+The conservative safety screen rejects unbounded quantifiers, quantified
+groups, alternation, look-around assertions, backreferences, and Unicode property escapes.
+It permits fixed atom repetitions up to 256 and at most one optional or
+variable bounded repetition per pattern. Patterns are limited to 1024
+characters. Rewrite rejected expressions using fixed-width atoms rather than
+disabling the screen. Unsafe patterns fail with `pii_pattern_unsafe`; invalid
+configuration or regex syntax fails with `pii_pattern_invalid`. Errors never
+contain the submitted pattern or detected value.
+
 See [Secret references](./secrets.md) for environment, file, and Key Vault reference forms and resolver behavior.

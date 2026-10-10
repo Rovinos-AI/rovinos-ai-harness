@@ -15,7 +15,8 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
-    "@harness/schemas": "workspace:^"
+    "@harness/schemas": "workspace:^",
+    "@harness/vault": "workspace:^"
   },
   "devDependencies": {
     "vitest": "3.2.6"
