@@ -24,7 +24,11 @@ export type JsonPointer = z.infer<typeof JsonPointerSchema>;
 export const PiiDetokenizeRuleSchema = z
   .object({
     toolId: Code,
-    args: z.array(JsonPointerSchema),
+    args: z.array(
+      JsonPointerSchema.refine((pointer) => pointer !== "", {
+        message: "A tool argument pointer must select a value",
+      }),
+    ),
     onUnresolvable: z.enum(["fail", "leave"]).default("fail"),
   })
   .strict();
@@ -34,7 +38,24 @@ export type PiiDetokenizeRule = z.infer<typeof PiiDetokenizeRuleSchema>;
 
 export const PiiConfigSchema = PiiPolicySchema.safeExtend({
   custom: z.array(CustomDetectorSchema).optional(),
-  detokenize: z.array(PiiDetokenizeRuleSchema).optional(),
+  detokenize: z
+    .array(PiiDetokenizeRuleSchema)
+    .superRefine((rules, context) => {
+      const seenToolIds = new Set<string>();
+      for (const [index, rule] of rules.entries()) {
+        if (seenToolIds.has(rule.toolId)) {
+          context.addIssue({
+            code: "custom",
+            path: [index, "toolId"],
+            message: "Duplicate toolId",
+            params: { errorCode: "duplicate_tool_id" },
+          });
+        } else {
+          seenToolIds.add(rule.toolId);
+        }
+      }
+    })
+    .optional(),
 }).prefault({});
 
 /** Validated PII configuration. */

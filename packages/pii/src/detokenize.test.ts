@@ -78,14 +78,11 @@ describe("detokenizeArgs", () => {
     expect(result.resolvedCount).toBe(2);
   });
 
-  it("supports a root pointer and a concrete array index", async () => {
+  it("supports a concrete array index", async () => {
     const vault = new InMemoryVault();
     const token = await vault.put(runId, "email", "alice@example.test");
     const resolver = new AuditingVaultResolver(vault, () => undefined);
 
-    await expect(
-      detokenizeArgs(runId, "mail.send", token, config([""]), resolver),
-    ).resolves.toEqual({ args: "alice@example.test", resolvedCount: 1 });
     await expect(
       detokenizeArgs(
         runId,

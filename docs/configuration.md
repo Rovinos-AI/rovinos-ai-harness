@@ -71,6 +71,9 @@ pii:
       onUnresolvable: fail
 ```
 
+The `*` segment traverses arrays only; for example, `/headers/*` does nothing
+when `headers` is an object.
+
 The conservative safety screen rejects unbounded quantifiers, quantified
 groups, alternation, look-around assertions, backreferences, and Unicode property escapes.
 It permits fixed atom repetitions up to 256 and at most one optional or

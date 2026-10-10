@@ -22,4 +22,34 @@ describe("JSON Pointer and PII detokenization config", () => {
       }).detokenize,
     ).toEqual([{ toolId: "mail.send", args: ["/to"], onUnresolvable: "fail" }]);
   });
+
+  it("rejects the root pointer in a detokenization allowlist", () => {
+    expect(
+      PiiConfigSchema.safeParse({
+        detokenize: [{ toolId: "mail.send", args: [""] }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects duplicate tool IDs with a value-free issue path", () => {
+    const result = PiiConfigSchema.safeParse({
+      detokenize: [
+        { toolId: "mail.send", args: ["/to"] },
+        { toolId: "mail.send", args: ["/body"] },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("Expected duplicate tool IDs to fail validation");
+    }
+    expect(result.error.issues).toEqual([
+      expect.objectContaining({
+        path: ["detokenize", 1, "toolId"],
+        code: "custom",
+        message: "Duplicate toolId",
+      }),
+    ]);
+    expect(JSON.stringify(result.error.issues)).not.toContain("mail.send");
+  });
 });
