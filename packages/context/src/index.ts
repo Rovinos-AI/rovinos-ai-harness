@@ -42,3 +42,9 @@ export {
   type WorkspacePort,
   type WorkspaceReadRange,
 } from "./offload.js";
+export {
+  CalibrationSnapshotSchema,
+  CalibratingTokenCounter,
+  HeuristicTokenCounter,
+  type CalibrationSnapshot,
+} from "./token-counter.js";

@@ -118,14 +118,16 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
   {
     event: validEvent({
       type: "pii_action",
-      boundary: "tool_input",
-      action: "tokenized",
+      boundary: "ui",
+      action: "detokenized",
+      toolId: "mail.send",
       entities: [{ type: "email", count: 1 }],
     }),
     kind: "pii_action",
     fields: {
-      boundary: "tool_input",
-      action: "tokenized",
+      boundary: "ui",
+      action: "detokenized",
+      toolId: "mail.send",
       entities: [{ type: "email", count: 1 }],
     },
   },

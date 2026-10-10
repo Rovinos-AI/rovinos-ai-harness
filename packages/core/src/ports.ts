@@ -5,6 +5,7 @@ import type {
   Id,
   JsonValue,
   Message,
+  ModelRef,
   ModelRequest as SharedModelRequest,
   ModelResponse,
   ModelUsage as SharedModelUsage,
@@ -16,10 +17,12 @@ import type {
 /** Provider-neutral request contract shared with the model gateway. */
 export type ModelRequest = SharedModelRequest;
 
-/** Identifies the active run and cancellation signal for an operation. */
+/** Identifies the active run, cancellation signal, and optional wall-clock deadline. */
 export interface RunContext {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  /** Epoch-millisecond wall-clock deadline computed from run budgets. */
+  readonly deadlineTs?: number;
 }
 
 /** A tool invocation proposed by the model. */
@@ -39,7 +42,7 @@ export interface ModelPort {
    * Completes a request using the configured provider.
    *
    * @param request - Request identifier and messages.
-   * @param context - Active run and cancellation signal.
+   * @param context - Active run, cancellation signal, and optional wall-clock deadline.
    * @returns Provider completion and usage metadata.
    */
   complete(request: ModelRequest, context: RunContext): Promise<ModelCompletion>;
@@ -94,6 +97,23 @@ export interface ContextPort {
    * @returns Provider-independent messages.
    */
   build(events: readonly Event[]): Promise<Message[]>;
+
+  /**
+   * Estimates the exact messages about to be sent, when the port has a token counter.
+   *
+   * @param messages - Complete provider-neutral request messages.
+   * @returns The estimate used for the request, or undefined when unavailable.
+   */
+  estimate?(messages: readonly Message[]): number;
+
+  /**
+   * Observes provider usage for the most recently built model context, when supported.
+   *
+   * @param model - Provider and model that produced the usage.
+   * @param estimated - Estimate computed before the request was sent.
+   * @param actualInputTokens - Input-token count reported by the provider.
+   */
+  observeModelResponse?(model: ModelRef, estimated: number, actualInputTokens: number): void;
 
   /**
    * Returns a JSON-safe checkpoint of the context implementation's current state.

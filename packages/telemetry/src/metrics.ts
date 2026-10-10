@@ -4,6 +4,7 @@ import { metrics, type Counter } from "@opentelemetry/api";
 /** Bounded reasons for dropping or stripping telemetry data. */
 export type TelemetryDropReason =
   | "unregistered_span"
+  | "unregistered_log_record"
   | "unregistered_attr"
   | "invalid_attr"
   | "event_stripped"

@@ -3,7 +3,7 @@ import { Code, type Event, type Id, type Message, type ToolSpec } from "@harness
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
-import type { IdGenerator, ModelCompletion, ModelPort } from "../ports.js";
+import type { IdGenerator, ModelCompletion, ModelPort, RunContext } from "../ports.js";
 
 /** Inputs needed to perform one recorded model call. */
 export interface ModelStepOptions {
@@ -14,6 +14,8 @@ export interface ModelStepOptions {
   readonly messages: Message[];
   readonly tools?: readonly ToolSpec[];
   readonly signal: AbortSignal;
+  /** Epoch-millisecond deadline from the run's wall-clock budget. */
+  readonly deadlineTs?: number;
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
@@ -37,6 +39,14 @@ function errorCode(error: unknown): Code {
     }
   }
   return "model_failed";
+}
+
+function modelRunContext(options: ModelStepOptions): RunContext {
+  return {
+    runId: options.runId,
+    signal: options.signal,
+    ...(options.deadlineTs === undefined ? {} : { deadlineTs: options.deadlineTs }),
+  };
 }
 
 /**
@@ -77,7 +87,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
           ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
           ...(role === undefined ? {} : { role }),
         },
-        { runId: options.runId, signal: options.signal },
+        modelRunContext(options),
       );
     } catch (error) {
       if (options.signal.reason === "shutdown") {
