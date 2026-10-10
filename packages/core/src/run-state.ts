@@ -246,6 +246,16 @@ function applyEvent(state: MutableRunState, event: Event, runId: Event["runId"])
   if (event.type === "model_response") {
     return applyResponseEvent(withEnvelope, event);
   }
+  if (event.type === "context_compacted") {
+    return {
+      ...withEnvelope,
+      usage: {
+        inputTokens: withEnvelope.usage.inputTokens + (event.inputTokens ?? 0),
+        outputTokens: withEnvelope.usage.outputTokens + (event.outputTokens ?? 0),
+        costMicros: withEnvelope.usage.costMicros + (event.costMicros ?? 0),
+      },
+    };
+  }
   if (event.type === "tool_intent") {
     return applyToolIntent(withEnvelope, event);
   }

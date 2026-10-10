@@ -35,7 +35,12 @@ import {
   SqliteEventStore,
   type EventStore,
 } from "@harness/store";
-import { CalibratingTokenCounter, HeuristicTokenCounter, NaiveStrategy } from "@harness/context";
+import {
+  CalibratingTokenCounter,
+  HeuristicTokenCounter,
+  NaiveStrategy,
+  SummarizingStrategy,
+} from "@harness/context";
 import { activeRuns } from "@harness/telemetry";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
@@ -56,6 +61,7 @@ import type {
   RunContext,
   ToolPort,
   ToolExecutionResult,
+  Summarizer,
 } from "./ports.js";
 import {
   applyResolvedApprovals,
@@ -850,6 +856,231 @@ describe("approval lifecycle", () => {
 });
 
 describe("runLoop", () => {
+  it("compacts before making the next model call", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const summarize = vi.fn<Summarizer["summarize"]>(({ groups, goal }) =>
+      Promise.resolve({
+        text: `summary of ${goal}: ${String(groups.length)}`,
+        usage: { inputTokens: 5, outputTokens: 2, costMicros: 20 },
+      }),
+    );
+    const summarizer: Summarizer = { summarize };
+    const model = new FakeModelPort([
+      completion([{ callId: modelCallId, toolId: "lookup", args: { query: "x" } }]),
+      completion(),
+    ]);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "lookup",
+          {
+            idempotent: true,
+            timeoutMs: 100,
+            execute: () => Promise.resolve({ outcome: "ok", result: { value: "found" } }),
+          },
+        ],
+      ]),
+    );
+
+    const result = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model,
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "compaction loop goal",
+      configHash,
+      budgets: defaultBudgets,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+      compaction: {
+        strategy: new SummarizingStrategy({ provider: "test_provider", model: "test_model" }),
+        summarizer,
+        budget: { maxTokens: 1, reserveOutputTokens: 0 },
+        counter: { count: () => 100 },
+        sanitizeSummary: (text) => Promise.resolve(text),
+        keepRecentGroups: 0,
+      },
+    });
+
+    const compactedIndex = result.events.findIndex((event) => event.type === "context_compacted");
+    const secondRequestId = model.requests[1]?.request.requestId;
+    const secondRequestIndex = result.events.findIndex(
+      (event) => event.type === "model_request" && event.requestId === secondRequestId,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.state.usage).toEqual({ inputTokens: 11, outputTokens: 12, costMicros: 44 });
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(compactedIndex).toBeGreaterThan(-1);
+    expect(compactedIndex).toBeLessThan(secondRequestIndex);
+    expect(
+      model.requests[1]?.request.messages.some((message) =>
+        message.parts.some(
+          (part) => part.type === "text" && part.text.startsWith("Summary of earlier work:"),
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("checks compaction usage against the run cost budget before requesting the model", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const summarize = vi.fn<Summarizer["summarize"]>(() =>
+      Promise.resolve({
+        text: "summary",
+        usage: { inputTokens: 4, outputTokens: 2, costMicros: 1 },
+      }),
+    );
+    const model = new FakeModelPort([
+      completion([{ callId: modelCallId, toolId: "lookup", args: { query: "x" } }]),
+    ]);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "lookup",
+          {
+            idempotent: true,
+            timeoutMs: 100,
+            execute: () => Promise.resolve({ outcome: "ok", result: { value: "found" } }),
+          },
+        ],
+      ]),
+    );
+
+    const result = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model,
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "budget compaction",
+      configHash,
+      budgets: { ...defaultBudgets, maxCostUsd: 0.000012 },
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+      compaction: {
+        strategy: new SummarizingStrategy({ provider: "test_provider", model: "test_model" }),
+        summarizer: { summarize },
+        budget: { maxTokens: 1, reserveOutputTokens: 0 },
+        counter: { count: () => 100 },
+        sanitizeSummary: (text) => Promise.resolve(text),
+        keepRecentGroups: 0,
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(model.requests).toHaveLength(1);
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(result.state.usage).toEqual({ inputTokens: 7, outputTokens: 7, costMicros: 13 });
+    expect(result.events).toContainEqual(
+      expect.objectContaining({ type: "budget_exceeded", budget: "cost", observed: 13 }),
+    );
+  });
+
+  it("does not call the summarizer after the model-step preflight exceeds its budget", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const summarize = vi.fn<Summarizer["summarize"]>(() =>
+      Promise.resolve({ text: "unused", usage: { inputTokens: 0, outputTokens: 0 } }),
+    );
+    const model = new FakeModelPort([
+      completion([{ callId: modelCallId, toolId: "lookup", args: { query: "x" } }]),
+    ]);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "lookup",
+          {
+            idempotent: true,
+            timeoutMs: 100,
+            execute: () => Promise.resolve({ outcome: "ok", result: { value: "found" } }),
+          },
+        ],
+      ]),
+    );
+
+    const result = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model,
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "step budget",
+      configHash,
+      budgets: { ...defaultBudgets, maxSteps: 1 },
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+      compaction: {
+        strategy: new SummarizingStrategy({ provider: "test_provider", model: "test_model" }),
+        summarizer: { summarize },
+        budget: { maxTokens: 1, reserveOutputTokens: 0 },
+        counter: { count: () => 100 },
+        sanitizeSummary: (text) => Promise.resolve(text),
+        keepRecentGroups: 0,
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(model.requests).toHaveLength(1);
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
+  it("continues with the model when summarization fails", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const summarize = vi.fn<Summarizer["summarize"]>(() =>
+      Promise.reject(new Error("provider unavailable")),
+    );
+    const model = new FakeModelPort([
+      completion([{ callId: modelCallId, toolId: "lookup", args: { query: "x" } }]),
+      completion(),
+    ]);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "lookup",
+          {
+            idempotent: true,
+            timeoutMs: 100,
+            execute: () => Promise.resolve({ outcome: "ok", result: { value: "found" } }),
+          },
+        ],
+      ]),
+    );
+
+    const result = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model,
+      tool,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "fallback after compaction failure",
+      configHash,
+      budgets: defaultBudgets,
+      policyVersion: "test.policy",
+      signal: new AbortController().signal,
+      compaction: {
+        strategy: new SummarizingStrategy({ provider: "test_provider", model: "test_model" }),
+        summarizer: { summarize },
+        budget: { maxTokens: 1, reserveOutputTokens: 0 },
+        counter: { count: () => 100 },
+        sanitizeSummary: (text) => Promise.resolve(text),
+        keepRecentGroups: 0,
+      },
+    });
+
+    expect(result.status).toBe("completed");
+    expect(model.requests).toHaveLength(2);
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(result.events.some((event) => event.type === "context_compacted")).toBe(false);
+  });
+
   it.each([
     ["SIGTERM", "SIGTERM"],
     ["SIGTERM", "SIGINT"],

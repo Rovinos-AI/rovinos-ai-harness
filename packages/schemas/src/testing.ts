@@ -76,6 +76,9 @@ export const eventSamples = [
     strategy: "summary",
     strategyVersion: "v1",
     summary: "compacted",
+    inputTokens: 2,
+    outputTokens: 1,
+    costMicros: 3,
   },
   {
     ...envelope,

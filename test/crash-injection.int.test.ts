@@ -15,12 +15,17 @@ import {
 } from "@harness/schemas";
 import {
   createRuntime,
+  NaiveContext,
+  resumeRun,
   RunAlreadyTerminalError,
+  RunRecorder,
+  runLoop,
   type ContextPort,
   type IdGenerator,
   type ModelCompletion,
   type ModelRequest,
 } from "@harness/core";
+import { SummarizingStrategy } from "@harness/context";
 import {
   CrashingEventStore,
   FakeModelPort,
@@ -30,7 +35,7 @@ import {
   type FakeToolDefinition,
 } from "@harness/core/testing";
 import { SqliteEventStore, type EventStore } from "@harness/store";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const config = {
   run: RunConfigSchema.parse({
@@ -582,4 +587,137 @@ describe("SQLite crash-injection matrix", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+});
+
+describe("SQLite compaction crash recovery", () => {
+  it.each(["before_commit", "after_commit"] as const)(
+    "resumes a compaction append failure %s",
+    async (mode) => {
+      const directory = await mkdtemp(join(tmpdir(), "harness-compaction-crash-"));
+      const compactRunId = Id.parse("00000000000000000000000001");
+      const segmentId = Id.parse("11111111111111111111111111");
+      const compactGoal = "compaction crash recovery";
+      const clock = new FakeClock(100);
+      const ids = new SequentialIdGenerator();
+      const database = new SqliteEventStore(join(directory, "events.sqlite"));
+      const store = new CrashingEventStore(database, { crashAt: 6, mode });
+      const tracingRuntime = await createRuntime(config, { dataDir: join(directory, "tracing") });
+      await tracingRuntime.close();
+      const model = new FakeModelPort([
+        {
+          parts: [
+            { type: "text", text: "calling lookup" },
+            {
+              type: "tool_call",
+              callId: Id.parse("22222222222222222222222222"),
+              toolId: "lookup",
+              args: { query: "synthetic" },
+            },
+          ],
+          usage: { inputTokens: 2, outputTokens: 1 },
+          finishReason: "stop",
+          provider: "fake",
+          model: "script",
+          latencyMs: 1,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+          providerBlobs: null,
+        },
+        {
+          parts: [{ type: "text", text: "finished" }],
+          usage: { inputTokens: 2, outputTokens: 1 },
+          finishReason: "stop",
+          provider: "fake",
+          model: "script",
+          latencyMs: 1,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+          providerBlobs: null,
+        },
+      ]);
+      const tool = new FakeToolPort(
+        new Map([
+          [
+            "lookup",
+            {
+              idempotent: true,
+              timeoutMs: 1_000,
+              execute: () => Promise.resolve({ outcome: "ok", result: { found: true } }),
+            },
+          ],
+        ]),
+      );
+      const context = new NaiveContext();
+      const summarize = vi.fn(() =>
+        Promise.resolve({
+          text: "durable summary",
+          usage: { inputTokens: 4, outputTokens: 2, costMicros: 3 },
+        }),
+      );
+      const compaction = {
+        strategy: new SummarizingStrategy({ provider: "fake", model: "script" }),
+        summarizer: { summarize },
+        budget: { maxTokens: 1, reserveOutputTokens: 0 },
+        counter: { count: () => 100 },
+        sanitizeSummary: (text: string) => Promise.resolve(text),
+        keepRecentGroups: 0,
+      };
+      const budgets = {
+        maxSteps: 10,
+        maxWallClockMs: 60_000,
+        countSuspendedTime: false,
+      };
+      try {
+        await expect(
+          runLoop({
+            recorder: new RunRecorder(store, compactRunId, segmentId, 0, clock),
+            clock,
+            model,
+            tool,
+            context,
+            ids,
+            goal: compactGoal,
+            configHash: "a".repeat(64),
+            budgets,
+            checkpointEveryEvents: 1_000,
+            policyVersion: "test.policy",
+            signal: new AbortController().signal,
+            compaction,
+          }),
+        ).rejects.toBeInstanceOf(SimulatedCrash);
+        expect(summarize).toHaveBeenCalledOnce();
+        const interruptedEvents = await readEvents(store, compactRunId);
+        expect(
+          interruptedEvents.filter((event) => event.type === "context_compacted"),
+        ).toHaveLength(mode === "before_commit" ? 0 : 1);
+
+        const resumed = await resumeRun({
+          store,
+          runId: compactRunId,
+          clock,
+          model,
+          tool,
+          context,
+          ids,
+          goal: compactGoal,
+          budgets,
+          checkpointEveryEvents: 1_000,
+          signal: new AbortController().signal,
+          compaction,
+        });
+        const events = await readEvents(store, compactRunId);
+
+        expect(resumed.status).toBe("completed");
+        expect(events.filter((event) => event.type === "context_compacted")).toHaveLength(1);
+        expect(events.filter((event) => event.type === "model_response")).toHaveLength(2);
+        expect(resumed.state.usage).toEqual({ inputTokens: 8, outputTokens: 4, costMicros: 3 });
+        expect(summarize).toHaveBeenCalledTimes(mode === "before_commit" ? 2 : 1);
+      } finally {
+        await database.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });

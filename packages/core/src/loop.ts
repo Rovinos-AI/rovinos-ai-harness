@@ -9,16 +9,19 @@ import {
   type RunConfig,
 } from "@harness/schemas";
 import { activeRuns } from "@harness/telemetry";
-import { BudgetTracker, type BudgetViolation } from "./budgets.js";
+import { BudgetTracker } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
 import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from "./run-state.js";
 import type { RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
-import { modelStep, modelToolOptions, type ModelStepResult } from "./steps/model-step.js";
+import type { ModelStepResult } from "./steps/model-step.js";
+import { requestModel } from "./steps/request-model.js";
+import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { toolStep } from "./steps/tool-step.js";
 import type { PreparedToolCall } from "./steps/prepare-tool.js";
 import type { ContextPort, IdGenerator, ModelPort, NewRunMetadata, ToolPort } from "./ports.js";
+import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata {
@@ -36,6 +39,8 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
+  /** Optional summarization compaction, checked before every model call. */
+  readonly compaction?: CompactionRuntimeOptions;
 }
 
 /** Execution options shared by new runs and resumptions. */
@@ -137,79 +142,6 @@ export async function continueRunLoop(
   return activeRuns.track(runId, () => runLoopSteps(options, events, execution), isTerminal);
 }
 
-/**
- * Records a budget failure and writes a checkpoint when the configured cadence requires one.
- *
- * @param recorder - Recorder for the active run segment.
- * @param events - Complete event history, extended with the failure and optional checkpoint.
- * @param violation - Budget limit exceeded by the folded run state.
- * @param checkpointer - Checkpointer associated with the active run.
- * @returns The run-status event that marks the run failed.
- */
-export async function recordBudgetFailureAndCheckpoint(
-  recorder: RunRecorder,
-  events: Event[],
-  violation: BudgetViolation,
-  checkpointer: Checkpointer,
-): Promise<Event> {
-  const recorded = await recorder.recordBatch([
-    {
-      type: "budget_exceeded",
-      v: 1,
-      budget: violation.budget,
-      limit: violation.limit,
-      observed: violation.observed,
-    },
-    {
-      type: "run_status_changed",
-      v: 1,
-      from: "running",
-      to: "failed",
-      reason: "budget_exceeded",
-    },
-  ]);
-  events.push(...recorded);
-  const failed = recorded.at(-1);
-  if (failed === undefined) {
-    throw new Error("Expected budget failure events.");
-  }
-  await checkpointAfterStep(checkpointer, events);
-  return failed;
-}
-
-async function requestModel(
-  options: RunLoopExecutionOptions,
-  runId: Id,
-  messages: Message[],
-  deadlineTs: number,
-): Promise<ModelStepResult> {
-  const estimatedTokens = options.context.estimate?.(messages);
-  const result = await modelStep({
-    recorder: options.recorder,
-    model: options.model,
-    tool: options.tool,
-    ids: options.ids,
-    runId,
-    ...modelToolOptions(options.tool, messages),
-    signal: options.signal,
-    deadlineTs,
-    ...(options.role === undefined ? {} : { role: options.role }),
-    ...(options.provider === undefined ? {} : { provider: options.provider }),
-    ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
-  });
-  if (result.outcome === "response" && estimatedTokens !== undefined) {
-    options.context.observeModelResponse?.(
-      {
-        provider: result.completion.provider,
-        model: result.completion.model,
-      },
-      estimatedTokens,
-      result.completion.usage.inputTokens,
-    );
-  }
-  return result;
-}
-
 async function recoverInterruptedModelResponse(
   options: RunLoopExecutionOptions,
   events: Event[],
@@ -244,47 +176,84 @@ async function runLoopSteps(
     if (aborted !== undefined) {
       return aborted;
     }
+    const preflight = await preflightModelBudget({
+      budgetTracker: execution.budgetTracker,
+      checkpointer: execution.checkpointer,
+      events,
+      now: options.clock.now(),
+      recorder: options.recorder,
+    });
+    if (preflight.event !== undefined) {
+      return preflight.event;
+    }
+    await compactBeforeModelCall({
+      recorder: options.recorder,
+      events,
+      compaction: options.compaction,
+      model: options.model,
+      ids: options.ids,
+      runId: execution.runId,
+      signal: options.signal,
+      modelRef: {
+        provider: options.provider ?? "unknown",
+        model: options.modelName ?? "unknown",
+      },
+      goal: options.goal,
+      deadlineTs: preflight.deadlineTs,
+    });
     const prepared = await prepareModelStep(options, events, execution);
     if (prepared.event !== undefined) {
       return prepared.event;
     }
     const modelResult = await requestModel(
-      options,
-      execution.runId,
-      prepared.context,
-      prepared.deadlineTs,
+      {
+        recorder: options.recorder,
+        model: options.model,
+        tool: options.tool,
+        ids: options.ids,
+        runId: execution.runId,
+        messages: prepared.context,
+        signal: options.signal,
+        deadlineTs: prepared.deadlineTs,
+        ...(options.role === undefined ? {} : { role: options.role }),
+        ...(options.provider === undefined ? {} : { provider: options.provider }),
+        ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
+      },
+      options.context,
     );
     events.push(...modelResult.events);
     const stoppedAfterModel = await suspendAfterModel(options, events, execution, modelResult);
     if (stoppedAfterModel !== undefined) {
       return stoppedAfterModel;
     }
-    const stepState = await checkpointAfterStep(execution.checkpointer, events);
-    if (stepState.status === "suspended") {
-      return suspendedOutcome(events);
+    const next = await finishModelStep(options, events, execution, modelResult);
+    if (next !== undefined) {
+      return next;
     }
-    if (modelResult.outcome === "failed") {
-      const failedEvent = modelResult.events.at(-1);
-      if (failedEvent === undefined) {
-        throw new Error("Expected the model step to record a failure.");
-      }
-      return failedEvent;
-    }
-    if (modelResult.outcome === "aborted") {
-      return suspendedOutcome(events);
-    }
-    const toolCalls = modelResult.preparedCalls;
-    if (toolCalls.length > 0) {
-      const outcome = await runToolCalls(options, events, execution, toolCalls);
-      if (outcome !== undefined) {
-        return outcome;
-      }
-      continue;
-    }
-
-    const finished = await recordFinalAnswer(options, events, execution);
-    return finished;
   }
+}
+
+async function finishModelStep(
+  options: RunLoopExecutionOptions,
+  events: Event[],
+  execution: RunLoopExecution,
+  modelResult: ModelStepResult,
+): Promise<Event | undefined> {
+  const stepState = await checkpointAfterStep(execution.checkpointer, events);
+  if (stepState.status === "suspended" || modelResult.outcome === "aborted") {
+    return suspendedOutcome(events);
+  }
+  if (modelResult.outcome === "failed") {
+    const failedEvent = modelResult.events.at(-1);
+    if (failedEvent === undefined) {
+      throw new Error("Expected the model step to record a failure.");
+    }
+    return failedEvent;
+  }
+  if (modelResult.preparedCalls.length > 0) {
+    return runToolCalls(options, events, execution, modelResult.preparedCalls);
+  }
+  return recordFinalAnswer(options, events, execution);
 }
 
 async function recordFinalAnswer(
@@ -310,26 +279,20 @@ async function prepareModelStep(
   execution: RunLoopExecution,
 ): Promise<{ readonly context: Message[]; readonly deadlineTs: number; readonly event?: Event }> {
   const context = await options.context.build(events.slice());
-  const state = foldRunState(events);
-  const deadlineTs = execution.budgetTracker.deadlineTs(state);
-  const budget = execution.budgetTracker.check(
-    { ...state, steps: state.steps + 1 },
-    options.clock.now(),
-  );
-  if (!budget.ok) {
-    return {
-      context,
-      deadlineTs,
-      event: await recordBudgetFailureAndCheckpoint(
-        options.recorder,
-        events,
-        budget,
-        execution.checkpointer,
-      ),
-    };
+  const preflight = await preflightModelBudget({
+    budgetTracker: execution.budgetTracker,
+    checkpointer: execution.checkpointer,
+    events,
+    now: options.clock.now(),
+    recorder: options.recorder,
+  });
+  if (preflight.event !== undefined) {
+    return { context, ...preflight };
   }
   const stopped = await suspendIfShutdown(options, events, execution);
-  return stopped === undefined ? { context, deadlineTs } : { context, deadlineTs, event: stopped };
+  return stopped === undefined
+    ? { context, deadlineTs: preflight.deadlineTs }
+    : { context, ...preflight, event: stopped };
 }
 
 async function runToolCalls(

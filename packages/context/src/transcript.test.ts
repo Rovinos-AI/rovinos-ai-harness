@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { parseJson, type Event, type Part } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
@@ -153,7 +153,12 @@ describe("eventsToTranscript", () => {
       ],
     ],
   ] as const)("matches the %s transcript golden", async (name, events) => {
-    expect(eventsToTranscript(events)).toEqual(await readGolden(name));
+    const transcript = eventsToTranscript(events);
+    if (process.env.UPDATE_GOLDEN === "1") {
+      const path = fileURLToPath(new URL(`./__golden__/${name}.json`, import.meta.url));
+      await writeFile(path, `${JSON.stringify(transcript, null, 2)}\n`, "utf8");
+    }
+    expect(transcript).toEqual(await readGolden(name));
   });
 
   it("matches tool results by call id and keeps calls and results in one group", () => {
@@ -202,7 +207,39 @@ describe("eventsToTranscript", () => {
     ]);
   });
 
-  it("renders JSON inputs and summaries and pins each reconstructed input", () => {
+  it("lets a nested compaction supersede an earlier summary without removing the goal", () => {
+    const transcript = eventsToTranscript([
+      runInput(0, "keep the goal"),
+      modelResponse(1, [{ type: "text", text: "earlier work" }]),
+      {
+        ...envelope(2),
+        type: "context_compacted",
+        fromSeq: 1,
+        toSeq: 1,
+        strategy: "summarizing",
+        strategyVersion: "v1",
+        summary: "first summary",
+      },
+      modelResponse(3, [{ type: "text", text: "later work" }]),
+      {
+        ...envelope(4),
+        type: "context_compacted",
+        fromSeq: 1,
+        toSeq: 3,
+        strategy: "summarizing",
+        strategyVersion: "v1",
+        summary: "replacement summary",
+      },
+    ]);
+
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0]?.messages[0]?.parts).toEqual([{ type: "text", text: "keep the goal" }]);
+    expect(transcript[1]?.messages[0]?.parts).toEqual([
+      { type: "text", text: "Summary of earlier work: replacement summary" },
+    ]);
+  });
+
+  it("renders JSON inputs and summaries while pinning the reconstructed input", () => {
     const transcript = eventsToTranscript([
       runInput(0, { goal: "goal" }),
       {

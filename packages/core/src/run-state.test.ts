@@ -275,12 +275,24 @@ describe("foldRunState", () => {
       runCreated(0, 100),
       statusChanged(1, "pending", "running", "start", 101),
       modelResponse(2, 4, 110),
-      statusChanged(3, "running", "suspended", "shutdown", 120),
-      statusChanged(4, "suspended", "running", "resume", 320, resumedSegmentId),
-      modelResponse(5, undefined, 330, resumedSegmentId),
+      {
+        ...envelope(3, 115),
+        type: "context_compacted",
+        fromSeq: 1,
+        toSeq: 2,
+        strategy: "summarizing",
+        strategyVersion: "v1",
+        summary: "summary",
+        inputTokens: 7,
+        outputTokens: 2,
+        costMicros: 9,
+      },
+      statusChanged(4, "running", "suspended", "shutdown", 120),
+      statusChanged(5, "suspended", "running", "resume", 320, resumedSegmentId),
+      modelResponse(6, undefined, 330, resumedSegmentId),
     ]);
 
-    expect(state.usage).toEqual({ inputTokens: 6, outputTokens: 10, costMicros: 4 });
+    expect(state.usage).toEqual({ inputTokens: 13, outputTokens: 12, costMicros: 13 });
     expect(state.steps).toBe(2);
     expect(state.startedAt).toBe(100);
     expect(state.suspendedTimeMs).toBe(200);

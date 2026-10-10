@@ -4,7 +4,12 @@
     "messages": [
       {
         "role": "user",
-        "parts": [{ "type": "text", "text": "keep the goal" }]
+        "parts": [
+          {
+            "type": "text",
+            "text": "keep the goal"
+          }
+        ]
       }
     ],
     "pinned": true
@@ -14,7 +19,12 @@
     "messages": [
       {
         "role": "user",
-        "parts": [{ "type": "text", "text": "Summary of earlier work: tool call was compacted" }]
+        "parts": [
+          {
+            "type": "text",
+            "text": "Summary of earlier work: tool call was compacted"
+          }
+        ]
       }
     ],
     "pinned": true

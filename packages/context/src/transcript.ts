@@ -27,19 +27,33 @@ function toolResultMessage(event: Extract<Event, { type: "tool_result" }>): Mess
 function removeCompactedGroups(
   groups: TranscriptGroup[],
   groupsByCallId: Map<string, TranscriptGroup>,
-  fromSeq: number,
-  toSeq: number,
+  range: {
+    readonly summaryGroups: Set<TranscriptGroup>;
+    readonly summaryRanges: Map<TranscriptGroup, number>;
+    readonly fromSeq: number;
+    readonly toSeq: number;
+  },
 ): void {
+  const { summaryGroups, summaryRanges, fromSeq, toSeq } = range;
   const removedGroups = new Set<TranscriptGroup>();
   for (let index = groups.length - 1; index >= 0; index -= 1) {
     const group = groups[index];
-    if (group?.seqs.some((seq) => seq >= fromSeq && seq <= toSeq) === true) {
-      if (group.pinned) {
-        continue;
-      }
-      groups.splice(index, 1);
-      removedGroups.add(group);
+    if (group === undefined) {
+      continue;
     }
+    const sourceOverlaps = group.seqs.some((seq) => seq >= fromSeq && seq <= toSeq);
+    const priorSummarySuperseded =
+      summaryGroups.has(group) && summaryRanges.get(group) === fromSeq - 1;
+    if (!sourceOverlaps && !priorSummarySuperseded) {
+      continue;
+    }
+    if (group.pinned && !summaryGroups.has(group)) {
+      continue;
+    }
+    groups.splice(index, 1);
+    removedGroups.add(group);
+    summaryGroups.delete(group);
+    summaryRanges.delete(group);
   }
   for (const [callId, group] of groupsByCallId) {
     if (removedGroups.has(group)) {
@@ -59,6 +73,8 @@ function removeCompactedGroups(
 export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] {
   const groups: TranscriptGroup[] = [];
   const groupsByCallId = new Map<string, TranscriptGroup>();
+  const summaryGroups = new Set<TranscriptGroup>();
+  const summaryRanges = new Map<TranscriptGroup, number>();
 
   for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
     if (event.type === "run_input") {
@@ -87,8 +103,13 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
         groupsByCallId.delete(event.callId);
       }
     } else if (event.type === "context_compacted") {
-      removeCompactedGroups(groups, groupsByCallId, event.fromSeq, event.toSeq);
-      groups.push({
+      removeCompactedGroups(groups, groupsByCallId, {
+        summaryGroups,
+        summaryRanges,
+        fromSeq: event.fromSeq,
+        toSeq: event.toSeq,
+      });
+      const summaryGroup: TranscriptGroup = {
         seqs: [event.fromSeq],
         messages: [
           {
@@ -101,9 +122,11 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
             ],
           },
         ],
-        // Summaries remain available to budgeted strategies as durable context.
         pinned: true,
-      });
+      };
+      groups.push(summaryGroup);
+      summaryGroups.add(summaryGroup);
+      summaryRanges.set(summaryGroup, event.toSeq);
     }
   }
 
