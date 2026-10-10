@@ -7,6 +7,7 @@ const vaultValueErrorCodeSchema = z.enum([
   "vault_value_empty",
   "vault_value_too_large",
   "vault_entity_type_invalid",
+  "vault_token_space_exhausted",
 ]);
 
 type VaultValueErrorCode = z.infer<typeof vaultValueErrorCodeSchema>;
@@ -15,6 +16,7 @@ const ERROR_MESSAGES: Record<VaultValueErrorCode, string> = {
   vault_value_empty: "Vault value is empty",
   vault_value_too_large: "Vault value is too large",
   vault_entity_type_invalid: "Vault entity type cannot be represented as a token",
+  vault_token_space_exhausted: "Vault token space is exhausted",
 };
 
 /** Raised when a value cannot be stored, without retaining or exposing it. */

@@ -26,6 +26,19 @@ describe("InMemoryVault", () => {
     await expect(vault.put(anotherRunId, "email", "alice@example.test")).resolves.toBe("<EMAIL_1>");
   });
 
+  it("shares numbering across entity types with the same token prefix", async () => {
+    const vault = new InMemoryVault();
+    const hyphenated = await vault.put(runId, "a-b", "first value");
+    const dotted = await vault.put(runId, "a.b", "second value");
+
+    expect(hyphenated).toBe("<A_B_1>");
+    expect(dotted).toBe("<A_B_2>");
+    await expect(vault.put(runId, "a-b", "first value")).resolves.toBe(hyphenated);
+    await expect(vault.put(runId, "a.b", "second value")).resolves.toBe(dotted);
+    await expect(vault.resolve(runId, hyphenated)).resolves.toBe("first value");
+    await expect(vault.resolve(runId, dotted)).resolves.toBe("second value");
+  });
+
   it("serializes concurrent duplicate puts to one token", async () => {
     const vault = new InMemoryVault();
     const tokens = await Promise.all(
@@ -96,5 +109,18 @@ describe("InMemoryVault", () => {
       code: "vault_entity_type_invalid",
     });
     await expect(vault.put(runId, "email", "alice@example.test")).resolves.toBe("<EMAIL_1>");
+  });
+
+  it("rejects token numbers beyond the six-digit limit", async () => {
+    const vault = new InMemoryVault();
+    Object.defineProperty(vault, "counters", {
+      value: new Map([[runId, new Map([["NAME", 999_998]])]]),
+    });
+
+    await expect(vault.put(runId, "name", "last valid token")).resolves.toBe("<NAME_999999>");
+    await expect(vault.put(runId, "name", "overflow")).rejects.toMatchObject({
+      code: "vault_token_space_exhausted",
+      message: "Vault token space is exhausted",
+    });
   });
 });

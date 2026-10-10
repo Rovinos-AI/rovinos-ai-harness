@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
+import type { Code } from "@harness/schemas";
 
 /** Runtime schema for the stable placeholder token format. */
 export const Token = z.string().regex(/^<[A-Z][A-Z0-9_]{0,31}_[1-9]\d{0,5}>$/u);
 
 /** A run-scoped placeholder for a sensitive value. */
 export type Token = z.infer<typeof Token>;
+
+/** Return the token prefix for an entity type. */
+export function tokenTypeName(entityType: Code): string {
+  return entityType.toUpperCase().replaceAll(/[-.]/gu, "_");
+}
 
 const TOKEN_PATTERN = /^<[A-Z][A-Z0-9_]{0,31}_[1-9]\d{0,5}>$/u;
 
