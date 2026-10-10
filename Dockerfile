@@ -29,6 +29,9 @@ RUN mise exec -- yarn workspaces focus @harness/cli --production \
     && for package in packages/*/; do \
          if [ -d "${package}dist" ]; then \
            mkdir -p "/out/${package}" && cp -a "${package}package.json" "${package}dist" "/out/${package}"; \
+           if [ -d "${package}migrations" ]; then \
+             cp -a "${package}migrations" "/out/${package}"; \
+           fi; \
          fi; \
        done \
     && cp -a packages/cli/dist/. /out/dist/

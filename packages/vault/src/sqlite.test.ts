@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { Code, type KeyProvider } from "@harness/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryVault } from "./memory.js";
-import { runVaultConformance } from "./conformance.js";
+import { runVaultConformance } from "./conformance.test-helpers.js";
 import { VaultOperationError } from "./errors.js";
 import { SqliteVault } from "./sqlite.js";
 
@@ -52,6 +52,22 @@ runVaultConformance("SqliteVault conformance", () => {
 });
 
 describe("SqliteVault", () => {
+  it("resolves the migration relative to the compiled module location", async () => {
+    const compiledModule = new URL("../dist/sqlite.js", import.meta.url);
+    const migrationPath = new URL("../migrations/sqlite/0001_init.sql", compiledModule);
+    const sql = await readFile(migrationPath, "utf8");
+    const database = new Database(":memory:");
+    try {
+      database.exec(sql);
+      const tables = database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        .all();
+      expect(tables).toEqual([{ name: "vault_counters" }, { name: "vault_entries" }]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("keeps a canary out of the database file", async () => {
     const { path } = await temporaryPath();
     const canary = "vault-canary-alice@example.test";

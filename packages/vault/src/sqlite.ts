@@ -185,7 +185,11 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     }
   }
 
-  /** Store a trimmed value or reuse its existing run-scoped token. */
+  /**
+   * Store a trimmed value or reuse its existing run-scoped token.
+   * Lookup uses the current key id, so rotation can issue a second token for the same value.
+   * Task 12.5 must query every active key id or keep the lookup key stable across rotations.
+   */
   async put(runId: Id, entityType: Code, raw: string): Promise<TokenValue> {
     const rawValue = raw.trim();
     if (rawValue.length === 0) {
