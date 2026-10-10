@@ -14,3 +14,8 @@ export {
   type ProviderContext,
   type ProviderResult,
 } from "./types.js";
+export {
+  OpenAIAdapter,
+  type OpenAIAdapterOptions,
+  type OpenAISecret,
+} from "./providers/openai.js";

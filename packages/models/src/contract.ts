@@ -126,6 +126,7 @@ async function assertAbortCompletion(
   didFetch: () => boolean,
 ): Promise<void> {
   const startedAt = performance.now();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
   controller.abort();
   const error = await completion.then(
     () => undefined,
