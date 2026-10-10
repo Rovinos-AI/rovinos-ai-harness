@@ -10,6 +10,7 @@ import type {
   ModelUsage as SharedModelUsage,
   Part,
   Sha256Hex,
+  ToolSpec,
 } from "@harness/schemas";
 
 /** Provider-neutral request contract shared with the model gateway. */
@@ -59,6 +60,13 @@ export interface ToolExecutionResult {
 
 /** Tool executor used by the run loop. */
 export interface ToolPort {
+  /**
+   * Returns model-visible specifications for registered tools, when available.
+   *
+   * @returns Tool specifications advertised in model requests.
+   */
+  getToolSpecs?(): readonly ToolSpec[];
+
   /**
    * Returns execution metadata for a known tool.
    *

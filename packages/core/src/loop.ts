@@ -13,7 +13,7 @@ import { Checkpointer } from "./checkpoint.js";
 import { foldRunState, planLastModelResponseRecovery, type RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
 import { RUN_SPAN } from "./spans.js";
-import { modelStep, type ModelStepResult } from "./steps/model-step.js";
+import { modelStep, type ModelStepOptions, type ModelStepResult } from "./steps/model-step.js";
 import { toolStep } from "./steps/tool-step.js";
 import type {
   ContextPort,
@@ -65,6 +65,11 @@ class RunAbortedError extends HarnessError {
   constructor() {
     super("Run was aborted.");
   }
+}
+
+function modelToolOptions(tool: ToolPort): Pick<ModelStepOptions, "tools"> {
+  const tools = tool.getToolSpecs?.();
+  return tools === undefined ? {} : { tools };
 }
 
 /**
@@ -229,6 +234,7 @@ async function runLoopSteps(
       ids: options.ids,
       runId: execution.runId,
       messages: prepared.context,
+      ...modelToolOptions(options.tool),
       signal: options.signal,
       ...(options.role === undefined ? {} : { role: options.role }),
       ...(options.provider === undefined ? {} : { provider: options.provider }),

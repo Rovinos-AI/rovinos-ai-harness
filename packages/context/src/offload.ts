@@ -72,7 +72,9 @@ export interface WorkspaceReadRange {
  * Workspace access used by output offloading.
  *
  * Implementations must keep paths under `.harness/offload/`, reject traversal and
- * absolute paths, and refuse symlinks.
+ * absolute paths, and refuse symlinks. Filesystem-backed implementations must
+ * resolve the final path and reject any symlink or real path outside the real
+ * `.harness/offload/` directory.
  */
 export interface WorkspacePort {
   /**
@@ -130,6 +132,9 @@ export interface OffloadToolDescription {
 export interface OffloadToolPortLike {
   /** Returns metadata for a registered tool. */
   describe(toolId: Code): OffloadToolDescription | undefined;
+
+  /** Returns provider-visible specifications for registered tools, when available. */
+  getToolSpecs?(): readonly ToolSpec[];
 
   /** Executes a validated tool call. */
   execute(call: OffloadToolCall, context: OffloadRunContext): Promise<OffloadToolExecutionResult>;
@@ -315,7 +320,7 @@ async function findWorkspaceFileSize(workspace: WorkspacePort, path: string): Pr
       throw new RangeError("Workspace file exceeds the supported size.");
     }
     lowerBound = upperBound + 1;
-    upperBound = Math.min(upperBound * 2, Number.MAX_SAFE_INTEGER);
+    upperBound = Math.min(lowerBound * 2, Number.MAX_SAFE_INTEGER);
   }
 
   while (lowerBound < upperBound) {
@@ -470,6 +475,16 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     return this.inner.describe(toolId);
   }
 
+  /** {@inheritDoc OffloadToolPortLike.getToolSpecs} */
+  getToolSpecs(): readonly ToolSpec[] {
+    return [
+      ...(this.inner.getToolSpecs?.() ?? []).filter(
+        ({ toolId }) => toolId !== READ_OFFLOADED_TOOL_SPEC.toolId,
+      ),
+      READ_OFFLOADED_TOOL_SPEC,
+    ];
+  }
+
   /** {@inheritDoc OffloadToolPortLike.execute} */
   async execute(
     call: OffloadToolCall,
@@ -482,7 +497,7 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     const execution = await this.inner.execute(call, context);
     const serialized = JSON.stringify(execution.result);
     const data = new TextEncoder().encode(serialized);
-    if (data.byteLength <= this.options.thresholdBytes) {
+    if (serialized.length <= this.options.thresholdBytes) {
       return execution;
     }
 
@@ -498,7 +513,7 @@ export class OffloadingToolPort implements OffloadToolPortLike {
         $offloaded: {
           handle: validatedHandle,
           bytes: data.byteLength,
-          preview: serialized.slice(0, this.options.previewChars),
+          preview: Array.from(serialized).slice(0, this.options.previewChars).join(""),
         },
       }),
     };

@@ -263,7 +263,7 @@ describe("NaiveStrategy", () => {
     });
     expect(result.pinnedSeqs).toEqual([0, 0]);
     expect(strategy.id).toBe("naive");
-    expect(strategy.version).toBe("v1");
+    expect(strategy.version).toBe("v2");
     expect(count).toHaveBeenCalledWith(result.messages, { provider: "test", model: "test" });
   });
 });

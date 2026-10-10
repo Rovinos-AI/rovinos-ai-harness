@@ -104,12 +104,14 @@ describe("InMemoryWorkspace", () => {
 });
 
 describe("OffloadingToolPort", () => {
-  it("leaves results at or below the UTF-8 byte threshold untouched", async () => {
+  it("leaves results at or below the serialized string-length threshold untouched", async () => {
     const workspace = new InMemoryWorkspace();
     const { inner, execution } = fakePort("é");
     const write = vi.spyOn(workspace, "write");
-    const port = new OffloadingToolPort(inner, workspace, { thresholdBytes: 4 });
+    const port = new OffloadingToolPort(inner, workspace, { thresholdBytes: 3 });
 
+    expect(JSON.stringify(execution.result)).toHaveLength(3);
+    expect(new TextEncoder().encode(JSON.stringify(execution.result)).byteLength).toBe(4);
     await expect(port.execute(call(), context)).resolves.toBe(execution);
     expect(write).not.toHaveBeenCalled();
   });
@@ -139,6 +141,22 @@ describe("OffloadingToolPort", () => {
         await workspace.read(`.harness/offload/${stub.$offloaded.handle}.json`),
       ),
     ).toBe(serialized);
+  });
+
+  it("keeps an astral character whole at the preview boundary", async () => {
+    const serialized = JSON.stringify(`${"a".repeat(8)}😀z`);
+    const { inner } = fakePort(`${"a".repeat(8)}😀z`);
+    const port = new OffloadingToolPort(
+      inner,
+      new InMemoryWorkspace(),
+      { thresholdBytes: 0, previewChars: 10 },
+      new SequentialIdGenerator(),
+    );
+    const stub = OffloadedStub.parse((await port.execute(call(), context)).result);
+
+    expect(stub.$offloaded.preview).toBe(Array.from(serialized).slice(0, 10).join(""));
+    expect(Array.from(stub.$offloaded.preview)).toHaveLength(10);
+    expect(stub.$offloaded.preview.endsWith("😀")).toBe(true);
   });
 
   it("uses unique ULID handles for separate large results", async () => {
@@ -181,6 +199,7 @@ describe("OffloadingToolPort", () => {
     expect(port.describe("sample_tool")).toEqual({ idempotent: false, timeoutMs: 1000 });
     expect(port.describe("missing_tool")).toBeUndefined();
     expect(READ_OFFLOADED_TOOL_SPEC.toolId).toBe("read_offloaded");
+    expect(port.getToolSpecs()).toContainEqual(READ_OFFLOADED_TOOL_SPEC);
     expect(
       ReadOffloadedInputSchema.safeParse({ handle: "wf_00000000000000000000000000" }).success,
     ).toBe(true);

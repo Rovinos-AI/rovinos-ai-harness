@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code } from "@harness/schemas";
-import type { Event, Id, Message } from "@harness/schemas";
+import { Code, type Event, type Id, type Message, type ToolSpec } from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
@@ -13,6 +12,7 @@ export interface ModelStepOptions {
   readonly ids: IdGenerator;
   readonly runId: Id;
   readonly messages: Message[];
+  readonly tools?: readonly ToolSpec[];
   readonly signal: AbortSignal;
   readonly role?: Code;
   readonly provider?: Code;
@@ -74,6 +74,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
             model: options.modelName ?? "unknown",
           },
           messages: options.messages,
+          ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
           ...(role === undefined ? {} : { role }),
         },
         { runId: options.runId, signal: options.signal },

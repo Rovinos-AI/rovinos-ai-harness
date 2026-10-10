@@ -1061,7 +1061,17 @@ describe("runLoop", () => {
       recorder,
       clock,
       model,
-      tool: new FakeToolPort(),
+      tool: {
+        describe: () => undefined,
+        execute: () => Promise.resolve({ outcome: "ok", result: null }),
+        getToolSpecs: () => [
+          {
+            toolId: "read_offloaded",
+            description: "Read a page of a large tool result stored in the run workspace.",
+            inputSchema: { type: "object" },
+          },
+        ],
+      },
       context: contextPort,
       ids,
       goal: "test goal",
@@ -1095,6 +1105,13 @@ describe("runLoop", () => {
           requestId: "00000000000000000000000000",
           model: { provider: "test_provider", model: "test_model" },
           messages: [{ role: "user", parts: [{ type: "text", text: "test goal" }] }],
+          tools: [
+            {
+              toolId: "read_offloaded",
+              description: "Read a page of a large tool result stored in the run workspace.",
+              inputSchema: { type: "object" },
+            },
+          ],
           role: "assistant",
         },
         context: { runId, signal },
@@ -1157,7 +1174,7 @@ describe("runLoop", () => {
       traceparent,
       context: {
         strategyId: "naive",
-        strategyVersion: "v1",
+        strategyVersion: "v2",
         calibration: null,
       },
       plan: null,

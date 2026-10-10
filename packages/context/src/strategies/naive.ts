@@ -9,7 +9,7 @@ import { eventsToTranscript } from "../transcript.js";
  */
 export class NaiveStrategy implements ContextStrategy {
   readonly id: Code = "naive";
-  readonly version: Code = "v1";
+  readonly version: Code = "v2";
 
   /** {@inheritDoc ContextStrategy.build} */
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
