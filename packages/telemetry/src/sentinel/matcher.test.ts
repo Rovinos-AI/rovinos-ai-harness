@@ -35,9 +35,11 @@ describe("SentinelMatcher", () => {
   });
 
   it("drops empty and duplicate variants", () => {
+    const build = vi.spyOn(AhoCorasick, "build");
     const matcher = SentinelMatcher.forValues(["Raw-Value"], (value) => ["", value, value]);
 
     expect(matcher.hasMatch("before Raw-Value after")).toBe(true);
+    expect(build).toHaveBeenCalledWith(["Raw-Value"]);
   });
 
   it("keeps the empty-pattern fast path when all variants are empty", () => {
