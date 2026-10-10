@@ -273,5 +273,5 @@ function canonicalValue(value: unknown): string {
   if (typeof value === "string") {
     return value;
   }
-  return JSON.stringify(value) ?? String(value);
+  return JSON.stringify(value);
 }

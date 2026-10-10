@@ -30,6 +30,18 @@ describe("ActiveRuns", () => {
     expect(runs.runIds()).toEqual([]);
   });
 
+  it("retains a run through an asynchronous operation and terminates it afterward", async () => {
+    const runs = new ActiveRuns({ graceMs: 0 });
+
+    await expect(
+      runs.track(firstRun, () => {
+        expect(runs.runIds()).toEqual([firstRun]);
+        return Promise.resolve("completed");
+      }),
+    ).resolves.toBe("completed");
+    expect(runs.runIds()).toEqual([]);
+  });
+
   it("rejects invalid grace periods", () => {
     expect(() => new ActiveRuns({ graceMs: -1 })).toThrow();
   });

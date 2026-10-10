@@ -54,8 +54,7 @@ export interface RunLoopResult {
   readonly events: readonly Event[];
 }
 
-interface RunLoopExecution {
-  readonly runId: Event["runId"];
+interface RunLoopExecution extends Pick<Event, "runId"> {
   readonly checkpointer: Checkpointer;
   readonly budgetTracker: BudgetTracker;
 }
@@ -139,12 +138,7 @@ export async function continueRunLoop(
       : { checkpointEveryEvents: options.checkpointEveryEvents }),
   });
   const execution = { runId, checkpointer, budgetTracker };
-  activeRuns.register(runId);
-  try {
-    return await runLoopSteps(options, events, execution);
-  } finally {
-    activeRuns.terminate(runId);
-  }
+  return activeRuns.track(runId, () => runLoopSteps(options, events, execution));
 }
 
 async function recordBudgetFailure(

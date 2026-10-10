@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  HarnessError,
-  Id as IdSchema,
-  type Id,
-  type TelemetryConfig,
-} from "@harness/schemas";
+import { HarnessError, Id as IdSchema, type Id, type TelemetryConfig } from "@harness/schemas";
 import { z } from "zod";
 import { countSentinelScopeReduced } from "../metrics.js";
-import { ActiveRuns, activeRuns } from "./active-runs.js";
+import { activeRuns, type ActiveRuns } from "./active-runs.js";
 import { SentinelMatcher } from "./matcher.js";
-import { VaultRunView } from "./run-values.js";
+import type { VaultRunView } from "./run-values.js";
 
 const SentinelGateOptionsSchema = z
   .object({
@@ -84,7 +79,8 @@ export class SentinelGate {
   private readonly matcherForValues: (values: readonly string[]) => SentinelMatcherLike;
   private readonly onTrip: ((trip: SentinelTrip) => void) | undefined;
   private readonly runMatchers = new Map<Id, CachedMatcher>();
-  private combinedMatcher: { readonly key: string; readonly matcher: SentinelMatcherLike } | undefined;
+  private combinedMatcher:
+    { readonly key: string; readonly matcher: SentinelMatcherLike } | undefined;
   private readonly trips: SentinelTrip[] = [];
 
   /**
@@ -119,22 +115,19 @@ export class SentinelGate {
       runId = request.runId;
       startedAt = this.now();
       const timedOut = new Promise<SentinelGateResult>((resolve) => {
-        timeout = setTimeout(() => resolve({ ok: false, reason: "timeout" }), this.maxScanMs);
+        timeout = setTimeout(() => {
+          resolve({ ok: false, reason: "timeout" });
+        }, this.maxScanMs);
       });
       const scan = Promise.resolve().then(async (): Promise<SentinelGateResult> => {
         const matcher =
           request.runId === undefined
             ? await this.globalMatcher()
             : await this.runMatcher(request.runId);
-        if (matcher === undefined) {
-          return { ok: false, reason: "error" };
-        }
-        return matcher.hasMatch(request.text)
-          ? { ok: false, reason: "hit" }
-          : { ok: true };
+        return matcher.hasMatch(request.text) ? { ok: false, reason: "hit" } : { ok: true };
       });
       const result = await Promise.race([scan, timedOut]);
-      if (result.reason === "timeout" || this.now() - startedAt > this.maxScanMs) {
+      if ((!result.ok && result.reason === "timeout") || this.now() - startedAt > this.maxScanMs) {
         this.enqueueTrip(runId, "timeout");
         return { ok: false, reason: "timeout" };
       }
@@ -181,24 +174,20 @@ export class SentinelGate {
 
   private async globalMatcher(): Promise<SentinelMatcherLike> {
     const runIds = this.runs.runIds();
-    const valueSets = await Promise.all(runIds.map(async (runId) => ({
-      runId,
-      valueSet: await this.values.valuesFor(runId),
-    })));
-    const key = JSON.stringify(
-      valueSets.map(({ runId, valueSet }) => [runId, valueSet.version]),
+    const valueSets = await Promise.all(
+      runIds.map(async (runId) => ({
+        runId,
+        valueSet: await this.values.valuesFor(runId),
+      })),
     );
+    const key = JSON.stringify(valueSets.map(({ runId, valueSet }) => [runId, valueSet.version]));
     if (this.combinedMatcher?.key === key) {
       return this.combinedMatcher.matcher;
     }
-    const combined = [
-      ...new Set(valueSets.flatMap(({ valueSet }) => [...valueSet.values])),
-    ];
+    const combined = [...new Set(valueSets.flatMap(({ valueSet }) => [...valueSet.values]))];
     if (combined.length > this.maxCombinedValues) {
       countSentinelScopeReduced();
-      const matchers = await Promise.all(
-        valueSets.map(({ runId }) => this.runMatcher(runId)),
-      );
+      const matchers = await Promise.all(valueSets.map(({ runId }) => this.runMatcher(runId)));
       return {
         hasMatch: (text) => matchers.some((matcher) => matcher.hasMatch(text)),
       };

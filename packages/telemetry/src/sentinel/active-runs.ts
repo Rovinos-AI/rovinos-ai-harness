@@ -32,6 +32,16 @@ export class ActiveRuns {
     this.runs.set(runId, undefined);
   }
 
+  /** Register a run for the duration of an asynchronous run-loop operation. */
+  async track<T>(runId: Id, operation: () => Promise<T>): Promise<T> {
+    this.register(runId);
+    try {
+      return await operation();
+    } finally {
+      this.terminate(runId);
+    }
+  }
+
   /** Mark a run finished while retaining it for the configured grace period. */
   terminate(runId: Id): void {
     if (this.runs.has(runId)) {

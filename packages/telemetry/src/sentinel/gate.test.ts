@@ -15,8 +15,8 @@ const secondRun = Id.parse("B".repeat(26));
 
 function createReader(valuesByRun: Map<string, string[]>): VaultRunReader {
   return {
-    version: async (runId) => valuesByRun.get(runId)?.length ?? 0,
-    listRawValues: async (runId) => valuesByRun.get(runId) ?? [],
+    version: (runId) => Promise.resolve(valuesByRun.get(runId)?.length ?? 0),
+    listRawValues: (runId) => Promise.resolve(valuesByRun.get(runId) ?? []),
   };
 }
 
@@ -36,10 +36,12 @@ describe("SentinelGate", () => {
       { matcherForValues, onTrip: enqueueTrip },
     );
 
-    await expect(gate.check({ runId: firstRun, text: "payload known-raw-value" })).resolves.toEqual({
-      ok: false,
-      reason: "hit",
-    });
+    await expect(gate.check({ runId: firstRun, text: "payload known-raw-value" })).resolves.toEqual(
+      {
+        ok: false,
+        reason: "hit",
+      },
+    );
     expect(matcherForValues).toHaveBeenCalledWith(["known-raw-value"]);
     expect(enqueueTrip).toHaveBeenCalledWith({ runId: firstRun, reason: "hit" });
     expect(JSON.stringify(enqueueTrip.mock.calls)).not.toContain("known-raw-value");
@@ -68,10 +70,15 @@ describe("SentinelGate", () => {
       { matcherForValues },
     );
 
-    await expect(gate.check({ text: "second-run-value" })).resolves.toEqual({ ok: false, reason: "hit" });
+    await expect(gate.check({ text: "second-run-value" })).resolves.toEqual({
+      ok: false,
+      reason: "hit",
+    });
     await expect(gate.check({ text: "safe" })).resolves.toEqual({ ok: true });
-    expect(matcherForValues).toHaveBeenCalledOnce();
-    expect(matcherForValues).toHaveBeenCalledWith(["first-run-value", "second-run-value"]);
+    expect(matcherForValues).toHaveBeenCalledExactlyOnceWith([
+      "first-run-value",
+      "second-run-value",
+    ]);
   });
 
   it("switches to per-run matchers when the combined value limit is exceeded", async () => {
@@ -94,7 +101,10 @@ describe("SentinelGate", () => {
       { maxCombinedValues: 1, matcherForValues },
     );
 
-    await expect(gate.check({ text: "second-value" })).resolves.toEqual({ ok: false, reason: "hit" });
+    await expect(gate.check({ text: "second-value" })).resolves.toEqual({
+      ok: false,
+      reason: "hit",
+    });
     expect(countSentinelScopeReduced).toHaveBeenCalledOnce();
     expect(matcherForValues).toHaveBeenCalledTimes(2);
   });
@@ -103,8 +113,8 @@ describe("SentinelGate", () => {
     let values = ["first-value"];
     let version = 1;
     const reader: VaultRunReader = {
-      version: async () => version,
-      listRawValues: async () => values,
+      version: () => Promise.resolve(version),
+      listRawValues: () => Promise.resolve(values),
     };
     const gate = new SentinelGate(new VaultRunView(reader));
 
@@ -166,7 +176,7 @@ describe("SentinelGate", () => {
   it("fails closed when vault reads exceed the timeout", async () => {
     const slowReader: VaultRunReader = {
       version: async () => new Promise<number>(() => undefined),
-      listRawValues: async () => [],
+      listRawValues: () => Promise.resolve([]),
     };
     const gate = new SentinelGate(new VaultRunView(slowReader), new ActiveRuns(), {
       maxScanMs: 1,
@@ -181,14 +191,18 @@ describe("SentinelGate", () => {
 
 describe("assertSentinelGate", () => {
   it("requires a gate unless explicitly disabled outside production", () => {
-    expect(() => assertSentinelGate(undefined, undefined, "production")).toThrow(
-      SentinelRequiredError,
-    );
-    expect(() =>
-      assertSentinelGate(undefined, { sentinel: { minValueLength: 6, enabled: false } }, "production"),
-    ).toThrow(SentinelRequiredError);
-    expect(() =>
-      assertSentinelGate(undefined, { sentinel: { minValueLength: 6, enabled: false } }, "test"),
-    ).not.toThrow();
+    expect(() => {
+      assertSentinelGate(undefined, undefined, "production");
+    }).toThrow(SentinelRequiredError);
+    expect(() => {
+      assertSentinelGate(
+        undefined,
+        { sentinel: { minValueLength: 6, enabled: false } },
+        "production",
+      );
+    }).toThrow(SentinelRequiredError);
+    expect(() => {
+      assertSentinelGate(undefined, { sentinel: { minValueLength: 6, enabled: false } }, "test");
+    }).not.toThrow();
   });
 });

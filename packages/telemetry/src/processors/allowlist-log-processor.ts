@@ -172,7 +172,7 @@ export class AllowlistLogRecordProcessor implements LogRecordProcessor {
 }
 
 function serializeLogRecord(record: ReadWriteLogRecord): string {
-  const fields = [record.eventName ?? "", record.body === undefined ? "" : String(record.body)];
+  const fields = [record.eventName ?? "", canonicalValue(record.body)];
   appendAttributes(fields, record.attributes);
   if (record.spanContext !== undefined) {
     fields.push(record.spanContext.traceId, record.spanContext.spanId);
@@ -193,5 +193,5 @@ function canonicalValue(value: unknown): string {
   if (typeof value === "string") {
     return value;
   }
-  return JSON.stringify(value) ?? String(value);
+  return JSON.stringify(value);
 }

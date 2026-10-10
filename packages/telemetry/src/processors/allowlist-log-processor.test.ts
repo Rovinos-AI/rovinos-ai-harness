@@ -207,7 +207,10 @@ describe("AllowlistLogRecordProcessor", () => {
     const activeRuns = new ActiveRuns();
     activeRuns.register(runId);
     const gate = new SentinelGate(
-      new VaultRunView({ version: async () => 1, listRawValues: async () => [canary] }),
+      new VaultRunView({
+        version: () => Promise.resolve(1),
+        listRawValues: () => Promise.resolve([canary]),
+      }),
       activeRuns,
     );
     const processor = new AllowlistLogRecordProcessor(next, { gate });

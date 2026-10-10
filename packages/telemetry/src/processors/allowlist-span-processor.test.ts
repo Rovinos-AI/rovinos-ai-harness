@@ -469,8 +469,8 @@ describe("AllowlistSpanProcessor", () => {
     activeRuns.register(runId);
     const gate = new SentinelGate(
       new VaultRunView({
-        version: async () => 1,
-        listRawValues: async () => [canary],
+        version: () => Promise.resolve(1),
+        listRawValues: () => Promise.resolve([canary]),
       }),
       activeRuns,
     );
@@ -506,10 +506,12 @@ describe("AllowlistSpanProcessor", () => {
     },
     {
       result: "timeout",
-      gateOptions: { now: (() => {
-        let calls = 0;
-        return () => (calls++ === 0 ? 0 : 6);
-      })() },
+      gateOptions: {
+        now: (() => {
+          let calls = 0;
+          return () => (calls++ === 0 ? 0 : 6);
+        })(),
+      },
     },
   ])("drops a span when the sentinel returns $result", async ({ gateOptions }) => {
     defineTestSpan();
@@ -517,7 +519,10 @@ describe("AllowlistSpanProcessor", () => {
     const activeRuns = new ActiveRuns();
     activeRuns.register(runId);
     const gate = new SentinelGate(
-      new VaultRunView({ version: async () => 1, listRawValues: async () => ["known-value"] }),
+      new VaultRunView({
+        version: () => Promise.resolve(1),
+        listRawValues: () => Promise.resolve(["known-value"]),
+      }),
       activeRuns,
       gateOptions,
     );
