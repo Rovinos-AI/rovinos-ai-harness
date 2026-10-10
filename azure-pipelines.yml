@@ -1,10 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Pushes to main that land close together share one build.
-trigger:
-  batch: true
-  branches:
-    include:
-      - main
+# No CI on pushes to main: every change reaches main through a PR whose build already tested the
+# merged result (refs/pull/N/merge) and gated the merge. Re-running it on main only spends minutes.
+trigger: none
 
 # Draft PRs don't build: Copilot PRs stay drafts through their review and fix rounds and are
 # marked ready right before merge, so each PR runs CI when it is ready (and again only if fixed).
