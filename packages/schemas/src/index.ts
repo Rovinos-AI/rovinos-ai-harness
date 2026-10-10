@@ -99,7 +99,7 @@ export {
   type InspectEvent,
   type InspectResult,
 } from "./cli/inspect.js";
-export { FakeClock, SequentialIdGenerator } from "./testing.js";
+export { eventSamples, FakeClock, SequentialIdGenerator } from "./testing.js";
 
 /** The current harness version. */
 export const HARNESS_VERSION = "0.0.0";
