@@ -24,9 +24,13 @@ function schemaChildren(schema: JsonValue | undefined, key: string): JsonValue[]
   return children;
 }
 
-function pathText(path: readonly (string | number)[], schema: JsonValue | undefined): string {
+/** Replaces path segments not declared by the schema with a value-free wildcard. */
+export function redactIssuePath(
+  path: readonly (string | number)[],
+  schema: JsonValue | undefined,
+): (string | number)[] {
   let schemas = schema === undefined ? [] : [schema];
-  return path.reduce<string>((result, segment) => {
+  return path.map((segment) => {
     if (typeof segment === "number") {
       schemas = schemas.flatMap((candidate) => {
         const prefixItems = schemaChildren(candidate, "prefixItems").flatMap((value) =>
@@ -37,7 +41,7 @@ function pathText(path: readonly (string | number)[], schema: JsonValue | undefi
           ...schemaChildren(candidate, "items"),
         ];
       });
-      return `${result}[${String(segment)}]`;
+      return segment;
     }
 
     const propertySchemas = schemas.flatMap((candidate) =>
@@ -52,9 +56,7 @@ function pathText(path: readonly (string | number)[], schema: JsonValue | undefi
     );
     if (propertySchemas.length > 0) {
       schemas = propertySchemas;
-      return /^[\w$]+$/u.test(segment)
-        ? `${result}.${segment}`
-        : `${result}[${JSON.stringify(segment)}]`;
+      return segment;
     }
 
     schemas = schemas.flatMap((candidate) =>
@@ -62,7 +64,21 @@ function pathText(path: readonly (string | number)[], schema: JsonValue | undefi
         (additional) => typeof additional === "object" && additional !== null,
       ),
     );
-    return `${result}[*]`;
+    return "*";
+  });
+}
+
+function pathText(path: readonly (string | number)[], schema: JsonValue | undefined): string {
+  return redactIssuePath(path, schema).reduce<string>((result, segment) => {
+    if (typeof segment === "number") {
+      return `${result}[${String(segment)}]`;
+    }
+    if (segment === "*") {
+      return `${result}[*]`;
+    }
+    return /^[\w$]+$/u.test(segment)
+      ? `${result}.${segment}`
+      : `${result}[${JSON.stringify(segment)}]`;
   }, "$");
 }
 

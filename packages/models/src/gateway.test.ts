@@ -572,6 +572,39 @@ describe("ModelGateway", () => {
     expect(complete).toHaveBeenCalledOnce();
   });
 
+  it("redacts model-provided record keys from exhausted-output errors", async () => {
+    const canary = "alice@example.test";
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: `{"${canary}":"invalid"}` }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      enforcement: { maxRepairs: 0 },
+    });
+    const error = await gateway
+      .complete(
+        { ...request, model: { provider: "sample", model: "model-a" } },
+        {
+          runId: request.requestId,
+          signal: new AbortController().signal,
+          outputSchema: z.record(z.string(), z.number()),
+        },
+      )
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+    expect(error).toMatchObject({ issuePaths: [["*"]] });
+    expect(JSON.stringify(error)).not.toContain(canary);
+  });
+
   it("repairs invalid output once and aggregates usage while keeping the selected rung", async () => {
     const seenRequests: ModelRequest[] = [];
     let calls = 0;

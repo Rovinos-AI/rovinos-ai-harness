@@ -52,9 +52,14 @@ describe("provider errors", () => {
   });
 
   it("retains only bounded repair count and issue paths on invalid model output", () => {
-    const error = new ModelOutputInvalidError(2, [
-      { path: ["answer"], code: "invalid_type", expected: "number" },
-    ]);
+    const error = new ModelOutputInvalidError(
+      2,
+      [{ path: ["answer"], code: "invalid_type", expected: "number" }],
+      {
+        type: "object",
+        properties: { answer: { type: "number" } },
+      },
+    );
 
     expect(error).toMatchObject({
       code: "model_output_invalid",
@@ -62,5 +67,17 @@ describe("provider errors", () => {
       issuePaths: [["answer"]],
     });
     expect(JSON.stringify(error)).not.toContain("expected");
+  });
+
+  it("redacts model-provided record keys from invalid-output paths", () => {
+    const canary = "alice@example.test";
+    const error = new ModelOutputInvalidError(
+      0,
+      [{ path: [canary], code: "invalid_type", expected: "number" }],
+      { type: "object", additionalProperties: { type: "number" } },
+    );
+
+    expect(error.issuePaths).toEqual([["*"]]);
+    expect(JSON.stringify(error)).not.toContain(canary);
   });
 });

@@ -300,7 +300,11 @@ export class ModelGateway {
       const enforcement = enforced.result;
       if (enforcement !== undefined && "issues" in enforcement) {
         if (repairAttempts >= this.maxRepairs) {
-          throw new ModelOutputInvalidError(repairAttempts, enforcement.issues);
+          throw new ModelOutputInvalidError(
+            repairAttempts,
+            enforcement.issues,
+            currentRequest.output?.schema,
+          );
         }
         currentRequest = appendRepairMessages(
           currentRequest,
