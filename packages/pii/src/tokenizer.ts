@@ -63,6 +63,7 @@ export interface TokenizerDependencies {
   readonly detectors: PiiDetectorRegistry;
   readonly policy: PiiPolicy;
   readonly vault: VaultWriter;
+  readonly scopeOf?: (runId: Id) => Id;
 }
 
 /** Detects sensitive entities, applies policy, and tokenizes/redacts approved output. */
@@ -89,7 +90,7 @@ export class Tokenizer {
     const plan = await this.planText(text, context, counts);
     this.throwIfBlocked(counts);
     return {
-      text: await this.applyPlan(runId, plan),
+      text: await this.applyPlan(this.scopeOf(runId), plan),
       actions: summarizeActions(context.boundary, counts.actions),
     };
   }
@@ -119,8 +120,9 @@ export class Tokenizer {
     this.throwIfBlocked(counts);
 
     const strings: string[] = [];
+    const scopeId = this.scopeOf(runId);
     for (const plan of plans) {
-      strings.push(await this.applyPlan(runId, plan));
+      strings.push(await this.applyPlan(scopeId, plan));
     }
     let stringIndex = 0;
     return {
@@ -248,7 +250,11 @@ export class Tokenizer {
     }
   }
 
-  private async applyPlan(runId: Id, plan: TextPlan): Promise<string> {
+  private scopeOf(runId: Id): Id {
+    return this.dependencies.scopeOf?.(runId) ?? runId;
+  }
+
+  private async applyPlan(scopeId: Id, plan: TextPlan): Promise<string> {
     const replacements: { readonly start: number; readonly end: number; readonly value: string }[] =
       [];
     for (const replacement of plan.replacements) {
@@ -258,7 +264,11 @@ export class Tokenizer {
       } else {
         let token: string;
         try {
-          token = await this.dependencies.vault.put(runId, replacement.entityType, replacement.raw);
+          token = await this.dependencies.vault.put(
+            scopeId,
+            replacement.entityType,
+            replacement.raw,
+          );
         } catch {
           throw new PiiTokenizerError("pii_vault_failed");
         }

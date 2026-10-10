@@ -24,6 +24,7 @@ export class AuditingVaultResolver implements VaultResolver {
   constructor(
     private readonly inner: VaultResolver,
     private readonly onAudit: VaultAuditHandler,
+    private readonly scopeOf: (runId: Id) => Id = (runId) => runId,
   ) {}
 
   /**
@@ -64,7 +65,7 @@ export class AuditingVaultResolver implements VaultResolver {
 
     for (const token of tokens) {
       try {
-        const value = await this.inner.resolve(runId, token, validatedContext);
+        const value = await this.inner.resolve(this.scopeOf(runId), token, validatedContext);
         values.push(value);
         const action = value === undefined ? "blocked" : "detokenized";
         const type = tokenType(token).toLowerCase();

@@ -29,6 +29,20 @@ describe("AuditingVaultResolver", () => {
     expect(payload).not.toContain("alice@example.test");
   });
 
+  it("resolves child tokens through the root scope while auditing the child run", async () => {
+    const inner = new InMemoryVault();
+    const token = await inner.put(runId, "email", "alice@example.test");
+    const childRunId = "00000000000000000000000002";
+    const onAudit = vi.fn();
+    const resolver = new AuditingVaultResolver(inner, onAudit, () => runId);
+
+    await expect(resolver.resolve(childRunId, token, context)).resolves.toBe("alice@example.test");
+
+    expect(onAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: childRunId, action: "detokenized" }),
+    );
+  });
+
   it("maps a vault audit to recorder event fields", () => {
     const audit: VaultAudit = {
       runId,

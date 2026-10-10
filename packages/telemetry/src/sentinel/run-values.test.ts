@@ -31,6 +31,25 @@ describe("VaultRunView", () => {
     expect(listRawValues).toHaveBeenCalledTimes(1);
   });
 
+  it("loads a child run's values from its root vault scope", async () => {
+    const rootId = Id.parse("B".repeat(26));
+    const childId = Id.parse("C".repeat(26));
+    const version = vi.fn().mockResolvedValue(3);
+    const listRawValues = vi.fn().mockResolvedValue(["shared-canary-value"]);
+    const view = new VaultRunView(
+      { version, listRawValues },
+      {},
+      () => rootId,
+    );
+
+    await expect(view.valuesFor(childId)).resolves.toMatchObject({
+      version: 3,
+      values: ["shared-canary-value"],
+    });
+    expect(version).toHaveBeenCalledExactlyOnceWith(rootId);
+    expect(listRawValues).toHaveBeenCalledExactlyOnceWith(rootId);
+  });
+
   it("refreshes the set when a new vault value changes its version", async () => {
     let version = 1;
     let rawValues = ["first-value"];

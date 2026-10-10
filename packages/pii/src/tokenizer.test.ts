@@ -31,6 +31,7 @@ function createTokenizer(
   action: PiiAction = "tokenize",
   vault: VaultWriter = new InMemoryVault(),
   detect: (text: string) => readonly Detection[] | Promise<readonly Detection[]> = emailDetector,
+  scopeOf?: (runId: string) => string,
 ): Tokenizer {
   const policy =
     action === "allow"
@@ -46,7 +47,7 @@ function createTokenizer(
         })
       : PiiPolicySchema.parse({ defaultAction: action });
   const detectors: PiiDetectorRegistry = { detect };
-  return new Tokenizer({ detectors, policy, vault });
+  return new Tokenizer({ detectors, policy, vault, ...(scopeOf === undefined ? {} : { scopeOf }) });
 }
 
 describe("Tokenizer.tokenizeText", () => {
@@ -95,6 +96,18 @@ describe("Tokenizer.tokenizeText", () => {
       text: "<EMAIL_1>,<EMAIL_2> then <EMAIL_3>",
       actions: [{ action: "tokenize", entities: [{ type: "email", count: 3 }] }],
     });
+  });
+
+  it("writes child tokens into the registered root scope", async () => {
+    const vault = new InMemoryVault();
+    const tokenizer = createTokenizer("tokenize", vault, emailDetector, () => runA);
+
+    await expect(
+      tokenizer.tokenizeText(runB, "Contact alice@example.test", context),
+    ).resolves.toMatchObject({ text: "Contact <EMAIL_1>" });
+
+    await expect(vault.stats(runA)).resolves.toEqual({ entries: 1 });
+    await expect(vault.stats(runB)).resolves.toEqual({ entries: 0 });
   });
 
   it("does not scan existing tokens and is idempotent on its output", async () => {
