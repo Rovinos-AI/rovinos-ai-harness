@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { Code, HarnessError, Sha256Hex, type JsonValue } from "@harness/schemas";
-import type { ModelToolCall, RunContext, ToolExecutionResult, ToolPort } from "../ports.js";
+import { Code, HarnessError, Sha256Hex, type Event, type JsonValue } from "@harness/schemas";
+import { SpanStatusCode, type Span } from "@opentelemetry/api";
+import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
+import type {
+  ModelToolCall,
+  RunContext,
+  ToolDescription,
+  ToolExecutionResult,
+  ToolPort,
+} from "../ports.js";
+import { onShutdown } from "../shutdown.js";
 import { SummaryRecordingError } from "./prepare-tool.js";
 
 /** Internal timeout marker; only the closed tool_timeout code is recorded. */
@@ -51,23 +60,144 @@ export async function executeWithTimeout(
 ): Promise<ToolExecutionResult> {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = AbortSignal.any([context.signal, timeoutSignal]);
+  let active = true;
+  const pendingSummaries = new Set<Promise<void>>();
+  const closeAttempt = (): void => {
+    active = false;
+  };
+  signal.addEventListener("abort", closeAttempt, { once: true });
   let rejectTimeout: ((reason: unknown) => void) | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     rejectTimeout = reject;
   });
-  const onTimeout = (): void => rejectTimeout?.(new ToolTimeoutError());
+  const onTimeout = (): void => {
+    closeAttempt();
+    rejectTimeout?.(new ToolTimeoutError());
+  };
   timeoutSignal.addEventListener("abort", onTimeout, { once: true });
   if (timeoutSignal.aborted) {
     onTimeout();
   }
+  const attemptContext: RunContext = {
+    ...context,
+    signal,
+    ...(context.recordPiiAction === undefined
+      ? {}
+      : {
+          recordPiiAction: async (summary) => {
+            if (!active || signal.aborted || context.recordPiiAction === undefined) {
+              return;
+            }
+            const pending = context.recordPiiAction(summary);
+            pendingSummaries.add(pending);
+            try {
+              await pending;
+            } finally {
+              pendingSummaries.delete(pending);
+            }
+          },
+        }),
+  };
   try {
-    return await Promise.race([tool.execute(call, { ...context, signal }), timeout]);
+    return await Promise.race([tool.execute(call, attemptContext), timeout]);
   } catch (error) {
     if (timeoutSignal.aborted) {
       throw new ToolTimeoutError();
     }
     throw error;
   } finally {
+    closeAttempt();
+    signal.removeEventListener("abort", closeAttempt);
     timeoutSignal.removeEventListener("abort", onTimeout);
+    await Promise.allSettled(pendingSummaries);
   }
+}
+
+/** Inputs for recording one tool execution result. */
+export interface ExecutePreparedToolOptions {
+  readonly call: ModelToolCall;
+  readonly clock: Clock;
+  readonly context: RunContext;
+  readonly description: ToolDescription;
+  readonly executedArgsHash?: string;
+  readonly intentEvent?: Event;
+  readonly recorder: RunRecorder;
+  readonly signal: AbortSignal;
+  readonly span: Span;
+  readonly tool: ToolPort;
+}
+
+/** Executes a prepared tool call and records its stable result, unless shutdown leaves it dangling. */
+export async function executePreparedTool(options: ExecutePreparedToolOptions): Promise<Event> {
+  const startedAt = options.clock.now();
+  let execution: ToolExecutionResult;
+  try {
+    execution = await executeWithTimeout(
+      options.tool,
+      options.call,
+      options.context,
+      options.description.timeoutMs,
+    );
+  } catch (error) {
+    const shutdownIntent = onShutdown(options.signal, options.intentEvent, error);
+    if (shutdownIntent !== undefined) {
+      return shutdownIntent;
+    }
+    if (options.signal.reason === "shutdown") {
+      throw new ToolTimeoutError();
+    }
+    const timedOut = error instanceof ToolTimeoutError;
+    const code = timedOut ? "tool_timeout" : toolErrorCode(error);
+    options.span.setStatus({ code: SpanStatusCode.ERROR });
+    options.span.setAttribute("harness.error.code", code);
+    return options.recorder.record({
+      type: "tool_result",
+      v: 1,
+      callId: options.call.callId,
+      toolId: options.call.toolId,
+      outcome: timedOut ? "timeout" : "error",
+      errorCode: code,
+      latencyMs: latencyMs(options.clock, startedAt),
+      ...executedArgsHashField(options.executedArgsHash),
+      result: null,
+    });
+  }
+  const result = await options.recorder.record(
+    executionPayload(
+      options.call,
+      execution,
+      latencyMs(options.clock, startedAt),
+      options.executedArgsHash,
+    ),
+  );
+  if (execution.outcome === "error") {
+    options.span.setStatus({ code: SpanStatusCode.ERROR });
+    options.span.setAttribute("harness.error.code", execution.errorCode ?? "tool_failed");
+  }
+  return result;
+}
+
+const latencyMs = (clock: Clock, startedAt: number): number =>
+  Math.max(0, Math.floor(clock.now() - startedAt));
+
+const executedArgsHashField = (hash?: string): { readonly executedArgsHash?: string } =>
+  hash === undefined ? {} : { executedArgsHash: hash };
+
+function executionPayload(
+  call: ModelToolCall,
+  execution: ToolExecutionResult,
+  latency: number,
+  executedArgsHash?: string,
+): EventPartial {
+  return {
+    type: "tool_result",
+    v: 1,
+    callId: call.callId,
+    toolId: call.toolId,
+    outcome: execution.outcome,
+    ...(execution.outcome === "error" ? { errorCode: execution.errorCode ?? "tool_failed" } : {}),
+    latencyMs: latency,
+    ...executedArgsHashField(executedArgsHash),
+    result: execution.result,
+  };
 }

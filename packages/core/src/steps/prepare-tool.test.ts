@@ -66,11 +66,14 @@ describe("tool preparation", () => {
     expect(JSON.stringify(prepared)).not.toContain(call.args);
   });
 
-  it("removes failed calls from durable recovery input but retains the in-flight denial", async () => {
+  it("retains failed calls as non-executable durable recovery input", async () => {
     const port = tool();
     port.prepare = () => Promise.reject(new BlockedError());
     const prepared = await prepareCompletion(completion(), port, context);
-    expect(prepared.completion.parts).toEqual([{ type: "text", text: "done" }]);
+    expect(prepared.completion.parts).toEqual([
+      { type: "tool_call", ...call, args: null },
+      { type: "text", text: "done" },
+    ]);
     expect(prepared.preparedCalls).toEqual([
       { call: { ...call, args: null }, errorCode: "pii_blocked" },
     ]);

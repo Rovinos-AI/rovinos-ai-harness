@@ -5,12 +5,14 @@ import type { Checkpointer } from "./checkpoint.js";
 import { LeaseLostError, RunRecorder, type Clock } from "./recorder.js";
 import { foldRunState, type RunState } from "./run-state.js";
 import { APPROVAL_WAIT_SPAN } from "./spans.js";
+import type { ToolPort } from "./ports.js";
 import {
   applyApprovalDecision,
   ApprovalEditsRequiredError,
   resolveDanglingIntentApproval,
   type ResumeToolStepOptions,
 } from "./steps/tool-step.js";
+import { prepareToolCall, toolRunContext } from "./steps/prepare-tool.js";
 
 export { ApprovalEditsRequiredError };
 
@@ -86,6 +88,14 @@ export class ApprovalRequestStateError extends HarnessError {
   constructor() {
     super("Approval requires a fresh id and a running run state.");
     this.name = "ApprovalRequestStateError";
+  }
+}
+
+class ApprovalEditPreparationError extends HarnessError {
+  readonly code = "pii_prepare_failed";
+
+  constructor() {
+    super("Approval edits require a PII-aware tool port.");
   }
 }
 
@@ -191,6 +201,7 @@ async function readState(
  * @param decision - Human decision.
  * @param edits - Replacement tool arguments for an edit decision.
  * @param clock - Clock used to timestamp the resolution.
+ * @param tool - PII-aware tool port required to resolve edit decisions.
  * @returns The durable approval resolution event.
  */
 // eslint-disable-next-line max-params -- task 2.9 specifies store, run, approval, decision, and edits; §3.3 requires an injected clock
@@ -201,9 +212,13 @@ export async function resolveApproval(
   decision: ApprovalDecision,
   edits?: JsonValue,
   clock: Clock = systemClock,
+  tool?: ToolPort,
 ): Promise<Extract<Event, { type: "approval_resolved" }>> {
   if (decision === "edit" && edits === undefined) {
     throw new ApprovalEditsRequiredError();
+  }
+  if (decision === "edit" && tool?.prepare === undefined) {
+    throw new ApprovalEditPreparationError();
   }
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const { state, lastEvent } = await readState(store, runId);
@@ -216,17 +231,34 @@ export async function resolveApproval(
     const recorder = new RunRecorder(store, runId, lastEvent.segmentId, state.nextSeq, {
       now: () => resolvedAt,
     });
+    const events: Event[] = [];
     try {
-      const event = await recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () =>
-        recorder.record({
+      const event = await recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () => {
+        let resolvedEdits = edits;
+        if (decision === "edit" && edits !== undefined && tool !== undefined) {
+          const intent = state.pendingToolCalls.get(request.callId);
+          if (intent === undefined) {
+            throw new ApprovalNotFoundError();
+          }
+          const prepared = await prepareToolCall(
+            tool,
+            { callId: request.callId, toolId: intent.toolId, args: edits },
+            toolRunContext({ runId, signal: new AbortController().signal }, recorder, events),
+          );
+          if (prepared.errorCode !== undefined) {
+            throw new ApprovalEditPreparationError();
+          }
+          resolvedEdits = prepared.call.args;
+        }
+        return recorder.record({
           type: "approval_resolved",
           v: 1,
           approvalId,
           decision,
           waitMs: Math.max(0, resolvedAt - request.ts),
-          ...(edits === undefined ? {} : { edits }),
-        }),
-      );
+          ...(resolvedEdits === undefined ? {} : { edits: resolvedEdits }),
+        });
+      });
       if (event.type !== "approval_resolved") {
         throw new ApprovalNotFoundError();
       }

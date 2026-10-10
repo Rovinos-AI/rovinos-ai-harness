@@ -1,15 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 // Synthetic canaries exercise every persisted event and the workspace offload sink.
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   FakeClock,
   PiiConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
+  type Event,
   type Detection,
   type JsonValue,
 } from "@harness/schemas";
-import { createRuntime, type ModelCompletion, type ToolPort } from "@harness/core";
+import {
+  applyResolvedApprovals,
+  createRuntime,
+  foldRunState,
+  resolveApproval,
+  RunRecorder,
+  RUN_SPAN,
+  type ModelCompletion,
+  type ToolPort,
+} from "@harness/core";
 import { FakeModelPort } from "@harness/core/testing";
 import { OffloadingToolPort, type WorkspacePort } from "@harness/context";
 import { InMemoryEventStore } from "@harness/store";
@@ -101,6 +112,7 @@ async function pipeline(
       ),
   };
   const ids = new SequentialIdGenerator();
+  const model = new FakeModelPort([completion(true), completion()]);
   const tool = new OffloadingToolPort(
     new PiiToolPort(
       {
@@ -136,12 +148,12 @@ async function pipeline(
       clock: new FakeClock(100),
       ids,
       tool,
-      model: new FakeModelPort([completion(true), completion()]),
+      model,
     },
   );
   try {
     const result = await runtime.run("synthetic tool pipeline");
-    return { result, execute, files, store };
+    return { result, execute, files, store, model, tool };
   } finally {
     await runtime.close();
   }
@@ -211,7 +223,7 @@ describe("PII tool pipeline", () => {
   ])(
     "denies preparation failure without persisting arguments ($code)",
     async ({ code, ...options }) => {
-      const { result, execute, files } = await pipeline(options);
+      const { result, execute, files, model } = await pipeline(options);
       expect(execute).not.toHaveBeenCalled();
       expect(files.size).toBe(0);
       const intent = result.events.find((event) => event.type === "tool_intent");
@@ -225,8 +237,128 @@ describe("PII tool pipeline", () => {
       for (const event of result.events) {
         expect(JSON.stringify(event)).not.toContain(email);
       }
+      const messages = model.requests[1]?.request.messages ?? [];
+      const assistantMessage = messages.find(({ role }) => role === "assistant");
+      const toolMessage = messages.find(({ role }) => role === "tool");
+      expect(
+        assistantMessage?.parts.some(
+          (part) => part.type === "tool_call" && part.callId === callId && part.args === null,
+        ),
+      ).toBe(true);
+      expect(
+        toolMessage?.parts.some(
+          (part) =>
+            part.type === "tool_result" &&
+            part.callId === callId &&
+            part.result === null &&
+            part.isError,
+        ),
+      ).toBe(true);
     },
   );
+
+  it("tokenizes edited approval arguments before recording and executing them", async () => {
+    const { tool, execute } = await pipeline();
+    execute.mockClear();
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const runId = "00000000000000000000000070";
+    const segmentId = "11111111111111111111111170";
+    const approvalCallId = "00000000000000000000000071";
+    const approvalId = "00000000000000000000000072";
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      const events = await recorder.recordBatch([
+        { type: "run_created", v: 1, configHash: "a".repeat(64), policyVersion: "test.policy" },
+        { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
+        {
+          type: "tool_intent",
+          v: 1,
+          callId: approvalCallId,
+          toolId: "mail.send",
+          idempotent: false,
+          policyDecision: "allow",
+          argsHash: "b".repeat(64),
+          args: null,
+        },
+        {
+          type: "approval_requested",
+          v: 1,
+          approvalId,
+          callId: approvalCallId,
+          payload: { kind: "tool_call" },
+        },
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "running",
+          to: "suspended",
+          reason: "awaiting_approval",
+        },
+      ]);
+      const last = events.at(-1);
+      if (last === undefined) {
+        throw new Error("Expected a suspended run.");
+      }
+      return last;
+    });
+
+    const resolution = await resolveApproval(
+      store,
+      runId,
+      approvalId,
+      "edit",
+      { to: email, note: email },
+      clock,
+      tool,
+    );
+    expect(resolution).toMatchObject({
+      decision: "edit",
+      edits: { to: "<EMAIL_1>", note: "<EMAIL_1>" },
+    });
+
+    const resumedRecorder = new RunRecorder(
+      store,
+      runId,
+      segmentId,
+      await store.head(runId),
+      clock,
+    );
+    await resumedRecorder.withStepSpan(RUN_SPAN, {}, async () =>
+      resumedRecorder.record({
+        type: "run_status_changed",
+        v: 1,
+        from: "suspended",
+        to: "running",
+        reason: "resumed",
+      }),
+    );
+    const beforeApply: Event[] = [];
+    for await (const event of store.read(runId)) {
+      beforeApply.push(event);
+    }
+    await applyResolvedApprovals(
+      { recorder: resumedRecorder, tool, clock, runId, signal: new AbortController().signal },
+      foldRunState(beforeApply),
+    );
+
+    const events: Event[] = [];
+    for await (const event of store.read(runId)) {
+      events.push(event);
+      expect(JSON.stringify(event)).not.toContain(email);
+    }
+    expect(execute.mock.calls[0]?.[0].args).toEqual({ to: email, note: "<EMAIL_1>" });
+    const expectedArgsHash = createHash("sha256")
+      .update('{"note":"<EMAIL_1>","to":"<EMAIL_1>"}')
+      .digest("hex");
+    expect(events.find((event) => event.type === "tool_result")).toMatchObject({
+      outcome: "ok",
+      executedArgsHash: expectedArgsHash,
+    });
+    expect(events.find((event) => event.type === "approval_resolved")).toMatchObject({
+      edits: { to: "<EMAIL_1>", note: "<EMAIL_1>" },
+    });
+  });
 
   it("rejects oversized text before offloading", async () => {
     const { result, files } = await pipeline({ largeText: true });

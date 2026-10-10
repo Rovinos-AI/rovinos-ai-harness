@@ -4,12 +4,11 @@ import { HarnessError, type Code, type Event, type Id } from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import { APPROVAL_WAIT_SPAN, TOOL_CALL_SPAN } from "../spans.js";
-import type { IdGenerator, ModelToolCall, ToolExecutionResult, ToolPort } from "../ports.js";
+import type { IdGenerator, ModelToolCall, ToolPort } from "../ports.js";
 import type { DanglingIntentAction } from "../resume-policy.js";
 import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
-import { onShutdown } from "../shutdown.js";
 import { prepareToolCall, toolRunContext, type PreparedToolCall } from "./prepare-tool.js";
-import { executeWithTimeout, hashArgs, toolErrorCode, ToolTimeoutError } from "./tool-execution.js";
+import { executePreparedTool, hashArgs } from "./tool-execution.js";
 
 /** Inputs needed to execute and record one or more tool calls. */
 export interface ToolStepOptions {
@@ -31,6 +30,7 @@ export interface ResumeToolStepOptions extends Omit<ToolStepOptions, "calls"> {
 
 interface RunToolCallBehavior {
   readonly executedArgsHash?: string;
+  readonly compareArgsHash?: string;
   readonly existingIntent?: ToolIntentEvent;
   readonly prepared?: PreparedToolCall;
 }
@@ -54,9 +54,6 @@ class ResumeEventMissingError extends HarnessError {
     this.name = "ResumeEventMissingError";
   }
 }
-
-const latencyMs = (clock: Clock, startedAt: number): number =>
-  Math.max(0, Math.floor(clock.now() - startedAt));
 
 const executedArgsHashField = (hash?: string): { readonly executedArgsHash?: string } =>
   hash === undefined ? {} : { executedArgsHash: hash };
@@ -87,13 +84,11 @@ async function runToolCall(
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
   const context = executionContext(options, events);
-  const prepared =
-    behavior.existingIntent?.policyDecision === "deny"
-      ? { call: { ...proposedCall, args: null }, errorCode: "pii_blocked" }
-      : (behavior.prepared ?? (await prepareToolCall(options.tool, proposedCall, context)));
-  const { call } = prepared;
   return options.recorder
     .withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
+      const prepared = await prepareRunToolCall(options, proposedCall, behavior, context);
+      const { call } = prepared;
+      const executedArgsHash = executedArgsHashFor(call, behavior);
       if (behavior.existingIntent === undefined) {
         events.push(
           await recordIntent(
@@ -106,82 +101,62 @@ async function runToolCall(
       }
       const intentEvent = events.at(-1) ?? behavior.existingIntent;
       if (prepared.errorCode !== undefined || description === undefined) {
-        const result = await recordDeniedResult(
+        const denied = await recordDeniedResult(
           options.recorder,
           call,
           prepared.errorCode ?? "unknown_tool",
-          behavior.executedArgsHash,
+          executedArgsHash,
         );
-        events.push(result);
-        return result;
+        events.push(denied);
+        return denied;
       }
-
-      const startedAt = options.clock.now();
-      let execution: ToolExecutionResult;
-      try {
-        execution = await executeWithTimeout(options.tool, call, context, description.timeoutMs);
-      } catch (error) {
-        const shutdownIntent = onShutdown(options.signal, intentEvent, error);
-        if (shutdownIntent !== undefined) {
-          return shutdownIntent;
-        }
-        const timedOut = error instanceof ToolTimeoutError;
-        const code = timedOut ? "tool_timeout" : toolErrorCode(error);
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        span.setAttribute("harness.error.code", code);
-        const result = await options.recorder.record({
-          type: "tool_result",
-          v: 1,
-          callId: call.callId,
-          toolId: call.toolId,
-          outcome: timedOut ? "timeout" : "error",
-          errorCode: code,
-          latencyMs: latencyMs(options.clock, startedAt),
-          ...executedArgsHashField(behavior.executedArgsHash),
-          result: null,
-        });
+      const result = await executePreparedTool({
+        recorder: options.recorder,
+        call,
+        tool: options.tool,
+        clock: options.clock,
+        context,
+        description,
+        ...(intentEvent === undefined ? {} : { intentEvent }),
+        ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
+        signal: options.signal,
+        span,
+      });
+      if (result !== intentEvent) {
         events.push(result);
-        return result;
-      }
-      const result = await options.recorder.record(
-        executionPayload(
-          call,
-          execution,
-          latencyMs(options.clock, startedAt),
-          behavior.executedArgsHash,
-        ),
-      );
-      events.push(result);
-      if (execution.outcome === "error") {
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        span.setAttribute("harness.error.code", execution.errorCode ?? "tool_failed");
       }
       return result;
     })
     .then(() => events);
 }
 
-function executionContext(options: Omit<ToolStepOptions, "calls">, events: Event[]) {
-  return toolRunContext({ runId: options.runId, signal: options.signal }, options.recorder, events);
+async function prepareRunToolCall(
+  options: Omit<ToolStepOptions, "calls">,
+  proposedCall: ModelToolCall,
+  behavior: RunToolCallBehavior,
+  context: ReturnType<typeof executionContext>,
+): Promise<PreparedToolCall> {
+  if (behavior.existingIntent?.policyDecision === "deny") {
+    return { call: { ...proposedCall, args: null }, errorCode: "pii_blocked" };
+  }
+  return behavior.prepared ?? prepareToolCall(options.tool, proposedCall, context);
 }
 
-function executionPayload(
+function executedArgsHashFor(
   call: ModelToolCall,
-  execution: ToolExecutionResult,
-  latency: number,
-  executedArgsHash?: string,
-): EventPartial {
-  return {
-    type: "tool_result",
-    v: 1,
-    callId: call.callId,
-    toolId: call.toolId,
-    outcome: execution.outcome,
-    ...(execution.outcome === "error" ? { errorCode: execution.errorCode ?? "tool_failed" } : {}),
-    latencyMs: latency,
-    ...executedArgsHashField(executedArgsHash),
-    result: execution.result,
-  };
+  behavior: RunToolCallBehavior,
+): string | undefined {
+  if (behavior.compareArgsHash === undefined) {
+    return behavior.executedArgsHash;
+  }
+  const preparedArgsHash = hashArgs(call.args);
+  return preparedArgsHash === behavior.compareArgsHash
+    ? behavior.executedArgsHash
+    : preparedArgsHash;
+}
+
+function executionContext(options: Omit<ToolStepOptions, "calls">, events: Event[]) {
+  return toolRunContext({ runId: options.runId, signal: options.signal }, options.recorder, events);
 }
 
 function recordDeniedResult(
@@ -328,15 +303,13 @@ export async function applyApprovalDecision(
     args = resolution.edits;
   }
   const call: ModelToolCall = { callId: intent.callId, toolId: intent.toolId, args };
-  const editedArgsHash = resolution.decision === "edit" ? hashArgs(args) : intent.argsHash;
-  const executedArgsHash = editedArgsHash === intent.argsHash ? undefined : editedArgsHash;
   const description = options.tool.describe(intent.toolId);
   if (description !== undefined) {
     await options.beforeToolExecution?.();
   }
   return runToolCall(options, call, description, {
     existingIntent: intent,
-    ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
+    ...(resolution.decision === "edit" ? { compareArgsHash: intent.argsHash } : {}),
   });
 }
 

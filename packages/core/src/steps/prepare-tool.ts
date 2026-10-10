@@ -99,10 +99,7 @@ export async function prepareCompletion(
     const call = { callId: part.callId, toolId: part.toolId, args: part.args };
     const prepared = tool === undefined ? { call } : await prepareToolCall(tool, call, context);
     preparedCalls.push(prepared);
-    // Failed calls are not durable recovery input: null must never execute after a crash.
-    if (prepared.errorCode === undefined) {
-      parts.push({ type: "tool_call", ...prepared.call });
-    }
+    parts.push({ type: "tool_call", ...prepared.call });
   }
   return {
     completion: {
