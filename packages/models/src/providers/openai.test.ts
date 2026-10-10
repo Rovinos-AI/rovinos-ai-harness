@@ -205,6 +205,31 @@ describe("OpenAI Chat Completions mapper", () => {
     });
   });
 
+  it("round-trips opaque parts under a configured provider id", () => {
+    const provider = "openai-compatible";
+    const response = fromChatResponse(
+      {
+        choices: [{ finish_reason: "tool_calls", message: rawToolMessage }],
+        usage,
+      },
+      { next: () => id },
+      provider,
+    );
+    const nextRequest = ModelRequestSchema.parse({
+      ...request,
+      model: { provider, model: "local-model" },
+      messages: [{ role: "assistant", parts: response.parts }],
+    });
+
+    const mapped = toChatRequest(
+      nextRequest,
+      { structuredOutput: "none", parallelToolCalls: false },
+      provider,
+    );
+
+    expect(mapped.messages[0]).toEqual(rawToolMessage);
+  });
+
   it("does not replay a forced synthetic tool call from opaque OpenAI messages", async () => {
     const dispatcher = new MockAgent();
     dispatcher.disableNetConnect();

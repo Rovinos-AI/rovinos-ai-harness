@@ -353,6 +353,17 @@ describe("loadConfig", () => {
           timeoutMs: 120_000,
         },
         maxConcurrent: 4,
+        providers: [],
+        routing: {
+          default: [],
+          roles: {},
+          fallbackOn: [
+            "provider_rate_limited",
+            "provider_timeout",
+            "provider_unavailable",
+            "model_output_invalid",
+          ],
+        },
       },
       servers: [],
       policy: {},

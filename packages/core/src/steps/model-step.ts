@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type Event, type Id, type Message, type ToolSpec } from "@harness/schemas";
+import {
+  Code,
+  ModelRequestSchema,
+  type Event,
+  type Id,
+  type Message,
+  type ToolSpec,
+} from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
@@ -89,7 +96,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
     let completion: ModelCompletion;
     try {
       completion = await options.model.complete(
-        {
+        ModelRequestSchema.parse({
           requestId,
           model: {
             provider: options.provider ?? "unknown",
@@ -98,7 +105,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
           messages: options.messages,
           ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
           ...(role === undefined ? {} : { role }),
-        },
+        }),
         modelRunContext(options),
       );
     } catch (error) {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { loadConfig, type HarnessConfig } from "@harness/config";
+import { CompositeSecretResolver, loadConfig, type HarnessConfig } from "@harness/config";
 import { HARNESS_VERSION } from "@harness/schemas";
 import { Command, CommanderError } from "commander";
 import type { CliContext, Clock, CommandModule } from "./command.js";
@@ -32,7 +32,10 @@ function createDefaultContext(program: Command, out: Output): CliContext {
     clock: systemClock,
     createRuntime: async (config, overrides) => {
       const { createRuntime } = await import("@harness/core");
-      return createRuntime(config, overrides);
+      return createRuntime(config, {
+        ...overrides,
+        secretResolver: overrides?.secretResolver ?? new CompositeSecretResolver(),
+      });
     },
   };
 }

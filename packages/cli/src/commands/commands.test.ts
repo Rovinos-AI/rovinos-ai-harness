@@ -25,6 +25,7 @@ import {
   FakeClock,
   Event as EventSchema,
   Id,
+  JsonValue,
   RunResultSchema,
   Sha256Hex,
   parseJson,
@@ -239,6 +240,7 @@ async function readEvents(store: InMemoryEventStore, runId: Id): Promise<Event[]
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   if (temporaryDirectory !== "") {
     await rm(temporaryDirectory, { recursive: true, force: true });
     temporaryDirectory = "";
@@ -273,6 +275,67 @@ describe("run, resume, and inspect CLI commands", () => {
     expect(harness.stdout).toHaveLength(1);
     expect(harness.stdout[0]).toMatch(/"status":"completed"/u);
     expect(harness.stderr).toEqual(["00000000000000000000000000\n"]);
+  });
+
+  it("runs configured routing without --fake-model and resolves provider secrets", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-routing-"));
+    const inputPath = await createFile("input.json", '{"goal":"say hello"}');
+    const configPath = await createFile(
+      "harness.json",
+      JSON.stringify({
+        models: {
+          providers: [
+            {
+              id: "local-openai",
+              kind: "openai",
+              apiKey: "env:MODEL_TEST_API_KEY",
+              baseUrl: "https://provider.example/v1",
+            },
+          ],
+          routing: {
+            default: [{ provider: "local-openai", model: "gpt-4o-mini" }],
+          },
+        },
+      }),
+    );
+    vi.stubEnv("HARNESS_DATA_DIR", temporaryDirectory);
+    vi.stubEnv("MODEL_TEST_API_KEY", "synthetic-test-key");
+    const requestBodies: JsonValue[] = [];
+    let authorizationHeader: string | null = null;
+    vi.stubGlobal("fetch", (_input: RequestInfo | URL, init?: RequestInit) => {
+      authorizationHeader = new Headers(init?.headers).get("authorization");
+      if (typeof init?.body === "string") {
+        requestBodies.push(parseJson(JsonValue, init.body));
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "completion-test",
+            object: "chat.completion",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [
+              {
+                index: 0,
+                message: { role: "assistant", content: "hello" },
+                finish_reason: "stop",
+              },
+            ],
+            usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+
+    const code = await main(["--config", configPath, "--json", "run", "--input", inputPath]);
+
+    expect(code).toBe(ExitCode.ok);
+    expect(authorizationHeader).toContain(process.env.MODEL_TEST_API_KEY ?? "");
+    expect(requestBodies[0]).toMatchObject({
+      model: "gpt-4o-mini",
+      max_completion_tokens: 4096,
+    });
   });
 
   it("reads JSON input from standard input", async () => {

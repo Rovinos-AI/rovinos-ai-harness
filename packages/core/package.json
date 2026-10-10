@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@harness/context": "workspace:^",
+    "@harness/models": "workspace:^",
     "@harness/schemas": "workspace:^",
     "@harness/store": "workspace:^",
     "@harness/telemetry": "workspace:^",

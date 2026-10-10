@@ -69,6 +69,21 @@ describe("provider errors", () => {
     expect(JSON.stringify(error)).not.toContain("expected");
   });
 
+  it("retains usage and latency when invalid output exhausts repairs", () => {
+    const error = new ModelOutputInvalidError(
+      2,
+      [{ path: ["answer"], code: "invalid_type" }],
+      undefined,
+      { usage: { inputTokens: 3, outputTokens: 5 }, latencyMs: 12 },
+    );
+
+    expect(error).toMatchObject({
+      repairAttempts: 2,
+      usage: { inputTokens: 3, outputTokens: 5 },
+      latencyMs: 12,
+    });
+  });
+
   it("redacts model-provided record keys from invalid-output paths", () => {
     const canary = "alice@example.test";
     const error = new ModelOutputInvalidError(
