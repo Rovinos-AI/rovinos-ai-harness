@@ -11,7 +11,16 @@ when forced tool choice is supported. The completion includes `schemaValid`, `ru
 `enforcement` result containing either the typed value or value-free validation issues. The
 `maxRung` gateway option can cap selection at `native` or `tool`. Requests combining `outputSchema`
 with real tools fail with `output_with_tools_unsupported`; providers without either supported rung
-return `rung_unavailable` for the later prompt fallback task.
+throw `rung_unavailable` for the later prompt fallback task before a provider call is made.
+
+Gateway resilience is configured with `models.retry` (`maxAttempts: 3`,
+`baseDelayMs: 500`, `maxDelayMs: 20000`, `timeoutMs: 120000`). Optional
+`models.maxConcurrent` defaults to 4. Provider request rates are supplied to the
+gateway by provider code through `requestsPerMinute`; bursts are capped at ten.
+Rate-limit and concurrency waits use run cancellation and the run deadline;
+`timeoutMs` starts when the adapter call begins. Successful responses are returned
+even when the injected clock has passed the deadline; the run budget is enforced
+at the next step boundary.
 
 ## Anthropic adapter
 

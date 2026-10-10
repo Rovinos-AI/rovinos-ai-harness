@@ -1,11 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lookupCapabilities } from "@harness/schemas";
-import type { Capabilities, Id, JsonValue, ModelRequest, ModelResponse } from "@harness/schemas";
+import {
+  Code,
+  lookupCapabilities,
+  ModelRetryConfigSchema,
+  type Capabilities,
+  type Id,
+  type JsonValue,
+  type ModelRequest,
+  type ModelResponse,
+  type ModelRetryConfig,
+} from "@harness/schemas";
+import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { z } from "zod";
-import type { Clock, IdGenerator } from "./types.js";
+import { ProviderResultSchema, type Clock, type IdGenerator } from "./types.js";
 import type { AdapterRegistry } from "./registry.js";
 import { ProviderError } from "./errors.js";
-import { ProviderResultSchema } from "./types.js";
+import { TokenBucketRateLimiter } from "./resilience/limiter.js";
+import { abortableSleep, withRetries, type Random, type Sleep } from "./resilience/retry.js";
+import { Semaphore } from "./resilience/semaphore.js";
 import { providerSchemaRules } from "./provider-schema-rules.js";
 import {
   EnforcementRungUnavailableError,
@@ -22,12 +34,18 @@ import { lowerForProvider, schemaHash } from "./json-schema.js";
 export interface ModelGatewayDependencies {
   readonly ids: IdGenerator;
   readonly clock: Clock;
+  readonly retryPolicy?: ModelRetryConfig;
+  readonly random?: Random;
+  readonly sleep?: Sleep;
+  readonly requestsPerMinute?: Readonly<Partial<Record<Code, number>>>;
+  readonly maxConcurrent?: number;
 }
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
 export interface ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType> {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  readonly deadlineTs?: number;
   readonly outputSchema?: OutputSchema;
 }
 
@@ -109,6 +127,13 @@ function enforceProviderOutput<OutputSchema extends z.ZodType>(
 
 /** Minimal provider-selecting model port implementation. */
 export class ModelGateway {
+  private readonly retryPolicy: ModelRetryConfig;
+  private readonly random: Random;
+  private readonly sleep: Sleep;
+  private readonly maxConcurrent: number;
+  private readonly limiters = new Map<Code, TokenBucketRateLimiter>();
+  private readonly semaphores = new Map<Code, Semaphore>();
+
   /**
    * @param registry - Provider adapters available for requests.
    * @param dependencies - Deterministic runtime dependencies forwarded to adapters.
@@ -117,13 +142,34 @@ export class ModelGateway {
     private readonly registry: AdapterRegistry,
     private readonly dependencies: ModelGatewayDependencies,
     private readonly options: ModelGatewayOptions = {},
-  ) {}
+  ) {
+    this.retryPolicy = ModelRetryConfigSchema.parse(
+      dependencies.retryPolicy ?? ModelRetryConfigSchema.parse({}),
+    );
+    this.random = dependencies.random ?? Math.random;
+    this.sleep = dependencies.sleep ?? abortableSleep;
+    this.maxConcurrent = dependencies.maxConcurrent ?? 4;
+    if (!Number.isSafeInteger(this.maxConcurrent) || this.maxConcurrent < 1) {
+      throw new RangeError("maxConcurrent must be a positive integer.");
+    }
+    for (const [provider, requestsPerMinute] of Object.entries(
+      dependencies.requestsPerMinute ?? {},
+    )) {
+      if (requestsPerMinute === undefined) {
+        continue;
+      }
+      this.limiters.set(
+        Code.parse(provider),
+        new TokenBucketRateLimiter(requestsPerMinute, dependencies.clock, this.sleep),
+      );
+    }
+  }
 
   /**
    * Completes a request through the adapter selected by its provider code.
    *
    * @param request - Normalized provider-neutral request.
-   * @param context - Run identifier, cancellation signal, and optional output schema.
+   * @param context - Run identifier, cancellation signal, optional deadline, and output schema.
    * @returns Provider completion with validation details when output enforcement is requested.
    */
   async complete<OutputSchema extends z.ZodType = z.ZodType>(
@@ -140,10 +186,36 @@ export class ModelGateway {
             lookupCapabilities(request.model, adapter.capabilities).capabilities,
             this.options.maxRung,
           );
-    const adapterResult = await adapter.complete(prepared.request, {
-      signal: context.signal,
-      ids: this.dependencies.ids,
+    const limiter = this.limiters.get(adapter.provider);
+    let semaphore = this.semaphores.get(adapter.provider);
+    if (semaphore === undefined) {
+      semaphore = new Semaphore(this.maxConcurrent);
+      this.semaphores.set(adapter.provider, semaphore);
+    }
+    let attempts = 0;
+    const adapterResult = await withRetries({
+      policy: this.retryPolicy,
       clock: this.dependencies.clock,
+      random: this.random,
+      sleep: this.sleep,
+      signal: context.signal,
+      ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+      prepareAttempt: async (signal, lastError) => {
+        if (limiter !== undefined) {
+          await limiter.acquire(signal, context.deadlineTs, lastError);
+        }
+        return semaphore.acquire(signal);
+      },
+      operation: (signal) => {
+        attempts += 1;
+        setActiveSpanAttribute("harness.model.attempts", attempts);
+        return adapter.complete(prepared.request, {
+          signal,
+          ids: this.dependencies.ids,
+          clock: this.dependencies.clock,
+          ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+        });
+      },
     });
     const parsedResult = ProviderResultSchema.safeParse(adapterResult);
     if (!parsedResult.success) {
