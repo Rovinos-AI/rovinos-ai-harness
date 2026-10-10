@@ -129,8 +129,9 @@ export class AhoCorasick {
   }
 
   /**
-   * Return matching pattern indexes and UTF-16 ranges for diagnostics.
+   * Return matching pattern indexes and UTF-16 ranges for tests and diagnostics only.
    * Matched text is intentionally never returned.
+   * @internal
    * @param text Text to scan.
    */
   findAll(text: string): { patternIndex: number; start: number; end: number }[] {

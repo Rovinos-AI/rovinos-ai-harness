@@ -25,8 +25,18 @@ export class SentinelMatcher {
     }
 
     const patterns: string[] = [];
+    const uniquePatterns = new Set<string>();
     for (const value of values) {
-      patterns.push(...variantFn(value));
+      for (const pattern of variantFn(value)) {
+        if (pattern.length === 0 || uniquePatterns.has(pattern)) {
+          continue;
+        }
+        uniquePatterns.add(pattern);
+        patterns.push(pattern);
+      }
+    }
+    if (patterns.length === 0) {
+      return new SentinelMatcher(undefined);
     }
     return new SentinelMatcher(AhoCorasick.build(patterns));
   }
