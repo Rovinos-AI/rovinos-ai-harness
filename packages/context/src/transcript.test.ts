@@ -15,6 +15,7 @@ const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
 const callId = "22222222222222222222222222";
 const pendingCallId = "44444444444444444444444444";
+const planCallId = "55555555555555555555555555";
 const envelope = (seq: number) => ({
   runId,
   seq,
@@ -67,6 +68,34 @@ function toolResult(
     latencyMs: 0,
     result,
   };
+}
+
+function planUpdate(seq: number): Event[] {
+  const plan = {
+    items: [{ id: "task.one", text: "Do the work", status: "doing" }],
+    notes: "Keep it",
+  };
+  return [
+    {
+      ...envelope(seq),
+      type: "tool_intent",
+      callId: planCallId,
+      toolId: "update_plan",
+      idempotent: true,
+      policyDecision: "allow",
+      argsHash: "c".repeat(64),
+      args: { plan },
+    },
+    {
+      ...envelope(seq + 1),
+      type: "tool_result",
+      callId: planCallId,
+      toolId: "update_plan",
+      outcome: "ok",
+      latencyMs: 0,
+      result: plan,
+    },
+  ];
 }
 
 async function readGolden(name: string): Promise<TranscriptGroup[]> {
@@ -254,6 +283,11 @@ describe("NaiveStrategy", () => {
     });
 
     expect(result.messages).toHaveLength(4);
+    expect(
+      result.messages.some((message) =>
+        message.parts.some((part) => part.type === "text" && part.text.startsWith("Current plan:")),
+      ),
+    ).toBe(false);
     expect(result.stats).toEqual({
       messageCount: 4,
       estimatedTokens: 9,
@@ -263,7 +297,26 @@ describe("NaiveStrategy", () => {
     });
     expect(result.pinnedSeqs).toEqual([0, 0]);
     expect(strategy.id).toBe("naive");
-    expect(strategy.version).toBe("v2");
+    expect(strategy.version).toBe("v3");
     expect(count).toHaveBeenCalledWith(result.messages, { provider: "test", model: "test" });
+  });
+
+  it("appends a plan message when a successful plan update exists", async () => {
+    const result = await new NaiveStrategy().build({
+      events: [runInput(0, "goal"), ...planUpdate(1)],
+      budget: { maxTokens: 100, reserveOutputTokens: 0 },
+      model: { provider: "test", model: "test" },
+      counter: { count: () => 1 },
+    });
+
+    expect(result.messages.at(-1)).toMatchObject({
+      role: "user",
+      parts: [
+        {
+          type: "text",
+          text: 'Current plan: {"items":[{"id":"task.one","text":"Do the work","status":"doing"}],"notes":"Keep it"}',
+        },
+      ],
+    });
   });
 });
