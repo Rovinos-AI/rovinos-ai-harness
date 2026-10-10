@@ -233,7 +233,9 @@ describe("OpenAI Chat Completions mapper", () => {
       responseOptions: { headers: { "content-type": "application/json" } },
     }));
     pool.intercept({ path: /.*/, method: "POST" }).reply((options) => {
-      secondRequest = JsonValue.parse(JSON.parse(String(options.body)));
+      if (typeof options.body === "string") {
+        secondRequest = parseJson(JsonValue, options.body);
+      }
       return {
         statusCode: 200,
         data: completion(textMessage),

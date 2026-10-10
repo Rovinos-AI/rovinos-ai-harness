@@ -5,9 +5,7 @@ import Anthropic, {
   type ClientOptions,
 } from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
-import { Code, JsonValue } from "@harness/schemas";
-import type { Capabilities } from "@harness/schemas";
-import type { ModelRequest, Part } from "@harness/schemas";
+import { Code, JsonValue, type Capabilities, type ModelRequest, type Part } from "@harness/schemas";
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
 

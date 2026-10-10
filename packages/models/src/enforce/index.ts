@@ -19,23 +19,39 @@ export const EnforcementIssueSchema = z
 /** Inferred structured-output validation issue. */
 export type EnforcementIssue = z.infer<typeof EnforcementIssueSchema>;
 
+function validEnforcementResultSchema<Schema extends z.ZodType>(outputSchema: Schema) {
+  return z
+    .object({
+      value: outputSchema,
+      valid: z.literal(true),
+      rungUsed: EnforcementRungSchema,
+    })
+    .strict();
+}
+
+function invalidEnforcementResultSchema() {
+  return z
+    .object({
+      issues: z.array(EnforcementIssueSchema),
+      valid: z.literal(false),
+      rungUsed: EnforcementRungSchema.optional(),
+    })
+    .strict();
+}
+
 /** Creates the runtime contract for the result of validating structured model output. */
-export function createEnforcementResultSchema<Schema extends z.ZodType>(outputSchema: Schema) {
+export function createEnforcementResultSchema<Schema extends z.ZodType>(
+  outputSchema: Schema,
+): z.ZodDiscriminatedUnion<
+  [
+    ReturnType<typeof validEnforcementResultSchema<Schema>>,
+    ReturnType<typeof invalidEnforcementResultSchema>,
+  ],
+  "valid"
+> {
   return z.discriminatedUnion("valid", [
-    z
-      .object({
-        value: outputSchema,
-        valid: z.literal(true),
-        rungUsed: EnforcementRungSchema,
-      })
-      .strict(),
-    z
-      .object({
-        issues: z.array(EnforcementIssueSchema),
-        valid: z.literal(false),
-        rungUsed: EnforcementRungSchema.optional(),
-      })
-      .strict(),
+    validEnforcementResultSchema(outputSchema),
+    invalidEnforcementResultSchema(),
   ]);
 }
 
@@ -103,127 +119,125 @@ export function stripSyntheticToolCall(parts: readonly Part[]): Part[] {
     if (part.type !== "opaque") {
       return [part];
     }
-    const blob = asJsonObject(part.blob);
-    if (blob === undefined) {
-      return [part];
-    }
-
+    let blob: JsonValue | undefined;
     if (part.provider === "anthropic") {
-      const content = blob.content;
-      const idsByCallId = asJsonObject(blob.toolUseIdByCallId);
-      if (!Array.isArray(content) || idsByCallId === undefined) {
-        return [part];
-      }
-      const providerIds = new Set(
-        [...syntheticCallIds].flatMap((callId) => {
-          const providerId = idsByCallId[callId];
-          return typeof providerId === "string" ? [providerId] : [];
-        }),
-      );
-      for (const block of content) {
-        const item = asJsonObject(block);
-        if (
-          item?.type === "tool_use" &&
-          item.name === "emit_result" &&
-          typeof item.id === "string"
-        ) {
-          providerIds.add(item.id);
-        }
-      }
-      if (providerIds.size === 0) {
-        return [part];
-      }
-      const filteredContent = content.filter((block) => {
-        const item = asJsonObject(block);
-        return (
-          item === undefined ||
-          item.type !== "tool_use" ||
-          (item.name !== "emit_result" &&
-            (typeof item.id !== "string" || !providerIds.has(item.id)))
-        );
-      });
-      const remainingIds = { ...idsByCallId };
-      for (const [callId, providerId] of Object.entries(remainingIds)) {
-        if (
-          syntheticCallIds.has(callId) ||
-          (typeof providerId === "string" && providerIds.has(providerId))
-        ) {
-          delete remainingIds[callId];
-        }
-      }
-      return [
-        {
-          ...part,
-          blob: { ...blob, content: filteredContent, toolUseIdByCallId: remainingIds },
-        },
-      ];
+      blob = sanitizeAnthropicBlob(part.blob, syntheticCallIds);
+    } else if (part.provider === "openai") {
+      blob = sanitizeOpenAiBlob(part.blob, syntheticCallIds);
     }
-
-    if (part.provider === "openai") {
-      const message = asJsonObject(blob.message);
-      const idsByCallId = asJsonObject(blob.openaiCallIdByCallId);
-      const toolCalls = message?.tool_calls;
-      if (message === undefined || !Array.isArray(toolCalls) || idsByCallId === undefined) {
-        return [part];
-      }
-      const providerIds = new Set(
-        [...syntheticCallIds].flatMap((callId) => {
-          const providerId = idsByCallId[callId];
-          return typeof providerId === "string" ? [providerId] : [];
-        }),
-      );
-      for (const toolCall of toolCalls) {
-        const item = asJsonObject(toolCall);
-        const functionData = asJsonObject(item?.function);
-        if (
-          item !== undefined &&
-          functionData?.name === "emit_result" &&
-          typeof item.id === "string"
-        ) {
-          providerIds.add(item.id);
-        }
-      }
-      if (providerIds.size === 0) {
-        return [part];
-      }
-      const remainingIds = { ...idsByCallId };
-      for (const [callId, providerId] of Object.entries(remainingIds)) {
-        if (
-          syntheticCallIds.has(callId) ||
-          (typeof providerId === "string" && providerIds.has(providerId))
-        ) {
-          delete remainingIds[callId];
-        }
-      }
-      return [
-        {
-          ...part,
-          blob: {
-            ...blob,
-            message: {
-              ...message,
-              tool_calls: toolCalls.filter((toolCall) => {
-                const item = asJsonObject(toolCall);
-                const functionData = asJsonObject(item?.function);
-                return (
-                  item === undefined ||
-                  (functionData?.name !== "emit_result" &&
-                    (typeof item.id !== "string" || !providerIds.has(item.id)))
-                );
-              }),
-            },
-            openaiCallIdByCallId: remainingIds,
-          },
-        },
-      ];
-    }
-
-    return [part];
+    return blob === undefined ? [part] : [{ ...part, blob }];
   });
 }
 
-function asJsonObject(
-  value: JsonValue | undefined,
-): { readonly [key: string]: JsonValue } | undefined {
+function sanitizeAnthropicBlob(
+  value: JsonValue,
+  syntheticCallIds: ReadonlySet<string>,
+): JsonValue | undefined {
+  const blob = asJsonObject(value);
+  const content = blob?.content;
+  const idsByCallId = asJsonObject(blob?.toolUseIdByCallId);
+  if (blob === undefined || !Array.isArray(content) || idsByCallId === undefined) {
+    return undefined;
+  }
+
+  const providerIds = mappedProviderIds(idsByCallId, syntheticCallIds);
+  for (const block of content) {
+    const item = asJsonObject(block);
+    if (item?.type === "tool_use" && item.name === "emit_result" && typeof item.id === "string") {
+      providerIds.add(item.id);
+    }
+  }
+  if (providerIds.size === 0) {
+    return undefined;
+  }
+
+  const filteredContent = content.filter((block) => {
+    const item = asJsonObject(block);
+    return (
+      item?.type !== "tool_use" ||
+      (item.name !== "emit_result" && (typeof item.id !== "string" || !providerIds.has(item.id)))
+    );
+  });
+  return {
+    ...blob,
+    content: filteredContent,
+    toolUseIdByCallId: remainingCallIds(idsByCallId, syntheticCallIds, providerIds),
+  };
+}
+
+function sanitizeOpenAiBlob(
+  value: JsonValue,
+  syntheticCallIds: ReadonlySet<string>,
+): JsonValue | undefined {
+  const blob = asJsonObject(value);
+  const message = asJsonObject(blob?.message);
+  const idsByCallId = asJsonObject(blob?.openaiCallIdByCallId);
+  const toolCalls = message?.tool_calls;
+  if (
+    blob === undefined ||
+    message === undefined ||
+    !Array.isArray(toolCalls) ||
+    idsByCallId === undefined
+  ) {
+    return undefined;
+  }
+
+  const providerIds = mappedProviderIds(idsByCallId, syntheticCallIds);
+  for (const toolCall of toolCalls) {
+    const item = asJsonObject(toolCall);
+    const functionData = asJsonObject(item?.function);
+    if (functionData?.name === "emit_result" && typeof item?.id === "string") {
+      providerIds.add(item.id);
+    }
+  }
+  if (providerIds.size === 0) {
+    return undefined;
+  }
+
+  return {
+    ...blob,
+    message: {
+      ...message,
+      tool_calls: toolCalls.filter((toolCall) => {
+        const item = asJsonObject(toolCall);
+        const functionData = asJsonObject(item?.function);
+        return (
+          item === undefined ||
+          (functionData?.name !== "emit_result" &&
+            (typeof item.id !== "string" || !providerIds.has(item.id)))
+        );
+      }),
+    },
+    openaiCallIdByCallId: remainingCallIds(idsByCallId, syntheticCallIds, providerIds),
+  };
+}
+
+function mappedProviderIds(
+  idsByCallId: Record<string, JsonValue>,
+  syntheticCallIds: ReadonlySet<string>,
+): Set<string> {
+  return new Set(
+    [...syntheticCallIds].flatMap((callId) => {
+      const providerId = idsByCallId[callId];
+      return typeof providerId === "string" ? [providerId] : [];
+    }),
+  );
+}
+
+function remainingCallIds(
+  idsByCallId: Record<string, JsonValue>,
+  syntheticCallIds: ReadonlySet<string>,
+  providerIds: ReadonlySet<string>,
+): Record<string, JsonValue> {
+  return Object.fromEntries(
+    Object.entries(idsByCallId).filter(
+      ([callId, providerId]) =>
+        !syntheticCallIds.has(callId) &&
+        (typeof providerId !== "string" || !providerIds.has(providerId)),
+    ),
+  );
+}
+
+function asJsonObject(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
 }
