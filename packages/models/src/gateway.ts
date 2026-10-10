@@ -70,7 +70,7 @@ export class ModelGateway {
    * Completes a request through the adapter selected by its provider code.
    *
    * @param request - Normalized provider-neutral request.
-   * @param context - Run identifier and cancellation signal.
+   * @param context - Run identifier, cancellation signal, and optional budget deadline.
    * @returns A minimal model-port completion without repair or fallback.
    */
   async complete(

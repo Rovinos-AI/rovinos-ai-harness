@@ -20,6 +20,7 @@ export interface ProviderContext {
   readonly signal: AbortSignal;
   readonly ids: IdGenerator;
   readonly clock: Clock;
+  /** Epoch-millisecond run deadline, when supplied by the budget tracker. */
   readonly deadlineTs?: number;
 }
 
