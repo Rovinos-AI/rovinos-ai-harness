@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   DetectorTextSchema,
-  DetectionSchema,
   JsonValue as JsonValueSchema,
   PiiActionSummarySchema,
   PiiEntitySchema,
@@ -15,18 +14,17 @@ import {
   type PiiBoundary,
   type PiiPolicy,
 } from "@harness/schemas";
-import { findTokens, isToken, type VaultWriter } from "@harness/vault";
+import { isToken, type VaultWriter } from "@harness/vault";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import { assertJsonSize, JsonSizeTracker } from "./json-size.js";
 import { evaluatePiiPolicy } from "./policy.js";
+import {
+  detectOutsideTokenSpans,
+  resolvePolicyOverlaps,
+  type EvaluatedDetection,
+} from "./tokenizer-helpers.js";
 
 const MAX_JSON_DEPTH = 64;
-const ACTION_PRIORITY: Readonly<Record<PiiAction, number>> = {
-  allow: 0,
-  tokenize: 1,
-  redact: 2,
-  block: 3,
-};
 
 interface Replacement {
   readonly start: number;
@@ -34,12 +32,6 @@ interface Replacement {
   readonly raw: string;
   readonly entityType: string;
   readonly action: PiiAction;
-}
-
-interface EvaluatedDetection {
-  readonly detection: Detection;
-  readonly action: PiiAction;
-  readonly entityType: Code;
 }
 
 interface TextPlan {
@@ -156,21 +148,7 @@ export class Tokenizer {
     if (ancestors.has(value)) {
       throw new PiiTokenizerError("pii_input_invalid");
     }
-    let isArray: boolean;
-    let copy: JsonContainer;
-    try {
-      isArray = Array.isArray(value);
-      const prototype = Object.getPrototypeOf(value);
-      if (
-        (isArray && prototype !== Array.prototype) ||
-        (!isArray && prototype !== Object.prototype && prototype !== null)
-      ) {
-        throw new PiiTokenizerError("pii_input_invalid");
-      }
-      copy = Array.isArray(value) ? [...value] : Object.fromEntries(Object.entries(value));
-    } catch {
-      throw new PiiTokenizerError("pii_input_invalid");
-    }
+    const copy = snapshotJsonContainer(value);
     size.addContainer(copy);
     ancestors.add(value);
     const result = Array.isArray(copy)
@@ -215,51 +193,12 @@ export class Tokenizer {
     counts: ActionCounts,
     isKey = false,
   ): Promise<TextPlan> {
-    const tokens = findTokens(text).map(({ index, token }) => ({
-      start: index,
-      end: index + token.length,
-    }));
-    const maskedText = maskTokenSpans(text, tokens);
-    let found: readonly Detection[];
-    try {
-      found = await this.dependencies.detectors.detect(maskedText);
-    } catch {
-      throw new PiiTokenizerError("pii_detector_failed");
-    }
-    const evaluated: EvaluatedDetection[] = [];
-    try {
-      for (const detection of found) {
-        const parsed = DetectionSchema.safeParse(detection);
-        if (!parsed.success || parsed.data.end > maskedText.length) {
-          throw new PiiTokenizerError("pii_detector_invalid_output");
-        }
-        if (intersectsToken(parsed.data.start, parsed.data.end, tokens)) {
-          continue;
-        }
-        const entity = PiiEntitySchema.safeParse(parsed.data.entityType);
-        if (!entity.success) {
-          throw new PiiTokenizerError("pii_detector_invalid_output");
-        }
-        const action = evaluatePiiPolicy(this.dependencies.policy, {
-          entity: entity.data,
-          boundary: context.boundary,
-          destination: context.destination,
-        });
-        addCount(counts.actions, action, entity.data);
-        if (isKey && action !== "allow") {
-          counts.keys.set(entity.data, (counts.keys.get(entity.data) ?? 0) + 1);
-        }
-        if (action === "block") {
-          counts.blocked.set(entity.data, (counts.blocked.get(entity.data) ?? 0) + 1);
-        }
-        evaluated.push({ detection: parsed.data, action, entityType: entity.data });
-      }
-    } catch (error) {
-      if (error instanceof PiiTokenizerError) {
-        throw error;
-      }
-      throw new PiiTokenizerError("pii_detector_invalid_output");
-    }
+    const detections = await detectOutsideTokenSpans(text, (maskedText) =>
+      this.dependencies.detectors.detect(maskedText),
+    );
+    const evaluated = detections.map((detection) =>
+      this.evaluateDetection(detection, context, counts, isKey),
+    );
 
     const replacements: Replacement[] = [];
     for (const item of resolvePolicyOverlaps(evaluated)) {
@@ -274,6 +213,31 @@ export class Tokenizer {
       }
     }
     return { text, replacements };
+  }
+
+  private evaluateDetection(
+    detection: Detection,
+    context: { readonly boundary: PiiBoundary; readonly destination: Destination },
+    counts: ActionCounts,
+    isKey: boolean,
+  ): EvaluatedDetection {
+    const entity = PiiEntitySchema.safeParse(detection.entityType);
+    if (!entity.success) {
+      throw new PiiTokenizerError("pii_detector_invalid_output");
+    }
+    const action = evaluatePiiPolicy(this.dependencies.policy, {
+      entity: entity.data,
+      boundary: context.boundary,
+      destination: context.destination,
+    });
+    addCount(counts.actions, action, entity.data);
+    if (isKey && action !== "allow") {
+      counts.keys.set(entity.data, (counts.keys.get(entity.data) ?? 0) + 1);
+    }
+    if (action === "block") {
+      counts.blocked.set(entity.data, (counts.blocked.get(entity.data) ?? 0) + 1);
+    }
+    return { detection, action, entityType: entity.data };
   }
 
   private throwIfBlocked(counts: ActionCounts): void {
@@ -385,99 +349,24 @@ function compareOrdinal(left: string, right: string): number {
   return left > right ? 1 : 0;
 }
 
-function maskTokenSpans(
-  text: string,
-  tokens: readonly { readonly start: number; readonly end: number }[],
-): string {
-  const parts: string[] = [];
-  let cursor = 0;
-  for (const token of tokens) {
-    parts.push(text.slice(cursor, token.start), " ".repeat(token.end - token.start));
-    cursor = token.end;
-  }
-  parts.push(text.slice(cursor));
-  return parts.join("");
-}
-
-function intersectsToken(
-  start: number,
-  end: number,
-  tokens: readonly { readonly start: number; readonly end: number }[],
-): boolean {
-  let low = 0;
-  let high = tokens.length;
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2);
-    const token = tokens[middle];
-    if (token !== undefined && token.end <= start) {
-      low = middle + 1;
-    } else {
-      high = middle;
+function snapshotJsonContainer(value: JsonContainer): JsonContainer {
+  try {
+    if (isJsonArray(value)) {
+      if (Reflect.getPrototypeOf(value) !== Array.prototype) {
+        throw new PiiTokenizerError("pii_input_invalid");
+      }
+      return [...value];
     }
-  }
-  const token = tokens[low];
-  return token !== undefined && token.start < end;
-}
-
-function resolvePolicyOverlaps(detections: readonly EvaluatedDetection[]): EvaluatedDetection[] {
-  const sorted = [...detections].sort((left, right) => {
-    const startDifference = left.detection.start - right.detection.start;
-    return startDifference !== 0 ? startDifference : left.detection.end - right.detection.end;
-  });
-  const resolved: EvaluatedDetection[] = [];
-  let group: EvaluatedDetection[] = [];
-  let groupStart = 0;
-  let groupEnd = 0;
-  for (const current of sorted) {
-    if (group.length === 0) {
-      group = [current];
-      groupStart = current.detection.start;
-      groupEnd = current.detection.end;
-    } else if (current.detection.start < groupEnd) {
-      group.push(current);
-      groupEnd = Math.max(groupEnd, current.detection.end);
-    } else {
-      resolved.push(mergePolicyOverlapGroup(group, groupStart, groupEnd));
-      group = [current];
-      groupStart = current.detection.start;
-      groupEnd = current.detection.end;
+    const prototype = Reflect.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new PiiTokenizerError("pii_input_invalid");
     }
+    return Object.fromEntries(Object.entries(value));
+  } catch {
+    throw new PiiTokenizerError("pii_input_invalid");
   }
-  if (group.length > 0) {
-    resolved.push(mergePolicyOverlapGroup(group, groupStart, groupEnd));
-  }
-  return resolved;
 }
 
-function mergePolicyOverlapGroup(
-  group: readonly EvaluatedDetection[],
-  start: number,
-  end: number,
-): EvaluatedDetection {
-  const winner = group.reduce((preferred, candidate) =>
-    isPreferredPolicyDetection(candidate, preferred) ? candidate : preferred,
-  );
-  return {
-    ...winner,
-    detection: { ...winner.detection, start, end },
-  };
-}
-
-function isPreferredPolicyDetection(
-  candidate: EvaluatedDetection,
-  preferred: EvaluatedDetection,
-): boolean {
-  const priorityDifference = ACTION_PRIORITY[candidate.action] - ACTION_PRIORITY[preferred.action];
-  if (priorityDifference !== 0) {
-    return priorityDifference > 0;
-  }
-  const candidateLength = candidate.detection.end - candidate.detection.start;
-  const preferredLength = preferred.detection.end - preferred.detection.start;
-  if (candidateLength !== preferredLength) {
-    return candidateLength > preferredLength;
-  }
-  if (candidate.detection.confidence !== preferred.detection.confidence) {
-    return candidate.detection.confidence > preferred.detection.confidence;
-  }
-  return compareOrdinal(candidate.detection.detectorId, preferred.detection.detectorId) < 0;
+function isJsonArray(value: JsonContainer): value is JsonValue[] {
+  return Array.isArray(value);
 }

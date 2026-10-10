@@ -285,6 +285,10 @@ describe("Tokenizer.tokenizeText", () => {
 });
 
 describe("Tokenizer.tokenizeJson", () => {
+  class CustomContainer {
+    readonly value = "safe";
+  }
+
   it("preserves and scans own __proto__ properties", async () => {
     const input = Object.fromEntries([["__proto__", "alice@example.test"]]);
     await expect(createTokenizer("block").tokenizeJson(runA, input, context)).rejects.toMatchObject(
@@ -477,15 +481,26 @@ describe("Tokenizer.tokenizeJson", () => {
     );
   });
 
+  const dateContainer: Record<string, JsonValue> = {};
+  const mapContainer: Record<string, JsonValue> = {};
+  const setContainer: Record<string, JsonValue> = {};
+  const classContainer: Record<string, JsonValue> = {};
+  const customPrototypeContainer: Record<string, JsonValue> = {};
+  Object.setPrototypeOf(dateContainer, Date.prototype);
+  Object.setPrototypeOf(mapContainer, Map.prototype);
+  Object.setPrototypeOf(setContainer, Set.prototype);
+  Object.setPrototypeOf(classContainer, CustomContainer.prototype);
+  Object.setPrototypeOf(customPrototypeContainer, { inherited: true });
+
   it.each([
-    ["Date", new Date()],
-    ["Map", new Map()],
-    ["Set", new Set()],
-    ["class instance", new (class { readonly value = "safe"; })()],
-    ["custom-prototype object", Object.create({ inherited: true }) as object],
+    ["Date", dateContainer],
+    ["Map", mapContainer],
+    ["Set", setContainer],
+    ["class instance", classContainer],
+    ["custom-prototype object", customPrototypeContainer],
   ])("rejects a %s as invalid JSON", async (_name, value) => {
     await expect(
-      createTokenizer().tokenizeJson(runA, value as JsonValue, context),
+      createTokenizer().tokenizeJson(runA, value, context),
     ).rejects.toMatchObject({
       code: "pii_input_invalid",
       message: "pii_input_invalid",
