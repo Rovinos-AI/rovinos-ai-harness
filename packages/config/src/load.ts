@@ -2,12 +2,19 @@
 // Config discovery follows explicit path, environment path, then the working-directory default.
 import { readFile as readFileFromDisk } from "node:fs/promises";
 import { resolve } from "node:path";
-import { ContractError, HarnessError, parseJson, parseYaml } from "@harness/schemas";
+import {
+  ContractError,
+  HarnessError,
+  SecretRefSchema,
+  parseJson,
+  parseYaml,
+} from "@harness/schemas";
 import { z } from "zod";
 import { HarnessConfigSchema, type HarnessConfig } from "./schema.js";
 
 const unknownValueSchema = z.unknown();
 const blockedPathSegments = new Set(["__proto__", "constructor", "prototype"]);
+const secretKeyPattern = /api[-_]?key|token|password|secret|credential/i;
 
 /** A file reader injected by config-loader tests or callers. */
 export type ConfigFileReader = (path: string) => Promise<string>;
@@ -88,6 +95,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return false;
   }
   return Object.prototype.toString.call(value) === "[object Object]";
+}
+
+function inlineSecretIssues(value: unknown, path: readonly (string | number)[] = []): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((child, index) => inlineSecretIssues(child, [...path, index]));
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  return Object.entries(value).flatMap(([key, child]) => {
+    const childPath = [...path, key];
+    const pathText = childPath.map(String).join(".");
+    const issue =
+      secretKeyPattern.test(key) && !SecretRefSchema.safeParse(child).success
+        ? [`${pathText}: a SecretRef (secret_inline)`]
+        : [];
+    return [...issue, ...inlineSecretIssues(child, childPath)];
+  });
+}
+
+function assertNoInlineSecrets(value: unknown): void {
+  const issues = inlineSecretIssues(value);
+  if (issues.length > 0) {
+    throw new ConfigError(issues);
+  }
 }
 
 function unwrapSchema(schema: z.core.$ZodType): z.core.$ZodType {
@@ -270,7 +303,9 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Harne
   const merged = deepMerge(parsedFile, environmentOverrides(env));
   const result = HarnessConfigSchema.safeParse(merged);
   if (!result.success) {
+    assertNoInlineSecrets(merged);
     throw new ConfigError(formatConfigIssues(result.error.issues));
   }
+  assertNoInlineSecrets(result.data);
   return deepFreeze(result.data);
 }
