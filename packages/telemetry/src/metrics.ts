@@ -12,6 +12,7 @@ export type TelemetryDropReason =
   | "processor_error";
 
 let droppedCounter: Counter<{ readonly reason: TelemetryDropReason }> | undefined;
+let skippedShortValuesCounter: Counter | undefined;
 
 function getDroppedCounter(): Counter<{ readonly reason: TelemetryDropReason }> {
   droppedCounter ??= metrics
@@ -20,10 +21,26 @@ function getDroppedCounter(): Counter<{ readonly reason: TelemetryDropReason }> 
   return droppedCounter;
 }
 
+function getSkippedShortValuesCounter(): Counter {
+  skippedShortValuesCounter ??= metrics
+    .getMeter("@harness/telemetry")
+    .createCounter("harness.sentinel.short_values_skipped");
+  return skippedShortValuesCounter;
+}
+
 /** Counts a telemetry drop using its bounded reason code. */
 export function countDroppedTelemetry(reason: TelemetryDropReason): void {
   try {
     getDroppedCounter().add(1, { reason });
+  } catch {
+    return;
+  }
+}
+
+/** Counts values excluded from a run's sentinel set without metric attributes. */
+export function countSkippedShortValues(count: number): void {
+  try {
+    getSkippedShortValuesCounter().add(count);
   } catch {
     return;
   }

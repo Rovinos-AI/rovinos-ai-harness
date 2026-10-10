@@ -19,6 +19,11 @@ export {
 export { eventsToTranscript } from "./transcript.js";
 export { NaiveStrategy } from "./strategies/naive.js";
 export {
+  ContextMarkerExceedsBudgetError,
+  ContextPinnedExceedsBudgetError,
+  SlidingWindowStrategy,
+} from "./strategies/sliding-window.js";
+export {
   InMemoryWorkspace,
   OffloadedHandleSchema,
   OffloadedStub,

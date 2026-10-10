@@ -63,6 +63,11 @@ export {
   type PiiPolicy,
   type PiiRule,
 } from "./pii-policy.js";
+export {
+  PiiActionSummarySchema,
+  toPiiActionEventPayload,
+  type PiiActionSummary,
+} from "./pii-action-summary.js";
 export { SnapshotSchema, type Snapshot } from "./snapshot.js";
 export { KEY_PROVIDER_KEY_BYTES, type KeyProvider } from "./key-provider.js";
 export { RunConfigSchema, type RunConfig } from "./config/run.js";
@@ -92,7 +97,7 @@ export {
   type CustomDetector,
   type Detection,
 } from "./pii-detection.js";
-export { TelemetryConfigSchema } from "./config/telemetry.js";
+export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
 export { SandboxConfigSchema } from "./config/sandbox.js";
 export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
 export {
