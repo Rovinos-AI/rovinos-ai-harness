@@ -15,6 +15,33 @@ type VaultFactory = () => Promise<VaultHarness>;
 const runId = "A".repeat(26);
 const anotherRunId = "B".repeat(26);
 
+function testPurgeInvalidatesView(createVault: VaultFactory): void {
+  it("returns undefined for unknown tokens and refreshes after purge", async () => {
+    const harness = await createVault();
+    try {
+      const token = await harness.vault.put(runId, "email", "alice@example.test");
+      const reader: VaultRunReader = harness.vault;
+      const view = new VaultRunView(reader);
+      await expect(view.valuesFor(runId)).resolves.toMatchObject({
+        values: ["alice@example.test"],
+      });
+      const versionBeforePurge = await harness.vault.version(runId);
+      await expect(harness.vault.resolve(runId, "<EMAIL_2>")).resolves.toBeUndefined();
+      await expect(harness.vault.purge(runId)).resolves.toBe(1);
+      await expect(harness.vault.version(runId)).resolves.toBeGreaterThan(versionBeforePurge);
+      await expect(view.valuesFor(runId)).resolves.toMatchObject({ values: [] });
+      await expect(harness.vault.purge(runId)).resolves.toBe(0);
+      await expect(harness.vault.resolve(runId, token)).resolves.toBeUndefined();
+      await expect(harness.vault.stats(runId)).resolves.toEqual({ entries: 0 });
+      await expect(harness.vault.put(runId, "email", "alice@example.test")).resolves.toBe(
+        "<EMAIL_2>",
+      );
+    } finally {
+      await harness.cleanup();
+    }
+  });
+}
+
 /** Register the shared behavioral contract against a vault implementation factory. */
 export function runVaultConformance(name: string, createVault: VaultFactory): void {
   describe(name, () => {
@@ -60,32 +87,7 @@ export function runVaultConformance(name: string, createVault: VaultFactory): vo
       }
     });
 
-    it("returns undefined for unknown tokens and after idempotent purge", async () => {
-      const harness = await createVault();
-      try {
-        const token = await harness.vault.put(runId, "email", "alice@example.test");
-        const reader: VaultRunReader = harness.vault;
-        const view = new VaultRunView(reader);
-        await expect(view.valuesFor(runId)).resolves.toMatchObject({
-          values: ["alice@example.test"],
-        });
-        const versionBeforePurge = await harness.vault.version(runId);
-        await expect(harness.vault.resolve(runId, "<EMAIL_2>")).resolves.toBeUndefined();
-        await expect(harness.vault.purge(runId)).resolves.toBe(1);
-        await expect(harness.vault.version(runId)).resolves.toBeGreaterThan(versionBeforePurge);
-        await expect(view.valuesFor(runId)).resolves.toMatchObject({ values: [] });
-        await expect(harness.vault.purge(runId)).resolves.toBe(0);
-        await expect(harness.vault.resolve(runId, token)).resolves.toBeUndefined();
-        await expect(harness.vault.stats(runId)).resolves.toEqual({ entries: 0 });
-        await expect(harness.vault.put(runId, "email", "alice@example.test")).resolves.toBe(
-          "<EMAIL_2>",
-        );
-      } finally {
-        await harness.cleanup();
-      }
-    });
-
-    it("increments the run version only for new entries and preserves it across purge", async () => {
+    it("increments the run version only for new entries and purges", async () => {
       const harness = await createVault();
       try {
         await expect(harness.vault.version(runId)).resolves.toBe(0);
@@ -109,5 +111,6 @@ export function runVaultConformance(name: string, createVault: VaultFactory): vo
         await harness.cleanup();
       }
     });
+    testPurgeInvalidatesView(createVault);
   });
 }

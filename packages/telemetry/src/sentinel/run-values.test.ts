@@ -63,8 +63,7 @@ describe("VaultRunView", () => {
       values: ["long-value"],
       skippedShort: 3,
     });
-    expect(countSkippedShortValues).toHaveBeenCalledOnce();
-    expect(countSkippedShortValues).toHaveBeenCalledWith(3);
+    expect(countSkippedShortValues).toHaveBeenCalledExactlyOnceWith(3);
   });
 
   it("counts only newly skipped short values when refreshing", async () => {
@@ -81,8 +80,7 @@ describe("VaultRunView", () => {
     rawValues = ["x", "y", "z", "long-value"];
     await view.valuesFor(runId);
 
-    expect(countSkippedShortValues).toHaveBeenCalledOnce();
-    expect(countSkippedShortValues).toHaveBeenCalledWith(3);
+    expect(countSkippedShortValues).toHaveBeenCalledExactlyOnceWith(3);
   });
 
   it("accepts a configured minimum length", async () => {
