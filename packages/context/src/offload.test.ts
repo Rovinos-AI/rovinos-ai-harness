@@ -258,6 +258,36 @@ describe("OffloadingToolPort", () => {
     });
   });
 
+  it("keeps four-byte UTF-8 characters within the 16 KiB page cap", async () => {
+    const workspace = new InMemoryWorkspace();
+    const result = "😀".repeat(10_000);
+    const serialized = JSON.stringify(result);
+    const port = new OffloadingToolPort(fakePort(result).inner, workspace, { thresholdBytes: 0 });
+    const stub = OffloadedStub.parse((await port.execute(call(), context)).result);
+    const first = await port.execute(
+      call("read_offloaded", { handle: stub.$offloaded.handle, length: 16 * 1024 - 1 }),
+      context,
+    );
+    const firstPage = ReadOffloadedResultSchema.parse(first.result);
+    const pages = [firstPage];
+    let offset = firstPage.nextOffset;
+    while (offset !== undefined) {
+      const next = await port.execute(
+        call("read_offloaded", { handle: stub.$offloaded.handle, offset }),
+        context,
+      );
+      pages.push(ReadOffloadedResultSchema.parse(next.result));
+      offset = pages.at(-1)?.nextOffset;
+    }
+
+    expect(firstPage.data).toBe(`"${"😀".repeat(4095)}`);
+    expect(new TextEncoder().encode(firstPage.data).byteLength).toBe(16 * 1024 - 3);
+    expect(pages.every(({ data }) => new TextEncoder().encode(data).byteLength <= 16 * 1024)).toBe(
+      true,
+    );
+    expect(pages.map(({ data }) => data).join("")).toBe(serialized);
+  });
+
   it("can read an existing handle after constructing a new decorator", async () => {
     const workspace = new InMemoryWorkspace();
     const handle = "wf_00000000000000000000000000";

@@ -336,7 +336,11 @@ async function completeUtf8Page(options: CompleteUtf8PageOptions): Promise<Uint8
   const incompleteLength = boundedPage.byteLength - incompleteTailStart;
   const remainingLength =
     expectedUtf8Length(boundedPage[incompleteTailStart] ?? 0) - incompleteLength;
-  if (length >= MAX_READ_BYTES || remainingLength <= 0) {
+  if (
+    length >= MAX_READ_BYTES ||
+    remainingLength <= 0 ||
+    boundedPage.byteLength + remainingLength > MAX_READ_BYTES
+  ) {
     return boundedPage.slice(0, incompleteTailStart);
   }
 
