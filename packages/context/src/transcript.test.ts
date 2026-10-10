@@ -1,0 +1,247 @@
+// SPDX-License-Identifier: Apache-2.0
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { parseJson, type Event, type Part } from "@harness/schemas";
+import { describe, expect, it, vi } from "vitest";
+import {
+  ContextBudgetSchema,
+  NaiveStrategy,
+  TranscriptSchema,
+  eventsToTranscript,
+  type TranscriptGroup,
+} from "./index.js";
+
+const runId = "00000000000000000000000000";
+const segmentId = "11111111111111111111111111";
+const callId = "22222222222222222222222222";
+const pendingCallId = "44444444444444444444444444";
+const envelope = (seq: number) => ({
+  runId,
+  seq,
+  ts: 100 + seq,
+  v: 1,
+  traceId: "a".repeat(32),
+  spanId: "b".repeat(16),
+  segmentId,
+});
+
+function runInput(seq: number, input: Extract<Event, { type: "run_input" }>["input"]): Event {
+  return {
+    ...envelope(seq),
+    type: "run_input",
+    input,
+    inputKind: "initial",
+  };
+}
+
+function modelResponse(seq: number, content: Part[]): Event {
+  return {
+    ...envelope(seq),
+    type: "model_response",
+    requestId: "33333333333333333333333333",
+    provider: "test",
+    model: "test",
+    inputTokens: 1,
+    outputTokens: 1,
+    finishReason: "stop",
+    latencyMs: 0,
+    schemaValid: true,
+    repairAttempts: 0,
+    fallbackDepth: 0,
+    content,
+    providerBlobs: null,
+  };
+}
+
+function toolResult(
+  seq: number,
+  result: Extract<Event, { type: "tool_result" }>["result"],
+  outcome: Extract<Event, { type: "tool_result" }>["outcome"] = "ok",
+): Event {
+  return {
+    ...envelope(seq),
+    type: "tool_result",
+    callId,
+    toolId: "lookup",
+    outcome,
+    latencyMs: 0,
+    result,
+  };
+}
+
+async function readGolden(name: string): Promise<TranscriptGroup[]> {
+  const path = fileURLToPath(new URL(`./__golden__/${name}.json`, import.meta.url));
+  return parseJson(TranscriptSchema, await readFile(path, "utf8"));
+}
+
+describe("eventsToTranscript", () => {
+  it.each([
+    [
+      "plain-run",
+      [runInput(0, "hello"), modelResponse(1, [{ type: "text", text: "answer" }])],
+    ],
+    [
+      "tool-run",
+      [
+        runInput(0, "use a tool"),
+        modelResponse(1, [
+          { type: "text", text: "working" },
+          { type: "tool_call", callId, toolId: "lookup", args: { query: "x" } },
+        ]),
+        toolResult(3, { value: "found" }),
+      ],
+    ],
+    [
+      "compacted-run",
+      [
+        runInput(0, "continue"),
+        modelResponse(1, [{ type: "text", text: "earlier" }]),
+        modelResponse(2, [{ type: "text", text: "inside range" }]),
+        {
+          ...envelope(3),
+          type: "context_compacted",
+          fromSeq: 1,
+          toSeq: 2,
+          strategy: "summary",
+          strategyVersion: "v1",
+          summary: "completed the setup",
+        },
+        modelResponse(4, [{ type: "text", text: "next" }]),
+      ],
+    ],
+  ] as const)("matches the %s transcript golden", async (name, events) => {
+    expect(eventsToTranscript(events)).toEqual(await readGolden(name));
+  });
+
+  it("matches tool results by call id and keeps calls and results in one group", () => {
+    const events: Event[] = [
+      toolResult(3, { value: "found" }, "timeout"),
+      modelResponse(1, [
+        { type: "tool_call", callId, toolId: "lookup", args: { query: "x" } },
+      ]),
+    ];
+    const [group] = eventsToTranscript(events);
+
+    expect(group?.seqs).toEqual([1, 3]);
+    expect(group?.messages.map(({ role }) => role)).toEqual(["assistant", "tool"]);
+    expect(group?.messages[1]?.parts).toMatchObject([{ isError: true }]);
+    expect(eventsToTranscript([toolResult(5, null)])).toMatchObject([
+      { seqs: [5], messages: [{ role: "tool" }], pinned: false },
+    ]);
+  });
+
+  it("replaces only intersecting groups and removes a whole atomic tool group", () => {
+    const events: Event[] = [
+      modelResponse(1, [
+        { type: "tool_call", callId, toolId: "lookup", args: { query: "x" } },
+        { type: "tool_call", callId: pendingCallId, toolId: "lookup", args: { query: "y" } },
+      ]),
+      runInput(0, "goal"),
+      toolResult(4, { value: "found" }),
+      modelResponse(5, [{ type: "text", text: "keep" }]),
+      {
+        ...envelope(6),
+        type: "context_compacted",
+        fromSeq: 1,
+        toSeq: 1,
+        strategy: "summary",
+        strategyVersion: "v1",
+        summary: "older",
+      },
+    ];
+    const transcript = eventsToTranscript(events);
+
+    expect(transcript).toHaveLength(3);
+    expect(transcript.map(({ seqs }) => seqs)).toEqual([[0], [1], [5]]);
+    expect(transcript[1]?.messages[0]?.parts).toEqual([
+      { type: "text", text: "Summary of earlier work: older" },
+    ]);
+  });
+
+  it("renders JSON inputs and summaries and pins each reconstructed input", () => {
+    const transcript = eventsToTranscript([
+      runInput(0, { goal: "goal" }),
+      {
+        ...envelope(1),
+        type: "context_compacted",
+        fromSeq: 1,
+        toSeq: 1,
+        strategy: "summary",
+        strategyVersion: "v1",
+        summary: { outcome: "done" },
+      },
+    ]);
+
+    expect(transcript).toMatchObject([
+      {
+        seqs: [0],
+        pinned: true,
+        messages: [{ parts: [{ text: "{\"goal\":\"goal\"}" }] }],
+      },
+      {
+        seqs: [1],
+        pinned: true,
+        messages: [{ parts: [{ text: "Summary of earlier work: {\"outcome\":\"done\"}" }] }],
+      },
+    ]);
+    expect(eventsToTranscript([])).toEqual([]);
+    expect(
+      eventsToTranscript([
+        {
+          ...envelope(2),
+          type: "run_created",
+          configHash: "a".repeat(64),
+          policyVersion: "test.policy",
+        },
+      ]),
+    ).toEqual([]);
+  });
+});
+
+describe("NaiveStrategy", () => {
+  it("validates the token budget shape", () => {
+    expect(ContextBudgetSchema.parse({ maxTokens: 100, reserveOutputTokens: 10 })).toEqual({
+      maxTokens: 100,
+      reserveOutputTokens: 10,
+    });
+    expect(ContextBudgetSchema.safeParse({ maxTokens: -1, reserveOutputTokens: 0 }).success).toBe(
+      false,
+    );
+  });
+
+  it("keeps all groups, reports statistics, and pins run inputs", async () => {
+    const count = vi.fn(() => 9);
+    const strategy = new NaiveStrategy();
+    const result = await strategy.build({
+      events: [
+        runInput(0, "goal"),
+        toolResult(1, { $offloaded: { handle: "wf_1" } }),
+        {
+          ...envelope(2),
+          type: "context_compacted",
+          fromSeq: 0,
+          toSeq: 0,
+          strategy: "summary",
+          strategyVersion: "v1",
+          summary: "input retained",
+        },
+      ],
+      budget: { maxTokens: 1, reserveOutputTokens: 1 },
+      model: { provider: "test", model: "test" },
+      counter: { count },
+    });
+
+    expect(result.messages).toHaveLength(2);
+    expect(result.stats).toEqual({
+      messageCount: 2,
+      estimatedTokens: 9,
+      droppedGroups: 0,
+      compactedRanges: 1,
+      offloadedResults: 1,
+    });
+    expect(result.pinnedSeqs).toEqual([0]);
+    expect(strategy.id).toBe("naive");
+    expect(strategy.version).toBe("v1");
+    expect(count).toHaveBeenCalledWith(result.messages, { provider: "test", model: "test" });
+  });
+});

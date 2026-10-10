@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "customConditions": ["source"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"]
+}
