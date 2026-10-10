@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ModelRefSchema, type JsonValue, type Message, type ModelRef } from "@harness/schemas";
+import { ModelRefSchema, type Message, type ModelRef } from "@harness/schemas";
 import { z } from "zod";
 import type { TokenCounter } from "./types.js";
 
@@ -76,7 +76,8 @@ export class HeuristicTokenCounter implements TokenCounter {
       }
     }
 
-    const estimate = Math.ceil(weightedCharacters / 3.5) + 4 * messages.length + 8 * toolCallPartCount;
+    const estimate =
+      Math.ceil(weightedCharacters / 3.5) + 4 * messages.length + 8 * toolCallPartCount;
     return Math.max(Math.ceil(estimate * this.safetyFactor), Math.ceil(totalCharacters / 4));
   }
 }
@@ -122,9 +123,7 @@ export class CalibratingTokenCounter implements TokenCounter {
     const correctedRatio = clamp(previousRatio * clamp(actualInputTokens / estimated));
     this.ratios.set(key, {
       model: modelRef,
-      ratio: clamp(
-        previousRatio * (1 - CALIBRATION_ALPHA) + correctedRatio * CALIBRATION_ALPHA,
-      ),
+      ratio: clamp(previousRatio * (1 - CALIBRATION_ALPHA) + correctedRatio * CALIBRATION_ALPHA),
     });
   }
 
@@ -174,9 +173,11 @@ function addText(
   totalCharacters: number,
   weightedCharacters: number,
 ): [number, number] {
+  let nextTotalCharacters = totalCharacters;
+  let nextWeightedCharacters = weightedCharacters;
   for (const character of text) {
-    totalCharacters += 1;
-    weightedCharacters += nonLatinScriptCharacter.test(character) ? 3.5 : 1;
+    nextTotalCharacters += 1;
+    nextWeightedCharacters += nonLatinScriptCharacter.test(character) ? 3.5 : 1;
   }
-  return [totalCharacters, weightedCharacters];
+  return [nextTotalCharacters, nextWeightedCharacters];
 }

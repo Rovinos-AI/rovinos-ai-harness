@@ -66,11 +66,7 @@ export class StrategyContextPort implements ContextPort {
     if (!(this.buildOptions.counter instanceof CalibratingTokenCounter)) {
       return;
     }
-    this.buildOptions.counter.observe(
-      ModelRefSchema.parse(model),
-      estimated,
-      actualInputTokens,
-    );
+    this.buildOptions.counter.observe(ModelRefSchema.parse(model), estimated, actualInputTokens);
     this.calibration = this.buildOptions.counter.snapshot();
   }
 

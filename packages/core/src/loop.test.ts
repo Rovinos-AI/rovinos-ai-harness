@@ -34,11 +34,7 @@ import {
   SqliteEventStore,
   type EventStore,
 } from "@harness/store";
-import {
-  CalibratingTokenCounter,
-  HeuristicTokenCounter,
-  NaiveStrategy,
-} from "@harness/context";
+import { CalibratingTokenCounter, HeuristicTokenCounter, NaiveStrategy } from "@harness/context";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";
@@ -1209,12 +1205,12 @@ describe("runLoop", () => {
       counter,
     });
     const initialModel: ModelPort = {
-      complete: async () => {
+      complete: () => {
         controller.abort("shutdown");
-        return {
+        return Promise.resolve({
           ...completion([resumeToolCall]),
           usage: { inputTokens: 150, outputTokens: 5 },
-        };
+        });
       },
     };
     const suspended = await runLoop({
@@ -1245,9 +1241,9 @@ describe("runLoop", () => {
     });
     let calibrationAtResume: ReturnType<typeof resumedCounter.snapshot> = [];
     const resumedModel: ModelPort = {
-      complete: async () => {
+      complete: () => {
         calibrationAtResume = resumedCounter.snapshot();
-        return completion();
+        return Promise.resolve(completion());
       },
     };
     const resumed = await resumeRun(
