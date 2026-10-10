@@ -31,7 +31,9 @@ const roleDirectories: string[] = [];
 
 afterEach(async () => {
   vi.unstubAllGlobals();
-  await Promise.all(roleDirectories.splice(0).map((directory) => rm(directory, { recursive: true })));
+  await Promise.all(
+    roleDirectories.splice(0).map((directory) => rm(directory, { recursive: true })),
+  );
 });
 
 describe("createRuntime model routing", () => {
@@ -124,8 +126,7 @@ describe("createRuntime model routing", () => {
     const adapter: ProviderAdapter = {
       provider: "local",
       kind: "openai",
-      complete: () =>
-        Promise.reject(new ProviderError("provider_unavailable")),
+      complete: () => Promise.reject(new ProviderError("provider_unavailable")),
     };
     const tool = {
       describe: () => undefined,
@@ -157,6 +158,7 @@ describe("createRuntime model routing", () => {
       },
     );
 
+    expect(runtime.store).toBeDefined();
     await runtime.close();
   });
 
@@ -168,9 +170,7 @@ describe("createRuntime model routing", () => {
           models: ModelsConfigSchema.parse({
             routing: { default: [{ provider: "local", model: "model" }] },
           }),
-          roles: RolesConfigSchema.parse([
-            { id: "worker", tools: [], contextStrategy: "missing" },
-          ]),
+          roles: RolesConfigSchema.parse([{ id: "worker", tools: [], contextStrategy: "missing" }]),
         },
         {
           store: new InMemoryEventStore(),

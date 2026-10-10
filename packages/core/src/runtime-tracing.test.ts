@@ -453,6 +453,8 @@ describe("runtime tracing fallback", () => {
     expect(firstResult.status).toBe("completed");
     expect(readAttempts).toBe(3);
     expect(diagnosticWarnings).toEqual([
+      ["harness.core", "role_tool_pattern_unmatched"],
+      ["harness.core", "role_tool_pattern_unmatched"],
       ["harness.core", "cancel_monitor_degraded"],
       ["harness.core", "cancel_monitor_degraded"],
     ]);

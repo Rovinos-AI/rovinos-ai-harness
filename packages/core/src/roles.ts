@@ -11,7 +11,7 @@ import {
   type RoleConfig,
   type RoleToolPattern,
 } from "@harness/schemas";
-import { z } from "zod";
+import type { z } from "zod";
 
 /** Stable codes emitted for role startup and lookup failures. */
 export type RoleRegistryErrorCode =
@@ -91,11 +91,10 @@ function isZodSchema(value: unknown): value is z.ZodType {
   if (typeof value !== "object" || value === null) {
     return false;
   }
-  const candidate = value as { readonly safeParse?: unknown; readonly _zod?: unknown };
+  const safeParse: unknown = Reflect.get(value, "safeParse");
+  const zodInternals: unknown = Reflect.get(value, "_zod");
   return (
-    typeof candidate.safeParse === "function" &&
-    typeof candidate._zod === "object" &&
-    candidate._zod !== null
+    typeof safeParse === "function" && typeof zodInternals === "object" && zodInternals !== null
   );
 }
 

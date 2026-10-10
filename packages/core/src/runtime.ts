@@ -36,6 +36,30 @@ const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" 
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
 
+async function validateRuntimeRoles(
+  config: RuntimeConfig,
+  roleConfigDirectory: string,
+  tool: ToolPort,
+): Promise<void> {
+  const models = parseRuntimeModelsConfig(config.models);
+  const contextStrategies = new Set(
+    Array.from(
+      createStrategyRegistry({ provider: "default", model: "default" }).keys(),
+      (strategyId) => Code.parse(strategyId),
+    ),
+  );
+  await RoleRegistry.create({
+    ...(config.roles === undefined ? {} : { roles: config.roles }),
+    models,
+    registeredTools: tool.getToolSpecs?.().map((spec) => spec.toolId) ?? [],
+    contextStrategies,
+    configDirectory: roleConfigDirectory,
+    onWarning: (warning) => {
+      roleConfigLogger.warn(warning.code);
+    },
+  });
+}
+
 function ensureTracing(): void {
   const probeIds = new SystemIdGenerator(systemClock);
   const probe = RUN_SPAN.start({
@@ -398,21 +422,7 @@ export async function createRuntime(
   const dataDir = overrides.dataDir ?? process.env.HARNESS_DATA_DIR ?? process.cwd();
   const tool = overrides.tool ?? unavailableTool;
   const context = overrides.context ?? new NaiveContext();
-  const models = parseRuntimeModelsConfig(config.models);
-  const contextStrategies = new Set(
-    Array.from(
-      createStrategyRegistry({ provider: "default", model: "default" }).keys(),
-      (strategyId) => Code.parse(strategyId),
-    ),
-  );
-  await RoleRegistry.create({
-    ...(config.roles === undefined ? {} : { roles: config.roles }),
-    models,
-    registeredTools: tool.getToolSpecs?.().map((spec) => spec.toolId) ?? [],
-    contextStrategies,
-    configDirectory: overrides.roleConfigDirectory ?? process.cwd(),
-    onWarning: (warning) => roleConfigLogger.warn(warning.code),
-  });
+  await validateRuntimeRoles(config, overrides.roleConfigDirectory ?? process.cwd(), tool);
   const store =
     overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
   return composeRuntime({ config, overrides, clock, ids, store, model, tool, context });
