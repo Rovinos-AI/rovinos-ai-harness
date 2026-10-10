@@ -70,6 +70,17 @@ describe("RoleRegistry", () => {
     ]);
   });
 
+  it("uses default routing when no role routes are configured", async () => {
+    const roleRegistry = await registry(await configDirectory(), [], {
+      models: ModelsConfigSchema.parse({
+        routing: { default: [{ provider: "local", model: "model" }] },
+      }),
+    });
+
+    expect(roleRegistry.resolveRole("planner").route).toBeUndefined();
+    expect(roleRegistry.resolveRole("worker").route).toBeUndefined();
+  });
+
   it("expands globs, deduplicates matching tools, and warns for unmatched patterns", async () => {
     const onWarning = vi.fn();
     const roleRegistry = await registry(
@@ -123,6 +134,18 @@ describe("RoleRegistry", () => {
     ).rejects.toMatchObject({ code: "role_prompt_path_invalid" });
   });
 
+  it("rejects prompt files larger than 8,000 characters without exposing their contents", async () => {
+    const directory = await configDirectory();
+    await writeFile(join(directory, "large.md"), "sensitive prompt".padEnd(8_001, "!"));
+
+    await expect(
+      registry(directory, [{ id: "worker", tools: [], systemPrompt: { file: "large.md" } }]),
+    ).rejects.toMatchObject({
+      code: "role_prompt_too_large",
+      message: "Role configuration failed (role_prompt_too_large).",
+    });
+  });
+
   it("rejects symlink escapes and reports unreadable prompt files", async () => {
     const directory = await configDirectory();
     const externalDirectory = await configDirectory();
@@ -165,6 +188,19 @@ describe("RoleRegistry", () => {
         loadSchema: () => Promise.resolve({ Schema: "not a schema" }),
       }),
     ).rejects.toMatchObject({ code: "role_result_schema_invalid" });
+  });
+
+  it("accepts result schemas from a separate Zod module copy", async () => {
+    const directory = await configDirectory();
+    const schema = { _zod: {}, safeParse: () => ({ success: true }) };
+    const roleRegistry = await registry(
+      directory,
+      [{ id: "worker", tools: [], resultSchema: "./schema.js#Result" }],
+      { loadSchema: () => Promise.resolve({ Result: schema }) },
+    );
+
+    expect(roleRegistry.resolveRole("worker").resultSchema).toBe(schema);
+    expect(Object.isFrozen(schema)).toBe(false);
   });
 
   it("returns deeply frozen role data and reports missing names", async () => {

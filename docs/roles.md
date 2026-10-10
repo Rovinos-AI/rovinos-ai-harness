@@ -20,8 +20,9 @@ roles:
     maxChildren: 8
 ```
 
-Each `route` (or, by default, the role's `id`) must exist as a key in
-`models.routing.roles`. A route may refer to an ordered list of model
+An explicitly configured `route` must exist as a key in
+`models.routing.roles`. When omitted, the model gateway uses
+`models.routing.default`. A route may refer to an ordered list of model
 references, as described in [Configuration](./configuration.md).
 
 `tools` is either `"*"` or a list of tool IDs and `*` patterns such as
@@ -34,15 +35,21 @@ leave other built-ins unchanged.
 Built-in roles are `planner`, `worker`, `judge`, and `summarizer`. Optional
 `budgets.maxSteps`, `budgets.maxCostUsd`, and `budgets.maxWallClockMs` are
 positive limits. `maxDepth` defaults to `2`; `maxChildren` defaults to `8`.
-The optional `systemPrompt` is either text (up to 8,000 characters) or
-`{ file: "relative/path.md" }`. Prompt files are loaded during startup and
-must resolve within the config directory, including through symlinks.
+The optional `systemPrompt` is either text (up to 8,000 characters) or a file
+reference such as `{ file: "relative/path.md" }` (whose contents are subject to
+the same limit). Prompt files are loaded during startup and must resolve within
+the config directory, including through symlinks.
 Operator-authored prompt text is trusted instruction content and is recorded
 in `model_request` events when sent to a model.
+
+Roles are validated and prompt files resolved during runtime startup, using
+the selected config directory and registered tools and context strategies.
 
 An optional `resultSchema` is a module reference of the form
 `"./schemas/result.js#ResultSchema"` or `"package-name#ResultSchema"`. Startup
 fails if the module cannot be loaded or the named export is not a Zod schema.
+Schemas from another Zod module copy are accepted when they expose Zod's
+`safeParse` and `_zod` members.
 An optional `contextStrategy` must name a strategy in the runtime registry.
 
 See the configuration schema for the exact accepted fields and validation.

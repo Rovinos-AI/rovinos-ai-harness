@@ -22,6 +22,7 @@ export type RoleRegistryErrorCode =
   | "role_result_schema_invalid"
   | "role_prompt_path_invalid"
   | "role_prompt_unavailable"
+  | "role_prompt_too_large"
   | "role_not_found";
 
 /** Role validation failure carrying a stable code without config values. */
@@ -47,7 +48,7 @@ export interface RoleRegistryWarning {
 /** Role after startup resolution of prompts, routes, tools, and schemas. */
 export interface ResolvedRole {
   readonly id: CodeType;
-  readonly route: CodeType;
+  readonly route?: CodeType;
   readonly systemPrompt?: string;
   readonly tools: readonly CodeType[];
   readonly budgets?: RoleConfig["budgets"];
@@ -75,7 +76,7 @@ function deepFreeze<T>(value: T): T {
   if (typeof value !== "object" || value === null || Object.isFrozen(value)) {
     return value;
   }
-  if (value instanceof z.ZodType) {
+  if (isZodSchema(value)) {
     return value;
   }
   if (Array.isArray(value)) {
@@ -84,6 +85,18 @@ function deepFreeze<T>(value: T): T {
     Object.values(value).forEach((child: unknown) => deepFreeze(child));
   }
   return Object.freeze(value);
+}
+
+function isZodSchema(value: unknown): value is z.ZodType {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as { readonly safeParse?: unknown; readonly _zod?: unknown };
+  return (
+    typeof candidate.safeParse === "function" &&
+    typeof candidate._zod === "object" &&
+    candidate._zod !== null
+  );
 }
 
 /**
@@ -132,7 +145,11 @@ async function readPromptFile(file: string, configDirectory: string): Promise<st
     if (!isWithinDirectory(root, promptPath)) {
       throw new RoleRegistryError("role_prompt_path_invalid");
     }
-    return await readFile(promptPath, "utf8");
+    const prompt = await readFile(promptPath, "utf8");
+    if (prompt.length > 8_000) {
+      throw new RoleRegistryError("role_prompt_too_large");
+    }
+    return prompt;
   } catch (error) {
     if (error instanceof RoleRegistryError) {
       throw error;
@@ -171,7 +188,7 @@ async function loadResultSchema(
       throw new RoleRegistryError("role_result_schema_invalid");
     }
     const schema: unknown = Reflect.get(namespace, exportName);
-    if (!(schema instanceof z.ZodType)) {
+    if (!isZodSchema(schema)) {
       throw new RoleRegistryError("role_result_schema_invalid");
     }
     return schema;
@@ -215,8 +232,8 @@ async function resolveRoleConfig(
   options: RoleRegistryOptions,
   warnings: RoleRegistryWarning[],
 ): Promise<ResolvedRole> {
-  const route = role.route ?? role.id;
-  if (!Object.hasOwn(options.models.routing.roles, route)) {
+  const route = role.route;
+  if (route !== undefined && !Object.hasOwn(options.models.routing.roles, route)) {
     throw new RoleRegistryError("role_route_unknown");
   }
   if (role.contextStrategy !== undefined && !options.contextStrategies.has(role.contextStrategy)) {
@@ -241,7 +258,7 @@ async function resolveRoleConfig(
 
   return deepFreeze({
     id: role.id,
-    route,
+    ...(route === undefined ? {} : { route }),
     ...(systemPrompt === undefined ? {} : { systemPrompt }),
     tools: expandTools(role, options.registeredTools, warnings),
     ...(role.budgets === undefined ? {} : { budgets: role.budgets }),
