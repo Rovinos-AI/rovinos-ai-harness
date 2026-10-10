@@ -95,6 +95,7 @@ describe("attribute schemas", () => {
       { schema: attr.hash(), kind: "hash" },
       { schema: attr.enum(["one", "two"]), kind: "enum" },
       { schema: attr.int(), kind: "int" },
+      { schema: attr.nonnegativeInt(), kind: "int" },
       { schema: attr.num(), kind: "num" },
       { schema: attr.bool(), kind: "bool" },
     ];
@@ -121,6 +122,7 @@ describe("attribute schemas", () => {
     expect(attr.enum(["one", "two"]).safeParse("three").success).toBe(false);
     expect(attr.int().safeParse(2).success).toBe(true);
     expect(attr.int().safeParse(2.5).success).toBe(false);
+    expect(attr.nonnegativeInt().safeParse(-1).success).toBe(false);
     expect(attr.num().safeParse(Number.POSITIVE_INFINITY).success).toBe(false);
     expect(attr.bool().safeParse(false).success).toBe(true);
   });

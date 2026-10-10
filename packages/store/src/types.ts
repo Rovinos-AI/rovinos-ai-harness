@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id, NewEvent, RunStatus, Snapshot, TraceId } from "@harness/schemas";
+import type { Code, Event, Id, NewEvent, RunStatus, Snapshot, TraceId } from "@harness/schemas";
 import { z } from "zod";
 
 /** Runtime schema for per-run checkpoint snapshot retention configuration. */
@@ -9,6 +9,15 @@ export const snapshotStoreOptionsSchema = z
 
 /** Snapshot retention options accepted by an EventStore. */
 export type SnapshotStoreOptions = z.input<typeof snapshotStoreOptionsSchema>;
+
+/** Source of epoch-millisecond timestamps used for store metadata. */
+export interface Clock {
+  /** Return the current epoch time in milliseconds. */
+  now(): number;
+}
+
+/** System clock used when a store clock is not supplied. */
+export const systemClock: Clock = Object.freeze({ now: () => Date.now() });
 
 /** Summary of a run derived from its stored events. */
 export interface RunSummary {
@@ -99,6 +108,21 @@ export interface EventStore {
    * @throws InvalidEventError when traceId is invalid.
    */
   findRunsByTrace(traceId: TraceId): Promise<Id[]>;
+
+  /**
+   * Fetch the next at-least-once batch of events for a sink.
+   * @param sinkId Sink identifier with an independent persisted cursor.
+   * @param limit Maximum number of events to return.
+   * @returns Ordered events and the cursor after the last returned event, or the acked cursor if empty.
+   */
+  fetchOutbox(sinkId: Code, limit: number): Promise<{ events: Event[]; cursor: number }>;
+
+  /**
+   * Advance a sink's outbox cursor monotonically.
+   * @param sinkId Sink identifier.
+   * @param cursor Cursor returned by {@link EventStore.fetchOutbox}.
+   */
+  ackOutbox(sinkId: Code, cursor: number): Promise<void>;
 
   /** Release resources held by the store. */
   close(): Promise<void>;

@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, TraceId, type Event, type NewEvent, type Snapshot } from "@harness/schemas";
+import {
+  Code,
+  Id,
+  TraceId,
+  type Code as SinkId,
+  type Event,
+  type NewEvent,
+  type Snapshot,
+} from "@harness/schemas";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { z } from "zod";
 import {
@@ -11,9 +19,15 @@ import {
   type SnapshotRow,
   validateSnapshotAppend,
 } from "../codec.js";
-import { InvalidEventError, StoreEncryptionMismatchError } from "../errors.js";
+import {
+  InvalidEventError,
+  StoreEncryptionMismatchError,
+  StoreUnavailableError,
+} from "../errors.js";
 import {
   snapshotStoreOptionsSchema,
+  systemClock,
+  type Clock,
   type EventStore,
   type ListRunsOptions,
   type RunSummary,
@@ -57,6 +71,7 @@ export class PostgresEventStore implements EventStore {
   private readonly pool: Pool;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
+  private readonly clock: Clock;
   private initialized: Promise<void> | undefined;
 
   /**
@@ -65,11 +80,13 @@ export class PostgresEventStore implements EventStore {
    * @param connectionString Postgres connection URL.
    * @param options Pool size and schema selection.
    * @param codec Codec used to store content separately from event metadata.
+   * @param clock Clock supplying timestamps for sink-cursor updates.
    */
   constructor(
     connectionString: string,
     options: PostgresEventStoreOptions = {},
     codec: ContentCodec = new JsonContentCodec(),
+    clock: Clock = systemClock,
   ) {
     const parsedConnectionString = connectionStringSchema.safeParse(connectionString);
     const parsedOptions = optionsSchema.safeParse(options);
@@ -84,6 +101,7 @@ export class PostgresEventStore implements EventStore {
     this.pool.on("error", () => undefined);
     this.codec = codec;
     this.snapshotKeep = parsedOptions.data.snapshotKeep;
+    this.clock = clock;
   }
 
   private ensureInitialized(): Promise<void> {
@@ -107,7 +125,7 @@ export class PostgresEventStore implements EventStore {
       transactionStarted = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
       const schemaState = await client.query<{ initialized: boolean } & QueryResultRow>(
-        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AND to_regclass('store_metadata') IS NOT NULL AS initialized",
+        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AND to_regclass('sink_cursors') IS NOT NULL AND to_regclass('store_metadata') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'events' AND column_name = 'tx_id') AS initialized",
       );
       if (schemaState.rows[0]?.initialized !== true) {
         await client.query(POSTGRES_SCHEMA);
@@ -292,6 +310,65 @@ export class PostgresEventStore implements EventStore {
         [parsedTraceId.data],
       );
       return result.rows.map(({ run_id }) => Id.parse(run_id));
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
+  /** {@inheritDoc EventStore.fetchOutbox} */
+  async fetchOutbox(sinkId: SinkId, limit: number): Promise<{ events: Event[]; cursor: number }> {
+    const parsedSinkId = Code.safeParse(sinkId);
+    if (!parsedSinkId.success) {
+      throw new InvalidEventError([["sinkId"]]);
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new InvalidEventError([["limit"]]);
+    }
+    try {
+      await this.ensureInitialized();
+      const cursorResult = await this.pool.query<{ cursor: number | string }>(
+        "SELECT cursor FROM sink_cursors WHERE sink_id = $1",
+        [parsedSinkId.data],
+      );
+      const lastAcked =
+        cursorResult.rows[0] === undefined ? 0 : integer(cursorResult.rows[0].cursor);
+      const result = await this.pool.query<EventRow & { global_seq: number | string }>(
+        "SELECT global_seq, run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id FROM events WHERE global_seq > $1 AND tx_id < pg_snapshot_xmin(pg_current_snapshot()) ORDER BY global_seq LIMIT $2",
+        [lastAcked, limit],
+      );
+      const events: Event[] = [];
+      for (const row of result.rows) {
+        const runId = Id.safeParse(row.run_id);
+        if (!runId.success) {
+          throw new StoreUnavailableError();
+        }
+        events.push(await eventFromRow(this.codec, runId.data, row));
+      }
+      const last = result.rows.at(-1);
+      return {
+        events,
+        cursor: last === undefined ? lastAcked : integer(last.global_seq),
+      };
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
+  /** {@inheritDoc EventStore.ackOutbox} */
+  async ackOutbox(sinkId: SinkId, cursor: number): Promise<void> {
+    const parsedSinkId = Code.safeParse(sinkId);
+    if (!parsedSinkId.success) {
+      throw new InvalidEventError([["sinkId"]]);
+    }
+    if (!Number.isSafeInteger(cursor) || cursor < 0) {
+      throw new InvalidEventError([["cursor"]]);
+    }
+    try {
+      await this.ensureInitialized();
+      await this.pool.query(
+        "INSERT INTO sink_cursors (sink_id, cursor, updated_at) VALUES ($1, $2, $3) ON CONFLICT (sink_id) DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = EXCLUDED.updated_at WHERE sink_cursors.cursor < EXCLUDED.cursor",
+        [parsedSinkId.data, cursor, this.clock.now()],
+      );
     } catch (error) {
       throw storeError(error);
     }

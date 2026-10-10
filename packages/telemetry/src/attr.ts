@@ -57,6 +57,8 @@ export const attr = {
     register(z.enum(values), { kind: "enum", values }),
   /** Restricts an attribute to integers. */
   int: (): z.ZodNumber => register(z.number().int(), { kind: "int" }),
+  /** Restricts an attribute to nonnegative integers. */
+  nonnegativeInt: (): z.ZodNumber => register(z.number().int().nonnegative(), { kind: "int" }),
   /** Restricts an attribute to finite numbers. */
   num: (): z.ZodNumber => register(z.number(), { kind: "num" }),
   /** Restricts an attribute to booleans. */
