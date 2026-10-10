@@ -85,6 +85,7 @@ class FakeHttpProvider implements ProviderAdapter {
   }
 
   readonly provider = "fake";
+  readonly kind = "openai" as const;
 
   async complete(
     requestToComplete: ModelRequest,

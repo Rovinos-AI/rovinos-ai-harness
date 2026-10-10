@@ -32,7 +32,7 @@ function routing(config: unknown): ModelRoutingConfig {
 }
 
 function adapter(provider: string, complete: ProviderAdapter["complete"]): ProviderAdapter {
-  return { provider, complete };
+  return { provider, kind: "openai", complete };
 }
 
 describe("RoutingModelGateway", () => {

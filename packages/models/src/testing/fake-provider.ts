@@ -16,6 +16,7 @@ export class FakeProviderScriptExhaustedError extends HarnessError {
 /** Scripted provider adapter that captures normalized requests. */
 export class FakeProvider implements ProviderAdapter {
   readonly requests: ModelRequest[] = [];
+  readonly kind: "anthropic" | "openai";
   private nextResult = 0;
 
   /**
@@ -25,7 +26,9 @@ export class FakeProvider implements ProviderAdapter {
   constructor(
     readonly provider: Code,
     private readonly script: readonly ProviderResult[],
-  ) {}
+  ) {
+    this.kind = provider === "anthropic" ? "anthropic" : "openai";
+  }
 
   /** {@inheritDoc ProviderAdapter.complete} */
   complete(request: ModelRequest, _context: ProviderContext): Promise<ProviderResult> {

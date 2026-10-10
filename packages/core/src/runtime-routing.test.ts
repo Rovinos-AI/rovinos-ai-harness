@@ -107,10 +107,12 @@ describe("createRuntime model routing", () => {
   it("runs through configured routing and records the successful fallback", async () => {
     const first: ProviderAdapter = {
       provider: "first",
+      kind: "openai",
       complete: () => Promise.reject(new ProviderError("provider_unavailable")),
     };
     const second: ProviderAdapter = {
       provider: "second",
+      kind: "openai",
       complete: () =>
         Promise.resolve({
           parts: [{ type: "text", text: "completed" }],

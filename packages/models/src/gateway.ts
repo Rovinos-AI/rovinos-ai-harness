@@ -79,7 +79,7 @@ interface PreparedEnforcement {
 }
 
 interface ProviderEnforcement {
-  readonly protocolProvider: string;
+  readonly kind: string;
   readonly capabilities: Capabilities;
   readonly maxRung?: EnforcementRung;
 }
@@ -105,7 +105,7 @@ function prepareEnforcementRequest(
     throw new OutputWithToolsUnsupportedError();
   }
 
-  const schemaRules = providerSchemaRules(provider.protocolProvider);
+  const schemaRules = providerSchemaRules(provider.kind);
   let rung: EnforcementRung | undefined;
   if (schemaRules === undefined) {
     rung = provider.maxRung === "native" || provider.maxRung === "tool" ? undefined : "prompt";
@@ -119,7 +119,7 @@ function prepareEnforcementRequest(
   const schema =
     schemaRules === undefined
       ? toJsonSchema(outputSchema)
-      : lowerForProvider(outputSchema, provider.protocolProvider).schema;
+      : lowerForProvider(outputSchema, provider.kind).schema;
   const output = {
     name: request.output?.name ?? "result",
     schema,
@@ -348,7 +348,6 @@ export class ModelGateway {
     context: ModelGatewayContext<OutputSchema>,
   ): Promise<ModelGatewayResponse<OutputSchema>> {
     const adapter = this.registry.get(request.model.provider);
-    const protocolProvider = adapter.protocolProvider ?? adapter.provider;
     const effectiveRequest =
       request.maxOutputTokens === undefined
         ? {
@@ -360,9 +359,9 @@ export class ModelGateway {
       context.outputSchema === undefined
         ? { request: effectiveRequest }
         : prepareEnforcementRequest(effectiveRequest, context.outputSchema, {
-            protocolProvider,
+            kind: adapter.kind,
             capabilities: lookupCapabilities(
-              { ...request.model, provider: protocolProvider },
+              { ...request.model, provider: adapter.kind },
               adapter.capabilities,
             ).capabilities,
             ...(this.options.maxRung === undefined ? {} : { maxRung: this.options.maxRung }),

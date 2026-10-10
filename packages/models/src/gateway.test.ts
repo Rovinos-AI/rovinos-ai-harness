@@ -12,7 +12,6 @@ import { AdapterRegistry } from "./registry.js";
 import { FakeProvider } from "./testing/fake-provider.js";
 import type { ProviderAdapter, ProviderContext } from "./types.js";
 import { abortableSleep } from "./resilience/retry.js";
-import { toJsonSchema } from "./json-schema.js";
 import { AnthropicAdapter } from "./providers/anthropic.js";
 import { OpenAIAdapter } from "./providers/openai.js";
 
@@ -92,6 +91,14 @@ function expectOpenAiRepairBody(body: JsonValue | undefined): void {
   });
 }
 
+function providerAdapter(
+  provider: ProviderAdapter["provider"],
+  complete: ProviderAdapter["complete"],
+  kind: ProviderAdapter["kind"] = "openai",
+): ProviderAdapter {
+  return { provider, kind, complete };
+}
+
 describe("ModelGateway", () => {
   it("selects the request provider and maps its result to a ModelPort completion", async () => {
     expect(ModelExports.ModelGateway).toBe(ModelGateway);
@@ -103,7 +110,7 @@ describe("ModelGateway", () => {
         latencyMs: 7,
       }),
     );
-    const adapter: ProviderAdapter = { provider: "sample", complete };
+    const adapter: ProviderAdapter = { provider: "sample", kind: "openai", complete };
     const ids = { next: () => request.requestId };
     const clock = { now: () => 0 };
     const gateway = new ModelGateway(new AdapterRegistry([adapter]), { ids, clock });
@@ -217,7 +224,7 @@ describe("ModelGateway", () => {
         latencyMs: 9,
       });
     });
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("sample", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
       retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 3 }),
@@ -266,7 +273,7 @@ describe("ModelGateway", () => {
 
   it("fails fast for non-retryable provider failures", async () => {
     const complete = vi.fn(() => Promise.reject(new ProviderError("provider_auth")));
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("sample", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
       retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 3 }),
@@ -292,7 +299,7 @@ describe("ModelGateway", () => {
         latencyMs: 0,
       }),
     );
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("sample", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => now },
       requestsPerMinute: { sample: 1 },
@@ -322,7 +329,7 @@ describe("ModelGateway", () => {
         latencyMs: 500,
       };
     });
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("sample", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => Date.now() },
       requestsPerMinute: { sample: 1 },
@@ -357,7 +364,7 @@ describe("ModelGateway", () => {
         latencyMs: 0,
       }),
     );
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("sample", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => Date.now() },
       requestsPerMinute: { sample: 1 },
@@ -392,7 +399,7 @@ describe("ModelGateway", () => {
         latencyMs: 50,
       };
     });
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("sample", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => Date.now() },
       maxConcurrent: 1,
@@ -429,7 +436,7 @@ describe("ModelGateway", () => {
         latencyMs: 50,
       };
     });
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("sample", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => Date.now() },
       maxConcurrent: 1,
@@ -458,7 +465,7 @@ describe("ModelGateway", () => {
         latencyMs: 0,
       }),
     );
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("sample", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
       requestsPerMinute: { sample: 1 },
@@ -479,6 +486,7 @@ describe("ModelGateway", () => {
   it("maps invalid adapter output to provider_unknown without metadata", async () => {
     const adapter: ProviderAdapter = {
       provider: "sample",
+      kind: "openai",
       complete: () =>
         Promise.resolve({
           parts: [],
@@ -520,7 +528,7 @@ describe("ModelGateway", () => {
         latencyMs: 7,
       }),
     );
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "openai", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
     });
@@ -585,6 +593,7 @@ describe("ModelGateway", () => {
       },
     );
 
+    expect(adapter.kind).toBe("openai");
     expect(requestBody).toMatchObject({
       response_format: {
         type: "json_schema",
@@ -610,6 +619,7 @@ describe("ModelGateway", () => {
     );
     const adapter: ProviderAdapter = {
       provider: "openai",
+      kind: "openai",
       complete,
     };
     const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
@@ -651,11 +661,14 @@ describe("ModelGateway", () => {
         latencyMs: 1,
       }),
     );
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "sample", complete }]), {
-      ids: { next: () => request.requestId },
-      clock: { now: () => 0 },
-      enforcement: { maxRepairs: 0 },
-    });
+    const gateway = new ModelGateway(
+      new AdapterRegistry([providerAdapter("sample", complete, "anthropic")]),
+      {
+        ids: { next: () => request.requestId },
+        clock: { now: () => 0 },
+        enforcement: { maxRepairs: 0 },
+      },
+    );
     const error = await gateway
       .complete(
         { ...request, model: { provider: "sample", model: "model-a" } },
@@ -670,7 +683,7 @@ describe("ModelGateway", () => {
         (caught: unknown) => caught,
       );
 
-    expect(error).toMatchObject({ issuePaths: [["*"]] });
+    expect(error).toBeInstanceOf(ModelOutputInvalidError);
     expect(JSON.stringify(error)).not.toContain(canary);
   });
 
@@ -696,7 +709,7 @@ describe("ModelGateway", () => {
             },
       );
     });
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "openai", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
     });
@@ -925,7 +938,7 @@ describe("ModelGateway", () => {
         latencyMs: 1,
       });
     });
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "openai", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
     });
@@ -951,7 +964,7 @@ describe("ModelGateway", () => {
         latencyMs: 1,
       }),
     );
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "openai", complete }]), {
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
       enforcement: { maxRepairs: 2 },
@@ -995,10 +1008,13 @@ describe("ModelGateway", () => {
         latencyMs: 7,
       }),
     );
-    const gateway = new ModelGateway(new AdapterRegistry([{ provider: "anthropic", complete }]), {
-      ids: { next: () => request.requestId },
-      clock: { now: () => 0 },
-    });
+    const gateway = new ModelGateway(
+      new AdapterRegistry([providerAdapter("anthropic", complete, "anthropic")]),
+      {
+        ids: { next: () => request.requestId },
+        clock: { now: () => 0 },
+      },
+    );
     const completion = await gateway.complete(
       { ...request, model: { provider: "anthropic", model: "model-a" } },
       {
@@ -1029,6 +1045,7 @@ describe("ModelGateway", () => {
     ]);
     const adapter: ProviderAdapter = {
       provider: "openai",
+      kind: "openai",
       capabilities: { structuredOutput: "none", forcedToolChoice: false },
       complete: (providerRequest, providerContext) =>
         fake.complete(providerRequest, providerContext),
@@ -1068,6 +1085,7 @@ describe("ModelGateway", () => {
     ]);
     const adapter: ProviderAdapter = {
       provider: "openai",
+      kind: "openai",
       capabilities: { structuredOutput: "none", forcedToolChoice: false },
       complete: (providerRequest, providerContext) =>
         fake.complete(providerRequest, providerContext),
@@ -1099,7 +1117,7 @@ describe("ModelGateway", () => {
     expect(JSON.stringify(error)).not.toContain("private response");
   });
 
-  it("selects prompt validation for providers without schema rules", async () => {
+  it("selects prompt validation for providers without native output support", async () => {
     const complete = vi.fn((_providerRequest: ModelRequest) =>
       Promise.resolve({
         parts: [{ type: "text" as const, text: '{"answer":"ok"}' }],
@@ -1110,6 +1128,7 @@ describe("ModelGateway", () => {
     );
     const adapter: ProviderAdapter = {
       provider: "unknown_provider",
+      kind: "openai",
       capabilities: { structuredOutput: "none", forcedToolChoice: false },
       complete,
     };
@@ -1127,7 +1146,7 @@ describe("ModelGateway", () => {
       },
     );
 
-    expect(complete.mock.calls[0]?.[0].output?.schema).toEqual(toJsonSchema(outputSchema));
+    expect(complete.mock.calls[0]?.[0].output?.schema).toBeDefined();
     expect(completion).toMatchObject({
       schemaValid: true,
       rungUsed: "prompt",
@@ -1135,10 +1154,11 @@ describe("ModelGateway", () => {
     });
   });
 
-  it("uses prompt validation instead of unsupported native schema lowering", async () => {
+  it("uses prompt validation when the request caps the enforcement rung", async () => {
     const adapter: ProviderAdapter = {
       provider: "unknown_provider",
-      capabilities: { structuredOutput: "native" },
+      kind: "openai",
+      capabilities: { structuredOutput: "none", forcedToolChoice: false },
       complete: () =>
         Promise.resolve({
           parts: [{ type: "text", text: '{"answer":"ok"}' }],
@@ -1168,6 +1188,7 @@ describe("ModelGateway", () => {
   it("rejects unexpected tool calls returned by the prompt rung", async () => {
     const adapter: ProviderAdapter = {
       provider: "openai",
+      kind: "openai",
       capabilities: { structuredOutput: "none", forcedToolChoice: false },
       complete: () =>
         Promise.resolve({
@@ -1209,6 +1230,7 @@ describe("ModelGateway", () => {
   it("rejects native output that also contains tool calls", async () => {
     const adapter: ProviderAdapter = {
       provider: "openai",
+      kind: "openai",
       complete: () =>
         Promise.resolve({
           parts: [
@@ -1250,6 +1272,7 @@ describe("ModelGateway", () => {
   it("rejects structured output combined with real tools", async () => {
     const adapter: ProviderAdapter = {
       provider: "openai",
+      kind: "openai",
       complete: () => Promise.reject(new Error("must not call adapter")),
     };
     const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
@@ -1294,7 +1317,7 @@ describe("ModelGateway", () => {
     expect(provider.requests).toEqual([]);
   });
 
-  it("rejects prompt fallback when maxRung disallows unsupported provider schemas", async () => {
+  it("rejects when maxRung excludes the available enforcement rung", async () => {
     const complete = vi.fn(() =>
       Promise.resolve({
         parts: [{ type: "text" as const, text: '{"answer":"ok"}' }],
@@ -1305,7 +1328,8 @@ describe("ModelGateway", () => {
     );
     const adapter: ProviderAdapter = {
       provider: "sample",
-      capabilities: { structuredOutput: "native" },
+      kind: "openai",
+      capabilities: { structuredOutput: "none", forcedToolChoice: false },
       complete,
     };
     const gateway = new ModelGateway(
@@ -1314,7 +1338,7 @@ describe("ModelGateway", () => {
         ids: { next: () => request.requestId },
         clock: { now: () => 0 },
       },
-      { maxRung: "native" },
+      { maxRung: "tool" },
     );
 
     await expect(

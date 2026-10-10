@@ -6,6 +6,7 @@ import type { ProviderAdapter } from "./types.js";
 
 const adapter: ProviderAdapter = {
   provider: "sample",
+  kind: "openai",
   complete: () =>
     Promise.resolve({
       parts: [],
