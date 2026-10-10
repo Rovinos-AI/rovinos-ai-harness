@@ -25,13 +25,13 @@ describe("HeuristicTokenCounter", () => {
         parts: [
           {
             type: "tool_call",
-            callId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            callId: "00000000000000000000000000",
             toolId: "search",
             args: { q: "x" },
           },
           {
             type: "tool_result",
-            callId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            callId: "00000000000000000000000000",
             result: { ok: true },
             isError: false,
           },

@@ -42,7 +42,7 @@ export class HeuristicTokenCounter implements TokenCounter {
    * @param safetyFactor - Positive multiplier applied to the estimate; defaults to 1.15.
    */
   constructor(safetyFactor = DEFAULT_SAFETY_FACTOR) {
-    this.safetyFactor = z.number().finite().positive().parse(safetyFactor);
+    this.safetyFactor = z.number().positive().parse(safetyFactor);
   }
 
   /** {@inheritDoc TokenCounter.count} */
@@ -77,7 +77,7 @@ export class HeuristicTokenCounter implements TokenCounter {
 
 /** Adds per-model EMA calibration to another token counter. */
 export class CalibratingTokenCounter implements TokenCounter {
-  private readonly ratios = new Map<string, number>();
+  private readonly ratios = new Map<string, { readonly model: ModelRef; readonly ratio: number }>();
 
   /**
    * Creates a calibrating wrapper around any token counter.
@@ -90,7 +90,7 @@ export class CalibratingTokenCounter implements TokenCounter {
   count(messages: readonly Message[], model: ModelRef): number {
     const modelRef = ModelRefSchema.parse(model);
     const estimate = this.inner.count(messages, modelRef);
-    return Math.ceil(estimate * (this.ratios.get(modelKey(modelRef)) ?? 1));
+    return Math.ceil(estimate * (this.ratios.get(modelKey(modelRef))?.ratio ?? 1));
   }
 
   /**
@@ -113,11 +113,11 @@ export class CalibratingTokenCounter implements TokenCounter {
 
     const key = modelKey(modelRef);
     const observedRatio = clamp(actualInputTokens / estimated);
-    const previousRatio = this.ratios.get(key) ?? 1;
-    this.ratios.set(
-      key,
-      clamp(previousRatio * (1 - CALIBRATION_ALPHA) + observedRatio * CALIBRATION_ALPHA),
-    );
+    const previousRatio = this.ratios.get(key)?.ratio ?? 1;
+    this.ratios.set(key, {
+      model: modelRef,
+      ratio: clamp(previousRatio * (1 - CALIBRATION_ALPHA) + observedRatio * CALIBRATION_ALPHA),
+    });
   }
 
   /**
@@ -127,13 +127,11 @@ export class CalibratingTokenCounter implements TokenCounter {
    */
   snapshot(): CalibrationSnapshot {
     return CalibrationSnapshotSchema.parse(
-      Array.from(this.ratios, ([key, ratio]) => {
-        const [provider, model] = key.split("/");
-        return { model: { provider, model }, ratio };
-      }).sort((left, right) =>
-        `${left.model.provider}/${left.model.model}`.localeCompare(
-          `${right.model.provider}/${right.model.model}`,
-        ),
+      Array.from(this.ratios.values(), ({ model, ratio }) => ({ model, ratio })).sort(
+        (left, right) =>
+          `${left.model.provider}\u0000${left.model.model}`.localeCompare(
+            `${right.model.provider}\u0000${right.model.model}`,
+          ),
       ),
     );
   }
@@ -147,7 +145,7 @@ export class CalibratingTokenCounter implements TokenCounter {
     const entries = CalibrationSnapshotSchema.parse(snapshot);
     this.ratios.clear();
     for (const entry of entries) {
-      this.ratios.set(modelKey(entry.model), entry.ratio);
+      this.ratios.set(modelKey(entry.model), entry);
     }
   }
 }
@@ -161,5 +159,5 @@ function clamp(ratio: number): number {
 }
 
 function serializedLength(value: JsonValue): number {
-  return JSON.stringify(value)?.length ?? 0;
+  return JSON.stringify(value).length;
 }
