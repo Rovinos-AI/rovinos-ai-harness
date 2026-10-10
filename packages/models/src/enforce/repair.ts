@@ -94,8 +94,13 @@ function repairMessages(
   rung: EnforcementRung | undefined,
   descriptions: readonly string[],
 ): ModelRequest["messages"] {
-  const messages: ModelRequest["messages"] = [{ role: "assistant", parts: [...previousOutput] }];
-  const toolCalls = previousOutput.filter((part) => part.type === "tool_call");
+  const assistantParts =
+    rung === "tool" ? previousOutput.filter((part) => part.type !== "opaque") : [...previousOutput];
+  const messages: ModelRequest["messages"] =
+    rung === "tool" && assistantParts.length === 0
+      ? []
+      : [{ role: "assistant", parts: assistantParts }];
+  const toolCalls = assistantParts.filter((part) => part.type === "tool_call");
   if (rung === "tool" && toolCalls.length > 0) {
     messages.push({
       role: "tool",

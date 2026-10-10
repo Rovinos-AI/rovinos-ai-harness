@@ -45,14 +45,20 @@ function expectAnthropicRepairBody(body: JsonValue | undefined): void {
       { role: "user" },
       {
         role: "assistant",
-        content: [{ type: "tool_use", id: "toolu_invalid", name: "emit_result" }],
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_00000000000000000000000000",
+            name: "emit_result",
+          },
+        ],
       },
       {
         role: "user",
         content: [
           {
             type: "tool_result",
-            tool_use_id: "toolu_invalid",
+            tool_use_id: "toolu_00000000000000000000000000",
             is_error: true,
             content: "$.answer: expected number",
           },
@@ -69,11 +75,16 @@ function expectOpenAiRepairBody(body: JsonValue | undefined): void {
       { role: "user" },
       {
         role: "assistant",
-        tool_calls: [{ id: "call_invalid", function: { name: "emit_result" } }],
+        tool_calls: [
+          {
+            id: "call_00000000000000000000000000",
+            function: { name: "emit_result" },
+          },
+        ],
       },
       {
         role: "tool",
-        tool_call_id: "call_invalid",
+        tool_call_id: "call_00000000000000000000000000",
         content: "$.answer: expected number",
       },
     ],
@@ -763,6 +774,84 @@ describe("ModelGateway", () => {
       assertRepairBody(requestBodies[1]);
     },
   );
+
+  it("drops malformed opaque OpenAI tool calls before tool-rung repair", async () => {
+    const requestBodies: JsonValue[] = [];
+    let calls = 0;
+    const responseFetch: typeof fetch = (_input, init) => {
+      if (typeof init?.body === "string") {
+        requestBodies.push(parseJson(JsonValue, init.body));
+      }
+      calls += 1;
+      const body = {
+        id: `completion-${String(calls)}`,
+        object: "chat.completion",
+        created: 1,
+        model: "gpt-test",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_malformed",
+                  type: "function",
+                  function: {
+                    name: "emit_result",
+                    arguments: calls === 1 ? "not-json" : '{"answer":1}',
+                  },
+                },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
+      };
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    const adapter = new OpenAIAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      fetch: responseFetch,
+      baseURL: "https://provider.test/v1",
+      capabilities: { structuredOutput: "none", forcedToolChoice: true },
+    });
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    const completion = await gateway.complete(
+      {
+        ...request,
+        model: { provider: "openai", model: "gpt-test" },
+      },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema: z.object({ answer: z.number() }),
+      },
+    );
+
+    expect(completion).toMatchObject({ schemaValid: true, repairAttempts: 1 });
+    expect(requestBodies[1]).toMatchObject({
+      messages: [
+        { role: "user", content: "hello" },
+        {
+          role: "user",
+          content:
+            "Correct the structured output to match the requested schema. Return only the corrected output.\n$: expected a value matching the requested schema",
+        },
+      ],
+    });
+    expect(JSON.stringify(requestBodies[1])).not.toContain("call_malformed");
+  });
 
   it("omits aggregate cost when any completed repair attempt does not report cost", async () => {
     let calls = 0;
