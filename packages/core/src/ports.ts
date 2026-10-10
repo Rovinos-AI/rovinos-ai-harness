@@ -11,15 +11,18 @@ import type {
   ModelUsage as SharedModelUsage,
   Part,
   Sha256Hex,
+  ToolSpec,
 } from "@harness/schemas";
 
 /** Provider-neutral request contract shared with the model gateway. */
 export type ModelRequest = SharedModelRequest;
 
-/** Identifies the active run and cancellation signal for an operation. */
+/** Identifies the active run, cancellation signal, and optional wall-clock deadline. */
 export interface RunContext {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  /** Epoch-millisecond wall-clock deadline computed from run budgets. */
+  readonly deadlineTs?: number;
 }
 
 /** A tool invocation proposed by the model. */
@@ -39,7 +42,7 @@ export interface ModelPort {
    * Completes a request using the configured provider.
    *
    * @param request - Request identifier and messages.
-   * @param context - Active run and cancellation signal.
+   * @param context - Active run, cancellation signal, and optional wall-clock deadline.
    * @returns Provider completion and usage metadata.
    */
   complete(request: ModelRequest, context: RunContext): Promise<ModelCompletion>;
@@ -60,6 +63,13 @@ export interface ToolExecutionResult {
 
 /** Tool executor used by the run loop. */
 export interface ToolPort {
+  /**
+   * Returns model-visible specifications for registered tools, when available.
+   *
+   * @returns Tool specifications advertised in model requests.
+   */
+  getToolSpecs?(): readonly ToolSpec[];
+
   /**
    * Returns execution metadata for a known tool.
    *

@@ -16,7 +16,10 @@ export const RUN_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan("harness
 /** Span for one model call. */
 export const MODEL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.model_call",
-  commonAttributes,
+  {
+    ...commonAttributes,
+    "harness.model.attempts": attr.optional(attr.int()),
+  },
 );
 
 /** Span for one tool call. */

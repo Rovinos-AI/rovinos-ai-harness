@@ -14,6 +14,7 @@ import {
   type VaultReader,
   type VaultResolver,
   type VaultWriter,
+  type VaultResolveContext,
 } from "./types.js";
 
 const MAX_VALUE_BYTES = 8 * 1024;
@@ -238,7 +239,11 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
   }
 
   /** Resolve a token only within its owning run. */
-  async resolve(runId: Id, token: TokenValue): Promise<string | undefined> {
+  async resolve(
+    runId: Id,
+    token: TokenValue,
+    _context: VaultResolveContext,
+  ): Promise<string | undefined> {
     let row: VaultEntryRow | undefined;
     try {
       row = this.db

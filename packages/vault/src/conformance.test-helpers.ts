@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { VaultRunView, type VaultRunReader } from "@harness/telemetry";
 import type { VaultAdmin, VaultReader, VaultResolver, VaultWriter } from "./types.js";
 
+const resolveContext = { boundary: "tool_input" } as const;
+
 type Vault = VaultWriter & VaultResolver & VaultReader & VaultAdmin;
 
 interface VaultHarness {
@@ -26,12 +28,14 @@ function testPurgeInvalidatesView(createVault: VaultFactory): void {
         values: ["alice@example.test"],
       });
       const versionBeforePurge = await harness.vault.version(runId);
-      await expect(harness.vault.resolve(runId, "<EMAIL_2>")).resolves.toBeUndefined();
+      await expect(
+        harness.vault.resolve(runId, "<EMAIL_2>", resolveContext),
+      ).resolves.toBeUndefined();
       await expect(harness.vault.purge(runId)).resolves.toBe(1);
       await expect(harness.vault.version(runId)).resolves.toBeGreaterThan(versionBeforePurge);
       await expect(view.valuesFor(runId)).resolves.toMatchObject({ values: [] });
       await expect(harness.vault.purge(runId)).resolves.toBe(0);
-      await expect(harness.vault.resolve(runId, token)).resolves.toBeUndefined();
+      await expect(harness.vault.resolve(runId, token, resolveContext)).resolves.toBeUndefined();
       await expect(harness.vault.stats(runId)).resolves.toEqual({ entries: 0 });
       await expect(harness.vault.put(runId, "email", "alice@example.test")).resolves.toBe(
         "<EMAIL_2>",
@@ -53,7 +57,9 @@ export function runVaultConformance(name: string, createVault: VaultFactory): vo
 
         expect(first).toBe("<EMAIL_1>");
         expect(second).toBe(first);
-        await expect(harness.vault.resolve(runId, first)).resolves.toBe("Alice@Example.test");
+        await expect(harness.vault.resolve(runId, first, resolveContext)).resolves.toBe(
+          "Alice@Example.test",
+        );
       } finally {
         await harness.cleanup();
       }

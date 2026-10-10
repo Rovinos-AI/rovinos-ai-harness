@@ -100,7 +100,9 @@ describe("SqliteVault", () => {
       .run(anotherRunId, "<EMAIL_9>", runId, token);
     database.close();
 
-    await expect(vault.resolve(anotherRunId, "<EMAIL_9>")).rejects.toMatchObject({
+    await expect(
+      vault.resolve(anotherRunId, "<EMAIL_9>", { boundary: "tool_input" }),
+    ).rejects.toMatchObject({
       code: "vault_decrypt_failed",
       message: "Vault decryption failed",
     });
@@ -137,7 +139,9 @@ describe("SqliteVault", () => {
     await expect(vault.put(runId, Code.parse("123"), "synthetic")).rejects.toMatchObject({
       code: "vault_entity_type_invalid",
     });
-    await expect(vault.resolve(runId, token)).resolves.toBe("alice@example.test");
+    await expect(vault.resolve(runId, token, { boundary: "tool_input" })).resolves.toBe(
+      "alice@example.test",
+    );
     vault.close();
 
     const failedProvider: KeyProvider = {

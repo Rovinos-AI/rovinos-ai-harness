@@ -12,6 +12,7 @@ const add = vi.spyOn(counter, "add");
 
 const dropReasons: readonly TelemetryDropReason[] = [
   "unregistered_span",
+  "unregistered_log_record",
   "unregistered_attr",
   "invalid_attr",
   "event_stripped",

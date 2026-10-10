@@ -65,3 +65,18 @@ configuration or regex syntax fails with `pii_pattern_invalid`. Errors never
 contain the submitted pattern or detected value.
 
 See [Secret references](./secrets.md) for environment, file, and Key Vault reference forms and resolver behavior.
+
+## PII tokenization
+
+`Tokenizer` applies policy before writing detected values to the vault. JSON
+string values are processed without changing structure. Keys remain unchanged:
+detected PII in a key with `tokenize`, `redact`, or `block` policy fails the
+operation with `pii_key_contains_pii` and per-type counts only, before vault
+writes. Keys whose detections are explicitly allowed pass through unchanged.
+JSON is limited to depth 64, 2 MiB of serialized UTF-8, and 1,024 string
+values and object keys per input.
+
+Tokens are run-scoped. Independent runs may use the same token string; resolve
+each token only with its owning run ID. Existing tokens are not scanned again.
+Action summaries use policy verbs; convert them with
+`toPiiActionEventPayload` before recording canonical `pii_action` events.
