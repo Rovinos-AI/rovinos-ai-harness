@@ -97,14 +97,23 @@ function prepareEnforcementRequest<OutputSchema extends z.ZodType>(
     schemaHash: schemaHash(lowered.schema),
   };
   return {
-    request:
-      rung === "native"
-        ? withNativeOutputSchema(request, output)
-        : rung === "tool"
-          ? withForcedOutputTool(request, output)
-          : withPromptOutput(request, output),
+    request: prepareRequestForRung(request, output, rung),
     rung,
   };
+}
+
+function prepareRequestForRung(
+  request: ModelRequest,
+  output: NonNullable<ModelRequest["output"]>,
+  rung: EnforcementRung,
+): ModelRequest {
+  if (rung === "native") {
+    return withNativeOutputSchema(request, output);
+  }
+  if (rung === "tool") {
+    return withForcedOutputTool(request, output);
+  }
+  return withPromptOutput(request, output);
 }
 
 function enforceProviderOutput<OutputSchema extends z.ZodType>(

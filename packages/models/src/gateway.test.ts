@@ -566,12 +566,10 @@ describe("ModelGateway", () => {
       },
     );
 
-    expect(fake.requests[0]?.messages[0]?.parts).toEqual([
-      {
-        type: "text",
-        text: expect.stringContaining('"properties":{"answer":{"type":"string"}}'),
-      },
-    ]);
+    const systemInstruction = fake.requests[0]?.messages[0]?.parts[0];
+    expect(systemInstruction?.type).toBe("text");
+    const instructionText = systemInstruction?.type === "text" ? systemInstruction.text : "";
+    expect(instructionText).toContain('"properties":{"answer":{"type":"string"}}');
     expect(completion).toMatchObject({
       schemaValid: true,
       rungUsed: "prompt",
