@@ -12,7 +12,7 @@ const statuses: readonly RunStatus[] = [
   "cancelled",
 ];
 const destinations: Record<RunStatus, Partial<Record<RunTrigger, RunStatus>>> = {
-  pending: { start: "running" },
+  pending: { start: "running", cancel: "cancelled" },
   running: {
     request_approval: "suspended",
     shutdown: "suspended",

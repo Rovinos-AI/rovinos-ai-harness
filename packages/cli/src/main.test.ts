@@ -196,7 +196,13 @@ describe("CLI main", () => {
 
     const code = await main([], context);
 
-    expect(COMMANDS.map((command) => command.name)).toEqual(["serve", "run", "resume", "inspect"]);
+    expect(COMMANDS.map((command) => command.name)).toEqual([
+      "serve",
+      "run",
+      "resume",
+      "inspect",
+      "cancel",
+    ]);
     expect(code).toBe(ExitCode.ok);
     expect(stdout.join("")).toContain("Usage: harness");
     expect(stdout.join("")).toContain("serve");

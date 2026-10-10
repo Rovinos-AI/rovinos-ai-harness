@@ -6,12 +6,19 @@ import type { CliContext, Clock, CommandModule } from "./command.js";
 import { errorCodeOf, exitCodeForError, ExitCode } from "./exit-codes.js";
 import { createOutput, type Output } from "./output.js";
 import { serveCommand } from "./serve.js";
+import { cancelCommand } from "./commands/cancel.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
 
 /** Static command registry; later epics add their owned commands here. */
-export const COMMANDS: CommandModule[] = [serveCommand, runCommand, resumeCommand, inspectCommand];
+export const COMMANDS: CommandModule[] = [
+  serveCommand,
+  runCommand,
+  resumeCommand,
+  inspectCommand,
+  cancelCommand,
+];
 
 const systemClock: Clock = { now: () => Date.now() };
 

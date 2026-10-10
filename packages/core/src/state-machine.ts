@@ -17,7 +17,7 @@ export const RUN_TRIGGERS = [
 export type RunTrigger = (typeof RUN_TRIGGERS)[number];
 
 const transitions: Record<RunStatusType, Partial<Record<RunTrigger, RunStatusType>>> = {
-  pending: { start: "running" },
+  pending: { start: "running", cancel: "cancelled" },
   running: {
     request_approval: "suspended",
     shutdown: "suspended",
