@@ -45,6 +45,8 @@ export interface RunLoopOptions extends NewRunMetadata {
   /** Parent run and tool call for a child run. */
   readonly parentRunId?: Id;
   readonly parentCallId?: Id;
+  /** Shared vault scope for this run tree. */
+  readonly scopeId?: Id;
   /** Run nesting depth; roots default to zero. */
   readonly depth?: number;
   /** Parent context and link for a child run's root span. */
@@ -94,6 +96,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
       policyVersion: options.policyVersion,
       ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
       ...(options.parentCallId === undefined ? {} : { parentCallId: options.parentCallId }),
+      ...(options.scopeId === undefined ? {} : { scopeId: options.scopeId }),
       depth: options.depth ?? 0,
     },
     { type: "run_input", v: 1, input: options.goal, inputKind: "initial" },

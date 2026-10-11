@@ -66,6 +66,8 @@ export interface ModelPort {
 export interface ToolDescription {
   readonly idempotent: boolean;
   readonly timeoutMs: number;
+  /** Runs to completion or cancellation without an independent timeout. */
+  readonly longRunning?: boolean;
 }
 
 /** Result returned after a tool execution. */

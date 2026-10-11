@@ -53,7 +53,7 @@ export class AgentSpawnTool implements ToolPort {
   /** Returns a non-idempotent, bounded description for the spawn tool. */
   describe(toolId: CodeType): ToolDescription | undefined {
     if (toolId === AGENT_SPAWN_ID) {
-      return { idempotent: false, timeoutMs: 300_000 };
+      return { idempotent: false, timeoutMs: 300_000, longRunning: true };
     }
     return this.inner.describe(toolId);
   }
@@ -66,9 +66,6 @@ export class AgentSpawnTool implements ToolPort {
 
   /** Leaves spawn inputs tokenized for the child run; delegates other preparation. */
   prepare(call: ModelToolCall, context: RunContext): Promise<ModelToolCall> {
-    if (call.toolId === AGENT_SPAWN_ID) {
-      return Promise.resolve(call);
-    }
     return this.inner.prepare?.(call, context) ?? Promise.resolve(call);
   }
 

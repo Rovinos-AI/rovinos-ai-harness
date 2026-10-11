@@ -152,6 +152,7 @@ describe("SubagentSupervisor", () => {
                     policyVersion: "test",
                     parentRunId,
                     parentCallId,
+                    scopeId: request.scopeId,
                     depth: request.depth,
                   },
                   { type: "run_input", v: 1, input: request.input, inputKind: "initial" },
@@ -224,8 +225,8 @@ describe("SubagentSupervisor", () => {
       runId: childRunId,
       parentRunId,
       parentCallId,
-      depth: 1,
       scopeId: parentRunId,
+      depth: 1,
       role,
       input: { goal: "tokenized goal", inputs: { ref: "<EMAIL_1>" } },
     });

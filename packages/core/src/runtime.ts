@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
-import { createStrategyRegistry } from "@harness/context";
-import { HarnessError, Code, type Event, type Id, type JsonValue } from "@harness/schemas";
-import { SqliteEventStore, type EventStore } from "@harness/store";
-import { ensureTracingFallback } from "@harness/telemetry";
+import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ModelPort, ToolPort } from "./ports.js";
@@ -14,11 +10,13 @@ import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
-import { RoleRegistry } from "./roles.js";
-import { RUN_SPAN } from "./spans.js";
+import type { RoleRegistry } from "./roles.js";
 import { foldRunState } from "./run-state.js";
 import { configHash, SystemIdGenerator, systemClock } from "./runtime-ids.js";
-import { parseRuntimeModelsConfig } from "./runtime-config.js";
+import { RunScopeRegistry } from "./subagent/scope.js";
+import { createSubagentTool, resolveRuntimeRoles } from "./subagent/runtime.js";
+import { createSqliteStore } from "./runtime-store.js";
+import { ensureTracing } from "./runtime-tracing-init.js";
 import type {
   Runtime,
   RuntimeComposition,
@@ -35,39 +33,6 @@ const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" 
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
-
-async function validateRuntimeRoles(
-  config: RuntimeConfig,
-  roleConfigDirectory: string,
-  tool: ToolPort,
-): Promise<void> {
-  const models = parseRuntimeModelsConfig(config.models);
-  const contextStrategies = new Set(
-    Array.from(
-      createStrategyRegistry({ provider: "default", model: "default" }).keys(),
-      (strategyId) => Code.parse(strategyId),
-    ),
-  );
-  await RoleRegistry.create({
-    ...(config.roles === undefined ? {} : { roles: config.roles }),
-    models,
-    registeredTools: tool.getToolSpecs?.().map((spec) => spec.toolId) ?? [],
-    contextStrategies,
-    configDirectory: roleConfigDirectory,
-    onWarning: (warning) => {
-      roleConfigLogger.warn(warning.code);
-    },
-  });
-}
-
-function ensureTracing(): void {
-  const probeIds = new SystemIdGenerator(systemClock);
-  const probe = RUN_SPAN.start({
-    "harness.run.id": probeIds.next(),
-    "harness.segment.id": probeIds.next(),
-  });
-  ensureTracingFallback(probe);
-}
 
 class ModelNotConfiguredError extends HarnessError {
   readonly code = "model_not_configured";
@@ -315,46 +280,63 @@ async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | und
   return undefined;
 }
 
-async function createSqliteStore(dataDir: string, readOnly: boolean): Promise<EventStore> {
-  if (!readOnly) {
-    await mkdir(dataDir, { recursive: true });
-  }
-  return new SqliteEventStore(join(dataDir, "harness.db"), undefined, { readOnly });
+function startRun(options: {
+  readonly composition: RuntimeComposition;
+  readonly tool: ToolPort;
+  readonly goal: JsonValue;
+}): Promise<RunLoopResult> {
+  const { config, overrides, clock, ids, store, model, context } = options.composition;
+  const runId = ids.next();
+  return withRunControl({
+    store,
+    runId,
+    firstNewSeq: 0,
+    processLike: overrides.processLike ?? defaultProcessLike,
+    graceMs: config.run.shutdownGraceMs,
+    operation: async (signal) => {
+      const recorder = new RunRecorder(store, runId, ids.next(), 0, clock);
+      return runLoop({
+        recorder,
+        clock,
+        model,
+        tool: options.tool,
+        context,
+        ids,
+        goal: options.goal,
+        signal,
+        scopeId: runId,
+        budgets: config.run.budgets,
+        checkpointEveryEvents: config.run.checkpointEveryEvents,
+        configHash: configHash(config),
+        policyVersion: POLICY_VERSION,
+      });
+    },
+  });
 }
 
-function composeRuntime(options: RuntimeComposition): Runtime {
-  const { config, overrides, clock, ids, store, model, tool, context } = options;
+function composeRuntime(
+  options: RuntimeComposition & {
+    readonly roles: RoleRegistry;
+    readonly scopes: RunScopeRegistry;
+  },
+): Runtime {
+  const { config, overrides, clock, ids, store, model, context, roles, scopes } = options;
+  const { tool: parentTool } = options;
+  const tool = createSubagentTool({
+    config,
+    clock,
+    ids,
+    store,
+    model,
+    parentTool,
+    roles,
+    scopes,
+  });
   return {
     store,
     clock,
     ids,
-    run: (goal) => {
-      const runId = ids.next();
-      return withRunControl({
-        store,
-        runId,
-        firstNewSeq: 0,
-        processLike: overrides.processLike ?? defaultProcessLike,
-        graceMs: config.run.shutdownGraceMs,
-        operation: async (signal) => {
-          const recorder = new RunRecorder(store, runId, ids.next(), 0, clock);
-          return runLoop({
-            recorder,
-            clock,
-            model,
-            tool,
-            context,
-            ids,
-            goal,
-            signal,
-            budgets: config.run.budgets,
-            checkpointEveryEvents: config.run.checkpointEveryEvents,
-            configHash: configHash(config),
-            policyVersion: POLICY_VERSION,
-          });
-        },
-      });
-    },
+    run: (goal) => startRun({ composition: options, tool, goal }),
     resume: async (runId) => {
       const firstNewSeq = await store.head(runId);
       return withRunControl({
@@ -378,6 +360,7 @@ function composeRuntime(options: RuntimeComposition): Runtime {
             tool,
             context,
             signal,
+            scopes,
             budgets: config.run.budgets,
             checkpointEveryEvents: config.run.checkpointEveryEvents,
             resumePolicy: config.run.resume.onNonIdempotent,
@@ -422,8 +405,27 @@ export async function createRuntime(
   const dataDir = overrides.dataDir ?? process.env.HARNESS_DATA_DIR ?? process.cwd();
   const tool = overrides.tool ?? unavailableTool;
   const context = overrides.context ?? new NaiveContext();
-  await validateRuntimeRoles(config, overrides.roleConfigDirectory ?? process.cwd(), tool);
+  const roles = await resolveRuntimeRoles(
+    config,
+    overrides.roleConfigDirectory ?? process.cwd(),
+    tool,
+    (code) => {
+      roleConfigLogger.warn(code);
+    },
+  );
   const store =
     overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
-  return composeRuntime({ config, overrides, clock, ids, store, model, tool, context });
+  const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
+  return composeRuntime({
+    config,
+    overrides,
+    clock,
+    ids,
+    store,
+    model,
+    tool,
+    context,
+    roles,
+    scopes,
+  });
 }

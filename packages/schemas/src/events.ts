@@ -38,6 +38,7 @@ const runCreatedEvent = z
     policyVersion: Code,
     parentRunId: Id.optional(),
     parentCallId: Id.optional(),
+    scopeId: Id.optional(),
     depth: z.number().int().nonnegative().default(0),
   })
   .strict();

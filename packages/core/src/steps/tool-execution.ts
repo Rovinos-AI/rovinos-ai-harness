@@ -56,9 +56,12 @@ export async function executeWithTimeout(
   tool: ToolPort,
   call: ModelToolCall,
   context: RunContext,
-  timeoutMs: number,
+  description: ToolDescription,
 ): Promise<ToolExecutionResult> {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (description.longRunning === true) {
+    return tool.execute(call, context);
+  }
+  const timeoutSignal = AbortSignal.timeout(description.timeoutMs);
   const signal = AbortSignal.any([context.signal, timeoutSignal]);
   let active = true;
   const pendingSummaries = new Set<Promise<void>>();
@@ -136,7 +139,7 @@ export async function executePreparedTool(options: ExecutePreparedToolOptions): 
       options.tool,
       options.call,
       options.context,
-      options.description.timeoutMs,
+      options.description,
     );
   } catch (error) {
     const shutdownIntent = onShutdown(options.signal, options.intentEvent, error);

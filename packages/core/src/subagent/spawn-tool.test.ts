@@ -101,17 +101,24 @@ describe("agent.spawn tool", () => {
 
   it("advertises a non-idempotent built-in and preserves other tool behavior", async () => {
     const inner = innerTools();
+    const prepare = vi.spyOn(inner, "prepare");
     const tool = createSpawnTool(inner, await roles());
     const spawnCall = call("agent.spawn", { role: "worker", goal: "goal" });
 
-    expect(tool.describe("agent.spawn")).toEqual({ idempotent: false, timeoutMs: 300_000 });
+    expect(tool.describe("agent.spawn")).toEqual({
+      idempotent: false,
+      timeoutMs: 300_000,
+      longRunning: true,
+    });
     expect(tool.describe("fs.read")).toEqual({ idempotent: true, timeoutMs: 1_000 });
     expect(tool.getToolSpecs().map(({ toolId }) => toolId)).toEqual([
       "fs.read",
       "fs.write",
       "agent.spawn",
     ]);
-    await expect(tool.prepare(spawnCall, runContext(inner))).resolves.toBe(spawnCall);
+    const context = runContext(inner);
+    await expect(tool.prepare(spawnCall, context)).resolves.toBe(spawnCall);
+    expect(prepare).toHaveBeenCalledWith(spawnCall, context);
     await expect(tool.prepare(call("fs.read", {}), runContext(inner))).resolves.toEqual(
       call("fs.read", {}),
     );
