@@ -194,7 +194,7 @@ describe("doctor registry", () => {
     }
 
     await expect(runDoctor(context({ dataDir }), [check])).resolves.toEqual([
-      { id: "data_dir_writable", status: "fail", code: "data_dir_unwritable" },
+      { id: "data_dir_writable", status: "fail", code: "data_dir_write_failed" },
     ]);
   });
 });

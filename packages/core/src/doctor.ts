@@ -166,7 +166,7 @@ const initialChecks: DoctorCheck[] = [
         if (temporaryDirectory !== undefined) {
           await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
         }
-        return result("fail", "data_dir_unwritable");
+        return result("fail", "data_dir_write_failed");
       }
     },
   },
