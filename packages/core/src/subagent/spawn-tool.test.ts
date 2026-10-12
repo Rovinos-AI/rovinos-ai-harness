@@ -105,11 +105,14 @@ describe("agent.spawn tool", () => {
     const tool = createSpawnTool(inner, await roles());
     const spawnCall = call("agent.spawn", { role: "worker", goal: "goal" });
 
-    expect(tool.describe("agent.spawn")).toEqual({
+    expect(tool.describe("agent.spawn")).toMatchObject({
       idempotent: false,
       timeoutMs: 300_000,
       longRunning: true,
     });
+    expect(tool.describe("agent.spawn")?.inputSchema).toEqual(
+      tool.getToolSpecs().find(({ toolId }) => toolId === "agent.spawn")?.inputSchema,
+    );
     expect(tool.describe("fs.read")).toEqual({ idempotent: true, timeoutMs: 1_000 });
     expect(tool.getToolSpecs().map(({ toolId }) => toolId)).toEqual([
       "fs.read",

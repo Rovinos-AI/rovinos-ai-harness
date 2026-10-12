@@ -53,7 +53,12 @@ export class AgentSpawnTool implements ToolPort {
   /** Returns a non-idempotent, bounded description for the spawn tool. */
   describe(toolId: CodeType): ToolDescription | undefined {
     if (toolId === AGENT_SPAWN_ID) {
-      return { idempotent: false, timeoutMs: 300_000, longRunning: true };
+      return {
+        idempotent: false,
+        timeoutMs: 300_000,
+        longRunning: true,
+        inputSchema: AGENT_SPAWN_SPEC.inputSchema,
+      };
     }
     return this.inner.describe(toolId);
   }

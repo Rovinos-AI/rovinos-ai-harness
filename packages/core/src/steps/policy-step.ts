@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event } from "@harness/schemas";
+import { HarnessError, JsonValue, type Event } from "@harness/schemas";
+import { buildApprovalPayload } from "@harness/policy";
 import { requestApproval } from "../approvals.js";
 import type { Checkpointer } from "../checkpoint.js";
 import { PolicyDecisionSchema } from "../ports.js";
@@ -68,32 +69,22 @@ export async function requestPolicyApproval(options: {
   readonly intent?: Extract<EventPartial, { type: "tool_intent" }>;
 }): Promise<{ readonly events: readonly Event[]; readonly checkpoint: Event }> {
   const { recorder, ids, checkpointer, state, clock, call, decision, intent } = options;
-  const expiresAt =
-    decision.approvalTtlMs === undefined
-      ? undefined
-      : Math.floor(clock.now()) + decision.approvalTtlMs;
-  const summary = `Tool ${call.toolId} requests approval (rule ${decision.ruleId})`;
-  const payload = {
-    payloadVersion: 1,
-    kind: "tool_call",
-    callId: call.callId,
-    toolId: call.toolId,
-    args: call.args,
-    ruleId: decision.ruleId,
-    reason: decision.reason,
-    summary,
-    ui: {
-      resourceUri: "ui://harness/approval/v1",
-      fallbackText: summary,
+  const approvalPayload = buildApprovalPayload({
+    call,
+    rule: {
+      id: decision.ruleId,
+      reason: decision.reason,
+      editable: decision.editable,
+      ...(decision.approvalTtlMs === undefined ? {} : { approvalTtlMs: decision.approvalTtlMs }),
     },
-    editableFields: decision.editable,
-    ...(expiresAt === undefined ? {} : { expiresAt }),
-  };
+    now: Math.floor(clock.now()),
+  });
+  const payload = JsonValue.parse(approvalPayload);
   const result = await requestApproval(recorder, {
     approvalId: ids.next(),
     callId: call.callId,
     payload,
-    ...(expiresAt === undefined ? {} : { expiresAt }),
+    ...(approvalPayload.expiresAt === undefined ? {} : { expiresAt: approvalPayload.expiresAt }),
     state,
     checkpointer,
     ...(intent === undefined ? {} : { intent }),

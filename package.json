@@ -58,6 +58,7 @@
     "@harness/eslint-plugin-harness": "workspace:^",
     "@harness/models": "workspace:^",
     "@harness/pii": "workspace:^",
+    "@harness/policy": "workspace:^",
     "@harness/schemas": "workspace:^",
     "@harness/store": "workspace:^",
     "@harness/telemetry": "workspace:^",

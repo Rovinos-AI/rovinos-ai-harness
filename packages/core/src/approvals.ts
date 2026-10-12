@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
+import {
+  ApprovalEditError,
+  ApprovalPayloadSchema,
+  diffToEdits,
+  validateEdits,
+} from "@harness/policy";
 import type { Checkpointer } from "./checkpoint.js";
 import { LeaseLostError, RunRecorder, type Clock, type EventPartial } from "./recorder.js";
 import { foldRunState, type RunState } from "./run-state.js";
@@ -101,6 +107,55 @@ class ApprovalEditPreparationError extends HarnessError {
 }
 
 const systemClock: Clock = { now: Date.now };
+
+interface PrepareApprovalEditOptions {
+  readonly tool: ToolPort;
+  readonly approval: Extract<Event, { type: "approval_requested" }>;
+  readonly intent: Extract<Event, { type: "tool_intent" }>;
+  readonly edits: JsonValue;
+  readonly runId: Id;
+  readonly recorder: RunRecorder;
+  readonly events: Event[];
+}
+
+async function prepareApprovalEdits(options: PrepareApprovalEditOptions): Promise<JsonValue> {
+  const { tool, approval, intent, edits, runId, recorder, events } = options;
+  const parsedPayload = ApprovalPayloadSchema.safeParse(approval.payload);
+  if (
+    !parsedPayload.success ||
+    parsedPayload.data.callId !== intent.callId ||
+    parsedPayload.data.toolId !== intent.toolId
+  ) {
+    throw new ApprovalEditError("edit_invalid");
+  }
+  const pointerEdits = diffToEdits(parsedPayload.data.args, edits);
+  const context = toolRunContext({ runId, signal: new AbortController().signal }, recorder, events);
+  const validateSchema =
+    tool.validateInputSchema === undefined
+      ? undefined
+      : (args: JsonValue, schema: JsonValue) =>
+          tool.validateInputSchema?.(intent.toolId, args, schema, context) ??
+          Promise.resolve(false);
+  return validateEdits(
+    parsedPayload.data,
+    pointerEdits,
+    tool.describe(intent.toolId)?.inputSchema,
+    {
+      tokenize: async (args) => {
+        const prepared = await prepareToolCall(
+          tool,
+          { callId: approval.callId, toolId: intent.toolId, args },
+          context,
+        );
+        if (prepared.errorCode !== undefined) {
+          throw new ApprovalEditPreparationError();
+        }
+        return prepared.call.args;
+      },
+      ...(validateSchema === undefined ? {} : { validateSchema }),
+    },
+  );
+}
 
 /**
  * Records an approval request, suspends the run, and forces a checkpoint.
@@ -254,15 +309,15 @@ export async function resolveApproval(
           if (intent === undefined) {
             throw new ApprovalNotFoundError();
           }
-          const prepared = await prepareToolCall(
+          resolvedEdits = await prepareApprovalEdits({
             tool,
-            { callId: request.callId, toolId: intent.toolId, args: edits },
-            toolRunContext({ runId, signal: new AbortController().signal }, recorder, events),
-          );
-          if (prepared.errorCode !== undefined) {
-            throw new ApprovalEditPreparationError();
-          }
-          resolvedEdits = prepared.call.args;
+            approval: request,
+            intent,
+            edits,
+            runId,
+            recorder,
+            events,
+          });
         }
         return recorder.record({
           type: "approval_resolved",

@@ -15,6 +15,20 @@ export {
 } from "./evaluate.js";
 export { PolicyEngine } from "./engine.js";
 export { policyVersion } from "./version.js";
+export { buildApprovalPayload, type ApprovalPayloadBuildOptions } from "./approval-payload.js";
+export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.js";
+export {
+  ApprovalEditError,
+  ApprovalEditSchema,
+  ApprovalEditsSchema,
+  approvalEditsAreAllowed,
+  diffToEdits,
+  validateEdits,
+  type ApprovalEdit,
+  type ApprovalEditAdapters,
+  type ApprovalEditSchemaValidator,
+  type ApprovalEditTokenizer,
+} from "./approval-edits.js";
 export {
   ArgMatcherSchema,
   PolicyDocumentSchema,
