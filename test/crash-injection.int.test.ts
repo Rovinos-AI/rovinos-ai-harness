@@ -31,6 +31,7 @@ import { SummarizingStrategy } from "@harness/context";
 import {
   CrashingEventStore,
   FakeModelPort,
+  allowAllPolicy,
   FakeToolPort,
   SimulatedCrash,
   type FakeModelOptions,
@@ -51,15 +52,6 @@ const nonIdempotentCallId = Id.parse("00000000000000000000000010");
 const idempotentCallId = Id.parse("00000000000000000000000011");
 const nonIdempotentToolId = "write_once";
 const idempotentToolId = "safe_retry";
-const allowPolicy: PolicyPort = {
-  version: Code.parse("test.policy"),
-  decide: () => ({
-    decision: "allow",
-    ruleId: "test_allow",
-    reason: "test_allowed",
-    editable: [],
-  }),
-};
 
 interface EffectCounts {
   nonIdempotent: number;
@@ -223,7 +215,7 @@ function modelOptions(scenario: Scenario, store: EventStore, ids: IdGenerator) {
     model: scenario.model,
     tool: scenario.tool,
     context: scenario.context,
-    policy: allowPolicy,
+    policy: allowAllPolicy,
   };
 }
 
@@ -843,7 +835,7 @@ describe("SQLite compaction crash recovery", () => {
             budgets,
             checkpointEveryEvents: 1_000,
             policyVersion: "test.policy",
-            policy: allowPolicy,
+            policy: allowAllPolicy,
             signal: new AbortController().signal,
             compaction,
           }),
@@ -865,7 +857,7 @@ describe("SQLite compaction crash recovery", () => {
           goal: compactGoal,
           budgets,
           checkpointEveryEvents: 1_000,
-          policy: allowPolicy,
+          policy: allowAllPolicy,
           signal: new AbortController().signal,
           compaction,
         });
