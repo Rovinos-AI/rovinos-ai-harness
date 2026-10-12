@@ -43,7 +43,7 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
             config,
             env,
             dataDir: env.HARNESS_DATA_DIR ?? process.cwd(),
-            resolveSecret: async (ref) => {
+            resolveSecret: async (ref, signal) => {
               let fileWarning: "secret_file_permissions" | undefined;
               const resolver = new CompositeSecretResolver({
                 env: envResolver,
@@ -53,7 +53,7 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
                   },
                 }),
               });
-              await resolver.resolve(ref);
+              await resolver.resolve(ref, signal);
               return fileWarning;
             },
           };

@@ -97,6 +97,45 @@ describe("doctor registry", () => {
     expect(DEFAULT_DOCTOR_TIMEOUT_MS).toBe(5_000);
   });
 
+  it("stops secret resolution after a timed-out reference", async () => {
+    vi.useFakeTimers();
+    const refs = [
+      SecretRefSchema.parse("env:FIRST_DOCTOR_SECRET"),
+      SecretRefSchema.parse("env:SECOND_DOCTOR_SECRET"),
+    ];
+    const resolved: string[] = [];
+    const secretCheck = DOCTOR_CHECKS.find(({ id }) => id === "secret_refs_resolvable");
+    if (secretCheck === undefined) {
+      throw new Error("secret_refs_resolvable check is not registered");
+    }
+
+    const resultsPromise = runDoctor(
+      context({
+        config: { first: refs[0], second: refs[1] },
+        resolveSecret: (ref, signal) => {
+          resolved.push(ref);
+          return new Promise((resolve) => {
+            signal?.addEventListener(
+              "abort",
+              () => {
+                resolve(undefined);
+              },
+              { once: true },
+            );
+          });
+        },
+      }),
+      [secretCheck],
+      5,
+    );
+    await vi.advanceTimersByTimeAsync(5);
+
+    await expect(resultsPromise).resolves.toEqual([
+      { id: "secret_refs_resolvable", status: "fail", code: "check_timeout" },
+    ]);
+    expect(resolved).toEqual([refs[0]]);
+  });
+
   it("converts thrown errors to safe failure codes", async () => {
     const failingCheck: DoctorCheck = {
       id: "throws",

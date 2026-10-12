@@ -19,7 +19,10 @@ export interface DoctorContext {
   /** Data directory selected for harness runtime state. */
   readonly dataDir: string;
   /** Resolves a reference without returning or retaining its secret value. */
-  readonly resolveSecret: (ref: SecretRef) => Promise<HarnessCode | undefined>;
+  readonly resolveSecret: (
+    ref: SecretRef,
+    signal?: AbortSignal,
+  ) => Promise<HarnessCode | undefined>;
   /** Node version override for deterministic checks. */
   readonly nodeVersion?: string;
   /** Per-check cancellation signal, set by the doctor runner. */
@@ -142,16 +145,25 @@ const initialChecks: DoctorCheck[] = [
       let firstFailure: DoctorCheckStatus | undefined;
       let firstWarning: DoctorCheckStatus | undefined;
       for (const rawRef of collectSecretRefs(ctx.config)) {
+        if (isAborted(ctx.signal)) {
+          return result("fail", "check_timeout");
+        }
         const parsed = SecretRefSchema.safeParse(rawRef);
         if (!parsed.success) {
           continue;
         }
         try {
-          const warning = await ctx.resolveSecret(parsed.data);
+          const warning = await ctx.resolveSecret(parsed.data, ctx.signal);
+          if (isAborted(ctx.signal)) {
+            return result("fail", "check_timeout");
+          }
           if (warning === "secret_file_permissions") {
             firstWarning ??= result("warn", warning, safeReferenceName(parsed.data));
           }
         } catch (error) {
+          if (isAborted(ctx.signal)) {
+            return result("fail", "check_timeout");
+          }
           firstFailure ??= result(
             "fail",
             knownSecretErrorCode(error),

@@ -6,7 +6,10 @@ import { HarnessError, SecretRefSchema, type SecretRef } from "@harness/schemas"
 
 /** Stable error codes raised while resolving a secret reference. */
 export type SecretResolutionErrorCode =
-  "secret_not_found" | "secret_ref_invalid" | "secret_resolver_unavailable";
+  | "secret_not_found"
+  | "secret_ref_invalid"
+  | "secret_resolver_unavailable"
+  | "secret_resolution_cancelled";
 
 /** Safe error raised when a secret reference cannot be resolved. */
 export class SecretResolutionError extends HarnessError {
@@ -60,7 +63,11 @@ export class Secret {
 /** Resolves a validated reference into an opaque secret value. */
 export interface SecretResolver {
   /** Resolves a secret without exposing its value in errors. */
-  resolve(ref: SecretRef): Promise<Secret>;
+  /**
+   * @param ref - Validated external secret reference.
+   * @param signal - Optional cancellation signal for the resolution operation.
+   */
+  resolve(ref: SecretRef, signal?: AbortSignal): Promise<Secret>;
 }
 
 /** Warning emitted when a POSIX secret file can be read by all users. */
@@ -76,8 +83,8 @@ export interface SecretFileStatus {
 
 /** Injectable file operations and warning handler for file-backed secrets. */
 export interface FileSecretResolverOptions {
-  /** Reads a file as UTF-8 text. */
-  readonly readFile?: (path: string) => Promise<string>;
+  /** Reads a file as UTF-8 text and honors an optional cancellation signal. */
+  readonly readFile?: (path: string, signal?: AbortSignal) => Promise<string>;
   /** Reads file status before the file contents are loaded. */
   readonly stat?: (path: string) => Promise<SecretFileStatus>;
   /** Platform used to decide whether POSIX permission bits apply. */
@@ -101,6 +108,12 @@ function isFileNotFound(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted === true) {
+    throw new SecretResolutionError("secret_resolution_cancelled");
+  }
+}
+
 /** Resolves `env:NAME` references from an injected or process environment. */
 export class EnvSecretResolver implements SecretResolver {
   /**
@@ -110,9 +123,10 @@ export class EnvSecretResolver implements SecretResolver {
    */
   constructor(private readonly env: Readonly<Record<string, string | undefined>> = process.env) {}
 
-  /** Resolves an environment variable or throws `secret_not_found`. */
-  resolve(ref: SecretRef): Promise<Secret> {
+  /** Resolves an environment variable or throws a safe resolver error. */
+  resolve(ref: SecretRef, signal?: AbortSignal): Promise<Secret> {
     return Promise.resolve().then(() => {
+      throwIfAborted(signal);
       const name = requireReference(ref, "env");
       const value = Object.hasOwn(this.env, name) ? this.env[name] : undefined;
       if (value === undefined) {
@@ -125,7 +139,7 @@ export class EnvSecretResolver implements SecretResolver {
 
 /** Resolves `file:/absolute/path` references into secret values. */
 export class FileSecretResolver implements SecretResolver {
-  private readonly readFile: (path: string) => Promise<string>;
+  private readonly readFile: (path: string, signal?: AbortSignal) => Promise<string>;
   private readonly stat: (path: string) => Promise<SecretFileStatus>;
   private readonly platform: NodeJS.Platform;
   private readonly onWarning: SecretFileWarningHandler;
@@ -136,21 +150,31 @@ export class FileSecretResolver implements SecretResolver {
    * @param options - File operations, platform, and permission-warning handler.
    */
   constructor(options: FileSecretResolverOptions = {}) {
-    this.readFile = options.readFile ?? ((path) => readFileFromDisk(path, { encoding: "utf8" }));
+    this.readFile =
+      options.readFile ??
+      ((path, signal) =>
+        readFileFromDisk(path, {
+          encoding: "utf8",
+          ...(signal === undefined ? {} : { signal }),
+        }));
     this.stat = options.stat ?? statFromDisk;
     this.platform = options.platform ?? process.platform;
     this.onWarning = options.onWarning ?? (() => undefined);
   }
 
-  /** Resolves a file reference, trimming at most one trailing newline. */
-  async resolve(ref: SecretRef): Promise<Secret> {
+  /** Resolves a file reference, trimming one newline and honoring cancellation. */
+  async resolve(ref: SecretRef, signal?: AbortSignal): Promise<Secret> {
+    throwIfAborted(signal);
     const path = requireReference(ref, "file");
     let status: SecretFileStatus;
     let value: string;
     try {
       status = await this.stat(path);
-      value = await this.readFile(path);
+      throwIfAborted(signal);
+      value = await this.readFile(path, signal);
+      throwIfAborted(signal);
     } catch (error) {
+      throwIfAborted(signal);
       throw new SecretResolutionError(
         isFileNotFound(error) ? "secret_not_found" : "secret_resolver_unavailable",
       );
@@ -187,16 +211,17 @@ export class CompositeSecretResolver implements SecretResolver {
   }
 
   /** Resolves `env:` and `file:` references; `akv:` awaits Key Vault support. */
-  async resolve(ref: SecretRef): Promise<Secret> {
+  async resolve(ref: SecretRef, signal?: AbortSignal): Promise<Secret> {
+    throwIfAborted(signal);
     const parsed = SecretRefSchema.safeParse(ref);
     if (!parsed.success) {
       throw new SecretResolutionError("secret_ref_invalid");
     }
     if (parsed.data.startsWith("env:")) {
-      return this.envResolver.resolve(parsed.data);
+      return this.envResolver.resolve(parsed.data, signal);
     }
     if (parsed.data.startsWith("file:")) {
-      return this.fileResolver.resolve(parsed.data);
+      return this.fileResolver.resolve(parsed.data, signal);
     }
     throw new SecretResolutionError("secret_resolver_unavailable");
   }
