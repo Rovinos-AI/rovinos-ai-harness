@@ -1127,6 +1127,7 @@ __metadata:
   resolution: "@harness/policy@workspace:packages/policy"
   dependencies:
     "@harness/schemas": "workspace:^"
+    fast-check: "npm:4.10.2"
     vitest: "npm:3.2.6"
     yaml: "npm:2.9.1"
     zod: "npm:4.6.5"
