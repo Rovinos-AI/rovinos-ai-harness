@@ -54,6 +54,9 @@ export const POSTGRES_SCHEMA = `
   ALTER TABLE events
     ADD COLUMN IF NOT EXISTS tx_id xid8 NOT NULL DEFAULT pg_current_xact_id();
   CREATE INDEX IF NOT EXISTS events_trace_id_idx ON events (trace_id);
+  CREATE INDEX IF NOT EXISTS events_continuation_of_idx
+    ON events ((meta ->> 'continuationOf'))
+    WHERE type = 'run_created';
   CREATE INDEX IF NOT EXISTS runs_status_created_at_idx ON runs (status, created_at);
   CREATE TABLE IF NOT EXISTS snapshots (
     snapshot_id text PRIMARY KEY,

@@ -221,6 +221,12 @@ export class InMemoryEventStore implements EventStore {
       if (created === undefined || last === undefined) {
         continue;
       }
+      if (
+        opts.continuationOf !== undefined &&
+        (created.type !== "run_created" || created.continuationOf !== opts.continuationOf)
+      ) {
+        continue;
+      }
 
       let status: RunSummary["status"] = "pending";
       for (const event of events) {

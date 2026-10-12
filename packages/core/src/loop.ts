@@ -321,7 +321,10 @@ async function prepareModelStep(
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<{ readonly context: Message[]; readonly deadlineTs: number; readonly event?: Event }> {
-  const context = await options.context.build(events.slice(), options.previousEventLogs);
+  const context =
+    options.previousEventLogs === undefined
+      ? await options.context.build(events.slice())
+      : await options.context.build(events.slice(), options.previousEventLogs);
   const preflight = await preflightModelBudget({
     budgetTracker: execution.budgetTracker,
     checkpointer: execution.checkpointer,

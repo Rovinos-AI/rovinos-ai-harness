@@ -26,6 +26,9 @@ export const SQLITE_SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS events_trace_id_idx ON events (trace_id);
   CREATE INDEX IF NOT EXISTS runs_status_created_at_idx ON runs (status, created_at);
+  CREATE INDEX IF NOT EXISTS events_continuation_of_idx
+    ON events (json_extract(meta_json, '$.continuationOf'))
+    WHERE type = 'run_created';
 
   CREATE TABLE IF NOT EXISTS snapshots (
     snapshot_id TEXT PRIMARY KEY,

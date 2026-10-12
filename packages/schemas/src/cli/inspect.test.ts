@@ -11,6 +11,7 @@ describe("inspect CLI schema", () => {
       usage: { inputTokens: 2, outputTokens: 3, costMicros: 0 },
       lastCheckpoint: null,
       pendingApprovals: [{ approvalId: "11111111111111111111111111", toolId: "test_tool" }],
+      continuations: [],
       events: [
         { type: "model_response", seq: 3 },
         { type: "tool_intent", seq: 4, event: { args: { token: "<EMAIL_1>" } } },

@@ -132,6 +132,8 @@ export class SqliteEventStore implements EventStore {
   private readonly findRunsByTraceQuery: Database.Statement<[TraceId], { run_id: string }>;
   private readonly listRunsQuery: Database.Statement<
     [
+      Id | null,
+      Id | null,
       RunStatus | null,
       RunStatus | null,
       number | null,
@@ -210,6 +212,8 @@ export class SqliteEventStore implements EventStore {
     );
     this.listRunsQuery = this.db.prepare<
       [
+        Id | null,
+        Id | null,
         RunStatus | null,
         RunStatus | null,
         number | null,
@@ -222,7 +226,11 @@ export class SqliteEventStore implements EventStore {
     >(`
       SELECT runs.run_id, runs.created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
       FROM runs
-      WHERE (? IS NULL OR runs.status = ?)
+      WHERE (? IS NULL OR runs.run_id IN (
+        SELECT run_id FROM events
+        WHERE type = 'run_created' AND json_extract(meta_json, '$.continuationOf') = ?
+      ))
+      AND (? IS NULL OR runs.status = ?)
       AND (? IS NULL OR runs.created_at < ? OR (runs.created_at = ? AND runs.run_id > ?))
       ORDER BY runs.created_at DESC, runs.run_id ASC
       LIMIT ?
@@ -381,6 +389,8 @@ export class SqliteEventStore implements EventStore {
     try {
       const cursor = opts.cursor === undefined ? undefined : decodeCursor(opts.cursor);
       const rows = this.listRunsQuery.all(
+        opts.continuationOf ?? null,
+        opts.continuationOf ?? null,
         opts.status ?? null,
         opts.status ?? null,
         cursor?.createdAt ?? null,

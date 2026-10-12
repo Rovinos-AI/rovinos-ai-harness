@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import {
+  HarnessError,
+  type Event,
+  type Id,
+  type JsonValue,
+  type RunInput,
+} from "@harness/schemas";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
@@ -17,6 +23,7 @@ import { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool, resolveRuntimeRoles } from "./subagent/runtime.js";
 import { createSqliteStore } from "./runtime-store.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
+import { continueRun as startContinuation } from "./continue.js";
 import type {
   Runtime,
   RuntimeComposition,
@@ -337,6 +344,39 @@ function composeRuntime(
     clock,
     ids,
     run: (goal) => startRun({ composition: options, tool, goal }),
+    continueRun: (previousRunId: Id, input: RunInput) => {
+      const runId = ids.next();
+      const goal: JsonValue =
+        input.metadata === undefined
+          ? { goal: input.goal }
+          : { goal: input.goal, metadata: input.metadata };
+      return withRunControl({
+        store,
+        runId,
+        firstNewSeq: 0,
+        processLike: overrides.processLike ?? defaultProcessLike,
+        graceMs: config.run.shutdownGraceMs,
+        operation: (signal) =>
+          startContinuation({
+            store,
+            runId,
+            previousRunId,
+            goal,
+            clock,
+            ids,
+            model,
+            tool,
+            context,
+            signal,
+            budgets: config.run.budgets,
+            checkpointEveryEvents: config.run.checkpointEveryEvents,
+            configHash: configHash(config),
+            policyVersion: POLICY_VERSION,
+            continuations: config.run.continuations,
+            scopes,
+          }),
+      });
+    },
     resume: async (runId) => {
       const firstNewSeq = await store.head(runId);
       return withRunControl({

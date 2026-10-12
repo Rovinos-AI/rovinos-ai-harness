@@ -62,12 +62,11 @@ function removeCompactedGroups(
   }
 }
 
-function transcriptForRun(events: readonly Event[]): {
-  readonly groups: TranscriptGroup[];
-  readonly inputGroups: TranscriptGroup[];
-} {
+function transcriptForRun(
+  events: readonly Event[],
+  newestInput: Extract<Event, { type: "run_input" }> | undefined,
+): TranscriptGroup[] {
   const groups: TranscriptGroup[] = [];
-  const inputGroups: TranscriptGroup[] = [];
   const groupsByCallId = new Map<string, TranscriptGroup>();
   const summaryGroups = new Set<TranscriptGroup>();
   const summaryRanges = new Map<TranscriptGroup, number>();
@@ -77,10 +76,9 @@ function transcriptForRun(events: readonly Event[]): {
       const group: TranscriptGroup = {
         seqs: [event.seq],
         messages: [{ role: "user", parts: [{ type: "text", text: inputText(event.input) }] }],
-        pinned: true,
+        pinned: newestInput === undefined || event === newestInput,
       };
       groups.push(group);
-      inputGroups.push(group);
     } else if (event.type === "model_response") {
       const group: TranscriptGroup = {
         seqs: [event.seq],
@@ -136,10 +134,7 @@ function transcriptForRun(events: readonly Event[]): {
     }
   }
 
-  return {
-    groups: groups.sort((left, right) => (left.seqs[0] ?? 0) - (right.seqs[0] ?? 0)),
-    inputGroups,
-  };
+  return groups.sort((left, right) => (left.seqs[0] ?? 0) - (right.seqs[0] ?? 0));
 }
 
 function isEventLogChain(
@@ -167,12 +162,20 @@ export function eventsToTranscript(
       : isEventLogChain(eventsOrLogs)
         ? eventsOrLogs
         : [eventsOrLogs];
-  const reconstructed = logs.map(transcriptForRun);
-  const newestInput = reconstructed.at(-1)?.inputGroups.at(-1);
-  for (const { inputGroups } of reconstructed) {
-    for (const group of inputGroups) {
-      group.pinned = group === newestInput;
+  let newestInput: Extract<Event, { type: "run_input" }> | undefined;
+  for (const events of logs) {
+    let newestInputInRun: Extract<Event, { type: "run_input" }> | undefined;
+    for (const event of events) {
+      if (
+        event.type === "run_input" &&
+        (newestInputInRun === undefined || event.seq > newestInputInRun.seq)
+      ) {
+        newestInputInRun = event;
+      }
     }
+    newestInput = newestInputInRun ?? newestInput;
   }
-  return TranscriptSchema.parse(reconstructed.flatMap(({ groups }) => groups));
+  const pinnedInput = logs.length > 1 ? newestInput : undefined;
+  const reconstructed = logs.map((events) => transcriptForRun(events, pinnedInput));
+  return TranscriptSchema.parse(reconstructed.flat());
 }

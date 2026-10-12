@@ -23,6 +23,8 @@ export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freez
   usage: ExitCode.usage,
   run_input_missing: ExitCode.failure,
   run_already_terminal: ExitCode.failure,
+  run_not_terminal: ExitCode.failure,
+  continuation_chain_too_long: ExitCode.failure,
   cancel_conflict: ExitCode.failure,
   config_invalid: ExitCode.configInvalid,
   policy_denied: ExitCode.policyDenied,

@@ -42,6 +42,8 @@ export interface RunSummary {
 export interface ListRunsOptions {
   /** Restrict results to runs with this latest status. */
   status?: RunStatus;
+  /** Restrict results to direct continuations of this run. */
+  continuationOf?: Id;
   /** Maximum number of summaries to return. */
   limit: number;
   /** Opaque cursor returned by a previous call to listRuns. */

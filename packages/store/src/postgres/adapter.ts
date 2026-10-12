@@ -125,7 +125,7 @@ export class PostgresEventStore implements EventStore {
       transactionStarted = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
       const schemaState = await client.query<{ initialized: boolean } & QueryResultRow>(
-        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AND to_regclass('sink_cursors') IS NOT NULL AND to_regclass('store_metadata') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'events' AND column_name = 'tx_id') AS initialized",
+        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('events_continuation_of_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AND to_regclass('sink_cursors') IS NOT NULL AND to_regclass('store_metadata') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'events' AND column_name = 'tx_id') AS initialized",
       );
       if (schemaState.rows[0]?.initialized !== true) {
         await client.query(POSTGRES_SCHEMA);
@@ -285,11 +285,21 @@ export class PostgresEventStore implements EventStore {
       const result = await this.pool.query<RunSummaryRow>(
         `SELECT runs.run_id, runs.created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
         FROM runs
-        WHERE ($1::text IS NULL OR runs.status = $1)
-        AND ($2::bigint IS NULL OR runs.created_at < $2 OR (runs.created_at = $2 AND runs.run_id > $3))
+        WHERE ($1::text IS NULL OR runs.run_id IN (
+          SELECT run_id FROM events
+          WHERE type = 'run_created' AND meta ->> 'continuationOf' = $1
+        ))
+        AND ($2::text IS NULL OR runs.status = $2)
+        AND ($3::bigint IS NULL OR runs.created_at < $3 OR (runs.created_at = $3 AND runs.run_id > $4))
         ORDER BY runs.created_at DESC, runs.run_id ASC
-        LIMIT $4`,
-        [opts.status ?? null, cursor?.createdAt ?? null, cursor?.runId ?? null, opts.limit + 1],
+        LIMIT $5`,
+        [
+          opts.continuationOf ?? null,
+          opts.status ?? null,
+          cursor?.createdAt ?? null,
+          cursor?.runId ?? null,
+          opts.limit + 1,
+        ],
       );
       return runListPage(result.rows, opts.limit);
     } catch (error) {

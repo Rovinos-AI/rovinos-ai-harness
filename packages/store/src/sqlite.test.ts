@@ -117,7 +117,7 @@ function asyncDecodeCodec(): ContentCodec {
   };
 }
 
-function runCreated(id: typeof runId, ts: number): NewEvent {
+function runCreated(id: typeof runId, ts: number, continuationOf?: typeof runId): NewEvent {
   return {
     runId: id,
     ts,
@@ -128,6 +128,7 @@ function runCreated(id: typeof runId, ts: number): NewEvent {
     type: "run_created",
     configHash: "a".repeat(64),
     policyVersion: "policy.v1",
+    ...(continuationOf === undefined ? {} : { continuationOf }),
     depth: 0,
   };
 }
@@ -691,6 +692,24 @@ describe("SqliteEventStore", () => {
 
       expect(secondPage.runs.map(({ runId: id }) => id)).toEqual(ids.slice(1));
       expect(secondPage.nextCursor).toBeUndefined();
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("filters runs by the indexed continuation link", async () => {
+    const store = new SqliteEventStore(":memory:");
+    const parentId = Id.parse("00000000000000000000000001");
+    const firstBranch = Id.parse("00000000000000000000000002");
+    const secondBranch = Id.parse("00000000000000000000000003");
+    try {
+      await store.append(parentId, [runCreated(parentId, 10)], 0);
+      await store.append(firstBranch, [runCreated(firstBranch, 20, parentId)], 0);
+      await store.append(secondBranch, [runCreated(secondBranch, 30, parentId)], 0);
+
+      await expect(store.listRuns({ continuationOf: parentId, limit: 10 })).resolves.toMatchObject({
+        runs: [{ runId: secondBranch }, { runId: firstBranch }],
+      });
     } finally {
       await store.close();
     }

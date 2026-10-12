@@ -8,6 +8,7 @@ import { errorCodeOf, exitCodeForError, ExitCode } from "./exit-codes.js";
 import { createOutput, type Output } from "./output.js";
 import { serveCommand } from "./serve.js";
 import { cancelCommand } from "./commands/cancel.js";
+import { continueCommand } from "./commands/continue.js";
 import { contextCommand } from "./commands/context.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { resumeCommand } from "./commands/resume.js";
@@ -21,6 +22,7 @@ export const COMMANDS: CommandModule[] = [
   inspectCommand,
   cancelCommand,
   contextCommand,
+  continueCommand,
 ];
 
 const systemClock: Clock = { now: () => Date.now() };

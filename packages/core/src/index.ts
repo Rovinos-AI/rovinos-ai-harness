@@ -53,6 +53,13 @@ export {
 } from "./spans.js";
 export { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
 export {
+  ContinuationChainTooLongError,
+  RunNotTerminalError,
+  continueRun,
+  loadContinuationChain,
+  type ContinueRunOptions,
+} from "./continue.js";
+export {
   installShutdownHandler,
   type ShutdownHandlerOptions,
   type ShutdownProcessLike,
