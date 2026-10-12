@@ -482,7 +482,8 @@ describe("SqliteEventStore", () => {
       lock.close();
       await store.close();
     }
-  }, 7_000);
+    // Waits out the store's real 5 s busy_timeout; leave headroom for slower CI agents.
+  }, 20_000);
 
   it("keeps event content out of meta_json", async () => {
     const path = await temporaryDatabase();
