@@ -89,7 +89,7 @@ class RunAbortedError extends HarnessError {
 export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
   const events: Event[] = [];
   let result: RunLoopResult | undefined;
-  const budgetTracker = new BudgetTracker(options.budgets);
+  const budgetTracker = new BudgetTracker(options.budgets, options.initialBudgetViolation);
   const startEvents: EventPartial[] = [
     {
       type: "run_created",
@@ -198,14 +198,6 @@ async function runLoopSteps(
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<Event> {
-  if (options.initialBudgetViolation !== undefined) {
-    return recordBudgetFailureAndCheckpoint(
-      options.recorder,
-      events,
-      options.initialBudgetViolation,
-      execution.checkpointer,
-    );
-  }
   const recovered = await recoverInterruptedModelResponse(options, events, execution);
   if (recovered !== undefined) {
     return recovered;

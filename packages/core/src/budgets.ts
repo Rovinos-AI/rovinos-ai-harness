@@ -24,8 +24,12 @@ export class BudgetTracker {
    * Creates a tracker for one run's configured budgets.
    *
    * @param budgets - Validated budgets from the run configuration.
+   * @param initialViolation - An inherited budget violation to return on the first check.
    */
-  constructor(private readonly budgets: RunConfig["budgets"]) {}
+  constructor(
+    private readonly budgets: RunConfig["budgets"],
+    private readonly initialViolation?: BudgetViolation,
+  ) {}
 
   /**
    * Returns the absolute wall-clock deadline while preserving excluded suspension time.
@@ -46,6 +50,10 @@ export class BudgetTracker {
    * @returns Whether usage is within every configured budget.
    */
   check(state: RunState, now: number): BudgetCheck {
+    if (this.initialViolation !== undefined) {
+      return this.initialViolation;
+    }
+
     if (state.steps > this.budgets.maxSteps) {
       return {
         ok: false,

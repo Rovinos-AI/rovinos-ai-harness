@@ -342,44 +342,44 @@ describe("inherited continuation budgets", () => {
   it.each([
     { costMicros: 1_000_000, observed: 1_000_000, label: "exactly at" },
     { costMicros: 1_100_000, observed: 1_100_000, label: "over" },
-  ])("fails before a model call when ancestor cost is $label the limit", async ({
-    costMicros,
-    observed,
-  }) => {
-    const store = new InMemoryEventStore();
-    const model = new FakeModelPort([
-      completedResponse("source answer", costMicros),
-      completedResponse("must not be requested"),
-    ]);
-    const configured = runtimeOptions(store, model, {
-      budgets: { maxSteps: 10, maxCostUsd: 1, maxWallClockMs: 100_000 },
-      continuations: { inheritBudgets: true },
-    });
-    const runtime = await createRuntime(configured.config, configured.overrides);
-    try {
-      const original = await runtime.run("source");
-      const originalId = original.events[0]?.runId;
-      if (originalId === undefined) {
-        throw new Error("Expected an original run.");
-      }
-
-      const continued = await runtime.continueRun(originalId, { goal: "follow-up" });
-
-      expect(continued.status).toBe("failed");
-      expect(model.requests).toHaveLength(1);
-      expect(continued.events.slice(-2)).toMatchObject([
-        { type: "budget_exceeded", budget: "cost", limit: 1_000_000, observed },
-        {
-          type: "run_status_changed",
-          from: "running",
-          to: "failed",
-          reason: "budget_exceeded",
-        },
+  ])(
+    "fails before a model call when ancestor cost is $label the limit",
+    async ({ costMicros, observed }) => {
+      const store = new InMemoryEventStore();
+      const model = new FakeModelPort([
+        completedResponse("source answer", costMicros),
+        completedResponse("must not be requested"),
       ]);
-    } finally {
-      await runtime.close();
-    }
-  });
+      const configured = runtimeOptions(store, model, {
+        budgets: { maxSteps: 10, maxCostUsd: 1, maxWallClockMs: 100_000 },
+        continuations: { inheritBudgets: true },
+      });
+      const runtime = await createRuntime(configured.config, configured.overrides);
+      try {
+        const original = await runtime.run("source");
+        const originalId = original.events[0]?.runId;
+        if (originalId === undefined) {
+          throw new Error("Expected an original run.");
+        }
+
+        const continued = await runtime.continueRun(originalId, { goal: "follow-up" });
+
+        expect(continued.status).toBe("failed");
+        expect(model.requests).toHaveLength(1);
+        expect(continued.events.slice(-2)).toMatchObject([
+          { type: "budget_exceeded", budget: "cost", limit: 1_000_000, observed },
+          {
+            type: "run_status_changed",
+            from: "running",
+            to: "failed",
+            reason: "budget_exceeded",
+          },
+        ]);
+      } finally {
+        await runtime.close();
+      }
+    },
+  );
 
   it("subtracts ancestor steps, active time, and cost while respecting suspension policy", () => {
     const runId = Id.parse("99999999999999999999999995");
