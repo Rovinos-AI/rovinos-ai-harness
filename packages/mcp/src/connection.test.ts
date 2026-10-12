@@ -533,7 +533,7 @@ describe("McpConnection", () => {
     await peer.serverTransport.close();
   });
 
-  it("serves tools from cache within the server ttlMs and refetches after it", async () => {
+  it("serves tools from cache within the server ttlMs and fetches again after it expires", async () => {
     const peer = await createCountingPeer(1_000);
     let now = 10_000;
     const connection = new McpConnection(config(), {
