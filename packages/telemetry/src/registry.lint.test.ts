@@ -19,7 +19,7 @@ const propertySpan = defineSpan("harness.test.random_string_property", {
   "harness.test.count": attr.int(),
   "harness.test.enabled": attr.bool(),
   "harness.test.ratio": attr.num(),
-});
+}, { taskId: "4.7", packageName: "@harness/telemetry" });
 
 describe("telemetry schema lint", () => {
   it("requires attr helpers for all registry and SafeEvent schema fields", () => {

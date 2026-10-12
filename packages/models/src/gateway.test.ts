@@ -202,7 +202,7 @@ describe("ModelGateway", () => {
       "harness.event.seq": attr.optional(attr.int()),
       "harness.model.attempts": attr.optional(attr.int()),
       "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
-    });
+    }, { taskId: "4.7", packageName: "@harness/models" });
     let calls = 0;
     const complete = vi.fn((_request: ModelRequest, _context: ProviderContext) => {
       calls += 1;

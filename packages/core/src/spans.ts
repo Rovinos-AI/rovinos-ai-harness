@@ -15,7 +15,7 @@ export const RUN_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan("harness
   "harness.run.parent_id": attr.optional(attr.id()),
   "harness.run.continuation_of": attr.optional(attr.id()),
   "harness.run.depth": attr.optional(attr.int()),
-});
+}, { taskId: "4.1", packageName: "@harness/core" });
 
 /** Creates metadata attributes for a run's root span. */
 export function runSpanAttributes(options: {
@@ -44,18 +44,21 @@ export const MODEL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     "harness.model.attempts": attr.optional(attr.int()),
     "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
   },
+  { taskId: "4.1", packageName: "@harness/core" },
 );
 
 /** Span for one tool call. */
 export const TOOL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.tool_call",
   commonAttributes,
+  { taskId: "4.1", packageName: "@harness/core" },
 );
 
 /** Span while waiting for an approval. */
 export const APPROVAL_WAIT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.approval_wait",
   commonAttributes,
+  { taskId: "4.1", packageName: "@harness/core" },
 );
 
 /** Span for writing a checkpoint. */
@@ -65,10 +68,12 @@ export const CHECKPOINT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     ...commonAttributes,
     "harness.checkpoint.reason": attr.optional(attr.code()),
   },
+  { taskId: "4.1", packageName: "@harness/core" },
 );
 
 /** Span for compacting run context. */
 export const COMPACTION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.compaction",
   commonAttributes,
+  { taskId: "4.1", packageName: "@harness/core" },
 );
