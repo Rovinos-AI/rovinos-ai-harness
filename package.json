@@ -48,7 +48,8 @@
     "check:agents": "yarn build:schemas && node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs",
     "check:spdx": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-spdx.ts",
     "check:dco": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-dco.ts",
-    "check:licenses": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-licenses.ts"
+    "check:licenses": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-licenses.ts",
+    "check:threat-cases": "yarn build:schemas && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/check-threat-cases.ts"
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
