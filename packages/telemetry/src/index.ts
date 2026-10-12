@@ -16,6 +16,7 @@ export { emitSafeEvent, safeEventLogAttributeMap } from "./safe-event-logs.js";
 export {
   __resetRegistryForTests,
   defineSpan,
+  defineSemconvSpan,
   ensureTracingFallback,
   listSpanDefinitions,
   lookupSpanDefinition,
@@ -23,8 +24,16 @@ export {
   withSpan,
   type SpanDefinition,
   type SpanDefinitionShape,
+  type SpanOwnerTask,
   type SpanShape,
 } from "./registry.js";
+export {
+  MCP_METHOD_NAME,
+  SEMCONV_ATTRIBUTE_NAMES,
+  SEMCONV_SPAN_NAMES,
+  SEMCONV_STABILITY_OPT_IN,
+  SEMCONV_VERSION,
+} from "./semconv.js";
 export {
   RunValueSet,
   VaultRunView,

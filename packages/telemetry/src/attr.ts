@@ -9,7 +9,7 @@ export interface AttrMeta {
   readonly optional?: true;
 }
 
-const attrMetadata = new WeakMap<z.core.$ZodType, AttrMeta>();
+const attrMetadata = new WeakMap<WeakKey, AttrMeta>();
 
 function register<Schema extends z.core.$ZodType>(schema: Schema, meta: AttrMeta): Schema {
   attrMetadata.set(
@@ -28,7 +28,10 @@ function register<Schema extends z.core.$ZodType>(schema: Schema, meta: AttrMeta
  * @param schema - The schema to inspect.
  * @returns Safe attribute metadata, or `undefined` when the schema is unregistered.
  */
-export function getAttrMeta(schema: z.core.$ZodType): AttrMeta | undefined {
+export function getAttrMeta(schema: unknown): AttrMeta | undefined {
+  if ((typeof schema !== "object" || schema === null) && typeof schema !== "function") {
+    return undefined;
+  }
   return attrMetadata.get(schema);
 }
 

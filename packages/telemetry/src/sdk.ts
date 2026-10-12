@@ -13,6 +13,8 @@ import {
 import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
 import { AllowlistSpanProcessor } from "./processors/allowlist-span-processor.js";
 import { assertSentinelGate, type SentinelGate } from "./sentinel/gate.js";
+import { SEMCONV_STABILITY_OPT_IN } from "./semconv.js";
+import { env } from "node:process";
 
 /** Inputs for constructing the guarded trace and log SDK providers. */
 export interface TelemetrySdkOptions {
@@ -35,6 +37,8 @@ export interface TelemetrySdk {
  */
 export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
   assertSentinelGate(options.gate, options.telemetry);
+  // Default to stable HTTP conventions without overriding an operator's setting.
+  env.OTEL_SEMCONV_STABILITY_OPT_IN ??= SEMCONV_STABILITY_OPT_IN;
   const processorOptions = {
     ...(options.gate === undefined ? {} : { gate: options.gate }),
     ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),

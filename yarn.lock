@@ -1177,6 +1177,7 @@ __metadata:
     "@opentelemetry/resources": "npm:2.12.0"
     "@opentelemetry/sdk-logs": "npm:0.223.0"
     "@opentelemetry/sdk-trace-base": "npm:2.12.0"
+    "@opentelemetry/semantic-conventions": "npm:1.43.0"
     "@types/node": "npm:22.20.5"
     fast-check: "npm:4.10.2"
     vitest: "npm:3.2.6"
@@ -1438,7 +1439,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@opentelemetry/semantic-conventions@npm:^1.29.0":
+"@opentelemetry/semantic-conventions@npm:1.43.0, @opentelemetry/semantic-conventions@npm:^1.29.0":
   version: 1.43.0
   resolution: "@opentelemetry/semantic-conventions@npm:1.43.0"
   checksum: 10c0/ea4b4b07c9414b0c5e7ce7349f608cb2572d16922d96077fb0882b59f173ec9b94aada74896bd5dd4aeb1759924503bd5a34b6dc2847a84c36f71626a0578ec4
@@ -5192,6 +5193,7 @@ __metadata:
     "@harness/pii": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
+    "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
     "@types/node": "npm:22.20.5"
     "@types/spdx-expression-parse": "npm:4.0.0"
