@@ -7,7 +7,7 @@ import {
   RunConfigSchema,
   RolesConfigSchema,
   SandboxConfigSchema,
-  ServerConfigSchema,
+  ServersConfigSchema,
   StoreConfigSchema,
   TelemetryConfigSchema,
 } from "@harness/schemas";
@@ -19,7 +19,7 @@ export const HarnessConfigSchema = z
     roles: RolesConfigSchema,
     store: StoreConfigSchema,
     models: ModelsConfigSchema,
-    servers: z.array(ServerConfigSchema).default([]),
+    servers: ServersConfigSchema,
     policy: PolicyConfigSchema,
     pii: PiiConfigSchema,
     telemetry: TelemetryConfigSchema,

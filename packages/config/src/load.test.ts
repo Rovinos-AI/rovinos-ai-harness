@@ -209,7 +209,7 @@ describe("loadConfig", () => {
       config.run.budgets.maxSteps = 13;
     }).toThrow(TypeError);
     expect(() => {
-      config.servers.push({});
+      Object.defineProperty(config.servers, "0", { value: {} });
     }).toThrow(TypeError);
   });
 

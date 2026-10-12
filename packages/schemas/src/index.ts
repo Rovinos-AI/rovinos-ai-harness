@@ -97,7 +97,12 @@ export {
   type RoleToolPattern,
   type RolesConfig,
 } from "./config/roles.js";
-export { ServerConfigSchema } from "./config/servers.js";
+export {
+  ServerConfigSchema,
+  ServersConfigSchema,
+  type ServerConfig,
+  type ServersConfig,
+} from "./config/servers.js";
 export { PolicyConfigSchema } from "./config/policy.js";
 export {
   JsonPointerSchema,
