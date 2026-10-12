@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
 import type { HostResponse } from "./types.js";
-import { writeRequestFailure } from "./http-utils.js";
+import { readStaticAsset, writeRequestFailure } from "./http-utils.js";
 
 function makeResponse(headersSent: boolean): {
   readonly response: HostResponse;
@@ -40,5 +40,18 @@ describe("writeRequestFailure", () => {
     expect(writeHead).not.toHaveBeenCalled();
     expect(end).not.toHaveBeenCalled();
     expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("reads the host page from source and falls back to the built bundle", async () => {
+    const page = await readStaticAsset("index");
+    expect(page.toString("utf8")).toContain('<script src="/host.js"');
+
+    // The unbundled source tree has no host.js, so this always takes the dist fallback; that
+    // file exists only after `yarn workspace @harness/host build`.
+    const bundle = await readStaticAsset("bundle").then(
+      (contents) => contents.byteLength > 0,
+      (error: unknown) => error instanceof Error,
+    );
+    expect(bundle).toBe(true);
   });
 });
