@@ -110,7 +110,9 @@ async function runCheck(): Promise<void> {
   const cases = parseJson(ThreatCasesSchema, catalogText);
   const progress = parseJson(ProgressSchema, progressText);
   const sourcePaths = (
-    await Promise.all(["test", "packages"].map((directory) => collectSourceFiles(join(root, directory), root)))
+    await Promise.all(
+      ["test", "packages"].map((directory) => collectSourceFiles(join(root, directory), root)),
+    )
   ).flat();
   const sourceContents = await Promise.all(
     sourcePaths.map((path) => readFile(join(root, path), "utf8")),

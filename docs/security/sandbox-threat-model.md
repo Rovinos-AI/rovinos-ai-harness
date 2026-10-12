@@ -27,12 +27,13 @@ corresponding mitigation task is considered complete.
 | Compromised dependency | Executes code with the privileges and access available to its process |
 | Operator | Configures images, networks, secrets, quotas, and optional hardening runtimes |
 
-The runner is a separate container on an internal network; the harness does not
-spawn it and does not mount the Docker socket. Container isolation depends on
-the host kernel, container runtime, and correctly applied runtime configuration.
-The runner admits only one active run at a time; this does not isolate processes
-from each other within that run. External services, the host, and the operator's
-secret-management system are assumed to enforce their own access controls.
+The design places the runner in a separate container on an internal network;
+the harness does not spawn it or mount the Docker socket. Container isolation
+depends on the host kernel, container runtime, and correctly applied runtime
+configuration. The design requires one active run per runner; this does not
+isolate processes from each other within that run. External services, the host,
+and the operator's secret-management system are assumed to enforce their own
+access controls.
 
 ## Trust boundaries
 
@@ -40,8 +41,9 @@ secret-management system are assumed to enforce their own access controls.
    before policy evaluation or dispatch.
 2. The harness crosses an authenticated internal-network boundary when it
    requests execution or workspace operations from the runner.
-3. Runner processes execute across the container/kernel boundary and can access
-   only the runner's configured workspace and resources.
+3. Runner processes execute in a container subject to host-kernel isolation;
+   runtime configuration is intended to constrain them to the runner's
+   configured workspace and resources.
 4. Network requests cross the runner-to-egress-proxy boundary; direct runner
    egress is denied, and the proxy enforces destination policy.
 5. Workspace and snapshot data cross filesystem and restore boundaries; paths

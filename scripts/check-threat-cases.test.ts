@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import {
-  findMissingThreatIds,
-  ThreatCasesSchema,
-  type ThreatCase,
-} from "./check-threat-cases.js";
+import { findMissingThreatIds, ThreatCasesSchema, type ThreatCase } from "./check-threat-cases.js";
 
 const activeCase: ThreatCase = {
   id: "T-01",
