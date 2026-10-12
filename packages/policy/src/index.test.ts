@@ -174,7 +174,7 @@ describe("PolicyDocumentSchema", () => {
       decision: "ask",
       reason: "approval_required",
     };
-    const document = (timedRule: object) =>
+    const document = (timedRule: unknown) =>
       PolicyDocumentSchema.safeParse({
         version: 1,
         defaultDecision: "deny",
@@ -189,17 +189,13 @@ describe("PolicyDocumentSchema", () => {
       escalateAfterMs: 10,
     });
     expect(escalationAtExpiry.success).toBe(false);
-    if (!escalationAtExpiry.success) {
-      expect(escalationAtExpiry.error.issues).toContainEqual(
-        expect.objectContaining({
-          code: "custom",
-          params: { errorCode: "policy_escalation_after_expiry" },
-        }),
-      );
-    }
-    expect(
-      document({ ...rule, approvalTtlMs: 10, escalateAfterMs: 9 }).success,
-    ).toBe(true);
+    expect(escalationAtExpiry.success ? [] : escalationAtExpiry.error.issues).toContainEqual(
+      expect.objectContaining({
+        code: "custom",
+        params: { errorCode: "policy_escalation_after_expiry" },
+      }),
+    );
+    expect(document({ ...rule, approvalTtlMs: 10, escalateAfterMs: 9 }).success).toBe(true);
   });
 });
 

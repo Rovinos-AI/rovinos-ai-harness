@@ -19,6 +19,24 @@ const ToolPatternSchema = z
     { message: "Tool patterns may only use a trailing .* wildcard." },
   );
 
+function validateExistsMatcher(
+  matcher: { op: string; value?: JsonValue | undefined },
+  context: z.RefinementCtx,
+): boolean {
+  if (matcher.op !== "exists") {
+    return false;
+  }
+  if (Object.hasOwn(matcher, "value")) {
+    context.addIssue({
+      code: "custom",
+      path: ["value"],
+      message: "The exists operation does not accept a value.",
+      params: { errorCode: "policy_match_value_unexpected" },
+    });
+  }
+  return true;
+}
+
 /** Match a tokenized tool argument at an RFC 6901 pointer. */
 export const ArgMatcherSchema = z
   .object({
@@ -28,15 +46,7 @@ export const ArgMatcherSchema = z
   })
   .strict()
   .superRefine((matcher, context) => {
-    if (matcher.op === "exists") {
-      if (Object.hasOwn(matcher, "value")) {
-        context.addIssue({
-          code: "custom",
-          path: ["value"],
-          message: "The exists operation does not accept a value.",
-          params: { errorCode: "policy_match_value_unexpected" },
-        });
-      }
+    if (validateExistsMatcher(matcher, context)) {
       return;
     }
     if (matcher.value === undefined) {
