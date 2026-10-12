@@ -1,0 +1,135 @@
+[
+  {
+    "id": "T-01",
+    "title": "Runner cannot control the host container runtime",
+    "mitigationTask": "19.3",
+    "testFile": "packages/sandbox/runner/src/server.int.test.ts",
+    "activeFromTask": "19.3"
+  },
+  {
+    "id": "T-02",
+    "title": "Runner has no excess capabilities or privileges",
+    "mitigationTask": "19.7",
+    "testFile": "scripts/ci/image-hardening.int.test.ts",
+    "activeFromTask": "19.7"
+  },
+  {
+    "id": "T-03",
+    "title": "Child processes do not inherit parent secrets",
+    "mitigationTask": "19.2",
+    "testFile": "packages/sandbox/src/inprocess.test.ts",
+    "activeFromTask": "19.2"
+  },
+  {
+    "id": "T-04",
+    "title": "Runner processes cannot read mounted host secrets",
+    "mitigationTask": "19.3",
+    "testFile": "packages/sandbox/runner/src/server.int.test.ts",
+    "activeFromTask": "19.3"
+  },
+  {
+    "id": "T-05",
+    "title": "Unallowlisted network egress is denied",
+    "mitigationTask": "19.4",
+    "testFile": "packages/sandbox/egress-proxy/src/proxy.test.ts",
+    "activeFromTask": "19.4"
+  },
+  {
+    "id": "T-06",
+    "title": "Metadata and private-address SSRF is denied",
+    "mitigationTask": "19.4",
+    "testFile": "packages/sandbox/egress-proxy/src/proxy.test.ts",
+    "activeFromTask": "19.4"
+  },
+  {
+    "id": "T-07",
+    "title": "Process spawning stays within the configured limit",
+    "mitigationTask": "19.3",
+    "testFile": "packages/sandbox/runner/src/server.int.test.ts",
+    "activeFromTask": "19.3"
+  },
+  {
+    "id": "T-08",
+    "title": "Memory use stays within the configured limit",
+    "mitigationTask": "19.3",
+    "testFile": "packages/sandbox/runner/src/server.int.test.ts",
+    "activeFromTask": "19.3"
+  },
+  {
+    "id": "T-09",
+    "title": "Workspace disk quotas are enforced",
+    "mitigationTask": "19.5",
+    "testFile": "packages/sandbox/src/workspace.test.ts",
+    "activeFromTask": "19.5"
+  },
+  {
+    "id": "T-10",
+    "title": "Timed-out commands and process groups are terminated",
+    "mitigationTask": "19.2",
+    "testFile": "packages/sandbox/src/inprocess.test.ts",
+    "activeFromTask": "19.2"
+  },
+  {
+    "id": "T-11",
+    "title": "Command output capture remains bounded",
+    "mitigationTask": "19.2",
+    "testFile": "packages/sandbox/src/inprocess.test.ts",
+    "activeFromTask": "19.2"
+  },
+  {
+    "id": "T-12",
+    "title": "Workspace paths cannot escape through traversal or symlinks",
+    "mitigationTask": "19.5",
+    "testFile": "packages/sandbox/src/workspace.test.ts",
+    "activeFromTask": "19.5"
+  },
+  {
+    "id": "T-13",
+    "title": "A runner lease prevents cross-run access",
+    "mitigationTask": "19.5",
+    "testFile": "packages/sandbox/src/workspace.test.ts",
+    "activeFromTask": "19.5"
+  },
+  {
+    "id": "T-14",
+    "title": "Run data is unavailable to subsequent runs",
+    "mitigationTask": "19.5",
+    "testFile": "packages/sandbox/src/workspace.test.ts",
+    "activeFromTask": "19.5"
+  },
+  {
+    "id": "T-15",
+    "title": "Runner images contain no exploitable setuid binaries",
+    "mitigationTask": "19.7",
+    "testFile": "scripts/ci/image-hardening.int.test.ts",
+    "activeFromTask": "19.7"
+  },
+  {
+    "id": "T-16",
+    "title": "The runner root filesystem is read-only",
+    "mitigationTask": "19.7",
+    "testFile": "scripts/ci/image-hardening.int.test.ts",
+    "activeFromTask": "19.7"
+  },
+  {
+    "id": "T-17",
+    "title": "Workspace restore rejects traversal archives",
+    "mitigationTask": "19.6",
+    "testFile": "packages/sandbox/src/snapshot.test.ts",
+    "activeFromTask": "19.6"
+  },
+  {
+    "id": "T-18",
+    "title": "Runner API rejects unauthenticated requests",
+    "mitigationTask": "19.3",
+    "testFile": "packages/sandbox/runner/src/server.int.test.ts",
+    "activeFromTask": "19.3"
+  },
+  {
+    "id": "T-19",
+    "title": "Runner API rejects Host and Origin abuse",
+    "mitigationTask": "19.3",
+    "testFile": "packages/sandbox/runner/src/server.int.test.ts",
+    "activeFromTask": "19.3"
+  }
+]
