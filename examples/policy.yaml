@@ -1,4 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
+# Synthetic example only; containsRealData: false.
 version: 1
 defaultDecision: ask
-rules: []
+rules:
+  - id: ask_email_send
+    description: Ask before sending to a tokenized email address
+    match:
+      tools:
+        - mail.send
+      args:
+        - pointer: /to
+          op: tokenType
+          value: email
+    decision: ask
+    reason: outbound_email
+    editable:
+      - /subject
+    approvalTtlMs: 300000
+    escalateAfterMs: 60000
