@@ -2,6 +2,7 @@
 // Preparation owns durable arguments; execution owns only the ephemeral raw copy.
 import {
   ToolBinaryPayloadSchema,
+  compileJsonSchema,
   type Code,
   type Id,
   type JsonValue,
@@ -9,7 +10,7 @@ import {
   type PiiConfig,
   type ToolSpec,
 } from "@harness/schemas";
-import type { AuditingVaultResolver } from "@harness/vault";
+import { type AuditingVaultResolver } from "@harness/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import type { Tokenizer } from "./tokenizer.js";
@@ -38,7 +39,14 @@ export interface PiiToolResult {
 
 /** Structural port avoids a dependency from PII back to core. */
 export interface PiiToolPortLike {
-  describe(toolId: Code): { readonly idempotent: boolean; readonly timeoutMs: number } | undefined;
+  describe(toolId: Code):
+    | {
+        readonly idempotent: boolean;
+        readonly timeoutMs: number;
+        readonly longRunning?: boolean;
+        readonly inputSchema?: JsonValue;
+      }
+    | undefined;
   getToolSpecs?(): readonly ToolSpec[];
   prepare?(call: PiiToolCall, context: PiiToolContext): Promise<PiiToolCall>;
   execute(call: PiiToolCall, context: PiiToolContext): Promise<PiiToolResult>;
@@ -61,6 +69,36 @@ export class PiiToolPort implements PiiToolPortLike {
   /** Forwards retry and timeout metadata. */
   describe(toolId: Code): ReturnType<PiiToolPortLike["describe"]> {
     return this.inner.describe(toolId);
+  }
+
+  /**
+   * Validates schema constraints after resolving tokens only into a temporary in-memory copy.
+   *
+   * @param toolId - Tool receiving the input.
+   * @param args - Tokenized arguments to validate.
+   * @param schema - External JSON Schema supplied by the tool.
+   * @param context - Active run and cancellation context.
+   * @returns Whether the resolved copy satisfies the schema.
+   */
+  async validateInputSchema(
+    toolId: Code,
+    args: JsonValue,
+    schema: JsonValue,
+    context: PiiToolContext,
+  ): Promise<boolean> {
+    try {
+      const { args: resolved } = await detokenizeArgs(
+        context.runId,
+        toolId,
+        args,
+        this.deps.config,
+        this.deps.resolver,
+      );
+      compileJsonSchema(schema)(resolved);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Forwards provider-visible tool specifications. */

@@ -9,7 +9,7 @@ import {
   SequentialIdGenerator,
   type Event,
   type Detection,
-  type JsonValue,
+  JsonValue,
 } from "@harness/schemas";
 import {
   applyResolvedApprovals,
@@ -26,6 +26,7 @@ import { OffloadingToolPort, type WorkspacePort } from "@harness/context";
 import { InMemoryEventStore } from "@harness/store";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { PiiToolPort, Tokenizer } from "@harness/pii";
+import { buildApprovalPayload } from "@harness/policy";
 
 const email = "pipeline-canary@example.test";
 const card = "4111111111111111";
@@ -287,7 +288,16 @@ describe("PII tool pipeline", () => {
           v: 1,
           approvalId,
           callId: approvalCallId,
-          payload: { kind: "tool_call", editableFields: ["/to", "/note"] },
+          payload: JsonValue.parse(
+            buildApprovalPayload({
+              call: {
+                callId: approvalCallId,
+                toolId: "mail.send",
+                args: { to: "draft-recipient", note: "draft-note" },
+              },
+              rule: { id: "ask_mail", reason: "outbound_email", editable: ["/to", "/note"] },
+            }),
+          ),
         },
         {
           type: "run_status_changed",

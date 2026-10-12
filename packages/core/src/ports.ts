@@ -69,6 +69,8 @@ export interface ToolDescription {
   readonly timeoutMs: number;
   /** Runs to completion or cancellation without an independent timeout. */
   readonly longRunning?: boolean;
+  /** External MCP JSON Schema used to validate approval edits when available. */
+  readonly inputSchema?: JsonValue;
 }
 
 /** Result returned after a tool execution. */
@@ -84,6 +86,20 @@ export interface ToolExecutionResult {
 export interface ToolPort {
   /** Sanitizes arguments before any durable model response or tool intent is recorded. */
   prepare?(call: ModelToolCall, context: RunContext): Promise<ModelToolCall>;
+  /**
+   * Validates tokenized arguments against an external schema using an in-memory token resolver.
+   *
+   * @param args - Arguments that remain tokenized outside this call.
+   * @param schema - External tool input JSON Schema.
+   * @param context - Active run and tool boundary context.
+   * @returns Whether the resolved in-memory arguments match the schema.
+   */
+  validateInputSchema?(
+    toolId: Code,
+    args: JsonValue,
+    schema: JsonValue,
+    context: RunContext,
+  ): Promise<boolean>;
   /**
    * Returns model-visible specifications for registered tools, when available.
    *
