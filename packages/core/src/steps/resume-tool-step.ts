@@ -45,6 +45,7 @@ export class ApprovalEditsRequiredError extends HarnessError {
 export class ApprovalEditNotAllowedError extends HarnessError {
   readonly code = "approval_edit_not_allowed";
 
+  /** Creates an error for an approval edit outside the allowed pointers. */
   constructor() {
     super("Approval edits may only change fields listed as editable.");
     this.name = "ApprovalEditNotAllowedError";
