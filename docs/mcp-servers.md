@@ -62,7 +62,11 @@ available to the safe logger.
 The MCP SDK negotiates the protocol automatically unless `protocol` pins an
 era. Tool discovery follows pagination, is capped at 1,000 tools, and caches
 results according to the server-provided `ttlMs`. Modern list-change
-subscriptions refresh the cached tools. `harness doctor` reports a
+subscriptions refresh the cached tools. Each page is validated against the
+MCP `tools/list` result schema. On modern Streamable HTTP connections, tools
+whose input schema declares `x-mcp-header` parameters are excluded; the
+harness logs only the excluded count (`mcp_tools_excluded`), never tool names.
+`harness doctor` reports a
 `servers_reachable.<serverId>` result for each configured server; its `detail`
 contains the configured server id.
 

@@ -73,6 +73,39 @@ const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
 
 const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
 
+const MAX_HEADER_SCAN_DEPTH = 32;
+
+function declaresMcpHeader(value: unknown, depth = 0): boolean {
+  if (typeof value !== "object" || value === null || depth > MAX_HEADER_SCAN_DEPTH) {
+    return depth > MAX_HEADER_SCAN_DEPTH;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => declaresMcpHeader(item, depth + 1));
+  }
+  return Object.entries(value).some(
+    ([key, item]) => key === "x-mcp-header" || declaresMcpHeader(item, depth + 1),
+  );
+}
+
+/**
+ * Drops tools that declare SEP-2243 `x-mcp-header` parameters on modern Streamable HTTP.
+ *
+ * The raw `tools/list` path bypasses the SDK's exclusion (which logs the server-provided tool
+ * name through `console.warn`), so this conservatively excludes every declaring tool instead
+ * of only invalid ones; overly deep schemas are excluded too. Returns the kept tools and the
+ * number excluded so callers can log a count, never a name.
+ */
+export function excludeHeaderDeclaringTools(
+  tools: readonly McpTool[],
+  options: { readonly era: "legacy" | "modern" | undefined; readonly transport: "stdio" | "http" },
+): { readonly tools: McpTool[]; readonly excluded: number } {
+  if (options.era !== "modern" || options.transport !== "http") {
+    return { tools: [...tools], excluded: 0 };
+  }
+  const kept = tools.filter((tool) => !declaresMcpHeader(tool.inputSchema));
+  return { tools: kept, excluded: tools.length - kept.length };
+}
+
 const schemaValidatorCache = new WeakMap<object, ReturnType<typeof compileJsonSchema>>();
 
 function getOrCreateValidator(inputSchema: unknown): ReturnType<typeof compileJsonSchema> {
@@ -376,20 +409,30 @@ export class McpConnection {
           { timeout: this.#config.timeouts.callMs },
         );
 
-        const pageTools = page.tools;
-        const pageTtlMs = (page as { ttlMs?: unknown }).ttlMs;
+        const pageTtlMs = "ttlMs" in page ? page.ttlMs : undefined;
         if (typeof pageTtlMs === "number" && ttlMs === undefined) {
           ttlMs = pageTtlMs;
         }
+        const filtered = excludeHeaderDeclaringTools(page.tools, {
+          era: this.#protocolEra,
+          transport: this.#config.transport.kind,
+        });
+        if (filtered.excluded > 0) {
+          this.#dependencies.logger?.log({
+            code: "mcp_tools_excluded",
+            serverId: this.#config.id,
+            count: filtered.excluded,
+          });
+        }
 
-        for (const tool of pageTools) {
+        for (const tool of filtered.tools) {
           tools.push(tool);
           if (tools.length > MAX_TOOLS) {
             throw new McpConnectionError("mcp_too_many_tools");
           }
         }
 
-        if (page.nextCursor === undefined || page.nextCursor === "" || pageTools.length === 0) {
+        if (page.nextCursor === undefined || page.nextCursor === "" || page.tools.length === 0) {
           break;
         }
         cursor = page.nextCursor;

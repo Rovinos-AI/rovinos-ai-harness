@@ -2,13 +2,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  StreamableHTTPClientTransport,
-  type CallToolResult,
-} from "@modelcontextprotocol/client";
-import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { StreamableHTTPClientTransport, type CallToolResult } from "@modelcontextprotocol/client";
 import { ServerConfigSchema } from "@harness/schemas";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
 import { createMcpTransport, type McpLogEvent } from "./transports.js";
 
@@ -123,43 +119,45 @@ describe("MCP transports", () => {
     "spawns child process with exact environment key set (inheritEnv=$inheritEnv)",
     async ({ inheritEnv, expectedKeys }) => {
       const canary = "HARNESS_PARENT_CANARY";
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mcp-env-"));
+      const outputFile = path.join(directory, "keys.json");
+      // macOS adds __CF_* keys to every process at exec; they are not inherited from the parent.
       const config = ServerConfigSchema.parse({
         id: "stdio_keys",
         transport: {
           kind: "stdio",
           command: process.execPath,
           args: [
-            "--input-type=module",
             "-e",
-            "process.stdout.write(JSON.stringify(Object.keys(process.env).sort()))",
+            "require('node:fs').writeFileSync(process.argv[1], JSON.stringify(Object.keys(process.env).filter((key) => !key.startsWith('__CF_')).sort()))",
+            outputFile,
           ],
           inheritEnv,
           env: { CONFIGURED: "configured-value" },
         },
       });
 
-      const transport = (await createMcpTransport(config, {
+      const transport = await createMcpTransport(config, {
         env: {
           PATH: process.env.PATH ?? "/bin:/usr/bin",
           [canary]: "canary-secret",
         },
         resolveSecret: () => Promise.reject(new Error("no secret expected")),
-      })) as StdioClientTransport;
-
-      let output = "";
-      await transport.start();
-      const childProcess = (
-        transport as unknown as { _process: import("node:child_process").ChildProcess }
-      )._process;
-      childProcess.stdout?.on("data", (chunk: Buffer) => {
-        output += chunk.toString();
       });
-      await new Promise<void>((resolve) => childProcess.on("close", () => resolve()));
-      await transport.close();
 
-      const receivedKeys = JSON.parse(output) as string[];
-      expect(receivedKeys).toEqual(expectedKeys);
-      expect(receivedKeys).not.toContain(canary);
+      try {
+        await transport.start();
+        await vi.waitFor(() => {
+          expect(fs.existsSync(outputFile)).toBe(true);
+        });
+        await transport.close();
+
+        const receivedKeys: unknown = JSON.parse(fs.readFileSync(outputFile, "utf8"));
+        expect(receivedKeys).toEqual(expectedKeys);
+        expect(receivedKeys).not.toContain(canary);
+      } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
     },
   );
 

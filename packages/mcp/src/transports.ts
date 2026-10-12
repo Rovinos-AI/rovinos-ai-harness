@@ -15,6 +15,11 @@ import {
 export type McpLogEvent =
   | { readonly code: "mcp_stderr"; readonly serverId: HarnessCode; readonly bytes: number }
   | {
+      readonly code: "mcp_tools_excluded";
+      readonly serverId: HarnessCode;
+      readonly count: number;
+    }
+  | {
       readonly code:
         | "mcp_connect_failed"
         | "mcp_connect_timeout"

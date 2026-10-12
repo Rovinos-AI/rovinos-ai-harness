@@ -6,9 +6,9 @@ import {
   type Transport,
 } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { ServerConfigSchema } from "@harness/schemas";
+import { ServerConfigSchema, type JsonValue } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
-import { McpConnection, McpConnectionError } from "./connection.js";
+import { McpConnection, McpConnectionError, excludeHeaderDeclaringTools } from "./connection.js";
 import * as mcpPackage from "./index.js";
 
 const inputSchema = {
@@ -93,6 +93,29 @@ function connectionFor(
     createTransport: () => createTransport(),
     sleep,
   });
+}
+
+/** Forwards a peer transport but replaces every `tools/list` result's `tools` with a non-array. */
+function corruptToolLists(inner: Transport): Transport {
+  const proxy: Transport = {
+    start: () => inner.start(),
+    send: (message, options) => inner.send(message, options),
+    close: () => inner.close(),
+  };
+  inner.onmessage = (message, extra) => {
+    if ("result" in message && "tools" in message.result) {
+      proxy.onmessage?.({ ...message, result: { ...message.result, tools: { tool: "x" } } }, extra);
+      return;
+    }
+    proxy.onmessage?.(message, extra);
+  };
+  inner.onclose = () => {
+    proxy.onclose?.();
+  };
+  inner.onerror = (error) => {
+    proxy.onerror?.(error);
+  };
+  return proxy;
 }
 
 describe("McpConnection", () => {
@@ -336,5 +359,75 @@ describe("McpConnection", () => {
     expect(connection.state).toBe("ready");
     await connection.close();
     await peer.serverTransport.close();
+  });
+  it("rejects a malformed tools/list page with a closed code", async () => {
+    const peer = await createMemoryPeer();
+    const connection = connectionFor(undefined, () =>
+      Promise.resolve(corruptToolLists(peer.client)),
+    );
+    await connection.connect();
+
+    await expect(connection.listTools()).rejects.toMatchObject({ code: "mcp_list_tools_failed" });
+    await connection.close();
+    await peer.serverTransport.close();
+  });
+
+  it("lists tools without writing server-provided text to the console", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const peer = await createMemoryPeer();
+      const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+      await connection.connect();
+      await connection.listTools();
+      await connection.close();
+      await peer.serverTransport.close();
+      expect(warn).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  it("excludes x-mcp-header tools only on modern Streamable HTTP and reports a count", () => {
+    const headerTool: Tool = {
+      name: "attacker <script> text",
+      inputSchema: {
+        type: "object",
+        properties: { region: { type: "string", "x-mcp-header": "Region" } },
+      },
+    };
+    const plainTool: Tool = { name: "plain", inputSchema };
+    const tools = [headerTool, plainTool];
+
+    expect(excludeHeaderDeclaringTools(tools, { era: "modern", transport: "http" })).toEqual({
+      tools: [plainTool],
+      excluded: 1,
+    });
+    expect(excludeHeaderDeclaringTools(tools, { era: "legacy", transport: "http" })).toEqual({
+      tools,
+      excluded: 0,
+    });
+    expect(excludeHeaderDeclaringTools(tools, { era: "modern", transport: "stdio" })).toEqual({
+      tools,
+      excluded: 0,
+    });
+  });
+
+  it("excludes tools whose schemas are too deep to scan", () => {
+    let nested: JsonValue = { type: "string" };
+    for (let index = 0; index < 40; index++) {
+      nested = { type: "object", properties: { child: nested } };
+    }
+    const deepTool: Tool = {
+      name: "deep",
+      inputSchema: { type: "object", properties: { root: nested } },
+    };
+
+    expect(excludeHeaderDeclaringTools([deepTool], { era: "modern", transport: "http" })).toEqual({
+      tools: [],
+      excluded: 1,
+    });
   });
 });
