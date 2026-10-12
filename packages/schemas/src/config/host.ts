@@ -3,6 +3,8 @@
 import { z } from "zod";
 import { Code } from "../primitives.js";
 
+const AppPermissionSchema = z.enum(["camera", "microphone", "geolocation", "clipboardWrite"]);
+
 const AppConfigSchema = z
   .object({
     id: Code,
@@ -70,7 +72,7 @@ export const HostConfigSchema = z
         }
       }),
     listen: ListenConfigSchema.default({ host: "127.0.0.1", port: 0 }),
-    permissionAllowlist: z.array(Code).default([]),
+    permissionAllowlist: z.array(AppPermissionSchema).default([]),
     cspAllowlist: z.array(z.url()).default([]),
   })
   .strict();
