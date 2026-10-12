@@ -1122,6 +1122,17 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@harness/policy@workspace:packages/policy":
+  version: 0.0.0-use.local
+  resolution: "@harness/policy@workspace:packages/policy"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+    yaml: "npm:2.9.1"
+    zod: "npm:4.6.5"
+  languageName: unknown
+  linkType: soft
+
 "@harness/schemas@workspace:^, @harness/schemas@workspace:packages/schemas":
   version: 0.0.0-use.local
   resolution: "@harness/schemas@workspace:packages/schemas"
