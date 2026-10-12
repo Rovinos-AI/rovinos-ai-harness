@@ -179,4 +179,15 @@ export interface IdGenerator {
 export interface NewRunMetadata {
   readonly configHash: Sha256Hex;
   readonly policyVersion: Code;
+  readonly parentRunId?: Id;
+  readonly parentCallId?: Id;
+  readonly continuationOf?: Id;
+  readonly scopeId?: Id;
+  readonly depth?: number;
+}
+
+/** Optional transcript history and input kind for a continuation run. */
+export interface RunContinuationMetadata {
+  readonly previousEventLogs?: readonly (readonly Event[])[];
+  readonly inputKind?: "initial" | "follow_up";
 }

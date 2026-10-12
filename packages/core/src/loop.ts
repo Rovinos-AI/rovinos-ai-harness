@@ -15,17 +15,24 @@ import { Checkpointer } from "./checkpoint.js";
 import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from "./run-state.js";
 import type { RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
-import { RUN_SPAN } from "./spans.js";
+import { RUN_SPAN, runSpanAttributes } from "./spans.js";
 import type { ModelStepResult } from "./steps/model-step.js";
 import { requestModel } from "./steps/request-model.js";
 import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { toolStep } from "./steps/tool-step.js";
 import type { PreparedToolCall } from "./steps/prepare-tool.js";
-import type { ContextPort, IdGenerator, ModelPort, NewRunMetadata, ToolPort } from "./ports.js";
+import type {
+  ContextPort,
+  IdGenerator,
+  ModelPort,
+  NewRunMetadata,
+  RunContinuationMetadata,
+  ToolPort,
+} from "./ports.js";
 import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
 
 /** Dependencies and initial input for a new run. */
-export interface RunLoopOptions extends NewRunMetadata {
+export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata {
   readonly recorder: RunRecorder;
   readonly clock: Clock;
   readonly model: ModelPort;
@@ -34,8 +41,6 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly ids: IdGenerator;
   readonly goal: JsonValue;
   readonly signal: AbortSignal;
-  /** Ancestor continuation logs, oldest first. */
-  readonly previousEventLogs?: readonly (readonly Event[])[];
   /** Per-run limits sourced from the validated run configuration. */
   readonly budgets: RunConfig["budgets"];
   readonly checkpointEveryEvents?: RunConfig["checkpointEveryEvents"];
@@ -44,15 +49,6 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly modelName?: Code;
   /** Optional summarization compaction, checked before every model call. */
   readonly compaction?: CompactionRuntimeOptions;
-  /** Parent run and tool call for a child run. */
-  readonly parentRunId?: Id;
-  readonly parentCallId?: Id;
-  readonly continuationOf?: Id;
-  readonly inputKind?: "initial" | "follow_up";
-  /** Shared vault scope for this run tree. */
-  readonly scopeId?: Id;
-  /** Run nesting depth; roots default to zero. */
-  readonly depth?: number;
   /** Parent context and link for a child run's root span. */
   readonly rootSpanParent?: Context;
   readonly rootSpanLinks?: readonly Link[];
@@ -100,9 +96,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
       policyVersion: options.policyVersion,
       ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
       ...(options.parentCallId === undefined ? {} : { parentCallId: options.parentCallId }),
-      ...(options.continuationOf === undefined
-        ? {}
-        : { continuationOf: options.continuationOf }),
+      ...(options.continuationOf === undefined ? {} : { continuationOf: options.continuationOf }),
       ...(options.scopeId === undefined ? {} : { scopeId: options.scopeId }),
       depth: options.depth ?? 0,
     },
@@ -116,15 +110,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
   ];
   await options.recorder.withStepSpan(
     RUN_SPAN,
-    {
-      ...(options.parentRunId === undefined
-        ? {}
-        : { "harness.run.parent_id": options.parentRunId }),
-      ...(options.continuationOf === undefined
-        ? {}
-        : { "harness.run.continuation_of": options.continuationOf }),
-      "harness.run.depth": options.depth ?? 0,
-    },
+    runSpanAttributes(options),
     async () => {
       const recorded = await options.recorder.recordBatch(startEvents);
       const last = recorded.at(-1);

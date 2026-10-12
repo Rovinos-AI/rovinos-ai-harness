@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, trace } from "@opentelemetry/api";
 import {
-  BasicTracerProvider,
-  InMemorySpanExporter,
-  SimpleSpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
-import {
   Code,
   FakeClock,
   Id,
@@ -17,7 +12,7 @@ import {
   type RunStatus,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import { createTestContextManager } from "@harness/telemetry/testing";
+import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
 import { InMemoryVault } from "@harness/vault";
 import { describe, expect, it } from "vitest";
 import {
@@ -50,10 +45,11 @@ function completedResponse(text: string, costMicros = 300): ModelCompletion {
   };
 }
 
-function envelope(runId: Id, seq: number, ts: number): Pick<
-  Event,
-  "runId" | "seq" | "ts" | "v" | "traceId" | "spanId" | "segmentId"
-> {
+function envelope(
+  runId: Id,
+  seq: number,
+  ts: number,
+): Pick<Event, "runId" | "seq" | "ts" | "v" | "traceId" | "spanId" | "segmentId"> {
   return { runId, seq, ts, v: 1, traceId, spanId, segmentId: runId };
 }
 
@@ -205,10 +201,7 @@ describe("continueRun", () => {
       new FakeModelPort([completedResponse("continued failure")]),
       { continuations: { allowFromFailed: true } },
     );
-    const runtime = await createRuntime(
-      runtimeOptionsValue.config,
-      runtimeOptionsValue.overrides,
-    );
+    const runtime = await createRuntime(runtimeOptionsValue.config, runtimeOptionsValue.overrides);
     try {
       await expect(runtime.continueRun(runId, { goal: "follow-up" })).resolves.toMatchObject({
         status: "completed",
@@ -413,10 +406,7 @@ describe("inherited continuation budgets", () => {
       maxWallClockMs: 980,
     });
     expect(
-      inheritedBudgets(
-        { ...budgets, countSuspendedTime: true },
-        [events],
-      ).maxWallClockMs,
+      inheritedBudgets({ ...budgets, countSuspendedTime: true }, [events]).maxWallClockMs,
     ).toBe(880);
     const withoutCost = RunConfigSchema.parse({ budgets: { maxSteps: 10 } }).budgets;
     expect(inheritedBudgets(withoutCost, [events])).not.toHaveProperty("maxCostUsd");
@@ -427,10 +417,7 @@ describe("continuation tracing", () => {
   it("links the new root span to the source root and records its continuation id", async () => {
     trace.disable();
     otelContext.disable();
-    const exporter = new InMemorySpanExporter();
-    const provider = new BasicTracerProvider({
-      spanProcessors: [new SimpleSpanProcessor(exporter)],
-    });
+    const { provider, getFinishedSpans } = createTestSpanCollector();
     trace.setGlobalTracerProvider(provider);
     otelContext.setGlobalContextManager(createTestContextManager());
     const store = new InMemoryEventStore();
@@ -448,24 +435,16 @@ describe("continuation tracing", () => {
       }
       await runtime.continueRun(sourceRoot.runId, { goal: "follow-up" });
       await provider.forceFlush();
-      const continuationSpan = exporter
-        .getFinishedSpans()
-        .find(
-          (span) =>
-            span.name === "harness.run" &&
-            span.attributes["harness.run.continuation_of"] === sourceRoot.runId,
-        );
-
-      expect(continuationSpan?.links).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            context: expect.objectContaining({
-              traceId: sourceRoot.traceId,
-              spanId: sourceRoot.spanId,
-            }),
-          }),
-        ]),
+      const continuationSpan = getFinishedSpans().find(
+        (span) =>
+          span.name === "harness.run" &&
+          span.attributes["harness.run.continuation_of"] === sourceRoot.runId,
       );
+
+      expect(continuationSpan?.links[0]?.context).toMatchObject({
+        traceId: sourceRoot.traceId,
+        spanId: sourceRoot.spanId,
+      });
     } finally {
       await runtime.close();
       await provider.shutdown();

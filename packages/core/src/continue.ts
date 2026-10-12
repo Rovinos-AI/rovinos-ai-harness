@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id, type JsonValue, type RunConfig } from "@harness/schemas";
+import {
+  HarnessError,
+  type Event,
+  type Id,
+  type JsonValue,
+  type RunConfig,
+} from "@harness/schemas";
 import type { Link } from "@opentelemetry/api";
 import type { EventStore } from "@harness/store";
 import { CorruptLogError, foldRunState } from "./run-state.js";
@@ -154,21 +160,20 @@ export function inheritedBudgets(
 }
 
 /** Inputs needed to execute a follow-up as an independent run linked to a terminal run. */
-export interface ContinueRunOptions
-  extends Omit<
-    RunLoopOptions,
-    | "recorder"
-    | "goal"
-    | "scopeId"
-    | "continuationOf"
-    | "inputKind"
-    | "previousEventLogs"
-    | "parentRunId"
-    | "parentCallId"
-    | "depth"
-    | "rootSpanParent"
-    | "rootSpanLinks"
-  > {
+export interface ContinueRunOptions extends Omit<
+  RunLoopOptions,
+  | "recorder"
+  | "goal"
+  | "scopeId"
+  | "continuationOf"
+  | "inputKind"
+  | "previousEventLogs"
+  | "parentRunId"
+  | "parentCallId"
+  | "depth"
+  | "rootSpanParent"
+  | "rootSpanLinks"
+> {
   readonly store: EventStore;
   readonly runId: Id;
   readonly previousRunId: Id;
@@ -186,15 +191,7 @@ export interface ContinueRunOptions
  * @throws ContinuationChainTooLongError when the configured chain limit would be exceeded.
  */
 export async function continueRun(options: ContinueRunOptions): Promise<RunLoopResult> {
-  const {
-    store,
-    runId,
-    previousRunId,
-    goal,
-    continuations,
-    scopes,
-    ...runOptions
-  } = options;
+  const { store, runId, previousRunId, goal, continuations, scopes, ...runOptions } = options;
   const previousLogs = await loadContinuationChain(
     store,
     previousRunId,

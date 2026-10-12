@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { attr, defineSpan } from "@harness/telemetry";
 import type { SpanDefinition, SpanDefinitionShape } from "@harness/telemetry";
+import type { Id } from "@harness/schemas";
 
 const commonAttributes = {
   "harness.run.id": attr.id(),
@@ -15,6 +16,25 @@ export const RUN_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan("harness
   "harness.run.continuation_of": attr.optional(attr.id()),
   "harness.run.depth": attr.optional(attr.int()),
 });
+
+/** Creates metadata attributes for a run's root span. */
+export function runSpanAttributes(options: {
+  readonly parentRunId?: Id;
+  readonly continuationOf?: Id;
+  readonly depth?: number;
+}): {
+  readonly "harness.run.parent_id"?: Id;
+  readonly "harness.run.continuation_of"?: Id;
+  readonly "harness.run.depth": number;
+} {
+  return {
+    ...(options.parentRunId === undefined ? {} : { "harness.run.parent_id": options.parentRunId }),
+    ...(options.continuationOf === undefined
+      ? {}
+      : { "harness.run.continuation_of": options.continuationOf }),
+    "harness.run.depth": options.depth ?? 0,
+  };
+}
 
 /** Span for one model call. */
 export const MODEL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(

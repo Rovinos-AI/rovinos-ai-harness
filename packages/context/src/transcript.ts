@@ -156,12 +156,10 @@ export function eventsToTranscript(
   eventsOrLogs: readonly Event[] | readonly (readonly Event[])[],
 ): TranscriptGroup[] {
   const first = eventsOrLogs[0];
-  const logs =
-    first === undefined
-      ? []
-      : isEventLogChain(eventsOrLogs)
-        ? eventsOrLogs
-        : [eventsOrLogs];
+  let logs: readonly (readonly Event[])[] = [];
+  if (first !== undefined) {
+    logs = isEventLogChain(eventsOrLogs) ? eventsOrLogs : [eventsOrLogs];
+  }
   let newestInput: Extract<Event, { type: "run_input" }> | undefined;
   for (const events of logs) {
     let newestInputInRun: Extract<Event, { type: "run_input" }> | undefined;

@@ -254,14 +254,15 @@ describe("run, resume, and inspect CLI commands", () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-continue-"));
     const inputPath = await createFile("input.json", '{"goal":"original question"}');
     const followUpPath = await createFile("follow-up.json", '{"goal":"follow-up question"}');
-    const model = new FakeModelPort([completion("original answer"), completion("follow-up answer")]);
+    const model = new FakeModelPort([
+      completion("original answer"),
+      completion("follow-up answer"),
+    ]);
     const harness = createHarness(model);
 
-    const runCode = await main(
-      ["--json", "run", "--input", inputPath],
-      harness.context,
-      [runCommand],
-    );
+    const runCode = await main(["--json", "run", "--input", inputPath], harness.context, [
+      runCommand,
+    ]);
     const originalResult = parseJson(RunResultSchema, harness.stdout.join(""));
     const originalHead = await harness.store.head(originalResult.runId);
     harness.stdout.length = 0;

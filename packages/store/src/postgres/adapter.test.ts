@@ -329,8 +329,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     const continuations = new Set(
       fakePg.events
         .filter(
-          (event) =>
-            event.type === "run_created" && event.meta.continuationOf === continuationOf,
+          (event) => event.type === "run_created" && event.meta.continuationOf === continuationOf,
         )
         .map(({ run_id }) => run_id),
     );

@@ -145,7 +145,12 @@ describe("eventsToTranscript", () => {
     };
 
     expect(eventsToTranscript([previousEvents, [followUp]])).toMatchObject([
-      { pinned: true, messages: [{ parts: [{ text: "Summary of earlier work: the earlier question was answered" }] }] },
+      {
+        pinned: true,
+        messages: [
+          { parts: [{ text: "Summary of earlier work: the earlier question was answered" }] },
+        ],
+      },
       { pinned: true, messages: [{ parts: [{ text: "new question" }] }] },
     ]);
   });

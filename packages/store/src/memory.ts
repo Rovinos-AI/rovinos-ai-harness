@@ -37,6 +37,13 @@ function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): nu
   return cursorIndex + 1;
 }
 
+function matchesContinuation(
+  created: Extract<StoredEvent, { type: "run_created" }>,
+  continuationOf: Id | undefined,
+): boolean {
+  return continuationOf === undefined || created.continuationOf === continuationOf;
+}
+
 function validateEventBatch(
   runId: Id,
   events: readonly NewEvent[],
@@ -221,10 +228,7 @@ export class InMemoryEventStore implements EventStore {
       if (created === undefined || last === undefined) {
         continue;
       }
-      if (
-        opts.continuationOf !== undefined &&
-        (created.type !== "run_created" || created.continuationOf !== opts.continuationOf)
-      ) {
+      if (!matchesContinuation(created, opts.continuationOf)) {
         continue;
       }
 
