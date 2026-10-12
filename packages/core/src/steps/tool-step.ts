@@ -2,31 +2,94 @@
 // Tool calls are sequential here; parallel execution can be added independently.
 import { HarnessError, type Code, type Event, type Id } from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
+import { requestApproval } from "../approvals.js";
+import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
+import { PolicyDecisionSchema } from "../ports.js";
 import { APPROVAL_WAIT_SPAN, TOOL_CALL_SPAN } from "../spans.js";
-import type { IdGenerator, ModelToolCall, ToolPort } from "../ports.js";
+import type {
+  IdGenerator,
+  ModelToolCall,
+  PolicyDecision,
+  PolicyPort,
+  ToolPort,
+} from "../ports.js";
 import type { DanglingIntentAction } from "../resume-policy.js";
 import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
+import { foldRunState } from "../run-state.js";
 import { prepareToolCall, toolRunContext, type PreparedToolCall } from "./prepare-tool.js";
 import { executePreparedTool, hashArgs } from "./tool-execution.js";
 
-/** Inputs needed to execute and record one or more tool calls. */
-export interface ToolStepOptions {
+interface ToolStepExecutionOptions {
   readonly recorder: RunRecorder;
   readonly tool: ToolPort;
   readonly clock: Clock;
   readonly runId: Id;
-  readonly calls: readonly ModelToolCall[];
-  readonly preparedCalls?: readonly PreparedToolCall[];
   readonly signal: AbortSignal;
   readonly depth?: number;
 }
 
+/** Inputs needed to execute and record one or more tool calls. */
+export interface ToolStepOptions extends ToolStepExecutionOptions {
+  readonly policy?: PolicyPort;
+  readonly ids: IdGenerator;
+  readonly checkpointer: Checkpointer;
+  readonly history: readonly Event[];
+  readonly calls: readonly ModelToolCall[];
+  readonly preparedCalls?: readonly PreparedToolCall[];
+}
+
 /** Dependencies for applying a resume action to an unresolved tool intent. */
-export interface ResumeToolStepOptions extends Omit<ToolStepOptions, "calls"> {
+export interface ResumeToolStepOptions extends ToolStepExecutionOptions {
   readonly ids: IdGenerator;
   readonly beforeToolExecution?: () => Promise<void>;
   readonly onEvents?: (events: readonly Event[]) => void;
+}
+
+async function decidePolicy(
+  policy: PolicyPort | undefined,
+  call: ModelToolCall,
+  depth: number,
+): Promise<PolicyDecision> {
+  if (policy === undefined) {
+    return { decision: "deny", ruleId: "default", reason: "policy_error", editable: [] };
+  }
+  try {
+    const evaluated = await policy.decide(call, { subagent: depth > 0 });
+    return PolicyDecisionSchema.parse({
+      decision: evaluated.decision,
+      ruleId: evaluated.ruleId,
+      reason: evaluated.reason,
+      editable: evaluated.editable,
+      ...(evaluated.approvalTtlMs === undefined
+        ? {}
+        : { approvalTtlMs: evaluated.approvalTtlMs }),
+      ...(evaluated.escalateAfterMs === undefined
+        ? {}
+        : { escalateAfterMs: evaluated.escalateAfterMs }),
+    });
+  } catch {
+    return { decision: "deny", ruleId: "default", reason: "policy_error", editable: [] };
+  }
+}
+
+function effectiveDecision(
+  decision: PolicyDecision | undefined,
+  preparationError: Code | undefined,
+  description: ReturnType<ToolPort["describe"]>,
+): PolicyDecision {
+  if (decision === undefined) {
+    return { decision: "deny", ruleId: "default", reason: "policy_error", editable: [] };
+  }
+  if (preparationError !== undefined || description === undefined) {
+    return {
+      ...decision,
+      decision: "deny",
+      reason: preparationError ?? "unknown_tool",
+      editable: [],
+    };
+  }
+  return decision;
 }
 
 interface RunToolCallBehavior {
@@ -64,6 +127,7 @@ function recordIntent(
   call: ModelToolCall,
   description: ReturnType<ToolPort["describe"]>,
   argsHash: string,
+  decision: PolicyDecision,
 ): Promise<Event> {
   return recorder.record({
     type: "tool_intent",
@@ -71,14 +135,20 @@ function recordIntent(
     callId: call.callId,
     toolId: call.toolId,
     idempotent: description?.idempotent ?? false,
-    policyDecision: description === undefined ? "deny" : "allow",
+    policyDecision: decision.decision,
+    ruleId: decision.ruleId,
     argsHash,
     args: call.args,
   });
 }
 
 async function runToolCall(
-  options: Omit<ToolStepOptions, "calls">,
+  options: ToolStepExecutionOptions & {
+    readonly policy?: PolicyPort;
+    readonly ids?: IdGenerator;
+    readonly checkpointer?: Checkpointer;
+    readonly history?: readonly Event[];
+  },
   proposedCall: ModelToolCall,
   description: ReturnType<ToolPort["describe"]>,
   behavior: RunToolCallBehavior = {},
@@ -90,26 +160,84 @@ async function runToolCall(
       const prepared = await prepareRunToolCall(options, proposedCall, behavior, context);
       const { call } = prepared;
       const executedArgsHash = executedArgsHashFor(call, behavior);
+      const policyDecision =
+        behavior.existingIntent === undefined
+          ? await decidePolicy(options.policy, call, options.depth ?? 0)
+          : undefined;
       if (behavior.existingIntent === undefined) {
         events.push(
           await recordIntent(
             options.recorder,
             call,
-            prepared.errorCode === undefined ? description : undefined,
+            description,
             hashArgs(call.args),
+            effectiveDecision(policyDecision, prepared.errorCode, description),
           ),
         );
       }
       const intentEvent = events.at(-1) ?? behavior.existingIntent;
-      if (prepared.errorCode !== undefined || description === undefined) {
+      const decision = policyDecision === undefined
+        ? undefined
+        : effectiveDecision(policyDecision, prepared.errorCode, description);
+      if (
+        prepared.errorCode !== undefined ||
+        description === undefined ||
+        decision?.decision === "deny"
+      ) {
         const denied = await recordDeniedResult(
           options.recorder,
           call,
-          prepared.errorCode ?? "unknown_tool",
+          prepared.errorCode ??
+            (description === undefined ? "unknown_tool" : (decision?.reason ?? "policy_error")),
           executedArgsHash,
         );
         events.push(denied);
         return denied;
+      }
+      if (decision?.decision === "ask") {
+        const approvalId = options.ids?.next();
+        const checkpointer = options.checkpointer;
+        const history = options.history;
+        if (approvalId === undefined || checkpointer === undefined || history === undefined) {
+          const denied = await recordDeniedResult(
+            options.recorder,
+            call,
+            "policy_error",
+            executedArgsHash,
+          );
+          events.push(denied);
+          return denied;
+        }
+        const expiresAt =
+          decision.approvalTtlMs === undefined
+            ? undefined
+            : Math.floor(options.clock.now()) + decision.approvalTtlMs;
+        const payload = {
+          payloadVersion: 1,
+          kind: "tool_call",
+          callId: call.callId,
+          toolId: call.toolId,
+          args: call.args,
+          ruleId: decision.ruleId,
+          reason: decision.reason,
+          summary: `Tool ${call.toolId} requests approval (rule ${decision.ruleId})`,
+          ui: {
+            resourceUri: "ui://harness/approval/v1",
+            fallbackText: `Tool ${call.toolId} requests approval (rule ${decision.ruleId})`,
+          },
+          editableFields: decision.editable,
+          ...(expiresAt === undefined ? {} : { expiresAt }),
+        };
+        const approval = await requestApproval(options.recorder, {
+          approvalId,
+          callId: call.callId,
+          payload,
+          ...(expiresAt === undefined ? {} : { expiresAt }),
+          state: foldRunState([...history, ...events]),
+          checkpointer,
+        });
+        events.push(...approval.events);
+        return approval.events.at(-1) ?? intentEvent;
       }
       const result = await executePreparedTool({
         recorder: options.recorder,
@@ -132,7 +260,7 @@ async function runToolCall(
 }
 
 async function prepareRunToolCall(
-  options: Omit<ToolStepOptions, "calls">,
+  options: ToolStepExecutionOptions,
   proposedCall: ModelToolCall,
   behavior: RunToolCallBehavior,
   context: ReturnType<typeof executionContext>,
@@ -156,7 +284,7 @@ function executedArgsHashFor(
     : preparedArgsHash;
 }
 
-function executionContext(options: Omit<ToolStepOptions, "calls">, events: Event[]) {
+function executionContext(options: ToolStepExecutionOptions, events: Event[]) {
   return toolRunContext(
     {
       runId: options.runId,

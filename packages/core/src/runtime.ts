@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { PolicyEngine, loadPolicy, type PolicyDocument } from "@harness/policy";
 import { type EventStore } from "@harness/store";
+import { resolve } from "node:path";
 import { cancelRun } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ModelPort, ToolPort } from "./ports.js";
@@ -287,7 +289,19 @@ function composeRuntime(
     readonly scopes: RunScopeRegistry;
   },
 ): Runtime {
-  const { config, overrides, clock, ids, store, model, context, roles, scopes } = options;
+  const {
+    config,
+    overrides,
+    clock,
+    ids,
+    store,
+    model,
+    context,
+    policy,
+    policyVersion,
+    roles,
+    scopes,
+  } = options;
   const { tool: parentTool } = options;
   const tool = createSubagentTool({
     config,
@@ -296,6 +310,8 @@ function composeRuntime(
     store,
     model,
     parentTool,
+    policy,
+    policyVersion,
     roles,
     scopes,
   });
@@ -335,6 +351,7 @@ function composeRuntime(
             goal,
             model,
             tool,
+            policy,
             context,
             signal,
             scopes,
@@ -352,7 +369,8 @@ function composeRuntime(
 
 /**
  * Builds a runtime from validated config with injectable ports.
- * Supply a composed tool port: Offloading(Pii(Policy(Tools))); policy uses tokenized arguments.
+ * Supply tools in decorator order `Offloading(Pii(Policy(Tools)))`; the loop
+ * evaluates policy after preparation so it only sees tokenized arguments.
  * Binary results use the outer offloader and are never returned as previews.
  *
  * @param config - Validated run and model configuration.
@@ -381,6 +399,13 @@ export async function createRuntime(
     missingModelPort;
   const dataDir = resolveDataDir(process.env, overrides.dataDir);
   const tool = overrides.tool ?? unavailableTool;
+  const policyDocument: PolicyDocument =
+    config.policy?.file === undefined
+      ? { version: 1, defaultDecision: "deny", rules: [] }
+      : await loadPolicy(
+          resolve(overrides.roleConfigDirectory ?? process.cwd(), config.policy.file),
+        );
+  const policy = overrides.policy ?? new PolicyEngine(policyDocument);
   const context = overrides.context ?? new NaiveContext();
   const roles = await resolveRuntimeRoles(
     config,
@@ -401,6 +426,8 @@ export async function createRuntime(
     store,
     model,
     tool,
+    policy,
+    policyVersion: policy.version,
     context,
     roles,
     scopes,

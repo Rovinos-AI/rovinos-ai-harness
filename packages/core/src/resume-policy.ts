@@ -41,6 +41,9 @@ export function planDanglingIntents(
     if (intent.policyDecision === "deny") {
       return { kind: "fail", callId: intent.callId, errorCode: "pii_blocked" };
     }
+    if (intent.policyDecision === "ask") {
+      return { kind: "escalate", callId: intent.callId };
+    }
     if (intent.idempotent && description.idempotent) {
       return { kind: "rerun", callId: intent.callId };
     }

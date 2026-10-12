@@ -105,6 +105,7 @@ const toolIntentEvent = z
     toolId: Code,
     idempotent: z.boolean(),
     policyDecision: z.enum(["allow", "ask", "deny"]),
+    ruleId: Code.optional(),
     argsHash: Sha256Hex,
     args: JsonValue,
   })

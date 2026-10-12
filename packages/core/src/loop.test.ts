@@ -47,7 +47,7 @@ import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";
 import { StrategyContextPort } from "./context/context-port.js";
 import { RunRecorder, type EventPartial } from "./recorder.js";
-import { runLoop } from "./loop.js";
+import { runLoop as runCoreLoop } from "./loop.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import { Checkpointer } from "./checkpoint.js";
 import { foldRunState } from "./run-state.js";
@@ -58,6 +58,7 @@ import type {
   ModelCompletion,
   ModelToolCall,
   ModelPort,
+  PolicyPort,
   RunContext,
   ToolPort,
   ToolExecutionResult,
@@ -80,6 +81,20 @@ import {
   resumeRun,
 } from "./resume.js";
 import type { ResumeRunOptions } from "./resume.js";
+
+const allowTestPolicy: PolicyPort = {
+  version: "test.policy",
+  decide: async () => ({
+    decision: "allow",
+    ruleId: "test_allow",
+    reason: "test_allowed",
+    editable: [],
+  }),
+};
+
+function runLoop(options: Parameters<typeof runCoreLoop>[0]) {
+  return runCoreLoop({ ...options, policy: options.policy ?? allowTestPolicy });
+}
 
 const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
@@ -1952,6 +1967,81 @@ describe("runLoop", () => {
         errorCode: "unknown_tool",
       }),
     );
+  });
+
+  it("suspends an ask decision durably and executes only after approval on resume", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "reviewed_tool",
+          {
+            idempotent: false,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: { completed: true } }),
+          },
+        ],
+      ]),
+    );
+    const policy: PolicyPort = {
+      version: "test.policy",
+      decide: async () => ({
+        decision: "ask",
+        ruleId: "review_rule",
+        reason: "human_review",
+        editable: [],
+      }),
+    };
+    const first = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock),
+      clock,
+      model: new FakeModelPort([
+        completion([{ callId: modelCallId, toolId: "reviewed_tool", args: { path: "<PATH_1>" } }]),
+      ]),
+      tool,
+      policy,
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "request approval",
+      configHash,
+      budgets: defaultBudgets,
+      policyVersion: policy.version,
+      signal: new AbortController().signal,
+    });
+    const approval = first.state.pendingApprovals.values().next().value;
+
+    expect(first.status).toBe("suspended");
+    expect(tool.calls).toHaveLength(0);
+    expect(first.events).toContainEqual(
+      expect.objectContaining({
+        type: "tool_intent",
+        policyDecision: "ask",
+        ruleId: "review_rule",
+      }),
+    );
+    expect(approval).toBeDefined();
+    if (approval === undefined) {
+      throw new Error("Expected the policy approval.");
+    }
+    await resolveApproval(store, runId, approval.approvalId, "approve", undefined, clock);
+
+    const resumed = await resumeRun(
+      createResumeOptions(store, clock, {
+        model: new FakeModelPort([completion()]),
+        tool,
+        policy,
+      }),
+    );
+    const stored = await readApprovalEvents(store);
+
+    expect(resumed.status).toBe("completed");
+    expect(tool.calls.map(({ call }) => call.callId)).toEqual([modelCallId]);
+    expect(stored.filter((event) => event.type === "tool_intent")).toHaveLength(1);
+    expect(stored.find((event) => event.type === "tool_intent")).toMatchObject({
+      policyDecision: "ask",
+      ruleId: "review_rule",
+    });
   });
 
   it("records timeouts and allows the model to continue", async () => {

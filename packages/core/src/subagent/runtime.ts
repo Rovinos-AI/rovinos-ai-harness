@@ -6,15 +6,13 @@ import { parseRuntimeModelsConfig, type RuntimeConfig } from "../runtime-config.
 import { RunRecorder, type Clock } from "../recorder.js";
 import { configHash } from "../runtime-ids.js";
 import { runLoop } from "../loop.js";
-import type { ContextPort, IdGenerator, ModelPort, ToolPort } from "../ports.js";
+import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "../ports.js";
 import { RoleRegistry, RoleRegistryError } from "../roles.js";
 import type { ResolvedRole } from "../roles.js";
 import { StrategyContextPort } from "../context/context-port.js";
 import { AgentSpawnTool } from "./spawn-tool.js";
 import type { RunScopeRegistry } from "./scope.js";
 import { SubagentSupervisor, type SubagentRunRequest } from "./supervisor.js";
-
-const POLICY_VERSION = "default";
 
 /** Resolves configured roles against the registered tools and built-in spawn tool. */
 export async function resolveRuntimeRoles(
@@ -82,6 +80,8 @@ export function createSubagentTool(options: {
   readonly store: EventStore;
   readonly model: ModelPort;
   readonly parentTool: ToolPort;
+  readonly policy: PolicyPort;
+  readonly policyVersion: PolicyPort["version"];
   readonly roles: RoleRegistry;
   readonly scopes: RunScopeRegistry;
 }): ToolPort {
@@ -102,6 +102,7 @@ export function createSubagentTool(options: {
         clock: options.clock,
         model: options.model,
         tool: request.tools,
+        policy: options.policy,
         context: contextForRole(request.role),
         ids: options.ids,
         goal: request.input,
@@ -109,7 +110,7 @@ export function createSubagentTool(options: {
         budgets: options.config.run.budgets,
         checkpointEveryEvents: options.config.run.checkpointEveryEvents,
         configHash: configHash(options.config),
-        policyVersion: POLICY_VERSION,
+        policyVersion: options.policyVersion,
         role: request.role.route ?? request.role.id,
         parentRunId: request.parentRunId,
         parentCallId: request.parentCallId,

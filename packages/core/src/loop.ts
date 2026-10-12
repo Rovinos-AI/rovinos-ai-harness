@@ -26,6 +26,7 @@ import type {
   IdGenerator,
   ModelPort,
   NewRunMetadata,
+  PolicyPort,
   RunContinuationMetadata,
   ToolPort,
 } from "./ports.js";
@@ -37,6 +38,7 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly clock: Clock;
   readonly model: ModelPort;
   readonly tool: ToolPort;
+  readonly policy?: PolicyPort;
   readonly context: ContextPort;
   readonly ids: IdGenerator;
   readonly goal: JsonValue;
@@ -354,8 +356,12 @@ async function runToolCalls(
       ...(await toolStep({
         recorder: options.recorder,
         tool: options.tool,
+        policy: options.policy,
         clock: options.clock,
         runId: execution.runId,
+        ids: options.ids,
+        checkpointer: execution.checkpointer,
+        history: events,
         calls: [call],
         preparedCalls: [prepared],
         signal: options.signal,

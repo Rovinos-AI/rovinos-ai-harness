@@ -49,6 +49,7 @@ export const EVENT_FIELD_CLASS = {
     toolId: "meta",
     idempotent: "meta",
     policyDecision: "meta",
+    ruleId: "meta",
     argsHash: "meta",
     args: "content",
   },
