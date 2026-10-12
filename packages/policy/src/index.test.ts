@@ -214,7 +214,14 @@ describe("loadPolicy and policyVersion", () => {
     await expect(loadPolicy(examplePath)).resolves.toMatchObject({
       version: 1,
       defaultDecision: "ask",
-      rules: [{ id: "ask_email_send" }],
+      rules: [
+        { id: "ask_email_send" },
+        {
+          id: "ask_sandbox_exec",
+          decision: "ask",
+          match: { tools: ["sandbox.exec"] },
+        },
+      ],
     });
   });
 
