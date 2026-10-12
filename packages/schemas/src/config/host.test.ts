@@ -48,6 +48,7 @@ describe("HostConfigSchema", () => {
     expect(HostConfigSchema.safeParse({ maxUiSessions: 0 }).success).toBe(false);
     expect(HostConfigSchema.safeParse({ maxUiSessions: 1025 }).success).toBe(false);
     expect(HostConfigSchema.safeParse({ uiSessionMaxMs: 0 }).success).toBe(false);
+    expect(HostConfigSchema.safeParse({ uiSessionMaxMs: 2_147_483_648 }).success).toBe(false);
   });
 
   it("rejects non-loopback addresses and unknown keys", () => {
