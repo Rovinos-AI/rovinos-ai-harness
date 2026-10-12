@@ -11,7 +11,6 @@ export default defineConfig({
       "@harness/schemas": fileURLToPath(
         new URL("./packages/schemas/src/index.ts", import.meta.url),
       ),
-
     },
   },
   ssr: {

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Client,
+  SdkError,
+  SdkErrorCode,
   type CallToolRequestOptions,
   type CallToolResult,
   type ListToolsResult,
@@ -52,11 +54,69 @@ export interface McpConnectionDependencies {
   /** Process environment source for the stdio PATH allowlist. */
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** Optional transport factory for in-memory tests and embedded transports. */
-  readonly createTransport?: (config: ServerConfig, signal: AbortSignal) => Promise<Transport>;
+  readonly createTransport?: (
+    config: ServerConfig,
+    signal?: AbortSignal,
+  ) => Promise<Transport> | Transport;
+  /** Injectable clock returning current epoch milliseconds. */
+  readonly now?: () => number;
+}
+
+interface CachedToolList {
+  readonly tools: readonly McpTool[];
+  readonly expiresAt: number;
 }
 
 const MAX_TOOLS = 1_000;
 const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
+
+const schemaValidatorCache = new WeakMap<object, ReturnType<typeof compileJsonSchema>>();
+
+function getOrCreateValidator(inputSchema: unknown): ReturnType<typeof compileJsonSchema> {
+  if (typeof inputSchema === "object" && inputSchema !== null) {
+    const cached = schemaValidatorCache.get(inputSchema);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const validator = compileJsonSchema(inputSchema);
+    schemaValidatorCache.set(inputSchema, validator);
+    return validator;
+  }
+  return compileJsonSchema(inputSchema);
+}
+
+function isConnectionLossError(error: unknown): boolean {
+  if (error instanceof SdkError) {
+    if (
+      error.code === SdkErrorCode.ConnectionClosed ||
+      error.code === SdkErrorCode.NotConnected ||
+      error.code === SdkErrorCode.SendFailed ||
+      error.code === SdkErrorCode.ClientHttpFailedToOpenStream ||
+      error.code === SdkErrorCode.ClientHttpFailedToTerminateSession
+    ) {
+      return true;
+    }
+  }
+  if (error instanceof McpConnectionError && error.code === "mcp_connection_lost") {
+    return true;
+  }
+  if (typeof error === "object" && error !== null) {
+    const code = (error as { code?: unknown }).code;
+    if (
+      code === "CONNECTION_CLOSED" ||
+      code === "ECONNRESET" ||
+      code === "ECONNREFUSED" ||
+      code === "EPIPE"
+    ) {
+      return true;
+    }
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.toLowerCase().includes("connection closed")) {
+      return true;
+    }
+  }
+  return false;
+}
 
 const defaultSleep = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
@@ -84,9 +144,14 @@ export class McpConnection {
   readonly #config: ServerConfig;
   readonly #dependencies: McpConnectionDependencies;
   #client: Client | undefined;
+  #currentTransport: Transport | undefined;
   #connectPromise: Promise<void> | undefined;
+  #activeConnectAbortController: AbortController | undefined;
   #state: McpConnectionState = "unavailable";
   #protocolEra: "legacy" | "modern" | undefined;
+  #cachedTools: CachedToolList | undefined;
+  #closed = false;
+  #connectGeneration = 0;
 
   /**
    * Creates a connection for one validated server configuration.
@@ -109,8 +174,15 @@ export class McpConnection {
     return this.#protocolEra;
   }
 
+  #now(): number {
+    return this.#dependencies.now?.() ?? Date.now();
+  }
+
   /** Connects once; concurrent callers share the same in-flight handshake. */
   async connect(externalSignal?: AbortSignal): Promise<void> {
+    if (this.#closed) {
+      throw new McpConnectionError("mcp_connect_failed");
+    }
     if (this.#state === "ready") {
       return;
     }
@@ -118,30 +190,57 @@ export class McpConnection {
       return this.#connectPromise;
     }
     this.#state = "connecting";
-    const connectPromise = this.#connect(externalSignal);
+    const generation = ++this.#connectGeneration;
+    const abortController = new AbortController();
+    this.#activeConnectAbortController = abortController;
+
+    const onCallerAbort = () => {
+      abortController.abort();
+    };
+    if (externalSignal !== undefined) {
+      if (externalSignal.aborted) {
+        abortController.abort();
+      } else {
+        externalSignal.addEventListener("abort", onCallerAbort, { once: true });
+      }
+    }
+
+    const connectPromise = this.#performConnect(generation, abortController.signal);
     this.#connectPromise = connectPromise;
     try {
       await connectPromise;
     } finally {
-      this.#connectPromise = undefined;
+      if (externalSignal !== undefined) {
+        externalSignal.removeEventListener("abort", onCallerAbort);
+      }
+      if (this.#connectPromise === connectPromise) {
+        this.#connectPromise = undefined;
+        this.#activeConnectAbortController = undefined;
+      }
     }
   }
 
-  async #connect(externalSignal?: AbortSignal): Promise<void> {
-    const timeoutSignal = AbortSignal.timeout(this.#config.timeouts.connectMs);
-    const signal =
-      externalSignal === undefined
-        ? timeoutSignal
-        : AbortSignal.any([timeoutSignal, externalSignal]);
+  async #performConnect(generation: number, signal: AbortSignal): Promise<void> {
     let client: Client | undefined;
+    let transportToClose: Transport | undefined;
+    let combinedSignal: AbortSignal | undefined;
     try {
       const previousClient = this.#client;
       this.#client = undefined;
+      this.#currentTransport = undefined;
       if (previousClient !== undefined) {
         await previousClient.close().catch(() => undefined);
       }
+      if (this.#closed || this.#connectGeneration !== generation) {
+        this.#state = "unavailable";
+        return;
+      }
+
+      const timeoutSignal = AbortSignal.timeout(this.#config.timeouts.connectMs);
+      combinedSignal = AbortSignal.any([timeoutSignal, signal]);
+
       const transport =
-        this.#dependencies.createTransport?.(this.#config, signal) ??
+        this.#dependencies.createTransport?.(this.#config, combinedSignal) ??
         createMcpTransport(
           this.#config,
           {
@@ -151,21 +250,38 @@ export class McpConnection {
               ? {}
               : { logger: this.#dependencies.logger }),
           },
-          signal,
+          combinedSignal,
         );
       const resolvedTransport = await transport;
+      transportToClose = resolvedTransport;
+      if (this.#closed || this.#connectGeneration !== generation) {
+        await resolvedTransport.close?.().catch?.(() => undefined);
+        this.#state = "unavailable";
+        return;
+      }
+
       client = new Client(
         { name: "rovinos-ai-harness", version: "0.0.0" },
         {
           versionNegotiation: protocolOptions(this.#config.protocol),
-          listMaxPages: MAX_TOOLS,
           listChanged: {
             tools: {
+              autoRefresh: false,
               onChanged: (error) => {
+                this.#cachedTools = undefined;
                 if (error !== null) {
                   this.#dependencies.logger?.log({
                     code: "mcp_tools_refresh_failed",
                     serverId: this.#config.id,
+                  });
+                  return;
+                }
+                if (this.#state === "ready") {
+                  void this.#fetchTools().catch(() => {
+                    this.#dependencies.logger?.log({
+                      code: "mcp_tools_refresh_failed",
+                      serverId: this.#config.id,
+                    });
                   });
                 }
               },
@@ -173,7 +289,18 @@ export class McpConnection {
           },
         },
       );
-      await client.connect(resolvedTransport, { signal, timeout: this.#config.timeouts.connectMs });
+
+      await client.connect(resolvedTransport, {
+        signal: combinedSignal,
+        timeout: this.#config.timeouts.connectMs,
+      });
+
+      if (this.#closed || this.#connectGeneration !== generation) {
+        await client.close().catch(() => undefined);
+        this.#state = "unavailable";
+        return;
+      }
+
       this.#client = client;
       this.#protocolEra = client.getProtocolEra();
       this.#state = "ready";
@@ -181,50 +308,110 @@ export class McpConnection {
     } catch {
       this.#state = "unavailable";
       this.#protocolEra = undefined;
+      this.#cachedTools = undefined;
       if (client !== undefined) {
         await client.close().catch(() => undefined);
+      } else if (transportToClose !== undefined) {
+        await transportToClose.close?.().catch?.(() => undefined);
       }
-      throw new McpConnectionError(signal.aborted ? "mcp_connect_timeout" : "mcp_connect_failed");
+      throw new McpConnectionError(
+        signal.aborted || combinedSignal?.aborted ? "mcp_connect_timeout" : "mcp_connect_failed",
+      );
     }
   }
 
   #watchTransport(transport: Transport): void {
+    this.#currentTransport = transport;
     const monitoredTransport = transport;
     const onclose = monitoredTransport.onclose;
     monitoredTransport.onclose = () => {
       onclose?.();
-      this.#state = "unavailable";
-      this.#protocolEra = undefined;
+      if (this.#currentTransport === transport) {
+        this.#state = "unavailable";
+        this.#protocolEra = undefined;
+        this.#cachedTools = undefined;
+      }
     };
     const onerror = monitoredTransport.onerror;
     monitoredTransport.onerror = (error) => {
       onerror?.(error);
-      this.#state = "unavailable";
-      this.#protocolEra = undefined;
     };
   }
 
-  /** Lists all server tools, honoring SDK pagination/cache behavior and a 1,000-tool cap. */
+  /** Lists all server tools, honoring caching per ttlMs, pagination, and a 1,000-tool cap. */
   async listTools(): Promise<McpTool[]> {
     await this.#ensureReady();
+    const now = this.#now();
+    if (this.#cachedTools !== undefined && this.#cachedTools.expiresAt > now) {
+      return [...this.#cachedTools.tools];
+    }
+    return this.#fetchTools();
+  }
+
+  async #fetchTools(): Promise<McpTool[]> {
     const client = this.#client;
-    if (client === undefined) {
+    if (client === undefined || this.#state !== "ready") {
       throw new McpConnectionError("mcp_list_tools_failed");
     }
+
+    const tools: McpTool[] = [];
+    let cursor: string | undefined = undefined;
+    const seenCursors = new Set<string>();
+    let ttlMs: number | undefined = undefined;
+
     try {
-      const { tools } = await client.listTools(undefined, {
-        timeout: this.#config.timeouts.callMs,
-      });
-      if (tools.length > MAX_TOOLS) {
-        throw new McpConnectionError("mcp_too_many_tools");
+      while (true) {
+        if (cursor !== undefined) {
+          if (seenCursors.has(cursor)) {
+            throw new McpConnectionError("mcp_list_tools_failed");
+          }
+          seenCursors.add(cursor);
+        }
+
+        const page = (await client.request(
+          {
+            method: "tools/list",
+            ...(cursor === undefined ? {} : { params: { cursor } }),
+          },
+          { timeout: this.#config.timeouts.callMs },
+        )) as {
+          tools?: McpTool[];
+          nextCursor?: string;
+          ttlMs?: number;
+          cacheScope?: "public" | "private";
+        };
+
+        const pageTools = page.tools ?? [];
+        if (typeof page.ttlMs === "number" && ttlMs === undefined) {
+          ttlMs = page.ttlMs;
+        }
+
+        for (const tool of pageTools) {
+          tools.push(tool);
+          if (tools.length > MAX_TOOLS) {
+            throw new McpConnectionError("mcp_too_many_tools");
+          }
+        }
+
+        if (page.nextCursor === undefined || page.nextCursor === "" || pageTools.length === 0) {
+          break;
+        }
+        cursor = page.nextCursor;
       }
-      return tools;
     } catch (error) {
       if (error instanceof McpConnectionError) {
         throw error;
       }
       throw new McpConnectionError("mcp_list_tools_failed");
     }
+
+    const effectiveTtl = typeof ttlMs === "number" && ttlMs > 0 ? ttlMs : 0;
+    this.#cachedTools = {
+      tools,
+      expiresAt: this.#now() + effectiveTtl,
+    };
+
+    return [...tools];
   }
 
   /**
@@ -242,7 +429,7 @@ export class McpConnection {
   ): Promise<CallToolResult> {
     let validate: ReturnType<typeof compileJsonSchema>;
     try {
-      validate = compileJsonSchema(inputSchema);
+      validate = getOrCreateValidator(inputSchema);
       validate(params.arguments ?? {});
     } catch {
       throw new McpConnectionError("mcp_tool_arguments_invalid");
@@ -251,10 +438,14 @@ export class McpConnection {
     await this.#ensureReady(options?.signal);
     try {
       return await this.#invoke(params, options);
-    } catch {
-      if (this.#state !== "unavailable") {
+    } catch (error) {
+      const isLoss = isConnectionLossError(error) || this.#state === "unavailable";
+      if (!isLoss) {
         throw new McpConnectionError("mcp_tool_call_failed");
       }
+      this.#state = "unavailable";
+      this.#protocolEra = undefined;
+      this.#cachedTools = undefined;
       if (!this.#isIdempotent(params.name)) {
         throw new McpConnectionError("mcp_connection_lost");
       }
@@ -282,6 +473,9 @@ export class McpConnection {
   }
 
   async #ensureReady(signal?: AbortSignal): Promise<void> {
+    if (this.#closed) {
+      throw new McpConnectionError("mcp_connection_lost");
+    }
     if (this.#state === "ready") {
       return;
     }
@@ -289,12 +483,21 @@ export class McpConnection {
   }
 
   async #reconnect(signal?: AbortSignal): Promise<void> {
+    if (this.#closed) {
+      throw new McpConnectionError("mcp_connection_lost");
+    }
     let lastError: unknown;
     for (const delay of RECONNECT_BACKOFF_MS) {
+      if (this.#closed) {
+        throw new McpConnectionError("mcp_connection_lost");
+      }
       if (isAborted(signal)) {
         throw new McpConnectionError("mcp_connect_timeout");
       }
       await (this.#dependencies.sleep ?? defaultSleep)(delay);
+      if (this.#closed) {
+        throw new McpConnectionError("mcp_connection_lost");
+      }
       if (isAborted(signal)) {
         throw new McpConnectionError("mcp_connect_timeout");
       }
@@ -317,10 +520,20 @@ export class McpConnection {
 
   /** Closes the SDK client and marks the connection unavailable. */
   async close(): Promise<void> {
+    this.#closed = true;
+    this.#connectGeneration++;
+    this.#activeConnectAbortController?.abort();
+    const connectPromise = this.#connectPromise;
     const client = this.#client;
     this.#client = undefined;
+    this.#currentTransport = undefined;
     this.#protocolEra = undefined;
     this.#state = "unavailable";
+    this.#cachedTools = undefined;
+
+    if (connectPromise !== undefined) {
+      await connectPromise.catch(() => undefined);
+    }
     if (client !== undefined) {
       await client.close().catch(() => undefined);
     }

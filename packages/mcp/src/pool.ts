@@ -153,8 +153,8 @@ export function createServersReachableChecks(
       },
     ];
   }
-  return configs.map((config, index) => ({
-    id: Code.parse(`servers_reachable_${String(index)}`),
+  return configs.map((config) => ({
+    id: Code.parse(`servers_reachable.${config.id}`.slice(0, 64)),
     title: `MCP server ${config.id} reachable`,
     run: async ({ signal }) => {
       const connection = new McpConnection(config, dependencies);

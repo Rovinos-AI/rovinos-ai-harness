@@ -54,8 +54,8 @@ async function createStdioTransport(
   dependencies: McpTransportDependencies,
   signal?: AbortSignal,
 ): Promise<StdioClientTransport> {
-  const environment: Record<string, string> = Object.fromEntries(
-    DEFAULT_INHERITED_ENV_VARS.map((key) => [key, ""]),
+  const environment: Record<string, string | undefined> = Object.fromEntries(
+    DEFAULT_INHERITED_ENV_VARS.map((key) => [key, undefined]),
   );
   const env = dependencies.env ?? process.env;
   if (config.inheritEnv && env.PATH !== undefined) {
@@ -68,7 +68,7 @@ async function createStdioTransport(
   const transport = new StdioClientTransport({
     command: config.command,
     args: config.args,
-    env: environment,
+    env: environment as Record<string, string>,
     ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
     stderr: "pipe",
   });
