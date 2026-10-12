@@ -91,6 +91,8 @@ describe("attribute schemas", () => {
   it("registers metadata for every safe helper and preserves it through optional", () => {
     const schemas: { readonly schema: z.ZodType; readonly kind: string }[] = [
       { schema: attr.id(), kind: "id" },
+      { schema: attr.traceId(), kind: "id" },
+      { schema: attr.spanId(), kind: "id" },
       { schema: attr.code(), kind: "code" },
       { schema: attr.hash(), kind: "hash" },
       { schema: attr.enum(["one", "two"]), kind: "enum" },
@@ -116,6 +118,10 @@ describe("attribute schemas", () => {
 
   it("validates the documented attribute value kinds", () => {
     expect(attr.id().safeParse(testId).success).toBe(true);
+    expect(attr.traceId().safeParse("a".repeat(32)).success).toBe(true);
+    expect(attr.traceId().safeParse("g".repeat(32)).success).toBe(false);
+    expect(attr.spanId().safeParse("b".repeat(16)).success).toBe(true);
+    expect(attr.spanId().safeParse("b".repeat(15)).success).toBe(false);
     expect(attr.code().safeParse("tool_failed").success).toBe(true);
     expect(attr.hash().safeParse("a".repeat(64)).success).toBe(true);
     expect(attr.enum(["one", "two"]).safeParse("one").success).toBe(true);
