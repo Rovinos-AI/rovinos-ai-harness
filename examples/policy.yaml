@@ -18,3 +18,10 @@ rules:
       - /subject
     approvalTtlMs: 300000
     escalateAfterMs: 60000
+  - id: ask_sandbox_exec
+    description: Ask before running a command in the sandbox
+    match:
+      tools:
+        - sandbox.exec
+    decision: ask
+    reason: sandbox_execution

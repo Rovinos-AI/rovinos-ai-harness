@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Placeholder owned by task 19.2.
 import { z } from "zod";
 
-export const SandboxConfigSchema = z.object({}).strict().prefault({});
+/** Sandbox-specific options with unsafe local execution disabled by default. */
+export const SandboxConfigSchema = z
+  .object({
+    allowUnsafeInProcess: z.boolean().optional(),
+  })
+  .strict()
+  .prefault({});

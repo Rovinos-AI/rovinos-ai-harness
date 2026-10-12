@@ -1148,6 +1148,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@harness/sandbox@workspace:packages/sandbox":
+  version: 0.0.0-use.local
+  resolution: "@harness/sandbox@workspace:packages/sandbox"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.5"
+  languageName: unknown
+  linkType: soft
+
 "@harness/schemas@workspace:^, @harness/schemas@workspace:packages/schemas":
   version: 0.0.0-use.local
   resolution: "@harness/schemas@workspace:packages/schemas"
