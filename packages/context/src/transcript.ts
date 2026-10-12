@@ -62,27 +62,25 @@ function removeCompactedGroups(
   }
 }
 
-/**
- * Reconstructs ordered, atomic transcript groups from durable run events.
- * Orphan tool results and assistant groups with unanswered tool calls are omitted so providers
- * never receive an invalid tool turn; pending calls are handled by run resumption.
- *
- * @param events - Validated events from one run, in any sequence order.
- * @returns Transcript groups ordered by their earliest sequence.
- */
-export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] {
+function transcriptForRun(events: readonly Event[]): {
+  readonly groups: TranscriptGroup[];
+  readonly inputGroups: TranscriptGroup[];
+} {
   const groups: TranscriptGroup[] = [];
+  const inputGroups: TranscriptGroup[] = [];
   const groupsByCallId = new Map<string, TranscriptGroup>();
   const summaryGroups = new Set<TranscriptGroup>();
   const summaryRanges = new Map<TranscriptGroup, number>();
 
   for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
     if (event.type === "run_input") {
-      groups.push({
+      const group: TranscriptGroup = {
         seqs: [event.seq],
         messages: [{ role: "user", parts: [{ type: "text", text: inputText(event.input) }] }],
         pinned: true,
-      });
+      };
+      groups.push(group);
+      inputGroups.push(group);
     } else if (event.type === "model_response") {
       const group: TranscriptGroup = {
         seqs: [event.seq],
@@ -138,7 +136,43 @@ export function eventsToTranscript(events: readonly Event[]): TranscriptGroup[] 
     }
   }
 
-  return TranscriptSchema.parse(
-    groups.sort((left, right) => (left.seqs[0] ?? 0) - (right.seqs[0] ?? 0)),
-  );
+  return {
+    groups: groups.sort((left, right) => (left.seqs[0] ?? 0) - (right.seqs[0] ?? 0)),
+    inputGroups,
+  };
+}
+
+function isEventLogChain(
+  eventsOrLogs: readonly Event[] | readonly (readonly Event[])[],
+): eventsOrLogs is readonly (readonly Event[])[] {
+  const first = eventsOrLogs[0];
+  return first !== undefined && Array.isArray(first);
+}
+
+/**
+ * Reconstructs atomic transcript groups from one run or an oldest-first continuation chain.
+ * Orphan tool results and assistant groups with unanswered tool calls are omitted so providers
+ * never receive an invalid tool turn; pending calls are handled by run resumption.
+ *
+ * @param eventsOrLogs - Validated events, or ordered per-run logs from oldest to newest.
+ * @returns Transcript groups in run-chain and sequence order.
+ */
+export function eventsToTranscript(
+  eventsOrLogs: readonly Event[] | readonly (readonly Event[])[],
+): TranscriptGroup[] {
+  const first = eventsOrLogs[0];
+  const logs =
+    first === undefined
+      ? []
+      : isEventLogChain(eventsOrLogs)
+        ? eventsOrLogs
+        : [eventsOrLogs];
+  const reconstructed = logs.map(transcriptForRun);
+  const newestInput = reconstructed.at(-1)?.inputGroups.at(-1);
+  for (const { inputGroups } of reconstructed) {
+    for (const group of inputGroups) {
+      group.pinned = group === newestInput;
+    }
+  }
+  return TranscriptSchema.parse(reconstructed.flatMap(({ groups }) => groups));
 }

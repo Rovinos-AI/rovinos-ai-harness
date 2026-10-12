@@ -31,7 +31,11 @@ export class SlidingWindowStrategy implements ContextStrategy {
 
   /** {@inheritDoc ContextStrategy.build} */
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
-    const groups = eventsToTranscript(input.events);
+    const groups = eventsToTranscript(
+      input.previousEventLogs === undefined
+        ? input.events
+        : [...input.previousEventLogs, input.events],
+    );
     const pinnedGroups = groups.filter((group) => group.pinned);
     const plan = derivePlan(input.events);
     const planMessages = plan === undefined ? [] : [renderPlanMessage(plan)];

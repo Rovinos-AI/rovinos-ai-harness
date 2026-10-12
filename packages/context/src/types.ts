@@ -91,6 +91,8 @@ export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;
 /** Inputs supplied when rebuilding context from its event log. */
 export interface ContextStrategyInput {
   readonly events: readonly Event[];
+  /** Earlier run logs in a continuation chain, oldest first. */
+  readonly previousEventLogs?: readonly (readonly Event[])[];
   readonly budget: ContextBudget;
   readonly model: ModelRef;
   readonly counter: TokenCounter;

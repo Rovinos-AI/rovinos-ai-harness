@@ -36,4 +36,20 @@ describe("Event", () => {
     Reflect.deleteProperty(legacyResponse, "fallbackDepth");
     expect(Event.parse(legacyResponse)).toMatchObject({ fallbackDepth: 0 });
   });
+
+  it("accepts continuation links and follow-up inputs as metadata", () => {
+    const created = eventSamples.find(({ type }) => type === "run_created");
+    const input = eventSamples.find(({ type }) => type === "run_input");
+    if (created?.type !== "run_created" || input?.type !== "run_input") {
+      throw new Error("Missing run event samples.");
+    }
+
+    expect(Event.parse({ ...created, continuationOf: created.runId })).toMatchObject({
+      continuationOf: created.runId,
+    });
+    expect(Event.parse({ ...input, inputKind: "follow_up" })).toMatchObject({
+      inputKind: "follow_up",
+    });
+    expect(Event.safeParse({ ...input, inputKind: "other" }).success).toBe(false);
+  });
 });

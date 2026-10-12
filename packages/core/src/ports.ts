@@ -113,10 +113,14 @@ export interface ContextPort {
   /**
    * Builds the messages to send from the ordered run events.
    *
-   * @param events - Events recorded so far.
+   * @param events - Events recorded so far in the current run.
+   * @param previousEventLogs - Earlier continuation logs, oldest first.
    * @returns Provider-independent messages.
    */
-  build(events: readonly Event[]): Promise<Message[]>;
+  build(
+    events: readonly Event[],
+    previousEventLogs?: readonly (readonly Event[])[],
+  ): Promise<Message[]>;
 
   /**
    * Estimates the exact messages about to be sent, when the port has a token counter.

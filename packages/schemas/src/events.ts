@@ -38,6 +38,7 @@ const runCreatedEvent = z
     policyVersion: Code,
     parentRunId: Id.optional(),
     parentCallId: Id.optional(),
+    continuationOf: Id.optional(),
     scopeId: Id.optional(),
     depth: z.number().int().nonnegative().default(0),
   })
@@ -48,7 +49,7 @@ const runInputEvent = z
     ...eventEnvelopeShape,
     type: z.literal("run_input"),
     input: JsonValue,
-    inputKind: Code,
+    inputKind: z.enum(["initial", "follow_up"]),
   })
   .strict();
 

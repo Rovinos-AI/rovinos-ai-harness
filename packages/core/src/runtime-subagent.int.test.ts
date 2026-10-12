@@ -306,7 +306,7 @@ describe("runtime subagent spawning", () => {
         type: "run_input" as const,
         v: 1,
         input: { goal: "resume child", inputs: { token } },
-        inputKind: Code.parse("initial"),
+        inputKind: "initial" as const,
       },
       {
         runId: childRunId,

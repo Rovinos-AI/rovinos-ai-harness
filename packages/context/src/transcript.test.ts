@@ -104,6 +104,25 @@ async function readGolden(name: string): Promise<TranscriptGroup[]> {
 }
 
 describe("eventsToTranscript", () => {
+  it("appends continuation logs in order and pins only the newest run input", () => {
+    const previousEvents = [
+      runInput(0, "original question"),
+      modelResponse(1, [{ type: "text", text: "original answer" }]),
+    ];
+    const followUp = {
+      ...envelope(0),
+      type: "run_input" as const,
+      input: "follow-up question",
+      inputKind: "follow_up" as const,
+    };
+
+    expect(eventsToTranscript([previousEvents, [followUp]])).toMatchObject([
+      { pinned: false, messages: [{ parts: [{ text: "original question" }] }] },
+      { pinned: false, messages: [{ parts: [{ text: "original answer" }] }] },
+      { pinned: true, messages: [{ parts: [{ text: "follow-up question" }] }] },
+    ]);
+  });
+
   it.each([
     ["plain-run", [runInput(0, "hello"), modelResponse(1, [{ type: "text", text: "answer" }])]],
     [

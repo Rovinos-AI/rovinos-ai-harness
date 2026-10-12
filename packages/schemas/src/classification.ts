@@ -14,6 +14,7 @@ export const EVENT_FIELD_CLASS = {
     policyVersion: "meta",
     parentRunId: "meta",
     parentCallId: "meta",
+    continuationOf: "meta",
     scopeId: "meta",
     depth: "meta",
   },

@@ -12,6 +12,7 @@ export const RUN_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan("harness
   ...commonAttributes,
   "harness.segment.id": attr.id(),
   "harness.run.parent_id": attr.optional(attr.id()),
+  "harness.run.continuation_of": attr.optional(attr.id()),
   "harness.run.depth": attr.optional(attr.int()),
 });
 

@@ -34,6 +34,8 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly ids: IdGenerator;
   readonly goal: JsonValue;
   readonly signal: AbortSignal;
+  /** Ancestor continuation logs, oldest first. */
+  readonly previousEventLogs?: readonly (readonly Event[])[];
   /** Per-run limits sourced from the validated run configuration. */
   readonly budgets: RunConfig["budgets"];
   readonly checkpointEveryEvents?: RunConfig["checkpointEveryEvents"];
@@ -45,6 +47,8 @@ export interface RunLoopOptions extends NewRunMetadata {
   /** Parent run and tool call for a child run. */
   readonly parentRunId?: Id;
   readonly parentCallId?: Id;
+  readonly continuationOf?: Id;
+  readonly inputKind?: "initial" | "follow_up";
   /** Shared vault scope for this run tree. */
   readonly scopeId?: Id;
   /** Run nesting depth; roots default to zero. */
@@ -96,10 +100,18 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
       policyVersion: options.policyVersion,
       ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
       ...(options.parentCallId === undefined ? {} : { parentCallId: options.parentCallId }),
+      ...(options.continuationOf === undefined
+        ? {}
+        : { continuationOf: options.continuationOf }),
       ...(options.scopeId === undefined ? {} : { scopeId: options.scopeId }),
       depth: options.depth ?? 0,
     },
-    { type: "run_input", v: 1, input: options.goal, inputKind: "initial" },
+    {
+      type: "run_input",
+      v: 1,
+      input: options.goal,
+      inputKind: options.inputKind ?? "initial",
+    },
     { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
   ];
   await options.recorder.withStepSpan(
@@ -108,6 +120,9 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
       ...(options.parentRunId === undefined
         ? {}
         : { "harness.run.parent_id": options.parentRunId }),
+      ...(options.continuationOf === undefined
+        ? {}
+        : { "harness.run.continuation_of": options.continuationOf }),
       "harness.run.depth": options.depth ?? 0,
     },
     async () => {
@@ -306,7 +321,7 @@ async function prepareModelStep(
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<{ readonly context: Message[]; readonly deadlineTs: number; readonly event?: Event }> {
-  const context = await options.context.build(events.slice());
+  const context = await options.context.build(events.slice(), options.previousEventLogs);
   const preflight = await preflightModelBudget({
     budgetTracker: execution.budgetTracker,
     checkpointer: execution.checkpointer,
