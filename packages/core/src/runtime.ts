@@ -19,6 +19,7 @@ import { createSqliteStore } from "./runtime-store.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
+import { createRuntimePolicy } from "./runtime-policy.js";
 import type {
   Runtime,
   RuntimeComposition,
@@ -287,7 +288,8 @@ function composeRuntime(
     readonly scopes: RunScopeRegistry;
   },
 ): Runtime {
-  const { config, overrides, clock, ids, store, model, context, roles, scopes } = options;
+  const { config, overrides, clock, ids, store, model, policy, policyVersion, roles, scopes } =
+    options;
   const { tool: parentTool } = options;
   const tool = createSubagentTool({
     config,
@@ -296,6 +298,8 @@ function composeRuntime(
     store,
     model,
     parentTool,
+    policy,
+    policyVersion,
     roles,
     scopes,
   });
@@ -308,51 +312,62 @@ function composeRuntime(
       graceMs: config.run.shutdownGraceMs,
       operation,
     });
+  const resume = createRuntimeResume(options, tool);
   return {
     store,
     clock,
     ids,
     run: (goal) => startRun(options, tool, goal, runWithControl),
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
-    resume: async (runId) => {
-      const firstNewSeq = await store.head(runId);
-      return withRunControl({
-        store,
-        runId,
-        firstNewSeq,
-        processLike: overrides.processLike ?? defaultProcessLike,
-        graceMs: config.run.shutdownGraceMs,
-        operation: async (signal) => {
-          const goal = await storedGoal(store, runId);
-          if (goal === undefined) {
-            throw new RunInputMissingError();
-          }
-          return resumeRun({
-            store,
-            runId,
-            clock,
-            ids,
-            goal,
-            model,
-            tool,
-            context,
-            signal,
-            scopes,
-            budgets: config.run.budgets,
-            checkpointEveryEvents: config.run.checkpointEveryEvents,
-            resumePolicy: config.run.resume.onNonIdempotent,
-          });
-        },
-      });
-    },
+    resume,
     cancel: (runId) => cancelRun(store, runId, clock, ids),
     close: () => store.close(),
   };
 }
 
+function createRuntimeResume(
+  options: RuntimeComposition & { readonly scopes: RunScopeRegistry },
+  tool: ToolPort,
+): Runtime["resume"] {
+  const { config, clock, ids, store, model, context, policy, scopes, overrides } = options;
+  return async (runId) => {
+    const firstNewSeq = await store.head(runId);
+    return withRunControl({
+      store,
+      runId,
+      firstNewSeq,
+      processLike: overrides.processLike ?? defaultProcessLike,
+      graceMs: config.run.shutdownGraceMs,
+      operation: async (signal) => {
+        const goal = await storedGoal(store, runId);
+        if (goal === undefined) {
+          throw new RunInputMissingError();
+        }
+        return resumeRun({
+          store,
+          runId,
+          clock,
+          ids,
+          goal,
+          model,
+          tool,
+          policy,
+          context,
+          signal,
+          scopes,
+          budgets: config.run.budgets,
+          checkpointEveryEvents: config.run.checkpointEveryEvents,
+          resumePolicy: config.run.resume.onNonIdempotent,
+        });
+      },
+    });
+  };
+}
+
 /**
  * Builds a runtime from validated config with injectable ports.
- * Supply a composed tool port: Offloading(Pii(Policy(Tools))); policy uses tokenized arguments.
+ * Supply tools in decorator order `Offloading(Pii(Policy(Tools)))`; the loop
+ * evaluates policy after preparation so it only sees tokenized arguments.
  * Binary results use the outer offloader and are never returned as previews.
  *
  * @param config - Validated run and model configuration.
@@ -381,6 +396,7 @@ export async function createRuntime(
     missingModelPort;
   const dataDir = resolveDataDir(process.env, overrides.dataDir);
   const tool = overrides.tool ?? unavailableTool;
+  const policy = await createRuntimePolicy(config, overrides);
   const context = overrides.context ?? new NaiveContext();
   const roles = await resolveRuntimeRoles(
     config,
@@ -401,6 +417,8 @@ export async function createRuntime(
     store,
     model,
     tool,
+    policy,
+    policyVersion: policy.version,
     context,
     roles,
     scopes,

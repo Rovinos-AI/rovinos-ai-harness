@@ -15,3 +15,4 @@ export {
   SimulatedCrash,
   type CrashingEventStoreOptions,
 } from "./crash-store.js";
+export { allowAllPolicy } from "./allow-policy.js";

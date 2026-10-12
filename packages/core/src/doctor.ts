@@ -75,6 +75,10 @@ function result(status: DoctorCheckStatus["status"], code: Code, detail?: Code) 
   return { status, code, ...(detail === undefined ? {} : { detail }) };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
@@ -125,6 +129,20 @@ const initialChecks: DoctorCheck[] = [
           ? result("fail", "config_invalid", ctx.configErrorCode)
           : result("ok", "config_valid"),
       ),
+  },
+  {
+    id: "policy_configured",
+    title: "Policy configuration",
+    run: (ctx) => {
+      if (!isRecord(ctx.config)) {
+        return Promise.resolve(result("ok", "policy_configured"));
+      }
+      const policy = ctx.config.policy;
+      const hasPolicyFile = isRecord(policy) && typeof policy.file === "string";
+      return Promise.resolve(
+        hasPolicyFile ? result("ok", "policy_configured") : result("warn", "policy_default_deny"),
+      );
+    },
   },
   {
     id: "secret_refs_resolvable",

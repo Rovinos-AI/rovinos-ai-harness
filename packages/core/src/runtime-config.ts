@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   ModelsConfigSchema,
+  type PolicyConfig,
   type RolesConfig,
   type Id,
   type JsonValue,
@@ -11,7 +12,7 @@ import {
 } from "@harness/schemas";
 import type { ProviderAdapter } from "@harness/models";
 import type { EventStore } from "@harness/store";
-import type { ContextPort, IdGenerator, ModelPort, ToolPort } from "./ports.js";
+import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
@@ -35,6 +36,8 @@ export interface RuntimeOverrides {
     resolve(ref: SecretRef): Promise<{ reveal(): string }>;
   };
   readonly tool?: ToolPort;
+  /** Policy evaluator replacing the policy document configured for the runtime. */
+  readonly policy?: PolicyPort;
   readonly context?: ContextPort;
   /** Shared token-scope registry used by the runtime and its tool adapters. */
   readonly scopeRegistry?: RunScopeRegistry;
@@ -46,6 +49,7 @@ export interface RuntimeConfig {
   readonly run: RunConfig;
   readonly models?: ModelsConfig;
   readonly roles?: RolesConfig;
+  readonly policy?: PolicyConfig;
 }
 
 /** Composed run-loop operations and their shared dependencies. */
@@ -71,6 +75,8 @@ export interface RuntimeComposition {
   readonly store: EventStore;
   readonly model: ModelPort;
   readonly tool: ToolPort;
+  readonly policy: PolicyPort;
+  readonly policyVersion: PolicyPort["version"];
   readonly context: ContextPort;
 }
 

@@ -13,9 +13,12 @@ import {
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { ProviderError } from "@harness/models";
+import { PolicyDocumentSchema, policyVersion } from "@harness/policy";
+import type { PolicyDocument } from "@harness/policy";
 import { createRuntime } from "./runtime.js";
 import type { ProviderAdapter } from "@harness/models";
 import { createConfiguredModelPort } from "./runtime-model.js";
+import type { ModelPort } from "./ports.js";
 
 const models = ModelsConfigSchema.parse({
   retry: { maxAttempts: 1 },
@@ -37,6 +40,89 @@ afterEach(async () => {
 });
 
 describe("createRuntime model routing", () => {
+  it("loads the configured policy once and records its content version on run creation", async () => {
+    const configDirectory = await mkdtemp(join(tmpdir(), "harness-runtime-policy-"));
+    roleDirectories.push(configDirectory);
+    const document = PolicyDocumentSchema.parse({
+      version: 1,
+      defaultDecision: "deny",
+      rules: [],
+    });
+
+    await writeFile(
+      join(configDirectory, "policy.yaml"),
+      "version: 1\ndefaultDecision: deny\nrules: []\n",
+    );
+    const model: ModelPort = {
+      complete: () =>
+        Promise.resolve({
+          parts: [{ type: "text", text: "done" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "stop",
+          provider: "test",
+          model: "test",
+          latencyMs: 0,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+          providerBlobs: null,
+        }),
+    };
+    const runtime = await createRuntime(
+      { run: RunConfigSchema.parse({}), policy: { file: "policy.yaml" } },
+      {
+        store: new InMemoryEventStore(),
+        roleConfigDirectory: configDirectory,
+        model,
+      },
+    );
+
+    try {
+      const result = await runtime.run("goal");
+
+      expect(result.events[0]).toMatchObject({
+        type: "run_created",
+        policyVersion: policyVersion(document),
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("records the built-in deny-all policy version when no policy file is configured", async () => {
+    const denyAllDocument: PolicyDocument = { version: 1, defaultDecision: "deny", rules: [] };
+    const model: ModelPort = {
+      complete: () =>
+        Promise.resolve({
+          parts: [{ type: "text", text: "done" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "stop",
+          provider: "test",
+          model: "test",
+          latencyMs: 0,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+          providerBlobs: null,
+        }),
+    };
+    const runtime = await createRuntime(
+      { run: RunConfigSchema.parse({}) },
+      { store: new InMemoryEventStore(), model },
+    );
+
+    try {
+      const result = await runtime.run("goal");
+
+      expect(result.events[0]).toMatchObject({
+        type: "run_created",
+        policyVersion: policyVersion(denyAllDocument),
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("constructs configured adapters and resolves provider secret references", async () => {
     const resolve = vi.fn((_reference: string) =>
       Promise.resolve({ reveal: () => "synthetic-key" }),

@@ -16,6 +16,7 @@ import { InMemoryVault, AuditingVaultResolver } from "@harness/vault";
 import { PiiToolPort, Tokenizer } from "@harness/pii";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
+import { allowAllPolicy } from "./testing/allow-policy.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 
 const email = "alice@example.test";
@@ -223,6 +224,7 @@ describe("runtime subagent spawning", () => {
         model,
         tool: piiTool(scopes, vault, resolvedValues),
         scopeRegistry: scopes,
+        policy: allowAllPolicy,
       },
     );
     try {
@@ -348,6 +350,7 @@ describe("runtime subagent spawning", () => {
         model,
         tool: piiTool(scopes, vault, resolvedValues),
         scopeRegistry: scopes,
+        policy: allowAllPolicy,
       },
     );
     try {

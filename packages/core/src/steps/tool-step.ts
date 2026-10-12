@@ -1,30 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tool calls are sequential here; parallel execution can be added independently.
 import { HarnessError, type Code, type Event, type Id } from "@harness/schemas";
-import { SpanStatusCode } from "@opentelemetry/api";
+import type { Span } from "@opentelemetry/api";
+import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
-import { APPROVAL_WAIT_SPAN, TOOL_CALL_SPAN } from "../spans.js";
-import type { IdGenerator, ModelToolCall, ToolPort } from "../ports.js";
-import type { DanglingIntentAction } from "../resume-policy.js";
-import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
+import { TOOL_CALL_SPAN } from "../spans.js";
+import type { IdGenerator, ModelToolCall, PolicyPort, ToolPort } from "../ports.js";
+import { foldRunState, type ToolIntentEvent } from "../run-state.js";
 import { prepareToolCall, toolRunContext, type PreparedToolCall } from "./prepare-tool.js";
+import { decidePolicy, effectiveDecision, requestPolicyApproval } from "./policy-step.js";
 import { executePreparedTool, hashArgs } from "./tool-execution.js";
 
-/** Inputs needed to execute and record one or more tool calls. */
-export interface ToolStepOptions {
+interface ToolStepExecutionOptions {
   readonly recorder: RunRecorder;
   readonly tool: ToolPort;
   readonly clock: Clock;
   readonly runId: Id;
-  readonly calls: readonly ModelToolCall[];
-  readonly preparedCalls?: readonly PreparedToolCall[];
   readonly signal: AbortSignal;
   readonly depth?: number;
 }
 
-/** Dependencies for applying a resume action to an unresolved tool intent. */
-export interface ResumeToolStepOptions extends Omit<ToolStepOptions, "calls"> {
+/** Inputs needed to execute and record one or more tool calls. */
+export interface ToolStepOptions extends ToolStepExecutionOptions {
+  readonly policy?: PolicyPort;
   readonly ids: IdGenerator;
+  readonly checkpointer: Checkpointer;
+  readonly history: readonly Event[];
+  readonly calls: readonly ModelToolCall[];
+  readonly preparedCalls?: readonly PreparedToolCall[];
+}
+
+/** Dependencies for applying a resume action to an unresolved tool intent. */
+export interface ResumeToolStepOptions extends ToolStepExecutionOptions {
+  readonly ids: IdGenerator;
+  readonly checkpointer?: Checkpointer;
+  readonly policy?: PolicyPort;
   readonly beforeToolExecution?: () => Promise<void>;
   readonly onEvents?: (events: readonly Event[]) => void;
 }
@@ -32,107 +42,289 @@ export interface ResumeToolStepOptions extends Omit<ToolStepOptions, "calls"> {
 interface RunToolCallBehavior {
   readonly executedArgsHash?: string;
   readonly compareArgsHash?: string;
+  readonly checkEditedPolicy?: boolean;
   readonly existingIntent?: ToolIntentEvent;
   readonly prepared?: PreparedToolCall;
-}
-
-/** Error raised when a resume action or approval does not identify its intent. */
-export class ResumeActionMismatchError extends HarnessError {
-  readonly code = "resume_action_mismatch";
-
-  /** Creates an error for a mismatched resume action or approval. */
-  constructor() {
-    super("Resume action or approval does not match its intent.");
-    this.name = "ResumeActionMismatchError";
-  }
-}
-
-class ResumeEventMissingError extends HarnessError {
-  readonly code = "resume_event_missing";
-
-  constructor() {
-    super("Expected a recorded resume event.");
-    this.name = "ResumeEventMissingError";
-  }
 }
 
 const executedArgsHashField = (hash?: string): { readonly executedArgsHash?: string } =>
   hash === undefined ? {} : { executedArgsHash: hash };
 
-function recordIntent(
-  recorder: RunRecorder,
-  call: ModelToolCall,
-  description: ReturnType<ToolPort["describe"]>,
-  argsHash: string,
-): Promise<Event> {
-  return recorder.record({
+function intentPartial(options: {
+  readonly call: ModelToolCall;
+  readonly description: ReturnType<ToolPort["describe"]>;
+  readonly argsHash: string;
+  readonly decision: ReturnType<typeof effectiveDecision>;
+}): Extract<EventPartial, { type: "tool_intent" }> {
+  return {
     type: "tool_intent",
     v: 1,
-    callId: call.callId,
-    toolId: call.toolId,
-    idempotent: description?.idempotent ?? false,
-    policyDecision: description === undefined ? "deny" : "allow",
-    argsHash,
-    args: call.args,
-  });
+    callId: options.call.callId,
+    toolId: options.call.toolId,
+    idempotent: options.description?.idempotent ?? false,
+    policyDecision: options.decision.decision,
+    ruleId: options.decision.ruleId,
+    policyReason: options.decision.reason,
+    policyEditable: options.decision.editable,
+    ...(options.decision.approvalTtlMs === undefined
+      ? {}
+      : { policyApprovalTtlMs: options.decision.approvalTtlMs }),
+    ...(options.decision.escalateAfterMs === undefined
+      ? {}
+      : { policyEscalateAfterMs: options.decision.escalateAfterMs }),
+    argsHash: options.argsHash,
+    args: options.call.args,
+  };
 }
 
-async function runToolCall(
-  options: Omit<ToolStepOptions, "calls">,
+/** Executes and records one prepared tool call. */
+export async function runToolCall(
+  options: ToolStepExecutionOptions & {
+    readonly policy?: PolicyPort;
+    readonly ids?: IdGenerator;
+    readonly checkpointer?: Checkpointer;
+    readonly history?: readonly Event[];
+  },
   proposedCall: ModelToolCall,
   description: ReturnType<ToolPort["describe"]>,
   behavior: RunToolCallBehavior = {},
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
   const context = executionContext(options, events);
-  return options.recorder
-    .withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
-      const prepared = await prepareRunToolCall(options, proposedCall, behavior, context);
-      const { call } = prepared;
-      const executedArgsHash = executedArgsHashFor(call, behavior);
-      if (behavior.existingIntent === undefined) {
-        events.push(
-          await recordIntent(
-            options.recorder,
-            call,
-            prepared.errorCode === undefined ? description : undefined,
-            hashArgs(call.args),
-          ),
-        );
-      }
-      const intentEvent = events.at(-1) ?? behavior.existingIntent;
-      if (prepared.errorCode !== undefined || description === undefined) {
-        const denied = await recordDeniedResult(
-          options.recorder,
-          call,
-          prepared.errorCode ?? "unknown_tool",
-          executedArgsHash,
-        );
-        events.push(denied);
-        return denied;
-      }
-      const result = await executePreparedTool({
-        recorder: options.recorder,
+  await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, (span) =>
+    runToolCallWithinSpan({
+      options,
+      proposedCall,
+      description,
+      behavior,
+      context,
+      events,
+      span,
+    }),
+  );
+  return events;
+}
+
+interface RunToolCallSpanOptions {
+  readonly options: ToolStepExecutionOptions & {
+    readonly policy?: PolicyPort;
+    readonly ids?: IdGenerator;
+    readonly checkpointer?: Checkpointer;
+    readonly history?: readonly Event[];
+  };
+  readonly proposedCall: ModelToolCall;
+  readonly description: ReturnType<ToolPort["describe"]>;
+  readonly behavior: RunToolCallBehavior;
+  readonly context: ReturnType<typeof executionContext>;
+  readonly events: Event[];
+  readonly span: Span;
+}
+
+async function runToolCallWithinSpan(input: RunToolCallSpanOptions): Promise<Event> {
+  const prepared = await prepareRunToolCall(
+    input.options,
+    input.proposedCall,
+    input.behavior,
+    input.context,
+  );
+  if (input.behavior.existingIntent !== undefined) {
+    return executeRecordedIntent(input, prepared.call, prepared.errorCode);
+  }
+  return decideAndRunToolCall(input, prepared.call, prepared.errorCode);
+}
+
+async function decideAndRunToolCall(
+  input: RunToolCallSpanOptions,
+  call: ModelToolCall,
+  preparationError: Code | undefined,
+): Promise<Event> {
+  const decision = effectiveDecision(
+    decidePolicy(input.options.policy, call, input.options.depth ?? 0),
+    preparationError,
+    input.description,
+  );
+  const executedArgsHash = hashArgs(call.args);
+  const intent = intentPartial({
+    call,
+    description: input.description,
+    argsHash: executedArgsHash,
+    decision,
+  });
+  if (
+    preparationError !== undefined ||
+    input.description === undefined ||
+    decision.decision === "deny"
+  ) {
+    const code =
+      preparationError ?? (input.description === undefined ? "unknown_tool" : decision.reason);
+    return recordDeniedIntentAndResultAndPush(input, {
+      intent,
+      call,
+      code,
+      executedArgsHash,
+    });
+  }
+  if (decision.decision === "ask") {
+    return requestToolApproval(input, intent, call, decision);
+  }
+  const intentEvent = await input.options.recorder.record(intent);
+  input.events.push(intentEvent);
+  return executeAndRecord(input, {
+    call,
+    description: input.description,
+    intentEvent,
+    executedArgsHash,
+  });
+}
+
+async function executeRecordedIntent(
+  input: RunToolCallSpanOptions,
+  call: ModelToolCall,
+  preparationError: Code | undefined,
+): Promise<Event> {
+  const executedArgsHash = executedArgsHashFor(call, input.behavior);
+  if (preparationError !== undefined || input.description === undefined) {
+    return recordDeniedResultAndPush(
+      input,
+      call,
+      preparationError ?? "unknown_tool",
+      executedArgsHash,
+    );
+  }
+  if (input.behavior.checkEditedPolicy === true) {
+    const decision = effectiveDecision(
+      decidePolicy(input.options.policy, call, input.options.depth ?? 0),
+      undefined,
+      input.description,
+    );
+    if (decision.decision !== "allow") {
+      return recordDeniedResultAndPush(
+        input,
         call,
-        tool: options.tool,
-        clock: options.clock,
-        context,
-        description,
-        ...(intentEvent === undefined ? {} : { intentEvent }),
-        ...(executedArgsHash === undefined ? {} : { executedArgsHash }),
-        signal: options.signal,
-        span,
-      });
-      if (result !== intentEvent) {
-        events.push(result);
-      }
-      return result;
-    })
-    .then(() => events);
+        decision.decision === "ask" ? "approval_edit_requires_approval" : decision.reason,
+        executedArgsHash,
+      );
+    }
+  }
+  return executeAndRecord(input, {
+    call,
+    description: input.description,
+    intentEvent: input.behavior.existingIntent,
+    executedArgsHash,
+  });
+}
+
+async function requestToolApproval(
+  input: RunToolCallSpanOptions,
+  intent: Extract<EventPartial, { type: "tool_intent" }>,
+  call: ModelToolCall,
+  decision: ReturnType<typeof effectiveDecision>,
+): Promise<Event> {
+  const { ids, checkpointer, history } = input.options;
+  if (ids === undefined || checkpointer === undefined || history === undefined) {
+    return recordDeniedIntentAndResultAndPush(input, {
+      intent,
+      call,
+      code: "policy_error",
+      executedArgsHash: hashArgs(call.args),
+    });
+  }
+  const approval = await requestPolicyApproval({
+    recorder: input.options.recorder,
+    ids,
+    checkpointer,
+    state: foldRunState([...history, ...input.events]),
+    clock: input.options.clock,
+    call,
+    decision,
+    intent,
+  });
+  input.events.push(...approval.events);
+  return approval.checkpoint;
+}
+
+async function recordDeniedIntentAndResultAndPush(
+  input: RunToolCallSpanOptions,
+  denial: {
+    readonly intent: Extract<EventPartial, { type: "tool_intent" }>;
+    readonly call: ModelToolCall;
+    readonly code: Code;
+    readonly executedArgsHash?: string;
+  },
+): Promise<Event> {
+  const recorded = await input.options.recorder.recordBatch([
+    denial.intent,
+    {
+      type: "tool_result",
+      v: 1,
+      callId: denial.call.callId,
+      toolId: denial.call.toolId,
+      outcome: "denied",
+      errorCode: denial.code,
+      latencyMs: 0,
+      ...executedArgsHashField(denial.executedArgsHash),
+      result: null,
+    },
+  ]);
+  const result = recorded.at(-1);
+  if (result === undefined) {
+    throw new ToolStepEventMissingError();
+  }
+  input.events.push(...recorded);
+  return result;
+}
+
+async function recordDeniedResultAndPush(
+  input: RunToolCallSpanOptions,
+  call: ModelToolCall,
+  code: Code,
+  executedArgsHash?: string,
+): Promise<Event> {
+  const event = await recordDeniedResult(input.options.recorder, call, code, executedArgsHash);
+  input.events.push(event);
+  return event;
+}
+
+class ToolStepEventMissingError extends HarnessError {
+  readonly code = "tool_step_event_missing";
+
+  constructor() {
+    super("Expected a recorded tool event.");
+    this.name = "ToolStepEventMissingError";
+  }
+}
+
+async function executeAndRecord(
+  input: RunToolCallSpanOptions,
+  options: {
+    readonly call: ModelToolCall;
+    readonly description: NonNullable<ReturnType<ToolPort["describe"]>>;
+    readonly intentEvent: Event | undefined;
+    readonly executedArgsHash: string | undefined;
+  },
+): Promise<Event> {
+  const event = await executePreparedTool({
+    recorder: input.options.recorder,
+    call: options.call,
+    tool: input.options.tool,
+    clock: input.options.clock,
+    context: input.context,
+    description: options.description,
+    ...(options.intentEvent === undefined ? {} : { intentEvent: options.intentEvent }),
+    ...(options.executedArgsHash === undefined
+      ? {}
+      : { executedArgsHash: options.executedArgsHash }),
+    signal: input.options.signal,
+    span: input.span,
+  });
+  if (event !== options.intentEvent) {
+    input.events.push(event);
+  }
+  return event;
 }
 
 async function prepareRunToolCall(
-  options: Omit<ToolStepOptions, "calls">,
+  options: ToolStepExecutionOptions,
   proposedCall: ModelToolCall,
   behavior: RunToolCallBehavior,
   context: ReturnType<typeof executionContext>,
@@ -156,7 +348,7 @@ function executedArgsHashFor(
     : preparedArgsHash;
 }
 
-function executionContext(options: Omit<ToolStepOptions, "calls">, events: Event[]) {
+function executionContext(options: ToolStepExecutionOptions, events: Event[]) {
   return toolRunContext(
     {
       runId: options.runId,
@@ -186,202 +378,6 @@ function recordDeniedResult(
     ...executedArgsHashField(executedArgsHash),
     result: null,
   });
-}
-
-async function recordDanglingFailure(
-  options: Omit<ResumeToolStepOptions, "ids">,
-  intent: ToolIntentEvent,
-  code: "unknown_tool" | "resume_ambiguous" | "pii_blocked",
-): Promise<readonly Event[]> {
-  const events: Event[] = [];
-  await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
-    const result = await options.recorder.record({
-      type: "tool_result",
-      v: 1,
-      callId: intent.callId,
-      toolId: intent.toolId,
-      outcome: "error",
-      errorCode: code,
-      latencyMs: 0,
-      result: null,
-    });
-    events.push(result);
-    span.setStatus({ code: SpanStatusCode.ERROR });
-    span.setAttribute("harness.error.code", code);
-    return result;
-  });
-  return events;
-}
-
-async function requestResumeApprovals(
-  options: ResumeToolStepOptions,
-  intents: readonly ToolIntentEvent[],
-): Promise<readonly Event[]> {
-  const events: Event[] = [];
-  await options.recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () => {
-    const batch: EventPartial[] = intents.map((intent) => ({
-      type: "approval_requested",
-      v: 1,
-      approvalId: options.ids.next(),
-      callId: intent.callId,
-      payload: {
-        kind: "resume_ambiguity",
-        callId: intent.callId,
-        toolId: intent.toolId,
-      },
-    }));
-    batch.push({
-      type: "run_status_changed",
-      v: 1,
-      from: "running",
-      to: "suspended",
-      reason: "resume_ambiguity",
-    });
-    const recorded = await options.recorder.recordBatch(batch);
-    events.push(...recorded);
-    const last = recorded.at(-1);
-    if (last === undefined) {
-      throw new ResumeEventMissingError();
-    }
-    return last;
-  });
-  return events;
-}
-
-function callFromIntent(intent: ToolIntentEvent): ModelToolCall {
-  return { callId: intent.callId, toolId: intent.toolId, args: intent.args };
-}
-
-/** Applies a fail or rerun action without writing another tool intent. */
-async function applyDanglingIntentAction(
-  options: ResumeToolStepOptions,
-  intent: ToolIntentEvent,
-  action: DanglingIntentAction,
-): Promise<readonly Event[] | "escalate"> {
-  if (action.callId !== intent.callId) {
-    throw new ResumeActionMismatchError();
-  }
-  if (action.kind === "fail") {
-    return recordDanglingFailure(options, intent, action.errorCode);
-  }
-  if (action.kind === "escalate") {
-    return "escalate";
-  }
-
-  const description = options.tool.describe(intent.toolId);
-  if (description === undefined) {
-    return recordDanglingFailure(options, intent, "unknown_tool");
-  }
-  if (!intent.idempotent || !description.idempotent) {
-    return "escalate";
-  }
-  await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
-}
-
-/** Applies a resolved approval without appending another intent. */
-export async function applyApprovalDecision(
-  options: Omit<ResumeToolStepOptions, "ids">,
-  intent: ToolIntentEvent,
-  approval: ApprovalRequestedEvent,
-  resolution: Extract<Event, { type: "approval_resolved" }>,
-): Promise<readonly Event[]> {
-  if (approval.callId !== intent.callId || resolution.approvalId !== approval.approvalId) {
-    throw new ResumeActionMismatchError();
-  }
-  if (resolution.decision === "deny") {
-    const result = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async () => {
-      const recordedResult = await options.recorder.record({
-        type: "tool_result",
-        v: 1,
-        callId: intent.callId,
-        toolId: intent.toolId,
-        outcome: "denied",
-        errorCode: "approval_denied",
-        latencyMs: 0,
-        result: null,
-      });
-      return recordedResult;
-    });
-    return [result];
-  }
-  let args = intent.args;
-  if (resolution.decision === "edit") {
-    if (resolution.edits === undefined) {
-      throw new ApprovalEditsRequiredError();
-    }
-    args = resolution.edits;
-  }
-  const call: ModelToolCall = { callId: intent.callId, toolId: intent.toolId, args };
-  const description = options.tool.describe(intent.toolId);
-  if (description !== undefined) {
-    await options.beforeToolExecution?.();
-  }
-  return runToolCall(options, call, description, {
-    existingIntent: intent,
-    ...(resolution.decision === "edit" ? { compareArgsHash: intent.argsHash } : {}),
-  });
-}
-
-/** Error raised when an edit decision has no replacement arguments. */
-export class ApprovalEditsRequiredError extends HarnessError {
-  readonly code = "approval_edits_required";
-
-  /** Creates an error for an edit decision without replacement arguments. */
-  constructor() {
-    super("An edit approval decision requires replacement arguments.");
-    this.name = "ApprovalEditsRequiredError";
-  }
-}
-
-/** Applies dangling-intent actions in event order and batches escalations. */
-export async function applyDanglingIntents(
-  options: ResumeToolStepOptions,
-  state: RunState,
-  actions: readonly DanglingIntentAction[],
-): Promise<readonly Event[]> {
-  const events: Event[] = [];
-  const escalations: ToolIntentEvent[] = [];
-  for (const action of actions) {
-    const intent = state.pendingToolCalls.get(action.callId);
-    if (intent === undefined) {
-      throw new ResumeActionMismatchError();
-    }
-    const applied = await applyDanglingIntentAction(options, intent, action);
-    if (applied === "escalate") {
-      escalations.push(intent);
-    } else {
-      events.push(...applied);
-      options.onEvents?.(applied);
-    }
-  }
-  if (escalations.length > 0) {
-    const approvalEvents = await requestResumeApprovals(options, escalations);
-    events.push(...approvalEvents);
-    options.onEvents?.(approvalEvents);
-  }
-  return events;
-}
-
-/** Resolves a resume-ambiguity approval without duplicating its intent. */
-export async function resolveDanglingIntentApproval(
-  options: Omit<ResumeToolStepOptions, "ids">,
-  intent: ToolIntentEvent,
-  approval: ApprovalRequestedEvent,
-  resolution: Extract<Event, { type: "approval_resolved" }>,
-): Promise<readonly Event[]> {
-  if (approval.callId !== intent.callId || resolution.approvalId !== approval.approvalId) {
-    throw new ResumeActionMismatchError();
-  }
-  if (resolution.decision === "deny") {
-    return recordDanglingFailure(options, intent, "resume_ambiguous");
-  }
-  const description = options.tool.describe(intent.toolId);
-  if (description === undefined) {
-    return recordDanglingFailure(options, intent, "unknown_tool");
-  }
-  await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
 }
 
 /** Records prepared tool intents durably before execution, then records results. */

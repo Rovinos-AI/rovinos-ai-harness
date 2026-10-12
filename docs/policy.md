@@ -7,6 +7,26 @@ The policy format is versioned and strict. Its default decision must be `ask`
 or `deny`; rules can match tool IDs, argument pointers, and request context.
 When rules match, the evaluator uses the most restrictive decision.
 
+When `policy.file` is not configured, the runtime applies a built-in deny-all
+policy. Configure a policy explicitly to allow any tools, and review
+`harness doctor`'s `policy_default_deny` warning when using that default. A
+minimal policy allows only the named tool and denies all unmatched calls:
+
+```yaml
+version: 1
+defaultDecision: deny
+rules:
+  - id: allow_read_only
+    match:
+      tools:
+        - my.read_only_tool
+    decision: allow
+    reason: read_only_operation
+```
+
+Replace `my.read_only_tool` with an actual tool ID and set
+`policy.file: ./policy.yaml` in `harness.config.yaml`.
+
 ## Matching token types
 
 PII values are replaced with tokens such as `<EMAIL_1>` before policy

@@ -80,14 +80,12 @@ export {
   type CompactionStepOptions,
   type CompactionRuntimeOptions,
 } from "./steps/compaction-step.js";
+export { toolStep, type ResumeToolStepOptions, type ToolStepOptions } from "./steps/tool-step.js";
 export {
   applyDanglingIntents,
   resolveDanglingIntentApproval,
   ResumeActionMismatchError,
-  toolStep,
-  type ResumeToolStepOptions,
-  type ToolStepOptions,
-} from "./steps/tool-step.js";
+} from "./steps/resume-tool-step.js";
 export {
   planDanglingIntents,
   type DanglingIntentAction,
@@ -102,6 +100,9 @@ export type {
   ModelToolCall,
   ModelUsage,
   NewRunMetadata,
+  PolicyContext,
+  PolicyDecision,
+  PolicyPort,
   RunContext,
   Summarizer,
   ToolDescription,

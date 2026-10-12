@@ -20,6 +20,37 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict schemas owned by their respective packages. `telemetry.sentinel.minValueLength` defaults to `6` and controls the minimum length of vault values included in leak-sentinel scans; shorter values are counted and skipped. The sentinel is enabled by default; `telemetry.sentinel.enabled: false` is accepted only outside production. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
 
+## Tool policy
+
+`policy.file` selects the YAML or JSON policy document used for tool calls. If
+it is omitted, the runtime uses a built-in deny-all policy: every tool call is
+denied. `harness doctor` warns with `policy_default_deny` when no policy file
+is configured.
+
+For example, configure a policy file alongside `harness.config.yaml`:
+
+```yaml
+policy:
+  file: ./policy.yaml
+```
+
+The smallest useful allow policy is explicit about the tool it permits; replace
+`my.read_only_tool` with an actual tool ID:
+
+```yaml
+version: 1
+defaultDecision: deny
+rules:
+  - id: allow_read_only
+    match:
+      tools:
+        - my.read_only_tool
+    decision: allow
+    reason: read_only_operation
+```
+
+See [Policy documents](./policy.md) for matching and tokenized-argument details.
+
 Role configuration is a list of role definitions used to override the built-in
 `planner`, `worker`, `judge`, and `summarizer` roles. See [Model roles](./roles.md)
 for routing, tool, prompt, budget, context-strategy, and result-schema behavior.
