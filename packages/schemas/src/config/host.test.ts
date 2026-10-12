@@ -32,6 +32,12 @@ describe("HostConfigSchema", () => {
 
   it("rejects non-loopback addresses and unknown keys", () => {
     expect(HostConfigSchema.safeParse({ listen: { host: "0.0.0.0" } }).success).toBe(false);
+    expect(
+      HostConfigSchema.safeParse({ cspAllowlist: ["http://external.example.test"] }).success,
+    ).toBe(false);
+    expect(HostConfigSchema.safeParse({ cspAllowlist: ["https://safe.test/path"] }).success).toBe(
+      false,
+    );
     expect(HostConfigSchema.safeParse({ unexpected: true }).success).toBe(false);
   });
 

@@ -1,42 +1,50 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CallToolResultSchema } from "@modelcontextprotocol/core";
 import { parseJson } from "@harness/schemas";
 import { z } from "zod";
 import {
   createReferenceHost,
+  ReferenceHostError,
   REFERENCE_CSP,
   type ReferenceHostDependencies,
 } from "./index.js";
 
+const appResourceUri = "ui://approval/index.html";
 const appConfig = {
   apps: [
     {
       id: "approval",
-      resourceUri: "ui://approval/index.html",
+      resourceUri: appResourceUri,
       telemetry: true,
       allowedTools: ["approve"],
     },
   ],
   listen: { host: "127.0.0.1", port: 0 },
 };
-const sessionId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const sessionId = "00000000000000000000000000";
 const resource = {
   contents: [{ mimeType: "text/html;profile=mcp-app", text: "<main>approved</main>" }],
 };
 const ResourceResponseSchema = z
   .object({ csp: z.string(), permissions: z.array(z.string()) })
-  .passthrough();
+  .loose();
 
-type RequestListener = Parameters<
-  NonNullable<ReferenceHostDependencies["createHttpServer"]>
->[0];
+type RequestListener = Parameters<NonNullable<ReferenceHostDependencies["createHttpServer"]>>[0];
 type HttpServer = ReturnType<NonNullable<ReferenceHostDependencies["createHttpServer"]>>;
 type Request = Parameters<RequestListener>[0];
 type Response = Parameters<RequestListener>[1];
 
+const appPath = `/api/app?resourceUri=${encodeURIComponent(appResourceUri)}`;
+const eventsPath = `/api/events?resourceUri=${encodeURIComponent(appResourceUri)}`;
+
 interface FakeResponse {
   readonly response: Response;
-  readonly read: () => { readonly status: number; readonly headers: Record<string, string>; readonly body: string };
+  readonly read: () => {
+    readonly status: number;
+    readonly headers: Record<string, string>;
+    readonly body: string;
+  };
 }
 
 function makeResponse(): FakeResponse {
@@ -61,28 +69,28 @@ function makeResponse(): FakeResponse {
   };
 }
 
-function makeServer(options: {
-  readonly address?: { readonly port: number } | string | null;
-  readonly listenError?: Error;
-  readonly closeError?: Error;
-  readonly readResource?: (uri: string) => Promise<unknown>;
-  readonly onAppCall?: ReferenceHostDependencies["onAppCall"];
-  readonly onCode?: ReferenceHostDependencies["onCode"];
-  readonly readStatic?: ReferenceHostDependencies["readStatic"];
-  readonly config?: unknown;
-  readonly idGenerator?: () => string;
-  readonly randomBytes?: (size: number) => Buffer;
-  readonly now?: () => number;
-} = {}) {
+function makeServer(
+  options: {
+    readonly address?: { readonly port: number } | string | null;
+    readonly listenError?: Error;
+    readonly closeError?: Error;
+    readonly readResource?: (uri: string) => Promise<unknown>;
+    readonly onAppCall?: ReferenceHostDependencies["onAppCall"];
+    readonly onCode?: ReferenceHostDependencies["onCode"];
+    readonly readStatic?: ReferenceHostDependencies["readStatic"];
+    readonly config?: unknown;
+    readonly idGenerator?: () => string;
+    readonly randomBytes?: (size: number) => Buffer;
+    readonly now?: () => number;
+  } = {},
+) {
   let listener: RequestListener | undefined;
   let errorListener: ((error: Error) => void) | undefined;
   let hostArgument = "";
   let closed = false;
   const server: HttpServer = {
     once(event, callback) {
-      if (event === "error") {
-        errorListener = callback;
-      }
+      errorListener = callback;
       return this;
     },
     listen(_port, host, callback) {
@@ -94,7 +102,7 @@ function makeServer(options: {
       }
       return this;
     },
-    address: () => options.address === undefined ? { port: 43210 } : options.address,
+    address: () => (options.address === undefined ? { port: 43210 } : options.address),
     close(callback) {
       closed = true;
       callback(options.closeError);
@@ -102,7 +110,8 @@ function makeServer(options: {
     },
   };
   const dependencies: ReferenceHostDependencies = {
-    readResource: options.readResource ?? (async () => resource),
+    readResource: options.readResource ?? (() => Promise.resolve(resource)),
+    onCode: options.onCode ?? (() => undefined),
     ...(options.onAppCall === undefined ? {} : { onAppCall: options.onAppCall }),
     ...(options.onCode === undefined ? {} : { onCode: options.onCode }),
     ...(options.readStatic === undefined ? {} : { readStatic: options.readStatic }),
@@ -139,7 +148,7 @@ function makeServer(options: {
         headers,
         async *[Symbol.asyncIterator]() {
           if (body !== undefined) {
-            yield Buffer.from(body);
+            yield await Promise.resolve(Buffer.from(body));
           }
         },
       };
@@ -158,6 +167,50 @@ afterEach(() => {
 });
 
 describe("createReferenceHost", () => {
+  it("serves authenticated resources through the Node HTTP adapter", async () => {
+    const host = await createReferenceHost(appConfig, {
+      readResource: () => Promise.resolve(resource),
+      onCode: () => undefined,
+      onAppCall: () =>
+        Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "ok" }] })),
+      idGenerator: () => sessionId,
+    });
+    try {
+      const page = await fetch(host.origin);
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-type")).toContain("text/html");
+
+      const appResponse = await fetch(new URL(appPath, host.origin), {
+        headers: {
+          authorization: ["Bearer", host.token].join(" "),
+          origin: host.origin,
+        },
+      });
+      expect(appResponse.status).toBe(200);
+
+      const callResponse = await fetch(new URL("/api/call", host.origin), {
+        method: "POST",
+        headers: {
+          authorization: ["Bearer", host.token].join(" "),
+          origin: host.origin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          appId: "approval",
+          sessionId,
+          toolName: "approve",
+          arguments: {},
+        }),
+      });
+      expect(callResponse.status).toBe(200);
+      expect(await callResponse.json()).toEqual({
+        content: [{ type: "text", text: "ok" }],
+      });
+    } finally {
+      await host.close();
+    }
+  });
+
   it("binds loopback, creates a ULID session, and returns a host-only launch URL", async () => {
     const fixture = makeServer({
       idGenerator: () => sessionId,
@@ -167,11 +220,11 @@ describe("createReferenceHost", () => {
     expect(fixture.hostArgument).toBe("127.0.0.1");
     expect(host.origin).toBe("http://127.0.0.1:43210");
     expect(host.url).toContain("#token=");
-    expect(host.url).toContain("resourceUri=ui%3A%2F%2Fapproval%2Findex.html");
+    expect(new URL(host.url).hash).toContain(encodeURIComponent(appResourceUri));
     expect(host.token).toHaveLength(43);
     const event = await fixture.request(
       "GET",
-      "/api/events?resourceUri=ui%3A%2F%2Fapproval%2Findex.html",
+      eventsPath,
       authorization(host),
     );
     expect(event.status).toBe(200);
@@ -189,7 +242,7 @@ describe("createReferenceHost", () => {
     const host = await fixture.hostPromise;
     const response = await fixture.request(
       "GET",
-      "/api/events?resourceUri=ui%3A%2F%2Fapproval%2Findex.html",
+      eventsPath,
       authorization(host),
     );
     expect(response.status).toBe(200);
@@ -197,10 +250,20 @@ describe("createReferenceHost", () => {
     await host.close();
   });
 
+  it("reuses the bearer token for every host instance in the process", async () => {
+    const first = makeServer({ idGenerator: () => sessionId });
+    const firstHost = await first.hostPromise;
+    const second = makeServer({ idGenerator: () => sessionId });
+    const secondHost = await second.hostPromise;
+    expect(secondHost.token).toBe(firstHost.token);
+    await firstHost.close();
+    await secondHost.close();
+  });
+
   it("requires both the bearer token and same-origin request on protected routes", async () => {
     const fixture = makeServer({ idGenerator: () => sessionId });
     const host = await fixture.hostPromise;
-    const path = "/api/app?resourceUri=ui%3A%2F%2Fapproval%2Findex.html";
+    const path = appPath;
     expect((await fixture.request("GET", path, { origin: host.origin })).status).toBe(403);
     expect(
       (
@@ -215,12 +278,12 @@ describe("createReferenceHost", () => {
   });
 
   it("refuses unknown resources and unknown paths with code-only errors", async () => {
-    const reader = vi.fn(async () => resource);
+    const reader = vi.fn(() => Promise.resolve(resource));
     const fixture = makeServer({ readResource: reader, idGenerator: () => sessionId });
     const host = await fixture.hostPromise;
     const unknown = await fixture.request(
       "GET",
-      "/api/app?resourceUri=ui%3A%2F%2Funknown",
+      `/api/app?resourceUri=${encodeURIComponent("ui://unknown")}`,
       authorization(host),
     );
     expect(unknown.status).toBe(404);
@@ -232,20 +295,20 @@ describe("createReferenceHost", () => {
 
   it("validates resource MIME and size and hides resource-reader errors", async () => {
     const invalid = makeServer({
-      readResource: async () => ({ contents: [{ mimeType: "text/plain", text: "no" }] }),
+      readResource: () => Promise.resolve({ contents: [{ mimeType: "text/plain", text: "no" }] }),
       idGenerator: () => sessionId,
     });
     const invalidHost = await invalid.hostPromise;
     const invalidResponse = await invalid.request(
       "GET",
-      "/api/app?resourceUri=ui%3A%2F%2Fapproval%2Findex.html",
+      appPath,
       authorization(invalidHost),
     );
     expect(invalidResponse.status).toBe(422);
     await invalidHost.close();
 
     const oversized = makeServer({
-      readResource: async () => ({
+      readResource: () => Promise.resolve({
         contents: [{ mimeType: "text/html;profile=mcp-app", text: "x".repeat(1_048_577) }],
       }),
       idGenerator: () => sessionId,
@@ -255,7 +318,7 @@ describe("createReferenceHost", () => {
       (
         await oversized.request(
           "GET",
-          "/api/app?resourceUri=ui%3A%2F%2Fapproval%2Findex.html",
+          appPath,
           authorization(oversizedHost),
         )
       ).status,
@@ -263,15 +326,13 @@ describe("createReferenceHost", () => {
     await oversizedHost.close();
 
     const failed = makeServer({
-      readResource: async () => {
-        throw new Error("sensitive reader detail");
-      },
+      readResource: () => Promise.reject(new Error("sensitive reader detail")),
       idGenerator: () => sessionId,
     });
     const failedHost = await failed.hostPromise;
     const failureResponse = await failed.request(
       "GET",
-      "/api/app?resourceUri=ui%3A%2F%2Fapproval%2Findex.html",
+      appPath,
       authorization(failedHost),
     );
     expect(failureResponse.status).toBe(502);
@@ -289,7 +350,7 @@ describe("createReferenceHost", () => {
       },
       onCode,
       idGenerator: () => sessionId,
-      readResource: async () => ({
+      readResource: () => Promise.resolve({
         contents: [
           {
             mimeType: "text/html;profile=mcp-app",
@@ -311,7 +372,7 @@ describe("createReferenceHost", () => {
     const host = await fixture.hostPromise;
     const result = await fixture.request(
       "GET",
-      "/api/app?resourceUri=ui%3A%2F%2Fapproval%2Findex.html",
+      appPath,
       authorization(host),
     );
     expect(result.status).toBe(200);
@@ -327,7 +388,7 @@ describe("createReferenceHost", () => {
   it("retains the deny-all CSP when there are no resource requests", async () => {
     const fixture = makeServer({
       idGenerator: () => sessionId,
-      readResource: async () => ({
+      readResource: () => Promise.resolve({
         contents: [
           { mimeType: "text/html;profile=mcp-app", text: "<main>safe</main>", _meta: { ui: {} } },
         ],
@@ -336,7 +397,7 @@ describe("createReferenceHost", () => {
     const host = await fixture.hostPromise;
     const result = await fixture.request(
       "GET",
-      "/api/app?resourceUri=ui%3A%2F%2Fapproval%2Findex.html",
+      appPath,
       authorization(host),
     );
     expect(parseJson(ResourceResponseSchema, result.body).csp).toBe(REFERENCE_CSP);
@@ -344,7 +405,7 @@ describe("createReferenceHost", () => {
   });
 
   it("serves the static host page and bundle without exposing token-protected data", async () => {
-    const readStatic = vi.fn(async (asset: "index" | "bundle") => Buffer.from(asset));
+    const readStatic = vi.fn((asset: "index" | "bundle") => Promise.resolve(Buffer.from(asset)));
     const fixture = makeServer({ readStatic, idGenerator: () => sessionId });
     const host = await fixture.hostPromise;
     expect((await fixture.request("GET", "/")).body).toBe("index");
@@ -352,9 +413,7 @@ describe("createReferenceHost", () => {
     expect(readStatic).toHaveBeenNthCalledWith(1, "index");
     expect(readStatic).toHaveBeenNthCalledWith(2, "bundle");
     const unavailable = makeServer({
-      readStatic: async () => {
-        throw new Error("private file path");
-      },
+      readStatic: () => Promise.reject(new Error("private file path")),
       idGenerator: () => sessionId,
     });
     const failedIndex = await unavailable.request("GET", "/");
@@ -367,7 +426,9 @@ describe("createReferenceHost", () => {
   });
 
   it("validates app calls against the active host session before routing", async () => {
-    const onAppCall = vi.fn(async () => ({ content: [{ type: "text" as const, text: "ok" }] }));
+    const onAppCall = vi.fn(() =>
+      Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "ok" }] })),
+    );
     const fixture = makeServer({ idGenerator: () => sessionId, onAppCall });
     const host = await fixture.hostPromise;
     const headers = authorization(host);
@@ -379,19 +440,27 @@ describe("createReferenceHost", () => {
     });
     const result = await fixture.request("POST", "/api/call", headers, body);
     expect(result.status).toBe(200);
-    expect(onAppCall).toHaveBeenCalledWith({
+    expect(onAppCall).toHaveBeenCalledExactlyOnceWith({
       appId: "approval",
       sessionId,
       toolName: "approve",
       arguments: { decision: "yes" },
     });
+    const disallowed = await fixture.request(
+      "POST",
+      "/api/call",
+      headers,
+      body.replace('"approve"', '"filesystem.write"'),
+    );
+    expect(disallowed.status).toBe(403);
+    expect(disallowed.body).toBe('{"error":"app_tool_not_allowed"}');
     const invalid = await fixture.request("POST", "/api/call", headers, "{");
     expect(invalid.status).toBe(400);
     const mismatched = await fixture.request(
       "POST",
       "/api/call",
       headers,
-      body.replace(sessionId, "01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+      body.replace(sessionId, "00000000000000000000000001"),
     );
     expect(mismatched.status).toBe(404);
     const large = await fixture.request("POST", "/api/call", headers, "x".repeat(16_385));
@@ -418,45 +487,49 @@ describe("createReferenceHost", () => {
     await noHandlerHost.close();
     const failing = makeServer({
       idGenerator: () => sessionId,
-      onAppCall: async () => {
-        throw new Error("sensitive tool error");
-      },
+      onAppCall: () => Promise.reject(new Error("sensitive tool error")),
     });
     const failingHost = await failing.hostPromise;
-    const failure = await failing.request(
-      "POST",
-      "/api/call",
-      authorization(failingHost),
-      body,
-    );
+    const failure = await failing.request("POST", "/api/call", authorization(failingHost), body);
     expect(failure.body).toBe('{"content":[],"isError":true}');
     await failingHost.close();
   });
 
   it("rejects non-loopback configuration and invalid session identifiers", async () => {
-    await expect(createReferenceHost(
-      { ...appConfig, listen: { host: "0.0.0.0", port: 8080 } },
-      { readResource: async () => resource },
-    )).rejects.toThrow();
-    await expect(createReferenceHost(appConfig, {
-      readResource: async () => resource,
-      idGenerator: () => "invalid",
-      createHttpServer: () => {
-        throw new Error("server should not start");
-      },
-    })).rejects.toThrow();
+    await expect(
+      createReferenceHost(
+        { ...appConfig, listen: { host: "0.0.0.0", port: 8080 } },
+        { readResource: () => Promise.resolve(resource), onCode: () => undefined },
+      ),
+    ).rejects.toThrow();
+    await expect(
+      createReferenceHost(appConfig, {
+        readResource: () => Promise.resolve(resource),
+        onCode: () => undefined,
+        idGenerator: () => "invalid",
+        createHttpServer: () => {
+          throw new Error("server should not start");
+        },
+      }),
+    ).rejects.toThrow();
   });
 
   it("handles listen failure, invalid bound addresses, and close errors", async () => {
     const listenFailure = makeServer({ listenError: new Error("private listen detail") });
-    await expect(listenFailure.hostPromise).rejects.toThrow("private listen detail");
+    await expect(listenFailure.hostPromise).rejects.toMatchObject({
+      code: "app_host_bind_failed",
+    });
 
     const invalidAddress = makeServer({ address: null });
-    await expect(invalidAddress.hostPromise).rejects.toThrow();
+    await expect(invalidAddress.hostPromise).rejects.toMatchObject({
+      code: "app_host_address_unavailable",
+    });
     expect(invalidAddress.closed).toBe(true);
 
     const badClose = makeServer({ idGenerator: () => sessionId, closeError: new Error("close") });
     const host = await badClose.hostPromise;
-    await expect(host.close()).rejects.toThrow("close");
+    const closeOperation = host.close();
+    await expect(closeOperation).rejects.toBeInstanceOf(ReferenceHostError);
+    await expect(closeOperation).rejects.toMatchObject({ code: "app_host_close_failed" });
   });
 });

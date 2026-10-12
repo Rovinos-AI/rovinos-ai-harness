@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CallToolResultSchema } from "@modelcontextprotocol/core";
 import { parseJson } from "@harness/schemas";
-import { z } from "zod";
+import type { z } from "zod";
 import {
   APP_CSP,
   createSandboxDocument,
   mountReferenceApp,
   parseLaunchDetails,
+  startReferenceHostPage,
   type HostPagePort,
 } from "./host.js";
 
@@ -15,9 +16,8 @@ const bridgeMock = vi.hoisted(() => ({
   connect: vi.fn<() => Promise<void>>(),
   sendToolInput: vi.fn<(input: Readonly<Record<string, unknown>>) => Promise<void>>(),
   sendToolResult: vi.fn<(result: z.infer<typeof CallToolResultSchema>) => Promise<void>>(),
-  toolCall: vi.fn<
-    (call: { name: string; arguments?: Record<string, unknown> }) => Promise<unknown>
-  >(),
+  toolCall:
+    vi.fn<(call: { name: string; arguments?: Record<string, unknown> }) => Promise<unknown>>(),
 }));
 
 vi.mock("./bridge.js", () => ({
@@ -39,7 +39,7 @@ vi.mock("./bridge.js", () => ({
 const resultSchema = CallToolResultSchema;
 const appPayload = {
   appId: "approval",
-  sessionId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  sessionId: "00000000000000000000000000",
   resourceUri: "ui://approval/index.html",
   html: "<main>trusted test content</main>",
   csp: APP_CSP,
@@ -51,6 +51,8 @@ const launchHash = `#${new URLSearchParams({
   token: "t".repeat(43),
   resourceUri: appPayload.resourceUri,
 })}`;
+const makeLaunchHash = (token: string, resourceUri: string) =>
+  `#${new URLSearchParams({ token, resourceUri })}`;
 
 interface FakeFrame {
   readonly contentWindow: Window | null;
@@ -92,13 +94,10 @@ function createFakeRoot(): {
 }
 
 function successfulRequest(payload: unknown = appPayload) {
-  const responses = [
-    new Response("event: host.ready\n\n"),
-    new Response(JSON.stringify(payload)),
-  ];
+  const responses = [new Response("event: host.ready\n\n"), new Response(JSON.stringify(payload))];
   return vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      responses.shift() ?? new Response("", { status: 500 }),
+    (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve(responses.shift() ?? new Response("", { status: 500 })),
   );
 }
 
@@ -109,15 +108,20 @@ beforeEach(() => {
   bridgeMock.toolCall.mockReset();
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("reference app page", () => {
   it("accepts only a bearer token and ui resource in the launch fragment", () => {
     expect(parseLaunchDetails(launchHash)).toEqual({
       token: "t".repeat(43),
       resourceUri: appPayload.resourceUri,
     });
-    expect(parseLaunchDetails("#token=short&resourceUri=ui%3A%2F%2Fapp")).toBeUndefined();
-    expect(parseLaunchDetails("#token=" + "t".repeat(43) + "&resourceUri=https%3A%2F%2Fbad"))
-      .toBeUndefined();
+    expect(parseLaunchDetails(makeLaunchHash("short", "ui://app"))).toBeUndefined();
+    expect(
+      parseLaunchDetails(makeLaunchHash("t".repeat(43), "https://bad")),
+    ).toBeUndefined();
   });
 
   it("wraps app HTML with the exact deny-all CSP and escapes the CSP attribute", () => {
@@ -125,7 +129,7 @@ describe("reference app page", () => {
     expect(wrapped).toContain(`content="${APP_CSP}"`);
     expect(wrapped).toContain("<script>run()</script>");
     expect(createSandboxDocument("x", 'img-src "unsafe" & none')).toContain(
-      'img-src &quot;unsafe&quot; &amp; none',
+      "img-src &quot;unsafe&quot; &amp; none",
     );
   });
 
@@ -139,11 +143,11 @@ describe("reference app page", () => {
 
   it("rejects unauthorized channel and app responses", async () => {
     const { root } = createFakeRoot();
-    const forbidden = vi.fn(async () => new Response("", { status: 403 }));
+    const forbidden = vi.fn(() => Promise.resolve(new Response("", { status: 403 })));
     expect(await mountReferenceApp(root, launchHash, forbidden)).toBe(false);
     expect(forbidden).toHaveBeenCalledOnce();
 
-    const unknown = vi.fn(async () => new Response("", { status: 404 }));
+    const unknown = vi.fn(() => Promise.resolve(new Response("", { status: 404 })));
     expect(await mountReferenceApp(root, launchHash, unknown)).toBe(false);
 
     const appFailure = vi
@@ -225,5 +229,46 @@ describe("reference app page", () => {
     expect(await bridgeMock.toolCall({ name: "approve" })).toEqual({ content: [], isError: true });
     request.mockRejectedValueOnce(new Error("private request detail"));
     expect(await bridgeMock.toolCall({ name: "approve" })).toEqual({ content: [], isError: true });
+  });
+
+  it("starts the browser page, attaches the iframe, and reports startup failures", async () => {
+    const { frame } = createFakeRoot();
+    let status = "";
+    let attached = false;
+    const element = {
+      set textContent(value: string | null) {
+        status = value ?? "";
+      },
+      get textContent() {
+        return status;
+      },
+      replaceChildren() {
+        attached = true;
+      },
+    };
+    vi.stubGlobal("document", {
+      getElementById: () => element,
+      createElement: () => frame,
+    });
+    vi.stubGlobal("window", { location: { hash: launchHash } });
+    vi.stubGlobal("fetch", successfulRequest());
+    startReferenceHostPage();
+    await vi.waitFor(() => { expect(attached).toBe(true); });
+    expect(bridgeMock.sendToolInput).toHaveBeenCalledWith(appPayload.toolInput);
+
+    vi.stubGlobal("document", { getElementById: () => element, createElement: () => frame });
+    vi.stubGlobal("window", { location: { hash: launchHash } });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new Error("private browser failure"))),
+    );
+    startReferenceHostPage();
+    await vi.waitFor(() => { expect(status).toBe("host_unavailable"); });
+
+    const missingRootFetch = vi.fn();
+    vi.stubGlobal("document", { getElementById: () => null });
+    vi.stubGlobal("fetch", missingRootFetch);
+    startReferenceHostPage();
+    expect(missingRootFetch).not.toHaveBeenCalled();
   });
 });

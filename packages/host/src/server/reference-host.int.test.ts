@@ -89,7 +89,8 @@ beforeAll(async () => {
       listen: { host: "127.0.0.1", port: 0 },
     },
     {
-      readResource: async () => ({
+      onCode: () => undefined,
+      readResource: () => Promise.resolve({
         contents: [
           {
             mimeType: "text/html;profile=mcp-app",
@@ -97,7 +98,7 @@ beforeAll(async () => {
           },
         ],
       }),
-      idGenerator: () => "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      idGenerator: () => "00000000000000000000000000",
       toolInput: { decision: "approve" },
       toolResult: { content: [{ type: "text", text: "complete" }] },
     },
@@ -127,9 +128,7 @@ afterAll(async () => {
 });
 
 describe("reference host browser security", () => {
-  it(
-    "isolates the MCP App, blocks external requests, and delivers tool data",
-    async () => {
+  it("isolates the MCP App, blocks external requests, and delivers tool data", async () => {
     if (page === undefined || host === undefined) {
       throw new Error("Browser test setup failed.");
     }
@@ -140,7 +139,7 @@ describe("reference host browser security", () => {
     await page.waitForTimeout(250);
     expect(
       await iframe.count(),
-      `Host status: ${await page.locator("#host").textContent()}; page errors: ${pageErrors.join(",")}`,
+      `Host status: ${(await page.locator("#host").textContent()) ?? "missing"}; page errors: ${pageErrors.join(",")}`,
     ).toBe(1);
     expect(await iframe.getAttribute("sandbox")).toBe("allow-scripts");
     expect(await iframe.getAttribute("referrerpolicy")).toBe("no-referrer");
@@ -158,9 +157,7 @@ describe("reference host browser security", () => {
     expect(await app.locator("#result").textContent()).toContain("complete");
     expect(externalFailures).toHaveLength(externalRequests.length);
     expect(externalResponses).toEqual([]);
-    },
-    20_000,
-  );
+  }, 20_000);
 
   it("refuses unknown resources and rejects missing-token and foreign-origin requests", async () => {
     if (host === undefined) {
@@ -177,14 +174,20 @@ describe("reference host browser security", () => {
     expect(unknown.status).toBe(404);
     expect(await unknown.text()).toBe('{"error":"app_unknown"}');
 
-    const missingToken = await fetch(`${host.origin}/api/events?resourceUri=${encodeURIComponent(resourceUri)}`, {
-      headers: { origin: host.origin },
-    });
+    const missingToken = await fetch(
+      `${host.origin}/api/events?resourceUri=${encodeURIComponent(resourceUri)}`,
+      {
+        headers: { origin: host.origin },
+      },
+    );
     expect(missingToken.status).toBe(403);
 
-    const foreignOrigin = await fetch(`${host.origin}/api/events?resourceUri=${encodeURIComponent(resourceUri)}`, {
-      headers: { ...headers, origin: "http://foreign.example.test" },
-    });
+    const foreignOrigin = await fetch(
+      `${host.origin}/api/events?resourceUri=${encodeURIComponent(resourceUri)}`,
+      {
+        headers: { ...headers, origin: "http://foreign.example.test" },
+      },
+    );
     expect(foreignOrigin.status).toBe(403);
   });
 });

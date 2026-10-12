@@ -4,6 +4,24 @@ import { z } from "zod";
 import { Code } from "../primitives.js";
 
 const AppPermissionSchema = z.enum(["camera", "microphone", "geolocation", "clipboardWrite"]);
+const CspOriginSchema = z.url().superRefine((value, context) => {
+  const url = new URL(value);
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (
+    (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    url.pathname !== "/" ||
+    url.search.length > 0 ||
+    url.hash.length > 0
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "CSP allowlist entries must be secure origins without credentials or paths.",
+      params: { errorCode: "host_csp_origin_invalid" },
+    });
+  }
+});
 
 const AppConfigSchema = z
   .object({
@@ -73,7 +91,7 @@ export const HostConfigSchema = z
       }),
     listen: ListenConfigSchema.default({ host: "127.0.0.1", port: 0 }),
     permissionAllowlist: z.array(AppPermissionSchema).default([]),
-    cspAllowlist: z.array(z.url()).default([]),
+    cspAllowlist: z.array(CspOriginSchema).default([]),
   })
   .strict();
 

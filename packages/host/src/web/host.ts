@@ -61,24 +61,28 @@ export function createSandboxDocument(html: string, csp = APP_CSP): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"></head><body>${html}</body></html>`;
 }
 
-function authorizedHeaders(token: string): HeadersInit {
+function authorizedHeaders(token: string): Record<string, string> {
   return { authorization: ["Bearer", token].join(" ") };
+}
+
+interface ToolCallContext {
+  readonly appId: string;
+  readonly sessionId: string;
+  readonly token: string;
+  readonly request: typeof fetch;
 }
 
 async function routeToolCall(
   call: AppToolCall,
-  appId: string,
-  sessionId: string,
-  token: string,
-  request: typeof fetch,
+  context: ToolCallContext,
 ): Promise<z.infer<typeof CallResponseSchema>> {
   try {
-    const response = await request("/api/call", {
+    const response = await context.request("/api/call", {
       method: "POST",
-      headers: { ...authorizedHeaders(token), "content-type": "application/json" },
+      headers: { ...authorizedHeaders(context.token), "content-type": "application/json" },
       body: JSON.stringify({
-        appId,
-        sessionId,
+        appId: context.appId,
+        sessionId: context.sessionId,
         toolName: call.name,
         arguments: call.arguments ?? {},
       }),
@@ -119,10 +123,9 @@ export async function mountReferenceApp(
     root.setStatus(channel.status === 404 ? "app_unknown" : "app_unauthorized");
     return false;
   }
-  const response = await request(
-    `/api/app?resourceUri=${encodeURIComponent(launch.resourceUri)}`,
-    { headers },
-  );
+  const response = await request(`/api/app?resourceUri=${encodeURIComponent(launch.resourceUri)}`, {
+    headers,
+  });
   if (!response.ok) {
     root.setStatus(response.status === 404 ? "app_unknown" : "app_resource_invalid");
     return false;
@@ -142,12 +145,17 @@ export async function mountReferenceApp(
   }
   frame.srcdoc = createSandboxDocument(app.html, app.csp);
   const loaded = new Promise<void>((resolve) => {
-    frame.addEventListener("load", () => resolve(), { once: true });
+    frame.addEventListener("load", () => { resolve(); }, { once: true });
   });
   root.attachFrame();
   await loaded;
   const bridge = createAppBridge(frame, (call) =>
-    routeToolCall(call, app.appId, app.sessionId, launch.token, request),
+    routeToolCall(call, {
+      appId: app.appId,
+      sessionId: app.sessionId,
+      token: launch.token,
+      request,
+    }),
   );
   await bridge.connect();
   await bridge.sendToolInput(app.toolInput);
@@ -157,7 +165,8 @@ export async function mountReferenceApp(
   return true;
 }
 
-function startPage(): void {
+/** Starts the browser entry point when the trusted static host page has loaded. */
+export function startReferenceHostPage(): void {
   const element = document.getElementById("host");
   if (element === null) {
     return;
@@ -183,5 +192,5 @@ function startPage(): void {
 }
 
 if (typeof document !== "undefined") {
-  startPage();
+  startReferenceHostPage();
 }
