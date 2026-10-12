@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, watch } from "node:fs";
-import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -328,7 +328,10 @@ describe("InProcessBackend", () => {
   it("resolves workspace paths and rejects traversal, absolute paths, and symlink escapes", async () => {
     const outside = await mkdtemp(join(tmpdir(), "sandbox-outside-"));
     try {
-      await expect(resolveWorkspacePath(workspaceRoot)).resolves.toBe(workspaceRoot);
+      // On macOS the temp directory is behind a symlink (/var -> /private/var).
+      await expect(resolveWorkspacePath(workspaceRoot)).resolves.toBe(
+        await realpath(workspaceRoot),
+      );
       await expect(resolveWorkspacePath(workspaceRoot, "../outside")).rejects.toBeInstanceOf(
         SandboxWorkspacePathError,
       );
