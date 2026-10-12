@@ -9,6 +9,7 @@ import {
   type LogRecordDefinition,
   type SpanDefinition,
   type SpanDefinitionShape,
+  type LogRecordShape,
 } from "@harness/telemetry";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -20,9 +21,16 @@ type CatalogSpanDefinition = Pick<
 >;
 
 type CatalogLogDefinition = Pick<LogRecordDefinition, "name" | "shape">;
+type CatalogShape = SpanDefinitionShape | LogRecordShape;
 
 function compareNames(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
 }
 
 function attributeType(meta: AttrMeta): string {
@@ -44,11 +52,7 @@ function attributeType(meta: AttrMeta): string {
   }
 }
 
-function renderAttributeTable(
-  name: string,
-  shape: object,
-  packageName: string,
-): string {
+function renderAttributeTable(name: string, shape: CatalogShape, packageName: string): string {
   const rows = Object.keys(shape)
     .sort(compareNames)
     .map((attributeName) => {

@@ -51,11 +51,15 @@ beforeEach(() => {
 });
 
 function defineTestSpan() {
-  return defineSpan("harness.test.operation", {
-    "harness.request.id": attr.id(),
-    "harness.test.count": attr.int(),
-    "harness.test.mode": attr.enum(["fast", "safe"]),
-  }, testOwnerTask);
+  return defineSpan(
+    "harness.test.operation",
+    {
+      "harness.request.id": attr.id(),
+      "harness.test.count": attr.int(),
+      "harness.test.mode": attr.enum(["fast", "safe"]),
+    },
+    testOwnerTask,
+  );
 }
 
 class X extends HarnessError {
@@ -164,22 +168,22 @@ describe("span registry", () => {
 
   it("registers only allowlisted semantic-convention span names and attributes", () => {
     expect(() =>
-      defineSpan("harness.test.unowned", {}, { taskId: "not-a-task", packageName: "@harness/telemetry" }),
-    ).toThrowError("span_owner_task_invalid");
-    expect(() =>
-      Reflect.apply(defineSemconvSpan, undefined, [
-        "mcp.server.call",
+      defineSpan(
+        "harness.test.unowned",
         {},
-        testOwnerTask,
-      ]),
-    ).toThrowError("span_name_invalid");
-    expect(() =>
+        { taskId: "not-a-task", packageName: "@harness/telemetry" },
+      ),
+    ).toThrowError("span_owner_task_invalid");
+    expect(() => {
+      Reflect.apply(defineSemconvSpan, undefined, ["mcp.server.call", {}, testOwnerTask]);
+    }).toThrowError("span_name_invalid");
+    expect(() => {
       Reflect.apply(defineSemconvSpan, undefined, [
         "mcp.client.call",
         { "mcp.server.name": attr.code() },
         testOwnerTask,
-      ]),
-    ).toThrowError("span_attr_name_invalid");
+      ]);
+    }).toThrowError("span_attr_name_invalid");
 
     const definition = defineSemconvSpan(
       "mcp.client.call",
@@ -195,9 +199,13 @@ describe("span registry", () => {
       defineSpan("harness.test.unsafe", { "harness.test.text": z.string() }, testOwnerTask),
     ).toThrowError("span_attr_unconstrained");
     expect(() =>
-      defineSpan("harness.test.optional_unsafe", {
-        "harness.test.text": attr.optional(z.string()),
-      }, testOwnerTask),
+      defineSpan(
+        "harness.test.optional_unsafe",
+        {
+          "harness.test.text": attr.optional(z.string()),
+        },
+        testOwnerTask,
+      ),
     ).toThrowError("span_attr_unconstrained");
   });
 
@@ -285,9 +293,13 @@ describe("span registry", () => {
   });
 
   it("sets only schema-validated attributes on the active span", () => {
-    const definition = defineSpan("harness.test.active", {
-      "harness.test.attempts": attr.optional(attr.int()),
-    }, testOwnerTask);
+    const definition = defineSpan(
+      "harness.test.active",
+      {
+        "harness.test.attempts": attr.optional(attr.int()),
+      },
+      testOwnerTask,
+    );
     const span = definition.start({});
     const activeContext = trace.setSpan(context.active(), span);
 
@@ -338,7 +350,11 @@ describe("span registry", () => {
 
   it("returns definitions in registration order and looks them up by name", () => {
     const first = defineTestSpan();
-    const second = defineSpan("harness.test.second", { "harness.test.enabled": attr.bool() }, testOwnerTask);
+    const second = defineSpan(
+      "harness.test.second",
+      { "harness.test.enabled": attr.bool() },
+      testOwnerTask,
+    );
 
     expect(listSpanDefinitions()).toEqual([first, second]);
     expect(lookupSpanDefinition(first.name)).toBe(first);

@@ -197,12 +197,16 @@ describe("ModelGateway", () => {
     const provider = createTestTracerProvider();
     trace.setGlobalTracerProvider(provider);
     context.setGlobalContextManager(createTestContextManager());
-    const definition = defineSpan("harness.model_call", {
-      "harness.run.id": attr.id(),
-      "harness.event.seq": attr.optional(attr.int()),
-      "harness.model.attempts": attr.optional(attr.int()),
-      "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
-    }, { taskId: "4.7", packageName: "@harness/models" });
+    const definition = defineSpan(
+      "harness.model_call",
+      {
+        "harness.run.id": attr.id(),
+        "harness.event.seq": attr.optional(attr.int()),
+        "harness.model.attempts": attr.optional(attr.int()),
+        "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
+      },
+      { taskId: "4.7", packageName: "@harness/models" },
+    );
     let calls = 0;
     const complete = vi.fn((_request: ModelRequest, _context: ProviderContext) => {
       calls += 1;

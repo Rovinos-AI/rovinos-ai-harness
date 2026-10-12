@@ -20,10 +20,7 @@ import { z } from "zod";
 import { attr, isSafeAttr } from "./attr.js";
 import { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
 import { getTracer } from "./tracer.js";
-import {
-  SEMCONV_ATTRIBUTE_NAMES,
-  SEMCONV_SPAN_NAMES,
-} from "./semconv.js";
+import { SEMCONV_ATTRIBUTE_NAMES, SEMCONV_SPAN_NAMES } from "./semconv.js";
 import { env } from "node:process";
 
 /** Attribute-schema shape accepted by registered span definitions. */
@@ -88,7 +85,7 @@ function isSpanOwnerTask(value: unknown): value is SpanOwnerTask {
     value !== null &&
     "taskId" in value &&
     typeof value.taskId === "string" &&
-    /^[0-9]+(?:\.[0-9]+)+$/u.test(value.taskId) &&
+    /^\d+(?:\.\d+)+$/u.test(value.taskId) &&
     "packageName" in value &&
     typeof value.packageName === "string" &&
     /^@harness\/[a-z0-9-]+$/u.test(value.packageName)
@@ -176,7 +173,7 @@ export function defineSpan<const Shape extends SpanShape>(
  * @throws SpanRegistryError when the name is not allowlisted or the shape is unsafe.
  */
 export function defineSemconvSpan<const Shape extends SpanShape>(
-  name: typeof SEMCONV_SPAN_NAMES[number],
+  name: (typeof SEMCONV_SPAN_NAMES)[number],
   shape: Shape,
   ownerTask: SpanOwnerTask,
 ): SpanDefinition<Shape & ErrorCodeShape, z.ZodObject<Shape & ErrorCodeShape>> {

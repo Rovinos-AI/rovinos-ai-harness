@@ -9,7 +9,7 @@ export interface AttrMeta {
   readonly optional?: true;
 }
 
-const attrMetadata = new WeakMap<object, AttrMeta>();
+const attrMetadata = new WeakMap<WeakKey, AttrMeta>();
 
 function register<Schema extends z.core.$ZodType>(schema: Schema, meta: AttrMeta): Schema {
   attrMetadata.set(

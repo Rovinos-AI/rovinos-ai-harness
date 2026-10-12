@@ -9,7 +9,7 @@ const PackageManifestSchema = z
   .object({
     dependencies: z.record(z.string(), z.string()),
   })
-  .passthrough();
+  .loose();
 
 describe("OpenTelemetry semantic conventions", () => {
   it("pins the package version and verifies the MCP attribute against it", () => {

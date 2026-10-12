@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { attr, defineLogRecord, defineSpan } from "@harness/telemetry";
 import { describe, expect, it } from "vitest";
-import {
-  isAttributeCatalogCurrent,
-  renderAttributeCatalog,
-} from "./gen-attribute-catalog.js";
+import { isAttributeCatalogCurrent, renderAttributeCatalog } from "./gen-attribute-catalog.js";
 
 const ownerTask = { taskId: "4.7", packageName: "@harness/telemetry" } as const;
 const fixtureSpan = defineSpan(

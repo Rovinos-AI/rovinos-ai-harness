@@ -9,13 +9,17 @@ const commonAttributes = {
 };
 
 /** Root span for one execution segment. */
-export const RUN_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan("harness.run", {
-  ...commonAttributes,
-  "harness.segment.id": attr.id(),
-  "harness.run.parent_id": attr.optional(attr.id()),
-  "harness.run.continuation_of": attr.optional(attr.id()),
-  "harness.run.depth": attr.optional(attr.int()),
-}, { taskId: "4.1", packageName: "@harness/core" });
+export const RUN_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
+  "harness.run",
+  {
+    ...commonAttributes,
+    "harness.segment.id": attr.id(),
+    "harness.run.parent_id": attr.optional(attr.id()),
+    "harness.run.continuation_of": attr.optional(attr.id()),
+    "harness.run.depth": attr.optional(attr.int()),
+  },
+  { taskId: "4.1", packageName: "@harness/core" },
+);
 
 /** Creates metadata attributes for a run's root span. */
 export function runSpanAttributes(options: {

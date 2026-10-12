@@ -38,12 +38,16 @@ const runId = Id.parse("A".repeat(26));
 const testOwnerTask = { taskId: "4.7", packageName: "@harness/telemetry" } as const;
 
 function defineTestSpan() {
-  return defineSpan("harness.test.operation", {
-    "harness.request.id": attr.id(),
-    "harness.test.count": attr.int(),
-    "harness.test.mode": attr.enum(["fast", "safe"]),
-    "harness.run.id": attr.optional(attr.id()),
-  }, testOwnerTask);
+  return defineSpan(
+    "harness.test.operation",
+    {
+      "harness.request.id": attr.id(),
+      "harness.test.count": attr.int(),
+      "harness.test.mode": attr.enum(["fast", "safe"]),
+      "harness.run.id": attr.optional(attr.id()),
+    },
+    testOwnerTask,
+  );
 }
 
 function makeReadableSpan(overrides: Partial<ReadableSpan> = {}): ReadableSpan {
@@ -538,10 +542,14 @@ describe("AllowlistSpanProcessor", () => {
   });
 
   it("serializes span attributes in locale-independent ordinal order", async () => {
-    const definition = defineSpan("harness.test.canonical_order", {
-      "harness.test.a_": attr.enum(["first"]),
-      "harness.test.aa": attr.enum(["second"]),
-    }, testOwnerTask);
+    const definition = defineSpan(
+      "harness.test.canonical_order",
+      {
+        "harness.test.a_": attr.enum(["first"]),
+        "harness.test.aa": attr.enum(["second"]),
+      },
+      testOwnerTask,
+    );
     const next = createNextProcessor();
     const gate = new SentinelGate(
       new VaultRunView({
