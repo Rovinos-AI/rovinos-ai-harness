@@ -9,7 +9,14 @@ export type EventFieldClass = "meta" | "content";
  * Classifies every payload key. New keys default to `content` unless explicitly proven metadata.
  */
 export const EVENT_FIELD_CLASS = {
-  run_created: { configHash: "meta", policyVersion: "meta", parentRunId: "meta" },
+  run_created: {
+    configHash: "meta",
+    policyVersion: "meta",
+    parentRunId: "meta",
+    parentCallId: "meta",
+    scopeId: "meta",
+    depth: "meta",
+  },
   run_input: { input: "content", inputKind: "meta" },
   run_status_changed: { from: "meta", to: "meta", reason: "meta" },
   model_request: {

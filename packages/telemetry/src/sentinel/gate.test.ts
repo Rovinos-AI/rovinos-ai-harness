@@ -49,6 +49,18 @@ describe("SentinelGate", () => {
     expect(gate.drainTrips()).toEqual([]);
   });
 
+  it("catches a child canary using the shared root vault scope", async () => {
+    const childRun = Id.parse("C".repeat(26));
+    const rootCanary = "root-scope-private-value";
+    const reader = createReader(new Map([[firstRun, [rootCanary]]]));
+    const view = new VaultRunView(reader, {}, () => firstRun);
+    const gate = new SentinelGate(view, new ActiveRuns());
+
+    await expect(
+      gate.check({ runId: childRun, text: `child span ${rootCanary}` }),
+    ).resolves.toEqual({ ok: false, reason: "hit" });
+  });
+
   it("uses and caches a combined matcher for active and grace-period runs", async () => {
     const runs = new ActiveRuns({ now: () => 1 });
     runs.register(firstRun);

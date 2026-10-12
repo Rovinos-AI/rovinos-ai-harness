@@ -9,6 +9,7 @@ import {
   type AttributeValue,
   type Link,
   type Span,
+  type Context,
   type SpanContext,
 } from "@opentelemetry/api";
 import {
@@ -60,6 +61,12 @@ export class SpanContextMissingError extends HarnessError {
   constructor() {
     super("A valid active span is required to record an event.");
   }
+}
+
+/** Optional parent context and links for a registered span. */
+export interface StepSpanOptions {
+  readonly links?: readonly Link[];
+  readonly parentContext?: Context;
 }
 
 /**
@@ -165,7 +172,7 @@ export class RunRecorder {
     definition: SpanDefinition<SpanDefinitionShape>,
     attrs: Readonly<Record<string, AttributeValue>>,
     fn: (span: Span) => Event | Promise<Event>,
-    links?: readonly Link[],
+    options: StepSpanOptions = {},
   ): Promise<Event> {
     const spanAttrs: Record<string, unknown> = {
       ...attrs,
@@ -179,7 +186,10 @@ export class RunRecorder {
     const span = definition.start(
       spanAttrs,
       definition.name === RUN_SPAN.name
-        ? { parent: ROOT_CONTEXT, ...(links === undefined ? {} : { links: [...links] }) }
+        ? {
+            parent: options.parentContext ?? ROOT_CONTEXT,
+            ...(options.links === undefined ? {} : { links: [...options.links] }),
+          }
         : undefined,
     );
     const activeContext = trace.setSpan(context.active(), span);

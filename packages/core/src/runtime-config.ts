@@ -15,6 +15,7 @@ import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
 import type { CancelRunResult } from "./cancel.js";
+import type { RunScopeRegistry } from "./subagent/scope.js";
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
 export interface RuntimeOverrides {
@@ -34,6 +35,8 @@ export interface RuntimeOverrides {
   };
   readonly tool?: ToolPort;
   readonly context?: ContextPort;
+  /** Shared token-scope registry used by the runtime and its tool adapters. */
+  readonly scopeRegistry?: RunScopeRegistry;
   readonly processLike?: ShutdownProcessLike;
 }
 

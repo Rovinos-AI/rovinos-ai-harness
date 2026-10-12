@@ -31,3 +31,21 @@ test("exports the event schema, classification, and split/join API", () => {
   expect(seq).toBe(0);
   expect(typedNewEvent).toMatchObject({ type: "run_created" });
 });
+
+test("run_created carries parent metadata and a non-negative depth", () => {
+  const sample = eventSamples.find(({ type }) => type === "run_created");
+  if (sample?.type !== "run_created") {
+    throw new Error("Missing run_created sample.");
+  }
+  const child = Event.parse({
+    ...sample,
+    parentRunId: "11111111111111111111111111",
+    parentCallId: "22222222222222222222222222",
+    depth: 1,
+  });
+
+  expect(child).toMatchObject({ parentRunId: "11111111111111111111111111", depth: 1 });
+  expect(EVENT_FIELD_CLASS.run_created.parentCallId).toBe("meta");
+  expect(EVENT_FIELD_CLASS.run_created.depth).toBe("meta");
+  expect(Event.safeParse({ ...child, depth: -1 }).success).toBe(false);
+});

@@ -45,6 +45,12 @@ in `model_request` events when sent to a model.
 Roles are validated and prompt files resolved during runtime startup, using
 the selected config directory and registered tools and context strategies.
 
+The built-in `agent.spawn` tool creates a separate child run for a selected
+role. Child runs receive their own event log and context, share the root run's
+vault scope, and can use only tools present in both the parent registry and the
+selected role's tool set. The tool is non-idempotent; the default example policy
+asks for human approval.
+
 An optional `resultSchema` is a module reference of the form
 `"./schemas/result.js#ResultSchema"` or `"package-name#ResultSchema"`. Startup
 fails if the module cannot be loaded or the named export is not a Zod schema.

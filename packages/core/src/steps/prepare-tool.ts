@@ -56,6 +56,17 @@ export function toolRunContext(
         throw new SummaryRecordingError(error);
       }
     },
+    recordSubagentSpawned: async ({ childRunId, role, parentCallId }) => {
+      events.push(
+        await recorder.record({
+          type: "subagent_spawned",
+          v: 1,
+          childRunId,
+          role,
+          parentCallId,
+        }),
+      );
+    },
   };
 }
 

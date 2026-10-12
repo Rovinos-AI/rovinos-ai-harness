@@ -37,6 +37,9 @@ const runCreatedEvent = z
     configHash: Sha256Hex,
     policyVersion: Code,
     parentRunId: Id.optional(),
+    parentCallId: Id.optional(),
+    scopeId: Id.optional(),
+    depth: z.number().int().nonnegative().default(0),
   })
   .strict();
 
@@ -243,4 +246,11 @@ export type PayloadKeys<T extends EventType> = Exclude<
 >;
 
 /** Event input before the store assigns its sequence number. */
-export type NewEvent = Event extends infer T ? (T extends Event ? Omit<T, "seq"> : never) : never;
+type EventInput = z.input<typeof EventSchema>;
+
+/** Event input before sequence assignment, retaining defaults as optional inputs. */
+export type NewEvent = EventInput extends infer T
+  ? T extends EventInput
+    ? Omit<T, "seq">
+    : never
+  : never;

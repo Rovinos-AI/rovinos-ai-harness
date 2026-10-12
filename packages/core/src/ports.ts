@@ -23,6 +23,16 @@ export type ModelRequest = SharedModelRequest;
 export interface RunContext {
   readonly runId: Id;
   readonly signal: AbortSignal;
+  /** The active run's available tools, used to prevent children from widening access. */
+  readonly toolRegistry?: ToolPort;
+  /** Nesting depth of the run making a tool call. */
+  readonly depth?: number;
+  /** Durable callback for a subagent's parent-log announcement. */
+  readonly recordSubagentSpawned?: (event: {
+    readonly childRunId: Id;
+    readonly role: Code;
+    readonly parentCallId: Id;
+  }) => Promise<void>;
   /** Epoch-millisecond wall-clock deadline computed from run budgets. */
   readonly deadlineTs?: number;
   /** Durable metadata-only PII summary sink supplied by the loop. */
@@ -56,6 +66,8 @@ export interface ModelPort {
 export interface ToolDescription {
   readonly idempotent: boolean;
   readonly timeoutMs: number;
+  /** Runs to completion or cancellation without an independent timeout. */
+  readonly longRunning?: boolean;
 }
 
 /** Result returned after a tool execution. */

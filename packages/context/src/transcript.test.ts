@@ -273,6 +273,7 @@ describe("eventsToTranscript", () => {
           type: "run_created",
           configHash: "a".repeat(64),
           policyVersion: "test.policy",
+          depth: 0,
         },
       ]),
     ).toEqual([]);

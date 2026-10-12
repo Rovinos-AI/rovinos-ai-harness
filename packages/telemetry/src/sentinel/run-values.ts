@@ -84,6 +84,7 @@ export class VaultRunView {
   constructor(
     private readonly reader: VaultRunReader,
     options: VaultRunViewOptions = {},
+    private readonly scopeOf: (runId: Id) => Id = (runId) => runId,
   ) {
     this.minValueLength =
       VaultRunViewOptionsSchema.parse(options).minValueLength ?? DEFAULT_MIN_VALUE_LENGTH;
@@ -94,14 +95,15 @@ export class VaultRunView {
    * @param runId Run identifier.
    */
   async valuesFor(runId: Id): Promise<RunValueSet> {
-    const version = await this.reader.version(runId);
-    const cached = this.cache.get(runId);
+    const scopeId = this.scopeOf(runId);
+    const version = await this.reader.version(scopeId);
+    const cached = this.cache.get(scopeId);
     if (cached?.version === version) {
-      this.touch(runId, cached);
+      this.touch(scopeId, cached);
       return cached.valueSet;
     }
 
-    const values = await this.reader.listRawValues(runId);
+    const values = await this.reader.listRawValues(scopeId);
     const uniqueValues = new Set<string>();
     let skippedShort = 0;
     for (const rawValue of values) {
@@ -118,14 +120,14 @@ export class VaultRunView {
     if (newlySkippedShort > 0) {
       countSkippedShortValues(newlySkippedShort);
     }
-    this.touch(runId, { version, valueSet });
+    this.touch(scopeId, { version, valueSet });
     this.evictOverflow();
     return valueSet;
   }
 
   /** Forget a completed run after its sentinel grace period. */
   forgetRun(runId: Id): void {
-    this.cache.delete(runId);
+    this.cache.delete(this.scopeOf(runId));
   }
 
   private touch(runId: Id, cached: CachedRunValues): void {

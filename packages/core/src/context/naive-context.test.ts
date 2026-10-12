@@ -128,6 +128,7 @@ describe("NaiveContext", () => {
       type: "run_created",
       configHash: "a".repeat(64),
       policyVersion: "test.policy",
+      depth: 0,
     };
 
     await expect(new NaiveContext().build([event])).resolves.toEqual([]);

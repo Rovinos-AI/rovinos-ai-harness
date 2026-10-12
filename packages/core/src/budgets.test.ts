@@ -113,6 +113,7 @@ describe("BudgetTracker", () => {
         type: "run_created",
         configHash,
         policyVersion: "test.policy",
+        depth: 0,
       },
       {
         ...eventEnvelope(1, 101, firstSegmentId),

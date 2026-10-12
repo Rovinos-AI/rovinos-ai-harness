@@ -10,9 +10,10 @@ import { continueRunLoop, type RunLoopExecutionOptions, type RunLoopResult } fro
 import { recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { LeaseLostError, RunRecorder, type EventPartial } from "./recorder.js";
 import { planDanglingIntents, type ResumePolicy } from "./resume-policy.js";
-import { foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
+import { CorruptLogError, foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
 import { RUN_SPAN } from "./spans.js";
 import { applyDanglingIntents } from "./steps/tool-step.js";
+import type { RunScopeRegistry } from "./subagent/scope.js";
 
 /** Error raised when attempting to resume a completed, failed, or cancelled run. */
 export class RunAlreadyTerminalError extends HarnessError {
@@ -62,6 +63,7 @@ export class RunAwaitingApprovalError extends HarnessError {
 export interface ResumeRunOptions extends Omit<RunLoopExecutionOptions, "recorder"> {
   readonly store: EventStore;
   readonly runId: Id;
+  readonly scopes?: RunScopeRegistry;
   /** Policy for dangling non-idempotent tool intents; defaults to escalation. */
   readonly resumePolicy?: ResumePolicy;
 }
@@ -72,6 +74,44 @@ async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
     events.push(event);
   }
   return events;
+}
+
+interface RunScopeRestoreOptions {
+  readonly store: EventStore;
+  readonly runId: Id;
+  readonly events: readonly Event[];
+  readonly scopes: RunScopeRegistry;
+  readonly visited?: Set<Id>;
+}
+
+async function registerRunScope(options: RunScopeRestoreOptions): Promise<void> {
+  const { store, runId, events, scopes } = options;
+  const visited = options.visited ?? new Set<Id>();
+  const created = events.find((event) => event.type === "run_created");
+  if (created?.type !== "run_created") {
+    throw new CorruptLogError();
+  }
+  if (created.scopeId !== undefined) {
+    scopes.register(runId, created.scopeId);
+    return;
+  }
+  if (visited.has(runId)) {
+    throw new CorruptLogError();
+  }
+  visited.add(runId);
+  if (created.parentRunId === undefined) {
+    scopes.register(runId, runId);
+    return;
+  }
+  const parentEvents = await readEvents(store, created.parentRunId);
+  await registerRunScope({
+    store,
+    runId: created.parentRunId,
+    events: parentEvents,
+    scopes,
+    visited,
+  });
+  scopes.register(runId, scopes.scopeOf(created.parentRunId));
 }
 
 function linkFromTraceparent(traceparent: string): Link | undefined {
@@ -163,6 +203,14 @@ async function readResumeHistory(options: ResumeRunOptions): Promise<{
     options.store.latestSnapshot(options.runId),
     options.store.head(options.runId),
   ]);
+  if (options.scopes !== undefined) {
+    await registerRunScope({
+      store: options.store,
+      runId: options.runId,
+      events,
+      scopes: options.scopes,
+    });
+  }
   const state = foldRunState(events);
   if (state.status === "completed" || state.status === "failed" || state.status === "cancelled") {
     throw new RunAlreadyTerminalError();
@@ -344,9 +392,9 @@ export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResul
   await activeRuns.track(
     options.runId,
     () =>
-      recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), [
-        previousSegmentLink(events, snapshot?.traceparent),
-      ]),
+      recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), {
+        links: [previousSegmentLink(events, snapshot?.traceparent)],
+      }),
     () => isTerminalRunState(foldRunState(events)),
   );
 
