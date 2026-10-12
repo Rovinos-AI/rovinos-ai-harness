@@ -59,9 +59,12 @@ async function createStdioTransport(
   dependencies: McpTransportDependencies,
   signal?: AbortSignal,
 ): Promise<StdioClientTransport> {
-  const environment: Record<string, string | undefined> = Object.fromEntries(
-    DEFAULT_INHERITED_ENV_VARS.map((key) => [key, undefined]),
-  );
+  const environment: Record<string, string> = {};
+  // The SDK spreads getDefaultEnvironment() under `env`; own keys set to undefined mask those
+  // defaults (spawn drops undefined values), so nothing is inherited unless configured below.
+  for (const key of DEFAULT_INHERITED_ENV_VARS) {
+    Reflect.set(environment, key, undefined);
+  }
   const env = dependencies.env ?? process.env;
   if (config.inheritEnv && env.PATH !== undefined) {
     environment.PATH = env.PATH;
@@ -73,7 +76,7 @@ async function createStdioTransport(
   const transport = new StdioClientTransport({
     command: config.command,
     args: config.args,
-    env: environment as Record<string, string>,
+    env: environment,
     ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
     stderr: "pipe",
   });

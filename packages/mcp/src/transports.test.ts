@@ -42,11 +42,11 @@ function stdioConfig(inheritEnv: boolean) {
 
 describe("MCP transports", () => {
   it.each([
-    { inheritEnv: false, path: null },
-    { inheritEnv: true, path: "safe-parent-path" },
+    { inheritEnv: false, expectedPath: null },
+    { inheritEnv: true, expectedPath: "safe-parent-path" },
   ])(
     "limits child environment inheritance when inheritEnv=$inheritEnv",
-    async ({ inheritEnv, path }) => {
+    async ({ inheritEnv, expectedPath }) => {
       const events: McpLogEvent[] = [];
       const connection = new McpConnection(stdioConfig(inheritEnv), {
         env: {
@@ -68,7 +68,7 @@ describe("MCP transports", () => {
 
       expect(result.content[0]).toMatchObject({
         text: JSON.stringify({
-          path,
+          path: expectedPath,
           home: null,
           user: null,
           shell: null,

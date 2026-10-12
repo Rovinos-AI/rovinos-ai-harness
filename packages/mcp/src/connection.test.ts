@@ -96,7 +96,8 @@ function connectionFor(
 }
 
 /** Forwards a peer transport but replaces every `tools/list` result's `tools` with a non-array. */
-function corruptToolLists(inner: Transport): Transport {
+function corruptToolLists(peerTransport: Transport): Transport {
+  const inner = peerTransport;
   const proxy: Transport = {
     start: () => inner.start(),
     send: (message, options) => inner.send(message, options),

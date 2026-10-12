@@ -1,48 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Client,
-  SdkError,
-  SdkErrorCode,
   specTypeSchemas,
   type CallToolRequestOptions,
   type CallToolResult,
-  type ListToolsResult,
   type Transport,
 } from "@modelcontextprotocol/client";
-import {
-  HarnessError,
-  compileJsonSchema,
-  type SecretRef,
-  type ServerConfig,
-} from "@harness/schemas";
+import { compileJsonSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
+import { McpConnectionError, isConnectionLossError } from "./errors.js";
+import { listAllTools, type McpTool } from "./tool-list.js";
 import { createMcpTransport, type McpLogger } from "./transports.js";
 
-/** Stable failures raised by an MCP connection without exposing server text. */
-export type McpConnectionErrorCode =
-  | "mcp_connect_failed"
-  | "mcp_connect_timeout"
-  | "mcp_connection_lost"
-  | "mcp_list_tools_failed"
-  | "mcp_too_many_tools"
-  | "mcp_tool_arguments_invalid"
-  | "mcp_tool_call_failed";
-
-/** Safe connection error with a closed code and no remote-provided message. */
-export class McpConnectionError extends HarnessError {
-  override readonly code: McpConnectionErrorCode;
-
-  /** Creates a safe MCP error. */
-  constructor(code: McpConnectionErrorCode) {
-    super(code);
-    this.code = code;
-  }
-}
+export { McpConnectionError, type McpConnectionErrorCode } from "./errors.js";
+export { excludeHeaderDeclaringTools, type McpTool } from "./tool-list.js";
 
 /** Observable lifecycle state for one MCP server connection. */
 export type McpConnectionState = "connecting" | "ready" | "unavailable";
-
-/** MCP tools discovered from a server. */
-export type McpTool = ListToolsResult["tools"][number];
 
 /** Dependencies injected at the connection boundary. */
 export interface McpConnectionDependencies {
@@ -68,86 +41,27 @@ interface CachedToolList {
   readonly expiresAt: number;
 }
 
-const MAX_TOOLS = 1_000;
 const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
 
 const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
 
-const MAX_HEADER_SCAN_DEPTH = 32;
+const schemaValidatorCache = new WeakMap<Record<string, unknown>, (value: unknown) => void>();
 
-function declaresMcpHeader(value: unknown, depth = 0): boolean {
-  if (typeof value !== "object" || value === null || depth > MAX_HEADER_SCAN_DEPTH) {
-    return depth > MAX_HEADER_SCAN_DEPTH;
-  }
-  if (Array.isArray(value)) {
-    return value.some((item) => declaresMcpHeader(item, depth + 1));
-  }
-  return Object.entries(value).some(
-    ([key, item]) => key === "x-mcp-header" || declaresMcpHeader(item, depth + 1),
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Drops tools that declare SEP-2243 `x-mcp-header` parameters on modern Streamable HTTP.
- *
- * The raw `tools/list` path bypasses the SDK's exclusion (which logs the server-provided tool
- * name through `console.warn`), so this conservatively excludes every declaring tool instead
- * of only invalid ones; overly deep schemas are excluded too. Returns the kept tools and the
- * number excluded so callers can log a count, never a name.
- */
-export function excludeHeaderDeclaringTools(
-  tools: readonly McpTool[],
-  options: { readonly era: "legacy" | "modern" | undefined; readonly transport: "stdio" | "http" },
-): { readonly tools: McpTool[]; readonly excluded: number } {
-  if (options.era !== "modern" || options.transport !== "http") {
-    return { tools: [...tools], excluded: 0 };
+function getOrCreateValidator(inputSchema: unknown): (value: unknown) => void {
+  if (!isRecord(inputSchema)) {
+    return compileJsonSchema(inputSchema);
   }
-  const kept = tools.filter((tool) => !declaresMcpHeader(tool.inputSchema));
-  return { tools: kept, excluded: tools.length - kept.length };
-}
-
-const schemaValidatorCache = new WeakMap<object, ReturnType<typeof compileJsonSchema>>();
-
-function getOrCreateValidator(inputSchema: unknown): ReturnType<typeof compileJsonSchema> {
-  if (typeof inputSchema === "object" && inputSchema !== null) {
-    const cached = schemaValidatorCache.get(inputSchema);
-    if (cached !== undefined) {
-      return cached;
-    }
-    const validator = compileJsonSchema(inputSchema);
-    schemaValidatorCache.set(inputSchema, validator);
-    return validator;
+  const cached = schemaValidatorCache.get(inputSchema);
+  if (cached !== undefined) {
+    return cached;
   }
-  return compileJsonSchema(inputSchema);
-}
-
-function isConnectionLossError(error: unknown): boolean {
-  if (error instanceof SdkError) {
-    if (
-      error.code === SdkErrorCode.ConnectionClosed ||
-      error.code === SdkErrorCode.NotConnected ||
-      error.code === SdkErrorCode.SendFailed ||
-      error.code === SdkErrorCode.ClientHttpFailedToOpenStream ||
-      error.code === SdkErrorCode.ClientHttpFailedToTerminateSession
-    ) {
-      return true;
-    }
-  }
-  if (error instanceof McpConnectionError && error.code === "mcp_connection_lost") {
-    return true;
-  }
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = error.code;
-    if (
-      code === "CONNECTION_CLOSED" ||
-      code === "ECONNRESET" ||
-      code === "ECONNREFUSED" ||
-      code === "EPIPE"
-    ) {
-      return true;
-    }
-  }
-  return false;
+  const validator = compileJsonSchema(inputSchema);
+  schemaValidatorCache.set(inputSchema, validator);
+  return validator;
 }
 
 const defaultSleep = (milliseconds: number): Promise<void> =>
@@ -252,103 +166,113 @@ export class McpConnection {
     }
   }
 
+  /** Whether a connect attempt was superseded by `close()` or a newer attempt. */
+  #isStale(generation: number): boolean {
+    return this.#closed || this.#connectGeneration !== generation;
+  }
+
   async #performConnect(generation: number, signal: AbortSignal): Promise<void> {
+    const combinedSignal = AbortSignal.any([
+      AbortSignal.timeout(this.#config.timeouts.connectMs),
+      signal,
+    ]);
+    let transport: Transport | undefined;
     let client: Client | undefined;
-    let transportToClose: Transport | undefined;
-    let combinedSignal: AbortSignal | undefined;
     try {
-      const previousClient = this.#client;
-      this.#client = undefined;
-      this.#currentTransport = undefined;
-      if (previousClient !== undefined) {
-        await previousClient.close().catch(() => undefined);
-      }
-      if (this.#closed || this.#connectGeneration !== generation) {
+      await this.#closeCurrentClient();
+      if (this.#isStale(generation)) {
         this.#state = "unavailable";
         return;
       }
-
-      const timeoutSignal = AbortSignal.timeout(this.#config.timeouts.connectMs);
-      combinedSignal = AbortSignal.any([timeoutSignal, signal]);
-
-      const transport =
-        this.#dependencies.createTransport?.(this.#config, combinedSignal) ??
-        createMcpTransport(
-          this.#config,
-          {
-            resolveSecret: this.#dependencies.resolveSecret,
-            ...(this.#dependencies.env === undefined ? {} : { env: this.#dependencies.env }),
-            ...(this.#dependencies.logger === undefined
-              ? {}
-              : { logger: this.#dependencies.logger }),
-          },
-          combinedSignal,
-        );
-      const resolvedTransport = await transport;
-      transportToClose = resolvedTransport;
-      if (this.#closed || this.#connectGeneration !== generation) {
-        await resolvedTransport.close?.().catch?.(() => undefined);
+      transport = await this.#createTransport(combinedSignal);
+      if (this.#isStale(generation)) {
         this.#state = "unavailable";
+        await transport.close().catch(() => undefined);
         return;
       }
-
-      client = new Client(
-        { name: "rovinos-ai-harness", version: "0.0.0" },
-        {
-          versionNegotiation: protocolOptions(this.#config.protocol),
-          listChanged: {
-            tools: {
-              autoRefresh: false,
-              onChanged: (error) => {
-                this.#cachedTools = undefined;
-                if (error !== null) {
-                  this.#dependencies.logger?.log({
-                    code: "mcp_tools_refresh_failed",
-                    serverId: this.#config.id,
-                  });
-                  return;
-                }
-                if (this.#state === "ready") {
-                  void this.#fetchTools().catch(() => {
-                    this.#dependencies.logger?.log({
-                      code: "mcp_tools_refresh_failed",
-                      serverId: this.#config.id,
-                    });
-                  });
-                }
-              },
-            },
-          },
-        },
-      );
-
-      await client.connect(resolvedTransport, {
+      client = this.#createClient();
+      await client.connect(transport, {
         signal: combinedSignal,
         timeout: this.#config.timeouts.connectMs,
       });
-
-      if (this.#closed || this.#connectGeneration !== generation) {
-        await client.close().catch(() => undefined);
+      if (this.#isStale(generation)) {
         this.#state = "unavailable";
+        await client.close().catch(() => undefined);
         return;
       }
-
       this.#client = client;
       this.#protocolEra = client.getProtocolEra();
       this.#state = "ready";
-      this.#watchTransport(resolvedTransport);
+      this.#watchTransport(transport);
     } catch {
-      this.#state = "unavailable";
-      this.#protocolEra = undefined;
-      this.#cachedTools = undefined;
-      if (client !== undefined) {
-        await client.close().catch(() => undefined);
-      } else if (transportToClose !== undefined) {
-        await transportToClose.close?.().catch?.(() => undefined);
-      }
+      this.#markUnavailable();
+      await (client ?? transport)?.close().catch(() => undefined);
       throw new McpConnectionError(
-        signal.aborted || combinedSignal?.aborted ? "mcp_connect_timeout" : "mcp_connect_failed",
+        combinedSignal.aborted ? "mcp_connect_timeout" : "mcp_connect_failed",
       );
+    }
+  }
+
+  async #closeCurrentClient(): Promise<void> {
+    const previousClient = this.#client;
+    this.#client = undefined;
+    this.#currentTransport = undefined;
+    await previousClient?.close().catch(() => undefined);
+  }
+
+  #markUnavailable(): void {
+    this.#state = "unavailable";
+    this.#protocolEra = undefined;
+    this.#cachedTools = undefined;
+  }
+
+  async #createTransport(signal: AbortSignal): Promise<Transport> {
+    const { createTransport, resolveSecret, env, logger } = this.#dependencies;
+    if (createTransport !== undefined) {
+      return createTransport(this.#config, signal);
+    }
+    return createMcpTransport(
+      this.#config,
+      {
+        resolveSecret,
+        ...(env === undefined ? {} : { env }),
+        ...(logger === undefined ? {} : { logger }),
+      },
+      signal,
+    );
+  }
+
+  #createClient(): Client {
+    return new Client(
+      { name: "rovinos-ai-harness", version: "0.0.0" },
+      {
+        versionNegotiation: protocolOptions(this.#config.protocol),
+        listChanged: {
+          tools: {
+            autoRefresh: false,
+            onChanged: (error) => {
+              this.#onToolsChanged(error);
+            },
+          },
+        },
+      },
+    );
+  }
+
+  #onToolsChanged(error: Error | null): void {
+    this.#cachedTools = undefined;
+    const logRefreshFailure = () => {
+      this.#dependencies.logger?.log({
+        code: "mcp_tools_refresh_failed",
+        serverId: this.#config.id,
+      });
+    };
+    if (error !== null) {
+      logRefreshFailure();
+      return;
+    }
+    if (this.#state === "ready") {
+      void this.#fetchTools().catch(logRefreshFailure);
     }
   }
 
@@ -385,72 +309,33 @@ export class McpConnection {
     if (client === undefined || this.#state !== "ready") {
       throw new McpConnectionError("mcp_list_tools_failed");
     }
-
-    const tools: McpTool[] = [];
-    let cursor: string | undefined = undefined;
-    const seenCursors = new Set<string>();
-    let ttlMs: number | undefined = undefined;
-
+    let listed: Awaited<ReturnType<typeof listAllTools>>;
     try {
-      while (true) {
-        if (cursor !== undefined) {
-          if (seenCursors.has(cursor)) {
-            throw new McpConnectionError("mcp_list_tools_failed");
-          }
-          seenCursors.add(cursor);
-        }
-
-        const page: ListToolsResult = await client.request(
-          {
-            method: "tools/list",
-            ...(cursor === undefined ? {} : { params: { cursor } }),
-          },
-          ListToolsResultSchema,
-          { timeout: this.#config.timeouts.callMs },
-        );
-
-        const pageTtlMs = "ttlMs" in page ? page.ttlMs : undefined;
-        if (typeof pageTtlMs === "number" && ttlMs === undefined) {
-          ttlMs = pageTtlMs;
-        }
-        const filtered = excludeHeaderDeclaringTools(page.tools, {
-          era: this.#protocolEra,
-          transport: this.#config.transport.kind,
-        });
-        if (filtered.excluded > 0) {
+      listed = await listAllTools({
+        requestPage: (cursor) =>
+          client.request(
+            { method: "tools/list", ...(cursor === undefined ? {} : { params: { cursor } }) },
+            ListToolsResultSchema,
+            { timeout: this.#config.timeouts.callMs },
+          ),
+        era: this.#protocolEra,
+        transport: this.#config.transport.kind,
+        onExcluded: (count) => {
           this.#dependencies.logger?.log({
             code: "mcp_tools_excluded",
             serverId: this.#config.id,
-            count: filtered.excluded,
+            count,
           });
-        }
-
-        for (const tool of filtered.tools) {
-          tools.push(tool);
-          if (tools.length > MAX_TOOLS) {
-            throw new McpConnectionError("mcp_too_many_tools");
-          }
-        }
-
-        if (page.nextCursor === undefined || page.nextCursor === "" || page.tools.length === 0) {
-          break;
-        }
-        cursor = page.nextCursor;
-      }
+        },
+      });
     } catch (error) {
-      if (error instanceof McpConnectionError) {
-        throw error;
-      }
-      throw new McpConnectionError("mcp_list_tools_failed");
+      throw error instanceof McpConnectionError
+        ? error
+        : new McpConnectionError("mcp_list_tools_failed");
     }
-
-    const effectiveTtl = typeof ttlMs === "number" && ttlMs > 0 ? ttlMs : 0;
-    this.#cachedTools = {
-      tools,
-      expiresAt: this.#now() + effectiveTtl,
-    };
-
-    return [...tools];
+    const ttlMs = listed.ttlMs !== undefined && listed.ttlMs > 0 ? listed.ttlMs : 0;
+    this.#cachedTools = { tools: listed.tools, expiresAt: this.#now() + ttlMs };
+    return [...listed.tools];
   }
 
   /**
@@ -521,25 +406,22 @@ export class McpConnection {
     await this.#reconnect(signal);
   }
 
-  async #reconnect(signal?: AbortSignal): Promise<void> {
+  /** Throws when the connection was closed or the caller gave up, before and after each wait. */
+  #assertMayReconnect(signal?: AbortSignal): void {
     if (this.#closed) {
       throw new McpConnectionError("mcp_connection_lost");
     }
+    if (isAborted(signal)) {
+      throw new McpConnectionError("mcp_connect_timeout");
+    }
+  }
+
+  async #reconnect(signal?: AbortSignal): Promise<void> {
     let lastError: unknown;
     for (const delay of RECONNECT_BACKOFF_MS) {
-      if (this.#closed) {
-        throw new McpConnectionError("mcp_connection_lost");
-      }
-      if (isAborted(signal)) {
-        throw new McpConnectionError("mcp_connect_timeout");
-      }
+      this.#assertMayReconnect(signal);
       await (this.#dependencies.sleep ?? defaultSleep)(delay);
-      if (this.#closed) {
-        throw new McpConnectionError("mcp_connection_lost");
-      }
-      if (isAborted(signal)) {
-        throw new McpConnectionError("mcp_connect_timeout");
-      }
+      this.#assertMayReconnect(signal);
       try {
         await this.connect(signal);
         return;
