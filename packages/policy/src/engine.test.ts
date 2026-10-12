@@ -18,15 +18,12 @@ const document: PolicyDocument = PolicyDocumentSchema.parse({
 });
 
 describe("PolicyEngine", () => {
-  it("compiles once, exposes the document version, and decides using run context", async () => {
+  it("compiles once, exposes the document version, and decides using run context", () => {
     const engine = new PolicyEngine(document);
 
-    await expect(
-      engine.decide(
-        { toolId: "fs.read", args: { path: "<PATH_1>" } },
-        { subagent: false },
-      ),
-    ).resolves.toMatchObject({
+    expect(
+      engine.decide({ toolId: "fs.read", args: { path: "<PATH_1>" } }, { subagent: false }),
+    ).toMatchObject({
       decision: "ask",
       ruleId: "read_rule",
       reason: "needs_review",
@@ -34,11 +31,12 @@ describe("PolicyEngine", () => {
     expect(engine.version).toMatch(/^pol-[0-9a-f]{12}$/u);
   });
 
-  it("uses the restrictive document default when no rule matches", async () => {
+  it("uses the restrictive document default when no rule matches", () => {
     const engine = new PolicyEngine(document);
 
-    await expect(
-      engine.decide({ toolId: "fs.write", args: null }, { subagent: false }),
-    ).resolves.toMatchObject({ decision: "deny", ruleId: "default" });
+    expect(engine.decide({ toolId: "fs.write", args: null }, { subagent: false })).toMatchObject({
+      decision: "deny",
+      ruleId: "default",
+    });
   });
 });

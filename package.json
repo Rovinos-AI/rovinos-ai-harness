@@ -58,6 +58,7 @@
     "@harness/pii": "workspace:^",
     "@harness/schemas": "workspace:^",
     "@harness/store": "workspace:^",
+    "@harness/telemetry": "workspace:^",
     "@harness/vault": "workspace:^",
     "@types/node": "22.20.5",
     "@types/spdx-expression-parse": "4.0.0",

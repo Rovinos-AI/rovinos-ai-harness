@@ -21,6 +21,7 @@ import { requestModel } from "./steps/request-model.js";
 import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { toolStep } from "./steps/tool-step.js";
 import type { PreparedToolCall } from "./steps/prepare-tool.js";
+import { suspendedOutcome } from "./steps/suspended-outcome.js";
 import type {
   ContextPort,
   IdGenerator,
@@ -356,7 +357,7 @@ async function runToolCalls(
       ...(await toolStep({
         recorder: options.recorder,
         tool: options.tool,
-        policy: options.policy,
+        ...(options.policy === undefined ? {} : { policy: options.policy }),
         clock: options.clock,
         runId: execution.runId,
         ids: options.ids,
@@ -434,14 +435,4 @@ async function checkpointAfterStep(checkpointer: Checkpointer, events: Event[]):
     return foldRunState(events);
   }
   return state;
-}
-
-function suspendedOutcome(events: readonly Event[]): Event {
-  const event = [...events]
-    .reverse()
-    .find((candidate) => candidate.type === "run_status_changed" && candidate.to === "suspended");
-  if (event === undefined) {
-    throw new Error("Expected a suspension status event.");
-  }
-  return event;
 }

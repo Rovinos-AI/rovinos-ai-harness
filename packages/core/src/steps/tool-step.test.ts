@@ -23,7 +23,8 @@ import { foldRunState, type ApprovalRequestedEvent, type ToolIntentEvent } from 
 import { RUN_SPAN } from "../spans.js";
 import { FakeToolPort, type FakeToolDefinition } from "../testing/index.js";
 import type { PolicyPort, ToolPort } from "../ports.js";
-import { applyDanglingIntents, resolveDanglingIntentApproval, toolStep } from "./tool-step.js";
+import { applyDanglingIntents, resolveDanglingIntentApproval } from "./resume-tool-step.js";
+import { toolStep } from "./tool-step.js";
 
 const runId = "00000000000000000000000000";
 const segmentId = "11111111111111111111111111";
@@ -184,7 +185,7 @@ function createRecorder(): { readonly recorder: RunRecorder; readonly store: InM
 
 const allowPolicy: PolicyPort = {
   version: Code.parse("test.policy"),
-  decide: async () => ({
+  decide: () => ({
     decision: "allow",
     ruleId: "test_allow",
     reason: "test_allowed",
@@ -421,7 +422,7 @@ describe("tool-step resume handling", () => {
     );
     const policy: PolicyPort = {
       version: Code.parse("test.policy"),
-      decide: async () => ({
+      decide: () => ({
         decision: "deny",
         ruleId: "deny_rule",
         reason: "forbidden",
@@ -458,7 +459,9 @@ describe("tool-step resume handling", () => {
     );
     const policy: PolicyPort = {
       version: Code.parse("test.policy"),
-      decide: () => Promise.reject(new Error("synthetic policy failure")),
+      decide: () => {
+        throw new Error("synthetic policy failure");
+      },
     };
 
     const events = await toolStep({
@@ -490,7 +493,7 @@ describe("tool-step resume handling", () => {
     );
     const policy: PolicyPort = {
       version: Code.parse("test.policy"),
-      decide: async () => ({
+      decide: () => ({
         decision: "ask",
         ruleId: "review_rule",
         reason: "human_review",
@@ -500,9 +503,7 @@ describe("tool-step resume handling", () => {
 
     const events = await toolStep({
       ...toolStepDependencies(recorder, tool, history, policy),
-      calls: [
-        { callId: callIds.nonIdempotent, toolId: "reviewed", args: { path: "<PATH_1>" } },
-      ],
+      calls: [{ callId: callIds.nonIdempotent, toolId: "reviewed", args: { path: "<PATH_1>" } }],
     });
     const state = foldRunState([...history, ...events]);
 

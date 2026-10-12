@@ -47,20 +47,24 @@ describe("createRuntime model routing", () => {
       defaultDecision: "deny",
       rules: [],
     });
-    await writeFile(join(configDirectory, "policy.yaml"), "version: 1\ndefaultDecision: deny\nrules: []\n");
+    await writeFile(
+      join(configDirectory, "policy.yaml"),
+      "version: 1\ndefaultDecision: deny\nrules: []\n",
+    );
     const model: ModelPort = {
-      complete: async () => ({
-        parts: [{ type: "text", text: "done" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-        finishReason: "stop",
-        provider: "test",
-        model: "test",
-        latencyMs: 0,
-        schemaValid: true,
-        repairAttempts: 0,
-        fallbackDepth: 0,
-        providerBlobs: null,
-      }),
+      complete: () =>
+        Promise.resolve({
+          parts: [{ type: "text", text: "done" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "stop",
+          provider: "test",
+          model: "test",
+          latencyMs: 0,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+          providerBlobs: null,
+        }),
     };
     const runtime = await createRuntime(
       { run: RunConfigSchema.parse({}), policy: { file: "policy.yaml" } },

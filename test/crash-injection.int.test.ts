@@ -9,7 +9,6 @@ import {
   RunConfigSchema,
   SequentialIdGenerator,
   type Event,
-  type Code,
   type JsonValue,
   type NewEvent,
   type Part,
@@ -54,7 +53,7 @@ const nonIdempotentToolId = "write_once";
 const idempotentToolId = "safe_retry";
 const allowPolicy: PolicyPort = {
   version: Code.parse("test.policy"),
-  decide: async () => ({
+  decide: () => ({
     decision: "allow",
     ruleId: "test_allow",
     reason: "test_allowed",
@@ -591,7 +590,7 @@ describe("SQLite crash-injection matrix", () => {
     const callId = Id.parse("66666666666666666666666666");
     const policy: PolicyPort = {
       version: Code.parse("test.policy"),
-      decide: async () => ({
+      decide: () => ({
         decision: "ask",
         ruleId: "review_rule",
         reason: "human_review",
@@ -623,9 +622,7 @@ describe("SQLite crash-injection matrix", () => {
     ]);
     const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
     const tool = new FakeToolPort(
-      new Map([
-        ["reviewed_tool", { idempotent: false, timeoutMs: 1_000, execute }],
-      ]),
+      new Map([["reviewed_tool", { idempotent: false, timeoutMs: 1_000, execute }]]),
     );
     const overrides = {
       store,

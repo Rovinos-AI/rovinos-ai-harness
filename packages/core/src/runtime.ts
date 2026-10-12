@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
-import { PolicyEngine, loadPolicy, type PolicyDocument } from "@harness/policy";
 import { type EventStore } from "@harness/store";
-import { resolve } from "node:path";
 import { cancelRun } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ModelPort, ToolPort } from "./ports.js";
@@ -21,6 +19,7 @@ import { createSqliteStore } from "./runtime-store.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
+import { createRuntimePolicy } from "./runtime-policy.js";
 import type {
   Runtime,
   RuntimeComposition,
@@ -289,19 +288,8 @@ function composeRuntime(
     readonly scopes: RunScopeRegistry;
   },
 ): Runtime {
-  const {
-    config,
-    overrides,
-    clock,
-    ids,
-    store,
-    model,
-    context,
-    policy,
-    policyVersion,
-    roles,
-    scopes,
-  } = options;
+  const { config, overrides, clock, ids, store, model, policy, policyVersion, roles, scopes } =
+    options;
   const { tool: parentTool } = options;
   const tool = createSubagentTool({
     config,
@@ -324,46 +312,55 @@ function composeRuntime(
       graceMs: config.run.shutdownGraceMs,
       operation,
     });
+  const resume = createRuntimeResume(options, tool);
   return {
     store,
     clock,
     ids,
     run: (goal) => startRun(options, tool, goal, runWithControl),
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
-    resume: async (runId) => {
-      const firstNewSeq = await store.head(runId);
-      return withRunControl({
-        store,
-        runId,
-        firstNewSeq,
-        processLike: overrides.processLike ?? defaultProcessLike,
-        graceMs: config.run.shutdownGraceMs,
-        operation: async (signal) => {
-          const goal = await storedGoal(store, runId);
-          if (goal === undefined) {
-            throw new RunInputMissingError();
-          }
-          return resumeRun({
-            store,
-            runId,
-            clock,
-            ids,
-            goal,
-            model,
-            tool,
-            policy,
-            context,
-            signal,
-            scopes,
-            budgets: config.run.budgets,
-            checkpointEveryEvents: config.run.checkpointEveryEvents,
-            resumePolicy: config.run.resume.onNonIdempotent,
-          });
-        },
-      });
-    },
+    resume,
     cancel: (runId) => cancelRun(store, runId, clock, ids),
     close: () => store.close(),
+  };
+}
+
+function createRuntimeResume(
+  options: RuntimeComposition & { readonly scopes: RunScopeRegistry },
+  tool: ToolPort,
+): Runtime["resume"] {
+  const { config, clock, ids, store, model, context, policy, scopes, overrides } = options;
+  return async (runId) => {
+    const firstNewSeq = await store.head(runId);
+    return withRunControl({
+      store,
+      runId,
+      firstNewSeq,
+      processLike: overrides.processLike ?? defaultProcessLike,
+      graceMs: config.run.shutdownGraceMs,
+      operation: async (signal) => {
+        const goal = await storedGoal(store, runId);
+        if (goal === undefined) {
+          throw new RunInputMissingError();
+        }
+        return resumeRun({
+          store,
+          runId,
+          clock,
+          ids,
+          goal,
+          model,
+          tool,
+          policy,
+          context,
+          signal,
+          scopes,
+          budgets: config.run.budgets,
+          checkpointEveryEvents: config.run.checkpointEveryEvents,
+          resumePolicy: config.run.resume.onNonIdempotent,
+        });
+      },
+    });
   };
 }
 
@@ -399,13 +396,7 @@ export async function createRuntime(
     missingModelPort;
   const dataDir = resolveDataDir(process.env, overrides.dataDir);
   const tool = overrides.tool ?? unavailableTool;
-  const policyDocument: PolicyDocument =
-    config.policy?.file === undefined
-      ? { version: 1, defaultDecision: "deny", rules: [] }
-      : await loadPolicy(
-          resolve(overrides.roleConfigDirectory ?? process.cwd(), config.policy.file),
-        );
-  const policy = overrides.policy ?? new PolicyEngine(policyDocument);
+  const policy = await createRuntimePolicy(config, overrides);
   const context = overrides.context ?? new NaiveContext();
   const roles = await resolveRuntimeRoles(
     config,

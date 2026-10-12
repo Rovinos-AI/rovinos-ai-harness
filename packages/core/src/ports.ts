@@ -147,10 +147,7 @@ export interface PolicyPort {
    * @param context - Bounded context used by policy matchers.
    * @returns The decision, rule, and approval metadata.
    */
-  decide(
-    call: Pick<ModelToolCall, "toolId" | "args">,
-    context: PolicyContext,
-  ): Promise<PolicyDecision>;
+  decide(call: Pick<ModelToolCall, "toolId" | "args">, context: PolicyContext): PolicyDecision;
 }
 
 /** Builds provider messages from the durable run history. */

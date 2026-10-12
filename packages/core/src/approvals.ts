@@ -10,8 +10,8 @@ import {
   applyApprovalDecision,
   ApprovalEditsRequiredError,
   resolveDanglingIntentApproval,
-  type ResumeToolStepOptions,
-} from "./steps/tool-step.js";
+} from "./steps/resume-tool-step.js";
+import type { ResumeToolStepOptions } from "./steps/tool-step.js";
 import { prepareToolCall, toolRunContext } from "./steps/prepare-tool.js";
 
 export { ApprovalEditsRequiredError };

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { type Id, type JsonValue, type RunInput } from "@harness/schemas";
 import type { RunScopeRegistry } from "./subagent/scope.js";
-import type { PolicyPort, ToolPort } from "./ports.js";
+import type { ToolPort } from "./ports.js";
 import { continueRun as startContinuation } from "./continue.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 import { RunRecorder } from "./recorder.js";

@@ -84,7 +84,7 @@ import type { ResumeRunOptions } from "./resume.js";
 
 const allowTestPolicy: PolicyPort = {
   version: "test.policy",
-  decide: async () => ({
+  decide: () => ({
     decision: "allow",
     ruleId: "test_allow",
     reason: "test_allowed",
@@ -1986,7 +1986,7 @@ describe("runLoop", () => {
     );
     const policy: PolicyPort = {
       version: "test.policy",
-      decide: async () => ({
+      decide: () => ({
         decision: "ask",
         ruleId: "review_rule",
         reason: "human_review",

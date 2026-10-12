@@ -12,7 +12,7 @@ import { LeaseLostError, RunRecorder, type EventPartial } from "./recorder.js";
 import { planDanglingIntents, type ResumePolicy } from "./resume-policy.js";
 import { CorruptLogError, foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
 import { RUN_SPAN } from "./spans.js";
-import { applyDanglingIntents } from "./steps/tool-step.js";
+import { applyDanglingIntents } from "./steps/resume-tool-step.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 
 /** Error raised when attempting to resume a completed, failed, or cancelled run. */

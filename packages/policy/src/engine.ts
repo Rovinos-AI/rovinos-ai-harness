@@ -34,7 +34,7 @@ export class PolicyEngine {
   decide(
     call: Omit<PolicyCall, "context">,
     context: PolicyCall["context"],
-  ): Promise<ReturnType<ReturnType<typeof compilePolicy>["evaluate"]>> {
-    return Promise.resolve(this.compiled.evaluate({ ...call, context }));
+  ): ReturnType<ReturnType<typeof compilePolicy>["evaluate"]> {
+    return this.compiled.evaluate({ ...call, context });
   }
 }
