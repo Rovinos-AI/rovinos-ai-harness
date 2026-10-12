@@ -8,7 +8,12 @@ import {
   type JsonValue as JsonValueType,
   type ToolSpec,
 } from "@harness/schemas";
-import { ExecLimitsSchema, ExecSpecSchema } from "./types.js";
+import {
+  ExecLimitsSchema,
+  ExecSpecSchema,
+  MAX_EXEC_TIMEOUT_MS,
+  SANDBOX_ENV_FORBIDDEN_CODE,
+} from "./types.js";
 import type { ExecLimits, SandboxBackend } from "./types.js";
 
 /** Model-visible command fields; resource limits remain under host control. */
@@ -78,7 +83,9 @@ export class SandboxExecTool {
 
   /** Return the non-idempotent execution metadata for this tool. */
   describe(toolId: CodeType): SandboxExecToolDescription | undefined {
-    return toolId === EXEC_TOOL_ID ? { idempotent: false, timeoutMs: 300_000 } : undefined;
+    return toolId === EXEC_TOOL_ID
+      ? { idempotent: false, timeoutMs: MAX_EXEC_TIMEOUT_MS }
+      : undefined;
   }
 
   /** Advertise the strict input schema to model providers. */
@@ -102,7 +109,12 @@ export class SandboxExecTool {
     }
     const input = ExecToolInputSchema.safeParse(call.args);
     if (!input.success) {
-      return { outcome: "error", errorCode: "sandbox_exec_invalid", result: null };
+      const errorCode = input.error.issues.some(
+        (issue) => issue.message === SANDBOX_ENV_FORBIDDEN_CODE,
+      )
+        ? SANDBOX_ENV_FORBIDDEN_CODE
+        : "sandbox_exec_invalid";
+      return { outcome: "error", errorCode, result: null };
     }
     try {
       const result = await this.#backend.exec(

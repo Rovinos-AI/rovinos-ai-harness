@@ -4,14 +4,25 @@ import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import process from "node:process";
 import { HarnessError, type Code, type Id } from "@harness/schemas";
+import { ExecTimeoutMsSchema, MAX_EXEC_TIMEOUT_MS } from "./types.js";
 import type { Clock, ExecResult, ExecSpec, SandboxBackend } from "./types.js";
 
 const UNSAFE_LOG_CODE: Code = "sandbox_inprocess_unsafe";
-const DEFAULT_CLOCK: Clock = { now: () => Date.now() };
+const UNENFORCED_LIMITS_LOG_CODE: Code = "sandbox_inprocess_limits_unenforced";
+const TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const DEFAULT_CLOCK: Clock = {
+  now: () => Date.now(),
+  schedule: (callback, delayMs) => {
+    const timer = setTimeout(callback, delayMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  },
+};
 
 /** Logger that accepts only a safe code and never receives command contents. */
 export interface InProcessLogger {
-  /** Emits the stable in-process backend warning code. */
+  /** Emits stable in-process backend warning codes. */
   log(code: Code): void;
 }
 
@@ -21,7 +32,9 @@ export interface InProcessBackendOptions {
   readonly workspaceRoot: string;
   /** Explicitly permits the development backend in a production Node environment. */
   readonly allowUnsafeInProcess?: boolean;
-  /** Clock used to calculate execution duration. */
+  /** Maximum timeout this host permits for one execution; defaults to 300 seconds. */
+  readonly maxTimeoutMs?: number;
+  /** Clock used to measure duration and schedule timeout enforcement. */
   readonly clock?: Clock;
   /** Required safe-code logger notified whenever this backend starts. */
   readonly logger: InProcessLogger;
@@ -151,8 +164,8 @@ class CapturedOutput {
 
   result(): Pick<ExecResult, "stdout" | "stderr" | "stdoutBytes" | "stderrBytes" | "truncated"> {
     return {
-      stdout: Buffer.concat(this.#stdout).toString("utf8"),
-      stderr: Buffer.concat(this.#stderr).toString("utf8"),
+      stdout: new TextDecoder().decode(Buffer.concat(this.#stdout), { stream: true }),
+      stderr: new TextDecoder().decode(Buffer.concat(this.#stderr), { stream: true }),
       stdoutBytes: this.#stdoutBytes,
       stderrBytes: this.#stderrBytes,
       truncated: this.#truncated,
@@ -169,26 +182,30 @@ function killProcessGroup(pid: number): void {
 }
 
 /**
- * Development-only backend. It is not an isolation boundary and relies on the remote runner
- * to enforce CPU, memory, PID, network, and filesystem restrictions.
+ * Development-only backend. It enforces only outputBytes and timeoutMs locally; it does not
+ * enforce memoryMb, pids, cpuSeconds, network, or filesystem restrictions and is not an
+ * isolation boundary. Use the remote runner when those restrictions are required.
  */
 export class InProcessBackend implements SandboxBackend {
   readonly #workspaceRoot: string;
   readonly #clock: Clock;
+  readonly #maxTimeoutMs: number;
 
   /**
-   * Create the local backend, recording the unsafe-backend code at startup.
+   * Create the local backend, recording its safety and unenforced-limit codes at startup.
    *
    * @param options - Workspace, opt-in, clock, and safe-code logger.
    * @throws InProcessBackendError if production use has not been explicitly enabled.
    */
   constructor(options: InProcessBackendOptions) {
     options.logger.log(UNSAFE_LOG_CODE);
+    options.logger.log(UNENFORCED_LIMITS_LOG_CODE);
     if (process.env.NODE_ENV === "production" && options.allowUnsafeInProcess !== true) {
       throw new InProcessBackendError();
     }
     this.#workspaceRoot = options.workspaceRoot;
     this.#clock = options.clock ?? DEFAULT_CLOCK;
+    this.#maxTimeoutMs = ExecTimeoutMsSchema.parse(options.maxTimeoutMs ?? MAX_EXEC_TIMEOUT_MS);
   }
 
   /** {@inheritDoc SandboxBackend.exec} */
@@ -214,19 +231,22 @@ export class InProcessBackend implements SandboxBackend {
     const cwd = await resolveWorkspacePath(this.#workspaceRoot, spec.cwd);
     const output = new CapturedOutput(spec.limits.outputBytes);
     const child = spawnCommand(command, spec.argv.slice(1), cwd, {
-      PATH: process.env.PATH ?? "",
       ...spec.env,
+      PATH: TRUSTED_PATH,
     });
 
     return new Promise((resolve, reject) => {
       let timedOut = false;
       let spawnFailed = false;
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        if (child.pid !== undefined) {
-          killProcessGroup(child.pid);
-        }
-      }, spec.timeoutMs);
+      const cancelTimeout = this.#clock.schedule(
+        () => {
+          timedOut = true;
+          if (child.pid !== undefined) {
+            killProcessGroup(child.pid);
+          }
+        },
+        Math.min(spec.timeoutMs, this.#maxTimeoutMs),
+      );
       const abort = (): void => {
         if (child.pid !== undefined) {
           killProcessGroup(child.pid);
@@ -243,7 +263,10 @@ export class InProcessBackend implements SandboxBackend {
         spawnFailed = true;
       });
       child.once("close", (exitCode, childSignal) => {
-        clearTimeout(timeout);
+        cancelTimeout();
+        if (child.pid !== undefined) {
+          killProcessGroup(child.pid);
+        }
         signal.removeEventListener("abort", abort);
         if (spawnFailed) {
           reject(new SandboxSpawnError());

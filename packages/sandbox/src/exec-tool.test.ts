@@ -91,6 +91,19 @@ describe("SandboxExecTool", () => {
       errorCode: "sandbox_exec_invalid",
     });
     await expect(
+      tool.execute(
+        makeCall("sandbox.exec", {
+          argv: ["echo"],
+          timeoutMs: 1000,
+          env: { NODE_OPTIONS: "--require=./workspace.js" },
+        }),
+        context,
+      ),
+    ).resolves.toMatchObject({
+      outcome: "error",
+      errorCode: "sandbox_env_forbidden",
+    });
+    await expect(
       tool.execute(makeCall("sandbox.exec", { argv: ["echo"], timeoutMs: 1000 }), context),
     ).resolves.toMatchObject({
       outcome: "error",

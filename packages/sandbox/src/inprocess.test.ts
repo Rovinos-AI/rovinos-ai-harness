@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { watch } from "node:fs";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -25,6 +26,7 @@ function createBackend(
     readonly allowUnsafeInProcess?: boolean;
     readonly clock?: Clock;
     readonly log?: InProcessLogger;
+    readonly maxTimeoutMs?: number;
   } = {},
 ): InProcessBackend {
   return new InProcessBackend({
@@ -33,6 +35,7 @@ function createBackend(
     ...(options.allowUnsafeInProcess === undefined
       ? {}
       : { allowUnsafeInProcess: options.allowUnsafeInProcess }),
+    ...(options.maxTimeoutMs === undefined ? {} : { maxTimeoutMs: options.maxTimeoutMs }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
   });
 }
@@ -81,7 +84,10 @@ describe("InProcessBackend", () => {
 
   it("echoes stdin and measures duration with the injected clock", async () => {
     const times = [100, 117];
-    const clock: Clock = { now: () => times.shift() ?? 117 };
+    const clock: Clock = {
+      now: () => times.shift() ?? 117,
+      schedule: () => () => undefined,
+    };
     const backend = createBackend({ clock });
 
     const result = await backend.exec(
@@ -94,6 +100,7 @@ describe("InProcessBackend", () => {
 
     expect(result).toMatchObject({ exitCode: 0, stdout: "hello", stderr: "", durationMs: 17 });
     expect(log).toHaveBeenCalledWith("sandbox_inprocess_unsafe");
+    expect(log).toHaveBeenCalledWith("sandbox_inprocess_limits_unenforced");
   });
 
   it("returns non-zero exit codes and keeps shell punctuation as argv data", async () => {
@@ -125,46 +132,110 @@ describe("InProcessBackend", () => {
   // threat: T-03
   it("does not pass parent environment variables to the child", async () => {
     vi.stubEnv("HARNESS_SYNTHETIC_PARENT_SECRET", "not-for-child");
+    vi.stubEnv("PATH", "/synthetic/parent/path");
     const backend = createBackend();
 
     const result = await backend.exec(
       runId,
-      makeSpec([
-        process.execPath,
-        "-e",
-        "process.stdout.write(process.env.HARNESS_SYNTHETIC_PARENT_SECRET ?? '')",
-      ]),
+      makeSpec(
+        [
+          process.execPath,
+          "-e",
+          "process.stdout.write(JSON.stringify([process.env.HARNESS_SYNTHETIC_PARENT_SECRET ?? '', process.env.PATH, process.env.HARNESS_SAFE_CHILD_VALUE]))",
+        ],
+        { env: { HARNESS_SAFE_CHILD_VALUE: "explicitly-allowed" } },
+      ),
       new AbortController().signal,
     );
 
-    expect(result.stdout).toBe("");
+    expect(result.stdout).toBe(
+      JSON.stringify([
+        "",
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "explicitly-allowed",
+      ]),
+    );
   });
 
   // threat: T-10
   it("kills the process group, including a grandchild, on timeout", async () => {
-    const backend = createBackend();
-    const grandchildScript = "setInterval(() => {}, 1000)";
-    const parentScript = [
-      'const { spawn } = require("node:child_process");',
-      `const child = spawn(process.execPath, ["-e", ${JSON.stringify(grandchildScript)}], { stdio: "ignore" });`,
-      "process.stdout.write(`${process.pid},${child.pid}`);",
+    let triggerTimeout: (() => void) | undefined;
+    let scheduledDelayMs: number | undefined;
+    let timeoutCancelled = false;
+    const clock: Clock = {
+      now: () => 100,
+      schedule: (callback, delayMs) => {
+        triggerTimeout = callback;
+        scheduledDelayMs = delayMs;
+        return () => {
+          timeoutCancelled = true;
+        };
+      },
+    };
+    const backend = createBackend({ clock, maxTimeoutMs: 250 });
+    const grandchildScript = [
+      'const { writeFileSync } = require("node:fs");',
+      'writeFileSync("grandchild.ready", String(process.pid));',
       "setInterval(() => {}, 1000);",
     ].join("");
+    const parentScript = [
+      'const { spawn } = require("node:child_process");',
+      'const { writeFileSync } = require("node:fs");',
+      `const child = spawn(process.execPath, ["-e", ${JSON.stringify(grandchildScript)}], { stdio: "ignore" });`,
+      'writeFileSync("parent.ready", String(process.pid));',
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    const processesReady = new Promise<void>((resolve) => {
+      const watcher = watch(workspaceRoot, (_event, filename) => {
+        if (filename?.toString() === "grandchild.ready") {
+          watcher.close();
+          resolve();
+        }
+      });
+    });
 
-    const result = await backend.exec(
+    const execution = backend.exec(
       runId,
-      makeSpec([process.execPath, "-e", parentScript], { timeoutMs: 250 }),
+      makeSpec([process.execPath, "-e", parentScript], { timeoutMs: 300_000 }),
       new AbortController().signal,
     );
-    const [parentPidText, grandchildPidText] = result.stdout.split(",");
+    await processesReady;
+    triggerTimeout?.();
+    const result = await execution;
+    const parentPidText = await readFile(join(workspaceRoot, "parent.ready"), "utf8");
+    const grandchildPidText = await readFile(join(workspaceRoot, "grandchild.ready"), "utf8");
     const parentPid = Number(parentPidText);
     const grandchildPid = Number(grandchildPidText);
 
+    expect(scheduledDelayMs).toBe(250);
+    expect(timeoutCancelled).toBe(true);
     expect(result.timedOut).toBe(true);
     expect(result.signal).toBe("SIGKILL");
     expect(Number.isSafeInteger(parentPid)).toBe(true);
     expect(Number.isSafeInteger(grandchildPid)).toBe(true);
     expect(await waitForProcessExit(parentPid)).toBe(true);
+    expect(await waitForProcessExit(grandchildPid)).toBe(true);
+  });
+
+  // threat: T-10
+  it("kills a background grandchild after the command exits normally", async () => {
+    const backend = createBackend();
+    const parentScript = [
+      'const { spawn } = require("node:child_process");',
+      'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+      "child.unref();",
+      "process.stdout.write(String(child.pid));",
+    ].join("");
+
+    const result = await backend.exec(
+      runId,
+      makeSpec([process.execPath, "-e", parentScript]),
+      new AbortController().signal,
+    );
+    const grandchildPid = Number(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(Number.isSafeInteger(grandchildPid)).toBe(true);
     expect(await waitForProcessExit(grandchildPid)).toBe(true);
   });
 
@@ -182,6 +253,22 @@ describe("InProcessBackend", () => {
 
     expect(result.stdout + result.stderr).toHaveLength(5);
     expect(result.stdoutBytes + result.stderrBytes).toBe(11);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("does not return a replacement character when truncation splits UTF-8", async () => {
+    const backend = createBackend();
+    const result = await backend.exec(
+      runId,
+      makeSpec([process.execPath, "-e", 'process.stdout.write("ab€")'], {
+        limits: { ...limits, outputBytes: 4 },
+      }),
+      new AbortController().signal,
+    );
+
+    expect(result.stdout).toBe("ab");
+    expect(result.stdout).not.toContain("\uFFFD");
+    expect(result.stdoutBytes).toBe(5);
     expect(result.truncated).toBe(true);
   });
 
