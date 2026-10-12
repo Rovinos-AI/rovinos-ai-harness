@@ -56,6 +56,7 @@ stages:
           - template: pipelines/templates/node-setup.yml
           - script: >
               yarn test:unit --reporter=junit
+              --maxWorkers=4
               --outputFile=reports/junit.xml
               --coverage
               --coverage.reportOnFailure
