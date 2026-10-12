@@ -119,6 +119,45 @@ function corruptToolLists(peerTransport: Transport): Transport {
   return proxy;
 }
 
+/** A legacy in-memory server that counts `tools/list` requests and can announce list changes. */
+async function createCountingPeer(ttlMs?: number) {
+  const [client, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = new McpServer({ name: "counting-server", version: "1.0.0" });
+  server.server.registerCapabilities({ tools: { listChanged: true } });
+  let listRequests = 0;
+  server.server.setRequestHandler("tools/list", () => {
+    listRequests += 1;
+    return {
+      tools: [{ name: "counted", inputSchema }],
+      ...(ttlMs === undefined ? {} : { ttlMs }),
+    };
+  });
+  await server.connect(serverTransport);
+  return {
+    client,
+    serverTransport,
+    server,
+    listRequests: () => listRequests,
+  };
+}
+
+/** Resolves a transport only when released, so tests can act during the handshake. */
+function deferredTransport(transport: Transport) {
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    create: async () => {
+      await released;
+      return transport;
+    },
+    release: () => {
+      release();
+    },
+  };
+}
+
 describe("McpConnection", () => {
   it("exports the MCP connection, pool, and transport APIs from the package entry point", () => {
     expect(Object.keys(mcpPackage).sort()).toEqual([
@@ -430,5 +469,115 @@ describe("McpConnection", () => {
       tools: [],
       excluded: 1,
     });
+  });
+  it("shares one in-flight handshake between concurrent connect calls", async () => {
+    const peer = await createMemoryPeer();
+    const deferred = deferredTransport(peer.client);
+    const create = vi.fn(deferred.create);
+    const connection = connectionFor(undefined, create);
+
+    const first = connection.connect();
+    const second = connection.connect();
+    expect(connection.state).toBe("connecting");
+    deferred.release();
+    await Promise.all([first, second]);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(connection.state).toBe("ready");
+    await connection.connect();
+    expect(create).toHaveBeenCalledTimes(1);
+    await connection.close();
+    await peer.serverTransport.close();
+  });
+
+  it("does not become ready when closed while the transport is being created", async () => {
+    const peer = await createMemoryPeer();
+    const deferred = deferredTransport(peer.client);
+    const connection = connectionFor(undefined, deferred.create);
+
+    const connecting = connection.connect();
+    const closing = connection.close();
+    deferred.release();
+    await Promise.allSettled([connecting]);
+    await closing;
+
+    expect(connection.state).toBe("unavailable");
+    await expect(connection.connect()).rejects.toMatchObject({ code: "mcp_connect_failed" });
+    await expect(connection.listTools()).rejects.toMatchObject({ code: "mcp_connection_lost" });
+    await peer.serverTransport.close();
+  });
+
+  it("maps an already-aborted caller signal to mcp_connect_timeout", async () => {
+    const peer = await createMemoryPeer();
+    const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+
+    await expect(connection.connect(AbortSignal.abort())).rejects.toMatchObject({
+      code: "mcp_connect_timeout",
+    });
+    expect(connection.state).toBe("unavailable");
+    await peer.serverTransport.close();
+  });
+
+  it("aborts the handshake when the caller aborts mid-connect", async () => {
+    const peer = await createMemoryPeer();
+    const deferred = deferredTransport(peer.client);
+    const connection = connectionFor(undefined, deferred.create);
+    const controller = new AbortController();
+
+    const connecting = connection.connect(controller.signal);
+    controller.abort();
+    deferred.release();
+
+    await expect(connecting).rejects.toMatchObject({ code: "mcp_connect_timeout" });
+    await connection.close();
+    await peer.serverTransport.close();
+  });
+
+  it("serves tools from cache within the server ttlMs and refetches after it", async () => {
+    const peer = await createCountingPeer(1_000);
+    let now = 10_000;
+    const connection = new McpConnection(config(), {
+      resolveSecret: () => Promise.reject(new Error("unexpected secret reference")),
+      createTransport: () => Promise.resolve(peer.client),
+      now: () => now,
+    });
+    await connection.connect();
+
+    await connection.listTools();
+    await connection.listTools();
+    expect(peer.listRequests()).toBe(1);
+    now += 1_001;
+    await connection.listTools();
+    expect(peer.listRequests()).toBe(2);
+    await connection.close();
+    await peer.serverTransport.close();
+  });
+
+  it("refreshes the tool list when the server announces a change", async () => {
+    const peer = await createCountingPeer(60_000);
+    const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+    await connection.connect();
+    await connection.listTools();
+    expect(peer.listRequests()).toBe(1);
+
+    await peer.server.server.notification({ method: "notifications/tools/list_changed" });
+
+    await vi.waitFor(() => {
+      expect(peer.listRequests()).toBe(2);
+    });
+    await connection.close();
+    await peer.serverTransport.close();
+  });
+
+  it("accepts boolean JSON Schemas when validating tool arguments", async () => {
+    const peer = await createMemoryPeer();
+    const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+    await connection.connect();
+
+    await expect(
+      connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, true),
+    ).resolves.toMatchObject({ content: [{ type: "text", text: "called" }] });
+    await connection.close();
+    await peer.serverTransport.close();
   });
 });
