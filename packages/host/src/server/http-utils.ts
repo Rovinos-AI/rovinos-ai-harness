@@ -29,6 +29,10 @@ export function writeJson(response: HostResponse, status: number, value: unknown
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
+    // JSON is never rendered or framed, including the 503 returned when a static asset is missing.
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
   });
   response.end(JSON.stringify(value));
 }

@@ -191,6 +191,8 @@ afterEach(() => {
 describe("createReferenceHost", () => {
   it("serves authenticated resources through the Node HTTP adapter", async () => {
     const host = await createReferenceHost(appConfig, {
+      readStatic: (asset) =>
+        Promise.resolve(Buffer.from(asset === "index" ? "<!doctype html>" : "void 0;")),
       readResource: () => Promise.resolve(resource),
       onCode: () => undefined,
       onAppCall: () =>
@@ -250,6 +252,24 @@ describe("createReferenceHost", () => {
       expect(await callResponse.json()).toEqual({
         content: [{ type: "text", text: "ok" }],
       });
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("sends anti-framing headers on JSON error responses", async () => {
+    const host = await createReferenceHost(appConfig, {
+      readStatic: () => Promise.reject(new Error("asset missing")),
+      readResource: () => Promise.resolve(resource),
+      onCode: () => undefined,
+      idGenerator: () => sessionId,
+    });
+    try {
+      const bundle = await fetch(new URL("/host.js", host.origin));
+      expect(bundle.status).toBe(503);
+      expect(bundle.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+      expect(bundle.headers.get("x-frame-options")).toBe("DENY");
+      expect(bundle.headers.get("referrer-policy")).toBe("no-referrer");
     } finally {
       await host.close();
     }
