@@ -98,7 +98,16 @@ describe("ServerConfigSchema", () => {
     ).toBe(false);
   });
 
-  it.each(["API_KEY", "accessToken", "client_secret", "password", "credential"])(
+  it.each([
+    "API_KEY",
+    "accessToken",
+    "client_secret",
+    "password",
+    "credential",
+    "APIKEY",
+    "myapikey",
+    "clientsecret",
+  ])(
     "requires SecretRef for secret-looking stdio environment key %s",
     (key) => {
       expect(
@@ -145,6 +154,7 @@ describe("ServerConfigSchema", () => {
 
   it.each([
     ["https://mcp.example", true],
+    ["https://user@mcp.example", false],
     ["http://localhost:8080", true],
     ["http://127.0.0.1:8080", true],
     ["http://[::1]:8080", true],
@@ -157,6 +167,26 @@ describe("ServerConfigSchema", () => {
         configWithTransport({ kind: "http", url, headers: { Authorization: "env:MCP_AUTH" } }),
       ).success,
     ).toBe(valid);
+  });
+
+  it("rejects URL credentials with a stable error code", () => {
+    const url = new URL("https://mcp.example");
+    url.username = "mcp-user";
+    url.password = "sample-value";
+    const result = ServerConfigSchema.safeParse(
+      configWithTransport({
+        kind: "http",
+        url: url.toString(),
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(
+      !result.success &&
+        result.error.issues.some(
+          (issue) =>
+            issue.code === "custom" && issue.params?.errorCode === "server_url_credentials",
+        ),
+    ).toBe(true);
   });
 
   it("requires a Code for the configured tool prefix and positive integer limits", () => {
@@ -175,6 +205,54 @@ describe("ServerConfigSchema", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("rejects empty stdio commands and working directories", () => {
+    expect(
+      ServerConfigSchema.safeParse({
+        id: "stdio",
+        transport: { kind: "stdio", command: "" },
+      }).success,
+    ).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({
+        id: "stdio",
+        transport: { kind: "stdio", command: "node", cwd: "" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects empty or duplicate tool names and idempotency hints outside the allowlist", () => {
+    const server = {
+      id: "stdio",
+      transport: { kind: "stdio", command: "node" },
+    };
+    expect(
+      ServerConfigSchema.safeParse({ ...server, toolAllowlist: [""] }).success,
+    ).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({ ...server, idempotentTools: ["", "allowed"] }).success,
+    ).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({ ...server, toolAllowlist: ["allowed", "allowed"] }).success,
+    ).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({ ...server, idempotentTools: ["allowed", "allowed"] }).success,
+    ).toBe(false);
+    const result = ServerConfigSchema.safeParse({
+      ...server,
+      toolAllowlist: ["allowed"],
+      idempotentTools: ["not-allowed"],
+    });
+    expect(result.success).toBe(false);
+    expect(
+      !result.success &&
+        result.error.issues.some(
+          (issue) =>
+            issue.code === "custom" &&
+            issue.params?.errorCode === "server_idempotent_not_allowed",
+        ),
+    ).toBe(true);
+  });
 });
 
 describe("ServersConfigSchema", () => {
@@ -185,6 +263,19 @@ describe("ServersConfigSchema", () => {
   it("rejects duplicate server IDs", () => {
     const server = { id: "duplicate", transport: { kind: "stdio", command: "node" } };
     expect(ServersConfigSchema.safeParse([server, server]).success).toBe(false);
+  });
+
+  it("rejects duplicate effective tool prefixes", () => {
+    expect(
+      ServersConfigSchema.safeParse([
+        { id: "weather", transport: { kind: "stdio", command: "node" } },
+        {
+          id: "wx",
+          transport: { kind: "stdio", command: "node" },
+          toolPrefix: "weather",
+        },
+      ]).success,
+    ).toBe(false);
   });
 
   it("validates the sample servers YAML", async () => {

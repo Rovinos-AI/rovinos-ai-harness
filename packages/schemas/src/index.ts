@@ -50,6 +50,7 @@ export {
 } from "./classification.js";
 export { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
+export { isSecretKeyName } from "./secret-key-name.js";
 export {
   DestinationSchema,
   PiiActionSchema,

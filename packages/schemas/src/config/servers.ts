@@ -3,20 +3,7 @@
 import { z } from "zod";
 import { Code } from "../primitives.js";
 import { SecretRefSchema } from "../secret-ref.js";
-
-const secretKeySegments = new Set(["password", "secret", "token", "credential", "credentials"]);
-
-function hasSecretKeySegment(key: string): boolean {
-  const segments = key
-    .replaceAll(/([a-z0-9])([A-Z])/gu, "$1 $2")
-    .replaceAll(/([A-Z])([A-Z][a-z])/gu, "$1 $2")
-    .split(/[\s_-]+/u)
-    .map((segment) => segment.toLowerCase());
-  return (
-    segments.some((segment) => secretKeySegments.has(segment)) ||
-    (segments.includes("api") && segments.includes("key"))
-  );
-}
+import { isSecretKeyName } from "../secret-key-name.js";
 
 const ServerTimeoutsSchema = z
   .object({
@@ -26,19 +13,36 @@ const ServerTimeoutsSchema = z
   .strict()
   .prefault({});
 
+const ToolNamesSchema = z
+  .array(z.string().min(1))
+  .superRefine((names, context) => {
+    const seen = new Set<string>();
+    for (const [index, name] of names.entries()) {
+      if (seen.has(name)) {
+        context.addIssue({
+          code: "custom",
+          path: [index],
+          message: "Tool names must be unique within a list.",
+          params: { errorCode: "server_tool_name_duplicate" },
+        });
+      }
+      seen.add(name);
+    }
+  });
+
 const StdioTransportSchema = z
   .object({
     kind: z.literal("stdio"),
-    command: z.string(),
+    command: z.string().min(1),
     args: z.array(z.string()).default([]),
     env: z.record(z.string(), z.union([z.string(), SecretRefSchema])).optional(),
-    cwd: z.string().optional(),
+    cwd: z.string().min(1).optional(),
     inheritEnv: z.boolean().default(false),
   })
   .strict()
   .superRefine((transport, context) => {
     for (const [key, value] of Object.entries(transport.env ?? {})) {
-      if (hasSecretKeySegment(key) && !SecretRefSchema.safeParse(value).success) {
+      if (isSecretKeyName(key) && !SecretRefSchema.safeParse(value).success) {
         context.addIssue({
           code: "custom",
           path: ["env", key],
@@ -60,6 +64,13 @@ const HttpTransportSchema = z
         return;
       }
       const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(parsedUrl.hostname);
+      if (parsedUrl.username.length > 0 || parsedUrl.password.length > 0) {
+        context.addIssue({
+          code: "custom",
+          message: "HTTP server URLs must not contain credentials.",
+          params: { errorCode: "server_url_credentials" },
+        });
+      }
       if (
         (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") ||
         (parsedUrl.protocol !== "https:" && !isLoopback)
@@ -83,9 +94,9 @@ const ServerConfigObjectSchema = z
     apps: z.boolean().default(false),
     trust: z.enum(["internal", "external"]).default("external"),
     propagateTrace: z.boolean().default(false),
-    toolAllowlist: z.array(z.string()).optional(),
+    toolAllowlist: ToolNamesSchema.optional(),
     toolPrefix: Code.optional(),
-    idempotentTools: z.array(z.string()).optional(),
+    idempotentTools: ToolNamesSchema.optional(),
     useAnnotations: z.boolean().default(false),
     timeouts: ServerTimeoutsSchema,
     maxResultBytes: z.number().int().positive().default(1_048_576),
@@ -110,6 +121,18 @@ export const ServerConfigSchema = ServerConfigObjectSchema.superRefine((server, 
       params: { errorCode: "annotations_require_internal" },
     });
   }
+  if (server.toolAllowlist !== undefined) {
+    for (const [index, toolName] of (server.idempotentTools ?? []).entries()) {
+      if (!server.toolAllowlist.includes(toolName)) {
+        context.addIssue({
+          code: "custom",
+          path: ["idempotentTools", index],
+          message: "Idempotent tools must be included in the tool allowlist.",
+          params: { errorCode: "server_idempotent_not_allowed" },
+        });
+      }
+    }
+  }
 }).transform(({ toolPrefix, ...server }) => ({
   ...server,
   toolPrefix: toolPrefix ?? server.id,
@@ -121,6 +144,7 @@ export const ServersConfigSchema = z
   .default([])
   .superRefine((servers, context) => {
     const ids = new Set<string>();
+    const toolPrefixes = new Set<string>();
     for (const [index, server] of servers.entries()) {
       if (ids.has(server.id)) {
         context.addIssue({
@@ -131,6 +155,15 @@ export const ServersConfigSchema = z
         });
       }
       ids.add(server.id);
+      if (toolPrefixes.has(server.toolPrefix)) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "toolPrefix"],
+          message: "Tool prefixes must be unique across servers.",
+          params: { errorCode: "server_tool_prefix_duplicate" },
+        });
+      }
+      toolPrefixes.add(server.toolPrefix);
     }
   });
 

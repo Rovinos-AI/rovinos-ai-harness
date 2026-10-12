@@ -23,17 +23,19 @@ transports reject unknown fields.
 | `maxResultBytes` | positive integer | `1048576` | Maximum accepted tool-result size in bytes. |
 
 Tool names in `toolAllowlist` and `idempotentTools` are the names returned by
-the server, before harness normalization.
+the server, before harness normalization. Names must be non-empty and unique
+within each list. When `toolAllowlist` is set, every `idempotentTools` entry
+must also be allowlisted. Effective tool prefixes must be unique across servers.
 
 ## Stdio transport
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `kind` | `stdio` | required | Selects the local process transport. |
-| `command` | string | required | Executable to launch. |
+| `command` | non-empty string | required | Executable to launch. |
 | `args` | string array | `[]` | Arguments passed to the executable. |
 | `env` | string or `SecretRef` values | omitted | Environment values for the process. Values under secret-looking keys must be `SecretRef`s. |
-| `cwd` | string | omitted | Working directory for the process. |
+| `cwd` | non-empty string | omitted | Working directory for the process. |
 | `inheritEnv` | boolean | `false` | Whether to inherit the parent environment. |
 
 ## HTTP transport
@@ -41,7 +43,7 @@ the server, before harness normalization.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `kind` | `http` | required | Selects the HTTP transport. |
-| `url` | URL string | required | HTTPS is required except for `localhost`, `127.0.0.1`, and `::1`; loopback accepts HTTP for local development. |
+| `url` | URL string | required | HTTPS is required except for `localhost`, `127.0.0.1`, and `::1`; loopback accepts HTTP for local development. URLs must not contain usernames or passwords. |
 | `headers` | `SecretRef` values | omitted | Request headers resolved from secret references. |
 
 Secret references use `env:NAME`, `file:/absolute/path`, or

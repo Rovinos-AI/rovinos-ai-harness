@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import {
   ContractError,
   HarnessError,
+  isSecretKeyName,
   SecretRefSchema,
   parseJson,
   parseYaml,
@@ -14,7 +15,6 @@ import { HarnessConfigSchema, type HarnessConfig } from "./schema.js";
 
 const unknownValueSchema = z.unknown();
 const blockedPathSegments = new Set(["__proto__", "constructor", "prototype"]);
-const secretKeySegments = new Set(["password", "secret", "token", "credential", "credentials"]);
 
 /** A file reader injected by config-loader tests or callers. */
 export type ConfigFileReader = (path: string) => Promise<string>;
@@ -101,18 +101,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Object.prototype.toString.call(value) === "[object Object]";
 }
 
-function hasSecretKeySegment(key: string): boolean {
-  const segments = key
-    .replaceAll(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replaceAll(/([A-Z])([A-Z][a-z])/g, "$1 $2")
-    .split(/[\s_-]+/)
-    .map((segment) => segment.toLowerCase());
-  return (
-    segments.some((segment) => secretKeySegments.has(segment)) ||
-    (segments.includes("api") && segments.includes("key"))
-  );
-}
-
 type ConfigContainer = Record<string, unknown> | unknown[];
 
 interface InlineSecretScanState {
@@ -143,7 +131,7 @@ function inlineSecretChildIssues(
   const childPath = [...path, key];
   const childPathText = childPath.map(String).join(".");
   const issues =
-    hasSecretKeySegment(key) &&
+    isSecretKeyName(key) &&
     typeof child === "string" &&
     !SecretRefSchema.safeParse(child).success
       ? [`${childPathText}: a SecretRef (secret_inline)`]
