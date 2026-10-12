@@ -6,6 +6,8 @@ OpenTelemetry semantic-conventions version: `1.43.0`.
 
 MCP and GenAI conventions are in development and may change; updating the pinned version requires a deliberate review.
 
+The SDK defaults `OTEL_SEMCONV_STABILITY_OPT_IN` to `http` only when it is unset, preserving an operator-provided value. This selects stable HTTP conventions without enabling HTTP auto-instrumentation; GenAI and MCP conventions remain opted out.
+
 ## Spans
 
 ### `harness.approval_wait`

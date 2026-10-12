@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 /// <reference types="vite/client" />
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
 import "@harness/core";
 import { listLogDefinitions, listSpanDefinitions } from "@harness/telemetry";
 import {
@@ -9,6 +7,7 @@ import {
   assertRandomStringsDroppedFromSpan,
   assertRegisteredSchemasSafe,
 } from "@harness/telemetry/testing";
+import { findTelemetryRegistrationSources } from "../scripts/telemetry-registration-sources.js";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const productionModules = import.meta.glob("../packages/*/src/**/*.ts");
@@ -33,34 +32,8 @@ const expectedLogNames = [
   "harness.safe.tool_call",
 ];
 
-function findRegistrationSources(directory: string, root: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      return findRegistrationSources(path, root);
-    }
-    if (!entry.isFile() || !entry.name.endsWith(".ts") || entry.name.endsWith(".test.ts")) {
-      return [];
-    }
-    const source = readFileSync(path, "utf8");
-    return /\b(?:defineSpan|defineLogRecord)\s*\(/u.test(source)
-      ? [relative(root, path).replaceAll("\\", "/")]
-      : [];
-  });
-}
-
-function productionRegistrationSources(root: string): string[] {
-  return readdirSync(join(root, "packages"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) => {
-      const sourceDirectory = join(root, "packages", entry.name, "src");
-      return existsSync(sourceDirectory) ? findRegistrationSources(sourceDirectory, root) : [];
-    })
-    .sort();
-}
-
 async function importProductionRegistrationSources(root: string): Promise<void> {
-  for (const source of productionRegistrationSources(root)) {
+  for (const source of findTelemetryRegistrationSources(root)) {
     const modulePath = `../${source}`;
     const load = productionModules[modulePath];
     expect(
@@ -81,7 +54,7 @@ describe("production telemetry definition catalog", () => {
 
   it("imports every production file that registers telemetry definitions", () => {
     const root = process.cwd();
-    const sources = productionRegistrationSources(root);
+    const sources = findTelemetryRegistrationSources(root);
     expect(sources.length).toBeGreaterThan(0);
     for (const source of sources) {
       expect(productionModules[`../${source}`]).toBeTypeOf("function");

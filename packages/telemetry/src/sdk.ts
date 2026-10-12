@@ -37,8 +37,8 @@ export interface TelemetrySdk {
  */
 export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
   assertSentinelGate(options.gate, options.telemetry);
-  // Keep stable HTTP semantic conventions selected; HTTP auto-instrumentation is disabled.
-  env.OTEL_SEMCONV_STABILITY_OPT_IN = SEMCONV_STABILITY_OPT_IN;
+  // Default to stable HTTP conventions without overriding an operator's setting.
+  env.OTEL_SEMCONV_STABILITY_OPT_IN ??= SEMCONV_STABILITY_OPT_IN;
   const processorOptions = {
     ...(options.gate === undefined ? {} : { gate: options.gate }),
     ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry }),

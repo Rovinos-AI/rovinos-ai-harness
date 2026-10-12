@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import "@harness/core";
 import {
   getAttrMeta,
   listLogDefinitions,
@@ -14,6 +13,7 @@ import {
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type * as RegistrationSourceModule from "./telemetry-registration-sources.js";
 
 type CatalogSpanDefinition = Pick<
   SpanDefinition<SpanDefinitionShape>,
@@ -109,6 +109,8 @@ export function renderAttributeCatalog(
     "",
     "MCP and GenAI conventions are in development and may change; updating the pinned version requires a deliberate review.",
     "",
+    "The SDK defaults `OTEL_SEMCONV_STABILITY_OPT_IN` to `http` only when it is unset, preserving an operator-provided value. This selects stable HTTP conventions without enabling HTTP auto-instrumentation; GenAI and MCP conventions remain opted out.",
+    "",
     "## Spans",
     "",
     ...(spanSections.length === 0 ? ["_No span definitions._"] : [spanSections.join("\n\n")]),
@@ -128,35 +130,142 @@ export function isAttributeCatalogCurrent(
   return existing === generated;
 }
 
-function main(): void {
-  const check = process.argv.slice(2).includes("--check");
-  if (process.argv.slice(2).some((argument) => argument !== "--check") || process.argv.length > 3) {
-    process.stderr.write("Usage: yarn docs:catalog [--check]\n");
-    process.exitCode = 2;
-    return;
+function catalogDefinitionNames(catalog: string | undefined): {
+  readonly spans: ReadonlySet<string>;
+  readonly logs: ReadonlySet<string>;
+} {
+  const spans = new Set<string>();
+  const logs = new Set<string>();
+  let section: "spans" | "logs" | undefined;
+  for (const line of (catalog ?? "").split("\n")) {
+    if (line === "## Spans") {
+      section = "spans";
+    } else if (line === "## Log records") {
+      section = "logs";
+    } else {
+      const match = /^### `([^`]+)`$/u.exec(line);
+      if (section !== undefined && match?.[1] !== undefined) {
+        (section === "spans" ? spans : logs).add(match[1]);
+      }
+    }
   }
+  return { spans, logs };
+}
 
-  const catalogPath = fileURLToPath(
-    new URL("../docs/telemetry/attribute-catalog.md", import.meta.url),
-  );
-  const generated = renderAttributeCatalog(listSpanDefinitions(), listLogDefinitions());
-  const existing = existsSync(catalogPath) ? readFileSync(catalogPath, "utf8") : undefined;
+function firstDifferingLine(existing: string | undefined, generated: string): number {
+  const existingLines = (existing ?? "").split("\n");
+  const generatedLines = generated.split("\n");
+  const lineCount = Math.max(existingLines.length, generatedLines.length);
+  for (let index = 0; index < lineCount; index += 1) {
+    if (existingLines[index] !== generatedLines[index]) {
+      return index + 1;
+    }
+  }
+  return lineCount + 1;
+}
+
+function catalogDiffHint(existing: string | undefined, generated: string): string {
+  const oldNames = catalogDefinitionNames(existing);
+  const newNames = catalogDefinitionNames(generated);
+  const differences: string[] = [];
+  for (const [section, label] of [
+    ["spans", "spans"],
+    ["logs", "log records"],
+  ] as const) {
+    const added = [...newNames[section]].filter((name) => !oldNames[section].has(name)).sort();
+    const removed = [...oldNames[section]].filter((name) => !newNames[section].has(name)).sort();
+    if (added.length > 0) {
+      differences.push(`added ${label}: ${added.map((name) => `\`${name}\``).join(", ")}`);
+    }
+    if (removed.length > 0) {
+      differences.push(`removed ${label}: ${removed.map((name) => `\`${name}\``).join(", ")}`);
+    }
+  }
+  if (differences.length === 0) {
+    differences.push("no span or log names changed");
+  }
+  differences.push(`first differing line: ${String(firstDifferingLine(existing, generated))}`);
+  return differences.join("; ");
+}
+
+/** Inputs needed to run the catalog command. */
+export interface AttributeCatalogCommandOptions {
+  readonly catalogPath: string;
+  readonly spans: readonly CatalogSpanDefinition[];
+  readonly logs: readonly CatalogLogDefinition[];
+}
+
+/** Exit status and safe diagnostic produced by the catalog command. */
+export interface AttributeCatalogCommandResult {
+  readonly exitCode: number;
+  readonly stderr: string;
+}
+
+/** Runs the generator command with explicit arguments, registry inputs, and destination path. */
+export function runAttributeCatalogCommand(
+  args: readonly string[],
+  options: AttributeCatalogCommandOptions,
+): AttributeCatalogCommandResult {
+  if (args.length > 1 || args.some((argument) => argument !== "--check")) {
+    return { exitCode: 2, stderr: "Usage: yarn docs:catalog [--check]\n" };
+  }
+  const check = args.includes("--check");
+  const generated = renderAttributeCatalog(options.spans, options.logs);
+  const existing = existsSync(options.catalogPath)
+    ? readFileSync(options.catalogPath, "utf8")
+    : undefined;
 
   if (check) {
     if (!isAttributeCatalogCurrent(existing, generated)) {
-      process.stderr.write(
-        "Telemetry attribute catalog is stale. Run `yarn docs:catalog` and commit the result.\n",
-      );
-      process.exitCode = 1;
+      return {
+        exitCode: 1,
+        stderr: `Telemetry attribute catalog is stale (${catalogDiffHint(existing, generated)}). Run \`yarn docs:catalog\` and commit the result.\n`,
+      };
     }
-    return;
+    return { exitCode: 0, stderr: "" };
   }
 
-  mkdirSync(dirname(catalogPath), { recursive: true });
-  writeFileSync(catalogPath, generated);
+  mkdirSync(dirname(options.catalogPath), { recursive: true });
+  writeFileSync(options.catalogPath, generated);
+  return { exitCode: 0, stderr: "" };
+}
+
+function isRegistrationSourceModule(value: unknown): value is typeof RegistrationSourceModule {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof Reflect.get(value, "findTelemetryRegistrationSources") === "function"
+  );
+}
+
+async function main(): Promise<void> {
+  const catalogPath = fileURLToPath(
+    new URL("../docs/telemetry/attribute-catalog.md", import.meta.url),
+  );
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const loadedRegistrationSources: unknown = await import(
+    new URL("./telemetry-registration-sources.ts", import.meta.url).href
+  );
+  if (!isRegistrationSourceModule(loadedRegistrationSources)) {
+    throw new Error("Telemetry registration source scanner failed to load.");
+  }
+  const registrationSources = loadedRegistrationSources;
+  for (const source of registrationSources.findTelemetryRegistrationSources(root)) {
+    const builtModule = source.replace("/src/", "/dist/").replace(/\.ts$/u, ".js");
+    await import(pathToFileURL(`${root}/${builtModule}`).href);
+  }
+  const result = runAttributeCatalogCommand(process.argv.slice(2), {
+    catalogPath,
+    spans: listSpanDefinitions(),
+    logs: listLogDefinitions(),
+  });
+  if (result.stderr !== "") {
+    process.stderr.write(result.stderr);
+  }
+  process.exitCode = result.exitCode;
 }
 
 const scriptPath = process.argv[1];
 if (scriptPath !== undefined && import.meta.url === pathToFileURL(scriptPath).href) {
-  main();
+  await main();
 }

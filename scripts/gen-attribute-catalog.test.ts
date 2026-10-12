@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { attr, defineLogRecord, defineSpan } from "@harness/telemetry";
-import { describe, expect, it } from "vitest";
-import { isAttributeCatalogCurrent, renderAttributeCatalog } from "./gen-attribute-catalog.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  isAttributeCatalogCurrent,
+  renderAttributeCatalog,
+  runAttributeCatalogCommand,
+} from "./gen-attribute-catalog.js";
 
 const ownerTask = { taskId: "4.7", packageName: "@harness/telemetry" } as const;
 const fixtureSpan = defineSpan(
@@ -20,6 +27,16 @@ const fixtureLog = defineLogRecord("harness.catalog_fixture_log", {
   "harness.fixture.ratio": attr.num(),
 });
 
+let testDirectory: string;
+
+beforeEach(() => {
+  testDirectory = mkdtempSync(join(tmpdir(), "attribute-catalog-"));
+});
+
+afterEach(() => {
+  rmSync(testDirectory, { recursive: true, force: true });
+});
+
 describe("attribute catalog generator", () => {
   it("renders a stable snapshot for fixture registries", () => {
     expect(renderAttributeCatalog([fixtureSpan], [fixtureLog])).toMatchInlineSnapshot(`
@@ -30,6 +47,8 @@ describe("attribute catalog generator", () => {
       OpenTelemetry semantic-conventions version: \`1.43.0\`.
 
       MCP and GenAI conventions are in development and may change; updating the pinned version requires a deliberate review.
+
+      The SDK defaults \`OTEL_SEMCONV_STABILITY_OPT_IN\` to \`http\` only when it is unset, preserving an operator-provided value. This selects stable HTTP conventions without enabling HTTP auto-instrumentation; GenAI and MCP conventions remain opted out.
 
       ## Spans
 
@@ -58,7 +77,67 @@ describe("attribute catalog generator", () => {
     `);
   });
 
-  it("detects drift for check mode without exposing file contents", () => {
+  it("accepts a current catalog in --check mode", () => {
+    const catalogPath = join(testDirectory, "attribute-catalog.md");
+    const options = { catalogPath, spans: [fixtureSpan], logs: [fixtureLog] };
+    const generated = runAttributeCatalogCommand([], options);
+    expect(generated.exitCode).toBe(0);
+    expect(existsSync(catalogPath)).toBe(true);
+
+    const check = runAttributeCatalogCommand(["--check"], options);
+    expect(check).toEqual({ exitCode: 0, stderr: "" });
+  });
+
+  it("fails --check on drift with changed names and a line hint", () => {
+    const catalogPath = join(testDirectory, "attribute-catalog.md");
+    const catalog = renderAttributeCatalog([fixtureSpan], [fixtureLog]);
+    const stale = catalog.replace(
+      "### `harness.catalog_fixture`",
+      "### `harness.old_catalog_fixture`",
+    );
+    writeFileSync(catalogPath, stale);
+
+    const result = runAttributeCatalogCommand(["--check"], {
+      catalogPath,
+      spans: [fixtureSpan],
+      logs: [fixtureLog],
+    });
+    const expectedLine =
+      catalog.split("\n").findIndex((line) => line === "### `harness.catalog_fixture`") + 1;
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("added spans: `harness.catalog_fixture`");
+    expect(result.stderr).toContain("removed spans: `harness.old_catalog_fixture`");
+    expect(result.stderr).toContain(`first differing line: ${String(expectedLine)}`);
+    expect(readFileSync(catalogPath, "utf8")).toBe(stale);
+  });
+
+  it("fails --check when the catalog is missing", () => {
+    const result = runAttributeCatalogCommand(["--check"], {
+      catalogPath: join(testDirectory, "missing.md"),
+      spans: [fixtureSpan],
+      logs: [fixtureLog],
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("first differing line: 1");
+    expect(result.stderr).toContain("added spans: `harness.catalog_fixture`");
+  });
+
+  it("rejects unsupported command-line arguments", () => {
+    const result = runAttributeCatalogCommand(["--unknown"], {
+      catalogPath: join(testDirectory, "unused.md"),
+      spans: [fixtureSpan],
+      logs: [fixtureLog],
+    });
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stderr: "Usage: yarn docs:catalog [--check]\n",
+    });
+  });
+
+  it("compares generated and existing catalog contents", () => {
     const catalog = renderAttributeCatalog([fixtureSpan], [fixtureLog]);
 
     expect(isAttributeCatalogCurrent(catalog, catalog)).toBe(true);
