@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { TOKEN_TYPE_MAX_LENGTH } from "@harness/schemas";
+import { parseTokenType } from "@harness/schemas";
 import type { Code } from "@harness/schemas";
 import { z } from "zod";
 
 /** Runtime schema for the stable placeholder token format. */
-export const Token = z
-  .string()
-  .regex(
-    new RegExp(`^<[A-Z][A-Z0-9_]{0,${String(TOKEN_TYPE_MAX_LENGTH - 1)}}_[1-9]\\d{0,5}>$`, "u"),
-  );
+export const Token = z.string().refine((value) => parseTokenType(value) !== undefined);
 
 /** A run-scoped placeholder for a sensitive value. */
 export type Token = z.infer<typeof Token>;
@@ -18,11 +14,6 @@ export function tokenTypeName(entityType: Code): string {
   return entityType.toUpperCase().replaceAll(/[-.]/gu, "_");
 }
 
-const TOKEN_PATTERN = new RegExp(
-  `^<[A-Z][A-Z0-9_]{0,${String(TOKEN_TYPE_MAX_LENGTH - 1)}}_[1-9]\\d{0,5}>$`,
-  "u",
-);
-
 /** Check whether an unknown value is a valid token. */
 export function isToken(value: unknown): value is Token {
   return Token.safeParse(value).success;
@@ -30,14 +21,10 @@ export function isToken(value: unknown): value is Token {
 
 /** Find valid tokens in text and return their UTF-16 offsets. */
 export function findTokens(text: string): { token: Token; index: number }[] {
-  const pattern = new RegExp(
-    `<[A-Z][A-Z0-9_]{0,${String(TOKEN_TYPE_MAX_LENGTH - 1)}}_[1-9]\\d{0,5}>`,
-    "gu",
-  );
   const found: { token: Token; index: number }[] = [];
 
-  for (const match of text.matchAll(pattern)) {
-    if (TOKEN_PATTERN.test(match[0])) {
+  for (const match of text.matchAll(/<[^<>]*>/gu)) {
+    if (parseTokenType(match[0]) !== undefined) {
       found.push({ token: match[0], index: match.index });
     }
   }

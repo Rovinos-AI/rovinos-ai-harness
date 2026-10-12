@@ -118,6 +118,7 @@ export {
   CustomDetectorSchema,
   DetectionSchema,
   DetectorTextSchema,
+  parseTokenType,
   TOKEN_TYPE_MAX_LENGTH,
   type CustomDetector,
   type Detection,
