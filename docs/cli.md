@@ -17,6 +17,13 @@ belongs in `packages/schemas/src/cli/<command>.ts` and is documented alongside t
 successful command in JSON mode writes exactly one newline-terminated JSON document to stdout;
 command text and error codes are sent to stderr.
 
+## `harness doctor`
+
+`harness doctor` checks the Node.js version, configuration, secret references, and data-directory
+write access. It returns `1` if any check fails; warnings do not fail the command. Human output is a
+table of check IDs, statuses, and codes. `--json` returns a schema-validated array; see
+[Environment diagnostics](doctor.md) for check details and the registration pattern.
+
 ## `harness serve`
 
 `serve` keeps the process running until SIGINT or SIGTERM, then exits successfully. With `--json`,
@@ -110,7 +117,7 @@ These numeric values are stable for scripts and automation:
 | Code | Name | Meaning |
 | --- | --- | --- |
 | `0` | `ok` | Command completed successfully. |
-| `1` | `failure` | Unhandled or unmapped failure, including cancellation of an already-terminal run. |
+| `1` | `failure` | Unhandled or unmapped failure, a failed doctor check, or cancellation of an already-terminal run. |
 | `2` | `usage` | Invalid arguments, unknown command, or unknown context strategy. |
 | `3` | `config_invalid` | Configuration is invalid. |
 | `4` | `policy_denied` | Policy denied an operation, including separation-of-duties denial. |
@@ -129,7 +136,7 @@ never included in CLI error output.
 | Error code | Exit code |
 | --- | --- |
 | `usage` | `2` |
-| `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
+| `doctor_failed`, `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
 | `config_invalid` | `3` |
 | `policy_denied`, `approver_is_requester` | `4` |
 | `suspended`, `run_awaiting_approval` | `5` |

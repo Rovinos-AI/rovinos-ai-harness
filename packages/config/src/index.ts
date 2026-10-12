@@ -6,6 +6,7 @@ export {
   type ConfigFileReader,
   type LoadConfigOptions,
 } from "./load.js";
+export { getConfigSecretRefs } from "./secret-refs.js";
 export { HarnessConfigSchema, type HarnessConfig } from "./schema.js";
 export {
   CompositeSecretResolver,

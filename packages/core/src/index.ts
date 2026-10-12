@@ -126,6 +126,15 @@ export {
   type RoleRegistryWarning,
   type RoleSchemaLoader,
 } from "./roles.js";
+export {
+  DEFAULT_DOCTOR_TIMEOUT_MS,
+  doctorChecks,
+  registerDoctorCheck,
+  runDoctor,
+  type DoctorCheck,
+  type DoctorContext,
+} from "./doctor.js";
+export { resolveDataDir } from "./runtime-data-dir.js";
 export { RunScopeConflictError, RunScopeRegistry } from "./subagent/scope.js";
 export { AgentSpawnInputSchema, AgentSpawnTool } from "./subagent/spawn-tool.js";
 export {
