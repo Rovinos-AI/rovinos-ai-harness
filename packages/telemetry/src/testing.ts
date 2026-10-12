@@ -63,3 +63,10 @@ export class StaticVaultReader implements VaultRunReader {
     return Promise.resolve(this.valuesByRun.get(runId)?.length ?? 0);
   }
 }
+
+export {
+  assertRandomStringsDroppedFromLog,
+  assertRandomStringsDroppedFromSpan,
+  assertRegisteredSchemasSafe,
+  assertSchemaCatalogSafe,
+} from "./testing/registry-lint.js";

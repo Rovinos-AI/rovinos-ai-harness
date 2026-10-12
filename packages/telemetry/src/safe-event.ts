@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, SpanId, TraceId, type Event, type Code as EventCode } from "@harness/schemas";
+import { Code, type Event, type Code as EventCode } from "@harness/schemas";
 import { attr } from "./attr.js";
 import { z } from "zod";
 
@@ -7,15 +7,15 @@ const commonFields = {
   runId: attr.id(),
   seq: attr.nonnegativeInt(),
   ts: attr.nonnegativeInt(),
-  traceId: TraceId,
-  spanId: SpanId,
+  traceId: attr.traceId(),
+  spanId: attr.spanId(),
   policyVersion: attr.code(),
 };
 
 const modelCall = z
   .object({
     ...commonFields,
-    kind: z.literal("model_call"),
+    kind: attr.enum(["model_call"]),
     provider: attr.code(),
     model: attr.code(),
     inputTokens: attr.nonnegativeInt(),
@@ -30,7 +30,7 @@ const modelCall = z
 const toolCall = z
   .object({
     ...commonFields,
-    kind: z.literal("tool_call"),
+    kind: attr.enum(["tool_call"]),
     toolId: attr.code(),
     outcome: attr.enum(["ok", "error", "denied", "timeout"]),
     errorCode: attr.optional(attr.code()),
@@ -41,7 +41,7 @@ const toolCall = z
 const approvalWait = z
   .object({
     ...commonFields,
-    kind: z.literal("approval_wait"),
+    kind: attr.enum(["approval_wait"]),
     decision: attr.enum(["approve", "deny", "edit"]),
     waitMs: attr.nonnegativeInt(),
   })
@@ -50,7 +50,7 @@ const approvalWait = z
 const checkpoint = z
   .object({
     ...commonFields,
-    kind: z.literal("checkpoint"),
+    kind: attr.enum(["checkpoint"]),
     atSeq: attr.nonnegativeInt(),
     hasWorkspaceRef: attr.bool(),
   })
@@ -59,7 +59,7 @@ const checkpoint = z
 const runStatus = z
   .object({
     ...commonFields,
-    kind: z.literal("run_status"),
+    kind: attr.enum(["run_status"]),
     from: attr.enum(["pending", "running", "suspended", "completed", "failed", "cancelled"]),
     to: attr.enum(["pending", "running", "suspended", "completed", "failed", "cancelled"]),
     reason: attr.code(),
@@ -69,7 +69,7 @@ const runStatus = z
 const piiAction = z
   .object({
     ...commonFields,
-    kind: z.literal("pii_action"),
+    kind: attr.enum(["pii_action"]),
     boundary: attr.enum(["model_input", "tool_input", "tool_output", "storage", "ui"]),
     action: attr.enum(["tokenized", "redacted", "blocked", "allowed", "detokenized"]),
     toolId: attr.optional(attr.code()),
@@ -80,7 +80,7 @@ const piiAction = z
 const budgetExceeded = z
   .object({
     ...commonFields,
-    kind: z.literal("budget_exceeded"),
+    kind: attr.enum(["budget_exceeded"]),
     budget: attr.enum(["steps", "cost", "wall_clock"]),
     limit: attr.num(),
     observed: attr.num(),
@@ -90,7 +90,7 @@ const budgetExceeded = z
 const subagentSpawned = z
   .object({
     ...commonFields,
-    kind: z.literal("subagent_spawned"),
+    kind: attr.enum(["subagent_spawned"]),
     childRunId: attr.id(),
     role: attr.code(),
     parentCallId: attr.optional(attr.id()),
@@ -100,7 +100,7 @@ const subagentSpawned = z
 const subagentCompleted = z
   .object({
     ...commonFields,
-    kind: z.literal("subagent_completed"),
+    kind: attr.enum(["subagent_completed"]),
     childRunId: attr.id(),
     outcome: attr.enum(["completed", "failed", "cancelled"]),
   })
@@ -109,7 +109,7 @@ const subagentCompleted = z
 const runCreated = z
   .object({
     ...commonFields,
-    kind: z.literal("run_created"),
+    kind: attr.enum(["run_created"]),
     configHash: attr.hash(),
   })
   .strict();
