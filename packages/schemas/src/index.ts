@@ -50,6 +50,7 @@ export {
 } from "./classification.js";
 export { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
+export { isSecretKeyName } from "./secret-key-name.js";
 export {
   DestinationSchema,
   PiiActionSchema,
@@ -97,7 +98,12 @@ export {
   type RoleToolPattern,
   type RolesConfig,
 } from "./config/roles.js";
-export { ServerConfigSchema } from "./config/servers.js";
+export {
+  ServerConfigSchema,
+  ServersConfigSchema,
+  type ServerConfig,
+  type ServersConfig,
+} from "./config/servers.js";
 export { PolicyConfigSchema } from "./config/policy.js";
 export {
   JsonPointerSchema,

@@ -245,7 +245,7 @@ describe("inline config secrets", () => {
       additions: { policy: { tokenizer: "cl100k_base" } },
       path: "policy.tokenizer",
       value: "cl100k_base",
-      inline: false,
+      inline: true,
     },
     {
       name: "auth token reference",
