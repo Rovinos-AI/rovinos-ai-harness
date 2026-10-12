@@ -1,0 +1,650 @@
+// SPDX-License-Identifier: Apache-2.0
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CallToolResultSchema } from "@modelcontextprotocol/core";
+import { parseJson } from "@harness/schemas";
+import { z } from "zod";
+import {
+  createReferenceHost,
+  ReferenceHostError,
+  REFERENCE_CSP,
+  type ReferenceHostDependencies,
+} from "./index.js";
+
+const appResourceUri = "ui://approval/index.html";
+const appConfig = {
+  apps: [
+    {
+      id: "approval",
+      resourceUri: appResourceUri,
+      telemetry: true,
+      allowedTools: ["approve"],
+    },
+  ],
+  listen: { host: "127.0.0.1", port: 0 },
+};
+const sessionId = "00000000000000000000000000";
+const resource = {
+  contents: [{ mimeType: "text/html;profile=mcp-app", text: "<main>approved</main>" }],
+};
+const ResourceResponseSchema = z
+  .object({ csp: z.string(), permissions: z.array(z.string()) })
+  .loose();
+const AppResourceResponseSchema = z.object({ sessionId: z.string() }).loose();
+
+type RequestListener = Parameters<NonNullable<ReferenceHostDependencies["createHttpServer"]>>[0];
+type HttpServer = ReturnType<NonNullable<ReferenceHostDependencies["createHttpServer"]>>;
+type Request = Parameters<RequestListener>[0];
+type Response = Parameters<RequestListener>[1];
+
+const eventsPath = `/api/events?resourceUri=${encodeURIComponent(appResourceUri)}`;
+const AppReadySchema = z.object({ appId: z.string(), sessionId: z.string() }).strict();
+
+interface FakeResponse {
+  readonly response: Response;
+  readonly read: () => {
+    readonly status: number;
+    readonly headers: Record<string, string>;
+    readonly body: string;
+  };
+}
+
+function makeResponse(): FakeResponse {
+  let status = 0;
+  let headers: Record<string, string> = {};
+  let body = "";
+  const destroy = vi.fn();
+  return {
+    response: {
+      get headersSent() {
+        return status !== 0;
+      },
+      writeHead(code, responseHeaders) {
+        status = code;
+        headers = responseHeaders;
+      },
+      write(value) {
+        body += value;
+        return true;
+      },
+      end(value) {
+        body += value?.toString() ?? "";
+      },
+      destroy,
+    },
+    read: () => ({ status, headers, body }),
+  };
+}
+
+function makeServer(
+  options: {
+    readonly address?: { readonly port: number } | string | null;
+    readonly listenError?: Error;
+    readonly closeError?: Error;
+    readonly readResource?: (uri: string) => Promise<unknown>;
+    readonly onAppCall?: ReferenceHostDependencies["onAppCall"];
+    readonly onCode?: ReferenceHostDependencies["onCode"];
+    readonly readStatic?: ReferenceHostDependencies["readStatic"];
+    readonly config?: unknown;
+    readonly idGenerator?: () => string;
+    readonly randomBytes?: (size: number) => Buffer;
+    readonly now?: () => number;
+  } = {},
+) {
+  let listener: RequestListener | undefined;
+  let errorListener: ((error: Error) => void) | undefined;
+  let hostArgument = "";
+  let closed = false;
+  const server: HttpServer = {
+    once(event, callback) {
+      errorListener = callback;
+      return this;
+    },
+    listen(_port, host, callback) {
+      hostArgument = host;
+      if (options.listenError !== undefined) {
+        errorListener?.(options.listenError);
+      } else {
+        callback();
+      }
+      return this;
+    },
+    address: () => (options.address === undefined ? { port: 43210 } : options.address),
+    close(callback) {
+      closed = true;
+      callback(options.closeError);
+      return this;
+    },
+  };
+  const dependencies: ReferenceHostDependencies = {
+    readResource: options.readResource ?? (() => Promise.resolve(resource)),
+    onCode: options.onCode ?? (() => undefined),
+    ...(options.onAppCall === undefined ? {} : { onAppCall: options.onAppCall }),
+    ...(options.onCode === undefined ? {} : { onCode: options.onCode }),
+    ...(options.readStatic === undefined ? {} : { readStatic: options.readStatic }),
+    ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
+    ...(options.randomBytes === undefined ? {} : { randomBytes: options.randomBytes }),
+    ...(options.now === undefined ? {} : { now: options.now }),
+    createHttpServer: (requestListener) => {
+      listener = requestListener;
+      return server;
+    },
+  };
+  const hostPromise = createReferenceHost(options.config ?? appConfig, dependencies);
+  return {
+    hostPromise,
+    get hostArgument() {
+      return hostArgument;
+    },
+    get closed() {
+      return closed;
+    },
+    request: async (
+      method: string,
+      url: string,
+      headers: Request["headers"] = {},
+      body?: string,
+    ) => {
+      if (listener === undefined) {
+        throw new Error("Server listener was not initialized.");
+      }
+      const response = makeResponse();
+      const request: Request = {
+        method,
+        url,
+        headers: { host: "127.0.0.1:43210", ...headers },
+        async *[Symbol.asyncIterator]() {
+          if (body !== undefined) {
+            yield await Promise.resolve(Buffer.from(body));
+          }
+        },
+      };
+      await listener(request, response.response);
+      return response.read();
+    },
+  };
+}
+
+async function newAppSession(
+  fixture: ReturnType<typeof makeServer>,
+  host: { readonly token: string; readonly origin: string },
+): Promise<string> {
+  const event = await fixture.request("GET", eventsPath, authorization(host));
+  const launchEvent = event.body.split("\n").find((line) => line.startsWith("data: "));
+  if (launchEvent === undefined) {
+    throw new Error("Host launch event is missing.");
+  }
+  return parseJson(AppReadySchema, launchEvent.slice("data: ".length)).sessionId;
+}
+
+function appPath(appSession: string): string {
+  return `/api/app?resourceUri=${encodeURIComponent(appResourceUri)}&sessionId=${encodeURIComponent(appSession)}`;
+}
+
+function authorization(host: { readonly token: string; readonly origin: string }) {
+  return { authorization: ["Bearer", host.token].join(" "), origin: host.origin };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("createReferenceHost", () => {
+  it("serves authenticated resources through the Node HTTP adapter", async () => {
+    const host = await createReferenceHost(appConfig, {
+      readStatic: (asset) =>
+        Promise.resolve(Buffer.from(asset === "index" ? "<!doctype html>" : "void 0;")),
+      readResource: () => Promise.resolve(resource),
+      onCode: () => undefined,
+      onAppCall: () =>
+        Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "ok" }] })),
+      idGenerator: () => sessionId,
+    });
+    try {
+      const page = await fetch(host.origin);
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-type")).toContain("text/html");
+      expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+      expect(page.headers.get("x-frame-options")).toBe("DENY");
+      expect(page.headers.get("referrer-policy")).toBe("no-referrer");
+
+      const bundle = await fetch(new URL("/host.js", host.origin));
+      expect(bundle.headers.get("content-security-policy")).toContain("frame-src 'self'");
+      expect(bundle.headers.get("x-frame-options")).toBe("DENY");
+      expect(bundle.headers.get("referrer-policy")).toBe("no-referrer");
+
+      const eventResponse = await fetch(new URL(eventsPath, host.origin), {
+        headers: { authorization: ["Bearer", host.token].join(" "), origin: host.origin },
+      });
+      const eventData = (await eventResponse.text())
+        .split("\n")
+        .find((line) => line.startsWith("data: "));
+      if (eventData === undefined) {
+        throw new Error("Host launch event is missing.");
+      }
+      const launchedSessionId = parseJson(
+        AppReadySchema,
+        eventData.slice("data: ".length),
+      ).sessionId;
+
+      const appResponse = await fetch(new URL(appPath(launchedSessionId), host.origin), {
+        headers: {
+          authorization: ["Bearer", host.token].join(" "),
+          origin: host.origin,
+        },
+      });
+      expect(appResponse.status).toBe(200);
+
+      const callResponse = await fetch(new URL("/api/call", host.origin), {
+        method: "POST",
+        headers: {
+          authorization: ["Bearer", host.token].join(" "),
+          origin: host.origin,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          appId: "approval",
+          sessionId: launchedSessionId,
+          toolName: "approve",
+          arguments: {},
+        }),
+      });
+      expect(callResponse.status).toBe(200);
+      expect(await callResponse.json()).toEqual({
+        content: [{ type: "text", text: "ok" }],
+      });
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("sends anti-framing headers on JSON error responses", async () => {
+    const host = await createReferenceHost(appConfig, {
+      readStatic: () => Promise.reject(new Error("asset missing")),
+      readResource: () => Promise.resolve(resource),
+      onCode: () => undefined,
+      idGenerator: () => sessionId,
+    });
+    try {
+      const bundle = await fetch(new URL("/host.js", host.origin));
+      expect(bundle.status).toBe(503);
+      expect(bundle.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+      expect(bundle.headers.get("x-frame-options")).toBe("DENY");
+      expect(bundle.headers.get("referrer-policy")).toBe("no-referrer");
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("binds loopback, creates a ULID session, and returns a host-only launch URL", async () => {
+    const fixture = makeServer({
+      idGenerator: () => sessionId,
+      randomBytes: (size) => Buffer.alloc(size, 3),
+    });
+    const host = await fixture.hostPromise;
+    expect(fixture.hostArgument).toBe("127.0.0.1");
+    expect(host.origin).toBe("http://127.0.0.1:43210");
+    expect(host.url).toContain("#token=");
+    expect(new URL(host.url).hash).toContain(encodeURIComponent(appResourceUri));
+    expect(host.token).toHaveLength(43);
+    const event = await fixture.request("GET", eventsPath, authorization(host));
+    expect(event.status).toBe(200);
+    expect(event.headers["content-type"]).toContain("text/event-stream");
+    expect(event.body).toContain(sessionId);
+    await host.close();
+    expect(fixture.closed).toBe(true);
+  });
+
+  it("creates a distinct ULID session for each launched app instance", async () => {
+    let next = 0;
+    const fixture = makeServer({
+      idGenerator: () => String(next++).padStart(26, "0"),
+    });
+    const host = await fixture.hostPromise;
+    const firstSession = await newAppSession(fixture, host);
+    const secondSession = await newAppSession(fixture, host);
+    expect(firstSession).not.toBe(secondSession);
+    const first = await fixture.request("GET", appPath(firstSession), authorization(host));
+    const second = await fixture.request("GET", appPath(secondSession), authorization(host));
+    expect(parseJson(AppResourceResponseSchema, first.body).sessionId).toBe(firstSession);
+    expect(parseJson(AppResourceResponseSchema, second.body).sessionId).toBe(secondSession);
+    await host.close();
+  });
+
+  it("generates a ULID from injected time and entropy", async () => {
+    const fixture = makeServer({
+      randomBytes: (size) => Buffer.alloc(size, 1),
+      now: () => 1_700_000_000_000,
+    });
+    const host = await fixture.hostPromise;
+    const response = await fixture.request("GET", eventsPath, authorization(host));
+    expect(response.status).toBe(200);
+    expect(response.body).toMatch(/[0-9A-HJKMNP-TV-Z]{26}/u);
+    await host.close();
+  });
+
+  it("reuses the bearer token for every host instance in the process", async () => {
+    const first = makeServer({ idGenerator: () => sessionId });
+    const firstHost = await first.hostPromise;
+    const second = makeServer({ idGenerator: () => sessionId });
+    const secondHost = await second.hostPromise;
+    expect(secondHost.token).toBe(firstHost.token);
+    await firstHost.close();
+    await secondHost.close();
+  });
+
+  it("requires both the bearer token and same-origin request on protected routes", async () => {
+    const fixture = makeServer({ idGenerator: () => sessionId });
+    const host = await fixture.hostPromise;
+    const path = appPath(await newAppSession(fixture, host));
+    expect((await fixture.request("GET", path, { origin: host.origin })).status).toBe(403);
+    expect(
+      (
+        await fixture.request("GET", path, {
+          authorization: ["Bearer", "x".repeat(host.token.length)].join(" "),
+          origin: "http://foreign.example.test",
+        })
+      ).status,
+    ).toBe(403);
+    expect((await fixture.request("GET", path, authorization(host))).status).toBe(200);
+    await host.close();
+  });
+
+  it("rejects a foreign Host header on every route", async () => {
+    const fixture = makeServer({
+      readStatic: () => Promise.resolve(Buffer.from("index")),
+    });
+    const host = await fixture.hostPromise;
+    for (const hostHeader of ["127.0.0.1:43210", "[::1]:43210", "localhost:43210"]) {
+      expect((await fixture.request("GET", "/", { host: hostHeader })).status).toBe(200);
+    }
+    const response = await fixture.request("GET", "/", { host: "foreign.example.test:43210" });
+    expect(response.status).toBe(403);
+    expect(response.body).toBe('{"error":"app_host_invalid"}');
+    expect((await fixture.request("GET", "/", { host: host.origin })).status).toBe(403);
+    await host.close();
+  });
+
+  it("refuses unknown resources and unknown paths with code-only errors", async () => {
+    const reader = vi.fn(() => Promise.resolve(resource));
+    const fixture = makeServer({ readResource: reader, idGenerator: () => sessionId });
+    const host = await fixture.hostPromise;
+    const unknown = await fixture.request(
+      "GET",
+      `/api/app?resourceUri=${encodeURIComponent("ui://unknown")}`,
+      authorization(host),
+    );
+    expect(unknown.status).toBe(404);
+    expect(unknown.body).toBe('{"error":"app_unknown"}');
+    expect(reader).not.toHaveBeenCalled();
+    expect((await fixture.request("GET", "/other")).status).toBe(404);
+    await host.close();
+  });
+
+  it("validates resource MIME and size and hides resource-reader errors", async () => {
+    const invalid = makeServer({
+      readResource: () => Promise.resolve({ contents: [{ mimeType: "text/plain", text: "no" }] }),
+      idGenerator: () => sessionId,
+    });
+    const invalidHost = await invalid.hostPromise;
+    const invalidResponse = await invalid.request(
+      "GET",
+      appPath(await newAppSession(invalid, invalidHost)),
+      authorization(invalidHost),
+    );
+    expect(invalidResponse.status).toBe(422);
+    await invalidHost.close();
+
+    const oversized = makeServer({
+      readResource: () =>
+        Promise.resolve({
+          contents: [{ mimeType: "text/html;profile=mcp-app", text: "x".repeat(1_048_577) }],
+        }),
+      idGenerator: () => sessionId,
+    });
+    const oversizedHost = await oversized.hostPromise;
+    expect(
+      (
+        await oversized.request(
+          "GET",
+          appPath(await newAppSession(oversized, oversizedHost)),
+          authorization(oversizedHost),
+        )
+      ).status,
+    ).toBe(422);
+    await oversizedHost.close();
+
+    const failed = makeServer({
+      readResource: () => Promise.reject(new Error("sensitive reader detail")),
+      idGenerator: () => sessionId,
+    });
+    const failedHost = await failed.hostPromise;
+    const failureResponse = await failed.request(
+      "GET",
+      appPath(await newAppSession(failed, failedHost)),
+      authorization(failedHost),
+    );
+    expect(failureResponse.status).toBe(502);
+    expect(failureResponse.body).not.toContain("sensitive reader detail");
+    await failedHost.close();
+  });
+
+  it("accepts MIME parameter spacing and case but requires the exact app profile", async () => {
+    for (const [mimeType, expectedStatus] of [
+      ["TEXT/HTML ; profile = mcp-app", 200],
+      ['text/html; charset=utf-8 ; profile="mcp-app"', 200],
+      ["text/html", 422],
+      ["text/html; profile=other", 422],
+    ] as const) {
+      const fixture = makeServer({
+        readResource: () =>
+          Promise.resolve({ contents: [{ mimeType, text: "<main>test</main>" }] }),
+      });
+      const host = await fixture.hostPromise;
+      const launchedSessionId = await newAppSession(fixture, host);
+      const result = await fixture.request("GET", appPath(launchedSessionId), authorization(host));
+      expect(result.status).toBe(expectedStatus);
+      await host.close();
+    }
+  });
+
+  it("filters CSP and permission requests against their allowlists", async () => {
+    const onCode = vi.fn();
+    const fixture = makeServer({
+      config: {
+        ...appConfig,
+        permissionAllowlist: ["camera", "clipboardWrite"],
+        cspAllowlist: ["https://allowed.example.test"],
+      },
+      onCode,
+      idGenerator: () => sessionId,
+      readResource: () =>
+        Promise.resolve({
+          contents: [
+            {
+              mimeType: "text/html;profile=mcp-app",
+              text: "<main>safe</main>",
+              _meta: {
+                ui: {
+                  permissions: { camera: {}, microphone: {}, clipboardWrite: {} },
+                  csp: {
+                    connectDomains: [
+                      "https://allowed.example.test",
+                      "https://blocked.example.test",
+                    ],
+                    resourceDomains: ["javascript:bad"],
+                    frameDomains: ["https://blocked.example.test"],
+                  },
+                },
+              },
+            },
+          ],
+        }),
+    });
+    const host = await fixture.hostPromise;
+    const result = await fixture.request(
+      "GET",
+      appPath(await newAppSession(fixture, host)),
+      authorization(host),
+    );
+    expect(result.status).toBe(200);
+    const payload = parseJson(ResourceResponseSchema, result.body);
+    expect(payload.permissions).toEqual(["camera", "clipboard-write"]);
+    expect(payload.csp).toContain("connect-src https://allowed.example.test");
+    expect(payload.csp).not.toContain("blocked.example.test");
+    expect(payload.csp).not.toContain("javascript:");
+    expect(onCode).toHaveBeenCalledWith("app_csp_request_ignored");
+    await host.close();
+  });
+
+  it("retains the deny-all CSP when there are no resource requests", async () => {
+    const fixture = makeServer({
+      idGenerator: () => sessionId,
+      readResource: () =>
+        Promise.resolve({
+          contents: [
+            { mimeType: "text/html;profile=mcp-app", text: "<main>safe</main>", _meta: { ui: {} } },
+          ],
+        }),
+    });
+    const host = await fixture.hostPromise;
+    const result = await fixture.request(
+      "GET",
+      appPath(await newAppSession(fixture, host)),
+      authorization(host),
+    );
+    expect(parseJson(ResourceResponseSchema, result.body).csp).toBe(REFERENCE_CSP);
+    await host.close();
+  });
+
+  it("serves the static host page and bundle without exposing token-protected data", async () => {
+    const readStatic = vi.fn((asset: "index" | "bundle") => Promise.resolve(Buffer.from(asset)));
+    const fixture = makeServer({ readStatic, idGenerator: () => sessionId });
+    const host = await fixture.hostPromise;
+    expect((await fixture.request("GET", "/")).body).toBe("index");
+    expect((await fixture.request("GET", "/host.js")).body).toBe("bundle");
+    expect(readStatic).toHaveBeenNthCalledWith(1, "index");
+    expect(readStatic).toHaveBeenNthCalledWith(2, "bundle");
+    const unavailable = makeServer({
+      readStatic: () => Promise.reject(new Error("private file path")),
+      idGenerator: () => sessionId,
+    });
+    const unavailableHost = await unavailable.hostPromise;
+    const failedIndex = await unavailable.request("GET", "/");
+    expect(failedIndex.status).toBe(503);
+    const failedBundle = await unavailable.request("GET", "/host.js");
+    expect(failedBundle.status).toBe(503);
+    await host.close();
+    await unavailableHost.close();
+  });
+
+  it("validates app calls against the active host session before routing", async () => {
+    const onAppCall = vi.fn(() =>
+      Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "ok" }] })),
+    );
+    const fixture = makeServer({ idGenerator: () => sessionId, onAppCall });
+    const host = await fixture.hostPromise;
+    await newAppSession(fixture, host);
+    const headers = authorization(host);
+    const body = JSON.stringify({
+      appId: "approval",
+      sessionId,
+      toolName: "approve",
+      arguments: { decision: "yes" },
+    });
+    const result = await fixture.request("POST", "/api/call", headers, body);
+    expect(result.status).toBe(200);
+    expect(onAppCall).toHaveBeenCalledExactlyOnceWith({
+      appId: "approval",
+      sessionId,
+      toolName: "approve",
+      arguments: { decision: "yes" },
+    });
+    const disallowed = await fixture.request(
+      "POST",
+      "/api/call",
+      headers,
+      body.replace('"approve"', '"filesystem.write"'),
+    );
+    expect(disallowed.status).toBe(403);
+    expect(disallowed.body).toBe('{"error":"app_tool_not_allowed"}');
+    const invalid = await fixture.request("POST", "/api/call", headers, "{");
+    expect(invalid.status).toBe(400);
+    const mismatched = await fixture.request(
+      "POST",
+      "/api/call",
+      headers,
+      body.replace(sessionId, "00000000000000000000000001"),
+    );
+    expect(mismatched.status).toBe(404);
+    const large = await fixture.request("POST", "/api/call", headers, "x".repeat(16_385));
+    expect(large.status).toBe(413);
+    await host.close();
+  });
+
+  it("returns a bounded error result if app calls are not handled or fail", async () => {
+    const noHandler = makeServer({ idGenerator: () => sessionId });
+    const noHandlerHost = await noHandler.hostPromise;
+    const sessionForNoHandler = await newAppSession(noHandler, noHandlerHost);
+    const body = JSON.stringify({
+      appId: "approval",
+      sessionId: sessionForNoHandler,
+      toolName: "approve",
+      arguments: {},
+    });
+    const noHandlerResult = await noHandler.request(
+      "POST",
+      "/api/call",
+      authorization(noHandlerHost),
+      body,
+    );
+    expect(JSON.parse(noHandlerResult.body)).toEqual({ content: [], isError: true });
+    await noHandlerHost.close();
+    const failing = makeServer({
+      idGenerator: () => sessionId,
+      onAppCall: () => Promise.reject(new Error("sensitive tool error")),
+    });
+    const failingHost = await failing.hostPromise;
+    await newAppSession(failing, failingHost);
+    const failure = await failing.request("POST", "/api/call", authorization(failingHost), body);
+    expect(failure.body).toBe('{"content":[],"isError":true}');
+    await failingHost.close();
+  });
+
+  it("rejects non-loopback configuration and invalid session identifiers", async () => {
+    await expect(
+      createReferenceHost(
+        { ...appConfig, listen: { host: "0.0.0.0", port: 8080 } },
+        { readResource: () => Promise.resolve(resource), onCode: () => undefined },
+      ),
+    ).rejects.toThrow();
+    await expect(
+      createReferenceHost(appConfig, {
+        readResource: () => Promise.resolve(resource),
+        onCode: () => undefined,
+        idGenerator: () => "invalid",
+        createHttpServer: () => {
+          throw new Error("server should not start");
+        },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("handles listen failure, invalid bound addresses, and close errors", async () => {
+    const listenFailure = makeServer({ listenError: new Error("private listen detail") });
+    await expect(listenFailure.hostPromise).rejects.toMatchObject({
+      code: "app_host_bind_failed",
+    });
+
+    const invalidAddress = makeServer({ address: null });
+    await expect(invalidAddress.hostPromise).rejects.toMatchObject({
+      code: "app_host_address_unavailable",
+    });
+    expect(invalidAddress.closed).toBe(true);
+
+    const badClose = makeServer({ idGenerator: () => sessionId, closeError: new Error("close") });
+    const host = await badClose.hostPromise;
+    const closeOperation = host.close();
+    await expect(closeOperation).rejects.toBeInstanceOf(ReferenceHostError);
+    await expect(closeOperation).rejects.toMatchObject({ code: "app_host_close_failed" });
+  });
+});

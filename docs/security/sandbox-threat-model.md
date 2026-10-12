@@ -84,6 +84,17 @@ test source before marking that task complete.
 
 ## Residual risks
 
+- **In-process development backend:** This backend enforces only `outputBytes` and
+  `timeoutMs` locally. It does not enforce `memoryMb`, `pids`, or `cpuSeconds` and
+  does not provide network or filesystem isolation; use the remote runner when
+  those guarantees are required. Startup emits `sandbox_inprocess_unsafe` and
+  `sandbox_inprocess_limits_unenforced`. Child processes receive a fixed trusted
+  `PATH` and explicitly supplied safe variables, never the parent environment.
+  `PATH`, all `LD_*` and `DYLD_*` variables, and interpreter-startup variables
+  (`BASH_ENV`, `ENV`, `NODE_OPTIONS`, `NODE_PATH`, `PYTHONHOME`, `PYTHONPATH`,
+  `PYTHONSTARTUP`, `PYTHONINSPECT`, `PERL5OPT`, `PERL5LIB`, `RUBYOPT`, `RUBYLIB`,
+  `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`, `PHP_INI_SCAN_DIR`,
+  and `PHPRC`) are rejected.
 - **Kernel and runtime exploits:** container isolation shares the host kernel;
   a kernel or runtime vulnerability may cross the container boundary. Keep the
   host and runtime patched and assess whether gVisor or Kata Containers is

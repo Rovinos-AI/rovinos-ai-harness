@@ -168,6 +168,11 @@ upcasters
 upcasting
 visibilitychange
 vulns
+domcontentloaded
+nosniff
+oncalltool
+referrerpolicy
+requestfailed
 xact
 xdev
 dpkg
@@ -176,3 +181,11 @@ iovalkey
 ioredis
 valkey
 Valkey
+DYLD
+PHPRC
+PYTHONHOME
+PYTHONINSPECT
+PYTHONPATH
+PYTHONSTARTUP
+RUBYLIB
+RUBYOPT
