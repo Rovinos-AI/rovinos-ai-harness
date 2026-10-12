@@ -10,7 +10,7 @@ const sandboxTaskIdSchema = z.string().regex(/^19\.(?:[1-9]|10)$/);
 const testFileSchema = z
   .string()
   .regex(
-    /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:(?:int|canary|replay)\.)?test\.(?:ts|tsx|js|jsx|mjs|cjs)$/,
+    /^(?!.*(?:^|\/)\.\.(?:\/|$))[\w.-]+(?:\/[\w.-]+)*\.(?:(?:int|canary|replay)\.)?test\.(?:ts|tsx|js|jsx|mjs|cjs)$/,
   );
 
 /** One sandbox threat and the test source expected to cover it. */

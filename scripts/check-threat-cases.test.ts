@@ -28,7 +28,7 @@ function validCatalog(): ThreatCase[] {
     const taskId = index === 0 ? "19.1" : "19.2";
     return {
       id: `T-${String(index + 1).padStart(2, "0")}`,
-      title: `Threat ${index + 1}`,
+      title: `Threat ${String(index + 1)}`,
       mitigationTask: taskId,
       testFile,
       activeFromTask: taskId,
