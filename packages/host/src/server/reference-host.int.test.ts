@@ -2,6 +2,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 import { request as httpRequest } from "node:http";
+import { trace, type Span } from "@opentelemetry/api";
+import { createTestSpanCollector } from "@harness/telemetry/testing";
 import { createReferenceHost, type ReferenceHost } from "./index.js";
 
 const resourceUri = "ui://test/network.html";
@@ -111,6 +113,9 @@ const externalFailures: string[] = [];
 const externalResponses: string[] = [];
 const allRequests: string[] = [];
 const routedExternalRequests: string[] = [];
+const spanCollector = createTestSpanCollector();
+const diagnosticCodes: string[] = [];
+let toolCallSpan: Span | undefined;
 
 function getWithHostHeader(
   url: string,
@@ -133,6 +138,9 @@ function getWithHostHeader(
 }
 
 beforeAll(async () => {
+  trace.setGlobalTracerProvider(spanCollector.provider);
+  toolCallSpan = spanCollector.provider.getTracer("reference-host-test").startSpan("harness.tool_call");
+  const parentSpan = toolCallSpan;
   browser = await chromium.launch({ headless: true });
   host = await createReferenceHost(
     {
@@ -140,14 +148,14 @@ beforeAll(async () => {
         {
           id: "network-test",
           resourceUri,
-          telemetry: false,
+          telemetry: true,
           allowedTools: [],
         },
       ],
       listen: { host: "127.0.0.1", port: 0 },
     },
     {
-      onCode: () => undefined,
+      onCode: (code) => diagnosticCodes.push(code),
       readResource: () =>
         Promise.resolve({
           contents: [
@@ -158,6 +166,10 @@ beforeAll(async () => {
           ],
         }),
       idGenerator: () => "00000000000000000000000000",
+      uiSessionContext: {
+        runId: "00000000000000000000000001",
+        toolCallSpanContext: parentSpan.spanContext(),
+      },
       toolInput: { decision: "approve" },
       toolResult: { content: [{ type: "text", text: "complete" }] },
     },
@@ -195,6 +207,8 @@ afterAll(async () => {
   await page?.close();
   await browser?.close();
   await host?.close();
+  toolCallSpan?.end();
+  await spanCollector.provider.shutdown();
 });
 
 describe("reference host browser security", () => {
@@ -253,7 +267,11 @@ describe("reference host browser security", () => {
     expect(networkResult).toContain('"image":"blocked"');
     expect(networkResult).toContain('"csp":');
     expect(await app.locator("#input").textContent()).toBe('{"decision":"approve"}');
-    expect(await app.locator("#result").textContent()).toContain("complete");
+    const resultNotification = await app.locator("#result").textContent();
+    expect(resultNotification).toContain("complete");
+    expect(resultNotification).toContain('"_meta":{"traceparent":"00-');
+    expect(resultNotification).not.toContain("tracestate");
+    expect(resultNotification).not.toContain("baggage");
     await expectNavigationAttempts(page);
     expect(externalRequests.map((url) => new URL(url).pathname).sort()).toEqual([
       "/beacon",
@@ -266,6 +284,19 @@ describe("reference host browser security", () => {
     expect(pageErrors.some((message) => message.includes("frame-src"))).toBe(true);
     expect(pageErrors.some((message) => message.includes("allow-popups"))).toBe(true);
     expect(pageErrors.some((message) => message.includes("allow-forms"))).toBe(true);
+
+    const sessionEnd = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/session/end" && response.status() === 200;
+    });
+    await iframe.evaluate((element) => element.remove());
+    await sessionEnd;
+    const sessionSpan = spanCollector
+      .getFinishedSpans()
+      .find((span) => span.name === "harness.ui_session");
+    expect(sessionSpan).toBeDefined();
+    expect(sessionSpan?.parentSpanContext?.spanId).toBe(toolCallSpan?.spanContext().spanId);
+    expect(diagnosticCodes).not.toContain("ui_trace_unavailable");
   }, 20_000);
 
   it("refuses unknown resources and rejects missing-token and foreign-origin requests", async () => {

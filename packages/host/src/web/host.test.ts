@@ -46,6 +46,7 @@ const appPayload = {
   permissions: [],
   toolInput: { decision: "approve" },
   toolResult: { content: [{ type: "text", text: "complete" }] },
+  telemetry: false,
 };
 const launchHash = `#${new URLSearchParams({
   token: "t".repeat(43),
@@ -67,6 +68,7 @@ function createFakeRoot(): {
   readonly frame: FakeFrame;
   readonly status: () => string;
   readonly attached: () => boolean;
+  readonly frameRemoved: () => void;
 } {
   const frame: FakeFrame = {
     contentWindow: null,
@@ -81,16 +83,26 @@ function createFakeRoot(): {
   };
   let status = "";
   let attached = false;
+  let onFrameRemoved = (): void => undefined;
   const root: HostPagePort = {
     setStatus(code) {
       status = code;
     },
     createFrame: () => frame,
+    onFrameRemoved(callback) {
+      onFrameRemoved = callback;
+    },
     attachFrame() {
       attached = true;
     },
   };
-  return { root, frame, status: () => status, attached: () => attached };
+  return {
+    root,
+    frame,
+    status: () => status,
+    attached: () => attached,
+    frameRemoved: () => onFrameRemoved(),
+  };
 }
 
 function successfulRequest(payload: unknown = appPayload) {
@@ -180,6 +192,65 @@ describe("reference app page", () => {
     expect(request).toHaveBeenCalledTimes(2);
     expect(request.mock.calls[0]?.[1]).toMatchObject({
       headers: { authorization: ["Bearer", "t".repeat(43)].join(" ") },
+    });
+  });
+
+  it("sends only opted-in traceparent metadata and ends the session when its frame is removed", async () => {
+    const { root, frameRemoved } = createFakeRoot();
+    const traceparent = `00-${"a".repeat(32)}-${"b".repeat(16)}-01`;
+    const result = {
+      content: [{ type: "text" as const, text: "complete" }],
+      _meta: {
+        traceparent: "00-invalid",
+        tracestate: "vendor=value",
+        baggage: "private=value",
+        preserved: true,
+      },
+    };
+    const request = successfulRequest({
+      ...appPayload,
+      telemetry: true,
+      traceparent,
+      toolResult: result,
+    });
+    expect(await mountReferenceApp(root, launchHash, request)).toBe(true);
+    expect(bridgeMock.sendToolResult).toHaveBeenCalledWith({
+      content: result.content,
+      _meta: { traceparent },
+    });
+    frameRemoved();
+    await vi.waitFor(() => {
+      expect(request).toHaveBeenCalledTimes(3);
+    });
+    expect(request.mock.calls[2]?.[0]).toBe(
+      `/api/session/end?sessionId=${appPayload.sessionId}`,
+    );
+    expect(request.mock.calls[2]?.[1]).toMatchObject({
+      method: "POST",
+    });
+  });
+
+  it("removes trace propagation fields for apps that have not opted in", async () => {
+    const { root } = createFakeRoot();
+    const result = {
+      content: [{ type: "text" as const, text: "complete" }],
+      _meta: {
+        traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+        tracestate: "vendor=value",
+        baggage: "private=value",
+        preserved: true,
+      },
+    };
+    expect(
+      await mountReferenceApp(
+        root,
+        launchHash,
+        successfulRequest({ ...appPayload, telemetry: false, toolResult: result }),
+      ),
+    ).toBe(true);
+    expect(bridgeMock.sendToolResult).toHaveBeenCalledWith({
+      content: result.content,
+      _meta: { preserved: true },
     });
   });
 

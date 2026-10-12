@@ -17,6 +17,7 @@ import {
   writeError,
   writeJson,
 } from "./http-utils.js";
+import { UiSession } from "./ui-session.js";
 
 const MAX_CALL_BYTES = 16_384;
 
@@ -70,10 +71,21 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
     writeError(response, 404, "app_unknown");
     return;
   }
+  const sessionId = Id.parse(options.nextSessionId());
   const instance: AppInstance = {
     id: app.id,
     resourceUri: app.resourceUri,
-    sessionId: Id.parse(options.nextSessionId()),
+    sessionId,
+    ...(app.telemetry
+      ? {
+          uiSession: new UiSession(
+            options.dependencies.uiSessionContext,
+            app.id,
+            sessionId,
+            () => options.dependencies.onCode("ui_trace_unavailable"),
+          ),
+        }
+      : {}),
   };
   options.sessions.set(instance.sessionId, instance);
   response.writeHead(200, {
@@ -124,12 +136,28 @@ async function sendAppResource(
       html: resource.html,
       csp: resource.csp,
       permissions: resource.permissions,
+      telemetry: app.telemetry,
+      ...(app.telemetry && instance.uiSession?.traceparent !== undefined
+        ? { traceparent: instance.uiSession.traceparent }
+        : {}),
       toolInput: options.dependencies.toolInput ?? {},
       toolResult: options.dependencies.toolResult ?? null,
     });
   } catch {
     writeError(response, 502, "app_resource_unavailable");
   }
+}
+
+function endAppSession(url: URL, response: HostResponse, options: RequestHandlerOptions): void {
+  const sessionId = url.searchParams.get("sessionId");
+  const instance = sessionId === null ? undefined : options.sessions.get(sessionId);
+  if (instance === undefined) {
+    writeError(response, 404, "app_unknown");
+    return;
+  }
+  instance.uiSession?.end();
+  options.sessions.delete(instance.sessionId);
+  writeJson(response, 200, {});
 }
 
 async function routeAppCall(
@@ -204,6 +232,9 @@ export function createRequestHandler(
           return;
         case "POST /api/call":
           await routeAppCall(request, response, options);
+          return;
+        case "POST /api/session/end":
+          endAppSession(url, response, options);
           return;
         default:
           writeError(response, 404, "not_found");

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CallToolResultSchema } from "@modelcontextprotocol/core";
-import { Code, Id, parseJson } from "@harness/schemas";
+import { Code, Id, Traceparent, parseJson } from "@harness/schemas";
 import { z } from "zod";
 import { createAppBridge, type AppIframe, type AppToolCall } from "./bridge.js";
 
@@ -14,6 +14,8 @@ const AppPayloadSchema = z
     permissions: z.array(Code),
     toolInput: z.record(z.string(), z.unknown()),
     toolResult: CallToolResultSchema.nullable(),
+    telemetry: z.boolean(),
+    traceparent: Traceparent.optional(),
   })
   .strict();
 const CallResponseSchema = CallToolResultSchema;
@@ -41,6 +43,7 @@ export type AppIframeFactory = () => AppIframe & {
 export interface HostPagePort {
   setStatus(code: string): void;
   createFrame: AppIframeFactory;
+  onFrameRemoved(callback: () => void): void;
   attachFrame(): void;
 }
 
@@ -64,6 +67,24 @@ export function createSandboxDocument(html: string, csp = APP_CSP): string {
 
 function authorizedHeaders(token: string): Record<string, string> {
   return { authorization: ["Bearer", token].join(" ") };
+}
+
+function toolResultForApp(
+  result: NonNullable<z.infer<typeof CallToolResultSchema>>,
+  app: Pick<z.infer<typeof AppPayloadSchema>, "telemetry" | "traceparent">,
+): z.infer<typeof CallToolResultSchema> {
+  const { _meta, ...resultWithoutMetadata } = result;
+  if (app.telemetry && app.traceparent !== undefined) {
+    return { ...resultWithoutMetadata, _meta: { traceparent: app.traceparent } };
+  }
+  const metadata = { ..._meta };
+  delete metadata.traceparent;
+  delete metadata.tracestate;
+  delete metadata.baggage;
+  return {
+    ...resultWithoutMetadata,
+    ...(Object.keys(metadata).length === 0 ? {} : { _meta: metadata }),
+  };
 }
 
 interface ToolCallContext {
@@ -167,6 +188,12 @@ export async function mountReferenceApp(
       { once: true },
     );
   });
+  root.onFrameRemoved(() => {
+    void request(`/api/session/end?sessionId=${encodeURIComponent(app.sessionId)}`, {
+      method: "POST",
+      headers,
+    }).catch(() => undefined);
+  });
   root.attachFrame();
   await loaded;
   const bridge = createAppBridge(frame, (call) =>
@@ -180,7 +207,7 @@ export async function mountReferenceApp(
   await bridge.connect();
   await bridge.sendToolInput(app.toolInput);
   if (app.toolResult !== null) {
-    await bridge.sendToolResult(app.toolResult);
+    await bridge.sendToolResult(toolResultForApp(app.toolResult, app));
   }
   return true;
 }
@@ -204,6 +231,18 @@ export function startReferenceHostPage(): void {
       if (frame !== undefined) {
         element.replaceChildren(frame);
       }
+    },
+    onFrameRemoved: (callback) => {
+      if (typeof MutationObserver === "undefined") {
+        return;
+      }
+      const observer = new MutationObserver(() => {
+        if (frame !== undefined && !element.contains(frame)) {
+          observer.disconnect();
+          callback();
+        }
+      });
+      observer.observe(element, { childList: true, subtree: true });
     },
   };
   void mountReferenceApp(root, window.location.hash).catch(() => {
