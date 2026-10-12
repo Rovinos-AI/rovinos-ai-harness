@@ -36,7 +36,7 @@ must also be allowlisted. Effective tool prefixes must be unique across servers.
 | `args` | string array | `[]` | Arguments passed to the executable. |
 | `env` | string or `SecretRef` values | omitted | Environment values for the process. Values under secret-looking keys must be `SecretRef`s. |
 | `cwd` | non-empty string | omitted | Working directory for the process. |
-| `inheritEnv` | boolean | `false` | Whether to inherit the parent environment. |
+| `inheritEnv` | boolean | `false` | Whether to inherit `PATH` from the parent environment. The SDK's other default-inherited values are cleared; configured `env` keys are then applied. |
 
 ## HTTP transport
 
@@ -50,6 +50,19 @@ Secret references use `env:NAME`, `file:/absolute/path`, or
 `akv:vault/secret`. Header values are always references. Stdio environment
 values may be literal strings unless the key looks secret-related, such as
 `API_KEY`, `accessToken`, or `password`.
+
+Connections resolve secret references only when opening the transport. Stdio
+servers receive no parent environment values by default. If `inheritEnv` is
+enabled, only the parent `PATH` and explicitly configured keys are available.
+The child stderr stream is never forwarded as text; only its byte count is
+available to the safe logger.
+
+The MCP SDK negotiates the protocol automatically unless `protocol` pins an
+era. Tool discovery follows pagination, is capped at 1,000 tools, and uses the
+SDK cache's server-provided TTL and scope hints. Modern list-change
+subscriptions refresh the SDK cache. `harness doctor` reports a
+`servers_reachable_<index>` result for each configured server; its `detail`
+contains the configured server id.
 
 ## Examples
 

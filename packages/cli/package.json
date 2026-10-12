@@ -18,6 +18,7 @@
     "@harness/config": "workspace:^",
     "@harness/context": "workspace:^",
     "@harness/core": "workspace:^",
+    "@harness/mcp": "workspace:^",
     "@harness/schemas": "workspace:^",
     "commander": "15.0.0",
     "zod": "4.6.5"
