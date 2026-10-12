@@ -48,7 +48,12 @@ export class FakeToolPort implements ToolPort {
     if (definition === undefined) {
       return undefined;
     }
-    return { idempotent: definition.idempotent, timeoutMs: definition.timeoutMs };
+    return {
+      idempotent: definition.idempotent,
+      timeoutMs: definition.timeoutMs,
+      ...(definition.longRunning === undefined ? {} : { longRunning: definition.longRunning }),
+      ...(definition.inputSchema === undefined ? {} : { inputSchema: definition.inputSchema }),
+    };
   }
 
   /** {@inheritDoc ToolPort.execute} */
