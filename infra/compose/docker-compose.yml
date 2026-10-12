@@ -20,3 +20,16 @@ services:
       timeout: 3s
       start_period: 5s
       retries: 3
+  otel-collector:
+    image: ${OTEL_COLLECTOR_IMAGE:?Set OTEL_COLLECTOR_IMAGE in infra/collector/VERSION}
+    command: ["--config=/etc/otel/base.yaml", "--config=/etc/otel/profile-debug.yaml"]
+    volumes:
+      - ../collector/base.yaml:/etc/otel/base.yaml:ro
+      - ../collector/profile-debug.yaml:/etc/otel/profile-debug.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
