@@ -5,6 +5,20 @@ import { Code } from "./primitives.js";
 /** Maximum characters in the uppercase entity-type segment of a vault token. */
 export const TOKEN_TYPE_MAX_LENGTH = 32;
 
+const TOKEN_PATTERN = new RegExp(
+  `^<[A-Z][A-Z0-9_]{0,${String(TOKEN_TYPE_MAX_LENGTH - 1)}}_[1-9]\\d{0,5}>$`,
+  "u",
+);
+
+/** Return the uppercase entity type for a valid token, or undefined for a non-token value. */
+export function parseTokenType(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const token = TOKEN_PATTERN.exec(value);
+  return token === null ? undefined : token[0].slice(1, token[0].lastIndexOf("_"));
+}
+
 /** A detected range in the original text, measured in UTF-16 code units. */
 export const DetectionSchema = z
   .object({

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every evaluation includes all matches so callers can choose when to show explain output.
-import { Code, JsonPointerSchema, JsonValue, TOKEN_TYPE_MAX_LENGTH } from "@harness/schemas";
+import { Code, JsonPointerSchema, JsonValue, parseTokenType } from "@harness/schemas";
 import type { Code as CodeValue, JsonPointer, JsonValue as JsonValueType } from "@harness/schemas";
 import { z } from "zod";
 import { PolicyDocumentSchema } from "./schema.js";
@@ -10,7 +10,7 @@ const DecisionSchema = z.enum(["allow", "ask", "deny"]);
 
 const PolicyCallContextSchema = z
   .object({
-    subagent: z.boolean().optional(),
+    subagent: z.boolean(),
     server: Code.optional(),
   })
   .strict();
@@ -24,7 +24,10 @@ export const PolicyCallSchema = z
   })
   .strict();
 
-/** A policy evaluation input. */
+/**
+ * A policy evaluation input. `subagent` is always known; `server` is omitted
+ * for calls that are not from an MCP tool.
+ */
 export type PolicyCall = z.infer<typeof PolicyCallSchema>;
 
 const MatchedRuleSchema = z
@@ -53,10 +56,15 @@ export type Explanation = z.infer<typeof ExplanationSchema>;
 type PointerLookup =
   { readonly exists: true; readonly value: JsonValueType } | { readonly exists: false };
 
-const TOKEN_TYPE_PATTERN = new RegExp(
-  `^<[A-Z][A-Z0-9_]{0,${String(TOKEN_TYPE_MAX_LENGTH - 1)}}_[1-9]\\d{0,5}>$`,
-  "u",
-);
+interface CompiledMatcher {
+  readonly matcher: ArgMatcher;
+  readonly pattern?: RegExp;
+}
+
+interface CompiledRule {
+  readonly rule: Rule;
+  readonly matchers: readonly CompiledMatcher[];
+}
 
 function pointerValue(root: JsonValueType, pointer: JsonPointer): PointerLookup {
   let current = root;
@@ -131,23 +139,18 @@ function matchesStringPrefix(candidate: JsonValueType, expected: JsonValueType):
   );
 }
 
-function matchesPattern(candidate: JsonValueType, expected: JsonValueType): boolean {
-  return (
-    typeof candidate === "string" &&
-    typeof expected === "string" &&
-    new RegExp(expected, "u").test(candidate)
-  );
-}
-
 function matchesTokenType(candidate: JsonValueType, expected: JsonValueType): boolean {
   if (typeof candidate !== "string" || typeof expected !== "string") {
     return false;
   }
-  const token = TOKEN_TYPE_PATTERN.exec(candidate);
-  return token !== null && token[0].slice(1, token[0].lastIndexOf("_")).toLowerCase() === expected;
+  return parseTokenType(candidate)?.toLowerCase() === expected;
 }
 
-function matchesMatcherValue(candidate: JsonValueType, matcher: ArgMatcher): boolean {
+function matchesMatcherValue(
+  candidate: JsonValueType,
+  matcher: ArgMatcher,
+  pattern?: RegExp,
+): boolean {
   if (matcher.value === undefined) {
     return false;
   }
@@ -161,7 +164,7 @@ function matchesMatcherValue(candidate: JsonValueType, matcher: ArgMatcher): boo
     case "startsWith":
       return matchesStringPrefix(candidate, matcher.value);
     case "matches":
-      return matchesPattern(candidate, matcher.value);
+      return typeof candidate === "string" && pattern?.test(candidate) === true;
     case "tokenType":
       return matchesTokenType(candidate, matcher.value);
     case "exists":
@@ -169,7 +172,7 @@ function matchesMatcherValue(candidate: JsonValueType, matcher: ArgMatcher): boo
   }
 }
 
-function matchesArgument(args: JsonValueType, matcher: ArgMatcher): boolean {
+function matchesArgument(args: JsonValueType, { matcher, pattern }: CompiledMatcher): boolean {
   const lookup = pointerValue(args, matcher.pointer);
   if (matcher.op === "exists") {
     return lookup.exists;
@@ -177,7 +180,7 @@ function matchesArgument(args: JsonValueType, matcher: ArgMatcher): boolean {
   if (!lookup.exists) {
     return false;
   }
-  return matchesMatcherValue(lookup.value, matcher);
+  return matchesMatcherValue(lookup.value, matcher, pattern);
 }
 
 function matchesTool(patterns: Rule["match"]["tools"], toolId: CodeValue): boolean {
@@ -200,10 +203,10 @@ function matchesContext(
   );
 }
 
-function matchesRule(rule: Rule, call: PolicyCall): boolean {
+function matchesRule({ rule, matchers }: CompiledRule, call: PolicyCall): boolean {
   return (
     matchesTool(rule.match.tools, call.toolId) &&
-    (rule.match.args ?? []).every((matcher) => matchesArgument(call.args, matcher)) &&
+    matchers.every((matcher) => matchesArgument(call.args, matcher)) &&
     matchesContext(rule.match.context, call.context)
   );
 }
@@ -222,35 +225,82 @@ function toExplanation(rule: Rule, matched: Explanation["matched"]): Explanation
   });
 }
 
+/** Reusable evaluator for a document validated and compiled by {@link compilePolicy}. */
+export interface CompiledPolicy {
+  /**
+   * Evaluates a tool call without parsing the policy document again.
+   *
+   * @param call - The tool id, tokenized JSON arguments, and policy context.
+   * @returns The deterministic decision and its explanation.
+   * @throws {z.ZodError} If the call is invalid.
+   */
+  evaluate(call: PolicyCall): Explanation;
+}
+
 /**
- * Evaluates a tokenized tool call against a validated policy document.
+ * Validates and compiles a policy once for repeated tool-call evaluation.
  *
  * The most restrictive matching decision wins (`deny` > `ask` > `allow`); ties
  * use the first matching rule in document order. All matches are returned in
  * `matched`, also in document order.
  *
  * @param doc - A policy document.
+ * @returns A reusable evaluator with precompiled argument patterns.
+ * @throws {z.ZodError} If the document is invalid.
+ */
+export function compilePolicy(doc: PolicyDocument): CompiledPolicy {
+  const document = PolicyDocumentSchema.parse(doc);
+  const rules: CompiledRule[] = document.rules.map((rule) => ({
+    rule,
+    matchers: (rule.match.args ?? []).map((matcher) =>
+      matcher.op === "matches" && typeof matcher.value === "string"
+        ? { matcher, pattern: new RegExp(matcher.value, "u") }
+        : { matcher },
+    ),
+  }));
+
+  return {
+    evaluate(call) {
+      const validatedCall = PolicyCallSchema.parse(call);
+      const matchingRules = rules.filter((rule) => matchesRule(rule, validatedCall));
+      const matched = matchingRules.map(({ rule }) => ({
+        ruleId: rule.id,
+        decision: rule.decision,
+      }));
+
+      if (matchingRules.length === 0) {
+        return ExplanationSchema.parse({
+          decision: document.defaultDecision,
+          ruleId: "default",
+          reason: "default_decision",
+          matched,
+          editable: [],
+        });
+      }
+
+      const selectedRule = matchingRules.reduce((selected, candidate) =>
+        DECISION_RANK[candidate.rule.decision] > DECISION_RANK[selected.rule.decision]
+          ? candidate
+          : selected,
+      );
+      return toExplanation(selectedRule.rule, matched);
+    },
+  };
+}
+
+/**
+ * Evaluates a tokenized tool call against a policy document.
+ *
+ * The most restrictive matching decision wins (`deny` > `ask` > `allow`); ties
+ * use the first matching rule in document order. All matches are returned in
+ * `matched`, also in document order. For repeated evaluations, use
+ * {@link compilePolicy} to validate the document and compile patterns once.
+ *
+ * @param doc - A policy document.
  * @param call - The tool id, tokenized JSON arguments, and policy context.
  * @returns The deterministic decision and its explanation.
+ * @throws {z.ZodError} If the document or call is invalid.
  */
 export function evaluate(doc: PolicyDocument, call: PolicyCall): Explanation {
-  const document = PolicyDocumentSchema.parse(doc);
-  const validatedCall = PolicyCallSchema.parse(call);
-  const matchingRules = document.rules.filter((rule) => matchesRule(rule, validatedCall));
-  const matched = matchingRules.map(({ id, decision }) => ({ ruleId: id, decision }));
-
-  if (matchingRules.length === 0) {
-    return ExplanationSchema.parse({
-      decision: document.defaultDecision,
-      ruleId: "default",
-      reason: "default_decision",
-      matched,
-      editable: [],
-    });
-  }
-
-  const selectedRule = matchingRules.reduce((selected, rule) =>
-    DECISION_RANK[rule.decision] > DECISION_RANK[selected.decision] ? rule : selected,
-  );
-  return toExplanation(selectedRule, matched);
+  return compilePolicy(doc).evaluate(call);
 }

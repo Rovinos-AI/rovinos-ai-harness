@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "@harness/schemas";
-import { evaluate, type PolicyCall, PolicyCallSchema } from "./index.js";
+import { compilePolicy, evaluate, type PolicyCall, PolicyCallSchema } from "./index.js";
 import { PolicyDocumentSchema, RuleSchema } from "./schema.js";
 import type { ArgMatcher, PolicyDocument, Rule } from "./schema.js";
 
@@ -64,7 +64,7 @@ function createPolicy(
 function createCall(
   args: JsonValue = { to: "<EMAIL_1>" },
   toolId = "mail.send",
-  context: PolicyCall["context"] = {},
+  context: PolicyCall["context"] = { subagent: false },
 ): PolicyCall {
   return PolicyCallSchema.parse({ toolId, args, context });
 }
@@ -81,6 +81,101 @@ function decisionRank(decision: Rule["decision"]): number {
 }
 
 const CALL = createCall();
+const scalarJsonArbitrary: fc.Arbitrary<JsonValue> = fc.oneof(
+  fc.constant(null),
+  fc.boolean(),
+  fc.integer({ min: -10, max: 10 }),
+  fc.constantFrom("", "mail", "x", "<EMAIL_1>", "<PATH_2>"),
+);
+const argsArbitrary: fc.Arbitrary<JsonValue> = fc.oneof(
+  scalarJsonArbitrary,
+  fc.array(scalarJsonArbitrary, { maxLength: 4 }),
+  fc.record({
+    value: scalarJsonArbitrary,
+    nested: fc.record({ value: scalarJsonArbitrary }),
+    token: fc.constantFrom("<EMAIL_1>", "<PATH_2>"),
+  }),
+);
+const pointerArbitrary = fc.constantFrom("", "/value", "/nested/value", "/missing");
+const matcherArbitrary: fc.Arbitrary<ArgMatcher> = fc.oneof(
+  fc
+    .tuple(pointerArbitrary, scalarJsonArbitrary)
+    .map(([pointer, value]) => ({ pointer, op: "equals", value }) satisfies ArgMatcher),
+  fc
+    .tuple(pointerArbitrary, fc.array(scalarJsonArbitrary, { maxLength: 4 }))
+    .map(([pointer, value]) => ({ pointer, op: "in", value }) satisfies ArgMatcher),
+  fc
+    .tuple(pointerArbitrary, fc.constantFrom("", "mail", "x"))
+    .map(([pointer, value]) => ({ pointer, op: "startsWith", value }) satisfies ArgMatcher),
+  fc
+    .tuple(pointerArbitrary, fc.constantFrom("^x$", "^mail$", "mail"))
+    .map(([pointer, value]) => ({ pointer, op: "matches", value }) satisfies ArgMatcher),
+  pointerArbitrary.map((pointer) => ({ pointer, op: "exists" }) satisfies ArgMatcher),
+  fc
+    .tuple(pointerArbitrary, fc.constantFrom("email", "path"))
+    .map(([pointer, value]) => ({ pointer, op: "tokenType", value }) satisfies ArgMatcher),
+);
+
+interface GeneratedRule {
+  readonly decision: Rule["decision"];
+  readonly tools: Rule["match"]["tools"];
+  readonly args: ArgMatcher[];
+  readonly contextSubagent: boolean | null;
+  readonly contextServer: string | null;
+}
+
+const generatedRuleMatchData = {
+  tools: fc.constantFrom<Rule["match"]["tools"]>(
+    "*",
+    ["mail.send"],
+    ["fs.read"],
+    ["fs.*"],
+    ["mail.*"],
+  ),
+  args: fc.array(matcherArbitrary, { maxLength: 2 }),
+  contextSubagent: fc.option(fc.boolean(), { nil: null }),
+  contextServer: fc.option(fc.constantFrom("mail", "fs"), { nil: null }),
+};
+const generatedRuleArbitrary: fc.Arbitrary<GeneratedRule> = fc.record({
+  decision: fc.constantFrom<Rule["decision"]>("allow", "ask", "deny"),
+  ...generatedRuleMatchData,
+});
+const generatedAllowRuleArbitrary: fc.Arbitrary<GeneratedRule> = fc.record({
+  decision: fc.constant<Rule["decision"]>("allow"),
+  ...generatedRuleMatchData,
+});
+const generatedRulesArbitrary = fc.array(generatedRuleArbitrary, { maxLength: 12 });
+const generatedDefaultArbitrary = fc.constantFrom<PolicyDocument["defaultDecision"]>("ask", "deny");
+const generatedCallArbitrary: fc.Arbitrary<PolicyCall> = fc
+  .record({
+    args: argsArbitrary,
+    toolId: fc.constantFrom("mail.send", "mail.read", "fs.read", "fs.read.file"),
+    subagent: fc.boolean(),
+    server: fc.option(fc.constantFrom("mail", "fs"), { nil: null }),
+  })
+  .map(({ args, toolId, subagent, server }) =>
+    createCall(args, toolId, { subagent, ...(server === null ? {} : { server }) }),
+  );
+
+function generatedMatch(data: GeneratedRule): Rule["match"] {
+  const context = {
+    ...(data.contextSubagent === null ? {} : { subagent: data.contextSubagent }),
+    ...(data.contextServer === null ? {} : { server: data.contextServer }),
+  };
+  const tools = data.decision === "allow" && data.tools === "*" ? ["mail.send"] : data.tools;
+  return {
+    tools,
+    ...(data.args.length === 0 ? {} : { args: data.args }),
+    ...(Object.keys(context).length === 0 ? {} : { context }),
+  };
+}
+
+function generatedRules(data: readonly GeneratedRule[]): Rule[] {
+  return data.map((rule, index) =>
+    createRule(`generated_${String(index)}`, rule.decision, generatedMatch(rule)),
+  );
+}
+
 const argumentCases: {
   readonly name: string;
   readonly args: JsonValue;
@@ -309,6 +404,63 @@ describe("evaluate", () => {
     expect(evaluateTokenized(createPolicy([rule]), wrongServer).decision).toBe("deny");
   });
 
+  it("requires subagent context and treats a missing server as a non-MCP call", () => {
+    const callWithoutServer = createCall({}, "mail.send", { subagent: false });
+    const callWithServer = createCall({}, "mail.send", { subagent: false, server: "mail" });
+    const subagentRule = createRule("not_subagent", "deny", {
+      tools: "*",
+      context: { subagent: false },
+    });
+    const serverRule = createRule("mail_server", "deny", {
+      tools: "*",
+      context: { server: "mail" },
+    });
+
+    expect(evaluateTokenized(createPolicy([subagentRule], "ask"), callWithoutServer).decision).toBe(
+      "deny",
+    );
+    expect(evaluateTokenized(createPolicy([subagentRule], "ask"), callWithServer).decision).toBe(
+      "deny",
+    );
+    expect(
+      evaluateTokenized(
+        createPolicy([subagentRule], "ask"),
+        createCall({}, "mail.send", { subagent: true, server: "mail" }),
+      ).decision,
+    ).toBe("ask");
+    expect(evaluateTokenized(createPolicy([serverRule], "ask"), callWithServer).decision).toBe(
+      "deny",
+    );
+    expect(evaluateTokenized(createPolicy([serverRule], "ask"), callWithoutServer).decision).toBe(
+      "ask",
+    );
+    expect(
+      evaluateTokenized(
+        createPolicy([serverRule], "ask"),
+        createCall({}, "mail.send", { subagent: false, server: "fs" }),
+      ).decision,
+    ).toBe("ask");
+  });
+
+  it("rejects the reserved default rule id with a closed validation code", () => {
+    const result = RuleSchema.safeParse({
+      id: "default",
+      decision: "deny",
+      reason: "reserved_id",
+      match: { tools: ["mail.send"] },
+    });
+
+    if (result.success) {
+      throw new Error("The reserved rule id was accepted.");
+    }
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({
+        path: ["id"],
+        params: { errorCode: "policy_rule_id_reserved" },
+      }),
+    );
+  });
+
   it("does not mutate policy or call inputs", () => {
     const doc = createPolicy([createRule("deny_rule", "deny")]);
     const call = createCall({ to: "<EMAIL_1>" });
@@ -339,57 +491,134 @@ describe("evaluate", () => {
       evaluate(createPolicy(), {
         toolId: "invalid tool",
         args: {},
-        context: {},
+        context: { subagent: false },
       }),
     ).toThrow();
+    expect(
+      PolicyCallSchema.safeParse({
+        toolId: "mail.send",
+        args: {},
+        context: {},
+      }).success,
+    ).toBe(false);
   });
 
   it("property: adding a deny never makes a call more permitted", () => {
-    const decisions = fc.array(fc.constantFrom<Rule["decision"]>("allow", "ask", "deny"), {
-      maxLength: 12,
-    });
-    const defaults = fc.constantFrom<PolicyDocument["defaultDecision"]>("ask", "deny");
-
     fc.assert(
-      fc.property(decisions, defaults, (ruleDecisions, defaultDecision) => {
-        const rules = ruleDecisions.map((decision, index) =>
-          createRule(`rule_${String(index)}`, decision),
-        );
-        const doc = createPolicy(rules, defaultDecision);
-        const before = evaluateTokenized(doc, CALL);
-        const withDeny = createPolicy(
-          [...rules, createRule(`appended_deny_${String(rules.length)}`, "deny")],
-          defaultDecision,
-        );
-        const after = evaluateTokenized(withDeny, CALL);
+      fc.property(
+        generatedRulesArbitrary,
+        generatedDefaultArbitrary,
+        generatedCallArbitrary,
+        (ruleData, defaultDecision, call) => {
+          const rules = generatedRules(ruleData);
+          const doc = createPolicy(rules, defaultDecision);
+          const before = evaluateTokenized(doc, call);
+          const withDeny = createPolicy(
+            [...rules, createRule("appended_deny", "deny", { tools: "*" })],
+            defaultDecision,
+          );
+          const after = evaluateTokenized(withDeny, call);
 
-        expect(decisionRank(after.decision)).toBeGreaterThanOrEqual(decisionRank(before.decision));
-        expect(before.decision !== "deny" || after.decision === "deny").toBe(true);
-      }),
+          expect(decisionRank(after.decision)).toBeGreaterThanOrEqual(
+            decisionRank(before.decision),
+          );
+          expect(before.decision !== "deny" || after.decision === "deny").toBe(true);
+        },
+      ),
+      { numRuns: 500 },
     );
   });
 
   it("property: removing allow rules never makes a call more permitted", () => {
-    const decisions = fc.array(fc.constantFrom<Rule["decision"]>("allow", "ask", "deny"), {
-      maxLength: 12,
-    });
-    const defaults = fc.constantFrom<PolicyDocument["defaultDecision"]>("ask", "deny");
-
     fc.assert(
-      fc.property(decisions, defaults, (ruleDecisions, defaultDecision) => {
-        const rules = ruleDecisions.map((decision, index) =>
-          createRule(`rule_${String(index)}`, decision),
-        );
-        const doc = createPolicy(rules, defaultDecision);
-        const withoutAllows = createPolicy(
-          rules.filter((rule) => rule.decision !== "allow"),
-          defaultDecision,
-        );
+      fc.property(
+        generatedAllowRuleArbitrary,
+        generatedRulesArbitrary,
+        generatedDefaultArbitrary,
+        generatedCallArbitrary,
+        (allowRuleData, ruleData, defaultDecision, call) => {
+          const rules = generatedRules([allowRuleData, ...ruleData]);
+          const before = evaluateTokenized(createPolicy(rules, defaultDecision), call);
 
-        expect(
-          decisionRank(evaluateTokenized(withoutAllows, CALL).decision),
-        ).toBeGreaterThanOrEqual(decisionRank(evaluateTokenized(doc, CALL).decision));
-      }),
+          for (const [index, rule] of rules.entries()) {
+            if (rule.decision !== "allow") {
+              continue;
+            }
+            const withoutAllow = createPolicy(
+              rules.filter((_, candidateIndex) => candidateIndex !== index),
+              defaultDecision,
+            );
+            const after = evaluateTokenized(withoutAllow, call);
+            expect(decisionRank(after.decision)).toBeGreaterThanOrEqual(
+              decisionRank(before.decision),
+            );
+          }
+        },
+      ),
+      { numRuns: 500 },
     );
+  });
+
+  it("property: decision is independent of rule order", () => {
+    const shuffledRulesArbitrary = generatedRulesArbitrary.chain((ruleData) => {
+      const rules = generatedRules(ruleData);
+      return fc
+        .shuffledSubarray(rules, {
+          minLength: rules.length,
+          maxLength: rules.length,
+        })
+        .map((shuffled) => ({ rules, shuffled }));
+    });
+    fc.assert(
+      fc.property(
+        shuffledRulesArbitrary,
+        generatedDefaultArbitrary,
+        generatedCallArbitrary,
+        ({ rules, shuffled }, defaultDecision, call) => {
+          expect(evaluateTokenized(createPolicy(shuffled, defaultDecision), call).decision).toBe(
+            evaluateTokenized(createPolicy(rules, defaultDecision), call).decision,
+          );
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+
+  it("matches the root JSON pointer without throwing for any JSON argument type and operation", () => {
+    const matchers: ArgMatcher[] = [
+      { pointer: "", op: "equals", value: null },
+      { pointer: "", op: "in", value: [null] },
+      { pointer: "", op: "startsWith", value: "x" },
+      { pointer: "", op: "matches", value: "^x$" },
+      { pointer: "", op: "exists" },
+      { pointer: "", op: "tokenType", value: "email" },
+    ];
+    const doc = createPolicy(
+      matchers.map((matcher, index) =>
+        createRule(`json_type_${String(index)}`, "ask", { tools: "*", args: [matcher] }),
+      ),
+    );
+    const argsByType: JsonValue[] = [null, 42, false, "text", [], { nested: { value: 1 } }];
+
+    for (const args of argsByType) {
+      expect(() => evaluate(doc, createCall(args))).not.toThrow();
+    }
+  });
+
+  it("reuses the compiled and validated document for repeated calls", () => {
+    const doc = createPolicy([
+      createRule("pattern_rule", "ask", {
+        tools: "*",
+        args: [{ pointer: "/to", op: "matches", value: "^<EMAIL_1>$" }],
+      }),
+    ]);
+    const parseSpy = vi.spyOn(PolicyDocumentSchema, "parse");
+    const compiled = compilePolicy(doc);
+
+    expect(compiled.evaluate(CALL).decision).toBe("ask");
+    expect(compiled.evaluate(CALL).decision).toBe("ask");
+    expect(parseSpy).toHaveBeenCalledTimes(1);
+
+    parseSpy.mockRestore();
   });
 });
