@@ -286,3 +286,25 @@ export function __resetRegistryForTests(): void {
   }
   definitions.clear();
 }
+
+/** Registers an unsafe span definition to verify schema linting in tests. */
+export function __registerUnsafeSpanForTests(name: string, shape: SpanShape): () => void {
+  if (env.NODE_ENV !== "test") {
+    throw new SpanRegistryError("span_unsafe_test_registration_forbidden");
+  }
+  const parsedName = Code.parse(name);
+  const definition: SpanDefinition<SpanDefinitionShape> = {
+    name: parsedName,
+    shape,
+    schema: z.object(shape).strict(),
+    start() {
+      throw new SpanRegistryError("span_attr_unconstrained");
+    },
+  };
+  definitions.set(parsedName, definition);
+  return () => {
+    if (definitions.get(parsedName) === definition) {
+      definitions.delete(parsedName);
+    }
+  };
+}
