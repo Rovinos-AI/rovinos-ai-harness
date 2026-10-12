@@ -54,14 +54,16 @@ values may be literal strings unless the key looks secret-related, such as
 Connections resolve secret references only when opening the transport. Stdio
 servers receive no parent environment values by default. If `inheritEnv` is
 enabled, only the parent `PATH` and explicitly configured keys are available.
+When `inheritEnv` is `false`, `command` must be an absolute path (or an executable
+path runnable without `PATH`) because `PATH` is omitted from the child process.
 The child stderr stream is never forwarded as text; only its byte count is
 available to the safe logger.
 
 The MCP SDK negotiates the protocol automatically unless `protocol` pins an
-era. Tool discovery follows pagination, is capped at 1,000 tools, and uses the
-SDK cache's server-provided TTL and scope hints. Modern list-change
-subscriptions refresh the SDK cache. `harness doctor` reports a
-`servers_reachable_<index>` result for each configured server; its `detail`
+era. Tool discovery follows pagination, is capped at 1,000 tools, and caches
+results according to the server-provided `ttlMs`. Modern list-change
+subscriptions refresh the cached tools. `harness doctor` reports a
+`servers_reachable.<serverId>` result for each configured server; its `detail`
 contains the configured server id.
 
 ## Examples

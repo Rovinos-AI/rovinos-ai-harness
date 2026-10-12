@@ -86,6 +86,20 @@ describe("McpPool", () => {
       },
     });
 
+    expect(checks.map((check) => check.id)).toEqual([
+      "servers_reachable.reachable",
+      "servers_reachable.offline",
+    ]);
+
+    // Check ids remain stable regardless of server ordering
+    const reorderedChecks = createServersReachableChecks([config("offline"), config("reachable")], {
+      resolveSecret: () => Promise.reject(new Error("not used")),
+    });
+    expect(reorderedChecks.map((check) => check.id)).toEqual([
+      "servers_reachable.offline",
+      "servers_reachable.reachable",
+    ]);
+
     await expect(Promise.all(checks.map((check) => check.run({})))).resolves.toEqual([
       { status: "ok", code: "servers_reachable", detail: "reachable" },
       { status: "fail", code: "mcp_connect_failed", detail: "offline" },
