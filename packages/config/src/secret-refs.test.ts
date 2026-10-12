@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: Apache-2.0
+import { describe, expect, it } from "vitest";
+import { getConfigSecretRefs } from "./index.js";
+import { HarnessConfigSchema } from "./schema.js";
+
+describe("getConfigSecretRefs", () => {
+  it("returns schema-owned references without interpreting arbitrary strings", () => {
+    const config = HarnessConfigSchema.parse({
+      models: {
+        providers: [
+          {
+            id: "provider",
+            kind: "openai",
+            apiKey: "env:DOCTOR_TEST_API_KEY",
+          },
+        ],
+      },
+      roles: [
+        {
+          id: "role",
+          tools: [],
+          systemPrompt: "env:PRODUCTION",
+        },
+      ],
+    });
+
+    expect(getConfigSecretRefs(config)).toEqual(["env:DOCTOR_TEST_API_KEY"]);
+  });
+});

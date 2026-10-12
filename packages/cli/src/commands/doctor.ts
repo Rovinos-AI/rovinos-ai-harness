@@ -3,9 +3,10 @@ import {
   CompositeSecretResolver,
   EnvSecretResolver,
   FileSecretResolver,
+  getConfigSecretRefs,
   type HarnessConfig,
 } from "@harness/config";
-import { DoctorResultsSchema, HarnessError } from "@harness/schemas";
+import { Code, DoctorResultsSchema, HarnessError } from "@harness/schemas";
 import type { DoctorCheck, DoctorContext } from "@harness/core";
 import type { CommandModule } from "../command.js";
 
@@ -32,17 +33,27 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
         .description("Check the local harness environment")
         .action(async () => {
           let config: HarnessConfig | undefined;
+          let configErrorCode: string | undefined;
           try {
             config = await context.loadConfig();
-          } catch {
+          } catch (error) {
             config = undefined;
+            if (error instanceof HarnessError) {
+              const parsedCode = Code.safeParse(error.code);
+              if (parsedCode.success) {
+                configErrorCode = parsedCode.data;
+              }
+            }
           }
           const env = process.env;
+          const core = await import("@harness/core");
           const envResolver = new EnvSecretResolver(env);
           const doctorContext: DoctorContext = {
             config,
+            ...(configErrorCode === undefined ? {} : { configErrorCode }),
+            secretRefs: config === undefined ? [] : getConfigSecretRefs(config),
             env,
-            dataDir: env.HARNESS_DATA_DIR ?? process.cwd(),
+            dataDir: core.resolveDataDir(env),
             resolveSecret: async (ref, signal) => {
               let fileWarning: "secret_file_permissions" | undefined;
               const resolver = new CompositeSecretResolver({
@@ -57,8 +68,7 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
               return fileWarning;
             },
           };
-          const core = await import("@harness/core");
-          const results = await core.runDoctor(doctorContext, checks ?? core.DOCTOR_CHECKS);
+          const results = await core.runDoctor(doctorContext, checks ?? core.doctorChecks());
           if (program.opts<{ json?: boolean }>().json === true) {
             context.out.json(DoctorResultsSchema, results);
           } else {

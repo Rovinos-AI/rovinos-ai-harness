@@ -2,15 +2,17 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SecretRefSchema } from "@harness/schemas";
+import { SecretRefSchema, type DoctorCheckStatus } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DOCTOR_TIMEOUT_MS,
-  DOCTOR_CHECKS,
+  doctorChecks,
+  registerDoctorCheck,
   runDoctor,
   type DoctorCheck,
   type DoctorContext,
 } from "./doctor.js";
+import { resolveDataDir } from "./runtime-data-dir.js";
 
 let temporaryDirectory: string | undefined;
 
@@ -22,6 +24,7 @@ async function createTemporaryDirectory(): Promise<string> {
 function context(overrides: Partial<DoctorContext> = {}): DoctorContext {
   return {
     config: {},
+    secretRefs: [],
     env: {},
     dataDir: tmpdir(),
     resolveSecret: () => Promise.resolve(undefined),
@@ -97,6 +100,43 @@ describe("doctor registry", () => {
     expect(DEFAULT_DOCTOR_TIMEOUT_MS).toBe(5_000);
   });
 
+  it("handles a rejection after timeout and continues to remaining checks", async () => {
+    vi.useFakeTimers();
+    let remainingCheckRan = false;
+    const lateRejectingCheck: DoctorCheck = {
+      id: "late_reject",
+      title: "Late rejection",
+      run: (ctx) =>
+        new Promise<DoctorCheckStatus>((_, reject) => {
+          ctx.signal?.addEventListener(
+            "abort",
+            () => {
+              setTimeout(() => reject(new Error("late failure")), 5);
+            },
+            { once: true },
+          );
+        }),
+    };
+    const remainingCheck: DoctorCheck = {
+      id: "remaining",
+      title: "Remaining check",
+      run: () => {
+        remainingCheckRan = true;
+        return Promise.resolve({ status: "ok", code: "remaining_ok" });
+      },
+    };
+
+    const resultsPromise = runDoctor(context(), [lateRejectingCheck, remainingCheck], 5);
+    await vi.advanceTimersByTimeAsync(5);
+
+    await expect(resultsPromise).resolves.toEqual([
+      { id: "late_reject", status: "fail", code: "check_timeout" },
+      { id: "remaining", status: "ok", code: "remaining_ok" },
+    ]);
+    expect(remainingCheckRan).toBe(true);
+    await vi.advanceTimersByTimeAsync(5);
+  });
+
   it("stops secret resolution after a timed-out reference", async () => {
     vi.useFakeTimers();
     const refs = [
@@ -104,7 +144,7 @@ describe("doctor registry", () => {
       SecretRefSchema.parse("env:SECOND_DOCTOR_SECRET"),
     ];
     const resolved: string[] = [];
-    const secretCheck = DOCTOR_CHECKS.find(({ id }) => id === "secret_refs_resolvable");
+    const secretCheck = doctorChecks().find(({ id }) => id === "secret_refs_resolvable");
     if (secretCheck === undefined) {
       throw new Error("secret_refs_resolvable check is not registered");
     }
@@ -112,6 +152,7 @@ describe("doctor registry", () => {
     const resultsPromise = runDoctor(
       context({
         config: { first: refs[0], second: refs[1] },
+        secretRefs: refs,
         resolveSecret: (ref, signal) => {
           resolved.push(ref);
           return new Promise((resolve) => {
@@ -149,7 +190,7 @@ describe("doctor registry", () => {
   });
 
   it("registers node version, config, secret, and data directory checks", () => {
-    expect(DOCTOR_CHECKS.map(({ id }) => id)).toEqual([
+    expect(doctorChecks().map(({ id }) => id)).toEqual([
       "node_version",
       "config_valid",
       "secret_refs_resolvable",
@@ -158,7 +199,9 @@ describe("doctor registry", () => {
   });
 
   it("checks the Node version and configuration status", async () => {
-    const checks = DOCTOR_CHECKS.filter(({ id }) => id === "node_version" || id === "config_valid");
+    const checks = doctorChecks().filter(
+      ({ id }) => id === "node_version" || id === "config_valid",
+    );
 
     await expect(
       runDoctor(context({ config: undefined, nodeVersion: "20.11.0" }), checks),
@@ -181,7 +224,7 @@ describe("doctor registry", () => {
       SecretRefSchema.parse("file:/private/path/doctor-key"),
     ];
     const resolved: string[] = [];
-    const secretCheck = DOCTOR_CHECKS.find(({ id }) => id === "secret_refs_resolvable");
+    const secretCheck = doctorChecks().find(({ id }) => id === "secret_refs_resolvable");
     if (secretCheck === undefined) {
       throw new Error("secret_refs_resolvable check is not registered");
     }
@@ -189,6 +232,7 @@ describe("doctor registry", () => {
     const results = await runDoctor(
       context({
         config: { first: refs[0], second: refs[1] },
+        secretRefs: refs,
         resolveSecret: (ref) => {
           resolved.push(ref);
           if (ref === refs[0]) {
@@ -217,7 +261,7 @@ describe("doctor registry", () => {
 
   it("reports secret-file permission warnings without treating them as failures", async () => {
     const ref = SecretRefSchema.parse("file:/private/path/doctor-key");
-    const secretCheck = DOCTOR_CHECKS.find(({ id }) => id === "secret_refs_resolvable");
+    const secretCheck = doctorChecks().find(({ id }) => id === "secret_refs_resolvable");
     if (secretCheck === undefined) {
       throw new Error("secret_refs_resolvable check is not registered");
     }
@@ -226,6 +270,7 @@ describe("doctor registry", () => {
       runDoctor(
         context({
           config: { credential: ref },
+          secretRefs: [ref],
           resolveSecret: () => Promise.resolve("secret_file_permissions"),
         }),
         [secretCheck],
@@ -242,7 +287,7 @@ describe("doctor registry", () => {
 
   it("creates and removes a temporary file under the configured data directory", async () => {
     const dataDir = await createTemporaryDirectory();
-    const check = DOCTOR_CHECKS.find(({ id }) => id === "data_dir_writable");
+    const check = doctorChecks().find(({ id }) => id === "data_dir_writable");
     if (check === undefined) {
       throw new Error("data_dir_writable check is not registered");
     }
@@ -257,13 +302,103 @@ describe("doctor registry", () => {
     const root = await createTemporaryDirectory();
     const dataDir = join(root, "not-a-directory");
     await writeFile(dataDir, "occupied");
-    const check = DOCTOR_CHECKS.find(({ id }) => id === "data_dir_writable");
+    const check = doctorChecks().find(({ id }) => id === "data_dir_writable");
     if (check === undefined) {
       throw new Error("data_dir_writable check is not registered");
     }
 
     await expect(runDoctor(context({ dataDir }), [check])).resolves.toEqual([
       { id: "data_dir_writable", status: "fail", code: "data_dir_write_failed" },
+    ]);
+  });
+
+  it("warns when a valid Key Vault reference has no available resolver", async () => {
+    const ref = SecretRefSchema.parse("akv:production-vault/doctor-secret");
+    const check = doctorChecks().find(({ id }) => id === "secret_refs_resolvable");
+    if (check === undefined) {
+      throw new Error("secret_refs_resolvable check is not registered");
+    }
+
+    await expect(
+      runDoctor(
+        context({
+          secretRefs: [ref],
+          resolveSecret: () =>
+            Promise.reject(Object.assign(new Error("unavailable"), {
+              code: "secret_resolver_unavailable",
+            })),
+        }),
+        [check],
+      ),
+    ).resolves.toEqual([
+      {
+        id: "secret_refs_resolvable",
+        status: "warn",
+        code: "secret_resolver_unavailable",
+        detail: "akv_doctor-secret",
+      },
+    ]);
+  });
+
+  it("does not treat arbitrary config strings as secret references", async () => {
+    const check = doctorChecks().find(({ id }) => id === "secret_refs_resolvable");
+    if (check === undefined) {
+      throw new Error("secret_refs_resolvable check is not registered");
+    }
+    const resolveSecret = vi.fn(() => Promise.resolve(undefined));
+
+    await expect(
+      runDoctor(
+        context({
+          config: { roles: [{ systemPrompt: "env:PRODUCTION" }] },
+          secretRefs: [],
+          resolveSecret,
+        }),
+        [check],
+      ),
+    ).resolves.toEqual([
+      { id: "secret_refs_resolvable", status: "ok", code: "secret_refs_resolvable" },
+    ]);
+    expect(resolveSecret).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate check ids and exposes only a frozen registry snapshot", () => {
+    const checks = doctorChecks();
+    expect(Object.isFrozen(checks)).toBe(true);
+    expect(() => (checks as DoctorCheck[]).splice(0, 1)).toThrow();
+
+    let thrown: unknown;
+    try {
+      registerDoctorCheck({
+        id: "node_version",
+        title: "Duplicate node check",
+        run: () => Promise.resolve({ status: "ok", code: "node_version" }),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: "doctor_check_duplicate",
+    });
+  });
+
+  it("resolves the data directory with the same override precedence as runtime", () => {
+    expect(resolveDataDir({}, "/explicit")).toBe("/explicit");
+    expect(resolveDataDir({ HARNESS_DATA_DIR: "/environment" })).toBe("/environment");
+    expect(resolveDataDir({})).toBe(process.cwd());
+  });
+
+  it("includes the safe config error code in the config check", async () => {
+    const check = doctorChecks().find(({ id }) => id === "config_valid");
+    if (check === undefined) {
+      throw new Error("config_valid check is not registered");
+    }
+
+    await expect(
+      runDoctor(context({ config: undefined, configErrorCode: "config_invalid" }), [check]),
+    ).resolves.toEqual([
+      { id: "config_valid", status: "fail", code: "config_invalid", detail: "config_invalid" },
     ]);
   });
 });

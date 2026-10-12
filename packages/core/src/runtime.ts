@@ -16,6 +16,7 @@ import { SystemIdGenerator, systemClock } from "./runtime-ids.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool, resolveRuntimeRoles } from "./subagent/runtime.js";
 import { createSqliteStore } from "./runtime-store.js";
+import { resolveDataDir } from "./runtime-data-dir.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import type {
@@ -378,7 +379,7 @@ export async function createRuntime(
         : { secretResolver: overrides.secretResolver }),
     })) ??
     missingModelPort;
-  const dataDir = overrides.dataDir ?? process.env.HARNESS_DATA_DIR ?? process.cwd();
+  const dataDir = resolveDataDir(process.env, overrides.dataDir);
   const tool = overrides.tool ?? unavailableTool;
   const context = overrides.context ?? new NaiveContext();
   const roles = await resolveRuntimeRoles(

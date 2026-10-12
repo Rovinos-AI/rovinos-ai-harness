@@ -2,7 +2,7 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HarnessConfigSchema } from "@harness/config";
+import { HarnessConfigSchema, loadConfig } from "@harness/config";
 import { DoctorResultsSchema, parseJson, type DoctorCheckStatus } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
@@ -82,6 +82,77 @@ describe("harness doctor", () => {
     );
     expect(stdout.join("")).not.toContain(secretValue);
     expect(stderr).toEqual([]);
+  });
+
+  it("keeps env and file secret values out of table and JSON failure output", async () => {
+    const dataDirectory = await createDataDirectory();
+    const envSecret = "doctor-cli-env-secret-value";
+    const fileSecret = "doctor-cli-file-secret-value";
+    const envName = "HARNESS_DOCTOR_SECRET_20_4";
+    const missingEnvName = "HARNESS_DOCTOR_MISSING_SECRET_20_4";
+    const secretFile = join(dataDirectory, "doctor-secret");
+    await writeFile(secretFile, fileSecret, { mode: 0o600 });
+    await chmod(secretFile, 0o600);
+    vi.stubEnv(envName, envSecret);
+    vi.stubEnv(missingEnvName, undefined);
+    const config = HarnessConfigSchema.parse({
+      models: {
+        providers: [
+          { id: "missing", kind: "openai", apiKey: `env:${missingEnvName}` },
+          { id: "environment", kind: "openai", apiKey: `env:${envName}` },
+          { id: "file", kind: "openai", apiKey: `file:${secretFile}` },
+        ],
+      },
+    });
+
+    for (const argv of [["doctor"], ["--json", "doctor"]]) {
+      const { context, stdout, stderr } = createContext(() => Promise.resolve(config));
+      const exitCode = await main(argv, context, [createDoctorCommand()]);
+      const output = stdout.join("") + stderr.join("");
+
+      expect(exitCode).toBe(ExitCode.failure);
+      expect(output).not.toContain(envSecret);
+      expect(output).not.toContain(fileSecret);
+      expect(output).not.toContain(secretFile);
+      expect(stderr).toEqual(["doctor_failed\n"]);
+      if (argv.includes("--json")) {
+        expect(parseJson(DoctorResultsSchema, stdout[0] ?? "")).toContainEqual(
+          expect.objectContaining({
+            id: "secret_refs_resolvable",
+            status: "fail",
+            code: "secret_not_found",
+          }),
+        );
+      } else {
+        expect(stdout.join("")).toContain("secret_not_found");
+      }
+    }
+  });
+
+  it("reports a safe code when an invalid config file prevents loading", async () => {
+    const dataDirectory = await createDataDirectory();
+    const invalidValue = "doctor-invalid-config-sensitive-value";
+    const configPath = join(dataDirectory, "harness.config.yaml");
+    await writeFile(
+      configPath,
+      `run:\n  budgets:\n    maxSteps: ${invalidValue}\n`,
+      "utf8",
+    );
+    const { context, stdout, stderr } = createContext(() => loadConfig({ configPath }));
+
+    const exitCode = await main(["--json", "doctor"], context, [createDoctorCommand()]);
+    const output = stdout.join("") + stderr.join("");
+    const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(results).toContainEqual({
+      id: "config_valid",
+      status: "fail",
+      code: "config_invalid",
+      detail: "config_invalid",
+    });
+    expect(stderr).toEqual(["doctor_failed\n"]);
+    expect(output).not.toContain(invalidValue);
   });
 
   it.skipIf(process.platform === "win32")(

@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   Code,
+  HarnessError,
   SecretRefSchema,
   type Code as HarnessCode,
   type DoctorCheckStatus,
@@ -14,6 +15,10 @@ import {
 export interface DoctorContext {
   /** Validated configuration, or `undefined` when loading failed. */
   readonly config: unknown;
+  /** Closed error code from config loading, when validation failed. */
+  readonly configErrorCode?: HarnessCode;
+  /** Secret references extracted from schema-owned config fields. */
+  readonly secretRefs: readonly SecretRef[];
   /** Environment used to load configuration and resolve references. */
   readonly env: Readonly<Record<string, string | undefined>>;
   /** Data directory selected for harness runtime state. */
@@ -42,55 +47,36 @@ export interface DoctorCheck {
 /** Default timeout applied independently to each check. */
 export const DEFAULT_DOCTOR_TIMEOUT_MS = 5_000;
 
-/** Extensible registry of built-in and package-registered checks. */
-export const DOCTOR_CHECKS: DoctorCheck[] = [];
+/** Internal registry of built-in and package-registered checks. */
+const registeredDoctorChecks: DoctorCheck[] = [];
+
+class DuplicateDoctorCheckError extends HarnessError {
+  override readonly code = "doctor_check_duplicate";
+
+  constructor() {
+    super("A doctor check with this id is already registered.");
+  }
+}
 
 /** Registers a diagnostic check for subsequent `runDoctor` invocations. */
 export function registerDoctorCheck(check: DoctorCheck): void {
-  DOCTOR_CHECKS.push(check);
+  if (registeredDoctorChecks.some(({ id }) => id === check.id)) {
+    throw new DuplicateDoctorCheckError();
+  }
+  registeredDoctorChecks.push(check);
+}
+
+/** Returns a frozen snapshot of all currently registered checks. */
+export function doctorChecks(): readonly DoctorCheck[] {
+  return Object.freeze([...registeredDoctorChecks]);
 }
 
 function result(status: DoctorCheckStatus["status"], code: Code, detail?: Code) {
   return { status, code, ...(detail === undefined ? {} : { detail }) };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
-}
-
-function collectSecretRefs(
-  value: unknown,
-  refs = new Set<string>(),
-  seen = new WeakSet<Record<string, unknown> | unknown[]>(),
-): Set<string> {
-  if (typeof value === "string") {
-    const parsed = SecretRefSchema.safeParse(value);
-    if (parsed.success) {
-      refs.add(parsed.data);
-    }
-    return refs;
-  }
-  if (typeof value !== "object" || value === null) {
-    return refs;
-  }
-  let container: Record<string, unknown> | unknown[] | undefined;
-  if (Array.isArray(value)) {
-    container = value;
-  } else if (isRecord(value)) {
-    container = value;
-  }
-  if (container === undefined || seen.has(container)) {
-    return refs;
-  }
-  seen.add(container);
-  for (const child of Object.values(container)) {
-    collectSecretRefs(child, refs, seen);
-  }
-  return refs;
 }
 
 function safeReferenceName(ref: SecretRef): Code {
@@ -135,7 +121,9 @@ const initialChecks: DoctorCheck[] = [
     title: "Configuration",
     run: (ctx) =>
       Promise.resolve(
-        ctx.config === undefined ? result("fail", "config_invalid") : result("ok", "config_valid"),
+        ctx.config === undefined
+          ? result("fail", "config_invalid", ctx.configErrorCode)
+          : result("ok", "config_valid"),
       ),
   },
   {
@@ -144,7 +132,7 @@ const initialChecks: DoctorCheck[] = [
     run: async (ctx) => {
       let firstFailure: DoctorCheckStatus | undefined;
       let firstWarning: DoctorCheckStatus | undefined;
-      for (const rawRef of collectSecretRefs(ctx.config)) {
+      for (const rawRef of ctx.secretRefs) {
         if (isAborted(ctx.signal)) {
           return result("fail", "check_timeout");
         }
@@ -164,11 +152,15 @@ const initialChecks: DoctorCheck[] = [
           if (isAborted(ctx.signal)) {
             return result("fail", "check_timeout");
           }
-          firstFailure ??= result(
-            "fail",
-            knownSecretErrorCode(error),
-            safeReferenceName(parsed.data),
-          );
+          const errorCode = knownSecretErrorCode(error);
+          if (
+            errorCode === "secret_resolver_unavailable" &&
+            parsed.data.startsWith("akv:")
+          ) {
+            firstWarning ??= result("warn", errorCode, safeReferenceName(parsed.data));
+          } else {
+            firstFailure ??= result("fail", errorCode, safeReferenceName(parsed.data));
+          }
         }
       }
       return firstFailure ?? firstWarning ?? result("ok", "secret_refs_resolvable");
@@ -231,7 +223,10 @@ async function runCheck(
   try {
     const checkResult = check
       .run({ ...ctx, signal: controller.signal })
-      .then((value) => ({ id: check.id, ...value }));
+      .then(
+        (value) => ({ id: check.id, ...value }),
+        () => ({ id: check.id, ...result("fail", "check_failed") }),
+      );
     return await Promise.race([checkResult, timedOut]);
   } catch {
     return { id: check.id, ...result("fail", "check_failed") };
@@ -252,7 +247,7 @@ async function runCheck(
  */
 export async function runDoctor(
   ctx: DoctorContext,
-  checks: readonly DoctorCheck[] = DOCTOR_CHECKS,
+  checks: readonly DoctorCheck[] = doctorChecks(),
   timeoutMs = DEFAULT_DOCTOR_TIMEOUT_MS,
 ): Promise<DoctorCheckResult[]> {
   const results: DoctorCheckResult[] = [];
