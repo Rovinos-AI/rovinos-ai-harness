@@ -2,6 +2,12 @@
 steps:
   - bash: |
       set -euo pipefail
+      # Self-hosted agents bring their own mise; the pinned download below is the Linux x64 hosted path.
+      if existing_mise="$(command -v mise)"; then
+        echo "Using preinstalled mise: $("$existing_mise" --version)"
+        echo "##vso[task.prependpath]$(dirname "$existing_mise")"
+        exit 0
+      fi
       MISE_VERSION=v2026.10.4
       MISE_SHA256=2fc793020b442d08163603400236b2c693f8cede810c7e432fc77220e6c9e8a1
       MISE_ARCHIVE="$(Agent.TempDirectory)/mise-${MISE_VERSION}-linux-x64.tar.gz"
