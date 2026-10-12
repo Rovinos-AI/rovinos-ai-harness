@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# Synthetic MCP server configuration examples.
+servers:
+  - id: internal-weather
+    transport:
+      kind: stdio
+      command: node
+      args: ["./weather-server.js"]
+      env:
+        WEATHER_API_KEY: env:WEATHER_API_KEY
+      inheritEnv: false
+    protocol: auto
+    apps: true
+    trust: internal
+    propagateTrace: true
+    toolAllowlist: ["forecast"]
+    toolPrefix: weather
+    idempotentTools: ["forecast"]
+    useAnnotations: true
+    timeouts:
+      connectMs: 10000
+      callMs: 60000
+    maxResultBytes: 1048576
+  - id: external-search
+    transport:
+      kind: http
+      url: https://mcp.example.test
+      headers:
+        Authorization: env:SEARCH_AUTHORIZATION
+    trust: external
+    propagateTrace: false
+    toolAllowlist: ["search"]
+    toolPrefix: search
