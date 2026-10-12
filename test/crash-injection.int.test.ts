@@ -843,6 +843,7 @@ describe("SQLite compaction crash recovery", () => {
             budgets,
             checkpointEveryEvents: 1_000,
             policyVersion: "test.policy",
+            policy: allowPolicy,
             signal: new AbortController().signal,
             compaction,
           }),
@@ -864,6 +865,7 @@ describe("SQLite compaction crash recovery", () => {
           goal: compactGoal,
           budgets,
           checkpointEveryEvents: 1_000,
+          policy: allowPolicy,
           signal: new AbortController().signal,
           compaction,
         });
