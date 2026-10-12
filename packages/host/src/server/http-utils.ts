@@ -38,6 +38,19 @@ export function writeError(response: HostResponse, status: number, code: string)
   writeJson(response, status, { error: code });
 }
 
+/** Ends request handling without attempting a second response after headers were sent. */
+export function writeRequestFailure(response: HostResponse): void {
+  if (response.headersSent) {
+    response.destroy();
+    return;
+  }
+  response.writeHead(500, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  response.end('{"error":"app_host_request_failed"}');
+}
+
 /** Reads a request body only while it remains under the supplied byte limit. */
 export async function readBody(
   request: HostRequest,

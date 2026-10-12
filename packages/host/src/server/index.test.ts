@@ -29,14 +29,15 @@ const resource = {
 const ResourceResponseSchema = z
   .object({ csp: z.string(), permissions: z.array(z.string()) })
   .loose();
+const AppResourceResponseSchema = z.object({ sessionId: z.string() }).loose();
 
 type RequestListener = Parameters<NonNullable<ReferenceHostDependencies["createHttpServer"]>>[0];
 type HttpServer = ReturnType<NonNullable<ReferenceHostDependencies["createHttpServer"]>>;
 type Request = Parameters<RequestListener>[0];
 type Response = Parameters<RequestListener>[1];
 
-const appPath = `/api/app?resourceUri=${encodeURIComponent(appResourceUri)}`;
 const eventsPath = `/api/events?resourceUri=${encodeURIComponent(appResourceUri)}`;
+const AppReadySchema = z.object({ appId: z.string(), sessionId: z.string() }).strict();
 
 interface FakeResponse {
   readonly response: Response;
@@ -53,6 +54,9 @@ function makeResponse(): FakeResponse {
   let body = "";
   return {
     response: {
+      get headersSent() {
+        return status !== 0;
+      },
       writeHead(code, responseHeaders) {
         status = code;
         headers = responseHeaders;
@@ -64,6 +68,7 @@ function makeResponse(): FakeResponse {
       end(value) {
         body += value?.toString() ?? "";
       },
+      destroy() {},
     },
     read: () => ({ status, headers, body }),
   };
@@ -145,7 +150,7 @@ function makeServer(
       const request: Request = {
         method,
         url,
-        headers,
+        headers: { host: "127.0.0.1:43210", ...headers },
         async *[Symbol.asyncIterator]() {
           if (body !== undefined) {
             yield await Promise.resolve(Buffer.from(body));
@@ -156,6 +161,22 @@ function makeServer(
       return response.read();
     },
   };
+}
+
+async function newAppSession(
+  fixture: ReturnType<typeof makeServer>,
+  host: { readonly token: string; readonly origin: string },
+): Promise<string> {
+  const event = await fixture.request("GET", eventsPath, authorization(host));
+  const data = event.body.split("\n").find((line) => line.startsWith("data: "));
+  if (data === undefined) {
+    throw new Error("Host launch event is missing.");
+  }
+  return parseJson(AppReadySchema, data.slice("data: ".length)).sessionId;
+}
+
+function appPath(sessionId: string): string {
+  return `/api/app?resourceUri=${encodeURIComponent(appResourceUri)}&sessionId=${encodeURIComponent(sessionId)}`;
 }
 
 function authorization(host: { readonly token: string; readonly origin: string }) {
@@ -179,8 +200,27 @@ describe("createReferenceHost", () => {
       const page = await fetch(host.origin);
       expect(page.status).toBe(200);
       expect(page.headers.get("content-type")).toContain("text/html");
+      expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+      expect(page.headers.get("x-frame-options")).toBe("DENY");
+      expect(page.headers.get("referrer-policy")).toBe("no-referrer");
 
-      const appResponse = await fetch(new URL(appPath, host.origin), {
+      const bundle = await fetch(new URL("/host.js", host.origin));
+      expect(bundle.headers.get("content-security-policy")).toContain("frame-src 'self'");
+      expect(bundle.headers.get("x-frame-options")).toBe("DENY");
+      expect(bundle.headers.get("referrer-policy")).toBe("no-referrer");
+
+      const eventResponse = await fetch(new URL(eventsPath, host.origin), {
+        headers: { authorization: ["Bearer", host.token].join(" "), origin: host.origin },
+      });
+      const eventData = (await eventResponse.text())
+        .split("\n")
+        .find((line) => line.startsWith("data: "));
+      if (eventData === undefined) {
+        throw new Error("Host launch event is missing.");
+      }
+      const sessionId = parseJson(AppReadySchema, eventData.slice("data: ".length)).sessionId;
+
+      const appResponse = await fetch(new URL(appPath(sessionId), host.origin), {
         headers: {
           authorization: ["Bearer", host.token].join(" "),
           origin: host.origin,
@@ -222,16 +262,28 @@ describe("createReferenceHost", () => {
     expect(host.url).toContain("#token=");
     expect(new URL(host.url).hash).toContain(encodeURIComponent(appResourceUri));
     expect(host.token).toHaveLength(43);
-    const event = await fixture.request(
-      "GET",
-      eventsPath,
-      authorization(host),
-    );
+    const event = await fixture.request("GET", eventsPath, authorization(host));
     expect(event.status).toBe(200);
     expect(event.headers["content-type"]).toContain("text/event-stream");
     expect(event.body).toContain(sessionId);
     await host.close();
     expect(fixture.closed).toBe(true);
+  });
+
+  it("creates a distinct ULID session for each launched app instance", async () => {
+    let next = 0;
+    const fixture = makeServer({
+      idGenerator: () => String(next++).padStart(26, "0"),
+    });
+    const host = await fixture.hostPromise;
+    const firstSession = await newAppSession(fixture, host);
+    const secondSession = await newAppSession(fixture, host);
+    expect(firstSession).not.toBe(secondSession);
+    const first = await fixture.request("GET", appPath(firstSession), authorization(host));
+    const second = await fixture.request("GET", appPath(secondSession), authorization(host));
+    expect(parseJson(AppResourceResponseSchema, first.body).sessionId).toBe(firstSession);
+    expect(parseJson(AppResourceResponseSchema, second.body).sessionId).toBe(secondSession);
+    await host.close();
   });
 
   it("generates a ULID from injected time and entropy", async () => {
@@ -240,11 +292,7 @@ describe("createReferenceHost", () => {
       now: () => 1_700_000_000_000,
     });
     const host = await fixture.hostPromise;
-    const response = await fixture.request(
-      "GET",
-      eventsPath,
-      authorization(host),
-    );
+    const response = await fixture.request("GET", eventsPath, authorization(host));
     expect(response.status).toBe(200);
     expect(response.body).toMatch(/[0-9A-HJKMNP-TV-Z]{26}/u);
     await host.close();
@@ -263,7 +311,7 @@ describe("createReferenceHost", () => {
   it("requires both the bearer token and same-origin request on protected routes", async () => {
     const fixture = makeServer({ idGenerator: () => sessionId });
     const host = await fixture.hostPromise;
-    const path = appPath;
+    const path = appPath(await newAppSession(fixture, host));
     expect((await fixture.request("GET", path, { origin: host.origin })).status).toBe(403);
     expect(
       (
@@ -274,6 +322,21 @@ describe("createReferenceHost", () => {
       ).status,
     ).toBe(403);
     expect((await fixture.request("GET", path, authorization(host))).status).toBe(200);
+    await host.close();
+  });
+
+  it("rejects a foreign Host header on every route", async () => {
+    const fixture = makeServer({
+      readStatic: () => Promise.resolve(Buffer.from("index")),
+    });
+    const host = await fixture.hostPromise;
+    for (const hostHeader of ["127.0.0.1:43210", "[::1]:43210", "localhost:43210"]) {
+      expect((await fixture.request("GET", "/", { host: hostHeader })).status).toBe(200);
+    }
+    const response = await fixture.request("GET", "/", { host: "foreign.example.test:43210" });
+    expect(response.status).toBe(403);
+    expect(response.body).toBe('{"error":"app_host_invalid"}');
+    expect((await fixture.request("GET", "/", { host: host.origin })).status).toBe(403);
     await host.close();
   });
 
@@ -301,16 +364,17 @@ describe("createReferenceHost", () => {
     const invalidHost = await invalid.hostPromise;
     const invalidResponse = await invalid.request(
       "GET",
-      appPath,
+      appPath(await newAppSession(invalid, invalidHost)),
       authorization(invalidHost),
     );
     expect(invalidResponse.status).toBe(422);
     await invalidHost.close();
 
     const oversized = makeServer({
-      readResource: () => Promise.resolve({
-        contents: [{ mimeType: "text/html;profile=mcp-app", text: "x".repeat(1_048_577) }],
-      }),
+      readResource: () =>
+        Promise.resolve({
+          contents: [{ mimeType: "text/html;profile=mcp-app", text: "x".repeat(1_048_577) }],
+        }),
       idGenerator: () => sessionId,
     });
     const oversizedHost = await oversized.hostPromise;
@@ -318,7 +382,7 @@ describe("createReferenceHost", () => {
       (
         await oversized.request(
           "GET",
-          appPath,
+          appPath(await newAppSession(oversized, oversizedHost)),
           authorization(oversizedHost),
         )
       ).status,
@@ -332,12 +396,31 @@ describe("createReferenceHost", () => {
     const failedHost = await failed.hostPromise;
     const failureResponse = await failed.request(
       "GET",
-      appPath,
+      appPath(await newAppSession(failed, failedHost)),
       authorization(failedHost),
     );
     expect(failureResponse.status).toBe(502);
     expect(failureResponse.body).not.toContain("sensitive reader detail");
     await failedHost.close();
+  });
+
+  it("accepts MIME parameter spacing and case but requires the exact app profile", async () => {
+    for (const [mimeType, expectedStatus] of [
+      ["TEXT/HTML ; profile = mcp-app", 200],
+      ['text/html; charset=utf-8 ; profile="mcp-app"', 200],
+      ["text/html", 422],
+      ["text/html; profile=other", 422],
+    ] as const) {
+      const fixture = makeServer({
+        readResource: () =>
+          Promise.resolve({ contents: [{ mimeType, text: "<main>test</main>" }] }),
+      });
+      const host = await fixture.hostPromise;
+      const sessionId = await newAppSession(fixture, host);
+      const result = await fixture.request("GET", appPath(sessionId), authorization(host));
+      expect(result.status).toBe(expectedStatus);
+      await host.close();
+    }
   });
 
   it("filters CSP and permission requests against their allowlists", async () => {
@@ -350,29 +433,33 @@ describe("createReferenceHost", () => {
       },
       onCode,
       idGenerator: () => sessionId,
-      readResource: () => Promise.resolve({
-        contents: [
-          {
-            mimeType: "text/html;profile=mcp-app",
-            text: "<main>safe</main>",
-            _meta: {
-              ui: {
-                permissions: { camera: {}, microphone: {}, clipboardWrite: {} },
-                csp: {
-                  connectDomains: ["https://allowed.example.test", "https://blocked.example.test"],
-                  resourceDomains: ["javascript:bad"],
-                  frameDomains: ["https://blocked.example.test"],
+      readResource: () =>
+        Promise.resolve({
+          contents: [
+            {
+              mimeType: "text/html;profile=mcp-app",
+              text: "<main>safe</main>",
+              _meta: {
+                ui: {
+                  permissions: { camera: {}, microphone: {}, clipboardWrite: {} },
+                  csp: {
+                    connectDomains: [
+                      "https://allowed.example.test",
+                      "https://blocked.example.test",
+                    ],
+                    resourceDomains: ["javascript:bad"],
+                    frameDomains: ["https://blocked.example.test"],
+                  },
                 },
               },
             },
-          },
-        ],
-      }),
+          ],
+        }),
     });
     const host = await fixture.hostPromise;
     const result = await fixture.request(
       "GET",
-      appPath,
+      appPath(await newAppSession(fixture, host)),
       authorization(host),
     );
     expect(result.status).toBe(200);
@@ -388,16 +475,17 @@ describe("createReferenceHost", () => {
   it("retains the deny-all CSP when there are no resource requests", async () => {
     const fixture = makeServer({
       idGenerator: () => sessionId,
-      readResource: () => Promise.resolve({
-        contents: [
-          { mimeType: "text/html;profile=mcp-app", text: "<main>safe</main>", _meta: { ui: {} } },
-        ],
-      }),
+      readResource: () =>
+        Promise.resolve({
+          contents: [
+            { mimeType: "text/html;profile=mcp-app", text: "<main>safe</main>", _meta: { ui: {} } },
+          ],
+        }),
     });
     const host = await fixture.hostPromise;
     const result = await fixture.request(
       "GET",
-      appPath,
+      appPath(await newAppSession(fixture, host)),
       authorization(host),
     );
     expect(parseJson(ResourceResponseSchema, result.body).csp).toBe(REFERENCE_CSP);
@@ -416,12 +504,12 @@ describe("createReferenceHost", () => {
       readStatic: () => Promise.reject(new Error("private file path")),
       idGenerator: () => sessionId,
     });
+    const unavailableHost = await unavailable.hostPromise;
     const failedIndex = await unavailable.request("GET", "/");
     expect(failedIndex.status).toBe(503);
     const failedBundle = await unavailable.request("GET", "/host.js");
     expect(failedBundle.status).toBe(503);
     await host.close();
-    const unavailableHost = await unavailable.hostPromise;
     await unavailableHost.close();
   });
 
@@ -431,6 +519,7 @@ describe("createReferenceHost", () => {
     );
     const fixture = makeServer({ idGenerator: () => sessionId, onAppCall });
     const host = await fixture.hostPromise;
+    await newAppSession(fixture, host);
     const headers = authorization(host);
     const body = JSON.stringify({
       appId: "approval",
@@ -469,14 +558,15 @@ describe("createReferenceHost", () => {
   });
 
   it("returns a bounded error result if app calls are not handled or fail", async () => {
+    const noHandler = makeServer({ idGenerator: () => sessionId });
+    const noHandlerHost = await noHandler.hostPromise;
+    const sessionForNoHandler = await newAppSession(noHandler, noHandlerHost);
     const body = JSON.stringify({
       appId: "approval",
-      sessionId,
+      sessionId: sessionForNoHandler,
       toolName: "approve",
       arguments: {},
     });
-    const noHandler = makeServer({ idGenerator: () => sessionId });
-    const noHandlerHost = await noHandler.hostPromise;
     const noHandlerResult = await noHandler.request(
       "POST",
       "/api/call",
@@ -490,6 +580,7 @@ describe("createReferenceHost", () => {
       onAppCall: () => Promise.reject(new Error("sensitive tool error")),
     });
     const failingHost = await failing.hostPromise;
+    await newAppSession(failing, failingHost);
     const failure = await failing.request("POST", "/api/call", authorization(failingHost), body);
     expect(failure.body).toBe('{"content":[],"isError":true}');
     await failingHost.close();

@@ -3,10 +3,8 @@ import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { HarnessError, HostConfigSchema, Id, type HostConfig } from "@harness/schemas";
 import { createRequestHandler } from "./request-handler.js";
-import { readStaticAsset } from "./http-utils.js";
-import {
-  REFERENCE_CSP,
-} from "./resource.js";
+import { readStaticAsset, writeRequestFailure } from "./http-utils.js";
+import { REFERENCE_CSP } from "./resource.js";
 import type {
   AppInstance,
   HttpServerPort,
@@ -16,20 +14,14 @@ import type {
 } from "./types.js";
 
 export { REFERENCE_CSP };
-export type {
-  AppCall,
-  AppResourceReader,
-  ReferenceHostDependencies,
-} from "./types.js";
+export type { AppCall, AppResourceReader, ReferenceHostDependencies } from "./types.js";
 export type { AppResourceRead, HostDiagnosticCode } from "./resource.js";
 
 let processToken: string | undefined;
 
 /** Closed failures that can occur while managing the reference host lifecycle. */
 export type ReferenceHostErrorCode =
-  | "app_host_bind_failed"
-  | "app_host_address_unavailable"
-  | "app_host_close_failed";
+  "app_host_bind_failed" | "app_host_address_unavailable" | "app_host_close_failed";
 
 /** Value-safe reference-host lifecycle error. */
 export class ReferenceHostError extends HarnessError {
@@ -67,6 +59,7 @@ function createHttpServer(listener: RequestListener): HttpServerPort {
         ...(request.headers.authorization === undefined
           ? {}
           : { authorization: request.headers.authorization }),
+        ...(request.headers.host === undefined ? {} : { host: request.headers.host }),
         ...(request.headers.origin === undefined ? {} : { origin: request.headers.origin }),
         ...(request.headers["sec-fetch-site"] === undefined
           ? {}
@@ -79,11 +72,7 @@ function createHttpServer(listener: RequestListener): HttpServerPort {
       },
     };
     void listener(hostRequest, response).catch(() => {
-      response.writeHead(500, {
-        "content-type": "application/json; charset=utf-8",
-        "cache-control": "no-store",
-      });
-      response.end('{"error":"app_host_request_failed"}');
+      writeRequestFailure(response);
     });
   });
 }
@@ -99,26 +88,14 @@ function encodeUlid(timestamp: number, randomness: Buffer): string {
   return Id.parse(result);
 }
 
-function createAppRegistry(
-  config: HostConfig,
-  nextId: () => string,
-): {
-  readonly apps: Map<string, AppInstance>;
+function createAppRegistry(config: HostConfig): {
+  readonly apps: Map<string, HostConfig["apps"][number]>;
   readonly appConfigs: Map<string, HostConfig["apps"][number]>;
   readonly sessions: Map<string, AppInstance>;
 } {
-  const apps = new Map<string, AppInstance>();
+  const apps = new Map(config.apps.map((app) => [app.resourceUri, app]));
   const appConfigs = new Map(config.apps.map((app) => [app.id, app]));
   const sessions = new Map<string, AppInstance>();
-  for (const app of config.apps) {
-    const instance: AppInstance = {
-      id: app.id,
-      resourceUri: app.resourceUri,
-      sessionId: Id.parse(nextId()),
-    };
-    apps.set(app.resourceUri, instance);
-    sessions.set(instance.sessionId, instance);
-  }
   return { apps, appConfigs, sessions };
 }
 
@@ -156,7 +133,11 @@ function createLaunchUrl(origin: string, token: string, config: HostConfig): str
   const url = new URL("/", origin);
   const app = config.apps[0];
   if (app !== undefined) {
-    url.hash = new URLSearchParams({ token, resourceUri: app.resourceUri, appId: app.id }).toString();
+    url.hash = new URLSearchParams({
+      token,
+      resourceUri: app.resourceUri,
+      appId: app.id,
+    }).toString();
   }
   return url.href;
 }
@@ -181,20 +162,27 @@ export async function createReferenceHost(
   const nextId = dependencies.idGenerator ?? (() => encodeUlid(now(), random(10)));
   processToken ??= random(32).toString("base64url");
   const token = processToken;
-  const registry = createAppRegistry(config, nextId);
+  const registry = createAppRegistry(config);
   const host = config.listen.host === "localhost" ? "127.0.0.1" : config.listen.host;
   let origin = "";
+  let port = 0;
   const createServerPort = dependencies.createHttpServer ?? createHttpServer;
   const server = createServerPort(
     createRequestHandler({
       config,
       dependencies: { ...dependencies, readStatic: dependencies.readStatic ?? readStaticAsset },
       ...registry,
+      nextSessionId: nextId,
       token,
       expectedOrigin: () => origin,
+      expectedHosts: () => [
+        `127.0.0.1:${String(port)}`,
+        `[::1]:${String(port)}`,
+        `localhost:${String(port)}`,
+      ],
     }),
   );
-  const port = await startServer(server, config, host);
+  port = await startServer(server, config, host);
   origin = formatOrigin(host, port);
   return {
     origin,

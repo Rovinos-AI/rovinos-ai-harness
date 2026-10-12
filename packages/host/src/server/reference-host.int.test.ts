@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
+import { request as httpRequest } from "node:http";
 import { createReferenceHost, type ReferenceHost } from "./index.js";
 
 const resourceUri = "ui://test/network.html";
@@ -53,6 +54,41 @@ const appHtml = `<!doctype html>
     image.onload = () => { state.image = "allowed"; update(); };
     image.onerror = () => { state.image = "blocked"; update(); };
     image.src = "https://example.test/beacon";
+    const attemptNavigation = (name, action) => {
+      window.parent.postMessage({ navigationAttempt: name }, "*");
+      try { action(); } catch {}
+    };
+    setTimeout(() => {
+      attemptNavigation("location.href", () => {
+        window.location.href = "https://example.test/location-href?secret=synthetic";
+      });
+      attemptNavigation("location.replace", () => {
+        window.location.replace("https://example.test/location-replace?secret=synthetic");
+      });
+      attemptNavigation("meta refresh", () => {
+        const refresh = document.createElement("meta");
+        refresh.httpEquiv = "refresh";
+        refresh.content = "0;url=https://example.test/meta-refresh?secret=synthetic";
+        document.head.append(refresh);
+      });
+      attemptNavigation("window.open", () => {
+        window.open("https://example.test/window-open?secret=synthetic");
+      });
+      attemptNavigation("form submit", () => {
+        const form = document.createElement("form");
+        form.action = "https://example.test/form-submit?secret=synthetic";
+        form.method = "post";
+        document.body.append(form);
+        form.submit();
+      });
+      attemptNavigation("anchor click", () => {
+        const anchor = document.createElement("a");
+        anchor.href = "https://example.test/anchor-click?secret=synthetic";
+        anchor.target = "_self";
+        document.body.append(anchor);
+        anchor.click();
+      });
+    }, 1_000);
     window.parent.postMessage({
       jsonrpc: "2.0",
       id: 1,
@@ -73,6 +109,27 @@ let page: Page | undefined;
 const externalRequests: string[] = [];
 const externalFailures: string[] = [];
 const externalResponses: string[] = [];
+const routedExternalRequests: string[] = [];
+
+function getWithHostHeader(
+  url: string,
+  hostHeader: string,
+): Promise<{ readonly statusCode: number | undefined; readonly body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(url, { headers: { host: hostHeader } }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        resolve({ statusCode: response.statusCode, body });
+      });
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
 
 beforeAll(async () => {
   browser = await chromium.launch({ headless: true });
@@ -90,32 +147,43 @@ beforeAll(async () => {
     },
     {
       onCode: () => undefined,
-      readResource: () => Promise.resolve({
-        contents: [
-          {
-            mimeType: "text/html;profile=mcp-app",
-            text: appHtml,
-          },
-        ],
-      }),
+      readResource: () =>
+        Promise.resolve({
+          contents: [
+            {
+              mimeType: "text/html;profile=mcp-app",
+              text: appHtml,
+            },
+          ],
+        }),
       idGenerator: () => "00000000000000000000000000",
       toolInput: { decision: "approve" },
       toolResult: { content: [{ type: "text", text: "complete" }] },
     },
   );
   page = await browser.newPage();
+  await page.route("**/*", async (route) => {
+    const hostname = new URL(route.request().url()).hostname;
+    if (!["127.0.0.1", "[::1]", "localhost"].includes(hostname)) {
+      routedExternalRequests.push(route.request().url());
+    }
+    await route.continue();
+  });
   page.on("request", (request) => {
-    if (new URL(request.url()).hostname === "example.test") {
+    const hostname = new URL(request.url()).hostname;
+    if (!["127.0.0.1", "[::1]", "localhost"].includes(hostname)) {
       externalRequests.push(request.url());
     }
   });
   page.on("requestfailed", (request) => {
-    if (new URL(request.url()).hostname === "example.test") {
+    const hostname = new URL(request.url()).hostname;
+    if (!["127.0.0.1", "[::1]", "localhost"].includes(hostname)) {
       externalFailures.push(request.failure()?.errorText ?? "unknown_failure");
     }
   });
   page.on("response", (response) => {
-    if (new URL(response.url()).hostname === "example.test") {
+    const hostname = new URL(response.url()).hostname;
+    if (!["127.0.0.1", "[::1]", "localhost"].includes(hostname)) {
       externalResponses.push(response.url());
     }
   });
@@ -134,7 +202,23 @@ describe("reference host browser security", () => {
     }
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.name));
+    page.on("console", (message) => {
+      if (message.type() === "error") {
+        pageErrors.push(message.text());
+      }
+    });
     await page.goto(host.url, { waitUntil: "domcontentloaded" });
+    await page.evaluate(() => {
+      const attempts = document.createElement("pre");
+      attempts.id = "navigation-attempts";
+      document.body.append(attempts);
+      window.addEventListener("message", (event) => {
+        const name = event.data?.navigationAttempt;
+        if (typeof name === "string") {
+          attempts.textContent += `${name}\n`;
+        }
+      });
+    });
     const iframe = page.locator("iframe");
     await page.waitForTimeout(250);
     expect(
@@ -144,9 +228,19 @@ describe("reference host browser security", () => {
     expect(await iframe.getAttribute("sandbox")).toBe("allow-scripts");
     expect(await iframe.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(await iframe.getAttribute("sandbox")).not.toContain("allow-same-origin");
+    expect(await iframe.getAttribute("title")).toBe("MCP App network-test");
     const app = page.frameLocator("iframe");
     const network = app.locator("#network");
-    await network.waitFor({ state: "visible", timeout: 10_000 });
+    try {
+      await network.waitFor({ state: "visible", timeout: 10_000 });
+    } catch {
+      throw new Error(
+        `App frame failed to load; page errors: ${pageErrors.join(" | ")}; frames: ${page
+          .frames()
+          .map((frame) => frame.url())
+          .join(",")}`,
+      );
+    }
     const networkResult = await network.textContent();
     expect(networkResult).toContain('"fetch":"blocked"');
     expect(networkResult).toContain('"xhr":"blocked"');
@@ -155,8 +249,17 @@ describe("reference host browser security", () => {
     expect(networkResult).toContain('"csp":');
     expect(await app.locator("#input").textContent()).toBe('{"decision":"approve"}');
     expect(await app.locator("#result").textContent()).toContain("complete");
+    await expectNavigationAttempts(page);
+    expect(externalRequests.map((url) => new URL(url).pathname).sort()).toEqual([
+      "/beacon",
+      "/xhr",
+    ]);
+    expect(routedExternalRequests).toEqual([]);
     expect(externalFailures).toHaveLength(externalRequests.length);
     expect(externalResponses).toEqual([]);
+    expect(pageErrors.some((message) => message.includes("frame-src"))).toBe(true);
+    expect(pageErrors.some((message) => message.includes("allow-popups"))).toBe(true);
+    expect(pageErrors.some((message) => message.includes("allow-forms"))).toBe(true);
   }, 20_000);
 
   it("refuses unknown resources and rejects missing-token and foreign-origin requests", async () => {
@@ -189,5 +292,25 @@ describe("reference host browser security", () => {
       },
     );
     expect(foreignOrigin.status).toBe(403);
+
+    const foreignHost = await getWithHostHeader(host.origin, "foreign.example.test");
+    expect(foreignHost.statusCode).toBe(403);
+    expect(foreignHost.body).toBe('{"error":"app_host_invalid"}');
   });
+
+  async function expectNavigationAttempts(page: Page): Promise<void> {
+    const attempts = page.locator("#navigation-attempts");
+    await attempts.getByText("location.href").waitFor({ state: "attached", timeout: 5_000 });
+    const value = await attempts.textContent();
+    for (const navigation of [
+      "location.href",
+      "location.replace",
+      "meta refresh",
+      "window.open",
+      "form submit",
+      "anchor click",
+    ]) {
+      expect(value).toContain(navigation);
+    }
+  }
 });

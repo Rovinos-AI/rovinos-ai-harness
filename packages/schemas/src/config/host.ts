@@ -9,6 +9,7 @@ const CspOriginSchema = z.url().superRefine((value, context) => {
   const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
   if (
     (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+    url.hostname.includes("*") ||
     url.username.length > 0 ||
     url.password.length > 0 ||
     url.pathname !== "/" ||
@@ -27,7 +28,7 @@ const AppConfigSchema = z
   .object({
     id: Code,
     resourceUri: z.string().startsWith("ui://"),
-    telemetry: z.boolean(),
+    telemetry: z.boolean().default(false),
     allowedTools: z.array(Code),
   })
   .strict()

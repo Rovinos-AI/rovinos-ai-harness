@@ -17,6 +17,7 @@ const AppPayloadSchema = z
   })
   .strict();
 const CallResponseSchema = CallToolResultSchema;
+const HostReadySchema = z.object({ appId: Code, sessionId: Id }).strict();
 
 /** Default restrictions placed on every reference-host app iframe. */
 export const APP_CSP =
@@ -123,9 +124,21 @@ export async function mountReferenceApp(
     root.setStatus(channel.status === 404 ? "app_unknown" : "app_unauthorized");
     return false;
   }
-  const response = await request(`/api/app?resourceUri=${encodeURIComponent(launch.resourceUri)}`, {
-    headers,
-  });
+  let hostReady: z.infer<typeof HostReadySchema>;
+  try {
+    const event = (await channel.text()).split("\n").find((line) => line.startsWith("data: "));
+    if (event === undefined) {
+      throw new Error("Host launch event is missing.");
+    }
+    hostReady = parseJson(HostReadySchema, event.slice("data: ".length));
+  } catch {
+    root.setStatus("app_unknown");
+    return false;
+  }
+  const response = await request(
+    `/api/app?resourceUri=${encodeURIComponent(launch.resourceUri)}&sessionId=${encodeURIComponent(hostReady.sessionId)}`,
+    { headers },
+  );
   if (!response.ok) {
     root.setStatus(response.status === 404 ? "app_unknown" : "app_resource_invalid");
     return false;
@@ -140,12 +153,19 @@ export async function mountReferenceApp(
   const frame = root.createFrame();
   frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("referrerpolicy", "no-referrer");
+  frame.setAttribute("title", `MCP App ${app.appId}`);
   if (app.permissions.length > 0) {
     frame.setAttribute("allow", app.permissions.join("; "));
   }
   frame.srcdoc = createSandboxDocument(app.html, app.csp);
   const loaded = new Promise<void>((resolve) => {
-    frame.addEventListener("load", () => { resolve(); }, { once: true });
+    frame.addEventListener(
+      "load",
+      () => {
+        resolve();
+      },
+      { once: true },
+    );
   });
   root.attachFrame();
   await loaded;

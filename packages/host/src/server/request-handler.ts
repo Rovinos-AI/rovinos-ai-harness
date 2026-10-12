@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseJson, type HostConfig } from "@harness/schemas";
+import { Id, parseJson, type HostConfig } from "@harness/schemas";
 import {
   AppCallSchema,
   type AppCall,
@@ -23,12 +23,17 @@ const MAX_CALL_BYTES = 16_384;
 interface RequestHandlerOptions {
   readonly config: HostConfig;
   readonly dependencies: ReferenceHostDependencies;
-  readonly apps: ReadonlyMap<string, AppInstance>;
+  readonly apps: ReadonlyMap<string, HostConfig["apps"][number]>;
   readonly appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>;
-  readonly sessions: ReadonlyMap<string, AppInstance>;
+  readonly sessions: Map<string, AppInstance>;
+  readonly nextSessionId: () => string;
   readonly token: string;
   readonly expectedOrigin: () => string;
+  readonly expectedHosts: () => readonly string[];
 }
+
+const HOST_PAGE_CSP =
+  "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'self'; frame-src 'self'; child-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 async function handleStaticRequest(
   request: HostRequest,
@@ -47,6 +52,9 @@ async function handleStaticRequest(
       "content-type": page ? "text/html; charset=utf-8" : "text/javascript; charset=utf-8",
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
+      "content-security-policy": HOST_PAGE_CSP,
+      "x-frame-options": "DENY",
+      "referrer-policy": "no-referrer",
     });
     response.end(contents);
   } catch {
@@ -55,17 +63,19 @@ async function handleStaticRequest(
   return true;
 }
 
-function sendAppEvents(
-  url: URL,
-  response: HostResponse,
-  apps: ReadonlyMap<string, AppInstance>,
-): void {
+function sendAppEvents(url: URL, response: HostResponse, options: RequestHandlerOptions): void {
   const resourceUri = url.searchParams.get("resourceUri");
-  const instance = resourceUri === null ? undefined : apps.get(resourceUri);
-  if (instance === undefined) {
+  const app = resourceUri === null ? undefined : options.apps.get(resourceUri);
+  if (app === undefined) {
     writeError(response, 404, "app_unknown");
     return;
   }
+  const instance: AppInstance = {
+    id: app.id,
+    resourceUri: app.resourceUri,
+    sessionId: Id.parse(options.nextSessionId()),
+  };
+  options.sessions.set(instance.sessionId, instance);
   response.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -84,8 +94,16 @@ async function sendAppResource(
   options: RequestHandlerOptions,
 ): Promise<void> {
   const resourceUri = url.searchParams.get("resourceUri");
-  const instance = resourceUri === null ? undefined : options.apps.get(resourceUri);
-  if (resourceUri === null || instance === undefined) {
+  const app = resourceUri === null ? undefined : options.apps.get(resourceUri);
+  const sessionId = url.searchParams.get("sessionId");
+  const instance = sessionId === null ? undefined : options.sessions.get(sessionId);
+  if (
+    resourceUri === null ||
+    app === undefined ||
+    instance === undefined ||
+    instance.resourceUri !== resourceUri ||
+    instance.id !== app.id
+  ) {
     writeError(response, 404, "app_unknown");
     return;
   }
@@ -153,15 +171,16 @@ async function routeAppCall(
 }
 
 /** Creates the authenticated static/API request handler for a single host process. */
-export function createRequestHandler(options: RequestHandlerOptions): (
-  request: HostRequest,
-  response: HostResponse,
-) => Promise<void> {
-  const readStatic =
-    options.dependencies.readStatic ??
-    readStaticAsset;
+export function createRequestHandler(
+  options: RequestHandlerOptions,
+): (request: HostRequest, response: HostResponse) => Promise<void> {
+  const readStatic = options.dependencies.readStatic ?? readStaticAsset;
   return async (request, response) => {
     try {
+      if (!options.expectedHosts().includes(request.headers.host ?? "")) {
+        writeError(response, 403, "app_host_invalid");
+        return;
+      }
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (await handleStaticRequest(request, response, readStatic)) {
         return;
@@ -179,7 +198,7 @@ export function createRequestHandler(options: RequestHandlerOptions): (
       }
       switch (`${request.method ?? ""} ${url.pathname}`) {
         case "GET /api/events":
-          sendAppEvents(url, response, options.apps);
+          sendAppEvents(url, response, options);
           return;
         case "GET /api/app":
           await sendAppResource(url, response, options);

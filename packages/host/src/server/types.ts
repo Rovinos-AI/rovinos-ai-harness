@@ -26,6 +26,7 @@ export interface HostRequest extends AsyncIterable<Uint8Array | string> {
   readonly url?: string;
   readonly headers: {
     readonly authorization?: string;
+    readonly host?: string;
     readonly origin?: string;
     readonly "sec-fetch-site"?: string;
   };
@@ -33,9 +34,11 @@ export interface HostRequest extends AsyncIterable<Uint8Array | string> {
 
 /** Minimal HTTP response contract shared by the server and its tests. */
 export interface HostResponse {
+  readonly headersSent: boolean;
   writeHead(status: number, headers: Record<string, string>): void;
   write(value: string): boolean;
   end(value?: string | Buffer): void;
+  destroy(error?: Error): void;
 }
 
 /** Minimal HTTP server contract shared by the server and its tests. */
@@ -47,12 +50,9 @@ export interface HttpServerPort {
 }
 
 /** Request callback contract used by the host HTTP server. */
-export type RequestListener = (
-  request: HostRequest,
-  response: HostResponse,
-) => Promise<void>;
+export type RequestListener = (request: HostRequest, response: HostResponse) => Promise<void>;
 
-/** Registered app identity and its process-local session identifier. */
+/** One launched app instance and its process-local session identifier. */
 export interface AppInstance {
   readonly id: string;
   readonly resourceUri: string;

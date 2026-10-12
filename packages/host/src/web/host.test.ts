@@ -94,10 +94,15 @@ function createFakeRoot(): {
 }
 
 function successfulRequest(payload: unknown = appPayload) {
-  const responses = [new Response("event: host.ready\n\n"), new Response(JSON.stringify(payload))];
-  return vi.fn(
-    (_input: RequestInfo | URL, _init?: RequestInit) =>
-      Promise.resolve(responses.shift() ?? new Response("", { status: 500 })),
+  const responses = [hostReadyResponse(), new Response(JSON.stringify(payload))];
+  return vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+    Promise.resolve(responses.shift() ?? new Response("", { status: 500 })),
+  );
+}
+
+function hostReadyResponse(): Response {
+  return new Response(
+    `event: host.ready\ndata: ${JSON.stringify({ appId: appPayload.appId, sessionId: appPayload.sessionId })}\n\n`,
   );
 }
 
@@ -119,9 +124,7 @@ describe("reference app page", () => {
       resourceUri: appPayload.resourceUri,
     });
     expect(parseLaunchDetails(makeLaunchHash("short", "ui://app"))).toBeUndefined();
-    expect(
-      parseLaunchDetails(makeLaunchHash("t".repeat(43), "https://bad")),
-    ).toBeUndefined();
+    expect(parseLaunchDetails(makeLaunchHash("t".repeat(43), "https://bad"))).toBeUndefined();
   });
 
   it("wraps app HTML with the exact deny-all CSP and escapes the CSP attribute", () => {
@@ -166,6 +169,7 @@ describe("reference app page", () => {
       new Map([
         ["sandbox", "allow-scripts"],
         ["referrerpolicy", "no-referrer"],
+        ["title", "MCP App approval"],
       ]),
     );
     expect(frame.srcdoc).toContain(`content="${APP_CSP}"`);
@@ -205,7 +209,7 @@ describe("reference app page", () => {
   it("routes calls through the authenticated host channel and handles failures", async () => {
     const { root } = createFakeRoot();
     const request = successfulRequest();
-    request.mockResolvedValueOnce(new Response("event stream"));
+    request.mockResolvedValueOnce(hostReadyResponse());
     request.mockResolvedValueOnce(new Response(JSON.stringify(appPayload)));
     request.mockResolvedValueOnce(
       new Response(JSON.stringify({ content: [{ type: "text", text: "accepted" }] })),
@@ -222,6 +226,9 @@ describe("reference app page", () => {
         arguments: { ok: true },
       }),
     });
+    expect(request.mock.calls[1]?.[0]).toBe(
+      `/api/app?resourceUri=${encodeURIComponent(appPayload.resourceUri)}&sessionId=${appPayload.sessionId}`,
+    );
 
     request.mockResolvedValueOnce(new Response("", { status: 403 }));
     expect(await bridgeMock.toolCall({ name: "approve" })).toEqual({ content: [], isError: true });
@@ -253,7 +260,9 @@ describe("reference app page", () => {
     vi.stubGlobal("window", { location: { hash: launchHash } });
     vi.stubGlobal("fetch", successfulRequest());
     startReferenceHostPage();
-    await vi.waitFor(() => { expect(attached).toBe(true); });
+    await vi.waitFor(() => {
+      expect(attached).toBe(true);
+    });
     expect(bridgeMock.sendToolInput).toHaveBeenCalledWith(appPayload.toolInput);
 
     vi.stubGlobal("document", { getElementById: () => element, createElement: () => frame });
@@ -263,7 +272,9 @@ describe("reference app page", () => {
       vi.fn(() => Promise.reject(new Error("private browser failure"))),
     );
     startReferenceHostPage();
-    await vi.waitFor(() => { expect(status).toBe("host_unavailable"); });
+    await vi.waitFor(() => {
+      expect(status).toBe("host_unavailable");
+    });
 
     const missingRootFetch = vi.fn();
     vi.stubGlobal("document", { getElementById: () => null });

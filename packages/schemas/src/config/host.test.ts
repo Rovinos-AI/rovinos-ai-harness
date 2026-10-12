@@ -30,12 +30,23 @@ describe("HostConfigSchema", () => {
     ).toHaveLength(1);
   });
 
+  it("defaults app telemetry to false", () => {
+    expect(
+      HostConfigSchema.parse({
+        apps: [{ id: "approval", resourceUri: "ui://approval/index.html", allowedTools: [] }],
+      }).apps[0]?.telemetry,
+    ).toBe(false);
+  });
+
   it("rejects non-loopback addresses and unknown keys", () => {
     expect(HostConfigSchema.safeParse({ listen: { host: "0.0.0.0" } }).success).toBe(false);
     expect(
       HostConfigSchema.safeParse({ cspAllowlist: ["http://external.example.test"] }).success,
     ).toBe(false);
     expect(HostConfigSchema.safeParse({ cspAllowlist: ["https://safe.test/path"] }).success).toBe(
+      false,
+    );
+    expect(HostConfigSchema.safeParse({ cspAllowlist: ["https://*.example.test"] }).success).toBe(
       false,
     );
     expect(HostConfigSchema.safeParse({ unexpected: true }).success).toBe(false);

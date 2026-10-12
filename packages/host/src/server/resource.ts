@@ -2,7 +2,6 @@
 import type { HostConfig } from "@harness/schemas";
 import { z } from "zod";
 
-const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 const MAX_RESOURCE_BYTES = 1_048_576;
 
 const ResourceContentsSchema = z
@@ -119,6 +118,30 @@ function buildCsp(
   return directives.join("; ");
 }
 
+function isMcpAppMimeType(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  const [mediaType, ...parameters] = value.split(";");
+  if (mediaType?.trim().toLowerCase() !== "text/html") {
+    return false;
+  }
+  let profile: string | undefined;
+  for (const parameter of parameters) {
+    const separator = parameter.indexOf("=");
+    if (separator < 0 || parameter.slice(0, separator).trim().toLowerCase() !== "profile") {
+      continue;
+    }
+    if (profile !== undefined) {
+      return false;
+    }
+    const candidate = parameter.slice(separator + 1).trim();
+    profile =
+      candidate.startsWith('"') && candidate.endsWith('"') ? candidate.slice(1, -1) : candidate;
+  }
+  return profile === "mcp-app";
+}
+
 /** Reads and filters an app resource against the host's CSP and permission policies. */
 export async function readValidatedResource(
   resourceUri: string,
@@ -131,7 +154,7 @@ export async function readValidatedResource(
     return undefined;
   }
   const content = result.data.contents[0];
-  if (content?.mimeType !== RESOURCE_MIME_TYPE || content.text === undefined) {
+  if (!isMcpAppMimeType(content?.mimeType) || content?.text === undefined) {
     return undefined;
   }
   if (Buffer.byteLength(content.text, "utf8") > MAX_RESOURCE_BYTES) {
