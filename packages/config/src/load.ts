@@ -131,9 +131,7 @@ function inlineSecretChildIssues(
   const childPath = [...path, key];
   const childPathText = childPath.map(String).join(".");
   const issues =
-    isSecretKeyName(key) &&
-    typeof child === "string" &&
-    !SecretRefSchema.safeParse(child).success
+    isSecretKeyName(key) && typeof child === "string" && !SecretRefSchema.safeParse(child).success
       ? [`${childPathText}: a SecretRef (secret_inline)`]
       : [];
   return [...issues, ...inlineSecretIssues(child, childPath, state)];

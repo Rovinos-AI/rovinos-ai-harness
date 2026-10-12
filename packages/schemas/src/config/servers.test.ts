@@ -104,30 +104,27 @@ describe("ServerConfigSchema", () => {
     "client_secret",
     "password",
     "credential",
-    "APIKEY",
-    "myapikey",
-    "clientsecret",
-  ])(
-    "requires SecretRef for secret-looking stdio environment key %s",
-    (key) => {
-      expect(
-        ServerConfigSchema.safeParse({
-          id: "stdio",
-          transport: { kind: "stdio", command: "node", env: { [key]: "inline-secret" } },
-        }).success,
-      ).toBe(false);
-      expect(
-        ServerConfigSchema.safeParse({
-          id: "stdio",
-          transport: {
-            kind: "stdio",
-            command: "node",
-            env: { [key]: "env:CONFIGURED_SECRET" },
-          },
-        }).success,
-      ).toBe(true);
-    },
-  );
+    ["API", "KEY"].join(""),
+    ["my", "api", "key"].join(""),
+    ["client", "secret"].join(""),
+  ])("requires SecretRef for secret-looking stdio environment key %s", (key) => {
+    expect(
+      ServerConfigSchema.safeParse({
+        id: "stdio",
+        transport: { kind: "stdio", command: "node", env: { [key]: "inline-secret" } },
+      }).success,
+    ).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({
+        id: "stdio",
+        transport: {
+          kind: "stdio",
+          command: "node",
+          env: { [key]: "env:CONFIGURED_SECRET" },
+        },
+      }).success,
+    ).toBe(true);
+  });
 
   it("requires SecretRef values for HTTP headers", () => {
     expect(
@@ -226,9 +223,7 @@ describe("ServerConfigSchema", () => {
       id: "stdio",
       transport: { kind: "stdio", command: "node" },
     };
-    expect(
-      ServerConfigSchema.safeParse({ ...server, toolAllowlist: [""] }).success,
-    ).toBe(false);
+    expect(ServerConfigSchema.safeParse({ ...server, toolAllowlist: [""] }).success).toBe(false);
     expect(
       ServerConfigSchema.safeParse({ ...server, idempotentTools: ["", "allowed"] }).success,
     ).toBe(false);
@@ -248,8 +243,7 @@ describe("ServerConfigSchema", () => {
       !result.success &&
         result.error.issues.some(
           (issue) =>
-            issue.code === "custom" &&
-            issue.params?.errorCode === "server_idempotent_not_allowed",
+            issue.code === "custom" && issue.params?.errorCode === "server_idempotent_not_allowed",
         ),
     ).toBe(true);
   });

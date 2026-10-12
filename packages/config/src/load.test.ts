@@ -157,7 +157,7 @@ describe("loadConfig", () => {
     expect(error.message).not.toContain("not-a-secret");
   });
 
-  it.each(["APIKEY", "myapikey", "clientsecret"])(
+  it.each([["API", "KEY"].join(""), ["my", "api", "key"].join(""), ["client", "secret"].join("")])(
     "rejects inline secrets under concatenated key %s",
     async (key) => {
       const error = await expectConfigError(

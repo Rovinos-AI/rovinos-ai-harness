@@ -13,22 +13,20 @@ const ServerTimeoutsSchema = z
   .strict()
   .prefault({});
 
-const ToolNamesSchema = z
-  .array(z.string().min(1))
-  .superRefine((names, context) => {
-    const seen = new Set<string>();
-    for (const [index, name] of names.entries()) {
-      if (seen.has(name)) {
-        context.addIssue({
-          code: "custom",
-          path: [index],
-          message: "Tool names must be unique within a list.",
-          params: { errorCode: "server_tool_name_duplicate" },
-        });
-      }
-      seen.add(name);
+const ToolNamesSchema = z.array(z.string().min(1)).superRefine((names, context) => {
+  const seen = new Set<string>();
+  for (const [index, name] of names.entries()) {
+    if (seen.has(name)) {
+      context.addIssue({
+        code: "custom",
+        path: [index],
+        message: "Tool names must be unique within a list.",
+        params: { errorCode: "server_tool_name_duplicate" },
+      });
     }
-  });
+    seen.add(name);
+  }
+});
 
 const StdioTransportSchema = z
   .object({
