@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { attr } from "./attr.js";
-import { listLogDefinitions, type LogRecordDefinition } from "./log-registry.js";
+import { listLogDefinitions } from "./log-registry.js";
 import { __registerUnsafeSpanForTests, defineSpan, listSpanDefinitions } from "./registry.js";
 import "./safe-event-logs.js";
 import {
@@ -30,13 +30,15 @@ describe("telemetry schema lint", () => {
 
   for (const definition of listSpanDefinitions()) {
     it(`drops unsafe random strings from span ${definition.name}`, () => {
-      assertRandomStringsDroppedFromSpan(definition);
+      expect(() => {
+        assertRandomStringsDroppedFromSpan(definition);
+      }).not.toThrow();
     });
   }
 
   for (const definition of listLogDefinitions()) {
     it(`drops unsafe random strings from log ${definition.name}`, async () => {
-      await assertRandomStringsDroppedFromLog(definition);
+      await expect(assertRandomStringsDroppedFromLog(definition)).resolves.toBeUndefined();
     });
   }
 
@@ -54,7 +56,7 @@ describe("telemetry schema lint", () => {
   });
 
   it("fails schema lint for an unsafe log definition", () => {
-    expect(() =>
+    expect(() => {
       assertSchemaCatalogSafe(
         [],
         [
@@ -64,8 +66,8 @@ describe("telemetry schema lint", () => {
           },
         ],
         [],
-      ),
-    ).toThrow("log harness.test.unsafe_log field harness.test.note");
+      );
+    }).toThrow("log harness.test.unsafe_log field harness.test.note");
   });
 
   it("fails schema lint for an unsafe SafeEvent field", () => {
@@ -75,8 +77,8 @@ describe("telemetry schema lint", () => {
         note: z.string(),
       })
       .strict();
-    expect(() => assertSchemaCatalogSafe([], [], [unsafeEvent])).toThrow(
-      "SafeEvent unsafe field note",
-    );
+    expect(() => {
+      assertSchemaCatalogSafe([], [], [unsafeEvent]);
+    }).toThrow("SafeEvent unsafe field note");
   });
 });

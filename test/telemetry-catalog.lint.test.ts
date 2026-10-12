@@ -1,22 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+/// <reference types="vite/client" />
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import "@harness/core";
-import {
-  listLogDefinitions,
-  listSpanDefinitions,
-} from "@harness/telemetry";
+import { listLogDefinitions, listSpanDefinitions } from "@harness/telemetry";
 import {
   assertRandomStringsDroppedFromLog,
   assertRandomStringsDroppedFromSpan,
   assertRegisteredSchemasSafe,
 } from "@harness/telemetry/testing";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
-const catalogRegistrationModules = [
-  "packages/core/src/spans.ts",
-  "packages/telemetry/src/safe-event-logs.ts",
-];
+const productionModules = import.meta.glob("../packages/*/src/**/*.ts");
 const expectedSpanNames = [
   "harness.approval_wait",
   "harness.checkpoint",
@@ -64,27 +59,60 @@ function productionRegistrationSources(root: string): string[] {
     .sort();
 }
 
+async function importProductionRegistrationSources(root: string): Promise<void> {
+  for (const source of productionRegistrationSources(root)) {
+    const modulePath = `../${source}`;
+    const load = productionModules[modulePath];
+    expect(
+      load,
+      `Production telemetry registration module ${source} must be importable`,
+    ).toBeTypeOf("function");
+    if (load === undefined) {
+      throw new Error(`Production telemetry registration module ${source} is not importable`);
+    }
+    await load();
+  }
+}
+
 describe("production telemetry definition catalog", () => {
+  beforeAll(async () => {
+    await importProductionRegistrationSources(process.cwd());
+  });
+
   it("imports every production file that registers telemetry definitions", () => {
     const root = process.cwd();
-    expect(productionRegistrationSources(root)).toEqual([...catalogRegistrationModules].sort());
+    const sources = productionRegistrationSources(root);
+    expect(sources.length).toBeGreaterThan(0);
+    for (const source of sources) {
+      expect(productionModules[`../${source}`]).toBeTypeOf("function");
+    }
   });
 
   it("loads every known production span and SafeEvent log definition", () => {
-    expect(listSpanDefinitions().map(({ name }) => name).sort()).toEqual(expectedSpanNames);
-    expect(listLogDefinitions().map(({ name }) => name).sort()).toEqual(expectedLogNames);
+    expect(
+      listSpanDefinitions()
+        .map(({ name }) => name)
+        .sort(),
+    ).toEqual(expectedSpanNames);
+    expect(
+      listLogDefinitions()
+        .map(({ name }) => name)
+        .sort(),
+    ).toEqual(expectedLogNames);
     assertRegisteredSchemasSafe();
   });
 
-  for (const definition of listSpanDefinitions()) {
-    it(`drops unsafe random strings from production span ${definition.name}`, () => {
-      assertRandomStringsDroppedFromSpan(definition);
-    });
-  }
+  it("drops unsafe random strings from every production span", () => {
+    for (const definition of listSpanDefinitions()) {
+      expect(() => {
+        assertRandomStringsDroppedFromSpan(definition);
+      }).not.toThrow();
+    }
+  });
 
-  for (const definition of listLogDefinitions()) {
-    it(`drops unsafe random strings from production log ${definition.name}`, async () => {
-      await assertRandomStringsDroppedFromLog(definition);
-    });
-  }
+  it("drops unsafe random strings from every production log", async () => {
+    for (const definition of listLogDefinitions()) {
+      await expect(assertRandomStringsDroppedFromLog(definition)).resolves.toBeUndefined();
+    }
+  });
 });

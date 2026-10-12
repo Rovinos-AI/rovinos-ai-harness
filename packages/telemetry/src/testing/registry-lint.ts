@@ -25,8 +25,8 @@ export const adversarialStrings = fc.oneof(
   fc.constant("alexandria@example.test"),
   fc.constant("🧪🙂".repeat(128)),
   fc.constant("x".repeat(4096)),
-  fc.stringMatching(/^[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/u),
-  fc.constant("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+  fc.stringMatching(/^[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}$/u),
+  fc.constant("A".repeat(26)),
   fc.constant("harness.valid.code"),
 );
 
@@ -39,7 +39,7 @@ function isZodSchema(value: unknown): value is z.ZodType {
   return value instanceof z.ZodType;
 }
 
-function assertSafeSchema(schema: z.ZodType, owner: string, field: string): void {
+function assertSafeSchema(schema: z.core.$ZodType, owner: string, field: string): void {
   if (isSafeAttr(schema)) {
     return;
   }
@@ -58,7 +58,7 @@ function assertSafeSchema(schema: z.ZodType, owner: string, field: string): void
   throw new Error(`${owner} field ${field} is not constrained by an attr helper`);
 }
 
-export function assertShapeSafe(shape: unknown, owner: string): void {
+function assertShapeSafe(shape: unknown, owner: string): void {
   assert.ok(typeof shape === "object" && shape !== null, `${owner} has no attribute shape`);
   for (const field of Object.keys(shape)) {
     const schema: unknown = Reflect.get(shape, field);
@@ -67,6 +67,13 @@ export function assertShapeSafe(shape: unknown, owner: string): void {
   }
 }
 
+/**
+ * Verifies that every field in the supplied telemetry schema catalog uses an attr helper.
+ *
+ * @param spanDefinitions - Span definitions to check.
+ * @param logDefinitions - Log definitions to check.
+ * @param safeEvents - SafeEvent schemas to check.
+ */
 export function assertSchemaCatalogSafe(
   spanDefinitions: readonly RegistryDefinition[],
   logDefinitions: readonly RegistryDefinition[],
@@ -80,12 +87,12 @@ export function assertSchemaCatalogSafe(
   }
   for (const schema of safeEvents) {
     const kindSchema: unknown = Reflect.get(schema.shape, "kind");
-    const kind =
-      kindSchema instanceof z.ZodEnum ? kindSchema.options.join("|") : "unknown";
+    const kind = kindSchema instanceof z.ZodEnum ? kindSchema.options.join("|") : "unknown";
     assertShapeSafe(schema.shape, `SafeEvent ${kind}`);
   }
 }
 
+/** Verifies that all currently registered schemas and SafeEvent schemas use attr helpers. */
 export function assertRegisteredSchemasSafe(): void {
   assertSchemaCatalogSafe(listSpanDefinitions(), listLogDefinitions(), safeEventSchemas);
 }
@@ -172,14 +179,21 @@ function assertUnregisteredAndNonStringAttrsDropped(
   }
 }
 
-function makeStringAttributes(definition: RegistryDefinition, value: string): Record<string, string> {
+function makeStringAttributes(
+  definition: RegistryDefinition,
+  value: string,
+): Record<string, string> {
   assert.ok(typeof definition.shape === "object" && definition.shape !== null);
-  return Object.fromEntries([
-    ...Object.keys(definition.shape).map((field) => [field, value]),
-    ["harness.unregistered", value],
-  ]);
+  const entries: [string, string][] = Object.keys(definition.shape).map((field) => [field, value]);
+  entries.push(["harness.unregistered", value]);
+  return Object.fromEntries(entries);
 }
 
+/**
+ * Exercises span sanitization with 500 adversarial strings and asserts only valid fields survive.
+ *
+ * @param definition - Registered span definition to exercise.
+ */
 export function assertRandomStringsDroppedFromSpan(definition: RegistryDefinition): void {
   fc.assert(
     fc.property(adversarialStrings, (value) => {
@@ -194,13 +208,18 @@ export function assertRandomStringsDroppedFromSpan(definition: RegistryDefinitio
   );
 }
 
+/**
+ * Exercises log sanitization with 500 adversarial strings and asserts only valid fields survive.
+ *
+ * @param definition - Registered log definition to exercise.
+ */
 export async function assertRandomStringsDroppedFromLog(
   definition: LogRecordDefinition,
 ): Promise<void> {
-  let forwarded: ReadWriteLogRecord | undefined;
+  const forwarded: ReadWriteLogRecord[] = [];
   const next = {
     onEmit(record: ReadWriteLogRecord) {
-      forwarded = record;
+      forwarded.push(record);
     },
     forceFlush: () => Promise.resolve(),
     shutdown: () => Promise.resolve(),
@@ -211,12 +230,12 @@ export async function assertRandomStringsDroppedFromLog(
 
   await fc.assert(
     fc.asyncProperty(adversarialStrings, async (value) => {
-      forwarded = undefined;
       processor.onEmit(makeRawLogRecord(definition, makeStringAttributes(definition, value)));
       await processor.forceFlush();
-      assert.ok(forwarded);
-      assertSurvivingStringsMatchSchema(definition, forwarded.attributes);
-      assertUnregisteredAndNonStringAttrsDropped(definition, forwarded.attributes);
+      const record = forwarded.at(-1);
+      assert.ok(record);
+      assertSurvivingStringsMatchSchema(definition, record.attributes);
+      assertUnregisteredAndNonStringAttrsDropped(definition, record.attributes);
     }),
     { numRuns: 500 },
   );

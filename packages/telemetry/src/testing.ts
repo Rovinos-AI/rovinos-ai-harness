@@ -65,10 +65,8 @@ export class StaticVaultReader implements VaultRunReader {
 }
 
 export {
-  adversarialStrings,
   assertRandomStringsDroppedFromLog,
   assertRandomStringsDroppedFromSpan,
   assertRegisteredSchemasSafe,
   assertSchemaCatalogSafe,
-  assertShapeSafe,
 } from "./testing/registry-lint.js";
