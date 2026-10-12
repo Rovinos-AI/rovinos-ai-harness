@@ -154,7 +154,7 @@ export function createServersReachableChecks(
     ];
   }
   return configs.map((config, index) => ({
-    id: Code.parse(`servers_reachable_${index}`),
+    id: Code.parse(`servers_reachable_${String(index)}`),
     title: `MCP server ${config.id} reachable`,
     run: async ({ signal }) => {
       const connection = new McpConnection(config, dependencies);
@@ -165,8 +165,7 @@ export function createServersReachableChecks(
         await connection.connect(signal);
         return { status: "ok", code: Code.parse("servers_reachable"), detail: config.id };
       } catch (error) {
-        const failureCode =
-          error instanceof McpConnectionError ? error.code : "mcp_connect_failed";
+        const failureCode = error instanceof McpConnectionError ? error.code : "mcp_connect_failed";
         return {
           status: "fail",
           code: Code.parse(failureCode),

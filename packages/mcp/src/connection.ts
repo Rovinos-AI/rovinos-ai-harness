@@ -142,11 +142,17 @@ export class McpConnection {
       }
       const transport =
         this.#dependencies.createTransport?.(this.#config, signal) ??
-        createMcpTransport(this.#config, {
-          resolveSecret: this.#dependencies.resolveSecret,
-          ...(this.#dependencies.env === undefined ? {} : { env: this.#dependencies.env }),
-          ...(this.#dependencies.logger === undefined ? {} : { logger: this.#dependencies.logger }),
-        }, signal);
+        createMcpTransport(
+          this.#config,
+          {
+            resolveSecret: this.#dependencies.resolveSecret,
+            ...(this.#dependencies.env === undefined ? {} : { env: this.#dependencies.env }),
+            ...(this.#dependencies.logger === undefined
+              ? {}
+              : { logger: this.#dependencies.logger }),
+          },
+          signal,
+        );
       const resolvedTransport = await transport;
       client = new Client(
         { name: "rovinos-ai-harness", version: "0.0.0" },
@@ -183,14 +189,15 @@ export class McpConnection {
   }
 
   #watchTransport(transport: Transport): void {
-    const onclose = transport.onclose;
-    transport.onclose = () => {
+    const monitoredTransport = transport;
+    const onclose = monitoredTransport.onclose;
+    monitoredTransport.onclose = () => {
       onclose?.();
       this.#state = "unavailable";
       this.#protocolEra = undefined;
     };
-    const onerror = transport.onerror;
-    transport.onerror = (error) => {
+    const onerror = monitoredTransport.onerror;
+    monitoredTransport.onerror = (error) => {
       onerror?.(error);
       this.#state = "unavailable";
       this.#protocolEra = undefined;

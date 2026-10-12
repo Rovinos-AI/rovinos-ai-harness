@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  StreamableHTTPClientTransport,
-  type CallToolResult,
-} from "@modelcontextprotocol/client";
+import { StreamableHTTPClientTransport, type CallToolResult } from "@modelcontextprotocol/client";
 import { ServerConfigSchema } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { McpConnection } from "./connection.js";
@@ -78,7 +75,11 @@ describe("MCP transports", () => {
         }),
       });
       expect(events).toEqual([
-        { code: "mcp_stderr", serverId: "stdio_test", bytes: Buffer.byteLength("private stderr marker") },
+        {
+          code: "mcp_stderr",
+          serverId: "stdio_test",
+          bytes: Buffer.byteLength("private stderr marker"),
+        },
       ]);
       expect(JSON.stringify(events)).not.toContain("private stderr marker");
       expect(JSON.stringify(events)).not.toContain("private-parent-value");
@@ -97,9 +98,9 @@ describe("MCP transports", () => {
     });
     const references: string[] = [];
     const transport = await createMcpTransport(config, {
-      resolveSecret: async (ref) => {
+      resolveSecret: (ref) => {
         references.push(ref);
-        return "resolved-token";
+        return Promise.resolve("resolved-token");
       },
     });
 

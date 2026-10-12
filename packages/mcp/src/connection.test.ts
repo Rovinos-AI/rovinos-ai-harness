@@ -5,7 +5,7 @@ import {
   type Tool,
   type Transport,
 } from "@modelcontextprotocol/client";
-import { Server } from "@modelcontextprotocol/server";
+import { McpServer } from "@modelcontextprotocol/server";
 import { ServerConfigSchema } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { McpConnection, McpConnectionError } from "./connection.js";
@@ -23,28 +23,32 @@ interface MemoryPeer {
   readonly serverTransport: InMemoryTransport;
 }
 
-type MemoryCallHandler = (serverTransport: InMemoryTransport) => Promise<CallToolResult> | CallToolResult;
+type MemoryCallHandler = (
+  serverTransport: InMemoryTransport,
+) => Promise<CallToolResult> | CallToolResult;
 
-async function createMemoryPeer(options: {
-  readonly count?: number;
-  readonly modern?: boolean;
-  readonly onCall?: MemoryCallHandler;
-} = {}): Promise<MemoryPeer> {
+async function createMemoryPeer(
+  options: {
+    readonly count?: number;
+    readonly modern?: boolean;
+    readonly onCall?: MemoryCallHandler;
+  } = {},
+): Promise<MemoryPeer> {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = new Server({ name: "memory-server", version: "1.0.0" });
-  server.registerCapabilities({ tools: { listChanged: true } });
+  const server = new McpServer({ name: "memory-server", version: "1.0.0" });
+  server.server.registerCapabilities({ tools: { listChanged: true } });
   if (options.modern === true) {
-    server.setRequestHandler("server/discover", () => ({
+    server.server.setRequestHandler("server/discover", () => ({
       supportedVersions: ["2026-07-28"],
       capabilities: { tools: { listChanged: true } },
     }));
   }
   const count = options.count ?? 2;
   const tools = Array.from({ length: count }, (_, index) => ({
-    name: `tool-${index + 1}`,
+    name: `tool-${String(index + 1)}`,
     inputSchema,
   }));
-  server.setRequestHandler("tools/list", (request) => {
+  server.server.setRequestHandler("tools/list", (request) => {
     if (count !== 2) {
       return { tools };
     }
@@ -53,7 +57,7 @@ async function createMemoryPeer(options: {
     }
     return { tools: [tools[0] ?? { name: "fallback", inputSchema }], nextCursor: "second" };
   });
-  server.setRequestHandler("tools/call", async () => {
+  server.server.setRequestHandler("tools/call", () => {
     if (options.onCall !== undefined) {
       return options.onCall(serverTransport);
     }
@@ -63,11 +67,13 @@ async function createMemoryPeer(options: {
   return { client, serverTransport };
 }
 
-function config(options: {
-  readonly protocol?: "auto" | "2026-07-28" | "2025-11-25";
-  readonly idempotentTools?: string[];
-  readonly connectMs?: number;
-} = {}) {
+function config(
+  options: {
+    readonly protocol?: "auto" | "2026-07-28" | "2025-11-25";
+    readonly idempotentTools?: string[];
+    readonly connectMs?: number;
+  } = {},
+) {
   return ServerConfigSchema.parse({
     id: "mcp_test",
     transport: { kind: "stdio", command: "not-spawned-by-memory-transport" },
@@ -119,9 +125,8 @@ describe("McpConnection", () => {
 
   it("uses legacy negotiation only when the protocol is explicitly pinned to 2025", async () => {
     const peer = await createMemoryPeer();
-    const connection = connectionFor(
-      config({ protocol: "2025-11-25" }),
-      () => Promise.resolve(peer.client),
+    const connection = connectionFor(config({ protocol: "2025-11-25" }), () =>
+      Promise.resolve(peer.client),
     );
 
     await connection.connect();
@@ -133,9 +138,8 @@ describe("McpConnection", () => {
 
   it("rejects a modern-only pin when the peer negotiates only the legacy era", async () => {
     const peer = await createMemoryPeer();
-    const connection = connectionFor(
-      config({ protocol: "2026-07-28" }),
-      () => Promise.resolve(peer.client),
+    const connection = connectionFor(config({ protocol: "2026-07-28" }), () =>
+      Promise.resolve(peer.client),
     );
 
     await expect(connection.connect()).rejects.toMatchObject({ code: "mcp_connect_failed" });
@@ -156,10 +160,7 @@ describe("McpConnection", () => {
 
   it("maps a stalled handshake to mcp_connect_timeout", async () => {
     const [client, serverTransport] = InMemoryTransport.createLinkedPair();
-    const connection = connectionFor(
-      config({ connectMs: 10 }),
-      () => Promise.resolve(client),
-    );
+    const connection = connectionFor(config({ connectMs: 10 }), () => Promise.resolve(client));
 
     await expect(connection.connect()).rejects.toMatchObject({
       code: "mcp_connect_timeout",
@@ -171,13 +172,18 @@ describe("McpConnection", () => {
   it("reconnects lazily after a transport closes using injected backoff", async () => {
     const peers: MemoryPeer[] = [];
     const delays: number[] = [];
-    const connection = connectionFor(config(), async () => {
-      const peer = await createMemoryPeer();
-      peers.push(peer);
-      return peer.client;
-    }, async (milliseconds) => {
-      delays.push(milliseconds);
-    });
+    const connection = connectionFor(
+      config(),
+      async () => {
+        const peer = await createMemoryPeer();
+        peers.push(peer);
+        return peer.client;
+      },
+      (milliseconds) => {
+        delays.push(milliseconds);
+        return Promise.resolve();
+      },
+    );
     await connection.connect();
 
     const oldPeer = peers.at(0);
@@ -187,8 +193,9 @@ describe("McpConnection", () => {
     await oldPeer.serverTransport.close();
     expect(connection.state).toBe("unavailable");
 
-    await expect(connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, inputSchema))
-      .resolves.toMatchObject({ content: [{ text: "called" }] });
+    await expect(
+      connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, inputSchema),
+    ).resolves.toMatchObject({ content: [{ text: "called" }] });
     expect(connection.state).toBe("ready");
     expect(delays).toEqual([250]);
     expect(peers).toHaveLength(2);
@@ -200,7 +207,6 @@ describe("McpConnection", () => {
 
   it("retries a broken in-flight request only for configured idempotent tools", async () => {
     let calls = 0;
-    let peerToClose: MemoryPeer | undefined;
     const peers: MemoryPeer[] = [];
     const connection = connectionFor(
       config({ idempotentTools: ["tool-1"] }),
@@ -215,7 +221,6 @@ describe("McpConnection", () => {
             return { content: [{ type: "text", text: "retried" }] };
           },
         });
-        peerToClose = peer;
         peers.push(peer);
         return peer.client;
       },
@@ -235,7 +240,6 @@ describe("McpConnection", () => {
 
   it("does not retry a broken in-flight request for non-idempotent tools", async () => {
     let calls = 0;
-    let peerToClose: MemoryPeer | undefined;
     const peers: MemoryPeer[] = [];
     const connection = connectionFor(config(), async () => {
       const peer = await createMemoryPeer({
@@ -258,9 +262,7 @@ describe("McpConnection", () => {
   });
 
   it("validates arguments before creating a transport", async () => {
-    const createTransport = vi.fn(() =>
-      Promise.reject(new Error("transport must not be created")),
-    );
+    const createTransport = vi.fn(() => Promise.reject(new Error("transport must not be created")));
     const connection = connectionFor(config(), createTransport);
 
     await expect(
@@ -314,11 +316,9 @@ describe("McpConnection", () => {
     );
 
     await expect(
-      connection.callTool(
-        { name: "tool-1", arguments: { value: "ok" } },
-        inputSchema,
-        { signal: controller.signal },
-      ),
+      connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, inputSchema, {
+        signal: controller.signal,
+      }),
     ).rejects.toMatchObject({ code: "mcp_connect_timeout" });
     expect(attempts).toBe(0);
   });

@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  StreamableHTTPClientTransport,
-  type Transport,
-} from "@modelcontextprotocol/client";
+import { StreamableHTTPClientTransport, type Transport } from "@modelcontextprotocol/client";
 import {
   DEFAULT_INHERITED_ENV_VARS,
   StdioClientTransport,
 } from "@modelcontextprotocol/client/stdio";
 import {
-  Code,
   SecretRefSchema,
   type Code as HarnessCode,
   type SecretRef,
@@ -54,7 +50,7 @@ async function resolveValue(
 
 async function createStdioTransport(
   config: Extract<ServerConfig["transport"], { kind: "stdio" }>,
-  serverId: Code,
+  serverId: HarnessCode,
   dependencies: McpTransportDependencies,
   signal?: AbortSignal,
 ): Promise<StdioClientTransport> {

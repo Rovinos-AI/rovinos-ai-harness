@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InMemoryTransport } from "@modelcontextprotocol/client";
-import { Server } from "@modelcontextprotocol/server";
+import { McpServer } from "@modelcontextprotocol/server";
 import { ServerConfigSchema } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { McpPool, createServersReachableChecks } from "./pool.js";
@@ -16,16 +16,16 @@ function config(id: string) {
 
 async function createPeer() {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = new Server({ name: "pool-server", version: "1.0.0" });
-  server.registerCapabilities({ tools: {} });
-  server.setRequestHandler("tools/list", () => ({ tools: [] }));
+  const server = new McpServer({ name: "pool-server", version: "1.0.0" });
+  server.server.registerCapabilities({ tools: {} });
+  server.server.setRequestHandler("tools/list", () => ({ tools: [] }));
   await server.connect(serverTransport);
   return { client, serverTransport };
 }
 
 describe("McpPool", () => {
   it("connects all servers in parallel, retains state, and closes every connection", async () => {
-    const peers: Array<Awaited<ReturnType<typeof createPeer>>> = [];
+    const peers: Awaited<ReturnType<typeof createPeer>>[] = [];
     const events: McpLogEvent[] = [];
     const pool = new McpPool([config("first"), config("second")], {
       resolveSecret: () => Promise.reject(new Error("no secrets expected")),
@@ -66,14 +66,12 @@ describe("McpPool", () => {
     expect(JSON.stringify(events)).not.toContain("remote error text");
   });
 
-  it("rejects unknown server lookups without including the requested id in its error", async () => {
+  it("rejects unknown server lookups without including the requested id in its error", () => {
     const pool = new McpPool([], {
       resolveSecret: () => Promise.reject(new Error("not used")),
     });
 
-    expect(() => pool.connection("unknown")).toThrowError(
-      expect.objectContaining({ code: "mcp_server_not_found" }),
-    );
+    expect(() => pool.connection("unknown")).toThrowError("mcp_server_not_found");
   });
 
   it("creates per-server doctor results with only safe state and identifiers", async () => {
