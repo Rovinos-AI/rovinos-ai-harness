@@ -66,6 +66,32 @@ budgets. `harness inspect <runId>` lists direct continuations.
 Non-terminal sources report `run_not_terminal`; a chain at its configured limit reports
 `continuation_chain_too_long`.
 
+## `harness approvals`
+
+Lists and resolves approvals from the terminal. Any process can resolve an approval; the suspended
+run needs no live process. Output carries tokenized values only unless `--reveal` is used.
+
+- `harness approvals list [--run <id>]` prints pending approvals of suspended runs as a table of
+  `approvalId`, `runId`, `toolId`, `ruleId`, `ageMs`, and `expiresAt` (`-` when it never expires).
+- `harness approvals show <approvalId> [--show-args] [--reveal]` prints metadata. Tokenized
+  arguments need `--show-args`. `--reveal` implies `--show-args`, resolves tokens through the
+  auditing vault resolver with boundary `ui`, writes `reveal_exposes_sensitive_values` to stderr,
+  and appends a `pii_action` audit event (counts only) to the run log. It fails with
+  `reveal_unavailable` when no vault is configured.
+- `harness approvals approve <approvalId> [--edit <json-file>] [--yes] [--resume]` approves. With
+  `--edit`, the file holds the complete replacement (tokenized) arguments; they are validated
+  against the rule's editable fields and the tool schema, and the decision is recorded as `edit`.
+- `harness approvals deny <approvalId> [--yes] [--resume]` denies.
+
+Without `--yes`, `approve` and `deny` ask for confirmation when standard input is a terminal; a
+refusal exits with `confirmation_declined` (code `1`). After resolving, the command prints
+`harness resume <runId>`; `--resume` resumes at once and then uses the `harness resume` exit codes.
+`--json` results are `ApprovalListResultSchema`, `ApprovalShowResultSchema`, and
+`ApprovalResolveResultSchema` in `packages/schemas/src/cli/approvals.ts`.
+
+Exit codes: `0` resolved, `1` failure, `2` usage (including a malformed id), `7` for
+`approval_not_found`, `approval_already_resolved`, or a run that is no longer suspended.
+
 ## `harness inspect`
 
 `harness inspect <runId> [--show-content]` displays the status, step count, token and cost usage,
