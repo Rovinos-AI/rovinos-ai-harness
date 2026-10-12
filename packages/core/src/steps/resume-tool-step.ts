@@ -2,10 +2,9 @@
 import { HarnessError, JsonPointerSchema, type Event, type JsonValue } from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial } from "../recorder.js";
-import type { PolicyDecision } from "../ports.js";
+import type { ModelToolCall, PolicyDecision } from "../ports.js";
 import { requestPolicyApproval } from "./policy-step.js";
 import { APPROVAL_WAIT_SPAN, TOOL_CALL_SPAN } from "../spans.js";
-import type { ModelToolCall } from "../ports.js";
 import type { DanglingIntentAction } from "../resume-policy.js";
 import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
 import { runToolCall, type ResumeToolStepOptions } from "./tool-step.js";
@@ -274,7 +273,11 @@ export async function applyDanglingIntents(
   return events;
 }
 
-function approvalEditIsAllowed(original: JsonValue, edited: JsonValue, payload: JsonValue): boolean {
+function approvalEditIsAllowed(
+  original: JsonValue,
+  edited: JsonValue,
+  payload: JsonValue,
+): boolean {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     return false;
   }
@@ -289,8 +292,7 @@ function approvalEditIsAllowed(original: JsonValue, edited: JsonValue, payload: 
   const pointers = editable.flatMap((result) => (result.success ? [result.data] : []));
   return collectChangedPointers(original, edited).every((changed) =>
     pointers.some(
-      (allowed) =>
-        changed === allowed || changed.startsWith(allowed === "" ? "/" : `${allowed}/`),
+      (allowed) => changed === allowed || changed.startsWith(allowed === "" ? "/" : `${allowed}/`),
     ),
   );
 }
@@ -317,7 +319,7 @@ function collectChangedPointers(
   }
   if (Array.isArray(before) && Array.isArray(after)) {
     return Array.from({ length: Math.max(before.length, after.length) }, (_, index) =>
-      collectChangedPointers(before[index], after[index], `${path}/${index}`),
+      collectChangedPointers(before[index], after[index], `${path}/${String(index)}`),
     ).flat();
   }
   return [path];
@@ -335,12 +337,12 @@ function collectLeafPointers(value: JsonValue, path: string): string[] {
   if (Array.isArray(value)) {
     return value.length === 0
       ? [path]
-      : value.flatMap((child, index) => collectLeafPointers(child, `${path}/${index}`));
+      : value.flatMap((child, index) => collectLeafPointers(child, `${path}/${String(index)}`));
   }
   return [path];
 }
 
-function isJsonObject(value: JsonValue): value is { readonly [key: string]: JsonValue } {
+function isJsonObject(value: JsonValue): value is Readonly<Record<string, JsonValue>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -364,7 +366,12 @@ function jsonValuesEqual(left: JsonValue, right: JsonValue): boolean {
       keys.every((key) => {
         const value = left[key];
         const other = right[key];
-        return Object.hasOwn(right, key) && value !== undefined && other !== undefined && jsonValuesEqual(value, other);
+        return (
+          Object.hasOwn(right, key) &&
+          value !== undefined &&
+          other !== undefined &&
+          jsonValuesEqual(value, other)
+        );
       })
     );
   }

@@ -673,6 +673,34 @@ describe("SQLite crash-injection matrix", () => {
         );
         const crashedBoundary = crashBoundaries.boundaries[crashAt - 1];
 
+        let blockedResumeError: unknown;
+        let callsBeforeApproval = 0;
+        let resumedStatus: string | undefined;
+        if (decision === "ask") {
+          if (request?.type !== "approval_requested") {
+            throw new Error("Expected the durable policy approval request.");
+          }
+          try {
+            await runtime.resume(runId);
+          } catch (error) {
+            blockedResumeError = error;
+          }
+          callsBeforeApproval = execute.mock.calls.length;
+          await resolveApproval(store, runId, request.approvalId, "approve", undefined, clock);
+          resumedStatus = (await runtime.resume(runId)).status;
+        } else {
+          callsBeforeApproval = execute.mock.calls.length;
+          resumedStatus = (await runtime.resume(runId)).status;
+        }
+        const deniedOrApproval = decision === "ask" ? request : result;
+        const finalEvents = await readEvents(store, runId);
+        const blockedResumeCode =
+          typeof blockedResumeError === "object" &&
+          blockedResumeError !== null &&
+          "code" in blockedResumeError
+            ? blockedResumeError.code
+            : undefined;
+
         expect(crashedBoundary?.eventTypes).toContain("tool_intent");
         expect(crashedBoundary?.eventTypes).toContain(
           decision === "ask" ? "approval_requested" : "tool_result",
@@ -682,38 +710,16 @@ describe("SQLite crash-injection matrix", () => {
           ruleId: decision === "ask" ? "review_rule" : "deny_rule",
           policyReason: decision === "ask" ? "human_review" : "policy_forbidden",
         });
-        expect(execute).not.toHaveBeenCalled();
-
-        if (decision === "ask") {
-          expect(request).toMatchObject({
-            type: "approval_requested",
-            payload: { kind: "tool_call", args: { path: "synthetic" } },
-          });
-          if (request?.type !== "approval_requested") {
-            throw new Error("Expected the durable policy approval request.");
-          }
-          await expect(runtime.resume(runId)).rejects.toMatchObject({
-            code: "run_awaiting_approval",
-          });
-          expect(execute).not.toHaveBeenCalled();
-          await resolveApproval(store, runId, request.approvalId, "approve", undefined, clock);
-          const resumed = await runtime.resume(runId);
-          const events = await readEvents(store, runId);
-
-          expect(resumed.status).toBe("completed");
-          expect(execute).toHaveBeenCalledOnce();
-          expect(events.filter((event) => event.type === "tool_intent")).toHaveLength(1);
-        } else {
-          expect(result).toMatchObject({
-            type: "tool_result",
-            outcome: "denied",
-            errorCode: "policy_forbidden",
-          });
-          const resumed = await runtime.resume(runId);
-
-          expect(resumed.status).toBe("completed");
-          expect(execute).not.toHaveBeenCalled();
-        }
+        expect(deniedOrApproval).toMatchObject(
+          decision === "ask"
+            ? { type: "approval_requested", payload: { kind: "tool_call" } }
+            : { type: "tool_result", outcome: "denied", errorCode: "policy_forbidden" },
+        );
+        expect(blockedResumeCode).toBe(decision === "ask" ? "run_awaiting_approval" : undefined);
+        expect(callsBeforeApproval).toBe(0);
+        expect(resumedStatus).toBe("completed");
+        expect(execute).toHaveBeenCalledTimes(decision === "ask" ? 1 : 0);
+        expect(finalEvents.filter((event) => event.type === "tool_intent")).toHaveLength(1);
       } finally {
         await runtime.close();
         await rm(directory, { recursive: true, force: true });

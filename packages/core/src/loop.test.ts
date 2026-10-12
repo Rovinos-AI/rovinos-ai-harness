@@ -362,7 +362,7 @@ async function requestApprovalForRun(
   return requestApproval(recorder, {
     approvalId,
     callId: modelCallId,
-    payload: { prompt: "Approve tool execution?" },
+    payload: { prompt: "Approve tool execution?", editableFields: ["/a"] },
     state,
     checkpointer: new Checkpointer({
       recorder,
@@ -614,6 +614,7 @@ describe("approval lifecycle", () => {
         {
           recorder: resumedRecorder,
           tool,
+          policy: allowTestPolicy,
           clock,
           runId,
           signal: new AbortController().signal,

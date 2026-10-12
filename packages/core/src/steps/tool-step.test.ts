@@ -12,7 +12,13 @@ import {
   type Tracer,
   type TracerProvider,
 } from "@opentelemetry/api";
-import { Code, FakeClock, SequentialIdGenerator, type Event, type JsonValue } from "@harness/schemas";
+import {
+  Code,
+  FakeClock,
+  SequentialIdGenerator,
+  type Event,
+  type JsonValue,
+} from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { PolicyEngine } from "@harness/policy";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -616,25 +622,28 @@ describe("tool-step resume handling", () => {
   it.each([
     ["deny", "blocked", "blocked_by_policy"],
     ["ask", "needs_review", "approval_edit_requires_approval"],
-  ] as const)("re-checks edited approval arguments when policy returns %s", async (decision, subject, code) => {
-    const policy = editPolicy();
-    const { recorder, tool, intent, approval } = await createEditableApproval(policy);
-    const resolution = await resolveEvent(recorder, approval.approvalId, "edit", {
-      to: "unchanged",
-      subject,
-    });
+  ] as const)(
+    "re-checks edited approval arguments when policy returns %s",
+    async (decision, subject, code) => {
+      const policy = editPolicy();
+      const { recorder, tool, intent, approval } = await createEditableApproval(policy);
+      const resolution = await resolveEvent(recorder, approval.approvalId, "edit", {
+        to: "unchanged",
+        subject,
+      });
 
-    const result = await applyApprovalDecision(
-      { ...resumeOptions(recorder, tool), policy },
-      intent,
-      approval,
-      resolution,
-    );
+      const result = await applyApprovalDecision(
+        { ...resumeOptions(recorder, tool), policy },
+        intent,
+        approval,
+        resolution,
+      );
 
-    expect(result[0]).toMatchObject({ type: "tool_result", outcome: "denied", errorCode: code });
-    expect(tool.calls).toHaveLength(0);
-    expect(decision).not.toBe("allow");
-  });
+      expect(result[0]).toMatchObject({ type: "tool_result", outcome: "denied", errorCode: code });
+      expect(tool.calls).toHaveLength(0);
+      expect(decision).not.toBe("allow");
+    },
+  );
 
   it("reruns only durable/current idempotent calls and batches escalations", async () => {
     const { recorder, store } = createRecorder();
@@ -934,9 +943,7 @@ async function createEditableApproval(policy: PolicyPort): Promise<{
       },
     ],
   });
-  const intent = events.find(
-    (event): event is ToolIntentEvent => event.type === "tool_intent",
-  );
+  const intent = events.find((event): event is ToolIntentEvent => event.type === "tool_intent");
   const approval = events.find(
     (event): event is ApprovalRequestedEvent => event.type === "approval_requested",
   );

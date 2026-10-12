@@ -157,7 +157,12 @@ async function decideAndRunToolCall(
   ) {
     const code =
       preparationError ?? (input.description === undefined ? "unknown_tool" : decision.reason);
-    return recordDeniedIntentAndResultAndPush(input, intent, call, code, executedArgsHash);
+    return recordDeniedIntentAndResultAndPush(input, {
+      intent,
+      call,
+      code,
+      executedArgsHash,
+    });
   }
   if (decision.decision === "ask") {
     return requestToolApproval(input, intent, call, decision);
@@ -217,13 +222,12 @@ async function requestToolApproval(
 ): Promise<Event> {
   const { ids, checkpointer, history } = input.options;
   if (ids === undefined || checkpointer === undefined || history === undefined) {
-    return recordDeniedIntentAndResultAndPush(
-      input,
+    return recordDeniedIntentAndResultAndPush(input, {
       intent,
       call,
-      "policy_error",
-      hashArgs(call.args),
-    );
+      code: "policy_error",
+      executedArgsHash: hashArgs(call.args),
+    });
   }
   const approval = await requestPolicyApproval({
     recorder: input.options.recorder,
@@ -241,22 +245,24 @@ async function requestToolApproval(
 
 async function recordDeniedIntentAndResultAndPush(
   input: RunToolCallSpanOptions,
-  intent: Extract<EventPartial, { type: "tool_intent" }>,
-  call: ModelToolCall,
-  code: Code,
-  executedArgsHash?: string,
+  denial: {
+    readonly intent: Extract<EventPartial, { type: "tool_intent" }>;
+    readonly call: ModelToolCall;
+    readonly code: Code;
+    readonly executedArgsHash?: string;
+  },
 ): Promise<Event> {
   const recorded = await input.options.recorder.recordBatch([
-    intent,
+    denial.intent,
     {
       type: "tool_result",
       v: 1,
-      callId: call.callId,
-      toolId: call.toolId,
+      callId: denial.call.callId,
+      toolId: denial.call.toolId,
       outcome: "denied",
-      errorCode: code,
+      errorCode: denial.code,
       latencyMs: 0,
-      ...executedArgsHashField(executedArgsHash),
+      ...executedArgsHashField(denial.executedArgsHash),
       result: null,
     },
   ]);

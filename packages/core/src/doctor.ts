@@ -75,6 +75,10 @@ function result(status: DoctorCheckStatus["status"], code: Code, detail?: Code) 
   return { status, code, ...(detail === undefined ? {} : { detail }) };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
@@ -130,18 +134,13 @@ const initialChecks: DoctorCheck[] = [
     id: "policy_configured",
     title: "Policy configuration",
     run: (ctx) => {
-      if (ctx.config === undefined || typeof ctx.config !== "object" || ctx.config === null) {
+      if (!isRecord(ctx.config)) {
         return Promise.resolve(result("ok", "policy_configured"));
       }
-      const policy = Reflect.get(ctx.config, "policy");
-      const hasPolicyFile =
-        typeof policy === "object" &&
-        policy !== null &&
-        typeof Reflect.get(policy, "file") === "string";
+      const policy = ctx.config.policy;
+      const hasPolicyFile = isRecord(policy) && typeof policy.file === "string";
       return Promise.resolve(
-        hasPolicyFile
-          ? result("ok", "policy_configured")
-          : result("warn", "policy_default_deny"),
+        hasPolicyFile ? result("ok", "policy_configured") : result("warn", "policy_default_deny"),
       );
     },
   },
