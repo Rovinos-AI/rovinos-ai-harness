@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { watch } from "node:fs";
+import { readFileSync, watch } from "node:fs";
 import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,9 +55,15 @@ function makeSpec(
 function processHasExited(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return false;
   } catch {
     return true;
+  }
+  try {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, "utf8");
+    const commandEnd = stat.lastIndexOf(")");
+    return commandEnd >= 0 && stat[commandEnd + 2] === "Z";
+  } catch {
+    return false;
   }
 }
 
