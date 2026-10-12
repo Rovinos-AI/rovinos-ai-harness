@@ -16,6 +16,18 @@ export {
 export { PolicyEngine } from "./engine.js";
 export { policyVersion } from "./version.js";
 export {
+  ApprovalEditError,
+  ApprovalEditSchema,
+  ApprovalEditsSchema,
+  ApprovalPayloadSchema,
+  buildApprovalPayload,
+  validateEdits,
+  type ApprovalEdit,
+  type ApprovalEditTokenizer,
+  type ApprovalPayload,
+  type ApprovalPayloadBuildOptions,
+} from "./approval-payload.js";
+export {
   ArgMatcherSchema,
   PolicyDocumentSchema,
   RuleSchema,

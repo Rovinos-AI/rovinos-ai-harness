@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, JsonPointerSchema, type Event, type JsonValue } from "@harness/schemas";
+import {
+  HarnessError,
+  JsonPointerSchema,
+  JsonValue as JsonValueSchema,
+  type Event,
+  type JsonValue,
+} from "@harness/schemas";
+import { buildApprovalPayload } from "@harness/policy";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial } from "../recorder.js";
 import type { ModelToolCall, PolicyDecision } from "../ports.js";
@@ -123,11 +130,17 @@ async function requestResumeApprovals(
       v: 1,
       approvalId: options.ids.next(),
       callId: intent.callId,
-      payload: {
-        kind: "resume_ambiguity",
-        callId: intent.callId,
-        toolId: intent.toolId,
-      },
+      payload: JsonValueSchema.parse(
+        buildApprovalPayload({
+          kind: "resume_ambiguity",
+          call: callFromIntent(intent),
+          rule: {
+            ruleId: intent.ruleId ?? "default",
+            reason: intent.policyReason ?? "resume_ambiguous",
+            editableFields: [],
+          },
+        }),
+      ),
     }));
     batch.push({
       type: "run_status_changed",
