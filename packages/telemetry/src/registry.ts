@@ -88,7 +88,7 @@ function isSpanOwnerTask(value: unknown): value is SpanOwnerTask {
     value !== null &&
     "taskId" in value &&
     typeof value.taskId === "string" &&
-    /^[0-9]+\.[0-9]+$/u.test(value.taskId) &&
+    /^[0-9]+(?:\.[0-9]+)+$/u.test(value.taskId) &&
     "packageName" in value &&
     typeof value.packageName === "string" &&
     /^@harness\/[a-z0-9-]+$/u.test(value.packageName)
@@ -368,6 +368,7 @@ export function __registerUnsafeSpanForTests(name: string, shape: SpanShape): ()
     name: parsedName,
     shape,
     schema: z.object(shape).strict(),
+    ownerTask: { taskId: "4.6", packageName: "@harness/telemetry" },
     start() {
       throw new SpanRegistryError("span_attr_unconstrained");
     },

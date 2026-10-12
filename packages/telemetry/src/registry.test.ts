@@ -116,6 +116,7 @@ describe("attribute schemas", () => {
     expect(isSafeAttr(z.string())).toBe(false);
     expect(isSafeAttr(attr.optional(z.string()))).toBe(false);
     expect(getAttrMeta(z.string())).toBeUndefined();
+    expect(getAttrMeta("not-a-schema")).toBeUndefined();
   });
 
   it("validates the documented attribute value kinds", () => {
@@ -162,17 +163,31 @@ describe("span registry", () => {
   });
 
   it("registers only allowlisted semantic-convention span names and attributes", () => {
+    expect(() =>
+      defineSpan("harness.test.unowned", {}, { taskId: "not-a-task", packageName: "@harness/telemetry" }),
+    ).toThrowError("span_owner_task_invalid");
+    expect(() =>
+      Reflect.apply(defineSemconvSpan, undefined, [
+        "mcp.server.call",
+        {},
+        testOwnerTask,
+      ]),
+    ).toThrowError("span_name_invalid");
+    expect(() =>
+      Reflect.apply(defineSemconvSpan, undefined, [
+        "mcp.client.call",
+        { "mcp.server.name": attr.code() },
+        testOwnerTask,
+      ]),
+    ).toThrowError("span_attr_name_invalid");
+
     const definition = defineSemconvSpan(
       "mcp.client.call",
       { "mcp.method.name": attr.enum(["tools/call"]) },
       testOwnerTask,
     );
-
     expect(definition.name).toBe("mcp.client.call");
     expect(definition.ownerTask).toEqual(testOwnerTask);
-    expect(() =>
-      defineSpan("harness.test.unowned", {}, { taskId: "4.7", packageName: "telemetry" }),
-    ).toThrowError("span_owner_task_invalid");
   });
 
   it("rejects an unconstrained attribute, including an optional wrapper", () => {

@@ -34,13 +34,16 @@ describe("createTelemetrySdk", () => {
       telemetry: TelemetryConfigSchema.parse({ sentinel: { enabled: false } }),
     });
 
-    expect(env.OTEL_SEMCONV_STABILITY_OPT_IN).toBe(SEMCONV_STABILITY_OPT_IN);
-    await sdk.tracerProvider.shutdown();
-    await sdk.loggerProvider.shutdown();
-    if (previous === undefined) {
-      delete env.OTEL_SEMCONV_STABILITY_OPT_IN;
-    } else {
-      env.OTEL_SEMCONV_STABILITY_OPT_IN = previous;
+    try {
+      expect(env.OTEL_SEMCONV_STABILITY_OPT_IN).toBe(SEMCONV_STABILITY_OPT_IN);
+    } finally {
+      await sdk.tracerProvider.shutdown();
+      await sdk.loggerProvider.shutdown();
+      if (previous === undefined) {
+        delete env.OTEL_SEMCONV_STABILITY_OPT_IN;
+      } else {
+        env.OTEL_SEMCONV_STABILITY_OPT_IN = previous;
+      }
     }
   });
 });
