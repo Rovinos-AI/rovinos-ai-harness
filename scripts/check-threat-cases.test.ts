@@ -25,7 +25,7 @@ const temporaryDirectories: string[] = [];
 
 function validCatalog(): ThreatCase[] {
   return Array.from({ length: 19 }, (_, index) => {
-    const taskId = `19.${index + 1}`;
+    const taskId = index === 0 ? "19.1" : "19.2";
     return {
       id: `T-${String(index + 1).padStart(2, "0")}`,
       title: `Threat ${index + 1}`,
@@ -161,12 +161,22 @@ describe("threat coverage CLI", () => {
 });
 
 describe("ThreatCaseSchema", () => {
-  it("requires mitigation tasks to be 19.x task ids", () => {
+  it("accepts the last currently defined sandbox task id", () => {
     expect(
       ThreatCaseSchema.safeParse({
         ...activeCase,
-        mitigationTask: "18.1",
-        activeFromTask: "18.1",
+        mitigationTask: "19.10",
+        activeFromTask: "19.10",
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each(["18.1", "19.30"])("rejects nonexistent sandbox task id %s", (taskId) => {
+    expect(
+      ThreatCaseSchema.safeParse({
+        ...activeCase,
+        mitigationTask: taskId,
+        activeFromTask: taskId,
       }).success,
     ).toBe(false);
   });

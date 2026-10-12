@@ -6,7 +6,7 @@ import { parseJson } from "@harness/schemas";
 import { z } from "zod";
 
 const taskIdSchema = z.string().regex(/^\d+\.\d+(?:\.\d+)?$/);
-const sandboxTaskIdSchema = z.string().regex(/^19\.\d+$/);
+const sandboxTaskIdSchema = z.string().regex(/^19\.(?:[1-9]|10)$/);
 const testFileSchema = z
   .string()
   .regex(
