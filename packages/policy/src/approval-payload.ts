@@ -32,7 +32,16 @@ export const ApprovalPayloadSchema = z
     editableFields: z.array(JsonPointerSchema),
     expiresAt: z.number().int().nonnegative().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((payload, context) => {
+    if (payload.kind === "resume_ambiguity" && payload.editableFields.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["editableFields"],
+        message: "Resume-ambiguity requests cannot have editable fields.",
+      });
+    }
+  });
 
 /** Inferred approval request payload contract. */
 export type ApprovalPayload = z.infer<typeof ApprovalPayloadSchema>;
@@ -63,9 +72,9 @@ const ApprovalPayloadBuildOptionsSchema = z
       .strict(),
     rule: z
       .object({
-        ruleId: Code,
+        id: Code,
         reason: Code,
-        editableFields: z.array(JsonPointerSchema),
+        editable: z.array(JsonPointerSchema).optional(),
         approvalTtlMs: z.number().int().positive().optional(),
       })
       .strict(),
@@ -103,7 +112,7 @@ export type ApprovalPayloadBuildOptions = z.input<typeof ApprovalPayloadBuildOpt
 export function buildApprovalPayload(input: ApprovalPayloadBuildOptions): ApprovalPayload {
   const options = ApprovalPayloadBuildOptionsSchema.parse(input);
   const kind = options.kind ?? "tool_call";
-  const summary = `Tool ${options.call.toolId} requests approval (rule ${options.rule.ruleId})`;
+  const summary = `Tool ${options.call.toolId} requests approval (rule ${options.rule.id})`;
   const expiresAt =
     kind === "tool_call" && options.rule.approvalTtlMs !== undefined && options.now !== undefined
       ? options.now + options.rule.approvalTtlMs
@@ -112,11 +121,11 @@ export function buildApprovalPayload(input: ApprovalPayloadBuildOptions): Approv
     payloadVersion: 1,
     kind,
     ...options.call,
-    ruleId: options.rule.ruleId,
+    ruleId: options.rule.id,
     reason: options.rule.reason,
     summary,
     ui: { resourceUri: APPROVAL_RESOURCE_URI, fallbackText: summary },
-    editableFields: kind === "resume_ambiguity" ? [] : options.rule.editableFields,
+    editableFields: kind === "resume_ambiguity" ? [] : (options.rule.editable ?? []),
     ...(expiresAt === undefined ? {} : { expiresAt }),
   });
 }

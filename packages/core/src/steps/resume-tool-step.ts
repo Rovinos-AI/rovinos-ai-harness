@@ -135,9 +135,8 @@ async function requestResumeApprovals(
           kind: "resume_ambiguity",
           call: callFromIntent(intent),
           rule: {
-            ruleId: intent.ruleId ?? "default",
+            id: intent.ruleId ?? "default",
             reason: intent.policyReason ?? "resume_ambiguous",
-            editableFields: [],
           },
         }),
       ),

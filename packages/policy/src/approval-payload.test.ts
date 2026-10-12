@@ -16,9 +16,9 @@ const call = {
 };
 
 const rule = {
-  ruleId: "confirm_mail",
+  id: "confirm_mail",
   reason: "external_email",
-  editableFields: ["/subject", "/metadata"],
+  editable: ["/subject", "/metadata"],
   approvalTtlMs: 30_000,
 };
 
@@ -40,7 +40,7 @@ function createPayload() {
 const identityTokenizer: ApprovalEditTokenizer = (args) => Promise.resolve(args);
 
 describe("approval payload", () => {
-  it("builds a deterministic payload with policy editability, expiry, and fallback text", () => {
+  it("builds a deterministic payload with policy editable fields, expiry, and fallback text", () => {
     const payload = createPayload();
 
     expect(payload).toEqual({
@@ -67,6 +67,12 @@ describe("approval payload", () => {
     expect(ApprovalPayloadSchema.safeParse({ ...payload, summary: "x".repeat(501) }).success).toBe(
       false,
     );
+    expect(
+      ApprovalPayloadSchema.safeParse({
+        ...payload,
+        kind: "resume_ambiguity",
+      }).success,
+    ).toBe(false);
   });
 
   it("builds resume-ambiguity payloads without editable fields or expiry", () => {
@@ -117,7 +123,7 @@ describe("validateEdits", () => {
   it("allows a child pointer under an editable field", async () => {
     const payload = buildApprovalPayload({
       call: { ...call, args: { ...call.args, metadata: { tag: "keep" } } },
-      rule: { ...rule, editableFields: ["/metadata"] },
+      rule: { ...rule, editable: ["/metadata"] },
       now: 100,
     });
     await expect(
@@ -133,7 +139,7 @@ describe("validateEdits", () => {
   it("rejects edits outside policy-marked pointers, including textual prefix collisions", async () => {
     const payload = buildApprovalPayload({
       call: { ...call, args: { ...call.args, subjectLine: "unchanged" } },
-      rule: { ...rule, editableFields: ["/subject"] },
+      rule: { ...rule, editable: ["/subject"] },
       now: 100,
     });
 
@@ -180,7 +186,7 @@ describe("validateEdits", () => {
   it("safely edits escaped object keys and array items", async () => {
     const payload = buildApprovalPayload({
       call: { ...call, args: { ...call.args, "safe/key": "before", items: ["first"] } },
-      rule: { ...rule, editableFields: ["/safe~1key", "/items"] },
+      rule: { ...rule, editable: ["/safe~1key", "/items"] },
       now: 100,
     });
     const schema = {
@@ -210,7 +216,7 @@ describe("validateEdits", () => {
   it("does not mutate the original arguments when replacing the root", async () => {
     const payload = buildApprovalPayload({
       call: { ...call, args: { nested: { value: "before" } } },
-      rule: { ...rule, editableFields: [""] },
+      rule: { ...rule, editable: [""] },
       now: 100,
     });
     const replacement: JsonValue = { replaced: true };

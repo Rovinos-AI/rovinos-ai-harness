@@ -72,9 +72,9 @@ export async function requestPolicyApproval(options: {
   const approvalPayload = buildApprovalPayload({
     call,
     rule: {
-      ruleId: decision.ruleId,
+      id: decision.ruleId,
       reason: decision.reason,
-      editableFields: decision.editable,
+      editable: decision.editable,
       ...(decision.approvalTtlMs === undefined ? {} : { approvalTtlMs: decision.approvalTtlMs }),
     },
     now: Math.floor(clock.now()),
