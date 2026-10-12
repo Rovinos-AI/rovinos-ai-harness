@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
+import { JsonPointerSchema } from "./config/pii.js";
 import { JsonValue } from "./json.js";
 import { MessageSchema, PartSchema } from "./messages.js";
 import { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
@@ -105,6 +106,11 @@ const toolIntentEvent = z
     toolId: Code,
     idempotent: z.boolean(),
     policyDecision: z.enum(["allow", "ask", "deny"]),
+    ruleId: Code.optional(),
+    policyReason: Code.optional(),
+    policyEditable: z.array(JsonPointerSchema).optional(),
+    policyApprovalTtlMs: z.number().int().positive().optional(),
+    policyEscalateAfterMs: z.number().int().positive().optional(),
     argsHash: Sha256Hex,
     args: JsonValue,
   })

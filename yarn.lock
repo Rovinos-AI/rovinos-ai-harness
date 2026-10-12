@@ -1057,6 +1057,7 @@ __metadata:
     "@harness/context": "workspace:^"
     "@harness/models": "workspace:^"
     "@harness/pii": "workspace:^"
+    "@harness/policy": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
@@ -1151,7 +1152,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@harness/policy@workspace:packages/policy":
+"@harness/policy@workspace:^, @harness/policy@workspace:packages/policy":
   version: 0.0.0-use.local
   resolution: "@harness/policy@workspace:packages/policy"
   dependencies:

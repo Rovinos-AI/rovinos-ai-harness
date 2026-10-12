@@ -2,7 +2,7 @@
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
 import type { Checkpointer } from "./checkpoint.js";
-import { LeaseLostError, RunRecorder, type Clock } from "./recorder.js";
+import { LeaseLostError, RunRecorder, type Clock, type EventPartial } from "./recorder.js";
 import { foldRunState, type RunState } from "./run-state.js";
 import { APPROVAL_WAIT_SPAN } from "./spans.js";
 import type { ToolPort } from "./ports.js";
@@ -10,8 +10,8 @@ import {
   applyApprovalDecision,
   ApprovalEditsRequiredError,
   resolveDanglingIntentApproval,
-  type ResumeToolStepOptions,
-} from "./steps/tool-step.js";
+} from "./steps/resume-tool-step.js";
+import type { ResumeToolStepOptions } from "./steps/tool-step.js";
 import { prepareToolCall, toolRunContext } from "./steps/prepare-tool.js";
 
 export { ApprovalEditsRequiredError };
@@ -27,6 +27,7 @@ export interface RequestApprovalOptions {
   readonly expiresAt?: number;
   readonly state: RunState;
   readonly checkpointer: Checkpointer;
+  readonly intent?: Extract<EventPartial, { type: "tool_intent" }>;
 }
 
 /** Result returned after the approval request and suspension checkpoint are durable. */
@@ -112,11 +113,13 @@ export async function requestApproval(
   recorder: RunRecorder,
   options: RequestApprovalOptions,
 ): Promise<ApprovalSuspensionResult> {
+  const hasPendingIntent = options.state.pendingToolCalls.has(options.callId);
   if (
     options.state.status !== "running" ||
     options.state.nextSeq !== recorder.nextSeq ||
     options.state.approvalRequests.has(options.approvalId) ||
-    !options.state.pendingToolCalls.has(options.callId)
+    hasPendingIntent === (options.intent !== undefined) ||
+    (options.intent !== undefined && options.intent.callId !== options.callId)
   ) {
     throw new ApprovalRequestStateError();
   }
@@ -132,6 +135,7 @@ export async function requestApproval(
       ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
     };
     const recorded = await recorder.recordBatch([
+      ...(options.intent === undefined ? [] : [options.intent]),
       request,
       {
         type: "run_status_changed",
@@ -141,8 +145,9 @@ export async function requestApproval(
         reason: "awaiting_approval",
       },
     ]);
-    const requestEvent = recorded[0];
-    const suspendedEvent = recorded[1];
+    const requestIndex = options.intent === undefined ? 0 : 1;
+    const requestEvent = recorded[requestIndex];
+    const suspendedEvent = recorded[requestIndex + 1];
     if (
       requestEvent?.type !== "approval_requested" ||
       suspendedEvent?.type !== "run_status_changed"
@@ -154,10 +159,19 @@ export async function requestApproval(
     approvalRequests.set(requestEvent.approvalId, requestEvent);
     const pendingApprovals = new Map(options.state.pendingApprovals);
     pendingApprovals.set(requestEvent.approvalId, requestEvent);
+    const pendingToolCalls = new Map(options.state.pendingToolCalls);
+    const intentEvent = options.intent === undefined ? undefined : recorded[0];
+    if (options.intent !== undefined) {
+      if (intentEvent?.type !== "tool_intent") {
+        throw new ApprovalRequestStateError();
+      }
+      pendingToolCalls.set(intentEvent.callId, intentEvent);
+    }
     const suspendedState: RunState = {
       ...options.state,
       status: "suspended",
       nextSeq: suspendedEvent.seq + 1,
+      pendingToolCalls,
       pendingApprovals,
       approvalRequests,
       segmentId: suspendedEvent.segmentId,

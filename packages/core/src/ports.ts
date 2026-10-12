@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { Code, JsonPointerSchema } from "@harness/schemas";
 import type {
-  Code,
   Event,
   Id,
   JsonValue,
@@ -15,6 +15,7 @@ import type {
   ToolSpec,
 } from "@harness/schemas";
 import type { TranscriptGroup } from "@harness/context";
+import { z } from "zod";
 
 /** Provider-neutral request contract shared with the model gateway. */
 export type ModelRequest = SharedModelRequest;
@@ -106,6 +107,47 @@ export interface ToolPort {
    * @returns The tool outcome and JSON result.
    */
   execute(call: ModelToolCall, context: RunContext): Promise<ToolExecutionResult>;
+}
+
+/** Context that policy is allowed to use when matching a prepared tool call. */
+export const PolicyContextSchema = z
+  .object({
+    subagent: z.boolean(),
+    server: Code.optional(),
+  })
+  .strict();
+
+/** Result returned by the policy engine for one prepared tool call. */
+export const PolicyDecisionSchema = z
+  .object({
+    decision: z.enum(["allow", "ask", "deny"]),
+    ruleId: Code,
+    reason: Code,
+    editable: z.array(JsonPointerSchema),
+    approvalTtlMs: z.number().int().positive().optional(),
+    escalateAfterMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+/** Inferred context supplied to a policy evaluator. */
+export type PolicyContext = z.infer<typeof PolicyContextSchema>;
+
+/** Inferred decision returned by a policy evaluator. */
+export type PolicyDecision = z.infer<typeof PolicyDecisionSchema>;
+
+/** Deterministic policy evaluator consulted before every new tool intent. */
+export interface PolicyPort {
+  /** Stable version of the immutable policy document loaded for this runtime. */
+  readonly version: Code;
+
+  /**
+   * Evaluates a prepared call whose arguments have already been tokenized.
+   *
+   * @param call - Tool identifier and prepared tokenized arguments.
+   * @param context - Bounded context used by policy matchers.
+   * @returns The decision, rule, and approval metadata.
+   */
+  decide(call: Pick<ModelToolCall, "toolId" | "args">, context: PolicyContext): PolicyDecision;
 }
 
 /** Builds provider messages from the durable run history. */

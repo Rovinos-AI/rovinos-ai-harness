@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   FakeClock,
+  Code,
   Id,
   RunConfigSchema,
   SequentialIdGenerator,
   type Event,
-  type Code,
   type JsonValue,
   type NewEvent,
   type Part,
@@ -17,6 +17,7 @@ import {
   createRuntime,
   NaiveContext,
   resumeRun,
+  resolveApproval,
   RunAlreadyTerminalError,
   RunRecorder,
   runLoop,
@@ -24,11 +25,13 @@ import {
   type IdGenerator,
   type ModelCompletion,
   type ModelRequest,
+  type PolicyPort,
 } from "@harness/core";
 import { SummarizingStrategy } from "@harness/context";
 import {
   CrashingEventStore,
   FakeModelPort,
+  allowAllPolicy,
   FakeToolPort,
   SimulatedCrash,
   type FakeModelOptions,
@@ -212,6 +215,7 @@ function modelOptions(scenario: Scenario, store: EventStore, ids: IdGenerator) {
     model: scenario.model,
     tool: scenario.tool,
     context: scenario.context,
+    policy: allowAllPolicy,
   };
 }
 
@@ -567,6 +571,154 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
 }
 
 describe("SQLite crash-injection matrix", () => {
+  it.each(["ask", "deny"] as const)(
+    "recovers an idempotent %s decision after its atomic intent append",
+    async (decision) => {
+      const directory = await mkdtemp(join(tmpdir(), `harness-${decision}-crash-`));
+      const clock = new FakeClock(100);
+      const callId = Id.parse("66666666666666666666666666");
+      const policy: PolicyPort = {
+        version: Code.parse("test.policy"),
+        decide: () => ({
+          decision,
+          ruleId: decision === "ask" ? "review_rule" : "deny_rule",
+          reason: decision === "ask" ? "human_review" : "policy_forbidden",
+          editable: [],
+        }),
+      };
+      const completionFor = (parts: ModelCompletion["parts"]): ModelCompletion => ({
+        parts,
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        provider: "fake",
+        model: "script",
+        latencyMs: 1,
+        schemaValid: true,
+        repairAttempts: 0,
+        fallbackDepth: 0,
+        providerBlobs: null,
+      });
+      const createModel = () =>
+        new FakeModelPort([
+          completionFor([
+            {
+              type: "tool_call",
+              callId,
+              toolId: "reviewed_tool",
+              args: { path: "synthetic" },
+            },
+          ]),
+          completionFor([{ type: "text", text: "finished" }]),
+        ]);
+      const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
+      const tool = new FakeToolPort(
+        new Map([["reviewed_tool", { idempotent: true, timeoutMs: 1_000, execute }]]),
+      );
+      const createTestRuntime = (store: EventStore) =>
+        createRuntime(config, {
+          store,
+          clock,
+          ids: idsAfter(0),
+          model: createModel(),
+          tool,
+          context: new NaiveContext(),
+          policy,
+        });
+
+      const referenceStore = new BoundaryRecordingStore(
+        new SqliteEventStore(join(directory, "reference.sqlite")),
+      );
+      const referenceRuntime = await createTestRuntime(referenceStore);
+      let crashAt: number;
+      try {
+        const reference = await referenceRuntime.run(goal);
+        expect(reference.status).toBe(decision === "ask" ? "suspended" : "completed");
+        crashAt =
+          referenceStore.boundaries.findIndex(
+            ({ eventTypes, callIds }) =>
+              callIds.includes(callId) && eventTypes.includes("tool_intent"),
+          ) + 1;
+      } finally {
+        await referenceRuntime.close();
+      }
+      expect(crashAt).toBeGreaterThan(0);
+
+      const crashBoundaries = new BoundaryRecordingStore(
+        new SqliteEventStore(join(directory, "events.sqlite")),
+      );
+      const store = new CrashingEventStore(crashBoundaries, {
+        crashAt,
+        mode: "after_commit",
+      });
+      const runtime = await createTestRuntime(store);
+      try {
+        await expect(runtime.run(goal)).rejects.toBeInstanceOf(SimulatedCrash);
+        const initialEvents = await readEvents(store, runId);
+        const intent = initialEvents.find(
+          (event) => event.type === "tool_intent" && event.callId === callId,
+        );
+        const result = initialEvents.find(
+          (event) => event.type === "tool_result" && event.callId === callId,
+        );
+        const request = initialEvents.find(
+          (event) => event.type === "approval_requested" && event.callId === callId,
+        );
+        const crashedBoundary = crashBoundaries.boundaries[crashAt - 1];
+
+        let blockedResumeError: unknown;
+        let callsBeforeApproval = 0;
+        let resumedStatus: string | undefined;
+        if (decision === "ask") {
+          if (request?.type !== "approval_requested") {
+            throw new Error("Expected the durable policy approval request.");
+          }
+          try {
+            await runtime.resume(runId);
+          } catch (error) {
+            blockedResumeError = error;
+          }
+          callsBeforeApproval = execute.mock.calls.length;
+          await resolveApproval(store, runId, request.approvalId, "approve", undefined, clock);
+          resumedStatus = (await runtime.resume(runId)).status;
+        } else {
+          callsBeforeApproval = execute.mock.calls.length;
+          resumedStatus = (await runtime.resume(runId)).status;
+        }
+        const deniedOrApproval = decision === "ask" ? request : result;
+        const finalEvents = await readEvents(store, runId);
+        const blockedResumeCode =
+          typeof blockedResumeError === "object" &&
+          blockedResumeError !== null &&
+          "code" in blockedResumeError
+            ? blockedResumeError.code
+            : undefined;
+
+        expect(crashedBoundary?.eventTypes).toContain("tool_intent");
+        expect(crashedBoundary?.eventTypes).toContain(
+          decision === "ask" ? "approval_requested" : "tool_result",
+        );
+        expect(intent).toMatchObject({
+          policyDecision: decision,
+          ruleId: decision === "ask" ? "review_rule" : "deny_rule",
+          policyReason: decision === "ask" ? "human_review" : "policy_forbidden",
+        });
+        expect(deniedOrApproval).toMatchObject(
+          decision === "ask"
+            ? { type: "approval_requested", payload: { kind: "tool_call" } }
+            : { type: "tool_result", outcome: "denied", errorCode: "policy_forbidden" },
+        );
+        expect(blockedResumeCode).toBe(decision === "ask" ? "run_awaiting_approval" : undefined);
+        expect(callsBeforeApproval).toBe(0);
+        expect(resumedStatus).toBe("completed");
+        expect(execute).toHaveBeenCalledTimes(decision === "ask" ? 1 : 0);
+        expect(finalEvents.filter((event) => event.type === "tool_intent")).toHaveLength(1);
+      } finally {
+        await runtime.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("resumes each append boundary in both modes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-crash-reference-"));
     try {
@@ -683,6 +835,7 @@ describe("SQLite compaction crash recovery", () => {
             budgets,
             checkpointEveryEvents: 1_000,
             policyVersion: "test.policy",
+            policy: allowAllPolicy,
             signal: new AbortController().signal,
             compaction,
           }),
@@ -704,6 +857,7 @@ describe("SQLite compaction crash recovery", () => {
           goal: compactGoal,
           budgets,
           checkpointEveryEvents: 1_000,
+          policy: allowAllPolicy,
           signal: new AbortController().signal,
           compaction,
         });

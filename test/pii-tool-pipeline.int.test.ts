@@ -21,7 +21,7 @@ import {
   type ModelCompletion,
   type ToolPort,
 } from "@harness/core";
-import { FakeModelPort } from "@harness/core/testing";
+import { FakeModelPort, allowAllPolicy } from "@harness/core/testing";
 import { OffloadingToolPort, type WorkspacePort } from "@harness/context";
 import { InMemoryEventStore } from "@harness/store";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
@@ -149,6 +149,7 @@ async function pipeline(
       ids,
       tool,
       model,
+      policy: allowAllPolicy,
     },
   );
   try {
@@ -277,16 +278,16 @@ describe("PII tool pipeline", () => {
           callId: approvalCallId,
           toolId: "mail.send",
           idempotent: false,
-          policyDecision: "allow",
+          policyDecision: "ask",
           argsHash: "b".repeat(64),
-          args: null,
+          args: { to: "draft-recipient", note: "draft-note" },
         },
         {
           type: "approval_requested",
           v: 1,
           approvalId,
           callId: approvalCallId,
-          payload: { kind: "tool_call" },
+          payload: { kind: "tool_call", editableFields: ["/to", "/note"] },
         },
         {
           type: "run_status_changed",
@@ -338,7 +339,14 @@ describe("PII tool pipeline", () => {
       beforeApply.push(event);
     }
     await applyResolvedApprovals(
-      { recorder: resumedRecorder, tool, clock, runId, signal: new AbortController().signal },
+      {
+        recorder: resumedRecorder,
+        tool,
+        clock,
+        runId,
+        policy: allowAllPolicy,
+        signal: new AbortController().signal,
+      },
       foldRunState(beforeApply),
     );
 
@@ -379,6 +387,7 @@ describe("PII tool pipeline", () => {
         clock: new FakeClock(100),
         ids: new SequentialIdGenerator(),
         model: new FakeModelPort([completion(true), completion()]),
+        policy: allowAllPolicy,
         tool: {
           describe: () => ({ idempotent: true, timeoutMs: 1000 }),
           execute: () => Promise.resolve({ outcome: "ok", result: null satisfies JsonValue }),
