@@ -17,7 +17,8 @@ export class SpanRegistryError extends HarnessError {
     | "span_duplicate"
     | "span_attr_invalid"
     | "span_attr_reserved"
-    | "span_registry_reset_forbidden";
+    | "span_registry_reset_forbidden"
+    | "span_unsafe_test_registration_forbidden";
   readonly issues: readonly SpanRegistryIssue[];
 
   /**
