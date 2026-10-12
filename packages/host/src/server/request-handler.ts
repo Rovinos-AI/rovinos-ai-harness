@@ -33,7 +33,7 @@ interface RequestHandlerOptions {
 }
 
 const HOST_PAGE_CSP =
-  "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'self'; frame-src 'self'; child-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  "default-src 'none'; script-src 'self' 'unsafe-inline' http: https:; style-src 'unsafe-inline' http: https:; img-src data: http: https:; font-src data: http: https:; connect-src 'self' http: https:; media-src data: http: https:; frame-src 'self'; child-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 async function handleStaticRequest(
   request: HostRequest,
@@ -100,8 +100,7 @@ async function sendAppResource(
   if (
     resourceUri === null ||
     app === undefined ||
-    instance === undefined ||
-    instance.resourceUri !== resourceUri ||
+    instance?.resourceUri !== resourceUri ||
     instance.id !== app.id
   ) {
     writeError(response, 404, "app_unknown");

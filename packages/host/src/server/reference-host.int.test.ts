@@ -109,6 +109,7 @@ let page: Page | undefined;
 const externalRequests: string[] = [];
 const externalFailures: string[] = [];
 const externalResponses: string[] = [];
+const allRequests: string[] = [];
 const routedExternalRequests: string[] = [];
 
 function getWithHostHeader(
@@ -170,6 +171,7 @@ beforeAll(async () => {
     await route.continue();
   });
   page.on("request", (request) => {
+    allRequests.push(request.url());
     const hostname = new URL(request.url()).hostname;
     if (!["127.0.0.1", "[::1]", "localhost"].includes(hostname)) {
       externalRequests.push(request.url());
@@ -213,9 +215,12 @@ describe("reference host browser security", () => {
       attempts.id = "navigation-attempts";
       document.body.append(attempts);
       window.addEventListener("message", (event) => {
-        const name = event.data?.navigationAttempt;
-        if (typeof name === "string") {
-          attempts.textContent += `${name}\n`;
+        const message: unknown = event.data;
+        if (message !== null && typeof message === "object" && "navigationAttempt" in message) {
+          const navigationAttempt: unknown = message.navigationAttempt;
+          if (typeof navigationAttempt === "string") {
+            attempts.textContent += `${navigationAttempt}\n`;
+          }
         }
       });
     });
@@ -254,6 +259,7 @@ describe("reference host browser security", () => {
       "/beacon",
       "/xhr",
     ]);
+    expect(allRequests.some((url) => new URL(url).pathname === "/host.js")).toBe(true);
     expect(routedExternalRequests).toEqual([]);
     expect(externalFailures).toHaveLength(externalRequests.length);
     expect(externalResponses).toEqual([]);
@@ -298,8 +304,8 @@ describe("reference host browser security", () => {
     expect(foreignHost.body).toBe('{"error":"app_host_invalid"}');
   });
 
-  async function expectNavigationAttempts(page: Page): Promise<void> {
-    const attempts = page.locator("#navigation-attempts");
+  async function expectNavigationAttempts(hostPage: Page): Promise<void> {
+    const attempts = hostPage.locator("#navigation-attempts");
     await attempts.getByText("location.href").waitFor({ state: "attached", timeout: 5_000 });
     const value = await attempts.textContent();
     for (const navigation of [

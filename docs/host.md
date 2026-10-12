@@ -17,7 +17,7 @@ The server binds to `127.0.0.1` by default. `host.listen.host` accepts only loop
 
 Every request must use the loopback `Host` value for the selected port (`127.0.0.1:<port>`, `[::1]:<port>`, or `localhost:<port>`). Protected requests also require the bearer token and a same-origin `Origin`. Browsers that omit `Origin` on a same-origin GET may use `Sec-Fetch-Site: same-origin`; requests with a foreign `Origin` are rejected. The host does not enable CORS.
 
-The host page and bundle are served with a restrictive CSP, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`. The parent CSP limits nested documents to its own loopback origin so an app cannot exfiltrate by navigating itself; the `srcdoc` app's own CSP further denies network connections, forms, and nested frames. The iframe is titled with its validated app ID for assistive technology.
+The host page and bundle are served with a restrictive CSP, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`. The parent CSP blocks nested frames from loading outside its own loopback origin, preventing apps from sending data outside by redirecting themselves. The `srcdoc` app's own CSP limits other resources and connections to its policy, which can include only explicitly allowlisted domains. Forms and nested frames are denied. The iframe is titled with its validated app ID for assistive technology.
 
 ## Iframe restrictions
 

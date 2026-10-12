@@ -52,6 +52,7 @@ function makeResponse(): FakeResponse {
   let status = 0;
   let headers: Record<string, string> = {};
   let body = "";
+  const destroy = vi.fn();
   return {
     response: {
       get headersSent() {
@@ -68,7 +69,7 @@ function makeResponse(): FakeResponse {
       end(value) {
         body += value?.toString() ?? "";
       },
-      destroy() {},
+      destroy,
     },
     read: () => ({ status, headers, body }),
   };
@@ -168,15 +169,15 @@ async function newAppSession(
   host: { readonly token: string; readonly origin: string },
 ): Promise<string> {
   const event = await fixture.request("GET", eventsPath, authorization(host));
-  const data = event.body.split("\n").find((line) => line.startsWith("data: "));
-  if (data === undefined) {
+  const launchEvent = event.body.split("\n").find((line) => line.startsWith("data: "));
+  if (launchEvent === undefined) {
     throw new Error("Host launch event is missing.");
   }
-  return parseJson(AppReadySchema, data.slice("data: ".length)).sessionId;
+  return parseJson(AppReadySchema, launchEvent.slice("data: ".length)).sessionId;
 }
 
-function appPath(sessionId: string): string {
-  return `/api/app?resourceUri=${encodeURIComponent(appResourceUri)}&sessionId=${encodeURIComponent(sessionId)}`;
+function appPath(appSession: string): string {
+  return `/api/app?resourceUri=${encodeURIComponent(appResourceUri)}&sessionId=${encodeURIComponent(appSession)}`;
 }
 
 function authorization(host: { readonly token: string; readonly origin: string }) {
@@ -218,9 +219,12 @@ describe("createReferenceHost", () => {
       if (eventData === undefined) {
         throw new Error("Host launch event is missing.");
       }
-      const sessionId = parseJson(AppReadySchema, eventData.slice("data: ".length)).sessionId;
+      const launchedSessionId = parseJson(
+        AppReadySchema,
+        eventData.slice("data: ".length),
+      ).sessionId;
 
-      const appResponse = await fetch(new URL(appPath(sessionId), host.origin), {
+      const appResponse = await fetch(new URL(appPath(launchedSessionId), host.origin), {
         headers: {
           authorization: ["Bearer", host.token].join(" "),
           origin: host.origin,
@@ -237,7 +241,7 @@ describe("createReferenceHost", () => {
         },
         body: JSON.stringify({
           appId: "approval",
-          sessionId,
+          sessionId: launchedSessionId,
           toolName: "approve",
           arguments: {},
         }),
@@ -416,8 +420,8 @@ describe("createReferenceHost", () => {
           Promise.resolve({ contents: [{ mimeType, text: "<main>test</main>" }] }),
       });
       const host = await fixture.hostPromise;
-      const sessionId = await newAppSession(fixture, host);
-      const result = await fixture.request("GET", appPath(sessionId), authorization(host));
+      const launchedSessionId = await newAppSession(fixture, host);
+      const result = await fixture.request("GET", appPath(launchedSessionId), authorization(host));
       expect(result.status).toBe(expectedStatus);
       await host.close();
     }

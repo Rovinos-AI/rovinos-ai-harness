@@ -37,12 +37,12 @@ describe("createAppBridge", () => {
     const target = {
       addEventListener: vi.fn(
         (_type: string, onMessage: (event: Pick<MessageEvent, "source" | "data">) => void) => {
-        listener = onMessage;
+          listener = onMessage;
         },
       ),
       removeEventListener: vi.fn(
         (_type: string, onMessage: (event: Pick<MessageEvent, "source" | "data">) => void) => {
-        removed = listener === onMessage;
+          removed = listener === onMessage;
         },
       ),
       postMessage: vi.fn(),
@@ -96,10 +96,8 @@ describe("createAppBridge", () => {
   });
 
   it("refuses to connect when the iframe has no content window", () => {
-    expect(
-      () => createAppBridge({ contentWindow: null }, () => Promise.resolve({ content: [] })),
-    ).toThrow(
-      "The app iframe has no content window.",
-    );
+    expect(() =>
+      createAppBridge({ contentWindow: null }, () => Promise.resolve({ content: [] })),
+    ).toThrow("The app iframe has no content window.");
   });
 });
