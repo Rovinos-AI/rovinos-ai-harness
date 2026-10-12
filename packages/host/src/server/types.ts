@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import type { SpanContext } from "@opentelemetry/api";
 import { Code, Id } from "@harness/schemas";
 import type { HostDiagnosticCode } from "./resource.js";
-import type { UiSession } from "./ui-session.js";
+import type { UiSession, UiSessionContext } from "./ui-session.js";
 import { z } from "zod";
 
 /** Validated app-originated call payload accepted at the host boundary. */
@@ -85,8 +84,5 @@ export interface ReferenceHostDependencies {
   /** Result data delivered to the app after it initializes. */
   readonly toolResult?: CallToolResult;
   /** Run and originating tool-call span for opt-in app trace propagation. */
-  readonly uiSessionContext?: {
-    readonly runId: Id;
-    readonly toolCallSpanContext: SpanContext;
-  };
+  readonly uiSessionContext?: UiSessionContext;
 }

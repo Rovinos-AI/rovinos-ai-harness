@@ -6,7 +6,7 @@ import {
   type Span,
   type SpanContext,
 } from "@opentelemetry/api";
-import { Id, Traceparent, type Code } from "@harness/schemas";
+import { Traceparent, type Code, type Id } from "@harness/schemas";
 import {
   attr,
   defineSpan,

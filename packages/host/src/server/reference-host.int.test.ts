@@ -139,7 +139,9 @@ function getWithHostHeader(
 
 beforeAll(async () => {
   trace.setGlobalTracerProvider(spanCollector.provider);
-  toolCallSpan = spanCollector.provider.getTracer("reference-host-test").startSpan("harness.tool_call");
+  toolCallSpan = spanCollector.provider
+    .getTracer("reference-host-test")
+    .startSpan("harness.tool_call");
   const parentSpan = toolCallSpan;
   browser = await chromium.launch({ headless: true });
   host = await createReferenceHost(
@@ -289,13 +291,21 @@ describe("reference host browser security", () => {
       const url = new URL(response.url());
       return url.pathname === "/api/session/end" && response.status() === 200;
     });
-    await iframe.evaluate((element) => element.remove());
+    await iframe.evaluate((element) => {
+      element.remove();
+    });
     await sessionEnd;
     const sessionSpan = spanCollector
       .getFinishedSpans()
       .find((span) => span.name === "harness.ui_session");
     expect(sessionSpan).toBeDefined();
-    expect(sessionSpan?.parentSpanContext?.spanId).toBe(toolCallSpan?.spanContext().spanId);
+    if (sessionSpan === undefined) {
+      throw new Error("The UI session span was not exported.");
+    }
+    expect(sessionSpan.parentSpanContext?.spanId).toBe(toolCallSpan?.spanContext().spanId);
+    expect(resultNotification).toContain(
+      `"_meta":{"traceparent":"00-${sessionSpan.spanContext().traceId}-${sessionSpan.spanContext().spanId}-01"}`,
+    );
     expect(diagnosticCodes).not.toContain("ui_trace_unavailable");
   }, 20_000);
 

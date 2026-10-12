@@ -78,12 +78,9 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
     sessionId,
     ...(app.telemetry
       ? {
-          uiSession: new UiSession(
-            options.dependencies.uiSessionContext,
-            app.id,
-            sessionId,
-            () => options.dependencies.onCode("ui_trace_unavailable"),
-          ),
+          uiSession: new UiSession(options.dependencies.uiSessionContext, app.id, sessionId, () => {
+            options.dependencies.onCode("ui_trace_unavailable");
+          }),
         }
       : {}),
   };

@@ -47,6 +47,8 @@ export interface HostPagePort {
   attachFrame(): void;
 }
 
+type AppPayload = z.infer<typeof AppPayloadSchema>;
+
 /** Reads and validates the non-secret resource selection and bearer token from the URL fragment. */
 export function parseLaunchDetails(hash: string): LaunchDetails | undefined {
   const values = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
@@ -69,13 +71,26 @@ function authorizedHeaders(token: string): Record<string, string> {
   return { authorization: ["Bearer", token].join(" ") };
 }
 
+function endUiSession(
+  request: typeof fetch,
+  sessionId: string,
+  headers: Record<string, string>,
+): void {
+  void request(`/api/session/end?sessionId=${encodeURIComponent(sessionId)}`, {
+    method: "POST",
+    headers,
+  }).catch(() => undefined);
+}
+
 function toolResultForApp(
   result: NonNullable<z.infer<typeof CallToolResultSchema>>,
-  app: Pick<z.infer<typeof AppPayloadSchema>, "telemetry" | "traceparent">,
+  app: Pick<AppPayload, "telemetry" | "traceparent">,
 ): z.infer<typeof CallToolResultSchema> {
   const { _meta, ...resultWithoutMetadata } = result;
-  if (app.telemetry && app.traceparent !== undefined) {
-    return { ...resultWithoutMetadata, _meta: { traceparent: app.traceparent } };
+  if (app.telemetry) {
+    return app.traceparent === undefined
+      ? resultWithoutMetadata
+      : { ...resultWithoutMetadata, _meta: { traceparent: app.traceparent } };
   }
   const metadata = { ..._meta };
   delete metadata.traceparent;
@@ -85,6 +100,12 @@ function toolResultForApp(
     ...resultWithoutMetadata,
     ...(Object.keys(metadata).length === 0 ? {} : { _meta: metadata }),
   };
+}
+
+function waitForFrameLoad(frame: ReturnType<AppIframeFactory>): Promise<void> {
+  return new Promise((resolve) => {
+    frame.addEventListener("load", resolve, { once: true });
+  });
 }
 
 interface ToolCallContext {
@@ -179,20 +200,9 @@ export async function mountReferenceApp(
     frame.setAttribute("allow", app.permissions.join("; "));
   }
   frame.srcdoc = createSandboxDocument(app.html, app.csp);
-  const loaded = new Promise<void>((resolve) => {
-    frame.addEventListener(
-      "load",
-      () => {
-        resolve();
-      },
-      { once: true },
-    );
-  });
+  const loaded = waitForFrameLoad(frame);
   root.onFrameRemoved(() => {
-    void request(`/api/session/end?sessionId=${encodeURIComponent(app.sessionId)}`, {
-      method: "POST",
-      headers,
-    }).catch(() => undefined);
+    endUiSession(request, app.sessionId, headers);
   });
   root.attachFrame();
   await loaded;
@@ -237,12 +247,12 @@ export function startReferenceHostPage(): void {
         return;
       }
       const observer = new MutationObserver(() => {
-        if (frame !== undefined && !element.contains(frame)) {
+        if (frame !== undefined && !frame.isConnected) {
           observer.disconnect();
           callback();
         }
       });
-      observer.observe(element, { childList: true, subtree: true });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
     },
   };
   void mountReferenceApp(root, window.location.hash).catch(() => {

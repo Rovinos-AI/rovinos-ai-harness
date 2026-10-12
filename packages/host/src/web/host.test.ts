@@ -101,7 +101,9 @@ function createFakeRoot(): {
     frame,
     status: () => status,
     attached: () => attached,
-    frameRemoved: () => onFrameRemoved(),
+    frameRemoved: () => {
+      onFrameRemoved();
+    },
   };
 }
 
@@ -222,9 +224,7 @@ describe("reference app page", () => {
     await vi.waitFor(() => {
       expect(request).toHaveBeenCalledTimes(3);
     });
-    expect(request.mock.calls[2]?.[0]).toBe(
-      `/api/session/end?sessionId=${appPayload.sessionId}`,
-    );
+    expect(request.mock.calls[2]?.[0]).toBe(`/api/session/end?sessionId=${appPayload.sessionId}`);
     expect(request.mock.calls[2]?.[1]).toMatchObject({
       method: "POST",
     });
@@ -252,6 +252,22 @@ describe("reference app page", () => {
       content: result.content,
       _meta: { preserved: true },
     });
+  });
+
+  it("delivers no result metadata when an opted-in session has no valid context", async () => {
+    const { root } = createFakeRoot();
+    const result = {
+      content: [{ type: "text" as const, text: "complete" }],
+      _meta: { traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01` },
+    };
+    expect(
+      await mountReferenceApp(
+        root,
+        launchHash,
+        successfulRequest({ ...appPayload, telemetry: true, toolResult: result }),
+      ),
+    ).toBe(true);
+    expect(bridgeMock.sendToolResult).toHaveBeenCalledWith({ content: result.content });
   });
 
   it("handles missing tool results and reports malformed host payloads", async () => {

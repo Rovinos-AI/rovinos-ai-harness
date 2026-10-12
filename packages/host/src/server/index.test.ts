@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CallToolResultSchema } from "@modelcontextprotocol/core";
-import { parseJson } from "@harness/schemas";
+import { parseJson, Traceparent } from "@harness/schemas";
 import { z } from "zod";
 import {
   createReferenceHost,
@@ -29,7 +29,13 @@ const resource = {
 const ResourceResponseSchema = z
   .object({ csp: z.string(), permissions: z.array(z.string()) })
   .loose();
-const AppResourceResponseSchema = z.object({ sessionId: z.string() }).loose();
+const AppResourceResponseSchema = z
+  .object({
+    sessionId: z.string(),
+    telemetry: z.boolean(),
+    traceparent: Traceparent.optional(),
+  })
+  .loose();
 
 type RequestListener = Parameters<NonNullable<ReferenceHostDependencies["createHttpServer"]>>[0];
 type HttpServer = ReturnType<NonNullable<ReferenceHostDependencies["createHttpServer"]>>;
@@ -307,6 +313,20 @@ describe("createReferenceHost", () => {
     const second = await fixture.request("GET", appPath(secondSession), authorization(host));
     expect(parseJson(AppResourceResponseSchema, first.body).sessionId).toBe(firstSession);
     expect(parseJson(AppResourceResponseSchema, second.body).sessionId).toBe(secondSession);
+    await host.close();
+  });
+
+  it("reports unavailable trace context and omits traceparent from the app payload", async () => {
+    const onCode = vi.fn();
+    const fixture = makeServer({ onCode, idGenerator: () => sessionId });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+    const result = await fixture.request("GET", appPath(launchedSessionId), authorization(host));
+    const payload = parseJson(AppResourceResponseSchema, result.body);
+
+    expect(payload.telemetry).toBe(true);
+    expect(payload.traceparent).toBeUndefined();
+    expect(onCode).toHaveBeenCalledWith("ui_trace_unavailable");
     await host.close();
   });
 

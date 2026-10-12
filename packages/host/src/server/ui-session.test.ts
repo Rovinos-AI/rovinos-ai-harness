@@ -53,13 +53,22 @@ describe("UiSession", () => {
     ],
   ])("omits trace context for %s", (_name, context) => {
     const unavailable = vi.fn();
-    const session = new UiSession(context === undefined ? undefined : {
-      runId,
-      toolCallSpanContext: context,
-    }, "approval", sessionId, unavailable);
+    const session = new UiSession(
+      context === undefined
+        ? undefined
+        : {
+            runId,
+            toolCallSpanContext: context,
+          },
+      "approval",
+      sessionId,
+      unavailable,
+    );
 
     expect(session.traceparent).toBeUndefined();
     expect(unavailable).toHaveBeenCalledOnce();
-    expect(() => session.end()).not.toThrow();
+    expect(() => {
+      session.end();
+    }).not.toThrow();
   });
 });
