@@ -12,8 +12,9 @@ import {
   type Tracer,
   type TracerProvider,
 } from "@opentelemetry/api";
-import { Code, FakeClock, SequentialIdGenerator, type Event } from "@harness/schemas";
+import { Code, FakeClock, SequentialIdGenerator, type Event, type JsonValue } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
+import { PolicyEngine } from "@harness/policy";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { RunRecorder, type EventPartial } from "../recorder.js";
 import { Checkpointer } from "../checkpoint.js";
@@ -23,7 +24,11 @@ import { foldRunState, type ApprovalRequestedEvent, type ToolIntentEvent } from 
 import { RUN_SPAN } from "../spans.js";
 import { FakeToolPort, type FakeToolDefinition } from "../testing/index.js";
 import type { PolicyPort, ToolPort } from "../ports.js";
-import { applyDanglingIntents, resolveDanglingIntentApproval } from "./resume-tool-step.js";
+import {
+  applyApprovalDecision,
+  applyDanglingIntents,
+  resolveDanglingIntentApproval,
+} from "./resume-tool-step.js";
 import { toolStep } from "./tool-step.js";
 
 const runId = "00000000000000000000000000";
@@ -226,6 +231,10 @@ async function createRun(
     readonly callId: ToolIntentEvent["callId"];
     readonly toolId: string;
     readonly idempotent: boolean;
+    readonly policyDecision?: ToolIntentEvent["policyDecision"];
+    readonly ruleId?: ToolIntentEvent["ruleId"];
+    readonly policyReason?: ToolIntentEvent["policyReason"];
+    readonly policyEditable?: ToolIntentEvent["policyEditable"];
   }[],
 ): Promise<Event[]> {
   let events: Event[] = [];
@@ -237,7 +246,10 @@ async function createRun(
         type: "tool_intent" as const,
         v: 1 as const,
         ...intent,
-        policyDecision: "allow" as const,
+        policyDecision: intent.policyDecision ?? ("allow" as const),
+        ...(intent.ruleId === undefined ? {} : { ruleId: intent.ruleId }),
+        ...(intent.policyReason === undefined ? {} : { policyReason: intent.policyReason }),
+        ...(intent.policyEditable === undefined ? {} : { policyEditable: intent.policyEditable }),
         argsHash: "d".repeat(64),
         args: { value: [1, null, { nested: true }] },
       })),
@@ -261,14 +273,24 @@ function resumeOptions(
   readonly runId: typeof runId;
   readonly signal: AbortSignal;
   readonly ids: SequentialIdGenerator;
+  readonly checkpointer: Checkpointer;
 } {
+  const clock = new FakeClock(100);
+  const ids = new SequentialIdGenerator();
   return {
     recorder,
     tool,
-    clock: new FakeClock(100),
+    clock,
     runId,
     signal: new AbortController().signal,
-    ids: new SequentialIdGenerator(),
+    ids,
+    checkpointer: new Checkpointer({
+      recorder,
+      runId,
+      context: new NaiveContext(),
+      ids,
+      clock,
+    }),
   };
 }
 
@@ -442,6 +464,46 @@ describe("tool-step resume handling", () => {
     expect(tool.calls).toHaveLength(0);
   });
 
+  it("passes only the PolicyPort call fields to a configured PolicyEngine", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "real_tool",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const policy = new PolicyEngine({
+      version: 1,
+      defaultDecision: "deny",
+      rules: [
+        {
+          id: "configured_allow",
+          match: { tools: ["real_tool"] },
+          decision: "allow",
+          reason: "configured_rule_matched",
+        },
+      ],
+    });
+
+    const events = await toolStep({
+      ...toolStepDependencies(recorder, tool, history, policy),
+      calls: [{ callId: callIds.idempotent, toolId: "real_tool", args: { value: "token" } }],
+    });
+
+    expect(events).toMatchObject([
+      { type: "tool_intent", policyDecision: "allow", ruleId: "configured_allow" },
+      { type: "tool_result", outcome: "ok" },
+    ]);
+    expect(tool.calls).toHaveLength(1);
+  });
+
   it("fails closed when policy evaluation throws", async () => {
     const { recorder } = createRecorder();
     const history = await createRun(recorder, []);
@@ -532,6 +594,48 @@ describe("tool-step resume handling", () => {
     expect(tool.calls).toHaveLength(0);
   });
 
+  it("rejects an approval edit that changes a field outside editableFields", async () => {
+    const policy = editPolicy();
+    const { recorder, tool, intent, approval } = await createEditableApproval(policy);
+    const resolution = await resolveEvent(recorder, approval.approvalId, "edit", {
+      to: "changed",
+      subject: "original",
+    });
+
+    await expect(
+      applyApprovalDecision(
+        { ...resumeOptions(recorder, tool), policy },
+        intent,
+        approval,
+        resolution,
+      ),
+    ).rejects.toMatchObject({ code: "approval_edit_not_allowed" });
+    expect(tool.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ["deny", "blocked", "blocked_by_policy"],
+    ["ask", "needs_review", "approval_edit_requires_approval"],
+  ] as const)("re-checks edited approval arguments when policy returns %s", async (decision, subject, code) => {
+    const policy = editPolicy();
+    const { recorder, tool, intent, approval } = await createEditableApproval(policy);
+    const resolution = await resolveEvent(recorder, approval.approvalId, "edit", {
+      to: "unchanged",
+      subject,
+    });
+
+    const result = await applyApprovalDecision(
+      { ...resumeOptions(recorder, tool), policy },
+      intent,
+      approval,
+      resolution,
+    );
+
+    expect(result[0]).toMatchObject({ type: "tool_result", outcome: "denied", errorCode: code });
+    expect(tool.calls).toHaveLength(0);
+    expect(decision).not.toBe("allow");
+  });
+
   it("reruns only durable/current idempotent calls and batches escalations", async () => {
     const { recorder, store } = createRecorder();
     const events = await createRun(recorder, [
@@ -594,6 +698,94 @@ describe("tool-step resume handling", () => {
         { kind: "rerun", callId: callIds.unknown },
       ]),
     ).rejects.toMatchObject({ code: "resume_action_mismatch" });
+  });
+
+  it("recovers a dangling policy denial without executing an idempotent tool", async () => {
+    const { recorder } = createRecorder();
+    const events = await createRun(recorder, [
+      {
+        callId: callIds.idempotent,
+        toolId: "idempotent",
+        idempotent: true,
+        policyDecision: "deny",
+        ruleId: "deny_rule",
+        policyReason: "forbidden",
+      },
+    ]);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "idempotent",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const state = foldRunState(events);
+    const result = await applyDanglingIntents(
+      resumeOptions(recorder, tool),
+      state,
+      planDanglingIntents(state, tool),
+    );
+
+    expect(result[0]).toMatchObject({
+      type: "tool_result",
+      outcome: "denied",
+      errorCode: "forbidden",
+    });
+    expect(tool.calls).toHaveLength(0);
+  });
+
+  it("recovers a dangling policy ask as the original approval rather than executing", async () => {
+    const { recorder } = createRecorder();
+    const events = await createRun(recorder, [
+      {
+        callId: callIds.idempotent,
+        toolId: "idempotent",
+        idempotent: true,
+        policyDecision: "ask",
+        ruleId: "review_rule",
+        policyReason: "human_review",
+        policyEditable: ["/value"],
+      },
+    ]);
+    const tool = new FakeToolPort(
+      new Map([
+        [
+          "idempotent",
+          {
+            idempotent: true,
+            timeoutMs: 1_000,
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        ],
+      ]),
+    );
+    const state = foldRunState(events);
+    const result = await applyDanglingIntents(
+      resumeOptions(recorder, tool),
+      state,
+      planDanglingIntents(state, tool),
+    );
+
+    expect(result).toMatchObject([
+      {
+        type: "approval_requested",
+        payload: {
+          kind: "tool_call",
+          ruleId: "review_rule",
+          reason: "human_review",
+          editableFields: ["/value"],
+        },
+      },
+      { type: "run_status_changed", to: "suspended", reason: "awaiting_approval" },
+      { type: "checkpoint_written" },
+    ]);
+    expect(result.filter((event) => event.type === "tool_intent")).toHaveLength(0);
+    expect(tool.calls).toHaveLength(0);
   });
 
   it("fails safely if an escalation batch records no events", async () => {
@@ -675,15 +867,102 @@ async function createDanglingIntentForResolution(
   };
 }
 
+function editPolicy(): PolicyEngine {
+  return new PolicyEngine({
+    version: 1,
+    defaultDecision: "deny",
+    rules: [
+      {
+        id: "ask_original",
+        match: {
+          tools: ["reviewed"],
+          args: [{ pointer: "/subject", op: "equals", value: "original" }],
+        },
+        decision: "ask",
+        reason: "human_review",
+        editable: ["/subject"],
+      },
+      {
+        id: "deny_edited",
+        match: {
+          tools: ["reviewed"],
+          args: [{ pointer: "/subject", op: "equals", value: "blocked" }],
+        },
+        decision: "deny",
+        reason: "blocked_by_policy",
+      },
+      {
+        id: "ask_edited",
+        match: {
+          tools: ["reviewed"],
+          args: [{ pointer: "/subject", op: "equals", value: "needs_review" }],
+        },
+        decision: "ask",
+        reason: "human_review_again",
+      },
+    ],
+  });
+}
+
+async function createEditableApproval(policy: PolicyPort): Promise<{
+  readonly recorder: RunRecorder;
+  readonly tool: FakeToolPort;
+  readonly intent: ToolIntentEvent;
+  readonly approval: ApprovalRequestedEvent;
+}> {
+  const { recorder } = createRecorder();
+  const history = await createRun(recorder, []);
+  const tool = new FakeToolPort(
+    new Map([
+      [
+        "reviewed",
+        {
+          idempotent: true,
+          timeoutMs: 1_000,
+          execute: () => Promise.resolve({ outcome: "ok", result: null }),
+        },
+      ],
+    ]),
+  );
+  const events = await toolStep({
+    ...toolStepDependencies(recorder, tool, history, policy),
+    calls: [
+      {
+        callId: callIds.nonIdempotent,
+        toolId: "reviewed",
+        args: { to: "unchanged", subject: "original" },
+      },
+    ],
+  });
+  const intent = events.find(
+    (event): event is ToolIntentEvent => event.type === "tool_intent",
+  );
+  const approval = events.find(
+    (event): event is ApprovalRequestedEvent => event.type === "approval_requested",
+  );
+  if (intent === undefined || approval === undefined) {
+    throw new Error("Expected a tool approval request.");
+  }
+  return { recorder, tool, intent, approval };
+}
+
 async function resolveEvent(
   recorder: RunRecorder,
   approvalId: ApprovalRequestedEvent["approvalId"],
-  decision: "approve" | "deny",
+  decision: "approve" | "deny" | "edit",
+  edits?: JsonValue,
 ): Promise<Extract<Event, { type: "approval_resolved" }>> {
   let resolved: Extract<Event, { type: "approval_resolved" }> | undefined;
   await recorder.withStepSpan(RUN_SPAN, {}, async () => {
     const events = await recorder.recordBatch([
-      { type: "approval_resolved", v: 1, approvalId, decision, waitMs: 0 },
+      {
+        type: "approval_resolved",
+        v: 1,
+        approvalId,
+        decision,
+        waitMs: 0,
+        ...(edits === undefined ? {} : { edits }),
+      },
       {
         type: "run_status_changed",
         v: 1,

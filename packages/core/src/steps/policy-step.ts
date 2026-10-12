@@ -3,9 +3,9 @@ import { HarnessError, type Event } from "@harness/schemas";
 import { requestApproval } from "../approvals.js";
 import type { Checkpointer } from "../checkpoint.js";
 import { PolicyDecisionSchema } from "../ports.js";
-import type { Clock, RunRecorder } from "../recorder.js";
+import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import type { IdGenerator, ModelToolCall, PolicyDecision, PolicyPort, ToolPort } from "../ports.js";
-import { foldRunState } from "../run-state.js";
+import type { RunState } from "../run-state.js";
 
 /** Decides whether a prepared call is allowed, needs approval, or is denied. */
 export function decidePolicy(
@@ -17,7 +17,10 @@ export function decidePolicy(
     return { decision: "deny", ruleId: "default", reason: "policy_error", editable: [] };
   }
   try {
-    const evaluated = policy.decide(call, { subagent: depth > 0 });
+    const evaluated = policy.decide(
+      { toolId: call.toolId, args: call.args },
+      { subagent: depth > 0 },
+    );
     return PolicyDecisionSchema.parse({
       decision: evaluated.decision,
       ruleId: evaluated.ruleId,
@@ -58,13 +61,13 @@ export async function requestPolicyApproval(options: {
   readonly recorder: RunRecorder;
   readonly ids: IdGenerator;
   readonly checkpointer: Checkpointer;
-  readonly history: readonly Event[];
-  readonly events: readonly Event[];
+  readonly state: RunState;
   readonly clock: Clock;
   readonly call: ModelToolCall;
   readonly decision: PolicyDecision;
+  readonly intent?: Extract<EventPartial, { type: "tool_intent" }>;
 }): Promise<{ readonly events: readonly Event[]; readonly checkpoint: Event }> {
-  const { recorder, ids, checkpointer, history, events, clock, call, decision } = options;
+  const { recorder, ids, checkpointer, state, clock, call, decision, intent } = options;
   const expiresAt =
     decision.approvalTtlMs === undefined
       ? undefined
@@ -91,8 +94,9 @@ export async function requestPolicyApproval(options: {
     callId: call.callId,
     payload,
     ...(expiresAt === undefined ? {} : { expiresAt }),
-    state: foldRunState([...history, ...events]),
+    state,
     checkpointer,
+    ...(intent === undefined ? {} : { intent }),
   });
   const checkpoint = result.events.at(-1);
   if (checkpoint === undefined) {

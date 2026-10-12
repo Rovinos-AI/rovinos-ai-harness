@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event } from "@harness/schemas";
+import { HarnessError, JsonPointerSchema, type Event, type JsonValue } from "@harness/schemas";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial } from "../recorder.js";
+import type { PolicyDecision } from "../ports.js";
+import { requestPolicyApproval } from "./policy-step.js";
 import { APPROVAL_WAIT_SPAN, TOOL_CALL_SPAN } from "../spans.js";
 import type { ModelToolCall } from "../ports.js";
 import type { DanglingIntentAction } from "../resume-policy.js";
@@ -39,6 +41,16 @@ export class ApprovalEditsRequiredError extends HarnessError {
   }
 }
 
+/** Error raised when an approval edit modifies a field outside the editable pointers. */
+export class ApprovalEditNotAllowedError extends HarnessError {
+  readonly code = "approval_edit_not_allowed";
+
+  constructor() {
+    super("Approval edits may only change fields listed as editable.");
+    this.name = "ApprovalEditNotAllowedError";
+  }
+}
+
 async function recordDanglingFailure(
   options: Omit<ResumeToolStepOptions, "ids">,
   intent: ToolIntentEvent,
@@ -62,6 +74,42 @@ async function recordDanglingFailure(
     return result;
   });
   return events;
+}
+
+async function recordPolicyDenied(
+  options: Omit<ResumeToolStepOptions, "ids">,
+  intent: ToolIntentEvent,
+  errorCode: string,
+): Promise<readonly Event[]> {
+  const result = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
+    options.recorder.record({
+      type: "tool_result",
+      v: 1,
+      callId: intent.callId,
+      toolId: intent.toolId,
+      outcome: "denied",
+      errorCode,
+      latencyMs: 0,
+      executedArgsHash: intent.argsHash,
+      result: null,
+    }),
+  );
+  return [result];
+}
+
+function policyDecisionFromIntent(intent: ToolIntentEvent): PolicyDecision {
+  return {
+    decision: "ask",
+    ruleId: intent.ruleId ?? "default",
+    reason: intent.policyReason ?? "default_decision",
+    editable: intent.policyEditable ?? [],
+    ...(intent.policyApprovalTtlMs === undefined
+      ? {}
+      : { approvalTtlMs: intent.policyApprovalTtlMs }),
+    ...(intent.policyEscalateAfterMs === undefined
+      ? {}
+      : { escalateAfterMs: intent.policyEscalateAfterMs }),
+  };
 }
 
 async function requestResumeApprovals(
@@ -105,11 +153,30 @@ function callFromIntent(intent: ToolIntentEvent): ModelToolCall {
 
 async function applyDanglingIntentAction(
   options: ResumeToolStepOptions,
+  state: RunState,
   intent: ToolIntentEvent,
   action: DanglingIntentAction,
 ): Promise<readonly Event[] | "escalate"> {
   if (action.callId !== intent.callId) {
     throw new ResumeActionMismatchError();
+  }
+  if (intent.policyDecision === "deny") {
+    return recordPolicyDenied(options, intent, intent.policyReason ?? "default_decision");
+  }
+  if (intent.policyDecision === "ask") {
+    if (options.checkpointer === undefined) {
+      return recordPolicyDenied(options, intent, "policy_error");
+    }
+    const approval = await requestPolicyApproval({
+      recorder: options.recorder,
+      ids: options.ids,
+      checkpointer: options.checkpointer,
+      state,
+      clock: options.clock,
+      call: callFromIntent(intent),
+      decision: policyDecisionFromIntent(intent),
+    });
+    return approval.events;
   }
   if (action.kind === "fail") {
     return recordDanglingFailure(options, intent, action.errorCode);
@@ -159,6 +226,9 @@ export async function applyApprovalDecision(
     if (resolution.edits === undefined) {
       throw new ApprovalEditsRequiredError();
     }
+    if (!approvalEditIsAllowed(intent.args, resolution.edits, approval.payload)) {
+      throw new ApprovalEditNotAllowedError();
+    }
     args = resolution.edits;
   }
   const call: ModelToolCall = { callId: intent.callId, toolId: intent.toolId, args };
@@ -168,7 +238,9 @@ export async function applyApprovalDecision(
   }
   return runToolCall(options, call, description, {
     existingIntent: intent,
-    ...(resolution.decision === "edit" ? { compareArgsHash: intent.argsHash } : {}),
+    ...(resolution.decision === "edit"
+      ? { compareArgsHash: intent.argsHash, checkEditedPolicy: true }
+      : {}),
   });
 }
 
@@ -185,7 +257,7 @@ export async function applyDanglingIntents(
     if (intent === undefined) {
       throw new ResumeActionMismatchError();
     }
-    const applied = await applyDanglingIntentAction(options, intent, action);
+    const applied = await applyDanglingIntentAction(options, state, intent, action);
     if (applied === "escalate") {
       escalations.push(intent);
     } else {
@@ -199,6 +271,103 @@ export async function applyDanglingIntents(
     options.onEvents?.(approvalEvents);
   }
   return events;
+}
+
+function approvalEditIsAllowed(original: JsonValue, edited: JsonValue, payload: JsonValue): boolean {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return false;
+  }
+  const editableFields = payload.editableFields;
+  if (!Array.isArray(editableFields)) {
+    return false;
+  }
+  const editable = editableFields.map((pointer) => JsonPointerSchema.safeParse(pointer));
+  if (editable.some(({ success }) => !success)) {
+    return false;
+  }
+  const pointers = editable.flatMap((result) => (result.success ? [result.data] : []));
+  return collectChangedPointers(original, edited).every((changed) =>
+    pointers.some(
+      (allowed) =>
+        changed === allowed || changed.startsWith(allowed === "" ? "/" : `${allowed}/`),
+    ),
+  );
+}
+
+function collectChangedPointers(
+  before: JsonValue | undefined,
+  after: JsonValue | undefined,
+  path = "",
+): string[] {
+  if (before === undefined || after === undefined) {
+    return collectLeafPointers(before ?? after ?? null, path);
+  }
+  if (jsonValuesEqual(before, after)) {
+    return [];
+  }
+  if (isJsonObject(before) && isJsonObject(after)) {
+    return Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).flatMap((key) =>
+      collectChangedPointers(
+        before[key],
+        after[key],
+        `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`,
+      ),
+    );
+  }
+  if (Array.isArray(before) && Array.isArray(after)) {
+    return Array.from({ length: Math.max(before.length, after.length) }, (_, index) =>
+      collectChangedPointers(before[index], after[index], `${path}/${index}`),
+    ).flat();
+  }
+  return [path];
+}
+
+function collectLeafPointers(value: JsonValue, path: string): string[] {
+  if (isJsonObject(value)) {
+    const entries = Object.entries(value);
+    return entries.length === 0
+      ? [path]
+      : entries.flatMap(([key, child]) =>
+          collectLeafPointers(child, `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`),
+        );
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0
+      ? [path]
+      : value.flatMap((child, index) => collectLeafPointers(child, `${path}/${index}`));
+  }
+  return [path];
+}
+
+function isJsonObject(value: JsonValue): value is { readonly [key: string]: JsonValue } {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function jsonValuesEqual(left: JsonValue, right: JsonValue): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return (
+      left.length === right.length &&
+      left.every((value, index) => {
+        const other = right[index];
+        return other !== undefined && jsonValuesEqual(value, other);
+      })
+    );
+  }
+  if (isJsonObject(left) && isJsonObject(right)) {
+    const keys = Object.keys(left);
+    return (
+      keys.length === Object.keys(right).length &&
+      keys.every((key) => {
+        const value = left[key];
+        const other = right[key];
+        return Object.hasOwn(right, key) && value !== undefined && other !== undefined && jsonValuesEqual(value, other);
+      })
+    );
+  }
+  return false;
 }
 
 /** Resolves a resume-ambiguity approval without duplicating its intent. */

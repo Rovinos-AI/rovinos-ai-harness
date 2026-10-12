@@ -127,6 +127,25 @@ const initialChecks: DoctorCheck[] = [
       ),
   },
   {
+    id: "policy_configured",
+    title: "Policy configuration",
+    run: (ctx) => {
+      if (ctx.config === undefined || typeof ctx.config !== "object" || ctx.config === null) {
+        return Promise.resolve(result("ok", "policy_configured"));
+      }
+      const policy = Reflect.get(ctx.config, "policy");
+      const hasPolicyFile =
+        typeof policy === "object" &&
+        policy !== null &&
+        typeof Reflect.get(policy, "file") === "string";
+      return Promise.resolve(
+        hasPolicyFile
+          ? result("ok", "policy_configured")
+          : result("warn", "policy_default_deny"),
+      );
+    },
+  },
+  {
     id: "secret_refs_resolvable",
     title: "Secret references",
     run: async (ctx) => {

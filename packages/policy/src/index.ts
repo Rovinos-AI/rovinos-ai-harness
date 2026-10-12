@@ -34,10 +34,3 @@ export {
 export async function loadPolicy(path: string): Promise<PolicyDocument> {
   return parseYaml(PolicyDocumentSchema, await readFile(path, "utf8"));
 }
-
-/**
- * Computes a stable, content-addressed version for a policy document.
- *
- * @param document - A policy document to validate and version.
- * @returns The `pol-` prefix followed by 12 lowercase SHA-256 hex characters.
- */

@@ -285,6 +285,8 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
       {
         recorder,
         tool: options.tool,
+        ...(options.policy === undefined ? {} : { policy: options.policy }),
+        checkpointer,
         clock: options.clock,
         runId: options.runId,
         ids: options.ids,
@@ -301,6 +303,7 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
       {
         recorder,
         tool: options.tool,
+        ...(options.policy === undefined ? {} : { policy: options.policy }),
         clock: options.clock,
         runId: options.runId,
         signal: options.signal,
