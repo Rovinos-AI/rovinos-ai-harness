@@ -49,6 +49,7 @@ export {
   type EventFieldClass,
 } from "./classification.js";
 export { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
+export { isRegexSafePattern } from "./regex-safety.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
 export {
   DestinationSchema,
@@ -98,7 +99,7 @@ export {
   type RolesConfig,
 } from "./config/roles.js";
 export { ServerConfigSchema } from "./config/servers.js";
-export { PolicyConfigSchema } from "./config/policy.js";
+export { PolicyConfigSchema, type PolicyConfig } from "./config/policy.js";
 export {
   JsonPointerSchema,
   PiiConfigSchema,
