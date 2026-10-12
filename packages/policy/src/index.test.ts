@@ -162,9 +162,18 @@ describe("PolicyDocumentSchema", () => {
     expect(
       ArgMatcherSchema.safeParse({ pointer: "/value", op: "exists", extra: true }).success,
     ).toBe(false);
-    expect(
-      ArgMatcherSchema.safeParse({ pointer: "/value", op: "exists", value: false }).success,
-    ).toBe(false);
+    const existsWithValue = ArgMatcherSchema.safeParse({
+      pointer: "/value",
+      op: "exists",
+      value: false,
+    });
+    expect(existsWithValue.success).toBe(false);
+    expect(existsWithValue.success ? [] : existsWithValue.error.issues).toContainEqual(
+      expect.objectContaining({
+        code: "custom",
+        params: { errorCode: "policy_match_value_unexpected" },
+      }),
+    );
   });
 
   it("requires positive approval timings and escalation before expiry", () => {
