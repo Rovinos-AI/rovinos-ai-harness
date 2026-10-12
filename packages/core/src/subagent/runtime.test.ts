@@ -11,7 +11,14 @@ import type { Event, Id as IdType } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { ensureTracingFallback } from "@harness/telemetry";
 import { describe, expect, it } from "vitest";
-import type { ModelCompletion, ModelPort, ModelRequest, RunContext, ToolPort } from "../ports.js";
+import type {
+  ModelCompletion,
+  ModelPort,
+  ModelRequest,
+  PolicyPort,
+  RunContext,
+  ToolPort,
+} from "../ports.js";
 import { RUN_SPAN, TOOL_CALL_SPAN } from "../spans.js";
 import { RunRecorder } from "../recorder.js";
 import { resolveRuntimeRoles, createSubagentTool } from "./runtime.js";
@@ -94,6 +101,15 @@ describe("production subagent runtime", () => {
       ],
     };
     const roles = await resolveRuntimeRoles(config, process.cwd(), parentTools, () => undefined);
+    const policy: PolicyPort = {
+      version: Code.parse("test.policy"),
+      decide: () => ({
+        decision: "allow",
+        ruleId: "test_allow",
+        reason: "test_allowed",
+        editable: [],
+      }),
+    };
     const childTool = createSubagentTool({
       config,
       clock,
@@ -101,6 +117,8 @@ describe("production subagent runtime", () => {
       store,
       model,
       parentTool: parentTools,
+      policy,
+      policyVersion: policy.version,
       roles,
       scopes,
     });

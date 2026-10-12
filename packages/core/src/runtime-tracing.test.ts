@@ -18,6 +18,7 @@ import { FakeModelPort } from "./testing/fake-model.js";
 import type {
   ModelCompletion,
   ModelPort,
+  PolicyPort,
   RunContext,
   ToolExecutionResult,
   ToolPort,
@@ -25,6 +26,10 @@ import type {
 import type { ShutdownProcessLike } from "./shutdown.js";
 
 const config = { run: RunConfigSchema.parse({}) };
+const allowPolicy: PolicyPort = {
+  version: "runtime-tracing-test",
+  decide: () => ({ decision: "allow", ruleId: "test_allow", reason: "test_allow", editable: [] }),
+};
 
 function completion(): ModelCompletion {
   return {
@@ -260,6 +265,7 @@ describe("runtime tracing fallback", () => {
       clock,
       ids: new SequentialIdGenerator(),
       model,
+      policy: allowPolicy,
       tool,
     });
     const runId = Id.parse("00000000000000000000000000");
@@ -336,6 +342,7 @@ describe("runtime tracing fallback", () => {
       store,
       ids: new SequentialIdGenerator(),
       model,
+      policy: allowPolicy,
       tool,
       processLike: shutdown,
     });
@@ -443,6 +450,7 @@ describe("runtime tracing fallback", () => {
       clock,
       ids: new SequentialIdGenerator(),
       model,
+      policy: allowPolicy,
       tool,
     });
     const firstRun = runtime.run("first");

@@ -22,7 +22,7 @@ import {
   applyDanglingIntents,
   resolveDanglingIntentApproval,
   ResumeActionMismatchError,
-} from "./steps/tool-step.js";
+} from "./steps/resume-tool-step.js";
 import { FakeToolPort } from "./testing/index.js";
 import { RUN_SPAN } from "./spans.js";
 

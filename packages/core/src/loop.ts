@@ -21,11 +21,13 @@ import { requestModel } from "./steps/request-model.js";
 import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { toolStep } from "./steps/tool-step.js";
 import type { PreparedToolCall } from "./steps/prepare-tool.js";
+import { suspendedOutcome } from "./steps/suspended-outcome.js";
 import type {
   ContextPort,
   IdGenerator,
   ModelPort,
   NewRunMetadata,
+  PolicyPort,
   RunContinuationMetadata,
   ToolPort,
 } from "./ports.js";
@@ -37,6 +39,7 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly clock: Clock;
   readonly model: ModelPort;
   readonly tool: ToolPort;
+  readonly policy?: PolicyPort;
   readonly context: ContextPort;
   readonly ids: IdGenerator;
   readonly goal: JsonValue;
@@ -354,8 +357,12 @@ async function runToolCalls(
       ...(await toolStep({
         recorder: options.recorder,
         tool: options.tool,
+        ...(options.policy === undefined ? {} : { policy: options.policy }),
         clock: options.clock,
         runId: execution.runId,
+        ids: options.ids,
+        checkpointer: execution.checkpointer,
+        history: events,
         calls: [call],
         preparedCalls: [prepared],
         signal: options.signal,
@@ -428,14 +435,4 @@ async function checkpointAfterStep(checkpointer: Checkpointer, events: Event[]):
     return foldRunState(events);
   }
   return state;
-}
-
-function suspendedOutcome(events: readonly Event[]): Event {
-  const event = [...events]
-    .reverse()
-    .find((candidate) => candidate.type === "run_status_changed" && candidate.to === "suspended");
-  if (event === undefined) {
-    throw new Error("Expected a suspension status event.");
-  }
-  return event;
 }

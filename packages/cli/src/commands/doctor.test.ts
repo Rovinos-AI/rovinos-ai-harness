@@ -77,6 +77,7 @@ describe("harness doctor", () => {
     expect(parseJson(DoctorResultsSchema, documents[0] ?? "")).toEqual(
       expect.arrayContaining([
         { id: "config_valid", status: "ok", code: "config_valid" },
+        { id: "policy_configured", status: "warn", code: "policy_default_deny" },
         { id: "secret_refs_resolvable", status: "ok", code: "secret_refs_resolvable" },
       ]),
     );

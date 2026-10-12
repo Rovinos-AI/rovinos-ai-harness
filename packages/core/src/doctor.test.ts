@@ -200,9 +200,24 @@ describe("doctor registry", () => {
     expect(doctorChecks().map(({ id }) => id)).toEqual([
       "node_version",
       "config_valid",
+      "policy_configured",
       "secret_refs_resolvable",
       "data_dir_writable",
     ]);
+  });
+
+  it("warns that the built-in policy denies every tool when no policy file is configured", async () => {
+    const check = doctorChecks().find(({ id }) => id === "policy_configured");
+    if (check === undefined) {
+      throw new Error("policy_configured check is not registered");
+    }
+
+    await expect(runDoctor(context({ config: {} }), [check])).resolves.toEqual([
+      { id: "policy_configured", status: "warn", code: "policy_default_deny" },
+    ]);
+    await expect(
+      runDoctor(context({ config: { policy: { file: "policy.yaml" } } }), [check]),
+    ).resolves.toEqual([{ id: "policy_configured", status: "ok", code: "policy_configured" }]);
   });
 
   it("checks the Node version and configuration status", async () => {
