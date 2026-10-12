@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  HarnessError,
-  JsonValue as JsonValueSchema,
-  type Event,
-} from "@harness/schemas";
+import { HarnessError, JsonValue as JsonValueSchema, type Event } from "@harness/schemas";
 import {
   ApprovalPayloadSchema,
   approvalEditsAreAllowed,

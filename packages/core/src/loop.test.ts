@@ -718,9 +718,9 @@ describe("approval lifecycle", () => {
     const executedArgs: JsonValueType[] = [];
     const inner = {
       describe: () => ({ idempotent: false, timeoutMs: 1_000, inputSchema }),
-      execute: async (call: { readonly args: JsonValueType }) => {
+      execute: (call: { readonly args: JsonValueType }) => {
         executedArgs.push(call.args);
-        return { outcome: "ok" as const, result: null };
+        return Promise.resolve({ outcome: "ok" as const, result: null });
       },
     };
     const tokenizer = new Tokenizer({
@@ -747,11 +747,11 @@ describe("approval lifecycle", () => {
       { runId, signal: new AbortController().signal },
     );
     if (typeof initial.args !== "object" || initial.args === null || Array.isArray(initial.args)) {
-      throw new Error("Expected tokenized object arguments.");
+      throw new TypeError("Expected tokenized object arguments.");
     }
     const ccToken = initial.args.cc;
     if (typeof ccToken !== "string") {
-      throw new Error("Expected a tokenized cc email.");
+      throw new TypeError("Expected a tokenized cc email.");
     }
     const { recorder, state } = await createApprovalRun(store, clock, initial.args, ["/to"]);
     await requestApprovalForRun(recorder, clock, state);
@@ -776,11 +776,15 @@ describe("approval lifecycle", () => {
       subject: "Original",
     });
     expect(JSON.stringify(resolution.edits)).not.toContain("new@example.test");
-    expect(tokenizeJson.mock.calls.filter(([, , context]) => context.boundary === "tool_input")).toHaveLength(2);
+    expect(
+      tokenizeJson.mock.calls.filter(
+        ([, , toolInputContext]) => toolInputContext.boundary === "tool_input",
+      ),
+    ).toHaveLength(2);
     const afterResolution = await readApprovalEvents(store);
     const lastEvent = afterResolution.at(-1);
     if (lastEvent === undefined) {
-      throw new Error("Expected a durable approval resolution.");
+      throw new TypeError("Expected a durable approval resolution.");
     }
     const resumedRecorder = new RunRecorder(
       store,
@@ -817,7 +821,11 @@ describe("approval lifecycle", () => {
         subject: "Original",
       },
     ]);
-    expect(tokenizeJson.mock.calls.filter(([, , context]) => context.boundary === "tool_input")).toHaveLength(2);
+    expect(
+      tokenizeJson.mock.calls.filter(
+        ([, , toolInputContext]) => toolInputContext.boundary === "tool_input",
+      ),
+    ).toHaveLength(2);
   });
 
   it.each([
@@ -834,36 +842,35 @@ describe("approval lifecycle", () => {
       },
       code: "edit_invalid",
     },
-  ])("rejects invalid approval edits before writing a resolution ($code)", async ({
-    changed,
-    schema,
-    code,
-  }) => {
-    const store = new InMemoryEventStore();
-    const clock = new FakeClock(100);
-    const { recorder, state } = await createApprovalRun(store, clock);
-    await requestApprovalForRun(recorder, clock, state);
-    const prepare = vi.fn((call: Parameters<NonNullable<ToolPort["prepare"]>>[0]) =>
-      Promise.resolve(call),
-    );
-    const tool: ToolPort = {
-      describe: () => ({
-        idempotent: false,
-        timeoutMs: 1_000,
-        ...(schema === undefined ? {} : { inputSchema: schema }),
-      }),
-      prepare,
-      execute: () => Promise.resolve({ outcome: "ok", result: null }),
-    };
+  ])(
+    "rejects invalid approval edits before writing a resolution ($code)",
+    async ({ changed, schema, code }) => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      const { recorder, state } = await createApprovalRun(store, clock);
+      await requestApprovalForRun(recorder, clock, state);
+      const prepare = vi.fn((call: Parameters<NonNullable<ToolPort["prepare"]>>[0]) =>
+        Promise.resolve(call),
+      );
+      const tool: ToolPort = {
+        describe: () => ({
+          idempotent: false,
+          timeoutMs: 1_000,
+          ...(schema === undefined ? {} : { inputSchema: schema }),
+        }),
+        prepare,
+        execute: () => Promise.resolve({ outcome: "ok", result: null }),
+      };
 
-    await expect(
-      resolveApproval(store, runId, approvalId, "edit", changed, clock, tool),
-    ).rejects.toMatchObject({ code });
-    const events = await readApprovalEvents(store);
-    expect(events.some(({ type }) => type === "approval_resolved")).toBe(false);
-    expect(events.some(({ type }) => type === "pii_action")).toBe(false);
-    expect(prepare).not.toHaveBeenCalled();
-  });
+      await expect(
+        resolveApproval(store, runId, approvalId, "edit", changed, clock, tool),
+      ).rejects.toMatchObject({ code });
+      const events = await readApprovalEvents(store);
+      expect(events.some(({ type }) => type === "approval_resolved")).toBe(false);
+      expect(events.some(({ type }) => type === "pii_action")).toBe(false);
+      expect(prepare).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects missing and repeated approval resolutions", async () => {
     const store = new InMemoryEventStore();

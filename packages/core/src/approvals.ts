@@ -108,6 +108,55 @@ class ApprovalEditPreparationError extends HarnessError {
 
 const systemClock: Clock = { now: Date.now };
 
+interface PrepareApprovalEditOptions {
+  readonly tool: ToolPort;
+  readonly approval: Extract<Event, { type: "approval_requested" }>;
+  readonly intent: Extract<Event, { type: "tool_intent" }>;
+  readonly edits: JsonValue;
+  readonly runId: Id;
+  readonly recorder: RunRecorder;
+  readonly events: Event[];
+}
+
+async function prepareApprovalEdits(options: PrepareApprovalEditOptions): Promise<JsonValue> {
+  const { tool, approval, intent, edits, runId, recorder, events } = options;
+  const parsedPayload = ApprovalPayloadSchema.safeParse(approval.payload);
+  if (
+    !parsedPayload.success ||
+    parsedPayload.data.callId !== intent.callId ||
+    parsedPayload.data.toolId !== intent.toolId
+  ) {
+    throw new ApprovalEditError("edit_invalid");
+  }
+  const pointerEdits = diffToEdits(parsedPayload.data.args, edits);
+  const context = toolRunContext({ runId, signal: new AbortController().signal }, recorder, events);
+  const validateSchema =
+    tool.validateInputSchema === undefined
+      ? undefined
+      : (args: JsonValue, schema: JsonValue) =>
+          tool.validateInputSchema?.(intent.toolId, args, schema, context) ??
+          Promise.resolve(false);
+  return validateEdits(
+    parsedPayload.data,
+    pointerEdits,
+    tool.describe(intent.toolId)?.inputSchema,
+    {
+      tokenize: async (args) => {
+        const prepared = await prepareToolCall(
+          tool,
+          { callId: approval.callId, toolId: intent.toolId, args },
+          context,
+        );
+        if (prepared.errorCode !== undefined) {
+          throw new ApprovalEditPreparationError();
+        }
+        return prepared.call.args;
+      },
+      ...(validateSchema === undefined ? {} : { validateSchema }),
+    },
+  );
+}
+
 /**
  * Records an approval request, suspends the run, and forces a checkpoint.
  *
@@ -260,43 +309,15 @@ export async function resolveApproval(
           if (intent === undefined) {
             throw new ApprovalNotFoundError();
           }
-          const parsedPayload = ApprovalPayloadSchema.safeParse(request.payload);
-          if (
-            !parsedPayload.success ||
-            parsedPayload.data.callId !== intent.callId ||
-            parsedPayload.data.toolId !== intent.toolId
-          ) {
-            throw new ApprovalEditError("edit_invalid");
-          }
-          const pointerEdits = diffToEdits(parsedPayload.data.args, edits);
-          const context = toolRunContext(
-            { runId, signal: new AbortController().signal },
+          resolvedEdits = await prepareApprovalEdits({
+            tool,
+            approval: request,
+            intent,
+            edits,
+            runId,
             recorder,
             events,
-          );
-          const validateSchema =
-            tool.validateInputSchema === undefined
-              ? undefined
-              : (args: JsonValue, schema: JsonValue) =>
-                  tool.validateInputSchema?.(intent.toolId, args, schema, context) ??
-                  Promise.resolve(false);
-          resolvedEdits = await validateEdits(
-            parsedPayload.data,
-            pointerEdits,
-            tool.describe(intent.toolId)?.inputSchema,
-            async (args) => {
-              const prepared = await prepareToolCall(
-                tool,
-                { callId: request.callId, toolId: intent.toolId, args },
-                context,
-              );
-              if (prepared.errorCode !== undefined) {
-                throw new ApprovalEditPreparationError();
-              }
-              return prepared.call.args;
-            },
-            validateSchema,
-          );
+          });
         }
         return recorder.record({
           type: "approval_resolved",

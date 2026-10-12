@@ -146,9 +146,9 @@ describe("PiiToolPort", () => {
       required: ["to", "other"],
     };
 
-    await expect(port.validateInputSchema(call.toolId, prepared.args, schema, context)).resolves.toBe(
-      true,
-    );
+    await expect(
+      port.validateInputSchema(call.toolId, prepared.args, schema, context),
+    ).resolves.toBe(true);
     expect(prepared.args).toEqual({ to: "<EMAIL_1>", other: "<EMAIL_1>" });
     await expect(
       port.validateInputSchema(call.toolId, { to: "<EMAIL_99>" }, schema, context),

@@ -94,6 +94,13 @@ describe("approval payload", () => {
   it("requires an injected time when either approval kind expires", () => {
     expect(() => buildApprovalPayload({ call, rule })).toThrow();
     expect(() => buildApprovalPayload({ kind: "resume_ambiguity", call, rule })).toThrow();
+    expect(() =>
+      buildApprovalPayload({
+        call,
+        rule: { ...rule, approvalTtlMs: 1 },
+        now: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toThrow();
   });
 
   it("includes a closed error code on the resume-ambiguity refinement issue", () => {
@@ -101,15 +108,13 @@ describe("approval payload", () => {
       ...createPayload(),
       kind: "resume_ambiguity",
     });
-
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const issue = result.error.issues[0];
-      expect(issue?.code).toBe("custom");
-      if (issue?.code === "custom") {
-        expect(issue.params).toEqual({ errorCode: "approval_payload_resume_editable" });
-      }
-    }
+    const issues = result.success ? [] : result.error.issues;
+    expect(
+      issues.some(
+        (issue) =>
+          issue.code === "custom" && issue.params?.errorCode === "approval_payload_resume_editable",
+      ),
+    ).toBe(true);
   });
 
   it("converts changed whole arguments into pointer edits, including removals and array changes", () => {
@@ -124,6 +129,11 @@ describe("approval payload", () => {
       { pointer: "/items/0", value: "changed" },
       { pointer: "/items/1", remove: true },
     ]);
+    expect(diffToEdits({ items: [1] }, { items: [1, 2] })).toEqual([
+      { pointer: "/items/1", value: 2 },
+    ]);
+    expect(diffToEdits("before", "after")).toEqual([{ pointer: "", value: "after" }]);
+    expect(diffToEdits({ unchanged: true }, { unchanged: true })).toEqual([]);
   });
 });
 
@@ -142,7 +152,7 @@ describe("validateEdits", () => {
       payload,
       [{ pointer: "/subject", value: "person@example.test" }],
       inputSchema,
-      tokenize,
+      { tokenize },
     );
 
     expect(edited).toMatchObject({ subject: "<EMAIL_2>" });
@@ -160,12 +170,9 @@ describe("validateEdits", () => {
       now: 100,
     });
     await expect(
-      validateEdits(
-        payload,
-        [{ pointer: "/metadata/tag", value: "changed" }],
-        inputSchema,
-        identityTokenizer,
-      ),
+      validateEdits(payload, [{ pointer: "/metadata/tag", value: "changed" }], inputSchema, {
+        tokenize: identityTokenizer,
+      }),
     ).resolves.toMatchObject({ metadata: { tag: "changed" } });
   });
 
@@ -177,12 +184,9 @@ describe("validateEdits", () => {
     });
 
     await expect(
-      validateEdits(
-        payload,
-        [{ pointer: "/subjectLine", value: "changed" }],
-        inputSchema,
-        identityTokenizer,
-      ),
+      validateEdits(payload, [{ pointer: "/subjectLine", value: "changed" }], inputSchema, {
+        tokenize: identityTokenizer,
+      }),
     ).rejects.toMatchObject({ code: "edit_not_allowed" });
   });
 
@@ -192,7 +196,7 @@ describe("validateEdits", () => {
         createPayload(),
         [{ pointer: "/subject", value: "x".repeat(41) }],
         inputSchema,
-        identityTokenizer,
+        { tokenize: identityTokenizer },
       ),
     ).rejects.toMatchObject({ code: "edit_invalid" });
   });
@@ -218,16 +222,13 @@ describe("validateEdits", () => {
     let validatedArgs: JsonValue | undefined;
 
     await expect(
-      validateEdits(
-        payload,
-        [{ pointer: "/subject", value: "Changed" }],
-        schema,
-        identityTokenizer,
-        async (args) => {
+      validateEdits(payload, [{ pointer: "/subject", value: "Changed" }], schema, {
+        tokenize: identityTokenizer,
+        validateSchema: (args) => {
           validatedArgs = args;
           return true;
         },
-      ),
+      }),
     ).resolves.toMatchObject({ subject: "Changed" });
     expect(validatedArgs).toEqual({
       to: "<EMAIL_1>",
@@ -238,13 +239,76 @@ describe("validateEdits", () => {
 
   it("explicitly skips tool-schema validation when no input schema is available", async () => {
     await expect(
-      validateEdits(
-        createPayload(),
-        [{ pointer: "/subject", value: "valid" }],
-        undefined,
-        identityTokenizer,
-      ),
+      validateEdits(createPayload(), [{ pointer: "/subject", value: "valid" }], undefined, {
+        tokenize: identityTokenizer,
+      }),
     ).resolves.toMatchObject({ subject: "valid" });
+  });
+
+  it("applies object removals and nested additions, plus array removals and appends", async () => {
+    const payload = buildApprovalPayload({
+      call: {
+        ...call,
+        args: {
+          details: { name: "before", gone: "remove" },
+          items: ["first", "second"],
+          newItems: [],
+        },
+      },
+      rule: { ...rule, editable: ["/details", "/items", "/newItems"] },
+      now: 100,
+    });
+    const edited = await validateEdits(
+      payload,
+      diffToEdits(payload.args, {
+        details: { name: "after", nested: { value: "added" } },
+        items: ["first"],
+        newItems: ["appended"],
+      }),
+      undefined,
+      { tokenize: identityTokenizer },
+    );
+
+    expect(edited).toEqual({
+      details: { name: "after", nested: { value: "added" } },
+      items: ["first"],
+      newItems: ["appended"],
+    });
+  });
+
+  it("rejects root removal and malformed array indices", async () => {
+    const payload = buildApprovalPayload({
+      call: { ...call, args: { items: ["first"] } },
+      rule: { ...rule, editable: [""] },
+      now: 100,
+    });
+
+    await expect(
+      validateEdits(payload, [{ pointer: "", remove: true }], undefined, {
+        tokenize: identityTokenizer,
+      }),
+    ).rejects.toMatchObject({ code: "edit_invalid" });
+    await expect(
+      validateEdits(payload, [{ pointer: "/items/01", value: "bad" }], undefined, {
+        tokenize: identityTokenizer,
+      }),
+    ).rejects.toMatchObject({ code: "edit_invalid" });
+    await expect(
+      validateEdits(payload, [{ pointer: "/items/2", value: "missing" }], undefined, {
+        tokenize: identityTokenizer,
+      }),
+    ).rejects.toMatchObject({ code: "edit_invalid" });
+  });
+
+  it("maps token-aware validator failures to edit_invalid", async () => {
+    await expect(
+      validateEdits(createPayload(), [], inputSchema, {
+        tokenize: identityTokenizer,
+        validateSchema: () => {
+          throw new Error("synthetic validator failure");
+        },
+      }),
+    ).rejects.toMatchObject({ code: "edit_invalid" });
   });
 
   it("rejects malformed schemas and edits whose parent path does not exist", async () => {
@@ -253,7 +317,7 @@ describe("validateEdits", () => {
         createPayload(),
         [{ pointer: "/metadata/missing/value", value: "x" }],
         inputSchema,
-        identityTokenizer,
+        { tokenize: identityTokenizer },
       ),
     ).rejects.toMatchObject({ code: "edit_invalid" });
     await expect(
@@ -261,7 +325,7 @@ describe("validateEdits", () => {
         createPayload(),
         [{ pointer: "/subject", value: "valid" }],
         { type: 5 },
-        identityTokenizer,
+        { tokenize: identityTokenizer },
       ),
     ).rejects.toMatchObject({ code: "edit_invalid" });
   });
@@ -291,7 +355,7 @@ describe("validateEdits", () => {
           { pointer: "/items/0", value: "second" },
         ],
         schema,
-        identityTokenizer,
+        { tokenize: identityTokenizer },
       ),
     ).resolves.toMatchObject({ "safe/key": "after", items: ["second"] });
   });
@@ -305,7 +369,9 @@ describe("validateEdits", () => {
     const replacement: JsonValue = { replaced: true };
 
     await expect(
-      validateEdits(payload, [{ pointer: "", value: replacement }], true, identityTokenizer),
+      validateEdits(payload, [{ pointer: "", value: replacement }], true, {
+        tokenize: identityTokenizer,
+      }),
     ).resolves.toEqual(replacement);
     expect(payload.args).toEqual({ nested: { value: "before" } });
   });
@@ -319,12 +385,9 @@ describe("validateEdits", () => {
     });
 
     await expect(
-      validateEdits(
-        payload,
-        [{ pointer: "/subject", value: "edited" }],
-        inputSchema,
-        identityTokenizer,
-      ),
+      validateEdits(payload, [{ pointer: "/subject", value: "edited" }], inputSchema, {
+        tokenize: identityTokenizer,
+      }),
     ).rejects.toBeInstanceOf(ApprovalEditError);
   });
 });

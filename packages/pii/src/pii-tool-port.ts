@@ -199,7 +199,6 @@ export class PiiToolPort implements PiiToolPortLike {
       }
       throw error;
     }
-
   }
 }
 
