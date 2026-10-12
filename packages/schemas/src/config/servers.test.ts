@@ -76,15 +76,16 @@ describe("ServerConfigSchema", () => {
       propagateTrace: true,
     });
 
+    const hasPropagationErrorCode =
+      !result.success &&
+      result.error.issues.some(
+        (issue) =>
+          issue.code === "custom" &&
+          typeof issue.params?.errorCode === "string" &&
+          issue.params.errorCode === "propagate_requires_internal",
+      );
     expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(
-        result.error.issues.some(
-          (issue) =>
-            issue.code === "custom" && issue.params?.errorCode === "propagate_requires_internal",
-        ),
-      ).toBe(true);
-    }
+    expect(hasPropagationErrorCode).toBe(true);
   });
 
   it("rejects annotations for external servers", () => {
