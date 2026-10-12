@@ -3,6 +3,7 @@ import {
   Client,
   SdkError,
   SdkErrorCode,
+  specTypeSchemas,
   type CallToolRequestOptions,
   type CallToolResult,
   type ListToolsResult,
@@ -70,6 +71,8 @@ interface CachedToolList {
 const MAX_TOOLS = 1_000;
 const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
 
+const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
+
 const schemaValidatorCache = new WeakMap<object, ReturnType<typeof compileJsonSchema>>();
 
 function getOrCreateValidator(inputSchema: unknown): ReturnType<typeof compileJsonSchema> {
@@ -100,18 +103,14 @@ function isConnectionLossError(error: unknown): boolean {
   if (error instanceof McpConnectionError && error.code === "mcp_connection_lost") {
     return true;
   }
-  if (typeof error === "object" && error !== null) {
-    const code = (error as { code?: unknown }).code;
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = error.code;
     if (
       code === "CONNECTION_CLOSED" ||
       code === "ECONNRESET" ||
       code === "ECONNREFUSED" ||
       code === "EPIPE"
     ) {
-      return true;
-    }
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.toLowerCase().includes("connection closed")) {
       return true;
     }
   }
@@ -368,22 +367,19 @@ export class McpConnection {
           seenCursors.add(cursor);
         }
 
-        const page = (await client.request(
+        const page: ListToolsResult = await client.request(
           {
             method: "tools/list",
             ...(cursor === undefined ? {} : { params: { cursor } }),
           },
+          ListToolsResultSchema,
           { timeout: this.#config.timeouts.callMs },
-        )) as {
-          tools?: McpTool[];
-          nextCursor?: string;
-          ttlMs?: number;
-          cacheScope?: "public" | "private";
-        };
+        );
 
-        const pageTools = page.tools ?? [];
-        if (typeof page.ttlMs === "number" && ttlMs === undefined) {
-          ttlMs = page.ttlMs;
+        const pageTools = page.tools;
+        const pageTtlMs = (page as { ttlMs?: unknown }).ttlMs;
+        if (typeof pageTtlMs === "number" && ttlMs === undefined) {
+          ttlMs = pageTtlMs;
         }
 
         for (const tool of pageTools) {
