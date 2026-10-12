@@ -168,6 +168,11 @@ upcasters
 upcasting
 visibilitychange
 vulns
+domcontentloaded
+nosniff
+oncalltool
+referrerpolicy
+requestfailed
 xact
 xdev
 dpkg
