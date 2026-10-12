@@ -77,15 +77,21 @@ run needs no live process. Output carries tokenized values only unless `--reveal
   arguments need `--show-args`. `--reveal` implies `--show-args`, resolves tokens through the
   auditing vault resolver with boundary `ui`, writes `reveal_exposes_sensitive_values` to stderr,
   and appends a `pii_action` audit event (counts only) to the run log. It fails with
-  `reveal_unavailable` when no vault is configured.
+  `reveal_unavailable` when no vault resolver is supplied. The default CLI resolver is pending
+  task 12.3; until then `--reveal` is unavailable unless a caller supplies the resolver.
 - `harness approvals approve <approvalId> [--edit <json-file>] [--yes] [--resume]` approves. With
   `--edit`, the file holds the complete replacement (tokenized) arguments; they are validated
   against the rule's editable fields and the tool schema, and the decision is recorded as `edit`.
+  Editing requires a caller-supplied PII-aware tool port; default MCP tool-port composition is
+  pending tasks 6.3/6.5. Until then `--edit` reports `approval_edit_unavailable` unless a caller
+  supplies that port.
 - `harness approvals deny <approvalId> [--yes] [--resume]` denies.
 
-Without `--yes`, `approve` and `deny` ask for confirmation when standard input is a terminal; a
-refusal exits with `confirmation_declined` (code `1`). After resolving, the command prints
-`harness resume <runId>`; `--resume` resumes at once and then uses the `harness resume` exit codes.
+Without `--yes`, `approve` and `deny` ask for confirmation when standard input is a terminal. When
+there is no TTY they fail with `confirmation_required` (code `2`), so piped or automated decisions
+must explicitly include `--yes`. A refusal exits with `confirmation_declined` (code `1`). After
+resolving, the command prints `harness resume <runId>`; `--resume` resumes at once and then uses the
+`harness resume` exit codes.
 `--json` results are `ApprovalListResultSchema`, `ApprovalShowResultSchema`, and
 `ApprovalResolveResultSchema` in `packages/schemas/src/cli/approvals.ts`.
 
@@ -144,7 +150,7 @@ These numeric values are stable for scripts and automation:
 | --- | --- | --- |
 | `0` | `ok` | Command completed successfully. |
 | `1` | `failure` | Unhandled or unmapped failure, a failed doctor check, or cancellation of an already-terminal run. |
-| `2` | `usage` | Invalid arguments, unknown command, or unknown context strategy. |
+| `2` | `usage` | Invalid arguments, unknown command or context strategy, missing non-interactive approval confirmation, or invalid approval edits. |
 | `3` | `config_invalid` | Configuration is invalid. |
 | `4` | `policy_denied` | Policy denied an operation, including separation-of-duties denial. |
 | `5` | `suspended` | A run is waiting for approval or human input, including a resume blocked by unresolved approvals. |
@@ -161,8 +167,9 @@ never included in CLI error output.
 
 | Error code | Exit code |
 | --- | --- |
-| `usage` | `2` |
+| `usage`, `confirmation_required`, `edit_not_allowed`, `edit_invalid` | `2` |
 | `doctor_failed`, `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
+| `approval_edit_unavailable`, `reveal_unavailable` | `1` |
 | `config_invalid` | `3` |
 | `policy_denied`, `approver_is_requester` | `4` |
 | `suspended`, `run_awaiting_approval` | `5` |

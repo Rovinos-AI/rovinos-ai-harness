@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Code, Id } from "../primitives.js";
 import { JsonValue } from "../json.js";
 import { RunStatus } from "../events.js";
+import { JsonPointerSchema } from "../config/pii.js";
 
 /** One pending approval row returned by `harness approvals list`. */
 export const ApprovalSummarySchema = z
@@ -32,7 +33,7 @@ export type ApprovalListResult = z.infer<typeof ApprovalListResultSchema>;
 export const ApprovalShowResultSchema = ApprovalSummarySchema.extend({
   callId: Id,
   reason: Code,
-  editableFields: z.array(z.string()),
+  editableFields: z.array(JsonPointerSchema),
   args: JsonValue.optional(),
   revealed: JsonValue.optional(),
 }).strict();

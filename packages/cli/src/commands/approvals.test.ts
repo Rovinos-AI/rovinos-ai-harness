@@ -27,7 +27,7 @@ import {
 import { InMemoryEventStore } from "@harness/store";
 import { InMemoryVault } from "@harness/vault";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
-import { context, trace } from "@opentelemetry/api";
+import { context as otelContext, trace } from "@opentelemetry/api";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { CliContext, Interactive } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
@@ -41,12 +41,12 @@ let directory = "";
 const tracerProvider = createTestTracerProvider();
 
 beforeAll(() => {
-  context.setGlobalContextManager(createTestContextManager());
+  otelContext.setGlobalContextManager(createTestContextManager());
   trace.setGlobalTracerProvider(tracerProvider);
 });
 
 afterAll(() => {
-  context.disable();
+  otelContext.disable();
   trace.disable();
 });
 
@@ -70,6 +70,8 @@ interface Fixture {
   readonly clock: FakeClock;
   readonly prompts: string[];
   readonly nextId: () => Id;
+  readonly runtimeCalls: () => number;
+  readonly configLoads: () => number;
 }
 
 function createFixture(
@@ -83,6 +85,8 @@ function createFixture(
   const vault = new InMemoryVault();
   const clock = new FakeClock(1_000);
   const prompts: string[] = [];
+  let runtimeCalls = 0;
+  let configLoads = 0;
   let counter = 0;
   const nextId = (): Id => {
     counter += 1;
@@ -93,13 +97,17 @@ function createFixture(
     stderr: (text) => stderr.push(text),
   });
   const cliContext: CliContext = {
-    loadConfig: () => Promise.resolve(config),
+    loadConfig: () => {
+      configLoads += 1;
+      return Promise.resolve(config);
+    },
     out,
     clock,
     ...(interactive === undefined ? {} : { interactive }),
     createVaultResolver: () => (withVault ? vault : undefined),
     createToolPort: () => new EditableToolPort(),
     createRuntime: async (runtimeConfig, overrides) => {
+      runtimeCalls += 1;
       const runtime = await createRuntime(runtimeConfig, {
         store,
         clock,
@@ -128,6 +136,8 @@ function createFixture(
     clock,
     prompts,
     nextId,
+    runtimeCalls: () => runtimeCalls,
+    configLoads: () => configLoads,
   } satisfies Fixture;
 }
 
@@ -190,9 +200,17 @@ async function seed(fixture: Fixture, args: JsonValue, ttlMs?: number) {
 }
 
 async function run(fixture: Fixture, ...argv: string[]): Promise<number> {
+  return runWithContext(fixture, fixture.context, ...argv);
+}
+
+async function runWithContext(
+  fixture: Fixture,
+  context: CliContext,
+  ...argv: string[]
+): Promise<number> {
   fixture.stdout.splice(0);
   fixture.stderr.splice(0);
-  return main(argv, fixture.context, [approvalsCommand]);
+  return main(argv, context, [approvalsCommand]);
 }
 
 async function readAll(store: InMemoryEventStore, runId: Id): Promise<Event[]> {
@@ -276,6 +294,49 @@ describe("harness approvals", () => {
     expect(fixture.stderr.join("")).toContain("reveal_unavailable");
   });
 
+  it("fails reveal before opening the runtime when no resolver factory is supplied", async () => {
+    const fixture = createFixture();
+    const { approvalId } = await seed(fixture, { to: "<EMAIL_1>" });
+    const context = { ...fixture.context };
+    delete context.createVaultResolver;
+
+    expect(
+      await runWithContext(fixture, context, "approvals", "show", approvalId, "--reveal"),
+    ).toBe(ExitCode.failure);
+    expect(fixture.stderr).toEqual(["reveal_unavailable\n"]);
+    expect(fixture.stdout).toEqual([]);
+    expect(fixture.runtimeCalls()).toBe(0);
+  });
+
+  it("fails edits before opening the runtime when no tool-port factory is supplied", async () => {
+    directory = await mkdtemp(join(tmpdir(), "harness-approvals-"));
+    const fixture = createFixture();
+    const { approvalId, runId } = await seed(fixture, { to: "<EMAIL_1>" });
+    const edit = join(directory, "edit.json");
+    await writeFile(edit, '{"to":"<EMAIL_2>"}');
+    const context = { ...fixture.context };
+    delete context.createToolPort;
+
+    expect(
+      await runWithContext(
+        fixture,
+        context,
+        "approvals",
+        "approve",
+        approvalId,
+        "--yes",
+        "--edit",
+        edit,
+      ),
+    ).toBe(ExitCode.failure);
+    expect(fixture.stderr).toEqual(["approval_edit_unavailable\n"]);
+    expect(fixture.stdout).toEqual([]);
+    expect(fixture.runtimeCalls()).toBe(0);
+    expect(
+      (await readAll(fixture.store, runId)).some((event) => event.type === "approval_resolved"),
+    ).toBe(false);
+  });
+
   it("approves, then reports already-resolved approvals with exit code 7", async () => {
     const fixture = createFixture();
     const { approvalId, runId } = await seed(fixture, { to: "<EMAIL_1>" });
@@ -316,17 +377,19 @@ describe("harness approvals", () => {
     );
   });
 
-  it("edits arguments from a JSON file and rejects disallowed edits", async () => {
+  it("edits arguments and maps disallowed or schema-invalid edits to usage", async () => {
     directory = await mkdtemp(join(tmpdir(), "harness-approvals-"));
     const fixture = createFixture();
     const { approvalId, runId } = await seed(fixture, { to: "<EMAIL_1>", cc: "<EMAIL_2>" });
     const good = join(directory, "good.json");
     const bad = join(directory, "bad.json");
+    const invalid = join(directory, "invalid.json");
     await writeFile(good, '{"to":"<EMAIL_3>","cc":"<EMAIL_2>"}');
     await writeFile(bad, '{"to":"<EMAIL_1>","cc":"<EMAIL_3>"}');
+    await writeFile(invalid, '{"to":3,"cc":"<EMAIL_2>"}');
 
     expect(await run(fixture, "approvals", "approve", approvalId, "--yes", "--edit", bad)).toBe(
-      ExitCode.failure,
+      ExitCode.usage,
     );
     expect(fixture.stderr.join("")).toContain("edit_not_allowed");
     expect(await run(fixture, "approvals", "approve", approvalId, "--yes", "--edit", good)).toBe(0);
@@ -335,6 +398,45 @@ describe("harness approvals", () => {
     );
     expect(resolved?.decision).toBe("edit");
     expect(resolved?.edits).toEqual({ to: "<EMAIL_3>", cc: "<EMAIL_2>" });
+
+    const invalidFixture = createFixture();
+    const schemaTool = new EditableToolPort();
+    schemaTool.describe = (toolId) => {
+      const metadata = new FakeToolPort(
+        new Map([
+          [
+            "send_mail",
+            {
+              idempotent: false,
+              timeoutMs: 1_000,
+              inputSchema: {
+                type: "object",
+                properties: { to: { type: "string" } },
+                required: ["to"],
+                additionalProperties: false,
+              },
+              execute: () => Promise.resolve({ outcome: "ok", result: null }),
+            },
+          ],
+        ]),
+      ).describe(toolId);
+      return metadata;
+    };
+    invalidFixture.context.createToolPort = () => schemaTool;
+    await writeFile(invalid, '{"to":3}');
+    const invalidApproval = await seed(invalidFixture, { to: "<EMAIL_1>" });
+    expect(
+      await run(
+        invalidFixture,
+        "approvals",
+        "approve",
+        invalidApproval.approvalId,
+        "--yes",
+        "--edit",
+        invalid,
+      ),
+    ).toBe(ExitCode.usage);
+    expect(invalidFixture.stderr.join("")).toContain("edit_invalid");
   });
 
   it("rejects --edit on deny", async () => {
@@ -374,6 +476,18 @@ describe("harness approvals", () => {
 
     const quiet = createFixture({ isTTY: false, confirm: () => Promise.resolve(false) });
     const third = await seed(quiet, { to: "<EMAIL_3>" });
-    expect(await run(quiet, "approvals", "approve", third.approvalId)).toBe(ExitCode.ok);
+    expect(await run(quiet, "approvals", "approve", third.approvalId)).toBe(ExitCode.usage);
+    expect(quiet.stderr.join("")).toContain("confirmation_required");
+    expect(
+      (await readAll(quiet.store, third.runId)).some((event) => event.type === "approval_resolved"),
+    ).toBe(false);
+    expect(await run(quiet, "approvals", "approve", third.approvalId, "--yes")).toBe(ExitCode.ok);
+  });
+
+  it("loads config once for an approval decision", async () => {
+    const fixture = createFixture();
+    const { approvalId } = await seed(fixture, { to: "<EMAIL_1>" });
+    expect(await run(fixture, "approvals", "deny", approvalId, "--yes")).toBe(ExitCode.ok);
+    expect(fixture.configLoads()).toBe(1);
   });
 });

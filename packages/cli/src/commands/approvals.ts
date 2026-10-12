@@ -2,15 +2,7 @@
 import { readFile } from "node:fs/promises";
 import type { Command } from "commander";
 import type { HarnessConfig } from "@harness/config";
-import {
-  APPROVAL_WAIT_SPAN,
-  RunRecorder,
-  foldRunState,
-  resolveApproval,
-  type Runtime,
-  type RunState,
-} from "@harness/core";
-import { ApprovalPayloadSchema } from "@harness/policy";
+import type { Runtime, RunState } from "@harness/core";
 import {
   ApprovalListResultSchema,
   ApprovalResolveResultSchema,
@@ -22,10 +14,10 @@ import {
   type ApprovalSummary,
   type Event,
 } from "@harness/schemas";
-import { AuditingVaultResolver, findTokens, vaultAuditToPiiAction } from "@harness/vault";
-import type { VaultAuditPiiAction } from "@harness/vault";
+import type { VaultAuditPiiAction, VaultResolver } from "@harness/vault";
 import type { CliContext, CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
+import { collectApprovalTokens, revealApprovalTokens } from "./approval-args.js";
 import { assertResumeStatus } from "./resume.js";
 
 class ApprovalsCodeError extends HarnessError {
@@ -88,6 +80,7 @@ async function pendingForRun(store: Store, runId: Id): Promise<PendingApproval[]
   if (events.length === 0) {
     return [];
   }
+  const { foldRunState } = await import("@harness/core");
   const state = foldRunState(events);
   return [...state.pendingApprovals.values()].map((request) => ({
     runId,
@@ -109,7 +102,8 @@ async function findPending(store: Store, approvalId: Id): Promise<PendingApprova
   throw new ApprovalsCodeError("approval_not_found");
 }
 
-function summarize(pending: PendingApproval, now: number): ApprovalSummary {
+async function summarize(pending: PendingApproval, now: number): Promise<ApprovalSummary> {
+  const { ApprovalPayloadSchema } = await import("@harness/policy");
   const { request, state, runId } = pending;
   const payload = ApprovalPayloadSchema.safeParse(request.payload);
   return {
@@ -136,6 +130,7 @@ function revealAudit(
     if (lastEvent === undefined) {
       return;
     }
+    const { APPROVAL_WAIT_SPAN, RunRecorder } = await import("@harness/core");
     const recorder = new RunRecorder(
       store,
       pending.runId,
@@ -154,65 +149,26 @@ function revealAudit(
   };
 }
 
-function revealValue(value: JsonValue, resolve: (token: string) => string | undefined): JsonValue {
-  if (typeof value === "string") {
-    let offset = 0;
-    let result = "";
-    for (const match of findTokens(value)) {
-      result += value.slice(offset, match.index) + (resolve(match.token) ?? match.token);
-      offset = match.index + match.token.length;
-    }
-    return result + value.slice(offset);
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => revealValue(item, resolve));
-  }
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, revealValue(item, resolve)]),
-    );
-  }
-  return value;
-}
-
-function collectTokens(value: JsonValue, tokens: Set<string>): void {
-  if (typeof value === "string") {
-    for (const match of findTokens(value)) {
-      tokens.add(match.token);
-    }
-  } else if (Array.isArray(value)) {
-    for (const item of value) {
-      collectTokens(item, tokens);
-    }
-  } else if (typeof value === "object" && value !== null) {
-    for (const item of Object.values(value)) {
-      collectTokens(item, tokens);
-    }
-  }
-}
-
 interface RevealEnvironment {
   readonly context: CliContext;
-  readonly config: HarnessConfig;
+  readonly resolver: VaultResolver;
   readonly store: Store;
 }
 
 async function revealArgs(
-  { context, config, store }: RevealEnvironment,
+  { context, resolver: inner, store }: RevealEnvironment,
   pending: PendingApproval,
   args: JsonValue,
   toolId: string,
 ): Promise<JsonValue> {
-  const inner = await context.createVaultResolver?.(config);
-  if (inner === undefined) {
-    throw new ApprovalsCodeError("reveal_unavailable");
-  }
+  const { AuditingVaultResolver, findTokens, vaultAuditToPiiAction } =
+    await import("@harness/vault");
   const audits: VaultAuditPiiAction[] = [];
   const resolver = new AuditingVaultResolver(inner, (audit) => {
     audits.push(vaultAuditToPiiAction(audit));
   });
   const tokens = new Set<string>();
-  collectTokens(args, tokens);
+  collectApprovalTokens(args, tokens, findTokens);
   const values = new Map<string, string>();
   try {
     if (tokens.size > 0) {
@@ -231,12 +187,15 @@ async function revealArgs(
   } finally {
     await revealAudit(store, context, pending)(audits);
   }
-  return revealValue(args, (token) => values.get(token));
+  return revealApprovalTokens(args, (token) => values.get(token), findTokens);
 }
 
 async function confirm(context: CliContext, yes: boolean | undefined, question: string) {
-  if (yes === true || context.interactive?.isTTY !== true) {
+  if (yes === true) {
     return;
+  }
+  if (context.interactive?.isTTY !== true) {
+    throw new ApprovalsCodeError("confirmation_required");
   }
   if (!(await context.interactive.confirm(question))) {
     throw new ApprovalsCodeError("confirmation_declined");
@@ -247,11 +206,12 @@ async function withRuntime<T>(
   context: CliContext,
   overrides: Parameters<typeof createCommandRuntime>[2],
   action: (runtime: Runtime, config: HarnessConfig) => Promise<T>,
+  config?: HarnessConfig,
 ): Promise<T> {
-  const config = await context.loadConfig();
-  const runtime = await createCommandRuntime(context, config, overrides);
+  const runtimeConfig = config ?? (await context.loadConfig());
+  const runtime = await createCommandRuntime(context, runtimeConfig, overrides);
   try {
-    return await action(runtime, config);
+    return await action(runtime, runtimeConfig);
   } finally {
     await runtime.close();
   }
@@ -270,7 +230,7 @@ function registerList(approvals: Command, context: CliContext): void {
         const rows: ApprovalSummary[] = [];
         for (const runId of runIds) {
           for (const pending of await pendingForRun(runtime.store, runId)) {
-            rows.push(summarize(pending, now));
+            rows.push(await summarize(pending, now));
           }
         }
         context.out.json(ApprovalListResultSchema, { approvals: rows });
@@ -305,35 +265,55 @@ function registerShow(approvals: Command, context: CliContext): void {
         options: { readonly showArgs?: boolean; readonly reveal?: boolean },
       ) => {
         const approvalId = parseId(value);
-        await withRuntime(context, undefined, async (runtime, config) => {
-          const pending = await findPending(runtime.store, approvalId);
-          const summary = summarize(pending, context.clock.now());
-          const payload = ApprovalPayloadSchema.safeParse(pending.request.payload);
-          const showArgs = options.showArgs === true || options.reveal === true;
-          const args = payload.success ? payload.data.args : null;
-          const revealed =
-            options.reveal === true
-              ? await revealArgs(
-                  { context, config, store: runtime.store },
-                  pending,
-                  args,
-                  summary.toolId,
-                )
-              : undefined;
-          if (revealed !== undefined) {
-            context.out.error("reveal_exposes_sensitive_values");
-          }
-          const result = {
-            ...summary,
-            callId: pending.request.callId,
-            reason: payload.success ? payload.data.reason : "unknown",
-            editableFields: payload.success ? payload.data.editableFields : [],
-            ...(showArgs ? { args } : {}),
-            ...(revealed === undefined ? {} : { revealed }),
-          };
-          context.out.json(ApprovalShowResultSchema, result);
-          context.out.print(`${JSON.stringify(result, null, 2)}\n`);
-        });
+        if (options.reveal === true && context.createVaultResolver === undefined) {
+          throw new ApprovalsCodeError("reveal_unavailable");
+        }
+        const config = options.reveal === true ? await context.loadConfig() : undefined;
+        const resolver =
+          options.reveal === true && config !== undefined
+            ? await context.createVaultResolver?.(config)
+            : undefined;
+        if (options.reveal === true && resolver === undefined) {
+          throw new ApprovalsCodeError("reveal_unavailable");
+        }
+        await withRuntime(
+          context,
+          undefined,
+          async (runtime) => {
+            const pending = await findPending(runtime.store, approvalId);
+            const summary = await summarize(pending, context.clock.now());
+            const { ApprovalPayloadSchema } = await import("@harness/policy");
+            const payload = ApprovalPayloadSchema.safeParse(pending.request.payload);
+            const showArgs = options.showArgs === true || options.reveal === true;
+            const args = payload.success ? payload.data.args : null;
+            let revealed: JsonValue | undefined;
+            if (options.reveal === true) {
+              if (resolver === undefined) {
+                throw new ApprovalsCodeError("reveal_unavailable");
+              }
+              revealed = await revealArgs(
+                { context, resolver, store: runtime.store },
+                pending,
+                args,
+                summary.toolId,
+              );
+            }
+            if (revealed !== undefined) {
+              context.out.error("reveal_exposes_sensitive_values");
+            }
+            const result = {
+              ...summary,
+              callId: pending.request.callId,
+              reason: payload.success ? payload.data.reason : "unknown",
+              editableFields: payload.success ? payload.data.editableFields : [],
+              ...(showArgs ? { args } : {}),
+              ...(revealed === undefined ? {} : { revealed }),
+            };
+            context.out.json(ApprovalShowResultSchema, result);
+            context.out.print(`${JSON.stringify(result, null, 2)}\n`);
+          },
+          config,
+        );
       },
     );
 }
@@ -345,41 +325,53 @@ async function decide(
   options: DecisionOptions,
 ): Promise<void> {
   const approvalId = parseId(value);
+  const edits =
+    options.edit === undefined
+      ? undefined
+      : parseJson(JsonValue, await readFile(options.edit, { encoding: "utf8" }));
+  if (edits !== undefined && context.createToolPort === undefined) {
+    throw new ApprovalsCodeError("approval_edit_unavailable");
+  }
   const config = await context.loadConfig();
-  const tool = await context.createToolPort?.(config);
-  await withRuntime(context, tool === undefined ? undefined : { tool }, async (runtime) => {
-    const pending = await findPending(runtime.store, approvalId);
-    const edits =
-      options.edit === undefined
-        ? undefined
-        : parseJson(JsonValue, await readFile(options.edit, { encoding: "utf8" }));
-    const edited = decision === "approve" && edits !== undefined;
-    const resolution = edited ? "edit" : decision;
-    const action = { approve: "Approve", edit: "Approve with edits", deny: "Deny" }[resolution];
-    await confirm(context, options.yes, `${action} approval ${approvalId}?`);
-    const resolved = await resolveApproval(
-      runtime.store,
-      pending.runId,
-      approvalId,
-      resolution,
-      edits,
-      context.clock,
-      tool,
-    );
-    const resumed = options.resume === true ? await runtime.resume(pending.runId) : undefined;
-    context.out.json(ApprovalResolveResultSchema, {
-      approvalId,
-      runId: pending.runId,
-      decision: resolved.decision,
-      ...(resumed === undefined ? {} : { resumedStatus: resumed.status }),
-    });
-    context.out.print(`${approvalId} ${resolved.decision}\n`);
-    if (resumed === undefined) {
-      context.out.print(`harness resume ${pending.runId}\n`);
-    } else {
-      assertResumeStatus(resumed.status, resumed.events);
-    }
-  });
+  const tool = edits === undefined ? undefined : await context.createToolPort?.(config);
+  if (edits !== undefined && tool === undefined) {
+    throw new ApprovalsCodeError("approval_edit_unavailable");
+  }
+  await withRuntime(
+    context,
+    tool === undefined ? undefined : { tool },
+    async (runtime) => {
+      const pending = await findPending(runtime.store, approvalId);
+      const edited = decision === "approve" && edits !== undefined;
+      const resolution = edited ? "edit" : decision;
+      const action = { approve: "Approve", edit: "Approve with edits", deny: "Deny" }[resolution];
+      await confirm(context, options.yes, `${action} approval ${approvalId}?`);
+      const { resolveApproval } = await import("@harness/core");
+      const resolved = await resolveApproval(
+        runtime.store,
+        pending.runId,
+        approvalId,
+        resolution,
+        edits,
+        context.clock,
+        tool,
+      );
+      const resumed = options.resume === true ? await runtime.resume(pending.runId) : undefined;
+      context.out.json(ApprovalResolveResultSchema, {
+        approvalId,
+        runId: pending.runId,
+        decision: resolved.decision,
+        ...(resumed === undefined ? {} : { resumedStatus: resumed.status }),
+      });
+      context.out.print(`${approvalId} ${resolved.decision}\n`);
+      if (resumed === undefined) {
+        context.out.print(`harness resume ${pending.runId}\n`);
+      } else {
+        assertResumeStatus(resumed.status, resumed.events);
+      }
+    },
+    config,
+  );
 }
 
 function decisionCommand(
