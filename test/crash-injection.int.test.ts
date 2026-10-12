@@ -649,6 +649,10 @@ describe("SQLite crash-injection matrix", () => {
       );
 
       expect(intent).toMatchObject({ policyDecision: "ask", ruleId: "review_rule" });
+      expect(initialEvents[0]).toMatchObject({
+        type: "run_created",
+        policyVersion: policy.version,
+      });
       expect(request).toMatchObject({
         type: "approval_requested",
         payload: { kind: "tool_call", args: { path: "<PATH_1>" } },
