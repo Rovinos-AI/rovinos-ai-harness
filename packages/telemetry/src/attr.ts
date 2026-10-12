@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, Sha256Hex } from "@harness/schemas";
+import { Code, Id, Sha256Hex, SpanId, TraceId } from "@harness/schemas";
 import { z } from "zod";
 
 /** Safe telemetry attribute kinds used by the attribute catalog and processors. */
@@ -9,9 +9,9 @@ export interface AttrMeta {
   readonly optional?: true;
 }
 
-const attrMetadata = new WeakMap<z.ZodType, AttrMeta>();
+const attrMetadata = new WeakMap<WeakKey, AttrMeta>();
 
-function register<Schema extends z.ZodType>(schema: Schema, meta: AttrMeta): Schema {
+function register<Schema extends z.core.$ZodType>(schema: Schema, meta: AttrMeta): Schema {
   attrMetadata.set(
     schema,
     Object.freeze({
@@ -28,7 +28,10 @@ function register<Schema extends z.ZodType>(schema: Schema, meta: AttrMeta): Sch
  * @param schema - The schema to inspect.
  * @returns Safe attribute metadata, or `undefined` when the schema is unregistered.
  */
-export function getAttrMeta(schema: z.ZodType): AttrMeta | undefined {
+export function getAttrMeta(schema: unknown): AttrMeta | undefined {
+  if ((typeof schema !== "object" || schema === null) && typeof schema !== "function") {
+    return undefined;
+  }
   return attrMetadata.get(schema);
 }
 
@@ -38,7 +41,7 @@ export function getAttrMeta(schema: z.ZodType): AttrMeta | undefined {
  * @param schema - The schema to inspect.
  * @returns Whether the schema is registered as a safe attribute.
  */
-export function isSafeAttr(schema: z.ZodType): boolean {
+export function isSafeAttr(schema: z.core.$ZodType): boolean {
   return getAttrMeta(schema) !== undefined;
 }
 
@@ -46,6 +49,10 @@ export function isSafeAttr(schema: z.ZodType): boolean {
 export const attr = {
   /** Validates a harness ULID. */
   id: (): typeof Id => register(Id, { kind: "id" }),
+  /** Validates a lowercase OpenTelemetry trace ID. */
+  traceId: (): typeof TraceId => register(TraceId, { kind: "id" }),
+  /** Validates a lowercase OpenTelemetry span ID. */
+  spanId: (): typeof SpanId => register(SpanId, { kind: "id" }),
   /** Validates a bounded harness code. */
   code: (): typeof Code => register(Code, { kind: "code" }),
   /** Validates a lowercase SHA-256 hex digest. */

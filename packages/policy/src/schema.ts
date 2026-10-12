@@ -145,6 +145,14 @@ export const RuleSchema = z
   })
   .strict()
   .superRefine((rule, context) => {
+    if (rule.id === "default") {
+      context.addIssue({
+        code: "custom",
+        path: ["id"],
+        message: "The default rule id is reserved.",
+        params: { errorCode: "policy_rule_id_reserved" },
+      });
+    }
     const allowsEveryTool =
       rule.match.tools === "*" ||
       (Array.isArray(rule.match.tools) && rule.match.tools.includes("*"));
