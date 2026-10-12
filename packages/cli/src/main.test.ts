@@ -204,6 +204,7 @@ describe("CLI main", () => {
       "cancel",
       "context",
       "continue",
+      "doctor",
     ]);
     expect(code).toBe(ExitCode.ok);
     expect(stdout.join("")).toContain("Usage: harness");

@@ -149,6 +149,38 @@ describe("FileSecretResolver", () => {
     ).rejects.toMatchObject({ code: "secret_resolver_unavailable" });
   });
 
+  it("cancels an in-flight file read when the signal is aborted", async () => {
+    const controller = new AbortController();
+    let notifyReadStarted: () => void = () => undefined;
+    const readStarted = new Promise<void>((resolve) => {
+      notifyReadStarted = resolve;
+    });
+    const resolver = new FileSecretResolver({
+      stat: () => Promise.resolve({ mode: 0o100600 }),
+      readFile: (_path, signal) => {
+        notifyReadStarted();
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              reject(new Error("cancelled"));
+            },
+            { once: true },
+          );
+        });
+      },
+    });
+
+    const resolving = resolver.resolve(
+      SecretRefSchema.parse("file:/run/secrets/cancellable"),
+      controller.signal,
+    );
+    await readStarted;
+    controller.abort();
+
+    await expect(resolving).rejects.toMatchObject({ code: "secret_resolution_cancelled" });
+  });
+
   it("rejects references for another resolver", async () => {
     await expect(
       new FileSecretResolver().resolve(SecretRefSchema.parse("env:API_KEY")),
