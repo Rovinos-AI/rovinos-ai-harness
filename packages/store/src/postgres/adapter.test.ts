@@ -321,14 +321,23 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     };
   }
   if (query.startsWith("SELECT runs.run_id")) {
-    const status = values[0] === null ? undefined : text(values[0]);
-    const createdAt = values[1] === null ? undefined : number(values[1]);
-    const runId = values[2] === null ? undefined : text(values[2]);
-    const limit = number(values[3]);
+    const continuationOf = values[0] === null ? undefined : text(values[0]);
+    const status = values[1] === null ? undefined : text(values[1]);
+    const createdAt = values[2] === null ? undefined : number(values[2]);
+    const runId = values[3] === null ? undefined : text(values[3]);
+    const limit = number(values[4]);
+    const continuations = new Set(
+      fakePg.events
+        .filter(
+          (event) => event.type === "run_created" && event.meta.continuationOf === continuationOf,
+        )
+        .map(({ run_id }) => run_id),
+    );
     return {
       rows: [...fakePg.runs.values()]
         .filter(
           (run) =>
+            (continuationOf === undefined || continuations.has(run.run_id)) &&
             (status === undefined || run.status === status) &&
             (createdAt === undefined ||
               run.created_at < createdAt ||
@@ -475,6 +484,30 @@ it("rejects malformed list cursors", async () => {
   const store = new PostgresEventStore("postgresql://harness@localhost/harness");
   await expect(store.listRuns({ limit: 1, cursor: "invalid" })).rejects.toMatchObject({
     code: "event_invalid",
+  });
+  await store.close();
+});
+
+it("filters Postgres run listings to direct continuations", async () => {
+  const builders = createEventBuilders();
+  const parentId = builders.nextRunId();
+  const firstBranch = builders.nextRunId();
+  const secondBranch = builders.nextRunId();
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  await store.append(parentId, [builders.runCreated(parentId)], 0);
+  await store.append(
+    firstBranch,
+    [{ ...builders.runCreated(firstBranch), continuationOf: parentId }],
+    0,
+  );
+  await store.append(
+    secondBranch,
+    [{ ...builders.runCreated(secondBranch), continuationOf: parentId }],
+    0,
+  );
+
+  await expect(store.listRuns({ continuationOf: parentId, limit: 10 })).resolves.toMatchObject({
+    runs: [{ runId: secondBranch }, { runId: firstBranch }],
   });
   await store.close();
 });

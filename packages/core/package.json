@@ -32,6 +32,8 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@harness/pii": "workspace:^",
+    "@harness/vault": "workspace:^",
     "vitest": "3.2.6"
   }
 }

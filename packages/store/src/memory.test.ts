@@ -28,7 +28,12 @@ const encryptedMemoryFactory: EventStoreFactory = () => {
   return Promise.resolve({ store, cleanup: () => store.close() });
 };
 
-function runCreated(id: typeof runId, ts: number, configHash = "a".repeat(64)): NewEvent {
+function runCreated(
+  id: typeof runId,
+  ts: number,
+  configHash = "a".repeat(64),
+  continuationOf?: typeof runId,
+): NewEvent {
   return {
     runId: id,
     ts,
@@ -39,6 +44,7 @@ function runCreated(id: typeof runId, ts: number, configHash = "a".repeat(64)): 
     type: "run_created",
     configHash,
     policyVersion: "policy.v1",
+    ...(continuationOf === undefined ? {} : { continuationOf }),
     depth: 0,
   };
 }
@@ -184,11 +190,25 @@ describe("InMemoryEventStore", () => {
       lastSeq: 3,
       lastTs: 13,
     });
+
     await expect(store.listRuns({ status: "running", limit: 2 })).resolves.toEqual({ runs: [] });
     await expect(store.listRuns({ status: "completed", limit: 2 })).resolves.toMatchObject({
       runs: [expect.objectContaining({ runId, status: "completed" })],
     });
     await expect(store.close()).resolves.toBeUndefined();
+  });
+
+  it("filters run listings to direct continuations without mixing branches", async () => {
+    const store = new InMemoryEventStore();
+    const firstBranch = Id.parse("00000000000000000000000003");
+    const secondBranch = Id.parse("00000000000000000000000004");
+    await store.append(runId, [runCreated(runId, 10)], 0);
+    await store.append(firstBranch, [runCreated(firstBranch, 20, "a".repeat(64), runId)], 0);
+    await store.append(secondBranch, [runCreated(secondBranch, 30, "a".repeat(64), runId)], 0);
+
+    await expect(store.listRuns({ continuationOf: runId, limit: 10 })).resolves.toMatchObject({
+      runs: [{ runId: secondBranch }, { runId: firstBranch }],
+    });
   });
 
   it("rejects unknown run-list cursors", async () => {

@@ -44,6 +44,7 @@ export const InspectResultSchema = z
         })
         .strict(),
     ),
+    continuations: z.array(Id),
     events: z.array(InspectEventSchema),
   })
   .strict();

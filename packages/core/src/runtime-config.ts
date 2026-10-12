@@ -6,6 +6,7 @@ import {
   type JsonValue,
   type ModelsConfig,
   type RunConfig,
+  type RunInput,
   type SecretRef,
 } from "@harness/schemas";
 import type { ProviderAdapter } from "@harness/models";
@@ -53,6 +54,8 @@ export interface Runtime {
   readonly clock: Clock;
   readonly ids: IdGenerator;
   run(goal: JsonValue): Promise<RunLoopResult>;
+  /** Starts a follow-up run from an eligible terminal run. */
+  continueRun(runId: Id, input: RunInput): Promise<RunLoopResult>;
   resume(runId: Id): Promise<RunLoopResult>;
   /** Requests durable cancellation and reports if the run was already terminal. */
   cancel(runId: Id): Promise<CancelRunResult>;

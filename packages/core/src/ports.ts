@@ -113,10 +113,14 @@ export interface ContextPort {
   /**
    * Builds the messages to send from the ordered run events.
    *
-   * @param events - Events recorded so far.
+   * @param events - Events recorded so far in the current run.
+   * @param previousEventLogs - Earlier continuation logs, oldest first.
    * @returns Provider-independent messages.
    */
-  build(events: readonly Event[]): Promise<Message[]>;
+  build(
+    events: readonly Event[],
+    previousEventLogs?: readonly (readonly Event[])[],
+  ): Promise<Message[]>;
 
   /**
    * Estimates the exact messages about to be sent, when the port has a token counter.
@@ -175,4 +179,15 @@ export interface IdGenerator {
 export interface NewRunMetadata {
   readonly configHash: Sha256Hex;
   readonly policyVersion: Code;
+  readonly parentRunId?: Id;
+  readonly parentCallId?: Id;
+  readonly continuationOf?: Id;
+  readonly scopeId?: Id;
+  readonly depth?: number;
+}
+
+/** Optional transcript history and input kind for a continuation run. */
+export interface RunContinuationMetadata {
+  readonly previousEventLogs?: readonly (readonly Event[])[];
+  readonly inputKind?: "initial" | "follow_up";
 }

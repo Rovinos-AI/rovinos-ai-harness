@@ -52,6 +52,18 @@ const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId",
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
 const READ_PAGE_SIZE = 256;
 
+type ListRunsQueryParams = [
+  Id | null,
+  Id | null,
+  RunStatus | null,
+  RunStatus | null,
+  number | null,
+  number | null,
+  number | null,
+  Id | null,
+  number,
+];
+
 interface EncodedEvent {
   event: StoredEvent;
   metaJson: string;
@@ -114,6 +126,28 @@ function decodeCursor(cursor: string): { createdAt: number; runId: Id } {
   }
 }
 
+function prepareListRunsQuery(
+  db: Database.Database,
+): Database.Statement<ListRunsQueryParams, RunSummaryRow> {
+  return db.prepare<ListRunsQueryParams, RunSummaryRow>(`
+    SELECT runs.run_id, runs.created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
+    FROM runs
+    WHERE (? IS NULL OR runs.run_id IN (
+      SELECT run_id FROM events
+      WHERE type = 'run_created' AND json_extract(meta_json, '$.continuationOf') = ?
+    ))
+    AND (? IS NULL OR runs.status = ?)
+    AND (? IS NULL OR runs.created_at < ? OR (runs.created_at = ? AND runs.run_id > ?))
+    ORDER BY runs.created_at DESC, runs.run_id ASC
+    LIMIT ?
+  `);
+}
+
+function continuationRunParams(continuationOf: Id | undefined): [Id | null, Id | null] {
+  const runId = continuationOf ?? null;
+  return [runId, runId];
+}
+
 /** Durable SQLite implementation of the append-only event store. */
 export class SqliteEventStore implements EventStore {
   private readonly db: Database.Database;
@@ -130,18 +164,7 @@ export class SqliteEventStore implements EventStore {
   >;
   private readonly getHead: Database.Statement<[Id], { next_seq: number }>;
   private readonly findRunsByTraceQuery: Database.Statement<[TraceId], { run_id: string }>;
-  private readonly listRunsQuery: Database.Statement<
-    [
-      RunStatus | null,
-      RunStatus | null,
-      number | null,
-      number | null,
-      number | null,
-      Id | null,
-      number,
-    ],
-    RunSummaryRow
-  >;
+  private readonly listRunsQuery: Database.Statement<ListRunsQueryParams, RunSummaryRow>;
   private readonly insertSnapshot: Database.Statement<
     [string, Id, number, number, string, string, string | null]
   >;
@@ -208,25 +231,7 @@ export class SqliteEventStore implements EventStore {
     this.findRunsByTraceQuery = this.db.prepare<[TraceId], { run_id: string }>(
       "SELECT run_id FROM events WHERE trace_id = ? GROUP BY run_id ORDER BY MIN(global_seq)",
     );
-    this.listRunsQuery = this.db.prepare<
-      [
-        RunStatus | null,
-        RunStatus | null,
-        number | null,
-        number | null,
-        number | null,
-        Id | null,
-        number,
-      ],
-      RunSummaryRow
-    >(`
-      SELECT runs.run_id, runs.created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
-      FROM runs
-      WHERE (? IS NULL OR runs.status = ?)
-      AND (? IS NULL OR runs.created_at < ? OR (runs.created_at = ? AND runs.run_id > ?))
-      ORDER BY runs.created_at DESC, runs.run_id ASC
-      LIMIT ?
-    `);
+    this.listRunsQuery = prepareListRunsQuery(this.db);
     this.insertSnapshot = this.db.prepare<
       [string, Id, number, number, string, string, string | null]
     >(
@@ -380,7 +385,9 @@ export class SqliteEventStore implements EventStore {
 
     try {
       const cursor = opts.cursor === undefined ? undefined : decodeCursor(opts.cursor);
+      const continuationParams = continuationRunParams(opts.continuationOf);
       const rows = this.listRunsQuery.all(
+        ...continuationParams,
         opts.status ?? null,
         opts.status ?? null,
         cursor?.createdAt ?? null,

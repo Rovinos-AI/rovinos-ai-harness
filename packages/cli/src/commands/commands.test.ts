@@ -25,6 +25,7 @@ import {
   FakeClock,
   Event as EventSchema,
   Id,
+  InspectResultSchema,
   JsonValue,
   RunResultSchema,
   Sha256Hex,
@@ -38,6 +39,7 @@ import { ExitCode } from "../exit-codes.js";
 import { createOutput } from "../output.js";
 import { main } from "../main.js";
 import { cancelCommand } from "./cancel.js";
+import { continueCommand } from "./continue.js";
 import { inspectCommand } from "./inspect.js";
 import { resumeCommand } from "./resume.js";
 import { runCommand } from "./run.js";
@@ -248,6 +250,151 @@ afterEach(async () => {
 });
 
 describe("run, resume, and inspect CLI commands", () => {
+  it("continues a run through a new log and exposes its continuation in inspect", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-continue-"));
+    const inputPath = await createFile("input.json", '{"goal":"original question"}');
+    const followUpPath = await createFile("follow-up.json", '{"goal":"follow-up question"}');
+    const model = new FakeModelPort([
+      completion("original answer"),
+      completion("follow-up answer"),
+    ]);
+    const harness = createHarness(model);
+
+    const runCode = await main(["--json", "run", "--input", inputPath], harness.context, [
+      runCommand,
+    ]);
+    const originalResult = parseJson(RunResultSchema, harness.stdout.join(""));
+    const originalHead = await harness.store.head(originalResult.runId);
+    harness.stdout.length = 0;
+    harness.stderr.length = 0;
+
+    const continueCode = await main(
+      ["--json", "continue", originalResult.runId, "--input", followUpPath],
+      harness.context,
+      [continueCommand],
+    );
+    const continuedResult = parseJson(RunResultSchema, harness.stdout.join(""));
+    const continuationEvents = await readEvents(harness.store, continuedResult.runId);
+
+    expect(runCode).toBe(ExitCode.ok);
+    expect(continueCode).toBe(ExitCode.ok);
+    expect(continuedResult.runId).not.toBe(originalResult.runId);
+    expect(await harness.store.head(originalResult.runId)).toBe(originalHead);
+    expect(continuationEvents[0]).toMatchObject({
+      type: "run_created",
+      continuationOf: originalResult.runId,
+    });
+    expect(continuationEvents.find((event) => event.type === "run_input")).toMatchObject({
+      type: "run_input",
+      inputKind: "follow_up",
+    });
+    expect(model.requests[1]?.request.messages.flatMap(({ parts }) => parts)).toEqual(
+      expect.arrayContaining([
+        { type: "text", text: '{"goal":"original question"}' },
+        { type: "text", text: "original answer" },
+        { type: "text", text: '{"goal":"follow-up question"}' },
+      ]),
+    );
+
+    harness.stdout.length = 0;
+    await main(["--json", "inspect", originalResult.runId], harness.context, [inspectCommand]);
+    expect(parseJson(InspectResultSchema, harness.stdout.join("")).continuations).toEqual([
+      continuedResult.runId,
+    ]);
+  });
+
+  it("reads follow-up input from stdin and rejects unsupported stdin chunks", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-continue-stdin-"));
+    const inputPath = await createFile("input.json", '{"goal":"original question"}');
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process, "stdin");
+    if (stdinDescriptor === undefined) {
+      throw new Error("Expected standard input descriptor.");
+    }
+    const harness = createHarness(
+      new FakeModelPort([completion("original answer"), completion("follow-up answer")]),
+    );
+    try {
+      await main(["--json", "run", "--input", inputPath], harness.context, [runCommand]);
+      const original = parseJson(RunResultSchema, harness.stdout.join(""));
+      harness.stdout.length = 0;
+      Object.defineProperty(process, "stdin", {
+        configurable: true,
+        value: Readable.from(['{"goal":"follow-up ', Buffer.from("from stdin"), '"}']),
+      });
+
+      const continueCode = await main(
+        ["--json", "continue", original.runId, "--input", "-"],
+        harness.context,
+        [continueCommand],
+      );
+      expect(continueCode).toBe(ExitCode.ok);
+      expect(parseJson(RunResultSchema, harness.stdout.join("")).status).toBe("completed");
+
+      Object.defineProperty(process, "stdin", {
+        configurable: true,
+        value: Readable.from([42]),
+      });
+      harness.stdout.length = 0;
+      const invalidCode = await main(
+        ["--json", "continue", original.runId, "--input", "-"],
+        harness.context,
+        [continueCommand],
+      );
+      expect(invalidCode).toBe(ExitCode.failure);
+      expect(harness.stderr).toContain("input_invalid\n");
+    } finally {
+      Object.defineProperty(process, "stdin", stdinDescriptor);
+    }
+  });
+
+  it("reports failed and suspended continuation outcomes with stable CLI exit codes", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-continue-status-"));
+    const inputPath = await createFile("input.json", '{"goal":"follow-up"}');
+    let modelCalls = 0;
+    const failedModel: ModelPort = {
+      complete: () => {
+        modelCalls += 1;
+        return modelCalls === 1
+          ? Promise.resolve(completion("original answer"))
+          : Promise.reject(new Error("synthetic model failure"));
+      },
+    };
+    const failedHarness = createHarness(failedModel);
+    await main(["--json", "run", "--input", inputPath], failedHarness.context, [runCommand]);
+    const failedSource = parseJson(RunResultSchema, failedHarness.stdout.join("")).runId;
+    failedHarness.stdout.length = 0;
+    const failedCode = await main(
+      ["--json", "continue", failedSource, "--input", inputPath],
+      failedHarness.context,
+      [continueCommand],
+    );
+    expect(failedCode).toBe(ExitCode.failure);
+    expect(failedHarness.stderr).toContain("run_failed\n");
+
+    const shutdown = new TestShutdownProcess();
+    let suspendOnContinuation = false;
+    const suspendingModel: ModelPort = {
+      complete: () => {
+        if (suspendOnContinuation) {
+          shutdown.emit("SIGTERM");
+        }
+        return Promise.resolve(completion("answer"));
+      },
+    };
+    const suspendedHarness = createHarness(suspendingModel, config, new FakeToolPort(), shutdown);
+    await main(["--json", "run", "--input", inputPath], suspendedHarness.context, [runCommand]);
+    const suspendedSource = parseJson(RunResultSchema, suspendedHarness.stdout.join("")).runId;
+    suspendedHarness.stdout.length = 0;
+    suspendOnContinuation = true;
+    const suspendedCode = await main(
+      ["--json", "continue", suspendedSource, "--input", inputPath],
+      suspendedHarness.context,
+      [continueCommand],
+    );
+    expect(suspendedCode).toBe(ExitCode.suspended);
+    expect(suspendedHarness.stderr).toContain("suspended\n");
+  });
+
   it("runs a JSON input with a scripted fake model and emits one JSON result", async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-run-"));
     const inputPath = await createFile(

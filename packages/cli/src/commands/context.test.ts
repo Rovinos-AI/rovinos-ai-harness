@@ -90,6 +90,7 @@ async function harness() {
     clock: { now: () => 0 },
     ids: { next: () => runId },
     run: modelCall,
+    continueRun: modelCall,
     resume: modelCall,
     cancel: modelCall,
   }));

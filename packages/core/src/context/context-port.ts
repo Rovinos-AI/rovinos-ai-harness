@@ -51,8 +51,15 @@ export class StrategyContextPort implements ContextPort {
   }
 
   /** {@inheritDoc ContextPort.build} */
-  async build(events: readonly Event[]): Promise<Message[]> {
-    const result = await this.strategy.build({ ...this.buildOptions, events });
+  async build(
+    events: readonly Event[],
+    previousEventLogs?: readonly (readonly Event[])[],
+  ): Promise<Message[]> {
+    const result = await this.strategy.build({
+      ...this.buildOptions,
+      events,
+      ...(previousEventLogs === undefined ? {} : { previousEventLogs }),
+    });
     return result.messages;
   }
 

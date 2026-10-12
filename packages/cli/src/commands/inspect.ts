@@ -50,6 +50,17 @@ export const inspectCommand: CommandModule = {
           }
           const { foldRunState } = await import("@harness/core");
           const state = foldRunState(events);
+          const continuations: Id[] = [];
+          let cursor: string | undefined;
+          do {
+            const page = await runtime.store.listRuns({
+              continuationOf: runId,
+              limit: 100,
+              ...(cursor === undefined ? {} : { cursor }),
+            });
+            continuations.push(...page.runs.map(({ runId: continuationId }) => continuationId));
+            cursor = page.nextCursor;
+          } while (cursor !== undefined);
           const eventSummaries: InspectEvent[] = events.slice(-10).map((event) => ({
             type: event.type,
             seq: event.seq,
@@ -65,6 +76,7 @@ export const inspectCommand: CommandModule = {
               approvalId: approval.approvalId,
               toolId: state.pendingToolCalls.get(approval.callId)?.toolId ?? "unknown",
             })),
+            continuations,
             events: eventSummaries,
           };
           const parsed = InspectResultSchema.parse(result);

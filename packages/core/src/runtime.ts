@@ -5,25 +5,25 @@ import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ModelPort, ToolPort } from "./ports.js";
-import { LeaseLostError, RunRecorder } from "./recorder.js";
+import { LeaseLostError } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
-import { runLoop, type RunLoopResult } from "./loop.js";
+import type { RunLoopResult } from "./loop.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
 import type { RoleRegistry } from "./roles.js";
 import { foldRunState } from "./run-state.js";
-import { configHash, SystemIdGenerator, systemClock } from "./runtime-ids.js";
+import { SystemIdGenerator, systemClock } from "./runtime-ids.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool, resolveRuntimeRoles } from "./subagent/runtime.js";
 import { createSqliteStore } from "./runtime-store.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
+import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import type {
   Runtime,
   RuntimeComposition,
   RuntimeConfig,
   RuntimeOverrides,
 } from "./runtime-config.js";
-const POLICY_VERSION = "default";
 const CANCEL_REQUESTED = "cancel_requested";
 const CANCEL_MONITOR_DEGRADED = "cancel_monitor_degraded";
 const CANCEL_POLL_INTERVAL_MS = 25;
@@ -280,40 +280,6 @@ async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | und
   return undefined;
 }
 
-function startRun(options: {
-  readonly composition: RuntimeComposition;
-  readonly tool: ToolPort;
-  readonly goal: JsonValue;
-}): Promise<RunLoopResult> {
-  const { config, overrides, clock, ids, store, model, context } = options.composition;
-  const runId = ids.next();
-  return withRunControl({
-    store,
-    runId,
-    firstNewSeq: 0,
-    processLike: overrides.processLike ?? defaultProcessLike,
-    graceMs: config.run.shutdownGraceMs,
-    operation: async (signal) => {
-      const recorder = new RunRecorder(store, runId, ids.next(), 0, clock);
-      return runLoop({
-        recorder,
-        clock,
-        model,
-        tool: options.tool,
-        context,
-        ids,
-        goal: options.goal,
-        signal,
-        scopeId: runId,
-        budgets: config.run.budgets,
-        checkpointEveryEvents: config.run.checkpointEveryEvents,
-        configHash: configHash(config),
-        policyVersion: POLICY_VERSION,
-      });
-    },
-  });
-}
-
 function composeRuntime(
   options: RuntimeComposition & {
     readonly roles: RoleRegistry;
@@ -332,11 +298,21 @@ function composeRuntime(
     roles,
     scopes,
   });
+  const runWithControl: RunControl = (runId, operation) =>
+    withRunControl({
+      store,
+      runId,
+      firstNewSeq: 0,
+      processLike: overrides.processLike ?? defaultProcessLike,
+      graceMs: config.run.shutdownGraceMs,
+      operation,
+    });
   return {
     store,
     clock,
     ids,
-    run: (goal) => startRun({ composition: options, tool, goal }),
+    run: (goal) => startRun(options, tool, goal, runWithControl),
+    continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume: async (runId) => {
       const firstNewSeq = await store.head(runId);
       return withRunControl({

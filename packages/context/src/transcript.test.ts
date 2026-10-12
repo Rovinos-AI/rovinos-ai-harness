@@ -104,6 +104,57 @@ async function readGolden(name: string): Promise<TranscriptGroup[]> {
 }
 
 describe("eventsToTranscript", () => {
+  it("appends continuation logs in order and pins only the newest run input", () => {
+    const previousEvents = [
+      runInput(0, "original question"),
+      modelResponse(1, [{ type: "text", text: "original answer" }]),
+    ];
+    const followUp = {
+      ...envelope(0),
+      type: "run_input" as const,
+      input: "follow-up question",
+      inputKind: "follow_up" as const,
+    };
+
+    expect(eventsToTranscript([previousEvents, [followUp]])).toMatchObject([
+      { pinned: false, messages: [{ parts: [{ text: "original question" }] }] },
+      { pinned: false, messages: [{ parts: [{ text: "original answer" }] }] },
+      { pinned: true, messages: [{ parts: [{ text: "follow-up question" }] }] },
+    ]);
+  });
+
+  it("allows compaction to remove an earlier run input from the continuation chain", () => {
+    const previousEvents = [
+      runInput(0, "superseded question"),
+      modelResponse(1, [{ type: "text", text: "superseded answer" }]),
+      {
+        ...envelope(2),
+        type: "context_compacted" as const,
+        fromSeq: 0,
+        toSeq: 1,
+        strategy: "summary" as const,
+        strategyVersion: "v1",
+        summary: "the earlier question was answered",
+      },
+    ];
+    const followUp = {
+      ...envelope(0),
+      type: "run_input" as const,
+      input: "new question",
+      inputKind: "follow_up" as const,
+    };
+
+    expect(eventsToTranscript([previousEvents, [followUp]])).toMatchObject([
+      {
+        pinned: true,
+        messages: [
+          { parts: [{ text: "Summary of earlier work: the earlier question was answered" }] },
+        ],
+      },
+      { pinned: true, messages: [{ parts: [{ text: "new question" }] }] },
+    ]);
+  });
+
   it.each([
     ["plain-run", [runInput(0, "hello"), modelResponse(1, [{ type: "text", text: "answer" }])]],
     [

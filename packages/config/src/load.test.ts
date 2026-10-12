@@ -341,6 +341,11 @@ describe("loadConfig", () => {
       run: {
         checkpointEveryEvents: 20,
         shutdownGraceMs: 20_000,
+        continuations: {
+          allowFromFailed: false,
+          maxChainLength: 50,
+          inheritBudgets: false,
+        },
         resume: { onNonIdempotent: "escalate" },
         budgets: { maxSteps: 200, maxWallClockMs: 3_600_000, countSuspendedTime: false },
       },

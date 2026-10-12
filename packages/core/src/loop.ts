@@ -10,22 +10,29 @@ import {
 } from "@harness/schemas";
 import type { Context, Link } from "@opentelemetry/api";
 import { activeRuns } from "@harness/telemetry";
-import { BudgetTracker } from "./budgets.js";
+import { BudgetTracker, type BudgetViolation } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
 import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from "./run-state.js";
 import type { RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
-import { RUN_SPAN } from "./spans.js";
+import { RUN_SPAN, runSpanAttributes } from "./spans.js";
 import type { ModelStepResult } from "./steps/model-step.js";
 import { requestModel } from "./steps/request-model.js";
 import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { toolStep } from "./steps/tool-step.js";
 import type { PreparedToolCall } from "./steps/prepare-tool.js";
-import type { ContextPort, IdGenerator, ModelPort, NewRunMetadata, ToolPort } from "./ports.js";
+import type {
+  ContextPort,
+  IdGenerator,
+  ModelPort,
+  NewRunMetadata,
+  RunContinuationMetadata,
+  ToolPort,
+} from "./ports.js";
 import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
 
 /** Dependencies and initial input for a new run. */
-export interface RunLoopOptions extends NewRunMetadata {
+export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata {
   readonly recorder: RunRecorder;
   readonly clock: Clock;
   readonly model: ModelPort;
@@ -36,19 +43,14 @@ export interface RunLoopOptions extends NewRunMetadata {
   readonly signal: AbortSignal;
   /** Per-run limits sourced from the validated run configuration. */
   readonly budgets: RunConfig["budgets"];
+  /** Optional inherited budget failure to record before executing this run. */
+  readonly initialBudgetViolation?: BudgetViolation;
   readonly checkpointEveryEvents?: RunConfig["checkpointEveryEvents"];
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
   /** Optional summarization compaction, checked before every model call. */
   readonly compaction?: CompactionRuntimeOptions;
-  /** Parent run and tool call for a child run. */
-  readonly parentRunId?: Id;
-  readonly parentCallId?: Id;
-  /** Shared vault scope for this run tree. */
-  readonly scopeId?: Id;
-  /** Run nesting depth; roots default to zero. */
-  readonly depth?: number;
   /** Parent context and link for a child run's root span. */
   readonly rootSpanParent?: Context;
   readonly rootSpanLinks?: readonly Link[];
@@ -87,7 +89,7 @@ class RunAbortedError extends HarnessError {
 export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
   const events: Event[] = [];
   let result: RunLoopResult | undefined;
-  const budgetTracker = new BudgetTracker(options.budgets);
+  const budgetTracker = new BudgetTracker(options.budgets, options.initialBudgetViolation);
   const startEvents: EventPartial[] = [
     {
       type: "run_created",
@@ -96,20 +98,21 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
       policyVersion: options.policyVersion,
       ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
       ...(options.parentCallId === undefined ? {} : { parentCallId: options.parentCallId }),
+      ...(options.continuationOf === undefined ? {} : { continuationOf: options.continuationOf }),
       ...(options.scopeId === undefined ? {} : { scopeId: options.scopeId }),
       depth: options.depth ?? 0,
     },
-    { type: "run_input", v: 1, input: options.goal, inputKind: "initial" },
+    {
+      type: "run_input",
+      v: 1,
+      input: options.goal,
+      inputKind: options.inputKind ?? "initial",
+    },
     { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
   ];
   await options.recorder.withStepSpan(
     RUN_SPAN,
-    {
-      ...(options.parentRunId === undefined
-        ? {}
-        : { "harness.run.parent_id": options.parentRunId }),
-      "harness.run.depth": options.depth ?? 0,
-    },
+    runSpanAttributes(options),
     async () => {
       const recorded = await options.recorder.recordBatch(startEvents);
       const last = recorded.at(-1);
@@ -306,7 +309,10 @@ async function prepareModelStep(
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<{ readonly context: Message[]; readonly deadlineTs: number; readonly event?: Event }> {
-  const context = await options.context.build(events.slice());
+  const context =
+    options.previousEventLogs === undefined
+      ? await options.context.build(events.slice())
+      : await options.context.build(events.slice(), options.previousEventLogs);
   const preflight = await preflightModelBudget({
     budgetTracker: execution.budgetTracker,
     checkpointer: execution.checkpointer,

@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import type { Id } from "@harness/schemas";
 import type { VaultRunReader } from "./sentinel/run-values.js";
@@ -12,6 +16,25 @@ export function createTestTracerProvider(): BasicTracerProvider {
       generateSpanId: () => "b".repeat(16),
     },
   });
+}
+
+/** Creates a deterministic tracer provider that retains finished spans for assertions. */
+export function createTestSpanCollector(): {
+  readonly provider: BasicTracerProvider;
+  getFinishedSpans: () => ReturnType<InMemorySpanExporter["getFinishedSpans"]>;
+} {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    idGenerator: {
+      generateTraceId: () => "a".repeat(32),
+      generateSpanId: () => "b".repeat(16),
+    },
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
+  return {
+    provider,
+    getFinishedSpans: () => exporter.getFinishedSpans(),
+  };
 }
 
 /** Creates an enabled async-local context manager for tests. */

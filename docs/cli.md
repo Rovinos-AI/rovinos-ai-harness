@@ -45,6 +45,20 @@ exceeded, and `1` means the run failed.
 checkpoint. The human and JSON output and exit codes match `harness run`. Resolve a pending approval
 through the approval API before resuming.
 
+## `harness continue`
+
+`harness continue <runId> --input <json-file|->` starts a new run with a follow-up input in the same
+`{"goal":"..."}` format as `harness run`. By default only completed runs can be continued; set
+`run.continuations.allowFromFailed: true` to allow failed runs. The original event log remains
+unchanged, and `run_created.continuationOf` links the new run to its source. Continuations branch
+independently, so multiple follow-ups to one run do not include each other's messages. Tokens remain
+in the shared run scope. `run.continuations.maxChainLength` defaults to 50, and
+`run.continuations.inheritBudgets: true` subtracts ancestor usage from the new run's configured
+budgets. `harness inspect <runId>` lists direct continuations.
+
+Non-terminal sources report `run_not_terminal`; a chain at its configured limit reports
+`continuation_chain_too_long`.
+
 ## `harness inspect`
 
 `harness inspect <runId> [--show-content]` displays the status, step count, token and cost usage,
@@ -115,7 +129,7 @@ never included in CLI error output.
 | Error code | Exit code |
 | --- | --- |
 | `usage` | `2` |
-| `run_already_terminal`, `cancel_conflict` | `1` |
+| `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
 | `config_invalid` | `3` |
 | `policy_denied`, `approver_is_requester` | `4` |
 | `suspended`, `run_awaiting_approval` | `5` |
