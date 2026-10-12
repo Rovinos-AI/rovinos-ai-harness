@@ -16,7 +16,8 @@ email address:
 
 ```yaml
 match:
-  tools: mail.send
+  tools:
+    - mail.send
   args:
     - pointer: /to
       op: tokenType

@@ -29,6 +29,14 @@ export const ArgMatcherSchema = z
   .strict()
   .superRefine((matcher, context) => {
     if (matcher.op === "exists") {
+      if (Object.hasOwn(matcher, "value")) {
+        context.addIssue({
+          code: "custom",
+          path: ["value"],
+          message: "The exists operation does not accept a value.",
+          params: { errorCode: "policy_match_value_unexpected" },
+        });
+      }
       return;
     }
     if (matcher.value === undefined) {
@@ -70,7 +78,7 @@ export const ArgMatcherSchema = z
         });
       }
       try {
-        new RegExp(matcher.value);
+        new RegExp(matcher.value, "u");
       } catch {
         context.addIssue({
           code: "custom",
@@ -98,7 +106,10 @@ export type ArgMatcher = z.infer<typeof ArgMatcherSchema>;
 
 const RuleMatchSchema = z
   .object({
-    tools: z.union([ToolPatternSchema, z.array(ToolPatternSchema).min(1)]),
+    tools: z.union([
+      z.literal("*"),
+      z.array(ToolPatternSchema.refine((pattern) => pattern !== "*")).min(1),
+    ]),
     args: z.array(ArgMatcherSchema).optional(),
     context: z
       .object({
@@ -119,8 +130,8 @@ export const RuleSchema = z
     decision: z.enum(["allow", "ask", "deny"]),
     reason: Code,
     editable: z.array(JsonPointerSchema).optional(),
-    approvalTtlMs: z.number().int().nonnegative().optional(),
-    escalateAfterMs: z.number().int().nonnegative().optional(),
+    approvalTtlMs: z.number().int().positive().optional(),
+    escalateAfterMs: z.number().int().positive().optional(),
   })
   .strict()
   .superRefine((rule, context) => {
@@ -149,6 +160,18 @@ export const RuleSchema = z
         path: ["escalateAfterMs"],
         message: "Escalation requires an ask decision.",
         params: { errorCode: "policy_escalation_requires_ask" },
+      });
+    }
+    if (
+      rule.escalateAfterMs !== undefined &&
+      rule.approvalTtlMs !== undefined &&
+      rule.escalateAfterMs >= rule.approvalTtlMs
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["escalateAfterMs"],
+        message: "Escalation must occur before approval expiry.",
+        params: { errorCode: "policy_escalation_after_expiry" },
       });
     }
   });

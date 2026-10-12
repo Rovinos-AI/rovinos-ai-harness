@@ -28,9 +28,9 @@ function canonicalJson(value: unknown): string {
     return `[${value.map(canonicalJson).join(",")}]`;
   }
   if (typeof value === "object") {
-    const entries = Object.entries(value).sort(([left], [right]) =>
-      left < right ? -1 : Number(left > right),
-    );
+    const entries = Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => (left < right ? -1 : Number(left > right)));
     return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
   }
   throw new TypeError("Policy document is not JSON.");

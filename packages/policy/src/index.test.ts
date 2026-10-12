@@ -2,6 +2,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseYaml } from "@harness/schemas";
 import { ArgMatcherSchema, loadPolicy, PolicyDocumentSchema, policyVersion } from "./index.js";
@@ -84,7 +85,7 @@ describe("PolicyDocumentSchema", () => {
     ).toBe(false);
   });
 
-  it.each(["mail.*", "*", ["mail.send", "fs.*"]])("accepts tool pattern %s", (tools) => {
+  it.each([["mail.*"], "*", ["mail.send", "fs.*"]])("accepts tool pattern %s", (tools) => {
     expect(
       PolicyDocumentSchema.safeParse({
         version: 1,
@@ -92,6 +93,26 @@ describe("PolicyDocumentSchema", () => {
         rules: [{ id: "valid", match: { tools }, decision: "deny", reason: "blocked" }],
       }).success,
     ).toBe(true);
+  });
+
+  it.each(["mail.send", "mail.*"])("rejects scalar tool pattern %s", (tools) => {
+    expect(
+      PolicyDocumentSchema.safeParse({
+        version: 1,
+        defaultDecision: "deny",
+        rules: [{ id: "invalid", match: { tools }, decision: "deny", reason: "blocked" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a global wildcard inside the tool pattern array", () => {
+    expect(
+      PolicyDocumentSchema.safeParse({
+        version: 1,
+        defaultDecision: "deny",
+        rules: [{ id: "invalid", match: { tools: ["*"] }, decision: "deny", reason: "blocked" }],
+      }).success,
+    ).toBe(false);
   });
 
   it.each(["mail.*.send", "mail.*send", "*.*", "mail.**", "bad~pattern"])(
@@ -125,6 +146,9 @@ describe("PolicyDocumentSchema", () => {
     expect(
       ArgMatcherSchema.safeParse({ pointer: "/value", op: "matches", value: "[" }).success,
     ).toBe(false);
+    expect(
+      ArgMatcherSchema.safeParse({ pointer: "/value", op: "matches", value: "\\-" }).success,
+    ).toBe(false);
   });
 
   it("requires operation-specific values and strict object keys", () => {
@@ -138,10 +162,57 @@ describe("PolicyDocumentSchema", () => {
     expect(
       ArgMatcherSchema.safeParse({ pointer: "/value", op: "exists", extra: true }).success,
     ).toBe(false);
+    expect(
+      ArgMatcherSchema.safeParse({ pointer: "/value", op: "exists", value: false }).success,
+    ).toBe(false);
+  });
+
+  it("requires positive approval timings and escalation before expiry", () => {
+    const rule = {
+      id: "timed_approval",
+      match: { tools: ["mail.send"] },
+      decision: "ask",
+      reason: "approval_required",
+    };
+    const document = (timedRule: object) =>
+      PolicyDocumentSchema.safeParse({
+        version: 1,
+        defaultDecision: "deny",
+        rules: [timedRule],
+      });
+
+    expect(document({ ...rule, approvalTtlMs: 0 }).success).toBe(false);
+    expect(document({ ...rule, escalateAfterMs: 0 }).success).toBe(false);
+    const escalationAtExpiry = document({
+      ...rule,
+      approvalTtlMs: 10,
+      escalateAfterMs: 10,
+    });
+    expect(escalationAtExpiry.success).toBe(false);
+    if (!escalationAtExpiry.success) {
+      expect(escalationAtExpiry.error.issues).toContainEqual(
+        expect.objectContaining({
+          code: "custom",
+          params: { errorCode: "policy_escalation_after_expiry" },
+        }),
+      );
+    }
+    expect(
+      document({ ...rule, approvalTtlMs: 10, escalateAfterMs: 9 }).success,
+    ).toBe(true);
   });
 });
 
 describe("loadPolicy and policyVersion", () => {
+  it("loads the documented example policy", async () => {
+    const examplePath = fileURLToPath(new URL("../../../examples/policy.yaml", import.meta.url));
+    await expect(loadPolicy(examplePath)).resolves.toMatchObject({
+      version: 1,
+      defaultDecision: "ask",
+      rules: [{ id: "ask_email_send" }],
+    });
+  });
+
   it("loads YAML and JSON policy files from disk", async () => {
     const directory = await mkdtemp(join(tmpdir(), "policy-schema-"));
     try {
@@ -190,5 +261,22 @@ describe("loadPolicy and policyVersion", () => {
     };
     expect(policyVersion(first)).toBe(policyVersion(second));
     expect(policyVersion(first)).toMatch(/^pol-[0-9a-f]{12}$/u);
+  });
+
+  it("ignores explicitly undefined optional properties when versioning", () => {
+    const document = parseYaml(PolicyDocumentSchema, validYaml);
+    const withoutDescription = {
+      ...document,
+      rules: document.rules.map((rule) => {
+        const result = { ...rule };
+        delete result.description;
+        return result;
+      }),
+    };
+    const withUndefinedDescription = {
+      ...withoutDescription,
+      rules: withoutDescription.rules.map((rule) => ({ ...rule, description: undefined })),
+    };
+    expect(policyVersion(withUndefinedDescription)).toBe(policyVersion(withoutDescription));
   });
 });
