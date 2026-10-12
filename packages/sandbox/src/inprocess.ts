@@ -40,8 +40,37 @@ export class InProcessBackendError extends HarnessError {
 export class SandboxWorkspacePathError extends HarnessError {
   readonly code = "sandbox_workspace_path_invalid";
 
+  /** Create a path error without including workspace paths in the message. */
   constructor() {
     super("The requested working directory is outside the workspace.");
+  }
+}
+
+class SandboxSpawnError extends HarnessError {
+  readonly code = "sandbox_exec_spawn_failed";
+
+  /** Create a closed error without exposing command or path contents. */
+  constructor() {
+    super("The command could not be started.");
+  }
+}
+
+function spawnCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  environment: NodeJS.ProcessEnv,
+) {
+  try {
+    return spawn(command, args, {
+      shell: false,
+      detached: true,
+      cwd,
+      env: environment,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch {
+    throw new SandboxSpawnError();
   }
 }
 
@@ -180,16 +209,13 @@ export class InProcessBackend implements SandboxBackend {
     }
     const command = spec.argv[0];
     if (command === undefined || command.length === 0) {
-      throw new Error("An executable is required.");
+      throw new SandboxSpawnError();
     }
     const cwd = await resolveWorkspacePath(this.#workspaceRoot, spec.cwd);
     const output = new CapturedOutput(spec.limits.outputBytes);
-    const child = spawn(command, spec.argv.slice(1), {
-      shell: false,
-      detached: true,
-      cwd,
-      env: { PATH: process.env.PATH ?? "", ...spec.env },
-      stdio: ["pipe", "pipe", "pipe"],
+    const child = spawnCommand(command, spec.argv.slice(1), cwd, {
+      PATH: process.env.PATH ?? "",
+      ...spec.env,
     });
 
     return new Promise((resolve, reject) => {
@@ -220,7 +246,7 @@ export class InProcessBackend implements SandboxBackend {
         clearTimeout(timeout);
         signal.removeEventListener("abort", abort);
         if (spawnFailed) {
-          reject(new Error("The command could not be started."));
+          reject(new SandboxSpawnError());
           return;
         }
         resolve({

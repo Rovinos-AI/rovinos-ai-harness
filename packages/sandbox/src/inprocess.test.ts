@@ -239,6 +239,9 @@ describe("InProcessBackend", () => {
       await expect(resolveWorkspacePath(workspaceRoot, "../outside")).rejects.toBeInstanceOf(
         SandboxWorkspacePathError,
       );
+      await expect(resolveWorkspacePath(workspaceRoot, "missing-directory")).rejects.toBeInstanceOf(
+        SandboxWorkspacePathError,
+      );
       await expect(resolveWorkspacePath(workspaceRoot, outside)).rejects.toBeInstanceOf(
         SandboxWorkspacePathError,
       );
@@ -259,6 +262,6 @@ describe("InProcessBackend", () => {
         makeSpec(["/definitely/not/a/real/executable"]),
         new AbortController().signal,
       ),
-    ).rejects.toThrow("The command could not be started.");
+    ).rejects.toMatchObject({ code: "sandbox_exec_spawn_failed" });
   });
 });
