@@ -2,7 +2,7 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HarnessConfigSchema, loadConfig } from "@harness/config";
+import { HarnessConfigSchema, loadConfig as loadConfigFromFile } from "@harness/config";
 import { DoctorResultsSchema, parseJson, type DoctorCheckStatus } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
@@ -13,11 +13,11 @@ import { createDoctorCommand } from "./doctor.js";
 
 let temporaryDirectory: string | undefined;
 
-function createContext(loadConfig: CliContext["loadConfig"]) {
+function createContext(loadConfigForTest: CliContext["loadConfig"]) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const context: CliContext = {
-    loadConfig,
+    loadConfig: loadConfigForTest,
     out: createOutput({
       stdout: (text) => stdout.push(text),
       stderr: (text) => stderr.push(text),
@@ -115,17 +115,13 @@ describe("harness doctor", () => {
       expect(output).not.toContain(fileSecret);
       expect(output).not.toContain(secretFile);
       expect(stderr).toEqual(["doctor_failed\n"]);
-      if (argv.includes("--json")) {
-        expect(parseJson(DoctorResultsSchema, stdout[0] ?? "")).toContainEqual(
-          expect.objectContaining({
-            id: "secret_refs_resolvable",
-            status: "fail",
-            code: "secret_not_found",
-          }),
-        );
-      } else {
-        expect(stdout.join("")).toContain("secret_not_found");
-      }
+      const secretFailureIsPresent = argv.includes("--json")
+        ? parseJson(DoctorResultsSchema, stdout[0] ?? "").some(
+            ({ id, status, code }) =>
+              id === "secret_refs_resolvable" && status === "fail" && code === "secret_not_found",
+          )
+        : stdout.join("").includes("secret_not_found");
+      expect(secretFailureIsPresent).toBe(true);
     }
   });
 
@@ -133,12 +129,8 @@ describe("harness doctor", () => {
     const dataDirectory = await createDataDirectory();
     const invalidValue = "doctor-invalid-config-sensitive-value";
     const configPath = join(dataDirectory, "harness.config.yaml");
-    await writeFile(
-      configPath,
-      `run:\n  budgets:\n    maxSteps: ${invalidValue}\n`,
-      "utf8",
-    );
-    const { context, stdout, stderr } = createContext(() => loadConfig({ configPath }));
+    await writeFile(configPath, `run:\n  budgets:\n    maxSteps: ${invalidValue}\n`, "utf8");
+    const { context, stdout, stderr } = createContext(() => loadConfigFromFile({ configPath }));
 
     const exitCode = await main(["--json", "doctor"], context, [createDoctorCommand()]);
     const output = stdout.join("") + stderr.join("");

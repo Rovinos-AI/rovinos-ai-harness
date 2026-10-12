@@ -22,8 +22,35 @@ describe("getConfigSecretRefs", () => {
           systemPrompt: "env:PRODUCTION",
         },
       ],
+      servers: [
+        {
+          id: "stdio",
+          transport: {
+            kind: "stdio",
+            command: "server",
+            env: {
+              API_TOKEN: "env:SERVER_TOKEN",
+              PLAIN_VALUE: "an ordinary value",
+            },
+          },
+        },
+        {
+          id: "http",
+          transport: {
+            kind: "http",
+            url: "http://localhost:3000",
+            headers: {
+              Authorization: "file:/run/secrets/server-token",
+            },
+          },
+        },
+      ],
     });
 
-    expect(getConfigSecretRefs(config)).toEqual(["env:DOCTOR_TEST_API_KEY"]);
+    expect(getConfigSecretRefs(config)).toEqual([
+      "env:DOCTOR_TEST_API_KEY",
+      "env:SERVER_TOKEN",
+      "file:/run/secrets/server-token",
+    ]);
   });
 });

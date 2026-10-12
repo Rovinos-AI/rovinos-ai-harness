@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { SecretRef } from "@harness/schemas";
+import { SecretRefSchema, type SecretRef } from "@harness/schemas";
 import type { HarnessConfig } from "./schema.js";
+
+function parseSecretRefs(values: readonly string[]): SecretRef[] {
+  return values.flatMap((value) => {
+    const parsed = SecretRefSchema.safeParse(value);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
 
 /**
  * Returns secret references from fields declared as `SecretRef` in the config schema.
@@ -9,7 +16,13 @@ import type { HarnessConfig } from "./schema.js";
  * @returns Schema-owned secret references, excluding arbitrary configuration strings.
  */
 export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
-  return config.models.providers.flatMap((provider) =>
+  const modelRefs = config.models.providers.flatMap((provider) =>
     provider.apiKey === undefined ? [] : [provider.apiKey],
   );
+  const serverRefs = config.servers.flatMap(({ transport }) =>
+    transport.kind === "stdio"
+      ? parseSecretRefs(Object.values(transport.env ?? {}))
+      : parseSecretRefs(Object.values(transport.headers ?? {})),
+  );
+  return [...modelRefs, ...serverRefs];
 }

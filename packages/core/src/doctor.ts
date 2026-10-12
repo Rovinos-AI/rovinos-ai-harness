@@ -153,10 +153,7 @@ const initialChecks: DoctorCheck[] = [
             return result("fail", "check_timeout");
           }
           const errorCode = knownSecretErrorCode(error);
-          if (
-            errorCode === "secret_resolver_unavailable" &&
-            parsed.data.startsWith("akv:")
-          ) {
+          if (errorCode === "secret_resolver_unavailable" && parsed.data.startsWith("akv:")) {
             firstWarning ??= result("warn", errorCode, safeReferenceName(parsed.data));
           } else {
             firstFailure ??= result("fail", errorCode, safeReferenceName(parsed.data));
@@ -221,12 +218,10 @@ async function runCheck(
     }, timeoutMs);
   });
   try {
-    const checkResult = check
-      .run({ ...ctx, signal: controller.signal })
-      .then(
-        (value) => ({ id: check.id, ...value }),
-        () => ({ id: check.id, ...result("fail", "check_failed") }),
-      );
+    const checkResult = check.run({ ...ctx, signal: controller.signal }).then(
+      (value) => ({ id: check.id, ...value }),
+      () => ({ id: check.id, ...result("fail", "check_failed") }),
+    );
     return await Promise.race([checkResult, timedOut]);
   } catch {
     return { id: check.id, ...result("fail", "check_failed") };

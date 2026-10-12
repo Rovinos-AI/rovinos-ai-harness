@@ -2,7 +2,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SecretRefSchema, type DoctorCheckStatus } from "@harness/schemas";
+import { SecretRefSchema } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DOCTOR_TIMEOUT_MS,
@@ -106,16 +106,23 @@ describe("doctor registry", () => {
     const lateRejectingCheck: DoctorCheck = {
       id: "late_reject",
       title: "Late rejection",
-      run: (ctx) =>
-        new Promise<DoctorCheckStatus>((_, reject) => {
+      run: async (ctx) => {
+        await new Promise<void>((resolve) => {
           ctx.signal?.addEventListener(
             "abort",
             () => {
-              setTimeout(() => reject(new Error("late failure")), 5);
+              resolve();
             },
             { once: true },
           );
-        }),
+        });
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            resolve();
+          }, 5);
+        });
+        throw new Error("late failure");
+      },
     };
     const remainingCheck: DoctorCheck = {
       id: "remaining",
@@ -324,9 +331,11 @@ describe("doctor registry", () => {
         context({
           secretRefs: [ref],
           resolveSecret: () =>
-            Promise.reject(Object.assign(new Error("unavailable"), {
-              code: "secret_resolver_unavailable",
-            })),
+            Promise.reject(
+              Object.assign(new Error("unavailable"), {
+                code: "secret_resolver_unavailable",
+              }),
+            ),
         }),
         [check],
       ),
@@ -365,7 +374,9 @@ describe("doctor registry", () => {
   it("rejects duplicate check ids and exposes only a frozen registry snapshot", () => {
     const checks = doctorChecks();
     expect(Object.isFrozen(checks)).toBe(true);
-    expect(() => (checks as DoctorCheck[]).splice(0, 1)).toThrow();
+    expect(() => {
+      Reflect.apply(Array.prototype.splice, checks, [0, 1]);
+    }).toThrow();
 
     let thrown: unknown;
     try {
