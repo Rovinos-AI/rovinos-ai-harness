@@ -36,7 +36,7 @@ must also be allowlisted. Effective tool prefixes must be unique across servers.
 | `args` | string array | `[]` | Arguments passed to the executable. |
 | `env` | string or `SecretRef` values | omitted | Environment values for the process. Values under secret-looking keys must be `SecretRef`s. |
 | `cwd` | non-empty string | omitted | Working directory for the process. |
-| `inheritEnv` | boolean | `false` | Whether to inherit the parent environment. |
+| `inheritEnv` | boolean | `false` | Whether to inherit `PATH` from the parent environment. The SDK's other default-inherited values are cleared; configured `env` keys are then applied. |
 
 ## HTTP transport
 
@@ -50,6 +50,25 @@ Secret references use `env:NAME`, `file:/absolute/path`, or
 `akv:vault/secret`. Header values are always references. Stdio environment
 values may be literal strings unless the key looks secret-related, such as
 `API_KEY`, `accessToken`, or `password`.
+
+Connections resolve secret references only when opening the transport. Stdio
+servers receive no parent environment values by default. If `inheritEnv` is
+enabled, only the parent `PATH` and explicitly configured keys are available.
+When `inheritEnv` is `false`, `command` must be an absolute path (or an executable
+path runnable without `PATH`) because `PATH` is omitted from the child process.
+The child stderr stream is never forwarded as text; only its byte count is
+available to the safe logger.
+
+The MCP SDK negotiates the protocol automatically unless `protocol` pins an
+era. Tool discovery follows pagination, is capped at 1,000 tools, and caches
+results according to the server-provided `ttlMs`. Modern list-change
+subscriptions refresh the cached tools. Each page is validated against the
+MCP `tools/list` result schema. On modern Streamable HTTP connections, tools
+whose input schema declares `x-mcp-header` parameters are excluded; the
+harness logs only the excluded count (`mcp_tools_excluded`), never tool names.
+`harness doctor` reports a
+`servers_reachable.<serverId>` result for each configured server; its `detail`
+contains the configured server id.
 
 ## Examples
 
