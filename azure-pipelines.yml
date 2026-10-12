@@ -46,6 +46,8 @@ stages:
             displayName: Check SPDX headers
           - script: yarn check:licenses
             displayName: Check dependency licenses
+          - script: yarn check:threat-cases
+            displayName: Check sandbox threat test coverage
           - script: yarn check:dco
             displayName: Check DCO sign-offs
             condition: eq(variables['Build.Reason'], 'PullRequest')
