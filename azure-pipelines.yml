@@ -12,8 +12,11 @@ pr:
     include:
       - main
 
+# Self-hosted agent (macOS arm64, Docker via Colima) in the project's Default pool: the hosted
+# pool's monthly minutes are exhausted. Fork PR builds are disabled at the project level, so
+# untrusted code never runs on this agent. Switch back to `vmImage: ubuntu-latest` to use hosted.
 pool:
-  vmImage: ubuntu-latest
+  name: Default
 
 variables:
   YARN_GLOBAL_FOLDER: $(Pipeline.Workspace)/.yarn
