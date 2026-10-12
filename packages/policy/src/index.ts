@@ -6,6 +6,13 @@ import { PolicyDocumentSchema } from "./schema.js";
 import type { PolicyDocument } from "./schema.js";
 
 export {
+  evaluate,
+  ExplanationSchema,
+  PolicyCallSchema,
+  type Explanation,
+  type PolicyCall,
+} from "./evaluate.js";
+export {
   ArgMatcherSchema,
   PolicyDocumentSchema,
   RuleSchema,
