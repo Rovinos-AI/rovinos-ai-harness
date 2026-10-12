@@ -5,6 +5,7 @@ import {
   ApprovalEditError,
   ApprovalPayloadSchema,
   buildApprovalPayload,
+  diffToEdits,
   type ApprovalEditTokenizer,
   validateEdits,
 } from "./index.js";
@@ -75,22 +76,54 @@ describe("approval payload", () => {
     ).toBe(false);
   });
 
-  it("builds resume-ambiguity payloads without editable fields or expiry", () => {
+  it("builds resume-ambiguity payloads without editable fields and retains expiry", () => {
     const payload = buildApprovalPayload({
       kind: "resume_ambiguity",
       call,
       rule,
+      now: 100,
     });
 
     expect(payload).toMatchObject({
       kind: "resume_ambiguity",
       editableFields: [],
+      expiresAt: 30_100,
     });
-    expect(payload.expiresAt).toBeUndefined();
   });
 
-  it("requires an injected time when a tool-call rule expires", () => {
+  it("requires an injected time when either approval kind expires", () => {
     expect(() => buildApprovalPayload({ call, rule })).toThrow();
+    expect(() => buildApprovalPayload({ kind: "resume_ambiguity", call, rule })).toThrow();
+  });
+
+  it("includes a closed error code on the resume-ambiguity refinement issue", () => {
+    const result = ApprovalPayloadSchema.safeParse({
+      ...createPayload(),
+      kind: "resume_ambiguity",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      expect(issue?.code).toBe("custom");
+      if (issue?.code === "custom") {
+        expect(issue.params).toEqual({ errorCode: "approval_payload_resume_editable" });
+      }
+    }
+  });
+
+  it("converts changed whole arguments into pointer edits, including removals and array changes", () => {
+    expect(
+      diffToEdits(
+        { metadata: { keep: true, remove: "old" }, items: ["first", "second"] },
+        { metadata: { keep: false }, items: ["changed"] },
+      ),
+    ).toEqual([
+      { pointer: "/metadata/keep", value: false },
+      { pointer: "/metadata/remove", remove: true },
+      { pointer: "/items/0", value: "changed" },
+      { pointer: "/items/1", remove: true },
+    ]);
   });
 });
 
@@ -164,6 +197,56 @@ describe("validateEdits", () => {
     ).rejects.toMatchObject({ code: "edit_invalid" });
   });
 
+  it("validates tokenized unchanged fields with an injected token-aware schema validator", async () => {
+    const payload = buildApprovalPayload({
+      call: {
+        ...call,
+        args: { to: "<EMAIL_1>", cc: "<EMAIL_2>", subject: "Original" },
+      },
+      rule: { ...rule, editable: ["/subject"] },
+      now: 100,
+    });
+    const schema = {
+      type: "object",
+      properties: {
+        to: { type: "string", format: "email" },
+        cc: { type: "string", format: "email" },
+        subject: { type: "string" },
+      },
+      required: ["to", "cc", "subject"],
+    };
+    let validatedArgs: JsonValue | undefined;
+
+    await expect(
+      validateEdits(
+        payload,
+        [{ pointer: "/subject", value: "Changed" }],
+        schema,
+        identityTokenizer,
+        async (args) => {
+          validatedArgs = args;
+          return true;
+        },
+      ),
+    ).resolves.toMatchObject({ subject: "Changed" });
+    expect(validatedArgs).toEqual({
+      to: "<EMAIL_1>",
+      cc: "<EMAIL_2>",
+      subject: "Changed",
+    });
+  });
+
+  it("explicitly skips tool-schema validation when no input schema is available", async () => {
+    await expect(
+      validateEdits(
+        createPayload(),
+        [{ pointer: "/subject", value: "valid" }],
+        undefined,
+        identityTokenizer,
+      ),
+    ).resolves.toMatchObject({ subject: "valid" });
+  });
+
   it("rejects malformed schemas and edits whose parent path does not exist", async () => {
     await expect(
       validateEdits(
@@ -232,6 +315,7 @@ describe("validateEdits", () => {
       kind: "resume_ambiguity",
       call,
       rule,
+      now: 100,
     });
 
     await expect(

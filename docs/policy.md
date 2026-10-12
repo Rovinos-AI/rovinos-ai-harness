@@ -50,3 +50,13 @@ The pointer selects a tokenized argument. This rule matches values such as
 `<EMAIL_1>` without exposing or storing the corresponding address. The example
 policy in [`examples/policy.yaml`](../examples/policy.yaml) is a complete
 validated document.
+
+## Approval edits
+
+Approval edits are limited to the JSON Pointers listed by the matched rule.
+When a tool description includes its external `inputSchema`, the edited
+arguments are validated against it before they are tokenized and recorded.
+The PII-aware tool port resolves unchanged tokens only in memory during this
+validation; durable arguments remain tokenized. Tool descriptions without an
+`inputSchema` skip schema validation, but still enforce editable pointers and
+tokenize edited arguments before recording.

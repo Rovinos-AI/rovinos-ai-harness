@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   HarnessError,
-  JsonPointerSchema,
   JsonValue as JsonValueSchema,
   type Event,
-  type JsonValue,
 } from "@harness/schemas";
-import { buildApprovalPayload } from "@harness/policy";
+import {
+  ApprovalPayloadSchema,
+  approvalEditsAreAllowed,
+  buildApprovalPayload,
+  diffToEdits,
+} from "@harness/policy";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial } from "../recorder.js";
 import type { ModelToolCall, PolicyDecision } from "../ports.js";
@@ -125,22 +128,29 @@ async function requestResumeApprovals(
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
   await options.recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () => {
-    const batch: EventPartial[] = intents.map((intent) => ({
-      type: "approval_requested",
-      v: 1,
-      approvalId: options.ids.next(),
-      callId: intent.callId,
-      payload: JsonValueSchema.parse(
-        buildApprovalPayload({
-          kind: "resume_ambiguity",
-          call: callFromIntent(intent),
-          rule: {
-            id: intent.ruleId ?? "default",
-            reason: intent.policyReason ?? "resume_ambiguous",
-          },
-        }),
-      ),
-    }));
+    const now = Math.floor(options.clock.now());
+    const batch: EventPartial[] = intents.map((intent) => {
+      const payload = buildApprovalPayload({
+        kind: "resume_ambiguity",
+        call: callFromIntent(intent),
+        rule: {
+          id: intent.ruleId ?? "default",
+          reason: intent.policyReason ?? "resume_ambiguous",
+          ...(intent.policyApprovalTtlMs === undefined
+            ? {}
+            : { approvalTtlMs: intent.policyApprovalTtlMs }),
+        },
+        now,
+      });
+      return {
+        type: "approval_requested",
+        v: 1,
+        approvalId: options.ids.next(),
+        callId: intent.callId,
+        payload: JsonValueSchema.parse(payload),
+        ...(payload.expiresAt === undefined ? {} : { expiresAt: payload.expiresAt }),
+      };
+    });
     batch.push({
       type: "run_status_changed",
       v: 1,
@@ -238,7 +248,12 @@ export async function applyApprovalDecision(
     if (resolution.edits === undefined) {
       throw new ApprovalEditsRequiredError();
     }
-    if (!approvalEditIsAllowed(intent.args, resolution.edits, approval.payload)) {
+    const payload = ApprovalPayloadSchema.safeParse(approval.payload);
+    if (
+      !payload.success ||
+      payload.data.callId !== intent.callId ||
+      !approvalEditsAreAllowed(payload.data, diffToEdits(intent.args, resolution.edits))
+    ) {
       throw new ApprovalEditNotAllowedError();
     }
     args = resolution.edits;
@@ -250,6 +265,7 @@ export async function applyApprovalDecision(
   }
   return runToolCall(options, call, description, {
     existingIntent: intent,
+    ...(resolution.decision === "edit" ? { prepared: { call } } : {}),
     ...(resolution.decision === "edit"
       ? { compareArgsHash: intent.argsHash, checkEditedPolicy: true }
       : {}),
@@ -283,111 +299,6 @@ export async function applyDanglingIntents(
     options.onEvents?.(approvalEvents);
   }
   return events;
-}
-
-function approvalEditIsAllowed(
-  original: JsonValue,
-  edited: JsonValue,
-  payload: JsonValue,
-): boolean {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    return false;
-  }
-  const editableFields = payload.editableFields;
-  if (!Array.isArray(editableFields)) {
-    return false;
-  }
-  const editable = editableFields.map((pointer) => JsonPointerSchema.safeParse(pointer));
-  if (editable.some(({ success }) => !success)) {
-    return false;
-  }
-  const pointers = editable.flatMap((result) => (result.success ? [result.data] : []));
-  return collectChangedPointers(original, edited).every((changed) =>
-    pointers.some(
-      (allowed) => changed === allowed || changed.startsWith(allowed === "" ? "/" : `${allowed}/`),
-    ),
-  );
-}
-
-function collectChangedPointers(
-  before: JsonValue | undefined,
-  after: JsonValue | undefined,
-  path = "",
-): string[] {
-  if (before === undefined || after === undefined) {
-    return collectLeafPointers(before ?? after ?? null, path);
-  }
-  if (jsonValuesEqual(before, after)) {
-    return [];
-  }
-  if (isJsonObject(before) && isJsonObject(after)) {
-    return Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).flatMap((key) =>
-      collectChangedPointers(
-        before[key],
-        after[key],
-        `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`,
-      ),
-    );
-  }
-  if (Array.isArray(before) && Array.isArray(after)) {
-    return Array.from({ length: Math.max(before.length, after.length) }, (_, index) =>
-      collectChangedPointers(before[index], after[index], `${path}/${String(index)}`),
-    ).flat();
-  }
-  return [path];
-}
-
-function collectLeafPointers(value: JsonValue, path: string): string[] {
-  if (isJsonObject(value)) {
-    const entries = Object.entries(value);
-    return entries.length === 0
-      ? [path]
-      : entries.flatMap(([key, child]) =>
-          collectLeafPointers(child, `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`),
-        );
-  }
-  if (Array.isArray(value)) {
-    return value.length === 0
-      ? [path]
-      : value.flatMap((child, index) => collectLeafPointers(child, `${path}/${String(index)}`));
-  }
-  return [path];
-}
-
-function isJsonObject(value: JsonValue): value is Readonly<Record<string, JsonValue>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function jsonValuesEqual(left: JsonValue, right: JsonValue): boolean {
-  if (left === right) {
-    return true;
-  }
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return (
-      left.length === right.length &&
-      left.every((value, index) => {
-        const other = right[index];
-        return other !== undefined && jsonValuesEqual(value, other);
-      })
-    );
-  }
-  if (isJsonObject(left) && isJsonObject(right)) {
-    const keys = Object.keys(left);
-    return (
-      keys.length === Object.keys(right).length &&
-      keys.every((key) => {
-        const value = left[key];
-        const other = right[key];
-        return (
-          Object.hasOwn(right, key) &&
-          value !== undefined &&
-          other !== undefined &&
-          jsonValuesEqual(value, other)
-        );
-      })
-    );
-  }
-  return false;
 }
 
 /** Resolves a resume-ambiguity approval without duplicating its intent. */

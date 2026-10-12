@@ -22,6 +22,7 @@ import {
   FakeClock,
   Id,
   JsonValue,
+  PiiConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
   HarnessError,
@@ -42,6 +43,9 @@ import {
   SummarizingStrategy,
 } from "@harness/context";
 import { activeRuns } from "@harness/telemetry";
+import { buildApprovalPayload } from "@harness/policy";
+import { emailDetector, PiiToolPort, Tokenizer } from "@harness/pii";
+import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 import { FakeModelPort, FakeToolPort } from "./testing/index.js";
 import { NaiveContext } from "./context/naive-context.js";
@@ -327,7 +331,12 @@ function completion(
   };
 }
 
-async function createApprovalRun(store: EventStore, clock: FakeClock) {
+async function createApprovalRun(
+  store: EventStore,
+  clock: FakeClock,
+  args: JsonValueType = { z: 1, a: 3 },
+  editable: readonly string[] = ["/a"],
+) {
   const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
   let events: Event[] = [];
   await recorder.withStepSpan(RUN_SPAN, {}, async () => {
@@ -341,8 +350,11 @@ async function createApprovalRun(store: EventStore, clock: FakeClock) {
         toolId: "approval_tool",
         idempotent: false,
         policyDecision: "ask",
+        ruleId: "test_rule",
+        policyReason: "manual_review",
+        policyEditable: [...editable],
         argsHash: "51221262a85f34235978c8dc712134f6e04b6078190d87ef73bee21422c8af3e",
-        args: { z: 1, a: 3 },
+        args,
       },
     ]);
     const last = events.at(-1);
@@ -359,10 +371,23 @@ async function requestApprovalForRun(
   clock: FakeClock,
   state: ReturnType<typeof foldRunState>,
 ) {
+  const intent = state.pendingToolCalls.get(modelCallId);
+  if (intent === undefined) {
+    throw new Error("Expected a pending approval intent.");
+  }
+  const payload = buildApprovalPayload({
+    call: { callId: intent.callId, toolId: intent.toolId, args: intent.args },
+    rule: {
+      id: intent.ruleId ?? "test_rule",
+      reason: intent.policyReason ?? "manual_review",
+      editable: intent.policyEditable ?? [],
+    },
+    now: Math.floor(clock.now()),
+  });
   return requestApproval(recorder, {
     approvalId,
     callId: modelCallId,
-    payload: { prompt: "Approve tool execution?", editableFields: ["/a"] },
+    payload: JsonValue.parse(payload),
     state,
     checkpointer: new Checkpointer({
       recorder,
@@ -536,7 +561,11 @@ describe("approval lifecycle", () => {
         type: "approval_requested",
         approvalId,
         callId: modelCallId,
-        payload: { prompt: "Approve tool execution?" },
+        payload: {
+          kind: "tool_call",
+          editableFields: ["/a"],
+          args: { z: 1, a: 3 },
+        },
       },
       { type: "run_status_changed", from: "running", to: "suspended", reason: "awaiting_approval" },
       { type: "checkpoint_written", atSeq: 5 },
@@ -667,6 +696,174 @@ describe("approval lifecycle", () => {
       ).resolves.toEqual([]);
     },
   );
+
+  it("validates and tokenizes edits before resolution, then resumes with raw values only in memory", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const vault = new InMemoryVault();
+    const piiConfig = PiiConfigSchema.parse({
+      defaultAction: "tokenize",
+      detokenize: [{ toolId: "approval_tool", args: ["/to"] }],
+    });
+    const inputSchema = {
+      type: "object",
+      properties: {
+        to: { type: "string", format: "email" },
+        cc: { type: "string", format: "email" },
+        subject: { type: "string" },
+      },
+      required: ["to", "cc", "subject"],
+      additionalProperties: false,
+    };
+    const executedArgs: JsonValueType[] = [];
+    const inner = {
+      describe: () => ({ idempotent: false, timeoutMs: 1_000, inputSchema }),
+      execute: async (call: { readonly args: JsonValueType }) => {
+        executedArgs.push(call.args);
+        return { outcome: "ok" as const, result: null };
+      },
+    };
+    const tokenizer = new Tokenizer({
+      policy: piiConfig,
+      vault,
+      detectors: { detect: (text) => emailDetector.detect(text) },
+    });
+    const tokenizeJson = vi.spyOn(tokenizer, "tokenizeJson");
+    const tool = new PiiToolPort(inner, {
+      config: piiConfig,
+      tokenizer,
+      resolver: new AuditingVaultResolver(vault, () => undefined),
+    });
+    const initial = await tool.prepare(
+      {
+        callId: modelCallId,
+        toolId: "approval_tool",
+        args: {
+          to: "old@example.test",
+          cc: "copy@example.test",
+          subject: "Original",
+        },
+      },
+      { runId, signal: new AbortController().signal },
+    );
+    if (typeof initial.args !== "object" || initial.args === null || Array.isArray(initial.args)) {
+      throw new Error("Expected tokenized object arguments.");
+    }
+    const ccToken = initial.args.cc;
+    if (typeof ccToken !== "string") {
+      throw new Error("Expected a tokenized cc email.");
+    }
+    const { recorder, state } = await createApprovalRun(store, clock, initial.args, ["/to"]);
+    await requestApprovalForRun(recorder, clock, state);
+
+    const resolution = await resolveApproval(
+      store,
+      runId,
+      approvalId,
+      "edit",
+      {
+        to: "new@example.test",
+        cc: ccToken,
+        subject: "Original",
+      },
+      clock,
+      tool,
+    );
+
+    expect(resolution.edits).toMatchObject({
+      to: "<EMAIL_3>",
+      cc: "<EMAIL_2>",
+      subject: "Original",
+    });
+    expect(JSON.stringify(resolution.edits)).not.toContain("new@example.test");
+    expect(tokenizeJson.mock.calls.filter(([, , context]) => context.boundary === "tool_input")).toHaveLength(2);
+    const afterResolution = await readApprovalEvents(store);
+    const lastEvent = afterResolution.at(-1);
+    if (lastEvent === undefined) {
+      throw new Error("Expected a durable approval resolution.");
+    }
+    const resumedRecorder = new RunRecorder(
+      store,
+      runId,
+      lastEvent.segmentId,
+      await store.head(runId),
+      clock,
+    );
+    await resumedRecorder.withStepSpan(RUN_SPAN, {}, async () =>
+      resumedRecorder.record({
+        type: "run_status_changed",
+        v: 1,
+        from: "suspended",
+        to: "running",
+        reason: "resumed",
+      }),
+    );
+    await applyResolvedApprovals(
+      {
+        recorder: resumedRecorder,
+        tool,
+        policy: allowTestPolicy,
+        clock,
+        runId,
+        signal: new AbortController().signal,
+      },
+      foldRunState(await readApprovalEvents(store)),
+    );
+
+    expect(executedArgs).toEqual([
+      {
+        to: "new@example.test",
+        cc: "<EMAIL_2>",
+        subject: "Original",
+      },
+    ]);
+    expect(tokenizeJson.mock.calls.filter(([, , context]) => context.boundary === "tool_input")).toHaveLength(2);
+  });
+
+  it.each([
+    {
+      changed: { z: 2, a: 4 },
+      schema: undefined,
+      code: "edit_not_allowed",
+    },
+    {
+      changed: { z: 1, a: -1 },
+      schema: {
+        type: "object",
+        properties: { z: { type: "integer" }, a: { type: "integer", minimum: 0 } },
+      },
+      code: "edit_invalid",
+    },
+  ])("rejects invalid approval edits before writing a resolution ($code)", async ({
+    changed,
+    schema,
+    code,
+  }) => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+    await requestApprovalForRun(recorder, clock, state);
+    const prepare = vi.fn((call: Parameters<NonNullable<ToolPort["prepare"]>>[0]) =>
+      Promise.resolve(call),
+    );
+    const tool: ToolPort = {
+      describe: () => ({
+        idempotent: false,
+        timeoutMs: 1_000,
+        ...(schema === undefined ? {} : { inputSchema: schema }),
+      }),
+      prepare,
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+    };
+
+    await expect(
+      resolveApproval(store, runId, approvalId, "edit", changed, clock, tool),
+    ).rejects.toMatchObject({ code });
+    const events = await readApprovalEvents(store);
+    expect(events.some(({ type }) => type === "approval_resolved")).toBe(false);
+    expect(events.some(({ type }) => type === "pii_action")).toBe(false);
+    expect(prepare).not.toHaveBeenCalled();
+  });
 
   it("rejects missing and repeated approval resolutions", async () => {
     const store = new InMemoryEventStore();
@@ -2437,6 +2634,7 @@ describe("runLoop", () => {
             toolId: "ambiguous_tool",
             idempotent: false,
             policyDecision: "allow",
+            policyApprovalTtlMs: 50,
             argsHash: "d".repeat(64),
             args: { value: 1 },
           },
@@ -2454,7 +2652,10 @@ describe("runLoop", () => {
           throw new Error("Expected the resume-ambiguity approval.");
         }
 
-        expect(approval.payload).toMatchObject({ kind: "resume_ambiguity" });
+        expect(approval).toMatchObject({
+          expiresAt: 150,
+          payload: { kind: "resume_ambiguity", expiresAt: 150 },
+        });
         await resolveApproval(store, runId, approval.approvalId, decision, undefined, clock);
         const resumed = await resumeRun(options);
         const result = (await readApprovalEvents(store)).find(

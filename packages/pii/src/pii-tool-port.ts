@@ -2,6 +2,7 @@
 // Preparation owns durable arguments; execution owns only the ephemeral raw copy.
 import {
   ToolBinaryPayloadSchema,
+  compileJsonSchema,
   type Code,
   type Id,
   type JsonValue,
@@ -9,7 +10,7 @@ import {
   type PiiConfig,
   type ToolSpec,
 } from "@harness/schemas";
-import type { AuditingVaultResolver } from "@harness/vault";
+import { findTokens, type AuditingVaultResolver } from "@harness/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import type { Tokenizer } from "./tokenizer.js";
@@ -38,7 +39,14 @@ export interface PiiToolResult {
 
 /** Structural port avoids a dependency from PII back to core. */
 export interface PiiToolPortLike {
-  describe(toolId: Code): { readonly idempotent: boolean; readonly timeoutMs: number } | undefined;
+  describe(toolId: Code):
+    | {
+        readonly idempotent: boolean;
+        readonly timeoutMs: number;
+        readonly longRunning?: boolean;
+        readonly inputSchema?: JsonValue;
+      }
+    | undefined;
   getToolSpecs?(): readonly ToolSpec[];
   prepare?(call: PiiToolCall, context: PiiToolContext): Promise<PiiToolCall>;
   execute(call: PiiToolCall, context: PiiToolContext): Promise<PiiToolResult>;
@@ -61,6 +69,35 @@ export class PiiToolPort implements PiiToolPortLike {
   /** Forwards retry and timeout metadata. */
   describe(toolId: Code): ReturnType<PiiToolPortLike["describe"]> {
     return this.inner.describe(toolId);
+  }
+
+  /**
+   * Validates schema constraints after resolving tokens only into a temporary in-memory copy.
+   *
+   * @param toolId - Tool receiving the input.
+   * @param args - Tokenized arguments to validate.
+   * @param schema - External JSON Schema supplied by the tool.
+   * @param context - Active run and cancellation context.
+   * @returns Whether the resolved copy satisfies the schema.
+   */
+  async validateInputSchema(
+    toolId: Code,
+    args: JsonValue,
+    schema: JsonValue,
+    context: PiiToolContext,
+  ): Promise<boolean> {
+    try {
+      const resolved = await resolveTokensForValidation(
+        args,
+        context.runId,
+        toolId,
+        this.deps.resolver,
+      );
+      compileJsonSchema(schema)(resolved);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Forwards provider-visible tool specifications. */
@@ -162,7 +199,56 @@ export class PiiToolPort implements PiiToolPortLike {
       }
       throw error;
     }
+
   }
+}
+
+async function resolveTokensForValidation(
+  value: JsonValue,
+  runId: Id,
+  toolId: Code,
+  resolver: AuditingVaultResolver,
+): Promise<JsonValue> {
+  if (typeof value === "string") {
+    const matches = findTokens(value);
+    if (matches.length === 0) {
+      return value;
+    }
+    const resolved = await resolver.resolveMany(
+      runId,
+      matches.map(({ token }) => token),
+      { boundary: "tool_input", toolId },
+    );
+    let result = "";
+    let offset = 0;
+    for (const [index, match] of matches.entries()) {
+      const replacement = resolved[index];
+      if (replacement === undefined) {
+        throw new PiiTokenUnresolvableError();
+      }
+      result += value.slice(offset, match.index) + replacement;
+      offset = match.index + match.token.length;
+    }
+    return result + value.slice(offset);
+  }
+  if (Array.isArray(value)) {
+    return Promise.all(
+      value.map((child) => resolveTokensForValidation(child, runId, toolId, resolver)),
+    );
+  }
+  if (value !== null && typeof value === "object") {
+    const resolved: Record<string, JsonValue> = {};
+    for (const [key, child] of Object.entries(value)) {
+      Object.defineProperty(resolved, key, {
+        value: await resolveTokensForValidation(child, runId, toolId, resolver),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+    return resolved;
+  }
+  return value;
 }
 
 function binaryResult(execution: PiiToolResult): PiiToolResult {

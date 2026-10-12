@@ -116,16 +116,43 @@ describe("PiiToolPort", () => {
 
   it("forwards metadata, tool specs and inner preparation on tokens", async () => {
     const { inner, port, context } = fixture();
+    const inputSchema = { type: "object" };
     const prepare = vi.fn<(proposed: PiiToolCall) => void>();
+    inner.describe = () => ({ idempotent: true, timeoutMs: 1000, inputSchema });
     inner.prepare = (proposed) => {
       prepare(proposed);
       return Promise.resolve(proposed);
     };
     inner.getToolSpecs = () => [];
-    expect(port.describe("mail.send")).toEqual({ idempotent: true, timeoutMs: 1000 });
+    expect(port.describe("mail.send")).toEqual({
+      idempotent: true,
+      timeoutMs: 1000,
+      inputSchema,
+    });
     expect(port.getToolSpecs()).toEqual([]);
     await port.prepare(call, context);
     expect(prepare.mock.calls[0]?.[0].args).toEqual({ to: "<EMAIL_1>", other: "<EMAIL_1>" });
+  });
+
+  it("validates tokenized arguments by resolving tokens only in memory", async () => {
+    const { port, context } = fixture();
+    const prepared = await port.prepare(call, context);
+    const schema = {
+      type: "object",
+      properties: {
+        to: { type: "string", pattern: "^[^<>]+@[^<>]+$" },
+        other: { type: "string", pattern: "^[^<>]+@[^<>]+$" },
+      },
+      required: ["to", "other"],
+    };
+
+    await expect(port.validateInputSchema(call.toolId, prepared.args, schema, context)).resolves.toBe(
+      true,
+    );
+    expect(prepared.args).toEqual({ to: "<EMAIL_1>", other: "<EMAIL_1>" });
+    await expect(
+      port.validateInputSchema(call.toolId, { to: "<EMAIL_99>" }, schema, context),
+    ).resolves.toBe(false);
   });
 
   it("keeps allowed content out of persisted input and output", async () => {
