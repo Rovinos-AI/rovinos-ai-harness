@@ -10,7 +10,7 @@ import {
   type PiiConfig,
   type ToolSpec,
 } from "@harness/schemas";
-import { findTokens, type AuditingVaultResolver } from "@harness/vault";
+import { type AuditingVaultResolver } from "@harness/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import type { Tokenizer } from "./tokenizer.js";
@@ -87,10 +87,11 @@ export class PiiToolPort implements PiiToolPortLike {
     context: PiiToolContext,
   ): Promise<boolean> {
     try {
-      const resolved = await resolveTokensForValidation(
-        args,
+      const { args: resolved } = await detokenizeArgs(
         context.runId,
         toolId,
+        args,
+        this.deps.config,
         this.deps.resolver,
       );
       compileJsonSchema(schema)(resolved);
@@ -200,54 +201,6 @@ export class PiiToolPort implements PiiToolPortLike {
       throw error;
     }
   }
-}
-
-async function resolveTokensForValidation(
-  value: JsonValue,
-  runId: Id,
-  toolId: Code,
-  resolver: AuditingVaultResolver,
-): Promise<JsonValue> {
-  if (typeof value === "string") {
-    const matches = findTokens(value);
-    if (matches.length === 0) {
-      return value;
-    }
-    const resolved = await resolver.resolveMany(
-      runId,
-      matches.map(({ token }) => token),
-      { boundary: "tool_input", toolId },
-    );
-    let result = "";
-    let offset = 0;
-    for (const [index, match] of matches.entries()) {
-      const replacement = resolved[index];
-      if (replacement === undefined) {
-        throw new PiiTokenUnresolvableError();
-      }
-      result += value.slice(offset, match.index) + replacement;
-      offset = match.index + match.token.length;
-    }
-    return result + value.slice(offset);
-  }
-  if (Array.isArray(value)) {
-    return Promise.all(
-      value.map((child) => resolveTokensForValidation(child, runId, toolId, resolver)),
-    );
-  }
-  if (value !== null && typeof value === "object") {
-    const resolved: Record<string, JsonValue> = {};
-    for (const [key, child] of Object.entries(value)) {
-      Object.defineProperty(resolved, key, {
-        value: await resolveTokensForValidation(child, runId, toolId, resolver),
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
-    }
-    return resolved;
-  }
-  return value;
 }
 
 function binaryResult(execution: PiiToolResult): PiiToolResult {

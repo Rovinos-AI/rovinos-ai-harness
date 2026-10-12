@@ -709,7 +709,7 @@ describe("approval lifecycle", () => {
       type: "object",
       properties: {
         to: { type: "string", format: "email" },
-        cc: { type: "string", format: "email" },
+        cc: { type: "string", pattern: "^<EMAIL_[0-9]+>$" },
         subject: { type: "string" },
       },
       required: ["to", "cc", "subject"],

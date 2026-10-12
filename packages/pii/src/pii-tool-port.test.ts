@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
 import { PiiConfigSchema, type PiiActionSummary, type JsonValue } from "@harness/schemas";
-import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
+import { AuditingVaultResolver, InMemoryVault, type VaultAudit } from "@harness/vault";
 import { PiiToolPort, type PiiToolPortLike, type PiiToolCall } from "./pii-tool-port.js";
 import { Tokenizer } from "./tokenizer.js";
 import { PiiBlockedError } from "./errors.js";
@@ -14,6 +14,13 @@ const call = {
   args: { to: "canary@example.test", other: "canary@example.test" },
 };
 
+function objectArgs(value: JsonValue): Readonly<Record<string, JsonValue>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Expected JSON object arguments.");
+  }
+  return value;
+}
+
 function fixture(
   options: {
     readonly block?: boolean;
@@ -25,6 +32,7 @@ function fixture(
     readonly innerFailure?: boolean;
     readonly innerError?: boolean;
     readonly binary?: boolean;
+    readonly detokenizeArgs?: readonly string[];
   } = {},
 ) {
   const config = PiiConfigSchema.parse({
@@ -41,7 +49,7 @@ function fixture(
           ],
         }
       : {}),
-    detokenize: [{ toolId: "mail.send", args: ["/to"] }],
+    detokenize: [{ toolId: "mail.send", args: options.detokenizeArgs ?? ["/to"] }],
   });
   const vault = new InMemoryVault();
   if (options.vaultFailure === true) {
@@ -88,12 +96,15 @@ function fixture(
       return Promise.resolve();
     },
   };
+  const audits: VaultAudit[] = [];
   const port = new PiiToolPort(inner, {
     config,
     tokenizer,
-    resolver: new AuditingVaultResolver(vault, () => undefined),
+    resolver: new AuditingVaultResolver(vault, (audit) => {
+      audits.push(audit);
+    }),
   });
-  return { port, context, execute, summaries, inner, vault };
+  return { port, context, execute, summaries, inner, vault, audits };
 }
 
 describe("PiiToolPort", () => {
@@ -134,14 +145,80 @@ describe("PiiToolPort", () => {
     expect(prepare.mock.calls[0]?.[0].args).toEqual({ to: "<EMAIL_1>", other: "<EMAIL_1>" });
   });
 
-  it("validates tokenized arguments by resolving tokens only in memory", async () => {
+  it("does not resolve or audit tokens outside the detokenization allowlist during validation", async () => {
+    const { port, context, vault, audits } = fixture();
+    const prepared = await port.prepare(
+      {
+        ...call,
+        args: { to: "allowed@example.test", other: "forbidden@example.test" },
+      },
+      context,
+    );
+    const preparedArgs = objectArgs(prepared.args);
+    const resolve = vi.spyOn(vault, "resolve");
+    const schema = { type: "object" };
+
+    await expect(
+      port.validateInputSchema(call.toolId, prepared.args, schema, context),
+    ).resolves.toBe(true);
+
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledWith(runId, preparedArgs.to, {
+      boundary: "tool_input",
+      toolId: call.toolId,
+    });
+    expect(resolve).not.toHaveBeenCalledWith(runId, preparedArgs.other, {
+      boundary: "tool_input",
+      toolId: call.toolId,
+    });
+    expect(audits).toEqual([
+      {
+        runId,
+        boundary: "tool_input",
+        action: "detokenized",
+        toolId: call.toolId,
+        entities: [{ type: "email", count: 1 }],
+      },
+    ]);
+  });
+
+  it("validates allowlisted email tokens against their resolved format", async () => {
     const { port, context } = fixture();
     const prepared = await port.prepare(call, context);
+    const preparedArgs = objectArgs(prepared.args);
     const schema = {
       type: "object",
       properties: {
-        to: { type: "string", pattern: "^[^<>]+@[^<>]+$" },
-        other: { type: "string", pattern: "^[^<>]+@[^<>]+$" },
+        to: { type: "string", format: "email" },
+      },
+      required: ["to"],
+    };
+
+    await expect(
+      port.validateInputSchema(call.toolId, prepared.args, schema, context),
+    ).resolves.toBe(true);
+    expect(preparedArgs.to).toBe("<EMAIL_1>");
+  });
+
+  it("validates non-allowlisted token constraints against what execution sends", async () => {
+    const { port, context, execute } = fixture();
+    const prepared = await port.prepare(
+      {
+        ...call,
+        args: { to: "allowed@example.test", other: "forbidden@example.test" },
+      },
+      context,
+    );
+    const preparedArgs = objectArgs(prepared.args);
+    const nonAllowlistedToken = preparedArgs.other;
+    if (nonAllowlistedToken === undefined) {
+      throw new Error("Expected a tokenized non-allowlisted argument.");
+    }
+    const schema = {
+      type: "object",
+      properties: {
+        to: { type: "string", format: "email" },
+        other: { type: "string", const: nonAllowlistedToken },
       },
       required: ["to", "other"],
     };
@@ -149,10 +226,11 @@ describe("PiiToolPort", () => {
     await expect(
       port.validateInputSchema(call.toolId, prepared.args, schema, context),
     ).resolves.toBe(true);
-    expect(prepared.args).toEqual({ to: "<EMAIL_1>", other: "<EMAIL_1>" });
-    await expect(
-      port.validateInputSchema(call.toolId, { to: "<EMAIL_99>" }, schema, context),
-    ).resolves.toBe(false);
+    await port.execute(prepared, context);
+    expect(execute.mock.calls[0]?.[0].args).toEqual({
+      to: "allowed@example.test",
+      other: nonAllowlistedToken,
+    });
   });
 
   it("keeps allowed content out of persisted input and output", async () => {
