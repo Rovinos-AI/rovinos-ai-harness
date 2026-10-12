@@ -6,6 +6,7 @@ import {
   getConfigSecretRefs,
   type HarnessConfig,
 } from "@harness/config";
+import { createServersReachableChecks } from "@harness/mcp";
 import { Code, DoctorResultsSchema, HarnessError } from "@harness/schemas";
 import type { DoctorCheck, DoctorContext } from "@harness/core";
 import type { CommandModule } from "../command.js";
@@ -68,7 +69,20 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
               return fileWarning;
             },
           };
-          const results = await core.runDoctor(doctorContext, checks ?? core.doctorChecks());
+          const defaultChecks = [
+            ...core.doctorChecks(),
+            ...createServersReachableChecks(config?.servers ?? [], {
+              resolveSecret: async (ref, signal) => {
+                const resolver = new CompositeSecretResolver({
+                  env: envResolver,
+                  file: new FileSecretResolver(),
+                });
+                return (await resolver.resolve(ref, signal)).reveal();
+              },
+              env,
+            }),
+          ];
+          const results = await core.runDoctor(doctorContext, checks ?? defaultChecks);
           if (program.opts<{ json?: boolean }>().json === true) {
             context.out.json(DoctorResultsSchema, results);
           } else {

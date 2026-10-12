@@ -29,6 +29,11 @@ export default defineConfig({
         lines: 85,
       },
     },
+    server: {
+      deps: {
+        inline: [/@modelcontextprotocol/, /eventsource/],
+      },
+    },
     projects: [
       {
         extends: true,

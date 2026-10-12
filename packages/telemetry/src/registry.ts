@@ -20,6 +20,7 @@ import { z } from "zod";
 import { attr, isSafeAttr } from "./attr.js";
 import { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
 import { getTracer } from "./tracer.js";
+import { SEMCONV_ATTRIBUTE_NAMES, SEMCONV_SPAN_NAMES } from "./semconv.js";
 import { env } from "node:process";
 
 /** Attribute-schema shape accepted by registered span definitions. */
@@ -33,6 +34,12 @@ interface ErrorCodeShape {
 /** Shape of any stored definition, including the automatically added error code. */
 export type SpanDefinitionShape = SpanShape | ErrorCodeShape;
 
+/** Task and package responsible for a registered span definition. */
+export interface SpanOwnerTask {
+  readonly taskId: string;
+  readonly packageName: `@harness/${string}`;
+}
+
 /** A registered span definition and its validated attribute contract. */
 export interface SpanDefinition<
   Shape extends SpanDefinitionShape,
@@ -41,6 +48,7 @@ export interface SpanDefinition<
   readonly name: Code;
   readonly shape: Shape;
   readonly schema: Schema;
+  readonly ownerTask: SpanOwnerTask;
   /**
    * Validates attributes before creating a span.
    *
@@ -56,6 +64,8 @@ export interface SpanDefinition<
 }
 
 const spanNamePattern = /^harness\.[a-z0-9_.]{1,56}$/u;
+const semconvSpanNames = new Set<string>(SEMCONV_SPAN_NAMES);
+const semconvAttributeNames = new Set<string>(SEMCONV_ATTRIBUTE_NAMES);
 const definitions = new Map<string, SpanDefinition<SpanDefinitionShape>>();
 const activeSpanDefinitions = new WeakMap<Span, SpanDefinition<SpanDefinitionShape>>();
 const tracingProbeKey = createContextKey("harness.telemetry.context-probe");
@@ -67,6 +77,19 @@ function addErrorCodeAttribute<Shape extends SpanShape>(shape: Shape): Shape & E
 
 function isSpanShape(value: unknown): value is SpanShape {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSpanOwnerTask(value: unknown): value is SpanOwnerTask {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "taskId" in value &&
+    typeof value.taskId === "string" &&
+    /^\d+(?:\.\d+)+$/u.test(value.taskId) &&
+    "packageName" in value &&
+    typeof value.packageName === "string" &&
+    /^@harness\/[a-z0-9-]+$/u.test(value.packageName)
+  );
 }
 
 function snapshotSpanShape<Shape extends SpanShape>(shape: Shape): Shape | undefined {
@@ -128,15 +151,53 @@ function harnessErrorCode(error: unknown): Code | undefined {
  *
  * @param name - Harness span name matching `harness.<lowercase_name>`.
  * @param shape - Attribute schemas created only with the `attr` helpers.
+ * @param ownerTask - Task and package that owns this span definition.
  * @returns The registered span definition.
  * @throws SpanRegistryError when the name is invalid, duplicated, or has an unsafe attribute.
  */
 export function defineSpan<const Shape extends SpanShape>(
   name: string,
   shape: Shape,
+  ownerTask: SpanOwnerTask,
 ): SpanDefinition<Shape & ErrorCodeShape, z.ZodObject<Shape & ErrorCodeShape>> {
-  if (typeof name !== "string" || !spanNamePattern.test(name) || !Code.safeParse(name).success) {
+  return registerSpan(name, shape, ownerTask, false);
+}
+
+/**
+ * Registers a semantic-convention span using only explicitly allowlisted names and attributes.
+ *
+ * @param name - Semantic-convention span name.
+ * @param shape - Attribute schemas created only with the `attr` helpers.
+ * @param ownerTask - Task and package that owns this span definition.
+ * @returns The registered span definition.
+ * @throws SpanRegistryError when the name is not allowlisted or the shape is unsafe.
+ */
+export function defineSemconvSpan<const Shape extends SpanShape>(
+  name: (typeof SEMCONV_SPAN_NAMES)[number],
+  shape: Shape,
+  ownerTask: SpanOwnerTask,
+): SpanDefinition<Shape & ErrorCodeShape, z.ZodObject<Shape & ErrorCodeShape>> {
+  if (!semconvSpanNames.has(name)) {
     throw new SpanRegistryError("span_name_invalid");
+  }
+  return registerSpan(name, shape, ownerTask, true);
+}
+
+function registerSpan<const Shape extends SpanShape>(
+  name: string,
+  shape: Shape,
+  ownerTask: SpanOwnerTask,
+  semanticConvention: boolean,
+): SpanDefinition<Shape & ErrorCodeShape, z.ZodObject<Shape & ErrorCodeShape>> {
+  if (
+    typeof name !== "string" ||
+    (!spanNamePattern.test(name) && !(semanticConvention && semconvSpanNames.has(name))) ||
+    !Code.safeParse(name).success
+  ) {
+    throw new SpanRegistryError("span_name_invalid");
+  }
+  if (!isSpanOwnerTask(ownerTask)) {
+    throw new SpanRegistryError("span_owner_task_invalid");
   }
   if (definitions.has(name)) {
     throw new SpanRegistryError("span_duplicate");
@@ -152,7 +213,12 @@ export function defineSpan<const Shape extends SpanShape>(
   if (Object.hasOwn(shapeSnapshot, "harness.error.code")) {
     throw new SpanRegistryError("span_attr_reserved");
   }
-  if (Object.keys(shapeSnapshot).some((key) => !spanNamePattern.test(key))) {
+  if (
+    Object.keys(shapeSnapshot).some(
+      (key) =>
+        !spanNamePattern.test(key) && !(semanticConvention && semconvAttributeNames.has(key)),
+    )
+  ) {
     throw new SpanRegistryError("span_attr_name_invalid");
   }
   if (Object.values(shapeSnapshot).some((schema) => !isSafeAttr(schema))) {
@@ -162,11 +228,13 @@ export function defineSpan<const Shape extends SpanShape>(
   const parsedName = Code.parse(name);
   const fullShape = addErrorCodeAttribute(shapeSnapshot);
   Object.freeze(fullShape);
+  const frozenOwnerTask = Object.freeze({ ...ownerTask });
   const schema = z.object(fullShape).strict();
   const definition: SpanDefinition<Shape & ErrorCodeShape, typeof schema> = {
     name: parsedName,
     shape: fullShape,
     schema,
+    ownerTask: frozenOwnerTask,
     start(attrs, opts) {
       const parsedAttrs = parseAttributes(schema, attrs);
 
@@ -297,6 +365,7 @@ export function __registerUnsafeSpanForTests(name: string, shape: SpanShape): ()
     name: parsedName,
     shape,
     schema: z.object(shape).strict(),
+    ownerTask: { taskId: "4.6", packageName: "@harness/telemetry" },
     start() {
       throw new SpanRegistryError("span_attr_unconstrained");
     },
