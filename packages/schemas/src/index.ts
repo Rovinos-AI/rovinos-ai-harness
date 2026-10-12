@@ -135,6 +135,15 @@ export {
   type InspectEvent,
   type InspectResult,
 } from "./cli/inspect.js";
+export {
+  DoctorCheckResultSchema,
+  DoctorCheckStatusSchema,
+  DoctorResultsSchema,
+  DoctorStatusSchema,
+  type DoctorCheckResult,
+  type DoctorCheckStatus,
+  type DoctorStatus,
+} from "./cli/doctor.js";
 export { eventSamples, FakeClock, SequentialIdGenerator } from "./testing.js";
 
 /** The current harness version. */
