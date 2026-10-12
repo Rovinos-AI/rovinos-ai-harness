@@ -8,6 +8,7 @@ import {
 } from "@harness/schemas";
 import type { Link } from "@opentelemetry/api";
 import type { EventStore } from "@harness/store";
+import type { BudgetViolation } from "./budgets.js";
 import { CorruptLogError, foldRunState } from "./run-state.js";
 import { RunRecorder } from "./recorder.js";
 import { runLoop, type RunLoopOptions, type RunLoopResult } from "./loop.js";
@@ -133,10 +134,10 @@ function linkedRoot(events: readonly Event[]): Link {
 }
 
 /** Subtracts completed ancestor usage from the limits for a continuation run. */
-export function inheritedBudgets(
+function inheritedUsage(
   budgets: RunConfig["budgets"],
   previousLogs: readonly (readonly Event[])[],
-): RunConfig["budgets"] {
+): { readonly steps: number; readonly costMicros: number; readonly elapsedMs: number } {
   const states = previousLogs.map((events) => foldRunState(events));
   const spentSteps = states.reduce((total, state) => total + state.steps, 0);
   const spentCostMicros = states.reduce((total, state) => total + state.usage.costMicros, 0);
@@ -149,14 +150,48 @@ export function inheritedBudgets(
       ),
     0,
   );
+  return { steps: spentSteps, costMicros: spentCostMicros, elapsedMs };
+}
+
+/** Subtracts completed ancestor usage from the limits for a continuation run. */
+export function inheritedBudgets(
+  budgets: RunConfig["budgets"],
+  previousLogs: readonly (readonly Event[])[],
+): RunConfig["budgets"] {
+  const usage = inheritedUsage(budgets, previousLogs);
   return {
     ...budgets,
-    maxSteps: budgets.maxSteps - spentSteps,
-    maxWallClockMs: budgets.maxWallClockMs - elapsedMs,
+    maxSteps: budgets.maxSteps - usage.steps,
+    maxWallClockMs: budgets.maxWallClockMs - usage.elapsedMs,
     ...(budgets.maxCostUsd === undefined
       ? {}
-      : { maxCostUsd: budgets.maxCostUsd - spentCostMicros / 1_000_000 }),
+      : { maxCostUsd: budgets.maxCostUsd - usage.costMicros / 1_000_000 }),
   };
+}
+
+function exhaustedInheritedBudget(
+  budgets: RunConfig["budgets"],
+  previousLogs: readonly (readonly Event[])[],
+): BudgetViolation | undefined {
+  const usage = inheritedUsage(budgets, previousLogs);
+  if (usage.steps >= budgets.maxSteps) {
+    return { ok: false, budget: "steps", limit: budgets.maxSteps, observed: usage.steps };
+  }
+  if (budgets.maxCostUsd !== undefined) {
+    const limit = budgets.maxCostUsd * 1_000_000;
+    if (usage.costMicros >= limit) {
+      return { ok: false, budget: "cost", limit, observed: usage.costMicros };
+    }
+  }
+  if (usage.elapsedMs >= budgets.maxWallClockMs) {
+    return {
+      ok: false,
+      budget: "wall_clock",
+      limit: budgets.maxWallClockMs,
+      observed: usage.elapsedMs,
+    };
+  }
+  return undefined;
 }
 
 /** Inputs needed to execute a follow-up as an independent run linked to a terminal run. */
@@ -173,6 +208,7 @@ export interface ContinueRunOptions extends Omit<
   | "depth"
   | "rootSpanParent"
   | "rootSpanLinks"
+  | "initialBudgetViolation"
 > {
   readonly store: EventStore;
   readonly runId: Id;
@@ -219,6 +255,9 @@ export async function continueRun(options: ContinueRunOptions): Promise<RunLoopR
   const budgets = continuations.inheritBudgets
     ? inheritedBudgets(runOptions.budgets, previousLogs)
     : runOptions.budgets;
+  const initialBudgetViolation = continuations.inheritBudgets
+    ? exhaustedInheritedBudget(runOptions.budgets, previousLogs)
+    : undefined;
   const recorder = new RunRecorder(store, runId, runOptions.ids.next(), 0, runOptions.clock);
 
   return runLoop({
@@ -226,6 +265,7 @@ export async function continueRun(options: ContinueRunOptions): Promise<RunLoopR
     recorder,
     goal,
     budgets,
+    ...(initialBudgetViolation === undefined ? {} : { initialBudgetViolation }),
     scopeId,
     continuationOf: previousRunId,
     inputKind: "follow_up",

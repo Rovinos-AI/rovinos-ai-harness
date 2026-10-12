@@ -10,7 +10,7 @@ import {
 } from "@harness/schemas";
 import type { Context, Link } from "@opentelemetry/api";
 import { activeRuns } from "@harness/telemetry";
-import { BudgetTracker } from "./budgets.js";
+import { BudgetTracker, type BudgetViolation } from "./budgets.js";
 import { Checkpointer } from "./checkpoint.js";
 import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from "./run-state.js";
 import type { RunState } from "./run-state.js";
@@ -43,6 +43,8 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly signal: AbortSignal;
   /** Per-run limits sourced from the validated run configuration. */
   readonly budgets: RunConfig["budgets"];
+  /** Optional inherited budget failure to record before executing this run. */
+  readonly initialBudgetViolation?: BudgetViolation;
   readonly checkpointEveryEvents?: RunConfig["checkpointEveryEvents"];
   readonly role?: Code;
   readonly provider?: Code;
@@ -196,6 +198,14 @@ async function runLoopSteps(
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<Event> {
+  if (options.initialBudgetViolation !== undefined) {
+    return recordBudgetFailureAndCheckpoint(
+      options.recorder,
+      events,
+      options.initialBudgetViolation,
+      execution.checkpointer,
+    );
+  }
   const recovered = await recoverInterruptedModelResponse(options, events, execution);
   if (recovered !== undefined) {
     return recovered;
