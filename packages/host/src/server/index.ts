@@ -102,6 +102,12 @@ function createAppRegistry(config: HostConfig): {
   return { apps, appConfigs, sessions };
 }
 
+function scheduleUiSessionExpiry(callback: () => void, delayMs: number): () => void {
+  const timer = setTimeout(callback, delayMs);
+  timer.unref();
+  return () => clearTimeout(timer);
+}
+
 async function startServer(
   server: HttpServerPort,
   config: HostConfig,
@@ -183,13 +189,15 @@ export async function createReferenceHost(
         `[::1]:${String(port)}`,
         `localhost:${String(port)}`,
       ],
+      scheduleUiSessionExpiry:
+        dependencies.scheduleUiSessionExpiry ?? scheduleUiSessionExpiry,
     }),
   );
   port = await startServer(server, config, host);
   origin = formatOrigin(host, port);
   const endUiSessions = (): void => {
     for (const instance of registry.sessions.values()) {
-      instance.uiSession?.end();
+      instance.end();
     }
   };
   return {

@@ -34,7 +34,10 @@ const ResourceMetadataSchema = z.object({ ui: UiMetadataSchema.optional() }).loo
 export type AppResourceRead = z.infer<typeof ResourceReadSchema>;
 
 /** Safe host diagnostic codes emitted for policy decisions. */
-export type HostDiagnosticCode = "app_csp_request_ignored" | "ui_trace_unavailable";
+export type HostDiagnosticCode =
+  | "app_csp_request_ignored"
+  | "ui_session_expired"
+  | "ui_trace_unavailable";
 
 /** The non-network policy applied to app resources before insertion into iframe srcdoc. */
 export const REFERENCE_CSP =

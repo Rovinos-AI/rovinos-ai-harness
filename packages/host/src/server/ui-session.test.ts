@@ -45,6 +45,23 @@ describe("UiSession", () => {
     expect(spans.filter((span) => span.name === "harness.ui_session")).toHaveLength(1);
   });
 
+  it("preserves the parent sampling flags in the session traceparent", () => {
+    const parent = collector.provider.getTracer("host-test").startSpan("harness.tool_call");
+    const parentContext = { ...parent.spanContext(), traceFlags: 0 };
+    const session = new UiSession(
+      { runId, toolCallSpanContext: parentContext },
+      "approval",
+      sessionId,
+      () => undefined,
+    );
+
+    expect(session.traceparent).toBe(
+      `00-${parentContext.traceId}-${"b".repeat(16)}-00`,
+    );
+    session.end();
+    parent.end();
+  });
+
   it.each([
     ["missing context", undefined],
     [

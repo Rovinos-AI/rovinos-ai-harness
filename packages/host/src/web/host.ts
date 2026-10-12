@@ -34,7 +34,7 @@ export interface LaunchDetails {
 /** DOM operations required by the host; kept injectable for deterministic unit tests. */
 /** Creates the iframe element used by the page. */
 export type AppIframeFactory = () => AppIframe & {
-  addEventListener(type: "load", callback: () => void, options: { once: true }): void;
+  addEventListener(type: "load" | "error", callback: () => void, options: { once: true }): void;
   setAttribute(name: string, value: string): void;
   srcdoc: string;
 };
@@ -44,6 +44,7 @@ export interface HostPagePort {
   setStatus(code: string): void;
   createFrame: AppIframeFactory;
   onFrameRemoved(callback: () => void): void;
+  onPageHide(callback: () => void): void;
   attachFrame(): void;
 }
 
@@ -75,10 +76,12 @@ function endUiSession(
   request: typeof fetch,
   sessionId: string,
   headers: Record<string, string>,
+  keepalive = false,
 ): void {
   void request(`/api/session/end?sessionId=${encodeURIComponent(sessionId)}`, {
     method: "POST",
     headers,
+    ...(keepalive ? { keepalive: true } : {}),
   }).catch(() => undefined);
 }
 
@@ -87,15 +90,13 @@ function toolResultForApp(
   app: Pick<AppPayload, "telemetry" | "traceparent">,
 ): z.infer<typeof CallToolResultSchema> {
   const { _meta, ...resultWithoutMetadata } = result;
-  if (app.telemetry) {
-    return app.traceparent === undefined
-      ? resultWithoutMetadata
-      : { ...resultWithoutMetadata, _meta: { traceparent: app.traceparent } };
-  }
   const metadata = { ..._meta };
   delete metadata.traceparent;
   delete metadata.tracestate;
   delete metadata.baggage;
+  if (app.telemetry && app.traceparent !== undefined) {
+    metadata.traceparent = app.traceparent;
+  }
   return {
     ...resultWithoutMetadata,
     ...(Object.keys(metadata).length === 0 ? {} : { _meta: metadata }),
@@ -103,8 +104,15 @@ function toolResultForApp(
 }
 
 function waitForFrameLoad(frame: ReturnType<AppIframeFactory>): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     frame.addEventListener("load", resolve, { once: true });
+    frame.addEventListener(
+      "error",
+      () => {
+        reject(new Error("App iframe failed to load."));
+      },
+      { once: true },
+    );
   });
 }
 
@@ -177,49 +185,65 @@ export async function mountReferenceApp(
     root.setStatus("app_unknown");
     return false;
   }
-  const response = await request(
-    `/api/app?resourceUri=${encodeURIComponent(launch.resourceUri)}&sessionId=${encodeURIComponent(hostReady.sessionId)}`,
-    { headers },
-  );
-  if (!response.ok) {
-    root.setStatus(response.status === 404 ? "app_unknown" : "app_resource_invalid");
-    return false;
-  }
-  let app: z.infer<typeof AppPayloadSchema>;
-  try {
-    app = parseJson(AppPayloadSchema, await response.text());
-  } catch {
-    root.setStatus("app_resource_invalid");
-    return false;
-  }
-  const frame = root.createFrame();
-  frame.setAttribute("sandbox", "allow-scripts");
-  frame.setAttribute("referrerpolicy", "no-referrer");
-  frame.setAttribute("title", `MCP App ${app.appId}`);
-  if (app.permissions.length > 0) {
-    frame.setAttribute("allow", app.permissions.join("; "));
-  }
-  frame.srcdoc = createSandboxDocument(app.html, app.csp);
-  const loaded = waitForFrameLoad(frame);
-  root.onFrameRemoved(() => {
-    endUiSession(request, app.sessionId, headers);
+  let ended = false;
+  const endSession = (keepalive = false): void => {
+    if (!ended) {
+      ended = true;
+      endUiSession(request, hostReady.sessionId, headers, keepalive);
+    }
+  };
+  root.onPageHide(() => {
+    endSession(true);
   });
-  root.attachFrame();
-  await loaded;
-  const bridge = createAppBridge(frame, (call) =>
-    routeToolCall(call, {
-      appId: app.appId,
-      sessionId: app.sessionId,
-      token: launch.token,
-      request,
-    }),
-  );
-  await bridge.connect();
-  await bridge.sendToolInput(app.toolInput);
-  if (app.toolResult !== null) {
-    await bridge.sendToolResult(toolResultForApp(app.toolResult, app));
+  let launched = false;
+  try {
+    const response = await request(
+      `/api/app?resourceUri=${encodeURIComponent(launch.resourceUri)}&sessionId=${encodeURIComponent(hostReady.sessionId)}`,
+      { headers },
+    );
+    if (!response.ok) {
+      root.setStatus(response.status === 404 ? "app_unknown" : "app_resource_invalid");
+      return false;
+    }
+    let app: z.infer<typeof AppPayloadSchema>;
+    try {
+      app = parseJson(AppPayloadSchema, await response.text());
+    } catch {
+      root.setStatus("app_resource_invalid");
+      return false;
+    }
+    const frame = root.createFrame();
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.setAttribute("title", `MCP App ${app.appId}`);
+    if (app.permissions.length > 0) {
+      frame.setAttribute("allow", app.permissions.join("; "));
+    }
+    frame.srcdoc = createSandboxDocument(app.html, app.csp);
+    const loaded = waitForFrameLoad(frame);
+    root.onFrameRemoved(endSession);
+    root.attachFrame();
+    await loaded;
+    const bridge = createAppBridge(frame, (call) =>
+      routeToolCall(call, {
+        appId: app.appId,
+        sessionId: app.sessionId,
+        token: launch.token,
+        request,
+      }),
+    );
+    await bridge.connect();
+    await bridge.sendToolInput(app.toolInput);
+    if (app.toolResult !== null) {
+      await bridge.sendToolResult(toolResultForApp(app.toolResult, app));
+    }
+    launched = true;
+    return true;
+  } finally {
+    if (!launched) {
+      endSession();
+    }
   }
-  return true;
 }
 
 /** Starts the browser entry point when the trusted static host page has loaded. */
@@ -253,6 +277,9 @@ export function startReferenceHostPage(): void {
         }
       });
       observer.observe(document.documentElement, { childList: true, subtree: true });
+    },
+    onPageHide: (callback) => {
+      window.addEventListener("pagehide", callback, { once: true });
     },
   };
   void mountReferenceApp(root, window.location.hash).catch(() => {

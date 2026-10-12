@@ -75,7 +75,10 @@ export class UiSession {
       return;
     }
     this.#span = span;
-    this.traceparent = Traceparent.parse(`00-${spanContext.traceId}-${spanContext.spanId}-01`);
+    const traceFlags = spanContext.traceFlags.toString(16).padStart(2, "0");
+    this.traceparent = Traceparent.parse(
+      `00-${spanContext.traceId}-${spanContext.spanId}-${traceFlags}`,
+    );
   }
 
   /** Ends the session span once when its iframe is removed or the owning run resumes. */

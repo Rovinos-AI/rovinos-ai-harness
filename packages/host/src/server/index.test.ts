@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { trace } from "@opentelemetry/api";
 import { CallToolResultSchema } from "@modelcontextprotocol/core";
 import { parseJson, Traceparent } from "@harness/schemas";
+import { createTestSpanCollector } from "@harness/telemetry/testing";
 import { z } from "zod";
 import {
   createReferenceHost,
@@ -11,6 +13,11 @@ import {
 } from "./index.js";
 
 const appResourceUri = "ui://approval/index.html";
+const spanCollector = createTestSpanCollector();
+trace.setGlobalTracerProvider(spanCollector.provider);
+afterAll(async () => {
+  await spanCollector.provider.shutdown();
+});
 const appConfig = {
   apps: [
     {
@@ -94,6 +101,8 @@ function makeServer(
     readonly idGenerator?: () => string;
     readonly randomBytes?: (size: number) => Buffer;
     readonly now?: () => number;
+    readonly scheduleUiSessionExpiry?: ReferenceHostDependencies["scheduleUiSessionExpiry"];
+    readonly uiSessionContext?: ReferenceHostDependencies["uiSessionContext"];
   } = {},
 ) {
   let listener: RequestListener | undefined;
@@ -130,6 +139,10 @@ function makeServer(
     ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
     ...(options.randomBytes === undefined ? {} : { randomBytes: options.randomBytes }),
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.scheduleUiSessionExpiry === undefined
+      ? {}
+      : { scheduleUiSessionExpiry: options.scheduleUiSessionExpiry }),
+    ...(options.uiSessionContext === undefined ? {} : { uiSessionContext: options.uiSessionContext }),
     createHttpServer: (requestListener) => {
       listener = requestListener;
       return server;
@@ -313,6 +326,62 @@ describe("createReferenceHost", () => {
     const second = await fixture.request("GET", appPath(secondSession), authorization(host));
     expect(parseJson(AppResourceResponseSchema, first.body).sessionId).toBe(firstSession);
     expect(parseJson(AppResourceResponseSchema, second.body).sessionId).toBe(secondSession);
+    await host.close();
+  });
+
+  it("expires and removes abandoned sessions after the configured lifetime", async () => {
+    let expire: (() => void) | undefined;
+    const scheduleUiSessionExpiry = vi.fn((callback: () => void) => {
+      expire = callback;
+      return vi.fn();
+    });
+    const onCode = vi.fn();
+    const parent = spanCollector.provider.getTracer("host-test").startSpan("harness.tool_call");
+    const fixture = makeServer({
+      config: { ...appConfig, uiSessionMaxMs: 60_000 },
+      idGenerator: () => sessionId,
+      onCode,
+      scheduleUiSessionExpiry,
+      uiSessionContext: {
+        runId: sessionId,
+        toolCallSpanContext: parent.spanContext(),
+      },
+    });
+    const host = await fixture.hostPromise;
+
+    expect(await newAppSession(fixture, host)).toBe(sessionId);
+    expect(scheduleUiSessionExpiry).toHaveBeenCalledWith(expect.any(Function), 60_000);
+    parent.end();
+    expire?.();
+    expect(onCode).toHaveBeenCalledWith("ui_session_expired");
+    expect(
+      spanCollector
+        .getFinishedSpans()
+        .some(
+          (span) =>
+            span.name === "harness.ui_session" &&
+            span.attributes["harness.ui.session_id"] === sessionId,
+        ),
+    ).toBe(true);
+    expect((await fixture.request("GET", appPath(sessionId), authorization(host))).status).toBe(
+      404,
+    );
+    await host.close();
+  });
+
+  it("rejects launches after the configured active-session limit", async () => {
+    let nextId = 0;
+    const fixture = makeServer({
+      config: { ...appConfig, maxUiSessions: 1 },
+      idGenerator: () => String(nextId++).padStart(26, "0"),
+    });
+    const host = await fixture.hostPromise;
+
+    expect(await newAppSession(fixture, host)).toBe("00000000000000000000000000");
+    const rejected = await fixture.request("GET", eventsPath, authorization(host));
+    expect(rejected.status).toBe(429);
+    expect(rejected.body).toBe('{"error":"app_session_limit"}');
+    expect((await fixture.request("GET", appPath(sessionId), authorization(host))).status).toBe(200);
     await host.close();
   });
 

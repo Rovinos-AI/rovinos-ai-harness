@@ -28,6 +28,7 @@ interface RequestHandlerOptions {
   readonly appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>;
   readonly sessions: Map<string, AppInstance>;
   readonly nextSessionId: () => string;
+  readonly scheduleUiSessionExpiry: (callback: () => void, delayMs: number) => () => void;
   readonly token: string;
   readonly expectedOrigin: () => string;
   readonly expectedHosts: () => readonly string[];
@@ -71,20 +72,44 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
     writeError(response, 404, "app_unknown");
     return;
   }
+  if (options.sessions.size >= options.config.maxUiSessions) {
+    writeError(response, 429, "app_session_limit");
+    return;
+  }
   const sessionId = Id.parse(options.nextSessionId());
-  const instance: AppInstance = {
+  const uiSession = app.telemetry
+    ? new UiSession(options.dependencies.uiSessionContext, app.id, sessionId, () => {
+        options.dependencies.onCode("ui_trace_unavailable");
+      })
+    : undefined;
+  let cancelExpiry = (): void => undefined;
+  let instance: AppInstance | undefined;
+  const end = (): void => {
+    cancelExpiry();
+    uiSession?.end();
+    if (instance !== undefined && options.sessions.get(sessionId) === instance) {
+      options.sessions.delete(sessionId);
+    }
+  };
+  instance = {
     id: app.id,
     resourceUri: app.resourceUri,
     sessionId,
-    ...(app.telemetry
-      ? {
-          uiSession: new UiSession(options.dependencies.uiSessionContext, app.id, sessionId, () => {
-            options.dependencies.onCode("ui_trace_unavailable");
-          }),
-        }
-      : {}),
+    ...(uiSession === undefined ? {} : { uiSession }),
+    end,
   };
   options.sessions.set(instance.sessionId, instance);
+  try {
+    cancelExpiry = options.scheduleUiSessionExpiry(() => {
+      if (instance !== undefined && options.sessions.get(sessionId) === instance) {
+        instance.end();
+        options.dependencies.onCode("ui_session_expired");
+      }
+    }, options.config.uiSessionMaxMs);
+  } catch (error) {
+    instance.end();
+    throw error;
+  }
   response.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -152,8 +177,7 @@ function endAppSession(url: URL, response: HostResponse, options: RequestHandler
     writeError(response, 404, "app_unknown");
     return;
   }
-  instance.uiSession?.end();
-  options.sessions.delete(instance.sessionId);
+  instance.end();
   writeJson(response, 200, {});
 }
 

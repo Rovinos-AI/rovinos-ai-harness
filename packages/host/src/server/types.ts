@@ -59,6 +59,7 @@ export interface AppInstance {
   readonly resourceUri: string;
   readonly sessionId: string;
   readonly uiSession?: UiSession;
+  readonly end: () => void;
 }
 
 /** Dependencies that make process randomness, time, and app-call routing testable. */
@@ -85,4 +86,6 @@ export interface ReferenceHostDependencies {
   readonly toolResult?: CallToolResult;
   /** Run and originating tool-call span for opt-in app trace propagation. */
   readonly uiSessionContext?: UiSessionContext;
+  /** Injectable UI-session expiry timer; returns a function that cancels it. */
+  readonly scheduleUiSessionExpiry?: (callback: () => void, delayMs: number) => () => void;
 }

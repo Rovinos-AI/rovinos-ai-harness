@@ -7,8 +7,10 @@ describe("HostConfigSchema", () => {
     expect(HostConfigSchema.parse({})).toEqual({
       apps: [],
       listen: { host: "127.0.0.1", port: 0 },
+      maxUiSessions: 32,
       permissionAllowlist: [],
       cspAllowlist: [],
+      uiSessionMaxMs: 3_600_000,
     });
   });
 
@@ -36,6 +38,16 @@ describe("HostConfigSchema", () => {
         apps: [{ id: "approval", resourceUri: "ui://approval/index.html", allowedTools: [] }],
       }).apps[0]?.telemetry,
     ).toBe(false);
+  });
+
+  it("accepts UI-session lifetime and active-session limits", () => {
+    expect(HostConfigSchema.parse({ maxUiSessions: 8, uiSessionMaxMs: 60_000 })).toMatchObject({
+      maxUiSessions: 8,
+      uiSessionMaxMs: 60_000,
+    });
+    expect(HostConfigSchema.safeParse({ maxUiSessions: 0 }).success).toBe(false);
+    expect(HostConfigSchema.safeParse({ maxUiSessions: 1025 }).success).toBe(false);
+    expect(HostConfigSchema.safeParse({ uiSessionMaxMs: 0 }).success).toBe(false);
   });
 
   it("rejects non-loopback addresses and unknown keys", () => {

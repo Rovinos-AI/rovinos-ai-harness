@@ -9,7 +9,7 @@ const host = await createReferenceHost(hostConfig, {
 });
 ```
 
-The host validates the resource MIME type (`text/html` with the exact `profile=mcp-app` parameter, allowing MIME casing and whitespace) and UTF-8 size (at most 1 MiB). A resource URI not present in `host.apps` returns the code `app_unknown`. Each launch receives a fresh ULID session ID. The SDK `AppBridge` handles MCP Apps initialization, tool-input and tool-result notifications, and app tool calls. Calls reach the provided handler only when their tool name is in that app's `allowedTools`; the handler remains responsible for the task 3.3 policy decision.
+The host validates the resource MIME type (`text/html` with the exact `profile=mcp-app` parameter, allowing MIME casing and whitespace) and UTF-8 size (at most 1 MiB). A resource URI not present in `host.apps` returns the code `app_unknown`. Each launch receives a fresh ULID session ID. `host.maxUiSessions` defaults to 32 active sessions per host; further launches receive `app_session_limit` until an active session ends. `host.uiSessionMaxMs` defaults to 3,600,000 ms; expired sessions are ended, removed, and reported as `ui_session_expired`. The SDK `AppBridge` handles MCP Apps initialization, tool-input and tool-result notifications, and app tool calls. Calls reach the provided handler only when their tool name is in that app's `allowedTools`; the handler remains responsible for the task 3.3 policy decision.
 
 ## Local channel
 
