@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest";
 import type { JsonValue } from "@harness/schemas";
 import {
-  ApprovalEditError,
   ApprovalPayloadSchema,
   buildApprovalPayload,
   diffToEdits,
@@ -376,7 +375,7 @@ describe("validateEdits", () => {
     expect(payload.args).toEqual({ nested: { value: "before" } });
   });
 
-  it("returns a typed error for edits on resume-ambiguity requests", async () => {
+  it("rejects edits, including no-op edits, on resume-ambiguity requests", async () => {
     const payload = buildApprovalPayload({
       kind: "resume_ambiguity",
       call,
@@ -388,6 +387,9 @@ describe("validateEdits", () => {
       validateEdits(payload, [{ pointer: "/subject", value: "edited" }], inputSchema, {
         tokenize: identityTokenizer,
       }),
-    ).rejects.toBeInstanceOf(ApprovalEditError);
+    ).rejects.toMatchObject({ code: "edit_not_allowed" });
+    await expect(
+      validateEdits(payload, [], undefined, { tokenize: identityTokenizer }),
+    ).rejects.toMatchObject({ code: "edit_not_allowed" });
   });
 });

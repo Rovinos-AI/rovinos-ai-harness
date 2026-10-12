@@ -104,6 +104,9 @@ export async function validateEdits(
     throw new ApprovalEditError("edit_invalid");
   }
 
+  if (validatedPayload.kind === "resume_ambiguity") {
+    throw new ApprovalEditError("edit_not_allowed");
+  }
   if (!approvalEditsAreAllowed(validatedPayload, validatedEdits)) {
     throw new ApprovalEditError("edit_not_allowed");
   }

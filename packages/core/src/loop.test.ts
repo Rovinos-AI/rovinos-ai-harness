@@ -2679,6 +2679,44 @@ describe("runLoop", () => {
       },
     );
 
+    it("rejects a no-op edit decision for a resume-ambiguity approval before recording", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      await createRunHistory(store, clock, [
+        {
+          type: "tool_intent",
+          v: 1,
+          callId: modelCallId,
+          toolId: "ambiguous_tool",
+          idempotent: false,
+          policyDecision: "allow",
+          argsHash: "d".repeat(64),
+          args: { value: 1 },
+        },
+      ]);
+      const prepare = vi.fn((call: Parameters<NonNullable<ToolPort["prepare"]>>[0]) =>
+        Promise.resolve(call),
+      );
+      const tool: ToolPort = {
+        describe: () => ({ idempotent: false, timeoutMs: 1_000 }),
+        prepare,
+        execute: () => Promise.resolve({ outcome: "ok", result: null }),
+      };
+      const requested = await resumeRun(createResumeOptions(store, clock, { tool }));
+      const approval = requested.state.pendingApprovals.values().next().value;
+      if (approval === undefined) {
+        throw new Error("Expected the resume-ambiguity approval.");
+      }
+
+      await expect(
+        resolveApproval(store, runId, approval.approvalId, "edit", { value: 1 }, clock, tool),
+      ).rejects.toMatchObject({ code: "edit_not_allowed" });
+      expect(
+        (await readApprovalEvents(store)).some(({ type }) => type === "approval_resolved"),
+      ).toBe(false);
+      expect(prepare).not.toHaveBeenCalled();
+    });
+
     it("checks the wall-clock budget before rerunning a dangling tool", async () => {
       const store = new InMemoryEventStore();
       const clock = new FakeClock(100);
