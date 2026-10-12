@@ -10,6 +10,7 @@ import { serveCommand } from "./serve.js";
 import { cancelCommand } from "./commands/cancel.js";
 import { continueCommand } from "./commands/continue.js";
 import { contextCommand } from "./commands/context.js";
+import { doctorCommand } from "./commands/doctor.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
@@ -23,6 +24,7 @@ export const COMMANDS: CommandModule[] = [
   cancelCommand,
   contextCommand,
   continueCommand,
+  doctorCommand,
 ];
 
 const systemClock: Clock = { now: () => Date.now() };
