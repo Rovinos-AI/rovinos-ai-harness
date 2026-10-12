@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HarnessConfigSchema } from "@harness/config";
@@ -83,6 +83,36 @@ describe("harness doctor", () => {
     expect(stdout.join("")).not.toContain(secretValue);
     expect(stderr).toEqual([]);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "reports world-readable secret files as warnings without printing their values",
+    async () => {
+      const dataDirectory = await createDataDirectory();
+      const secretValue = "doctor-file-secret-value";
+      const secretFile = join(dataDirectory, "doctor-key");
+      await writeFile(secretFile, secretValue, { mode: 0o644 });
+      await chmod(secretFile, 0o644);
+      const config = HarnessConfigSchema.parse({
+        models: {
+          providers: [{ id: "provider", kind: "openai", apiKey: `file:${secretFile}` }],
+        },
+      });
+      const { context, stdout, stderr } = createContext(() => Promise.resolve(config));
+
+      const exitCode = await main(["--json", "doctor"], context, [createDoctorCommand()]);
+      const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
+
+      expect(exitCode).toBe(ExitCode.ok);
+      expect(results).toContainEqual({
+        id: "secret_refs_resolvable",
+        status: "warn",
+        code: "secret_file_permissions",
+        detail: "file_doctor-key",
+      });
+      expect(stdout.join("") + stderr.join("")).not.toContain(secretValue);
+      expect(stdout.join("") + stderr.join("")).not.toContain(secretFile);
+    },
+  );
 
   it("returns failure when config loading or a check fails", async () => {
     const { context, stdout, stderr } = createContext(() =>

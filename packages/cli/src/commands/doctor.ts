@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CompositeSecretResolver, EnvSecretResolver, type HarnessConfig } from "@harness/config";
+import {
+  CompositeSecretResolver,
+  EnvSecretResolver,
+  FileSecretResolver,
+  type HarnessConfig,
+} from "@harness/config";
 import { DoctorResultsSchema, HarnessError } from "@harness/schemas";
 import type { DoctorCheck, DoctorContext } from "@harness/core";
 import type { CommandModule } from "../command.js";
@@ -33,13 +38,23 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
             config = undefined;
           }
           const env = process.env;
-          const resolver = new CompositeSecretResolver({ env: new EnvSecretResolver(env) });
+          const envResolver = new EnvSecretResolver(env);
           const doctorContext: DoctorContext = {
             config,
             env,
             dataDir: env.HARNESS_DATA_DIR ?? process.cwd(),
             resolveSecret: async (ref) => {
+              let fileWarning: "secret_file_permissions" | undefined;
+              const resolver = new CompositeSecretResolver({
+                env: envResolver,
+                file: new FileSecretResolver({
+                  onWarning: (code) => {
+                    fileWarning = code;
+                  },
+                }),
+              });
               await resolver.resolve(ref);
+              return fileWarning;
             },
           };
           const core = await import("@harness/core");

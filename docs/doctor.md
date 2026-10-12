@@ -7,13 +7,15 @@ each. A failed check produces exit code `1`; warnings do not change the successf
 Human output is a table containing each check's `id`, `status`, and `code`. With `--json`, the
 command prints one array validated by `DoctorResultsSchema` from
 `packages/schemas/src/cli/doctor.ts`. A check may include a safe `detail` code in its JSON result;
-secret-resolution failures use the reference name, never the resolved value or file path.
+secret-resolution results use a sanitized reference name, never the resolved value or file path.
+World-readable secret files resolve with a `warn` result and the `secret_file_permissions` code.
 
 ## Adding a check
 
 Packages can register checks with `registerDoctorCheck` from `@harness/core`. Each check receives
-the loaded configuration, environment, configured data directory, and a resolver that reports
-success or failure without returning the secret value.
+the loaded configuration, environment, configured data directory, an abort signal, and a resolver
+that reports success or failure without returning the secret value. A timed-out check has its
+signal aborted; checks with asynchronous work should stop and clean up when their signal is aborted.
 
 ```ts
 registerDoctorCheck({

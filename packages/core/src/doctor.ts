@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   Code,
   SecretRefSchema,
+  type Code as HarnessCode,
   type DoctorCheckStatus,
   type DoctorCheckResult,
   type SecretRef,
@@ -18,9 +19,11 @@ export interface DoctorContext {
   /** Data directory selected for harness runtime state. */
   readonly dataDir: string;
   /** Resolves a reference without returning or retaining its secret value. */
-  readonly resolveSecret: (ref: SecretRef) => Promise<void>;
+  readonly resolveSecret: (ref: SecretRef) => Promise<HarnessCode | undefined>;
   /** Node version override for deterministic checks. */
   readonly nodeVersion?: string;
+  /** Per-check cancellation signal, set by the doctor runner. */
+  readonly signal?: AbortSignal;
 }
 
 /** One registered environment diagnostic. */
@@ -50,6 +53,10 @@ function result(status: DoctorCheckStatus["status"], code: Code, detail?: Code) 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 function collectSecretRefs(
@@ -133,13 +140,17 @@ const initialChecks: DoctorCheck[] = [
     title: "Secret references",
     run: async (ctx) => {
       let firstFailure: DoctorCheckStatus | undefined;
+      let firstWarning: DoctorCheckStatus | undefined;
       for (const rawRef of collectSecretRefs(ctx.config)) {
         const parsed = SecretRefSchema.safeParse(rawRef);
         if (!parsed.success) {
           continue;
         }
         try {
-          await ctx.resolveSecret(parsed.data);
+          const warning = await ctx.resolveSecret(parsed.data);
+          if (warning === "secret_file_permissions") {
+            firstWarning ??= result("warn", warning, safeReferenceName(parsed.data));
+          }
         } catch (error) {
           firstFailure ??= result(
             "fail",
@@ -148,7 +159,7 @@ const initialChecks: DoctorCheck[] = [
           );
         }
       }
-      return firstFailure ?? result("ok", "secret_refs_resolvable");
+      return firstFailure ?? firstWarning ?? result("ok", "secret_refs_resolvable");
     },
   },
   {
@@ -158,15 +169,31 @@ const initialChecks: DoctorCheck[] = [
       let temporaryDirectory: string | undefined;
       try {
         await mkdir(ctx.dataDir, { recursive: true });
+        if (isAborted(ctx.signal)) {
+          return result("fail", "check_timeout");
+        }
         temporaryDirectory = await mkdtemp(join(ctx.dataDir, ".harness-doctor-"));
-        await writeFile(join(temporaryDirectory, "write-check"), "");
+        if (isAborted(ctx.signal)) {
+          return result("fail", "check_timeout");
+        }
+        const temporaryFile = join(temporaryDirectory, "write-check");
+        if (ctx.signal === undefined) {
+          await writeFile(temporaryFile, "");
+        } else {
+          await writeFile(temporaryFile, "", { signal: ctx.signal });
+        }
+        if (isAborted(ctx.signal)) {
+          return result("fail", "check_timeout");
+        }
         await rm(temporaryDirectory, { recursive: true });
+        temporaryDirectory = undefined;
         return result("ok", "data_dir_writable");
       } catch {
+        return result("fail", "data_dir_write_failed");
+      } finally {
         if (temporaryDirectory !== undefined) {
           await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => undefined);
         }
-        return result("fail", "data_dir_write_failed");
       }
     },
   },
@@ -181,14 +208,18 @@ async function runCheck(
   ctx: DoctorContext,
   timeoutMs: number,
 ): Promise<DoctorCheckResult> {
+  const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<DoctorCheckResult>((resolve) => {
     timeout = setTimeout(() => {
+      controller.abort();
       resolve({ id: check.id, ...result("fail", "check_timeout") });
     }, timeoutMs);
   });
   try {
-    const checkResult = check.run(ctx).then((value) => ({ id: check.id, ...value }));
+    const checkResult = check
+      .run({ ...ctx, signal: controller.signal })
+      .then((value) => ({ id: check.id, ...value }));
     return await Promise.race([checkResult, timedOut]);
   } catch {
     return { id: check.id, ...result("fail", "check_failed") };

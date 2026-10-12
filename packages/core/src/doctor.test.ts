@@ -24,7 +24,7 @@ function context(overrides: Partial<DoctorContext> = {}): DoctorContext {
     config: {},
     env: {},
     dataDir: tmpdir(),
-    resolveSecret: () => Promise.resolve(),
+    resolveSecret: () => Promise.resolve(undefined),
     ...overrides,
   };
 }
@@ -77,10 +77,14 @@ describe("doctor registry", () => {
 
   it("turns a hung check into check_timeout using the per-check timeout", async () => {
     vi.useFakeTimers();
+    let checkSignal: AbortSignal | undefined;
     const hangingCheck: DoctorCheck = {
       id: "hanging",
       title: "Hanging check",
-      run: () => new Promise(() => undefined),
+      run: (ctx) => {
+        checkSignal = ctx.signal;
+        return new Promise(() => undefined);
+      },
     };
 
     const resultPromise = runDoctor(context(), [hangingCheck], 5);
@@ -89,6 +93,7 @@ describe("doctor registry", () => {
     await expect(resultPromise).resolves.toEqual([
       { id: "hanging", status: "fail", code: "check_timeout" },
     ]);
+    expect(checkSignal?.aborted).toBe(true);
     expect(DEFAULT_DOCTOR_TIMEOUT_MS).toBe(5_000);
   });
 
@@ -152,7 +157,7 @@ describe("doctor registry", () => {
               Object.assign(new Error(secretValue), { code: "secret_not_found" }),
             );
           }
-          return Promise.resolve();
+          return Promise.resolve(undefined);
         },
       }),
       [secretCheck],
@@ -169,6 +174,31 @@ describe("doctor registry", () => {
     ]);
     expect(JSON.stringify(results)).not.toContain(secretValue);
     expect(JSON.stringify(results)).not.toContain("/private/path");
+  });
+
+  it("reports secret-file permission warnings without treating them as failures", async () => {
+    const ref = SecretRefSchema.parse("file:/private/path/doctor-key");
+    const secretCheck = DOCTOR_CHECKS.find(({ id }) => id === "secret_refs_resolvable");
+    if (secretCheck === undefined) {
+      throw new Error("secret_refs_resolvable check is not registered");
+    }
+
+    await expect(
+      runDoctor(
+        context({
+          config: { credential: ref },
+          resolveSecret: () => Promise.resolve("secret_file_permissions"),
+        }),
+        [secretCheck],
+      ),
+    ).resolves.toEqual([
+      {
+        id: "secret_refs_resolvable",
+        status: "warn",
+        code: "secret_file_permissions",
+        detail: "file_doctor-key",
+      },
+    ]);
   });
 
   it("creates and removes a temporary file under the configured data directory", async () => {
