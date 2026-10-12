@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
-import { HarnessError } from "@harness/schemas";
+import { HarnessError, ServerConfigSchema, type ServerConfig } from "@harness/schemas";
 import { ConfigError, formatConfigIssues, loadConfig } from "./index.js";
 
 const validYaml = `run:
@@ -157,6 +157,39 @@ describe("loadConfig", () => {
     expect(error.message).not.toContain("not-a-secret");
   });
 
+  it.each([["API", "KEY"].join(""), ["my", "api", "key"].join(""), ["client", "secret"].join("")])(
+    "rejects inline secrets under concatenated key %s",
+    async (key) => {
+      const error = await expectConfigError(
+        loadConfig({
+          env: {},
+          readFile: reader(validYaml.replace("store: {}", `store:\n  ${key}: "inline-secret"`)),
+        }),
+      );
+
+      expect(error.issues).toContain(`store.${key}: a SecretRef (secret_inline)`);
+      expect(error.message).not.toContain("inline-secret");
+    },
+  );
+
+  it("reports trace propagation error codes through the config loader", async () => {
+    const contents = validYaml.replace(
+      "store: {}",
+      `servers:
+  - id: external
+    transport:
+      kind: stdio
+      command: node
+    propagateTrace: true
+store: {}`,
+    );
+    const error = await expectConfigError(loadConfig({ env: {}, readFile: reader(contents) }));
+
+    expect(error.issues).toContain(
+      "servers.0.propagateTrace: a valid configuration value (propagate_requires_internal)",
+    );
+  });
+
   it("reports multiple invalid paths in one error", async () => {
     const contents = validYaml
       .replace("maxSteps: 12", "maxSteps: 0")
@@ -209,7 +242,11 @@ describe("loadConfig", () => {
       config.run.budgets.maxSteps = 13;
     }).toThrow(TypeError);
     expect(() => {
-      config.servers.push({});
+      const server: ServerConfig = ServerConfigSchema.parse({
+        id: "frozen",
+        transport: { kind: "stdio", command: "node" },
+      });
+      config.servers.push(server);
     }).toThrow(TypeError);
   });
 
