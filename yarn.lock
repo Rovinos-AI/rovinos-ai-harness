@@ -1101,6 +1101,7 @@ __metadata:
     "@types/node": "npm:22.20.5"
     esbuild: "npm:0.28.2"
     playwright: "npm:1.64.0"
+    typescript: "npm:5.9.3"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   languageName: unknown
