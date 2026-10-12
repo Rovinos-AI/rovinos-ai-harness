@@ -8,6 +8,11 @@ import { z } from "zod";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const yamlSchema = z.record(z.string(), z.unknown());
+const composeFiles = [
+  "infra/compose/docker-compose.yml",
+  "infra/compose/docker-compose.dev.yml",
+  "infra/compose/docker-compose.test.yml",
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -37,34 +42,37 @@ it("keeps collector and Compose YAML free of literal credentials", () => {
   for (const path of [
     "infra/collector/base.yaml",
     "infra/collector/profile-debug.yaml",
-    "infra/compose/docker-compose.yml",
-    "infra/compose/docker-compose.test.yml",
+    ...composeFiles,
   ]) {
     expect(containsLiteralSecrets(readYaml(path))).toBe(false);
   }
 });
 
-it("does not publish a wildcard-bound port in Compose profiles", () => {
-  for (const path of [
-    "infra/compose/docker-compose.yml",
-    "infra/compose/docker-compose.test.yml",
-  ]) {
+function hasLoopbackPortBinding(port: unknown): boolean {
+  if (typeof port === "string") {
+    return /^(?:127\.0\.0\.1|\[::1\]|::1):/u.test(port);
+  }
+  return (
+    isRecord(port) &&
+    (port.host_ip === "127.0.0.1" || port.host_ip === "::1" || port.host_ip === "[::1]")
+  );
+}
+
+it("binds every published Compose port to loopback", () => {
+  expect(hasLoopbackPortBinding("4318:4318")).toBe(false);
+  for (const path of composeFiles) {
     const compose = readYaml(path);
     const services = compose.services;
     expect(isRecord(services)).toBe(true);
     if (!isRecord(services)) {
       continue;
     }
-    expect(
-      isRecord(services["otel-collector"]) ? services["otel-collector"].ports : undefined,
-    ).toBe(undefined);
-
     for (const service of Object.values(services)) {
       if (!isRecord(service) || !Array.isArray(service.ports)) {
         continue;
       }
       for (const port of service.ports) {
-        expect(typeof port === "string" ? port : JSON.stringify(port)).not.toMatch(/^0\.0\.0\.0:/u);
+        expect(hasLoopbackPortBinding(port)).toBe(true);
       }
     }
   }
@@ -86,6 +94,15 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
     memory_limiter: { check_interval: "1s", limit_mib: 256, spike_limit_mib: 64 },
     batch: { timeout: "5s", send_batch_size: 512 },
   });
+  expect(readYaml("infra/compose/docker-compose.yml").services).toMatchObject({
+    "otel-collector": { mem_limit: "512m", pids_limit: 256 },
+  });
+  expect(readYaml("infra/compose/docker-compose.dev.yml").services).toMatchObject({
+    "otel-collector-dev": {
+      profiles: ["dev"],
+      ports: ["127.0.0.1:4318:4318", "127.0.0.1::13133"],
+    },
+  });
   expect(base.extensions).toMatchObject({
     health_check: { endpoint: "0.0.0.0:13133" },
   });
@@ -106,6 +123,16 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
     },
   });
   expect(profile.exporters).toMatchObject({ debug: { verbosity: "basic" } });
+  const profileText = readFileSync(resolve(root, "infra/collector/profile-debug.yaml"), "utf8");
+  expect(
+    profileText
+      .split("\n")
+      .filter(
+        (line) =>
+          line.startsWith("      processors: [memory_limiter, batch]") &&
+          line.endsWith("# Task 10.2 inserts generated allowlist processors here."),
+      ),
+  ).toHaveLength(3);
   expect(profile.service).toMatchObject({
     pipelines: {
       traces: {

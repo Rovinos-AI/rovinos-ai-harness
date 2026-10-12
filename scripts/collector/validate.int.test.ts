@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -9,20 +8,39 @@ import { expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const collectorDirectory = resolve(root, "infra/collector");
-const containerName = `harness-otel-health-${String(process.pid)}`;
+const projectName = `harness-otel-health-${String(process.pid)}`;
 const commandOptions = {
   encoding: "utf8" satisfies BufferEncoding,
   maxBuffer: 10 * 1024 * 1024,
 };
 
-async function readCollectorImage(): Promise<string> {
-  const versionFile = await readFile(resolve(collectorDirectory, "VERSION"), "utf8");
-  const match = /^OTEL_COLLECTOR_IMAGE=(\S+)$/mu.exec(versionFile);
-  if (match?.[1] === undefined) {
-    throw new Error("infra/collector/VERSION does not contain the collector image");
+async function compose(args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync(
+    "docker",
+    [
+      "compose",
+      "--env-file",
+      "infra/collector/VERSION",
+      "--project-name",
+      projectName,
+      "--file",
+      "infra/compose/docker-compose.yml",
+      "--file",
+      "infra/compose/docker-compose.dev.yml",
+      "--profile",
+      "dev",
+      ...args,
+    ],
+    { ...commandOptions, cwd: root },
+  );
+  return requireStdout(stdout);
+}
+
+function requireStdout(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new TypeError("Docker command did not return text output.");
   }
-  return match[1];
+  return value;
 }
 
 it("validates the base configuration and debug profile with the pinned collector", async () => {
@@ -39,41 +57,25 @@ it("validates the base configuration and debug profile with the pinned collector
 }, 120_000);
 
 it("serves the health endpoint on a loopback-only published port", async () => {
-  const image = await readCollectorImage();
-  await execFileAsync(
-    "docker",
-    [
-      "run",
-      "--detach",
-      "--rm",
-      "--name",
-      containerName,
-      "--read-only",
-      "--tmpfs",
-      "/tmp",
-      "--cap-drop",
-      "ALL",
-      "--security-opt",
-      "no-new-privileges:true",
-      "--volume",
-      `${collectorDirectory}:/etc/otel:ro`,
-      "--publish",
-      "127.0.0.1::13133",
-      image,
-      "--config=/etc/otel/base.yaml",
-      "--config=/etc/otel/profile-debug.yaml",
-    ],
-    commandOptions,
-  );
-
   try {
-    const publishedPort = await execFileAsync(
+    await compose(["up", "--detach", "--pull=never", "otel-collector-dev"]);
+    const containerId = (await compose(["ps", "--quiet", "otel-collector-dev"])).trim();
+    expect(containerId).not.toBe("");
+    const readonlyRoot = await execFileAsync(
       "docker",
-      ["port", containerName, "13133/tcp"],
+      ["inspect", "--format", "{{.HostConfig.ReadonlyRootfs}}", containerId],
       commandOptions,
     );
-    const publishedAddress = typeof publishedPort.stdout === "string" ? publishedPort.stdout : "";
-    const hostPort = publishedAddress.trim().split(":").at(-1);
+    expect(requireStdout(readonlyRoot.stdout).trim()).toBe("true");
+    const droppedCapabilities = await execFileAsync(
+      "docker",
+      ["inspect", "--format", '{{join .HostConfig.CapDrop ","}}', containerId],
+      commandOptions,
+    );
+    expect(requireStdout(droppedCapabilities.stdout).trim()).toContain("ALL");
+
+    const publishedPort = await compose(["port", "otel-collector-dev", "13133"]);
+    const hostPort = publishedPort.trim().split(":").at(-1);
     if (hostPort === undefined || !/^\d+$/u.test(hostPort)) {
       throw new Error("Collector health endpoint did not receive a published port");
     }
@@ -95,8 +97,6 @@ it("serves the health endpoint on a loopback-only published port", async () => {
     }
     expect(healthy).toBe(true);
   } finally {
-    await execFileAsync("docker", ["rm", "--force", containerName], commandOptions).catch(
-      () => undefined,
-    );
+    await compose(["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
   }
 }, 60_000);

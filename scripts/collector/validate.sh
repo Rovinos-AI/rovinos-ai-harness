@@ -2,8 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 
+pull_policy=never
+if [[ "${1:-}" == "--pull" ]]; then
+  pull_policy=always
+  shift
+fi
+
 if [[ $# -ne 1 || ! "$1" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
-  printf 'Usage: %s <profile>\n' "$0" >&2
+  printf 'Usage: %s [--pull] <profile>\n' "$0" >&2
   exit 2
 fi
 
@@ -22,7 +28,7 @@ if [[ ! -f "$collector_directory/$profile_file" ]]; then
   exit 2
 fi
 
-docker run --rm \
+docker run --pull="$pull_policy" --rm \
   --volume "$collector_directory:/etc/otel:ro" \
   "$image" validate \
   --config=/etc/otel/base.yaml \

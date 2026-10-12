@@ -7,14 +7,13 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, batch] # Task 10.2 inserts generated allowlist processors here.
       exporters: [debug]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, batch] # Task 10.2 inserts generated allowlist processors here.
       exporters: [debug]
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, batch] # Task 10.2 inserts generated allowlist processors here.
       exporters: [debug]
-      # Task 10.2 inserts generated allowlist processors between the limiter and batch.
