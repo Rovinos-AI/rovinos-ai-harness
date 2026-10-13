@@ -1,0 +1,275 @@
+// SPDX-License-Identifier: Apache-2.0
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { Id, parseJson } from "@harness/schemas";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { resolve } from "node:path";
+import { z } from "zod";
+import { ExecResultSchema } from "../../src/types.js";
+import type { ExecSpec } from "../../src/types.js";
+
+const execFileAsync = promisify(execFile);
+const root = resolve(fileURLToPath(new URL("../../../../", import.meta.url)));
+const projectName = `harness-sandbox-runner-${String(process.pid)}`;
+const integrationToken = "synthetic-runner-token-for-integration";
+const composeFile = "infra/compose/docker-compose.yml";
+const composeEnvironment = {
+  ...process.env,
+  SANDBOX_RUNNER_TOKEN: integrationToken,
+};
+
+const ComposeSchema = z.object({
+  networks: z.record(z.string(), z.object({ internal: z.boolean().optional() })),
+  services: z.record(
+    z.string(),
+    z.object({
+      cpus: z.number().optional(),
+      mem_limit: z.union([z.string(), z.number()]).optional(),
+      networks: z.record(z.string(), z.unknown()).optional(),
+      pids_limit: z.number().optional(),
+      ports: z.array(z.unknown()).optional(),
+      privileged: z.boolean().optional(),
+      read_only: z.boolean().optional(),
+      user: z.string().optional(),
+      volumes: z
+        .array(
+          z.object({
+            source: z.string().optional(),
+            target: z.string().optional(),
+            type: z.string().optional(),
+          }),
+        )
+        .optional(),
+    }),
+  ),
+});
+const HttpResponseSchema = z.object({ status: z.number().int(), body: z.string() }).strict();
+
+function composeArgs(args: string[]): string[] {
+  return [
+    "compose",
+    "--env-file",
+    "infra/collector/VERSION",
+    "--project-name",
+    projectName,
+    "--profile",
+    "sandbox",
+    "--file",
+    composeFile,
+    ...args,
+  ];
+}
+
+async function runCompose(args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("docker", composeArgs(args), {
+    cwd: root,
+    env: composeEnvironment,
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return stdout;
+}
+
+function readRenderedComposeConfig(): z.infer<typeof ComposeSchema> {
+  const output = execFileSync("docker", composeArgs(["config", "--format", "json"]), {
+    cwd: root,
+    env: composeEnvironment,
+    encoding: "utf8",
+  });
+  return parseJson(ComposeSchema, output);
+}
+
+async function executeInRunner(script: string): Promise<string> {
+  const { stdout } = await execFileAsync(
+    "docker",
+    [
+      "compose",
+      "--env-file",
+      "infra/collector/VERSION",
+      "--project-name",
+      projectName,
+      "--profile",
+      "sandbox",
+      "--file",
+      composeFile,
+      "exec",
+      "--no-TTY",
+      "sandbox-runner",
+      "node",
+      "-e",
+      script,
+    ],
+    { cwd: root, env: composeEnvironment, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
+  );
+  return stdout;
+}
+
+async function requestRunner(
+  body: unknown,
+  options: { readonly token?: string; readonly host?: string; readonly origin?: string } = {},
+): Promise<z.infer<typeof HttpResponseSchema>> {
+  const headers = {
+    host: options.host ?? "sandbox-runner",
+    ...(options.token === undefined ? {} : { authorization: ["Bearer", options.token].join(" ") }),
+    ...(options.origin === undefined ? {} : { origin: options.origin }),
+    "content-type": "application/json",
+  };
+  const script = [
+    'const http = require("node:http");',
+    `const request = http.request({ hostname: "127.0.0.1", port: 8080, path: "/exec", method: "POST", headers: ${JSON.stringify(headers)} }, (response) => {`,
+    '  const chunks = []; response.on("data", (chunk) => chunks.push(chunk));',
+    '  response.on("end", () => process.stdout.write(JSON.stringify({ status: response.statusCode, body: Buffer.concat(chunks).toString() })));',
+    "});",
+    `request.end(${JSON.stringify(JSON.stringify(body))});`,
+  ].join("\n");
+  const output = await executeInRunner(script);
+  return parseJson(HttpResponseSchema, output);
+}
+
+function makeSpec(argv: string[], options: Partial<ExecSpec> = {}): ExecSpec {
+  return {
+    argv,
+    timeoutMs: 5000,
+    limits: { memoryMb: 2048, pids: 2048, outputBytes: 2048, cpuSeconds: 5 },
+    ...options,
+  };
+}
+
+async function runExec(spec: ExecSpec): Promise<z.infer<typeof ExecResultSchema>> {
+  const response = await requestRunner(
+    { runId: Id.parse("00000000000000000000000001"), spec },
+    { token: integrationToken },
+  );
+  expect(response.status).toBe(200);
+  return parseJson(ExecResultSchema, response.body);
+}
+
+describe("sandbox runner Compose service", () => {
+  beforeAll(async () => {
+    await runCompose(["up", "--detach", "--wait", "--pull=missing", "--build", "sandbox-runner"]);
+  }, 180_000);
+
+  afterAll(async () => {
+    await runCompose(["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
+  }, 60_000);
+
+  // threat: T-01
+  // threat: T-04
+  it("has no host runtime or secret mounts, privileged mode, or published ports", () => {
+    const config = readRenderedComposeConfig();
+    const runner = config.services["sandbox-runner"];
+    expect(runner).toBeDefined();
+    expect(runner?.privileged).not.toBe(true);
+    expect(runner?.ports ?? []).toHaveLength(0);
+    expect(runner?.volumes?.some((volume) => volume.type === "bind")).toBe(false);
+    expect(
+      runner?.volumes?.some(
+        (volume) =>
+          volume.source?.includes("docker.sock") === true ||
+          volume.target?.includes("docker.sock") === true,
+      ),
+    ).toBe(false);
+    expect(config.networks.sandbox?.internal).toBe(true);
+    expect(Object.keys(runner?.networks ?? {})).toEqual(["sandbox"]);
+    expect(runner?.read_only).toBe(true);
+    expect(runner?.user).toBe("10002:10002");
+    expect(runner?.pids_limit).toBeGreaterThan(0);
+    expect(runner?.mem_limit).toBeDefined();
+    expect(runner?.cpus).toBeGreaterThan(0);
+  });
+
+  it("echoes argv over the authenticated API", async () => {
+    const result = await runExec(makeSpec(["/bin/echo", "runner-ready"]));
+
+    expect(result).toMatchObject({ exitCode: 0, stdout: "runner-ready\n" });
+  });
+
+  // threat: T-18
+  it("rejects requests without a valid runner token", async () => {
+    const response = await requestRunner({
+      runId: Id.parse("00000000000000000000000001"),
+      spec: makeSpec(["/bin/echo", "not-authorized"]),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
+  // threat: T-19
+  it("rejects unapproved Host and Origin authorities", async () => {
+    const payload = {
+      runId: Id.parse("00000000000000000000000001"),
+      spec: makeSpec(["/bin/echo", "not-authorized"]),
+    };
+    const wrongHost = await requestRunner(payload, {
+      token: integrationToken,
+      host: "untrusted.test",
+    });
+    const wrongOrigin = await requestRunner(payload, {
+      token: integrationToken,
+      origin: "https://untrusted.test",
+    });
+
+    expect(wrongHost.status).toBe(400);
+    expect(wrongOrigin.status).toBe(400);
+  });
+
+  // threat: T-07
+  it("contains a process-spawning workload within the per-exec process limit", async () => {
+    const script = [
+      "(async () => {",
+      '  const { spawn } = require("node:child_process");',
+      "  const children = [];",
+      "  for (let index = 0; index < 64; index += 1) {",
+      '    const child = spawn("/bin/sleep", ["5"], { stdio: "ignore" });',
+      '    child.once("spawn", () => children.push(child));',
+      '    child.once("error", () => undefined);',
+      "  }",
+      "  await new Promise((resolve) => setTimeout(resolve, 250));",
+      '  for (const child of children) child.kill("SIGKILL");',
+      "  process.stdout.write(String(children.length));",
+      "})().catch(() => { process.exitCode = 1; });",
+    ].join("\n");
+    const result = await runExec(
+      makeSpec(["node", "-e", script], {
+        limits: { memoryMb: 2048, pids: 32, outputBytes: 128, cpuSeconds: 5 },
+      }),
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(Number(result.stdout)).toBeLessThan(64);
+  }, 30_000);
+
+  // threat: T-08
+  it("contains a memory-hogging process", async () => {
+    const result = await runExec(
+      makeSpec(["/usr/bin/dd", "if=/dev/zero", "of=/dev/null", "bs=256M", "count=1", "status=none"], {
+        limits: { memoryMb: 128, pids: 16, outputBytes: 128, cpuSeconds: 5 },
+      }),
+    );
+
+    expect(result.exitCode).not.toBe(0);
+  }, 30_000);
+
+  // threat: T-10
+  it("kills an infinite loop at the request timeout", async () => {
+    const result = await runExec(
+      makeSpec(["/bin/sleep", "10"], {
+        timeoutMs: 500,
+        limits: { memoryMb: 2048, pids: 16, outputBytes: 128, cpuSeconds: 5 },
+      }),
+    );
+
+    expect(result.timedOut).toBe(true);
+    expect(result.signal).toBe("SIGKILL");
+  }, 30_000);
+
+  // threat: T-16
+  it("cannot write to the read-only container root", async () => {
+    const script =
+      'try { require("node:fs").writeFileSync("/sandbox-runner-root-probe", "test"); process.stdout.write("writable"); } catch (error) { process.stdout.write(error.code ?? "denied"); }';
+    const result = await runExec(makeSpec(["node", "-e", script]));
+
+    expect(result.stdout).not.toBe("writable");
+  });
+});
