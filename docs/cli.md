@@ -33,8 +33,16 @@ table of check IDs, statuses, and codes. `--json` returns a schema-validated arr
 
 ## `harness serve`
 
-`serve` keeps the process running until SIGINT or SIGTERM, then exits successfully. With `--json`,
-it writes `{"status":"serving"}` once when startup completes.
+`harness serve` defaults to MCP over loopback HTTP and stops on SIGINT or SIGTERM. Use
+`--http [--port <port>]` to select HTTP explicitly; it prints only the endpoint URL and defaults to
+port 3000. Use `--stdio` for MCP over standard input and output; it stops when its input closes or
+receives SIGINT or SIGTERM. HTTP mode also accepts `--json`, which writes the validated
+`{"status":"serving"}` result to stdout and the endpoint to stderr. JSON mode is not available with
+stdio because stdout carries the MCP protocol.
+
+HTTP mode has no authentication yet; bearer-token authentication is planned for task 18.5. Until
+then, access is limited by loopback binding and `Host`/`Origin` validation. Any local process running
+as the same user can read run metadata.
 
 ## `harness run`
 
@@ -175,6 +183,7 @@ never included in CLI error output.
 | Error code | Exit code |
 | --- | --- |
 | `usage`, `confirmation_required`, `edit_not_allowed`, `edit_invalid` | `2` |
+| `serve_options_invalid`, `serve_port_invalid`, `stdio_json_unsupported` | `2` |
 | `doctor_failed`, `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
 | `approval_edit_unavailable`, `reveal_unavailable` | `1` |
 | `config_invalid` | `3` |

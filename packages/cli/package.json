@@ -17,6 +17,7 @@
   "dependencies": {
     "@harness/config": "workspace:^",
     "@harness/context": "workspace:^",
+    "@harness/control-plane": "workspace:^",
     "@harness/core": "workspace:^",
     "@harness/mcp": "workspace:^",
     "@harness/policy": "workspace:^",
