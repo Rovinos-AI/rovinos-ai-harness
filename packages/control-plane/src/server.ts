@@ -13,8 +13,6 @@ import { controlPlaneHttpPortSchema } from "./schemas.js";
 import { registerGetRunTool } from "./tools/get-run.js";
 import { registerListRunsTool } from "./tools/list-runs.js";
 
-const MCP_APPS_EXTENSION = "io.modelcontextprotocol/ui";
-const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 const HTTP_HOST = "127.0.0.1";
 const HTTP_PATH = "/mcp";
 
@@ -37,10 +35,7 @@ export interface ControlPlaneHttpHandle {
 /** Creates the shared MCP server with metadata-only run inspection tools. */
 export function createControlPlaneServer(store: EventStore): McpServer {
   const server = new McpServer({ name: "rovinos-ai-harness-control-plane", version: "0.0.0" });
-  server.server.registerCapabilities({
-    tools: {},
-    extensions: { [MCP_APPS_EXTENSION]: { mimeTypes: [MCP_APP_MIME_TYPE] } },
-  });
+  server.server.registerCapabilities({ tools: {} });
   registerListRunsTool(server, store);
   registerGetRunTool(server, store);
   return server;
@@ -77,7 +72,15 @@ export async function startControlPlaneHttp(
         [Symbol.asyncIterator]: () => request[Symbol.asyncIterator](),
       },
       response,
-    );
+    ).catch(() => {
+      if (!response.headersSent) {
+        response
+          .writeHead(500, { "content-type": "text/plain; charset=utf-8" })
+          .end("control_plane_request_failed");
+      } else if (!response.writableEnded) {
+        response.end();
+      }
+    });
   });
   await listen(server, checkedPort);
   const address = server.address();

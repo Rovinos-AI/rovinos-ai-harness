@@ -1,8 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { listRunsInputSchema, listRunsOutputSchema, type ListRunsInput } from "../schemas.js";
-import { readRunState } from "./run-state.js";
+
+async function countRunMetadata(store: EventStore, runId: Id, lastSeq: number) {
+  let steps = 0;
+  const pendingApprovals = new Set<string>();
+  for await (const event of store.read(runId, { toSeq: lastSeq })) {
+    if (event.type === "model_response") {
+      steps += 1;
+    } else if (event.type === "approval_requested") {
+      pendingApprovals.add(event.approvalId);
+    } else if (event.type === "approval_resolved") {
+      pendingApprovals.delete(event.approvalId);
+    }
+  }
+  return { steps, pendingApprovals: pendingApprovals.size };
+}
 
 /** Lists run metadata and derived step and approval counts. */
 export async function listRuns(store: EventStore, input: ListRunsInput) {
@@ -14,11 +29,10 @@ export async function listRuns(store: EventStore, input: ListRunsInput) {
   });
   const runs = await Promise.all(
     page.runs.map(async (summary) => {
-      const run = await readRunState(store, summary.runId);
+      const counts = await countRunMetadata(store, summary.runId, summary.lastSeq);
       return {
         ...summary,
-        steps: run?.state.steps ?? 0,
-        pendingApprovals: run?.state.pendingApprovals.size ?? 0,
+        ...counts,
       };
     }),
   );

@@ -6,8 +6,6 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { getRunInputSchema, getRunOutputSchema, type GetRunInput } from "../schemas.js";
 import { readRunState } from "./run-state.js";
 
-const SAFE_EVENT_POLICY_VERSION = Code.parse("control_plane_v1");
-
 /** Returns one run's status, usage, pending approvals, and recent safe events. */
 export async function getRun(store: EventStore, input: GetRunInput) {
   const { runId } = getRunInputSchema.parse(input);
@@ -25,7 +23,7 @@ export async function getRun(store: EventStore, input: GetRunInput) {
     };
   });
   const recentEvents = run.events.slice(-20).flatMap((event) => {
-    const safeEvent = toSafeEvent(event, SAFE_EVENT_POLICY_VERSION);
+    const safeEvent = toSafeEvent(event, run.policyVersion);
     return safeEvent === null ? [] : [safeEvent];
   });
   return getRunOutputSchema.parse({

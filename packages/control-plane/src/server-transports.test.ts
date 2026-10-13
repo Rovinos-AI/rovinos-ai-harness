@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InMemoryEventStore } from "@harness/store";
+import { Id } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
 
 interface MockRequest {
@@ -11,8 +12,11 @@ interface MockRequest {
 
 interface MockResponse {
   statusCode: number;
-  writeHead(status: number): MockResponse;
-  end(): MockResponse;
+  headersSent: boolean;
+  writableEnded: boolean;
+  body: string | undefined;
+  writeHead(status: number, headers?: Record<string, string>): MockResponse;
+  end(body?: string): MockResponse;
 }
 
 type RequestListener = (request: MockRequest, response: MockResponse) => void;
@@ -119,11 +123,17 @@ function request(url: string, headers: Record<string, string | undefined> = {}):
 function response(): MockResponse {
   const result: MockResponse = {
     statusCode: 200,
+    headersSent: false,
+    writableEnded: false,
+    body: undefined,
     writeHead(status) {
       result.statusCode = status;
+      result.headersSent = true;
       return result;
     },
-    end() {
+    end(body) {
+      result.body = body;
+      result.writableEnded = true;
       return result;
     },
   };
@@ -161,6 +171,38 @@ describe("control-plane transports", () => {
     await handle.close();
     expect(mocks.createMcpHandler).toHaveBeenCalledOnce();
     expect(mocks.createServer).toHaveBeenCalledOnce();
+  });
+
+  it("returns a code-only 500 when a store read rejects in the request handler", async () => {
+    mocks.reset();
+    const store = new InMemoryEventStore();
+    const runId = Id.parse("00000000000000000000000000");
+    const rejectingStore = new Proxy(store, {
+      get(target, property) {
+        if (property === "read") {
+          return async function* () {
+            throw new Error("synthetic store failure");
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    mocks.httpRequestHandler.mockImplementationOnce(async () => {
+      for await (const event of rejectingStore.read(runId)) {
+        void event;
+      }
+    });
+    const handle = await startControlPlaneHttp(rejectingStore, 0);
+    const outgoing = response();
+
+    mocks.dispatch(request("/mcp"), outgoing);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(outgoing.statusCode).toBe(500);
+    expect(outgoing.body).toBe("control_plane_request_failed");
+    expect(outgoing.writableEnded).toBe(true);
+    await handle.close();
   });
 
   it("fails closed for invalid ports, listen errors, and missing listener addresses", async () => {

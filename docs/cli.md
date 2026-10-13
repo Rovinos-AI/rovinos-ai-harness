@@ -40,6 +40,10 @@ receives SIGINT or SIGTERM. HTTP mode also accepts `--json`, which writes the va
 `{"status":"serving"}` result to stdout and the endpoint to stderr. JSON mode is not available with
 stdio because stdout carries the MCP protocol.
 
+HTTP mode has no authentication yet; bearer-token authentication is planned for task 18.5. Until
+then, access is limited by loopback binding and `Host`/`Origin` validation. Any local process running
+as the same user can read run metadata.
+
 ## `harness run`
 
 `harness run --input <json-file|-> [--fake-model <script.json>]` starts a run. The input file must
@@ -179,6 +183,7 @@ never included in CLI error output.
 | Error code | Exit code |
 | --- | --- |
 | `usage`, `confirmation_required`, `edit_not_allowed`, `edit_invalid` | `2` |
+| `serve_options_invalid`, `serve_port_invalid`, `stdio_json_unsupported` | `2` |
 | `doctor_failed`, `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
 | `approval_edit_unavailable`, `reveal_unavailable` | `1` |
 | `config_invalid` | `3` |

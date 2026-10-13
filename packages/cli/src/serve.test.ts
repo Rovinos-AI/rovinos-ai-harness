@@ -59,6 +59,10 @@ function createContext() {
   const store = new InMemoryEventStore();
   const runtime: Runtime = {
     store,
+    keys: {
+      currentKeyId: () => "test-key",
+      getKey: () => Promise.resolve(new Uint8Array(32)),
+    },
     clock: { now: () => 1_000 },
     ids: { next: () => "00000000000000000000000000" },
     run: async () => {
@@ -102,10 +106,7 @@ describe("serve command", () => {
     const sigtermListeners = process.listenerCount("SIGTERM");
     const result = main(["serve"], context, [serveCommand]);
     const signalWait = waitForSignalListener("SIGTERM", sigtermListeners);
-    const waitingForSignal = await Promise.race([
-      result.then(() => false),
-      signalWait.promise,
-    ]);
+    const waitingForSignal = await Promise.race([result.then(() => false), signalWait.promise]);
     signalWait.cancel();
     if (waitingForSignal) {
       process.emit("SIGTERM");
@@ -129,10 +130,7 @@ describe("serve command", () => {
 
     const baseline = signal === "SIGINT" ? sigintListeners : sigtermListeners;
     const signalWait = waitForSignalListener(signal, baseline);
-    const waitingForSignal = await Promise.race([
-      result.then(() => false),
-      signalWait.promise,
-    ]);
+    const waitingForSignal = await Promise.race([result.then(() => false), signalWait.promise]);
     signalWait.cancel();
     if (waitingForSignal) {
       process.emit(signal);
@@ -155,7 +153,7 @@ describe("serve command", () => {
 
     for (const { args, code } of cases) {
       const { context, runtime, stdout, stderr } = createContext();
-      await expect(main(args, context, [serveCommand])).resolves.toBe(ExitCode.failure);
+      await expect(main(args, context, [serveCommand])).resolves.toBe(ExitCode.usage);
       expect(stdout).toEqual([]);
       expect(stderr).toEqual([`${code}\n`]);
       expect(runtime.close).not.toHaveBeenCalled();

@@ -7,7 +7,14 @@ import type { EventStore } from "@harness/store";
 export async function readRunState(
   store: EventStore,
   runId: Id,
-): Promise<{ events: Event[]; state: RunState } | undefined> {
+): Promise<
+  | {
+      events: Event[];
+      state: RunState;
+      policyVersion: Extract<Event, { type: "run_created" }>["policyVersion"];
+    }
+  | undefined
+> {
   const events: Event[] = [];
   for await (const event of store.read(runId)) {
     events.push(event);
@@ -15,5 +22,10 @@ export async function readRunState(
   if (events.length === 0) {
     return undefined;
   }
-  return { events, state: foldRunState(events) };
+  const state = foldRunState(events);
+  const runCreated = events[0];
+  if (runCreated?.type !== "run_created") {
+    return undefined;
+  }
+  return { events, state, policyVersion: runCreated.policyVersion };
 }
