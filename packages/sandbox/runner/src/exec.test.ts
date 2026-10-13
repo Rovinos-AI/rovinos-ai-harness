@@ -2,13 +2,13 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Id } from "@harness/schemas";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { executeSpec } from "./exec.js";
 import type { ExecSpec } from "../../src/types.js";
 
-const runId = Id.parse("00000000000000000000000001");
 const limits = { memoryMb: 2048, pids: 2048, outputBytes: 1024, cpuSeconds: 5 };
+const executionUid = process.getuid?.() ?? 10003;
+const executionGid = process.getgid?.() ?? 10003;
 let workspaceRoot: string;
 
 function makeSpec(
@@ -16,6 +16,16 @@ function makeSpec(
   options: Partial<Pick<ExecSpec, "cwd" | "env" | "stdin" | "timeoutMs" | "limits">> = {},
 ): ExecSpec {
   return { argv, timeoutMs: 2000, limits, ...options };
+}
+
+function execute(spec: ExecSpec, signal = new AbortController().signal) {
+  return executeSpec({
+    spec,
+    signal,
+    workspaceRoot,
+    executionUid,
+    executionGid,
+  });
 }
 
 describe("executeSpec", () => {
@@ -34,12 +44,7 @@ describe("executeSpec", () => {
       'process.stdin.pipe(process.stdout); process.stderr.write("diagnostic")',
     ]);
 
-    const result = await executeSpec(
-      runId,
-      { ...spec, stdin: "hello" },
-      new AbortController().signal,
-      workspaceRoot,
-    );
+    const result = await execute({ ...spec, stdin: "hello" });
 
     expect(result).toMatchObject({
       exitCode: 0,
@@ -52,13 +57,10 @@ describe("executeSpec", () => {
   });
 
   it("bounds captured output and preserves the total byte counts", async () => {
-    const result = await executeSpec(
-      runId,
+    const result = await execute(
       makeSpec([process.execPath, "-e", 'process.stdout.write("abcdefgh")'], {
         limits: { ...limits, outputBytes: 4 },
       }),
-      new AbortController().signal,
-      workspaceRoot,
     );
 
     expect(result).toMatchObject({
@@ -70,11 +72,8 @@ describe("executeSpec", () => {
   });
 
   it("kills the process group when the command exceeds its timeout", async () => {
-    const result = await executeSpec(
-      runId,
+    const result = await execute(
       makeSpec([process.execPath, "-e", "setInterval(() => {}, 1000)"], { timeoutMs: 100 }),
-      new AbortController().signal,
-      workspaceRoot,
     );
 
     expect(result).toMatchObject({ timedOut: true, signal: "SIGKILL" });
@@ -85,23 +84,26 @@ describe("executeSpec", () => {
     controller.abort();
 
     await expect(
-      executeSpec(
-        runId,
-        makeSpec([process.execPath, "-e", "process.exit(1)"]),
-        controller.signal,
-        workspaceRoot,
-      ),
+      execute(makeSpec([process.execPath, "-e", "process.exit(1)"]), controller.signal),
     ).resolves.toMatchObject({ exitCode: null, signal: "SIGKILL", timedOut: false });
   });
 
   it("rejects working directories outside the workspace", async () => {
     await expect(
-      executeSpec(
-        runId,
-        makeSpec([process.execPath, "-e", "process.exit(0)"], { cwd: "../" }),
-        new AbortController().signal,
-        workspaceRoot,
-      ),
+      execute(makeSpec([process.execPath, "-e", "process.exit(0)"], { cwd: "../" })),
     ).rejects.toMatchObject({ code: "sandbox_workspace_path_invalid" });
+  });
+
+  it("decodes stdout and stderr independently", async () => {
+    const result = await execute(
+      makeSpec([
+        process.execPath,
+        "-e",
+        'process.stdout.write(Buffer.from([0xe2])); process.stderr.write("ok")',
+      ]),
+    );
+
+    expect(result.stdout).toBe("\uFFFD");
+    expect(result.stderr).toBe("ok");
   });
 });

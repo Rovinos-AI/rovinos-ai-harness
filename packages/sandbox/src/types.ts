@@ -71,7 +71,12 @@ export const ExecLimitsSchema = z
 /** Inferred execution resource limits. */
 export type ExecLimits = z.infer<typeof ExecLimitsSchema>;
 
-/** A shell-free command request scoped to a workspace. */
+/**
+ * A shell-free command request scoped to a workspace.
+ *
+ * `limits.outputBytes` also sets the RLIMIT_FSIZE limit on files written by the
+ * command until per-run workspace quotas are implemented in task 19.5.
+ */
 export const ExecSpecSchema = z
   .object({
     argv: z

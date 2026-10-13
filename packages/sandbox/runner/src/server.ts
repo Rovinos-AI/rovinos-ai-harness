@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { resolve } from "node:path";
 import process from "node:process";
@@ -13,6 +14,7 @@ import type { ExecResult, ExecSpec } from "../../src/types.js";
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = MAX_EXEC_TIMEOUT_MS + 10_000;
 const TOKEN_HASH_BYTES = 32;
+const MIN_RUNNER_TOKEN_BYTES = 32;
 
 const RunnerRequestSchema = z.object({ runId: Id, spec: ExecSpecSchema }).strict();
 const RunnerHealthSchema = z.object({ status: z.literal("ok") }).strict();
@@ -151,7 +153,7 @@ function writeError(response: RunnerResponse, status: number, code: string): voi
 
 function validateRunnerOptions(options: RunnerServerOptions): ReadonlySet<string> {
   if (
-    options.token.length === 0 ||
+    Buffer.byteLength(options.token, "utf8") < MIN_RUNNER_TOKEN_BYTES ||
     options.allowedHosts.length === 0 ||
     options.allowedHosts.some((host) => authorityFrom(host) !== host.toLowerCase())
   ) {
@@ -254,14 +256,17 @@ export function createRunnerServer(options: RunnerServerOptions): Server {
 
 /** Starts the runner server on its configured internal container port. */
 export function startRunnerServer(): Server {
-  const token = process.env.SANDBOX_RUNNER_TOKEN;
+  const tokenFile = process.env.SANDBOX_RUNNER_TOKEN_FILE ?? "/run/secrets/sandbox_runner_token";
   const port = Number(process.env.SANDBOX_RUNNER_PORT ?? 8080);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new RunnerConfigurationError();
   }
   const hostsText = process.env.SANDBOX_ALLOWED_HOSTS ?? `sandbox-runner:${String(port)}`;
   const workspaceRoot = process.env.SANDBOX_WORKSPACE_ROOT ?? "/workspaces";
-  if (token === undefined) {
+  let token: string;
+  try {
+    token = readFileSync(tokenFile, "utf8").replace(/\r?\n$/u, "");
+  } catch {
     throw new RunnerConfigurationError();
   }
   const server = createRunnerServer({

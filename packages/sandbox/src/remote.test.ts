@@ -28,7 +28,7 @@ function response(body: unknown, status = 200): Response {
 function backend(fetcher: typeof fetch, options: { timeoutGraceMs?: number } = {}) {
   return new RemoteSandboxBackend({
     url: "http://sandbox-runner:8080",
-    token: "synthetic-runner-token",
+    token: "synthetic-runner-token-that-is-at-least-32-bytes",
     fetcher,
     ...options,
   });
@@ -38,7 +38,7 @@ describe("RemoteSandboxBackend", () => {
   it("sends the run request with bearer authentication and validates the response", async () => {
     const fetcher: typeof fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(
-        ["Bearer", "synthetic-runner-token"].join(" "),
+        ["Bearer", "synthetic-runner-token-that-is-at-least-32-bytes"].join(" "),
       );
       return Promise.resolve(response(result));
     });
@@ -164,5 +164,24 @@ describe("RemoteSandboxBackend", () => {
           fetcher: () => Promise.resolve(response(result)),
         }),
     ).toThrow(RemoteSandboxError);
+  });
+
+  it("rejects runner tokens shorter than 32 UTF-8 bytes with a configuration error", () => {
+    expect(
+      () =>
+        new RemoteSandboxBackend({
+          url: "http://sandbox-runner:8080",
+          token: "short-synthetic-token",
+          fetcher: () => Promise.resolve(response(result)),
+        }),
+    ).toThrow(expect.objectContaining({ code: "sandbox_runner_config_invalid" }));
+    expect(
+      () =>
+        new RemoteSandboxBackend({
+          url: "http://sandbox-runner:8080",
+          token: "é".repeat(16),
+          fetcher: () => Promise.resolve(response(result)),
+        }),
+    ).not.toThrow();
   });
 });

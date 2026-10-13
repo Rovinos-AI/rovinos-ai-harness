@@ -33,16 +33,19 @@ services:
     profiles:
       - sandbox
     environment:
-      SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN:-}
+      SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
       SANDBOX_ALLOWED_HOSTS: sandbox-runner:8080
       SANDBOX_WORKSPACE_ROOT: /workspaces
     init: true
-    user: "10002:10002"
+    user: "${SANDBOX_RUNNER_UID:-10002}:${SANDBOX_RUNNER_GID:-10002}"
     read_only: true
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     pids_limit: 128
@@ -50,6 +53,12 @@ services:
     cpus: 2.0
     volumes:
       - harness-workspaces:/workspaces
+    secrets:
+      - source: sandbox_runner_token
+        target: sandbox_runner_token
+        uid: "10002"
+        gid: "10002"
+        mode: 0400
     healthcheck:
       test:
         - CMD
@@ -94,3 +103,6 @@ networks:
   egress: {}
 volumes:
   harness-workspaces: {}
+secrets:
+  sandbox_runner_token:
+    file: ${SANDBOX_RUNNER_TOKEN_SOURCE:-./sandbox_runner_token}

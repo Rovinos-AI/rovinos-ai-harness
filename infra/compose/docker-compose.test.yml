@@ -39,6 +39,8 @@ services:
 networks:
   internal:
     internal: true
+  sandbox:
+    internal: true
   egress: {}
   # Keep this test-only fixture off the internal network so Docker Desktop and Colima can publish
   # its host port. PostgreSQL is not a harness sidecar and is not attached to egress.

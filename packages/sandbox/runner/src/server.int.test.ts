@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile, execFileSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Id, parseJson } from "@harness/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { resolve } from "node:path";
 import { z } from "zod";
 import { ExecResultSchema } from "../../src/types.js";
 import type { ExecSpec } from "../../src/types.js";
@@ -14,10 +16,15 @@ const root = resolve(fileURLToPath(new URL("../../../../", import.meta.url)));
 const projectName = `harness-sandbox-runner-${String(process.pid)}`;
 const integrationToken = "synthetic-runner-token-for-integration";
 const composeFile = "infra/compose/docker-compose.yml";
+const integrationUid = process.getuid?.() ?? 10002;
+const integrationGid = process.getgid?.() ?? 10002;
 const composeEnvironment = {
   ...process.env,
-  SANDBOX_RUNNER_TOKEN: integrationToken,
+  SANDBOX_RUNNER_TOKEN_SOURCE: "",
+  SANDBOX_RUNNER_UID: String(integrationUid),
+  SANDBOX_RUNNER_GID: String(integrationGid),
 };
+let tokenDirectory: string | undefined;
 
 const ComposeSchema = z.object({
   networks: z.record(z.string(), z.object({ internal: z.boolean().optional() })),
@@ -25,6 +32,8 @@ const ComposeSchema = z.object({
     z.string(),
     z.object({
       cpus: z.number().optional(),
+      cap_add: z.array(z.string()).optional(),
+      cap_drop: z.array(z.string()).optional(),
       mem_limit: z.union([z.string(), z.number()]).optional(),
       networks: z.record(z.string(), z.unknown()).optional(),
       pids_limit: z.number().optional(),
@@ -147,11 +156,18 @@ async function runExec(spec: ExecSpec): Promise<z.infer<typeof ExecResultSchema>
 
 describe("sandbox runner Compose service", () => {
   beforeAll(async () => {
+    tokenDirectory = await mkdtemp(join(tmpdir(), "sandbox-runner-integration-"));
+    const tokenFile = join(tokenDirectory, "runner-token");
+    await writeFile(tokenFile, integrationToken, { mode: 0o400 });
+    composeEnvironment.SANDBOX_RUNNER_TOKEN_SOURCE = tokenFile;
     await runCompose(["up", "--detach", "--wait", "--pull=missing", "--build", "sandbox-runner"]);
   }, 180_000);
 
   afterAll(async () => {
     await runCompose(["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
+    if (tokenDirectory !== undefined) {
+      await rm(tokenDirectory, { recursive: true, force: true });
+    }
   }, 60_000);
 
   // threat: T-01
@@ -173,7 +189,9 @@ describe("sandbox runner Compose service", () => {
     expect(config.networks.sandbox?.internal).toBe(true);
     expect(Object.keys(runner?.networks ?? {})).toEqual(["sandbox"]);
     expect(runner?.read_only).toBe(true);
-    expect(runner?.user).toBe("10002:10002");
+    expect(runner?.user).toBe(`${String(integrationUid)}:${String(integrationGid)}`);
+    expect(runner?.cap_drop).toEqual(["ALL"]);
+    expect(runner?.cap_add).toEqual(["SETUID", "SETGID"]);
     expect(runner?.pids_limit).toBeGreaterThan(0);
     expect(runner?.mem_limit).toBeDefined();
     expect(runner?.cpus).toBeGreaterThan(0);
@@ -238,6 +256,7 @@ describe("sandbox runner Compose service", () => {
 
     expect(result.exitCode).toBe(0);
     expect(Number(result.stdout)).toBeLessThan(32);
+    expect(await readRunnerHealthStatus()).toBe(200);
   }, 30_000);
 
   // threat: T-08
@@ -275,4 +294,44 @@ describe("sandbox runner Compose service", () => {
 
     expect(result.stdout).not.toBe("writable");
   });
+
+  // threat: T-02
+  // threat: T-03
+  // threat: T-04
+  it("keeps the runner token inaccessible to commands", async () => {
+    const script = [
+      'const fs = require("node:fs");',
+      'let token = ""; let proc = "";',
+      'try { token = fs.readFileSync("/run/secrets/sandbox_runner_token", "utf8"); } catch {}',
+      'try { proc = fs.readFileSync("/proc/1/environ", "utf8"); } catch {}',
+      'process.stdout.write(String(token.includes("synthetic-runner-token-for-integration") || proc.includes("synthetic-runner-token-for-integration")));',
+    ].join("\n");
+    const result = await runExec(makeSpec(["node", "-e", script]));
+
+    expect(result).toMatchObject({ exitCode: 0, stdout: "false" });
+  });
+
+  // threat: T-02
+  it("cannot signal the runner and leaves its health endpoint available", async () => {
+    const result = await runExec(
+      makeSpec([
+        "node",
+        "-e",
+        'try { process.kill(1, "SIGKILL"); process.stdout.write("signaled"); } catch (error) { process.stdout.write(error.code ?? "denied"); }',
+      ]),
+    );
+
+    expect(result.stdout).toBe("EPERM");
+    expect(await readRunnerHealthStatus()).toBe(200);
+  });
 });
+
+async function readRunnerHealthStatus(): Promise<number> {
+  const script = [
+    'const http = require("node:http");',
+    'http.get({ hostname: "127.0.0.1", port: 8080, path: "/healthz", headers: { host: "sandbox-runner:8080" } }, (response) => {',
+    '  response.resume(); response.on("end", () => process.stdout.write(String(response.statusCode)));',
+    '}).on("error", () => process.stdout.write("0"));',
+  ].join("\n");
+  return Number(await executeInRunner(script));
+}

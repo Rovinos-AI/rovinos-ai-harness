@@ -7,6 +7,8 @@ import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 
 const PRLIMIT_PATH = "/usr/bin/prlimit";
 const TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const SANDBOX_EXEC_UID = 10003;
+const SANDBOX_EXEC_GID = 10003;
 
 const systemClock: Clock = {
   now: () => Date.now(),
@@ -58,10 +60,9 @@ class CapturedOutput {
   }
 
   result(): Pick<ExecResult, "stdout" | "stderr" | "stdoutBytes" | "stderrBytes" | "truncated"> {
-    const decoder = new TextDecoder();
     return {
-      stdout: decoder.decode(Buffer.concat(this.#stdout), { stream: true }),
-      stderr: decoder.decode(Buffer.concat(this.#stderr), { stream: true }),
+      stdout: new TextDecoder().decode(Buffer.concat(this.#stdout)),
+      stderr: new TextDecoder().decode(Buffer.concat(this.#stderr)),
       stdoutBytes: this.#stdoutBytes,
       stderrBytes: this.#stderrBytes,
       truncated: this.#truncated,
@@ -69,11 +70,27 @@ class CapturedOutput {
   }
 }
 
-function killProcessGroup(pid: number): void {
+function killProcessGroup(pid: number, executionUid: number): void {
+  if (process.geteuid === undefined || process.seteuid === undefined) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // The process group may have exited before the timeout or abort was observed.
+    }
+    return;
+  }
+  const serverUid = process.geteuid();
   try {
+    if (serverUid !== executionUid) {
+      process.seteuid(executionUid);
+    }
     process.kill(-pid, "SIGKILL");
   } catch {
     // The process group may have exited before the timeout or abort was observed.
+  } finally {
+    if (serverUid !== executionUid) {
+      process.seteuid(serverUid);
+    }
   }
 }
 
@@ -109,6 +126,8 @@ interface ProcessOptions {
   signal: AbortSignal;
   clock: Clock;
   startedAt: number;
+  executionUid: number;
+  executionGid: number;
 }
 
 function executeProcess({
@@ -117,6 +136,8 @@ function executeProcess({
   signal,
   clock,
   startedAt,
+  executionUid,
+  executionGid,
 }: ProcessOptions): Promise<ExecResult> {
   const output = new CapturedOutput(spec.limits.outputBytes);
   let child: ReturnType<typeof spawn>;
@@ -126,6 +147,8 @@ function executeProcess({
       detached: true,
       cwd,
       env: { ...spec.env, PATH: TRUSTED_PATH },
+      uid: executionUid,
+      gid: executionGid,
       stdio: "pipe",
     });
   } catch {
@@ -134,7 +157,7 @@ function executeProcess({
   const { stdin, stdout, stderr } = child;
   if (stdin === null || stdout === null || stderr === null) {
     if (child.pid !== undefined) {
-      killProcessGroup(child.pid);
+      killProcessGroup(child.pid, executionUid);
     }
     throw new RunnerExecError();
   }
@@ -145,12 +168,12 @@ function executeProcess({
     const cancelTimeout = clock.schedule(() => {
       timedOut = true;
       if (child.pid !== undefined) {
-        killProcessGroup(child.pid);
+        killProcessGroup(child.pid, executionUid);
       }
     }, spec.timeoutMs);
     const abort = (): void => {
       if (child.pid !== undefined) {
-        killProcessGroup(child.pid);
+        killProcessGroup(child.pid, executionUid);
       }
     };
     stdout.on("data", (chunk: Buffer) => {
@@ -166,7 +189,7 @@ function executeProcess({
     child.once("close", (exitCode, childSignal) => {
       cancelTimeout();
       if (child.pid !== undefined) {
-        killProcessGroup(child.pid);
+        killProcessGroup(child.pid, executionUid);
       }
       signal.removeEventListener("abort", abort);
       if (spawnFailed) {
@@ -200,6 +223,8 @@ export async function executeSpec(options: {
   signal: AbortSignal;
   workspaceRoot: string;
   clock?: Clock;
+  executionUid?: number;
+  executionGid?: number;
 }): Promise<ExecResult> {
   const { spec, signal, workspaceRoot } = options;
   const clock = options.clock ?? systemClock;
@@ -207,6 +232,15 @@ export async function executeSpec(options: {
   if (signal.aborted) {
     return abortedResult();
   }
+  // Per-run workspace isolation is enforced by task 19.5; this execution resolves only the shared root for now.
   const cwd = await resolveWorkspacePath(workspaceRoot, spec.cwd);
-  return executeProcess({ spec, cwd, signal, clock, startedAt });
+  return executeProcess({
+    spec,
+    cwd,
+    signal,
+    clock,
+    startedAt,
+    executionUid: options.executionUid ?? SANDBOX_EXEC_UID,
+    executionGid: options.executionGid ?? SANDBOX_EXEC_GID,
+  });
 }

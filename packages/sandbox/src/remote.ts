@@ -7,16 +7,26 @@ import type { ExecResult, ExecSpec, SandboxBackend } from "./types.js";
 const RemoteOptionsSchema = z
   .object({
     url: SandboxRunnerUrlSchema,
-    token: z.string().min(1),
+    token: z.string().refine((token) => new TextEncoder().encode(token).byteLength >= 32),
     timeoutGraceMs: z.number().int().nonnegative().max(10_000).optional(),
   })
   .strict();
 
 /** Error reported when a remote runner request fails. */
 export class RemoteSandboxError extends HarnessError {
-  readonly code: "sandbox_unavailable" | "sandbox_busy" | "sandbox_timeout";
+  readonly code:
+    | "sandbox_unavailable"
+    | "sandbox_busy"
+    | "sandbox_timeout"
+    | "sandbox_runner_config_invalid";
 
-  constructor(code: "sandbox_unavailable" | "sandbox_busy" | "sandbox_timeout") {
+  constructor(
+    code:
+      | "sandbox_unavailable"
+      | "sandbox_busy"
+      | "sandbox_timeout"
+      | "sandbox_runner_config_invalid",
+  ) {
     super("The remote sandbox request failed.");
     this.code = code;
   }
@@ -100,7 +110,7 @@ export class RemoteSandboxBackend implements SandboxBackend {
       timeoutGraceMs: options.timeoutGraceMs,
     });
     if (!parsed.success) {
-      throw new RemoteSandboxError("sandbox_unavailable");
+      throw new RemoteSandboxError("sandbox_runner_config_invalid");
     }
     this.#url = new URL(parsed.data.url).origin;
     this.#token = parsed.data.token;

@@ -33,7 +33,16 @@ sandbox:
     token: env:SANDBOX_RUNNER_TOKEN
 ```
 
-The runner is intended for the internal Compose `sandbox` network; do not publish its port. Enable its Compose profile with `docker compose --profile sandbox up` and provide `SANDBOX_RUNNER_TOKEN` through a protected environment file (`--env-file`) or deployment secret manager.
+The runner is intended for the internal Compose `sandbox` network; do not publish its port. The runner reads the shared token from `/run/secrets/sandbox_runner_token`, not its environment. Provide a host-side token file owned by uid/gid `10002` with mode `0400`, then render and start Compose from the repository root with the collector version file and the secret source path:
+
+```sh
+sudo install -o 10002 -g 10002 -m 0400 /path/from/secret-manager /secure/sandbox-runner-token
+SANDBOX_RUNNER_TOKEN_SOURCE=/secure/sandbox-runner-token \
+  docker compose --env-file infra/collector/VERSION \
+  --file infra/compose/docker-compose.yml --profile sandbox up --detach --build
+```
+
+`limits.outputBytes` also limits the maximum size of any file written by a command through `RLIMIT_FSIZE`; this coupling remains until task 19.5 adds per-run workspace quotas. The runner's per-run workspace isolation is also deferred to task 19.5. The `sandbox.runner` setting is not yet wired into `core.createRuntime`; task #385 (2.15) tracks that integration.
 
 Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. CLI scheduling and vault-purge wiring are deferred to task 20.x; the retention job supports dry runs and invokes a per-run purge hook after deletion.
 
