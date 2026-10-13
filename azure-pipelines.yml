@@ -109,7 +109,8 @@ stages:
               failTaskOnFailedTests: true
           - bash: |
               mkdir -p "$(Build.ArtifactStagingDirectory)"
-              docker compose -f infra/compose/docker-compose.test.yml logs --no-color \
+              docker compose --env-file infra/collector/VERSION \
+                -f infra/compose/docker-compose.test.yml logs --no-color \
                 > "$(Build.ArtifactStagingDirectory)/compose.log"
             condition: failed()
             displayName: Collect Compose logs
@@ -119,6 +120,6 @@ stages:
               PathtoPublish: $(Build.ArtifactStagingDirectory)/compose.log
               ArtifactName: compose-logs
               publishLocation: Container
-          - bash: docker compose -f infra/compose/docker-compose.test.yml down -v
+          - bash: docker compose --env-file infra/collector/VERSION -f infra/compose/docker-compose.test.yml down -v
             condition: always()
             displayName: Stop Compose services

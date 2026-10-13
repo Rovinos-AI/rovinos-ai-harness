@@ -7,7 +7,16 @@ const composeFile = "infra/compose/docker-compose.test.yml";
 export function readHarnessHealthStatus(): string {
   const containerId = execFileSync(
     "docker",
-    ["compose", "-f", composeFile, "ps", "--quiet", "harness"],
+    [
+      "compose",
+      "--env-file",
+      "infra/collector/VERSION",
+      "-f",
+      composeFile,
+      "ps",
+      "--quiet",
+      "harness",
+    ],
     { encoding: "utf8" },
   ).trim();
 
