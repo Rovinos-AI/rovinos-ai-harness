@@ -499,6 +499,32 @@ it("does not map an event insert unique violation to a sequence conflict at the 
   await store.close();
 });
 
+it("rolls back run deletion when one of its delete statements fails", async () => {
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  const snapshotId = builders.nextRunId();
+  const snapshot = builders.snapshot(runId, snapshotId, 1);
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  await store.appendWithSnapshot(
+    runId,
+    [builders.runCreated(runId), builders.checkpointWritten(runId, snapshotId, 1)],
+    0,
+    snapshot,
+  );
+  await store.append(runId, [builders.runStatusChanged(runId, "pending", "completed")], 2);
+  fakePg.handler = (sql, values) => {
+    if (sql.includes("DELETE FROM snapshots WHERE run_id")) {
+      throw new Error("synthetic delete failure");
+    }
+    return fakeQuery(sql, values);
+  };
+
+  await expect(store.deleteRun(runId)).rejects.toBeInstanceOf(StoreUnavailableError);
+  await expect(store.head(runId)).resolves.toBe(3);
+  await expect(store.latestSnapshot(runId)).resolves.toEqual(snapshot);
+  await store.close();
+});
+
 it("maps malformed stored content to an unavailable-store error", async () => {
   const builders = createEventBuilders();
   const runId = builders.nextRunId();
