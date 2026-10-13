@@ -2,7 +2,12 @@
 import type { Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { listRunsInputSchema, listRunsOutputSchema, type ListRunsInput } from "../schemas.js";
+import {
+  listRunsInputSchema,
+  listRunsOutputSchema,
+  type ListRunsInput,
+  type ListRunsOutput,
+} from "../schemas.js";
 
 async function countRunMetadata(store: EventStore, runId: Id, lastSeq: number) {
   let steps = 0;
@@ -20,7 +25,7 @@ async function countRunMetadata(store: EventStore, runId: Id, lastSeq: number) {
 }
 
 /** Lists run metadata and derived step and approval counts. */
-export async function listRuns(store: EventStore, input: ListRunsInput) {
+export async function listRuns(store: EventStore, input: ListRunsInput): Promise<ListRunsOutput> {
   const parsedInput = listRunsInputSchema.parse(input);
   const page = await store.listRuns({
     limit: parsedInput.limit,
@@ -56,7 +61,7 @@ export function registerListRunsTool(server: McpServer, store: EventStore): void
       const output = await listRuns(store, input);
       return {
         structuredContent: output,
-        content: [{ type: "text", text: `${output.runs.length} runs.` }],
+        content: [{ type: "text", text: `${String(output.runs.length)} runs.` }],
       };
     },
   );

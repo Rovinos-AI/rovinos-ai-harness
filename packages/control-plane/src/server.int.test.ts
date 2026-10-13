@@ -20,7 +20,9 @@ function sendMcpRequest(endpoint: string, headers: Record<string, string>): Prom
       },
       (incoming) => {
         incoming.resume();
-        incoming.on("end", () => resolve(incoming.statusCode ?? 0));
+        incoming.on("end", () => {
+          resolve(incoming.statusCode ?? 0);
+        });
       },
     );
     outgoing.on("error", reject);
@@ -39,9 +41,7 @@ describe("control-plane HTTP transport", () => {
       await client.connect(transport);
       const { tools } = await client.listTools();
       expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
-      await expect(
-        client.callTool({ name: "list_runs", arguments: {} }),
-      ).resolves.toMatchObject({
+      await expect(client.callTool({ name: "list_runs", arguments: {} })).resolves.toMatchObject({
         structuredContent: { runs: [] },
         content: [{ text: "0 runs." }],
       });

@@ -88,7 +88,7 @@ export async function startControlPlaneHttp(
     throw new ControlPlaneListenError();
   }
   return {
-    endpoint: `http://${HTTP_HOST}:${address.port}${HTTP_PATH}`,
+    endpoint: `http://${HTTP_HOST}:${String(address.port)}${HTTP_PATH}`,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => {

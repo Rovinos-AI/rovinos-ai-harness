@@ -3,11 +3,19 @@ import { Code } from "@harness/schemas";
 import { toSafeEvent } from "@harness/telemetry";
 import type { EventStore } from "@harness/store";
 import type { McpServer } from "@modelcontextprotocol/server";
-import { getRunInputSchema, getRunOutputSchema, type GetRunInput } from "../schemas.js";
+import {
+  getRunInputSchema,
+  getRunOutputSchema,
+  type GetRunInput,
+  type GetRunOutput,
+} from "../schemas.js";
 import { readRunState } from "./run-state.js";
 
 /** Returns one run's status, usage, pending approvals, and recent safe events. */
-export async function getRun(store: EventStore, input: GetRunInput) {
+export async function getRun(
+  store: EventStore,
+  input: GetRunInput,
+): Promise<GetRunOutput | undefined> {
   const { runId } = getRunInputSchema.parse(input);
   const run = await readRunState(store, runId);
   if (run === undefined) {
@@ -42,7 +50,7 @@ export function getRunText(output: Awaited<ReturnType<typeof getRun>>): string {
   if (output === undefined) {
     return "run_not_found";
   }
-  return `Run metadata: ${output.steps} steps, ${output.pendingApprovals.length} pending approvals, ${output.recentEvents.length} recent safe events.`;
+  return `Run metadata: ${String(output.steps)} steps, ${String(output.pendingApprovals.length)} pending approvals, ${String(output.recentEvents.length)} recent safe events.`;
 }
 
 /** Registers the `get_run` read-only MCP tool. */

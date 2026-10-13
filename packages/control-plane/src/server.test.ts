@@ -250,7 +250,7 @@ describe("control-plane inspection tools", () => {
     expect(result.content).toEqual([
       {
         type: "text",
-        text: `Run metadata: 1 steps, 1 pending approvals, ${output.recentEvents.length} recent safe events.`,
+        text: `Run metadata: 1 steps, 1 pending approvals, ${String(output.recentEvents.length)} recent safe events.`,
       },
     ]);
     expect(JSON.stringify(result)).not.toContain(CONTENT_CANARY);
@@ -296,7 +296,7 @@ describe("control-plane inspection tools", () => {
           const builders = createEventBuilders();
           const runId = builders.nextRunId();
           const canaries = suffixes.map(
-            (suffix, index) => `GENERATED_CONTENT_CANARY_${index}_${suffix}`,
+            (suffix, index) => `GENERATED_CONTENT_CANARY_${String(index)}_${String(suffix)}`,
           );
           await store.append(runId, eventsWithContentCanaries(runId, canaries), 0);
           await addRun(store, builders);

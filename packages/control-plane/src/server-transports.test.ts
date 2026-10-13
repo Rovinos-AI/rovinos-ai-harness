@@ -63,8 +63,8 @@ const mocks = vi.hoisted(() => {
     setFailClose: (value: boolean) => {
       failClose = value;
     },
-    dispatch: (request: MockRequest, response: MockResponse) => {
-      requestListener?.(request, response);
+    dispatch: (incomingRequest: MockRequest, outgoingResponse: MockResponse) => {
+      requestListener?.(incomingRequest, outgoingResponse);
     },
     reset: () => {
       requestListener = undefined;
@@ -84,27 +84,30 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("node:http", () => ({ createServer: mocks.createServer }));
 vi.mock("@modelcontextprotocol/node", () => ({
-  localhostHostValidation: () => (request: MockRequest, response: MockResponse) => {
-    if (request.headers.host === "untrusted.example") {
-      response.writeHead(403).end();
+  localhostHostValidation: () => (incomingRequest: MockRequest, outgoingResponse: MockResponse) => {
+    if (incomingRequest.headers.host === "untrusted.example") {
+      outgoingResponse.writeHead(403).end();
       return false;
     }
     return true;
   },
-  localhostOriginValidation: () => (request: MockRequest, response: MockResponse) => {
-    if (request.headers.origin === "http://untrusted.example") {
-      response.writeHead(403).end();
-      return false;
-    }
-    return true;
-  },
+  localhostOriginValidation:
+    () => (incomingRequest: MockRequest, outgoingResponse: MockResponse) => {
+      if (incomingRequest.headers.origin === "http://untrusted.example") {
+        outgoingResponse.writeHead(403).end();
+        return false;
+      }
+      return true;
+    },
   toNodeHandler: () => mocks.httpRequestHandler,
 }));
 vi.mock("@modelcontextprotocol/server", () => ({
   createMcpHandler: mocks.createMcpHandler,
   McpServer: class {
-    server = { registerCapabilities: () => undefined };
-    registerTool(): void {}
+    server = { registerCapabilities: (_capabilities: unknown) => undefined };
+    registerTool(): void {
+      this.server.registerCapabilities({});
+    }
   },
 }));
 vi.mock("@modelcontextprotocol/server/stdio", () => ({ serveStdio: mocks.serveStdio }));
@@ -116,7 +119,9 @@ function request(url: string, headers: Record<string, string | undefined> = {}):
     url,
     method: "POST",
     headers,
-    async *[Symbol.asyncIterator]() {},
+    [Symbol.asyncIterator]: () => ({
+      next: () => Promise.resolve({ done: true, value: undefined }),
+    }),
   };
 }
 
@@ -177,23 +182,13 @@ describe("control-plane transports", () => {
     mocks.reset();
     const store = new InMemoryEventStore();
     const runId = Id.parse("00000000000000000000000000");
-    const rejectingStore = new Proxy(store, {
-      get(target, property) {
-        if (property === "read") {
-          return async function* () {
-            throw new Error("synthetic store failure");
-          };
-        }
-        const value: unknown = Reflect.get(target, property, target);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
+    vi.spyOn(store, "read").mockImplementation(async function* () {
+      await Promise.reject(new Error("synthetic store failure"));
     });
     mocks.httpRequestHandler.mockImplementationOnce(async () => {
-      for await (const event of rejectingStore.read(runId)) {
-        void event;
-      }
+      await store.read(runId)[Symbol.asyncIterator]().next();
     });
-    const handle = await startControlPlaneHttp(rejectingStore, 0);
+    const handle = await startControlPlaneHttp(store, 0);
     const outgoing = response();
 
     mocks.dispatch(request("/mcp"), outgoing);

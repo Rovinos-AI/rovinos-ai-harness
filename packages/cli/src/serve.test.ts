@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessConfigSchema } from "@harness/config";
+import type * as ControlPlane from "@harness/control-plane";
 import type { Runtime } from "@harness/core";
 import { InMemoryEventStore } from "@harness/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +21,7 @@ const controlPlaneMocks = vi.hoisted(() => {
 });
 
 vi.mock("@harness/control-plane", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@harness/control-plane")>()),
+  ...(await importOriginal<typeof ControlPlane>()),
   startControlPlaneHttp: controlPlaneMocks.startHttp,
 }));
 
@@ -57,6 +58,7 @@ function createContext() {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const store = new InMemoryEventStore();
+  const closeRuntime = vi.fn(() => Promise.resolve());
   const runtime: Runtime = {
     store,
     keys: {
@@ -65,19 +67,11 @@ function createContext() {
     },
     clock: { now: () => 1_000 },
     ids: { next: () => "00000000000000000000000000" },
-    run: async () => {
-      throw new Error("Run is not used by serve tests.");
-    },
-    continueRun: async () => {
-      throw new Error("Continue is not used by serve tests.");
-    },
-    resume: async () => {
-      throw new Error("Resume is not used by serve tests.");
-    },
-    cancel: async () => {
-      throw new Error("Cancel is not used by serve tests.");
-    },
-    close: vi.fn(() => Promise.resolve()),
+    run: () => Promise.reject(new Error("Run is not used by serve tests.")),
+    continueRun: () => Promise.reject(new Error("Continue is not used by serve tests.")),
+    resume: () => Promise.reject(new Error("Resume is not used by serve tests.")),
+    cancel: () => Promise.reject(new Error("Cancel is not used by serve tests.")),
+    close: closeRuntime,
   };
   const context: CliContext = {
     loadConfig: () => Promise.resolve(HarnessConfigSchema.parse({})),
@@ -92,7 +86,7 @@ function createContext() {
     clock: { now: () => 1_000 },
     createRuntime: () => runtime,
   };
-  return { context, runtime, stdout, stderr };
+  return { context, runtime, closeRuntime, stdout, stderr };
 }
 
 afterEach(() => {
@@ -102,7 +96,7 @@ afterEach(() => {
 
 describe("serve command", () => {
   it("defaults to loopback HTTP and stops cleanly on SIGTERM", async () => {
-    const { context, runtime, stdout, stderr } = createContext();
+    const { context, runtime, closeRuntime, stdout, stderr } = createContext();
     const sigtermListeners = process.listenerCount("SIGTERM");
     const result = main(["serve"], context, [serveCommand]);
     const signalWait = waitForSignalListener("SIGTERM", sigtermListeners);
@@ -115,15 +109,15 @@ describe("serve command", () => {
     expect(waitingForSignal).toBe(true);
     await expect(result).resolves.toBe(ExitCode.ok);
     expect(controlPlaneMocks.startHttp).toHaveBeenCalledWith(runtime.store, 3_000);
-    expect(controlPlaneMocks.closeHttp).toHaveBeenCalledOnce();
+    expect(controlPlaneMocks.closeHttp.mock.calls).toHaveLength(1);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermListeners);
     expect(stdout).toEqual(["http://127.0.0.1:3000/mcp\n"]);
     expect(stderr).toEqual([]);
-    expect(runtime.close).toHaveBeenCalledOnce();
+    expect(closeRuntime.mock.calls).toHaveLength(1);
   });
 
   it.each(["SIGINT", "SIGTERM"] as const)("stops stdio cleanly on %s", async (signal) => {
-    const { context, runtime, stdout, stderr } = createContext();
+    const { context, closeRuntime, stdout, stderr } = createContext();
     const sigintListeners = process.listenerCount("SIGINT");
     const sigtermListeners = process.listenerCount("SIGTERM");
     const result = main(["serve", "--stdio"], context, [serveCommand]);
@@ -141,7 +135,7 @@ describe("serve command", () => {
     expect(process.listenerCount("SIGTERM")).toBe(sigtermListeners);
     expect(stdout).toEqual([]);
     expect(stderr).toEqual([]);
-    expect(runtime.close).toHaveBeenCalledOnce();
+    expect(closeRuntime.mock.calls).toHaveLength(1);
   });
 
   it("rejects invalid transports, ports, and stdio JSON mode with error codes", async () => {
@@ -152,11 +146,11 @@ describe("serve command", () => {
     ] as const;
 
     for (const { args, code } of cases) {
-      const { context, runtime, stdout, stderr } = createContext();
+      const { context, closeRuntime, stdout, stderr } = createContext();
       await expect(main(args, context, [serveCommand])).resolves.toBe(ExitCode.usage);
       expect(stdout).toEqual([]);
       expect(stderr).toEqual([`${code}\n`]);
-      expect(runtime.close).not.toHaveBeenCalled();
+      expect(closeRuntime.mock.calls).toHaveLength(0);
     }
   });
 
