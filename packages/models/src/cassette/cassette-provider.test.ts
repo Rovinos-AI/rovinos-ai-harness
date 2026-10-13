@@ -5,6 +5,7 @@ import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.
 import {
   CassetteAutoDisabledError,
   CassetteInnerRequiredError,
+  CassettePrivacyRequiredError,
   CassetteProvider,
   type CassetteEntry,
   type CassetteMissError,
@@ -27,6 +28,10 @@ const context: ProviderContext = {
   signal: new AbortController().signal,
   ids: { next: () => "00000000000000000000000002" },
   clock: { now: () => 1 },
+};
+const privacyOptions = {
+  sanitize: async (response: ProviderResult) => response,
+  detectRealData: async () => false,
 };
 
 function memoryStore(): CassetteStore & { readonly entries: Map<string, CassetteEntry> } {
@@ -54,7 +59,7 @@ describe("CassetteProvider", () => {
     const store = memoryStore();
     const complete = vi.fn(() => Promise.resolve(result));
     const inner = innerAdapter(complete);
-    const recorder = new CassetteProvider("record", store, inner);
+    const recorder = new CassetteProvider("record", store, inner, privacyOptions);
     const recorded = await recorder.complete(request, context);
     const replay = new CassetteProvider("replay", store);
 
@@ -82,7 +87,7 @@ describe("CassetteProvider", () => {
     await store.set({ hash, response: result });
     const complete = vi.fn(() => Promise.resolve(result));
     const inner = innerAdapter(complete);
-    const auto = new CassetteProvider("auto", store, inner);
+    const auto = new CassetteProvider("auto", store, inner, privacyOptions);
     expect(await auto.complete(request, context)).toEqual(result);
     expect(complete).not.toHaveBeenCalled();
 
@@ -96,19 +101,108 @@ describe("CassetteProvider", () => {
   });
 
   it("disables auto mode when HARNESS_CASSETTE_AUTO is zero", () => {
-    vi.stubEnv("HARNESS_CASSETTE_AUTO", "0");
-
     const complete = vi.fn<ProviderAdapter["complete"]>();
-    expect(() => new CassetteProvider("auto", memoryStore(), innerAdapter(complete))).toThrow(
-      CassetteAutoDisabledError,
-    );
+    expect(
+      () =>
+        new CassetteProvider("auto", memoryStore(), innerAdapter(complete), {
+          ...privacyOptions,
+          env: { HARNESS_CASSETTE_AUTO: "0" },
+        }),
+    ).toThrow(CassetteAutoDisabledError);
   });
 
   it("requires an inner adapter only when a request must be recorded", async () => {
-    const recorder = new CassetteProvider("record", memoryStore());
+    const recorder = new CassetteProvider("record", memoryStore(), undefined, privacyOptions);
 
     await expect(recorder.complete(request, context)).rejects.toBeInstanceOf(
       CassetteInnerRequiredError,
     );
+  });
+
+  it("requires sanitization and detection hooks for recording modes", () => {
+    expect(() => new CassetteProvider("record", memoryStore(), innerAdapter(vi.fn()))).toThrow(
+      CassettePrivacyRequiredError,
+    );
+  });
+
+  it("tokenizes detected email content before storing", async () => {
+    const store = memoryStore();
+    const response: ProviderResult = {
+      ...result,
+      parts: [{ type: "text", text: "Contact synthetic@example.test" }],
+    };
+    const recorder = new CassetteProvider(
+      "record",
+      store,
+      innerAdapter(() => Promise.resolve(response)),
+      {
+        sanitize: async (value) => ({
+          ...value,
+          parts: value.parts.map((part) =>
+            part.type === "text"
+              ? { ...part, text: part.text.replace("synthetic@example.test", "[EMAIL]") }
+              : part,
+          ),
+        }),
+        detectRealData: async (value) => JSON.stringify(value).includes("@"),
+      },
+    );
+
+    await recorder.complete(request, context);
+
+    expect(store.entries.get(requestHash(request))?.response.parts).toEqual([
+      { type: "text", text: "Contact [EMAIL]" },
+    ]);
+  });
+
+  it("refuses to persist content still detected after sanitization", async () => {
+    const store = memoryStore();
+    const sensitiveResponse: ProviderResult = {
+      ...result,
+      parts: [{ type: "text", text: "synthetic@example.test" }],
+    };
+    const recorder = new CassetteProvider(
+      "record",
+      store,
+      innerAdapter(() => Promise.resolve(sensitiveResponse)),
+      {
+        ...privacyOptions,
+        detectRealData: async () => true,
+      },
+    );
+
+    const error = await recorder.complete(request, context).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ code: "cassette_real_data_detected" });
+    expect(error).toHaveProperty("message", "A cassette response contains detected real data.");
+    expect(JSON.stringify(error)).not.toContain("synthetic@example.test");
+    expect(store.entries.size).toBe(0);
+  });
+
+  it("returns and replays byte-identical responses with all optional fields", async () => {
+    const store = memoryStore();
+    const response: ProviderResult = {
+      parts: [
+        {
+          type: "tool_call",
+          callId: "00000000000000000000000005",
+          toolId: "lookup",
+          args: { query: "sample" },
+        },
+        { type: "opaque", provider: "openai", blob: { id: "opaque-id" } },
+      ],
+      usage: { inputTokens: 2, outputTokens: 3, costMicros: 9 },
+      finishReason: "tool_calls",
+      latencyMs: 5,
+    };
+    const recorded = await new CassetteProvider(
+      "record",
+      store,
+      innerAdapter(() => Promise.resolve(response)),
+      privacyOptions,
+    ).complete(request, context);
+    const replayed = await new CassetteProvider("replay", store).complete(request, context);
+
+    expect(JSON.stringify(recorded)).toBe(JSON.stringify(replayed));
   });
 });

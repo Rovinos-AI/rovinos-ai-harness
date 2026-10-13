@@ -3,6 +3,7 @@ import { type Event, type ModelRequest, type Sha256Hex } from "@harness/schemas"
 import { ProviderResultSchema } from "../types.js";
 import {
   CassetteDivergenceError,
+  CassetteLogIncompleteError,
   CassetteStoreReadOnlyError,
   type CassetteEntry,
   type CassetteStore,
@@ -11,59 +12,55 @@ import { requestHash } from "./hash.js";
 
 interface EventLogPair {
   readonly requestHash: Sha256Hex;
-  readonly schemaHash?: string;
   readonly request: ModelRequest;
   readonly response: ReturnType<typeof ProviderResultSchema.parse>;
 }
 
-function comparableRequest(request: ModelRequest): ModelRequest {
-  // Event logs omit tool and generation options, so only persisted request fields can be hashed.
-  return {
-    requestId: request.requestId,
-    model: request.model,
-    ...(request.role === undefined ? {} : { role: request.role }),
-    messages: request.messages,
-  };
-}
-
 function collectPairs(events: readonly Event[]): EventLogPair[] {
-  const responses = new Map<string, Extract<Event, { type: "model_response" }>>();
-  for (const event of events) {
-    if (event.type === "model_response") {
-      responses.set(event.requestId, event);
-    }
-  }
-
   const pairs: EventLogPair[] = [];
-  for (const event of events) {
-    if (event.type !== "model_request") {
+  let pending: { readonly event: Extract<Event, { type: "model_request" }>; readonly index: number } | undefined;
+  for (const [index, event] of events.entries()) {
+    if (event.type === "model_request") {
+      if (pending !== undefined) {
+        throw new CassetteLogIncompleteError();
+      }
+      pending = { event, index };
       continue;
     }
-    const response = responses.get(event.requestId);
-    if (response === undefined) {
+    if (event.type !== "model_response") {
       continue;
+    }
+    if (pending === undefined || pending.event.requestId !== event.requestId) {
+      throw new CassetteLogIncompleteError();
+    }
+    const requestHash = pending.event.requestHash;
+    if (requestHash === undefined) {
+      throw new CassetteLogIncompleteError();
     }
     const request: ModelRequest = {
-      requestId: event.requestId,
-      model: { provider: event.provider, model: event.model },
-      ...(event.role === undefined ? {} : { role: event.role }),
-      messages: event.messages,
+      requestId: pending.event.requestId,
+      model: { provider: pending.event.provider, model: pending.event.model },
+      ...(pending.event.role === undefined ? {} : { role: pending.event.role }),
+      messages: pending.event.messages,
     };
     pairs.push({
-      requestHash: requestHash(request),
-      ...(event.schemaHash === undefined ? {} : { schemaHash: event.schemaHash }),
+      requestHash,
       request,
       response: ProviderResultSchema.parse({
-        parts: response.content,
+        parts: event.content,
         usage: {
-          inputTokens: response.inputTokens,
-          outputTokens: response.outputTokens,
-          ...(response.costMicros === undefined ? {} : { costMicros: response.costMicros }),
+          inputTokens: event.inputTokens,
+          outputTokens: event.outputTokens,
+          ...(event.costMicros === undefined ? {} : { costMicros: event.costMicros }),
         },
-        finishReason: response.finishReason,
-        latencyMs: response.latencyMs,
+        finishReason: event.finishReason,
+        latencyMs: event.latencyMs,
       }),
     });
+    pending = undefined;
+  }
+  if (pending !== undefined && pending.index !== events.length - 1) {
+    throw new CassetteLogIncompleteError();
   }
   return pairs;
 }
@@ -86,9 +83,12 @@ export class EventLogCassetteStore implements CassetteStore {
     if (pair === undefined) {
       return Promise.resolve(undefined);
     }
-    const incomingHash = requestHash(comparableRequest(request));
-    const schemaHashMatches = pair.schemaHash === request.output?.schemaHash;
-    if (pair.requestHash !== incomingHash || !schemaHashMatches) {
+    const routedRequest: ModelRequest = {
+      ...request,
+      model: { ...request.model, provider: pair.request.model.provider },
+    };
+    const incomingHash = requestHash(routedRequest);
+    if (pair.requestHash !== incomingHash) {
       return Promise.reject(new CassetteDivergenceError(pair.requestHash, incomingHash));
     }
     this.nextPair += 1;

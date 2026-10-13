@@ -5,8 +5,17 @@ import { MockAgent, fetch as undiciFetch } from "undici";
 import type { RequestInit as UndiciRequestInit } from "undici";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { runProviderContract, type ProviderContractFixture } from "../contract.js";
-import { ProviderResultSchema } from "../types.js";
+import {
+  runProviderContract,
+  type ProviderContractAdapterOptions,
+  type ProviderContractFixture,
+} from "../contract.js";
+import {
+  CassetteProvider,
+  type CassetteEntry,
+  type CassetteStore,
+} from "../cassette/cassette-provider.js";
+import { ProviderResultSchema, type ProviderResult } from "../types.js";
 import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { OpenAIAdapter } from "./openai.js";
 import { fromChatResponse, toChatRequest } from "./chat-completions-mapper.js";
@@ -158,14 +167,39 @@ function mockFetch(dispatcher: MockAgent): typeof fetch {
   };
 }
 
+function cassetteStore(): CassetteStore {
+  const entries = new Map<string, CassetteEntry>();
+  return {
+    get: async (hash) => entries.get(hash)?.response,
+    set: async (entry) => {
+      entries.set(entry.hash, entry);
+    },
+  };
+}
+
+function openAIAdapter(options: ProviderContractAdapterOptions) {
+  return new OpenAIAdapter({
+    apiKey: { reveal: () => "test-key" },
+    fetch: adaptFetch(options.fetch),
+    baseURL: options.baseUrl,
+  });
+}
+
+const cassettePrivacy = {
+  sanitize: async (response: ProviderResult) => response,
+  detectRealData: async () => false,
+};
+
+runProviderContract("OpenAI Chat Completions contract", openAIAdapter, contractFixtures);
 runProviderContract(
-  "OpenAI Chat Completions contract",
+  "Cassette record adapter contract",
   (options) =>
-    new OpenAIAdapter({
-      apiKey: { reveal: () => "test-key" },
-      fetch: adaptFetch(options.fetch),
-      baseURL: options.baseUrl,
-    }),
+    new CassetteProvider(
+      "record",
+      cassetteStore(),
+      openAIAdapter(options),
+      cassettePrivacy,
+    ),
   contractFixtures,
 );
 

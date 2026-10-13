@@ -2,20 +2,22 @@
 import { createHash } from "node:crypto";
 import { Sha256Hex, type ModelRequest } from "@harness/schemas";
 
-function canonicalJson(value: unknown): string {
+function canonicalJson(value: unknown): string | undefined {
   if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
+    return `[${value.map((entry) => canonicalJson(entry) ?? "null").join(",")}]`;
   }
   if (typeof value === "object" && value !== null) {
-    const entries = Object.entries(value).sort(([left], [right]) => {
-      if (left < right) {
-        return -1;
-      }
-      if (left > right) {
-        return 1;
-      }
-      return 0;
-    });
+    const entries = Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => {
+        if (left < right) {
+          return -1;
+        }
+        if (left > right) {
+          return 1;
+        }
+        return 0;
+      });
     return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
   }
   return JSON.stringify(value);
@@ -31,5 +33,6 @@ export function requestHash(request: ModelRequest): Sha256Hex {
   const stableRequest = Object.fromEntries(
     Object.entries(request).filter(([key]) => key !== "requestId"),
   );
-  return Sha256Hex.parse(createHash("sha256").update(canonicalJson(stableRequest)).digest("hex"));
+  const canonical = canonicalJson(stableRequest);
+  return Sha256Hex.parse(createHash("sha256").update(canonical ?? "null").digest("hex"));
 }

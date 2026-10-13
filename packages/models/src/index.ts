@@ -13,12 +13,17 @@ export {
   CassetteDivergenceError,
   CassetteEntrySchema,
   CassetteInnerRequiredError,
+  CassetteLogIncompleteError,
   CassetteMissError,
   CassetteModeSchema,
+  CassettePrivacyRequiredError,
   CassetteProvider,
+  CassetteRealDataDetectedError,
   CassetteStoreReadOnlyError,
   type CassetteEntry,
   type CassetteMode,
+  type CassettePrivacyOptions,
+  type CassetteProviderOptions,
   type CassetteStore,
 } from "./cassette/cassette-provider.js";
 export { CassetteFileSchema, FileCassetteStore, type CassetteFile } from "./cassette/file-store.js";

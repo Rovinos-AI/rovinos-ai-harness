@@ -34,6 +34,20 @@ export interface CassetteStore {
   set(entry: CassetteEntry): Promise<void>;
 }
 
+/** Hooks used to tokenize and verify a response before it is persisted. */
+export interface CassettePrivacyOptions {
+  /** Applies storage-boundary tokenization to a provider response. */
+  readonly sanitize: (response: ProviderResult) => Promise<ProviderResult>;
+  /** Returns whether a detector still finds sensitive content in a response. */
+  readonly detectRealData: (response: ProviderResult) => Promise<boolean>;
+}
+
+/** Optional cassette runtime dependencies. */
+export interface CassetteProviderOptions extends Partial<CassettePrivacyOptions> {
+  /** Environment values used by the auto-mode guard. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+}
+
 /** Raised when a request has no recorded cassette response. */
 export class CassetteMissError extends HarnessError {
   readonly code = "cassette_miss";
@@ -45,6 +59,26 @@ export class CassetteMissError extends HarnessError {
   constructor(hash: z.infer<typeof Sha256Hex>) {
     super("No cassette response exists for this request.");
     this.hash = hash;
+  }
+}
+
+/** Raised when a sanitized cassette response still contains detected real data. */
+export class CassetteRealDataDetectedError extends HarnessError {
+  readonly code = "cassette_real_data_detected";
+
+  /** Creates the content-free unsafe-cassette error. */
+  constructor() {
+    super("A cassette response contains detected real data.");
+  }
+}
+
+/** Raised when recording is requested without privacy hooks. */
+export class CassettePrivacyRequiredError extends HarnessError {
+  readonly code = "cassette_privacy_required";
+
+  /** Creates the missing-privacy-hooks error. */
+  constructor() {
+    super("Recording requires cassette sanitization and detection hooks.");
   }
 }
 
@@ -65,6 +99,16 @@ export class CassetteDivergenceError extends HarnessError {
     super("The replay request diverges from the recorded request.");
     this.expectedHash = expectedHash;
     this.actualHash = actualHash;
+  }
+}
+
+/** Raised when an event log cannot be paired into complete model calls. */
+export class CassetteLogIncompleteError extends HarnessError {
+  readonly code = "cassette_log_incomplete";
+
+  /** Creates the content-free incomplete-log error. */
+  constructor() {
+    super("The cassette event log contains an incomplete model call.");
   }
 }
 
@@ -113,9 +157,16 @@ export class CassetteProvider implements ProviderAdapter {
     mode: CassetteMode,
     private readonly store: CassetteStore,
     private readonly inner?: ProviderAdapter,
+    private readonly options: CassetteProviderOptions = {},
   ) {
     this.mode = CassetteModeSchema.parse(mode);
-    if (this.mode === "auto" && process.env.HARNESS_CASSETTE_AUTO === "0") {
+    if (
+      this.mode !== "replay" &&
+      (options.sanitize === undefined || options.detectRealData === undefined)
+    ) {
+      throw new CassettePrivacyRequiredError();
+    }
+    if (this.mode === "auto" && (options.env ?? process.env).HARNESS_CASSETTE_AUTO === "0") {
       throw new CassetteAutoDisabledError();
     }
   }
@@ -126,7 +177,7 @@ export class CassetteProvider implements ProviderAdapter {
     if (this.mode !== "record") {
       const response = await this.store.get(hash, request);
       if (response !== undefined) {
-        return ProviderResultSchema.parse(response);
+        return response;
       }
       if (this.mode === "replay") {
         throw new CassetteMissError(hash);
@@ -137,7 +188,22 @@ export class CassetteProvider implements ProviderAdapter {
       throw new CassetteInnerRequiredError();
     }
     const response = ProviderResultSchema.parse(await this.inner.complete(request, context));
-    await this.store.set({ hash, response });
-    return response;
+    const sanitize = this.options.sanitize;
+    const detectRealData = this.options.detectRealData;
+    if (sanitize === undefined || detectRealData === undefined) {
+      throw new CassettePrivacyRequiredError();
+    }
+    const sanitized = ProviderResultSchema.parse(await sanitize(response));
+    let detected: boolean;
+    try {
+      detected = await detectRealData(sanitized);
+    } catch {
+      throw new CassetteRealDataDetectedError();
+    }
+    if (detected) {
+      throw new CassetteRealDataDetectedError();
+    }
+    await this.store.set({ hash, response: sanitized });
+    return sanitized;
   }
 }

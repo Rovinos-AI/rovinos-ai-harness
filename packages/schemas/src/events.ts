@@ -72,6 +72,7 @@ const modelRequestEvent = z
     provider: Code,
     model: Code,
     role: Code.optional(),
+    requestHash: Sha256Hex.optional(),
     schemaHash: Sha256Hex.optional(),
     messages: z.array(MessageSchema),
   })

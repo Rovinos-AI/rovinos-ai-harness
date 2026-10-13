@@ -50,4 +50,27 @@ describe("requestHash", () => {
       }),
     ).not.toBe(requestHash(request));
   });
+
+  it("omits undefined object fields like JSON serialization", () => {
+    const request: ModelRequest = {
+      requestId,
+      model: { provider: "cassette", model: "test" },
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+    };
+
+    expect(requestHash({ ...request, role: undefined })).toBe(requestHash(request));
+    expect(requestHash({ ...request, output: undefined })).toBe(requestHash(request));
+  });
+
+  it("serializes undefined array elements as null", () => {
+    const request: ModelRequest = {
+      requestId,
+      model: { provider: "cassette", model: "test" },
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+    };
+    const withUndefined = { ...request, messages: [undefined] } as unknown as ModelRequest;
+    const withNull = { ...request, messages: [null] } as unknown as ModelRequest;
+
+    expect(requestHash(withUndefined)).toBe(requestHash(withNull));
+  });
 });

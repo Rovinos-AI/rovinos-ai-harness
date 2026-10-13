@@ -4,10 +4,13 @@ import { describe, expect, it } from "vitest";
 import type { ProviderContext } from "../types.js";
 import {
   CassetteDivergenceError,
+  CassetteLogIncompleteError,
   CassetteProvider,
+  CassetteMissError,
   CassetteStoreReadOnlyError,
 } from "./cassette-provider.js";
 import { EventLogCassetteStore } from "./event-log-store.js";
+import { requestHash } from "./hash.js";
 
 const runId = "00000000000000000000000001";
 const traceId = "a".repeat(32);
@@ -30,8 +33,14 @@ function requestEvent(
   seq: number,
   id: string,
   text: string,
-  options: { readonly role?: Code; readonly schemaHash?: string } = {},
+  options: { readonly role?: Code; readonly provider?: string } = {},
 ): Event {
+  const modelRequest: ModelRequest = {
+    requestId: id,
+    model: { provider: options.provider ?? "cassette", model: "test" },
+    ...(options.role === undefined ? {} : { role: options.role }),
+    messages: [{ role: "user", parts: [{ type: "text", text }] }],
+  };
   return {
     runId,
     seq,
@@ -42,11 +51,11 @@ function requestEvent(
     segmentId,
     type: "model_request",
     requestId: id,
-    provider: "cassette",
+    provider: options.provider ?? "cassette",
     model: "test",
     ...(options.role === undefined ? {} : { role: options.role }),
-    ...(options.schemaHash === undefined ? {} : { schemaHash: options.schemaHash }),
-    messages: [{ role: "user", parts: [{ type: "text", text }] }],
+    requestHash: requestHash(modelRequest),
+    messages: modelRequest.messages,
   };
 }
 
@@ -123,29 +132,81 @@ describe("EventLogCassetteStore", () => {
     ]);
   });
 
-  it("detects output schema hash divergence and skips unpaired requests", async () => {
+  it("detects divergence in full request fields", async () => {
     const events = [
-      responseEvent(0, "00000000000000000000000006", "orphan"),
-      requestEvent(1, "00000000000000000000000007", "unpaired"),
-      requestEvent(2, requestId, "hello", {
+      requestEvent(0, requestId, "hello", {
         role: "assistant",
-        schemaHash: Sha256Hex.parse("a".repeat(64)),
       }),
-      responseEvent(3, requestId, "first"),
+      responseEvent(1, requestId, "first"),
     ] satisfies Event[];
     const store = new EventLogCassetteStore(events);
-    const differentSchema = {
-      ...request,
-      output: {
-        name: "result",
-        schema: {},
-        schemaHash: Sha256Hex.parse("b".repeat(64)),
+    const variants: readonly ModelRequest[] = [
+      { ...request, tools: [{ toolId: "lookup", description: "lookup", inputSchema: {} }] },
+      { ...request, toolChoice: "none" },
+      { ...request, maxOutputTokens: 10 },
+      { ...request, temperature: 0.2 },
+      {
+        ...request,
+        output: {
+          name: "result",
+          schema: {},
+          schemaHash: Sha256Hex.parse("b".repeat(64)),
+        },
       },
-    } satisfies ModelRequest;
+    ];
 
-    await expect(store.get("a".repeat(64), differentSchema)).rejects.toBeInstanceOf(
-      CassetteDivergenceError,
+    for (const variant of variants) {
+      await expect(store.get("a".repeat(64), variant)).rejects.toBeInstanceOf(
+        CassetteDivergenceError,
+      );
+    }
+    await expect(store.get("a".repeat(64), request)).resolves.toBeDefined();
+  });
+
+  it("pairs repeated request ids in log order", async () => {
+    const provider = new CassetteProvider(
+      "replay",
+      new EventLogCassetteStore([
+        requestEvent(0, requestId, "hello", { role: "assistant" }),
+        responseEvent(1, requestId, "first"),
+        requestEvent(2, requestId, "hello", { role: "assistant" }),
+        responseEvent(3, requestId, "second"),
+      ]),
     );
+
+    expect((await provider.complete(request, context)).parts).toEqual([
+      { type: "text", text: "first" },
+    ]);
+    expect((await provider.complete(request, context)).parts).toEqual([
+      { type: "text", text: "second" },
+    ]);
+  });
+
+  it("normalizes the recorded provider when replay routes through cassette", async () => {
+    const store = new EventLogCassetteStore([
+      requestEvent(0, requestId, "hello", { role: "assistant", provider: "openai" }),
+      responseEvent(1, requestId, "recorded"),
+    ]);
+
+    await expect(store.get("a".repeat(64), request)).resolves.toMatchObject({
+      parts: [{ type: "text", text: "recorded" }],
+    });
+  });
+
+  it("rejects interrupted non-final requests and treats a final request as a miss", async () => {
+    expect(
+      () =>
+        new EventLogCassetteStore([
+          requestEvent(0, requestId, "interrupted"),
+          requestEvent(1, "00000000000000000000000005", "later"),
+          responseEvent(2, "00000000000000000000000005", "response"),
+        ]),
+    ).toThrow(CassetteLogIncompleteError);
+
+    const finalRequestStore = new EventLogCassetteStore([requestEvent(0, requestId, "hello")]);
+    await expect(finalRequestStore.get("a".repeat(64), request)).resolves.toBeUndefined();
+    const provider = new CassetteProvider("replay", finalRequestStore);
+    await expect(provider.complete(request, context)).rejects.toBeInstanceOf(CassetteMissError);
   });
 
   it("is read-only and returns a miss after the ordered responses are exhausted", async () => {
