@@ -7,7 +7,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { HarnessError, Id, parseJson } from "@harness/schemas";
 import { z } from "zod";
-import { executeSpec } from "./exec.js";
+import { executeSpec, SANDBOX_EXEC_GID, SANDBOX_EXEC_UID } from "./exec.js";
 import { ExecResultSchema, ExecSpecSchema, MAX_EXEC_TIMEOUT_MS } from "../../src/types.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
 
@@ -43,6 +43,10 @@ export interface RunnerServerOptions {
   readonly allowedHosts: readonly string[];
   /** Workspace root mounted into the runner container. */
   readonly workspaceRoot: string;
+  /** UID used for sandbox commands. */
+  readonly executionUid?: number;
+  /** GID used for sandbox commands. */
+  readonly executionGid?: number;
   /** Executes validated requests; injectable for isolated server tests. */
   readonly execute?: (
     runId: z.infer<typeof Id>,
@@ -152,10 +156,14 @@ function writeError(response: RunnerResponse, status: number, code: string): voi
 }
 
 function validateRunnerOptions(options: RunnerServerOptions): ReadonlySet<string> {
+  const executionUid = options.executionUid ?? SANDBOX_EXEC_UID;
+  const executionGid = options.executionGid ?? SANDBOX_EXEC_GID;
   if (
     Buffer.byteLength(options.token, "utf8") < MIN_RUNNER_TOKEN_BYTES ||
     options.allowedHosts.length === 0 ||
-    options.allowedHosts.some((host) => authorityFrom(host) !== host.toLowerCase())
+    options.allowedHosts.some((host) => authorityFrom(host) !== host.toLowerCase()) ||
+    executionUid === process.getuid?.() ||
+    executionGid === process.getgid?.()
   ) {
     throw new RunnerConfigurationError();
   }
@@ -176,7 +184,13 @@ export function createRunnerRequestHandler(
   const runExec =
     options.execute ??
     ((_runId: z.infer<typeof Id>, spec: ExecSpec, signal: AbortSignal) =>
-      executeSpec({ spec, signal, workspaceRoot: options.workspaceRoot }));
+      executeSpec({
+        spec,
+        signal,
+        workspaceRoot: options.workspaceRoot,
+        ...(options.executionUid === undefined ? {} : { executionUid: options.executionUid }),
+        ...(options.executionGid === undefined ? {} : { executionGid: options.executionGid }),
+      }));
   let activeExec = false;
 
   return async (request, response) => {

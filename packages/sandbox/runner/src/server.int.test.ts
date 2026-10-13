@@ -71,6 +71,7 @@ const ChildCapabilitiesSchema = z
       .strict(),
     uidError: z.string(),
     gidError: z.string(),
+    supplementaryGroups: z.array(z.number().int()),
     tokenFileReadable: z.boolean(),
     tokenInProcessEnvironment: z.boolean(),
     signalError: z.string(),
@@ -252,11 +253,12 @@ describe("sandbox runner Compose service", () => {
       'let uidError = ""; let gidError = "";',
       'try { process.setuid(10002); } catch (error) { uidError = error.code ?? ""; }',
       'try { process.setgid(10002); } catch (error) { gidError = error.code ?? ""; }',
+      "const supplementaryGroups = process.getgroups().filter((group) => group !== process.getgid());",
       'let tokenFileReadable = false; let tokenInProcessEnvironment = false; let signalError = "";',
       'try { tokenFileReadable = fs.readFileSync("/run/secrets/sandbox_runner_token", "utf8").includes("synthetic-runner-token-for-integration"); } catch {}',
       'try { tokenInProcessEnvironment = fs.readFileSync("/proc/1/environ", "utf8").includes("synthetic-runner-token-for-integration"); } catch {}',
       'try { process.kill(1, "SIGKILL"); } catch (error) { signalError = error.code ?? ""; }',
-      "process.stdout.write(JSON.stringify({ values, uidError, gidError, tokenFileReadable, tokenInProcessEnvironment, signalError }));",
+      "process.stdout.write(JSON.stringify({ values, uidError, gidError, supplementaryGroups, tokenFileReadable, tokenInProcessEnvironment, signalError }));",
     ].join("\n");
     const result = await runExec(makeSpec(["node", "-e", script]));
     const parsed = parseJson(ChildCapabilitiesSchema, result.stdout);
@@ -272,6 +274,7 @@ describe("sandbox runner Compose service", () => {
       },
       uidError: "EPERM",
       gidError: "EPERM",
+      supplementaryGroups: [],
       tokenFileReadable: false,
       tokenInProcessEnvironment: false,
       signalError: "EPERM",

@@ -2,12 +2,14 @@
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import process from "node:process";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { Id, parseJson } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
+  createRunnerServer,
   createRunnerRequestHandler,
   RunnerConfigurationError,
   startRunnerServer,
@@ -130,6 +132,18 @@ afterEach(() => {
 });
 
 describe("runner HTTP request handler", () => {
+  it("rejects execution credentials that match the runner identity", () => {
+    const serverUid = process.getuid?.() ?? 0;
+    const serverGid = process.getgid?.() ?? 0;
+
+    expect(() => createRunnerServer(makeOptions({ executionUid: serverUid }))).toThrowError(
+      RunnerConfigurationError,
+    );
+    expect(() => createRunnerServer(makeOptions({ executionGid: serverGid }))).toThrowError(
+      RunnerConfigurationError,
+    );
+  });
+
   it("serves health without auth and rejects unknown routes", async () => {
     const handler = createRunnerRequestHandler(makeOptions());
 

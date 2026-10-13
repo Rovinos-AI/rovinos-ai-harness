@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,21 @@ const limits = { memoryMb: 2048, pids: 2048, outputBytes: 1024, cpuSeconds: 5 };
 const executionUid = process.getuid?.() ?? 10003;
 const executionGid = process.getgid?.() ?? 10003;
 let workspaceRoot: string;
+
+function spawnWithoutPrivilegeChanges(
+  file: string,
+  args: readonly string[],
+  options: {
+    shell: false;
+    detached: boolean;
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    stdio: "pipe";
+  },
+): ChildProcess {
+  const separator = args.indexOf("--");
+  return spawn(args[separator + 1] ?? file, args.slice(separator + 2), options);
+}
 
 function makeSpec(
   argv: string[],
@@ -25,6 +41,7 @@ function execute(spec: ExecSpec, signal = new AbortController().signal) {
     workspaceRoot,
     executionUid,
     executionGid,
+    spawnProcess: spawnWithoutPrivilegeChanges,
   });
 }
 

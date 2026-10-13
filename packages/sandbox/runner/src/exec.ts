@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import process from "node:process";
 import { HarnessError } from "@harness/schemas";
 import { resolveWorkspacePath } from "../../src/inprocess.js";
@@ -8,8 +8,20 @@ import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 const PRLIMIT_PATH = "/usr/bin/prlimit";
 const SETPRIV_PATH = "/usr/bin/setpriv";
 const TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-const SANDBOX_EXEC_UID = 10003;
-const SANDBOX_EXEC_GID = 10003;
+export const SANDBOX_EXEC_UID = 10003;
+export const SANDBOX_EXEC_GID = 10003;
+
+type SpawnProcess = (
+  file: string,
+  args: readonly string[],
+  options: {
+    shell: false;
+    detached: boolean;
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    stdio: "pipe";
+  },
+) => ChildProcess;
 
 const systemClock: Clock = {
   now: () => Date.now(),
@@ -108,14 +120,13 @@ function prlimitArgs(spec: ExecSpec): string[] {
 }
 
 function setprivArgs(spec: ExecSpec, executionUid: number, executionGid: number): string[] {
-  const dropBoundingSet = process.geteuid?.() !== executionUid;
   return [
     `--reuid=${String(executionUid)}`,
     `--regid=${String(executionGid)}`,
-    "--keep-groups",
+    "--clear-groups",
     "--inh-caps=-all",
     "--ambient-caps=-all",
-    ...(dropBoundingSet ? ["--bounding-set=-all"] : []),
+    "--bounding-set=-all",
     "--",
     PRLIMIT_PATH,
     ...prlimitArgs(spec),
@@ -144,6 +155,7 @@ interface ProcessOptions {
   startedAt: number;
   executionUid: number;
   executionGid: number;
+  spawnProcess: SpawnProcess;
 }
 
 function executeProcess({
@@ -154,11 +166,12 @@ function executeProcess({
   startedAt,
   executionUid,
   executionGid,
+  spawnProcess,
 }: ProcessOptions): Promise<ExecResult> {
   const output = new CapturedOutput(spec.limits.outputBytes);
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn(SETPRIV_PATH, setprivArgs(spec, executionUid, executionGid), {
+    child = spawnProcess(SETPRIV_PATH, setprivArgs(spec, executionUid, executionGid), {
       shell: false,
       detached: true,
       cwd,
@@ -239,6 +252,7 @@ export async function executeSpec(options: {
   clock?: Clock;
   executionUid?: number;
   executionGid?: number;
+  spawnProcess?: SpawnProcess;
 }): Promise<ExecResult> {
   const { spec, signal, workspaceRoot } = options;
   const clock = options.clock ?? systemClock;
@@ -256,5 +270,6 @@ export async function executeSpec(options: {
     startedAt,
     executionUid: options.executionUid ?? SANDBOX_EXEC_UID,
     executionGid: options.executionGid ?? SANDBOX_EXEC_GID,
+    spawnProcess: options.spawnProcess ?? spawn,
   });
 }
