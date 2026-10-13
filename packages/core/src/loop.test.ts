@@ -20,6 +20,7 @@ import {
 } from "@opentelemetry/api";
 import {
   FakeClock,
+  Event,
   Id,
   JsonValue,
   PiiConfigSchema,
@@ -27,7 +28,6 @@ import {
   SequentialIdGenerator,
   HarnessError,
   Traceparent,
-  type Event,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
 import {
@@ -891,6 +891,38 @@ describe("approval lifecycle", () => {
     ).rejects.toBeInstanceOf(ApprovalEditsRequiredError);
     await requestApprovalForRun(recorder, clock, state);
     await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
+    await expect(
+      resolveApproval(store, runId, approvalId, "deny", undefined, clock),
+    ).rejects.toBeInstanceOf(ApprovalAlreadyResolvedError);
+  });
+
+  it("resumes reading a legacy resolution as a human decision", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+    await requestApprovalForRun(recorder, clock, state);
+    const events = await readApprovalEvents(store);
+    const last = events.at(-1);
+    if (last === undefined) {
+      throw new Error("Expected a suspended approval history.");
+    }
+    const legacyResolution = Event.parse({
+      runId,
+      seq: events.length,
+      ts: clock.now(),
+      v: 1,
+      traceId: last.traceId,
+      spanId: last.spanId,
+      segmentId: last.segmentId,
+      type: "approval_resolved",
+      approvalId,
+      decision: "approve",
+      waitMs: 0,
+    });
+    await store.append(runId, [legacyResolution], events.length);
+
+    const resumedState = foldRunState(await readApprovalEvents(store));
+    expect(resumedState.resolvedApprovals.get(approvalId)?.decidedBy).toBe("human");
     await expect(
       resolveApproval(store, runId, approvalId, "deny", undefined, clock),
     ).rejects.toBeInstanceOf(ApprovalAlreadyResolvedError);
@@ -2262,10 +2294,12 @@ describe("runLoop", () => {
     const sweepStore: ApprovalSweepStore = {
       listRuns: (options) => store.listRuns(options),
       read: (forRun) => store.read(forRun),
-      claimApprovalNotification: (forApproval, forRun) =>
-        store.claimApprovalNotification(forApproval, forRun),
-      releaseApprovalNotification: (forApproval, forRun) =>
-        store.releaseApprovalNotification(forApproval, forRun),
+      claimApprovalNotification: (forApproval, forRun, claimedAt, leaseMs) =>
+        store.claimApprovalNotification(forApproval, forRun, claimedAt, leaseMs),
+      markApprovalNotificationSent: (forApproval, forRun, claimedAt, sentAt) =>
+        store.markApprovalNotificationSent(forApproval, forRun, claimedAt, sentAt),
+      releaseApprovalNotification: (forApproval, forRun, claimedAt) =>
+        store.releaseApprovalNotification(forApproval, forRun, claimedAt),
       resolveApproval: (forRun, forApproval, metadata) =>
         resolveApproval(store, forRun, forApproval, "deny", undefined, clock, undefined, metadata),
     };

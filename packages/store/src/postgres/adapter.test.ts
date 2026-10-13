@@ -40,6 +40,12 @@ interface FakeSnapshot {
   key_id: string | null;
 }
 
+interface FakeApprovalNotification {
+  readonly run_id: string;
+  readonly claimed_at: number;
+  readonly sent_at?: number;
+}
+
 interface FakeQueryResult {
   rows: unknown[];
   rowCount?: number | null;
@@ -51,7 +57,7 @@ let transactionBackup:
       events: FakeEvent[];
       sinkCursors: Map<string, number>;
       snapshots: FakeSnapshot[];
-      approvalNotifications: Map<string, string>;
+      approvalNotifications: Map<string, FakeApprovalNotification>;
     }
   | undefined;
 
@@ -60,7 +66,7 @@ const fakePg = vi.hoisted(() => ({
   events: new Array<FakeEvent>(),
   sinkCursors: new Map<string, number>(),
   snapshots: new Array<FakeSnapshot>(),
-  approvalNotifications: new Map<string, string>(),
+  approvalNotifications: new Map<string, FakeApprovalNotification>(),
   schemaInitialized: false,
   migrationHistory: new Map<string, string>(),
   encryptionValue: "",
@@ -293,28 +299,67 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   }
   if (query === "DELETE FROM approval_notifications WHERE run_id = $1") {
     const runId = text(values[0]);
-    for (const [approvalId, notificationRunId] of fakePg.approvalNotifications) {
-      if (notificationRunId === runId) {
+    for (const [approvalId, notification] of fakePg.approvalNotifications) {
+      if (notification.run_id === runId) {
         fakePg.approvalNotifications.delete(approvalId);
       }
     }
     return { rows: [] };
   }
-  if (query === "DELETE FROM approval_notifications WHERE approval_id = $1 AND run_id = $2") {
+  if (
+    query ===
+    "DELETE FROM approval_notifications WHERE approval_id = $1 AND run_id = $2 AND claimed_at = $3 AND sent_at IS NULL"
+  ) {
     const approvalId = text(values[0]);
     const runId = text(values[1]);
-    if (fakePg.approvalNotifications.get(approvalId) === runId) {
+    const claimedAt = number(values[2]);
+    const notification = fakePg.approvalNotifications.get(approvalId);
+    if (
+      notification?.run_id === runId &&
+      notification.claimed_at === claimedAt &&
+      notification.sent_at === undefined
+    ) {
       fakePg.approvalNotifications.delete(approvalId);
     }
     return { rows: [] };
   }
+  if (
+    query ===
+    "UPDATE approval_notifications SET sent_at = $1 WHERE approval_id = $2 AND run_id = $3 AND claimed_at = $4 AND sent_at IS NULL"
+  ) {
+    const sentAt = number(values[0]);
+    const approvalId = text(values[1]);
+    const runId = text(values[2]);
+    const claimedAt = number(values[3]);
+    const notification = fakePg.approvalNotifications.get(approvalId);
+    if (
+      notification?.run_id === runId &&
+      notification.claimed_at === claimedAt &&
+      notification.sent_at === undefined
+    ) {
+      fakePg.approvalNotifications.set(approvalId, { ...notification, sent_at: sentAt });
+      return { rows: [], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  }
   if (query.startsWith("INSERT INTO approval_notifications")) {
     const approvalId = text(values[0]);
     const runId = text(values[1]);
-    if (fakePg.approvalNotifications.has(approvalId)) {
+    const claimedAt = number(values[2]);
+    const leaseMs = number(values[3]);
+    const notification = fakePg.approvalNotifications.get(approvalId);
+    if (notification === undefined) {
+      fakePg.approvalNotifications.set(approvalId, { run_id: runId, claimed_at: claimedAt });
+      return { rows: [{ approval_id: approvalId }] };
+    }
+    if (
+      notification.run_id !== runId ||
+      notification.sent_at !== undefined ||
+      notification.claimed_at > claimedAt - leaseMs
+    ) {
       return { rows: [] };
     }
-    fakePg.approvalNotifications.set(approvalId, runId);
+    fakePg.approvalNotifications.set(approvalId, { run_id: runId, claimed_at: claimedAt });
     return { rows: [{ approval_id: approvalId }] };
   }
   if (query.startsWith("DELETE FROM snapshots")) {

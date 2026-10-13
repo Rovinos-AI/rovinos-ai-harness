@@ -82,6 +82,24 @@ describe("approval notifiers", () => {
     expect(calls).toBe(2);
   });
 
+  it("rejects redirect responses rather than following another host", async () => {
+    let calls = 0;
+    const notifier = new WebhookNotifier({
+      url: SecretRefSchema.parse("env:APPROVAL_WEBHOOK"),
+      secrets: { resolve: () => Promise.resolve("https://hooks.example.test/approval") },
+      fetch: (_input, init) => {
+        calls += 1;
+        expect(init?.redirect).toBe("error");
+        return Promise.reject(new TypeError("Redirect rejected."));
+      },
+    });
+
+    await expect(notifier.notify(notification)).rejects.toMatchObject({
+      code: "approval_webhook_failed",
+    });
+    expect(calls).toBe(2);
+  });
+
   it("rejects invalid SecretRefs and resolved webhook URLs without exposing them", async () => {
     const notifier = new WebhookNotifier({
       url: SecretRefSchema.parse("env:APPROVAL_WEBHOOK"),

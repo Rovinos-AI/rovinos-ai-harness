@@ -105,6 +105,7 @@ export class WebhookNotifier implements Notifier {
           headers: { "content-type": "application/json" },
           body,
           signal,
+          redirect: "error",
         });
         if (response.ok) {
           return;

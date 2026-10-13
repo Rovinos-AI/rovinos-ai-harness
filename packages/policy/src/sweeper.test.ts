@@ -19,9 +19,13 @@ interface StoreFixture {
 
 class FakeSweepStore implements ApprovalSweepStore {
   private readonly runEvents = new Map<Id, StoredEvent[]>();
-  private readonly notificationClaims = new Map<Id, Id>();
+  private readonly notificationClaims = new Map<
+    Id,
+    { readonly runId: Id; readonly claimedAt: number; readonly sentAt?: number }
+  >();
   private readonly resolutions = new Set<Id>();
   readonly resolutionMetadata: ApprovalExpiryResolution[] = [];
+  beforeResolve: ((runId: Id, approvalId: Id) => void) | undefined;
 
   constructor(
     readonly runId: Id,
@@ -33,7 +37,14 @@ class FakeSweepStore implements ApprovalSweepStore {
   }
 
   listRuns(): Promise<{ runs: { runId: Id }[] }> {
-    return Promise.resolve({ runs: [{ runId: this.runId }] });
+    return Promise.resolve({ runs: [...this.runEvents.keys()].map((runId) => ({ runId })) });
+  }
+
+  addRunFrom(store: FakeSweepStore): void {
+    const events = store.runEvents.get(store.runId);
+    if (events !== undefined) {
+      this.runEvents.set(store.runId, events);
+    }
   }
 
   read(runId: Id): AsyncIterable<StoredEvent> {
@@ -44,16 +55,79 @@ class FakeSweepStore implements ApprovalSweepStore {
     })();
   }
 
-  claimApprovalNotification(approvalId: Id, runId: Id): Promise<boolean> {
-    if (this.notificationClaims.has(approvalId)) {
+  cancelRun(runId: Id): void {
+    const events = this.runEvents.get(runId);
+    const last = events?.at(-1);
+    if (events === undefined || last === undefined) {
+      return;
+    }
+    this.runEvents.set(runId, [
+      ...events,
+      Event.parse({
+        runId,
+        seq: events.length,
+        ts: this.now(),
+        v: 1,
+        traceId: last.traceId,
+        spanId: last.spanId,
+        segmentId: last.segmentId,
+        type: "run_status_changed",
+        from: "suspended",
+        to: "cancelled",
+        reason: "cancelled",
+      }),
+    ]);
+  }
+
+  removeRun(runId: Id): void {
+    this.runEvents.delete(runId);
+  }
+
+  claimApprovalNotification(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    leaseMs: number,
+  ): Promise<boolean> {
+    const current = this.notificationClaims.get(approvalId);
+    if (
+      current !== undefined &&
+      (current.runId !== runId ||
+        current.sentAt !== undefined ||
+        current.claimedAt > claimedAt - leaseMs)
+    ) {
       return Promise.resolve(false);
     }
-    this.notificationClaims.set(approvalId, runId);
+    this.notificationClaims.set(approvalId, { runId, claimedAt });
     return Promise.resolve(true);
   }
 
-  releaseApprovalNotification(approvalId: Id, runId: Id): Promise<void> {
-    if (this.notificationClaims.get(approvalId) === runId) {
+  markApprovalNotificationSent(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ): Promise<boolean> {
+    const current = this.notificationClaims.get(approvalId);
+    if (
+      current === undefined ||
+      current.runId !== runId ||
+      current.claimedAt !== claimedAt ||
+      current.sentAt !== undefined
+    ) {
+      return Promise.resolve(false);
+    }
+    this.notificationClaims.set(approvalId, { runId, claimedAt, sentAt });
+    return Promise.resolve(true);
+  }
+
+  releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void> {
+    const current = this.notificationClaims.get(approvalId);
+    if (
+      current?.runId === runId &&
+      current.claimedAt === claimedAt &&
+      current.sentAt === undefined
+    ) {
       this.notificationClaims.delete(approvalId);
     }
     return Promise.resolve();
@@ -65,17 +139,27 @@ class FakeSweepStore implements ApprovalSweepStore {
     metadata: ApprovalExpiryResolution,
   ): Promise<Extract<StoredEvent, { type: "approval_resolved" }>> {
     await Promise.resolve();
+    this.beforeResolve?.(runId, approvalId);
     if (this.resolutions.has(approvalId)) {
       throw Object.assign(new Error("Already resolved"), { code: "approval_already_resolved" });
     }
     const events = this.runEvents.get(runId);
+    if (events === undefined) {
+      throw Object.assign(new Error("Run was deleted."), { code: "approval_not_found" });
+    }
     const last = events?.at(-1);
     const request = events?.find(
       (event): event is Extract<StoredEvent, { type: "approval_requested" }> =>
         event.type === "approval_requested" && event.approvalId === approvalId,
     );
-    if (events === undefined || last === undefined || request === undefined) {
-      throw new Error("Missing synthetic approval.");
+    if (last === undefined || request === undefined) {
+      throw Object.assign(new Error("Approval was deleted."), { code: "approval_not_found" });
+    }
+    const status = [...events].reverse().find((event) => event.type === "run_status_changed");
+    if (status?.type !== "run_status_changed" || status.to !== "suspended") {
+      throw Object.assign(new Error("Run is no longer suspended."), {
+        code: "approval_run_not_suspended",
+      });
     }
     const resolution: Extract<StoredEvent, { type: "approval_resolved" }> = {
       runId,
@@ -105,10 +189,13 @@ function createStoreFixture(options: {
   readonly requestedAt?: number;
   readonly ttlMs?: number;
   readonly escalateAfterMs?: number;
+  readonly idOffset?: number;
 }): StoreFixture {
-  const runId = Id.parse("00000000000000000000000001");
-  const callId = Id.parse("00000000000000000000000002");
-  const approvalId = Id.parse("00000000000000000000000003");
+  const id = (offset: number) =>
+    Id.parse(String((options.idOffset ?? 0) + offset).padStart(26, "0"));
+  const runId = id(1);
+  const callId = id(2);
+  const approvalId = id(3);
   const requestedAt = options.requestedAt ?? 100;
   const payload = buildApprovalPayload({
     call: { callId, toolId: Code.parse("mail.send"), args: { to: "<EMAIL_1>" } },
@@ -193,7 +280,7 @@ describe("sweepApprovals", () => {
       notifier,
     });
 
-    expect(result).toEqual({ examined: 1, expired: 1, escalated: 0 });
+    expect(result).toEqual({ examined: 1, expired: 1, escalated: 0, failed: 0 });
     expect(fixture.store.resolutionMetadata).toEqual([
       { decidedBy: "expiry", reason: Code.parse("expired") },
     ]);
@@ -209,11 +296,13 @@ describe("sweepApprovals", () => {
       examined: 1,
       expired: 0,
       escalated: 1,
+      failed: 0,
     });
     await expect(sweepApprovals(options)).resolves.toEqual({
       examined: 1,
       expired: 0,
       escalated: 0,
+      failed: 0,
     });
     expect(notifier.notify).toHaveBeenCalledTimes(1);
     expect(notifier.notify).toHaveBeenCalledWith({
@@ -253,7 +342,7 @@ describe("sweepApprovals", () => {
     expect(notifier.notify).toHaveBeenCalledTimes(1);
   });
 
-  it("releases a notification claim when delivery fails", async () => {
+  it("releases failed notification claims and counts the failure", async () => {
     const fixture = createStoreFixture({ now: 110, escalateAfterMs: 10 });
     await expect(
       sweepApprovals({
@@ -261,12 +350,84 @@ describe("sweepApprovals", () => {
         clock: new FakeClock(110),
         notifier: { notify: () => Promise.reject(new Error("transport")) },
       }),
-    ).rejects.toMatchObject({ code: "approval_sweep_failed" });
+    ).resolves.toEqual({ examined: 1, expired: 0, escalated: 0, failed: 1 });
 
     const notifier = { notify: vi.fn(() => Promise.resolve()) };
     await expect(
       sweepApprovals({ store: fixture.store, clock: new FakeClock(110), notifier }),
-    ).resolves.toMatchObject({ escalated: 1 });
+    ).resolves.toMatchObject({ escalated: 1, failed: 0 });
+  });
+
+  it("reclaims an abandoned claim after the delivery lease expires", async () => {
+    const fixture = createStoreFixture({ now: 110, escalateAfterMs: 10 });
+    const clock = new FakeClock(110);
+    const leaseMs = 60_000;
+    await expect(
+      fixture.store.claimApprovalNotification(
+        fixture.approvalId,
+        fixture.runId,
+        clock.now(),
+        leaseMs,
+      ),
+    ).resolves.toBe(true);
+    clock.advance(leaseMs);
+    const notifier = { notify: vi.fn(() => Promise.resolve()) };
+
+    await expect(sweepApprovals({ store: fixture.store, clock, notifier })).resolves.toEqual({
+      examined: 1,
+      expired: 0,
+      escalated: 1,
+      failed: 0,
+    });
+
+    expect(notifier.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["cancelled", "approval_run_not_suspended"],
+    ["deleted", "approval_not_found"],
+  ])("ignores a run %s after the pending snapshot", async (_name, code) => {
+    const fixture = createStoreFixture({ now: 110, ttlMs: 10 });
+    const later = createStoreFixture({ now: 110, ttlMs: 10, idOffset: 10 });
+    fixture.store.addRunFrom(later.store);
+    fixture.store.beforeResolve = (runId) => {
+      if (runId === fixture.runId) {
+        if (code === "approval_not_found") {
+          fixture.store.removeRun(runId);
+        } else {
+          fixture.store.cancelRun(runId);
+        }
+      }
+    };
+
+    await expect(
+      sweepApprovals({
+        store: fixture.store,
+        clock: new FakeClock(110),
+        notifier: { notify: vi.fn(() => Promise.resolve()) },
+      }),
+    ).resolves.toEqual({ examined: 2, expired: 1, escalated: 0, failed: 0 });
+  });
+
+  it("counts unexpected per-approval failures and continues with later approvals", async () => {
+    const fixture = createStoreFixture({ now: 110, ttlMs: 10 });
+    const later = createStoreFixture({ now: 110, ttlMs: 10, idOffset: 10 });
+    fixture.store.addRunFrom(later.store);
+    fixture.store.beforeResolve = (runId) => {
+      if (runId === fixture.runId) {
+        throw Object.assign(new Error("Synthetic per-approval failure"), {
+          code: "synthetic_failure",
+        });
+      }
+    };
+
+    await expect(
+      sweepApprovals({
+        store: fixture.store,
+        clock: new FakeClock(110),
+        notifier: { notify: vi.fn(() => Promise.resolve()) },
+      }),
+    ).resolves.toEqual({ examined: 2, expired: 1, escalated: 0, failed: 1 });
   });
 
   it("skips unresolved approvals before their expiry or escalation thresholds", async () => {
@@ -275,7 +436,7 @@ describe("sweepApprovals", () => {
 
     await expect(
       sweepApprovals({ store: fixture.store, clock: new FakeClock(105), notifier }),
-    ).resolves.toEqual({ examined: 1, expired: 0, escalated: 0 });
+    ).resolves.toEqual({ examined: 1, expired: 0, escalated: 0, failed: 0 });
     expect(notifier.notify).not.toHaveBeenCalled();
   });
 

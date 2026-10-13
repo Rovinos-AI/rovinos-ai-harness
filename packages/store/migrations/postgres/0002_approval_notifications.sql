@@ -1,7 +1,9 @@
 -- SPDX-License-Identifier: Apache-2.0
 CREATE TABLE IF NOT EXISTS approval_notifications (
   approval_id text PRIMARY KEY,
-  run_id text NOT NULL
+  run_id text NOT NULL,
+  claimed_at bigint NOT NULL,
+  sent_at bigint
 );
 
 CREATE INDEX IF NOT EXISTS approval_notifications_run_id_idx

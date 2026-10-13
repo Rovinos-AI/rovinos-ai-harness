@@ -139,19 +139,42 @@ export interface EventStore {
   ackOutbox(sinkId: Code, cursor: number): Promise<void>;
 
   /**
-   * Atomically claim the single escalation notification for an approval.
+   * Atomically claim an escalation notification or reclaim an expired unsent claim.
    * @param approvalId Approval whose notification is being claimed.
    * @param runId Run containing the approval, used to clean up with run retention.
-   * @returns True only for the call that created the durable claim.
+   * @param claimedAt Claim time in epoch milliseconds.
+   * @param leaseMs Duration before an unsent claim can be reclaimed.
+   * @returns True only for the call that acquired the claim.
    */
-  claimApprovalNotification(approvalId: Id, runId: Id): Promise<boolean>;
+  claimApprovalNotification(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    leaseMs: number,
+  ): Promise<boolean>;
+
+  /**
+   * Mark a successfully delivered escalation notification as sent.
+   * @param approvalId Approval whose notification was delivered.
+   * @param runId Run containing the approval.
+   * @param claimedAt Claim timestamp that identifies the current lease owner.
+   * @param sentAt Successful delivery time in epoch milliseconds.
+   * @returns Whether this claim was still current.
+   */
+  markApprovalNotificationSent(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ): Promise<boolean>;
 
   /**
    * Release an escalation claim after notification delivery fails.
    * @param approvalId Approval whose claim should be released.
    * @param runId Run containing the approval.
+   * @param claimedAt Claim timestamp that identifies the current lease owner.
    */
-  releaseApprovalNotification(approvalId: Id, runId: Id): Promise<void>;
+  releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void>;
 
   /** Release resources held by the store. */
   close(): Promise<void>;

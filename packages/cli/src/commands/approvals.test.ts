@@ -503,6 +503,7 @@ describe("harness approvals", () => {
       examined: 1,
       expired: 1,
       escalated: 0,
+      failed: 0,
     });
     const resolution = (await readAll(fixture.store, runId)).find(
       (event) => event.type === "approval_resolved",

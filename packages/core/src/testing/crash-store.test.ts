@@ -119,6 +119,28 @@ describe("CrashingEventStore", () => {
     await store.close();
   });
 
+  it("delegates approval notification lease operations", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new CrashingEventStore(inner, { crashAt: 1, mode: "before_commit" });
+    const approvalId = Id.parse("00000000000000000000000003");
+
+    await expect(store.claimApprovalNotification(approvalId, runId, 100, 60)).resolves.toBe(true);
+    await expect(store.markApprovalNotificationSent(approvalId, runId, 100, 101)).resolves.toBe(
+      true,
+    );
+    await expect(store.claimApprovalNotification(approvalId, runId, 200, 60)).resolves.toBe(false);
+
+    const retryApprovalId = Id.parse("00000000000000000000000004");
+    await expect(store.claimApprovalNotification(retryApprovalId, runId, 100, 60)).resolves.toBe(
+      true,
+    );
+    await store.releaseApprovalNotification(retryApprovalId, runId, 100);
+    await expect(store.claimApprovalNotification(retryApprovalId, runId, 100, 60)).resolves.toBe(
+      true,
+    );
+    await store.close();
+  });
+
   it("rejects invalid crash points", () => {
     expect(
       () => new CrashingEventStore(new InMemoryEventStore(), { crashAt: 0, mode: "before_commit" }),

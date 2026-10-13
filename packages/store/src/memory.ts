@@ -90,7 +90,10 @@ export class InMemoryEventStore implements EventStore {
   private readonly snapshots = new Map<Id, EncodedSnapshot[]>();
   private readonly outboxEvents: { globalSeq: number; event: StoredEvent }[] = [];
   private readonly sinkCursors = new Map<string, number>();
-  private readonly approvalNotifications = new Map<Id, Id>();
+  private readonly approvalNotifications = new Map<
+    Id,
+    { readonly runId: Id; readonly claimedAt: number; readonly sentAt?: number }
+  >();
   private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -234,8 +237,8 @@ export class InMemoryEventStore implements EventStore {
 
     this.runs.delete(runId);
     this.snapshots.delete(runId);
-    for (const [approvalId, notificationRunId] of this.approvalNotifications) {
-      if (notificationRunId === runId) {
+    for (const [approvalId, notification] of this.approvalNotifications) {
+      if (notification.runId === runId) {
         this.approvalNotifications.delete(approvalId);
       }
     }
@@ -357,17 +360,52 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /** {@inheritDoc EventStore.claimApprovalNotification} */
-  claimApprovalNotification(approvalId: Id, runId: Id): Promise<boolean> {
-    if (this.approvalNotifications.has(approvalId)) {
+  claimApprovalNotification(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    leaseMs: number,
+  ): Promise<boolean> {
+    const current = this.approvalNotifications.get(approvalId);
+    if (
+      current !== undefined &&
+      (current.runId !== runId ||
+        current.sentAt !== undefined ||
+        current.claimedAt > claimedAt - leaseMs)
+    ) {
       return Promise.resolve(false);
     }
-    this.approvalNotifications.set(approvalId, runId);
+    this.approvalNotifications.set(approvalId, { runId, claimedAt });
+    return Promise.resolve(true);
+  }
+
+  markApprovalNotificationSent(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ): Promise<boolean> {
+    const current = this.approvalNotifications.get(approvalId);
+    if (
+      current === undefined ||
+      current.runId !== runId ||
+      current.claimedAt !== claimedAt ||
+      current.sentAt !== undefined
+    ) {
+      return Promise.resolve(false);
+    }
+    this.approvalNotifications.set(approvalId, { runId, claimedAt, sentAt });
     return Promise.resolve(true);
   }
 
   /** {@inheritDoc EventStore.releaseApprovalNotification} */
-  releaseApprovalNotification(approvalId: Id, runId: Id): Promise<void> {
-    if (this.approvalNotifications.get(approvalId) === runId) {
+  releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void> {
+    const current = this.approvalNotifications.get(approvalId);
+    if (
+      current?.runId === runId &&
+      current.claimedAt === claimedAt &&
+      current.sentAt === undefined
+    ) {
       this.approvalNotifications.delete(approvalId);
     }
     return Promise.resolve();

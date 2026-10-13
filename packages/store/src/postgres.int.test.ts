@@ -2,7 +2,7 @@
 import { Pool } from "pg";
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { Code, type KeyProvider } from "@harness/schemas";
+import { Code, Id, type KeyProvider, type NewEvent } from "@harness/schemas";
 import { afterAll, expect, it } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, type ContentCodec } from "./codec.js";
@@ -145,6 +145,78 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
   supportsFileReopen: false,
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
+
+it("reads persisted v1 approval resolutions that predate decidedBy", async () => {
+  const { admin, schema } = await createSchema();
+  const raw = new Pool({
+    connectionString,
+    max: 1,
+    options: `-c search_path="${schema}"`,
+  });
+  const store = new PostgresEventStore(connectionString, { schema });
+  stores.add(store);
+  const runId = schemaIds.nextRunId();
+  const callId = Id.parse("00000000000000000000000002");
+  const approvalId = Id.parse("00000000000000000000000003");
+  const created = schemaIds.runCreated(runId);
+  const eventBase = {
+    runId,
+    ts: 2,
+    v: 1,
+    traceId: created.traceId,
+    spanId: created.spanId,
+    segmentId: runId,
+  };
+  const history: NewEvent[] = [
+    created,
+    { ...eventBase, type: "run_status_changed", from: "pending", to: "running", reason: "started" },
+    {
+      ...eventBase,
+      type: "tool_intent",
+      callId,
+      toolId: "test.tool",
+      idempotent: false,
+      policyDecision: "ask",
+      argsHash: "c".repeat(64),
+      args: {},
+    },
+    { ...eventBase, type: "approval_requested", approvalId, callId, payload: {} },
+    {
+      ...eventBase,
+      type: "run_status_changed",
+      from: "running",
+      to: "suspended",
+      reason: "awaiting_approval",
+    },
+    {
+      ...eventBase,
+      type: "approval_resolved",
+      approvalId,
+      decision: "approve",
+      decidedBy: "human",
+      waitMs: 1,
+    },
+  ];
+  try {
+    await store.append(runId, history, 0);
+    await raw.query(
+      "UPDATE events SET meta = meta - 'decidedBy' WHERE run_id = $1 AND type = 'approval_resolved'",
+      [runId],
+    );
+    const events = [];
+    for await (const event of store.read(runId)) {
+      events.push(event);
+    }
+    expect(events.find((event) => event.type === "approval_resolved")).toMatchObject({
+      type: "approval_resolved",
+      decidedBy: "human",
+    });
+  } finally {
+    await closeStore(store);
+    await raw.end();
+    await dropSchema(admin, schema);
+  }
+});
 
 it("serializes concurrent Postgres migration startup", async () => {
   const { admin, schema } = await createSchema();

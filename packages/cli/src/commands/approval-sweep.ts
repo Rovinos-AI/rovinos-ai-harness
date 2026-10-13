@@ -13,10 +13,12 @@ export async function runApprovalSweep(runtime: Runtime, context: CliContext): P
   const store: ApprovalSweepStore = {
     listRuns: (options) => runtime.store.listRuns(options),
     read: (runId) => runtime.store.read(runId),
-    claimApprovalNotification: (approvalId, runId) =>
-      runtime.store.claimApprovalNotification(approvalId, runId),
-    releaseApprovalNotification: (approvalId, runId) =>
-      runtime.store.releaseApprovalNotification(approvalId, runId),
+    claimApprovalNotification: (approvalId, runId, claimedAt, leaseMs) =>
+      runtime.store.claimApprovalNotification(approvalId, runId, claimedAt, leaseMs),
+    markApprovalNotificationSent: (approvalId, runId, claimedAt, sentAt) =>
+      runtime.store.markApprovalNotificationSent(approvalId, runId, claimedAt, sentAt),
+    releaseApprovalNotification: (approvalId, runId, claimedAt) =>
+      runtime.store.releaseApprovalNotification(approvalId, runId, claimedAt),
     resolveApproval: (runId, approvalId, metadata) =>
       resolveApproval(
         runtime.store,
@@ -40,6 +42,6 @@ export async function runApprovalSweep(runtime: Runtime, context: CliContext): P
   });
   context.out.json(ApprovalSweepResultSchema, result);
   context.out.print(
-    `examined=${String(result.examined)} expired=${String(result.expired)} escalated=${String(result.escalated)}\n`,
+    `examined=${String(result.examined)} expired=${String(result.expired)} escalated=${String(result.escalated)} failed=${String(result.failed)}\n`,
   );
 }

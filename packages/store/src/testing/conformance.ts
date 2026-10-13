@@ -290,10 +290,10 @@ function registerDeleteRun(factory: EventStoreFactory, builders: EventStoreTestB
         builders.snapshot(runId, snapshotId, 1),
       );
       await store.append(runId, [builders.runStatusChanged(runId, "pending", "completed")], 2);
-      await store.claimApprovalNotification(approvalId, runId);
+      await store.claimApprovalNotification(approvalId, runId, 10, 60);
 
       await expect(store.deleteRun(runId)).resolves.toBe(3);
-      await expect(store.claimApprovalNotification(approvalId, runId)).resolves.toBe(true);
+      await expect(store.claimApprovalNotification(approvalId, runId, 11, 60)).resolves.toBe(true);
       await expect(store.head(runId)).resolves.toBe(0);
       await expect(collect(store.read(runId))).resolves.toEqual([]);
       await expect(store.latestSnapshot(runId)).resolves.toBeUndefined();

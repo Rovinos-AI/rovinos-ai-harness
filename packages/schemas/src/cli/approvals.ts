@@ -60,6 +60,7 @@ export const ApprovalSweepResultSchema = z
     examined: z.number().int().nonnegative(),
     expired: z.number().int().nonnegative(),
     escalated: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
   })
   .strict();
 

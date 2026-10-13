@@ -429,13 +429,28 @@ export class SqliteEventStore implements EventStore {
   ackOutbox: EventStore["ackOutbox"] = (sinkId, cursor) => this.outbox.ack(sinkId, cursor);
 
   /** {@inheritDoc EventStore.claimApprovalNotification} */
-  claimApprovalNotification(approvalId: Id, runId: Id): Promise<boolean> {
-    return this.approvalNotifications.claim(approvalId, runId);
+  claimApprovalNotification(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    leaseMs: number,
+  ): Promise<boolean> {
+    return this.approvalNotifications.claim(approvalId, runId, claimedAt, leaseMs);
+  }
+
+  /** {@inheritDoc EventStore.markApprovalNotificationSent} */
+  markApprovalNotificationSent(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ): Promise<boolean> {
+    return this.approvalNotifications.markSent(approvalId, runId, claimedAt, sentAt);
   }
 
   /** {@inheritDoc EventStore.releaseApprovalNotification} */
-  releaseApprovalNotification(approvalId: Id, runId: Id): Promise<void> {
-    return this.approvalNotifications.release(approvalId, runId);
+  releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void> {
+    return this.approvalNotifications.release(approvalId, runId, claimedAt);
   }
 
   /** {@inheritDoc EventStore.close} */

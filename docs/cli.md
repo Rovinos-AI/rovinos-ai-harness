@@ -118,7 +118,8 @@ resolving, the command prints `harness resume <runId>`; `--resume` resumes at on
 `harness resume` exit codes.
 `--json` results are `ApprovalListResultSchema`, `ApprovalShowResultSchema`, and
 `ApprovalResolveResultSchema` and `ApprovalSweepResultSchema` in
-`packages/schemas/src/cli/approvals.ts`; `sweep` returns examined, expired, and escalated counts.
+`packages/schemas/src/cli/approvals.ts`; `sweep` returns examined, expired, escalated, and failed
+counts.
 
 Exit codes: `0` completed, `1` failure, `2` usage (including a malformed id), `7` for
 `approval_not_found`, `approval_already_resolved`, or a run that is no longer suspended.

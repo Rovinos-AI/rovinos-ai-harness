@@ -37,7 +37,7 @@ describe("Event", () => {
     expect(Event.parse(legacyResponse)).toMatchObject({ fallbackDepth: 0 });
   });
 
-  it("requires approval resolver metadata and accepts an optional reason code", () => {
+  it("defaults legacy approval resolutions to human and accepts an optional reason code", () => {
     const resolution = eventSamples.find(({ type }) => type === "approval_resolved");
     if (resolution?.type !== "approval_resolved") {
       throw new Error("Missing approval_resolved sample.");
@@ -45,7 +45,7 @@ describe("Event", () => {
     const withoutDecidedBy = { ...resolution };
     Reflect.deleteProperty(withoutDecidedBy, "decidedBy");
 
-    expect(Event.safeParse(withoutDecidedBy).success).toBe(false);
+    expect(Event.parse(withoutDecidedBy)).toMatchObject({ decidedBy: "human" });
     expect(Event.parse({ ...resolution, decidedBy: "expiry", reason: "expired" })).toMatchObject({
       decidedBy: "expiry",
       reason: "expired",

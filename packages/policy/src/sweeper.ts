@@ -16,6 +16,7 @@ import {
 } from "./notifier.js";
 
 const sweepTimestampSchema = z.number().int().nonnegative().refine(Number.isSafeInteger);
+const APPROVAL_NOTIFICATION_LEASE_MS = 60_000;
 
 /** Epoch-millisecond clock used for deterministic approval sweeps. */
 export interface ApprovalSweepClock {
@@ -47,10 +48,22 @@ export interface ApprovalSweepStore {
   }): Promise<{ readonly runs: readonly ApprovalSweepRun[]; readonly nextCursor?: string }>;
   /** Read the validated event history for a run. */
   read(runId: Id): AsyncIterable<Event>;
-  /** Atomically claim the unique notification for one approval. */
-  claimApprovalNotification(approvalId: Id, runId: Id): Promise<boolean>;
+  /** Atomically claim or reclaim an expired unsent notification for an approval. */
+  claimApprovalNotification(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    leaseMs: number,
+  ): Promise<boolean>;
+  /** Mark a successfully delivered notification as sent if its claim is current. */
+  markApprovalNotificationSent(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ): Promise<boolean>;
   /** Release the notification claim when delivery fails. */
-  releaseApprovalNotification(approvalId: Id, runId: Id): Promise<void>;
+  releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void>;
   /** Append an expiry resolution through the core approval resolver. */
   resolveApproval(
     runId: Id,
@@ -78,6 +91,7 @@ function hasErrorCode(error: unknown, code: string): boolean {
 }
 
 async function pendingForRun(store: ApprovalSweepStore, runId: Id): Promise<PendingApproval[]> {
+  // 18.x periodic sweeping should replace full-history reads with an index of pending approvals.
   const events: Event[] = [];
   for await (const event of store.read(runId)) {
     events.push(event);
@@ -136,7 +150,11 @@ async function expireApproval(
     });
     return true;
   } catch (error) {
-    if (hasErrorCode(error, "approval_already_resolved")) {
+    if (
+      hasErrorCode(error, "approval_already_resolved") ||
+      hasErrorCode(error, "approval_run_not_suspended") ||
+      hasErrorCode(error, "approval_not_found")
+    ) {
       return false;
     }
     throw error;
@@ -147,25 +165,48 @@ async function notifyApproval(
   store: ApprovalSweepStore,
   notifier: Notifier,
   notification: ApprovalNotification,
+  claimedAt: number,
+  sentAt: () => number,
 ): Promise<boolean> {
-  if (!(await store.claimApprovalNotification(notification.approvalId, notification.runId))) {
+  if (
+    !(await store.claimApprovalNotification(
+      notification.approvalId,
+      notification.runId,
+      claimedAt,
+      APPROVAL_NOTIFICATION_LEASE_MS,
+    ))
+  ) {
     return false;
   }
   try {
     await notifier.notify(ApprovalNotificationSchema.parse(notification));
-    return true;
   } catch {
     try {
-      await store.releaseApprovalNotification(notification.approvalId, notification.runId);
+      await store.releaseApprovalNotification(
+        notification.approvalId,
+        notification.runId,
+        claimedAt,
+      );
     } catch {
       throw new ApprovalSweepError();
     }
     throw new ApprovalSweepError();
   }
+  if (
+    !(await store.markApprovalNotificationSent(
+      notification.approvalId,
+      notification.runId,
+      claimedAt,
+      sentAt(),
+    ))
+  ) {
+    throw new ApprovalSweepError();
+  }
+  return true;
 }
 
 /**
- * Deny expired approvals and send each due escalation notification at most once.
+ * Deny expired approvals and send each due escalation notification once.
  *
  * Expiry takes precedence over escalation at the same instant. The store port
  * delegates resolution to core so event recording continues through RunRecorder.
@@ -182,36 +223,44 @@ export async function sweepApprovals(options: {
   if (!sweepTimestampSchema.safeParse(now).success) {
     throw new ApprovalSweepError();
   }
-  const result = { examined: 0, expired: 0, escalated: 0 };
+  const result = { examined: 0, expired: 0, escalated: 0, failed: 0 };
   for (const runId of await suspendedRunIds(options.store)) {
     for (const pending of await pendingForRun(options.store, runId)) {
       result.examined += 1;
-      const { request, intent } = pending;
-      if (request.expiresAt !== undefined && now >= request.expiresAt) {
-        if (await expireApproval(options.store, runId, request.approvalId)) {
-          result.expired += 1;
+      try {
+        const { request, intent } = pending;
+        if (request.expiresAt !== undefined && now >= request.expiresAt) {
+          if (await expireApproval(options.store, runId, request.approvalId)) {
+            result.expired += 1;
+          }
+          continue;
         }
-        continue;
-      }
-      const escalateAfterMs = intent?.policyEscalateAfterMs;
-      const payload = ApprovalPayloadSchema.safeParse(request.payload);
-      if (
-        escalateAfterMs === undefined ||
-        now < request.ts ||
-        now - request.ts < escalateAfterMs ||
-        !payload.success
-      ) {
-        continue;
-      }
-      const notification = ApprovalNotificationSchema.parse({
-        runId,
-        approvalId: request.approvalId,
-        toolId: payload.data.toolId,
-        ruleId: payload.data.ruleId,
-        ageMs: now - request.ts,
-      });
-      if (await notifyApproval(options.store, options.notifier, notification)) {
-        result.escalated += 1;
+        const escalateAfterMs = intent?.policyEscalateAfterMs;
+        const payload = ApprovalPayloadSchema.safeParse(request.payload);
+        if (
+          escalateAfterMs === undefined ||
+          now < request.ts ||
+          now - request.ts < escalateAfterMs ||
+          !payload.success
+        ) {
+          continue;
+        }
+        const notification = ApprovalNotificationSchema.parse({
+          runId,
+          approvalId: request.approvalId,
+          toolId: payload.data.toolId,
+          ruleId: payload.data.ruleId,
+          ageMs: now - request.ts,
+        });
+        if (
+          await notifyApproval(options.store, options.notifier, notification, now, () =>
+            options.clock.now(),
+          )
+        ) {
+          result.escalated += 1;
+        }
+      } catch {
+        result.failed += 1;
       }
     }
   }
