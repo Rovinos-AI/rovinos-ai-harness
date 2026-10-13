@@ -39,10 +39,7 @@ export type AppCallRejectedReason = HostAppRejectedReason;
 
 /** Error codes returned when an app tool call fails the host boundary. */
 export type AppCallRouterErrorCode =
-  | "app_tool_not_allowed"
-  | "app_run_mismatch"
-  | "app_run_unavailable"
-  | "app_telemetry_unavailable";
+  "app_tool_not_allowed" | "app_run_mismatch" | "app_run_unavailable" | "app_telemetry_unavailable";
 
 /** Safe error raised when an app call violates its host session policy. */
 export class AppCallRouterError extends HarnessError {
@@ -94,6 +91,62 @@ function callError(code: string): CallToolResult {
   return { content: [{ type: "text", text: code }], isError: true };
 }
 
+function makeModelToolCall(
+  request: AppCall,
+  toolId: Code,
+  nextCallId: () => Id,
+): ModelToolCall | undefined {
+  try {
+    return {
+      callId: request.callId ?? nextCallId(),
+      toolId,
+      args: JsonValue.parse(request.arguments),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function prepareAppToolCall(
+  tool: ToolPort,
+  call: ModelToolCall,
+  context: RunContext,
+): Promise<ModelToolCall | undefined> {
+  try {
+    return (await tool.prepare?.(call, context)) ?? call;
+  } catch {
+    return undefined;
+  }
+}
+
+function decideAppToolCall(
+  policy: PolicyPort,
+  call: ModelToolCall,
+  context: AppCallExecutionContext,
+): ReturnType<PolicyPort["decide"]> | undefined {
+  try {
+    return policy.decide({ toolId: call.toolId, args: call.args }, context.policyContext);
+  } catch {
+    return undefined;
+  }
+}
+
+async function executeAllowedAppToolCall(
+  tool: ToolPort,
+  call: ModelToolCall,
+  context: RunContext,
+): Promise<CallToolResult> {
+  try {
+    const result = await tool.execute(call, context);
+    if (result.outcome === "error") {
+      return callError(result.errorCode ?? "app_tool_failed");
+    }
+    return { content: [{ type: "text", text: JSON.stringify(result.result) }] };
+  } catch {
+    return callError("app_tool_failed");
+  }
+}
+
 /**
  * Creates the host-side app handler that prepares arguments and applies policy before execution.
  *
@@ -111,39 +164,23 @@ export function createPolicyCheckedAppCallHandler(
     if (!toolId.success || options.tool.describe(toolId.data) === undefined) {
       return callError("unknown_tool");
     }
-
-    let call: ModelToolCall;
-    try {
-      call = {
-        callId: request.callId ?? options.nextCallId(),
-        toolId: toolId.data,
-        args: JsonValue.parse(request.arguments),
-      };
-    } catch {
+    const call = makeModelToolCall(request, toolId.data, options.nextCallId);
+    if (call === undefined) {
       return callError("app_tool_arguments_invalid");
     }
-
     const runContext: RunContext = {
       runId: context.runId,
       signal: new AbortController().signal,
     };
-    let prepared: ModelToolCall;
-    try {
-      prepared = (await options.tool.prepare?.(call, runContext)) ?? call;
-    } catch {
+    const prepared = await prepareAppToolCall(options.tool, call, runContext);
+    if (prepared === undefined) {
       return callError("app_tool_prepare_failed");
     }
     if (prepared.toolId !== toolId.data) {
       return callError("unknown_tool");
     }
-
-    let decision: ReturnType<PolicyPort["decide"]>;
-    try {
-      decision = options.policy.decide(
-        { toolId: prepared.toolId, args: prepared.args },
-        context.policyContext,
-      );
-    } catch {
+    const decision = decideAppToolCall(options.policy, prepared, context);
+    if (decision === undefined) {
       return callError("policy_error");
     }
     if (decision.decision === "deny") {
@@ -152,18 +189,7 @@ export function createPolicyCheckedAppCallHandler(
     if (decision.decision === "ask") {
       return callError("app_call_requires_approval");
     }
-
-    try {
-      const result = await options.tool.execute(prepared, runContext);
-      if (result.outcome === "error") {
-        return callError(result.errorCode ?? "app_tool_failed");
-      }
-      return {
-        content: [{ type: "text", text: JSON.stringify(result.result) ?? "null" }],
-      };
-    } catch {
-      return callError("app_tool_failed");
-    }
+    return executeAllowedAppToolCall(options.tool, prepared, runContext);
   };
 }
 
@@ -219,7 +245,7 @@ export class AppCallRouter {
       if (!parsed.success) {
         return { content: [], isError: true };
       }
-      return await this.#options.onTelemetryEmit(session, parsed.data, context);
+      return this.#options.onTelemetryEmit(session, parsed.data, context);
     }
 
     return (
@@ -288,21 +314,18 @@ export class AppCallRouter {
         throw new AppCallRouterError("app_run_mismatch");
       }
     }
-    const ids: unknown[] = [
-      request.callId,
-      request.approvalId,
-      ...(request.approvalIds ?? []),
-    ];
+    const ids: unknown[] = [request.callId, request.approvalId, ...(request.approvalIds ?? [])];
     for (const name of ["callId", "approvalId"] as const) {
       if (Object.hasOwn(args, name)) {
         ids.push(args[name]);
       }
     }
     if (Object.hasOwn(args, "approvalIds")) {
-      if (!Array.isArray(args.approvalIds)) {
+      const approvalIds = z.array(z.unknown()).safeParse(args.approvalIds);
+      if (!approvalIds.success) {
         throw new AppCallRouterError("app_run_mismatch");
       }
-      ids.push(...args.approvalIds);
+      ids.push(...approvalIds.data);
     }
     for (const value of ids) {
       if (value !== undefined) {

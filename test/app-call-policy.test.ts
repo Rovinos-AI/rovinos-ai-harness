@@ -47,7 +47,8 @@ function tool() {
   );
   const port: ToolPort = {
     prepare,
-    describe: (toolId) => (toolId === "approve" ? { idempotent: true, timeoutMs: 1_000 } : undefined),
+    describe: (toolId) =>
+      toolId === "approve" ? { idempotent: true, timeoutMs: 1_000 } : undefined,
     execute,
   };
   return { port, prepare, execute };
@@ -95,9 +96,15 @@ describe("policy-checked app call handler", () => {
 
   it("does not match a rule scoped to a different app", async () => {
     const tools = tool();
-    const result = await handler(policy("allow", Code.parse("other_app")), tools.port)(call, context);
+    const result = await handler(policy("allow", Code.parse("other_app")), tools.port)(
+      call,
+      context,
+    );
 
-    expect(result).toEqual({ content: [{ type: "text", text: "default_decision" }], isError: true });
+    expect(result).toEqual({
+      content: [{ type: "text", text: "default_decision" }],
+      isError: true,
+    });
     expect(tools.execute).not.toHaveBeenCalled();
   });
 });

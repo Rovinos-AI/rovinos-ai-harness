@@ -389,6 +389,34 @@ describe("createReferenceHost", () => {
     expect(crossRun.status).toBe(409);
     expect(crossRun.body).toBe('{"error":"app_run_mismatch"}');
 
+    const embeddedApprovalId = await fixture.request(
+      "POST",
+      "/api/call",
+      auth,
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        toolName: "approve",
+        arguments: { approvalId: foreignId },
+      }),
+    );
+    expect(embeddedApprovalId.status).toBe(409);
+    expect(embeddedApprovalId.body).toBe('{"error":"app_run_mismatch"}');
+
+    const embeddedRunId = await fixture.request(
+      "POST",
+      "/api/call",
+      auth,
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        toolName: "approve",
+        arguments: { runId: foreignRunId },
+      }),
+    );
+    expect(embeddedRunId.status).toBe(409);
+    expect(embeddedRunId.body).toBe('{"error":"app_run_mismatch"}');
+
     const disallowed = await fixture.request(
       "POST",
       "/api/call",
@@ -589,14 +617,15 @@ describe("createReferenceHost", () => {
   });
 
   it("uses the policy-checked handler by default when policy and tool ports are supplied", async () => {
+    const decide = vi.fn(() => ({
+      decision: "allow" as const,
+      ruleId: Code.parse("allow_app"),
+      reason: Code.parse("app_allowed"),
+      editable: [],
+    }));
     const policy: PolicyPort = {
       version: Code.parse("test.policy"),
-      decide: vi.fn(() => ({
-        decision: "allow",
-        ruleId: Code.parse("allow_app"),
-        reason: Code.parse("app_allowed"),
-        editable: [],
-      })),
+      decide,
     };
     const execute = vi.fn(() =>
       Promise.resolve({ outcome: "ok" as const, result: { completed: true } }),
@@ -623,7 +652,7 @@ describe("createReferenceHost", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(policy.decide).toHaveBeenCalledWith(
+    expect(decide).toHaveBeenCalledWith(
       { toolId: "approve", args: { prepared: true } },
       { subagent: false, app: "approval" },
     );
@@ -634,6 +663,29 @@ describe("createReferenceHost", () => {
     expect(parseJson(CallToolResultSchema, response.body)).toEqual({
       content: [{ type: "text", text: '{"completed":true}' }],
     });
+    await host.close();
+  });
+
+  it("returns a bounded unavailable error when opted-in telemetry has no handler", async () => {
+    const onAppRejected = vi.fn();
+    const fixture = makeServer({ onAppRejected, idGenerator: () => sessionId });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+    const response = await fixture.request(
+      "POST",
+      "/api/call",
+      authorization(host),
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        toolName: APP_TELEMETRY_TOOL_NAME,
+        arguments: { spans: [] },
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.body).toBe('{"error":"app_telemetry_unavailable"}');
+    expect(onAppRejected).toHaveBeenCalledWith("telemetry_unavailable");
     await host.close();
   });
 

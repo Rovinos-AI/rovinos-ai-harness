@@ -178,13 +178,10 @@ function createAppCallRouter(
           nextCallId: nextId,
         })
       : undefined;
+  const onAppCall = dependencies.onAppCall ?? defaultOnAppCall;
   return new AppCallRouter({
     apps: appConfigs,
-    ...(dependencies.onAppCall === undefined
-      ? defaultOnAppCall === undefined
-        ? {}
-        : { onAppCall: defaultOnAppCall }
-      : { onAppCall: dependencies.onAppCall }),
+    ...(onAppCall === undefined ? {} : { onAppCall }),
     ...(dependencies.onTelemetryEmit === undefined
       ? {}
       : { onTelemetryEmit: dependencies.onTelemetryEmit }),
