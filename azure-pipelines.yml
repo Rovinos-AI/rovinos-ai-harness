@@ -89,7 +89,7 @@ stages:
             displayName: Start Compose services and wait for health
           - script: yarn build:schemas
             displayName: Build schemas for worker-thread tests
-          - script: yarn workspace @harness/host build
+          - script: yarn build:host
             displayName: Build reference host browser bundle
           - script: yarn workspace @harness/host exec playwright install chromium
             displayName: Install Chromium for host security tests

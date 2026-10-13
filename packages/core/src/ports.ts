@@ -130,6 +130,7 @@ export const PolicyContextSchema = z
   .object({
     subagent: z.boolean(),
     server: Code.optional(),
+    app: Code.optional(),
   })
   .strict();
 

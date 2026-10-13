@@ -125,6 +125,7 @@ const RuleMatchSchema = z
       .object({
         subagent: z.boolean().optional(),
         server: Code.optional(),
+        app: Code.optional(),
       })
       .strict()
       .optional(),
