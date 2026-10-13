@@ -7,6 +7,13 @@
   "files": [
     "dist"
   ],
+  "exports": {
+    "./programmatic": {
+      "source": "./src/programmatic.ts",
+      "types": "./dist/programmatic.d.ts",
+      "default": "./dist/programmatic.js"
+    }
+  },
   "bin": {
     "harness": "./dist/bin.js"
   },
