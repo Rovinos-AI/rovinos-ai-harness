@@ -16,6 +16,7 @@ import { doctorCommand } from "./commands/doctor.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
+import { keysCommand } from "./commands/keys.js";
 
 /** Static command registry; later epics add their owned commands here. */
 export const COMMANDS: CommandModule[] = [
@@ -28,6 +29,7 @@ export const COMMANDS: CommandModule[] = [
   contextCommand,
   continueCommand,
   doctorCommand,
+  keysCommand,
 ];
 
 const systemClock: Clock = { now: () => Date.now() };

@@ -51,6 +51,11 @@ export {
 export { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
 export { isRegexSafePattern } from "./regex-safety.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
+export {
+  KeyVersionConfigSchema,
+  KeysConfigSchema,
+  type KeysConfig,
+} from "./config/keys.js";
 export { isSecretKeyName } from "./secret-key-name.js";
 export {
   DestinationSchema,
@@ -163,6 +168,7 @@ export {
   type DoctorCheckStatus,
   type DoctorStatus,
 } from "./cli/doctor.js";
+export { KeyGenerateResultSchema, type KeyGenerateResult } from "./cli/keys.js";
 export { eventSamples, FakeClock, SequentialIdGenerator } from "./testing.js";
 
 /** The current harness version. */

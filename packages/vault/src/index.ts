@@ -22,3 +22,11 @@ export {
   type VaultWriter,
 } from "./types.js";
 export { VaultOperationError } from "./errors.js";
+export {
+  LocalKeyProvider,
+  LocalKeyProviderError,
+  type KeySecretResolver,
+  type LocalKeyProviderErrorCode,
+  type LocalKeyProviderOptions,
+  type ResolvedKeySecret,
+} from "./local-key-provider.js";
