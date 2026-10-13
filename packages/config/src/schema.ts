@@ -2,6 +2,7 @@
 import { z } from "zod";
 import {
   ModelsConfigSchema,
+  KeysConfigSchema,
   PiiConfigSchema,
   PolicyConfigSchema,
   RunConfigSchema,
@@ -18,6 +19,7 @@ export const HarnessConfigSchema = z
     run: RunConfigSchema,
     roles: RolesConfigSchema,
     store: StoreConfigSchema,
+    keys: KeysConfigSchema.optional(),
     models: ModelsConfigSchema,
     servers: ServersConfigSchema,
     policy: PolicyConfigSchema,

@@ -4,7 +4,8 @@ import { HarnessError, type Event, type Id, type JsonValue } from "@harness/sche
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
-import type { ModelPort, ToolPort } from "./ports.js";
+import type { ToolPort } from "./ports.js";
+import { missingModelPort, unavailableTool } from "./runtime-default-ports.js";
 import { LeaseLostError } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
@@ -19,6 +20,7 @@ import { createSqliteStore } from "./runtime-store.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
+import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
 import type {
   Runtime,
@@ -35,31 +37,6 @@ const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" 
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
-
-class ModelNotConfiguredError extends HarnessError {
-  readonly code = "model_not_configured";
-
-  constructor() {
-    super("No model port is configured.");
-  }
-}
-
-class ToolNotConfiguredError extends HarnessError {
-  readonly code = "tool_not_configured";
-
-  constructor() {
-    super("No tool port is configured.");
-  }
-}
-
-const missingModelPort: ModelPort = {
-  complete: () => Promise.reject(new ModelNotConfiguredError()),
-};
-
-const unavailableTool: ToolPort = {
-  describe: () => undefined,
-  execute: () => Promise.reject(new ToolNotConfiguredError()),
-};
 
 class RunInputMissingError extends HarnessError {
   readonly code = "run_input_missing";
@@ -288,16 +265,26 @@ function composeRuntime(
     readonly scopes: RunScopeRegistry;
   },
 ): Runtime {
-  const { config, overrides, clock, ids, store, model, policy, policyVersion, roles, scopes } =
-    options;
-  const { tool: parentTool } = options;
+  const {
+    config,
+    overrides,
+    clock,
+    ids,
+    store,
+    keys,
+    model,
+    policy,
+    policyVersion,
+    roles,
+    scopes,
+  } = options;
   const tool = createSubagentTool({
     config,
     clock,
     ids,
     store,
     model,
-    parentTool,
+    parentTool: options.tool,
     policy,
     policyVersion,
     roles,
@@ -315,13 +302,20 @@ function composeRuntime(
   const resume = createRuntimeResume(options, tool);
   return {
     store,
+    keys,
     clock,
     ids,
     run: (goal) => startRun(options, tool, goal, runWithControl),
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume,
     cancel: (runId) => cancelRun(store, runId, clock, ids),
-    close: () => store.close(),
+    close: async () => {
+      try {
+        await store.close();
+      } finally {
+        keys.dispose();
+      }
+    },
   };
 }
 
@@ -381,46 +375,53 @@ export async function createRuntime(
   ensureTracing();
   const clock = overrides.clock ?? systemClock;
   const ids = overrides.ids ?? new SystemIdGenerator(clock);
-  const model =
-    overrides.model ??
-    (await createConfiguredModelPort(config.models, {
-      ids,
+  const keys = await createRuntimeKeys(config.keys, overrides);
+  try {
+    const model =
+      overrides.model ??
+      (await createConfiguredModelPort(config.models, {
+        ids,
+        clock,
+        ...(overrides.providerAdapters === undefined
+          ? {}
+          : { providerAdapters: overrides.providerAdapters }),
+        ...(overrides.secretResolver === undefined
+          ? {}
+          : { secretResolver: overrides.secretResolver }),
+      })) ??
+      missingModelPort;
+    const dataDir = resolveDataDir(process.env, overrides.dataDir);
+    const tool = overrides.tool ?? unavailableTool;
+    const policy = await createRuntimePolicy(config, overrides);
+    const context = overrides.context ?? new NaiveContext();
+    const roles = await resolveRuntimeRoles(
+      config,
+      overrides.roleConfigDirectory ?? process.cwd(),
+      tool,
+      (code) => {
+        roleConfigLogger.warn(code);
+      },
+    );
+    const store =
+      overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
+    const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
+    return composeRuntime({
+      config,
+      overrides,
       clock,
-      ...(overrides.providerAdapters === undefined
-        ? {}
-        : { providerAdapters: overrides.providerAdapters }),
-      ...(overrides.secretResolver === undefined
-        ? {}
-        : { secretResolver: overrides.secretResolver }),
-    })) ??
-    missingModelPort;
-  const dataDir = resolveDataDir(process.env, overrides.dataDir);
-  const tool = overrides.tool ?? unavailableTool;
-  const policy = await createRuntimePolicy(config, overrides);
-  const context = overrides.context ?? new NaiveContext();
-  const roles = await resolveRuntimeRoles(
-    config,
-    overrides.roleConfigDirectory ?? process.cwd(),
-    tool,
-    (code) => {
-      roleConfigLogger.warn(code);
-    },
-  );
-  const store =
-    overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
-  const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
-  return composeRuntime({
-    config,
-    overrides,
-    clock,
-    ids,
-    store,
-    model,
-    tool,
-    policy,
-    policyVersion: policy.version,
-    context,
-    roles,
-    scopes,
-  });
+      ids,
+      store,
+      keys,
+      model,
+      tool,
+      policy,
+      policyVersion: policy.version,
+      context,
+      roles,
+      scopes,
+    });
+  } catch (error) {
+    keys.dispose();
+    throw error;
+  }
 }

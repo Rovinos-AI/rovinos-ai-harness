@@ -73,6 +73,35 @@ describe("loadConfig", () => {
     expect(config.run.budgets.maxSteps).toBe(17);
   });
 
+  it("loads key versions as secret references", async () => {
+    const contents = `${validYaml}keys:
+  currentKeyId: primary
+  keys:
+    - id: primary
+      secret: env:HARNESS_PRIMARY_KEY
+`;
+    const config = await loadConfig({ env: {}, readFile: reader(contents) });
+
+    expect(config.keys).toEqual({
+      currentKeyId: "primary",
+      keys: [{ id: "primary", secret: "env:HARNESS_PRIMARY_KEY" }],
+    });
+  });
+
+  it("reports a missing current key at the config path", async () => {
+    const contents = `${validYaml}keys:
+  currentKeyId: missing
+  keys:
+    - id: previous
+      secret: env:HARNESS_PREVIOUS_KEY
+`;
+    const error = await expectConfigError(loadConfig({ env: {}, readFile: reader(contents) }));
+
+    expect(error.issues).toContain(
+      "keys.currentKeyId: a valid configuration value (key_current_missing)",
+    );
+  });
+
   it("lets an environment override take precedence over the file", async () => {
     const config = await loadConfig({
       env: { HARNESS__RUN__BUDGETS__MAXSTEPS: "50" },

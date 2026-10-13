@@ -45,12 +45,21 @@ describe("getConfigSecretRefs", () => {
           },
         },
       ],
+      keys: {
+        currentKeyId: "primary",
+        keys: [
+          { id: "primary", secret: "env:DOCTOR_PRIMARY_KEY" },
+          { id: "previous", secret: "file:/run/secrets/doctor-previous-key" },
+        ],
+      },
     });
 
     expect(getConfigSecretRefs(config)).toEqual([
       "env:DOCTOR_TEST_API_KEY",
       "env:SERVER_TOKEN",
       "file:/run/secrets/server-token",
+      "env:DOCTOR_PRIMARY_KEY",
+      "file:/run/secrets/doctor-previous-key",
     ]);
   });
 });

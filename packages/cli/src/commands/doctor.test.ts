@@ -85,6 +85,82 @@ describe("harness doctor", () => {
     expect(stderr).toEqual([]);
   });
 
+  it("warns about ephemeral development keys and requires keys in production", async () => {
+    await createDataDirectory();
+    const config = HarnessConfigSchema.parse({});
+
+    vi.stubEnv("NODE_ENV", "development");
+    const development = createContext(() => Promise.resolve(config));
+    await main(["--json", "doctor"], development.context);
+    const developmentResults = parseJson(DoctorResultsSchema, development.stdout[0] ?? "");
+    expect(developmentResults).toContainEqual({
+      id: "keys_configured",
+      status: "warn",
+      code: "keys_ephemeral",
+    });
+
+    vi.stubEnv("NODE_ENV", "production");
+    const production = createContext(() => Promise.resolve(config));
+    const exitCode = await main(["--json", "doctor"], production.context);
+    const productionResults = parseJson(DoctorResultsSchema, production.stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(productionResults).toContainEqual({
+      id: "keys_configured",
+      status: "fail",
+      code: "key_config_required",
+    });
+  });
+
+  it("reports configured key failures with only the key id as detail", async () => {
+    await createDataDirectory();
+    vi.stubEnv("NODE_ENV", "development");
+    const invalidSecret = Buffer.alloc(31, 4).toString("base64");
+    vi.stubEnv("HARNESS_DOCTOR_PRIMARY_KEY", invalidSecret);
+    const invalidConfig = HarnessConfigSchema.parse({
+      keys: {
+        currentKeyId: "primary",
+        keys: [{ id: "primary", secret: "env:HARNESS_DOCTOR_PRIMARY_KEY" }],
+      },
+    });
+    const invalid = createContext(() => Promise.resolve(invalidConfig));
+    await main(["--json", "doctor"], invalid.context);
+    const invalidOutput = invalid.stdout.join("") + invalid.stderr.join("");
+    const invalidResults = parseJson(DoctorResultsSchema, invalid.stdout[0] ?? "");
+
+    expect(invalidResults).toContainEqual({
+      id: "keys_configured",
+      status: "fail",
+      code: "key_invalid_length",
+      detail: "primary",
+    });
+    expect(invalidOutput).not.toContain(invalidSecret);
+
+    vi.stubEnv("HARNESS_DOCTOR_PRIMARY_KEY", Buffer.alloc(32, 5).toString("base64"));
+    vi.stubEnv("HARNESS_DOCTOR_PREVIOUS_KEY", undefined);
+    const unresolvedConfig = HarnessConfigSchema.parse({
+      keys: {
+        currentKeyId: "primary",
+        keys: [
+          { id: "primary", secret: "env:HARNESS_DOCTOR_PRIMARY_KEY" },
+          { id: "previous", secret: "env:HARNESS_DOCTOR_PREVIOUS_KEY" },
+        ],
+      },
+    });
+    const unresolved = createContext(() => Promise.resolve(unresolvedConfig));
+    await main(["--json", "doctor"], unresolved.context);
+    const unresolvedOutput = unresolved.stdout.join("") + unresolved.stderr.join("");
+    const unresolvedResults = parseJson(DoctorResultsSchema, unresolved.stdout[0] ?? "");
+
+    expect(unresolvedResults).toContainEqual({
+      id: "keys_configured",
+      status: "fail",
+      code: "key_secret_unavailable",
+      detail: "previous",
+    });
+    expect(unresolvedOutput).not.toContain("HARNESS_DOCTOR_PREVIOUS_KEY");
+  });
+
   it("keeps env and file secret values out of table and JSON failure output", async () => {
     const dataDirectory = await createDataDirectory();
     const envSecret = "doctor-cli-env-secret-value";

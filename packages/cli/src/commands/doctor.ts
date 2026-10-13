@@ -8,7 +8,8 @@ import {
 } from "@harness/config";
 import { createServersReachableChecks } from "@harness/mcp";
 import { Code, DoctorResultsSchema, HarnessError } from "@harness/schemas";
-import type { DoctorCheck, DoctorContext } from "@harness/core";
+import { LocalKeyProvider, LocalKeyProviderError } from "@harness/vault";
+import type { DoctorCheck, DoctorContext, RuntimeConfig } from "@harness/core";
 import type { CommandModule } from "../command.js";
 
 class DoctorChecksFailedError extends HarnessError {
@@ -17,6 +18,56 @@ class DoctorChecksFailedError extends HarnessError {
   constructor() {
     super("One or more doctor checks failed.");
   }
+}
+
+function keysConfiguredCheck(
+  config: RuntimeConfig | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+): DoctorCheck {
+  return {
+    id: "keys_configured",
+    title: "Encryption keys",
+    run: async (ctx) => {
+      if (config === undefined) {
+        return { status: "ok", code: "keys_configured" };
+      }
+      if (config.keys === undefined) {
+        return env.NODE_ENV === "production"
+          ? { status: "fail", code: "key_config_required" }
+          : { status: "warn", code: "keys_ephemeral" };
+      }
+      const provider = new LocalKeyProvider({
+        config: config.keys,
+        secretResolver: new CompositeSecretResolver({
+          env: new EnvSecretResolver(env),
+          file: new FileSecretResolver(),
+        }),
+        env,
+        onWarning: () => undefined,
+      });
+      try {
+        for (const { id } of config.keys.keys) {
+          if (ctx.signal?.aborted === true) {
+            return { status: "fail", code: "check_timeout" };
+          }
+          try {
+            await provider.getKey(id);
+          } catch (error) {
+            const parsedCode =
+              error instanceof LocalKeyProviderError ? Code.safeParse(error.code) : undefined;
+            return {
+              status: "fail",
+              code: parsedCode?.success === true ? parsedCode.data : "key_secret_unavailable",
+              detail: Code.parse(id),
+            };
+          }
+        }
+        return { status: "ok", code: "keys_configured" };
+      } finally {
+        provider.dispose();
+      }
+    },
+  };
 }
 
 /**
@@ -49,6 +100,10 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
           const env = process.env;
           const core = await import("@harness/core");
           const envResolver = new EnvSecretResolver(env);
+          const secretResolver = new CompositeSecretResolver({
+            env: envResolver,
+            file: new FileSecretResolver(),
+          });
           const doctorContext: DoctorContext = {
             config,
             ...(configErrorCode === undefined ? {} : { configErrorCode }),
@@ -71,13 +126,10 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
           };
           const defaultChecks = [
             ...core.doctorChecks(),
+            keysConfiguredCheck(config, env),
             ...createServersReachableChecks(config?.servers ?? [], {
               resolveSecret: async (ref, signal) => {
-                const resolver = new CompositeSecretResolver({
-                  env: envResolver,
-                  file: new FileSecretResolver(),
-                });
-                return (await resolver.resolve(ref, signal)).reveal();
+                return (await secretResolver.resolve(ref, signal)).reveal();
               },
               env,
             }),
