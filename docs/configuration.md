@@ -20,6 +20,20 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict schemas owned by their respective packages. `telemetry.sentinel.minValueLength` defaults to `6` and controls the minimum length of vault values included in leak-sentinel scans; shorter values are counted and skipped. The sentinel is enabled by default; `telemetry.sentinel.enabled: false` is accepted only outside production. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
 
+Key versions are configured under `keys`. Each key must be a base64-encoded 32-byte secret reference. Keep old versions configured while stored content still uses them; new content uses `currentKeyId`.
+
+```yaml
+keys:
+  currentKeyId: primary
+  keys:
+    - id: primary
+      secret: env:HARNESS_PRIMARY_KEY
+    - id: previous
+      secret: file:/run/secrets/harness-previous-key
+```
+
+Generate a key with `harness keys generate` and place the output in an environment variable or secret store. The generated key is shown only once and is never written to a file.
+
 ## Tool policy
 
 `policy.file` selects the YAML or JSON policy document used for tool calls. If

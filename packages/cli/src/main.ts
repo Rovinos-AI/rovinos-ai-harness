@@ -16,6 +16,7 @@ import { doctorCommand } from "./commands/doctor.js";
 import { inspectCommand } from "./commands/inspect.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
+import { keysCommand } from "./commands/keys.js";
 
 /** Static command registry; later epics add their owned commands here. */
 export const COMMANDS: CommandModule[] = [
@@ -28,11 +29,13 @@ export const COMMANDS: CommandModule[] = [
   contextCommand,
   continueCommand,
   doctorCommand,
+  keysCommand,
 ];
 
 const systemClock: Clock = { now: () => Date.now() };
 
-function createDefaultContext(program: Command, out: Output): CliContext {
+/** Creates the CLI context with config loading, runtime composition, and output routing. */
+export function createDefaultContext(program: Command, out: Output): CliContext {
   return {
     loadConfig: (): Promise<HarnessConfig> => {
       const configPath = program.opts<{ config?: string }>().config;
@@ -45,6 +48,10 @@ function createDefaultContext(program: Command, out: Output): CliContext {
       const { createRuntime } = await import("@harness/core");
       return createRuntime(config, {
         ...overrides,
+        onKeysWarning: (code) => {
+          overrides?.onKeysWarning?.(code);
+          out.error(code, "development_only_ephemeral_key");
+        },
         roleConfigDirectory:
           overrides?.roleConfigDirectory ??
           dirname(

@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readdir, readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Command } from "commander";
+import { HarnessConfigSchema } from "@harness/config";
 import { parseJson } from "@harness/schemas";
 import { z } from "zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext, CommandModule } from "./command.js";
 import { ERROR_EXIT_CODES, errorCodeOf, ExitCode, exitCodeForError } from "./exit-codes.js";
 import { createOutput } from "./output.js";
-import { COMMANDS, main } from "./main.js";
+import { COMMANDS, createDefaultContext, main } from "./main.js";
 
 function createContext() {
   const stdout: string[] = [];
@@ -60,6 +63,7 @@ async function sourceFilesIn(directory: string): Promise<string[]> {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("CLI main", () => {
@@ -95,6 +99,32 @@ describe("CLI main", () => {
     expect(code).toBe(ExitCode.ok);
     expect(stdout).toEqual(["human output\n"]);
     expect(stderr).toEqual([]);
+  });
+
+  it("routes the development ephemeral-key warning through CLI stderr", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harness-cli-keys-"));
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("HARNESS_DATA_DIR", join(directory, "data"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const context = createDefaultContext(
+      new Command(),
+      createOutput({
+        stdout: (text) => stdout.push(text),
+        stderr: (text) => stderr.push(text),
+      }),
+    );
+
+    try {
+      const runtime = await context.createRuntime?.(HarnessConfigSchema.parse({}));
+      if (runtime === undefined) {
+        throw new Error("Expected the default runtime factory.");
+      }
+      await runtime.close();
+      expect(stderr).toEqual(["keys_ephemeral development_only_ephemeral_key\n"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("fails JSON mode when the command writes no JSON document", async () => {
@@ -206,6 +236,7 @@ describe("CLI main", () => {
       "context",
       "continue",
       "doctor",
+      "keys",
     ]);
     expect(code).toBe(ExitCode.ok);
     expect(stdout.join("")).toContain("Usage: harness");

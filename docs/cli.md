@@ -17,6 +17,13 @@ belongs in `packages/schemas/src/cli/<command>.ts` and is documented alongside t
 successful command in JSON mode writes exactly one newline-terminated JSON document to stdout;
 command text and error codes are sent to stderr.
 
+## `harness keys generate`
+
+Generates a fresh cryptographically random 32-byte key and prints its base64 value. Store it in an
+environment variable or secret store; the command never writes files. `--help` includes this
+storage guidance. In `--json` mode the key and storage instructions are returned as one
+`KeyGenerateResultSchema` document. Treat either output format as secret material.
+
 ## `harness doctor`
 
 `harness doctor` checks the Node.js version, configuration, secret references, and data-directory
