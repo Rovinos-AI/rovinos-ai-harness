@@ -14,18 +14,28 @@ export const TELEMETRY_DROP_REASONS = [
   "processor_error",
 ] as const;
 
+/** Closed rejection reasons used by the host app-call counter. */
+export const HOST_APP_REJECTED_REASONS = ["unknown_tool", "telemetry_unavailable"] as const;
+
 /** Bounded reasons for dropping or stripping telemetry data. */
 export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];
+/** Bounded reasons counted when an app call is rejected by the host. */
+export type HostAppRejectedReason = (typeof HOST_APP_REJECTED_REASONS)[number];
 interface TelemetryDropAttributes extends Readonly<Record<string, TelemetryDropReason>> {
   readonly reason: TelemetryDropReason;
+}
+interface HostAppRejectedAttributes extends Readonly<Record<string, HostAppRejectedReason>> {
+  readonly reason: HostAppRejectedReason;
 }
 
 /** String-valued metric attributes are explicitly closed enumerations. */
 export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
   "harness.telemetry.dropped.reason": TELEMETRY_DROP_REASONS,
+  "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
 } as const;
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
+let hostAppRejectedCounter: Counter<HostAppRejectedAttributes> | undefined;
 let skippedShortValuesCounter: Counter<NoMetricAttributes> | undefined;
 let scopeReducedCounter: Counter<NoMetricAttributes> | undefined;
 
@@ -34,6 +44,13 @@ function getDroppedCounter(): Counter<TelemetryDropAttributes> {
     .getMeter("@harness/telemetry")
     .createCounter<TelemetryDropAttributes>("harness.telemetry.dropped");
   return droppedCounter;
+}
+
+function getHostAppRejectedCounter(): Counter<HostAppRejectedAttributes> {
+  hostAppRejectedCounter ??= metrics
+    .getMeter("@harness/telemetry")
+    .createCounter<HostAppRejectedAttributes>("harness.host.app_rejected");
+  return hostAppRejectedCounter;
 }
 
 function getSkippedShortValuesCounter(): Counter<NoMetricAttributes> {
@@ -54,6 +71,15 @@ function getScopeReducedCounter(): Counter<NoMetricAttributes> {
 export function countDroppedTelemetry(reason: TelemetryDropReason): void {
   try {
     getDroppedCounter().add(1, { reason });
+  } catch {
+    return;
+  }
+}
+
+/** Counts an app tool rejection with its bounded host reason code. */
+export function countHostAppRejected(reason: HostAppRejectedReason): void {
+  try {
+    getHostAppRejectedCounter().add(1, { reason });
   } catch {
     return;
   }

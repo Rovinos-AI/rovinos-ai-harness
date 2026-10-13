@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { CallToolResult } from "@modelcontextprotocol/client";
+import type { CallToolResult, ListToolsResult } from "@modelcontextprotocol/client";
 import { Code, Id } from "@harness/schemas";
 import type { HostDiagnosticCode } from "./resource.js";
 import type { UiSession, UiSessionContext } from "./ui-session.js";
 import { z } from "zod";
+import type { AppCallExecutionContext, AppCallRejectedReason } from "./app-calls.js";
+import type { PolicyPort, ToolPort } from "@harness/core";
 
 /** Validated app-originated call payload accepted at the host boundary. */
 export const AppCallSchema = z
   .object({
     appId: Code,
     sessionId: Id,
+    runId: Id.optional(),
+    callId: Id.optional(),
+    approvalId: Id.optional(),
+    approvalIds: z.array(Id).optional(),
     toolName: z.string().min(1),
     arguments: z.record(z.string(), z.unknown()),
   })
@@ -58,6 +64,7 @@ export interface AppInstance {
   readonly id: string;
   readonly resourceUri: string;
   readonly sessionId: string;
+  readonly runId?: Id;
   readonly uiSession?: UiSession;
   readonly end: () => void;
 }
@@ -75,7 +82,26 @@ export interface ReferenceHostDependencies {
   /** Receives safe host diagnostic codes, never resource data or call payloads. */
   readonly onCode: (code: HostDiagnosticCode) => void;
   /** Routes allowlisted app calls through the host's policy-aware handler. */
-  readonly onAppCall?: (call: AppCall) => Promise<CallToolResult>;
+  readonly onAppCall?: (call: AppCall, context: AppCallExecutionContext) => Promise<CallToolResult>;
+  /** Policy and tool ports used by the default app-call handler when both are supplied. */
+  readonly policy?: PolicyPort;
+  readonly tool?: ToolPort;
+  /** Handles app telemetry locally without forwarding it to an MCP server. */
+  readonly onTelemetryEmit?: (
+    session: AppInstance,
+    args: { readonly spans: readonly unknown[] },
+    context: AppCallExecutionContext,
+  ) => Promise<CallToolResult>;
+  /** Lists MCP tools for an app; the host router filters this result to its allowlist. */
+  readonly onAppToolsList?: (
+    appId: Code,
+    allowedTools: readonly Code[],
+    cursor?: string,
+  ) => Promise<ListToolsResult>;
+  /** Confirms that a call or approval identifier belongs to the active run. */
+  readonly isIdOwnedByRun?: (runId: Id, id: Id) => boolean | Promise<boolean>;
+  /** Counts a rejected app tool call using a bounded reason. */
+  readonly onAppRejected?: (reason: AppCallRejectedReason) => void;
   /** Injectable static asset reader for tests. */
   readonly readStatic?: (asset: "index" | "bundle") => Promise<Buffer>;
   /** Injectable HTTP server factory for tests that must not use a network socket. */
@@ -86,6 +112,8 @@ export interface ReferenceHostDependencies {
   readonly toolResult?: CallToolResult;
   /** Run and originating tool-call span for opt-in app trace propagation. */
   readonly uiSessionContext?: UiSessionContext;
+  /** Run binding for host sessions when trace propagation is disabled. */
+  readonly runId?: Id;
   /** Injectable UI-session expiry timer; returns a function that cancels it. */
   readonly scheduleUiSessionExpiry?: (callback: () => void, delayMs: number) => () => void;
 }
