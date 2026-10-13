@@ -12,7 +12,8 @@ class ResumeStatusError extends HarnessError {
   }
 }
 
-function assertResumeStatus(
+/** Throws the coded error that maps a non-completed resume status to its exit code. */
+export function assertResumeStatus(
   status: "completed" | "failed" | "running" | "suspended" | "pending" | "cancelled",
   events: readonly { readonly type: string }[],
 ): void {

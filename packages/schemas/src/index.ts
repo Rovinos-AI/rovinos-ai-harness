@@ -145,6 +145,16 @@ export {
   type InspectResult,
 } from "./cli/inspect.js";
 export {
+  ApprovalListResultSchema,
+  ApprovalResolveResultSchema,
+  ApprovalShowResultSchema,
+  ApprovalSummarySchema,
+  type ApprovalListResult,
+  type ApprovalResolveResult,
+  type ApprovalShowResult,
+  type ApprovalSummary,
+} from "./cli/approvals.js";
+export {
   DoctorCheckResultSchema,
   DoctorCheckStatusSchema,
   DoctorResultsSchema,
