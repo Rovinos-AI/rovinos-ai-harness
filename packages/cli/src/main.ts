@@ -6,9 +6,11 @@ import { dirname, resolve } from "node:path";
 import type { CliContext, Clock, CommandModule } from "./command.js";
 import { errorCodeOf, exitCodeForError, ExitCode } from "./exit-codes.js";
 import { createOutput, type Output } from "./output.js";
+import { createTerminalPrompt } from "./prompt.js";
 import { serveCommand } from "./serve.js";
 import { cancelCommand } from "./commands/cancel.js";
 import { continueCommand } from "./commands/continue.js";
+import { approvalsCommand } from "./commands/approvals.js";
 import { contextCommand } from "./commands/context.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { inspectCommand } from "./commands/inspect.js";
@@ -20,6 +22,7 @@ export const COMMANDS: CommandModule[] = [
   serveCommand,
   runCommand,
   resumeCommand,
+  approvalsCommand,
   inspectCommand,
   cancelCommand,
   contextCommand,
@@ -37,6 +40,7 @@ function createDefaultContext(program: Command, out: Output): CliContext {
     },
     out,
     clock: systemClock,
+    interactive: createTerminalPrompt(process.stdin, out),
     createRuntime: async (config, overrides) => {
       const { createRuntime } = await import("@harness/core");
       return createRuntime(config, {
