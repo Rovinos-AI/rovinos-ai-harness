@@ -36,7 +36,12 @@ export function modelToolOptions(
   messages: Message[],
 ): Pick<ModelStepOptions, "messages" | "tools"> {
   const tools = tool.getToolSpecs?.();
-  return { messages, ...(tools === undefined ? {} : { tools }) };
+  return {
+    messages,
+    ...(tools === undefined
+      ? {}
+      : { tools: tools.filter(({ toolId }) => toolId !== "harness.telemetry.emit") }),
+  };
 }
 
 /** Result of one model step, including events appended by the step. */

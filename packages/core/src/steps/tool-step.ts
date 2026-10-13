@@ -384,7 +384,8 @@ function recordDeniedResult(
 export async function toolStep(options: ToolStepOptions): Promise<readonly Event[]> {
   const events: Event[] = [];
   for (const [index, call] of options.calls.entries()) {
-    const description = options.tool.describe(call.toolId);
+    const description =
+      call.toolId === "harness.telemetry.emit" ? undefined : options.tool.describe(call.toolId);
     const prepared = options.preparedCalls?.[index];
     events.push(
       ...(await runToolCall(

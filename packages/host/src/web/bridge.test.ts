@@ -10,6 +10,7 @@ const bridgeMocks = vi.hoisted(() => ({
   sendResult: vi.fn<(result: unknown) => Promise<void>>(),
   handleCall:
     vi.fn<(call: { name: string; arguments?: Record<string, unknown> }) => Promise<unknown>>(),
+  handleListTools: vi.fn<(params: { readonly cursor?: string } | undefined) => Promise<unknown>>(),
 }));
 
 vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
@@ -18,6 +19,13 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
       handler: (call: { name: string; arguments?: Record<string, unknown> }) => Promise<unknown>,
     ) {
       bridgeMocks.handleCall.mockImplementation(handler);
+    }
+    setRequestHandler(
+      _method: string,
+      _schemas: unknown,
+      handler: (params: { readonly cursor?: string } | undefined) => Promise<unknown>,
+    ) {
+      bridgeMocks.handleListTools.mockImplementation(handler);
     }
     connect = bridgeMocks.connect;
     sendToolInput = bridgeMocks.sendInput;
@@ -53,7 +61,9 @@ describe("createAppBridge", () => {
     bridgeMocks.sendResult.mockResolvedValue();
     const result: CallToolResult = { content: [{ type: "text", text: "accepted" }] };
     const onToolCall = vi.fn(() => Promise.resolve(result));
-    const bridge = createAppBridge({ contentWindow: window }, onToolCall);
+    const listedTools = { tools: [] };
+    const onListTools = vi.fn(() => Promise.resolve(listedTools));
+    const bridge = createAppBridge({ contentWindow: window }, onToolCall, onListTools);
     await bridge.connect();
     await bridge.sendToolInput({ city: "Seattle" });
     await bridge.sendToolResult(result);
@@ -64,6 +74,8 @@ describe("createAppBridge", () => {
       bridgeMocks.handleCall({ name: "approve", arguments: { ok: true } }),
     ).resolves.toBe(result);
     expect(onToolCall).toHaveBeenCalledWith({ name: "approve", arguments: { ok: true } });
+    await expect(bridgeMocks.handleListTools({ cursor: "next" })).resolves.toBe(listedTools);
+    expect(onListTools).toHaveBeenCalledWith("next");
 
     const transport = bridgeMocks.connect.mock.calls[0]?.[0];
     expect(transport).toBeDefined();

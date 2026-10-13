@@ -395,6 +395,7 @@ describe("evaluate", () => {
       tools: "*",
       context: { subagent: false, server: "mail" },
     });
+
     const matchingCall = createCall({}, "mail.send", { subagent: false, server: "mail" });
     const wrongSubagent = createCall({}, "mail.send", { subagent: true, server: "mail" });
     const wrongServer = createCall({}, "mail.send", { subagent: false, server: "fs" });
@@ -402,6 +403,26 @@ describe("evaluate", () => {
     expect(evaluateTokenized(createPolicy([rule]), matchingCall).decision).toBe("ask");
     expect(evaluateTokenized(createPolicy([rule]), wrongSubagent).decision).toBe("deny");
     expect(evaluateTokenized(createPolicy([rule]), wrongServer).decision).toBe("deny");
+  });
+
+  it("matches policy rules against the calling app id", () => {
+    const rule = createRule("app_context", "ask", {
+      tools: ["mail.send"],
+      context: { subagent: false, app: "approval" },
+    });
+
+    expect(
+      evaluateTokenized(
+        createPolicy([rule]),
+        createCall({}, "mail.send", { subagent: false, app: "approval" }),
+      ).decision,
+    ).toBe("ask");
+    expect(
+      evaluateTokenized(
+        createPolicy([rule]),
+        createCall({}, "mail.send", { subagent: false, app: "other" }),
+      ).decision,
+    ).toBe("deny");
   });
 
   it("requires subagent context and treats a missing server as a non-MCP call", () => {

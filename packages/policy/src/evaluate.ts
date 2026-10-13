@@ -12,6 +12,7 @@ const PolicyCallContextSchema = z
   .object({
     subagent: z.boolean(),
     server: Code.optional(),
+    app: Code.optional(),
   })
   .strict();
 
@@ -199,7 +200,8 @@ function matchesContext(
   return (
     ruleContext === undefined ||
     ((ruleContext.subagent === undefined || ruleContext.subagent === callContext.subagent) &&
-      (ruleContext.server === undefined || ruleContext.server === callContext.server))
+      (ruleContext.server === undefined || ruleContext.server === callContext.server) &&
+      (ruleContext.app === undefined || ruleContext.app === callContext.app))
   );
 }
 

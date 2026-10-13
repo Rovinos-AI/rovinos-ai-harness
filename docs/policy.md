@@ -4,8 +4,9 @@ Policies make deterministic decisions in code before a tool runs. They operate
 on tokenized arguments and never see raw sensitive values.
 
 The policy format is versioned and strict. Its default decision must be `ask`
-or `deny`; rules can match tool IDs, argument pointers, and request context.
-When rules match, the evaluator uses the most restrictive decision.
+or `deny`; rules can match tool IDs, argument pointers, and request context
+(`subagent`, MCP `server`, and calling app ID). When rules match, the evaluator
+uses the most restrictive decision.
 
 When `policy.file` is not configured, the runtime applies a built-in deny-all
 policy. Configure a policy explicitly to allow any tools, and review
