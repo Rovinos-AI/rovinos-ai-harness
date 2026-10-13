@@ -1,0 +1,300 @@
+// SPDX-License-Identifier: Apache-2.0
+import {
+  listLogDefinitions,
+  listSpanDefinitions,
+  METRIC_ALLOWLIST,
+  type LogRecordDefinition,
+  type LogRecordShape,
+  type SpanDefinition,
+  type SpanDefinitionShape,
+} from "@harness/telemetry";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import type * as RegistrationSourceModule from "./telemetry-registration-sources.js";
+
+type CollectorSpanDefinition = Pick<SpanDefinition<SpanDefinitionShape>, "name" | "shape">;
+type CollectorLogDefinition = Pick<LogRecordDefinition, "name" | "shape">;
+type YamlValue = string | readonly string[] | { readonly [key: string]: YamlValue };
+
+const resourceAttributeKeys = [
+  "harness.policy.version",
+  "service.name",
+  "service.version",
+  "telemetry.sdk.language",
+  "telemetry.sdk.name",
+  "telemetry.sdk.version",
+];
+
+function compareNames(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
+function ottlString(value: string): string {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+function keepKeys(path: string, keys: readonly string[]): string {
+  return `keep_keys(${path}, [${[...keys].sort(compareNames).map(ottlString).join(", ")}])`;
+}
+
+function dropUnlessRegistered(path: string, names: readonly string[]): string {
+  if (names.length === 0) {
+    return "true";
+  }
+  const conditions = [...names]
+    .sort(compareNames)
+    .map((name) => `${path} == ${ottlString(name)}`)
+    .join(" or ");
+  return `not (${conditions})`;
+}
+
+function attributeNames(shape: LogRecordShape | SpanDefinitionShape): string[] {
+  return Object.keys(shape).sort(compareNames);
+}
+
+const pipelines: YamlValue = {
+  traces: {
+    processors: [
+      "memory_limiter",
+      "filter/drop_unregistered_spans",
+      "filter/drop_span_events",
+      "transform/span_attributes",
+      "transform/resource_attributes",
+      "batch",
+    ],
+  },
+  logs: {
+    processors: [
+      "memory_limiter",
+      "filter/drop_unregistered_logs",
+      "transform/log_attributes",
+      "transform/resource_attributes",
+      "batch",
+    ],
+  },
+  metrics: {
+    processors: [
+      "memory_limiter",
+      "filter/drop_unregistered_metrics",
+      "transform/metric_attributes",
+      "transform/resource_attributes",
+      "batch",
+    ],
+  },
+};
+
+function renderYamlEntry(key: string, value: YamlValue, indentation: number): string[] {
+  const prefix = " ".repeat(indentation);
+  if (typeof value === "string") {
+    return [`${prefix}${key}: ${JSON.stringify(value)}`];
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return [`${prefix}${key}: []`];
+    }
+    return [`${prefix}${key}:`, ...value.map((item) => `${prefix}  - ${JSON.stringify(item)}`)];
+  }
+  return [
+    `${prefix}${key}:`,
+    ...Object.entries(value).flatMap(([nestedKey, nestedValue]) =>
+      renderYamlEntry(nestedKey, nestedValue, indentation + 2),
+    ),
+  ];
+}
+
+function createProcessors(
+  spans: readonly CollectorSpanDefinition[],
+  logs: readonly CollectorLogDefinition[],
+  metricNames: readonly string[],
+  metricAllowlist: Readonly<Record<string, readonly string[]>>,
+): YamlValue {
+  return {
+    "filter/drop_unregistered_spans": {
+      error_mode: "ignore",
+      traces: {
+        span: [
+          dropUnlessRegistered(
+            "name",
+            spans.map(({ name }) => name),
+          ),
+        ],
+      },
+    },
+    "filter/drop_span_events": {
+      error_mode: "ignore",
+      traces: { spanevent: ["true"] },
+    },
+    "transform/span_attributes": {
+      error_mode: "ignore",
+      trace_statements: [
+        keepKeys("scope.attributes", []),
+        "set(span.links, nil)",
+        ...spans.map(
+          ({ name, shape }) =>
+            `${keepKeys("span.attributes", attributeNames(shape))} where span.name == ${ottlString(name)}`,
+        ),
+        'set(span.status.message, "")',
+      ],
+    },
+    "filter/drop_unregistered_logs": {
+      error_mode: "ignore",
+      logs: {
+        log_record: [
+          dropUnlessRegistered(
+            "body",
+            logs.map(({ name }) => name),
+          ),
+        ],
+      },
+    },
+    "transform/log_attributes": {
+      error_mode: "ignore",
+      log_statements: [
+        keepKeys("scope.attributes", []),
+        ...logs.map(
+          ({ name, shape }) =>
+            `${keepKeys("log.attributes", attributeNames(shape))} where log.body == ${ottlString(name)}`,
+        ),
+      ],
+    },
+    "filter/drop_unregistered_metrics": {
+      error_mode: "ignore",
+      metrics: { metric: [dropUnlessRegistered("name", metricNames)] },
+    },
+    "transform/metric_attributes": {
+      error_mode: "ignore",
+      metric_statements: [
+        keepKeys("scope.attributes", []),
+        keepKeys("exemplar.filtered_attributes", []),
+        ...metricNames.map(
+          (name) =>
+            `${keepKeys("datapoint.attributes", metricAllowlist[name] ?? [])} where metric.name == ${ottlString(name)}`,
+        ),
+      ],
+    },
+    "transform/resource_attributes": {
+      error_mode: "ignore",
+      trace_statements: [keepKeys("resource.attributes", resourceAttributeKeys)],
+      log_statements: [keepKeys("resource.attributes", resourceAttributeKeys)],
+      metric_statements: [keepKeys("resource.attributes", resourceAttributeKeys)],
+    },
+  };
+}
+
+/** Renders deterministic Collector processors from telemetry registry definitions. */
+export function renderCollectorAllowlist(
+  spans: readonly CollectorSpanDefinition[],
+  logs: readonly CollectorLogDefinition[],
+  metricAllowlist: Readonly<Record<string, readonly string[]>>,
+): string {
+  const sortedSpans = [...spans].sort((left, right) => compareNames(left.name, right.name));
+  const sortedLogs = [...logs].sort((left, right) => compareNames(left.name, right.name));
+  const metricNames = Object.keys(metricAllowlist).sort(compareNames);
+  const processors = createProcessors(sortedSpans, sortedLogs, metricNames, metricAllowlist);
+  return [
+    "# SPDX-License-Identifier: Apache-2.0",
+    "# Generated by scripts/gen-collector-allowlist.ts. Do not edit directly.",
+    "# The policy version is derived from this file's SHA-256 (task 10.5).",
+    ...renderYamlEntry("processors", processors, 0),
+    ...renderYamlEntry("service", { pipelines }, 0),
+    "",
+  ].join("\n");
+}
+
+/** Inputs required to run the Collector allowlist generator. */
+export interface CollectorAllowlistCommandOptions {
+  readonly allowlistPath: string;
+  readonly spans: readonly CollectorSpanDefinition[];
+  readonly logs: readonly CollectorLogDefinition[];
+  readonly metricAllowlist: Readonly<Record<string, readonly string[]>>;
+}
+
+/** Exit status and safe diagnostic produced by the Collector allowlist command. */
+export interface CollectorAllowlistCommandResult {
+  readonly exitCode: number;
+  readonly stderr: string;
+}
+
+/** Regenerates the allowlist file or checks it for drift. */
+export function runCollectorAllowlistCommand(
+  args: readonly string[],
+  options: CollectorAllowlistCommandOptions,
+): CollectorAllowlistCommandResult {
+  if (args.length > 1 || args.some((argument) => argument !== "--check")) {
+    return { exitCode: 2, stderr: "Usage: yarn gen:collector [--check]\n" };
+  }
+  const generated = renderCollectorAllowlist(options.spans, options.logs, options.metricAllowlist);
+  const existing = existsSync(options.allowlistPath)
+    ? readFileSync(options.allowlistPath, "utf8")
+    : undefined;
+  if (args.includes("--check")) {
+    if (existing !== generated) {
+      const existingLines = (existing ?? "").split("\n");
+      const generatedLines = generated.split("\n");
+      const lineCount = Math.max(existingLines.length, generatedLines.length);
+      let firstDifferingLine = 1;
+      for (let index = 0; index < lineCount; index += 1) {
+        if (existingLines[index] !== generatedLines[index]) {
+          firstDifferingLine = index + 1;
+          break;
+        }
+      }
+      return {
+        exitCode: 1,
+        stderr: `Collector allowlist is stale (first differing line: ${String(firstDifferingLine)}). Run \`yarn gen:collector\` and commit the result.\n`,
+      };
+    }
+    return { exitCode: 0, stderr: "" };
+  }
+
+  mkdirSync(dirname(options.allowlistPath), { recursive: true });
+  writeFileSync(options.allowlistPath, generated);
+  return { exitCode: 0, stderr: "" };
+}
+
+function isRegistrationSourceModule(value: unknown): value is typeof RegistrationSourceModule {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof Reflect.get(value, "findTelemetryRegistrationSources") === "function"
+  );
+}
+
+async function main(): Promise<void> {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const allowlistPath = fileURLToPath(
+    new URL("../infra/collector/allowlist.generated.yaml", import.meta.url),
+  );
+  const loadedRegistrationSources: unknown = await import(
+    new URL("./telemetry-registration-sources.ts", import.meta.url).href
+  );
+  if (!isRegistrationSourceModule(loadedRegistrationSources)) {
+    throw new Error("Telemetry registration source scanner failed to load.");
+  }
+  for (const source of loadedRegistrationSources.findTelemetryRegistrationSources(root)) {
+    const builtModule = source.replace("/src/", "/dist/").replace(/\.ts$/u, ".js");
+    await import(pathToFileURL(`${root}/${builtModule}`).href);
+  }
+  const result = runCollectorAllowlistCommand(process.argv.slice(2), {
+    allowlistPath,
+    spans: listSpanDefinitions(),
+    logs: listLogDefinitions(),
+    metricAllowlist: METRIC_ALLOWLIST,
+  });
+  if (result.stderr !== "") {
+    process.stderr.write(result.stderr);
+  }
+  process.exitCode = result.exitCode;
+}
+
+const scriptPath = process.argv[1];
+if (scriptPath !== undefined && import.meta.url === pathToFileURL(scriptPath).href) {
+  await main();
+}

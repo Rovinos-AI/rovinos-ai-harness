@@ -23,7 +23,7 @@ Shared design for this epic:
 **Implementation guidance:**
 
 1. `base.yaml`: receivers `otlp` (protocols `grpc` on `0.0.0.0:4317` and `http` on `0.0.0.0:4318`); processors `memory_limiter` (`check_interval: 1s`, `limit_mib: 256`, `spike_limit_mib: 64`) and `batch` (`timeout: 5s`, `send_batch_size: 512`); extensions `health_check` on `0.0.0.0:13133`; `service.telemetry.metrics.level: basic` with the collector's own metrics address bound to `0.0.0.0:8888` (internal network only).
-2. `profile-debug.yaml`: exporter `debug` (`verbosity: basic`) and pipelines for traces, logs, metrics: `receivers: [otlp]`, `processors: [memory_limiter, batch]`, `exporters: [debug]`. The allowlist processors are added to the pipelines in 10.2 through a generated profile include; leave a comment marking where.
+2. `profile-debug.yaml`: exporter `debug` (`verbosity: basic`) and pipelines for traces, logs, metrics with `receivers: [otlp]` and `exporters: [debug]`. Task 10.2 generates each pipeline's full processor list in `allowlist.generated.yaml`; profiles must not duplicate that list.
 3. Compose service: image pinned from `VERSION` via build arg or `.env` file, command `["--config=/etc/otel/base.yaml","--config=/etc/otel/profile-debug.yaml"]`, config files mounted read-only, **no published ports** except in the dev profile (`4318:4318` on `127.0.0.1` only).
 4. `scripts/collector/validate.sh <profile>` runs `docker run --rm -v ... <image> validate --config=... --config=...` for the requested profile and exits non-zero on error. Use it from the integration stage.
 5. Container runs as the image's non-root user; mount configs read-only.

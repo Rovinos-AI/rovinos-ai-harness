@@ -38,7 +38,6 @@ import {
   encodeEvents,
   eventFromRow,
   integer,
-  POSTGRES_SCHEMA,
   READ_PAGE_SIZE,
   runListPage,
   storeError,
@@ -47,6 +46,7 @@ import {
   type RunSummaryRow,
 } from "./helpers.js";
 import { deleteRunTransaction } from "./retention.js";
+import { migrate } from "../migrate.js";
 
 const connectionStringSchema = z
   .url()
@@ -114,23 +114,19 @@ export class PostgresEventStore implements EventStore {
   }
 
   private async initialize(): Promise<void> {
-    let client: PoolClient;
     try {
-      client = await this.pool.connect();
+      await migrate(this.pool, "postgres", { appliedAt: this.clock.now() });
     } catch (error) {
       throw storeError(error);
     }
+    const client = await this.pool.connect().catch((error: unknown) => {
+      throw storeError(error);
+    });
     let transactionStarted = false;
     try {
       await client.query("BEGIN");
       transactionStarted = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
-      const schemaState = await client.query<{ initialized: boolean } & QueryResultRow>(
-        "SELECT to_regclass('runs') IS NOT NULL AND to_regclass('events') IS NOT NULL AND to_regclass('events_trace_id_idx') IS NOT NULL AND to_regclass('events_continuation_of_idx') IS NOT NULL AND to_regclass('runs_status_created_at_idx') IS NOT NULL AND to_regclass('snapshots') IS NOT NULL AND to_regclass('snapshots_run_at_seq_idx') IS NOT NULL AND to_regclass('sink_cursors') IS NOT NULL AND to_regclass('store_metadata') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'events' AND column_name = 'tx_id') AS initialized",
-      );
-      if (schemaState.rows[0]?.initialized !== true) {
-        await client.query(POSTGRES_SCHEMA);
-      }
       const encryptionState = await client.query<{ metadata_value: string } & QueryResultRow>(
         "SELECT metadata_value FROM store_metadata WHERE metadata_key = $1",
         ["encrypted"],

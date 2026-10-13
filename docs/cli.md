@@ -31,6 +31,12 @@ write access. It returns `1` if any check fails; warnings do not fail the comman
 table of check IDs, statuses, and codes. `--json` returns a schema-validated array; see
 [Environment diagnostics](doctor.md) for check details and the registration pattern.
 
+## `harness store migrate`
+
+The store migration command is reserved for applying pending, checksummed SQLite or Postgres schema
+migrations. Database adapters currently apply migrations when they open the store; a standalone CLI
+command is not yet registered.
+
 ## `harness serve`
 
 `harness serve` defaults to MCP over loopback HTTP and stops on SIGINT or SIGTERM. Use

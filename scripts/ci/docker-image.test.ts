@@ -28,6 +28,10 @@ it("pins multi-platform base indexes and installs only build-stage tools", () =>
   expect(dockerfile).not.toMatch(/^RUN mise install\s*&&/mu);
 });
 
+it("copies package migration files into the runtime image", () => {
+  expect(dockerfile).toContain('cp -a "${package}migrations" "/out/${package}"');
+});
+
 it("removes the image even if Compose teardown fails", async () => {
   const beforeAll = vi.fn<(callback: () => Promise<void>) => void>();
   const afterAll = vi.fn<(callback: () => Promise<void>) => void>();
@@ -54,7 +58,7 @@ it("removes the image even if Compose teardown fails", async () => {
 
   await import("./docker-image.int.test.js");
   const build = beforeAll.mock.calls[0]?.[0];
-  const startCompose = test.mock.calls[1]?.[1];
+  const startCompose = test.mock.calls[2]?.[1];
   const cleanup = afterAll.mock.calls[0]?.[0];
   expect(build).toBeDefined();
   expect(startCompose).toBeDefined();
