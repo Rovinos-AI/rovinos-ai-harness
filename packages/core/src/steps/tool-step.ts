@@ -2,6 +2,7 @@
 // Tool calls are sequential here; parallel execution can be added independently.
 import { HarnessError, type Code, type Event, type Id } from "@harness/schemas";
 import type { Span } from "@opentelemetry/api";
+import { isSanitizedField, markSanitizedField } from "@harness/pii";
 import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
@@ -56,7 +57,7 @@ function intentPartial(options: {
   readonly argsHash: string;
   readonly decision: ReturnType<typeof effectiveDecision>;
 }): Extract<EventPartial, { type: "tool_intent" }> {
-  return {
+  const intent: Extract<EventPartial, { type: "tool_intent" }> = {
     type: "tool_intent",
     v: 1,
     callId: options.call.callId,
@@ -75,6 +76,7 @@ function intentPartial(options: {
     argsHash: options.argsHash,
     args: options.call.args,
   };
+  return isSanitizedField(options.call, "args") ? markSanitizedField(intent, "args") : intent;
 }
 
 /** Executes and records one prepared tool call. */
