@@ -108,6 +108,7 @@ function makeServer(
     readonly idGenerator?: () => string;
     readonly randomBytes?: (size: number) => Buffer;
     readonly now?: () => number;
+    readonly maxAppTelemetryBatchesPerMinute?: number;
     readonly runId?: ReferenceHostDependencies["runId"];
     readonly policy?: ReferenceHostDependencies["policy"];
     readonly tool?: ReferenceHostDependencies["tool"];
@@ -153,6 +154,9 @@ function makeServer(
     ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
     ...(options.randomBytes === undefined ? {} : { randomBytes: options.randomBytes }),
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.maxAppTelemetryBatchesPerMinute === undefined
+      ? {}
+      : { maxAppTelemetryBatchesPerMinute: options.maxAppTelemetryBatchesPerMinute }),
     runId: options.runId ?? sessionId,
     ...(options.policy === undefined ? {} : { policy: options.policy }),
     ...(options.tool === undefined ? {} : { tool: options.tool }),
@@ -220,6 +224,26 @@ function appPath(appSession: string): string {
 
 function authorization(host: { readonly token: string; readonly origin: string }) {
   return { authorization: ["Bearer", host.token].join(" "), origin: host.origin };
+}
+
+function telemetryCallBody(appSession: string, batch: unknown): string {
+  return JSON.stringify({
+    appId: "approval",
+    sessionId: appSession,
+    toolName: APP_TELEMETRY_TOOL_NAME,
+    arguments: batch,
+  });
+}
+
+function expectTelemetryAck(
+  response: { readonly status: number; readonly body: string },
+  accepted: number,
+  dropped: number,
+): void {
+  expect(response.status).toBe(200);
+  expect(parseJson(CallToolResultSchema, response.body).content).toEqual([
+    { type: "text", text: JSON.stringify({ accepted, dropped }) },
+  ]);
 }
 
 afterEach(() => {
@@ -666,8 +690,9 @@ describe("createReferenceHost", () => {
     await host.close();
   });
 
-  it("returns a bounded unavailable error when opted-in telemetry has no handler", async () => {
+  it("validates app telemetry through the default host handler", async () => {
     const onAppRejected = vi.fn();
+    const spanStart = spanCollector.getFinishedSpans().length;
     const fixture = makeServer({ onAppRejected, idGenerator: () => sessionId });
     const host = await fixture.hostPromise;
     const launchedSessionId = await newAppSession(fixture, host);
@@ -679,13 +704,33 @@ describe("createReferenceHost", () => {
         appId: "approval",
         sessionId: launchedSessionId,
         toolName: APP_TELEMETRY_TOOL_NAME,
-        arguments: { spans: [] },
+        arguments: {
+          spans: [
+            { name: "ui.render", startOffsetMs: 0, durationMs: 1 },
+            { name: "ui.render", startOffsetMs: "INVALID-CANARY", durationMs: 1 },
+          ],
+        },
       }),
     );
 
-    expect(response.status).toBe(409);
-    expect(response.body).toBe('{"error":"app_telemetry_unavailable"}');
-    expect(onAppRejected).toHaveBeenCalledWith("telemetry_unavailable");
+    expect(response.status).toBe(200);
+    expect(parseJson(CallToolResultSchema, response.body)).toEqual({
+      content: [{ type: "text", text: '{"accepted":1,"dropped":1}' }],
+    });
+    expect(onAppRejected).toHaveBeenCalledWith("schema");
+    const exported = JSON.stringify(
+      spanCollector
+        .getFinishedSpans()
+        .slice(spanStart)
+        .map(({ name, attributes }) => ({ name, attributes })),
+    );
+    expect(exported).not.toContain("INVALID-CANARY");
+    expect(
+      spanCollector
+        .getFinishedSpans()
+        .slice(spanStart)
+        .map(({ name }) => name),
+    ).toContain("harness.ui.render");
     await host.close();
   });
 
@@ -936,8 +981,123 @@ describe("createReferenceHost", () => {
       body.replace(sessionId, "00000000000000000000000001"),
     );
     expect(mismatched.status).toBe(404);
-    const large = await fixture.request("POST", "/api/call", headers, "x".repeat(16_385));
+    const large = await fixture.request("POST", "/api/call", headers, "x".repeat(32_769));
     expect(large.status).toBe(413);
+    await host.close();
+  });
+
+  it("accepts exact-limit telemetry and acknowledges over-limit batches through the endpoint", async () => {
+    const onAppRejected = vi.fn();
+    const fixture = makeServer({ onAppRejected, idGenerator: () => sessionId });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+    const size = 16 * 1024;
+    const prefix = '{"spans":[{"padding":"';
+    const suffix = '"}]}';
+    const exactBatch = {
+      spans: [{ padding: "x".repeat(size - prefix.length - suffix.length) }],
+    };
+    const oversizedBatch = {
+      spans: [{ padding: "x".repeat(size + 1 - prefix.length - suffix.length) }],
+    };
+    const exactBody = telemetryCallBody(launchedSessionId, exactBatch);
+    const oversizedBody = telemetryCallBody(launchedSessionId, oversizedBatch);
+
+    expect(Buffer.byteLength(JSON.stringify(exactBatch), "utf8")).toBe(size);
+    expect(Buffer.byteLength(JSON.stringify(oversizedBatch), "utf8")).toBe(size + 1);
+    expect(Buffer.byteLength(exactBody, "utf8")).toBeGreaterThan(size);
+    expect(Buffer.byteLength(oversizedBody, "utf8")).toBeLessThan(32 * 1024);
+
+    const exact = await fixture.request("POST", "/api/call", authorization(host), exactBody);
+    const oversized = await fixture.request(
+      "POST",
+      "/api/call",
+      authorization(host),
+      oversizedBody,
+    );
+
+    expectTelemetryAck(exact, 0, 1);
+    expectTelemetryAck(oversized, 0, 1);
+    expect(onAppRejected.mock.calls).toEqual([["schema"], ["size"]]);
+    await host.close();
+  });
+
+  it("parents ingested app spans to their active UI-session span", async () => {
+    const start = spanCollector.getFinishedSpans().length;
+    const toolCallSpan = spanCollector.provider
+      .getTracer("host-test")
+      .startSpan("harness.tool_call");
+    const fixture = makeServer({
+      idGenerator: () => sessionId,
+      uiSessionContext: {
+        runId: sessionId,
+        toolCallSpanContext: toolCallSpan.spanContext(),
+      },
+    });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+    const response = await fixture.request(
+      "POST",
+      "/api/call",
+      authorization(host),
+      telemetryCallBody(launchedSessionId, {
+        spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 1 }],
+      }),
+    );
+    expectTelemetryAck(response, 1, 0);
+    await host.close();
+    toolCallSpan.end();
+
+    const spans = spanCollector.getFinishedSpans().slice(start);
+    const sessionSpan = spans.find(
+      (span) =>
+        span.name === "harness.ui_session" &&
+        span.attributes["harness.ui.session_id"] === launchedSessionId,
+    );
+    const appSpan = spans.find((span) => span.name === "harness.ui.render");
+    expect(sessionSpan).toBeDefined();
+    expect(appSpan?.parentSpanContext?.spanId).toBe(sessionSpan?.spanContext().spanId);
+  });
+
+  it("limits telemetry batches per session in a rolling minute", async () => {
+    let now = 0;
+    let nextId = 0;
+    const onAppRejected = vi.fn();
+    const fixture = makeServer({
+      idGenerator: () => String(nextId++).padStart(26, "0"),
+      maxAppTelemetryBatchesPerMinute: 2,
+      now: () => now,
+      onAppRejected,
+    });
+    const host = await fixture.hostPromise;
+    const firstSession = await newAppSession(fixture, host);
+    const secondSession = await newAppSession(fixture, host);
+    const batch = { spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 1 }] };
+    const emit = (appSession: string) =>
+      fixture.request(
+        "POST",
+        "/api/call",
+        authorization(host),
+        telemetryCallBody(appSession, batch),
+      );
+
+    expectTelemetryAck(await emit(firstSession), 1, 0);
+    expectTelemetryAck(await emit(firstSession), 1, 0);
+    expectTelemetryAck(
+      await fixture.request(
+        "POST",
+        "/api/call",
+        authorization(host),
+        telemetryCallBody(firstSession, { spans: [batch.spans[0], batch.spans[0]] }),
+      ),
+      0,
+      2,
+    );
+    expectTelemetryAck(await emit(secondSession), 1, 0);
+    expect(onAppRejected).toHaveBeenCalledExactlyOnceWith("rate");
+
+    now = 60_000;
+    expectTelemetryAck(await emit(firstSession), 1, 0);
     await host.close();
   });
 

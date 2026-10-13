@@ -34,6 +34,7 @@ export interface UiSessionContext {
 /** Active UI-session span and its app-safe W3C traceparent. */
 export class UiSession {
   readonly traceparent: string | undefined;
+  readonly spanContext: SpanContext | undefined;
   readonly #span: Span | undefined;
   #ended = false;
 
@@ -56,6 +57,7 @@ export class UiSession {
       onUnavailable();
       this.#span = undefined;
       this.traceparent = undefined;
+      this.spanContext = undefined;
       return;
     }
     const span = UI_SESSION_SPAN.start(
@@ -72,9 +74,11 @@ export class UiSession {
       onUnavailable();
       this.#span = undefined;
       this.traceparent = undefined;
+      this.spanContext = undefined;
       return;
     }
     this.#span = span;
+    this.spanContext = spanContext;
     const traceFlags = spanContext.traceFlags.toString(16).padStart(2, "0");
     this.traceparent = Traceparent.parse(
       `00-${spanContext.traceId}-${spanContext.spanId}-${traceFlags}`,

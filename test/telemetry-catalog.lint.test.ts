@@ -18,6 +18,10 @@ const expectedSpanNames = [
   "harness.model_call",
   "harness.run",
   "harness.tool_call",
+  "harness.ui.decision",
+  "harness.ui.error",
+  "harness.ui.interaction",
+  "harness.ui.render",
   "harness.ui_session",
 ];
 const expectedLogNames = [

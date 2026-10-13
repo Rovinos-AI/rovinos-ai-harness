@@ -47,15 +47,12 @@ describe("countDroppedTelemetry", () => {
   });
 
   it("counts host app rejections with a bounded reason", () => {
-    countHostAppRejected("unknown_tool");
-    countHostAppRejected("telemetry_unavailable");
+    for (const reason of HOST_APP_REJECTED_REASONS) {
+      countHostAppRejected(reason);
+    }
 
     expect(createCounter).toHaveBeenCalledWith("harness.host.app_rejected");
-    expect(add.mock.calls).toEqual([
-      [1, { reason: "unknown_tool" }],
-      [1, { reason: "telemetry_unavailable" }],
-    ]);
-    expect(HOST_APP_REJECTED_REASONS).toEqual(["unknown_tool", "telemetry_unavailable"]);
+    expect(add.mock.calls).toEqual(HOST_APP_REJECTED_REASONS.map((reason) => [1, { reason }]));
   });
 
   it("counts skipped short sentinel values without attributes", () => {

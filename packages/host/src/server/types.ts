@@ -79,6 +79,8 @@ export interface ReferenceHostDependencies {
   readonly randomBytes?: (size: number) => Buffer;
   /** Provides epoch milliseconds for generated ULIDs. */
   readonly now?: () => number;
+  /** Maximum telemetry batches accepted per app session in a rolling minute (default 20). */
+  readonly maxAppTelemetryBatchesPerMinute?: number;
   /** Receives safe host diagnostic codes, never resource data or call payloads. */
   readonly onCode: (code: HostDiagnosticCode) => void;
   /** Routes allowlisted app calls through the host's policy-aware handler. */
@@ -86,10 +88,10 @@ export interface ReferenceHostDependencies {
   /** Policy and tool ports used by the default app-call handler when both are supplied. */
   readonly policy?: PolicyPort;
   readonly tool?: ToolPort;
-  /** Handles app telemetry locally without forwarding it to an MCP server. */
+  /** Replaces default ingestion; validate with `ingestBatch`, keep input local, and return its acknowledgment. */
   readonly onTelemetryEmit?: (
     session: AppInstance,
-    args: { readonly spans: readonly unknown[] },
+    args: unknown,
     context: AppCallExecutionContext,
   ) => Promise<CallToolResult>;
   /** Lists MCP tools for an app; the host router filters this result to its allowlist. */

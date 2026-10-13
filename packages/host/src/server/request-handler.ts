@@ -21,7 +21,7 @@ import { UiSession } from "./ui-session.js";
 import { AppCallRouterError } from "./app-calls.js";
 import type { AppCallRouter } from "./app-calls.js";
 
-const MAX_CALL_BYTES = 16_384;
+const MAX_CALL_BYTES = 32_768;
 
 interface RequestHandlerOptions {
   readonly config: HostConfig;
