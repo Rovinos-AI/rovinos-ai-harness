@@ -139,6 +139,11 @@ export {
   type DoctorContext,
 } from "./doctor.js";
 export { resolveDataDir } from "./runtime-data-dir.js";
+export {
+  migrateConfiguredStore,
+  openConfiguredStore,
+  type ConfiguredStoreOptions,
+} from "./runtime-store.js";
 export { RunScopeConflictError, RunScopeRegistry } from "./subagent/scope.js";
 export { AgentSpawnInputSchema, AgentSpawnTool } from "./subagent/spawn-tool.js";
 export {

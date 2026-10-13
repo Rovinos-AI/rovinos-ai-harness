@@ -25,6 +25,8 @@ export interface CliContext {
   loadConfig(): Promise<HarnessConfig>;
   /** Writes human, JSON, and safe error output. */
   out: Output;
+  /** Shared secret resolver used for runtime and configured store operations. */
+  secretResolver?: RuntimeOverrides["secretResolver"];
   /** Provides the current time without direct clock access in commands. */
   clock: Clock;
   /** Creates a composed run-loop runtime, optionally replacing its ports. */
