@@ -2,7 +2,7 @@
 import { Code, JsonValue, PolicyLintResultSchema, parseTokenType } from "@harness/schemas";
 import type { JsonValue as JsonValueType, PolicyLintResult } from "@harness/schemas";
 import { PolicyDocumentSchema } from "./schema.js";
-import type { ArgMatcher, PolicyDocument, Rule } from "./schema.js";
+import type { ArgMatcher, Rule } from "./schema.js";
 import { z } from "zod";
 
 const LintToolMetadataSchema = z.array(
@@ -17,6 +17,7 @@ const LintToolMetadataSchema = z.array(
 
 type LintToolMetadata = z.infer<typeof LintToolMetadataSchema>;
 type Decision = Rule["decision"];
+const UnknownArraySchema = z.array(z.unknown());
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -26,7 +27,11 @@ function ruleIdAt(value: unknown, index: number): string | undefined {
   if (!isRecord(value) || !Array.isArray(value.rules)) {
     return undefined;
   }
-  const rule = value.rules[index];
+  const rules = UnknownArraySchema.safeParse(value.rules);
+  if (!rules.success) {
+    return undefined;
+  }
+  const rule = rules.data[index];
   if (!isRecord(rule)) {
     return undefined;
   }
@@ -38,7 +43,11 @@ function hasMissingReason(value: unknown, index: number): boolean {
   if (!isRecord(value) || !Array.isArray(value.rules)) {
     return false;
   }
-  const rule = value.rules[index];
+  const rules = UnknownArraySchema.safeParse(value.rules);
+  if (!rules.success) {
+    return false;
+  }
+  const rule = rules.data[index];
   return isRecord(rule) && !Object.hasOwn(rule, "reason");
 }
 
@@ -166,20 +175,10 @@ function exactValues(matcher: ArgMatcher): JsonValueType[] | undefined {
   return undefined;
 }
 
-function matcherImplies(candidate: ArgMatcher, cover: ArgMatcher): boolean {
-  if (candidate.pointer !== cover.pointer) {
-    return false;
-  }
-  if (cover.op === "exists") {
-    return true;
-  }
-  if (candidate.op === cover.op && jsonEquals(candidate.value ?? null, cover.value ?? null)) {
-    return true;
-  }
-  const values = exactValues(candidate);
-  if (values === undefined || cover.value === undefined) {
-    return false;
-  }
+function valuesImplyMatcher(
+  values: readonly JsonValueType[],
+  cover: ArgMatcher & { readonly value: JsonValueType },
+): boolean {
   switch (cover.op) {
     case "equals":
       return values.length === 1 && jsonEquals(values[0] ?? null, cover.value);
@@ -197,10 +196,11 @@ function matcherImplies(candidate: ArgMatcher, cover: ArgMatcher): boolean {
       return values.every((value) => typeof value === "string" && value.startsWith(prefix));
     }
     case "matches": {
-      if (typeof cover.value !== "string") {
+      const expression = cover.value;
+      if (typeof expression !== "string") {
         return false;
       }
-      const pattern = new RegExp(cover.value, "u");
+      const pattern = new RegExp(expression, "u");
       return values.every((value) => typeof value === "string" && pattern.test(value));
     }
     case "tokenType":
@@ -211,7 +211,28 @@ function matcherImplies(candidate: ArgMatcher, cover: ArgMatcher): boolean {
             typeof value === "string" && parseTokenType(value)?.toLowerCase() === cover.value,
         )
       );
+    case "exists":
+      return true;
   }
+}
+
+function matcherImplies(candidate: ArgMatcher, cover: ArgMatcher): boolean {
+  if (candidate.pointer !== cover.pointer) {
+    return false;
+  }
+  if (cover.op === "exists") {
+    return true;
+  }
+  if (candidate.op === cover.op && jsonEquals(candidate.value ?? null, cover.value ?? null)) {
+    return true;
+  }
+  const values = exactValues(candidate);
+  const coverValue = cover.value;
+  return (
+    values !== undefined &&
+    coverValue !== undefined &&
+    valuesImplyMatcher(values, { ...cover, value: coverValue })
+  );
 }
 
 function argsAreSubset(candidate: Rule, cover: Rule): boolean {
@@ -310,6 +331,70 @@ function unusedEditablePointers(rule: Rule, metadata: LintToolMetadata): string[
   });
 }
 
+function isShadowed(document: readonly Rule[], rule: Rule, index: number): boolean {
+  return document
+    .slice(0, index)
+    .some(
+      (earlier) =>
+        decisionRank(earlier.decision) > decisionRank(rule.decision) && ruleIsSubset(rule, earlier),
+    );
+}
+
+function isDeniedAllow(document: readonly Rule[], rule: Rule): boolean {
+  return (
+    rule.decision === "allow" &&
+    document.some((other) => other.decision === "deny" && ruleIsSubset(rule, other))
+  );
+}
+
+function isBroadDestructiveAllow(rule: Rule, metadata: LintToolMetadata): boolean {
+  return (
+    rule.decision === "allow" &&
+    (rule.match.args === undefined || rule.match.args.length === 0) &&
+    rule.match.tools !== "*" &&
+    rule.match.tools.some((pattern) => pattern.endsWith(".*")) &&
+    metadata.some((tool) => tool.destructive === true && toolMatches(rule.match.tools, tool.toolId))
+  );
+}
+
+interface RuleDiagnosticOptions {
+  readonly rules: readonly Rule[];
+  readonly rule: Rule;
+  readonly index: number;
+  readonly metadata: LintToolMetadata;
+  readonly seenMatchers: Set<string>;
+}
+
+function ruleDiagnostics({
+  rules,
+  rule,
+  index,
+  metadata,
+  seenMatchers,
+}: RuleDiagnosticOptions): PolicyLintResult["diagnostics"] {
+  const diagnostics: PolicyLintResult["diagnostics"] = [];
+  const key = matcherKey(rule);
+  if (seenMatchers.has(key)) {
+    diagnostics.push(diagnostic("error", "duplicate_matcher", rule.id));
+  }
+  seenMatchers.add(key);
+  if (isShadowed(rules, rule, index)) {
+    diagnostics.push(diagnostic("error", "rule_shadowed", rule.id));
+  }
+  if (isDeniedAllow(rules, rule)) {
+    diagnostics.push(diagnostic("error", "allow_fully_denied", rule.id));
+  }
+  if (isBroadDestructiveAllow(rule, metadata)) {
+    diagnostics.push(diagnostic("error", "allow_destructive_wildcard", rule.id));
+  }
+  diagnostics.push(
+    ...unusedEditablePointers(rule, metadata).map(() =>
+      diagnostic("error", "unused_editable_pointer", rule.id),
+    ),
+  );
+  return diagnostics;
+}
+
 /**
  * Reports policy rule defects without performing I/O or requiring runtime services.
  *
@@ -333,46 +418,15 @@ export function lintPolicy(input: unknown, rawToolMetadata: unknown = []): Polic
   const seenMatchers = new Set<string>();
 
   for (const [index, rule] of document.data.rules.entries()) {
-    const id = rule.id;
-    const key = matcherKey(rule);
-    if (seenMatchers.has(key)) {
-      diagnostics.push(diagnostic("error", "duplicate_matcher", id));
-    }
-    seenMatchers.add(key);
-
-    const earlierStricterMatch = document.data.rules
-      .slice(0, index)
-      .some(
-        (earlier) =>
-          decisionRank(earlier.decision) > decisionRank(rule.decision) &&
-          ruleIsSubset(rule, earlier),
-      );
-    if (earlierStricterMatch) {
-      diagnostics.push(diagnostic("error", "rule_shadowed", id));
-    }
-
-    if (
-      rule.decision === "allow" &&
-      document.data.rules.some((other) => other.decision === "deny" && ruleIsSubset(rule, other))
-    ) {
-      diagnostics.push(diagnostic("error", "allow_fully_denied", id));
-    }
-
-    if (
-      rule.decision === "allow" &&
-      (rule.match.args === undefined || rule.match.args.length === 0) &&
-      rule.match.tools !== "*" &&
-      rule.match.tools.some((pattern) => pattern.endsWith(".*")) &&
-      metadata.some(
-        (tool) => tool.destructive === true && toolMatches(rule.match.tools, tool.toolId),
-      )
-    ) {
-      diagnostics.push(diagnostic("error", "allow_destructive_wildcard", id));
-    }
-
-    for (const pointer of unusedEditablePointers(rule, metadata)) {
-      diagnostics.push(diagnostic("error", "unused_editable_pointer", id));
-    }
+    diagnostics.push(
+      ...ruleDiagnostics({
+        rules: document.data.rules,
+        rule,
+        index,
+        metadata,
+        seenMatchers,
+      }),
+    );
   }
 
   return PolicyLintResultSchema.parse({ diagnostics });

@@ -52,9 +52,9 @@ async function createFixture(options: {
   const stderr: string[] = [];
   let configLoads = 0;
   const context: CliContext = {
-    loadConfig: async () => {
+    loadConfig: () => {
       configLoads += 1;
-      throw new Error("Offline policy commands must not load configuration.");
+      return Promise.reject(new Error("Offline policy commands must not load configuration."));
     },
     out: createOutput({
       stdout: (text) => stdout.push(text),
@@ -93,7 +93,7 @@ describe("harness policy test", () => {
       [policyCommand],
     );
 
-    expect(exitCode, fixture.stderr.join("")).toBe(ExitCode.ok);
+    expect(exitCode).toBe(ExitCode.ok);
     expect(fixture.stdout.join("")).toContain("read_one\tallow\tallow_read\tread_only\tallow_read");
     expect(fixture.stderr).toEqual([]);
     expect(fixture.configLoads()).toBe(0);
@@ -118,7 +118,7 @@ describe("harness policy test", () => {
       [policyCommand],
     );
 
-    expect(exitCode, fixture.stderr.join("")).toBe(ExitCode.ok);
+    expect(exitCode).toBe(ExitCode.ok);
     expect(fixture.stdout).toHaveLength(1);
     expect(parseJson(PolicyTestResultSchema, fixture.stdout[0] ?? "").results).toMatchObject([
       { id: "read_one", decision: "allow", ruleId: "allow_read" },

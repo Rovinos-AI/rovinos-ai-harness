@@ -60,13 +60,41 @@ function ensureUniqueIds(items: readonly { readonly id: string }[], code: string
   }
 }
 
-function testPolicyResult(
-  compiled: CompiledPolicy,
-  calls: readonly PolicyTestCall[],
-  expectations: readonly PolicyTestExpectation[],
+function compareExpectation(
+  actual: PolicyTestResult["results"][number],
+  expected: PolicyTestExpectation | undefined,
   checkExpectations: boolean,
-  explain: boolean,
-): PolicyTestResult {
+): PolicyTestResult["mismatches"][number] | undefined {
+  if (!checkExpectations) {
+    return undefined;
+  }
+  if (expected === undefined) {
+    return { id: actual.id, code: "expectation_missing", actual };
+  }
+  if (actual.decision !== expected.decision) {
+    return { id: actual.id, code: "decision_mismatch", expected, actual };
+  }
+  if (expected.ruleId !== undefined && actual.ruleId !== expected.ruleId) {
+    return { id: actual.id, code: "rule_id_mismatch", expected, actual };
+  }
+  return undefined;
+}
+
+interface PolicyTestExecution {
+  readonly compiled: CompiledPolicy;
+  readonly calls: readonly PolicyTestCall[];
+  readonly expectations: readonly PolicyTestExpectation[];
+  readonly checkExpectations: boolean;
+  readonly explain: boolean;
+}
+
+function testPolicyResult({
+  compiled,
+  calls,
+  expectations,
+  checkExpectations,
+  explain,
+}: PolicyTestExecution): PolicyTestResult {
   const expectedById = new Map(expectations.map((expectation) => [expectation.id, expectation]));
   const results: PolicyTestResult["results"] = [];
   const mismatches: PolicyTestResult["mismatches"] = [];
@@ -91,19 +119,13 @@ function testPolicyResult(
     };
     results.push(result);
 
-    if (!checkExpectations) {
-      continue;
-    }
     const expected = expectedById.get(fixture.id);
-    if (expected === undefined) {
-      mismatches.push({ id: fixture.id, code: "expectation_missing", actual: result });
-      continue;
+    if (expected !== undefined) {
+      expectedById.delete(fixture.id);
     }
-    expectedById.delete(fixture.id);
-    if (result.decision !== expected.decision) {
-      mismatches.push({ id: fixture.id, code: "decision_mismatch", expected, actual: result });
-    } else if (expected.ruleId !== undefined && result.ruleId !== expected.ruleId) {
-      mismatches.push({ id: fixture.id, code: "rule_id_mismatch", expected, actual: result });
+    const mismatch = compareExpectation(result, expected, checkExpectations);
+    if (mismatch !== undefined) {
+      mismatches.push(mismatch);
     }
   }
 
@@ -153,13 +175,13 @@ async function runTest(rawOptions: unknown, context: CliContext, jsonMode: boole
   ensureUniqueIds(expectations, "policy_expectations_duplicate_id");
 
   const { compilePolicy } = await import("@harness/policy");
-  const result = testPolicyResult(
-    compilePolicy(document),
+  const result = testPolicyResult({
+    compiled: compilePolicy(document),
     calls,
     expectations,
-    options.expect !== undefined,
-    options.explain,
-  );
+    checkExpectations: options.expect !== undefined,
+    explain: options.explain,
+  });
   context.out.json(PolicyTestResultSchema, result);
   if (!jsonMode) {
     context.out.print(testSummary(result));
