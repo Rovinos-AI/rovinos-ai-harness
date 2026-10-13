@@ -28,6 +28,15 @@ export class PiiTokenizerError extends HarnessError {
   }
 }
 
+/** Safe storage-boundary failure; the cause may contain detector or vault details. */
+export class PiiStorageFailedError extends HarnessError {
+  readonly code = "pii_storage_failed";
+
+  constructor() {
+    super("PII storage sanitization failed.");
+  }
+}
+
 /** Policy block carrying only entity types and counts, never detected values. */
 export class PiiBlockedError extends HarnessError {
   readonly code = "pii_blocked";

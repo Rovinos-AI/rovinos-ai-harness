@@ -7,7 +7,7 @@
   "config": ["schemas"],
   "store": ["schemas", "telemetry", "crypto"],
   "vault": ["schemas", "telemetry", "crypto"],
-  "pii": ["schemas", "telemetry", "vault"],
+  "pii": ["schemas", "telemetry", "store", "vault"],
   "models": ["schemas", "telemetry"],
   "context": ["schemas", "telemetry"],
   "policy": ["schemas", "telemetry"],
