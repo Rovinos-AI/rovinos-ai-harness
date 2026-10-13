@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TELEMETRY_DROP_REASONS,
   TELEMETRY_METRIC_STRING_ATTRIBUTES,
+  HOST_APP_REJECTED_REASONS,
+  countHostAppRejected,
   countDroppedTelemetry,
   countSentinelScopeReduced,
   countSkippedShortValues,
@@ -21,6 +23,7 @@ const dropReasons: readonly TelemetryDropReason[] = TELEMETRY_DROP_REASONS;
 describe("countDroppedTelemetry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    add.mockImplementation(() => undefined);
   });
 
   it("records the bounded reason as the counter's only attribute", () => {
@@ -43,6 +46,14 @@ describe("countDroppedTelemetry", () => {
     }).not.toThrow();
   });
 
+  it("counts host app rejections with a bounded reason", () => {
+    countHostAppRejected("unknown_tool");
+
+    expect(createCounter).toHaveBeenCalledWith("harness.host.app_rejected");
+    expect(add).toHaveBeenCalledWith(1, { reason: "unknown_tool" });
+    expect(HOST_APP_REJECTED_REASONS).toEqual(["unknown_tool"]);
+  });
+
   it("counts skipped short sentinel values without attributes", () => {
     countSkippedShortValues(3);
 
@@ -54,6 +65,7 @@ describe("countDroppedTelemetry", () => {
   it("uses only closed-enum string attributes for metric instruments", () => {
     expect(TELEMETRY_METRIC_STRING_ATTRIBUTES).toEqual({
       "harness.telemetry.dropped.reason": dropReasons,
+      "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
     });
     expect(
       TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.telemetry.dropped.reason"].length,

@@ -4,10 +4,7 @@ import { Code, Id } from "@harness/schemas";
 import type { HostDiagnosticCode } from "./resource.js";
 import type { UiSession, UiSessionContext } from "./ui-session.js";
 import { z } from "zod";
-import type {
-  AppCallExecutionContext,
-  AppCallRejectedReason,
-} from "./app-calls.js";
+import type { AppCallExecutionContext, AppCallRejectedReason } from "./app-calls.js";
 
 /** Validated app-originated call payload accepted at the host boundary. */
 export const AppCallSchema = z
@@ -84,10 +81,7 @@ export interface ReferenceHostDependencies {
   /** Receives safe host diagnostic codes, never resource data or call payloads. */
   readonly onCode: (code: HostDiagnosticCode) => void;
   /** Routes allowlisted app calls through the host's policy-aware handler. */
-  readonly onAppCall?: (
-    call: AppCall,
-    context: AppCallExecutionContext,
-  ) => Promise<CallToolResult>;
+  readonly onAppCall?: (call: AppCall, context: AppCallExecutionContext) => Promise<CallToolResult>;
   /** Handles app telemetry locally without forwarding it to an MCP server. */
   readonly onTelemetryEmit?: (
     session: AppInstance,

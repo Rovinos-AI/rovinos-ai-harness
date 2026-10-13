@@ -140,18 +140,10 @@ function makeServer(
     readResource: options.readResource ?? (() => Promise.resolve(resource)),
     onCode: options.onCode ?? (() => undefined),
     ...(options.onAppCall === undefined ? {} : { onAppCall: options.onAppCall }),
-    ...(options.onTelemetryEmit === undefined
-      ? {}
-      : { onTelemetryEmit: options.onTelemetryEmit }),
-    ...(options.onAppToolsList === undefined
-      ? {}
-      : { onAppToolsList: options.onAppToolsList }),
-    ...(options.isIdOwnedByRun === undefined
-      ? {}
-      : { isIdOwnedByRun: options.isIdOwnedByRun }),
-    ...(options.onAppRejected === undefined
-      ? {}
-      : { onAppRejected: options.onAppRejected }),
+    ...(options.onTelemetryEmit === undefined ? {} : { onTelemetryEmit: options.onTelemetryEmit }),
+    ...(options.onAppToolsList === undefined ? {} : { onAppToolsList: options.onAppToolsList }),
+    ...(options.isIdOwnedByRun === undefined ? {} : { isIdOwnedByRun: options.isIdOwnedByRun }),
+    ...(options.onAppRejected === undefined ? {} : { onAppRejected: options.onAppRejected }),
     ...(options.onCode === undefined ? {} : { onCode: options.onCode }),
     ...(options.readStatic === undefined ? {} : { readStatic: options.readStatic }),
     ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
@@ -304,15 +296,23 @@ describe("createReferenceHost", () => {
       Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "ok" }] })),
     );
     const onTelemetryEmit = vi.fn(() =>
-      Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "accepted" }] })),
+      Promise.resolve(
+        CallToolResultSchema.parse({ content: [{ type: "text", text: "accepted" }] }),
+      ),
     );
     const onAppToolsList = vi.fn(() =>
-      Promise.resolve(ListToolsResultSchema.parse({
-        tools: [
-          { name: "approve", description: "allowed", inputSchema: { type: "object" } },
-          { name: "filesystem.write", description: "not allowed", inputSchema: { type: "object" } },
-        ],
-      })),
+      Promise.resolve(
+        ListToolsResultSchema.parse({
+          tools: [
+            { name: "approve", description: "allowed", inputSchema: { type: "object" } },
+            {
+              name: "filesystem.write",
+              description: "not allowed",
+              inputSchema: { type: "object" },
+            },
+          ],
+        }),
+      ),
     );
     const onAppRejected = vi.fn();
     const foreignId = "00000000000000000000000006";
@@ -354,10 +354,10 @@ describe("createReferenceHost", () => {
       }),
     );
     expect(forwarded.status).toBe(200);
-    expect(onAppCall).toHaveBeenCalledWith(
-      expect.objectContaining({ toolName: "approve" }),
-      { runId: sessionId, policyContext: { subagent: false, app: "approval" } },
-    );
+    expect(onAppCall).toHaveBeenCalledWith(expect.objectContaining({ toolName: "approve" }), {
+      runId: sessionId,
+      policyContext: { subagent: false, app: "approval" },
+    });
 
     const discovered = await fixture.request(
       "GET",

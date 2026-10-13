@@ -10,9 +10,7 @@ const bridgeMocks = vi.hoisted(() => ({
   sendResult: vi.fn<(result: unknown) => Promise<void>>(),
   handleCall:
     vi.fn<(call: { name: string; arguments?: Record<string, unknown> }) => Promise<unknown>>(),
-  handleListTools: vi.fn<
-    (params: { readonly cursor?: string } | undefined) => Promise<unknown>
-  >(),
+  handleListTools: vi.fn<(params: { readonly cursor?: string } | undefined) => Promise<unknown>>(),
 }));
 
 vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({

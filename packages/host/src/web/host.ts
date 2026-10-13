@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  CallToolResultSchema,
-  ListToolsResultSchema,
-} from "@modelcontextprotocol/core";
+import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/core";
 import { INVALID_REQUEST, ProtocolError } from "@modelcontextprotocol/client";
 import { Code, Id, Traceparent, parseJson } from "@harness/schemas";
 import { z } from "zod";

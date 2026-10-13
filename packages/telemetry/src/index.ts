@@ -13,6 +13,7 @@ export {
   type LogRecordShape,
 } from "./log-registry.js";
 export { emitSafeEvent, safeEventLogAttributeMap } from "./safe-event-logs.js";
+export { countHostAppRejected, type HostAppRejectedReason } from "./metrics.js";
 export {
   __resetRegistryForTests,
   defineSpan,

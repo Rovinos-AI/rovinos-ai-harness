@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, Id } from "@harness/schemas";
-import { metrics, type Counter } from "@opentelemetry/api";
+import { Code, HarnessError, type Id, type HostConfig } from "@harness/schemas";
+import { countHostAppRejected, type HostAppRejectedReason } from "@harness/telemetry";
 import type { CallToolResult, ListToolsResult, Tool } from "@modelcontextprotocol/client";
+import { ToolSchema } from "@modelcontextprotocol/core";
 import { isToolVisibilityModelOnly } from "@modelcontextprotocol/ext-apps/app-bridge";
 import { z } from "zod";
-import type { HostConfig } from "@harness/schemas";
 import type { AppCall, AppInstance } from "./types.js";
 
 /** Name of the host-local telemetry tool exposed to MCP Apps. */
@@ -14,12 +14,12 @@ export const APP_TELEMETRY_TOOL_NAME = "harness.telemetry.emit";
 export const AppTelemetryEmitArgsSchema = z.object({ spans: z.array(z.unknown()) }).strict();
 
 /** MCP tool metadata marks this declaration as callable by the app, not the model. */
-export const APP_TELEMETRY_TOOL = {
+export const APP_TELEMETRY_TOOL: Tool = ToolSchema.parse({
   name: APP_TELEMETRY_TOOL_NAME,
   description: "Emit telemetry spans from this app through the host.",
-  inputSchema: z.toJSONSchema(AppTelemetryEmitArgsSchema) as Tool["inputSchema"],
+  inputSchema: z.toJSONSchema(AppTelemetryEmitArgsSchema),
   _meta: { ui: { visibility: ["app"] } },
-} satisfies Tool;
+});
 
 /** Policy context for an app-originated tool call. */
 export interface AppCallPolicyContext {
@@ -34,30 +34,11 @@ export interface AppCallExecutionContext {
 }
 
 /** Bounded rejection reasons emitted for app tool calls. */
-export type AppCallRejectedReason = "unknown_tool";
-
-interface AppCallRejectedAttributes extends Readonly<Record<string, AppCallRejectedReason>> {
-  readonly reason: AppCallRejectedReason;
-}
-
-let appRejectedCounter: Counter<AppCallRejectedAttributes> | undefined;
-
-function countAppRejection(reason: AppCallRejectedReason): void {
-  try {
-    appRejectedCounter ??= metrics
-      .getMeter("@harness/host")
-      .createCounter<AppCallRejectedAttributes>("harness.host.app_rejected");
-    appRejectedCounter.add(1, { reason });
-  } catch {
-    return;
-  }
-}
+export type AppCallRejectedReason = HostAppRejectedReason;
 
 /** Error codes returned when an app tool call fails the host boundary. */
 export type AppCallRouterErrorCode =
-  | "app_tool_not_allowed"
-  | "app_run_mismatch"
-  | "app_run_unavailable";
+  "app_tool_not_allowed" | "app_run_mismatch" | "app_run_unavailable";
 
 /** Safe error raised when an app call violates its host session policy. */
 export class AppCallRouterError extends HarnessError {
@@ -79,10 +60,7 @@ export interface AppCallRouterOptions {
   /** Validated app configurations keyed by app id. */
   readonly apps: ReadonlyMap<string, HostConfig["apps"][number]>;
   /** Executes an allowlisted call through the run's policy-aware tool pipeline. */
-  readonly onAppCall?: (
-    call: AppCall,
-    context: AppCallExecutionContext,
-  ) => Promise<CallToolResult>;
+  readonly onAppCall?: (call: AppCall, context: AppCallExecutionContext) => Promise<CallToolResult>;
   /** Consumes telemetry locally; this callback must not forward to an MCP server. */
   readonly onTelemetryEmit?: (
     session: AppInstance,
@@ -175,8 +153,7 @@ export class AppCallRouter {
   async listTools(session: AppInstance, cursor?: string): Promise<ListToolsResult> {
     const app = this.#options.apps.get(session.id);
     if (
-      app === undefined ||
-      session.resourceUri !== app.resourceUri ||
+      app?.resourceUri !== session.resourceUri ||
       session.sessionId.length === 0 ||
       app.allowedTools.length === 0
     ) {
@@ -194,10 +171,7 @@ export class AppCallRouter {
         !isToolVisibilityModelOnly(tool),
     );
     return {
-      tools:
-        cursor === undefined && app.telemetry
-          ? [...tools, APP_TELEMETRY_TOOL]
-          : tools,
+      tools: cursor === undefined && app.telemetry ? [...tools, APP_TELEMETRY_TOOL] : tools,
       ...(result.nextCursor === undefined ? {} : { nextCursor: result.nextCursor }),
     };
   }
@@ -238,7 +212,7 @@ export class AppCallRouter {
   }
 
   #rejectUnknownTool(): void {
-    countAppRejection("unknown_tool");
+    countHostAppRejected("unknown_tool");
     try {
       this.#options.onRejected?.("unknown_tool");
     } catch {

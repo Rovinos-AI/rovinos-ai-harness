@@ -164,6 +164,26 @@ function createLaunchUrl(origin: string, token: string, config: HostConfig): str
   return url.href;
 }
 
+function createAppCallRouter(
+  appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>,
+  dependencies: ReferenceHostDependencies,
+): AppCallRouter {
+  return new AppCallRouter({
+    apps: appConfigs,
+    ...(dependencies.onAppCall === undefined ? {} : { onAppCall: dependencies.onAppCall }),
+    ...(dependencies.onTelemetryEmit === undefined
+      ? {}
+      : { onTelemetryEmit: dependencies.onTelemetryEmit }),
+    ...(dependencies.onAppToolsList === undefined
+      ? {}
+      : { onAppToolsList: dependencies.onAppToolsList }),
+    ...(dependencies.isIdOwnedByRun === undefined
+      ? {}
+      : { isIdOwnedByRun: dependencies.isIdOwnedByRun }),
+    ...(dependencies.onAppRejected === undefined ? {} : { onRejected: dependencies.onAppRejected }),
+  });
+}
+
 /**
  * Starts a loopback-only host for configured MCP Apps resources.
  *
@@ -185,22 +205,7 @@ export async function createReferenceHost(
   processToken ??= random(32).toString("base64url");
   const token = processToken;
   const registry = createAppRegistry(config);
-  const appCallRouter = new AppCallRouter({
-    apps: registry.appConfigs,
-    ...(dependencies.onAppCall === undefined ? {} : { onAppCall: dependencies.onAppCall }),
-    ...(dependencies.onTelemetryEmit === undefined
-      ? {}
-      : { onTelemetryEmit: dependencies.onTelemetryEmit }),
-    ...(dependencies.onAppToolsList === undefined
-      ? {}
-      : { onAppToolsList: dependencies.onAppToolsList }),
-    ...(dependencies.isIdOwnedByRun === undefined
-      ? {}
-      : { isIdOwnedByRun: dependencies.isIdOwnedByRun }),
-    ...(dependencies.onAppRejected === undefined
-      ? {}
-      : { onRejected: dependencies.onAppRejected }),
-  });
+  const appCallRouter = createAppCallRouter(registry.appConfigs, dependencies);
   const sessionRunId = dependencies.runId ?? dependencies.uiSessionContext?.runId;
   const host = config.listen.host === "localhost" ? "127.0.0.1" : config.listen.host;
   let origin = "";

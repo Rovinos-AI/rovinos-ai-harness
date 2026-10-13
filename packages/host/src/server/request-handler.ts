@@ -18,7 +18,8 @@ import {
   writeJson,
 } from "./http-utils.js";
 import { UiSession } from "./ui-session.js";
-import { AppCallRouter, AppCallRouterError } from "./app-calls.js";
+import { AppCallRouterError } from "./app-calls.js";
+import type { AppCallRouter } from "./app-calls.js";
 
 const MAX_CALL_BYTES = 16_384;
 

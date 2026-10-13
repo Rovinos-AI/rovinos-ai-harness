@@ -29,9 +29,7 @@ const session: AppInstance = {
   end: () => undefined,
 };
 
-function request(
-  values: Partial<AppCall> & Pick<AppCall, "toolName" | "arguments">,
-): AppCall {
+function request(values: Partial<AppCall> & Pick<AppCall, "toolName" | "arguments">): AppCall {
   return {
     appId: app.id,
     sessionId: session.sessionId,
@@ -160,10 +158,7 @@ describe("AppCallRouter", () => {
       ),
     ).rejects.toMatchObject({ code: "app_run_mismatch" });
     await expect(
-      router.handle(
-        session,
-        request({ toolName: "approval.resolve", arguments: {}, approvalId }),
-      ),
+      router.handle(session, request({ toolName: "approval.resolve", arguments: {}, approvalId })),
     ).rejects.toBeInstanceOf(AppCallRouterError);
 
     expect(onAppCall).not.toHaveBeenCalled();
