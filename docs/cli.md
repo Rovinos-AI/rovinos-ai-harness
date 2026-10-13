@@ -26,11 +26,12 @@ table of check IDs, statuses, and codes. `--json` returns a schema-validated arr
 
 ## `harness serve`
 
-`harness serve` defaults to MCP over stdio and stops when its input closes or it receives SIGINT or
-SIGTERM. Use `--http [--port <port>]` to bind the MCP endpoint to `127.0.0.1`; it prints only the
-endpoint URL and defaults to port 3000. `--stdio` explicitly selects stdio. HTTP mode also accepts
-`--json`, which writes the validated `{"status":"serving"}` result to stdout and the endpoint to
-stderr. JSON mode is not available with stdio because stdout carries the MCP protocol.
+`harness serve` defaults to MCP over loopback HTTP and stops on SIGINT or SIGTERM. Use
+`--http [--port <port>]` to select HTTP explicitly; it prints only the endpoint URL and defaults to
+port 3000. Use `--stdio` for MCP over standard input and output; it stops when its input closes or
+receives SIGINT or SIGTERM. HTTP mode also accepts `--json`, which writes the validated
+`{"status":"serving"}` result to stdout and the endpoint to stderr. JSON mode is not available with
+stdio because stdout carries the MCP protocol.
 
 ## `harness run`
 

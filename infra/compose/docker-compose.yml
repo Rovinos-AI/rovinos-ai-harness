@@ -6,6 +6,8 @@ services:
       dockerfile: Dockerfile
     image: ${HARNESS_IMAGE:-harness:local}
     command: ["serve"]
+    environment:
+      HARNESS_DATA_DIR: /tmp/harness
     init: true
     read_only: true
     tmpfs:

@@ -28,8 +28,8 @@ export const serveCommand: CommandModule = {
       .option("--http", "serve MCP over loopback HTTP")
       .option("--port <port>", "HTTP listener port")
       .action(async (options: { readonly stdio?: boolean; readonly http?: boolean; readonly port?: string }) => {
-        const http = options.http === true;
-        if ((options.stdio === true && http) || (options.port !== undefined && !http)) {
+        const http = options.http === true || options.stdio !== true;
+        if ((options.stdio === true && options.http === true) || (options.port !== undefined && !http)) {
           throw new ServeCommandError("serve_options_invalid");
         }
         if (program.opts<{ json?: boolean }>().json === true && !http) {

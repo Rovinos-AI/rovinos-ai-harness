@@ -9,6 +9,21 @@ import { createOutput } from "./output.js";
 import { main } from "./main.js";
 import { serveCommand } from "./serve.js";
 
+const controlPlaneMocks = vi.hoisted(() => {
+  const closeHttp = vi.fn(() => Promise.resolve());
+  return {
+    closeHttp,
+    startHttp: vi.fn(() =>
+      Promise.resolve({ endpoint: "http://127.0.0.1:3000/mcp", close: closeHttp }),
+    ),
+  };
+});
+
+vi.mock("@harness/control-plane", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@harness/control-plane")>()),
+  startControlPlaneHttp: controlPlaneMocks.startHttp,
+}));
+
 function waitForSignalListener(
   signal: NodeJS.Signals,
   baseline: number,
@@ -78,9 +93,34 @@ function createContext() {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 describe("serve command", () => {
+  it("defaults to loopback HTTP and stops cleanly on SIGTERM", async () => {
+    const { context, runtime, stdout, stderr } = createContext();
+    const sigtermListeners = process.listenerCount("SIGTERM");
+    const result = main(["serve"], context, [serveCommand]);
+    const signalWait = waitForSignalListener("SIGTERM", sigtermListeners);
+    const waitingForSignal = await Promise.race([
+      result.then(() => false),
+      signalWait.promise,
+    ]);
+    signalWait.cancel();
+    if (waitingForSignal) {
+      process.emit("SIGTERM");
+    }
+
+    expect(waitingForSignal).toBe(true);
+    await expect(result).resolves.toBe(ExitCode.ok);
+    expect(controlPlaneMocks.startHttp).toHaveBeenCalledWith(runtime.store, 3_000);
+    expect(controlPlaneMocks.closeHttp).toHaveBeenCalledOnce();
+    expect(process.listenerCount("SIGTERM")).toBe(sigtermListeners);
+    expect(stdout).toEqual(["http://127.0.0.1:3000/mcp\n"]);
+    expect(stderr).toEqual([]);
+    expect(runtime.close).toHaveBeenCalledOnce();
+  });
+
   it.each(["SIGINT", "SIGTERM"] as const)("stops stdio cleanly on %s", async (signal) => {
     const { context, runtime, stdout, stderr } = createContext();
     const sigintListeners = process.listenerCount("SIGINT");
