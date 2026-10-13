@@ -41,6 +41,7 @@ function containsLiteralSecrets(value: unknown): boolean {
 it("keeps collector and Compose YAML free of literal credentials", () => {
   for (const path of [
     "infra/collector/base.yaml",
+    "infra/collector/allowlist.generated.yaml",
     "infra/collector/profile-debug.yaml",
     ...composeFiles,
   ]) {
@@ -80,6 +81,7 @@ it("binds every published Compose port to loopback", () => {
 
 it("sets the receiver, processors, health endpoint, and debug pipelines", () => {
   const base = readYaml("infra/collector/base.yaml");
+  const allowlist = readYaml("infra/collector/allowlist.generated.yaml");
   const profile = readYaml("infra/collector/profile-debug.yaml");
 
   expect(base.receivers).toMatchObject({
@@ -123,29 +125,83 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
     },
   });
   expect(profile.exporters).toMatchObject({ debug: { verbosity: "basic" } });
-  const profileText = readFileSync(resolve(root, "infra/collector/profile-debug.yaml"), "utf8");
-  expect(
-    profileText
-      .split("\n")
-      .filter(
-        (line) =>
-          line.startsWith("      processors: [memory_limiter, batch]") &&
-          line.endsWith("# Task 10.2 inserts generated allowlist processors here."),
-      ),
-  ).toHaveLength(3);
+  const processors = yamlSchema.parse(allowlist.processors);
+  expect(allowlist.processors).toMatchObject({
+    "filter/drop_unregistered_spans": { error_mode: "ignore" },
+    "filter/drop_span_events": { error_mode: "ignore" },
+    "transform/span_attributes": { error_mode: "ignore" },
+    "filter/drop_unregistered_logs": { error_mode: "ignore" },
+    "transform/log_attributes": { error_mode: "ignore" },
+    "filter/drop_unregistered_metrics": { error_mode: "ignore" },
+    "transform/metric_attributes": { error_mode: "ignore" },
+    "transform/resource_attributes": { error_mode: "ignore" },
+  });
+  const spanAttributes = yamlSchema.parse(processors["transform/span_attributes"]);
+  expect(z.array(z.string()).parse(spanAttributes.trace_statements)).toEqual(
+    expect.arrayContaining(["keep_keys(scope.attributes, [])", "set(span.links, nil)"]),
+  );
+  const logAttributes = yamlSchema.parse(processors["transform/log_attributes"]);
+  expect(z.array(z.string()).parse(logAttributes.log_statements)).toEqual(
+    expect.arrayContaining(["keep_keys(scope.attributes, [])"]),
+  );
+  const metricAttributes = yamlSchema.parse(processors["transform/metric_attributes"]);
+  expect(z.array(z.string()).parse(metricAttributes.metric_statements)).toEqual(
+    expect.arrayContaining([
+      "keep_keys(scope.attributes, [])",
+      "keep_keys(exemplar.filtered_attributes, [])",
+      'keep_keys(datapoint.attributes, ["harness.host.app_rejected.reason"]) where metric.name == "harness.host.app_rejected"',
+      'keep_keys(datapoint.attributes, ["harness.telemetry.dropped.reason"]) where metric.name == "harness.telemetry.dropped"',
+    ]),
+  );
+  expect(allowlist.service).toMatchObject({
+    pipelines: {
+      traces: {
+        processors: [
+          "memory_limiter",
+          "filter/drop_unregistered_spans",
+          "filter/drop_span_events",
+          "transform/span_attributes",
+          "transform/resource_attributes",
+          "batch",
+        ],
+      },
+      logs: {
+        processors: [
+          "memory_limiter",
+          "filter/drop_unregistered_logs",
+          "transform/log_attributes",
+          "transform/resource_attributes",
+          "batch",
+        ],
+      },
+      metrics: {
+        processors: [
+          "memory_limiter",
+          "filter/drop_unregistered_metrics",
+          "transform/metric_attributes",
+          "transform/resource_attributes",
+          "batch",
+        ],
+      },
+    },
+  });
   expect(profile.service).toMatchObject({
     pipelines: {
       traces: {
         receivers: ["otlp"],
-        processors: ["memory_limiter", "batch"],
         exporters: ["debug"],
       },
-      logs: { receivers: ["otlp"], processors: ["memory_limiter", "batch"], exporters: ["debug"] },
+      logs: {
+        receivers: ["otlp"],
+        exporters: ["debug"],
+      },
       metrics: {
         receivers: ["otlp"],
-        processors: ["memory_limiter", "batch"],
         exporters: ["debug"],
       },
     },
   });
+  expect(profile).not.toHaveProperty("service.pipelines.traces.processors");
+  expect(profile).not.toHaveProperty("service.pipelines.logs.processors");
+  expect(profile).not.toHaveProperty("service.pipelines.metrics.processors");
 });
