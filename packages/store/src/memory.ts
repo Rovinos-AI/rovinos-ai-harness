@@ -215,6 +215,38 @@ export class InMemoryEventStore implements EventStore {
     return Promise.resolve(this.runs.get(runId)?.length ?? 0);
   }
 
+  /** {@inheritDoc EventStore.deleteRun} */
+  deleteRun(runId: Id): Promise<number> {
+    const events = this.runs.get(runId);
+    if (events === undefined) {
+      return Promise.resolve(0);
+    }
+    let status: RunSummary["status"] = "pending";
+    for (const event of events) {
+      if (event.type === "run_status_changed") {
+        status = event.to;
+      }
+    }
+    if (status !== "completed" && status !== "failed" && status !== "cancelled") {
+      return Promise.resolve(0);
+    }
+
+    this.runs.delete(runId);
+    this.snapshots.delete(runId);
+    for (let index = this.outboxEvents.length - 1; index >= 0; index -= 1) {
+      if (this.outboxEvents[index]?.event.runId === runId) {
+        this.outboxEvents.splice(index, 1);
+      }
+    }
+    for (const [traceId, runs] of this.traceRuns) {
+      runs.delete(runId);
+      if (runs.size === 0) {
+        this.traceRuns.delete(traceId);
+      }
+    }
+    return Promise.resolve(events.length);
+  }
+
   /** {@inheritDoc EventStore.listRuns} */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
     if (!Number.isInteger(opts.limit) || opts.limit < 1) {

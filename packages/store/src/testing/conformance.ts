@@ -272,6 +272,50 @@ function registerStatusSummary(factory: EventStoreFactory, builders: EventStoreT
   });
 }
 
+function registerDeleteRun(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
+  it("atomically deletes terminal run events, snapshots, and its summary", async () => {
+    await withStore(factory, async (store) => {
+      const runId = builders.nextRunId();
+      const snapshotId = builders.nextRunId();
+      const traceId = "c".repeat(32);
+      await store.appendWithSnapshot(
+        runId,
+        [
+          { ...builders.runCreated(runId), traceId },
+          builders.checkpointWritten(runId, snapshotId, 1),
+        ],
+        0,
+        builders.snapshot(runId, snapshotId, 1),
+      );
+      await store.append(runId, [builders.runStatusChanged(runId, "pending", "completed")], 2);
+
+      await expect(store.deleteRun(runId)).resolves.toBe(3);
+      await expect(store.head(runId)).resolves.toBe(0);
+      await expect(collect(store.read(runId))).resolves.toEqual([]);
+      await expect(store.latestSnapshot(runId)).resolves.toBeUndefined();
+      const runs = await store.listRuns({ status: "completed", limit: 100 });
+      expect(runs.runs.map(({ runId: listedRunId }) => listedRunId)).not.toContain(runId);
+      await expect(store.findRunsByTrace(traceId)).resolves.toEqual([]);
+    });
+  });
+
+  it("does not delete active or pending runs", async () => {
+    await withStore(factory, async (store) => {
+      for (const status of ["pending", "running", "suspended"] as const) {
+        const runId = builders.nextRunId();
+        const events =
+          status === "pending"
+            ? [builders.runCreated(runId)]
+            : [builders.runCreated(runId), builders.runStatusChanged(runId, "pending", status)];
+        await store.append(runId, events, 0);
+
+        await expect(store.deleteRun(runId)).resolves.toBe(0);
+        await expect(store.head(runId)).resolves.toBe(events.length);
+      }
+    });
+  });
+}
+
 function registerTraceLookup(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
   it("finds the run containing a trace", async () => {
     await withStore(factory, async (store) => {
@@ -387,6 +431,7 @@ export function runEventStoreConformance(
     registerLargeContent(factory, builders);
     registerRunListing(factory, builders);
     registerStatusSummary(factory, builders);
+    registerDeleteRun(factory, builders);
     registerTraceLookup(factory, builders);
     registerOutboxConformance(factory, builders, caps.supportsFileReopen);
     registerLazyRead(factory, builders);
