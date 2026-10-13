@@ -78,6 +78,29 @@ describe("ingestBatch", () => {
     expect(spans.map((span) => span.name)).toEqual(["harness.ui.render"]);
   });
 
+  it("silently drops valid spans refused by the session cap", () => {
+    const reasons: string[] = [];
+    let accepted = 0;
+    const acknowledgment = ingestBatch(
+      {
+        spans: [
+          { name: "ui.render", startOffsetMs: 0, durationMs: 1 },
+          { name: "ui.render", startOffsetMs: 1, durationMs: 1 },
+        ],
+      },
+      {
+        acceptSpan: () => {
+          accepted += 1;
+          return accepted === 1;
+        },
+        onRejected: (reason) => reasons.push(reason),
+      },
+    );
+
+    expect(acknowledgment).toEqual({ accepted: 1, dropped: 1 });
+    expect(reasons).toEqual(["session_cap"]);
+  });
+
   it("rejects malformed batches, extra keys, and arrays over fifty spans", () => {
     const reasons: string[] = [];
     expect(ingestBatch(null, { onRejected: (reason) => reasons.push(reason) })).toEqual({

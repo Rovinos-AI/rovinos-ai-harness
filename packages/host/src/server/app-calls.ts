@@ -36,11 +36,15 @@ export interface AppCallExecutionContext {
 }
 
 /** Bounded rejection reasons emitted for app tool calls. */
-export type AppCallRejectedReason = HostAppRejectedReason;
+export type AppCallRejectedReason = HostAppRejectedReason | "telemetry_unavailable";
 
 /** Error codes returned when an app tool call fails the host boundary. */
 export type AppCallRouterErrorCode =
-  "app_tool_not_allowed" | "app_run_mismatch" | "app_run_unavailable" | "app_telemetry_unavailable";
+  | "app_tool_not_allowed"
+  | "app_run_mismatch"
+  | "app_run_unavailable"
+  | "app_telemetry_unavailable"
+  | "rate_limited";
 
 /** Safe error raised when an app call violates its host session policy. */
 export class AppCallRouterError extends HarnessError {
@@ -349,7 +353,9 @@ export class AppCallRouter {
   }
 
   #reject(reason: AppCallRejectedReason): void {
-    countHostAppRejected(reason);
+    if (reason !== "telemetry_unavailable") {
+      countHostAppRejected(reason);
+    }
     try {
       this.#options.onRejected?.(reason);
     } catch {

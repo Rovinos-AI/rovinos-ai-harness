@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id, parseJson, type HostConfig } from "@harness/schemas";
+import { countHostAppRejected } from "@harness/telemetry";
 import {
   AppCallSchema,
   type AppCall,
@@ -20,6 +21,7 @@ import {
 import { UiSession } from "./ui-session.js";
 import { AppCallRouterError } from "./app-calls.js";
 import type { AppCallRouter } from "./app-calls.js";
+import type { AppRateLimiter } from "./app-limits.js";
 
 const MAX_CALL_BYTES = 32_768;
 
@@ -27,6 +29,7 @@ interface RequestHandlerOptions {
   readonly config: HostConfig;
   readonly dependencies: ReferenceHostDependencies;
   readonly appCallRouter: AppCallRouter;
+  readonly rateLimiter: AppRateLimiter;
   readonly apps: ReadonlyMap<string, HostConfig["apps"][number]>;
   readonly appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>;
   readonly sessions: Map<string, AppInstance>;
@@ -92,6 +95,7 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
     uiSession?.end();
     if (options.sessions.get(sessionId)?.end === end) {
       options.sessions.delete(sessionId);
+      options.rateLimiter.endSession(sessionId);
     }
   };
   const instance: AppInstance = {
@@ -204,6 +208,13 @@ async function routeAppCall(
   }
   const session = options.sessions.get(call.sessionId);
   if (session?.id !== call.appId) {
+    countHostAppRejected("unknown_app");
+    try {
+      options.dependencies.onAppRejected?.("unknown_app");
+    } catch {
+      writeError(response, 404, "app_unknown");
+      return;
+    }
     writeError(response, 404, "app_unknown");
     return;
   }
@@ -211,7 +222,13 @@ async function routeAppCall(
     writeJson(response, 200, await options.appCallRouter.handle(session, call));
   } catch (error) {
     if (error instanceof AppCallRouterError) {
-      writeError(response, error.code === "app_tool_not_allowed" ? 403 : 409, error.code);
+      let status = 409;
+      if (error.code === "rate_limited") {
+        status = 429;
+      } else if (error.code === "app_tool_not_allowed") {
+        status = 403;
+      }
+      writeError(response, status, error.code);
       return;
     }
     writeJson(response, 200, { content: [], isError: true });
