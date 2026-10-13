@@ -16,6 +16,7 @@ import type {
 export { REFERENCE_CSP };
 export type { AppCall, AppResourceReader, ReferenceHostDependencies } from "./types.js";
 export type { AppResourceRead, HostDiagnosticCode } from "./resource.js";
+export { UiSession, UI_SESSION_SPAN, type UiSessionContext } from "./ui-session.js";
 
 let processToken: string | undefined;
 
@@ -46,6 +47,8 @@ export interface ReferenceHost {
   readonly token: string;
   /** Local launch URL with the token and first configured resource in its fragment. */
   readonly url: string;
+  /** Ends all active UI-session spans when the owning run resumes. */
+  endUiSessions(): void;
   /** Closes the local server. */
   close(): Promise<void>;
 }
@@ -97,6 +100,14 @@ function createAppRegistry(config: HostConfig): {
   const appConfigs = new Map(config.apps.map((app) => [app.id, app]));
   const sessions = new Map<string, AppInstance>();
   return { apps, appConfigs, sessions };
+}
+
+function scheduleUiSessionExpiry(callback: () => void, delayMs: number): () => void {
+  const timer = setTimeout(callback, delayMs);
+  timer.unref();
+  return () => {
+    clearTimeout(timer);
+  };
 }
 
 async function startServer(
@@ -180,16 +191,24 @@ export async function createReferenceHost(
         `[::1]:${String(port)}`,
         `localhost:${String(port)}`,
       ],
+      scheduleUiSessionExpiry: dependencies.scheduleUiSessionExpiry ?? scheduleUiSessionExpiry,
     }),
   );
   port = await startServer(server, config, host);
   origin = formatOrigin(host, port);
+  const endUiSessions = (): void => {
+    for (const instance of registry.sessions.values()) {
+      instance.end();
+    }
+  };
   return {
     origin,
     token,
     url: createLaunchUrl(origin, token, config),
+    endUiSessions,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        endUiSessions();
         server.close((error) => {
           if (error === undefined) {
             resolve();

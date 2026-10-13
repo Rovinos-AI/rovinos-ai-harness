@@ -18,6 +18,7 @@ const expectedSpanNames = [
   "harness.model_call",
   "harness.run",
   "harness.tool_call",
+  "harness.ui_session",
 ];
 const expectedLogNames = [
   "harness.safe.approval_wait",

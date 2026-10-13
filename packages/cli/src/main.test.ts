@@ -200,6 +200,7 @@ describe("CLI main", () => {
       "serve",
       "run",
       "resume",
+      "approvals",
       "inspect",
       "cancel",
       "context",
