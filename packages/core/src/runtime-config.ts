@@ -29,7 +29,7 @@ export interface RuntimeOverrides {
   readonly dataDir?: string;
   /** Directory used to resolve role prompt and result-schema references. */
   readonly roleConfigDirectory?: string;
-  /** Open existing SQLite storage without schema initialization or writes. */
+  /** Open existing storage without schema initialization or writes. */
   readonly readOnlyStore?: boolean;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;

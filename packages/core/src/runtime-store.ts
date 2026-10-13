@@ -13,6 +13,7 @@ import {
   type EventStore,
 } from "@harness/store";
 import type { SecretRef, StoreConfig } from "@harness/schemas";
+import type { RuntimeOverrides } from "./runtime-config.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 
 /** Inputs shared by runtime and CLI configured-store operations. */
@@ -24,6 +25,23 @@ export interface ConfiguredStoreOptions {
   readonly secretResolver?: {
     resolve(ref: SecretRef): Promise<{ reveal(): string }>;
   };
+}
+
+/** Runtime store selection, including an optional embedding-provided store. */
+export async function createRuntimeStore(
+  config: { readonly store?: StoreConfig },
+  overrides: RuntimeOverrides,
+  clock: Clock,
+): Promise<EventStore> {
+  if (overrides.store !== undefined) {
+    return overrides.store;
+  }
+  return openConfiguredStore(config, {
+    clock,
+    readOnly: overrides.readOnlyStore === true,
+    ...(overrides.dataDir === undefined ? {} : { dataDir: overrides.dataDir }),
+    ...(overrides.secretResolver === undefined ? {} : { secretResolver: overrides.secretResolver }),
+  });
 }
 
 async function postgresConnectionString(

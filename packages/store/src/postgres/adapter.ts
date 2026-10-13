@@ -19,11 +19,7 @@ import {
   type SnapshotRow,
   validateSnapshotAppend,
 } from "../codec.js";
-import {
-  InvalidEventError,
-  StoreReadOnlyError,
-  StoreUnavailableError,
-} from "../errors.js";
+import { InvalidEventError, StoreReadOnlyError, StoreUnavailableError } from "../errors.js";
 import {
   snapshotStoreOptionsSchema,
   systemClock,
@@ -83,7 +79,7 @@ export class PostgresEventStore implements EventStore {
    * Open a Postgres connection pool and initialize its event-store schema.
    *
    * @param connectionString Postgres connection URL.
-   * @param options Pool size and schema selection.
+   * @param options Pool size, schema selection, and validation-only read-only mode.
    * @param codec Codec used to store content separately from event metadata.
    * @param clock Clock supplying timestamps for sink-cursor updates.
    */

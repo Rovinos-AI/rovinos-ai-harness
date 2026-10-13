@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  RunConfigSchema,
-  StoreConfigSchema,
-} from "@harness/schemas";
+import { RunConfigSchema, StoreConfigSchema } from "@harness/schemas";
 import { PostgresEventStore } from "@harness/store";
 import { expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
@@ -24,7 +21,9 @@ vi.mock("pg", () => ({
 
 it("creates the configured Postgres store and resolves its connection with the injected resolver", async () => {
   postgresPool.ended = false;
-  const resolve = vi.fn(() => Promise.resolve({ reveal: () => "postgresql://harness@localhost/test" }));
+  const resolve = vi.fn(() =>
+    Promise.resolve({ reveal: () => "postgresql://harness@localhost/test" }),
+  );
   const runtime = await createRuntime(
     {
       run: RunConfigSchema.parse({}),
