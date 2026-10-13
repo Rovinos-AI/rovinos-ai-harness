@@ -142,6 +142,7 @@ const approvalRequestedEvent = z
   })
   .strict();
 
+// V1 resolutions predate this field and all represented human choices.
 const approvalResolvedEvent = z
   .object({
     ...eventEnvelopeShape,

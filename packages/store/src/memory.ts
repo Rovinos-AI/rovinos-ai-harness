@@ -387,8 +387,7 @@ export class InMemoryEventStore implements EventStore {
   ): Promise<boolean> {
     const current = this.approvalNotifications.get(approvalId);
     if (
-      current === undefined ||
-      current.runId !== runId ||
+      current?.runId !== runId ||
       current.claimedAt !== claimedAt ||
       current.sentAt !== undefined
     ) {

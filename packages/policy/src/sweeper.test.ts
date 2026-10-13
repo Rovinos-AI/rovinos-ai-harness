@@ -110,8 +110,7 @@ class FakeSweepStore implements ApprovalSweepStore {
   ): Promise<boolean> {
     const current = this.notificationClaims.get(approvalId);
     if (
-      current === undefined ||
-      current.runId !== runId ||
+      current?.runId !== runId ||
       current.claimedAt !== claimedAt ||
       current.sentAt !== undefined
     ) {
@@ -147,8 +146,8 @@ class FakeSweepStore implements ApprovalSweepStore {
     if (events === undefined) {
       throw Object.assign(new Error("Run was deleted."), { code: "approval_not_found" });
     }
-    const last = events?.at(-1);
-    const request = events?.find(
+    const last = events.at(-1);
+    const request = events.find(
       (event): event is Extract<StoredEvent, { type: "approval_requested" }> =>
         event.type === "approval_requested" && event.approvalId === approvalId,
     );

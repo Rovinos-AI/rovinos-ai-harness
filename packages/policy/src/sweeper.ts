@@ -161,13 +161,14 @@ async function expireApproval(
   }
 }
 
-async function notifyApproval(
-  store: ApprovalSweepStore,
-  notifier: Notifier,
-  notification: ApprovalNotification,
-  claimedAt: number,
-  sentAt: () => number,
-): Promise<boolean> {
+async function notifyApproval(options: {
+  readonly store: ApprovalSweepStore;
+  readonly notifier: Notifier;
+  readonly notification: ApprovalNotification;
+  readonly claimedAt: number;
+  readonly sentAt: () => number;
+}): Promise<boolean> {
+  const { store, notifier, notification, claimedAt, sentAt } = options;
   if (
     !(await store.claimApprovalNotification(
       notification.approvalId,
@@ -205,6 +206,54 @@ async function notifyApproval(
   return true;
 }
 
+type ApprovalSweepOutcome = "expired" | "escalated" | "failed" | "skipped";
+
+async function sweepPendingApproval(options: {
+  readonly store: ApprovalSweepStore;
+  readonly notifier: Notifier;
+  readonly clock: ApprovalSweepClock;
+  readonly runId: Id;
+  readonly pending: PendingApproval;
+  readonly now: number;
+}): Promise<ApprovalSweepOutcome> {
+  try {
+    const { request, intent } = options.pending;
+    if (request.expiresAt !== undefined && options.now >= request.expiresAt) {
+      return (await expireApproval(options.store, options.runId, request.approvalId))
+        ? "expired"
+        : "skipped";
+    }
+    const escalateAfterMs = intent?.policyEscalateAfterMs;
+    const payload = ApprovalPayloadSchema.safeParse(request.payload);
+    if (
+      escalateAfterMs === undefined ||
+      options.now < request.ts ||
+      options.now - request.ts < escalateAfterMs ||
+      !payload.success
+    ) {
+      return "skipped";
+    }
+    const notification = ApprovalNotificationSchema.parse({
+      runId: options.runId,
+      approvalId: request.approvalId,
+      toolId: payload.data.toolId,
+      ruleId: payload.data.ruleId,
+      ageMs: options.now - request.ts,
+    });
+    return (await notifyApproval({
+      store: options.store,
+      notifier: options.notifier,
+      notification,
+      claimedAt: options.now,
+      sentAt: () => options.clock.now(),
+    }))
+      ? "escalated"
+      : "skipped";
+  } catch {
+    return "failed";
+  }
+}
+
 /**
  * Deny expired approvals and send each due escalation notification once.
  *
@@ -227,40 +276,9 @@ export async function sweepApprovals(options: {
   for (const runId of await suspendedRunIds(options.store)) {
     for (const pending of await pendingForRun(options.store, runId)) {
       result.examined += 1;
-      try {
-        const { request, intent } = pending;
-        if (request.expiresAt !== undefined && now >= request.expiresAt) {
-          if (await expireApproval(options.store, runId, request.approvalId)) {
-            result.expired += 1;
-          }
-          continue;
-        }
-        const escalateAfterMs = intent?.policyEscalateAfterMs;
-        const payload = ApprovalPayloadSchema.safeParse(request.payload);
-        if (
-          escalateAfterMs === undefined ||
-          now < request.ts ||
-          now - request.ts < escalateAfterMs ||
-          !payload.success
-        ) {
-          continue;
-        }
-        const notification = ApprovalNotificationSchema.parse({
-          runId,
-          approvalId: request.approvalId,
-          toolId: payload.data.toolId,
-          ruleId: payload.data.ruleId,
-          ageMs: now - request.ts,
-        });
-        if (
-          await notifyApproval(options.store, options.notifier, notification, now, () =>
-            options.clock.now(),
-          )
-        ) {
-          result.escalated += 1;
-        }
-      } catch {
-        result.failed += 1;
+      const outcome = await sweepPendingApproval({ ...options, runId, pending, now });
+      if (outcome === "expired" || outcome === "escalated" || outcome === "failed") {
+        result[outcome] += 1;
       }
     }
   }

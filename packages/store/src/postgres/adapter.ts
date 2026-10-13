@@ -401,30 +401,12 @@ export class PostgresEventStore implements EventStore {
     }
   }
 
-  /** {@inheritDoc EventStore.claimApprovalNotification} */
-  claimApprovalNotification(
-    approvalId: Id,
-    runId: Id,
-    claimedAt: number,
-    leaseMs: number,
-  ): Promise<boolean> {
-    return this.approvalNotifications.claim(approvalId, runId, claimedAt, leaseMs);
-  }
-
-  /** {@inheritDoc EventStore.markApprovalNotificationSent} */
-  markApprovalNotificationSent(
-    approvalId: Id,
-    runId: Id,
-    claimedAt: number,
-    sentAt: number,
-  ): Promise<boolean> {
-    return this.approvalNotifications.markSent(approvalId, runId, claimedAt, sentAt);
-  }
-
-  /** {@inheritDoc EventStore.releaseApprovalNotification} */
-  releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void> {
-    return this.approvalNotifications.release(approvalId, runId, claimedAt);
-  }
+  claimApprovalNotification: EventStore["claimApprovalNotification"] = (...args) =>
+    this.approvalNotifications.claim(...args);
+  markApprovalNotificationSent: EventStore["markApprovalNotificationSent"] = (...args) =>
+    this.approvalNotifications.markSent(...args);
+  releaseApprovalNotification: EventStore["releaseApprovalNotification"] = (...args) =>
+    this.approvalNotifications.release(...args);
 
   /** {@inheritDoc EventStore.close} */
   async close(): Promise<void> {
