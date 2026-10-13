@@ -33,7 +33,7 @@ sandbox:
     token: env:SANDBOX_RUNNER_TOKEN
 ```
 
-The runner is intended for the internal Compose `sandbox` network; do not publish its port. Enable its Compose profile with `docker compose --profile sandbox up` and provide the token through the environment or a secret file.
+The runner is intended for the internal Compose `sandbox` network; do not publish its port. Enable its Compose profile with `docker compose --profile sandbox up` and provide `SANDBOX_RUNNER_TOKEN` through a protected environment file (`--env-file`) or deployment secret manager.
 
 Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. CLI scheduling and vault-purge wiring are deferred to task 20.x; the retention job supports dry runs and invokes a per-run purge hook after deletion.
 

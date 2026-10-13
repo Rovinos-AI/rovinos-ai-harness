@@ -34,6 +34,10 @@ export interface RemoteSandboxBackendOptions {
   readonly fetcher?: typeof fetch;
 }
 
+function wasAborted(candidate: AbortSignal): boolean {
+  return candidate.aborted;
+}
+
 function abortedResult(): ExecResult {
   return {
     exitCode: null,
@@ -49,26 +53,30 @@ function abortedResult(): ExecResult {
 }
 
 async function readBoundedResponse(response: Response, maxBytes: number): Promise<string> {
-  const reader = response.body?.getReader();
-  if (reader === undefined) {
+  if (response.body === null) {
     return "";
   }
+  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let text = "";
   let bytes = 0;
+  let finished = false;
   try {
-    while (true) {
+    while (!finished) {
       const chunk = await reader.read();
       if (chunk.done) {
-        return text + decoder.decode();
+        text += decoder.decode();
+        finished = true;
+      } else {
+        bytes += chunk.value.byteLength;
+        if (bytes > maxBytes) {
+          await reader.cancel();
+          throw new RemoteSandboxError("sandbox_unavailable");
+        }
+        text += decoder.decode(chunk.value, { stream: true });
       }
-      bytes += chunk.value.byteLength;
-      if (bytes > maxBytes) {
-        await reader.cancel();
-        throw new RemoteSandboxError("sandbox_unavailable");
-      }
-      text += decoder.decode(chunk.value, { stream: true });
     }
+    return text;
   } finally {
     reader.releaseLock();
   }
@@ -106,16 +114,17 @@ export class RemoteSandboxBackend implements SandboxBackend {
       return abortedResult();
     }
     const controller = new AbortController();
-    let timedOut = false;
+    const timeoutReason = new DOMException("The sandbox request timed out.", "TimeoutError");
     const timeoutMs = Math.min(
       MAX_EXEC_TIMEOUT_MS + this.#timeoutGraceMs,
       spec.timeoutMs + this.#timeoutGraceMs,
     );
     const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
+      controller.abort(timeoutReason);
     }, timeoutMs);
-    const abort = (): void => controller.abort();
+    const abort = (): void => {
+      controller.abort();
+    };
     signal.addEventListener("abort", abort, { once: true });
 
     try {
@@ -150,10 +159,10 @@ export class RemoteSandboxBackend implements SandboxBackend {
       if (error instanceof RemoteSandboxError) {
         throw error;
       }
-      if (timedOut) {
+      if (controller.signal.reason === timeoutReason) {
         throw new RemoteSandboxError("sandbox_timeout");
       }
-      if (signal.aborted) {
+      if (wasAborted(signal)) {
         return abortedResult();
       }
       throw new RemoteSandboxError("sandbox_unavailable");

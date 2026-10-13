@@ -68,7 +68,7 @@ function processHasExited(pid: number): boolean {
 }
 
 async function waitForProcessExit(pid: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
     if (processHasExited(pid)) {
       return true;
     }

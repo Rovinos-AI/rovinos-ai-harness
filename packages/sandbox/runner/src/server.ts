@@ -37,7 +37,7 @@ interface RunnerResponse {
 export interface RunnerServerOptions {
   /** Authentication credential shared only by the harness and runner. */
   readonly token: string;
-  /** Hostnames accepted in HTTP Host and Origin headers. */
+  /** Exact authorities accepted in HTTP Host and Origin headers. */
   readonly allowedHosts: readonly string[];
   /** Workspace root mounted into the runner container. */
   readonly workspaceRoot: string;
@@ -72,19 +72,19 @@ function hashToken(token: string): Buffer {
 
 function authorized(request: RunnerRequest, tokenHash: Buffer): boolean {
   const header = request.headers.authorization;
-  if (header === undefined || !header.startsWith("Bearer ")) {
+  if (header?.startsWith("Bearer ") !== true) {
     return false;
   }
   const candidateHash = hashToken(header.slice("Bearer ".length));
   return candidateHash.byteLength === TOKEN_HASH_BYTES && timingSafeEqual(tokenHash, candidateHash);
 }
 
-function hostnameFrom(value: string | undefined): string | undefined {
+function authorityFrom(value: string | undefined): string | undefined {
   if (
     value === undefined ||
     value.length === 0 ||
     value.trim() !== value ||
-    /[\/@?#]/u.test(value)
+    /[/@?#]/u.test(value)
   ) {
     return undefined;
   }
@@ -93,7 +93,7 @@ function hostnameFrom(value: string | undefined): string | undefined {
     if (url.username !== "" || url.password !== "" || url.pathname !== "/" || url.search !== "") {
       return undefined;
     }
-    return url.hostname.toLowerCase();
+    return url.host.toLowerCase();
   } catch {
     return undefined;
   }
@@ -112,7 +112,7 @@ function validOrigin(origin: string | undefined, allowedHosts: ReadonlySet<strin
       url.pathname === "/" &&
       url.search === "" &&
       url.hash === "" &&
-      allowedHosts.has(url.hostname.toLowerCase())
+      allowedHosts.has(url.host.toLowerCase())
     );
   } catch {
     return false;
@@ -120,8 +120,8 @@ function validOrigin(origin: string | undefined, allowedHosts: ReadonlySet<strin
 }
 
 function validHost(request: RunnerRequest, allowedHosts: ReadonlySet<string>): boolean {
-  const hostname = hostnameFrom(request.headers.host);
-  return hostname !== undefined && allowedHosts.has(hostname);
+  const authority = authorityFrom(request.headers.host);
+  return authority !== undefined && allowedHosts.has(authority);
 }
 
 async function readRequestBody(
@@ -149,6 +149,17 @@ function writeError(response: RunnerResponse, status: number, code: string): voi
   sendJson(response, status, { code });
 }
 
+function validateRunnerOptions(options: RunnerServerOptions): ReadonlySet<string> {
+  if (
+    options.token.length === 0 ||
+    options.allowedHosts.length === 0 ||
+    options.allowedHosts.some((host) => authorityFrom(host) !== host.toLowerCase())
+  ) {
+    throw new RunnerConfigurationError();
+  }
+  return new Set(options.allowedHosts.map((host) => host.toLowerCase()));
+}
+
 /**
  * Creates the HTTP request handler separately so its policy can be tested without opening sockets.
  *
@@ -158,19 +169,12 @@ function writeError(response: RunnerResponse, status: number, code: string): voi
 export function createRunnerRequestHandler(
   options: RunnerServerOptions,
 ): (request: RunnerRequest, response: RunnerResponse) => Promise<void> {
-  if (
-    options.token.length === 0 ||
-    options.allowedHosts.length === 0 ||
-    options.allowedHosts.some((host) => hostnameFrom(host) !== host.toLowerCase())
-  ) {
-    throw new RunnerConfigurationError();
-  }
-  const allowedHosts = new Set(options.allowedHosts.map((host) => host.toLowerCase()));
+  const allowedHosts = validateRunnerOptions(options);
   const tokenHash = hashToken(options.token);
   const runExec =
     options.execute ??
-    ((runId: z.infer<typeof Id>, spec: ExecSpec, signal: AbortSignal) =>
-      executeSpec(runId, spec, signal, options.workspaceRoot));
+    ((_runId: z.infer<typeof Id>, spec: ExecSpec, signal: AbortSignal) =>
+      executeSpec({ spec, signal, workspaceRoot: options.workspaceRoot }));
   let activeExec = false;
 
   return async (request, response) => {
@@ -251,7 +255,11 @@ export function createRunnerServer(options: RunnerServerOptions): Server {
 /** Starts the runner server on its configured internal container port. */
 export function startRunnerServer(): Server {
   const token = process.env.SANDBOX_RUNNER_TOKEN;
-  const hostsText = process.env.SANDBOX_ALLOWED_HOSTS ?? "sandbox-runner";
+  const port = Number(process.env.SANDBOX_RUNNER_PORT ?? 8080);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new RunnerConfigurationError();
+  }
+  const hostsText = process.env.SANDBOX_ALLOWED_HOSTS ?? `sandbox-runner:${String(port)}`;
   const workspaceRoot = process.env.SANDBOX_WORKSPACE_ROOT ?? "/workspaces";
   if (token === undefined) {
     throw new RunnerConfigurationError();
@@ -261,10 +269,6 @@ export function startRunnerServer(): Server {
     allowedHosts: hostsText.split(",").map((host) => host.trim()),
     workspaceRoot: resolve(workspaceRoot),
   });
-  const port = Number(process.env.SANDBOX_RUNNER_PORT ?? 8080);
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new RunnerConfigurationError();
-  }
   server.listen(port, "0.0.0.0");
   return server;
 }

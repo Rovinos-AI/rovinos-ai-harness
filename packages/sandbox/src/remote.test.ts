@@ -36,11 +36,11 @@ function backend(fetcher: typeof fetch, options: { timeoutGraceMs?: number } = {
 
 describe("RemoteSandboxBackend", () => {
   it("sends the run request with bearer authentication and validates the response", async () => {
-    const fetcher: typeof fetch = vi.fn(async (_url, init) => {
+    const fetcher: typeof fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(
         ["Bearer", "synthetic-runner-token"].join(" "),
       );
-      return response(result);
+      return Promise.resolve(response(result));
     });
 
     await expect(backend(fetcher).exec(runId, spec, new AbortController().signal)).resolves.toEqual(
@@ -54,20 +54,26 @@ describe("RemoteSandboxBackend", () => {
 
   it("maps busy and timeout status codes", async () => {
     await expect(
-      backend(async () => response({}, 409)).exec(runId, spec, new AbortController().signal),
+      backend(() => Promise.resolve(response({}, 409))).exec(
+        runId,
+        spec,
+        new AbortController().signal,
+      ),
     ).rejects.toMatchObject({ code: "sandbox_busy" });
     await expect(
-      backend(async () => response({}, 504)).exec(runId, spec, new AbortController().signal),
+      backend(() => Promise.resolve(response({}, 504))).exec(
+        runId,
+        spec,
+        new AbortController().signal,
+      ),
     ).rejects.toMatchObject({ code: "sandbox_timeout" });
   });
 
   it("maps other HTTP failures, invalid responses, and fetch failures to unavailable", async () => {
     const failingFetchers: (typeof fetch)[] = [
-      async () => response({}, 500),
-      async () => new Response("not json"),
-      async () => {
-        throw new Error("synthetic transport error");
-      },
+      () => Promise.resolve(response({}, 500)),
+      () => Promise.resolve(new Response("not json")),
+      () => Promise.reject(new Error("synthetic transport error")),
     ];
     for (const fetcher of failingFetchers) {
       await expect(
@@ -86,7 +92,7 @@ describe("RemoteSandboxBackend", () => {
       ...spec,
       limits: { ...spec.limits, outputBytes: 400_000 },
     };
-    const fetcher: typeof fetch = async () => response(largeResult);
+    const fetcher: typeof fetch = () => Promise.resolve(response(largeResult));
 
     await expect(
       backend(fetcher).exec(runId, largeSpec, new AbortController().signal),
@@ -108,9 +114,15 @@ describe("RemoteSandboxBackend", () => {
 
   it("returns an aborted result when the caller cancels an in-flight request", async () => {
     const controller = new AbortController();
-    const fetcher: typeof fetch = async (_url, init) =>
+    const fetcher: typeof fetch = (_url, init) =>
       new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            reject(new Error("aborted"));
+          },
+          { once: true },
+        );
         controller.abort();
       });
 
@@ -121,9 +133,15 @@ describe("RemoteSandboxBackend", () => {
   });
 
   it("maps an expired client deadline to sandbox_timeout", async () => {
-    const fetcher: typeof fetch = async (_url, init) =>
+    const fetcher: typeof fetch = (_url, init) =>
       new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            reject(new Error("aborted"));
+          },
+          { once: true },
+        );
       });
     const shortSpec = { ...spec, timeoutMs: 1 };
 
@@ -139,7 +157,12 @@ describe("RemoteSandboxBackend", () => {
     { url: "http://sandbox-runner:8080", token: "" },
   ])("rejects unsafe runner configuration", ({ url, token }) => {
     expect(
-      () => new RemoteSandboxBackend({ url, token, fetcher: async () => response(result) }),
+      () =>
+        new RemoteSandboxBackend({
+          url,
+          token,
+          fetcher: () => Promise.resolve(response(result)),
+        }),
     ).toThrow(RemoteSandboxError);
   });
 });

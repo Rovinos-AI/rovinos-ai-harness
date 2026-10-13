@@ -110,7 +110,7 @@ async function requestRunner(
   options: { readonly token?: string; readonly host?: string; readonly origin?: string } = {},
 ): Promise<z.infer<typeof HttpResponseSchema>> {
   const headers = {
-    host: options.host ?? "sandbox-runner",
+    host: options.host ?? "sandbox-runner:8080",
     ...(options.token === undefined ? {} : { authorization: ["Bearer", options.token].join(" ") }),
     ...(options.origin === undefined ? {} : { origin: options.origin }),
     "content-type": "application/json",
@@ -237,15 +237,18 @@ describe("sandbox runner Compose service", () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(Number(result.stdout)).toBeLessThan(64);
+    expect(Number(result.stdout)).toBeLessThan(32);
   }, 30_000);
 
   // threat: T-08
   it("contains a memory-hogging process", async () => {
     const result = await runExec(
-      makeSpec(["/usr/bin/dd", "if=/dev/zero", "of=/dev/null", "bs=256M", "count=1", "status=none"], {
-        limits: { memoryMb: 128, pids: 16, outputBytes: 128, cpuSeconds: 5 },
-      }),
+      makeSpec(
+        ["/usr/bin/dd", "if=/dev/zero", "of=/dev/null", "bs=256M", "count=1", "status=none"],
+        {
+          limits: { memoryMb: 128, pids: 16, outputBytes: 128, cpuSeconds: 5 },
+        },
+      ),
     );
 
     expect(result.exitCode).not.toBe(0);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from "node:child_process";
 import process from "node:process";
-import { HarnessError, type Id } from "@harness/schemas";
+import { HarnessError } from "@harness/schemas";
 import { resolveWorkspacePath } from "../../src/inprocess.js";
 import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 
@@ -12,7 +12,9 @@ const systemClock: Clock = {
   now: () => Date.now(),
   schedule: (callback, delayMs) => {
     const timer = setTimeout(callback, delayMs);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+    };
   },
 };
 
@@ -87,38 +89,35 @@ function prlimitArgs(spec: ExecSpec): string[] {
   ];
 }
 
-/**
- * Runs a command through util-linux prlimit in the workspace with all child limits applied.
- *
- * @param runId - Run owning the command.
- * @param spec - Validated command and resource limits.
- * @param signal - Signal that cancels and kills the command process group.
- * @param workspaceRoot - Trusted workspace directory mounted in the runner.
- * @param clock - Clock used to measure duration and schedule timeout enforcement.
- * @returns Bounded command output and process metadata.
- */
-export async function executeSpec(
-  _runId: Id,
-  spec: ExecSpec,
-  signal: AbortSignal,
-  workspaceRoot: string,
-  clock: Clock = systemClock,
-): Promise<ExecResult> {
-  const startedAt = clock.now();
-  if (signal.aborted) {
-    return {
-      exitCode: null,
-      signal: "SIGKILL",
-      stdout: "",
-      stderr: "",
-      stdoutBytes: 0,
-      stderrBytes: 0,
-      truncated: false,
-      timedOut: false,
-      durationMs: 0,
-    };
-  }
-  const cwd = await resolveWorkspacePath(workspaceRoot, spec.cwd);
+function abortedResult(): ExecResult {
+  return {
+    exitCode: null,
+    signal: "SIGKILL",
+    stdout: "",
+    stderr: "",
+    stdoutBytes: 0,
+    stderrBytes: 0,
+    truncated: false,
+    timedOut: false,
+    durationMs: 0,
+  };
+}
+
+interface ProcessOptions {
+  spec: ExecSpec;
+  cwd: string;
+  signal: AbortSignal;
+  clock: Clock;
+  startedAt: number;
+}
+
+function executeProcess({
+  spec,
+  cwd,
+  signal,
+  clock,
+  startedAt,
+}: ProcessOptions): Promise<ExecResult> {
   const output = new CapturedOutput(spec.limits.outputBytes);
   let child: ReturnType<typeof spawn>;
   try {
@@ -154,8 +153,12 @@ export async function executeSpec(
         killProcessGroup(child.pid);
       }
     };
-    stdout.on("data", (chunk: Buffer) => output.add("stdout", chunk));
-    stderr.on("data", (chunk: Buffer) => output.add("stderr", chunk));
+    stdout.on("data", (chunk: Buffer) => {
+      output.add("stdout", chunk);
+    });
+    stderr.on("data", (chunk: Buffer) => {
+      output.add("stderr", chunk);
+    });
     stdin.on("error", () => undefined);
     child.once("error", () => {
       spawnFailed = true;
@@ -184,4 +187,26 @@ export async function executeSpec(
     }
     stdin.end(spec.stdin ?? "");
   });
+}
+
+/**
+ * Runs a command through util-linux prlimit in the workspace with all child limits applied.
+ *
+ * @param options - Validated command, cancellation signal, workspace, and clock.
+ * @returns Bounded command output and process metadata.
+ */
+export async function executeSpec(options: {
+  spec: ExecSpec;
+  signal: AbortSignal;
+  workspaceRoot: string;
+  clock?: Clock;
+}): Promise<ExecResult> {
+  const { spec, signal, workspaceRoot } = options;
+  const clock = options.clock ?? systemClock;
+  const startedAt = clock.now();
+  if (signal.aborted) {
+    return abortedResult();
+  }
+  const cwd = await resolveWorkspacePath(workspaceRoot, spec.cwd);
+  return executeProcess({ spec, cwd, signal, clock, startedAt });
 }

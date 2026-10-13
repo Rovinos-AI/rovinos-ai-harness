@@ -100,7 +100,7 @@ function makeOptions(overrides: Partial<RunnerServerOptions> = {}): RunnerServer
     token,
     allowedHosts: ["runner.test"],
     workspaceRoot: "/tmp",
-    execute: async () => result,
+    execute: () => Promise.resolve(result),
     ...overrides,
   };
 }
@@ -170,6 +170,10 @@ describe("runner HTTP request handler", () => {
       handler,
       makeRequest({ host: "untrusted.test", authorization: "Bearer " + token }),
     );
+    const wrongHostPort = await call(
+      handler,
+      makeRequest({ host: "runner.test:8080", authorization: "Bearer " + token }),
+    );
     const malformedHost = await call(
       handler,
       makeRequest({ host: "http://runner.test", authorization: "Bearer " + token }),
@@ -191,6 +195,7 @@ describe("runner HTTP request handler", () => {
     );
 
     expect(wrongHost.status).toBe(400);
+    expect(wrongHostPort.status).toBe(400);
     expect(malformedHost.status).toBe(400);
     expect(wrongOrigin.status).toBe(400);
     expect(validOrigin.status).toBe(200);
@@ -221,7 +226,7 @@ describe("runner HTTP request handler", () => {
   });
 
   it("executes an authenticated request and returns a schema-validated result", async () => {
-    const execute = vi.fn(async () => result);
+    const execute = vi.fn(() => Promise.resolve(result));
     const handler = createRunnerRequestHandler(makeOptions({ execute }));
 
     const response = await call(
@@ -297,10 +302,10 @@ describe("runner HTTP request handler", () => {
 
   it("returns a safe execution failure when the executor or result contract fails", async () => {
     const failing = createRunnerRequestHandler(
-      makeOptions({ execute: async () => Promise.reject(new Error("synthetic failure")) }),
+      makeOptions({ execute: () => Promise.reject(new Error("synthetic failure")) }),
     );
     const invalidResult = createRunnerRequestHandler(
-      makeOptions({ execute: async () => ({ ...result, exitCode: -1 }) as ExecResult }),
+      makeOptions({ execute: () => Promise.resolve({ ...result, exitCode: -1 }) }),
     );
     const request = () => makeRequest({ authorization: "Bearer " + token, body: makePayload() });
 
