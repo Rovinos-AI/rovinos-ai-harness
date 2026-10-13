@@ -4,35 +4,39 @@
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
 // Not wired yet: harness store migrate / store purge (20.6 -> #386)
 // Not wired yet: vault purge hook (12.6 -> #108)
-// Not wired yet: approvals --reveal (20.6 -> #373)
+// Not wired yet: approvals --reveal (17.10 -> #373)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
+// Not wired yet: runtime vault from config (13.12 -> #389)
 // Not wired yet: storage-boundary tokenization (13.8 -> #81)
 import { Command } from "commander";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { ExportResultCode } from "@opentelemetry/core";
+import Database from "better-sqlite3";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDefaultContext, main } from "../packages/cli/src/main.js";
-import type { CliContext } from "../packages/cli/src/command.js";
-import { ExitCode } from "../packages/cli/src/exit-codes.js";
-import { createOutput } from "../packages/cli/src/output.js";
-import { type ModelCompletion, type ToolPort } from "@harness/core";
+import {
+  createDefaultContext,
+  createOutput,
+  ExitCode,
+  main,
+  type CliContext,
+} from "@harness/cli/programmatic";
+import { CompositeSecretResolver } from "@harness/config";
+import { createRuntime, type ModelCompletion, type ToolPort } from "@harness/core";
 import { FakeModelPort } from "@harness/core/testing";
 import {
   ApprovalListResultSchema,
   ApprovalShowResultSchema,
   FakeClock,
   Id,
-  KeysConfigSchema,
   RunResultSchema,
   SequentialIdGenerator,
   StoreRetentionConfigSchema,
   parseJson,
 } from "@harness/schemas";
 import { SqliteEventStore, purgeExpiredRuns } from "@harness/store";
-import { emailDetector, PiiToolPort, Tokenizer } from "@harness/pii";
 import {
   attr,
   createTelemetrySdk,
@@ -41,8 +45,6 @@ import {
   listSpanDefinitions,
   type TelemetrySdkOptions,
 } from "@harness/telemetry";
-import { LocalKeyProvider, SqliteVault, AuditingVaultResolver } from "@harness/vault";
-import type { KeySecretResolver } from "@harness/vault";
 import type { JsonValue, Event } from "@harness/schemas";
 import type { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -50,7 +52,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const DAY_MS = 86_400_000;
 const KEY_REF = "env:HARNESS_E2E_KEY";
 const KEY_ID = "e2e-test";
-const ALLOW_TOOL = "synthetic.allow";
+const ALLOW_TOOL = "update_plan";
 const ASK_TOOL = "synthetic.ask";
 const logDefinition = defineLogRecord("harness.e2e.skeleton", {
   "harness.error.code": attr.code(),
@@ -69,7 +71,6 @@ interface Skeleton {
   readonly configPath: string;
   readonly dataDirectory: string;
   readonly eventStorePath: string;
-  readonly vaultPath: string;
   readonly canary: string;
   readonly clock: FakeClock;
   readonly ids: SequentialIdGenerator;
@@ -78,15 +79,16 @@ interface Skeleton {
   readonly callsAfterApproval: string[];
   readonly stdout: string[];
   readonly stderr: string[];
+  readonly approvalOutput: string[];
   readonly context: CliContext;
   readonly spans: ExportedSpan[];
   readonly logs: ExportedLogRecord[];
   readonly telemetry: ReturnType<typeof createTelemetrySdk>;
-  readonly vault: SqliteVault;
   runId?: Id;
   approvalId?: Id;
   eventStoreBytes?: Uint8Array;
-  snapshotWritten?: boolean;
+  snapshotBytes?: Uint8Array;
+  toolCallEvents?: readonly Event[];
 }
 
 let skeleton: Skeleton | undefined;
@@ -147,7 +149,7 @@ async function readEvents(store: SqliteEventStore, runId: Id) {
   return events;
 }
 
-async function invokeCli(args: readonly string[]): Promise<CliCapture> {
+async function invokeCli(args: readonly string[], captureOutput = true): Promise<CliCapture> {
   const current = fixture();
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -160,32 +162,22 @@ async function invokeCli(args: readonly string[]): Promise<CliCapture> {
   program.setOptionValue("config", current.configPath);
   const cliContext = createDefaultContext(program, out);
   cliContext.clock = current.clock;
-  const createDefaultRuntime = cliContext.createRuntime?.bind(cliContext);
-  if (createDefaultRuntime === undefined) {
-    throw new Error("The CLI default runtime factory is unavailable.");
-  }
   cliContext.createRuntime = (config, overrides) => {
-    const baseTool = syntheticTools(current.callsBeforeApproval, current.callsAfterApproval);
-    const tool = new PiiToolPort(baseTool, {
-      tokenizer: new Tokenizer({
-        vault: current.vault,
-        policy: config.pii,
-        detectors: { detect: (text) => emailDetector.detect(text) },
-      }),
-      config: config.pii,
-      resolver: new AuditingVaultResolver(current.vault, () => undefined),
-    });
-    return createDefaultRuntime(config, {
+    return createRuntime(config, {
       ...overrides,
       clock: current.clock,
       ids: current.ids,
       model: overrides?.model ?? current.model,
-      tool,
+      roleConfigDirectory: current.directory,
+      secretResolver: overrides?.secretResolver ?? new CompositeSecretResolver(),
+      tool: syntheticTools(current.callsBeforeApproval, current.callsAfterApproval),
     });
   };
   const code = await main(args, cliContext);
-  current.stdout.push(...stdout);
-  current.stderr.push(...stderr);
+  if (captureOutput) {
+    current.stdout.push(...stdout);
+    current.stderr.push(...stderr);
+  }
   return { code, stdout, stderr };
 }
 
@@ -201,7 +193,6 @@ beforeAll(async () => {
   const configPath = join(directory, "harness.yaml");
   const dataDirectory = join(directory, "data");
   const eventStorePath = join(dataDirectory, "harness.db");
-  const vaultPath = join(directory, "vault.sqlite");
   const canary = `canary.${directory.split("/").at(-1) ?? "fixture"}@example.test`;
   const key = Buffer.alloc(32, 29).toString("base64");
   previousConfig = process.env.HARNESS_CONFIG;
@@ -210,19 +201,6 @@ beforeAll(async () => {
   process.env.HARNESS_CONFIG = configPath;
   process.env.HARNESS_DATA_DIR = dataDirectory;
   process.env.HARNESS_E2E_KEY = key;
-  const keyConfig = {
-    currentKeyId: KEY_ID,
-    keys: [{ id: KEY_ID, secret: KEY_REF }],
-  };
-  const keySecretResolver: KeySecretResolver = {
-    resolve: () => Promise.resolve({ reveal: () => key }),
-  };
-  const vaultKeyProvider = new LocalKeyProvider({
-    config: KeysConfigSchema.parse(keyConfig),
-    secretResolver: keySecretResolver,
-    onWarning: () => undefined,
-  });
-  const vault = new SqliteVault(vaultPath, vaultKeyProvider, () => 1_000);
   const spans: ExportedSpan[] = [];
   const records: ExportedLogRecord[] = [];
   const spanExporter: TelemetrySdkOptions["spanExporter"] = {
@@ -258,7 +236,11 @@ beforeAll(async () => {
   const model = new FakeModelPort([
     completion(
       [
-        { callId: id(10), toolId: ALLOW_TOOL, args: { value: "synthetic" } },
+        {
+          callId: id(10),
+          toolId: ALLOW_TOOL,
+          args: { plan: { items: [], notes: canary } },
+        },
         { callId: id(11), toolId: ASK_TOOL, args: { email: canary } },
       ],
       "awaiting approval",
@@ -325,7 +307,6 @@ beforeAll(async () => {
     configPath,
     dataDirectory,
     eventStorePath,
-    vaultPath,
     canary,
     clock,
     ids,
@@ -334,18 +315,17 @@ beforeAll(async () => {
     callsAfterApproval,
     stdout: [],
     stderr: [],
+    approvalOutput: [],
     context: createDefaultContext(new Command(), createOutput()),
     spans,
     logs: records,
     telemetry,
-    vault,
   };
 });
 
 afterAll(async () => {
   const current = skeleton;
   if (current !== undefined) {
-    current.vault.close();
     await current.telemetry.tracerProvider.shutdown();
     await current.telemetry.loggerProvider.shutdown();
     await rm(current.directory, { recursive: true, force: true });
@@ -401,7 +381,6 @@ describe("run", () => {
       current.approvalId = pending.approvalId;
       const checkpoint = await store.latestSnapshot(run.runId);
       expect(checkpoint).toBeDefined();
-      current.snapshotWritten = checkpoint !== undefined;
     } finally {
       await store.close();
     }
@@ -415,17 +394,17 @@ describe("approval", () => {
     if (approvalId === undefined) {
       throw new Error("The approval id is not available.");
     }
-    const list = await invokeCli(["--json", "approvals", "list"]);
+    const list = await invokeCli(["--json", "approvals", "list"], false);
     expect(list.code).toBe(ExitCode.ok);
     const listed = jsonResult(ApprovalListResultSchema, list.stdout);
     expect(listed.approvals).toHaveLength(1);
     expect(listed.approvals[0]?.approvalId).toBe(approvalId);
 
-    const show = await invokeCli(["--json", "approvals", "show", approvalId, "--show-args"]);
+    const show = await invokeCli(["--json", "approvals", "show", approvalId, "--show-args"], false);
     expect(show.code).toBe(ExitCode.ok);
     const displayed = jsonResult(ApprovalShowResultSchema, show.stdout);
-    expect(JSON.stringify(displayed.args)).toContain("<EMAIL_1>");
-    expect(JSON.stringify({ ...list, ...show })).not.toContain(current.canary);
+    expect(displayed.approvalId).toBe(approvalId);
+    current.approvalOutput.push(...list.stdout, ...list.stderr, ...show.stdout, ...show.stderr);
     expect(current.callsAfterApproval).toEqual([]);
 
     const approved = await invokeCli(["--json", "approvals", "approve", approvalId, "--yes"]);
@@ -458,8 +437,33 @@ describe("resume", () => {
       expect(resolved).toBeGreaterThanOrEqual(0);
       expect(executed).toBeGreaterThan(resolved);
       expect(events.at(-1)).toMatchObject({ type: "run_status_changed", to: "completed" });
-      current.eventStoreBytes = await readFile(current.eventStorePath);
-      current.snapshotWritten = (await store.latestSnapshot(runId)) !== undefined;
+      current.toolCallEvents = events.filter(
+        (event) => event.type === "tool_intent" || event.type === "tool_result",
+      );
+      expect(await store.latestSnapshot(runId)).toBeDefined();
+      const database = new Database(current.eventStorePath, { readonly: true });
+      try {
+        const eventRows = database
+          .prepare<[], { readonly content_blob: string }>(
+            "SELECT content_blob FROM events ORDER BY global_seq",
+          )
+          .all();
+        const snapshotRows = database
+          .prepare<[], { readonly content_blob: string }>(
+            "SELECT content_blob FROM snapshots ORDER BY at_seq",
+          )
+          .all();
+        current.eventStoreBytes = Buffer.from(
+          eventRows.map(({ content_blob }) => content_blob).join("\n"),
+          "utf8",
+        );
+        current.snapshotBytes = Buffer.from(
+          snapshotRows.map(({ content_blob }) => content_blob).join("\n"),
+          "utf8",
+        );
+      } finally {
+        database.close();
+      }
     } finally {
       await store.close();
     }
@@ -494,7 +498,7 @@ describe("retention", () => {
 });
 
 describe("invariants", () => {
-  it("keeps the canary out of telemetry, CLI output, and plaintext vault storage", async () => {
+  it("keeps the canary out of telemetry, CLI output, and log captures", async () => {
     const current = fixture();
     await current.telemetry.tracerProvider.forceFlush();
     await current.telemetry.loggerProvider.forceFlush();
@@ -525,31 +529,42 @@ describe("invariants", () => {
     }
     expect(JSON.stringify(current.stdout)).not.toContain(current.canary);
     expect(JSON.stringify(current.stderr)).not.toContain(current.canary);
-    const runId = current.runId;
-    if (runId === undefined) {
-      throw new Error("The run id is not available.");
-    }
-    expect(await current.vault.listRawValues(runId)).toContain(current.canary);
-    expect((await readFile(current.vaultPath)).includes(Buffer.from(current.canary, "utf8"))).toBe(
-      false,
-    );
   });
 
+  // Not wired yet: runtime vault + PII tool boundary (13.12 -> #389)
+  it.fails("does not expose the synthetic canary in approval list or show output", () => {
+    const current = fixture();
+    expect(current.approvalOutput.join("")).not.toContain(current.canary);
+  });
+
+  // Not wired yet: PII tool boundary in core.createRuntime (13.12 -> #389)
+  it.fails("does not expose the synthetic canary in tool-call events", () => {
+    const current = fixture();
+    expect(current.toolCallEvents).toBeDefined();
+    expect(JSON.stringify(current.toolCallEvents)).not.toContain(current.canary);
+  });
+
+  // Not wired yet: model-input boundary (13.6 -> #150)
+  it.fails("does not send the synthetic canary in model requests", () => {
+    const current = fixture();
+    expect(JSON.stringify(current.model.requests)).not.toContain(current.canary);
+  });
+
+  // Not wired yet: runtime vault + PII tool boundary (13.12 -> #389)
   // Not wired yet: storage-boundary tokenization (13.8 -> #81)
-  it.fails("does not persist the synthetic canary in SQLite event-store bytes", () => {
+  it.fails("does not persist the synthetic canary in SQLite event-store content bytes", () => {
     const current = fixture();
     expect(current.eventStoreBytes).toBeDefined();
     const bytes = Buffer.from(current.eventStoreBytes ?? new Uint8Array()).toString("utf8");
     expect(bytes).not.toContain(current.canary);
   });
 
+  // Not wired yet: runtime vault + PII tool boundary (13.12 -> #389)
   // Not wired yet: storage-boundary tokenization (13.8 -> #81)
-  it.fails("does not persist the synthetic canary in SQLite snapshot bytes", () => {
+  it.fails("does not persist the synthetic canary in SQLite snapshot content bytes", () => {
     const current = fixture();
-    expect(current.snapshotWritten).toBe(true);
-    const snapshotBytes = current.eventStoreBytes;
-    expect(snapshotBytes).toBeDefined();
-    const bytes = Buffer.from(snapshotBytes ?? new Uint8Array()).toString("utf8");
+    expect(current.snapshotBytes).toBeDefined();
+    const bytes = Buffer.from(current.snapshotBytes ?? new Uint8Array()).toString("utf8");
     expect(bytes).not.toContain(current.canary);
   });
 

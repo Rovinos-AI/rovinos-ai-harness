@@ -1012,7 +1012,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@harness/cli@workspace:packages/cli":
+"@harness/cli@workspace:^, @harness/cli@workspace:packages/cli":
   version: 0.0.0-use.local
   resolution: "@harness/cli@workspace:packages/cli"
   dependencies:
@@ -5398,6 +5398,8 @@ __metadata:
   resolution: "rovinos-ai-harness@workspace:."
   dependencies:
     "@eslint-community/eslint-plugin-eslint-comments": "npm:4.8.1"
+    "@harness/cli": "workspace:^"
+    "@harness/config": "workspace:^"
     "@harness/context": "workspace:^"
     "@harness/core": "workspace:^"
     "@harness/eslint-plugin-harness": "workspace:^"
@@ -5416,6 +5418,7 @@ __metadata:
     "@types/spdx-expression-parse": "npm:4.0.0"
     "@vitest/coverage-v8": "npm:3.2.6"
     "@vitest/eslint-plugin": "npm:1.6.27"
+    better-sqlite3: "npm:13.0.3"
     commander: "npm:15.0.0"
     cspell: "npm:10.3.6"
     eslint: "npm:9.39.2"
