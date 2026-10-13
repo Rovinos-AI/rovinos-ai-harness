@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { metrics, type Counter } from "@opentelemetry/api";
+import { metrics, type Attributes, type Counter, type Meter } from "@opentelemetry/api";
 import type { Code } from "@harness/schemas";
 
 type NoMetricAttributes = Readonly<Record<string, never>>;
@@ -30,10 +30,10 @@ export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];
 /** Bounded reasons counted when an app call is rejected by the host. */
 export type HostAppRejectedReason = (typeof HOST_APP_REJECTED_REASONS)[number];
 interface TelemetryDropAttributes extends Readonly<Record<string, TelemetryDropReason>> {
-  readonly reason: TelemetryDropReason;
+  readonly "harness.telemetry.dropped.reason": TelemetryDropReason;
 }
 interface HostAppRejectedAttributes extends Readonly<Record<string, HostAppRejectedReason>> {
-  readonly reason: HostAppRejectedReason;
+  readonly "harness.host.app_rejected.reason": HostAppRejectedReason;
 }
 
 /** String-valued metric attributes are explicitly closed enumerations. */
@@ -43,50 +43,61 @@ export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
 } as const;
 
 /** Collector allowlist of metric names and their allowed datapoint attribute keys. */
-export const METRIC_ALLOWLIST: Record<Code, Code[]> = {
-  "harness.host.app_rejected": ["reason"],
+export const METRIC_ALLOWLIST = {
+  "harness.host.app_rejected": ["harness.host.app_rejected.reason"],
   "harness.sentinel.scope_reduced": [],
   "harness.sentinel.short_values_skipped": [],
-  "harness.telemetry.dropped": ["reason"],
-};
+  "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
+} as const satisfies Record<Code, readonly Code[]>;
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
 let hostAppRejectedCounter: Counter<HostAppRejectedAttributes> | undefined;
 let skippedShortValuesCounter: Counter<NoMetricAttributes> | undefined;
 let scopeReducedCounter: Counter<NoMetricAttributes> | undefined;
 
+function createCounter<TAttributes extends Attributes>(
+  name: keyof typeof METRIC_ALLOWLIST,
+  factory: (meter: Meter, name: keyof typeof METRIC_ALLOWLIST) => Counter<TAttributes>,
+): Counter<TAttributes> {
+  return factory(metrics.getMeter("@harness/telemetry"), name);
+}
+
 function getDroppedCounter(): Counter<TelemetryDropAttributes> {
-  droppedCounter ??= metrics
-    .getMeter("@harness/telemetry")
-    .createCounter<TelemetryDropAttributes>("harness.telemetry.dropped");
+  droppedCounter ??= createCounter<TelemetryDropAttributes>(
+    "harness.telemetry.dropped",
+    (meter, name) => meter.createCounter<TelemetryDropAttributes>(name),
+  );
   return droppedCounter;
 }
 
 function getHostAppRejectedCounter(): Counter<HostAppRejectedAttributes> {
-  hostAppRejectedCounter ??= metrics
-    .getMeter("@harness/telemetry")
-    .createCounter<HostAppRejectedAttributes>("harness.host.app_rejected");
+  hostAppRejectedCounter ??= createCounter<HostAppRejectedAttributes>(
+    "harness.host.app_rejected",
+    (meter, name) => meter.createCounter<HostAppRejectedAttributes>(name),
+  );
   return hostAppRejectedCounter;
 }
 
 function getSkippedShortValuesCounter(): Counter<NoMetricAttributes> {
-  skippedShortValuesCounter ??= metrics
-    .getMeter("@harness/telemetry")
-    .createCounter<NoMetricAttributes>("harness.sentinel.short_values_skipped");
+  skippedShortValuesCounter ??= createCounter<NoMetricAttributes>(
+    "harness.sentinel.short_values_skipped",
+    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
+  );
   return skippedShortValuesCounter;
 }
 
 function getScopeReducedCounter(): Counter<NoMetricAttributes> {
-  scopeReducedCounter ??= metrics
-    .getMeter("@harness/telemetry")
-    .createCounter<NoMetricAttributes>("harness.sentinel.scope_reduced");
+  scopeReducedCounter ??= createCounter<NoMetricAttributes>(
+    "harness.sentinel.scope_reduced",
+    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
+  );
   return scopeReducedCounter;
 }
 
 /** Counts a telemetry drop using its bounded reason code. */
 export function countDroppedTelemetry(reason: TelemetryDropReason): void {
   try {
-    getDroppedCounter().add(1, { reason });
+    getDroppedCounter().add(1, { "harness.telemetry.dropped.reason": reason });
   } catch {
     return;
   }
@@ -95,7 +106,7 @@ export function countDroppedTelemetry(reason: TelemetryDropReason): void {
 /** Counts an app tool rejection with its bounded host reason code. */
 export function countHostAppRejected(reason: HostAppRejectedReason): void {
   try {
-    getHostAppRejectedCounter().add(1, { reason });
+    getHostAppRejectedCounter().add(1, { "harness.host.app_rejected.reason": reason });
   } catch {
     return;
   }

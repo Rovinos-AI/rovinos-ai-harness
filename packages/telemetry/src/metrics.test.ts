@@ -16,16 +16,29 @@ import {
 const meter = metrics.getMeter("@harness/telemetry");
 const counter = meter.createCounter("harness.telemetry.dropped");
 const getMeter = vi.spyOn(metrics, "getMeter").mockReturnValue(meter);
+const createdMetricNames: string[] = [];
 function createAllowlistedCounter(name: string): typeof counter {
   if (!Object.hasOwn(METRIC_ALLOWLIST, name)) {
     throw new Error("metric_not_allowlisted");
   }
+  createdMetricNames.push(name);
   return counter;
 }
 const createCounter = vi.spyOn(meter, "createCounter").mockImplementation(createAllowlistedCounter);
 const add = vi.spyOn(counter, "add");
 
 const dropReasons: readonly TelemetryDropReason[] = TELEMETRY_DROP_REASONS;
+
+function expectAddCallsAreAllowlisted(name: keyof typeof METRIC_ALLOWLIST): void {
+  const allowedKeys = METRIC_ALLOWLIST[name];
+  for (const [, attributes] of add.mock.calls) {
+    expect(
+      Object.keys(attributes ?? {}).every((key) =>
+        allowedKeys.some((allowedKey) => allowedKey === key),
+      ),
+    ).toBe(true);
+  }
+}
 
 describe("countDroppedTelemetry", () => {
   beforeEach(() => {
@@ -40,7 +53,10 @@ describe("countDroppedTelemetry", () => {
 
     expect(getMeter).toHaveBeenCalledWith("@harness/telemetry");
     expect(createCounter).toHaveBeenCalledWith("harness.telemetry.dropped");
-    expect(add.mock.calls).toEqual(dropReasons.map((reason) => [1, { reason }]));
+    expect(add.mock.calls).toEqual(
+      dropReasons.map((reason) => [1, { "harness.telemetry.dropped.reason": reason }]),
+    );
+    expectAddCallsAreAllowlisted("harness.telemetry.dropped");
   });
 
   it("contains metric provider failures", () => {
@@ -51,6 +67,7 @@ describe("countDroppedTelemetry", () => {
     expect(() => {
       countDroppedTelemetry("processor_error");
     }).not.toThrow();
+    expectAddCallsAreAllowlisted("harness.telemetry.dropped");
   });
 
   it("counts host app rejections with a bounded reason", () => {
@@ -59,7 +76,13 @@ describe("countDroppedTelemetry", () => {
     }
 
     expect(createCounter).toHaveBeenCalledWith("harness.host.app_rejected");
-    expect(add.mock.calls).toEqual(HOST_APP_REJECTED_REASONS.map((reason) => [1, { reason }]));
+    expect(add.mock.calls).toEqual(
+      HOST_APP_REJECTED_REASONS.map((reason) => [
+        1,
+        { "harness.host.app_rejected.reason": reason },
+      ]),
+    );
+    expectAddCallsAreAllowlisted("harness.host.app_rejected");
   });
 
   it("counts skipped short sentinel values without attributes", () => {
@@ -68,6 +91,7 @@ describe("countDroppedTelemetry", () => {
     expect(getMeter).toHaveBeenCalledWith("@harness/telemetry");
     expect(createCounter).toHaveBeenCalledWith("harness.sentinel.short_values_skipped");
     expect(add).toHaveBeenCalledWith(3);
+    expectAddCallsAreAllowlisted("harness.sentinel.short_values_skipped");
   });
 
   it("uses only closed-enum string attributes for metric instruments", () => {
@@ -85,5 +109,10 @@ describe("countDroppedTelemetry", () => {
 
     expect(createCounter).toHaveBeenCalledWith("harness.sentinel.scope_reduced");
     expect(add).toHaveBeenCalledWith(1);
+    expectAddCallsAreAllowlisted("harness.sentinel.scope_reduced");
+  });
+
+  it("has an instrument for every allowlist entry and no stale entries", () => {
+    expect([...createdMetricNames].sort()).toEqual(Object.keys(METRIC_ALLOWLIST).sort());
   });
 });

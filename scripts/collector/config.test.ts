@@ -125,6 +125,7 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
     },
   });
   expect(profile.exporters).toMatchObject({ debug: { verbosity: "basic" } });
+  const processors = yamlSchema.parse(allowlist.processors);
   expect(allowlist.processors).toMatchObject({
     "filter/drop_unregistered_spans": { error_mode: "ignore" },
     "filter/drop_span_events": { error_mode: "ignore" },
@@ -135,10 +136,26 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
     "transform/metric_attributes": { error_mode: "ignore" },
     "transform/resource_attributes": { error_mode: "ignore" },
   });
-  expect(profile.service).toMatchObject({
+  const spanAttributes = yamlSchema.parse(processors["transform/span_attributes"]);
+  expect(z.array(z.string()).parse(spanAttributes.trace_statements)).toEqual(
+    expect.arrayContaining(["keep_keys(scope.attributes, [])", "set(span.links, nil)"]),
+  );
+  const logAttributes = yamlSchema.parse(processors["transform/log_attributes"]);
+  expect(z.array(z.string()).parse(logAttributes.log_statements)).toEqual(
+    expect.arrayContaining(["keep_keys(scope.attributes, [])"]),
+  );
+  const metricAttributes = yamlSchema.parse(processors["transform/metric_attributes"]);
+  expect(z.array(z.string()).parse(metricAttributes.metric_statements)).toEqual(
+    expect.arrayContaining([
+      "keep_keys(scope.attributes, [])",
+      "keep_keys(exemplar.filtered_attributes, [])",
+      'keep_keys(datapoint.attributes, ["harness.host.app_rejected.reason"]) where metric.name == "harness.host.app_rejected"',
+      'keep_keys(datapoint.attributes, ["harness.telemetry.dropped.reason"]) where metric.name == "harness.telemetry.dropped"',
+    ]),
+  );
+  expect(allowlist.service).toMatchObject({
     pipelines: {
       traces: {
-        receivers: ["otlp"],
         processors: [
           "memory_limiter",
           "filter/drop_unregistered_spans",
@@ -147,10 +164,8 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
           "transform/resource_attributes",
           "batch",
         ],
-        exporters: ["debug"],
       },
       logs: {
-        receivers: ["otlp"],
         processors: [
           "memory_limiter",
           "filter/drop_unregistered_logs",
@@ -158,10 +173,8 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
           "transform/resource_attributes",
           "batch",
         ],
-        exporters: ["debug"],
       },
       metrics: {
-        receivers: ["otlp"],
         processors: [
           "memory_limiter",
           "filter/drop_unregistered_metrics",
@@ -169,8 +182,26 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
           "transform/resource_attributes",
           "batch",
         ],
+      },
+    },
+  });
+  expect(profile.service).toMatchObject({
+    pipelines: {
+      traces: {
+        receivers: ["otlp"],
+        exporters: ["debug"],
+      },
+      logs: {
+        receivers: ["otlp"],
+        exporters: ["debug"],
+      },
+      metrics: {
+        receivers: ["otlp"],
         exporters: ["debug"],
       },
     },
   });
+  expect(profile).not.toHaveProperty("service.pipelines.traces.processors");
+  expect(profile).not.toHaveProperty("service.pipelines.logs.processors");
+  expect(profile).not.toHaveProperty("service.pipelines.metrics.processors");
 });

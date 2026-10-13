@@ -59,6 +59,37 @@ function attributeNames(shape: LogRecordShape | SpanDefinitionShape): string[] {
   return Object.keys(shape).sort(compareNames);
 }
 
+const pipelines: YamlValue = {
+  traces: {
+    processors: [
+      "memory_limiter",
+      "filter/drop_unregistered_spans",
+      "filter/drop_span_events",
+      "transform/span_attributes",
+      "transform/resource_attributes",
+      "batch",
+    ],
+  },
+  logs: {
+    processors: [
+      "memory_limiter",
+      "filter/drop_unregistered_logs",
+      "transform/log_attributes",
+      "transform/resource_attributes",
+      "batch",
+    ],
+  },
+  metrics: {
+    processors: [
+      "memory_limiter",
+      "filter/drop_unregistered_metrics",
+      "transform/metric_attributes",
+      "transform/resource_attributes",
+      "batch",
+    ],
+  },
+};
+
 function renderYamlEntry(key: string, value: YamlValue, indentation: number): string[] {
   const prefix = " ".repeat(indentation);
   if (typeof value === "string") {
@@ -78,23 +109,20 @@ function renderYamlEntry(key: string, value: YamlValue, indentation: number): st
   ];
 }
 
-/** Renders deterministic Collector processors from telemetry registry definitions. */
-export function renderCollectorAllowlist(
+function createProcessors(
   spans: readonly CollectorSpanDefinition[],
   logs: readonly CollectorLogDefinition[],
+  metricNames: readonly string[],
   metricAllowlist: Readonly<Record<string, readonly string[]>>,
-): string {
-  const sortedSpans = [...spans].sort((left, right) => compareNames(left.name, right.name));
-  const sortedLogs = [...logs].sort((left, right) => compareNames(left.name, right.name));
-  const metricNames = Object.keys(metricAllowlist).sort(compareNames);
-  const processors: YamlValue = {
+): YamlValue {
+  return {
     "filter/drop_unregistered_spans": {
       error_mode: "ignore",
       traces: {
         span: [
           dropUnlessRegistered(
             "name",
-            sortedSpans.map(({ name }) => name),
+            spans.map(({ name }) => name),
           ),
         ],
       },
@@ -106,7 +134,9 @@ export function renderCollectorAllowlist(
     "transform/span_attributes": {
       error_mode: "ignore",
       trace_statements: [
-        ...sortedSpans.map(
+        keepKeys("scope.attributes", []),
+        "set(span.links, nil)",
+        ...spans.map(
           ({ name, shape }) =>
             `${keepKeys("span.attributes", attributeNames(shape))} where span.name == ${ottlString(name)}`,
         ),
@@ -119,17 +149,20 @@ export function renderCollectorAllowlist(
         log_record: [
           dropUnlessRegistered(
             "body",
-            sortedLogs.map(({ name }) => name),
+            logs.map(({ name }) => name),
           ),
         ],
       },
     },
     "transform/log_attributes": {
       error_mode: "ignore",
-      log_statements: sortedLogs.map(
-        ({ name, shape }) =>
-          `${keepKeys("log.attributes", attributeNames(shape))} where log.body == ${ottlString(name)}`,
-      ),
+      log_statements: [
+        keepKeys("scope.attributes", []),
+        ...logs.map(
+          ({ name, shape }) =>
+            `${keepKeys("log.attributes", attributeNames(shape))} where log.body == ${ottlString(name)}`,
+        ),
+      ],
     },
     "filter/drop_unregistered_metrics": {
       error_mode: "ignore",
@@ -137,10 +170,14 @@ export function renderCollectorAllowlist(
     },
     "transform/metric_attributes": {
       error_mode: "ignore",
-      metric_statements: metricNames.map(
-        (name) =>
-          `${keepKeys("datapoint.attributes", metricAllowlist[name] ?? [])} where metric.name == ${ottlString(name)}`,
-      ),
+      metric_statements: [
+        keepKeys("scope.attributes", []),
+        keepKeys("exemplar.filtered_attributes", []),
+        ...metricNames.map(
+          (name) =>
+            `${keepKeys("datapoint.attributes", metricAllowlist[name] ?? [])} where metric.name == ${ottlString(name)}`,
+        ),
+      ],
     },
     "transform/resource_attributes": {
       error_mode: "ignore",
@@ -149,11 +186,24 @@ export function renderCollectorAllowlist(
       metric_statements: [keepKeys("resource.attributes", resourceAttributeKeys)],
     },
   };
+}
+
+/** Renders deterministic Collector processors from telemetry registry definitions. */
+export function renderCollectorAllowlist(
+  spans: readonly CollectorSpanDefinition[],
+  logs: readonly CollectorLogDefinition[],
+  metricAllowlist: Readonly<Record<string, readonly string[]>>,
+): string {
+  const sortedSpans = [...spans].sort((left, right) => compareNames(left.name, right.name));
+  const sortedLogs = [...logs].sort((left, right) => compareNames(left.name, right.name));
+  const metricNames = Object.keys(metricAllowlist).sort(compareNames);
+  const processors = createProcessors(sortedSpans, sortedLogs, metricNames, metricAllowlist);
   return [
     "# SPDX-License-Identifier: Apache-2.0",
     "# Generated by scripts/gen-collector-allowlist.ts. Do not edit directly.",
-    "# Policy version: 10.5",
+    "# The policy version is derived from this file's SHA-256 (task 10.5).",
     ...renderYamlEntry("processors", processors, 0),
+    ...renderYamlEntry("service", { pipelines }, 0),
     "",
   ].join("\n");
 }
