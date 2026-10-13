@@ -11,7 +11,13 @@ export { Tokenizer, type PiiDetectorRegistry, type TokenizerDependencies } from 
 export { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 export { PiiStorageFailedError } from "./errors.js";
 export { PiiToolPort } from "./pii-tool-port.js";
-export { PiiEventStore, markSanitized } from "./pii-event-store.js";
+export {
+  PiiEventStore,
+  isSanitizedField,
+  markSanitized,
+  markSanitizedField,
+} from "./pii-event-store.js";
+export type { EventStoreLike } from "./pii-event-store.js";
 export type {
   PiiToolCall,
   PiiToolContext,

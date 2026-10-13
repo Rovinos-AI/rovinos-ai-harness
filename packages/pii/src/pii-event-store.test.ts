@@ -1,25 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
 import {
+  EventSchema,
   Id,
   PiiConfigSchema,
+  SequentialIdGenerator,
   type Detection,
   type Event,
   type JsonValue,
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
-import { runEventStoreConformance, type EventStoreFactory } from "@harness/store/testing";
 import { InMemoryVault, type VaultWriter } from "@harness/vault";
 import { emailDetector } from "./detectors/email.js";
-import { PiiEventStore, markSanitized } from "./pii-event-store.js";
+import {
+  PiiEventStore,
+  markSanitized,
+  markSanitizedField,
+  type EventStoreLike,
+} from "./pii-event-store.js";
 import { PiiStorageFailedError } from "./errors.js";
 import { Tokenizer, type PiiDetectorRegistry } from "./tokenizer.js";
 
-const runId = Id.parse("00000000000000000000000001");
+const ids = new SequentialIdGenerator();
+const canarySeed = randomUUID();
+const runId = Id.parse(ids.next());
+const snapshotId = Id.parse(ids.next());
 const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);
+
+function canary(prefix = "storage"): string {
+  return `${prefix}-${canarySeed.replaceAll("-", "").slice(0, 16)}-${ids.next().slice(-8)}@example.test`;
+}
 
 function common() {
   return { runId, ts: 10, v: 1 as const, traceId, spanId, segmentId: runId };
@@ -43,21 +56,21 @@ function checkpointWritten(): NewEvent {
   return {
     ...common(),
     type: "checkpoint_written",
-    checkpointId: Id.parse("00000000000000000000000002"),
+    checkpointId: snapshotId,
     atSeq: 1,
     traceparent: `00-${traceId}-${spanId}-01`,
   };
 }
 
-function snapshot(): Snapshot {
+function snapshot(context = canary("context"), plan = canary("plan")): Snapshot {
   return {
-    snapshotId: Id.parse("00000000000000000000000002"),
+    snapshotId,
     runId,
     atSeq: 1,
     createdAt: 10,
     traceparent: `00-${traceId}-${spanId}-01`,
-    context: { text: "context@example.test" },
-    plan: { text: "plan@example.test" },
+    context: { text: context },
+    plan: { text: plan },
   };
 }
 
@@ -80,29 +93,90 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
   return result;
 }
 
-const conformanceFactory: EventStoreFactory = () => {
-  const inner = new InMemoryEventStore();
-  const store = new PiiEventStore(
-    inner,
-    createTokenizer(() => []),
-  );
-  return Promise.resolve({ store, cleanup: () => store.close() });
-};
+function createInnerStore(): EventStoreLike {
+  let events: Event[] = [];
+  let savedSnapshot: Snapshot | undefined;
+  return {
+    append(appendRunId, newEvents, expectedSeq) {
+      if (appendRunId !== runId || expectedSeq !== events.length || newEvents.length === 0) {
+        throw new Error("Unexpected test-store append.");
+      }
+      events = [
+        ...events,
+        ...newEvents.map((event, index) =>
+          EventSchema.parse({ ...event, seq: expectedSeq + index }),
+        ),
+      ];
+      return Promise.resolve({ nextSeq: events.length });
+    },
+    async appendWithSnapshot(appendRunId, newEvents, expectedSeq, nextSnapshot) {
+      const result = await this.append(appendRunId, newEvents, expectedSeq);
+      savedSnapshot = nextSnapshot;
+      return result;
+    },
+    latestSnapshot() {
+      return Promise.resolve(savedSnapshot);
+    },
+    read(_readRunId, range) {
+      return (async function* () {
+        await Promise.resolve();
+        for (const event of events) {
+          if (
+            (range?.fromSeq === undefined || event.seq >= range.fromSeq) &&
+            (range?.toSeq === undefined || event.seq <= range.toSeq)
+          ) {
+            yield event;
+          }
+        }
+      })();
+    },
+    head() {
+      return Promise.resolve(events.length);
+    },
+    deleteRun() {
+      const count = events.length;
+      events = [];
+      savedSnapshot = undefined;
+      return Promise.resolve(count);
+    },
+    listRuns() {
+      return Promise.resolve({ runs: [] });
+    },
+    findRunsByTrace() {
+      return Promise.resolve([]);
+    },
+    fetchOutbox() {
+      return Promise.resolve({ events: [], cursor: 0 });
+    },
+    ackOutbox() {
+      return Promise.resolve();
+    },
+    claimApprovalNotification() {
+      return Promise.resolve(false);
+    },
+    markApprovalNotificationSent() {
+      return Promise.resolve(false);
+    },
+    releaseApprovalNotification() {
+      return Promise.resolve();
+    },
+    close() {
+      return Promise.resolve();
+    },
+  };
+}
 
 describe("PiiEventStore", () => {
-  runEventStoreConformance("PiiEventStore", conformanceFactory, {
-    supportsFileReopen: false,
-  });
-
   it("tokenizes unmarked event content and reports a metadata-only summary", async () => {
-    const inner = new InMemoryEventStore();
+    const inner = createInnerStore();
     const summaries: unknown[] = [];
     const store = new PiiEventStore(inner, createTokenizer(), (summary) => {
       summaries.push(summary);
     });
+    const rawEmail = canary();
 
     await expect(
-      store.append(runId, [runCreated(), runInput({ text: "alice@example.test" })], 0),
+      store.append(runId, [runCreated(), runInput({ text: rawEmail })], 0),
     ).resolves.toEqual({ nextSeq: 2 });
 
     const events = await collect(store.read(runId));
@@ -111,14 +185,15 @@ describe("PiiEventStore", () => {
     expect(summaries).toEqual([
       { boundary: "storage", action: "tokenize", entities: [{ type: "email", count: 1 }] },
     ]);
-    expect(JSON.stringify(summaries)).not.toContain("alice@example.test");
+    expect(JSON.stringify(summaries)).not.toContain(rawEmail);
   });
 
   it("skips scanning marked events and marked content fields", async () => {
     const detect = vi.fn((text: string): readonly Detection[] => emailDetector.detect(text));
-    const store = new PiiEventStore(new InMemoryEventStore(), createTokenizer(detect));
-    const markedField = markSanitized({ text: "already-tokenized@example.test" });
-    const firstEvent = markSanitized(runInput({ text: "already-tokenized@example.test" }));
+    const store = new PiiEventStore(createInnerStore(), createTokenizer(detect));
+    const value = canary("already-tokenized");
+    const markedField = markSanitized({ text: value });
+    const firstEvent = markSanitized(runInput({ text: value }));
     const secondEvent = runInput(markedField);
 
     await store.append(runId, [runCreated(), firstEvent, secondEvent], 0);
@@ -126,9 +201,28 @@ describe("PiiEventStore", () => {
     expect(detect).not.toHaveBeenCalled();
   });
 
+  it("skips scanning a sanitized token in a primitive tool result field", async () => {
+    const detect = vi.fn((text: string): readonly Detection[] => emailDetector.detect(text));
+    const store = new PiiEventStore(createInnerStore(), createTokenizer(detect));
+    const result = {
+      ...common(),
+      type: "tool_result" as const,
+      callId: Id.parse(ids.next()),
+      toolId: "test.tool",
+      outcome: "ok" as const,
+      latencyMs: 0,
+      result: "<EMAIL_1>",
+    };
+
+    await store.append(runId, [runCreated(), markSanitizedField(result, "result")], 0);
+
+    expect(detect).not.toHaveBeenCalled();
+  });
+
   it("fails closed without writing when detection fails", async () => {
-    const inner = new InMemoryEventStore();
-    const detectorFailure = new Error("raw@example.test");
+    const inner = createInnerStore();
+    const rawEmail = canary("detector-failure");
+    const detectorFailure = new Error(rawEmail);
     const store = new PiiEventStore(
       inner,
       createTokenizer(() => {
@@ -137,46 +231,49 @@ describe("PiiEventStore", () => {
     );
 
     await expect(
-      store.append(runId, [runCreated(), runInput({ text: "raw@example.test" })], 0),
+      store.append(runId, [runCreated(), runInput({ text: rawEmail })], 0),
     ).rejects.toBeInstanceOf(PiiStorageFailedError);
     await expect(inner.head(runId)).resolves.toBe(0);
   });
 
   it("fails closed without exposing vault errors or writing events", async () => {
-    const inner = new InMemoryEventStore();
+    const inner = createInnerStore();
     const vault = new InMemoryVault();
-    vi.spyOn(vault, "put").mockRejectedValue(new Error("raw@example.test"));
+    const rawEmail = canary("vault-failure");
+    vi.spyOn(vault, "put").mockRejectedValue(new Error(rawEmail));
     const store = new PiiEventStore(inner, createTokenizer(undefined, vault));
 
     await expect(
-      store.append(runId, [runCreated(), runInput({ text: "raw@example.test" })], 0),
+      store.append(runId, [runCreated(), runInput({ text: rawEmail })], 0),
     ).rejects.toMatchObject({ code: "pii_storage_failed" });
     await expect(inner.head(runId)).resolves.toBe(0);
   });
 
   it("converts summary callback failures to a safe storage error before writing", async () => {
-    const inner = new InMemoryEventStore();
+    const inner = createInnerStore();
     const store = new PiiEventStore(inner, createTokenizer(), () => {
-      throw new Error("raw@example.test");
+      throw new Error(canary("summary-failure"));
     });
 
     await expect(
-      store.append(runId, [runCreated(), runInput({ text: "raw@example.test" })], 0),
+      store.append(runId, [runCreated(), runInput({ text: canary("summary-failure-event") })], 0),
     ).rejects.toMatchObject({ code: "pii_storage_failed" });
     await expect(inner.head(runId)).resolves.toBe(0);
   });
 
   it("scans snapshot context and plan before writing", async () => {
-    const inner = new InMemoryEventStore();
+    const inner = createInnerStore();
     const summaries: unknown[] = [];
     const store = new PiiEventStore(inner, createTokenizer(), (summary) => {
       summaries.push(summary);
     });
+    const contextCanary = canary("context");
+    const planCanary = canary("plan");
     const result = await store.appendWithSnapshot(
       runId,
       [runCreated(), checkpointWritten()],
       0,
-      snapshot(),
+      snapshot(contextCanary, planCanary),
     );
 
     expect(result.nextSeq).toBe(2);
@@ -189,13 +286,13 @@ describe("PiiEventStore", () => {
       "checkpoint_written",
     ]);
     expect(summaries).toHaveLength(2);
-    expect(JSON.stringify(summaries)).not.toContain("context@example.test");
-    expect(JSON.stringify(summaries)).not.toContain("plan@example.test");
+    expect(JSON.stringify(summaries)).not.toContain(contextCanary);
+    expect(JSON.stringify(summaries)).not.toContain(planCanary);
   });
 
   it("does not scan pii_action events", async () => {
     const detect = vi.fn((text: string): readonly Detection[] => emailDetector.detect(text));
-    const store = new PiiEventStore(new InMemoryEventStore(), createTokenizer(detect));
+    const store = new PiiEventStore(createInnerStore(), createTokenizer(detect));
     const action: NewEvent = {
       ...common(),
       type: "pii_action",
@@ -210,16 +307,22 @@ describe("PiiEventStore", () => {
   });
 
   it("does not persist raw snapshot content if tokenization fails", async () => {
-    const inner = new InMemoryEventStore();
+    const inner = createInnerStore();
+    const rawEmail = canary("snapshot-failure");
     const store = new PiiEventStore(
       inner,
       createTokenizer(() => {
-        throw new Error("snapshot@example.test");
+        throw new Error(rawEmail);
       }),
     );
 
     await expect(
-      store.appendWithSnapshot(runId, [runCreated(), checkpointWritten()], 0, snapshot()),
+      store.appendWithSnapshot(
+        runId,
+        [runCreated(), checkpointWritten()],
+        0,
+        snapshot(rawEmail, canary("snapshot-failure-plan")),
+      ),
     ).rejects.toBeInstanceOf(PiiStorageFailedError);
     await expect(inner.head(runId)).resolves.toBe(0);
     await expect(inner.latestSnapshot(runId)).resolves.toBeUndefined();

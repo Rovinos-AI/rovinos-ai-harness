@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-import { randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Id, KeysConfigSchema, PiiConfigSchema, type Event, type NewEvent } from "@harness/schemas";
+import {
+  Id,
+  KeysConfigSchema,
+  PiiConfigSchema,
+  SequentialIdGenerator,
+  type Event,
+  type NewEvent,
+} from "@harness/schemas";
 import { emailDetector, PiiEventStore, Tokenizer } from "@harness/pii";
 import { SqliteEventStore } from "@harness/store";
 import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
 
-const runId = Id.parse("00000000000000000000000010");
-const snapshotId = Id.parse("00000000000000000000000011");
 const traceId = "a".repeat(32);
 const spanId = "b".repeat(16);
 const databaseDirectories: string[] = [];
@@ -23,21 +28,8 @@ afterEach(async () => {
   );
 });
 
-function seededRandom(seed: number): () => number {
-  let state = seed;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let value = state;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / 0x1_0000_0000;
-  };
-}
-
-function createCanary(random: () => number): string {
-  return `c${Math.floor(random() * 0x1_0000_0000)
-    .toString(16)
-    .padStart(8, "0")}@example.test`;
+function createCanary(ids: SequentialIdGenerator, seed: string, prefix: string): string {
+  return `${prefix}-${seed.replaceAll("-", "").slice(0, 16)}-${ids.next().slice(-8)}@example.test`;
 }
 
 function createTestKeyProvider(): LocalKeyProvider {
@@ -63,7 +55,7 @@ function createTokenizer(vault: SqliteVault): Tokenizer {
   });
 }
 
-function eventsFor(canary: string): NewEvent[] {
+function eventsFor(runId: Id, snapshotId: Id, canary: string): NewEvent[] {
   const envelope = {
     runId,
     ts: 100,
@@ -91,7 +83,7 @@ function eventsFor(canary: string): NewEvent[] {
   ];
 }
 
-function snapshotFor(contextCanary: string, planCanary: string) {
+function snapshotFor(runId: Id, snapshotId: Id, contextCanary: string, planCanary: string) {
   return {
     snapshotId,
     runId,
@@ -113,11 +105,14 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
 
 describe("PII storage boundary", () => {
   it("keeps generated canaries out of SQLite and resolves stored tokens after reopen", async () => {
-    const random = seededRandom(randomBytes(4).readUInt32BE());
+    const ids = new SequentialIdGenerator();
+    const seed = randomUUID();
+    const runId = Id.parse(ids.next());
+    const snapshotId = Id.parse(ids.next());
     const [eventCanary, contextCanary, planCanary] = [
-      createCanary(random),
-      createCanary(random),
-      createCanary(random),
+      createCanary(ids, seed, "event"),
+      createCanary(ids, seed, "context"),
+      createCanary(ids, seed, "plan"),
     ];
     const canaries = [eventCanary, contextCanary, planCanary];
     const directory = await mkdtemp(join(tmpdir(), "harness-pii-storage-"));
@@ -132,9 +127,9 @@ describe("PII storage boundary", () => {
     try {
       await initialStore.appendWithSnapshot(
         runId,
-        eventsFor(eventCanary),
+        eventsFor(runId, snapshotId, eventCanary),
         0,
-        snapshotFor(contextCanary, planCanary),
+        snapshotFor(runId, snapshotId, contextCanary, planCanary),
       );
     } finally {
       await initialStore.close();

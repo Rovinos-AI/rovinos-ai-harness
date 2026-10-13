@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "@harness/schemas": "workspace:^",
-    "@harness/store": "workspace:^",
     "@harness/vault": "workspace:^"
   },
   "devDependencies": {

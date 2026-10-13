@@ -1174,7 +1174,6 @@ __metadata:
   resolution: "@harness/pii@workspace:packages/pii"
   dependencies:
     "@harness/schemas": "workspace:^"
-    "@harness/store": "workspace:^"
     "@harness/vault": "workspace:^"
     vitest: "npm:3.2.6"
   languageName: unknown

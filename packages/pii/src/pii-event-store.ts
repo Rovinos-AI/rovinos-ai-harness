@@ -9,24 +9,95 @@ import {
   type JsonValue,
   type NewEvent,
   type PiiActionSummary,
+  type RunStatus,
   type Snapshot,
   type Code,
   type TraceId,
 } from "@harness/schemas";
-import type { EventStore, ListRunsOptions, RunSummary } from "@harness/store";
 import { PiiStorageFailedError } from "./errors.js";
 import type { Tokenizer } from "./tokenizer.js";
 
-const sanitized = new WeakSet();
+interface RunSummaryLike {
+  readonly runId: Id;
+  readonly createdAt: number;
+  readonly status: RunStatus;
+  readonly lastSeq: number;
+  readonly lastTs: number;
+}
+
+interface ListRunsOptionsLike {
+  readonly status?: RunStatus;
+  readonly continuationOf?: Id;
+  readonly limit: number;
+  readonly cursor?: string;
+}
+
+/** Structural event-store contract implemented by the wrapped store. */
+export interface EventStoreLike {
+  append(runId: Id, events: readonly NewEvent[], expectedSeq: number): Promise<{ nextSeq: number }>;
+  appendWithSnapshot(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    snapshot: Snapshot,
+  ): Promise<{ nextSeq: number }>;
+  latestSnapshot(runId: Id): Promise<Snapshot | undefined>;
+  read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event>;
+  head(runId: Id): Promise<number>;
+  deleteRun(runId: Id): Promise<number>;
+  listRuns(opts: ListRunsOptionsLike): Promise<{ runs: RunSummaryLike[]; nextCursor?: string }>;
+  findRunsByTrace(traceId: TraceId): Promise<Id[]>;
+  fetchOutbox(sinkId: Code, limit: number): Promise<{ events: Event[]; cursor: number }>;
+  ackOutbox(sinkId: Code, cursor: number): Promise<void>;
+  claimApprovalNotification(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    leaseMs: number,
+  ): Promise<boolean>;
+  markApprovalNotificationSent(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ): Promise<boolean>;
+  releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void>;
+  close(): Promise<void>;
+}
+
+type WeakObject = Exclude<WeakKey, symbol>;
+
+const sanitized = new WeakSet<WeakObject>();
+const sanitizedFields = new WeakMap<WeakObject, Set<PropertyKey>>();
 
 /** Marks an event or object-valued content field as already sanitized. */
-export function markSanitized<T extends WeakKey>(value: T): T {
-  sanitized.add(value);
+export function markSanitized<T>(value: T): T {
+  if ((typeof value === "object" && value !== null) || typeof value === "function") {
+    sanitized.add(value);
+  }
   return value;
 }
 
+/** Marks a content field on its containing event or call as already sanitized. */
+export function markSanitizedField<T>(value: T, field: PropertyKey): T {
+  if ((typeof value === "object" && value !== null) || typeof value === "function") {
+    const marked = sanitizedFields.get(value) ?? new Set<PropertyKey>();
+    marked.add(field);
+    sanitizedFields.set(value, marked);
+  }
+  return value;
+}
+
+/** Checks whether a field on its containing call or result was marked sanitized. */
+export function isSanitizedField(value: unknown, field: PropertyKey): boolean {
+  return (
+    ((typeof value === "object" && value !== null) || typeof value === "function") &&
+    sanitizedFields.get(value)?.has(field) === true
+  );
+}
+
 /** Tokenizes classified event content and snapshot values before they reach storage. */
-export class PiiEventStore implements EventStore {
+export class PiiEventStore implements EventStoreLike {
   /**
    * Wraps an event store with storage-boundary content sanitization.
    *
@@ -35,7 +106,7 @@ export class PiiEventStore implements EventStore {
    * @param onSummary - Receives metadata-only summaries before the append is attempted.
    */
   constructor(
-    private readonly inner: EventStore,
+    private readonly inner: EventStoreLike,
     private readonly tokenizer: Tokenizer,
     private readonly onSummary: (summary: PiiActionSummary) => void | Promise<void> = () =>
       Promise.resolve(),
@@ -61,10 +132,10 @@ export class PiiEventStore implements EventStore {
     let sanitizedSnapshot: Snapshot;
     let snapshotSummaries: readonly PiiActionSummary[];
     try {
-      const context = isMarked(snapshot)
+      const context = isMarked(snapshot, "context")
         ? { value: snapshot.context, actions: [] }
         : await this.sanitizeJson(runId, snapshot.context);
-      const plan = isMarked(snapshot)
+      const plan = isMarked(snapshot, "plan")
         ? { value: snapshot.plan, actions: [] }
         : await this.sanitizeJson(runId, snapshot.plan);
       sanitizedSnapshot =
@@ -95,7 +166,7 @@ export class PiiEventStore implements EventStore {
     return this.inner.deleteRun(runId);
   }
 
-  listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
+  listRuns(opts: ListRunsOptionsLike): Promise<{ runs: RunSummaryLike[]; nextCursor?: string }> {
     return this.inner.listRuns(opts);
   }
 
@@ -103,7 +174,7 @@ export class PiiEventStore implements EventStore {
     return this.inner.findRunsByTrace(traceId);
   }
 
-  fetchOutbox(sinkId: Code, limit: number): ReturnType<EventStore["fetchOutbox"]> {
+  fetchOutbox(sinkId: Code, limit: number): ReturnType<EventStoreLike["fetchOutbox"]> {
     return this.inner.fetchOutbox(sinkId, limit);
   }
 
@@ -159,7 +230,7 @@ export class PiiEventStore implements EventStore {
       }
       const { meta, content } = splitEvent(parsed.data);
       const unmarkedContent = Object.fromEntries(
-        Object.entries(content).filter(([key]) => !isMarked(Reflect.get(source, key))),
+        Object.entries(content).filter(([key]) => !isMarked(source, key)),
       );
       if (Object.keys(unmarkedContent).length === 0) {
         prepared.push(source);
@@ -222,10 +293,24 @@ export class PiiEventStore implements EventStore {
   }
 }
 
-function isMarked(value: unknown): boolean {
-  return (typeof value === "object" && value !== null) || typeof value === "function"
-    ? sanitized.has(value)
-    : false;
+function isMarked(container: unknown, field?: string): boolean {
+  if ((typeof container !== "object" || container === null) && typeof container !== "function") {
+    return false;
+  }
+  if (sanitized.has(container)) {
+    return true;
+  }
+  if (field === undefined) {
+    return false;
+  }
+  if (sanitizedFields.get(container)?.has(field) === true) {
+    return true;
+  }
+  const value: unknown = Object.getOwnPropertyDescriptor(container, field)?.value;
+  return (
+    ((typeof value === "object" && value !== null) || typeof value === "function") &&
+    sanitized.has(value)
+  );
 }
 
 function asJsonObject(value: JsonValue): Record<string, JsonValue> {
