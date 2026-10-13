@@ -55,9 +55,7 @@ describe("UiSession", () => {
       () => undefined,
     );
 
-    expect(session.traceparent).toBe(
-      `00-${parentContext.traceId}-${"b".repeat(16)}-00`,
-    );
+    expect(session.traceparent).toBe(`00-${parentContext.traceId}-${"b".repeat(16)}-00`);
     session.end();
     parent.end();
   });

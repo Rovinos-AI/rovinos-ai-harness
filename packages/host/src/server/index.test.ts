@@ -142,7 +142,9 @@ function makeServer(
     ...(options.scheduleUiSessionExpiry === undefined
       ? {}
       : { scheduleUiSessionExpiry: options.scheduleUiSessionExpiry }),
-    ...(options.uiSessionContext === undefined ? {} : { uiSessionContext: options.uiSessionContext }),
+    ...(options.uiSessionContext === undefined
+      ? {}
+      : { uiSessionContext: options.uiSessionContext }),
     createHttpServer: (requestListener) => {
       listener = requestListener;
       return server;
@@ -381,7 +383,9 @@ describe("createReferenceHost", () => {
     const rejected = await fixture.request("GET", eventsPath, authorization(host));
     expect(rejected.status).toBe(429);
     expect(rejected.body).toBe('{"error":"app_session_limit"}');
-    expect((await fixture.request("GET", appPath(sessionId), authorization(host))).status).toBe(200);
+    expect((await fixture.request("GET", appPath(sessionId), authorization(host))).status).toBe(
+      200,
+    );
     await host.close();
   });
 

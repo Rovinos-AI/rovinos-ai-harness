@@ -83,15 +83,14 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
       })
     : undefined;
   let cancelExpiry = (): void => undefined;
-  let instance: AppInstance | undefined;
   const end = (): void => {
     cancelExpiry();
     uiSession?.end();
-    if (instance !== undefined && options.sessions.get(sessionId) === instance) {
+    if (options.sessions.get(sessionId)?.end === end) {
       options.sessions.delete(sessionId);
     }
   };
-  instance = {
+  const instance: AppInstance = {
     id: app.id,
     resourceUri: app.resourceUri,
     sessionId,
@@ -101,8 +100,8 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
   options.sessions.set(instance.sessionId, instance);
   try {
     cancelExpiry = options.scheduleUiSessionExpiry(() => {
-      if (instance !== undefined && options.sessions.get(sessionId) === instance) {
-        instance.end();
+      if (options.sessions.get(sessionId)?.end === end) {
+        end();
         options.dependencies.onCode("ui_session_expired");
       }
     }, options.config.uiSessionMaxMs);

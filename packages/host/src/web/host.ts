@@ -116,6 +116,41 @@ function waitForFrameLoad(frame: ReturnType<AppIframeFactory>): Promise<void> {
   });
 }
 
+async function connectAppFrame(options: {
+  readonly root: HostPagePort;
+  readonly app: AppPayload;
+  readonly launch: LaunchDetails;
+  readonly request: typeof fetch;
+  readonly endSession: () => void;
+}): Promise<void> {
+  const { root, app, launch, request, endSession } = options;
+  const frame = root.createFrame();
+  frame.setAttribute("sandbox", "allow-scripts");
+  frame.setAttribute("referrerpolicy", "no-referrer");
+  frame.setAttribute("title", `MCP App ${app.appId}`);
+  if (app.permissions.length > 0) {
+    frame.setAttribute("allow", app.permissions.join("; "));
+  }
+  frame.srcdoc = createSandboxDocument(app.html, app.csp);
+  const loaded = waitForFrameLoad(frame);
+  root.onFrameRemoved(endSession);
+  root.attachFrame();
+  await loaded;
+  const bridge = createAppBridge(frame, (call) =>
+    routeToolCall(call, {
+      appId: app.appId,
+      sessionId: app.sessionId,
+      token: launch.token,
+      request,
+    }),
+  );
+  await bridge.connect();
+  await bridge.sendToolInput(app.toolInput);
+  if (app.toolResult !== null) {
+    await bridge.sendToolResult(toolResultForApp(app.toolResult, app));
+  }
+}
+
 interface ToolCallContext {
   readonly appId: string;
   readonly sessionId: string;
@@ -212,31 +247,7 @@ export async function mountReferenceApp(
       root.setStatus("app_resource_invalid");
       return false;
     }
-    const frame = root.createFrame();
-    frame.setAttribute("sandbox", "allow-scripts");
-    frame.setAttribute("referrerpolicy", "no-referrer");
-    frame.setAttribute("title", `MCP App ${app.appId}`);
-    if (app.permissions.length > 0) {
-      frame.setAttribute("allow", app.permissions.join("; "));
-    }
-    frame.srcdoc = createSandboxDocument(app.html, app.csp);
-    const loaded = waitForFrameLoad(frame);
-    root.onFrameRemoved(endSession);
-    root.attachFrame();
-    await loaded;
-    const bridge = createAppBridge(frame, (call) =>
-      routeToolCall(call, {
-        appId: app.appId,
-        sessionId: app.sessionId,
-        token: launch.token,
-        request,
-      }),
-    );
-    await bridge.connect();
-    await bridge.sendToolInput(app.toolInput);
-    if (app.toolResult !== null) {
-      await bridge.sendToolResult(toolResultForApp(app.toolResult, app));
-    }
+    await connectAppFrame({ root, app, launch, request, endSession });
     launched = true;
     return true;
   } finally {
