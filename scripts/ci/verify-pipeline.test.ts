@@ -151,13 +151,11 @@ it("runs integration tests with Compose and always tears down", () => {
   const runTests = integrationSteps.find(
     (step) => typeof step.script === "string" && step.script.includes("yarn test:integration"),
   );
-  const composeWait = readFileSync(resolve(root, "scripts/ci/compose-wait.sh"), "utf8");
   expect(runTests?.script).toContain("--reporter=junit");
   expect(runTests?.script).toContain("integration-junit.xml");
   expect(runTests?.env).toMatchObject({
-    TEST_POSTGRES_URL: "$(TEST_POSTGRES_URL)",
+    TEST_POSTGRES_URL: "postgresql://harness@127.0.0.1:5432/harness",
   });
-  expect(composeWait).toContain("##vso[task.setvariable variable=TEST_POSTGRES_URL]");
   expect(
     integrationSteps.some(
       (step) => typeof step.script === "string" && step.script.includes("yarn build:schemas"),

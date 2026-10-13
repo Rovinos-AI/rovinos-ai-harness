@@ -21,6 +21,18 @@ spec:
     - Egress
   egress:
     - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: otel-collector
@@ -29,7 +41,29 @@ spec:
           port: 4317
         - protocol: TCP
           port: 4318
+    # No sidecar port is defined by this example. Add an explicit ports list before applying;
+    # omitting ports permits all ports to the selected sidecars.
     - to:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: harness-sidecar
+# The default-deny policy also applies to collector pods. To enable exporter traffic, uncomment
+# this template, replace the CIDR with the operator-approved exporter destination, and adapt labels.
+# ---
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: collector-exporter-egress
+# spec:
+#   podSelector:
+#     matchLabels:
+#       app.kubernetes.io/name: otel-collector
+#   policyTypes:
+#     - Egress
+#   egress:
+#     - to:
+#         - ipBlock:
+#             cidr: <OPERATOR_SUPPLIED_CIDR>
+#       ports:
+#         - protocol: TCP
+#           port: 443

@@ -1,8 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, it } from "vitest";
-import { runNetworkIsolationCompose } from "../scripts/ci/network-isolation.js";
+import {
+  readRenderedComposeNetworkConfig,
+  runNetworkIsolationCompose,
+} from "../scripts/ci/network-isolation.js";
 
 const projectName = `harness-network-isolation-${String(process.pid)}`;
+
+it("limits the rendered Compose egress network to the collector", () => {
+  const config = readRenderedComposeNetworkConfig();
+
+  expect(config.networks.internal?.internal).toBe(true);
+  expect(config.networks.egress?.internal).not.toBe(true);
+  expect(Object.keys(config.services.harness?.networks ?? {}).sort()).toEqual(["internal"]);
+  expect(Object.keys(config.services["otel-collector"]?.networks ?? {}).sort()).toEqual([
+    "egress",
+    "internal",
+  ]);
+  expect(Object.keys(config.services.postgres?.networks ?? {}).sort()).toEqual(["test-host"]);
+  expect(
+    Object.entries(config.services)
+      .filter(([, service]) => Object.hasOwn(service.networks ?? {}, "egress"))
+      .map(([name]) => name),
+  ).toEqual(["otel-collector"]);
+});
 
 it("isolates internal clients from the egress network and public internet", async () => {
   try {

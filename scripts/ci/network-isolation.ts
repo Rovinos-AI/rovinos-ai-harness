@@ -16,8 +16,8 @@ const composeConfigSchema = z.object({
   ),
 });
 
-/** Renders and validates the main Compose test profile's network configuration. */
-export function readComposeNetworkConfig(): z.infer<typeof composeConfigSchema> {
+/** Renders the main Compose test profile's network configuration for integration checks. */
+export function readRenderedComposeNetworkConfig(): z.infer<typeof composeConfigSchema> {
   const rendered = execFileSync(
     "docker",
     [
