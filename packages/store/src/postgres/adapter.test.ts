@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { beforeEach, expect, it, vi } from "vitest";
-import { parseJson, type KeyProvider } from "@harness/schemas";
+import { Code, parseJson, type KeyProvider } from "@harness/schemas";
 import { AesGcmContentCodec } from "../aes-gcm-codec.js";
 import type { ContentCodec } from "../codec.js";
 import { StoreUnavailableError } from "../errors.js";
@@ -143,7 +143,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     fakePg.migrationHistory.set(text(values[0]), text(values[1]));
     return { rows: [] };
   }
-  if (query === "BEGIN") {
+  if (query === "BEGIN" || query === "BEGIN READ ONLY") {
     transactionBackup = {
       runs: structuredClone(fakePg.runs),
       events: structuredClone(fakePg.events),
@@ -543,6 +543,109 @@ it("rejects invalid connection and pool configuration", () => {
   expect(
     () => new PostgresEventStore("postgresql://harness@localhost/harness", { schema: "bad;drop" }),
   ).toThrow("Invalid Postgres event-store configuration");
+});
+
+it("checks pending migrations without applying schema changes when requested", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness", {
+    skipMigrations: true,
+  });
+
+  await expect(store.listRuns({ limit: 1 })).rejects.toMatchObject({
+    code: "schema_migration_pending",
+  });
+  expect(fakePg.schemaInitialized).toBe(false);
+  expect(fakePg.migrationHistory.size).toBe(0);
+  await store.close();
+});
+
+it("validates encryption metadata without writing in read-only mode", async () => {
+  const runId = createEventBuilders().nextRunId();
+  const initial = new PostgresEventStore("postgresql://harness@localhost/harness");
+  await expect(initial.head(runId)).resolves.toBe(0);
+  await initial.close();
+
+  fakePg.encryptionValue = "";
+  const readOnly = new PostgresEventStore("postgresql://harness@localhost/harness", {
+    skipMigrations: true,
+  });
+  await expect(readOnly.listRuns({ limit: 1 })).resolves.toEqual({ runs: [] });
+  expect(fakePg.encryptionValue).toBe("");
+  await readOnly.close();
+});
+
+it("rejects all Postgres mutations through a read-only store", async () => {
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  const initial = new PostgresEventStore("postgresql://harness@localhost/harness");
+  await expect(initial.head(runId)).resolves.toBe(0);
+  await initial.close();
+
+  const readOnly = new PostgresEventStore("postgresql://harness@localhost/harness", {
+    skipMigrations: true,
+  });
+  const snapshotId = builders.nextRunId();
+  const snapshot = builders.snapshot(runId, snapshotId, 1);
+  const operations = [
+    readOnly.append(runId, [builders.runCreated(runId)], 0),
+    readOnly.appendWithSnapshot(
+      runId,
+      [builders.runCreated(runId), builders.checkpointWritten(runId, snapshotId, 1)],
+      0,
+      snapshot,
+    ),
+    readOnly.deleteRun(runId),
+    readOnly.ackOutbox(Code.parse("readonly.test"), 1),
+    readOnly.claimApprovalNotification(builders.nextRunId(), runId, 1, 1),
+    readOnly.markApprovalNotificationSent(builders.nextRunId(), runId, 1, 2),
+    readOnly.releaseApprovalNotification(builders.nextRunId(), runId, 1),
+  ];
+
+  for (const operation of operations) {
+    await expect(operation).rejects.toMatchObject({ code: "store_read_only" });
+  }
+  expect(fakePg.runs.size).toBe(0);
+  expect(fakePg.events).toHaveLength(0);
+  await readOnly.close();
+});
+
+it("checks existing encryption metadata during read-only initialization", async () => {
+  const initial = new PostgresEventStore("postgresql://harness@localhost/harness");
+  await expect(initial.head(createEventBuilders().nextRunId())).resolves.toBe(0);
+  await initial.close();
+
+  fakePg.encryptionValue = "true";
+  const readOnly = new PostgresEventStore("postgresql://harness@localhost/harness", {
+    skipMigrations: true,
+  });
+  await expect(readOnly.head(createEventBuilders().nextRunId())).rejects.toMatchObject({
+    code: "store_encryption_mismatch",
+  });
+  await readOnly.close();
+});
+
+it("preserves encryption mismatch errors during initialization", async () => {
+  fakePg.encryptionValue = "true";
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+
+  await expect(store.head(createEventBuilders().nextRunId())).rejects.toMatchObject({
+    code: "store_encryption_mismatch",
+  });
+  await store.close();
+});
+
+it("normalizes metadata initialization failures and returns the pool connection", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  fakePg.handler = (sql, values) => {
+    if (sql.startsWith("SELECT metadata_value FROM store_metadata")) {
+      throw new Error("synthetic metadata failure");
+    }
+    return fakeQuery(sql, values);
+  };
+
+  await expect(store.head(createEventBuilders().nextRunId())).rejects.toMatchObject({
+    code: "store_unavailable",
+  });
+  await store.close();
 });
 
 it("skips schema DDL when another pool already initialized the schema", async () => {
