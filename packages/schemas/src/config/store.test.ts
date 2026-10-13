@@ -7,13 +7,13 @@ describe("StoreConfigSchema", () => {
     expect(StoreConfigSchema.parse({})).toEqual({});
   });
 
-  it("parses run and snapshot retention overrides", () => {
+  it("parses run retention windows", () => {
     expect(
       StoreConfigSchema.parse({
-        retention: { completedRunsDays: "30", failedRunsDays: 60, snapshotKeep: "3" },
+        retention: { completedRunsDays: "30", failedRunsDays: 60 },
       }),
     ).toEqual({
-      retention: { completedRunsDays: 30, failedRunsDays: 60, snapshotKeep: 3 },
+      retention: { completedRunsDays: 30, failedRunsDays: 60 },
     });
   });
 
@@ -28,7 +28,7 @@ describe("StoreConfigSchema", () => {
       StoreRetentionConfigSchema.parse({
         completedRunsDays: 1,
         failedRunsDays: 1,
-        unrecognized: true,
+        snapshotKeep: 5,
       }),
     ).toThrow();
     expect(() => StoreConfigSchema.parse({ unrecognized: true })).toThrow();

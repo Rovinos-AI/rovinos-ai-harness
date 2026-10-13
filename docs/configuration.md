@@ -24,7 +24,7 @@ Set `HARNESS_CASSETTE_AUTO=0` to disable cassette auto mode. Record and auto mod
 
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict schemas owned by their respective packages. `telemetry.sentinel.minValueLength` defaults to `6` and controls the minimum length of vault values included in leak-sentinel scans; shorter values are counted and skipped. The sentinel is enabled by default; `telemetry.sentinel.enabled: false` is accepted only outside production. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
 
-Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. `snapshotKeep` defaults to `5` and limits snapshots retained per run. CLI scheduling and vault-purge wiring are deferred to task 20.x; the retention job supports dry runs and invokes a per-run purge hook after deletion.
+Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. CLI scheduling and vault-purge wiring are deferred to task 20.x; the retention job supports dry runs and invokes a per-run purge hook after deletion.
 
 Key versions are configured under `keys`. Each key must be a base64-encoded 32-byte secret reference. Keep old versions configured while stored content still uses them; new content uses `currentKeyId`.
 

@@ -144,6 +144,47 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
 
+it("atomically deletes a run racing with an append", async () => {
+  const { store, cleanup } = await plaintextPostgresFactory();
+  const runId = schemaIds.nextRunId();
+  const snapshotId = schemaIds.nextRunId();
+  const snapshot = schemaIds.snapshot(runId, snapshotId, 1);
+  try {
+    await store.appendWithSnapshot(
+      runId,
+      [schemaIds.runCreated(runId), schemaIds.checkpointWritten(runId, snapshotId, 1)],
+      0,
+      snapshot,
+    );
+    await store.append(runId, [schemaIds.runStatusChanged(runId, "pending", "completed")], 2);
+
+    const [deleteResult, appendResult] = await Promise.allSettled([
+      store.deleteRun(runId),
+      store.append(runId, [schemaIds.runStatusChanged(runId, "completed", "running")], 3),
+    ]);
+
+    if (deleteResult.status !== "fulfilled") {
+      throw deleteResult.reason;
+    }
+    const deleted = deleteResult.value === 3;
+    expect([0, 3]).toContain(deleteResult.value);
+    expect(appendResult.status === "fulfilled").toBe(deleteResult.value === 0);
+    await expect(store.head(runId)).resolves.toBe(deleted ? 0 : 4);
+    const events = [];
+    for await (const event of store.read(runId)) {
+      events.push(event);
+    }
+    expect(events).toHaveLength(deleted ? 0 : 4);
+    await expect(store.latestSnapshot(runId)).resolves.toEqual(deleted ? undefined : snapshot);
+    const runStatuses = (await store.listRuns({ limit: 100 })).runs
+      .filter((run) => run.runId === runId)
+      .map(({ status }) => status);
+    expect(runStatuses).toEqual(deleted ? [] : ["running"]);
+  } finally {
+    await cleanup();
+  }
+});
+
 it("hides later committed outbox rows until earlier transactions finish", async () => {
   const { admin, schema } = await createSchema();
   const store = new PostgresEventStore(connectionString, { schema });

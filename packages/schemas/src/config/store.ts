@@ -8,12 +8,11 @@ const retentionDays = z.coerce
   .positive()
   .max(Math.floor(Number.MAX_SAFE_INTEGER / 86_400_000));
 
-/** Run and snapshot retention settings for the event store. */
+/** Run retention windows; cancelled runs use the failed-run window. */
 export const StoreRetentionConfigSchema = z
   .object({
     completedRunsDays: retentionDays,
     failedRunsDays: retentionDays,
-    snapshotKeep: z.coerce.number().int().min(1).default(5),
   })
   .strict();
 

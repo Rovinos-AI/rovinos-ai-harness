@@ -9,7 +9,7 @@ import type { Clock, EventStore, RunSummary } from "./types.js";
 
 const RUN_LIST_BATCH_SIZE = 100;
 const MILLIS_PER_DAY = 86_400_000;
-const RUN_ID_FIELD = "harness.run_id" satisfies Code;
+const RUN_ID_FIELD = "harness.run.id" satisfies Code;
 
 /** Safe metadata fields accepted by the retention logger. */
 export type RetentionLogFields = Readonly<Record<string, Id | number | boolean>>;
@@ -42,10 +42,12 @@ export interface PurgeExpiredRunsOptions {
 export interface PurgeExpiredRunsResult {
   /** Terminal and active runs examined. */
   examined: number;
-  /** Runs deleted from the store. */
+  /** Runs deleted from the store, or eligible runs in dry-run mode. */
   purged: number;
   /** Running and suspended runs left untouched. */
   skippedActive: number;
+  /** Post-deletion hook failures. */
+  hookFailures: number;
 }
 
 const noopLogger: RetentionLogger = {
@@ -57,7 +59,7 @@ const noopLogger: RetentionLogger = {
  * Delete terminal runs older than their configured retention windows.
  *
  * @param options Store, clock, retention policy, and side-effect hooks.
- * @returns Counts of examined, deleted, and skipped active runs.
+ * @returns Counts of examined, purged, skipped active runs, and hook failures.
  */
 export async function purgeExpiredRuns(
   options: PurgeExpiredRunsOptions,
@@ -65,7 +67,12 @@ export async function purgeExpiredRuns(
   const policy = StoreRetentionConfigSchema.parse(options.policy);
   const cutoff = options.clock.now();
   const logger = options.logger ?? noopLogger;
-  const result: PurgeExpiredRunsResult = { examined: 0, purged: 0, skippedActive: 0 };
+  const result: PurgeExpiredRunsResult = {
+    examined: 0,
+    purged: 0,
+    skippedActive: 0,
+    hookFailures: 0,
+  };
 
   async function considerRun(run: RunSummary, status: RunSummary["status"]): Promise<void> {
     result.examined += 1;
@@ -74,7 +81,11 @@ export async function purgeExpiredRuns(
       return;
     }
     const retentionDays = status === "completed" ? policy.completedRunsDays : policy.failedRunsDays;
-    if (run.lastTs >= cutoff - retentionDays * MILLIS_PER_DAY || options.dryRun) {
+    if (run.lastTs >= cutoff - retentionDays * MILLIS_PER_DAY) {
+      return;
+    }
+    if (options.dryRun) {
+      result.purged += 1;
       return;
     }
     const deletedEvents = await options.store.deleteRun(run.runId);
@@ -87,6 +98,7 @@ export async function purgeExpiredRuns(
       try {
         await options.onRunPurged(run.runId);
       } catch {
+        result.hookFailures += 1;
         logger.error("run_purge_hook_failed", { [RUN_ID_FIELD]: run.runId });
       }
     }
