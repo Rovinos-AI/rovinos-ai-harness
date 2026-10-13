@@ -128,7 +128,7 @@ describe("compactionStep", () => {
       fromSeq: 2,
       toSeq: 7,
       strategy: "summarizing",
-      strategyVersion: "v1",
+      strategyVersion: "v2",
       summary: "summary <EMAIL_1>",
       inputTokens: 8,
       outputTokens: 2,
@@ -316,6 +316,7 @@ describe("ModelPortSummarizer", () => {
       summarizer.summarize({
         groups: [
           {
+            runId,
             seqs: [1],
             pinned: false,
             messages: [{ role: "user", parts: [{ type: "text", text: "email <EMAIL_1>" }] }],
@@ -342,6 +343,7 @@ describe("ModelPortSummarizer", () => {
     await summarizer.summarize({
       groups: [
         {
+          runId,
           seqs: [1],
           pinned: false,
           messages: [

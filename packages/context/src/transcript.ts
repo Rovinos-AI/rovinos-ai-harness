@@ -74,6 +74,7 @@ function transcriptForRun(
   for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
     if (event.type === "run_input") {
       const group: TranscriptGroup = {
+        runId: event.runId,
         seqs: [event.seq],
         messages: [{ role: "user", parts: [{ type: "text", text: inputText(event.input) }] }],
         pinned: newestInput === undefined || event === newestInput,
@@ -81,6 +82,7 @@ function transcriptForRun(
       groups.push(group);
     } else if (event.type === "model_response") {
       const group: TranscriptGroup = {
+        runId: event.runId,
         seqs: [event.seq],
         messages: [{ role: "assistant", parts: event.content }],
         pinned: false,
@@ -106,6 +108,7 @@ function transcriptForRun(
         toSeq: event.toSeq,
       });
       const summaryGroup: TranscriptGroup = {
+        runId: event.runId,
         seqs: [event.fromSeq],
         messages: [
           {

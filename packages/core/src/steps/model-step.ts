@@ -29,6 +29,12 @@ export interface ModelStepOptions {
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
+  readonly contextMetadata: {
+    readonly strategyId: Code;
+    readonly strategyVersion: Code;
+    readonly estimatedTokens: number;
+    readonly messageCount: number;
+  };
 }
 
 /** Selects request messages and model-visible tool specifications for the model step. */
@@ -106,49 +112,58 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
   const recorded: Event[] = [];
   let result: ModelStepResult | undefined;
 
-  await options.recorder.withStepSpan(MODEL_CALL_SPAN, {}, async (span) => {
-    const requestEvent = await options.recorder.record(requestPartial);
-    recorded.push(requestEvent);
+  await options.recorder.withStepSpan(
+    MODEL_CALL_SPAN,
+    {
+      "harness.context.strategy": options.contextMetadata.strategyId,
+      "harness.context.strategy_version": options.contextMetadata.strategyVersion,
+      "harness.context.estimated_tokens": options.contextMetadata.estimatedTokens,
+      "harness.context.message_count": options.contextMetadata.messageCount,
+    },
+    async (span) => {
+      const requestEvent = await options.recorder.record(requestPartial);
+      recorded.push(requestEvent);
 
-    let completion: ModelCompletion;
-    try {
-      completion = await options.model.complete(modelRequest, modelRunContext(options));
-    } catch (error) {
-      if (options.signal.reason === "shutdown") {
-        result = { outcome: "aborted", events: recorded };
-        return requestEvent;
+      let completion: ModelCompletion;
+      try {
+        completion = await options.model.complete(modelRequest, modelRunContext(options));
+      } catch (error) {
+        if (options.signal.reason === "shutdown") {
+          result = { outcome: "aborted", events: recorded };
+          return requestEvent;
+        }
+        const code = errorCode(error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        span.setAttribute("harness.error.code", code);
+        const failed = await options.recorder.record({
+          type: "run_status_changed",
+          v: 1,
+          from: "running",
+          to: "failed",
+          reason: code,
+        });
+        recorded.push(failed);
+        result = { outcome: "failed", code, events: recorded };
+        return failed;
       }
-      const code = errorCode(error);
-      span.setStatus({ code: SpanStatusCode.ERROR });
-      span.setAttribute("harness.error.code", code);
-      const failed = await options.recorder.record({
-        type: "run_status_changed",
-        v: 1,
-        from: "running",
-        to: "failed",
-        reason: code,
-      });
-      recorded.push(failed);
-      result = { outcome: "failed", code, events: recorded };
-      return failed;
-    }
 
-    const prepared = await prepareCompletion(
-      completion,
-      options.tool,
-      toolRunContext(modelRunContext(options), options.recorder, recorded),
-    );
-    completion = prepared.completion;
-    const response = await options.recorder.record(responsePayload(requestId, completion));
-    recorded.push(response);
-    result = {
-      outcome: "response",
-      completion,
-      preparedCalls: prepared.preparedCalls,
-      events: recorded,
-    };
-    return response;
-  });
+      const prepared = await prepareCompletion(
+        completion,
+        options.tool,
+        toolRunContext(modelRunContext(options), options.recorder, recorded),
+      );
+      completion = prepared.completion;
+      const response = await options.recorder.record(responsePayload(requestId, completion));
+      recorded.push(response);
+      result = {
+        outcome: "response",
+        completion,
+        preparedCalls: prepared.preparedCalls,
+        events: recorded,
+      };
+      return response;
+    },
+  );
 
   if (result === undefined) {
     throw new Error("Expected the model step to record an outcome.");

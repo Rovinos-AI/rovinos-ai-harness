@@ -19,3 +19,17 @@ export function createStrategyRegistry(model: ModelRef): ReadonlyMap<string, Con
   ];
   return new Map(strategies.map((strategy) => [strategy.id, strategy]));
 }
+
+/**
+ * Looks up a strategy in an existing registry for configuration and eval consumers.
+ *
+ * @param registry - Strategies available to the current runtime.
+ * @param id - Stable strategy identifier.
+ * @returns The strategy, or undefined when the identifier is not registered.
+ */
+export function lookupContextStrategy(
+  registry: ReadonlyMap<string, ContextStrategy>,
+  id: string,
+): ContextStrategy | undefined {
+  return registry.get(id);
+}

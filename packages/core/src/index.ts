@@ -93,6 +93,8 @@ export {
   type ResumePolicy,
 } from "./resume-policy.js";
 export type {
+  ContextBuildMetadata,
+  ContextBuildResult,
   ContextPort,
   IdGenerator,
   ModelCompletion,

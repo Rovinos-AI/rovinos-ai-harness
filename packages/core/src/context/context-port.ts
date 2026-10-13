@@ -14,7 +14,7 @@ import {
   type ContextStrategy,
   type ContextStrategyInput,
 } from "@harness/context";
-import type { ContextPort } from "../ports.js";
+import type { ContextBuildResult, ContextPort } from "../ports.js";
 
 /** Context build dependencies configured for a strategy-backed run-loop port. */
 export interface StrategyContextPortOptions extends Omit<ContextStrategyInput, "events"> {
@@ -54,13 +54,21 @@ export class StrategyContextPort implements ContextPort {
   async build(
     events: readonly Event[],
     previousEventLogs?: readonly (readonly Event[])[],
-  ): Promise<Message[]> {
+  ): Promise<ContextBuildResult> {
     const result = await this.strategy.build({
       ...this.buildOptions,
       events,
       ...(previousEventLogs === undefined ? {} : { previousEventLogs }),
     });
-    return result.messages;
+    return {
+      messages: result.messages,
+      metadata: {
+        strategyId: this.strategy.id,
+        strategyVersion: this.strategy.version,
+        estimatedTokens: result.stats.estimatedTokens,
+        messageCount: result.messages.length,
+      },
+    };
   }
 
   /** {@inheritDoc ContextPort.estimate} */

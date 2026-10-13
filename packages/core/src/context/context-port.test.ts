@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
 import type { Event, JsonValue } from "@harness/schemas";
-import { NaiveStrategy } from "@harness/context";
+import { NaiveStrategy, type ContextStrategy } from "@harness/context";
 import { StrategyContextPort } from "./context-port.js";
 
 const runId = "00000000000000000000000000";
@@ -39,22 +39,34 @@ describe("StrategyContextPort", () => {
     const context = createContextPort(calibration, strategy);
     const input = runInput(0, "goal");
 
-    await expect(context.build([input])).resolves.toEqual([
-      { role: "user", parts: [{ type: "text", text: "goal" }] },
-    ]);
+    await expect(context.build([input])).resolves.toMatchObject({
+      messages: [{ role: "user", parts: [{ type: "text", text: "goal" }] }],
+      metadata: {
+        strategyId: "naive",
+        strategyVersion: "v4",
+        estimatedTokens: 2,
+        messageCount: 1,
+      },
+    });
     expect(build.mock.calls[0]?.[0]).not.toHaveProperty("calibration");
     const snapshot = await context.snapshot();
     expect(snapshot).toEqual({
       strategyId: "naive",
-      strategyVersion: "v3",
+      strategyVersion: "v4",
       calibration,
     });
 
     await context.restore(snapshot, [runInput(1, "ignored")]);
     await expect(context.snapshot()).resolves.toEqual(snapshot);
-    await expect(context.build([input])).resolves.toEqual([
-      { role: "user", parts: [{ type: "text", text: "goal" }] },
-    ]);
+    await expect(context.build([input])).resolves.toMatchObject({
+      messages: [{ role: "user", parts: [{ type: "text", text: "goal" }] }],
+      metadata: {
+        strategyId: "naive",
+        strategyVersion: "v4",
+        estimatedTokens: 2,
+        messageCount: 1,
+      },
+    });
   });
 
   it("clears calibration when no checkpoint exists", async () => {
@@ -63,6 +75,45 @@ describe("StrategyContextPort", () => {
     await context.restore(undefined, []);
 
     await expect(context.snapshot()).resolves.toMatchObject({ calibration: null });
+  });
+
+  it("keeps concurrent build metadata paired with its own messages", async () => {
+    const base = new NaiveStrategy();
+    const strategy: ContextStrategy = {
+      id: base.id,
+      version: base.version,
+      build: async (input) => {
+        await new Promise((resolve) => setTimeout(resolve, input.events[0]?.seq === 0 ? 10 : 0));
+        return base.build(input);
+      },
+    };
+    const context = new StrategyContextPort(strategy, {
+      budget: { maxTokens: 100, reserveOutputTokens: 10 },
+      model: { provider: "test", model: "test" },
+      counter: {
+        count: (messages) =>
+          messages.reduce(
+            (count, message) =>
+              count +
+              message.parts.reduce(
+                (partCount, part) =>
+                  part.type === "text" ? partCount + part.text.length : partCount,
+                0,
+              ),
+            0,
+          ),
+      },
+    });
+
+    const [slow, fast] = await Promise.all([
+      context.build([runInput(0, "slower")]),
+      context.build([runInput(1, "x")]),
+    ]);
+
+    expect(slow.metadata).toMatchObject({ estimatedTokens: 6, messageCount: 1 });
+    expect(fast.metadata).toMatchObject({ estimatedTokens: 1, messageCount: 1 });
+    expect(slow.messages[0]?.parts).toMatchObject([{ text: "slower" }]);
+    expect(fast.messages[0]?.parts).toMatchObject([{ text: "x" }]);
   });
 
   it("rejects an invalid checkpoint without exposing its content", async () => {
