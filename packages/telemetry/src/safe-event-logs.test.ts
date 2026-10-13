@@ -44,7 +44,13 @@ const events = [
     errorCode: "tool_error",
     latencyMs: 10,
   }),
-  SafeEvent.parse({ ...common, kind: "approval_wait", decision: "approve", waitMs: 10 }),
+  SafeEvent.parse({
+    ...common,
+    kind: "approval_wait",
+    decision: "approve",
+    decidedBy: "human",
+    waitMs: 10,
+  }),
   SafeEvent.parse({ ...common, kind: "checkpoint", atSeq: 11, hasWorkspaceRef: true }),
   SafeEvent.parse({
     ...common,

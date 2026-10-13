@@ -87,12 +87,14 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
     event: validEvent({
       type: "approval_resolved",
       approvalId: "00000000000000000000000002",
-      decision: "approve",
+      decision: "deny",
+      decidedBy: "expiry",
+      reason: "expired",
       waitMs: 5,
       edits: "APPROVAL_CONTENT_CANARY",
     }),
     kind: "approval_wait",
-    fields: { decision: "approve", waitMs: 5 },
+    fields: { decision: "deny", decidedBy: "expiry", reason: "expired", waitMs: 5 },
   },
   {
     event: validEvent({

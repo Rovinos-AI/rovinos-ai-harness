@@ -142,12 +142,15 @@ const approvalRequestedEvent = z
   })
   .strict();
 
+// V1 resolutions predate this field and all represented human choices.
 const approvalResolvedEvent = z
   .object({
     ...eventEnvelopeShape,
     type: z.literal("approval_resolved"),
     approvalId: Id,
     decision: z.enum(["approve", "deny", "edit"]),
+    decidedBy: z.enum(["human", "policy", "expiry"]).default("human"),
+    reason: Code.optional(),
     waitMs: z.number().int().nonnegative(),
     edits: JsonValue.optional(),
   })

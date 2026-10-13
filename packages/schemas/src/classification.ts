@@ -71,6 +71,8 @@ export const EVENT_FIELD_CLASS = {
   approval_resolved: {
     approvalId: "meta",
     decision: "meta",
+    decidedBy: "meta",
+    reason: "meta",
     waitMs: "meta",
     edits: "content",
   },

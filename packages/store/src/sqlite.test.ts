@@ -54,6 +54,81 @@ function readOnlyMigrationErrorCode(path: string): StoreMigrationError["code"] {
 }
 
 describe("read-only SQLite inspection", () => {
+  it("reads persisted v1 approval resolutions that predate decidedBy", async () => {
+    const path = await temporaryDatabase();
+    const writer = new SqliteEventStore(path);
+    const callId = Id.parse("00000000000000000000000002");
+    const approvalId = Id.parse("00000000000000000000000003");
+    await writer.append(
+      runId,
+      [
+        runCreated(runId, 1),
+        runStatusChanged(runId, 2, "pending", "running"),
+        {
+          runId,
+          ts: 3,
+          v: 1,
+          traceId,
+          spanId,
+          segmentId: runId,
+          type: "tool_intent",
+          callId,
+          toolId: "test.tool",
+          idempotent: false,
+          policyDecision: "ask",
+          argsHash: "c".repeat(64),
+          args: {},
+        },
+        {
+          runId,
+          ts: 4,
+          v: 1,
+          traceId,
+          spanId,
+          segmentId: runId,
+          type: "approval_requested",
+          approvalId,
+          callId,
+          payload: {},
+        },
+        runStatusChanged(runId, 5, "running", "suspended"),
+        {
+          runId,
+          ts: 6,
+          v: 1,
+          traceId,
+          spanId,
+          segmentId: runId,
+          type: "approval_resolved",
+          approvalId,
+          decision: "approve",
+          decidedBy: "human",
+          waitMs: 1,
+        },
+      ],
+      0,
+    );
+    await writer.close();
+
+    const database = new Database(path);
+    database
+      .prepare(
+        "UPDATE events SET meta_json = json_remove(meta_json, '$.decidedBy') WHERE run_id = ? AND type = 'approval_resolved'",
+      )
+      .run(runId);
+    database.close();
+
+    const reader = new SqliteEventStore(path, undefined, { readOnly: true });
+    try {
+      const resolution = (await collect(reader.read(runId))).find(
+        (event) => event.type === "approval_resolved",
+      );
+      expect(resolution).toMatchObject({ type: "approval_resolved", decidedBy: "human" });
+    } finally {
+      await reader.close();
+    }
+  });
+
   it("reads existing events without changing database files or allowing writes", async () => {
     const path = await temporaryDatabase();
     const writer = new SqliteEventStore(path);

@@ -40,6 +40,7 @@ export {
   requestApproval,
   resolveApproval,
   type ApprovalDecision,
+  type ApprovalResolutionMetadata,
   type ApprovalSuspensionResult,
   type RequestApprovalOptions,
 } from "./approvals.js";
