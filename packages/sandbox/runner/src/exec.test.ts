@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { executeSpec } from "./exec.js";
+import { executeSpec, RunnerExecError } from "./exec.js";
 import type { ExecSpec } from "../../src/types.js";
 
 const limits = { memoryMb: 2048, pids: 2048, outputBytes: 1024, cpuSeconds: 5 };
@@ -23,7 +23,9 @@ function spawnWithoutPrivilegeChanges(
     stdio: "pipe";
   },
 ): ChildProcess {
-  const separator = args.indexOf("--");
+  // setpriv and prlimit are Linux-only (util-linux); unit tests run the wrapped argv directly so they
+  // pass on the macOS CI agent. The Compose integration tests exercise the real wrappers in Linux.
+  const separator = args.lastIndexOf("--");
   return spawn(args[separator + 1] ?? file, args.slice(separator + 2), options);
 }
 
@@ -112,15 +114,20 @@ describe("executeSpec", () => {
   });
 
   it("does not execute commands when the execution credentials are invalid", async () => {
-    const result = await executeSpec({
+    // On Linux setpriv rejects the credentials (non-zero exit); where setpriv is absent (macOS CI agent)
+    // the spawn itself fails. Either way the command must not run successfully.
+    const outcome = await executeSpec({
       spec: makeSpec([process.execPath, "-e", "process.exit(0)"]),
       signal: new AbortController().signal,
       workspaceRoot,
       executionUid: -1,
       executionGid: -1,
-    });
+    }).then(
+      (result) => result.exitCode,
+      (error: unknown) => (error instanceof RunnerExecError ? "rejected" : error),
+    );
 
-    expect(result.exitCode).not.toBe(0);
+    expect(outcome === "rejected" || (typeof outcome === "number" && outcome !== 0)).toBe(true);
   });
 
   it("decodes stdout and stderr independently", async () => {
