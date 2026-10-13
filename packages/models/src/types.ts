@@ -41,7 +41,7 @@ export type ProviderResult = z.infer<typeof ProviderResultSchema>;
 export interface ProviderAdapter {
   readonly provider: Code;
   /** Built-in provider kind used for capability and schema-rule lookup. */
-  readonly kind: "anthropic" | "openai";
+  readonly kind: "anthropic" | "openai" | "cassette";
   /** Default maximum response-token count used when the request does not specify one. */
   readonly maxOutputTokens?: number;
   readonly capabilities?: Partial<Capabilities>;

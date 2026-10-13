@@ -9,6 +9,26 @@ export {
 } from "./errors.js";
 export { prepareMessagesForProvider } from "./blobs.js";
 export {
+  CassetteAutoDisabledError,
+  CassetteDivergenceError,
+  CassetteEntrySchema,
+  CassetteInnerRequiredError,
+  CassetteMissError,
+  CassetteModeSchema,
+  CassetteProvider,
+  CassetteStoreReadOnlyError,
+  type CassetteEntry,
+  type CassetteMode,
+  type CassetteStore,
+} from "./cassette/cassette-provider.js";
+export {
+  CassetteFileSchema,
+  FileCassetteStore,
+  type CassetteFile,
+} from "./cassette/file-store.js";
+export { EventLogCassetteStore } from "./cassette/event-log-store.js";
+export { requestHash } from "./cassette/hash.js";
+export {
   ModelGateway,
   type ModelGatewayContext,
   type ModelGatewayDependencies,
