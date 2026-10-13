@@ -4,7 +4,6 @@ import {
   JsonValue as JsonValueSchema,
   joinEvent,
   splitEvent,
-  toPiiActionEventPayload,
   type Event,
   type Id,
   type JsonValue,
@@ -18,20 +17,28 @@ import type { EventStore, ListRunsOptions, RunSummary } from "@harness/store";
 import { PiiStorageFailedError } from "./errors.js";
 import type { Tokenizer } from "./tokenizer.js";
 
-const sanitized = new WeakSet<object>();
+const sanitized = new WeakSet();
 
 /** Marks an event or object-valued content field as already sanitized. */
-export function markSanitized<T extends object>(value: T): T {
+export function markSanitized<T extends WeakKey>(value: T): T {
   sanitized.add(value);
   return value;
 }
 
 /** Tokenizes classified event content and snapshot values before they reach storage. */
 export class PiiEventStore implements EventStore {
+  /**
+   * Wraps an event store with storage-boundary content sanitization.
+   *
+   * @param inner - Store that receives sanitized events and snapshots.
+   * @param tokenizer - Tokenizer used only for unmarked content.
+   * @param onSummary - Receives metadata-only summaries before the append is attempted.
+   */
   constructor(
     private readonly inner: EventStore,
     private readonly tokenizer: Tokenizer,
-    private readonly onSummary: (summary: PiiActionSummary) => void | Promise<void> = () => {},
+    private readonly onSummary: (summary: PiiActionSummary) => void | Promise<void> = () =>
+      Promise.resolve(),
   ) {}
 
   async append(
@@ -40,8 +47,8 @@ export class PiiEventStore implements EventStore {
     expectedSeq: number,
   ): Promise<{ nextSeq: number }> {
     const prepared = await this.prepareEvents(runId, events, expectedSeq);
-    const appended = await this.inner.append(runId, prepared.events, expectedSeq);
-    return { nextSeq: await this.appendSummaries(prepared.summaries, appended.nextSeq) };
+    await this.notifySummaries(prepared.summaries);
+    return this.inner.append(runId, prepared.events, expectedSeq);
   }
 
   async appendWithSnapshot(
@@ -52,30 +59,24 @@ export class PiiEventStore implements EventStore {
   ): Promise<{ nextSeq: number }> {
     const prepared = await this.prepareEvents(runId, events, expectedSeq);
     let sanitizedSnapshot: Snapshot;
-    let snapshotSummaries: readonly { source: NewEvent; summary: PiiActionSummary }[];
+    let snapshotSummaries: readonly PiiActionSummary[];
     try {
-      const context = await this.sanitizeJson(runId, snapshot.context);
-      const plan = await this.sanitizeJson(runId, snapshot.plan);
-      sanitizedSnapshot = { ...snapshot, context: context.value, plan: plan.value };
-      const source = prepared.events.find((event) => event.type === "checkpoint_written");
-      snapshotSummaries = source === undefined
-        ? []
-        : [...context.actions, ...plan.actions].map((summary) => ({ source, summary }));
-      await this.notifySummaries(snapshotSummaries);
+      const context = isMarked(snapshot)
+        ? { value: snapshot.context, actions: [] }
+        : await this.sanitizeJson(runId, snapshot.context);
+      const plan = isMarked(snapshot)
+        ? { value: snapshot.plan, actions: [] }
+        : await this.sanitizeJson(runId, snapshot.plan);
+      sanitizedSnapshot =
+        context.value === snapshot.context && plan.value === snapshot.plan
+          ? snapshot
+          : { ...snapshot, context: context.value, plan: plan.value };
+      snapshotSummaries = [...context.actions, ...plan.actions];
+      await this.notifySummaries([...prepared.summaries, ...snapshotSummaries]);
     } catch {
       throw new PiiStorageFailedError();
     }
-    const appended = await this.inner.appendWithSnapshot(
-      runId,
-      prepared.events,
-      expectedSeq,
-      sanitizedSnapshot,
-    );
-    const nextSeq = await this.appendSummaries(
-      [...prepared.summaries, ...snapshotSummaries],
-      appended.nextSeq,
-    );
-    return { nextSeq };
+    return this.inner.appendWithSnapshot(runId, prepared.events, expectedSeq, sanitizedSnapshot);
   }
 
   latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
@@ -94,9 +95,7 @@ export class PiiEventStore implements EventStore {
     return this.inner.deleteRun(runId);
   }
 
-  listRuns(
-    opts: ListRunsOptions,
-  ): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
+  listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
     return this.inner.listRuns(opts);
   }
 
@@ -144,10 +143,10 @@ export class PiiEventStore implements EventStore {
     expectedSeq: number,
   ): Promise<{
     readonly events: readonly NewEvent[];
-    readonly summaries: readonly { source: NewEvent; summary: PiiActionSummary }[];
+    readonly summaries: readonly PiiActionSummary[];
   }> {
     const prepared: NewEvent[] = [];
-    const summaries: { source: NewEvent; summary: PiiActionSummary }[] = [];
+    const summaries: PiiActionSummary[] = [];
     for (const [index, source] of events.entries()) {
       if (sanitized.has(source)) {
         prepared.push(source);
@@ -177,32 +176,30 @@ export class PiiEventStore implements EventStore {
           throw new PiiStorageFailedError();
         }
         const sanitizedContent = asJsonObject(result.value);
-        for (const summary of result.actions) {
-          const entry = { source, summary };
-          summaries.push(entry);
-        }
+        summaries.push(...result.actions);
         if (Object.keys(sanitizedContent).length === 0) {
           prepared.push(source);
           continue;
         }
         const event = joinEvent(meta, { ...content, ...sanitizedContent });
         const { seq, ...newEvent } = event;
-        void seq;
+        if (seq !== expectedSeq + index) {
+          throw new PiiStorageFailedError();
+        }
         prepared.push(newEvent);
       } catch {
         throw new PiiStorageFailedError();
       }
     }
-    await this.notifySummaries(summaries);
     return { events: prepared, summaries };
   }
 
   private async sanitizeJson(
     runId: Id,
     value: JsonValue,
-  ): Promise<{ value: JsonValue; summaries: readonly PiiActionSummary[] }> {
+  ): Promise<{ value: JsonValue; actions: readonly PiiActionSummary[] }> {
     if (isMarked(value)) {
-      return { value, summaries: [] };
+      return { value, actions: [] };
     }
     const result = await this.tokenizer.tokenizeJson(runId, value, {
       boundary: "storage",
@@ -214,32 +211,21 @@ export class PiiEventStore implements EventStore {
     return result;
   }
 
-  private async notifySummaries(
-    summaries: readonly { source: NewEvent; summary: PiiActionSummary }[],
-  ): Promise<void> {
-    for (const { summary } of summaries) {
-      await this.onSummary(summary);
+  private async notifySummaries(summaries: readonly PiiActionSummary[]): Promise<void> {
+    for (const summary of summaries) {
+      try {
+        await this.onSummary(summary);
+      } catch {
+        throw new PiiStorageFailedError();
+      }
     }
-  }
-
-  private async appendSummaries(
-    summaries: readonly { source: NewEvent; summary: PiiActionSummary }[],
-    expectedSeq: number,
-  ): Promise<number> {
-    if (summaries.length === 0) {
-      return expectedSeq;
-    }
-    const events = summaries.map(({ source, summary }) => storageActionEvent(source, summary));
-    const firstEvent = events[0];
-    if (firstEvent === undefined) {
-      throw new PiiStorageFailedError();
-    }
-    return (await this.inner.append(firstEvent.runId, events, expectedSeq)).nextSeq;
   }
 }
 
-function isMarked(value: unknown): value is object {
-  return typeof value === "object" && value !== null && sanitized.has(value);
+function isMarked(value: unknown): boolean {
+  return (typeof value === "object" && value !== null) || typeof value === "function"
+    ? sanitized.has(value)
+    : false;
 }
 
 function asJsonObject(value: JsonValue): Record<string, JsonValue> {
@@ -247,17 +233,4 @@ function asJsonObject(value: JsonValue): Record<string, JsonValue> {
     throw new PiiStorageFailedError();
   }
   return value;
-}
-
-function storageActionEvent(source: NewEvent, summary: PiiActionSummary): NewEvent {
-  return {
-    runId: source.runId,
-    ts: source.ts,
-    v: source.v,
-    traceId: source.traceId,
-    spanId: source.spanId,
-    segmentId: source.segmentId,
-    type: "pii_action",
-    ...toPiiActionEventPayload(summary),
-  };
 }

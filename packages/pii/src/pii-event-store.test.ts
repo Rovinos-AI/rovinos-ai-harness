@@ -9,9 +9,9 @@ import {
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
-import { InMemoryEventStore, type EventStoreFactory } from "@harness/store";
-import { runEventStoreConformance } from "@harness/store/testing";
-import { InMemoryVault } from "@harness/vault";
+import { InMemoryEventStore } from "@harness/store";
+import { runEventStoreConformance, type EventStoreFactory } from "@harness/store/testing";
+import { InMemoryVault, type VaultWriter } from "@harness/vault";
 import { emailDetector } from "./detectors/email.js";
 import { PiiEventStore, markSanitized } from "./pii-event-store.js";
 import { PiiStorageFailedError } from "./errors.js";
@@ -63,11 +63,12 @@ function snapshot(): Snapshot {
 
 function createTokenizer(
   detect: PiiDetectorRegistry["detect"] = (text) => emailDetector.detect(text),
+  vault: VaultWriter = new InMemoryVault(),
 ) {
   return new Tokenizer({
     detectors: { detect },
     policy: PiiConfigSchema.parse({}),
-    vault: new InMemoryVault(),
+    vault,
   });
 }
 
@@ -81,7 +82,10 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
 
 const conformanceFactory: EventStoreFactory = () => {
   const inner = new InMemoryEventStore();
-  const store = new PiiEventStore(inner, createTokenizer(() => []));
+  const store = new PiiEventStore(
+    inner,
+    createTokenizer(() => []),
+  );
   return Promise.resolve({ store, cleanup: () => store.close() });
 };
 
@@ -90,7 +94,7 @@ describe("PiiEventStore", () => {
     supportsFileReopen: false,
   });
 
-  it("tokenizes unmarked event content and appends a pii_action event", async () => {
+  it("tokenizes unmarked event content and reports a metadata-only summary", async () => {
     const inner = new InMemoryEventStore();
     const summaries: unknown[] = [];
     const store = new PiiEventStore(inner, createTokenizer(), (summary) => {
@@ -99,17 +103,14 @@ describe("PiiEventStore", () => {
 
     await expect(
       store.append(runId, [runCreated(), runInput({ text: "alice@example.test" })], 0),
-    ).resolves.toEqual({ nextSeq: 3 });
+    ).resolves.toEqual({ nextSeq: 2 });
 
     const events = await collect(store.read(runId));
-    expect(events.map(({ seq }) => seq)).toEqual([0, 1, 2]);
+    expect(events.map(({ seq }) => seq)).toEqual([0, 1]);
     expect(events[1]).toMatchObject({ type: "run_input", input: { text: "<EMAIL_1>" } });
-    expect(events[2]).toMatchObject({
-      type: "pii_action",
-      boundary: "storage",
-      action: "tokenized",
-      entities: [{ type: "email", count: 1 }],
-    });
+    expect(summaries).toEqual([
+      { boundary: "storage", action: "tokenize", entities: [{ type: "email", count: 1 }] },
+    ]);
     expect(JSON.stringify(summaries)).not.toContain("alice@example.test");
   });
 
@@ -141,9 +142,36 @@ describe("PiiEventStore", () => {
     await expect(inner.head(runId)).resolves.toBe(0);
   });
 
+  it("fails closed without exposing vault errors or writing events", async () => {
+    const inner = new InMemoryEventStore();
+    const vault = new InMemoryVault();
+    vi.spyOn(vault, "put").mockRejectedValue(new Error("raw@example.test"));
+    const store = new PiiEventStore(inner, createTokenizer(undefined, vault));
+
+    await expect(
+      store.append(runId, [runCreated(), runInput({ text: "raw@example.test" })], 0),
+    ).rejects.toMatchObject({ code: "pii_storage_failed" });
+    await expect(inner.head(runId)).resolves.toBe(0);
+  });
+
+  it("converts summary callback failures to a safe storage error before writing", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new PiiEventStore(inner, createTokenizer(), () => {
+      throw new Error("raw@example.test");
+    });
+
+    await expect(
+      store.append(runId, [runCreated(), runInput({ text: "raw@example.test" })], 0),
+    ).rejects.toMatchObject({ code: "pii_storage_failed" });
+    await expect(inner.head(runId)).resolves.toBe(0);
+  });
+
   it("scans snapshot context and plan before writing", async () => {
     const inner = new InMemoryEventStore();
-    const store = new PiiEventStore(inner, createTokenizer());
+    const summaries: unknown[] = [];
+    const store = new PiiEventStore(inner, createTokenizer(), (summary) => {
+      summaries.push(summary);
+    });
     const result = await store.appendWithSnapshot(
       runId,
       [runCreated(), checkpointWritten()],
@@ -151,7 +179,7 @@ describe("PiiEventStore", () => {
       snapshot(),
     );
 
-    expect(result.nextSeq).toBe(4);
+    expect(result.nextSeq).toBe(2);
     await expect(store.latestSnapshot(runId)).resolves.toMatchObject({
       context: { text: "<EMAIL_1>" },
       plan: { text: "<EMAIL_2>" },
@@ -159,9 +187,10 @@ describe("PiiEventStore", () => {
     expect((await collect(store.read(runId))).map((event) => event.type)).toEqual([
       "run_created",
       "checkpoint_written",
-      "pii_action",
-      "pii_action",
     ]);
+    expect(summaries).toHaveLength(2);
+    expect(JSON.stringify(summaries)).not.toContain("context@example.test");
+    expect(JSON.stringify(summaries)).not.toContain("plan@example.test");
   });
 
   it("does not scan pii_action events", async () => {

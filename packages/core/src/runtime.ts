@@ -1,25 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
-import {
-  HarnessError,
-  PiiConfigSchema,
-  type Event,
-  type Id,
-  type JsonValue,
-} from "@harness/schemas";
+import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { type EventStore } from "@harness/store";
-import {
-  PiiEventStore,
-  Tokenizer,
-  creditCardDetector,
-  emailDetector,
-  ibanDetector,
-  ipDetector,
-  phoneDetector,
-  secretsDetector,
-  urlCredentialsDetector,
-} from "@harness/pii";
-import { InMemoryVault } from "@harness/vault";
 import { cancelRun } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ToolPort } from "./ports.js";
@@ -34,7 +16,7 @@ import { foldRunState } from "./run-state.js";
 import { SystemIdGenerator, systemClock } from "./runtime-ids.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool, resolveRuntimeRoles } from "./subagent/runtime.js";
-import { createSqliteStore } from "./runtime-store.js";
+import { createPiiStorageStore, createSqliteStore } from "./runtime-store.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
@@ -52,16 +34,6 @@ const CANCEL_POLL_INTERVAL_MS = 25;
 const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
-const storagePiiConfig = PiiConfigSchema.parse({});
-const storageDetectors = [
-  creditCardDetector,
-  emailDetector,
-  ibanDetector,
-  ipDetector,
-  phoneDetector,
-  secretsDetector,
-  urlCredentialsDetector,
-];
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
@@ -432,14 +404,7 @@ export async function createRuntime(
     );
     const innerStore =
       overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
-    const tokenizer = new Tokenizer({
-      detectors: {
-        detect: (text) => storageDetectors.flatMap((detector) => detector.detect(text)),
-      },
-      policy: storagePiiConfig,
-      vault: new InMemoryVault(),
-    });
-    const store = new PiiEventStore(innerStore, tokenizer);
+    const store = createPiiStorageStore(innerStore);
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     return composeRuntime({
       config,

@@ -28,7 +28,7 @@ export class PiiTokenizerError extends HarnessError {
   }
 }
 
-/** Safe storage-boundary failure; the cause may contain detector or vault details. */
+/** Safe storage-boundary failure that does not expose detector or vault details. */
 export class PiiStorageFailedError extends HarnessError {
   readonly code = "pii_storage_failed";
 
