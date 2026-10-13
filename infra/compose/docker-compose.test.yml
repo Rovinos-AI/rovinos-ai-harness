@@ -29,8 +29,17 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    networks:
+      - test-host
     healthcheck:
       test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "harness", "-d", "harness"]
       interval: 2s
       timeout: 3s
       retries: 30
+networks:
+  internal:
+    internal: true
+  egress: {}
+  # Keep this test-only fixture off the internal network so Docker Desktop and Colima can publish
+  # its host port. PostgreSQL is not a harness sidecar and is not attached to egress.
+  test-host: {}
