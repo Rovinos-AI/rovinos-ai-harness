@@ -3,7 +3,9 @@
   "compilerOptions": {
     "composite": false,
     "customConditions": ["source"],
+    "rootDir": ".",
     "noEmit": true
   },
+  "include": ["src/**/*.ts", "runner/src/**/*.ts"],
   "exclude": []
 }

@@ -12,7 +12,12 @@ it("limits the rendered Compose egress network to the collector", () => {
 
   expect(config.networks.internal?.internal).toBe(true);
   expect(config.networks.egress?.internal).not.toBe(true);
-  expect(Object.keys(config.services.harness?.networks ?? {}).sort()).toEqual(["internal"]);
+  expect(Object.keys(config.services.harness?.networks ?? {}).sort()).toEqual([
+    "internal",
+    "sandbox",
+  ]);
+  expect(Object.keys(config.services["sandbox-runner"]?.networks ?? {})).toEqual(["sandbox"]);
+  expect(config.networks.sandbox?.internal).toBe(true);
   expect(Object.keys(config.services["otel-collector"]?.networks ?? {}).sort()).toEqual([
     "egress",
     "internal",

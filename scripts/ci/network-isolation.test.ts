@@ -60,9 +60,11 @@ it("limits Compose egress to the collector and keeps Postgres host-publishable",
     file: "docker-compose.yml",
     service: "otel-collector",
   });
-  expect(serviceNetworks.harness).toEqual(["internal"]);
+  expect(serviceNetworks.harness).toEqual(["internal", "sandbox"]);
   expect(serviceNetworks["otel-collector"]).toEqual(["egress", "internal"]);
   expect(serviceNetworks.postgres).toEqual(["test-host"]);
+  expect(base.networks.sandbox?.internal).toBe(true);
+  expect(networkNames(base.services["sandbox-runner"] ?? {})).toEqual(["sandbox"]);
   expect(
     Object.entries(serviceNetworks)
       .filter(([, networks]) => networks.includes("egress"))
