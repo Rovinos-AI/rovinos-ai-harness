@@ -18,6 +18,7 @@ import type { VaultAuditPiiAction, VaultResolver } from "@harness/vault";
 import type { CliContext, CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 import { collectApprovalTokens, revealApprovalTokens } from "./approval-args.js";
+import { runApprovalSweep } from "./approval-sweep.js";
 import { assertResumeStatus } from "./resume.js";
 
 class ApprovalsCodeError extends HarnessError {
@@ -393,6 +394,13 @@ function decisionCommand(
   });
 }
 
+function registerSweep(approvals: Command, context: CliContext): void {
+  approvals
+    .command("sweep")
+    .description("Expire and escalate pending approvals")
+    .action(() => withRuntime(context, undefined, (runtime) => runApprovalSweep(runtime, context)));
+}
+
 /** Registers the `harness approvals` command group. */
 export const approvalsCommand: CommandModule = {
   name: "approvals",
@@ -402,5 +410,6 @@ export const approvalsCommand: CommandModule = {
     registerShow(approvals, context);
     decisionCommand(approvals, context, "approve");
     decisionCommand(approvals, context, "deny");
+    registerSweep(approvals, context);
   },
 };

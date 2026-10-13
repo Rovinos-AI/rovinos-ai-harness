@@ -999,6 +999,7 @@ async function resolveEvent(
         v: 1,
         approvalId,
         decision,
+        decidedBy: "human",
         waitMs: 0,
         ...(edits === undefined ? {} : { edits }),
       },

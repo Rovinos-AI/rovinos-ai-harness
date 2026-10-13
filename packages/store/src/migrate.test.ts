@@ -160,7 +160,7 @@ describe("SQLite schema migrations", () => {
 
   it("loads and applies the checked-in schema with the required indexes and tables", () => {
     const db = new Database(":memory:");
-    expect(migrate(db, "sqlite")).toEqual(["0001"]);
+    expect(migrate(db, "sqlite")).toEqual(["0001", "0002"]);
     const names = db
       .prepare<[], { name: string }>(
         "SELECT name FROM sqlite_master WHERE type IN ('table', 'index') ORDER BY name",
@@ -177,6 +177,8 @@ describe("SQLite schema migrations", () => {
         "snapshots_run_at_seq_idx",
         "sink_cursors",
         "store_metadata",
+        "approval_notifications",
+        "approval_notifications_run_id_idx",
       ]),
     );
     expect(db.prepare("PRAGMA table_info(events)").all()).toEqual(
@@ -208,6 +210,7 @@ describe("SQLite schema migrations", () => {
   it("keeps the migration source files readable from the package", async () => {
     const directory = new URL("../migrations/sqlite/", import.meta.url);
     expect(await readdir(directory)).toContain("0001_init.sql");
+    expect(await readdir(directory)).toContain("0002_approval_notifications.sql");
     expect(await readFile(new URL("0001_init.sql", directory), "utf8")).toContain(
       "CREATE TABLE IF NOT EXISTS events",
     );

@@ -47,6 +47,7 @@ import {
 } from "./helpers.js";
 import { deleteRunTransaction } from "./retention.js";
 import { migrate } from "../migrate.js";
+import { PostgresApprovalNotifications } from "./approval-notifications.js";
 
 const connectionStringSchema = z
   .url()
@@ -73,6 +74,7 @@ export class PostgresEventStore implements EventStore {
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
   private readonly clock: Clock;
+  private readonly approvalNotifications: PostgresApprovalNotifications;
   private initialized: Promise<void> | undefined;
 
   /**
@@ -103,6 +105,9 @@ export class PostgresEventStore implements EventStore {
     this.codec = codec;
     this.snapshotKeep = parsedOptions.data.snapshotKeep;
     this.clock = clock;
+    this.approvalNotifications = new PostgresApprovalNotifications(this.pool, () =>
+      this.ensureInitialized(),
+    );
   }
 
   private ensureInitialized(): Promise<void> {
@@ -395,6 +400,13 @@ export class PostgresEventStore implements EventStore {
       throw storeError(error);
     }
   }
+
+  claimApprovalNotification: EventStore["claimApprovalNotification"] = (...args) =>
+    this.approvalNotifications.claim(...args);
+  markApprovalNotificationSent: EventStore["markApprovalNotificationSent"] = (...args) =>
+    this.approvalNotifications.markSent(...args);
+  releaseApprovalNotification: EventStore["releaseApprovalNotification"] = (...args) =>
+    this.approvalNotifications.release(...args);
 
   /** {@inheritDoc EventStore.close} */
   async close(): Promise<void> {

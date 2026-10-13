@@ -43,6 +43,8 @@ const approvalWait = z
     ...commonFields,
     kind: attr.enum(["approval_wait"]),
     decision: attr.enum(["approve", "deny", "edit"]),
+    decidedBy: attr.enum(["human", "policy", "expiry"]),
+    reason: attr.optional(attr.code()),
     waitMs: attr.nonnegativeInt(),
   })
   .strict();
@@ -208,6 +210,8 @@ function projectApprovalResolved(
     ...envelope,
     kind: "approval_wait",
     decision: event.decision,
+    decidedBy: event.decidedBy,
+    ...(event.reason === undefined ? {} : { reason: event.reason }),
     waitMs: event.waitMs,
   });
 }

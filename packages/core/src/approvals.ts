@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { HarnessError, type Code, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
 import {
   ApprovalEditError,
@@ -24,6 +24,12 @@ export { ApprovalEditsRequiredError };
 
 /** A human decision supported by an approval resolution. */
 export type ApprovalDecision = Extract<Event, { type: "approval_resolved" }>["decision"];
+
+/** Metadata describing who or what resolved an approval. */
+export interface ApprovalResolutionMetadata {
+  readonly decidedBy: Extract<Event, { type: "approval_resolved" }>["decidedBy"];
+  readonly reason?: Code;
+}
 
 /** Inputs and checkpoint state required to suspend a run for one approval. */
 export interface RequestApprovalOptions {
@@ -271,6 +277,7 @@ async function readState(
  * @param edits - Replacement tool arguments for an edit decision.
  * @param clock - Clock used to timestamp the resolution.
  * @param tool - PII-aware tool port required to resolve edit decisions.
+ * @param metadata - Resolver identity and optional machine-readable reason.
  * @returns The durable approval resolution event.
  */
 // eslint-disable-next-line max-params -- task 2.9 specifies store, run, approval, decision, and edits; §3.3 requires an injected clock
@@ -282,12 +289,15 @@ export async function resolveApproval(
   edits?: JsonValue,
   clock: Clock = systemClock,
   tool?: ToolPort,
+  metadata: ApprovalResolutionMetadata = { decidedBy: "human" },
 ): Promise<Extract<Event, { type: "approval_resolved" }>> {
-  if (decision === "edit" && edits === undefined) {
-    throw new ApprovalEditsRequiredError();
-  }
-  if (decision === "edit" && tool?.prepare === undefined) {
-    throw new ApprovalEditPreparationError();
+  if (decision === "edit") {
+    if (edits === undefined) {
+      throw new ApprovalEditsRequiredError();
+    }
+    if (tool?.prepare === undefined) {
+      throw new ApprovalEditPreparationError();
+    }
   }
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const { state, lastEvent } = await readState(store, runId);
@@ -324,6 +334,8 @@ export async function resolveApproval(
           v: 1,
           approvalId,
           decision,
+          decidedBy: metadata.decidedBy,
+          ...(metadata.reason === undefined ? {} : { reason: metadata.reason }),
           waitMs: Math.max(0, resolvedAt - request.ts),
           ...(resolvedEdits === undefined ? {} : { edits: resolvedEdits }),
         });

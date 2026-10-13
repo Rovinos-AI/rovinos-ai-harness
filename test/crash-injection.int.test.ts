@@ -306,6 +306,23 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.ackOutbox(sinkId, cursor);
   }
 
+  claimApprovalNotification(approvalId: Id, approvalRunId: Id, claimedAt: number, leaseMs: number) {
+    return this.inner.claimApprovalNotification(approvalId, approvalRunId, claimedAt, leaseMs);
+  }
+
+  markApprovalNotificationSent(
+    approvalId: Id,
+    approvalRunId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ) {
+    return this.inner.markApprovalNotificationSent(approvalId, approvalRunId, claimedAt, sentAt);
+  }
+
+  releaseApprovalNotification(approvalId: Id, approvalRunId: Id, claimedAt: number) {
+    return this.inner.releaseApprovalNotification(approvalId, approvalRunId, claimedAt);
+  }
+
   close() {
     return this.inner.close();
   }
@@ -483,6 +500,23 @@ class PreIntentExecutionStore implements EventStore {
 
   ackOutbox(sinkId: Code, cursor: number) {
     return this.inner.ackOutbox(sinkId, cursor);
+  }
+
+  claimApprovalNotification(approvalId: Id, approvalRunId: Id, claimedAt: number, leaseMs: number) {
+    return this.inner.claimApprovalNotification(approvalId, approvalRunId, claimedAt, leaseMs);
+  }
+
+  markApprovalNotificationSent(
+    approvalId: Id,
+    approvalRunId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ) {
+    return this.inner.markApprovalNotificationSent(approvalId, approvalRunId, claimedAt, sentAt);
+  }
+
+  releaseApprovalNotification(approvalId: Id, approvalRunId: Id, claimedAt: number) {
+    return this.inner.releaseApprovalNotification(approvalId, approvalRunId, claimedAt);
   }
 
   close() {

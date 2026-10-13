@@ -60,7 +60,14 @@ export const eventSamples = [
     result: null,
   },
   { ...envelope, type: "approval_requested", approvalId: id, callId: id, payload: {} },
-  { ...envelope, type: "approval_resolved", approvalId: id, decision: "approve", waitMs: 1 },
+  {
+    ...envelope,
+    type: "approval_resolved",
+    approvalId: id,
+    decision: "approve",
+    decidedBy: "human",
+    waitMs: 1,
+  },
   {
     ...envelope,
     type: "checkpoint_written",
