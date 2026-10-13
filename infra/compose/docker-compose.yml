@@ -33,7 +33,7 @@ services:
     profiles:
       - sandbox
     environment:
-      SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN:?set SANDBOX_RUNNER_TOKEN}
+      SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN:-}
       SANDBOX_ALLOWED_HOSTS: sandbox-runner:8080
       SANDBOX_WORKSPACE_ROOT: /workspaces
     init: true

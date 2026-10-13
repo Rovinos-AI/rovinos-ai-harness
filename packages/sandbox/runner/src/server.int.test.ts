@@ -115,6 +115,23 @@ function readRenderedComposeConfig(): z.infer<typeof ComposeSchema> {
   return parseJson(ComposeSchema, output);
 }
 
+function renderComposeConfigWithoutRunnerToken(file: string): void {
+  const environment = { ...composeEnvironment };
+  delete environment.SANDBOX_RUNNER_TOKEN;
+  execFileSync(
+    "docker",
+    [
+      "compose",
+      "--env-file",
+      "infra/collector/VERSION",
+      "--file",
+      file,
+      "config",
+    ],
+    { cwd: root, env: environment, encoding: "utf8" },
+  );
+}
+
 async function executeInRunner(script: string): Promise<string> {
   const { stdout } = await execFileAsync(
     "docker",
@@ -181,6 +198,11 @@ async function runExec(spec: ExecSpec): Promise<z.infer<typeof ExecResultSchema>
 }
 
 describe("sandbox runner Compose service", () => {
+  it("renders base and test Compose models without the optional sandbox token", () => {
+    renderComposeConfigWithoutRunnerToken("infra/compose/docker-compose.yml");
+    renderComposeConfigWithoutRunnerToken("infra/compose/docker-compose.test.yml");
+  });
+
   beforeAll(async () => {
     await runCompose(["up", "--detach", "--wait", "--pull=missing", "--build", "sandbox-runner"]);
   }, 180_000);
