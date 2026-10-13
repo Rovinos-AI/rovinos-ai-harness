@@ -23,9 +23,7 @@ export async function compareStrategies(
   const eventLogs = [...(options.previousEventLogs ?? []), events];
   const compactedRanges = eventLogs.flatMap((log) =>
     log.flatMap((event) =>
-      event.type === "context_compacted"
-        ? [{ fromSeq: event.fromSeq, toSeq: event.toSeq }]
-        : [],
+      event.type === "context_compacted" ? [{ fromSeq: event.fromSeq, toSeq: event.toSeq }] : [],
     ),
   );
 

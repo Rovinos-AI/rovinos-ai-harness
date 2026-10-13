@@ -162,7 +162,8 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
         events: recorded,
       };
       return response;
-  });
+    },
+  );
 
   if (result === undefined) {
     throw new Error("Expected the model step to record an outcome.");

@@ -53,23 +53,18 @@ const input = {
   counter: { count: (messages: readonly unknown[]) => messages.length },
 };
 
-const StrategyGoldenSchema = z
-  .record(
-    z.string(),
-    z
-      .object({
-        version: Code,
-        output: ContextResultSchema,
-      })
-      .strict(),
-  );
+const StrategyGoldenSchema = z.record(
+  z.string(),
+  z
+    .object({
+      version: Code,
+      output: ContextResultSchema,
+    })
+    .strict(),
+);
 
 function strategies(): ContextStrategy[] {
-  return [
-    new NaiveStrategy(),
-    new SlidingWindowStrategy(),
-    new SummarizingStrategy(model),
-  ];
+  return [new NaiveStrategy(), new SlidingWindowStrategy(), new SummarizingStrategy(model)];
 }
 
 async function loadGoldens() {
@@ -87,6 +82,7 @@ async function assertMatchesGolden(strategy: ContextStrategy): Promise<void> {
 
 describe("context strategy output version guards", () => {
   it("keeps a versioned golden output for every built-in strategy", async () => {
+    expect(strategies()).toHaveLength(3);
     if (process.env.UPDATE_GOLDEN === "1") {
       const output: Record<string, { version: string; output: unknown }> = {};
       for (const strategy of strategies()) {

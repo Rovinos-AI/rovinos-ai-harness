@@ -200,7 +200,7 @@ function createScenario(): Scenario {
             },
           ],
         },
-      ]      ),
+      ]),
     buildMetadata: () => ({
       strategyId: "naive",
       strategyVersion: "v3",

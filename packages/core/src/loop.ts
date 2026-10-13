@@ -5,7 +5,6 @@ import {
   type Event,
   type Id,
   type JsonValue,
-  type Message,
   type RunConfig,
 } from "@harness/schemas";
 import type { Context, Link } from "@opentelemetry/api";
@@ -312,12 +311,7 @@ async function prepareModelStep(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
-): Promise<{
-  readonly context: Message[];
-  readonly contextMetadata: ReturnType<ContextPort["buildMetadata"]>;
-  readonly deadlineTs: number;
-  readonly event?: Event;
-}> {
+) {
   const context =
     options.previousEventLogs === undefined
       ? await options.context.build(events.slice())

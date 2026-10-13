@@ -47,15 +47,8 @@
         "compactedRanges": 0,
         "offloadedResults": 0
       },
-      "pinnedSeqs": [
-        0
-      ],
-      "retainedSeqs": [
-        0,
-        1,
-        2,
-        3
-      ]
+      "pinnedSeqs": [0],
+      "retainedSeqs": [0, 1, 2, 3]
     }
   },
   "sliding_window": {
@@ -97,13 +90,8 @@
         "compactedRanges": 0,
         "offloadedResults": 0
       },
-      "pinnedSeqs": [
-        0
-      ],
-      "retainedSeqs": [
-        0,
-        3
-      ]
+      "pinnedSeqs": [0],
+      "retainedSeqs": [0, 3]
     }
   },
   "summarizing": {
@@ -145,13 +133,8 @@
         "compactedRanges": 0,
         "offloadedResults": 0
       },
-      "pinnedSeqs": [
-        0
-      ],
-      "retainedSeqs": [
-        0,
-        3
-      ]
+      "pinnedSeqs": [0],
+      "retainedSeqs": [0, 3]
     }
   }
 }

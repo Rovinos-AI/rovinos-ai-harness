@@ -301,26 +301,23 @@ describe("harness context", () => {
   it("prints a metadata-only strategy comparison table", async () => {
     const test = await harness();
     const exitCode = await main(
-        [
-          "context",
-          runId,
-          "--compare",
-          "naive,sliding_window",
-          "--max-tokens",
-          "45",
-          "--reserve-output",
-          "0",
-          "--json",
-        ],
-        test.context,
-        [contextCommand],
-      );
-    expect(exitCode, test.stderr.join("")).toBe(0);
+      [
+        "context",
+        runId,
+        "--compare",
+        "naive,sliding_window",
+        "--max-tokens",
+        "45",
+        "--reserve-output",
+        "0",
+        "--json",
+      ],
+      test.context,
+      [contextCommand],
+    );
+    expect(exitCode).toBe(0);
     const report = parseJson(StrategyComparisonReportSchema, test.stdout.join(""));
-    expect(report.comparisons.map(({ strategy }) => strategy)).toEqual([
-      "naive",
-      "sliding_window",
-    ]);
+    expect(report.comparisons.map(({ strategy }) => strategy)).toEqual(["naive", "sliding_window"]);
     expect(report.coverage).toHaveLength(2);
     expect(report.comparisons[0]?.retainedSeqs).toEqual([1, 2, 4, 5, 6]);
     expect(report.comparisons[1]?.droppedGroups).toBeGreaterThan(0);
@@ -332,20 +329,20 @@ describe("harness context", () => {
   it("snapshots the human-readable comparison table", async () => {
     const test = await harness();
     const exitCode = await main(
-        [
-          "context",
-          runId,
-          "--compare",
-          "naive,sliding_window",
-          "--max-tokens",
-          "45",
-          "--reserve-output",
-          "0",
-        ],
-        test.context,
-        [contextCommand],
-      );
-    expect(exitCode, test.stderr.join("")).toBe(0);
+      [
+        "context",
+        runId,
+        "--compare",
+        "naive,sliding_window",
+        "--max-tokens",
+        "45",
+        "--reserve-output",
+        "0",
+      ],
+      test.context,
+      [contextCommand],
+    );
+    expect(exitCode).toBe(0);
 
     expect(test.stdout.join("")).toMatchInlineSnapshot(`
       "Strategy	Version	Tokens	Messages	Dropped	Compacted ranges	Retained seqs	Coverage
