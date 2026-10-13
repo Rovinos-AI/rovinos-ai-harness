@@ -120,14 +120,7 @@ function renderComposeConfigWithoutRunnerToken(file: string): void {
   delete environment.SANDBOX_RUNNER_TOKEN;
   execFileSync(
     "docker",
-    [
-      "compose",
-      "--env-file",
-      "infra/collector/VERSION",
-      "--file",
-      file,
-      "config",
-    ],
+    ["compose", "--env-file", "infra/collector/VERSION", "--file", file, "config"],
     { cwd: root, env: environment, encoding: "utf8" },
   );
 }
