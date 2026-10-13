@@ -10,7 +10,7 @@ import { eventsToTranscript } from "../transcript.js";
  */
 export class NaiveStrategy implements ContextStrategy {
   readonly id: Code = "naive";
-  readonly version: Code = "v3";
+  readonly version: Code = "v4";
 
   /** {@inheritDoc ContextStrategy.build} */
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
@@ -42,6 +42,7 @@ export class NaiveStrategy implements ContextStrategy {
         offloadedResults,
       },
       pinnedSeqs: groups.filter((group) => group.pinned).flatMap((group) => group.seqs),
+      retainedSeqs: groups.flatMap(({ runId, seqs }) => seqs.map((seq) => ({ runId, seq }))),
     });
   }
 }

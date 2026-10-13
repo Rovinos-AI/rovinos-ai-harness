@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ContextInspectionSchema, Event as EventSchema, parseJson } from "@harness/schemas";
+import { StrategyComparisonReportSchema } from "@harness/context";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
@@ -295,6 +296,108 @@ describe("harness context", () => {
     expect(result.pinnedSeqs).toEqual([1, 2]);
     expect(result.estimatedTokens).toBeLessThanOrEqual(45);
     expect(test.append).not.toHaveBeenCalled();
+  });
+
+  it("prints a metadata-only strategy comparison table", async () => {
+    const test = await harness();
+    const exitCode = await main(
+      [
+        "context",
+        runId,
+        "--compare",
+        "naive,sliding_window",
+        "--max-tokens",
+        "45",
+        "--reserve-output",
+        "0",
+        "--json",
+      ],
+      test.context,
+      [contextCommand],
+    );
+    expect(exitCode).toBe(0);
+    const report = parseJson(StrategyComparisonReportSchema, test.stdout.join(""));
+    expect(report.comparisons.map(({ strategy }) => strategy)).toEqual(["naive", "sliding_window"]);
+    expect(report.coverage).toHaveLength(2);
+    expect(report.coverage.map(({ retainedSeqCoverage }) => retainedSeqCoverage)).toEqual([1, 0.4]);
+    expect(report.comparisons[0]?.retainedSeqs).toEqual(
+      [1, 2, 4, 5, 6].map((seq) => ({ runId, seq })),
+    );
+    expect(report.comparisons[1]?.droppedGroups).toBeGreaterThan(0);
+    expect(test.stderr).toEqual([]);
+    expect(test.append).not.toHaveBeenCalled();
+    expect(test.modelCall).not.toHaveBeenCalled();
+  });
+
+  it("compares naive and summarizing offline using recorded compaction events", async () => {
+    const test = await harness();
+    expect(
+      await main(["context", runId, "--compare", "naive,summarizing", "--json"], test.context, [
+        contextCommand,
+      ]),
+    ).toBe(0);
+    const report = parseJson(StrategyComparisonReportSchema, test.stdout.join(""));
+
+    expect(report.comparisons.map(({ strategy }) => strategy)).toEqual(["naive", "summarizing"]);
+    expect(report.comparisons[1]?.compactedRanges).toEqual([{ fromSeq: 2, toSeq: 2 }]);
+    expect(report.comparisons[1]?.retainedSeqs).toContainEqual({ runId, seq: 2 });
+    expect(test.modelCall).not.toHaveBeenCalled();
+    expect(test.append).not.toHaveBeenCalled();
+  });
+
+  it("snapshots the human-readable comparison table", async () => {
+    const test = await harness();
+    const exitCode = await main(
+      [
+        "context",
+        runId,
+        "--compare",
+        "naive,sliding_window",
+        "--max-tokens",
+        "45",
+        "--reserve-output",
+        "0",
+      ],
+      test.context,
+      [contextCommand],
+    );
+    expect(exitCode).toBe(0);
+
+    expect(test.stdout.join("")).toBe(
+      [
+        [
+          "Strategy",
+          "Version",
+          "Tokens",
+          "Messages",
+          "Dropped",
+          "Compacted ranges",
+          "Retained refs",
+          "Coverage",
+        ].join("\t"),
+        [
+          "naive",
+          "v4",
+          "101",
+          "5",
+          "0",
+          "2-2",
+          [1, 2, 4, 5, 6].map((seq) => `${runId}:${String(seq)}`).join(", "),
+          "100.0% covered",
+        ].join("\t"),
+        [
+          "sliding_window",
+          "v3",
+          "42",
+          "3",
+          "2",
+          "2-2",
+          [1, 2].map((seq) => `${runId}:${String(seq)}`).join(", "),
+          "40.0% covered",
+        ].join("\t"),
+        "",
+      ].join("\n"),
+    );
   });
 
   it("inspects SQLite without initialization writes or creating missing storage", async () => {

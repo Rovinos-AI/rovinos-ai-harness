@@ -42,7 +42,8 @@ export async function resolveRuntimeRoles(
   });
 }
 
-function contextForRole(role: ResolvedRole): ContextPort {
+/** Builds the context port configured for one subagent role. */
+export function contextForRole(role: ResolvedRole): ContextPort {
   const strategy = createStrategyRegistry({ provider: "default", model: "default" }).get(
     role.contextStrategy ?? "naive",
   );
@@ -62,7 +63,18 @@ function contextForRole(role: ResolvedRole): ContextPort {
     parts: [{ type: "text", text: role.systemPrompt }],
   };
   return {
-    build: async (events) => [systemMessage, ...(await strategyContext.build(events))],
+    build: async (events, previousEventLogs) => {
+      const built = await strategyContext.build(events, previousEventLogs);
+      const messages = [systemMessage, ...built.messages];
+      return {
+        messages,
+        metadata: {
+          ...built.metadata,
+          estimatedTokens: strategyContext.estimate(messages),
+          messageCount: messages.length,
+        },
+      };
+    },
     estimate: (messages) => strategyContext.estimate(messages),
     observeModelResponse: (model, estimated, actual) => {
       strategyContext.observeModelResponse(model, estimated, actual);

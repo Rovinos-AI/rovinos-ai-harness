@@ -1,20 +1,32 @@
 [
   {
+    "runId": "00000000000000000000000000",
     "seqs": [0],
     "messages": [
       {
         "role": "user",
-        "parts": [{ "type": "text", "text": "hello" }]
+        "parts": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ]
       }
     ],
     "pinned": true
   },
   {
+    "runId": "00000000000000000000000000",
     "seqs": [1],
     "messages": [
       {
         "role": "assistant",
-        "parts": [{ "type": "text", "text": "answer" }]
+        "parts": [
+          {
+            "type": "text",
+            "text": "answer"
+          }
+        ]
       }
     ],
     "pinned": false

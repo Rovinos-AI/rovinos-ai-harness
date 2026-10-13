@@ -203,7 +203,16 @@ function makeRecorder(store: InMemoryEventStore, clock: Clock = new FakeClock(10
 }
 
 async function recordInSpan(recorder: RunRecorder, partial: EventPartial): Promise<Event> {
-  return recorder.withStepSpan(MODEL_CALL_SPAN, {}, () => recorder.record(partial));
+  return recorder.withStepSpan(
+    MODEL_CALL_SPAN,
+    {
+      "harness.context.strategy": "naive",
+      "harness.context.strategy_version": "v3",
+      "harness.context.estimated_tokens": 0,
+      "harness.context.message_count": 0,
+    },
+    () => recorder.record(partial),
+  );
 }
 
 beforeAll(() => {
@@ -363,8 +372,16 @@ describe("RunRecorder", () => {
     const recorder = makeRecorder(new InMemoryEventStore());
 
     await expect(
-      recorder.withStepSpan(MODEL_CALL_SPAN, { "harness.private.value": "sensitive" }, () =>
-        recorder.record(runCreated()),
+      recorder.withStepSpan(
+        MODEL_CALL_SPAN,
+        {
+          "harness.context.strategy": "naive",
+          "harness.context.strategy_version": "v3",
+          "harness.context.estimated_tokens": 0,
+          "harness.context.message_count": 0,
+          "harness.private.value": "sensitive",
+        },
+        () => recorder.record(runCreated()),
       ),
     ).rejects.toThrowError("span_attr_invalid");
   });
@@ -397,9 +414,18 @@ describe("RunRecorder", () => {
     const recorder = makeRecorder(new InMemoryEventStore());
 
     await expect(
-      recorder.withStepSpan(MODEL_CALL_SPAN, {}, () => {
-        throw new LeaseLostError(3);
-      }),
+      recorder.withStepSpan(
+        MODEL_CALL_SPAN,
+        {
+          "harness.context.strategy": "naive",
+          "harness.context.strategy_version": "v3",
+          "harness.context.estimated_tokens": 0,
+          "harness.context.message_count": 0,
+        },
+        () => {
+          throw new LeaseLostError(3);
+        },
+      ),
     ).rejects.toBeInstanceOf(LeaseLostError);
 
     const [span] = finishedSpans;

@@ -47,6 +47,10 @@ export const MODEL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     ...commonAttributes,
     "harness.model.attempts": attr.optional(attr.int()),
     "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
+    "harness.context.strategy": attr.code(),
+    "harness.context.strategy_version": attr.code(),
+    "harness.context.estimated_tokens": attr.int(),
+    "harness.context.message_count": attr.int(),
   },
   { taskId: "4.1", packageName: "@harness/core" },
 );

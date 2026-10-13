@@ -9,6 +9,7 @@ import {
 } from "@harness/schemas";
 import type { Event, Id as IdType } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
+import { HeuristicTokenCounter } from "@harness/context";
 import { ensureTracingFallback } from "@harness/telemetry";
 import { describe, expect, it } from "vitest";
 import type {
@@ -21,8 +22,9 @@ import type {
 } from "../ports.js";
 import { RUN_SPAN, TOOL_CALL_SPAN } from "../spans.js";
 import { RunRecorder } from "../recorder.js";
-import { resolveRuntimeRoles, createSubagentTool } from "./runtime.js";
+import { contextForRole, resolveRuntimeRoles, createSubagentTool } from "./runtime.js";
 import { RunScopeRegistry } from "./scope.js";
+import type { ResolvedRole } from "../roles.js";
 
 const parentRunId = Id.parse("99999999999999999999999999");
 const parentCallId = Id.parse("11111111111111111111111111");
@@ -61,6 +63,44 @@ async function readEvents(store: InMemoryEventStore, runId: IdType): Promise<Eve
 }
 
 describe("production subagent runtime", () => {
+  it("includes a role system prompt in the context build metadata", async () => {
+    const role: ResolvedRole = {
+      id: Code.parse("worker"),
+      systemPrompt: "Follow the task.",
+      tools: [],
+      maxDepth: 1,
+      maxChildren: 1,
+    };
+    const context = contextForRole(role);
+    const built = await context.build([
+      {
+        runId: parentRunId,
+        seq: 0,
+        ts: 0,
+        v: 1,
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        segmentId: parentRunId,
+        type: "run_input",
+        input: "inspect this",
+        inputKind: "initial",
+      },
+    ]);
+
+    expect(built.messages[0]).toEqual({
+      role: "system",
+      parts: [{ type: "text", text: "Follow the task." }],
+    });
+    expect(built.metadata.messageCount).toBe(built.messages.length);
+    expect(built.metadata.messageCount).toBe(2);
+    const counter = new HeuristicTokenCounter();
+    const modelRef = { provider: "default", model: "default" };
+    expect(built.metadata.estimatedTokens).toBe(counter.count(built.messages, modelRef));
+    expect(built.metadata.estimatedTokens).toBeGreaterThan(
+      counter.count(built.messages.slice(1), modelRef),
+    );
+  });
+
   it("routes the child through its role and persists isolated run metadata", async () => {
     ensureTracing();
     const store = new InMemoryEventStore();
