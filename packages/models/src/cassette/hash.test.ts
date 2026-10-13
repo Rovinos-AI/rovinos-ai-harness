@@ -68,8 +68,10 @@ describe("requestHash", () => {
       model: { provider: "cassette", model: "test" },
       messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
     };
-    const withUndefined = { ...request, messages: [undefined] } as unknown as ModelRequest;
-    const withNull = { ...request, messages: [null] } as unknown as ModelRequest;
+    const withUndefined = { ...request };
+    Object.defineProperty(withUndefined, "messages", { value: [undefined] });
+    const withNull = { ...request };
+    Object.defineProperty(withNull, "messages", { value: [null] });
 
     expect(requestHash(withUndefined)).toBe(requestHash(withNull));
   });

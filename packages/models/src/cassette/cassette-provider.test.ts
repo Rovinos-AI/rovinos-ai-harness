@@ -30,8 +30,8 @@ const context: ProviderContext = {
   clock: { now: () => 1 },
 };
 const privacyOptions = {
-  sanitize: async (response: ProviderResult) => response,
-  detectRealData: async () => false,
+  sanitize: (response: ProviderResult) => Promise.resolve(response),
+  detectRealData: () => Promise.resolve(false),
 };
 
 function memoryStore(): CassetteStore & { readonly entries: Map<string, CassetteEntry> } {
@@ -136,15 +136,16 @@ describe("CassetteProvider", () => {
       store,
       innerAdapter(() => Promise.resolve(response)),
       {
-        sanitize: async (value) => ({
-          ...value,
-          parts: value.parts.map((part) =>
-            part.type === "text"
-              ? { ...part, text: part.text.replace("synthetic@example.test", "[EMAIL]") }
-              : part,
-          ),
-        }),
-        detectRealData: async (value) => JSON.stringify(value).includes("@"),
+        sanitize: (value) =>
+          Promise.resolve({
+            ...value,
+            parts: value.parts.map((part) =>
+              part.type === "text"
+                ? { ...part, text: part.text.replace("synthetic@example.test", "[EMAIL]") }
+                : part,
+            ),
+          }),
+        detectRealData: (value) => Promise.resolve(JSON.stringify(value).includes("@")),
       },
     );
 
@@ -167,7 +168,7 @@ describe("CassetteProvider", () => {
       innerAdapter(() => Promise.resolve(sensitiveResponse)),
       {
         ...privacyOptions,
-        detectRealData: async () => true,
+        detectRealData: () => Promise.resolve(true),
       },
     );
 

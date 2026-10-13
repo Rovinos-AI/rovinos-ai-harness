@@ -170,9 +170,10 @@ function mockFetch(dispatcher: MockAgent): typeof fetch {
 function cassetteStore(): CassetteStore {
   const entries = new Map<string, CassetteEntry>();
   return {
-    get: async (hash) => entries.get(hash)?.response,
-    set: async (entry) => {
+    get: (hash) => Promise.resolve(entries.get(hash)?.response),
+    set: (entry) => {
       entries.set(entry.hash, entry);
+      return Promise.resolve();
     },
   };
 }
@@ -186,20 +187,15 @@ function openAIAdapter(options: ProviderContractAdapterOptions) {
 }
 
 const cassettePrivacy = {
-  sanitize: async (response: ProviderResult) => response,
-  detectRealData: async () => false,
+  sanitize: (response: ProviderResult) => Promise.resolve(response),
+  detectRealData: () => Promise.resolve(false),
 };
 
 runProviderContract("OpenAI Chat Completions contract", openAIAdapter, contractFixtures);
 runProviderContract(
   "Cassette record adapter contract",
   (options) =>
-    new CassetteProvider(
-      "record",
-      cassetteStore(),
-      openAIAdapter(options),
-      cassettePrivacy,
-    ),
+    new CassetteProvider("record", cassetteStore(), openAIAdapter(options), cassettePrivacy),
   contractFixtures,
 );
 

@@ -18,7 +18,9 @@ interface EventLogPair {
 
 function collectPairs(events: readonly Event[]): EventLogPair[] {
   const pairs: EventLogPair[] = [];
-  let pending: { readonly event: Extract<Event, { type: "model_request" }>; readonly index: number } | undefined;
+  let pending:
+    | { readonly event: Extract<Event, { type: "model_request" }>; readonly index: number }
+    | undefined;
   for (const [index, event] of events.entries()) {
     if (event.type === "model_request") {
       if (pending !== undefined) {
@@ -30,11 +32,11 @@ function collectPairs(events: readonly Event[]): EventLogPair[] {
     if (event.type !== "model_response") {
       continue;
     }
-    if (pending === undefined || pending.event.requestId !== event.requestId) {
+    if (pending?.event.requestId !== event.requestId) {
       throw new CassetteLogIncompleteError();
     }
-    const requestHash = pending.event.requestHash;
-    if (requestHash === undefined) {
+    const recordedHash = pending.event.requestHash;
+    if (recordedHash === undefined) {
       throw new CassetteLogIncompleteError();
     }
     const request: ModelRequest = {
@@ -44,7 +46,7 @@ function collectPairs(events: readonly Event[]): EventLogPair[] {
       messages: pending.event.messages,
     };
     pairs.push({
-      requestHash,
+      requestHash: recordedHash,
       request,
       response: ProviderResultSchema.parse({
         parts: event.content,

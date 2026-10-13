@@ -18,7 +18,9 @@ function canonicalJson(value: unknown): string | undefined {
         }
         return 0;
       });
-    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+    return `{${entries
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry) ?? "null"}`)
+      .join(",")}}`;
   }
   return JSON.stringify(value);
 }
@@ -34,5 +36,9 @@ export function requestHash(request: ModelRequest): Sha256Hex {
     Object.entries(request).filter(([key]) => key !== "requestId"),
   );
   const canonical = canonicalJson(stableRequest);
-  return Sha256Hex.parse(createHash("sha256").update(canonical ?? "null").digest("hex"));
+  return Sha256Hex.parse(
+    createHash("sha256")
+      .update(canonical ?? "null")
+      .digest("hex"),
+  );
 }

@@ -112,10 +112,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
 
     let completion: ModelCompletion;
     try {
-      completion = await options.model.complete(
-        modelRequest,
-        modelRunContext(options),
-      );
+      completion = await options.model.complete(modelRequest, modelRunContext(options));
     } catch (error) {
       if (options.signal.reason === "shutdown") {
         result = { outcome: "aborted", events: recorded };
