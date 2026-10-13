@@ -24,5 +24,6 @@ export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
       ? parseSecretRefs(Object.values(transport.env ?? {}))
       : parseSecretRefs(Object.values(transport.headers ?? {})),
   );
-  return [...modelRefs, ...serverRefs];
+  const keyRefs = config.keys?.keys.map(({ secret }) => secret) ?? [];
+  return [...modelRefs, ...serverRefs, ...keyRefs];
 }
