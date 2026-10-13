@@ -194,6 +194,6 @@ describe("PiiPolicySchema", () => {
     );
     const parsed = parseYaml(PiiConfigSchema, yaml);
 
-    expect(PiiPolicySchema.parse(parsed)).toEqual(parsed);
+    expect(PiiConfigSchema.parse(parsed)).toEqual(parsed);
   });
 });

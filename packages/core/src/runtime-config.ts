@@ -15,8 +15,12 @@ import {
 } from "@harness/schemas";
 import type { ProviderAdapter } from "@harness/models";
 import type { EventStore } from "@harness/store";
-import type { LocalKeyProvider } from "@harness/vault";
-import type { AuditingVaultResolver, SqliteVault, VaultResolver } from "@harness/vault";
+import type {
+  AuditingVaultResolver,
+  LocalKeyProvider,
+  SqliteVault,
+  VaultResolver,
+} from "@harness/vault";
 import type { Tokenizer } from "@harness/pii";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";

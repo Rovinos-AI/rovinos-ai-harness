@@ -1,33 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
-import { HarnessError, PiiConfigSchema, type Event, type Id, type JsonValue } from "@harness/schemas";
-import { PiiEventStore, PiiToolPort } from "@harness/pii";
+import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { PiiToolPort } from "@harness/pii";
 import { type EventStore } from "@harness/store";
-import { SqliteVault } from "@harness/vault";
 import { cancelRun } from "./cancel.js";
-import { NaiveContext } from "./context/naive-context.js";
 import type { ToolPort } from "./ports.js";
-import { missingModelPort, unavailableTool } from "./runtime-default-ports.js";
 import { LeaseLostError } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
-import { createConfiguredModelPort } from "./runtime-model.js";
 import type { RoleRegistry } from "./roles.js";
 import { foldRunState } from "./run-state.js";
-import { SystemIdGenerator, systemClock } from "./runtime-ids.js";
-import { RunScopeRegistry } from "./subagent/scope.js";
-import { createSubagentTool, resolveRuntimeRoles } from "./subagent/runtime.js";
-import { createSqliteStore } from "./runtime-store.js";
-import { resolveDataDir } from "./runtime-data-dir.js";
-import { ensureTracing } from "./runtime-tracing-init.js";
+import type { RunScopeRegistry } from "./subagent/scope.js";
+import { createSubagentTool } from "./subagent/runtime.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
-import { createRuntimeKeys } from "./runtime-keys.js";
-import { createRuntimePii } from "./runtime-pii.js";
-import { createRuntimePolicy } from "./runtime-policy.js";
+import { setupRuntime } from "./runtime-setup.js";
 import type {
   Runtime,
   RuntimeComposition,
@@ -39,7 +26,6 @@ const CANCEL_MONITOR_DEGRADED = "cancel_monitor_degraded";
 const CANCEL_POLL_INTERVAL_MS = 25;
 const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
-const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
@@ -49,14 +35,6 @@ class RunInputMissingError extends HarnessError {
 
   constructor() {
     super("The run input is unavailable.");
-  }
-}
-
-class PiiDisabledInProductionError extends HarnessError {
-  readonly code = "pii_disabled_in_production";
-
-  constructor() {
-    super("PII cannot be disabled in production.");
   }
 }
 
@@ -402,82 +380,5 @@ export async function createRuntime(
   config: RuntimeConfig,
   overrides: RuntimeOverrides = {},
 ): Promise<Runtime> {
-  const piiConfig = PiiConfigSchema.parse(config.pii ?? {});
-  if (piiConfig.enabled === false && process.env.NODE_ENV === "production") {
-    throw new PiiDisabledInProductionError();
-  }
-  const runtimeConfig = { ...config, pii: piiConfig };
-  ensureTracing();
-  const clock = overrides.clock ?? systemClock;
-  const ids = overrides.ids ?? new SystemIdGenerator(clock);
-  const keys = await createRuntimeKeys(runtimeConfig.keys, overrides);
-  let vault: SqliteVault | undefined;
-  try {
-    const model =
-      overrides.model ??
-      (await createConfiguredModelPort(runtimeConfig.models, {
-        ids,
-        clock,
-        ...(overrides.providerAdapters === undefined
-          ? {}
-          : { providerAdapters: overrides.providerAdapters }),
-        ...(overrides.secretResolver === undefined
-          ? {}
-          : { secretResolver: overrides.secretResolver }),
-      })) ??
-      missingModelPort;
-    const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    const vaultPath = join(dataDir, "vault.db");
-    if (overrides.readOnlyStore !== true) {
-      await mkdir(dataDir, { recursive: true });
-    }
-    const runtimeVault = new SqliteVault(
-      overrides.readOnlyStore === true && !existsSync(vaultPath) ? ":memory:" : vaultPath,
-      keys,
-      () => clock.now(),
-    );
-    vault = runtimeVault;
-    const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
-    const piiRuntime = createRuntimePii(piiConfig, runtimeVault, scopes);
-    const tool = overrides.tool ?? unavailableTool;
-    const policy = await createRuntimePolicy(runtimeConfig, overrides);
-    const context = overrides.context ?? new NaiveContext();
-    const roles = await resolveRuntimeRoles(
-      runtimeConfig,
-      overrides.roleConfigDirectory ?? process.cwd(),
-      tool,
-      (code) => {
-        roleConfigLogger.warn(code);
-      },
-    );
-    const rawStore =
-      overrides.store ??
-      (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
-    const store = piiConfig.enabled ? new PiiEventStore(rawStore, piiRuntime.tokenizer) : rawStore;
-    return composeRuntime({
-      config: runtimeConfig,
-      overrides,
-      clock,
-      ids,
-      store,
-      keys,
-      vault: runtimeVault,
-      vaultResolver: piiRuntime.resolver,
-      pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
-      model,
-      tool,
-      policy,
-      policyVersion: policy.version,
-      context,
-      roles,
-      scopes,
-    });
-  } catch (error) {
-    try {
-      vault?.close();
-    } finally {
-      keys.dispose();
-    }
-    throw error;
-  }
+  return composeRuntime(await setupRuntime(config, overrides));
 }

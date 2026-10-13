@@ -199,6 +199,7 @@ describe("runtime subagent spawning", () => {
     const runtime = await createRuntime(
       {
         run: RunConfigSchema.parse({}),
+        pii: PiiConfigSchema.parse({ enabled: false }),
         models: ModelsConfigSchema.parse({
           routing: {
             default: [{ provider: "local", model: "parent" }],
@@ -342,7 +343,7 @@ describe("runtime subagent spawning", () => {
         ),
     };
     const runtime = await createRuntime(
-      { run: RunConfigSchema.parse({}) },
+      { run: RunConfigSchema.parse({}), pii: PiiConfigSchema.parse({ enabled: false }) },
       {
         store,
         clock: new FakeClock(4),

@@ -11,8 +11,9 @@ import {
   type JsonValue,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import { Token } from "@harness/vault";
+import { AuditingVaultResolver, InMemoryVault, Token } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PiiToolPort, Tokenizer } from "@harness/pii";
 import type { ModelCompletion, ModelToolCall, ToolPort } from "./ports.js";
 import { createRuntime } from "./runtime.js";
 import type { RuntimeConfig } from "./runtime-config.js";
@@ -81,7 +82,9 @@ function config(pii = PiiConfigSchema.parse({})): RuntimeConfig {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
-  await Promise.all(directories.map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    directories.map((directory) => rm(directory, { recursive: true, force: true })),
+  );
   directories = [];
 });
 
@@ -167,5 +170,23 @@ describe("createRuntime PII composition", () => {
         store: new InMemoryEventStore(),
       }),
     ).rejects.toMatchObject({ code: "pii_disabled_in_production" });
+  });
+
+  it("rejects a pre-wrapped tool port instead of silently nesting runtime boundaries", async () => {
+    const piiConfig = PiiConfigSchema.parse({});
+    const vault = new InMemoryVault();
+    const wrapped = new PiiToolPort(makeTool([], null), {
+      tokenizer: new Tokenizer({
+        detectors: { detect: () => [] },
+        policy: piiConfig,
+        vault,
+      }),
+      config: piiConfig,
+      resolver: new AuditingVaultResolver(vault, () => undefined),
+    });
+
+    await expect(
+      createRuntime(config(), { store: new InMemoryEventStore(), tool: wrapped }),
+    ).rejects.toMatchObject({ code: "pii_tool_port_already_wrapped" });
   });
 });

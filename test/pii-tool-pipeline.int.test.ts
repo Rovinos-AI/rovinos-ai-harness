@@ -143,7 +143,10 @@ async function pipeline(
   );
   const store = new InMemoryEventStore();
   const runtime = await createRuntime(
-    { run: RunConfigSchema.parse({ checkpointEveryEvents: 2 }) },
+    {
+      run: RunConfigSchema.parse({ checkpointEveryEvents: 2 }),
+      pii: PiiConfigSchema.parse({ enabled: false }),
+    },
     {
       store,
       clock: new FakeClock(100),
@@ -391,7 +394,7 @@ describe("PII tool pipeline", () => {
   it("demonstrates the negative control when the PII boundary is removed", async () => {
     const store = new InMemoryEventStore();
     const runtime = await createRuntime(
-      { run: RunConfigSchema.parse({}) },
+      { run: RunConfigSchema.parse({}), pii: PiiConfigSchema.parse({ enabled: false }) },
       {
         store,
         clock: new FakeClock(100),
