@@ -10,6 +10,10 @@ services:
     extends:
       file: docker-compose.yml
       service: otel-collector
+  sandbox-runner:
+    extends:
+      file: docker-compose.yml
+      service: sandbox-runner
   postgres:
     image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     user: postgres
@@ -45,3 +49,8 @@ networks:
   # Keep this test-only fixture off the internal network so Docker Desktop and Colima can publish
   # its host port. PostgreSQL is not a harness sidecar and is not attached to egress.
   test-host: {}
+volumes:
+  harness-workspaces: {}
+secrets:
+  sandbox_runner_token:
+    file: ${SANDBOX_RUNNER_TOKEN_SOURCE:-./sandbox_runner_token}

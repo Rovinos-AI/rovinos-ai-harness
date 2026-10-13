@@ -24,6 +24,8 @@ export function readRenderedComposeNetworkConfig(): z.infer<typeof composeConfig
       "compose",
       "--env-file",
       "infra/collector/VERSION",
+      "--profile",
+      "sandbox",
       "--file",
       "infra/compose/docker-compose.test.yml",
       "config",
