@@ -14,7 +14,7 @@ import {
   type ContextStrategy,
   type ContextStrategyInput,
 } from "@harness/context";
-import type { ContextPort } from "../ports.js";
+import type { ContextBuildResult, ContextPort } from "../ports.js";
 
 /** Context build dependencies configured for a strategy-backed run-loop port. */
 export interface StrategyContextPortOptions extends Omit<ContextStrategyInput, "events"> {
@@ -36,7 +36,6 @@ class ContextSnapshotError extends HarnessError {
 export class StrategyContextPort implements ContextPort {
   private calibration: JsonValue;
   private readonly buildOptions: Omit<ContextStrategyInput, "events">;
-  private lastBuildMetadata: ReturnType<ContextPort["buildMetadata"]>;
 
   constructor(
     private readonly strategy: ContextStrategy,
@@ -49,36 +48,27 @@ export class StrategyContextPort implements ContextPort {
       (buildOptions.counter instanceof CalibratingTokenCounter
         ? buildOptions.counter.snapshot()
         : null);
-    this.lastBuildMetadata = {
-      strategyId: strategy.id,
-      strategyVersion: strategy.version,
-      estimatedTokens: 0,
-      messageCount: 0,
-    };
   }
 
   /** {@inheritDoc ContextPort.build} */
   async build(
     events: readonly Event[],
     previousEventLogs?: readonly (readonly Event[])[],
-  ): Promise<Message[]> {
+  ): Promise<ContextBuildResult> {
     const result = await this.strategy.build({
       ...this.buildOptions,
       events,
       ...(previousEventLogs === undefined ? {} : { previousEventLogs }),
     });
-    this.lastBuildMetadata = {
-      strategyId: this.strategy.id,
-      strategyVersion: this.strategy.version,
-      estimatedTokens: result.stats.estimatedTokens,
-      messageCount: result.stats.messageCount,
+    return {
+      messages: result.messages,
+      metadata: {
+        strategyId: this.strategy.id,
+        strategyVersion: this.strategy.version,
+        estimatedTokens: result.stats.estimatedTokens,
+        messageCount: result.messages.length,
+      },
     };
-    return result.messages;
-  }
-
-  /** {@inheritDoc ContextPort.buildMetadata} */
-  buildMetadata(): ReturnType<ContextPort["buildMetadata"]> {
-    return this.lastBuildMetadata;
   }
 
   /** {@inheritDoc ContextPort.estimate} */

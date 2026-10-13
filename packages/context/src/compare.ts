@@ -13,7 +13,7 @@ import {
  * @param events - Stored events to rebuild.
  * @param strategies - Strategies to evaluate.
  * @param options - Shared budget, model, counter, and optional continuation history.
- * @returns Per-strategy estimates, compactions, and retained event sequences.
+ * @returns Per-strategy estimates, compactions, and retained run-scoped event references.
  */
 export async function compareStrategies(
   events: readonly Event[],
@@ -44,7 +44,7 @@ export async function compareStrategies(
 }
 
 /**
- * Returns the fraction of `b`'s retained event sequences also retained by `a`.
+ * Returns the fraction of `b`'s retained events also retained by `a`.
  *
  * An empty `b` has no uncovered sequences, so its coverage is defined as 1.
  *
@@ -56,14 +56,16 @@ export function coverage(
   a: Pick<Comparison, "retainedSeqs">,
   b: Pick<Comparison, "retainedSeqs">,
 ): number {
-  const target = new Set(b.retainedSeqs);
+  const referenceKey = ({ runId, seq }: Comparison["retainedSeqs"][number]) =>
+    `${runId}:${String(seq)}`;
+  const target = new Set(b.retainedSeqs.map(referenceKey));
   if (target.size === 0) {
     return 1;
   }
-  const retained = new Set(a.retainedSeqs);
+  const retained = new Set(a.retainedSeqs.map(referenceKey));
   let common = 0;
-  for (const seq of target) {
-    if (retained.has(seq)) {
+  for (const eventRef of target) {
+    if (retained.has(eventRef)) {
       common += 1;
     }
   }

@@ -143,9 +143,9 @@ from the stored event log without appending events or calling models. Summarizin
 already-recorded compactions; it does not create a new summary.
 
 `--compare a,b` rebuilds the same stored events with the two named strategies and prints their
-token estimates, message and drop counts, compacted ranges, retained sequences, and directional
-retained-sequence coverage. With `--json`, it emits the comparison list and coverage fractions as
-one JSON document.
+token estimates, message and drop counts, compacted ranges, retained run/sequence references, and
+directional retained-event coverage. The table rounds percentages to one decimal place. With
+`--json`, it emits the comparison list and exact coverage fractions as one JSON document.
 Context inspection currently supports SQLite only. SQLite is loaded into an in-memory read-only
 snapshot without directory creation, schema initialization, metadata writes, or sidecar creation.
 If a WAL or rollback-journal sidecar exists, inspection fails rather than returning a potentially

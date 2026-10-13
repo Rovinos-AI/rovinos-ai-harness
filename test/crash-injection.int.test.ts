@@ -10,6 +10,7 @@ import {
   SequentialIdGenerator,
   type Event,
   type JsonValue,
+  type Message,
   type NewEvent,
   type Part,
 } from "@harness/schemas";
@@ -189,8 +190,8 @@ function createScenario(): Scenario {
   ]);
   const tool = new FakeToolPort(definitions);
   const context: ContextPort = {
-    build: (events) =>
-      Promise.resolve([
+    build: (events) => {
+      const messages: Message[] = [
         {
           role: "user",
           parts: [
@@ -200,13 +201,17 @@ function createScenario(): Scenario {
             },
           ],
         },
-      ]),
-    buildMetadata: () => ({
-      strategyId: "naive",
-      strategyVersion: "v3",
-      estimatedTokens: 1,
-      messageCount: 1,
-    }),
+      ];
+      return Promise.resolve({
+        messages,
+        metadata: {
+          strategyId: "naive",
+          strategyVersion: "v4",
+          estimatedTokens: 1,
+          messageCount: 1,
+        },
+      });
+    },
     snapshot: () => Promise.resolve(null),
     restore: () => Promise.resolve(),
   };

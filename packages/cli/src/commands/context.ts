@@ -186,14 +186,16 @@ function comparisonTableRows(report: Awaited<ReturnType<typeof comparisonReport>
       "Messages",
       "Dropped",
       "Compacted ranges",
-      "Retained seqs",
+      "Retained refs",
       "Coverage",
     ],
     ...report.comparisons.map((comparison, index) => {
       const ranges = comparison.compactedRanges
         .map(({ fromSeq, toSeq }) => `${String(fromSeq)}-${String(toSeq)}`)
         .join(", ");
-      const retainedSeqs = comparison.retainedSeqs.join(", ");
+      const retainedSeqs = comparison.retainedSeqs
+        .map(({ runId, seq }) => `${runId}:${String(seq)}`)
+        .join(", ");
       const retainedSeqCoverage = report.coverage[index]?.retainedSeqCoverage ?? 0;
       return [
         comparison.strategy,
@@ -203,7 +205,7 @@ function comparisonTableRows(report: Awaited<ReturnType<typeof comparisonReport>
         comparison.droppedGroups,
         ranges.length === 0 ? "none" : ranges,
         retainedSeqs.length === 0 ? "none" : retainedSeqs,
-        `${String(retainedSeqCoverage * 100)}% covered`,
+        `${(retainedSeqCoverage * 100).toFixed(1)}% covered`,
       ];
     }),
   ];

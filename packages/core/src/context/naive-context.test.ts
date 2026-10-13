@@ -93,33 +93,37 @@ describe("NaiveContext", () => {
       },
     ];
 
-    await expect(new NaiveContext().build(events)).resolves.toEqual([
-      {
-        role: "assistant",
-        parts: [
-          { type: "text", text: "first answer" },
-          { type: "tool_call", callId, toolId: "fake_tool", args: { input: "tool args" } },
-          {
-            type: "tool_call",
-            callId: secondCallId,
-            toolId: "fake_tool",
-            args: { input: "other" },
-          },
-        ],
-      },
-      {
-        role: "tool",
-        parts: [{ type: "tool_result", callId, isError: false, result: { output: "tool result" } }],
-      },
-      {
-        role: "tool",
-        parts: [{ type: "tool_result", callId: secondCallId, isError: true, result: null }],
-      },
-      {
-        role: "assistant",
-        parts: [{ type: "text", text: "second answer" }],
-      },
-    ]);
+    await expect(new NaiveContext().build(events)).resolves.toMatchObject({
+      messages: [
+        {
+          role: "assistant",
+          parts: [
+            { type: "text", text: "first answer" },
+            { type: "tool_call", callId, toolId: "fake_tool", args: { input: "tool args" } },
+            {
+              type: "tool_call",
+              callId: secondCallId,
+              toolId: "fake_tool",
+              args: { input: "other" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          parts: [
+            { type: "tool_result", callId, isError: false, result: { output: "tool result" } },
+          ],
+        },
+        {
+          role: "tool",
+          parts: [{ type: "tool_result", callId: secondCallId, isError: true, result: null }],
+        },
+        {
+          role: "assistant",
+          parts: [{ type: "text", text: "second answer" }],
+        },
+      ],
+    });
   });
 
   it("does not add a plan when the history has no successful plan update", async () => {
@@ -131,6 +135,6 @@ describe("NaiveContext", () => {
       depth: 0,
     };
 
-    await expect(new NaiveContext().build([event])).resolves.toEqual([]);
+    await expect(new NaiveContext().build([event])).resolves.toMatchObject({ messages: [] });
   });
 });

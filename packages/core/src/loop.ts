@@ -312,11 +312,11 @@ async function prepareModelStep(
   events: Event[],
   execution: RunLoopExecution,
 ) {
-  const context =
+  const builtContext =
     options.previousEventLogs === undefined
       ? await options.context.build(events.slice())
       : await options.context.build(events.slice(), options.previousEventLogs);
-  const contextMetadata = options.context.buildMetadata();
+  const contextMetadata = builtContext.metadata;
   const preflight = await preflightModelBudget({
     budgetTracker: execution.budgetTracker,
     checkpointer: execution.checkpointer,
@@ -325,12 +325,12 @@ async function prepareModelStep(
     recorder: options.recorder,
   });
   if (preflight.event !== undefined) {
-    return { context, contextMetadata, ...preflight };
+    return { context: builtContext.messages, contextMetadata, ...preflight };
   }
   const stopped = await suspendIfShutdown(options, events, execution);
   return stopped === undefined
-    ? { context, contextMetadata, deadlineTs: preflight.deadlineTs }
-    : { context, contextMetadata, ...preflight, event: stopped };
+    ? { context: builtContext.messages, contextMetadata, deadlineTs: preflight.deadlineTs }
+    : { context: builtContext.messages, contextMetadata, ...preflight, event: stopped };
 }
 
 async function runToolCalls(

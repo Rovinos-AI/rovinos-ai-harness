@@ -308,7 +308,7 @@ describe("SlidingWindowStrategy", () => {
 
   it("keeps its strategy identity and version stable", () => {
     expect(strategy.id).toBe("sliding_window");
-    expect(strategy.version).toBe("v2");
+    expect(strategy.version).toBe("v3");
   });
 
   it("estimates each group in linear time", async () => {

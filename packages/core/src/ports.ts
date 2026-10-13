@@ -167,6 +167,20 @@ export interface PolicyPort {
   decide(call: Pick<ModelToolCall, "toolId" | "args">, context: PolicyContext): PolicyDecision;
 }
 
+/** Strategy identity and estimates for one completed context build. */
+export interface ContextBuildMetadata {
+  readonly strategyId: Code;
+  readonly strategyVersion: Code;
+  readonly estimatedTokens: number;
+  readonly messageCount: number;
+}
+
+/** Provider messages and metadata produced atomically by one context build. */
+export interface ContextBuildResult {
+  readonly messages: Message[];
+  readonly metadata: ContextBuildMetadata;
+}
+
 /** Builds provider messages from the durable run history. */
 export interface ContextPort {
   /**
@@ -174,24 +188,12 @@ export interface ContextPort {
    *
    * @param events - Events recorded so far in the current run.
    * @param previousEventLogs - Earlier continuation logs, oldest first.
-   * @returns Provider-independent messages.
+   * @returns Provider-independent messages and metadata from the same build.
    */
   build(
     events: readonly Event[],
     previousEventLogs?: readonly (readonly Event[])[],
-  ): Promise<Message[]>;
-
-  /**
-   * Returns identity and statistics from the most recently built context.
-   *
-   * @returns Strategy identity and deterministic context statistics.
-   */
-  buildMetadata(): {
-    readonly strategyId: Code;
-    readonly strategyVersion: Code;
-    readonly estimatedTokens: number;
-    readonly messageCount: number;
-  };
+  ): Promise<ContextBuildResult>;
 
   /**
    * Estimates the exact messages about to be sent, when the port has a token counter.
@@ -202,7 +204,7 @@ export interface ContextPort {
   estimate?(messages: readonly Message[]): number;
 
   /**
-   * Observes provider usage for the most recently built model context, when supported.
+   * Observes provider usage for a model context, when supported.
    *
    * @param model - Provider and model that produced the usage.
    * @param estimated - Estimate computed before the request was sent.

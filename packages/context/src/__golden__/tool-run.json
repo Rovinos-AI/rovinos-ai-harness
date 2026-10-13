@@ -1,26 +1,38 @@
 [
   {
+    "runId": "00000000000000000000000000",
     "seqs": [0],
     "messages": [
       {
         "role": "user",
-        "parts": [{ "type": "text", "text": "use a tool" }]
+        "parts": [
+          {
+            "type": "text",
+            "text": "use a tool"
+          }
+        ]
       }
     ],
     "pinned": true
   },
   {
+    "runId": "00000000000000000000000000",
     "seqs": [1, 3],
     "messages": [
       {
         "role": "assistant",
         "parts": [
-          { "type": "text", "text": "working" },
+          {
+            "type": "text",
+            "text": "working"
+          },
           {
             "type": "tool_call",
             "callId": "22222222222222222222222222",
             "toolId": "lookup",
-            "args": { "query": "x" }
+            "args": {
+              "query": "x"
+            }
           }
         ]
       },
@@ -30,7 +42,9 @@
           {
             "type": "tool_result",
             "callId": "22222222222222222222222222",
-            "result": { "value": "found" },
+            "result": {
+              "value": "found"
+            },
             "isError": false
           }
         ]

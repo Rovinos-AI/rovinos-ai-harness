@@ -1598,7 +1598,7 @@ describe("runLoop", () => {
     expect(modelSpans[0]?.parentSpanId).toBe(runSpans[0]?.spanContextValue.spanId);
     expect(modelSpans[0]?.attributes).toMatchObject({
       "harness.context.strategy": "naive",
-      "harness.context.strategy_version": "v3",
+      "harness.context.strategy_version": "v4",
       "harness.context.estimated_tokens": 0,
       "harness.context.message_count": 1,
     });
@@ -1652,7 +1652,7 @@ describe("runLoop", () => {
       traceparent,
       context: {
         strategyId: "naive",
-        strategyVersion: "v3",
+        strategyVersion: "v4",
         calibration: null,
       },
       plan: null,
@@ -2092,13 +2092,17 @@ describe("runLoop", () => {
       ]),
     );
     const contextPort = {
-      build: vi.fn(() => Promise.resolve([])),
-      buildMetadata: vi.fn(() => ({
-        strategyId: "naive",
-        strategyVersion: "v3",
-        estimatedTokens: 0,
-        messageCount: 0,
-      })),
+      build: vi.fn(() =>
+        Promise.resolve({
+          messages: [],
+          metadata: {
+            strategyId: "naive",
+            strategyVersion: "v4",
+            estimatedTokens: 0,
+            messageCount: 0,
+          },
+        }),
+      ),
       snapshot: vi.fn(() => Promise.resolve([])),
       restore: vi.fn(() => Promise.resolve()),
     };

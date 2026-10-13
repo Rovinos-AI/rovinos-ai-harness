@@ -102,7 +102,6 @@ async function resumeChild(persistScope: boolean): Promise<{
   let observedScope: Id | undefined;
   const context: ContextPort = {
     build: (events) => baseContext.build(events),
-    buildMetadata: () => baseContext.buildMetadata(),
     estimate: (messages) => baseContext.estimate(messages),
     observeModelResponse: (model, estimated, actual) => {
       baseContext.observeModelResponse(model, estimated, actual);

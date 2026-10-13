@@ -27,7 +27,7 @@ export class ContextMarkerExceedsBudgetError extends HarnessError {
  */
 export class SlidingWindowStrategy implements ContextStrategy {
   readonly id: Code = "sliding_window";
-  readonly version: Code = "v2";
+  readonly version: Code = "v3";
 
   /** {@inheritDoc ContextStrategy.build} */
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
@@ -135,7 +135,7 @@ function createResult({
     pinnedSeqs: groups.filter((group) => group.pinned).flatMap((group) => group.seqs),
     retainedSeqs: groups
       .filter((group) => group.pinned || retainedGroups.has(group))
-      .flatMap((group) => group.seqs),
+      .flatMap(({ runId, seqs }) => seqs.map((seq) => ({ runId, seq }))),
   });
 }
 

@@ -2,6 +2,7 @@
 import { z } from "zod";
 import {
   Code,
+  Id,
   JsonValue,
   MessageSchema,
   type Event,
@@ -23,6 +24,7 @@ export type ContextBudget = z.infer<typeof ContextBudgetSchema>;
 /** A contiguous transcript unit that strategies may retain or drop atomically. */
 export const TranscriptGroupSchema = z
   .object({
+    runId: Id,
     seqs: z.array(z.number().int().nonnegative()).min(1),
     messages: z.array(MessageSchema).min(1),
     pinned: z.boolean(),
@@ -64,13 +66,24 @@ export const ContextStatsSchema = z
 /** Inferred context build statistics. */
 export type ContextStats = z.infer<typeof ContextStatsSchema>;
 
+/** A retained event reference whose sequence is scoped to its run. */
+export const RetainedEventRefSchema = z
+  .object({
+    runId: Id,
+    seq: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Inferred run-scoped retained event reference. */
+export type RetainedEventRef = z.infer<typeof RetainedEventRefSchema>;
+
 /** Validated output of a context strategy. */
 export const ContextResultSchema = z
   .object({
     messages: z.array(MessageSchema),
     stats: ContextStatsSchema,
     pinnedSeqs: z.array(z.number().int().nonnegative()),
-    retainedSeqs: z.array(z.number().int().nonnegative()),
+    retainedSeqs: z.array(RetainedEventRefSchema),
   })
   .strict();
 
@@ -97,7 +110,7 @@ export const ComparisonSchema = z
     messageCount: z.number().int().nonnegative(),
     droppedGroups: z.number().int().nonnegative(),
     compactedRanges: z.array(CompactedRangeSchema),
-    retainedSeqs: z.array(z.number().int().nonnegative()),
+    retainedSeqs: z.array(RetainedEventRefSchema),
   })
   .strict();
 
