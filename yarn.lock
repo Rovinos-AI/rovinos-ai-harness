@@ -1018,6 +1018,7 @@ __metadata:
   dependencies:
     "@harness/config": "workspace:^"
     "@harness/context": "workspace:^"
+    "@harness/control-plane": "workspace:^"
     "@harness/core": "workspace:^"
     "@harness/mcp": "workspace:^"
     "@harness/policy": "workspace:^"
@@ -1049,6 +1050,23 @@ __metadata:
   resolution: "@harness/context@workspace:packages/context"
   dependencies:
     "@harness/schemas": "workspace:^"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.5"
+  languageName: unknown
+  linkType: soft
+
+"@harness/control-plane@workspace:^, @harness/control-plane@workspace:packages/control-plane":
+  version: 0.0.0-use.local
+  resolution: "@harness/control-plane@workspace:packages/control-plane"
+  dependencies:
+    "@harness/core": "workspace:^"
+    "@harness/schemas": "workspace:^"
+    "@harness/store": "workspace:^"
+    "@harness/telemetry": "workspace:^"
+    "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/node": "npm:2.1.1"
+    "@modelcontextprotocol/server": "npm:2.3.1"
+    "@types/node": "npm:22.20.5"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   languageName: unknown
@@ -1246,6 +1264,15 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@hono/node-server@npm:^1.19.9":
+  version: 1.19.17
+  resolution: "@hono/node-server@npm:1.19.17"
+  peerDependencies:
+    hono: ^4
+  checksum: 10c0/e77907e3b5db8ab68ed4f297ad84807bfdd698636408de86ab8d36dab4658504ac4c0ed9d9436bc272a0172b9b7a5a4b578532e0b5baf97674c7b420cb5cff4b
+  languageName: node
+  linkType: hard
+
 "@humanfs/core@npm:^0.19.2":
   version: 0.19.2
   resolution: "@humanfs/core@npm:0.19.2"
@@ -1395,6 +1422,18 @@ __metadata:
     react-dom:
       optional: true
   checksum: 10c0/5f80dbf74901e375ef37a6005dd0683fa0c7f810c81ce1e04c56c04976c97aa94a6c05390cae1b3c8cc003f1e83a58e04c3cd5876df02538d5173d0ebf408507
+  languageName: node
+  linkType: hard
+
+"@modelcontextprotocol/node@npm:2.1.1":
+  version: 2.1.1
+  resolution: "@modelcontextprotocol/node@npm:2.1.1"
+  dependencies:
+    "@hono/node-server": "npm:^1.19.9"
+    hono: "npm:^4.11.4"
+  peerDependencies:
+    "@modelcontextprotocol/server": ^2.3.0
+  checksum: 10c0/3ae1b8379f8479e2a524ed8e4cb7c524cec573dea39e987a789402eb72c7a2ce835b4ade223c4f765b735085d73b35412291953e17373fdacca2768b7f0942c4
   languageName: node
   linkType: hard
 
@@ -3809,6 +3848,13 @@ __metadata:
   version: 4.0.0
   resolution: "has-flag@npm:4.0.0"
   checksum: 10c0/2e789c61b7888d66993e14e8331449e525ef42aac53c627cc53d1c3334e768bcb6abdc4f5f0de1478a25beec6f0bd62c7549058b7ac53e924040d4f301f02fd1
+  languageName: node
+  linkType: hard
+
+"hono@npm:^4.11.4":
+  version: 4.13.13
+  resolution: "hono@npm:4.13.13"
+  checksum: 10c0/c8524e685a59b4f23a9bea15385eeac5622218949db251cb871b20fd9ef673b751b44ccdee6c22b3df56e5ed4c1b1cebad17b518bdc1823039da39b53ef9c1cf
   languageName: node
   linkType: hard
 

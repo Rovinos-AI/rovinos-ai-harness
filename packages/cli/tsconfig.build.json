@@ -11,6 +11,7 @@
   "references": [
     { "path": "../schemas/tsconfig.build.json" },
     { "path": "../config/tsconfig.build.json" },
+    { "path": "../control-plane/tsconfig.build.json" },
     { "path": "../mcp/tsconfig.build.json" }
   ]
 }
