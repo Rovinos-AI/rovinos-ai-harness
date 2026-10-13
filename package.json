@@ -29,6 +29,7 @@
     "clean": "node scripts/clean.mjs",
     "deps:check": "yarn constraints && yarn dedupe --check",
     "build:schemas": "yarn workspace @harness/schemas build",
+    "build:host": "yarn workspaces foreach --recursive --topological --from @harness/host run build",
     "docs:catalog": "yarn build && node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/gen-attribute-catalog.ts",
     "lint": "yarn build:schemas && yarn lint:md && yarn lint:yaml && yarn lint:sh && yarn lint:docker && yarn lint:editorconfig && yarn lint:spell && eslint . --max-warnings 0 && prettier --check . && yarn deps:check",
     "lint:fix": "yarn build:schemas && markdownlint-cli2 --fix \"**/*.md\" \".github/**/*.md\" && eslint . --fix --max-warnings 0 && prettier --write .",
