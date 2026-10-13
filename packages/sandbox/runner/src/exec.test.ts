@@ -94,16 +94,16 @@ describe("executeSpec", () => {
     ).rejects.toMatchObject({ code: "sandbox_workspace_path_invalid" });
   });
 
-  it("returns a safe error when the command credentials are invalid", async () => {
-    await expect(
-      executeSpec({
-        spec: makeSpec([process.execPath, "-e", "process.exit(0)"]),
-        signal: new AbortController().signal,
-        workspaceRoot,
-        executionUid: -1,
-        executionGid: -1,
-      }),
-    ).rejects.toMatchObject({ code: "sandbox_exec_failed" });
+  it("does not execute commands when the execution credentials are invalid", async () => {
+    const result = await executeSpec({
+      spec: makeSpec([process.execPath, "-e", "process.exit(0)"]),
+      signal: new AbortController().signal,
+      workspaceRoot,
+      executionUid: -1,
+      executionGid: -1,
+    });
+
+    expect(result.exitCode).not.toBe(0);
   });
 
   it("decodes stdout and stderr independently", async () => {

@@ -33,7 +33,7 @@ sandbox:
     token: env:SANDBOX_RUNNER_TOKEN
 ```
 
-The runner is intended for the internal Compose `sandbox` network; do not publish its port. Its Compose launcher retains only `SETUID` and `SETGID`, then uses a privilege-dropping utility to run the server as `10002:10002` with those capabilities and `no-new-privileges`. The runner reads the shared token from `/run/secrets/sandbox_runner_token`, not its environment. Provide a host-side token file owned by uid/gid `10002` with mode `0400`, then render and start Compose from the repository root with the collector version file and the secret source path:
+The runner is intended for the internal Compose `sandbox` network; do not publish its port. Its Compose launcher retains `SETUID`/`SETGID` and the capability needed to clear child capability sets, so the server runs as `10002:10002` and can start each command with a separate uid/gid and all capability sets cleared. The server retains only those capabilities; sandboxed commands have empty inheritable, permitted, effective, bounding, and ambient sets, and cannot change uid or gid. `no-new-privileges` remains enabled. The runner reads the shared token from `/run/secrets/sandbox_runner_token`, not its environment. Provide a host-side token file owned by uid/gid `10002` with mode `0400`, then render and start Compose from the repository root with the collector version file and the secret source path:
 
 ```sh
 sudo install -o 10002 -g 10002 -m 0400 /path/from/secret-manager /secure/sandbox-runner-token

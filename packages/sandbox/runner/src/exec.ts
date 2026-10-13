@@ -6,6 +6,7 @@ import { resolveWorkspacePath } from "../../src/inprocess.js";
 import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 
 const PRLIMIT_PATH = "/usr/bin/prlimit";
+const SETPRIV_PATH = "/usr/bin/setpriv";
 const TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const SANDBOX_EXEC_UID = 10003;
 const SANDBOX_EXEC_GID = 10003;
@@ -106,6 +107,21 @@ function prlimitArgs(spec: ExecSpec): string[] {
   ];
 }
 
+function setprivArgs(spec: ExecSpec, executionUid: number, executionGid: number): string[] {
+  const dropBoundingSet = process.geteuid?.() !== executionUid;
+  return [
+    `--reuid=${String(executionUid)}`,
+    `--regid=${String(executionGid)}`,
+    "--keep-groups",
+    "--inh-caps=-all",
+    "--ambient-caps=-all",
+    ...(dropBoundingSet ? ["--bounding-set=-all"] : []),
+    "--",
+    PRLIMIT_PATH,
+    ...prlimitArgs(spec),
+  ];
+}
+
 function abortedResult(): ExecResult {
   return {
     exitCode: null,
@@ -142,13 +158,11 @@ function executeProcess({
   const output = new CapturedOutput(spec.limits.outputBytes);
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn(PRLIMIT_PATH, prlimitArgs(spec), {
+    child = spawn(SETPRIV_PATH, setprivArgs(spec, executionUid, executionGid), {
       shell: false,
       detached: true,
       cwd,
       env: { ...spec.env, PATH: TRUSTED_PATH },
-      uid: executionUid,
-      gid: executionGid,
       stdio: "pipe",
     });
   } catch {

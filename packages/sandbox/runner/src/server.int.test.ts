@@ -58,6 +58,24 @@ const ComposeSchema = z.object({
   ),
 });
 const HttpResponseSchema = z.object({ status: z.number().int(), body: z.string() }).strict();
+const ChildCapabilitiesSchema = z
+  .object({
+    values: z
+      .object({
+        CapInh: z.string(),
+        CapPrm: z.string(),
+        CapEff: z.string(),
+        CapBnd: z.string(),
+        CapAmb: z.string(),
+      })
+      .strict(),
+    uidError: z.string(),
+    gidError: z.string(),
+    tokenFileReadable: z.boolean(),
+    tokenInProcessEnvironment: z.boolean(),
+    signalError: z.string(),
+  })
+  .strict();
 
 function composeArgs(args: string[]): string[] {
   return [
@@ -197,7 +215,7 @@ describe("sandbox runner Compose service", () => {
     expect(runner?.entrypoint).toContain(`--reuid=${String(integrationUid)}`);
     expect(runner?.entrypoint).toContain(`--regid=${String(integrationGid)}`);
     expect(runner?.cap_drop).toEqual(["ALL"]);
-    expect(runner?.cap_add).toEqual(["SETUID", "SETGID"]);
+    expect(runner?.cap_add).toEqual(["SETUID", "SETGID", "SETPCAP"]);
     expect(runner?.pids_limit).toBeGreaterThan(0);
     expect(runner?.mem_limit).toBeDefined();
     expect(runner?.cpus).toBeGreaterThan(0);
@@ -221,6 +239,44 @@ describe("sandbox runner Compose service", () => {
 
     expect(result.stdout).toBe("10003:10003");
     expect(result.stdout).not.toBe(`${String(integrationUid)}:${String(integrationGid)}`);
+  });
+
+  // threat: T-02
+  // threat: T-18
+  it("gives sandbox commands no capabilities and denies credential escalation (T-02, T-18)", async () => {
+    const script = [
+      'const fs = require("node:fs");',
+      'const status = fs.readFileSync("/proc/self/status", "utf8");',
+      'const capabilities = ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"];',
+      'const values = Object.fromEntries(capabilities.map((name) => [name, status.match(new RegExp(`^${name}:\\\\s+([0-9a-f]+)$`, "m"))?.[1]]));',
+      'let uidError = ""; let gidError = "";',
+      'try { process.setuid(10002); } catch (error) { uidError = error.code ?? ""; }',
+      'try { process.setgid(10002); } catch (error) { gidError = error.code ?? ""; }',
+      'let tokenFileReadable = false; let tokenInProcessEnvironment = false; let signalError = "";',
+      'try { tokenFileReadable = fs.readFileSync("/run/secrets/sandbox_runner_token", "utf8").includes("synthetic-runner-token-for-integration"); } catch {}',
+      'try { tokenInProcessEnvironment = fs.readFileSync("/proc/1/environ", "utf8").includes("synthetic-runner-token-for-integration"); } catch {}',
+      'try { process.kill(1, "SIGKILL"); } catch (error) { signalError = error.code ?? ""; }',
+      "process.stdout.write(JSON.stringify({ values, uidError, gidError, tokenFileReadable, tokenInProcessEnvironment, signalError }));",
+    ].join("\n");
+    const result = await runExec(makeSpec(["node", "-e", script]));
+    const parsed = parseJson(ChildCapabilitiesSchema, result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed).toEqual({
+      values: {
+        CapInh: "0000000000000000",
+        CapPrm: "0000000000000000",
+        CapEff: "0000000000000000",
+        CapBnd: "0000000000000000",
+        CapAmb: "0000000000000000",
+      },
+      uidError: "EPERM",
+      gidError: "EPERM",
+      tokenFileReadable: false,
+      tokenInProcessEnvironment: false,
+      signalError: "EPERM",
+    });
+    expect(await readRunnerHealthStatus()).toBe(200);
   });
 
   // threat: T-18
@@ -318,7 +374,7 @@ describe("sandbox runner Compose service", () => {
   // threat: T-02
   // threat: T-03
   // threat: T-04
-  it("keeps the runner token inaccessible to commands", async () => {
+  it("keeps the runner token inaccessible to commands (T-02, T-18)", async () => {
     const script = [
       'const fs = require("node:fs");',
       'let token = ""; let proc = "";',
@@ -332,7 +388,7 @@ describe("sandbox runner Compose service", () => {
   });
 
   // threat: T-02
-  it("cannot signal the runner and leaves its health endpoint available", async () => {
+  it("cannot signal the runner and leaves health available (T-02, T-18)", async () => {
     const result = await runExec(
       makeSpec([
         "node",

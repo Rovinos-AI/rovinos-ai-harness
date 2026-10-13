@@ -37,15 +37,15 @@ services:
       SANDBOX_ALLOWED_HOSTS: sandbox-runner:8080
       SANDBOX_WORKSPACE_ROOT: /workspaces
     init: true
-    # Keep only SETUID/SETGID for setpriv to drop the server to uid/gid 10002 with those capabilities.
+    # The server retains only SETUID/SETGID/SETPCAP; each command drops all capabilities.
     user: "0:0"
     entrypoint:
       - setpriv
       - --reuid=${SANDBOX_RUNNER_UID:-10002}
       - --regid=${SANDBOX_RUNNER_GID:-10002}
       - --clear-groups
-      - --inh-caps=+setuid,+setgid
-      - --ambient-caps=+setuid,+setgid
+      - --inh-caps=+setuid,+setgid,+setpcap
+      - --ambient-caps=+setuid,+setgid,+setpcap
       - --
       - node
       - packages/sandbox/dist/runner/src/server.js
@@ -57,6 +57,7 @@ services:
     cap_add:
       - SETUID
       - SETGID
+      - SETPCAP
     security_opt:
       - no-new-privileges:true
     pids_limit: 128
