@@ -6,7 +6,7 @@ Repo scripts: CI checks, generators, security and docs tooling.
 
 ## Specs and task ids
 
-- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.4-1.9, 4.7, 10.2, 13.11, 19.1, 21.1-21.8, 22.1-22.4, 7.13, 24.8
+- [TASKS.md](./TASKS.md) (specs in other folders): tasks 1.4-1.9, 4.7, 10.2, 10.4, 13.11, 19.1, 21.1-21.8, 22.1-22.4, 7.13, 24.8
 
 <!-- END GENERATED: agents-index -->
 
