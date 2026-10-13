@@ -306,10 +306,7 @@ function registerDeleteRun(factory: EventStoreFactory, builders: EventStoreTestB
         const events =
           status === "pending"
             ? [builders.runCreated(runId)]
-            : [
-                builders.runCreated(runId),
-                builders.runStatusChanged(runId, "pending", status),
-              ];
+            : [builders.runCreated(runId), builders.runStatusChanged(runId, "pending", status)];
         await store.append(runId, events, 0);
 
         await expect(store.deleteRun(runId)).resolves.toBe(0);

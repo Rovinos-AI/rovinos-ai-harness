@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
-  Code,
   StoreRetentionConfigSchema,
+  type Code,
   type Id,
   type StoreRetentionConfig,
 } from "@harness/schemas";
@@ -12,7 +12,7 @@ const MILLIS_PER_DAY = 86_400_000;
 const RUN_ID_FIELD = "harness.run_id" satisfies Code;
 
 /** Safe metadata fields accepted by the retention logger. */
-export type RetentionLogFields = Readonly<Record<string, Id | Code | number | boolean>>;
+export type RetentionLogFields = Readonly<Record<string, Id | number | boolean>>;
 
 /** Metadata-only logger used by the retention job. */
 export interface RetentionLogger {
@@ -73,8 +73,7 @@ export async function purgeExpiredRuns(
       result.skippedActive += 1;
       return;
     }
-    const retentionDays =
-      status === "completed" ? policy.completedRunsDays : policy.failedRunsDays;
+    const retentionDays = status === "completed" ? policy.completedRunsDays : policy.failedRunsDays;
     if (run.lastTs >= cutoff - retentionDays * MILLIS_PER_DAY || options.dryRun) {
       return;
     }
@@ -109,8 +108,7 @@ export async function purgeExpiredRuns(
       for (const run of page.runs.slice(0, anchorIndex)) {
         await considerRun(run, status);
       }
-      pendingCursorRun =
-        page.nextCursor === undefined ? undefined : page.runs.at(-1);
+      pendingCursorRun = page.nextCursor === undefined ? undefined : page.runs.at(-1);
       cursor = page.nextCursor;
     } while (cursor !== undefined);
   }

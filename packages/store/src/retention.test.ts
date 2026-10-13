@@ -99,9 +99,7 @@ describe("purgeExpiredRuns", () => {
         clock: new FakeClock(now),
         policy,
         logger: { info, error },
-        onRunPurged: async () => {
-          throw new Error("synthetic hook failure");
-        },
+        onRunPurged: () => Promise.reject(new Error("synthetic hook failure")),
         dryRun: false,
       }),
     ).resolves.toEqual({ examined: 1, purged: 1, skippedActive: 0 });

@@ -103,7 +103,7 @@ export interface EventStore {
   /**
    * Atomically remove a terminal run, its events, and its snapshots.
    * @param runId Run identifier to delete.
-   * @returns The number of deleted events, or zero when the run is missing or nonterminal.
+   * @returns The number of deleted events, or zero when the run is missing or not terminal.
    */
   deleteRun(runId: Id): Promise<number>;
 
