@@ -41,6 +41,18 @@ async function temporaryDatabase(): Promise<string> {
   return join(directory, "events.sqlite");
 }
 
+function readOnlyMigrationErrorCode(path: string): StoreMigrationError["code"] {
+  try {
+    new SqliteEventStore(path, undefined, { readOnly: true });
+  } catch (error) {
+    if (error instanceof StoreMigrationError) {
+      return error.code;
+    }
+    throw error;
+  }
+  throw new Error("Expected read-only migration validation to fail");
+}
+
 describe("read-only SQLite inspection", () => {
   it("reads existing events without changing database files or allowing writes", async () => {
     const path = await temporaryDatabase();
@@ -91,9 +103,7 @@ describe("read-only SQLite inspection", () => {
       .run("synthetic-checksum", "0001");
     database.close();
 
-    expect(() => new SqliteEventStore(path, undefined, { readOnly: true })).toThrow(
-      expect.objectContaining({ code: "migration_checksum_mismatch" }),
-    );
+    expect(readOnlyMigrationErrorCode(path)).toBe("migration_checksum_mismatch");
   });
 
   it("rejects read-only databases with a schema newer than this code", async () => {
@@ -106,9 +116,7 @@ describe("read-only SQLite inspection", () => {
       .run("9999", "synthetic-checksum", 1);
     database.close();
 
-    expect(() => new SqliteEventStore(path, undefined, { readOnly: true })).toThrow(
-      expect.objectContaining({ code: "schema_newer_than_code" }),
-    );
+    expect(readOnlyMigrationErrorCode(path)).toBe("schema_newer_than_code");
   });
 
   it("rejects read-only databases with migrations pending", async () => {
@@ -119,9 +127,7 @@ describe("read-only SQLite inspection", () => {
     database.exec("DROP TABLE schema_migrations");
     database.close();
 
-    expect(() => new SqliteEventStore(path, undefined, { readOnly: true })).toThrow(
-      expect.objectContaining({ code: "schema_migration_pending" }),
-    );
+    expect(readOnlyMigrationErrorCode(path)).toBe("schema_migration_pending");
     expect(new StoreMigrationError("schema_migration_pending").code).toBe(
       "schema_migration_pending",
     );

@@ -235,11 +235,11 @@ async function verifyLegacyPostgresSchema(includeTxId: boolean): Promise<void> {
 }
 
 it("adopts the pre-migration Postgres schema without losing events", async () => {
-  await verifyLegacyPostgresSchema(true);
+  await expect(verifyLegacyPostgresSchema(true)).resolves.toBeUndefined();
 });
 
 it("adds tx_id when adopting a legacy Postgres events table without it", async () => {
-  await verifyLegacyPostgresSchema(false);
+  await expect(verifyLegacyPostgresSchema(false)).resolves.toBeUndefined();
 });
 
 it("atomically deletes a run racing with an append", async () => {
