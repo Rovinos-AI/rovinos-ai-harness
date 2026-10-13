@@ -46,6 +46,7 @@ const appPayload = {
   permissions: [],
   toolInput: { decision: "approve" },
   toolResult: { content: [{ type: "text", text: "complete" }] },
+  telemetry: false,
 };
 const launchHash = `#${new URLSearchParams({
   token: "t".repeat(43),
@@ -59,14 +60,16 @@ interface FakeFrame {
   readonly attributes: Map<string, string>;
   srcdoc: string;
   setAttribute(name: string, value: string): void;
-  addEventListener(type: "load", callback: () => void, options: { once: true }): void;
+  addEventListener(type: "load" | "error", callback: () => void, options: { once: true }): void;
 }
 
-function createFakeRoot(): {
+function createFakeRoot(frameEvent: "load" | "error" = "load"): {
   readonly root: HostPagePort;
   readonly frame: FakeFrame;
   readonly status: () => string;
   readonly attached: () => boolean;
+  readonly frameRemoved: () => void;
+  readonly pageHide: () => void;
 } {
   const frame: FakeFrame = {
     contentWindow: null,
@@ -75,22 +78,43 @@ function createFakeRoot(): {
     setAttribute(name, value) {
       frame.attributes.set(name, value);
     },
-    addEventListener(_type, callback) {
-      callback();
+    addEventListener(type, callback) {
+      if (type === frameEvent) {
+        callback();
+      }
     },
   };
   let status = "";
   let attached = false;
+  let onFrameRemoved = (): void => undefined;
+  let onPageHide = (): void => undefined;
   const root: HostPagePort = {
     setStatus(code) {
       status = code;
     },
     createFrame: () => frame,
+    onFrameRemoved(callback) {
+      onFrameRemoved = callback;
+    },
+    onPageHide(callback) {
+      onPageHide = callback;
+    },
     attachFrame() {
       attached = true;
     },
   };
-  return { root, frame, status: () => status, attached: () => attached };
+  return {
+    root,
+    frame,
+    status: () => status,
+    attached: () => attached,
+    frameRemoved: () => {
+      onFrameRemoved();
+    },
+    pageHide: () => {
+      onPageHide();
+    },
+  };
 }
 
 function successfulRequest(payload: unknown = appPayload) {
@@ -155,9 +179,16 @@ describe("reference app page", () => {
 
     const appFailure = vi
       .fn()
-      .mockResolvedValueOnce(new Response("event stream"))
-      .mockResolvedValueOnce(new Response("", { status: 422 }));
+      .mockResolvedValueOnce(hostReadyResponse())
+      .mockResolvedValueOnce(new Response("", { status: 422 }))
+      .mockResolvedValueOnce(new Response("", { status: 200 }));
     expect(await mountReferenceApp(root, launchHash, appFailure)).toBe(false);
+    await vi.waitFor(() => {
+      expect(appFailure).toHaveBeenCalledTimes(3);
+    });
+    expect(appFailure.mock.calls[2]?.[0]).toBe(
+      `/api/session/end?sessionId=${appPayload.sessionId}`,
+    );
   });
 
   it("mounts a sandboxed iframe and connects the MCP Apps bridge", async () => {
@@ -181,6 +212,119 @@ describe("reference app page", () => {
     expect(request.mock.calls[0]?.[1]).toMatchObject({
       headers: { authorization: ["Bearer", "t".repeat(43)].join(" ") },
     });
+  });
+
+  it("sends only opted-in traceparent metadata and ends the session when its frame is removed", async () => {
+    const { root, frameRemoved } = createFakeRoot();
+    const traceparent = `00-${"a".repeat(32)}-${"b".repeat(16)}-01`;
+    const result = {
+      content: [{ type: "text" as const, text: "complete" }],
+      _meta: {
+        traceparent: "00-invalid",
+        tracestate: "vendor=value",
+        baggage: "private=value",
+        preserved: true,
+      },
+    };
+    const request = successfulRequest({
+      ...appPayload,
+      telemetry: true,
+      traceparent,
+      toolResult: result,
+    });
+    expect(await mountReferenceApp(root, launchHash, request)).toBe(true);
+    expect(bridgeMock.sendToolResult).toHaveBeenCalledWith({
+      content: result.content,
+      _meta: { preserved: true, traceparent },
+    });
+    frameRemoved();
+    await vi.waitFor(() => {
+      expect(request).toHaveBeenCalledTimes(3);
+    });
+    expect(request.mock.calls[2]?.[0]).toBe(`/api/session/end?sessionId=${appPayload.sessionId}`);
+    expect(request.mock.calls[2]?.[1]).toMatchObject({
+      method: "POST",
+    });
+  });
+
+  it("ends the session with keepalive and authorization when the page is hidden", async () => {
+    const { root, pageHide, frameRemoved } = createFakeRoot();
+    const request = successfulRequest();
+    expect(await mountReferenceApp(root, launchHash, request)).toBe(true);
+
+    pageHide();
+    await vi.waitFor(() => {
+      expect(request).toHaveBeenCalledTimes(3);
+    });
+    expect(request.mock.calls[2]?.[1]).toMatchObject({
+      method: "POST",
+      keepalive: true,
+      headers: { authorization: ["Bearer", "t".repeat(43)].join(" ") },
+    });
+    frameRemoved();
+    await Promise.resolve();
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("ends the session when iframe loading or bridge connection fails", async () => {
+    const loadFailure = createFakeRoot("error");
+    const loadRequest = successfulRequest();
+    await expect(mountReferenceApp(loadFailure.root, launchHash, loadRequest)).rejects.toThrow(
+      "App iframe failed to load.",
+    );
+    await vi.waitFor(() => {
+      expect(loadRequest).toHaveBeenCalledTimes(3);
+    });
+
+    const bridgeFailure = createFakeRoot();
+    const bridgeRequest = successfulRequest();
+    bridgeMock.connect.mockRejectedValueOnce(new Error("bridge failure"));
+    await expect(mountReferenceApp(bridgeFailure.root, launchHash, bridgeRequest)).rejects.toThrow(
+      "bridge failure",
+    );
+    await vi.waitFor(() => {
+      expect(bridgeRequest).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  it("removes trace propagation fields for apps that have not opted in", async () => {
+    const { root } = createFakeRoot();
+    const result = {
+      content: [{ type: "text" as const, text: "complete" }],
+      _meta: {
+        traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+        tracestate: "vendor=value",
+        baggage: "private=value",
+        preserved: true,
+      },
+    };
+    expect(
+      await mountReferenceApp(
+        root,
+        launchHash,
+        successfulRequest({ ...appPayload, telemetry: false, toolResult: result }),
+      ),
+    ).toBe(true);
+    expect(bridgeMock.sendToolResult).toHaveBeenCalledWith({
+      content: result.content,
+      _meta: { preserved: true },
+    });
+  });
+
+  it("delivers no result metadata when an opted-in session has no valid context", async () => {
+    const { root } = createFakeRoot();
+    const result = {
+      content: [{ type: "text" as const, text: "complete" }],
+      _meta: { traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01` },
+    };
+    expect(
+      await mountReferenceApp(
+        root,
+        launchHash,
+        successfulRequest({ ...appPayload, telemetry: true, toolResult: result }),
+      ),
+    ).toBe(true);
+    expect(bridgeMock.sendToolResult).toHaveBeenCalledWith({ content: result.content });
   });
 
   it("handles missing tool results and reports malformed host payloads", async () => {
@@ -257,7 +401,7 @@ describe("reference app page", () => {
       getElementById: () => element,
       createElement: () => frame,
     });
-    vi.stubGlobal("window", { location: { hash: launchHash } });
+    vi.stubGlobal("window", { location: { hash: launchHash }, addEventListener: vi.fn() });
     vi.stubGlobal("fetch", successfulRequest());
     startReferenceHostPage();
     await vi.waitFor(() => {
@@ -266,7 +410,7 @@ describe("reference app page", () => {
     expect(bridgeMock.sendToolInput).toHaveBeenCalledWith(appPayload.toolInput);
 
     vi.stubGlobal("document", { getElementById: () => element, createElement: () => frame });
-    vi.stubGlobal("window", { location: { hash: launchHash } });
+    vi.stubGlobal("window", { location: { hash: launchHash }, addEventListener: vi.fn() });
     vi.stubGlobal(
       "fetch",
       vi.fn(() => Promise.reject(new Error("private browser failure"))),

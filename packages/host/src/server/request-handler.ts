@@ -17,6 +17,7 @@ import {
   writeError,
   writeJson,
 } from "./http-utils.js";
+import { UiSession } from "./ui-session.js";
 
 const MAX_CALL_BYTES = 16_384;
 
@@ -27,6 +28,7 @@ interface RequestHandlerOptions {
   readonly appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>;
   readonly sessions: Map<string, AppInstance>;
   readonly nextSessionId: () => string;
+  readonly scheduleUiSessionExpiry: (callback: () => void, delayMs: number) => () => void;
   readonly token: string;
   readonly expectedOrigin: () => string;
   readonly expectedHosts: () => readonly string[];
@@ -70,12 +72,43 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
     writeError(response, 404, "app_unknown");
     return;
   }
+  if (options.sessions.size >= options.config.maxUiSessions) {
+    writeError(response, 429, "app_session_limit");
+    return;
+  }
+  const sessionId = Id.parse(options.nextSessionId());
+  const uiSession = app.telemetry
+    ? new UiSession(options.dependencies.uiSessionContext, app.id, sessionId, () => {
+        options.dependencies.onCode("ui_trace_unavailable");
+      })
+    : undefined;
+  let cancelExpiry = (): void => undefined;
+  const end = (): void => {
+    cancelExpiry();
+    uiSession?.end();
+    if (options.sessions.get(sessionId)?.end === end) {
+      options.sessions.delete(sessionId);
+    }
+  };
   const instance: AppInstance = {
     id: app.id,
     resourceUri: app.resourceUri,
-    sessionId: Id.parse(options.nextSessionId()),
+    sessionId,
+    ...(uiSession === undefined ? {} : { uiSession }),
+    end,
   };
   options.sessions.set(instance.sessionId, instance);
+  try {
+    cancelExpiry = options.scheduleUiSessionExpiry(() => {
+      if (options.sessions.get(sessionId)?.end === end) {
+        end();
+        options.dependencies.onCode("ui_session_expired");
+      }
+    }, options.config.uiSessionMaxMs);
+  } catch (error) {
+    instance.end();
+    throw error;
+  }
   response.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -124,12 +157,27 @@ async function sendAppResource(
       html: resource.html,
       csp: resource.csp,
       permissions: resource.permissions,
+      telemetry: app.telemetry,
+      ...(app.telemetry && instance.uiSession?.traceparent !== undefined
+        ? { traceparent: instance.uiSession.traceparent }
+        : {}),
       toolInput: options.dependencies.toolInput ?? {},
       toolResult: options.dependencies.toolResult ?? null,
     });
   } catch {
     writeError(response, 502, "app_resource_unavailable");
   }
+}
+
+function endAppSession(url: URL, response: HostResponse, options: RequestHandlerOptions): void {
+  const sessionId = url.searchParams.get("sessionId");
+  const instance = sessionId === null ? undefined : options.sessions.get(sessionId);
+  if (instance === undefined) {
+    writeError(response, 404, "app_unknown");
+    return;
+  }
+  instance.end();
+  writeJson(response, 200, {});
 }
 
 async function routeAppCall(
@@ -204,6 +252,9 @@ export function createRequestHandler(
           return;
         case "POST /api/call":
           await routeAppCall(request, response, options);
+          return;
+        case "POST /api/session/end":
+          endAppSession(url, response, options);
           return;
         default:
           writeError(response, 404, "not_found");

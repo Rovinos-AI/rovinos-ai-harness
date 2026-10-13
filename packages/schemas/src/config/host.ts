@@ -91,8 +91,10 @@ export const HostConfigSchema = z
         }
       }),
     listen: ListenConfigSchema.default({ host: "127.0.0.1", port: 0 }),
+    maxUiSessions: z.number().int().positive().max(1024).default(32),
     permissionAllowlist: z.array(AppPermissionSchema).default([]),
     cspAllowlist: z.array(CspOriginSchema).default([]),
+    uiSessionMaxMs: z.number().int().positive().max(2_147_483_647).default(3_600_000),
   })
   .strict();
 

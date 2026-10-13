@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CallToolResultSchema } from "@modelcontextprotocol/core";
-import { Code, Id, parseJson } from "@harness/schemas";
+import { Code, Id, Traceparent, parseJson } from "@harness/schemas";
 import { z } from "zod";
 import { createAppBridge, type AppIframe, type AppToolCall } from "./bridge.js";
 
@@ -14,6 +14,8 @@ const AppPayloadSchema = z
     permissions: z.array(Code),
     toolInput: z.record(z.string(), z.unknown()),
     toolResult: CallToolResultSchema.nullable(),
+    telemetry: z.boolean(),
+    traceparent: Traceparent.optional(),
   })
   .strict();
 const CallResponseSchema = CallToolResultSchema;
@@ -32,7 +34,7 @@ export interface LaunchDetails {
 /** DOM operations required by the host; kept injectable for deterministic unit tests. */
 /** Creates the iframe element used by the page. */
 export type AppIframeFactory = () => AppIframe & {
-  addEventListener(type: "load", callback: () => void, options: { once: true }): void;
+  addEventListener(type: "load" | "error", callback: () => void, options: { once: true }): void;
   setAttribute(name: string, value: string): void;
   srcdoc: string;
 };
@@ -41,8 +43,12 @@ export type AppIframeFactory = () => AppIframe & {
 export interface HostPagePort {
   setStatus(code: string): void;
   createFrame: AppIframeFactory;
+  onFrameRemoved(callback: () => void): void;
+  onPageHide(callback: () => void): void;
   attachFrame(): void;
 }
+
+type AppPayload = z.infer<typeof AppPayloadSchema>;
 
 /** Reads and validates the non-secret resource selection and bearer token from the URL fragment. */
 export function parseLaunchDetails(hash: string): LaunchDetails | undefined {
@@ -64,6 +70,85 @@ export function createSandboxDocument(html: string, csp = APP_CSP): string {
 
 function authorizedHeaders(token: string): Record<string, string> {
   return { authorization: ["Bearer", token].join(" ") };
+}
+
+function endUiSession(
+  request: typeof fetch,
+  sessionId: string,
+  headers: Record<string, string>,
+  keepalive = false,
+): void {
+  void request(`/api/session/end?sessionId=${encodeURIComponent(sessionId)}`, {
+    method: "POST",
+    headers,
+    ...(keepalive ? { keepalive: true } : {}),
+  }).catch(() => undefined);
+}
+
+function toolResultForApp(
+  result: NonNullable<z.infer<typeof CallToolResultSchema>>,
+  app: Pick<AppPayload, "telemetry" | "traceparent">,
+): z.infer<typeof CallToolResultSchema> {
+  const { _meta, ...resultWithoutMetadata } = result;
+  const metadata = { ..._meta };
+  delete metadata.traceparent;
+  delete metadata.tracestate;
+  delete metadata.baggage;
+  if (app.telemetry && app.traceparent !== undefined) {
+    metadata.traceparent = app.traceparent;
+  }
+  return {
+    ...resultWithoutMetadata,
+    ...(Object.keys(metadata).length === 0 ? {} : { _meta: metadata }),
+  };
+}
+
+function waitForFrameLoad(frame: ReturnType<AppIframeFactory>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    frame.addEventListener("load", resolve, { once: true });
+    frame.addEventListener(
+      "error",
+      () => {
+        reject(new Error("App iframe failed to load."));
+      },
+      { once: true },
+    );
+  });
+}
+
+async function connectAppFrame(options: {
+  readonly root: HostPagePort;
+  readonly app: AppPayload;
+  readonly launch: LaunchDetails;
+  readonly request: typeof fetch;
+  readonly endSession: () => void;
+}): Promise<void> {
+  const { root, app, launch, request, endSession } = options;
+  const frame = root.createFrame();
+  frame.setAttribute("sandbox", "allow-scripts");
+  frame.setAttribute("referrerpolicy", "no-referrer");
+  frame.setAttribute("title", `MCP App ${app.appId}`);
+  if (app.permissions.length > 0) {
+    frame.setAttribute("allow", app.permissions.join("; "));
+  }
+  frame.srcdoc = createSandboxDocument(app.html, app.csp);
+  const loaded = waitForFrameLoad(frame);
+  root.onFrameRemoved(endSession);
+  root.attachFrame();
+  await loaded;
+  const bridge = createAppBridge(frame, (call) =>
+    routeToolCall(call, {
+      appId: app.appId,
+      sessionId: app.sessionId,
+      token: launch.token,
+      request,
+    }),
+  );
+  await bridge.connect();
+  await bridge.sendToolInput(app.toolInput);
+  if (app.toolResult !== null) {
+    await bridge.sendToolResult(toolResultForApp(app.toolResult, app));
+  }
 }
 
 interface ToolCallContext {
@@ -135,54 +220,41 @@ export async function mountReferenceApp(
     root.setStatus("app_unknown");
     return false;
   }
-  const response = await request(
-    `/api/app?resourceUri=${encodeURIComponent(launch.resourceUri)}&sessionId=${encodeURIComponent(hostReady.sessionId)}`,
-    { headers },
-  );
-  if (!response.ok) {
-    root.setStatus(response.status === 404 ? "app_unknown" : "app_resource_invalid");
-    return false;
-  }
-  let app: z.infer<typeof AppPayloadSchema>;
-  try {
-    app = parseJson(AppPayloadSchema, await response.text());
-  } catch {
-    root.setStatus("app_resource_invalid");
-    return false;
-  }
-  const frame = root.createFrame();
-  frame.setAttribute("sandbox", "allow-scripts");
-  frame.setAttribute("referrerpolicy", "no-referrer");
-  frame.setAttribute("title", `MCP App ${app.appId}`);
-  if (app.permissions.length > 0) {
-    frame.setAttribute("allow", app.permissions.join("; "));
-  }
-  frame.srcdoc = createSandboxDocument(app.html, app.csp);
-  const loaded = new Promise<void>((resolve) => {
-    frame.addEventListener(
-      "load",
-      () => {
-        resolve();
-      },
-      { once: true },
-    );
+  let ended = false;
+  const endSession = (keepalive = false): void => {
+    if (!ended) {
+      ended = true;
+      endUiSession(request, hostReady.sessionId, headers, keepalive);
+    }
+  };
+  root.onPageHide(() => {
+    endSession(true);
   });
-  root.attachFrame();
-  await loaded;
-  const bridge = createAppBridge(frame, (call) =>
-    routeToolCall(call, {
-      appId: app.appId,
-      sessionId: app.sessionId,
-      token: launch.token,
-      request,
-    }),
-  );
-  await bridge.connect();
-  await bridge.sendToolInput(app.toolInput);
-  if (app.toolResult !== null) {
-    await bridge.sendToolResult(app.toolResult);
+  let launched = false;
+  try {
+    const response = await request(
+      `/api/app?resourceUri=${encodeURIComponent(launch.resourceUri)}&sessionId=${encodeURIComponent(hostReady.sessionId)}`,
+      { headers },
+    );
+    if (!response.ok) {
+      root.setStatus(response.status === 404 ? "app_unknown" : "app_resource_invalid");
+      return false;
+    }
+    let app: z.infer<typeof AppPayloadSchema>;
+    try {
+      app = parseJson(AppPayloadSchema, await response.text());
+    } catch {
+      root.setStatus("app_resource_invalid");
+      return false;
+    }
+    await connectAppFrame({ root, app, launch, request, endSession });
+    launched = true;
+    return true;
+  } finally {
+    if (!launched) {
+      endSession();
+    }
   }
-  return true;
 }
 
 /** Starts the browser entry point when the trusted static host page has loaded. */
@@ -204,6 +276,21 @@ export function startReferenceHostPage(): void {
       if (frame !== undefined) {
         element.replaceChildren(frame);
       }
+    },
+    onFrameRemoved: (callback) => {
+      if (typeof MutationObserver === "undefined") {
+        return;
+      }
+      const observer = new MutationObserver(() => {
+        if (frame !== undefined && !frame.isConnected) {
+          observer.disconnect();
+          callback();
+        }
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    },
+    onPageHide: (callback) => {
+      window.addEventListener("pagehide", callback, { once: true });
     },
   };
   void mountReferenceApp(root, window.location.hash).catch(() => {
