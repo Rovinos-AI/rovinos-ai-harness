@@ -4,9 +4,10 @@
     "composite": false,
     "declaration": false,
     "customConditions": ["source"],
+    "types": ["node"],
     "noEmit": true,
     "rootDir": ".",
     "skipLibCheck": true
   },
-  "include": ["src/**/*.test.ts"]
+  "include": ["src/**/*.test.ts", "runner/src/**/*.test.ts"]
 }

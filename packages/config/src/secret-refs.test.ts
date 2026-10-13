@@ -56,6 +56,9 @@ describe("getConfigSecretRefs", () => {
         dialect: "postgres",
         connectionString: "env:DOCTOR_STORE_URL",
       },
+      sandbox: {
+        runner: { url: "http://sandbox-runner:8080", token: "env:SANDBOX_RUNNER_TOKEN" },
+      },
     });
 
     expect(getConfigSecretRefs(config)).toEqual([
@@ -65,6 +68,7 @@ describe("getConfigSecretRefs", () => {
       "env:DOCTOR_PRIMARY_KEY",
       "file:/run/secrets/doctor-previous-key",
       "env:DOCTOR_STORE_URL",
+      "env:SANDBOX_RUNNER_TOKEN",
     ]);
   });
 });

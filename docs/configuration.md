@@ -24,7 +24,7 @@ Set `HARNESS_CASSETTE_AUTO=0` to disable cassette auto mode. Record and auto mod
 
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict schemas owned by their respective packages. `telemetry.sentinel.minValueLength` defaults to `6` and controls the minimum length of vault values included in leak-sentinel scans; shorter values are counted and skipped. The sentinel is enabled by default; `telemetry.sentinel.enabled: false` is accepted only outside production. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
 
-The `store.dialect` is `sqlite` by default; select `postgres` and provide `store.connectionString` as a secret reference for Postgres store-management commands:
+The `store.dialect` is `sqlite` by default; select `postgres` and provide `store.connectionString` as a secret reference for the runtime and the store-management commands (both use the same configured store):
 
 ```yaml
 store:
@@ -35,9 +35,34 @@ store:
     failedRunsDays: 60
 ```
 
-The Postgres connection URL is resolved only when a store command needs it and is never printed. `harness run` currently uses the SQLite runtime store; Postgres runtime selection is not yet wired.
+The Postgres connection URL is resolved only when a store command needs it and is never printed.
 
-Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. `harness store purge` supports dry runs and invokes a vault-purge hook only when the supplied vault resolver exposes one; the default CLI context does not yet supply that hook.
+Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. `harness store purge` supports dry runs; it does not yet purge vault mappings for deleted runs (12.6, #108).
+
+Configure `sandbox.runner` to use the isolated runner instead of the development-only in-process backend. Its URL must be an HTTP(S) origin, and `token` must be a secret reference:
+
+```yaml
+sandbox:
+  runner:
+    url: http://sandbox-runner:8080
+    token: env:SANDBOX_RUNNER_TOKEN
+```
+
+The runner is intended for the internal Compose `sandbox` network; do not publish its port. Its Compose launcher retains `SETUID`/`SETGID` and the capability needed to clear child capability sets, so the server runs as `10002:10002` and can start each command with a separate uid/gid and all capability sets cleared. The server retains only those capabilities; sandboxed commands have empty inheritable, permitted, effective, bounding, and ambient sets, cannot change uid or gid, and have no supplementary groups. `no-new-privileges` remains enabled.
+
+The sandbox Compose profile requires `SANDBOX_RUNNER_TOKEN`; provide it through the environment using your secret manager. The Compose service defaults the variable to empty so rendering or starting other profiles does not require a sandbox token, but the runner validates it (at least 32 bytes) and exits with `sandbox_runner_config_invalid` if it is missing or too short. The server removes a valid token from its environment at startup. The runner deliberately avoids a mounted token file because some container hosts, including Colima and Docker Desktop on macOS, do not enforce Unix permissions on bind-mounted files. Commands run under a different uid with no capabilities, receive only an explicit sanitized environment, and cannot read the server's `/proc` environment; integration tests also check that the token is absent from `/run`, `/app`, and the workspace.
+
+Render and start Compose from the repository root with the collector version file:
+
+```sh
+SANDBOX_RUNNER_TOKEN="$(cat /secure/sandbox-runner-token)" \
+  docker compose --env-file infra/collector/VERSION \
+  --file infra/compose/docker-compose.yml --profile sandbox up --detach --build
+```
+
+`limits.outputBytes` also limits the maximum size of any file written by a command through its file-size resource limit; this coupling remains until task 19.5 adds per-run workspace quotas. The runner's per-run workspace isolation is also deferred to task 19.5. The `sandbox.runner` setting is not yet wired into `core.createRuntime`; task #385 (2.15) tracks that integration.
+
+Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. CLI scheduling and vault-purge wiring are deferred to task 20.x; the retention job supports dry runs and invokes a per-run purge hook after deletion.
 
 Key versions are configured under `keys`. Each key must be a base64-encoded 32-byte secret reference. Keep old versions configured while stored content still uses them; new content uses `currentKeyId`.
 
