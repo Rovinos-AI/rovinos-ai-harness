@@ -199,8 +199,12 @@ async function runExec(spec: ExecSpec): Promise<z.infer<typeof ExecResultSchema>
 
 describe("sandbox runner Compose service", () => {
   it("renders base and test Compose models without the optional sandbox token", () => {
-    renderComposeConfigWithoutRunnerToken("infra/compose/docker-compose.yml");
-    renderComposeConfigWithoutRunnerToken("infra/compose/docker-compose.test.yml");
+    expect(() => {
+      renderComposeConfigWithoutRunnerToken("infra/compose/docker-compose.yml");
+    }).not.toThrow();
+    expect(() => {
+      renderComposeConfigWithoutRunnerToken("infra/compose/docker-compose.test.yml");
+    }).not.toThrow();
   });
 
   beforeAll(async () => {
