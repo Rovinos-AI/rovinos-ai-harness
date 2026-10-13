@@ -61,6 +61,7 @@ function createContext() {
   const closeRuntime = vi.fn(() => Promise.resolve());
   const runtime: Runtime = {
     store,
+    vault: { resolve: () => Promise.resolve(undefined) },
     keys: {
       currentKeyId: () => "test-key",
       getKey: () => Promise.resolve(new Uint8Array(32)),

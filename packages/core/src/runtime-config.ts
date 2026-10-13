@@ -2,6 +2,7 @@
 import {
   ModelsConfigSchema,
   type PolicyConfig,
+  type PiiConfig,
   type RolesConfig,
   type Id,
   type JsonValue,
@@ -15,6 +16,8 @@ import {
 import type { ProviderAdapter } from "@harness/models";
 import type { EventStore } from "@harness/store";
 import type { LocalKeyProvider } from "@harness/vault";
+import type { AuditingVaultResolver, SqliteVault, VaultResolver } from "@harness/vault";
+import type { Tokenizer } from "@harness/pii";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
@@ -52,6 +55,7 @@ export interface RuntimeOverrides {
 /** Runtime configuration required by the currently implemented run loop. */
 export interface RuntimeConfig {
   readonly run: RunConfig;
+  readonly pii?: PiiConfig;
   readonly models?: ModelsConfig;
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;
@@ -61,6 +65,8 @@ export interface RuntimeConfig {
 /** Composed run-loop operations and their shared dependencies. */
 export interface Runtime {
   readonly store: EventStore;
+  /** Read-only resolver for audited vault access by runtime consumers. */
+  readonly vault: VaultResolver;
   /** Key provider shared by encryption consumers in the composed runtime. */
   readonly keys: KeyProvider;
   readonly clock: Clock;
@@ -82,6 +88,15 @@ export interface RuntimeComposition {
   readonly ids: IdGenerator;
   readonly store: EventStore;
   readonly keys: LocalKeyProvider;
+  readonly vault: SqliteVault;
+  readonly vaultResolver: VaultResolver;
+  readonly pii:
+    | {
+        readonly config: PiiConfig;
+        readonly tokenizer: Tokenizer;
+        readonly resolver: AuditingVaultResolver;
+      }
+    | undefined;
   readonly model: ModelPort;
   readonly tool: ToolPort;
   readonly policy: PolicyPort;

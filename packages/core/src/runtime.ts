@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { HarnessError, PiiConfigSchema, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import { type EventStore } from "@harness/store";
+import { SqliteVault } from "@harness/vault";
 import { cancelRun } from "./cancel.js";
 import { NaiveContext } from "./context/naive-context.js";
 import type { ToolPort } from "./ports.js";
@@ -21,6 +26,7 @@ import { resolveDataDir } from "./runtime-data-dir.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
+import { createRuntimePii } from "./runtime-pii.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
 import type {
   Runtime,
@@ -43,6 +49,14 @@ class RunInputMissingError extends HarnessError {
 
   constructor() {
     super("The run input is unavailable.");
+  }
+}
+
+class PiiDisabledInProductionError extends HarnessError {
+  readonly code = "pii_disabled_in_production";
+
+  constructor() {
+    super("PII cannot be disabled in production.");
   }
 }
 
@@ -272,13 +286,16 @@ function composeRuntime(
     ids,
     store,
     keys,
+    vault,
+    vaultResolver,
+    pii,
     model,
     policy,
     policyVersion,
     roles,
     scopes,
   } = options;
-  const tool = createSubagentTool({
+  const subagentTool = createSubagentTool({
     config,
     clock,
     ids,
@@ -290,6 +307,14 @@ function composeRuntime(
     roles,
     scopes,
   });
+  const tool =
+    pii === undefined
+      ? subagentTool
+      : new PiiToolPort(subagentTool, {
+          tokenizer: pii.tokenizer,
+          config: pii.config,
+          resolver: pii.resolver,
+        });
   const runWithControl: RunControl = (runId, operation) =>
     withRunControl({
       store,
@@ -302,6 +327,7 @@ function composeRuntime(
   const resume = createRuntimeResume(options, tool);
   return {
     store,
+    vault: vaultResolver,
     keys,
     clock,
     ids,
@@ -313,7 +339,11 @@ function composeRuntime(
       try {
         await store.close();
       } finally {
-        keys.dispose();
+        try {
+          vault.close();
+        } finally {
+          keys.dispose();
+        }
       }
     },
   };
@@ -372,14 +402,20 @@ export async function createRuntime(
   config: RuntimeConfig,
   overrides: RuntimeOverrides = {},
 ): Promise<Runtime> {
+  const piiConfig = PiiConfigSchema.parse(config.pii ?? {});
+  if (piiConfig.enabled === false && process.env.NODE_ENV === "production") {
+    throw new PiiDisabledInProductionError();
+  }
+  const runtimeConfig = { ...config, pii: piiConfig };
   ensureTracing();
   const clock = overrides.clock ?? systemClock;
   const ids = overrides.ids ?? new SystemIdGenerator(clock);
-  const keys = await createRuntimeKeys(config.keys, overrides);
+  const keys = await createRuntimeKeys(runtimeConfig.keys, overrides);
+  let vault: SqliteVault | undefined;
   try {
     const model =
       overrides.model ??
-      (await createConfiguredModelPort(config.models, {
+      (await createConfiguredModelPort(runtimeConfig.models, {
         ids,
         clock,
         ...(overrides.providerAdapters === undefined
@@ -391,27 +427,43 @@ export async function createRuntime(
       })) ??
       missingModelPort;
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
+    const vaultPath = join(dataDir, "vault.db");
+    if (overrides.readOnlyStore !== true) {
+      await mkdir(dataDir, { recursive: true });
+    }
+    const runtimeVault = new SqliteVault(
+      overrides.readOnlyStore === true && !existsSync(vaultPath) ? ":memory:" : vaultPath,
+      keys,
+      () => clock.now(),
+    );
+    vault = runtimeVault;
+    const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
+    const piiRuntime = createRuntimePii(piiConfig, runtimeVault, scopes);
     const tool = overrides.tool ?? unavailableTool;
-    const policy = await createRuntimePolicy(config, overrides);
+    const policy = await createRuntimePolicy(runtimeConfig, overrides);
     const context = overrides.context ?? new NaiveContext();
     const roles = await resolveRuntimeRoles(
-      config,
+      runtimeConfig,
       overrides.roleConfigDirectory ?? process.cwd(),
       tool,
       (code) => {
         roleConfigLogger.warn(code);
       },
     );
-    const store =
-      overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
-    const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
+    const rawStore =
+      overrides.store ??
+      (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
+    const store = piiConfig.enabled ? new PiiEventStore(rawStore, piiRuntime.tokenizer) : rawStore;
     return composeRuntime({
-      config,
+      config: runtimeConfig,
       overrides,
       clock,
       ids,
       store,
       keys,
+      vault: runtimeVault,
+      vaultResolver: piiRuntime.resolver,
+      pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
       model,
       tool,
       policy,
@@ -421,7 +473,11 @@ export async function createRuntime(
       scopes,
     });
   } catch (error) {
-    keys.dispose();
+    try {
+      vault?.close();
+    } finally {
+      keys.dispose();
+    }
     throw error;
   }
 }

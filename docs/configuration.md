@@ -144,6 +144,10 @@ See [Secret references](./secrets.md) for environment, file, and Key Vault refer
 
 ## PII tokenization
 
+Runtime tool and storage boundaries are protected by default. Set
+`pii.enabled: false` only for non-production development or testing; runtime
+startup rejects that setting when `NODE_ENV=production`.
+
 `Tokenizer` applies policy before writing detected values to the vault. JSON
 string values are processed without changing structure. Keys remain unchanged:
 detected PII in a key with `tokenize`, `redact`, or `block` policy fails the
