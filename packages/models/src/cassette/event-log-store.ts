@@ -17,6 +17,7 @@ interface EventLogPair {
 }
 
 function comparableRequest(request: ModelRequest): ModelRequest {
+  // Event logs omit tool and generation options, so only persisted request fields can be hashed.
   return {
     requestId: request.requestId,
     model: request.model,
