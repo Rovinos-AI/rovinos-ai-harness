@@ -1099,9 +1099,11 @@ __metadata:
   resolution: "@harness/host@workspace:packages/host"
   dependencies:
     "@harness/schemas": "workspace:^"
+    "@harness/telemetry": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
     "@modelcontextprotocol/core": "npm:2.3.1"
     "@modelcontextprotocol/ext-apps": "npm:2.0.3"
+    "@opentelemetry/api": "npm:1.9.1"
     "@types/node": "npm:22.20.5"
     esbuild: "npm:0.28.2"
     playwright: "npm:1.64.0"

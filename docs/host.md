@@ -9,7 +9,7 @@ const host = await createReferenceHost(hostConfig, {
 });
 ```
 
-The host validates the resource MIME type (`text/html` with the exact `profile=mcp-app` parameter, allowing MIME casing and whitespace) and UTF-8 size (at most 1 MiB). A resource URI not present in `host.apps` returns the code `app_unknown`. Each launch receives a fresh ULID session ID. The SDK `AppBridge` handles MCP Apps initialization, tool-input and tool-result notifications, and app tool calls. Calls reach the provided handler only when their tool name is in that app's `allowedTools`; the handler remains responsible for the task 3.3 policy decision.
+The host validates the resource MIME type (`text/html` with the exact `profile=mcp-app` parameter, allowing MIME casing and whitespace) and UTF-8 size (at most 1 MiB). A resource URI not present in `host.apps` returns the code `app_unknown`. Each launch receives a fresh ULID session ID. `host.maxUiSessions` defaults to 32 active sessions per host; further launches receive `app_session_limit` until an active session ends. `host.uiSessionMaxMs` defaults to 3,600,000 ms; expired sessions are ended, removed, and reported as `ui_session_expired`. The SDK `AppBridge` handles MCP Apps initialization, tool-input and tool-result notifications, and app tool calls. Calls reach the provided handler only when their tool name is in that app's `allowedTools`; the handler remains responsible for the task 3.3 policy decision.
 
 ## Local channel
 
@@ -29,6 +29,6 @@ default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-s
 
 Requested permissions are denied unless named in `host.permissionAllowlist`. CSP domains are reduced to exact origins in `host.cspAllowlist`; unlisted, malformed, and wildcard requests are ignored and reported only with `app_csp_request_ignored`. The default empty allowlist permits no external connections or resources. Allowlisting an origin intentionally grants the corresponding resource types, so only trusted origins should be configured.
 
-`host.apps[].telemetry` defaults to `false` and is reserved for task 3.2's opt-in UI-session trace propagation. Task 3.1 does not emit app telemetry based on this setting.
+`host.apps[].telemetry` defaults to `false`. When enabled, the host sends the app a W3C `traceparent` in the tool-result notification metadata, correlated with the originating tool-call span. The trace ID is visible to app code and is a correlation identifier, not a secret; only apps explicitly configured with `telemetry: true` receive it. No `tracestate` or `baggage` is sent. Supply the owning run ID and tool-call span context with `uiSessionContext`; call `ReferenceHost.endUiSessions()` when that run resumes. A missing or invalid span context omits the metadata and reports only `ui_trace_unavailable`.
 
 This setup assumes a trusted local host page and a browser that enforces iframe sandboxing and CSP. The CSP and sandbox are containment controls, not proof against browser vulnerabilities. App-call policy and host-stamped telemetry are completed by later tasks in epic 3.

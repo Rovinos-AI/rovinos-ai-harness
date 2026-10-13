@@ -77,6 +77,17 @@ Owner task: `4.1`.
 
 Owner task: `4.1`.
 
+### `harness.ui_session`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.app.id` | Code | Required | `@harness/host` |
+| `harness.error.code` | Code | Optional | `@harness/host` |
+| `harness.run.id` | Id | Required | `@harness/host` |
+| `harness.ui.session_id` | Id | Required | `@harness/host` |
+
+Owner task: `3.2`.
+
 ## Log records
 
 ### `harness.safe.approval_wait`

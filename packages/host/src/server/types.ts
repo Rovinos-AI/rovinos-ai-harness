@@ -2,6 +2,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/client";
 import { Code, Id } from "@harness/schemas";
 import type { HostDiagnosticCode } from "./resource.js";
+import type { UiSession, UiSessionContext } from "./ui-session.js";
 import { z } from "zod";
 
 /** Validated app-originated call payload accepted at the host boundary. */
@@ -57,6 +58,8 @@ export interface AppInstance {
   readonly id: string;
   readonly resourceUri: string;
   readonly sessionId: string;
+  readonly uiSession?: UiSession;
+  readonly end: () => void;
 }
 
 /** Dependencies that make process randomness, time, and app-call routing testable. */
@@ -81,4 +84,8 @@ export interface ReferenceHostDependencies {
   readonly toolInput?: Readonly<Record<string, unknown>>;
   /** Result data delivered to the app after it initializes. */
   readonly toolResult?: CallToolResult;
+  /** Run and originating tool-call span for opt-in app trace propagation. */
+  readonly uiSessionContext?: UiSessionContext;
+  /** Injectable UI-session expiry timer; returns a function that cancels it. */
+  readonly scheduleUiSessionExpiry?: (callback: () => void, delayMs: number) => () => void;
 }
