@@ -33,6 +33,8 @@ stages:
             displayName: Check telemetry schemas and random strings
           - script: yarn docs:catalog --check
             displayName: Check telemetry attribute catalog
+          - script: yarn gen:collector --check
+            displayName: Check Collector allowlist
           - script: yarn lint
             displayName: Lint
             # Scoped to this step so unit tests never inherit it; they must not depend on the environment.
