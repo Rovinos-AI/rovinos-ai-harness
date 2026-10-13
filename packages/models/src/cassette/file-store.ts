@@ -8,7 +8,11 @@ import {
   type Sha256Hex as Sha256HexType,
 } from "@harness/schemas";
 import { z } from "zod";
-import { CassetteEntrySchema, type CassetteEntry, type CassetteStore } from "./cassette-provider.js";
+import {
+  CassetteEntrySchema,
+  type CassetteEntry,
+  type CassetteStore,
+} from "./cassette-provider.js";
 
 /** Strict, privacy-declared file format for a cassette scenario. */
 export const CassetteFileSchema = z
@@ -22,13 +26,19 @@ export const CassetteFileSchema = z
 export type CassetteFile = z.infer<typeof CassetteFileSchema>;
 
 function isMissingFile(error: unknown): boolean {
-  return z.object({ code: z.literal("ENOENT") }).passthrough().safeParse(error).success;
+  return z.looseObject({ code: z.literal("ENOENT") }).safeParse(error).success;
 }
 
 function stableFile(entries: ReadonlyMap<string, CassetteEntry>): string {
-  const sortedEntries = [...entries.values()].sort((left, right) =>
-    left.hash < right.hash ? -1 : left.hash > right.hash ? 1 : 0,
-  );
+  const sortedEntries = [...entries.values()].sort((left, right) => {
+    if (left.hash < right.hash) {
+      return -1;
+    }
+    if (left.hash > right.hash) {
+      return 1;
+    }
+    return 0;
+  });
   const cassetteFile: CassetteFile = { containsRealData: false, entries: sortedEntries };
   return `${JSON.stringify(cassetteFile, null, 2)}\n`;
 }

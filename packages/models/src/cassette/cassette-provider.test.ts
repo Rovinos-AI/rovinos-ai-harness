@@ -5,9 +5,9 @@ import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.
 import {
   CassetteAutoDisabledError,
   CassetteInnerRequiredError,
-  CassetteMissError,
   CassetteProvider,
   type CassetteEntry,
+  type CassetteMissError,
   type CassetteStore,
 } from "./cassette-provider.js";
 import { requestHash } from "./hash.js";
@@ -33,11 +33,10 @@ function memoryStore(): CassetteStore & { readonly entries: Map<string, Cassette
   const entries = new Map<string, CassetteEntry>();
   return {
     entries,
-    async get(hash) {
-      return entries.get(hash)?.response;
-    },
-    async set(entry) {
+    get: (hash) => Promise.resolve(entries.get(hash)?.response),
+    set: (entry) => {
       entries.set(entry.hash, entry);
+      return Promise.resolve();
     },
   };
 }
@@ -53,15 +52,19 @@ afterEach(() => {
 describe("CassetteProvider", () => {
   it("records and replays a response unchanged", async () => {
     const store = memoryStore();
-    const inner = innerAdapter(vi.fn(async () => result));
+    const complete = vi.fn(() => Promise.resolve(result));
+    const inner = innerAdapter(complete);
     const recorder = new CassetteProvider("record", store, inner);
     const recorded = await recorder.complete(request, context);
     const replay = new CassetteProvider("replay", store);
 
     expect(recorded).toEqual(result);
     expect(await replay.complete(request, context)).toEqual(result);
-    expect(inner.complete).toHaveBeenCalledOnce();
-    expect(store.entries.get(requestHash(request))).toEqual({ hash: requestHash(request), response: result });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(store.entries.get(requestHash(request))).toEqual({
+      hash: requestHash(request),
+      response: result,
+    });
   });
 
   it("reports the missing request hash in replay mode", async () => {
@@ -77,10 +80,11 @@ describe("CassetteProvider", () => {
     const store = memoryStore();
     const hash = requestHash(request);
     await store.set({ hash, response: result });
-    const inner = innerAdapter(vi.fn(async () => result));
+    const complete = vi.fn(() => Promise.resolve(result));
+    const inner = innerAdapter(complete);
     const auto = new CassetteProvider("auto", store, inner);
     expect(await auto.complete(request, context)).toEqual(result);
-    expect(inner.complete).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
 
     const nextRequest = { ...request, requestId: "00000000000000000000000003" };
     const recorded = await auto.complete(
@@ -88,13 +92,14 @@ describe("CassetteProvider", () => {
       context,
     );
     expect(recorded).toEqual(result);
-    expect(inner.complete).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledOnce();
   });
 
   it("disables auto mode when HARNESS_CASSETTE_AUTO is zero", () => {
     vi.stubEnv("HARNESS_CASSETTE_AUTO", "0");
 
-    expect(() => new CassetteProvider("auto", memoryStore(), innerAdapter(vi.fn()))).toThrow(
+    const complete = vi.fn<ProviderAdapter["complete"]>();
+    expect(() => new CassetteProvider("auto", memoryStore(), innerAdapter(complete))).toThrow(
       CassetteAutoDisabledError,
     );
   });

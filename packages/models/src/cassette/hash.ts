@@ -7,12 +7,18 @@ function canonicalJson(value: unknown): string {
     return `[${value.map(canonicalJson).join(",")}]`;
   }
   if (typeof value === "object" && value !== null) {
-    const entries = Object.entries(value).sort(([left], [right]) =>
-      left < right ? -1 : left > right ? 1 : 0,
-    );
+    const entries = Object.entries(value).sort(([left], [right]) => {
+      if (left < right) {
+        return -1;
+      }
+      if (left > right) {
+        return 1;
+      }
+      return 0;
+    });
     return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
   }
-  return JSON.stringify(value) ?? "null";
+  return JSON.stringify(value);
 }
 
 /**
@@ -22,6 +28,8 @@ function canonicalJson(value: unknown): string {
  * @returns Lowercase SHA-256 digest.
  */
 export function requestHash(request: ModelRequest): Sha256Hex {
-  const { requestId: _requestId, ...stableRequest } = request;
+  const stableRequest = Object.fromEntries(
+    Object.entries(request).filter(([key]) => key !== "requestId"),
+  );
   return Sha256Hex.parse(createHash("sha256").update(canonicalJson(stableRequest)).digest("hex"));
 }

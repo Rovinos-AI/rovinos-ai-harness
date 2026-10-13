@@ -21,11 +21,7 @@ export {
   type CassetteMode,
   type CassetteStore,
 } from "./cassette/cassette-provider.js";
-export {
-  CassetteFileSchema,
-  FileCassetteStore,
-  type CassetteFile,
-} from "./cassette/file-store.js";
+export { CassetteFileSchema, FileCassetteStore, type CassetteFile } from "./cassette/file-store.js";
 export { EventLogCassetteStore } from "./cassette/event-log-store.js";
 export { requestHash } from "./cassette/hash.js";
 export {

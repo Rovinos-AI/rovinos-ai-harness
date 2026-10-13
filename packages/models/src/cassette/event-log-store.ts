@@ -80,22 +80,22 @@ export class EventLogCassetteStore implements CassetteStore {
   }
 
   /** @inheritdoc CassetteStore */
-  async get(_hash: string, request: ModelRequest): Promise<CassetteEntry["response"] | undefined> {
+  get(_hash: string, request: ModelRequest): Promise<CassetteEntry["response"] | undefined> {
     const pair = this.pairs[this.nextPair];
     if (pair === undefined) {
-      return undefined;
+      return Promise.resolve(undefined);
     }
     const incomingHash = requestHash(comparableRequest(request));
     const schemaHashMatches = pair.schemaHash === request.output?.schemaHash;
     if (pair.requestHash !== incomingHash || !schemaHashMatches) {
-      throw new CassetteDivergenceError(pair.requestHash, incomingHash);
+      return Promise.reject(new CassetteDivergenceError(pair.requestHash, incomingHash));
     }
     this.nextPair += 1;
-    return pair.response;
+    return Promise.resolve(pair.response);
   }
 
   /** @inheritdoc CassetteStore */
-  async set(_entry: CassetteEntry): Promise<void> {
-    throw new CassetteStoreReadOnlyError();
+  set(_entry: CassetteEntry): Promise<void> {
+    return Promise.reject(new CassetteStoreReadOnlyError());
   }
 }
