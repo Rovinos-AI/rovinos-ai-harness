@@ -16,7 +16,7 @@ import { foldRunState } from "./run-state.js";
 import { SystemIdGenerator, systemClock } from "./runtime-ids.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool, resolveRuntimeRoles } from "./subagent/runtime.js";
-import { createPiiStorageStore, createSqliteStore } from "./runtime-store.js";
+import { createSqliteStore } from "./runtime-store.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
@@ -402,9 +402,8 @@ export async function createRuntime(
         roleConfigLogger.warn(code);
       },
     );
-    const innerStore =
+    const store =
       overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
-    const store = createPiiStorageStore(innerStore);
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     return composeRuntime({
       config,

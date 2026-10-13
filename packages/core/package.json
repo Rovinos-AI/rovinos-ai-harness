@@ -25,7 +25,6 @@
   "dependencies": {
     "@harness/context": "workspace:^",
     "@harness/models": "workspace:^",
-    "@harness/pii": "workspace:^",
     "@harness/policy": "workspace:^",
     "@harness/schemas": "workspace:^",
     "@harness/store": "workspace:^",
@@ -35,6 +34,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@harness/pii": "workspace:^",
     "vitest": "3.2.6"
   }
 }
