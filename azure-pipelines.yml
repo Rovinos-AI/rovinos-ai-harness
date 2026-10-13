@@ -45,14 +45,14 @@ stages:
           - script: yarn build
             displayName: Build packages for policy fixture commands
           - script: >
-              yarn workspace @harness/cli start policy test
+              node packages/cli/dist/bin.js policy test
               --policy examples/policy-tests/policy.yaml
               --calls examples/policy-tests/calls.jsonl
               --expect examples/policy-tests/expectations.jsonl
               --explain
             displayName: Test policy examples
           - script: >
-              yarn workspace @harness/cli start policy lint
+              node packages/cli/dist/bin.js policy lint
               --policy examples/policy-tests/policy.yaml
             displayName: Lint policy examples
           - script: yarn check:agents

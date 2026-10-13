@@ -63,12 +63,11 @@ function diagnostic(
   };
 }
 
-function invalidDocumentDiagnostics(value: unknown): PolicyLintResult {
-  const parsed = PolicyDocumentSchema.safeParse(value);
-  if (parsed.success) {
-    return PolicyLintResultSchema.parse({ diagnostics: [] });
-  }
-  const diagnostics = parsed.error.issues.flatMap((issue) => {
+function invalidDocumentDiagnostics(
+  value: unknown,
+  issues: z.ZodError["issues"],
+): PolicyLintResult {
+  const diagnostics = issues.flatMap((issue) => {
     for (let position = 0; position < issue.path.length - 2; position += 1) {
       const index = issue.path[position + 1];
       if (
@@ -408,7 +407,7 @@ function ruleDiagnostics({
 export function lintPolicy(input: unknown, rawToolMetadata: unknown = []): PolicyLintResult {
   const document = PolicyDocumentSchema.safeParse(input);
   if (!document.success) {
-    return invalidDocumentDiagnostics(input);
+    return invalidDocumentDiagnostics(input, document.error.issues);
   }
   const metadataResult = LintToolMetadataSchema.safeParse(rawToolMetadata);
   const metadata = metadataResult.success ? metadataResult.data : [];
