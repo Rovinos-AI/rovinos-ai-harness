@@ -19,11 +19,7 @@ import {
   type SnapshotRow,
   validateSnapshotAppend,
 } from "../codec.js";
-import {
-  InvalidEventError,
-  StoreEncryptionMismatchError,
-  StoreUnavailableError,
-} from "../errors.js";
+import { InvalidEventError, StoreUnavailableError } from "../errors.js";
 import {
   snapshotStoreOptionsSchema,
   systemClock,
@@ -46,8 +42,8 @@ import {
   type RunSummaryRow,
 } from "./helpers.js";
 import { deleteRunTransaction } from "./retention.js";
-import { migrate } from "../migrate.js";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";
+import { initializePostgresStore } from "./initialize.js";
 
 const connectionStringSchema = z
   .url()
@@ -62,6 +58,7 @@ const optionsSchema = snapshotStoreOptionsSchema
       .string()
       .regex(/^[a-z_]\w{0,62}$/i)
       .default("public"),
+    skipMigrations: z.boolean().default(false),
   })
   .strict();
 
@@ -74,6 +71,7 @@ export class PostgresEventStore implements EventStore {
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
   private readonly clock: Clock;
+  private readonly skipMigrations: boolean;
   private readonly approvalNotifications: PostgresApprovalNotifications;
   private initialized: Promise<void> | undefined;
 
@@ -105,6 +103,7 @@ export class PostgresEventStore implements EventStore {
     this.codec = codec;
     this.snapshotKeep = parsedOptions.data.snapshotKeep;
     this.clock = clock;
+    this.skipMigrations = parsedOptions.data.skipMigrations;
     this.approvalNotifications = new PostgresApprovalNotifications(this.pool, () =>
       this.ensureInitialized(),
     );
@@ -119,49 +118,7 @@ export class PostgresEventStore implements EventStore {
   }
 
   private async initialize(): Promise<void> {
-    try {
-      await migrate(this.pool, "postgres", { appliedAt: this.clock.now() });
-    } catch (error) {
-      throw storeError(error);
-    }
-    const client = await this.pool.connect().catch((error: unknown) => {
-      throw storeError(error);
-    });
-    let transactionStarted = false;
-    try {
-      await client.query("BEGIN");
-      transactionStarted = true;
-      await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
-      const encryptionState = await client.query<{ metadata_value: string } & QueryResultRow>(
-        "SELECT metadata_value FROM store_metadata WHERE metadata_key = $1",
-        ["encrypted"],
-      );
-      const expectedEncryption = this.codec.encrypted ? "true" : "false";
-      const storedEncryption = encryptionState.rows[0]?.metadata_value;
-      if (storedEncryption === undefined) {
-        const contentCount = await client.query<{ count: string } & QueryResultRow>(
-          "SELECT (SELECT COUNT(*) FROM events) + (SELECT COUNT(*) FROM snapshots) AS count",
-        );
-        if (expectedEncryption === "true" && Number(contentCount.rows[0]?.count ?? "0") !== 0) {
-          throw new StoreEncryptionMismatchError();
-        }
-        await client.query(
-          "INSERT INTO store_metadata (metadata_key, metadata_value) VALUES ($1, $2) ON CONFLICT (metadata_key) DO NOTHING",
-          ["encrypted", expectedEncryption],
-        );
-      } else if (storedEncryption !== expectedEncryption) {
-        throw new StoreEncryptionMismatchError();
-      }
-      await client.query("COMMIT");
-      transactionStarted = false;
-    } catch (error) {
-      if (transactionStarted) {
-        await client.query("ROLLBACK").catch(() => undefined);
-      }
-      throw storeError(error);
-    } finally {
-      client.release();
-    }
+    await initializePostgresStore(this.pool, this.codec, this.clock, this.skipMigrations);
   }
 
   /** {@inheritDoc EventStore.append} */

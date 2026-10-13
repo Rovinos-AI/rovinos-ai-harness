@@ -545,6 +545,57 @@ it("rejects invalid connection and pool configuration", () => {
   ).toThrow("Invalid Postgres event-store configuration");
 });
 
+it("checks pending migrations without applying schema changes when requested", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness", {
+    skipMigrations: true,
+  });
+
+  await expect(store.listRuns({ limit: 1 })).rejects.toMatchObject({
+    code: "schema_migration_pending",
+  });
+  expect(fakePg.schemaInitialized).toBe(false);
+  expect(fakePg.migrationHistory.size).toBe(0);
+  await store.close();
+});
+
+it("skips metadata initialization when migrations are already applied", async () => {
+  const runId = createEventBuilders().nextRunId();
+  const initial = new PostgresEventStore("postgresql://harness@localhost/harness");
+  await expect(initial.head(runId)).resolves.toBe(0);
+  await initial.close();
+
+  const readOnly = new PostgresEventStore("postgresql://harness@localhost/harness", {
+    skipMigrations: true,
+  });
+  await expect(readOnly.listRuns({ limit: 1 })).resolves.toEqual({ runs: [] });
+  await readOnly.close();
+});
+
+it("preserves encryption mismatch errors during initialization", async () => {
+  fakePg.encryptionValue = "true";
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+
+  await expect(store.head(createEventBuilders().nextRunId())).rejects.toMatchObject({
+    code: "store_encryption_mismatch",
+  });
+  await store.close();
+});
+
+it("normalizes metadata initialization failures and returns the pool connection", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  fakePg.handler = (sql, values) => {
+    if (sql.startsWith("SELECT metadata_value FROM store_metadata")) {
+      throw new Error("synthetic metadata failure");
+    }
+    return fakeQuery(sql, values);
+  };
+
+  await expect(store.head(createEventBuilders().nextRunId())).rejects.toMatchObject({
+    code: "store_unavailable",
+  });
+  await store.close();
+});
+
 it("skips schema DDL when another pool already initialized the schema", async () => {
   const runId = createEventBuilders().nextRunId();
   const first = new PostgresEventStore("postgresql://harness@localhost/harness");

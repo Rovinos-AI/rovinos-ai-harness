@@ -10,6 +10,11 @@ export {
   StoreUnavailableError,
 } from "./errors.js";
 export { migrate } from "./migrate.js";
+export {
+  migratePostgresConnection,
+  migrateSqliteFile,
+  type StoreFileMigrationOptions,
+} from "./migrate-file.js";
 export { AesGcmContentCodec } from "./aes-gcm-codec.js";
 export { JsonContentCodec } from "./codec.js";
 export { InMemoryEventStore } from "./memory.js";
