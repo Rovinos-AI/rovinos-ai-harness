@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile, execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Id, parseJson } from "@harness/schemas";
@@ -20,14 +18,14 @@ const integrationUid = process.getuid?.() ?? 10002;
 const integrationGid = process.getgid?.() ?? 10002;
 const composeEnvironment = {
   ...process.env,
-  SANDBOX_RUNNER_TOKEN_SOURCE: "",
+  SANDBOX_RUNNER_TOKEN: integrationToken,
   SANDBOX_RUNNER_UID: String(integrationUid),
   SANDBOX_RUNNER_GID: String(integrationGid),
 };
-let tokenDirectory: string | undefined;
 
 const ComposeSchema = z.object({
   networks: z.record(z.string(), z.object({ internal: z.boolean().optional() })),
+  secrets: z.record(z.string(), z.unknown()).optional(),
   services: z.record(
     z.string(),
     z.object({
@@ -38,12 +36,14 @@ const ComposeSchema = z.object({
         .union([z.array(z.string()), z.string()])
         .nullable()
         .optional(),
+      environment: z.record(z.string(), z.string()).optional(),
       mem_limit: z.union([z.string(), z.number()]).optional(),
       networks: z.record(z.string(), z.unknown()).optional(),
       pids_limit: z.number().optional(),
       ports: z.array(z.unknown()).optional(),
       privileged: z.boolean().optional(),
       read_only: z.boolean().optional(),
+      secrets: z.array(z.unknown()).optional(),
       user: z.string().optional(),
       volumes: z
         .array(
@@ -72,8 +72,11 @@ const ChildCapabilitiesSchema = z
     uidError: z.string(),
     gidError: z.string(),
     supplementaryGroups: z.array(z.number().int()),
-    tokenFileReadable: z.boolean(),
-    tokenInProcessEnvironment: z.boolean(),
+    tokenInChildEnvironment: z.boolean(),
+    procOneEnvironmentReadable: z.boolean(),
+    serverPidFound: z.boolean(),
+    serverEnvironmentReadable: z.boolean(),
+    tokenInFiles: z.boolean(),
     signalError: z.string(),
   })
   .strict();
@@ -179,18 +182,11 @@ async function runExec(spec: ExecSpec): Promise<z.infer<typeof ExecResultSchema>
 
 describe("sandbox runner Compose service", () => {
   beforeAll(async () => {
-    tokenDirectory = await mkdtemp(join(tmpdir(), "sandbox-runner-integration-"));
-    const tokenFile = join(tokenDirectory, "runner-token");
-    await writeFile(tokenFile, integrationToken, { mode: 0o400 });
-    composeEnvironment.SANDBOX_RUNNER_TOKEN_SOURCE = tokenFile;
     await runCompose(["up", "--detach", "--wait", "--pull=missing", "--build", "sandbox-runner"]);
   }, 180_000);
 
   afterAll(async () => {
     await runCompose(["down", "--volumes", "--remove-orphans"]).catch(() => undefined);
-    if (tokenDirectory !== undefined) {
-      await rm(tokenDirectory, { recursive: true, force: true });
-    }
   }, 60_000);
 
   // threat: T-01
@@ -202,6 +198,10 @@ describe("sandbox runner Compose service", () => {
     expect(runner?.privileged).not.toBe(true);
     expect(runner?.ports ?? []).toHaveLength(0);
     expect(runner?.volumes?.some((volume) => volume.type === "bind")).toBe(false);
+    expect(runner?.secrets ?? []).toHaveLength(0);
+    expect(config.secrets ?? {}).toEqual({});
+    expect(runner?.environment?.SANDBOX_RUNNER_TOKEN).toBe(integrationToken);
+    expect(runner?.environment?.SANDBOX_RUNNER_TOKEN_FILE).toBeUndefined();
     expect(
       runner?.volumes?.some(
         (volume) =>
@@ -254,11 +254,30 @@ describe("sandbox runner Compose service", () => {
       'try { process.setuid(10002); } catch (error) { uidError = error.code ?? ""; }',
       'try { process.setgid(10002); } catch (error) { gidError = error.code ?? ""; }',
       "const supplementaryGroups = process.getgroups().filter((group) => group !== process.getgid());",
-      'let tokenFileReadable = false; let tokenInProcessEnvironment = false; let signalError = "";',
-      'try { tokenFileReadable = fs.readFileSync("/run/secrets/sandbox_runner_token", "utf8").includes("synthetic-runner-token-for-integration"); } catch {}',
-      'try { tokenInProcessEnvironment = fs.readFileSync("/proc/1/environ", "utf8").includes("synthetic-runner-token-for-integration"); } catch {}',
+      'const token = "synthetic-runner-token-for-integration";',
+      'const tokenInChildEnvironment = Object.entries(process.env).some(([key, value]) => key === "SANDBOX_RUNNER_TOKEN" || value?.includes(token) === true);',
+      'let procOneEnvironmentReadable = false; let serverPid = ""; let serverEnvironmentReadable = false; let signalError = "";',
+      'try { fs.readFileSync("/proc/1/environ"); procOneEnvironmentReadable = true; } catch {}',
+      'for (const pid of fs.readdirSync("/proc").filter((entry) => /^\\d+$/u.test(entry) && entry !== String(process.pid))) { try { if (fs.readFileSync(`/proc/${pid}/cmdline`).includes(Buffer.from("packages/sandbox/dist/runner/src/server.js"))) serverPid = pid; } catch {} }',
+      'if (serverPid !== "") { try { fs.readFileSync(`/proc/${serverPid}/environ`); serverEnvironmentReadable = true; } catch {} }',
+      "const scannedDirectories = new Set();",
+      "function containsToken(directory) {",
+      "  let realDirectory; try { realDirectory = fs.realpathSync(directory); } catch { return false; }",
+      "  if (scannedDirectories.has(realDirectory)) return false;",
+      "  scannedDirectories.add(realDirectory);",
+      "  let entries; try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { return false; }",
+      "  for (const entry of entries) {",
+      "    const path = `${directory}/${entry.name}`;",
+      "    let isDirectory = entry.isDirectory();",
+      "    if (entry.isSymbolicLink()) { try { isDirectory = fs.statSync(path).isDirectory(); } catch {} }",
+      "    if (isDirectory && containsToken(path)) return true;",
+      "    if (!isDirectory && (entry.isFile() || entry.isSymbolicLink())) { try { if (fs.readFileSync(path).includes(token)) return true; } catch {} }",
+      "  }",
+      "  return false;",
+      "}",
+      'const tokenInFiles = ["/run", "/app", "/workspaces"].some(containsToken);',
       'try { process.kill(1, "SIGKILL"); } catch (error) { signalError = error.code ?? ""; }',
-      "process.stdout.write(JSON.stringify({ values, uidError, gidError, supplementaryGroups, tokenFileReadable, tokenInProcessEnvironment, signalError }));",
+      'process.stdout.write(JSON.stringify({ values, uidError, gidError, supplementaryGroups, tokenInChildEnvironment, procOneEnvironmentReadable, serverPidFound: serverPid !== "", serverEnvironmentReadable, tokenInFiles, signalError }));',
     ].join("\n");
     const result = await runExec(makeSpec(["node", "-e", script]));
     const parsed = parseJson(ChildCapabilitiesSchema, result.stdout);
@@ -275,8 +294,11 @@ describe("sandbox runner Compose service", () => {
       uidError: "EPERM",
       gidError: "EPERM",
       supplementaryGroups: [],
-      tokenFileReadable: false,
-      tokenInProcessEnvironment: false,
+      tokenInChildEnvironment: false,
+      procOneEnvironmentReadable: false,
+      serverPidFound: true,
+      serverEnvironmentReadable: false,
+      tokenInFiles: false,
       signalError: "EPERM",
     });
     expect(await readRunnerHealthStatus()).toBe(200);
@@ -380,10 +402,25 @@ describe("sandbox runner Compose service", () => {
   it("keeps the runner token inaccessible to commands (T-02, T-18)", async () => {
     const script = [
       'const fs = require("node:fs");',
-      'let token = ""; let proc = "";',
-      'try { token = fs.readFileSync("/run/secrets/sandbox_runner_token", "utf8"); } catch {}',
-      'try { proc = fs.readFileSync("/proc/1/environ", "utf8"); } catch {}',
-      'process.stdout.write(String(token.includes("synthetic-runner-token-for-integration") || proc.includes("synthetic-runner-token-for-integration")));',
+      'const token = "synthetic-runner-token-for-integration";',
+      'const childEnvironmentContainsToken = Object.entries(process.env).some(([key, value]) => key === "SANDBOX_RUNNER_TOKEN" || value?.includes(token) === true);',
+      "const scannedDirectories = new Set();",
+      "function containsToken(directory) {",
+      "  let realDirectory; try { realDirectory = fs.realpathSync(directory); } catch { return false; }",
+      "  if (scannedDirectories.has(realDirectory)) return false;",
+      "  scannedDirectories.add(realDirectory);",
+      "  let entries; try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { return false; }",
+      "  for (const entry of entries) {",
+      "    const path = `${directory}/${entry.name}`;",
+      "    let isDirectory = entry.isDirectory();",
+      "    if (entry.isSymbolicLink()) { try { isDirectory = fs.statSync(path).isDirectory(); } catch {} }",
+      "    if (isDirectory && containsToken(path)) return true;",
+      "    if (!isDirectory && (entry.isFile() || entry.isSymbolicLink())) { try { if (fs.readFileSync(path).includes(token)) return true; } catch {} }",
+      "  }",
+      "  return false;",
+      "}",
+      'const tokenInFiles = ["/run", "/app", "/workspaces"].some(containsToken);',
+      "process.stdout.write(String(childEnvironmentContainsToken || tokenInFiles));",
     ].join("\n");
     const result = await runExec(makeSpec(["node", "-e", script]));
 

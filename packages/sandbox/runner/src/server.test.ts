@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import process from "node:process";
-import { join } from "node:path";
 import { Readable } from "node:stream";
 import { Id, parseJson } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -367,16 +364,17 @@ describe("runner HTTP request handler", () => {
     ).toThrow(RunnerConfigurationError);
   });
 
-  it("requires a token at startup and rejects invalid runner ports", () => {
-    const tokenDirectory = mkdtempSync(join(tmpdir(), "sandbox-runner-token-"));
-    const tokenFile = join(tokenDirectory, "token");
-    writeFileSync(tokenFile, token, { mode: 0o400 });
-    vi.stubEnv("SANDBOX_RUNNER_TOKEN_FILE", tokenFile);
+  it("requires a strong token at startup and removes it from the environment", () => {
+    vi.stubEnv("SANDBOX_RUNNER_TOKEN", "");
+    expect(() => startRunnerServer()).toThrow(RunnerConfigurationError);
+    vi.stubEnv("SANDBOX_RUNNER_TOKEN", "short-token");
+    expect(() => startRunnerServer()).toThrow(RunnerConfigurationError);
+    vi.stubEnv("SANDBOX_RUNNER_TOKEN", token);
     vi.stubEnv("SANDBOX_RUNNER_PORT", "0");
     expect(() => startRunnerServer()).toThrow(RunnerConfigurationError);
+    expect(process.env.SANDBOX_RUNNER_TOKEN).toBeUndefined();
     vi.stubEnv("SANDBOX_RUNNER_PORT", "8080");
-    vi.stubEnv("SANDBOX_RUNNER_TOKEN_FILE", join(tokenDirectory, "missing"));
+    delete process.env.SANDBOX_RUNNER_TOKEN;
     expect(() => startRunnerServer()).toThrow(RunnerConfigurationError);
-    rmSync(tokenDirectory, { recursive: true, force: true });
   });
 });

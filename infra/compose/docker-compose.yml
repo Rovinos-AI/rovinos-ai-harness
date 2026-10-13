@@ -33,7 +33,7 @@ services:
     profiles:
       - sandbox
     environment:
-      SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
+      SANDBOX_RUNNER_TOKEN: ${SANDBOX_RUNNER_TOKEN:?set SANDBOX_RUNNER_TOKEN}
       SANDBOX_ALLOWED_HOSTS: sandbox-runner:8080
       SANDBOX_WORKSPACE_ROOT: /workspaces
     init: true
@@ -65,9 +65,6 @@ services:
     cpus: 2.0
     volumes:
       - harness-workspaces:/workspaces
-    secrets:
-      - source: sandbox_runner_token
-        target: sandbox_runner_token
     healthcheck:
       test:
         - CMD
@@ -112,6 +109,3 @@ networks:
   egress: {}
 volumes:
   harness-workspaces: {}
-secrets:
-  sandbox_runner_token:
-    file: ${SANDBOX_RUNNER_TOKEN_SOURCE:-./sandbox_runner_token}

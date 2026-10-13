@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { resolve } from "node:path";
 import process from "node:process";
@@ -270,19 +269,17 @@ export function createRunnerServer(options: RunnerServerOptions): Server {
 
 /** Starts the runner server on its configured internal container port. */
 export function startRunnerServer(): Server {
-  const tokenFile = process.env.SANDBOX_RUNNER_TOKEN_FILE ?? "/run/secrets/sandbox_runner_token";
+  const token = process.env.SANDBOX_RUNNER_TOKEN;
+  if (token === undefined || Buffer.byteLength(token, "utf8") < MIN_RUNNER_TOKEN_BYTES) {
+    throw new RunnerConfigurationError();
+  }
+  delete process.env.SANDBOX_RUNNER_TOKEN;
   const port = Number(process.env.SANDBOX_RUNNER_PORT ?? 8080);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new RunnerConfigurationError();
   }
   const hostsText = process.env.SANDBOX_ALLOWED_HOSTS ?? `sandbox-runner:${String(port)}`;
   const workspaceRoot = process.env.SANDBOX_WORKSPACE_ROOT ?? "/workspaces";
-  let token: string;
-  try {
-    token = readFileSync(tokenFile, "utf8").replace(/\r?\n$/u, "");
-  } catch {
-    throw new RunnerConfigurationError();
-  }
   const server = createRunnerServer({
     token,
     allowedHosts: hostsText.split(",").map((host) => host.trim()),

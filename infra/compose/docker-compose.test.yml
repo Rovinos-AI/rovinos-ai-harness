@@ -51,6 +51,3 @@ networks:
   test-host: {}
 volumes:
   harness-workspaces: {}
-secrets:
-  sandbox_runner_token:
-    file: ${SANDBOX_RUNNER_TOKEN_SOURCE:-./sandbox_runner_token}
