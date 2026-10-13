@@ -253,7 +253,7 @@ function ingestSpan(
   candidate: unknown,
   onRejected?: (reason: AppTelemetryRejectReason) => void,
   parent?: SpanContext,
-  acceptSpan?: () => boolean,
+  acceptSpan?: () => true | "rate" | "session_cap",
 ): boolean {
   try {
     const name = isRecord(candidate) ? candidate.name : undefined;
@@ -266,9 +266,12 @@ function ingestSpan(
       reject("schema", onRejected);
       return false;
     }
-    if (acceptSpan !== undefined && !acceptSpan()) {
-      reject("session_cap", onRejected);
-      return false;
+    if (acceptSpan !== undefined) {
+      const acceptance = acceptSpan();
+      if (acceptance !== true) {
+        reject(acceptance, onRejected);
+        return false;
+      }
     }
     if (!startSpan(parsed.data, parent)) {
       reject("schema", onRejected);
@@ -293,7 +296,7 @@ export function ingestBatch(
   options: {
     readonly onRejected?: (reason: AppTelemetryRejectReason) => void;
     readonly parent?: SpanContext;
-    readonly acceptSpan?: () => boolean;
+    readonly acceptSpan?: () => true | "rate" | "session_cap";
   } = {},
 ): AppSpanBatchAck {
   const inspection = inspectBatch(input);

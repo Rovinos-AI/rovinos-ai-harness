@@ -8,6 +8,7 @@ import type { PolicyPort, ToolPort } from "@harness/core";
 import { z } from "zod";
 import {
   APP_TELEMETRY_TOOL_NAME,
+  AppRateLimiter,
   createReferenceHost,
   ReferenceHostError,
   REFERENCE_CSP,
@@ -1088,7 +1089,7 @@ describe("createReferenceHost", () => {
     expectTelemetryAck(await emit(firstSession), 1, 0);
     expectTelemetryAck(await emit(firstSession), 0, 1);
     expectTelemetryAck(await emit(secondSession), 1, 0);
-    expect(onAppRejected).toHaveBeenCalledExactlyOnceWith("session_cap");
+    expect(onAppRejected).toHaveBeenCalledExactlyOnceWith("rate");
 
     now = 60_000;
     expectTelemetryAck(await emit(firstSession), 1, 0);
@@ -1111,6 +1112,7 @@ describe("createReferenceHost", () => {
         },
       },
       idGenerator: () => sessionId,
+      now: () => 0,
       onAppRejected,
     });
     const host = await fixture.hostPromise;
@@ -1146,6 +1148,15 @@ describe("createReferenceHost", () => {
   it("releases limiter state when an app session ends", async () => {
     let now = 0;
     const onAppRejected = vi.fn();
+    const sessionCountsAtEnd: number[] = [];
+    const endLimiterSession = AppRateLimiter.prototype.endSession;
+    vi.spyOn(AppRateLimiter.prototype, "endSession").mockImplementation(function (
+      this: AppRateLimiter,
+      endedSessionId,
+    ) {
+      endLimiterSession.call(this, endedSessionId);
+      sessionCountsAtEnd.push(this.activeSessionCount);
+    });
     const fixture = makeServer({
       config: {
         ...appConfig,
@@ -1179,6 +1190,7 @@ describe("createReferenceHost", () => {
         )
       ).status,
     ).toBe(200);
+    expect(sessionCountsAtEnd).toEqual([0]);
 
     const nextSession = await newAppSession(fixture, host);
     expect(nextSession).toBe(firstSession);
@@ -1189,6 +1201,7 @@ describe("createReferenceHost", () => {
     );
     expect(onAppRejected).toHaveBeenCalledExactlyOnceWith("session_cap");
     await host.close();
+    expect(sessionCountsAtEnd).toEqual([0, 0]);
   });
 
   it("returns a bounded error result if app calls are not handled or fail", async () => {

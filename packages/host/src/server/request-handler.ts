@@ -90,6 +90,7 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
       })
     : undefined;
   let cancelExpiry = (): void => undefined;
+  // Explicit end, expiry, and host close all funnel through this callback.
   const end = (): void => {
     cancelExpiry();
     uiSession?.end();

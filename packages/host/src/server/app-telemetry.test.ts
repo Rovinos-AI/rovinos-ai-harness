@@ -91,7 +91,7 @@ describe("ingestBatch", () => {
       {
         acceptSpan: () => {
           accepted += 1;
-          return accepted === 1;
+          return accepted === 1 ? true : "session_cap";
         },
         onRejected: (reason) => reasons.push(reason),
       },

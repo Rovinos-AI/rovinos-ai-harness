@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { HostConfig } from "@harness/schemas";
 import { AppRateLimiter } from "./app-limits.js";
 
@@ -41,7 +41,7 @@ describe("AppRateLimiter", () => {
 
     expect(limiter.tryAcceptSpan("session-a")).toBe(true);
     expect(limiter.tryAcceptSpan("session-a")).toBe(true);
-    expect(limiter.tryAcceptSpan("session-a")).toBe(false);
+    expect(limiter.tryAcceptSpan("session-a")).toBe("rate");
 
     now = 60_000;
     expect(limiter.tryAcceptSpan("session-a")).toBe(true);
@@ -55,7 +55,26 @@ describe("AppRateLimiter", () => {
 
     expect(limiter.tryAcceptSpan("session-a")).toBe(true);
     expect(limiter.tryAcceptSpan("session-a")).toBe(true);
-    expect(limiter.tryAcceptSpan("session-a")).toBe(false);
+    expect(limiter.tryAcceptSpan("session-a")).toBe("session_cap");
+  });
+
+  it("does constant queue work for repeated minute-cap rejections", () => {
+    const limiter = new AppRateLimiter(
+      { ...defaultLimits, spansPerMinute: 2, spansPerSessionLifetime: 10_000 },
+      { now: () => 0 },
+    );
+    const filter = vi.spyOn(Array.prototype, "filter");
+
+    try {
+      expect(limiter.tryAcceptSpan("session-a")).toBe(true);
+      expect(limiter.tryAcceptSpan("session-a")).toBe(true);
+      for (let attempt = 0; attempt < 10_000; attempt += 1) {
+        expect(limiter.tryAcceptSpan("session-a")).toBe("rate");
+      }
+      expect(filter).not.toHaveBeenCalled();
+    } finally {
+      filter.mockRestore();
+    }
   });
 
   it("releases batch and span state when a session ends", () => {
@@ -68,10 +87,11 @@ describe("AppRateLimiter", () => {
     }
     expect(limiter.tryAcquireBatch("session-a")).toBe(false);
     expect(limiter.tryAcceptSpan("session-a")).toBe(true);
-    expect(limiter.tryAcceptSpan("session-a")).toBe(false);
+    expect(limiter.tryAcceptSpan("session-a")).toBe("session_cap");
 
     limiter.endSession("session-a");
 
+    expect(limiter.activeSessionCount).toBe(0);
     expect(limiter.tryAcquireBatch("session-a")).toBe(true);
     expect(limiter.tryAcceptSpan("session-a")).toBe(true);
   });
