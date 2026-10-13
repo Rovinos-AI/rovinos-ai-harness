@@ -295,6 +295,14 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.ackOutbox(sinkId, cursor);
   }
 
+  claimApprovalNotification(approvalId: Id, approvalRunId: Id) {
+    return this.inner.claimApprovalNotification(approvalId, approvalRunId);
+  }
+
+  releaseApprovalNotification(approvalId: Id, approvalRunId: Id) {
+    return this.inner.releaseApprovalNotification(approvalId, approvalRunId);
+  }
+
   close() {
     return this.inner.close();
   }
@@ -472,6 +480,14 @@ class PreIntentExecutionStore implements EventStore {
 
   ackOutbox(sinkId: Code, cursor: number) {
     return this.inner.ackOutbox(sinkId, cursor);
+  }
+
+  claimApprovalNotification(approvalId: Id, approvalRunId: Id) {
+    return this.inner.claimApprovalNotification(approvalId, approvalRunId);
+  }
+
+  releaseApprovalNotification(approvalId: Id, approvalRunId: Id) {
+    return this.inner.releaseApprovalNotification(approvalId, approvalRunId);
   }
 
   close() {

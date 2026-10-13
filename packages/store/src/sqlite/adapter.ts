@@ -4,11 +4,10 @@ import {
   Event,
   Id,
   RunStatus,
-  TraceId,
   parseJson,
   splitEvent,
+  type TraceId,
   type Event as StoredEvent,
-  type Code,
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
@@ -48,6 +47,8 @@ import {
 } from "./serialization.js";
 import { openReadOnlyDatabase } from "./read-only.js";
 import { deleteRunTransaction } from "./retention.js";
+import { SqliteApprovalNotifications } from "./approval-notifications.js";
+import { findRunsByTrace } from "./traces.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
@@ -173,6 +174,7 @@ export class SqliteEventStore implements EventStore {
   private readonly latestSnapshotQuery: Database.Statement<[Id], SnapshotRow>;
   private readonly snapshotKeep: number;
   private readonly outbox: SqliteOutboxReader;
+  private readonly approvalNotifications: SqliteApprovalNotifications;
 
   /**
    * Open a SQLite database and initialize its initial schema.
@@ -207,6 +209,7 @@ export class SqliteEventStore implements EventStore {
       this.db.pragma("busy_timeout = 5000");
       this.db.pragma("foreign_keys = ON");
       this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
+      this.approvalNotifications = new SqliteApprovalNotifications(this.db);
     } catch (error) {
       this.db.close();
       throw error;
@@ -416,26 +419,23 @@ export class SqliteEventStore implements EventStore {
   }
 
   /** {@inheritDoc EventStore.findRunsByTrace} */
-  findRunsByTrace(traceId: TraceId): Promise<Id[]> {
-    const parsedTraceId = TraceId.safeParse(traceId);
-    if (!parsedTraceId.success) {
-      return Promise.reject(new InvalidEventError([["traceId"]]));
-    }
-    try {
-      return Promise.resolve(
-        this.findRunsByTraceQuery.all(parsedTraceId.data).map(({ run_id }) => Id.parse(run_id)),
-      );
-    } catch (error) {
-      return Promise.reject(storeError(error));
-    }
-  }
+  findRunsByTrace: EventStore["findRunsByTrace"] = (traceId) =>
+    findRunsByTrace(this.findRunsByTraceQuery, traceId);
 
   /** {@inheritDoc EventStore.fetchOutbox} */
   fetchOutbox: EventStore["fetchOutbox"] = (sinkId, limit) => this.outbox.fetch(sinkId, limit);
 
   /** {@inheritDoc EventStore.ackOutbox} */
-  ackOutbox(sinkId: Code, cursor: number): Promise<void> {
-    return this.outbox.ack(sinkId, cursor);
+  ackOutbox: EventStore["ackOutbox"] = (sinkId, cursor) => this.outbox.ack(sinkId, cursor);
+
+  /** {@inheritDoc EventStore.claimApprovalNotification} */
+  claimApprovalNotification(approvalId: Id, runId: Id): Promise<boolean> {
+    return this.approvalNotifications.claim(approvalId, runId);
+  }
+
+  /** {@inheritDoc EventStore.releaseApprovalNotification} */
+  releaseApprovalNotification(approvalId: Id, runId: Id): Promise<void> {
+    return this.approvalNotifications.release(approvalId, runId);
   }
 
   /** {@inheritDoc EventStore.close} */

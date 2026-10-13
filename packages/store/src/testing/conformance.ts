@@ -7,6 +7,7 @@ import {
   registerSnapshotConformance,
   registerSnapshotReopenConformance,
 } from "./conformance-snapshots.js";
+import { registerApprovalNotificationConformance } from "./conformance-approval-notifications.js";
 import { registerOutboxConformance } from "./conformance-outbox.js";
 import { createEventBuilders, type EventStoreTestBuilders } from "./testing.js";
 
@@ -277,6 +278,7 @@ function registerDeleteRun(factory: EventStoreFactory, builders: EventStoreTestB
     await withStore(factory, async (store) => {
       const runId = builders.nextRunId();
       const snapshotId = builders.nextRunId();
+      const approvalId = builders.nextRunId();
       const traceId = "c".repeat(32);
       await store.appendWithSnapshot(
         runId,
@@ -288,8 +290,10 @@ function registerDeleteRun(factory: EventStoreFactory, builders: EventStoreTestB
         builders.snapshot(runId, snapshotId, 1),
       );
       await store.append(runId, [builders.runStatusChanged(runId, "pending", "completed")], 2);
+      await store.claimApprovalNotification(approvalId, runId);
 
       await expect(store.deleteRun(runId)).resolves.toBe(3);
+      await expect(store.claimApprovalNotification(approvalId, runId)).resolves.toBe(true);
       await expect(store.head(runId)).resolves.toBe(0);
       await expect(collect(store.read(runId))).resolves.toEqual([]);
       await expect(store.latestSnapshot(runId)).resolves.toBeUndefined();
@@ -432,6 +436,7 @@ export function runEventStoreConformance(
     registerRunListing(factory, builders);
     registerStatusSummary(factory, builders);
     registerDeleteRun(factory, builders);
+    registerApprovalNotificationConformance(factory, builders);
     registerTraceLookup(factory, builders);
     registerOutboxConformance(factory, builders, caps.supportsFileReopen);
     registerLazyRead(factory, builders);

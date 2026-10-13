@@ -43,7 +43,7 @@ import {
   SummarizingStrategy,
 } from "@harness/context";
 import { activeRuns } from "@harness/telemetry";
-import { buildApprovalPayload } from "@harness/policy";
+import { buildApprovalPayload, sweepApprovals, type ApprovalSweepStore } from "@harness/policy";
 import { emailDetector, PiiToolPort, Tokenizer } from "@harness/pii";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
@@ -370,6 +370,7 @@ async function requestApprovalForRun(
   recorder: RunRecorder,
   clock: FakeClock,
   state: ReturnType<typeof foldRunState>,
+  approvalTtlMs?: number,
 ) {
   const intent = state.pendingToolCalls.get(modelCallId);
   if (intent === undefined) {
@@ -381,6 +382,7 @@ async function requestApprovalForRun(
       id: intent.ruleId ?? "test_rule",
       reason: intent.policyReason ?? "manual_review",
       editable: intent.policyEditable ?? [],
+      ...(approvalTtlMs === undefined ? {} : { approvalTtlMs }),
     },
     now: Math.floor(clock.now()),
   });
@@ -388,6 +390,7 @@ async function requestApprovalForRun(
     approvalId,
     callId: modelCallId,
     payload: JsonValue.parse(payload),
+    ...(approvalTtlMs === undefined ? {} : { expiresAt: Math.floor(clock.now()) + approvalTtlMs }),
     state,
     checkpointer: new Checkpointer({
       recorder,
@@ -2247,6 +2250,58 @@ describe("runLoop", () => {
       policyDecision: "ask",
       ruleId: "review_rule",
     });
+  });
+
+  it("applies an expired approval as a denial when the run resumes", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+    await requestApprovalForRun(recorder, clock, state, 10);
+    clock.advance(10);
+
+    const sweepStore: ApprovalSweepStore = {
+      listRuns: (options) => store.listRuns(options),
+      read: (forRun) => store.read(forRun),
+      claimApprovalNotification: (forApproval, forRun) =>
+        store.claimApprovalNotification(forApproval, forRun),
+      releaseApprovalNotification: (forApproval, forRun) =>
+        store.releaseApprovalNotification(forApproval, forRun),
+      resolveApproval: (forRun, forApproval, metadata) =>
+        resolveApproval(store, forRun, forApproval, "deny", undefined, clock, undefined, metadata),
+    };
+    const sweepResult = await sweepApprovals({
+      store: sweepStore,
+      clock,
+      notifier: { notify: () => Promise.resolve() },
+    });
+    const tool = new FakeToolPort();
+    const resumed = await resumeRun(
+      createResumeOptions(store, clock, {
+        model: new FakeModelPort([completion()]),
+        tool,
+      }),
+    );
+    const events = await readApprovalEvents(store);
+
+    expect(sweepResult).toMatchObject({ examined: 1, expired: 1 });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "approval_resolved",
+        approvalId,
+        decision: "deny",
+        decidedBy: "expiry",
+        reason: "expired",
+      }),
+    );
+    expect(resumed.status).toBe("completed");
+    expect(tool.calls).toHaveLength(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool_result",
+        outcome: "denied",
+        errorCode: "approval_denied",
+      }),
+    );
   });
 
   it("records timeouts and allows the model to continue", async () => {

@@ -17,6 +17,7 @@ import { FakeModelPort, FakeToolPort } from "@harness/core/testing";
 import { buildApprovalPayload } from "@harness/policy";
 import {
   ApprovalListResultSchema,
+  ApprovalSweepResultSchema,
   FakeClock,
   Id,
   JsonValue,
@@ -141,7 +142,7 @@ function createFixture(
   } satisfies Fixture;
 }
 
-async function seed(fixture: Fixture, args: JsonValue, ttlMs?: number) {
+async function seed(fixture: Fixture, args: JsonValue, ttlMs?: number, escalateAfterMs?: number) {
   const runId = fixture.nextId();
   const segmentId = fixture.nextId();
   const callId = fixture.nextId();
@@ -163,6 +164,7 @@ async function seed(fixture: Fixture, args: JsonValue, ttlMs?: number) {
         toolId: "send_mail",
         idempotent: false,
         policyDecision: "ask",
+        ...(escalateAfterMs === undefined ? {} : { policyEscalateAfterMs: escalateAfterMs }),
         argsHash: Sha256Hex.parse("b".repeat(64)),
         args,
       },
@@ -489,5 +491,39 @@ describe("harness approvals", () => {
     const { approvalId } = await seed(fixture, { to: "<EMAIL_1>" });
     expect(await run(fixture, "approvals", "deny", approvalId, "--yes")).toBe(ExitCode.ok);
     expect(fixture.configLoads()).toBe(1);
+  });
+
+  it("sweeps expired approvals and records expiry metadata", async () => {
+    const fixture = createFixture();
+    const { approvalId, runId } = await seed(fixture, { to: "<EMAIL_1>" }, 5);
+    fixture.clock.advance(5);
+
+    expect(await run(fixture, "--json", "approvals", "sweep")).toBe(ExitCode.ok);
+    expect(parseJson(ApprovalSweepResultSchema, fixture.stdout.join(""))).toEqual({
+      examined: 1,
+      expired: 1,
+      escalated: 0,
+    });
+    const resolution = (await readAll(fixture.store, runId)).find(
+      (event) => event.type === "approval_resolved",
+    );
+    expect(resolution).toMatchObject({
+      approvalId,
+      decision: "deny",
+      decidedBy: "expiry",
+      reason: "expired",
+    });
+  });
+
+  it("logs due escalation metadata without tool arguments", async () => {
+    const fixture = createFixture();
+    await seed(fixture, { to: "APPROVAL_ARGS_CANARY" }, undefined, 5);
+    fixture.clock.advance(5);
+
+    expect(await run(fixture, "approvals", "sweep")).toBe(ExitCode.ok);
+
+    expect(fixture.stdout.join("")).toContain("escalated=1");
+    expect(fixture.stdout.join("")).toContain("approval_escalated");
+    expect(fixture.stdout.join("")).not.toContain("APPROVAL_ARGS_CANARY");
   });
 });

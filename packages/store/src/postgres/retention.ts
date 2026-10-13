@@ -20,6 +20,7 @@ export async function deleteRunTransaction(client: PoolClient, runId: Id): Promi
     }
     const events = await client.query("DELETE FROM events WHERE run_id = $1", [runId]);
     await client.query("DELETE FROM snapshots WHERE run_id = $1", [runId]);
+    await client.query("DELETE FROM approval_notifications WHERE run_id = $1", [runId]);
     await client.query("DELETE FROM runs WHERE run_id = $1", [runId]);
     await client.query("COMMIT");
     transactionStarted = false;

@@ -138,6 +138,21 @@ export interface EventStore {
    */
   ackOutbox(sinkId: Code, cursor: number): Promise<void>;
 
+  /**
+   * Atomically claim the single escalation notification for an approval.
+   * @param approvalId Approval whose notification is being claimed.
+   * @param runId Run containing the approval, used to clean up with run retention.
+   * @returns True only for the call that created the durable claim.
+   */
+  claimApprovalNotification(approvalId: Id, runId: Id): Promise<boolean>;
+
+  /**
+   * Release an escalation claim after notification delivery fails.
+   * @param approvalId Approval whose claim should be released.
+   * @param runId Run containing the approval.
+   */
+  releaseApprovalNotification(approvalId: Id, runId: Id): Promise<void>;
+
   /** Release resources held by the store. */
   close(): Promise<void>;
 }

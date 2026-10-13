@@ -148,6 +148,8 @@ const approvalResolvedEvent = z
     type: z.literal("approval_resolved"),
     approvalId: Id,
     decision: z.enum(["approve", "deny", "edit"]),
+    decidedBy: z.enum(["human", "policy", "expiry"]),
+    reason: Code.optional(),
     waitMs: z.number().int().nonnegative(),
     edits: JsonValue.optional(),
   })

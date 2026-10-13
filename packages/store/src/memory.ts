@@ -90,6 +90,7 @@ export class InMemoryEventStore implements EventStore {
   private readonly snapshots = new Map<Id, EncodedSnapshot[]>();
   private readonly outboxEvents: { globalSeq: number; event: StoredEvent }[] = [];
   private readonly sinkCursors = new Map<string, number>();
+  private readonly approvalNotifications = new Map<Id, Id>();
   private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -233,6 +234,11 @@ export class InMemoryEventStore implements EventStore {
 
     this.runs.delete(runId);
     this.snapshots.delete(runId);
+    for (const [approvalId, notificationRunId] of this.approvalNotifications) {
+      if (notificationRunId === runId) {
+        this.approvalNotifications.delete(approvalId);
+      }
+    }
     for (let index = this.outboxEvents.length - 1; index >= 0; index -= 1) {
       if (this.outboxEvents[index]?.event.runId === runId) {
         this.outboxEvents.splice(index, 1);
@@ -346,6 +352,23 @@ export class InMemoryEventStore implements EventStore {
     const previous = this.sinkCursors.get(parsedSinkId.data) ?? 0;
     if (cursor > previous) {
       this.sinkCursors.set(parsedSinkId.data, cursor);
+    }
+    return Promise.resolve();
+  }
+
+  /** {@inheritDoc EventStore.claimApprovalNotification} */
+  claimApprovalNotification(approvalId: Id, runId: Id): Promise<boolean> {
+    if (this.approvalNotifications.has(approvalId)) {
+      return Promise.resolve(false);
+    }
+    this.approvalNotifications.set(approvalId, runId);
+    return Promise.resolve(true);
+  }
+
+  /** {@inheritDoc EventStore.releaseApprovalNotification} */
+  releaseApprovalNotification(approvalId: Id, runId: Id): Promise<void> {
+    if (this.approvalNotifications.get(approvalId) === runId) {
+      this.approvalNotifications.delete(approvalId);
     }
     return Promise.resolve();
   }

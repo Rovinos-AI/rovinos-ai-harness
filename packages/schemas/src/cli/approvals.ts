@@ -53,3 +53,15 @@ export const ApprovalResolveResultSchema = z
 
 /** Inferred result of resolving an approval. */
 export type ApprovalResolveResult = z.infer<typeof ApprovalResolveResultSchema>;
+
+/** Result of one `harness approvals sweep` invocation. */
+export const ApprovalSweepResultSchema = z
+  .object({
+    examined: z.number().int().nonnegative(),
+    expired: z.number().int().nonnegative(),
+    escalated: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Inferred result of one approval sweep. */
+export type ApprovalSweepResult = z.infer<typeof ApprovalSweepResultSchema>;

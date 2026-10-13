@@ -158,11 +158,11 @@ it("serializes concurrent Postgres migration startup", async () => {
       migrate(migrationPool, "postgres"),
       migrate(migrationPool, "postgres"),
     ]);
-    expect(results.flat()).toHaveLength(1);
+    expect(results.flat()).toHaveLength(2);
     const versions = await migrationPool.query<{ version: string }>(
       "SELECT version FROM schema_migrations ORDER BY version",
     );
-    expect(versions.rows.map(({ version }) => version)).toEqual(["0001"]);
+    expect(versions.rows.map(({ version }) => version)).toEqual(["0001", "0002"]);
   } finally {
     await migrationPool.end();
     await dropSchema(admin, schema);
@@ -222,7 +222,7 @@ async function verifyLegacyPostgresSchema(includeTxId: boolean): Promise<void> {
     const versions = await legacyPool.query<{ version: string }>(
       "SELECT version FROM schema_migrations ORDER BY version",
     );
-    expect(versions.rows.map(({ version }) => version)).toEqual(["0001"]);
+    expect(versions.rows.map(({ version }) => version)).toEqual(["0001", "0002"]);
     const txIdColumn = await legacyPool.query<{ present: boolean }>(
       "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'events' AND column_name = 'tx_id') AS present",
     );

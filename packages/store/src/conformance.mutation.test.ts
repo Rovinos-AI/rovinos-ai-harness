@@ -29,6 +29,10 @@ function brokenFactory(): EventStoreFactory {
       findRunsByTrace: (traceId) => reference.findRunsByTrace(traceId),
       fetchOutbox: (sinkId, limit) => reference.fetchOutbox(sinkId, limit),
       ackOutbox: (sinkId, cursor) => reference.ackOutbox(sinkId, cursor),
+      claimApprovalNotification: (approvalId, runId) =>
+        reference.claimApprovalNotification(approvalId, runId),
+      releaseApprovalNotification: (approvalId, runId) =>
+        reference.releaseApprovalNotification(approvalId, runId),
       close: () => reference.close(),
     };
     return Promise.resolve({ store, cleanup: () => reference.close() });

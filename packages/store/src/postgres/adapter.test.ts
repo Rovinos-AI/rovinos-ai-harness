@@ -51,6 +51,7 @@ let transactionBackup:
       events: FakeEvent[];
       sinkCursors: Map<string, number>;
       snapshots: FakeSnapshot[];
+      approvalNotifications: Map<string, string>;
     }
   | undefined;
 
@@ -59,6 +60,7 @@ const fakePg = vi.hoisted(() => ({
   events: new Array<FakeEvent>(),
   sinkCursors: new Map<string, number>(),
   snapshots: new Array<FakeSnapshot>(),
+  approvalNotifications: new Map<string, string>(),
   schemaInitialized: false,
   migrationHistory: new Map<string, string>(),
   encryptionValue: "",
@@ -141,6 +143,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       events: structuredClone(fakePg.events),
       sinkCursors: structuredClone(fakePg.sinkCursors),
       snapshots: structuredClone(fakePg.snapshots),
+      approvalNotifications: structuredClone(fakePg.approvalNotifications),
     };
     return { rows: [] };
   }
@@ -153,6 +156,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       events: structuredClone(fakePg.events),
       sinkCursors: structuredClone(fakePg.sinkCursors),
       snapshots: structuredClone(fakePg.snapshots),
+      approvalNotifications: structuredClone(fakePg.approvalNotifications),
     };
     return { rows: [] };
   }
@@ -172,6 +176,10 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
         fakePg.sinkCursors.set(sinkId, cursor);
       }
       fakePg.snapshots.splice(0, fakePg.snapshots.length, ...transactionBackup.snapshots);
+      fakePg.approvalNotifications.clear();
+      for (const [approvalId, runId] of transactionBackup.approvalNotifications) {
+        fakePg.approvalNotifications.set(approvalId, runId);
+      }
       transactionBackup = undefined;
     }
     return { rows: [] };
@@ -282,6 +290,32 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       ...fakePg.snapshots.filter((snapshot) => snapshot.run_id !== runId),
     );
     return { rows: [] };
+  }
+  if (query === "DELETE FROM approval_notifications WHERE run_id = $1") {
+    const runId = text(values[0]);
+    for (const [approvalId, notificationRunId] of fakePg.approvalNotifications) {
+      if (notificationRunId === runId) {
+        fakePg.approvalNotifications.delete(approvalId);
+      }
+    }
+    return { rows: [] };
+  }
+  if (query === "DELETE FROM approval_notifications WHERE approval_id = $1 AND run_id = $2") {
+    const approvalId = text(values[0]);
+    const runId = text(values[1]);
+    if (fakePg.approvalNotifications.get(approvalId) === runId) {
+      fakePg.approvalNotifications.delete(approvalId);
+    }
+    return { rows: [] };
+  }
+  if (query.startsWith("INSERT INTO approval_notifications")) {
+    const approvalId = text(values[0]);
+    const runId = text(values[1]);
+    if (fakePg.approvalNotifications.has(approvalId)) {
+      return { rows: [] };
+    }
+    fakePg.approvalNotifications.set(approvalId, runId);
+    return { rows: [{ approval_id: approvalId }] };
   }
   if (query.startsWith("DELETE FROM snapshots")) {
     const runId = text(values[0]);
@@ -419,6 +453,7 @@ beforeEach(() => {
   fakePg.events.length = 0;
   fakePg.sinkCursors.clear();
   fakePg.snapshots.length = 0;
+  fakePg.approvalNotifications.clear();
   transactionBackup = undefined;
   fakePg.schemaInitialized = false;
   fakePg.migrationHistory.clear();

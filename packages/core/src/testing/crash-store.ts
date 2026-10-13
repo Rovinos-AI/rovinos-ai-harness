@@ -110,6 +110,14 @@ export class CrashingEventStore implements EventStore {
     return this.inner.ackOutbox(sinkId, cursor);
   }
 
+  claimApprovalNotification(approvalId: Id, runId: Id): Promise<boolean> {
+    return this.inner.claimApprovalNotification(approvalId, runId);
+  }
+
+  releaseApprovalNotification(approvalId: Id, runId: Id): Promise<void> {
+    return this.inner.releaseApprovalNotification(approvalId, runId);
+  }
+
   close(): Promise<void> {
     return this.inner.close();
   }

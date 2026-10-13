@@ -37,6 +37,21 @@ describe("Event", () => {
     expect(Event.parse(legacyResponse)).toMatchObject({ fallbackDepth: 0 });
   });
 
+  it("requires approval resolver metadata and accepts an optional reason code", () => {
+    const resolution = eventSamples.find(({ type }) => type === "approval_resolved");
+    if (resolution?.type !== "approval_resolved") {
+      throw new Error("Missing approval_resolved sample.");
+    }
+    const withoutDecidedBy = { ...resolution };
+    Reflect.deleteProperty(withoutDecidedBy, "decidedBy");
+
+    expect(Event.safeParse(withoutDecidedBy).success).toBe(false);
+    expect(Event.parse({ ...resolution, decidedBy: "expiry", reason: "expired" })).toMatchObject({
+      decidedBy: "expiry",
+      reason: "expired",
+    });
+  });
+
   it("accepts continuation links and follow-up inputs as metadata", () => {
     const created = eventSamples.find(({ type }) => type === "run_created");
     const input = eventSamples.find(({ type }) => type === "run_input");
