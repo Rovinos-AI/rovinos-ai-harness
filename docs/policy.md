@@ -52,9 +52,12 @@ The pointer selects a tokenized argument. This rule matches values such as
 policy in [`examples/policy.yaml`](../examples/policy.yaml) is a complete
 validated document.
 
-Use `harness policy test` with tokenized JSONL call fixtures and optional expected decisions to
-regression-test a policy offline. `harness policy lint` reports rule defects without starting a
-runtime. The synthetic runnable example is in
+Use `harness policy test` with JSONL tool-call fixtures and optional expected decisions to
+regression-test a policy offline. The command tokenizes fixture arguments with the built-in and
+configured custom PII detectors and policy from the active harness configuration, using an ephemeral
+in-memory vault that is discarded when testing completes. This ensures token-type rules see the
+same form of arguments as runtime policy evaluation. Use synthetic values in fixtures. `harness
+policy lint` reports rule defects without starting a runtime. The synthetic runnable example is in
 [`examples/policy-tests`](../examples/policy-tests/).
 
 ## Approval edits

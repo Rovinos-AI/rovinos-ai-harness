@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFile } from "node:fs/promises";
 import {
+  Id,
   HarnessError,
   parseJson,
   parseYaml,
@@ -11,8 +12,30 @@ import {
 } from "@harness/schemas";
 import type { PolicyTestCall, PolicyTestExpectation, PolicyTestResult } from "@harness/schemas";
 import type { CompiledPolicy } from "@harness/policy";
+import {
+  createCustomDetector,
+  creditCardDetector,
+  emailDetector,
+  ibanDetector,
+  ipDetector,
+  phoneDetector,
+  resolveOverlaps,
+  secretsDetector,
+  Tokenizer,
+  urlCredentialsDetector,
+} from "@harness/pii";
+import type { Detector } from "@harness/pii";
+import { InMemoryVault } from "@harness/vault";
 import { z } from "zod";
 import type { CliContext, CommandModule } from "../command.js";
+
+type PolicyCommandErrorCode =
+  | "policy_test_mismatch"
+  | "policy_lint_failed"
+  | "policy_test_ids_duplicate"
+  | "policy_expectations_ids_duplicate";
+
+const POLICY_TEST_RUN_ID = Id.parse("01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
 const TestOptionsSchema = z
   .object({
@@ -26,9 +49,9 @@ const TestOptionsSchema = z
 const LintOptionsSchema = z.object({ policy: z.string() }).strict();
 
 class PolicyCommandError extends HarnessError {
-  override readonly code: string;
+  override readonly code: PolicyCommandErrorCode;
 
-  constructor(code: string) {
+  constructor(code: PolicyCommandErrorCode) {
     super(code);
     this.code = code;
   }
@@ -50,7 +73,10 @@ async function readJsonLines<Schema extends z.ZodType>(
     .map((line) => parseJson(schema, line));
 }
 
-function ensureUniqueIds(items: readonly { readonly id: string }[], code: string): void {
+function ensureUniqueIds(
+  items: readonly { readonly id: string }[],
+  code: "policy_test_ids_duplicate" | "policy_expectations_ids_duplicate",
+): void {
   const ids = new Set<string>();
   for (const item of items) {
     if (ids.has(item.id)) {
@@ -86,18 +112,40 @@ interface PolicyTestExecution {
   readonly expectations: readonly PolicyTestExpectation[];
   readonly checkExpectations: boolean;
   readonly explain: boolean;
+  readonly cliContext: CliContext;
 }
 
-function testPolicyResult({
+async function testPolicyResult({
   compiled,
   calls,
   expectations,
   checkExpectations,
   explain,
-}: PolicyTestExecution): PolicyTestResult {
+  cliContext,
+}: PolicyTestExecution): Promise<PolicyTestResult> {
   const expectedById = new Map(expectations.map((expectation) => [expectation.id, expectation]));
   const results: PolicyTestResult["results"] = [];
   const mismatches: PolicyTestResult["mismatches"] = [];
+  const config = await cliContext.loadConfig();
+  const builtInAndCustomDetectors: readonly Detector[] = [
+    creditCardDetector,
+    emailDetector,
+    ibanDetector,
+    ipDetector,
+    phoneDetector,
+    secretsDetector,
+    urlCredentialsDetector,
+    ...(config.pii.custom ?? []).map((detector) => createCustomDetector(detector)),
+  ];
+  const vault = new InMemoryVault();
+  const tokenizer = new Tokenizer({
+    detectors: {
+      detect: (text) =>
+        resolveOverlaps(builtInAndCustomDetectors.flatMap((detector) => detector.detect(text))),
+    },
+    policy: config.pii,
+    vault,
+  });
 
   for (const fixture of calls) {
     const context = {
@@ -105,9 +153,13 @@ function testPolicyResult({
       ...(fixture.context?.server === undefined ? {} : { server: fixture.context.server }),
       ...(fixture.context?.app === undefined ? {} : { app: fixture.context.app }),
     };
+    const tokenized = await tokenizer.tokenizeJson(POLICY_TEST_RUN_ID, fixture.args, {
+      boundary: "tool_input",
+      destination: { tool: fixture.toolId },
+    });
     const explanation = compiled.evaluate({
       toolId: fixture.toolId,
-      args: fixture.args,
+      args: tokenized.value,
       context,
     });
     const result = {
@@ -171,23 +223,24 @@ async function runTest(rawOptions: unknown, context: CliContext, jsonMode: boole
     options.expect === undefined
       ? []
       : await readJsonLines(options.expect, PolicyTestExpectationSchema);
-  ensureUniqueIds(calls, "policy_calls_duplicate_id");
-  ensureUniqueIds(expectations, "policy_expectations_duplicate_id");
+  ensureUniqueIds(calls, "policy_test_ids_duplicate");
+  ensureUniqueIds(expectations, "policy_expectations_ids_duplicate");
 
   const { compilePolicy } = await import("@harness/policy");
-  const result = testPolicyResult({
+  const result = await testPolicyResult({
     compiled: compilePolicy(document),
     calls,
     expectations,
     checkExpectations: options.expect !== undefined,
     explain: options.explain,
+    cliContext: context,
   });
   context.out.json(PolicyTestResultSchema, result);
   if (!jsonMode) {
     context.out.print(testSummary(result));
   }
   if (result.mismatches.length > 0) {
-    throw new PolicyCommandError("policy_test_failed");
+    throw new PolicyCommandError("policy_test_mismatch");
   }
 }
 
@@ -221,9 +274,9 @@ export const policyCommand: CommandModule = {
     const policy = program.command("policy").description("Test and lint policy files");
     policy
       .command("test")
-      .description("Evaluate tokenized call fixtures against a policy")
+      .description("Tokenize and evaluate call fixtures against a policy")
       .requiredOption("--policy <file>", "policy YAML or JSON file")
-      .requiredOption("--calls <jsonl>", "JSONL tokenized call fixture file")
+      .requiredOption("--calls <jsonl>", "JSONL tool call fixture file")
       .option("--expect <jsonl>", "JSONL expectation file")
       .option("--explain", "include all matching rules")
       .action(async (rawOptions: unknown) => {

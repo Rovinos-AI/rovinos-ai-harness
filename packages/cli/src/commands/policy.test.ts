@@ -2,6 +2,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HarnessConfigSchema } from "@harness/config";
 import { parseJson, PolicyLintResultSchema, PolicyTestResultSchema } from "@harness/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CliContext } from "../command.js";
@@ -37,6 +38,12 @@ async function createFixture(options: {
   readonly policy?: string;
   readonly calls?: string;
   readonly expectations?: string;
+  readonly customDetectors?: readonly {
+    readonly name: string;
+    readonly pattern: string;
+    readonly flags?: string;
+    readonly validator?: "luhn" | "mod97";
+  }[];
 }) {
   const directory = await mkdtemp(join(tmpdir(), "harness-policy-cli-"));
   directories.push(directory);
@@ -54,7 +61,13 @@ async function createFixture(options: {
   const context: CliContext = {
     loadConfig: () => {
       configLoads += 1;
-      return Promise.reject(new Error("Offline policy commands must not load configuration."));
+      return Promise.resolve(
+        HarnessConfigSchema.parse({
+          ...(options.customDetectors === undefined
+            ? {}
+            : { pii: { custom: options.customDetectors } }),
+        }),
+      );
     },
     out: createOutput({
       stdout: (text) => stdout.push(text),
@@ -96,7 +109,7 @@ describe("harness policy test", () => {
     expect(exitCode).toBe(ExitCode.ok);
     expect(fixture.stdout.join("")).toContain("read_one\tallow\tallow_read\tread_only\tallow_read");
     expect(fixture.stderr).toEqual([]);
-    expect(fixture.configLoads()).toBe(0);
+    expect(fixture.configLoads()).toBe(1);
   });
 
   it("emits exactly one validated JSON report", async () => {
@@ -140,6 +153,114 @@ describe("harness policy test", () => {
     expect(fixture.stderr).toEqual([]);
   });
 
+  it("uses built-in tokenization before matching a token type", async () => {
+    const fixture = await createFixture({
+      policy: `version: 1
+defaultDecision: deny
+rules:
+  - id: allow_raw_email
+    match:
+      tools: [mail.send]
+      args:
+        - pointer: /to
+          op: equals
+          value: alice@example.test
+    decision: allow
+    reason: raw_email
+  - id: deny_email_token
+    match:
+      tools: [mail.send]
+      args:
+        - pointer: /to
+          op: tokenType
+          value: email
+    decision: deny
+    reason: tokenized_email
+`,
+      calls: JSON.stringify({
+        id: "send_email",
+        toolId: "mail.send",
+        args: { to: "alice@example.test" },
+      }),
+      expectations: JSON.stringify({
+        id: "send_email",
+        decision: "deny",
+        ruleId: "deny_email_token",
+      }),
+    });
+
+    const exitCode = await main(
+      [
+        "--json",
+        "policy",
+        "test",
+        "--policy",
+        fixture.policyPath,
+        "--calls",
+        fixture.callsPath,
+        "--expect",
+        fixture.expectPath,
+      ],
+      fixture.context,
+      [policyCommand],
+    );
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(parseJson(PolicyTestResultSchema, fixture.stdout[0] ?? "").results).toMatchObject([
+      { id: "send_email", decision: "deny", ruleId: "deny_email_token" },
+    ]);
+  });
+
+  it("uses configured custom detectors before matching a token type", async () => {
+    const fixture = await createFixture({
+      policy: `version: 1
+defaultDecision: deny
+rules:
+  - id: deny_custom_token
+    match:
+      tools: [cases.open]
+      args:
+        - pointer: /id
+          op: tokenType
+          value: custom_ticket
+    decision: deny
+    reason: custom_identifier
+`,
+      calls: JSON.stringify({
+        id: "open_case",
+        toolId: "cases.open",
+        args: { id: "CASE-AB12" },
+      }),
+      expectations: JSON.stringify({
+        id: "open_case",
+        decision: "deny",
+        ruleId: "deny_custom_token",
+      }),
+      customDetectors: [{ name: "ticket", pattern: "CASE-[A-Z]{2}[0-9]{2}" }],
+    });
+
+    const exitCode = await main(
+      [
+        "--json",
+        "policy",
+        "test",
+        "--policy",
+        fixture.policyPath,
+        "--calls",
+        fixture.callsPath,
+        "--expect",
+        fixture.expectPath,
+      ],
+      fixture.context,
+      [policyCommand],
+    );
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(parseJson(PolicyTestResultSchema, fixture.stdout[0] ?? "").results).toMatchObject([
+      { id: "open_case", decision: "deny", ruleId: "deny_custom_token" },
+    ]);
+  });
+
   it("returns failure and a safe diff when expectations do not match", async () => {
     const fixture = await createFixture({
       expectations: JSON.stringify({ id: "read_one", decision: "deny" }),
@@ -165,7 +286,7 @@ describe("harness policy test", () => {
     expect(parseJson(PolicyTestResultSchema, fixture.stdout[0] ?? "").mismatches).toMatchObject([
       { id: "read_one", code: "decision_mismatch" },
     ]);
-    expect(fixture.stderr).toEqual(["policy_test_failed\n"]);
+    expect(fixture.stderr).toEqual(["policy_test_mismatch\n"]);
   });
 
   it("detects missing, extra, and rule-id-mismatched expectations", async () => {
@@ -215,7 +336,31 @@ describe("harness policy test", () => {
     );
 
     expect(exitCode).toBe(ExitCode.failure);
-    expect(fixture.stderr).toEqual(["policy_calls_duplicate_id\n"]);
+    expect(fixture.stderr).toEqual(["policy_test_ids_duplicate\n"]);
+  });
+
+  it("rejects duplicate expectation identifiers with a closed error code", async () => {
+    const fixture = await createFixture({
+      expectations: `${expectationLine}\n${expectationLine}`,
+    });
+
+    const exitCode = await main(
+      [
+        "policy",
+        "test",
+        "--policy",
+        fixture.policyPath,
+        "--calls",
+        fixture.callsPath,
+        "--expect",
+        fixture.expectPath,
+      ],
+      fixture.context,
+      [policyCommand],
+    );
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(fixture.stderr).toEqual(["policy_expectations_ids_duplicate\n"]);
   });
 
   it("does not print malformed fixture content", async () => {

@@ -231,6 +231,74 @@ describe("lintPolicy", () => {
     }
   });
 
+  it("recognizes nested startsWith containment for shadowing and fully denied allows", () => {
+    const rules: readonly Rule[] = [
+      {
+        id: "deny_workspace",
+        match: {
+          tools: ["fs.write"],
+          args: [{ pointer: "/path", op: "startsWith", value: "/workspace" }],
+        },
+        decision: "deny",
+        reason: "blocked",
+      },
+      {
+        id: "ask_workspace_tmp",
+        match: {
+          tools: ["fs.write"],
+          args: [{ pointer: "/path", op: "startsWith", value: "/workspace/tmp" }],
+        },
+        decision: "ask",
+        reason: "approval",
+      },
+      {
+        id: "allow_workspace_tmp",
+        match: {
+          tools: ["fs.write"],
+          args: [{ pointer: "/path", op: "startsWith", value: "/workspace/tmp" }],
+        },
+        decision: "allow",
+        reason: "allowed",
+      },
+    ];
+
+    expect(lintPolicy({ version: 1, defaultDecision: "deny", rules }).diagnostics).toContainEqual({
+      severity: "error",
+      code: "rule_shadowed",
+      ruleId: "ask_workspace_tmp",
+    });
+    expect(lintPolicy({ version: 1, defaultDecision: "deny", rules }).diagnostics).toContainEqual({
+      severity: "error",
+      code: "allow_fully_denied",
+      ruleId: "allow_workspace_tmp",
+    });
+  });
+
+  it("does not infer coverage when a prefix matcher is compared to an unsupported matcher", () => {
+    const rules: readonly Rule[] = [
+      {
+        id: "deny_regex",
+        match: {
+          tools: ["fs.write"],
+          args: [{ pointer: "/path", op: "matches", value: "^/workspace" }],
+        },
+        decision: "deny",
+        reason: "blocked",
+      },
+      {
+        id: "allow_prefix",
+        match: {
+          tools: ["fs.write"],
+          args: [{ pointer: "/path", op: "startsWith", value: "/workspace/tmp" }],
+        },
+        decision: "allow",
+        reason: "allowed",
+      },
+    ];
+
+    expect(lintPolicy({ version: 1, defaultDecision: "deny", rules }).diagnostics).toEqual([]);
+  });
+
   it("compares nested JSON matcher values and canonicalizes duplicate matcher keys", () => {
     const left = { nested: [1, { value: true }], object: { first: "a", second: "b" } };
     const right = { object: { second: "b", first: "a" }, nested: [1, { value: true }] };

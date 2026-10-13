@@ -222,6 +222,15 @@ function matcherImplies(candidate: ArgMatcher, cover: ArgMatcher): boolean {
   if (cover.op === "exists") {
     return true;
   }
+  if (
+    candidate.op === "startsWith" &&
+    cover.op === "startsWith" &&
+    typeof candidate.value === "string" &&
+    typeof cover.value === "string" &&
+    candidate.value.startsWith(cover.value)
+  ) {
+    return true;
+  }
   if (candidate.op === cover.op && jsonEquals(candidate.value ?? null, cover.value ?? null)) {
     return true;
   }
