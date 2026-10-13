@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+exporters:
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch] # Task 10.2 inserts generated allowlist processors here.
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch] # Task 10.2 inserts generated allowlist processors here.
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch] # Task 10.2 inserts generated allowlist processors here.
+      exporters: [debug]
