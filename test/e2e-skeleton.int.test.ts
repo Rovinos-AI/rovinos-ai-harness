@@ -2,7 +2,6 @@
 // Every task that wires a capability into the runtime or CLI extends this test.
 // Not wired yet: approval escalation WebhookNotifier (17.6 -> #125)
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
-// Not wired yet: harness store migrate / store purge (20.6 -> #386)
 // Not wired yet: vault purge hook (12.6 -> #108)
 // Not wired yet: approvals --reveal (17.10 -> #373)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
@@ -11,7 +10,7 @@ import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { ExportResultCode } from "@opentelemetry/core";
 import Database from "better-sqlite3";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -31,10 +30,11 @@ import {
   Id,
   RunResultSchema,
   SequentialIdGenerator,
-  StoreRetentionConfigSchema,
+  StoreMigrateResultSchema,
+  StorePurgeResultSchema,
   parseJson,
 } from "@harness/schemas";
-import { SqliteEventStore, purgeExpiredRuns } from "@harness/store";
+import { SqliteEventStore } from "@harness/store";
 import {
   attr,
   createTelemetrySdk,
@@ -493,25 +493,42 @@ describe("resume", () => {
 });
 
 describe("retention", () => {
-  it("purges the completed run after its configured retention window", async () => {
+  it("uses the CLI to inspect pending migrations and purge the completed run", async () => {
     const current = fixture();
     const runId = current.runId;
     if (runId === undefined) {
       throw new Error("The run id is not available.");
     }
     current.clock.advance(2 * DAY_MS);
+    const databaseFilesBeforeDryRuns = await readdir(current.dataDirectory);
+    const databaseBeforeDryRuns = await readFile(current.eventStorePath);
+    const migration = await invokeCli(["--json", "store", "migrate", "--dry-run"]);
+    expect(migration.code).toBe(ExitCode.ok);
+    expect(jsonResult(StoreMigrateResultSchema, migration.stdout)).toEqual({
+      applied: [],
+      pending: [],
+    });
+    expect(await readFile(current.eventStorePath)).toEqual(databaseBeforeDryRuns);
+    expect(await readdir(current.dataDirectory)).toEqual(databaseFilesBeforeDryRuns);
+
+    const dryRun = await invokeCli(["--json", "store", "purge", "--dry-run"]);
+    expect(dryRun.stderr).toEqual([]);
+    expect(dryRun.code).toBe(ExitCode.ok);
+    expect(jsonResult(StorePurgeResultSchema, dryRun.stdout)).toMatchObject({ purged: 1 });
+    expect(await readFile(current.eventStorePath)).toEqual(databaseBeforeDryRuns);
+    expect(await readdir(current.dataDirectory)).toEqual(databaseFilesBeforeDryRuns);
+
+    const purge = await invokeCli(["--json", "store", "purge"]);
+    expect(purge.code).toBe(ExitCode.ok);
+    expect(jsonResult(StorePurgeResultSchema, purge.stdout)).toMatchObject({
+      examined: 1,
+      purged: 1,
+      skippedActive: 0,
+      hookFailures: 0,
+    });
+
     const store = new SqliteEventStore(current.eventStorePath);
     try {
-      const result = await purgeExpiredRuns({
-        store,
-        clock: current.clock,
-        policy: StoreRetentionConfigSchema.parse({
-          completedRunsDays: 1,
-          failedRunsDays: 1,
-        }),
-        dryRun: false,
-      });
-      expect(result.purged).toBe(1);
       expect(await store.head(runId)).toBe(0);
     } finally {
       await store.close();

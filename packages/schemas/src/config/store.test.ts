@@ -17,6 +17,32 @@ describe("StoreConfigSchema", () => {
     });
   });
 
+  it("selects SQLite by default and requires a secret reference for Postgres", () => {
+    expect(StoreConfigSchema.parse({ dialect: "sqlite" })).toEqual({ dialect: "sqlite" });
+    expect(
+      StoreConfigSchema.parse({
+        dialect: "postgres",
+        connectionString: "env:HARNESS_STORE_URL",
+      }),
+    ).toEqual({
+      dialect: "postgres",
+      connectionString: "env:HARNESS_STORE_URL",
+    });
+    expect(() => StoreConfigSchema.parse({ dialect: "postgres" })).toThrow();
+    expect(() =>
+      StoreConfigSchema.parse({
+        dialect: "sqlite",
+        connectionString: "env:HARNESS_STORE_URL",
+      }),
+    ).toThrow();
+    expect(() =>
+      StoreConfigSchema.parse({
+        dialect: "postgres",
+        connectionString: "******localhost/harness",
+      }),
+    ).toThrow();
+  });
+
   it("rejects invalid values and unknown settings", () => {
     expect(() =>
       StoreRetentionConfigSchema.parse({

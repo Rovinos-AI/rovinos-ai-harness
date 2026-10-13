@@ -33,9 +33,24 @@ table of check IDs, statuses, and codes. `--json` returns a schema-validated arr
 
 ## `harness store migrate`
 
-The store migration command is reserved for applying pending, checksummed SQLite or Postgres schema
-migrations. Database adapters currently apply migrations when they open the store; a standalone CLI
-command is not yet registered.
+`harness store migrate [--dry-run] [--json]` applies pending, checksummed SQLite or Postgres schema
+migrations selected by `store.dialect` (SQLite is the default). A dry run lists pending migration
+versions without writing to the database. JSON output has `applied` and `pending` version arrays.
+Migration checksum mismatches, a schema newer than this code, invalid migration sets, and pending
+migrations in a read-only operation are reported by their store error codes and exit with code `1`.
+
+Postgres uses `store.connectionString`, which must be a secret reference such as
+`env:HARNESS_STORE_URL`; the resolved URL is never printed. SQLite uses `harness.db` under
+`HARNESS_DATA_DIR` (or the current directory when unset).
+
+## `harness store purge`
+
+`harness store purge [--dry-run] [--json]` applies `store.retention` to terminal runs using the
+system clock. It reports `examined`, `purged`, `skippedActive`, and `hookFailures`; a dry run counts
+eligible runs without deleting them. Without `store.retention`, it reports `retention_not_configured`
+and exits with code `1`. If a vault resolver supplied by the caller exposes `purge(runId)`, it is
+called after each deleted run; otherwise no vault hook is used. Hook failures remain visible in the
+JSON counts, report `retention_hook_failed`, and exit with code `1`.
 
 ## `harness serve`
 
@@ -203,6 +218,7 @@ never included in CLI error output.
 | `serve_options_invalid`, `serve_port_invalid`, `stdio_json_unsupported` | `2` |
 | `doctor_failed`, `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
 | `approval_edit_unavailable`, `reveal_unavailable` | `1` |
+| `migration_checksum_mismatch`, `schema_newer_than_code`, `migration_set_invalid`, `schema_migration_pending`, `retention_not_configured`, `retention_hook_failed` | `1` |
 | `config_invalid` | `3` |
 | `policy_denied`, `approver_is_requester` | `4` |
 | `suspended`, `run_awaiting_approval` | `5` |

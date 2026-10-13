@@ -79,6 +79,7 @@ export { RunResumePolicySchema } from "./config/run.js";
 export {
   StoreConfigSchema,
   StoreRetentionConfigSchema,
+  type StoreConfig,
   type StoreRetentionConfig,
 } from "./config/store.js";
 export {
@@ -133,6 +134,12 @@ export { HostConfigSchema, type HostConfig } from "./config/host.js";
 export { SandboxConfigSchema, SandboxRunnerUrlSchema } from "./config/sandbox.js";
 export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
 export { ContextInspectionSchema, type ContextInspection } from "./cli/context.js";
+export {
+  StoreMigrateResultSchema,
+  StorePurgeResultSchema,
+  type StoreMigrateResult,
+  type StorePurgeResult,
+} from "./cli/store.js";
 export {
   FakeModelCompletionSchema,
   FakeModelScriptSchema,

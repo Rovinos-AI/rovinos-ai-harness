@@ -24,6 +24,21 @@ Set `HARNESS_CASSETTE_AUTO=0` to disable cassette auto mode. Record and auto mod
 
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict schemas owned by their respective packages. `telemetry.sentinel.minValueLength` defaults to `6` and controls the minimum length of vault values included in leak-sentinel scans; shorter values are counted and skipped. The sentinel is enabled by default; `telemetry.sentinel.enabled: false` is accepted only outside production. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
 
+The `store.dialect` is `sqlite` by default; select `postgres` and provide `store.connectionString` as a secret reference for the runtime and the store-management commands (both use the same configured store):
+
+```yaml
+store:
+  dialect: postgres
+  connectionString: env:HARNESS_STORE_URL
+  retention:
+    completedRunsDays: 30
+    failedRunsDays: 60
+```
+
+The Postgres connection URL is resolved only when a store command needs it and is never printed.
+
+Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. `harness store purge` supports dry runs; it does not yet purge vault mappings for deleted runs (12.6, #108).
+
 Configure `sandbox.runner` to use the isolated runner instead of the development-only in-process backend. Its URL must be an HTTP(S) origin, and `token` must be a secret reference:
 
 ```yaml

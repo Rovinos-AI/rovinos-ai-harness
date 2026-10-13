@@ -31,6 +31,17 @@ export class StoreUnavailableError extends HarnessError {
   }
 }
 
+/** Raised when a write is attempted through a read-only store. */
+export class StoreReadOnlyError extends HarnessError {
+  /** Stable error code. */
+  readonly code = "store_read_only";
+
+  /** Create a read-only-store error without exposing implementation details. */
+  constructor() {
+    super("Event store is read-only");
+  }
+}
+
 /** Raised when encrypted content cannot be authenticated or decoded. */
 export class ContentDecryptFailedError extends HarnessError {
   /** Stable error code. */
@@ -115,14 +126,16 @@ export function isPreservedStoreError(
   | ContentDecryptFailedError
   | KeyNotFoundError
   | StoreEncryptionMismatchError
-  | StoreMigrationError {
+  | StoreMigrationError
+  | StoreReadOnlyError {
   return (
     error instanceof SeqConflictError ||
     error instanceof InvalidEventError ||
     error instanceof ContentDecryptFailedError ||
     error instanceof KeyNotFoundError ||
     error instanceof StoreEncryptionMismatchError ||
-    error instanceof StoreMigrationError
+    error instanceof StoreMigrationError ||
+    error instanceof StoreReadOnlyError
   );
 }
 

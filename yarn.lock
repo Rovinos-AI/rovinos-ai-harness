@@ -1028,6 +1028,7 @@ __metadata:
     "@harness/vault": "workspace:^"
     "@opentelemetry/api": "npm:1.9.1"
     commander: "npm:15.0.0"
+    pg: "npm:8.23.1"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   bin:
