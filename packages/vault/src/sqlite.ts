@@ -109,6 +109,34 @@ function migrate(db: Database.Database): void {
   }
 }
 
+function validateReadOnlyMigrations(db: Database.Database): void {
+  const table = db
+    .prepare<[], { name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'",
+    )
+    .get();
+  if (table === undefined) {
+    throw new VaultOperationError("schema_migration_pending");
+  }
+  const knownVersions = new Set<string>(MIGRATIONS.map(({ version }) => version));
+  const appliedVersions = db
+    .prepare<[], MigrationRow>("SELECT version, checksum FROM schema_migrations ORDER BY version")
+    .all();
+  if (appliedVersions.some(({ version }) => !knownVersions.has(version))) {
+    throw new VaultOperationError("vault_migration_newer_than_code");
+  }
+  const appliedByVersion = new Map(appliedVersions.map((row) => [row.version, row.checksum]));
+  for (const migration of MIGRATIONS) {
+    const appliedChecksum = appliedByVersion.get(migration.version);
+    if (appliedChecksum === undefined) {
+      throw new VaultOperationError("schema_migration_pending");
+    }
+    if (appliedChecksum !== readMigration(migration.path).checksum) {
+      throw new VaultOperationError("vault_migration_checksum_mismatch");
+    }
+  }
+}
+
 function lookupMessage(runId: Id, entityType: Code, normalizedValue: string): Buffer {
   return Buffer.concat([
     Buffer.from(runId, "utf8"),
@@ -178,12 +206,24 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     path: string,
     private readonly keyProvider: KeyProvider,
     private readonly now: () => number = Date.now,
+    options: { readonly readonly?: boolean } = {},
   ) {
-    this.db = new Database(path);
+    const readOnly = options.readonly === true;
     try {
-      this.db.pragma("secure_delete = ON");
-      this.db.pragma("busy_timeout = 5000");
-      migrate(this.db);
+      this.db = new Database(path, {
+        ...(readOnly ? { readonly: true, fileMustExist: true } : {}),
+      });
+    } catch {
+      throw new VaultOperationError("vault_unavailable");
+    }
+    try {
+      if (readOnly) {
+        validateReadOnlyMigrations(this.db);
+      } else {
+        this.db.pragma("secure_delete = ON");
+        this.db.pragma("busy_timeout = 5000");
+        migrate(this.db);
+      }
     } catch (error) {
       this.db.close();
       throw error;

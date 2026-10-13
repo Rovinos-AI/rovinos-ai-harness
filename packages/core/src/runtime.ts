@@ -11,16 +11,8 @@ import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js"
 import type { RunLoopResult } from "./loop.js";
 import type { RoleRegistry } from "./roles.js";
 import { foldRunState } from "./run-state.js";
-<<<<<<< HEAD
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool } from "./subagent/runtime.js";
-=======
-import { SystemIdGenerator, systemClock } from "./runtime-ids.js";
-import { RunScopeRegistry } from "./subagent/scope.js";
-import { createSubagentTool, resolveRuntimeRoles } from "./subagent/runtime.js";
-import { createRuntimeStore } from "./runtime-store.js";
-import { ensureTracing } from "./runtime-tracing-init.js";
->>>>>>> origin/main
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import { setupRuntime } from "./runtime-setup.js";
 import type {
@@ -388,58 +380,5 @@ export async function createRuntime(
   config: RuntimeConfig,
   overrides: RuntimeOverrides = {},
 ): Promise<Runtime> {
-<<<<<<< HEAD
   return composeRuntime(await setupRuntime(config, overrides));
-=======
-  ensureTracing();
-  const clock = overrides.clock ?? systemClock;
-  const ids = overrides.ids ?? new SystemIdGenerator(clock);
-  const keys = await createRuntimeKeys(config.keys, overrides);
-  try {
-    const model =
-      overrides.model ??
-      (await createConfiguredModelPort(config.models, {
-        ids,
-        clock,
-        ...(overrides.providerAdapters === undefined
-          ? {}
-          : { providerAdapters: overrides.providerAdapters }),
-        ...(overrides.secretResolver === undefined
-          ? {}
-          : { secretResolver: overrides.secretResolver }),
-      })) ??
-      missingModelPort;
-    const tool = overrides.tool ?? unavailableTool;
-    const policy = await createRuntimePolicy(config, overrides);
-    const context = overrides.context ?? new NaiveContext();
-    const roles = await resolveRuntimeRoles(
-      config,
-      overrides.roleConfigDirectory ?? process.cwd(),
-      tool,
-      (code) => {
-        roleConfigLogger.warn(code);
-      },
-    );
-    const store = await createRuntimeStore(config, overrides, clock);
-    const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
-    return composeRuntime({
-      config,
-      overrides,
-      clock,
-      ids,
-      store,
-      keys,
-      model,
-      tool,
-      policy,
-      policyVersion: policy.version,
-      context,
-      roles,
-      scopes,
-    });
-  } catch (error) {
-    keys.dispose();
-    throw error;
-  }
->>>>>>> origin/main
 }

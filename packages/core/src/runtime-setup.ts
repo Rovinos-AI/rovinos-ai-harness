@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
-import type { PiiConfig } from "@harness/schemas";
+import type { Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import { SqliteVault } from "@harness/vault";
+import type { EventStore } from "@harness/store";
+import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimePii } from "./runtime-pii.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
-import { createSqliteStore } from "./runtime-store.js";
 import { missingModelPort, unavailableTool } from "./runtime-default-ports.js";
 import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
@@ -44,6 +44,14 @@ class PiiToolPortAlreadyWrappedError extends HarnessError {
 
   constructor() {
     super("The runtime cannot accept an already wrapped PII tool port.");
+  }
+}
+
+class TransientVaultInProductionError extends HarnessError {
+  readonly code = "transient_vault_in_production";
+
+  constructor() {
+    super("A transient vault cannot be used in production.");
   }
 }
 
@@ -87,21 +95,58 @@ async function createRuntimeVault(
   clock: Clock,
 ): Promise<SqliteVault> {
   const vaultPath = join(dataDir, "vault.db");
-  // Development runtimes with injected stores and no data directory keep their
-  // SQLite vault state transient.
-  const transient =
-    overrides.store !== undefined &&
-    overrides.dataDir === undefined &&
-    process.env.HARNESS_DATA_DIR === undefined &&
-    process.env.NODE_ENV !== "production";
+  const transient = overrides.transientVault === true && overrides.readOnlyStore !== true;
+  if (transient && process.env.NODE_ENV === "production") {
+    throw new TransientVaultInProductionError();
+  }
   if (overrides.readOnlyStore !== true && !transient) {
     await mkdir(dataDir, { recursive: true });
   }
-  const path =
-    transient || (overrides.readOnlyStore === true && !existsSync(vaultPath))
-      ? ":memory:"
-      : vaultPath;
-  return new SqliteVault(path, keys, () => clock.now());
+  return new SqliteVault(transient ? ":memory:" : vaultPath, keys, () => clock.now(), {
+    readonly: overrides.readOnlyStore === true,
+  });
+}
+
+function persistedScopeResolver(store: EventStore, scopes: RunScopeRegistry) {
+  const pending = new Map<Id, Promise<Id>>();
+  const resolve = async (runId: Id, visited: Set<Id>): Promise<Id> => {
+    const registered = scopes.registeredScopeOf(runId);
+    if (registered !== undefined) {
+      return registered;
+    }
+    if (visited.has(runId)) {
+      return runId;
+    }
+    visited.add(runId);
+    let scopeId: Id | undefined;
+    let parentRunId: Id | undefined;
+    for await (const event of store.read(runId, { fromSeq: 0, toSeq: 0 })) {
+      if (event.type === "run_created") {
+        scopeId = event.scopeId;
+        parentRunId = event.parentRunId;
+        break;
+      }
+    }
+    if (scopeId === undefined) {
+      scopeId =
+        parentRunId === undefined ? runId : await resolve(parentRunId, visited);
+    }
+    scopes.register(runId, scopeId);
+    return scopeId;
+  };
+  return (runId: Id): Promise<Id> => {
+    const known = scopes.registeredScopeOf(runId);
+    if (known !== undefined) {
+      return Promise.resolve(known);
+    }
+    const existing = pending.get(runId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const resolution = resolve(runId, new Set<Id>());
+    pending.set(runId, resolution);
+    return resolution;
+  };
 }
 
 /** Builds validated ports and owned storage dependencies for `createRuntime`. */
@@ -122,13 +167,13 @@ export async function setupRuntime(
   const ids = overrides.ids ?? new SystemIdGenerator(clock);
   const keys = await createRuntimeKeys(runtimeConfig.keys, overrides);
   let vault: SqliteVault | undefined;
+  let eventStore: EventStore | undefined;
   try {
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
     const runtimeVault = await createRuntimeVault(dataDir, overrides, keys, clock);
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
-    const piiRuntime = createRuntimePii(piiConfig, runtimeVault, scopes);
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
     const context = overrides.context ?? new NaiveContext();
     const tool = overrides.tool ?? unavailableTool;
@@ -140,8 +185,16 @@ export async function setupRuntime(
         roleConfigLogger.warn(code);
       },
     );
-    const rawStore =
-      overrides.store ?? (await createSqliteStore(dataDir, overrides.readOnlyStore === true));
+    const rawStore = await createRuntimeStore(runtimeConfig, overrides, clock);
+    eventStore = rawStore;
+    const piiRuntime = createRuntimePii(
+      piiConfig,
+      runtimeVault,
+      scopes,
+      persistedScopeResolver(rawStore, scopes),
+      policy.version,
+      clock,
+    );
     const store = piiConfig.enabled ? new PiiEventStore(rawStore, piiRuntime.tokenizer) : rawStore;
     return {
       config: runtimeConfig,
@@ -163,9 +216,13 @@ export async function setupRuntime(
     };
   } catch (error) {
     try {
-      vault?.close();
+      await eventStore?.close();
     } finally {
-      keys.dispose();
+      try {
+        vault?.close();
+      } finally {
+        keys.dispose();
+      }
     }
     throw error;
   }

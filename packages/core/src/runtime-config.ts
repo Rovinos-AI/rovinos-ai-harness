@@ -38,6 +38,8 @@ export interface RuntimeOverrides {
   readonly roleConfigDirectory?: string;
   /** Open existing storage without schema initialization or writes. */
   readonly readOnlyStore?: boolean;
+  /** Use an in-memory vault explicitly, for tests that do not need persistence. */
+  readonly transientVault?: boolean;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly model?: ModelPort;
@@ -60,11 +62,8 @@ export interface RuntimeOverrides {
 /** Runtime configuration required by the currently implemented run loop. */
 export interface RuntimeConfig {
   readonly run: RunConfig;
-<<<<<<< HEAD
   readonly pii?: PiiConfig;
-=======
   readonly store?: StoreConfig;
->>>>>>> origin/main
   readonly models?: ModelsConfig;
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;

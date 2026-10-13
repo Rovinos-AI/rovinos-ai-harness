@@ -12,6 +12,7 @@ import {
 
 /** Receives a metadata-only record for each detokenization action. */
 export type VaultAuditHandler = (audit: VaultAudit) => Promise<void> | void;
+export type VaultScopeResolver = (runId: Id) => Id | Promise<Id>;
 
 /** Adds metadata-only audit records to a vault resolver. */
 export class AuditingVaultResolver implements VaultResolver {
@@ -24,7 +25,7 @@ export class AuditingVaultResolver implements VaultResolver {
   constructor(
     private readonly inner: VaultResolver,
     private readonly onAudit: VaultAuditHandler,
-    private readonly scopeOf: (runId: Id) => Id = (runId) => runId,
+    private readonly scopeOf: VaultScopeResolver = (runId) => runId,
   ) {}
 
   /**
@@ -39,8 +40,9 @@ export class AuditingVaultResolver implements VaultResolver {
     runId: Id,
     token: Token,
     context: VaultResolveContext,
+    onAudit?: VaultAuditHandler,
   ): Promise<string | undefined> {
-    const [value] = await this.resolveMany(runId, [token], context);
+    const [value] = await this.resolveMany(runId, [token], context, onAudit);
     return value;
   }
 
@@ -56,6 +58,7 @@ export class AuditingVaultResolver implements VaultResolver {
     runId: Id,
     tokens: readonly Token[],
     context: VaultResolveContext,
+    onAudit: VaultAuditHandler = this.onAudit,
   ): Promise<(string | undefined)[]> {
     const validatedContext = VaultResolveContextSchema.parse(context);
     const values: (string | undefined)[] = [];
@@ -65,7 +68,7 @@ export class AuditingVaultResolver implements VaultResolver {
 
     for (const token of tokens) {
       try {
-        const value = await this.inner.resolve(this.scopeOf(runId), token, validatedContext);
+        const value = await this.inner.resolve(await this.scopeOf(runId), token, validatedContext);
         values.push(value);
         const action = value === undefined ? "blocked" : "detokenized";
         const type = tokenType(token).toLowerCase();
@@ -94,7 +97,7 @@ export class AuditingVaultResolver implements VaultResolver {
         entities: [...entityCounts].map(([type, count]) => ({ type, count })),
       }),
     );
-    await Promise.all(auditRecords.map((audit) => Promise.resolve(this.onAudit(audit))));
+    await Promise.all(auditRecords.map((audit) => Promise.resolve(onAudit(audit))));
 
     if (resolutionFailed) {
       throw resolutionFailure;
