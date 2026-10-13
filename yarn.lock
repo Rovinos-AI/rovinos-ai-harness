@@ -1196,6 +1196,7 @@ __metadata:
   resolution: "@harness/sandbox@workspace:packages/sandbox"
   dependencies:
     "@harness/schemas": "workspace:^"
+    "@types/node": "npm:22.20.5"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   languageName: unknown

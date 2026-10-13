@@ -13,6 +13,46 @@ describe("SandboxConfigSchema", () => {
     });
   });
 
+  it("accepts a remote runner URL with a secret reference", () => {
+    expect(
+      SandboxConfigSchema.parse({
+        runner: { url: "http://sandbox-runner:8080", token: "env:SANDBOX_RUNNER_TOKEN" },
+      }),
+    ).toEqual({
+      runner: { url: "http://sandbox-runner:8080", token: "env:SANDBOX_RUNNER_TOKEN" },
+    });
+  });
+
+  it("rejects inline runner tokens and unknown runner settings", () => {
+    expect(
+      SandboxConfigSchema.safeParse({
+        runner: { url: "http://sandbox-runner:8080", token: "plain-text-token" },
+      }).success,
+    ).toBe(false);
+    expect(
+      SandboxConfigSchema.safeParse({
+        runner: {
+          url: "http://sandbox-runner:8080",
+          token: "env:SANDBOX_RUNNER_TOKEN",
+          extra: true,
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects runner URLs that are not an HTTP origin", () => {
+    expect(
+      SandboxConfigSchema.safeParse({
+        runner: { url: "file:///tmp/runner", token: "env:SANDBOX_RUNNER_TOKEN" },
+      }).success,
+    ).toBe(false);
+    expect(
+      SandboxConfigSchema.safeParse({
+        runner: { url: "http://sandbox-runner:8080/path", token: "env:SANDBOX_RUNNER_TOKEN" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects unknown sandbox settings", () => {
     expect(SandboxConfigSchema.safeParse({ allowUnsafe: true }).success).toBe(false);
   });

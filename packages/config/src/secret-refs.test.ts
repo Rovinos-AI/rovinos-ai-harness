@@ -52,6 +52,9 @@ describe("getConfigSecretRefs", () => {
           { id: "previous", secret: "file:/run/secrets/doctor-previous-key" },
         ],
       },
+      sandbox: {
+        runner: { url: "http://sandbox-runner:8080", token: "env:SANDBOX_RUNNER_TOKEN" },
+      },
     });
 
     expect(getConfigSecretRefs(config)).toEqual([
@@ -60,6 +63,7 @@ describe("getConfigSecretRefs", () => {
       "file:/run/secrets/server-token",
       "env:DOCTOR_PRIMARY_KEY",
       "file:/run/secrets/doctor-previous-key",
+      "env:SANDBOX_RUNNER_TOKEN",
     ]);
   });
 });

@@ -22,7 +22,7 @@ export default defineConfig({
   test: {
     coverage: {
       provider: "v8",
-      include: ["packages/*/src/**/*.ts"],
+      include: ["packages/*/src/**/*.ts", "packages/sandbox/runner/src/**/*.ts"],
       reportOnFailure: true,
       thresholds: {
         perFile: true,

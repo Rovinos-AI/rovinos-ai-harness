@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.build.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "../dist",
+    "tsBuildInfoFile": "../dist/runner.tsbuildinfo",
+    "composite": true
+  },
+  "include": ["src/**/*.ts", "../src/inprocess.ts", "../src/types.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [{ "path": "../../schemas/tsconfig.build.json" }]
+}
