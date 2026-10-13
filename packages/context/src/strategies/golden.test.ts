@@ -186,8 +186,7 @@ async function updateGoldens(
     const output = await strategy.build(input);
     const stored = previous[strategy.id];
     if (
-      stored !== undefined &&
-      stored.version === strategy.version &&
+      stored?.version === strategy.version &&
       JSON.stringify(stored.output) !== JSON.stringify(output)
     ) {
       throw new StrategyVersionBumpRequiredError();
@@ -242,7 +241,8 @@ describe("context strategy output version guards", () => {
       summarizedResult.messages.some((message) =>
         message.parts.some(
           (part) =>
-            part.type === "text" && part.text === "Summary of earlier work: summary of compacted work",
+            part.type === "text" &&
+            part.text === "Summary of earlier work: summary of compacted work",
         ),
       ),
     ).toBe(true);

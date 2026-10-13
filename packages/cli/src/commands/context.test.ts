@@ -363,12 +363,41 @@ describe("harness context", () => {
     );
     expect(exitCode).toBe(0);
 
-    expect(test.stdout.join("")).toMatchInlineSnapshot(`
-      "Strategy	Version	Tokens	Messages	Dropped	Compacted ranges	Retained refs	Coverage
-      naive	v4	101	5	0	2-2	${runId}:1, ${runId}:2, ${runId}:4, ${runId}:5, ${runId}:6	100.0% covered
-      sliding_window	v3	42	3	2	2-2	${runId}:1, ${runId}:2	40.0% covered
-      "
-    `);
+    expect(test.stdout.join("")).toBe(
+      [
+        [
+          "Strategy",
+          "Version",
+          "Tokens",
+          "Messages",
+          "Dropped",
+          "Compacted ranges",
+          "Retained refs",
+          "Coverage",
+        ].join("\t"),
+        [
+          "naive",
+          "v4",
+          "101",
+          "5",
+          "0",
+          "2-2",
+          [1, 2, 4, 5, 6].map((seq) => `${runId}:${String(seq)}`).join(", "),
+          "100.0% covered",
+        ].join("\t"),
+        [
+          "sliding_window",
+          "v3",
+          "42",
+          "3",
+          "2",
+          "2-2",
+          [1, 2].map((seq) => `${runId}:${String(seq)}`).join(", "),
+          "40.0% covered",
+        ].join("\t"),
+        "",
+      ].join("\n"),
+    );
   });
 
   it("inspects SQLite without initialization writes or creating missing storage", async () => {

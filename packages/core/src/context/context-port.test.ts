@@ -110,10 +110,10 @@ describe("StrategyContextPort", () => {
       context.build([runInput(1, "x")]),
     ]);
 
-    expect(slow?.metadata).toMatchObject({ estimatedTokens: 6, messageCount: 1 });
-    expect(fast?.metadata).toMatchObject({ estimatedTokens: 1, messageCount: 1 });
-    expect(slow?.messages[0]?.parts).toMatchObject([{ text: "slower" }]);
-    expect(fast?.messages[0]?.parts).toMatchObject([{ text: "x" }]);
+    expect(slow.metadata).toMatchObject({ estimatedTokens: 6, messageCount: 1 });
+    expect(fast.metadata).toMatchObject({ estimatedTokens: 1, messageCount: 1 });
+    expect(slow.messages[0]?.parts).toMatchObject([{ text: "slower" }]);
+    expect(fast.messages[0]?.parts).toMatchObject([{ text: "x" }]);
   });
 
   it("rejects an invalid checkpoint without exposing its content", async () => {

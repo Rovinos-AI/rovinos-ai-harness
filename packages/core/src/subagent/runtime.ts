@@ -42,6 +42,7 @@ export async function resolveRuntimeRoles(
   });
 }
 
+/** Builds the context port configured for one subagent role. */
 export function contextForRole(role: ResolvedRole): ContextPort {
   const strategy = createStrategyRegistry({ provider: "default", model: "default" }).get(
     role.contextStrategy ?? "naive",
