@@ -4,7 +4,7 @@ import { z } from "zod";
 /** The intentional output from `harness keys generate`. */
 export const KeyGenerateResultSchema = z
   .object({
-    key: z.string().regex(/^[A-Za-z0-9+/]{43}=$/),
+    key: z.string().regex(/^[A-Z0-9+/]{43}=$/i),
     instructions: z.string(),
   })
   .strict();

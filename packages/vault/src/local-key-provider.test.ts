@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  KeysConfigSchema,
-  type SecretRef,
-} from "@harness/schemas";
+import { KeysConfigSchema, type SecretRef } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
-import {
-  LocalKeyProvider,
-  type KeySecretResolver,
-} from "./local-key-provider.js";
+import { LocalKeyProvider, type KeySecretResolver } from "./local-key-provider.js";
 
 function createConfig(currentKeyId: string, keys: readonly { id: string; secret: string }[]) {
   return KeysConfigSchema.parse({ currentKeyId, keys });
@@ -109,10 +103,9 @@ describe("LocalKeyProvider", () => {
 
   it("rejects a current key id that is not present in the configured versions", () => {
     expect(() =>
-      createProvider(
-        createConfig("missing", [{ id: "old", secret: "env:OLD_KEY" }]),
-        { "env:OLD_KEY": Buffer.alloc(32).toString("base64") },
-      ),
+      createProvider(createConfig("missing", [{ id: "old", secret: "env:OLD_KEY" }]), {
+        "env:OLD_KEY": Buffer.alloc(32).toString("base64"),
+      }),
     ).toThrowError("key_current_missing");
   });
 
@@ -155,7 +148,7 @@ describe("LocalKeyProvider", () => {
           env: { NODE_ENV: "production" },
           onWarning: () => undefined,
         }),
-    ).toThrowError(expect.objectContaining({ code: "key_config_required" }));
+    ).toThrowError("key_config_required");
   });
 
   it("warns when creating a development ephemeral key and zeroes it on dispose", async () => {
@@ -235,5 +228,4 @@ describe("LocalKeyProvider", () => {
     await expect(pending).rejects.toMatchObject({ code: "key_provider_disposed" });
     expect(keyBytes).toEqual(Buffer.alloc(32, 10));
   });
-
 });

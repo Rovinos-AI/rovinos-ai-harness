@@ -61,10 +61,7 @@ interface KeyReference {
 
 function decodeKey(encoded: string): Uint8Array {
   const decoded = Buffer.from(encoded, "base64");
-  if (
-    decoded.byteLength !== KEY_PROVIDER_KEY_BYTES ||
-    decoded.toString("base64") !== encoded
-  ) {
+  if (decoded.byteLength !== KEY_PROVIDER_KEY_BYTES || decoded.toString("base64") !== encoded) {
     decoded.fill(0);
     throw new LocalKeyProviderError("key_invalid_length");
   }

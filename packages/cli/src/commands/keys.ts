@@ -15,13 +15,12 @@ export const keysCommand: CommandModule = {
       .description("Manage encryption keys")
       .command("generate")
       .description("Generate a 32-byte key for an environment variable or secret store")
-      .action((_options, command) => {
+      .action(() => {
         const result = {
           key: randomBytes(KEY_PROVIDER_KEY_BYTES).toString("base64"),
           instructions: KEY_STORAGE_INSTRUCTIONS,
         };
-        const parentOptions = command.optsWithGlobals<{ json?: boolean }>();
-        if (parentOptions.json === true) {
+        if (program.opts().json === true) {
           context.out.json(KeyGenerateResultSchema, result);
           return;
         }
