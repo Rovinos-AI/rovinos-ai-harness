@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+# Example only: apply in the harness namespace and adapt the pod labels.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: harness-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: harness
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: otel-collector
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: harness-sidecar

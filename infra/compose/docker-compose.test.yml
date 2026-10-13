@@ -29,8 +29,14 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    networks:
+      - internal
     healthcheck:
       test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "harness", "-d", "harness"]
       interval: 2s
       timeout: 3s
       retries: 30
+networks:
+  internal:
+    internal: true
+  egress: {}
