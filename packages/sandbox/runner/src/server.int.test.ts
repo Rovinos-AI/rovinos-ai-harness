@@ -116,7 +116,7 @@ function readRenderedComposeConfig(): z.infer<typeof ComposeSchema> {
 }
 
 function renderComposeConfigWithoutRunnerToken(file: string): void {
-  const environment = { ...composeEnvironment };
+  const environment: NodeJS.ProcessEnv = { ...composeEnvironment };
   delete environment.SANDBOX_RUNNER_TOKEN;
   execFileSync(
     "docker",
