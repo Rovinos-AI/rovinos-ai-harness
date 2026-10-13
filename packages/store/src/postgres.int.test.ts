@@ -5,6 +5,7 @@ import { Code, type KeyProvider } from "@harness/schemas";
 import { afterAll, expect, it } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, type ContentCodec } from "./codec.js";
+import { migrate } from "./migrate.js";
 import { PostgresEventStore, openPostgresEventStore } from "./postgres/adapter.js";
 import { encodeEvents } from "./postgres/helpers.js";
 import {
@@ -143,6 +144,29 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
   supportsFileReopen: false,
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
+
+it("serializes concurrent Postgres migration startup", async () => {
+  const { admin, schema } = await createSchema();
+  const migrationPool = new Pool({
+    connectionString,
+    max: 2,
+    options: `-c search_path="${schema}"`,
+  });
+  try {
+    const results = await Promise.all([
+      migrate(migrationPool, "postgres"),
+      migrate(migrationPool, "postgres"),
+    ]);
+    expect(results.flat()).toHaveLength(1);
+    const versions = await migrationPool.query<{ version: string }>(
+      "SELECT version FROM schema_migrations ORDER BY version",
+    );
+    expect(versions.rows.map(({ version }) => version)).toEqual(["0001_init"]);
+  } finally {
+    await migrationPool.end();
+    await dropSchema(admin, schema);
+  }
+});
 
 it("atomically deletes a run racing with an append", async () => {
   const { store, cleanup } = await plaintextPostgresFactory();
