@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [
+    { "path": "../schemas/tsconfig.build.json" },
+    { "path": "../telemetry/tsconfig.build.json" },
+    { "path": "../store/tsconfig.build.json" },
+    { "path": "../core/tsconfig.build.json" }
+  ]
+}

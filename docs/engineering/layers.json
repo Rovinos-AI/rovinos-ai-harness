@@ -83,7 +83,8 @@
     "mcp",
     "sandbox",
     "core",
-    "config"
+    "config",
+    "control-plane"
   ],
   "sdk": [
     "schemas",
