@@ -13,6 +13,7 @@ import {
 import { type AuditingVaultResolver } from "@harness/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
+import { markSanitized, markSanitizedField } from "./pii-event-store.js";
 import type { Tokenizer } from "./tokenizer.js";
 
 /** Schema-typed tool invocation, structurally compatible with core's port. */
@@ -134,7 +135,8 @@ export class PiiToolPort implements PiiToolPortLike {
           destination: { tool: call.toolId },
         })
       : tokenized;
-    const prepared = { ...call, args: stored.value };
+    const prepared = { ...call, args: markJsonSanitized(stored.value) };
+    markSanitizedField(prepared, "args");
     // Future policy decorators decide in prepare, while arguments still carry tokens.
     return this.inner.prepare?.(prepared, context) ?? prepared;
   }
@@ -182,11 +184,12 @@ export class PiiToolPort implements PiiToolPortLike {
             destination: { tool: call.toolId },
           })
         : tokenized;
-      return {
+      const result = {
         outcome: execution.outcome,
-        result: stored.value,
+        result: markJsonSanitized(stored.value),
         ...(execution.outcome === "error" ? { errorCode: "tool_failed" } : {}),
       };
+      return markSanitizedField(result, "result");
     } catch (error) {
       if (error instanceof PiiBlockedError || error instanceof PiiTokenizerError) {
         if (error instanceof PiiBlockedError) {
@@ -214,4 +217,8 @@ function binaryResult(execution: PiiToolResult): PiiToolResult {
     binary: true,
     ...(execution.outcome === "error" ? { errorCode: "tool_failed" } : {}),
   };
+}
+
+function markJsonSanitized(value: JsonValue): JsonValue {
+  return typeof value === "object" && value !== null ? markSanitized(value) : value;
 }

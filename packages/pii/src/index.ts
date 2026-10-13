@@ -9,7 +9,15 @@ export type { PiiPolicyContext, PiiPolicyExplanation } from "./policy.js";
 export * from "./detectors/index.js";
 export { Tokenizer, type PiiDetectorRegistry, type TokenizerDependencies } from "./tokenizer.js";
 export { PiiBlockedError, PiiTokenizerError } from "./errors.js";
+export { PiiStorageFailedError } from "./errors.js";
 export { PiiToolPort } from "./pii-tool-port.js";
+export {
+  PiiEventStore,
+  isSanitizedField,
+  markSanitized,
+  markSanitizedField,
+} from "./pii-event-store.js";
+export type { EventStoreLike } from "./pii-event-store.js";
 export type {
   PiiToolCall,
   PiiToolContext,
