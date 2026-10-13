@@ -46,6 +46,7 @@ import {
   type EncodedEvent,
   type RunSummaryRow,
 } from "./helpers.js";
+import { deleteRunTransaction } from "./retention.js";
 
 const connectionStringSchema = z
   .url()
@@ -254,6 +255,21 @@ export class PostgresEventStore implements EventStore {
       );
       const row = result.rows[0];
       return row === undefined ? 0 : integer(row.next_seq);
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
+  /** {@inheritDoc EventStore.deleteRun} */
+  async deleteRun(runId: Id): Promise<number> {
+    try {
+      await this.ensureInitialized();
+      const client = await this.pool.connect();
+      try {
+        return await deleteRunTransaction(client, runId);
+      } finally {
+        client.release();
+      }
     } catch (error) {
       throw storeError(error);
     }

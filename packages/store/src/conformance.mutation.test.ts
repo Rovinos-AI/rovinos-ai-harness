@@ -24,6 +24,7 @@ function brokenFactory(): EventStoreFactory {
       latestSnapshot: (runId) => reference.latestSnapshot(runId),
       read: (runId, range) => reference.read(runId, range),
       head: (runId) => reference.head(runId),
+      deleteRun: (runId) => reference.deleteRun(runId),
       listRuns: (options) => reference.listRuns(options),
       findRunsByTrace: (traceId) => reference.findRunsByTrace(traceId),
       fetchOutbox: (sinkId, limit) => reference.fetchOutbox(sinkId, limit),
