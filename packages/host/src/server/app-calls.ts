@@ -63,7 +63,7 @@ export interface AppCallRouterOptions {
   readonly apps: ReadonlyMap<string, HostConfig["apps"][number]>;
   /** Executes an allowlisted call through the run's policy-aware tool pipeline. */
   readonly onAppCall?: (call: AppCall, context: AppCallExecutionContext) => Promise<CallToolResult>;
-  /** Consumes telemetry locally; this callback must not forward to an MCP server. */
+  /** Replaces default ingestion; validate with `ingestBatch`, keep input local, and return its acknowledgment. */
   readonly onTelemetryEmit?: (
     session: AppInstance,
     args: unknown,

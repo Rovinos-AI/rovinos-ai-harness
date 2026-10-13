@@ -86,7 +86,7 @@ export interface ReferenceHostDependencies {
   /** Policy and tool ports used by the default app-call handler when both are supplied. */
   readonly policy?: PolicyPort;
   readonly tool?: ToolPort;
-  /** Handles app telemetry locally without forwarding it to an MCP server. */
+  /** Replaces default ingestion; validate with `ingestBatch`, keep input local, and return its acknowledgment. */
   readonly onTelemetryEmit?: (
     session: AppInstance,
     args: unknown,
