@@ -41,6 +41,7 @@ function containsLiteralSecrets(value: unknown): boolean {
 it("keeps collector and Compose YAML free of literal credentials", () => {
   for (const path of [
     "infra/collector/base.yaml",
+    "infra/collector/allowlist.generated.yaml",
     "infra/collector/profile-debug.yaml",
     ...composeFiles,
   ]) {
@@ -80,6 +81,7 @@ it("binds every published Compose port to loopback", () => {
 
 it("sets the receiver, processors, health endpoint, and debug pipelines", () => {
   const base = readYaml("infra/collector/base.yaml");
+  const allowlist = readYaml("infra/collector/allowlist.generated.yaml");
   const profile = readYaml("infra/collector/profile-debug.yaml");
 
   expect(base.receivers).toMatchObject({
@@ -123,27 +125,50 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
     },
   });
   expect(profile.exporters).toMatchObject({ debug: { verbosity: "basic" } });
-  const profileText = readFileSync(resolve(root, "infra/collector/profile-debug.yaml"), "utf8");
-  expect(
-    profileText
-      .split("\n")
-      .filter(
-        (line) =>
-          line.startsWith("      processors: [memory_limiter, batch]") &&
-          line.endsWith("# Task 10.2 inserts generated allowlist processors here."),
-      ),
-  ).toHaveLength(3);
+  expect(allowlist.processors).toMatchObject({
+    "filter/drop_unregistered_spans": { error_mode: "ignore" },
+    "filter/drop_span_events": { error_mode: "ignore" },
+    "transform/span_attributes": { error_mode: "ignore" },
+    "filter/drop_unregistered_logs": { error_mode: "ignore" },
+    "transform/log_attributes": { error_mode: "ignore" },
+    "filter/drop_unregistered_metrics": { error_mode: "ignore" },
+    "transform/metric_attributes": { error_mode: "ignore" },
+    "transform/resource_attributes": { error_mode: "ignore" },
+  });
   expect(profile.service).toMatchObject({
     pipelines: {
       traces: {
         receivers: ["otlp"],
-        processors: ["memory_limiter", "batch"],
+        processors: [
+          "memory_limiter",
+          "filter/drop_unregistered_spans",
+          "filter/drop_span_events",
+          "transform/span_attributes",
+          "transform/resource_attributes",
+          "batch",
+        ],
         exporters: ["debug"],
       },
-      logs: { receivers: ["otlp"], processors: ["memory_limiter", "batch"], exporters: ["debug"] },
+      logs: {
+        receivers: ["otlp"],
+        processors: [
+          "memory_limiter",
+          "filter/drop_unregistered_logs",
+          "transform/log_attributes",
+          "transform/resource_attributes",
+          "batch",
+        ],
+        exporters: ["debug"],
+      },
       metrics: {
         receivers: ["otlp"],
-        processors: ["memory_limiter", "batch"],
+        processors: [
+          "memory_limiter",
+          "filter/drop_unregistered_metrics",
+          "transform/metric_attributes",
+          "transform/resource_attributes",
+          "batch",
+        ],
         exporters: ["debug"],
       },
     },

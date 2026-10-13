@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { metrics, type Counter } from "@opentelemetry/api";
+import type { Code } from "@harness/schemas";
 
 type NoMetricAttributes = Readonly<Record<string, never>>;
 
@@ -40,6 +41,14 @@ export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
   "harness.telemetry.dropped.reason": TELEMETRY_DROP_REASONS,
   "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
 } as const;
+
+/** Collector allowlist of metric names and their allowed datapoint attribute keys. */
+export const METRIC_ALLOWLIST: Record<Code, Code[]> = {
+  "harness.host.app_rejected": ["reason"],
+  "harness.sentinel.scope_reduced": [],
+  "harness.sentinel.short_values_skipped": [],
+  "harness.telemetry.dropped": ["reason"],
+};
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
 let hostAppRejectedCounter: Counter<HostAppRejectedAttributes> | undefined;
