@@ -1154,7 +1154,7 @@ __metadata:
     "@harness/telemetry": "workspace:^"
     "@opentelemetry/api": "npm:1.9.1"
     ajv: "npm:8.20.0"
-    openai: "npm:6.33.0"
+    openai: "npm:7.32.0"
     undici: "npm:8.11.2"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
@@ -4863,20 +4863,30 @@ __metadata:
   languageName: node
   linkType: hard
 
-"openai@npm:6.33.0":
-  version: 6.33.0
-  resolution: "openai@npm:6.33.0"
+"openai@npm:7.32.0":
+  version: 7.32.0
+  resolution: "openai@npm:7.32.0"
   peerDependencies:
-    ws: ^8.18.0
+    "@aws-sdk/credential-provider-node": ">=3.972.0 <4"
+    "@smithy/hash-node": ">=4.3.0 <5"
+    "@smithy/signature-v4": ">=5.4.0 <6"
+    undici: ">=5 <9"
+    ws: ^8.21.0
     zod: ^3.25 || ^4.0
   peerDependenciesMeta:
+    "@aws-sdk/credential-provider-node":
+      optional: true
+    "@smithy/hash-node":
+      optional: true
+    "@smithy/signature-v4":
+      optional: true
+    undici:
+      optional: true
     ws:
       optional: true
     zod:
       optional: true
-  bin:
-    openai: bin/cli
-  checksum: 10c0/158b6466469d269e944ea64453e32f116193523f0fbe93e73193ebfd84e1be40d5bc2d6dbfada327d8b7c70ede4c6530c5e023e1dfb62a11b8706c46c6dc1889
+  checksum: 10c0/b6adb111ed7c6ce5ce5b27696b4218de4e0cae5aacb256c0bbed574fd1f950d7c8066d0a813c31df44d46f946e1199867085fbe77253f33d829446583c3c4489
   languageName: node
   linkType: hard
 
