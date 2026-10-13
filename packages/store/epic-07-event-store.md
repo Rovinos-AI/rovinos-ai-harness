@@ -280,8 +280,8 @@ interface EventStore {
 ## 7.11 Retention policy job
 
 **Parent:** #7 Event store
-**Task Description:** Delete expired runs and old snapshots per configured retention, with a dry-run mode and a hook so the token vault purges at the same time.
-**Expected Inputs:** Retention config (`completedRunsDays`, `failedRunsDays`, `snapshotKeep`), clock.
+**Task Description:** Delete expired runs under configured retention, with a dry-run mode and a hook so the token vault purges at the same time. Snapshot pruning is configured per store adapter and happens on snapshot writes.
+**Expected Inputs:** Retention config (`completedRunsDays`, `failedRunsDays`), clock.
 **Expected Output:** `deleteRun(runId)` on `EventStore`, `packages/store/src/retention.ts` (`purgeExpiredRuns`), config fragment `packages/schemas/src/config/store.ts` retention section, CLI wiring left to 20.x commands (document only).
 **Dependencies:** none.
 **Items it depends on:** 7.8, 20.1.
@@ -289,7 +289,7 @@ interface EventStore {
 
 1. `deleteRun` removes events, snapshots, and the `runs` row in one transaction; returns the number of events deleted. Never deletes runs whose status is `running` or `suspended`.
 2. `purgeExpiredRuns({ store, clock, policy, onRunPurged?, dryRun })`: select terminal runs where `last_ts < now - days*86_400_000` (use `listRuns` with status filters and keyset pagination; do not load all runs), call `deleteRun`, then `await onRunPurged(runId)` (12.6 wires the vault purge here). Process in batches of 100.
-3. Returns `{ examined, purged, skippedActive }`. In dry-run nothing is deleted and the same counts are returned.
+3. Returns `{ examined, purged, skippedActive, hookFailures }`; hook failures are counted without undoing deletion. In dry-run nothing is deleted or passed to the hook, and the run counts match a real purge.
 4. Emit only metadata through the logger (`run_purged` with the run id).
 **Tests to write:** Expiry boundaries with `FakeClock`; active runs never purged; dry run deletes nothing; `onRunPurged` called after deletion; failure in the hook does not roll back deletion but is reported; conformance case for `deleteRun` atomicity on all adapters.
 **Acceptance Criteria:**

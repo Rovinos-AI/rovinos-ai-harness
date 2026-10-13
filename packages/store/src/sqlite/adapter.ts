@@ -47,6 +47,7 @@ import {
   type RunSummaryRow,
 } from "./serialization.js";
 import { openReadOnlyDatabase } from "./read-only.js";
+import { deleteRunTransaction } from "./retention.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
@@ -362,6 +363,15 @@ export class SqliteEventStore implements EventStore {
     try {
       const row = this.getHead.get(runId);
       return Promise.resolve(row?.next_seq ?? 0);
+    } catch (error) {
+      return Promise.reject(storeError(error));
+    }
+  }
+
+  /** {@inheritDoc EventStore.deleteRun} */
+  deleteRun(runId: Id): Promise<number> {
+    try {
+      return Promise.resolve(deleteRunTransaction(this.db, runId));
     } catch (error) {
       return Promise.reject(storeError(error));
     }

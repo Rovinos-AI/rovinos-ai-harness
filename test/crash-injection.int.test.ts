@@ -275,6 +275,10 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.head(forRun);
   }
 
+  deleteRun(forRun: Id) {
+    return this.inner.deleteRun(forRun);
+  }
+
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {
     return this.inner.listRuns(options);
   }
@@ -448,6 +452,10 @@ class PreIntentExecutionStore implements EventStore {
 
   head(forRun: Id) {
     return this.inner.head(forRun);
+  }
+
+  deleteRun(forRun: Id) {
+    return this.inner.deleteRun(forRun);
   }
 
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {
