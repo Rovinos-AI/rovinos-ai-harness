@@ -34,7 +34,8 @@ export const COMMANDS: CommandModule[] = [
 
 const systemClock: Clock = { now: () => Date.now() };
 
-function createDefaultContext(program: Command, out: Output): CliContext {
+/** Creates the CLI context with config loading, runtime composition, and output routing. */
+export function createDefaultContext(program: Command, out: Output): CliContext {
   return {
     loadConfig: (): Promise<HarnessConfig> => {
       const configPath = program.opts<{ config?: string }>().config;
@@ -47,6 +48,10 @@ function createDefaultContext(program: Command, out: Output): CliContext {
       const { createRuntime } = await import("@harness/core");
       return createRuntime(config, {
         ...overrides,
+        onKeysWarning: (code) => {
+          overrides?.onKeysWarning?.(code);
+          out.error(code, "development_only_ephemeral_key");
+        },
         roleConfigDirectory:
           overrides?.roleConfigDirectory ??
           dirname(

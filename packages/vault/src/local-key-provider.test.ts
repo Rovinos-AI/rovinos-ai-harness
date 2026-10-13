@@ -101,14 +101,6 @@ describe("LocalKeyProvider", () => {
     expect(secret).not.toContain("private");
   });
 
-  it("rejects a current key id that is not present in the configured versions", () => {
-    expect(() =>
-      createProvider(createConfig("missing", [{ id: "old", secret: "env:OLD_KEY" }]), {
-        "env:OLD_KEY": Buffer.alloc(32).toString("base64"),
-      }),
-    ).toThrowError("key_current_missing");
-  });
-
   it("keeps old key versions readable after the current key rotates", async () => {
     const oldKey = Buffer.alloc(32, 3);
     const newKey = Buffer.alloc(32, 4);

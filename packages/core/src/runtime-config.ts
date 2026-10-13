@@ -5,6 +5,8 @@ import {
   type RolesConfig,
   type Id,
   type JsonValue,
+  type KeyProvider,
+  type KeysConfig,
   type ModelsConfig,
   type RunConfig,
   type RunInput,
@@ -12,6 +14,7 @@ import {
 } from "@harness/schemas";
 import type { ProviderAdapter } from "@harness/models";
 import type { EventStore } from "@harness/store";
+import type { LocalKeyProvider } from "@harness/vault";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
@@ -35,6 +38,8 @@ export interface RuntimeOverrides {
   readonly secretResolver?: {
     resolve(ref: SecretRef): Promise<{ reveal(): string }>;
   };
+  /** Receives safe warnings raised during key-provider setup. */
+  readonly onKeysWarning?: (code: "keys_ephemeral") => void;
   readonly tool?: ToolPort;
   /** Policy evaluator replacing the policy document configured for the runtime. */
   readonly policy?: PolicyPort;
@@ -50,11 +55,14 @@ export interface RuntimeConfig {
   readonly models?: ModelsConfig;
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;
+  readonly keys?: KeysConfig | undefined;
 }
 
 /** Composed run-loop operations and their shared dependencies. */
 export interface Runtime {
   readonly store: EventStore;
+  /** Key provider shared by encryption consumers in the composed runtime. */
+  readonly keys: KeyProvider;
   readonly clock: Clock;
   readonly ids: IdGenerator;
   run(goal: JsonValue): Promise<RunLoopResult>;
@@ -73,6 +81,7 @@ export interface RuntimeComposition {
   readonly clock: Clock;
   readonly ids: IdGenerator;
   readonly store: EventStore;
+  readonly keys: LocalKeyProvider;
   readonly model: ModelPort;
   readonly tool: ToolPort;
   readonly policy: PolicyPort;

@@ -16,12 +16,20 @@ export const KeyVersionConfigSchema = z
 export const KeysConfigSchema = z
   .object({
     currentKeyId: Code,
-    keys: z.array(KeyVersionConfigSchema),
+    keys: z.array(KeyVersionConfigSchema).min(1),
   })
   .strict()
-  .superRefine(({ keys }, context) => {
+  .superRefine(({ currentKeyId, keys }, context) => {
     const seen = new Set<string>();
     for (const [index, key] of keys.entries()) {
+      if (key.id === "ephemeral") {
+        context.addIssue({
+          code: "custom",
+          path: ["keys", index, "id"],
+          message: "The key identifier is reserved.",
+          params: { errorCode: "key_id_reserved" },
+        });
+      }
       if (seen.has(key.id)) {
         context.addIssue({
           code: "custom",
@@ -31,6 +39,14 @@ export const KeysConfigSchema = z
         });
       }
       seen.add(key.id);
+    }
+    if (!seen.has(currentKeyId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["currentKeyId"],
+        message: "The current key must be configured.",
+        params: { errorCode: "key_current_missing" },
+      });
     }
   });
 
