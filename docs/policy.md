@@ -61,3 +61,21 @@ The PII-aware tool port resolves unchanged tokens only in memory during this
 validation; durable arguments remain tokenized. Tool descriptions without an
 `inputSchema` skip schema validation, but still enforce editable pointers and
 tokenize edited arguments before recording.
+
+## Approval expiry and escalation
+
+An `ask` rule can set `approvalTtlMs` to deny an approval once it expires, and
+`escalateAfterMs` to notify a human while the approval is still pending. If both
+are set, the escalation threshold must precede expiry. Run
+`harness approvals sweep` to process pending approvals; expiry takes precedence
+at its boundary and is recorded as a denied `approval_resolved` event with
+`decidedBy: expiry` and `reason: expired`. Sweeping is a one-shot CLI operation,
+not a background service.
+
+The CLI emits escalation notifications as metadata-only log lines. The policy
+package also provides `WebhookNotifier` for integrations that resolve its URL
+from a `SecretRef`; its strict payload contains run, approval, tool, and rule
+IDs plus approval age, never tool arguments. Selecting the webhook from CLI
+configuration is a follow-up; `harness approvals sweep` currently uses the log
+notifier.
+Control-plane integrations can invoke the sweep periodically.

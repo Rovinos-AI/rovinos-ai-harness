@@ -10,6 +10,7 @@ import {
   SequentialIdGenerator,
   type Event,
   type JsonValue,
+  type Message,
   type NewEvent,
   type Part,
 } from "@harness/schemas";
@@ -189,8 +190,8 @@ function createScenario(): Scenario {
   ]);
   const tool = new FakeToolPort(definitions);
   const context: ContextPort = {
-    build: (events) =>
-      Promise.resolve([
+    build: (events) => {
+      const messages: Message[] = [
         {
           role: "user",
           parts: [
@@ -200,7 +201,17 @@ function createScenario(): Scenario {
             },
           ],
         },
-      ]),
+      ];
+      return Promise.resolve({
+        messages,
+        metadata: {
+          strategyId: "naive",
+          strategyVersion: "v4",
+          estimatedTokens: 1,
+          messageCount: 1,
+        },
+      });
+    },
     snapshot: () => Promise.resolve(null),
     restore: () => Promise.resolve(),
   };
@@ -293,6 +304,23 @@ class BoundaryRecordingStore implements EventStore {
 
   ackOutbox(sinkId: Code, cursor: number) {
     return this.inner.ackOutbox(sinkId, cursor);
+  }
+
+  claimApprovalNotification(approvalId: Id, approvalRunId: Id, claimedAt: number, leaseMs: number) {
+    return this.inner.claimApprovalNotification(approvalId, approvalRunId, claimedAt, leaseMs);
+  }
+
+  markApprovalNotificationSent(
+    approvalId: Id,
+    approvalRunId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ) {
+    return this.inner.markApprovalNotificationSent(approvalId, approvalRunId, claimedAt, sentAt);
+  }
+
+  releaseApprovalNotification(approvalId: Id, approvalRunId: Id, claimedAt: number) {
+    return this.inner.releaseApprovalNotification(approvalId, approvalRunId, claimedAt);
   }
 
   close() {
@@ -472,6 +500,23 @@ class PreIntentExecutionStore implements EventStore {
 
   ackOutbox(sinkId: Code, cursor: number) {
     return this.inner.ackOutbox(sinkId, cursor);
+  }
+
+  claimApprovalNotification(approvalId: Id, approvalRunId: Id, claimedAt: number, leaseMs: number) {
+    return this.inner.claimApprovalNotification(approvalId, approvalRunId, claimedAt, leaseMs);
+  }
+
+  markApprovalNotificationSent(
+    approvalId: Id,
+    approvalRunId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ) {
+    return this.inner.markApprovalNotificationSent(approvalId, approvalRunId, claimedAt, sentAt);
+  }
+
+  releaseApprovalNotification(approvalId: Id, approvalRunId: Id, claimedAt: number) {
+    return this.inner.releaseApprovalNotification(approvalId, approvalRunId, claimedAt);
   }
 
   close() {

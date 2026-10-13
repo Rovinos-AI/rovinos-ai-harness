@@ -40,6 +40,7 @@ export {
   requestApproval,
   resolveApproval,
   type ApprovalDecision,
+  type ApprovalResolutionMetadata,
   type ApprovalSuspensionResult,
   type RequestApprovalOptions,
 } from "./approvals.js";
@@ -92,6 +93,8 @@ export {
   type ResumePolicy,
 } from "./resume-policy.js";
 export type {
+  ContextBuildMetadata,
+  ContextBuildResult,
   ContextPort,
   IdGenerator,
   ModelCompletion,

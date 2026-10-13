@@ -107,6 +107,9 @@ run needs no live process. Output carries tokenized values only unless `--reveal
   pending tasks 6.3/6.5. Until then `--edit` reports `approval_edit_unavailable` unless a caller
   supplies that port.
 - `harness approvals deny <approvalId> [--yes] [--resume]` denies.
+- `harness approvals sweep` runs one sweep: approvals at or past expiry are denied and recorded;
+  due escalations are written as metadata-only log notifications. Expiry takes precedence when both
+  thresholds have elapsed.
 
 Without `--yes`, `approve` and `deny` ask for confirmation when standard input is a terminal. When
 there is no TTY they fail with `confirmation_required` (code `2`), so piped or automated decisions
@@ -114,9 +117,11 @@ must explicitly include `--yes`. A refusal exits with `confirmation_declined` (c
 resolving, the command prints `harness resume <runId>`; `--resume` resumes at once and then uses the
 `harness resume` exit codes.
 `--json` results are `ApprovalListResultSchema`, `ApprovalShowResultSchema`, and
-`ApprovalResolveResultSchema` in `packages/schemas/src/cli/approvals.ts`.
+`ApprovalResolveResultSchema` and `ApprovalSweepResultSchema` in
+`packages/schemas/src/cli/approvals.ts`; `sweep` returns examined, expired, escalated, and failed
+counts.
 
-Exit codes: `0` resolved, `1` failure, `2` usage (including a malformed id), `7` for
+Exit codes: `0` completed, `1` failure, `2` usage (including a malformed id), `7` for
 `approval_not_found`, `approval_already_resolved`, or a run that is no longer suspended.
 
 ## `harness inspect`
@@ -137,9 +142,15 @@ report `cancel_conflict`; both exit with code `1`.
 ## `harness context`
 
 `harness context <runId> [--strategy naive|sliding_window|summarizing] [--max-tokens N]
-[--reserve-output N] [--model provider/model] [--show-content] [--json]` re-derives context
+[--reserve-output N] [--model provider/model] [--show-content] [--compare a,b] [--json]`
+re-derives context
 from the stored event log without appending events or calling models. Summarizing uses only
 already-recorded compactions; it does not create a new summary.
+
+`--compare a,b` rebuilds the same stored events with the two named strategies and prints their
+token estimates, message and drop counts, compacted ranges, retained run/sequence references, and
+directional retained-event coverage. The table rounds percentages to one decimal place. With
+`--json`, it emits the comparison list and exact coverage fractions as one JSON document.
 Context inspection currently supports SQLite only. SQLite is loaded into an in-memory read-only
 snapshot without directory creation, schema initialization, metadata writes, or sidecar creation.
 If a WAL or rollback-journal sidecar exists, inspection fails rather than returning a potentially

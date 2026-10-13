@@ -13,6 +13,7 @@ export function deleteRunTransaction(db: Database.Database, runId: Id): number {
     }
     const eventCount = db.prepare<[Id]>("DELETE FROM events WHERE run_id = ?").run(runId).changes;
     db.prepare<[Id]>("DELETE FROM snapshots WHERE run_id = ?").run(runId);
+    db.prepare<[Id]>("DELETE FROM approval_notifications WHERE run_id = ?").run(runId);
     db.prepare<[Id]>("DELETE FROM runs WHERE run_id = ?").run(runId);
     return eventCount;
   });

@@ -153,10 +153,12 @@ export {
   ApprovalListResultSchema,
   ApprovalResolveResultSchema,
   ApprovalShowResultSchema,
+  ApprovalSweepResultSchema,
   ApprovalSummarySchema,
   type ApprovalListResult,
   type ApprovalResolveResult,
   type ApprovalShowResult,
+  type ApprovalSweepResult,
   type ApprovalSummary,
 } from "./cli/approvals.js";
 export {

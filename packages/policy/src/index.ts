@@ -38,6 +38,24 @@ export {
   type PolicyDocument,
   type Rule,
 } from "./schema.js";
+export {
+  ApprovalNotificationSchema,
+  LogNotifier,
+  WebhookNotificationError,
+  WebhookNotifier,
+  type ApprovalNotification,
+  type Notifier,
+  type WebhookNotifierOptions,
+  type WebhookSecretResolver,
+} from "./notifier.js";
+export {
+  sweepApprovals,
+  type ApprovalExpiryResolution,
+  type ApprovalSweepClock,
+  type ApprovalSweepRun,
+  type ApprovalSweepStore,
+} from "./sweeper.js";
+export type { ApprovalSweepResult } from "@harness/schemas";
 
 /**
  * Loads and validates a YAML or JSON policy document from disk.

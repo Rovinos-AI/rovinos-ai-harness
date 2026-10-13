@@ -5,7 +5,6 @@ import {
   type Event,
   type Id,
   type JsonValue,
-  type Message,
   type RunConfig,
 } from "@harness/schemas";
 import type { Context, Link } from "@opentelemetry/api";
@@ -247,6 +246,7 @@ async function runLoopSteps(
         ids: options.ids,
         runId: execution.runId,
         messages: prepared.context,
+        contextMetadata: prepared.contextMetadata,
         signal: options.signal,
         deadlineTs: prepared.deadlineTs,
         ...(options.role === undefined ? {} : { role: options.role }),
@@ -311,11 +311,12 @@ async function prepareModelStep(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
-): Promise<{ readonly context: Message[]; readonly deadlineTs: number; readonly event?: Event }> {
-  const context =
+) {
+  const builtContext =
     options.previousEventLogs === undefined
       ? await options.context.build(events.slice())
       : await options.context.build(events.slice(), options.previousEventLogs);
+  const contextMetadata = builtContext.metadata;
   const preflight = await preflightModelBudget({
     budgetTracker: execution.budgetTracker,
     checkpointer: execution.checkpointer,
@@ -324,12 +325,12 @@ async function prepareModelStep(
     recorder: options.recorder,
   });
   if (preflight.event !== undefined) {
-    return { context, ...preflight };
+    return { context: builtContext.messages, contextMetadata, ...preflight };
   }
   const stopped = await suspendIfShutdown(options, events, execution);
   return stopped === undefined
-    ? { context, deadlineTs: preflight.deadlineTs }
-    : { context, ...preflight, event: stopped };
+    ? { context: builtContext.messages, contextMetadata, deadlineTs: preflight.deadlineTs }
+    : { context: builtContext.messages, contextMetadata, ...preflight, event: stopped };
 }
 
 async function runToolCalls(

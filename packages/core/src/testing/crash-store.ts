@@ -110,6 +110,28 @@ export class CrashingEventStore implements EventStore {
     return this.inner.ackOutbox(sinkId, cursor);
   }
 
+  claimApprovalNotification(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    leaseMs: number,
+  ): Promise<boolean> {
+    return this.inner.claimApprovalNotification(approvalId, runId, claimedAt, leaseMs);
+  }
+
+  markApprovalNotificationSent(
+    approvalId: Id,
+    runId: Id,
+    claimedAt: number,
+    sentAt: number,
+  ): Promise<boolean> {
+    return this.inner.markApprovalNotificationSent(approvalId, runId, claimedAt, sentAt);
+  }
+
+  releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void> {
+    return this.inner.releaseApprovalNotification(approvalId, runId, claimedAt);
+  }
+
   close(): Promise<void> {
     return this.inner.close();
   }

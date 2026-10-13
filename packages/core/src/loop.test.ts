@@ -20,6 +20,7 @@ import {
 } from "@opentelemetry/api";
 import {
   FakeClock,
+  Event,
   Id,
   JsonValue,
   PiiConfigSchema,
@@ -27,7 +28,6 @@ import {
   SequentialIdGenerator,
   HarnessError,
   Traceparent,
-  type Event,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
 import {
@@ -43,7 +43,7 @@ import {
   SummarizingStrategy,
 } from "@harness/context";
 import { activeRuns } from "@harness/telemetry";
-import { buildApprovalPayload } from "@harness/policy";
+import { buildApprovalPayload, sweepApprovals, type ApprovalSweepStore } from "@harness/policy";
 import { emailDetector, PiiToolPort, Tokenizer } from "@harness/pii";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
@@ -370,6 +370,7 @@ async function requestApprovalForRun(
   recorder: RunRecorder,
   clock: FakeClock,
   state: ReturnType<typeof foldRunState>,
+  approvalTtlMs?: number,
 ) {
   const intent = state.pendingToolCalls.get(modelCallId);
   if (intent === undefined) {
@@ -381,6 +382,7 @@ async function requestApprovalForRun(
       id: intent.ruleId ?? "test_rule",
       reason: intent.policyReason ?? "manual_review",
       editable: intent.policyEditable ?? [],
+      ...(approvalTtlMs === undefined ? {} : { approvalTtlMs }),
     },
     now: Math.floor(clock.now()),
   });
@@ -388,6 +390,7 @@ async function requestApprovalForRun(
     approvalId,
     callId: modelCallId,
     payload: JsonValue.parse(payload),
+    ...(approvalTtlMs === undefined ? {} : { expiresAt: Math.floor(clock.now()) + approvalTtlMs }),
     state,
     checkpointer: new Checkpointer({
       recorder,
@@ -888,6 +891,38 @@ describe("approval lifecycle", () => {
     ).rejects.toBeInstanceOf(ApprovalEditsRequiredError);
     await requestApprovalForRun(recorder, clock, state);
     await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
+    await expect(
+      resolveApproval(store, runId, approvalId, "deny", undefined, clock),
+    ).rejects.toBeInstanceOf(ApprovalAlreadyResolvedError);
+  });
+
+  it("resumes reading a legacy resolution as a human decision", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+    await requestApprovalForRun(recorder, clock, state);
+    const events = await readApprovalEvents(store);
+    const last = events.at(-1);
+    if (last === undefined) {
+      throw new Error("Expected a suspended approval history.");
+    }
+    const legacyResolution = Event.parse({
+      runId,
+      seq: events.length,
+      ts: clock.now(),
+      v: 1,
+      traceId: last.traceId,
+      spanId: last.spanId,
+      segmentId: last.segmentId,
+      type: "approval_resolved",
+      approvalId,
+      decision: "approve",
+      waitMs: 0,
+    });
+    await store.append(runId, [legacyResolution], events.length);
+
+    const resumedState = foldRunState(await readApprovalEvents(store));
+    expect(resumedState.resolvedApprovals.get(approvalId)?.decidedBy).toBe("human");
     await expect(
       resolveApproval(store, runId, approvalId, "deny", undefined, clock),
     ).rejects.toBeInstanceOf(ApprovalAlreadyResolvedError);
@@ -1596,6 +1631,12 @@ describe("runLoop", () => {
     expect(runSpans).toHaveLength(1);
     expect(modelSpans).toHaveLength(1);
     expect(modelSpans[0]?.parentSpanId).toBe(runSpans[0]?.spanContextValue.spanId);
+    expect(modelSpans[0]?.attributes).toMatchObject({
+      "harness.context.strategy": "naive",
+      "harness.context.strategy_version": "v4",
+      "harness.context.estimated_tokens": 0,
+      "harness.context.message_count": 1,
+    });
     expect(runSpans[0]?.attributes["harness.event.seq"]).toBe(5);
 
     const actual = `${JSON.stringify(normalizeEvents(result.events), null, 2)}\n`;
@@ -1646,7 +1687,7 @@ describe("runLoop", () => {
       traceparent,
       context: {
         strategyId: "naive",
-        strategyVersion: "v3",
+        strategyVersion: "v4",
         calibration: null,
       },
       plan: null,
@@ -2086,7 +2127,17 @@ describe("runLoop", () => {
       ]),
     );
     const contextPort = {
-      build: vi.fn(() => Promise.resolve([])),
+      build: vi.fn(() =>
+        Promise.resolve({
+          messages: [],
+          metadata: {
+            strategyId: "naive",
+            strategyVersion: "v4",
+            estimatedTokens: 0,
+            messageCount: 0,
+          },
+        }),
+      ),
       snapshot: vi.fn(() => Promise.resolve([])),
       restore: vi.fn(() => Promise.resolve()),
     };
@@ -2247,6 +2298,60 @@ describe("runLoop", () => {
       policyDecision: "ask",
       ruleId: "review_rule",
     });
+  });
+
+  it("applies an expired approval as a denial when the run resumes", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+    await requestApprovalForRun(recorder, clock, state, 10);
+    clock.advance(10);
+
+    const sweepStore: ApprovalSweepStore = {
+      listRuns: (options) => store.listRuns(options),
+      read: (forRun) => store.read(forRun),
+      claimApprovalNotification: (forApproval, forRun, claimedAt, leaseMs) =>
+        store.claimApprovalNotification(forApproval, forRun, claimedAt, leaseMs),
+      markApprovalNotificationSent: (forApproval, forRun, claimedAt, sentAt) =>
+        store.markApprovalNotificationSent(forApproval, forRun, claimedAt, sentAt),
+      releaseApprovalNotification: (forApproval, forRun, claimedAt) =>
+        store.releaseApprovalNotification(forApproval, forRun, claimedAt),
+      resolveApproval: (forRun, forApproval, metadata) =>
+        resolveApproval(store, forRun, forApproval, "deny", undefined, clock, undefined, metadata),
+    };
+    const sweepResult = await sweepApprovals({
+      store: sweepStore,
+      clock,
+      notifier: { notify: () => Promise.resolve() },
+    });
+    const tool = new FakeToolPort();
+    const resumed = await resumeRun(
+      createResumeOptions(store, clock, {
+        model: new FakeModelPort([completion()]),
+        tool,
+      }),
+    );
+    const events = await readApprovalEvents(store);
+
+    expect(sweepResult).toMatchObject({ examined: 1, expired: 1 });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "approval_resolved",
+        approvalId,
+        decision: "deny",
+        decidedBy: "expiry",
+        reason: "expired",
+      }),
+    );
+    expect(resumed.status).toBe("completed");
+    expect(tool.calls).toHaveLength(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool_result",
+        outcome: "denied",
+        errorCode: "approval_denied",
+      }),
+    );
   });
 
   it("records timeouts and allows the model to continue", async () => {
