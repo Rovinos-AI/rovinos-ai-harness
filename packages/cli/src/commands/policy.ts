@@ -12,20 +12,7 @@ import {
 } from "@harness/schemas";
 import type { PolicyTestCall, PolicyTestExpectation, PolicyTestResult } from "@harness/schemas";
 import type { CompiledPolicy } from "@harness/policy";
-import {
-  createCustomDetector,
-  creditCardDetector,
-  emailDetector,
-  ibanDetector,
-  ipDetector,
-  phoneDetector,
-  resolveOverlaps,
-  secretsDetector,
-  Tokenizer,
-  urlCredentialsDetector,
-} from "@harness/pii";
 import type { Detector } from "@harness/pii";
-import { InMemoryVault } from "@harness/vault";
 import { z } from "zod";
 import type { CliContext, CommandModule } from "../command.js";
 
@@ -35,7 +22,7 @@ type PolicyCommandErrorCode =
   | "policy_test_ids_duplicate"
   | "policy_expectations_ids_duplicate";
 
-const POLICY_TEST_RUN_ID = Id.parse("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+const POLICY_TEST_RUN_ID = Id.parse("00000000000000000000000000");
 
 const TestOptionsSchema = z
   .object({
@@ -127,21 +114,23 @@ async function testPolicyResult({
   const results: PolicyTestResult["results"] = [];
   const mismatches: PolicyTestResult["mismatches"] = [];
   const config = await cliContext.loadConfig();
+  const pii = await import("@harness/pii");
+  const { InMemoryVault } = await import("@harness/vault");
   const builtInAndCustomDetectors: readonly Detector[] = [
-    creditCardDetector,
-    emailDetector,
-    ibanDetector,
-    ipDetector,
-    phoneDetector,
-    secretsDetector,
-    urlCredentialsDetector,
-    ...(config.pii.custom ?? []).map((detector) => createCustomDetector(detector)),
+    pii.creditCardDetector,
+    pii.emailDetector,
+    pii.ibanDetector,
+    pii.ipDetector,
+    pii.phoneDetector,
+    pii.secretsDetector,
+    pii.urlCredentialsDetector,
+    ...(config.pii.custom ?? []).map((detector) => pii.createCustomDetector(detector)),
   ];
   const vault = new InMemoryVault();
-  const tokenizer = new Tokenizer({
+  const tokenizer = new pii.Tokenizer({
     detectors: {
       detect: (text) =>
-        resolveOverlaps(builtInAndCustomDetectors.flatMap((detector) => detector.detect(text))),
+        pii.resolveOverlaps(builtInAndCustomDetectors.flatMap((detector) => detector.detect(text))),
     },
     policy: config.pii,
     vault,
