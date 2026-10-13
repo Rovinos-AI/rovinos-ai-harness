@@ -26,7 +26,17 @@ describe("Docker image", () => {
     try {
       if (composeStarted) {
         await runDocker(
-          ["compose", "--project-name", projectName, "--file", composeFile, "down", "--volumes"],
+          [
+            "compose",
+            "--env-file",
+            "infra/collector/VERSION",
+            "--project-name",
+            projectName,
+            "--file",
+            composeFile,
+            "down",
+            "--volumes",
+          ],
           composeEnvironment,
         );
       }
@@ -51,6 +61,8 @@ describe("Docker image", () => {
     await runDocker(
       [
         "compose",
+        "--env-file",
+        "infra/collector/VERSION",
         "--project-name",
         projectName,
         "--file",
@@ -58,6 +70,7 @@ describe("Docker image", () => {
         "up",
         "--wait",
         "--no-build",
+        "--pull=never",
       ],
       composeEnvironment,
     );
@@ -65,6 +78,8 @@ describe("Docker image", () => {
       await runDocker(
         [
           "compose",
+          "--env-file",
+          "infra/collector/VERSION",
           "--project-name",
           projectName,
           "--file",
