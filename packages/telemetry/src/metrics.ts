@@ -15,7 +15,7 @@ export const TELEMETRY_DROP_REASONS = [
 ] as const;
 
 /** Closed rejection reasons used by the host app-call counter. */
-export const HOST_APP_REJECTED_REASONS = ["unknown_tool"] as const;
+export const HOST_APP_REJECTED_REASONS = ["unknown_tool", "telemetry_unavailable"] as const;
 
 /** Bounded reasons for dropping or stripping telemetry data. */
 export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];

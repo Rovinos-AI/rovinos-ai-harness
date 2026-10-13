@@ -2,8 +2,9 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { trace } from "@opentelemetry/api";
 import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/core";
-import { parseJson, Traceparent } from "@harness/schemas";
+import { Code, parseJson, Traceparent } from "@harness/schemas";
 import { createTestSpanCollector } from "@harness/telemetry/testing";
+import type { PolicyPort, ToolPort } from "@harness/core";
 import { z } from "zod";
 import {
   APP_TELEMETRY_TOOL_NAME,
@@ -31,6 +32,7 @@ const appConfig = {
   listen: { host: "127.0.0.1", port: 0 },
 };
 const sessionId = "00000000000000000000000000";
+const foreignRunId = "00000000000000000000000001";
 const resource = {
   contents: [{ mimeType: "text/html;profile=mcp-app", text: "<main>approved</main>" }],
 };
@@ -107,6 +109,8 @@ function makeServer(
     readonly randomBytes?: (size: number) => Buffer;
     readonly now?: () => number;
     readonly runId?: ReferenceHostDependencies["runId"];
+    readonly policy?: ReferenceHostDependencies["policy"];
+    readonly tool?: ReferenceHostDependencies["tool"];
     readonly scheduleUiSessionExpiry?: ReferenceHostDependencies["scheduleUiSessionExpiry"];
     readonly uiSessionContext?: ReferenceHostDependencies["uiSessionContext"];
   } = {},
@@ -150,6 +154,8 @@ function makeServer(
     ...(options.randomBytes === undefined ? {} : { randomBytes: options.randomBytes }),
     ...(options.now === undefined ? {} : { now: options.now }),
     runId: options.runId ?? sessionId,
+    ...(options.policy === undefined ? {} : { policy: options.policy }),
+    ...(options.tool === undefined ? {} : { tool: options.tool }),
     ...(options.scheduleUiSessionExpiry === undefined
       ? {}
       : { scheduleUiSessionExpiry: options.scheduleUiSessionExpiry }),
@@ -545,6 +551,90 @@ describe("createReferenceHost", () => {
     expect(secondHost.token).toBe(firstHost.token);
     await firstHost.close();
     await secondHost.close();
+  });
+
+  it("uses the UI-session run when a conflicting fallback run id is supplied", async () => {
+    const onAppCall = vi.fn(() =>
+      Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "ok" }] })),
+    );
+    const parent = spanCollector.provider.getTracer("host-test").startSpan("harness.tool_call");
+    const fixture = makeServer({
+      onAppCall,
+      runId: foreignRunId,
+      uiSessionContext: { runId: sessionId, toolCallSpanContext: parent.spanContext() },
+      idGenerator: () => sessionId,
+    });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+
+    const response = await fixture.request(
+      "POST",
+      "/api/call",
+      authorization(host),
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        toolName: "approve",
+        arguments: {},
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(onAppCall).toHaveBeenCalledWith(expect.anything(), {
+      runId: sessionId,
+      policyContext: { subagent: false, app: "approval" },
+    });
+    parent.end();
+    await host.close();
+  });
+
+  it("uses the policy-checked handler by default when policy and tool ports are supplied", async () => {
+    const policy: PolicyPort = {
+      version: Code.parse("test.policy"),
+      decide: vi.fn(() => ({
+        decision: "allow",
+        ruleId: Code.parse("allow_app"),
+        reason: Code.parse("app_allowed"),
+        editable: [],
+      })),
+    };
+    const execute = vi.fn(() =>
+      Promise.resolve({ outcome: "ok" as const, result: { completed: true } }),
+    );
+    const tool: ToolPort = {
+      prepare: vi.fn((call) => Promise.resolve({ ...call, args: { prepared: true } })),
+      describe: (toolId) =>
+        toolId === "approve" ? { idempotent: false, timeoutMs: 1_000 } : undefined,
+      execute,
+    };
+    const fixture = makeServer({ policy, tool, idGenerator: () => sessionId });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+    const response = await fixture.request(
+      "POST",
+      "/api/call",
+      authorization(host),
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        toolName: "approve",
+        arguments: { raw: "synthetic value" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(policy.decide).toHaveBeenCalledWith(
+      { toolId: "approve", args: { prepared: true } },
+      { subagent: false, app: "approval" },
+    );
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ args: { prepared: true } }),
+      expect.objectContaining({ runId: sessionId }),
+    );
+    expect(parseJson(CallToolResultSchema, response.body)).toEqual({
+      content: [{ type: "text", text: '{"completed":true}' }],
+    });
+    await host.close();
   });
 
   it("requires both the bearer token and same-origin request on protected routes", async () => {

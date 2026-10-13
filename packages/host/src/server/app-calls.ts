@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, type Id, type HostConfig } from "@harness/schemas";
+import { Code, HarnessError, Id, JsonValue, type HostConfig } from "@harness/schemas";
 import { countHostAppRejected, type HostAppRejectedReason } from "@harness/telemetry";
 import type { CallToolResult, ListToolsResult, Tool } from "@modelcontextprotocol/client";
 import { ToolSchema } from "@modelcontextprotocol/core";
 import { isToolVisibilityModelOnly } from "@modelcontextprotocol/ext-apps/app-bridge";
+import type { ModelToolCall, PolicyPort, RunContext, ToolPort } from "@harness/core";
 import { z } from "zod";
 import type { AppCall, AppInstance } from "./types.js";
 
@@ -38,7 +39,10 @@ export type AppCallRejectedReason = HostAppRejectedReason;
 
 /** Error codes returned when an app tool call fails the host boundary. */
 export type AppCallRouterErrorCode =
-  "app_tool_not_allowed" | "app_run_mismatch" | "app_run_unavailable";
+  | "app_tool_not_allowed"
+  | "app_run_mismatch"
+  | "app_run_unavailable"
+  | "app_telemetry_unavailable";
 
 /** Safe error raised when an app call violates its host session policy. */
 export class AppCallRouterError extends HarnessError {
@@ -77,6 +81,90 @@ export interface AppCallRouterOptions {
   readonly isIdOwnedByRun?: (runId: Id, id: Id) => boolean | Promise<boolean>;
   /** Observes bounded app-call rejections. */
   readonly onRejected?: (reason: AppCallRejectedReason) => void;
+}
+
+/** Dependencies for executing app calls through the normal preparation and policy ports. */
+export interface PolicyCheckedAppCallHandlerOptions {
+  readonly policy: PolicyPort;
+  readonly tool: ToolPort;
+  readonly nextCallId: () => Id;
+}
+
+function callError(code: string): CallToolResult {
+  return { content: [{ type: "text", text: code }], isError: true };
+}
+
+/**
+ * Creates the host-side app handler that prepares arguments and applies policy before execution.
+ *
+ * Policy `ask` decisions fail closed with `app_call_requires_approval`; suspending a run for app
+ * calls is intentionally deferred until the host can provide an approval flow.
+ *
+ * @param options - Policy, tool pipeline, and injected call ID generator.
+ * @returns An app-call handler suitable for {@link AppCallRouterOptions.onAppCall}.
+ */
+export function createPolicyCheckedAppCallHandler(
+  options: PolicyCheckedAppCallHandlerOptions,
+): NonNullable<AppCallRouterOptions["onAppCall"]> {
+  return async (request, context) => {
+    const toolId = Code.safeParse(request.toolName);
+    if (!toolId.success || options.tool.describe(toolId.data) === undefined) {
+      return callError("unknown_tool");
+    }
+
+    let call: ModelToolCall;
+    try {
+      call = {
+        callId: request.callId ?? options.nextCallId(),
+        toolId: toolId.data,
+        args: JsonValue.parse(request.arguments),
+      };
+    } catch {
+      return callError("app_tool_arguments_invalid");
+    }
+
+    const runContext: RunContext = {
+      runId: context.runId,
+      signal: new AbortController().signal,
+    };
+    let prepared: ModelToolCall;
+    try {
+      prepared = (await options.tool.prepare?.(call, runContext)) ?? call;
+    } catch {
+      return callError("app_tool_prepare_failed");
+    }
+    if (prepared.toolId !== toolId.data) {
+      return callError("unknown_tool");
+    }
+
+    let decision: ReturnType<PolicyPort["decide"]>;
+    try {
+      decision = options.policy.decide(
+        { toolId: prepared.toolId, args: prepared.args },
+        context.policyContext,
+      );
+    } catch {
+      return callError("policy_error");
+    }
+    if (decision.decision === "deny") {
+      return callError(decision.reason);
+    }
+    if (decision.decision === "ask") {
+      return callError("app_call_requires_approval");
+    }
+
+    try {
+      const result = await options.tool.execute(prepared, runContext);
+      if (result.outcome === "error") {
+        return callError(result.errorCode ?? "app_tool_failed");
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(result.result) ?? "null" }],
+      };
+    } catch {
+      return callError("app_tool_failed");
+    }
+  };
 }
 
 /**
@@ -123,16 +211,15 @@ export class AppCallRouter {
         this.#rejectUnknownTool();
         throw new AppCallRouterError("app_tool_not_allowed");
       }
+      if (this.#options.onTelemetryEmit === undefined) {
+        this.#reject("telemetry_unavailable");
+        throw new AppCallRouterError("app_telemetry_unavailable");
+      }
       const parsed = AppTelemetryEmitArgsSchema.safeParse(request.arguments);
       if (!parsed.success) {
         return { content: [], isError: true };
       }
-      return (
-        (await this.#options.onTelemetryEmit?.(session, parsed.data, context)) ?? {
-          content: [],
-          isError: true,
-        }
-      );
+      return await this.#options.onTelemetryEmit(session, parsed.data, context);
     }
 
     return (
@@ -194,13 +281,39 @@ export class AppCallRouter {
   }
 
   async #validateScopedIds(runId: Id, request: AppCall): Promise<void> {
-    const ids = [request.callId, request.approvalId, ...(request.approvalIds ?? [])];
-    for (const id of ids) {
-      if (id !== undefined) {
+    const args = request.arguments;
+    if (Object.hasOwn(args, "runId")) {
+      const argumentRunId = Id.safeParse(args.runId);
+      if (!argumentRunId.success || argumentRunId.data !== runId) {
+        throw new AppCallRouterError("app_run_mismatch");
+      }
+    }
+    const ids: unknown[] = [
+      request.callId,
+      request.approvalId,
+      ...(request.approvalIds ?? []),
+    ];
+    for (const name of ["callId", "approvalId"] as const) {
+      if (Object.hasOwn(args, name)) {
+        ids.push(args[name]);
+      }
+    }
+    if (Object.hasOwn(args, "approvalIds")) {
+      if (!Array.isArray(args.approvalIds)) {
+        throw new AppCallRouterError("app_run_mismatch");
+      }
+      ids.push(...args.approvalIds);
+    }
+    for (const value of ids) {
+      if (value !== undefined) {
+        const id = Id.safeParse(value);
+        if (!id.success) {
+          throw new AppCallRouterError("app_run_mismatch");
+        }
         try {
           if (
             this.#options.isIdOwnedByRun === undefined ||
-            !(await this.#options.isIdOwnedByRun(runId, id))
+            !(await this.#options.isIdOwnedByRun(runId, id.data))
           ) {
             throw new AppCallRouterError("app_run_mismatch");
           }
@@ -212,9 +325,13 @@ export class AppCallRouter {
   }
 
   #rejectUnknownTool(): void {
-    countHostAppRejected("unknown_tool");
+    this.#reject("unknown_tool");
+  }
+
+  #reject(reason: AppCallRejectedReason): void {
+    countHostAppRejected(reason);
     try {
-      this.#options.onRejected?.("unknown_tool");
+      this.#options.onRejected?.(reason);
     } catch {
       return;
     }

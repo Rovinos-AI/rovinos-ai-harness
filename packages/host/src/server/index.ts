@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { HarnessError, HostConfigSchema, Id, type HostConfig } from "@harness/schemas";
-import { AppCallRouter } from "./app-calls.js";
+import { AppCallRouter, createPolicyCheckedAppCallHandler } from "./app-calls.js";
 import { createRequestHandler } from "./request-handler.js";
 import { readStaticAsset, writeRequestFailure } from "./http-utils.js";
 import { REFERENCE_CSP } from "./resource.js";
@@ -21,6 +21,7 @@ export {
   AppCallRouter,
   AppCallRouterError,
   AppTelemetryEmitArgsSchema,
+  createPolicyCheckedAppCallHandler,
   type AppCallExecutionContext,
   type AppCallPolicyContext,
   type AppCallRejectedReason,
@@ -167,10 +168,23 @@ function createLaunchUrl(origin: string, token: string, config: HostConfig): str
 function createAppCallRouter(
   appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>,
   dependencies: ReferenceHostDependencies,
+  nextId: () => Id,
 ): AppCallRouter {
+  const defaultOnAppCall =
+    dependencies.policy !== undefined && dependencies.tool !== undefined
+      ? createPolicyCheckedAppCallHandler({
+          policy: dependencies.policy,
+          tool: dependencies.tool,
+          nextCallId: nextId,
+        })
+      : undefined;
   return new AppCallRouter({
     apps: appConfigs,
-    ...(dependencies.onAppCall === undefined ? {} : { onAppCall: dependencies.onAppCall }),
+    ...(dependencies.onAppCall === undefined
+      ? defaultOnAppCall === undefined
+        ? {}
+        : { onAppCall: defaultOnAppCall }
+      : { onAppCall: dependencies.onAppCall }),
     ...(dependencies.onTelemetryEmit === undefined
       ? {}
       : { onTelemetryEmit: dependencies.onTelemetryEmit }),
@@ -205,8 +219,8 @@ export async function createReferenceHost(
   processToken ??= random(32).toString("base64url");
   const token = processToken;
   const registry = createAppRegistry(config);
-  const appCallRouter = createAppCallRouter(registry.appConfigs, dependencies);
-  const sessionRunId = dependencies.runId ?? dependencies.uiSessionContext?.runId;
+  const sessionRunId = dependencies.uiSessionContext?.runId ?? dependencies.runId;
+  const appCallRouter = createAppCallRouter(registry.appConfigs, dependencies, nextId);
   const host = config.listen.host === "localhost" ? "127.0.0.1" : config.listen.host;
   let origin = "";
   let port = 0;

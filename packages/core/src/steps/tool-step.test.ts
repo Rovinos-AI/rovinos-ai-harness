@@ -30,6 +30,7 @@ import { foldRunState, type ApprovalRequestedEvent, type ToolIntentEvent } from 
 import { RUN_SPAN } from "../spans.js";
 import { FakeToolPort, type FakeToolDefinition } from "../testing/index.js";
 import type { PolicyPort, ToolPort } from "../ports.js";
+import { modelToolOptions } from "./model-step.js";
 import {
   applyApprovalDecision,
   applyDanglingIntents,
@@ -468,6 +469,37 @@ describe("tool-step resume handling", () => {
       { type: "tool_result", outcome: "denied", errorCode: "forbidden" },
     ]);
     expect(tool.calls).toHaveLength(0);
+  });
+
+  it("hides the host-local telemetry tool from the model and rejects forged calls", async () => {
+    const { recorder } = createRecorder();
+    const history = await createRun(recorder, []);
+    const telemetryToolId = Code.parse("harness.telemetry.emit");
+    const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
+    const tool: ToolPort = {
+      getToolSpecs: () => [
+        {
+          toolId: telemetryToolId,
+          description: "Host-local telemetry",
+          inputSchema: { type: "object" },
+        },
+      ],
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute,
+    };
+
+    expect(modelToolOptions(tool, []).tools).toEqual([]);
+
+    const events = await toolStep({
+      ...toolStepDependencies(recorder, tool, history),
+      calls: [{ callId: callIds.unknown, toolId: telemetryToolId, args: null }],
+    });
+
+    expect(events).toMatchObject([
+      { type: "tool_intent", policyDecision: "deny", policyReason: "unknown_tool" },
+      { type: "tool_result", outcome: "denied", errorCode: "unknown_tool" },
+    ]);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("passes only the PolicyPort call fields to a configured PolicyEngine", async () => {

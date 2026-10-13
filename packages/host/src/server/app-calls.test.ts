@@ -164,6 +164,55 @@ describe("AppCallRouter", () => {
     expect(onAppCall).not.toHaveBeenCalled();
   });
 
+  it("validates run and approval identifiers carried in bridge tool arguments", async () => {
+    const onAppCall = vi.fn(() => Promise.resolve({ content: [] }));
+    const isIdOwnedByRun = vi.fn((_owner: Id, id: Id) => id !== approvalId);
+    const router = new AppCallRouter({
+      apps: new Map([[app.id, app]]),
+      onAppCall,
+      isIdOwnedByRun,
+    });
+
+    await expect(
+      router.handle(
+        session,
+        request({
+          toolName: "approval.resolve",
+          arguments: { runId: foreignRunId },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "app_run_mismatch" });
+    await expect(
+      router.handle(
+        session,
+        request({
+          toolName: "approval.resolve",
+          arguments: { approvalId },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "app_run_mismatch" });
+
+    expect(isIdOwnedByRun).toHaveBeenCalledWith(runId, approvalId);
+    expect(onAppCall).not.toHaveBeenCalled();
+  });
+
+  it("rejects opted-in telemetry when the local handler is unavailable", async () => {
+    const onRejected = vi.fn();
+    const router = new AppCallRouter({
+      apps: new Map([[app.id, app]]),
+      onRejected,
+    });
+
+    await expect(
+      router.handle(
+        session,
+        request({ toolName: APP_TELEMETRY_TOOL_NAME, arguments: { spans: [] } }),
+      ),
+    ).rejects.toMatchObject({ code: "app_telemetry_unavailable" });
+
+    expect(onRejected).toHaveBeenCalledWith("telemetry_unavailable");
+  });
+
   it("fails closed when scoped ids cannot be verified or the session has no run", async () => {
     const router = new AppCallRouter({ apps: new Map([[app.id, app]]) });
     await expect(

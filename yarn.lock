@@ -1094,10 +1094,11 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@harness/host@workspace:packages/host":
+"@harness/host@workspace:^, @harness/host@workspace:packages/host":
   version: 0.0.0-use.local
   resolution: "@harness/host@workspace:packages/host"
   dependencies:
+    "@harness/core": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
@@ -5350,6 +5351,7 @@ __metadata:
     "@harness/context": "workspace:^"
     "@harness/core": "workspace:^"
     "@harness/eslint-plugin-harness": "workspace:^"
+    "@harness/host": "workspace:^"
     "@harness/models": "workspace:^"
     "@harness/pii": "workspace:^"
     "@harness/policy": "workspace:^"
