@@ -42,6 +42,7 @@ interface FakeSnapshot {
 
 interface FakeQueryResult {
   rows: unknown[];
+  rowCount?: number | null;
 }
 
 let transactionBackup:
@@ -117,7 +118,16 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     fakePg.schemaInitialized = true;
     return { rows: [] };
   }
-  if (query === "BEGIN" || query.startsWith("SELECT pg_advisory_xact_lock")) {
+  if (query === "BEGIN") {
+    transactionBackup = {
+      runs: structuredClone(fakePg.runs),
+      events: structuredClone(fakePg.events),
+      sinkCursors: structuredClone(fakePg.sinkCursors),
+      snapshots: structuredClone(fakePg.snapshots),
+    };
+    return { rows: [] };
+  }
+  if (query.startsWith("SELECT pg_advisory_xact_lock")) {
     return { rows: [] };
   }
   if (query === "BEGIN ISOLATION LEVEL READ COMMITTED") {
@@ -182,6 +192,10 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     const run = fakePg.runs.get(text(values[0]));
     return { rows: run === undefined ? [] : [{ next_seq: run.next_seq, status: run.status }] };
   }
+  if (query.startsWith("SELECT status FROM runs")) {
+    const run = fakePg.runs.get(text(values[0]));
+    return { rows: run === undefined ? [] : [{ status: run.status }] };
+  }
   if (query.startsWith("WITH inserted_events AS") || query.startsWith("INSERT INTO events")) {
     const updatesRun = query.startsWith("WITH inserted_events AS");
     const eventValues = values.length - (updatesRun ? 3 : 0);
@@ -233,6 +247,25 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     });
     return { rows: [] };
   }
+  if (query === "DELETE FROM events WHERE run_id = $1") {
+    const runId = text(values[0]);
+    const previousLength = fakePg.events.length;
+    fakePg.events.splice(
+      0,
+      previousLength,
+      ...fakePg.events.filter((event) => event.run_id !== runId),
+    );
+    return { rows: [], rowCount: previousLength - fakePg.events.length };
+  }
+  if (query === "DELETE FROM snapshots WHERE run_id = $1") {
+    const runId = text(values[0]);
+    fakePg.snapshots.splice(
+      0,
+      fakePg.snapshots.length,
+      ...fakePg.snapshots.filter((snapshot) => snapshot.run_id !== runId),
+    );
+    return { rows: [] };
+  }
   if (query.startsWith("DELETE FROM snapshots")) {
     const runId = text(values[0]);
     const keep = number(values[1]);
@@ -250,6 +283,10 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
         (snapshot) => snapshot.run_id !== runId || retainedIds.has(snapshot.snapshot_id),
       ),
     );
+    return { rows: [] };
+  }
+  if (query === "DELETE FROM runs WHERE run_id = $1") {
+    fakePg.runs.delete(text(values[0]));
     return { rows: [] };
   }
   if (query.startsWith("SELECT snapshot_id, run_id, at_seq")) {

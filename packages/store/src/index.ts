@@ -23,3 +23,10 @@ export {
   type RunSummary,
   type SnapshotStoreOptions,
 } from "./types.js";
+export {
+  purgeExpiredRuns,
+  type PurgeExpiredRunsOptions,
+  type PurgeExpiredRunsResult,
+  type RetentionLogFields,
+  type RetentionLogger,
+} from "./retention.js";

@@ -163,6 +163,10 @@ export class SqliteEventStore implements EventStore {
     EventRow
   >;
   private readonly getHead: Database.Statement<[Id], { next_seq: number }>;
+  private readonly getRunStatus: Database.Statement<[Id], { status: string }>;
+  private readonly deleteEvents: Database.Statement<[Id]>;
+  private readonly deleteSnapshots: Database.Statement<[Id]>;
+  private readonly deleteRunRow: Database.Statement<[Id]>;
   private readonly findRunsByTraceQuery: Database.Statement<[TraceId], { run_id: string }>;
   private readonly listRunsQuery: Database.Statement<ListRunsQueryParams, RunSummaryRow>;
   private readonly insertSnapshot: Database.Statement<
@@ -228,6 +232,12 @@ export class SqliteEventStore implements EventStore {
     this.getHead = this.db.prepare<[Id], { next_seq: number }>(
       "SELECT next_seq FROM runs WHERE run_id = ?",
     );
+    this.getRunStatus = this.db.prepare<[Id], { status: string }>(
+      "SELECT status FROM runs WHERE run_id = ?",
+    );
+    this.deleteEvents = this.db.prepare<[Id]>("DELETE FROM events WHERE run_id = ?");
+    this.deleteSnapshots = this.db.prepare<[Id]>("DELETE FROM snapshots WHERE run_id = ?");
+    this.deleteRunRow = this.db.prepare<[Id]>("DELETE FROM runs WHERE run_id = ?");
     this.findRunsByTraceQuery = this.db.prepare<[TraceId], { run_id: string }>(
       "SELECT run_id FROM events WHERE trace_id = ? GROUP BY run_id ORDER BY MIN(global_seq)",
     );
@@ -362,6 +372,28 @@ export class SqliteEventStore implements EventStore {
     try {
       const row = this.getHead.get(runId);
       return Promise.resolve(row?.next_seq ?? 0);
+    } catch (error) {
+      return Promise.reject(storeError(error));
+    }
+  }
+
+  /** {@inheritDoc EventStore.deleteRun} */
+  deleteRun(runId: Id): Promise<number> {
+    try {
+      const deleteTransaction = this.db.transaction(() => {
+        const run = this.getRunStatus.get(runId);
+        if (
+          run === undefined ||
+          (run.status !== "completed" && run.status !== "failed" && run.status !== "cancelled")
+        ) {
+          return 0;
+        }
+        const eventCount = this.deleteEvents.run(runId).changes;
+        this.deleteSnapshots.run(runId);
+        this.deleteRunRow.run(runId);
+        return eventCount;
+      });
+      return Promise.resolve(deleteTransaction.immediate());
     } catch (error) {
       return Promise.reject(storeError(error));
     }

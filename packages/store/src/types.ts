@@ -101,6 +101,13 @@ export interface EventStore {
   head(runId: Id): Promise<number>;
 
   /**
+   * Atomically remove a terminal run, its events, and its snapshots.
+   * @param runId Run identifier to delete.
+   * @returns The number of deleted events, or zero when the run is missing or nonterminal.
+   */
+  deleteRun(runId: Id): Promise<number>;
+
+  /**
    * List runs ordered by creation timestamp, newest first, with runId cursors.
    * @param opts Filters and pagination options.
    * @returns The selected run summaries and an optional cursor for the next page.

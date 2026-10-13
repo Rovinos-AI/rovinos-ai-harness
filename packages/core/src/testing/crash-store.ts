@@ -90,6 +90,10 @@ export class CrashingEventStore implements EventStore {
     return this.inner.head(runId);
   }
 
+  deleteRun(runId: Id): Promise<number> {
+    return this.inner.deleteRun(runId);
+  }
+
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
     return this.inner.listRuns(opts);
   }

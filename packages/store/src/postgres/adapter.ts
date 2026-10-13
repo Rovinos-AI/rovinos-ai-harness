@@ -259,6 +259,47 @@ export class PostgresEventStore implements EventStore {
     }
   }
 
+  /** {@inheritDoc EventStore.deleteRun} */
+  async deleteRun(runId: Id): Promise<number> {
+    let client: PoolClient;
+    try {
+      await this.ensureInitialized();
+      client = await this.pool.connect();
+    } catch (error) {
+      throw storeError(error);
+    }
+
+    let transactionStarted = false;
+    try {
+      await client.query("BEGIN");
+      transactionStarted = true;
+      const runResult = await client.query<{ status: string } & QueryResultRow>(
+        "SELECT status FROM runs WHERE run_id = $1 FOR UPDATE",
+        [runId],
+      );
+      const status = runResult.rows[0]?.status;
+      if (status !== "completed" && status !== "failed" && status !== "cancelled") {
+        await client.query("COMMIT");
+        transactionStarted = false;
+        return 0;
+      }
+
+      const events = await client.query("DELETE FROM events WHERE run_id = $1", [runId]);
+      await client.query("DELETE FROM snapshots WHERE run_id = $1", [runId]);
+      await client.query("DELETE FROM runs WHERE run_id = $1", [runId]);
+      await client.query("COMMIT");
+      transactionStarted = false;
+      return events.rowCount ?? 0;
+    } catch (error) {
+      if (transactionStarted) {
+        await client.query("ROLLBACK").catch(() => undefined);
+      }
+      throw storeError(error);
+    } finally {
+      client.release();
+    }
+  }
+
   /** {@inheritDoc EventStore.latestSnapshot} */
   async latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
     try {
