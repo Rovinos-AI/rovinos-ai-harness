@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Pool } from "pg";
 import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { Code, type KeyProvider } from "@harness/schemas";
 import { afterAll, expect, it } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, type ContentCodec } from "./codec.js";
+import { migrate } from "./migrate.js";
 import { PostgresEventStore, openPostgresEventStore } from "./postgres/adapter.js";
 import { encodeEvents } from "./postgres/helpers.js";
 import {
@@ -143,6 +145,102 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
   supportsFileReopen: false,
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
+
+it("serializes concurrent Postgres migration startup", async () => {
+  const { admin, schema } = await createSchema();
+  const migrationPool = new Pool({
+    connectionString,
+    max: 2,
+    options: `-c search_path="${schema}"`,
+  });
+  try {
+    const results = await Promise.all([
+      migrate(migrationPool, "postgres"),
+      migrate(migrationPool, "postgres"),
+    ]);
+    expect(results.flat()).toHaveLength(1);
+    const versions = await migrationPool.query<{ version: string }>(
+      "SELECT version FROM schema_migrations ORDER BY version",
+    );
+    expect(versions.rows.map(({ version }) => version)).toEqual(["0001"]);
+  } finally {
+    await migrationPool.end();
+    await dropSchema(admin, schema);
+  }
+});
+
+async function verifyLegacyPostgresSchema(includeTxId: boolean): Promise<void> {
+  const { admin, schema } = await createSchema();
+  const legacyPool = new Pool({
+    connectionString,
+    max: 1,
+    options: `-c search_path="${schema}"`,
+  });
+  const store = new PostgresEventStore(connectionString, { schema });
+  stores.add(store);
+  const runId = schemaIds.nextRunId();
+  const event = schemaIds.runCreated(runId);
+  try {
+    const legacySchema = await readFile(
+      new URL("./fixtures/legacy-postgres-schema.sql", import.meta.url),
+      "utf8",
+    );
+    const schemaSql = includeTxId
+      ? legacySchema
+      : legacySchema
+          .replace("  tx_id xid8 NOT NULL DEFAULT pg_current_xact_id(),\n", "")
+          .replace(
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS tx_id xid8 NOT NULL DEFAULT pg_current_xact_id();\n",
+            "",
+          );
+    await legacyPool.query(schemaSql);
+    await legacyPool.query(
+      "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES ($1, $2, $3, $4, $5)",
+      [runId, event.ts, "pending", 1, event.ts],
+    );
+    await legacyPool.query(
+      "INSERT INTO events (run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)",
+      [
+        runId,
+        0,
+        event.ts,
+        event.type,
+        event.traceId,
+        event.spanId,
+        event.segmentId,
+        JSON.stringify({ v: 1, configHash: "a".repeat(64), policyVersion: "policy.v1", depth: 0 }),
+        "{}",
+        null,
+      ],
+    );
+
+    const events = [];
+    for await (const storedEvent of store.read(runId)) {
+      events.push(storedEvent);
+    }
+    expect(events).toMatchObject([{ type: "run_created", runId, seq: 0 }]);
+    const versions = await legacyPool.query<{ version: string }>(
+      "SELECT version FROM schema_migrations ORDER BY version",
+    );
+    expect(versions.rows.map(({ version }) => version)).toEqual(["0001"]);
+    const txIdColumn = await legacyPool.query<{ present: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'events' AND column_name = 'tx_id') AS present",
+    );
+    expect(txIdColumn.rows[0]?.present).toBe(true);
+  } finally {
+    await legacyPool.end();
+    await closeStore(store);
+    await dropSchema(admin, schema);
+  }
+}
+
+it("adopts the pre-migration Postgres schema without losing events", async () => {
+  await expect(verifyLegacyPostgresSchema(true)).resolves.toBeUndefined();
+});
+
+it("adds tx_id when adopting a legacy Postgres events table without it", async () => {
+  await expect(verifyLegacyPostgresSchema(false)).resolves.toBeUndefined();
+});
 
 it("atomically deletes a run racing with an append", async () => {
   const { store, cleanup } = await plaintextPostgresFactory();

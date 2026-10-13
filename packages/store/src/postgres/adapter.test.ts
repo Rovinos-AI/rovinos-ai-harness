@@ -60,6 +60,7 @@ const fakePg = vi.hoisted(() => ({
   sinkCursors: new Map<string, number>(),
   snapshots: new Array<FakeSnapshot>(),
   schemaInitialized: false,
+  migrationHistory: new Map<string, string>(),
   encryptionValue: "",
   handler: (_sql: string, _values: unknown[]): FakeQueryResult => ({ rows: [] }),
   connectError: new Error("connection refused"),
@@ -114,8 +115,24 @@ function number(value: unknown): number {
 
 function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   const query = sql.replaceAll(/\s+/g, " ").trim();
+  if (query.startsWith("-- SPDX-License-Identifier: Apache-2.0")) {
+    fakePg.schemaInitialized = true;
+    return { rows: [] };
+  }
   if (query.startsWith("CREATE TABLE") || query.startsWith("CREATE INDEX")) {
     fakePg.schemaInitialized = true;
+    return { rows: [] };
+  }
+  if (query.startsWith("SELECT to_regclass('schema_migrations')")) {
+    return { rows: [{ present: fakePg.migrationHistory.size > 0 || fakePg.schemaInitialized }] };
+  }
+  if (query.startsWith("SELECT version, checksum FROM schema_migrations")) {
+    return {
+      rows: [...fakePg.migrationHistory].map(([version, checksum]) => ({ version, checksum })),
+    };
+  }
+  if (query.startsWith("INSERT INTO schema_migrations")) {
+    fakePg.migrationHistory.set(text(values[0]), text(values[1]));
     return { rows: [] };
   }
   if (query === "BEGIN") {
@@ -404,6 +421,7 @@ beforeEach(() => {
   fakePg.snapshots.length = 0;
   transactionBackup = undefined;
   fakePg.schemaInitialized = false;
+  fakePg.migrationHistory.clear();
   fakePg.encryptionValue = "";
   fakePg.handler = fakeQuery;
   fakePg.connectErrorCode = "ECONNREFUSED";

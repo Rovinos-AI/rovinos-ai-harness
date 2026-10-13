@@ -75,6 +75,37 @@ export class StoreEncryptionMismatchError extends HarnessError {
   }
 }
 
+/** Raised when a store migration is missing from or modified relative to migration history. */
+export class StoreMigrationError extends HarnessError {
+  /** Stable migration error code. */
+  readonly code:
+    | "migration_checksum_mismatch"
+    | "migration_set_invalid"
+    | "schema_migration_pending"
+    | "schema_newer_than_code";
+
+  /**
+   * @param code Stable reason for rejecting the migration history.
+   */
+  constructor(
+    code:
+      | "migration_checksum_mismatch"
+      | "migration_set_invalid"
+      | "schema_migration_pending"
+      | "schema_newer_than_code",
+  ) {
+    super(
+      {
+        migration_checksum_mismatch: "Migration checksum mismatch",
+        migration_set_invalid: "Migration set is invalid",
+        schema_migration_pending: "Database schema migrations are pending",
+        schema_newer_than_code: "Database schema is newer than code",
+      }[code],
+    );
+    this.code = code;
+  }
+}
+
 /** Identify typed errors that Postgres must preserve rather than normalize. */
 export function isPreservedStoreError(
   error: unknown,
@@ -83,13 +114,15 @@ export function isPreservedStoreError(
   | InvalidEventError
   | ContentDecryptFailedError
   | KeyNotFoundError
-  | StoreEncryptionMismatchError {
+  | StoreEncryptionMismatchError
+  | StoreMigrationError {
   return (
     error instanceof SeqConflictError ||
     error instanceof InvalidEventError ||
     error instanceof ContentDecryptFailedError ||
     error instanceof KeyNotFoundError ||
-    error instanceof StoreEncryptionMismatchError
+    error instanceof StoreEncryptionMismatchError ||
+    error instanceof StoreMigrationError
   );
 }
 

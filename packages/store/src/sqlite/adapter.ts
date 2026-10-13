@@ -23,7 +23,7 @@ import {
   type EncodedSnapshot,
   type SnapshotRow,
 } from "../codec.js";
-import { InvalidEventError, SeqConflictError } from "../errors.js";
+import { InvalidEventError, SeqConflictError, StoreMigrationError } from "../errors.js";
 import {
   systemClock,
   sqliteStoreOptionsSchema,
@@ -32,8 +32,8 @@ import {
   type ListRunsOptions,
   type RunSummary,
 } from "../types.js";
-import { SQLITE_SCHEMA } from "./schema.sql.js";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
+import { migrate } from "../migrate.js";
 import {
   decodeStoredContent,
   eventFromRow,
@@ -196,9 +196,12 @@ export class SqliteEventStore implements EventStore {
       if (!parsedOptions.readOnly) {
         this.db.pragma("journal_mode = WAL");
         this.db.pragma("synchronous = NORMAL");
-        this.db.exec(SQLITE_SCHEMA);
+        migrate(this.db, "sqlite", { appliedAt: clock.now() });
         initializeEncryptionMetadata(this.db, this.codec.encrypted);
       } else {
+        if (migrate(this.db, "sqlite", { dryRun: true }).length > 0) {
+          throw new StoreMigrationError("schema_migration_pending");
+        }
         validateEncryptionMetadata(this.db, this.codec.encrypted);
       }
       this.db.pragma("busy_timeout = 5000");
