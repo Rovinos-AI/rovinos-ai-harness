@@ -6,6 +6,7 @@ import { PiiToolPort, type PiiToolPortLike, type PiiToolCall } from "./pii-tool-
 import { Tokenizer } from "./tokenizer.js";
 import { PiiBlockedError } from "./errors.js";
 import { emailDetector } from "./detectors/email.js";
+import { isSanitizedField } from "./pii-event-store.js";
 
 const runId = "00000000000000000000000001";
 const call = {
@@ -123,6 +124,15 @@ describe("PiiToolPort", () => {
     });
     expect(summaries.map(({ boundary }) => boundary)).toEqual(["tool_input", "tool_output"]);
     expect(JSON.stringify(summaries)).not.toContain("canary@example.test");
+  });
+
+  it("marks primitive arguments and tool results as sanitized fields", async () => {
+    const { port, context } = fixture({ result: "<EMAIL_1>" });
+    const prepared = await port.prepare({ ...call, args: "<EMAIL_1>" }, context);
+    const result = await port.execute(prepared, context);
+
+    expect(isSanitizedField(prepared, "args")).toBe(true);
+    expect(isSanitizedField(result, "result")).toBe(true);
   });
 
   it("forwards metadata, tool specs and inner preparation on tokens", async () => {

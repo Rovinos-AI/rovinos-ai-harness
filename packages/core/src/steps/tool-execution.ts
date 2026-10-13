@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { Code, HarnessError, Sha256Hex, type Event, type JsonValue } from "@harness/schemas";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
+import { isSanitizedField, markSanitizedField } from "@harness/pii";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import type {
   ModelToolCall,
@@ -192,7 +193,7 @@ function executionPayload(
   latency: number,
   executedArgsHash?: string,
 ): EventPartial {
-  return {
+  const payload: Extract<EventPartial, { type: "tool_result" }> = {
     type: "tool_result",
     v: 1,
     callId: call.callId,
@@ -203,4 +204,5 @@ function executionPayload(
     ...executedArgsHashField(executedArgsHash),
     result: execution.result,
   };
+  return isSanitizedField(execution, "result") ? markSanitizedField(payload, "result") : payload;
 }
