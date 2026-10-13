@@ -70,11 +70,62 @@ export const ContextResultSchema = z
     messages: z.array(MessageSchema),
     stats: ContextStatsSchema,
     pinnedSeqs: z.array(z.number().int().nonnegative()),
+    retainedSeqs: z.array(z.number().int().nonnegative()),
   })
   .strict();
 
 /** Inferred output of a context strategy. */
 export type ContextResult = z.infer<typeof ContextResultSchema>;
+
+/** Sequence ranges replaced by recorded context compactions. */
+export const CompactedRangeSchema = z
+  .object({
+    fromSeq: z.number().int().nonnegative(),
+    toSeq: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Inferred sequence range from a context compaction event. */
+export type CompactedRange = z.infer<typeof CompactedRangeSchema>;
+
+/** Result of deriving one context strategy for comparison. */
+export const ComparisonSchema = z
+  .object({
+    strategy: Code,
+    strategyVersion: Code,
+    estimatedTokens: z.number().int().nonnegative(),
+    messageCount: z.number().int().nonnegative(),
+    droppedGroups: z.number().int().nonnegative(),
+    compactedRanges: z.array(CompactedRangeSchema),
+    retainedSeqs: z.array(z.number().int().nonnegative()),
+  })
+  .strict();
+
+/** Inferred comparison result for one context strategy. */
+export type Comparison = z.infer<typeof ComparisonSchema>;
+
+/** Strategy coverage in both directions for a comparison report. */
+export const StrategyCoverageSchema = z
+  .object({
+    strategy: Code,
+    comparedTo: Code,
+    retainedSeqCoverage: z.number().min(0).max(1),
+  })
+  .strict();
+
+/** Inferred directional retained-sequence coverage. */
+export type StrategyCoverage = z.infer<typeof StrategyCoverageSchema>;
+
+/** Machine-readable result emitted by `harness context --compare`. */
+export const StrategyComparisonReportSchema = z
+  .object({
+    comparisons: z.array(ComparisonSchema).min(2),
+    coverage: z.array(StrategyCoverageSchema).length(2),
+  })
+  .strict();
+
+/** Inferred CLI comparison report. */
+export type StrategyComparisonReport = z.infer<typeof StrategyComparisonReportSchema>;
 
 /** Serializable context strategy state stored with a run checkpoint. */
 export const ContextSnapshotSchema = z

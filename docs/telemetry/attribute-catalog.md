@@ -45,6 +45,10 @@ Owner task: `4.1`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
+| `harness.context.estimated_tokens` | integer | Optional | `@harness/core` |
+| `harness.context.message_count` | integer | Optional | `@harness/core` |
+| `harness.context.strategy` | Code | Optional | `@harness/core` |
+| `harness.context.strategy_version` | Code | Optional | `@harness/core` |
 | `harness.error.code` | Code | Optional | `@harness/core` |
 | `harness.event.seq` | integer | Optional | `@harness/core` |
 | `harness.model.attempts` | integer | Optional | `@harness/core` |

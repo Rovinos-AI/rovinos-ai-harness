@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ContextInspectionSchema, Event as EventSchema, parseJson } from "@harness/schemas";
+import { StrategyComparisonReportSchema } from "@harness/context";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
@@ -295,6 +296,63 @@ describe("harness context", () => {
     expect(result.pinnedSeqs).toEqual([1, 2]);
     expect(result.estimatedTokens).toBeLessThanOrEqual(45);
     expect(test.append).not.toHaveBeenCalled();
+  });
+
+  it("prints a metadata-only strategy comparison table", async () => {
+    const test = await harness();
+    const exitCode = await main(
+        [
+          "context",
+          runId,
+          "--compare",
+          "naive,sliding_window",
+          "--max-tokens",
+          "45",
+          "--reserve-output",
+          "0",
+          "--json",
+        ],
+        test.context,
+        [contextCommand],
+      );
+    expect(exitCode, test.stderr.join("")).toBe(0);
+    const report = parseJson(StrategyComparisonReportSchema, test.stdout.join(""));
+    expect(report.comparisons.map(({ strategy }) => strategy)).toEqual([
+      "naive",
+      "sliding_window",
+    ]);
+    expect(report.coverage).toHaveLength(2);
+    expect(report.comparisons[0]?.retainedSeqs).toEqual([1, 2, 4, 5, 6]);
+    expect(report.comparisons[1]?.droppedGroups).toBeGreaterThan(0);
+    expect(test.stderr).toEqual([]);
+    expect(test.append).not.toHaveBeenCalled();
+    expect(test.modelCall).not.toHaveBeenCalled();
+  });
+
+  it("snapshots the human-readable comparison table", async () => {
+    const test = await harness();
+    const exitCode = await main(
+        [
+          "context",
+          runId,
+          "--compare",
+          "naive,sliding_window",
+          "--max-tokens",
+          "45",
+          "--reserve-output",
+          "0",
+        ],
+        test.context,
+        [contextCommand],
+      );
+    expect(exitCode, test.stderr.join("")).toBe(0);
+
+    expect(test.stdout.join("")).toMatchInlineSnapshot(`
+      "Strategy	Version	Tokens	Messages	Dropped	Compacted ranges	Retained seqs	Coverage
+      naive	v3	101	5	0	2-2	1, 2, 4, 5, 6	100% covered
+      sliding_window	v2	42	3	2	2-2	1, 2	40% covered
+      "
+    `);
   });
 
   it("inspects SQLite without initialization writes or creating missing storage", async () => {

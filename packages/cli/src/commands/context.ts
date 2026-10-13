@@ -20,6 +20,7 @@ const OptionsSchema = z
     reserveOutput: z.number().int().nonnegative(),
     model: z.string().optional(),
     showContent: z.boolean().optional(),
+    compare: z.string().optional(),
   })
   .strict();
 
@@ -132,16 +133,34 @@ export const contextCommand: CommandModule = {
       .option("--reserve-output <N>", "reserved output tokens", tokenCount, 1_024)
       .option("--model <provider/model>", "model reference for token estimates")
       .option("--show-content", "include stored tokenized message content")
+      .option("--compare <strategies>", "compare two context strategies")
       .action(async (value: string, rawOptions: unknown) => {
         const runId = Id.safeParse(value);
         const options = OptionsSchema.parse(rawOptions);
         if (!runId.success) {
           throw new ContextCommandError("usage");
         }
-        const { createStrategyRegistry, HeuristicTokenCounter } = await import("@harness/context");
+        const {
+          compareStrategies,
+          createStrategyRegistry,
+          coverage,
+          HeuristicTokenCounter,
+          lookupContextStrategy,
+          StrategyComparisonReportSchema,
+        } = await import("@harness/context");
         const registryModel = { provider: "heuristic", model: "default" };
         const registry = createStrategyRegistry(registryModel);
-        if (!registry.has(options.strategy)) {
+        const strategyNames =
+          options.compare === undefined
+            ? [options.strategy]
+            : options.compare.split(",").map((name) => name.trim());
+        if (
+          options.compare !== undefined &&
+          (strategyNames.length !== 2 || new Set(strategyNames).size !== 2)
+        ) {
+          throw new ContextCommandError("usage");
+        }
+        if (strategyNames.some((name) => !registry.has(name))) {
           context.out.error("available_strategies");
           for (const name of registry.keys()) {
             context.out.error(name);
@@ -153,7 +172,15 @@ export const contextCommand: CommandModule = {
           options.model,
           config.models.routing.default[0] ?? registryModel,
         );
-        const strategy = createStrategyRegistry(model).get(options.strategy);
+        const modelRegistry = createStrategyRegistry(model);
+        const strategies = strategyNames.map((name) => lookupContextStrategy(modelRegistry, name));
+        if (strategies.some((strategy) => strategy === undefined)) {
+          throw new ContextCommandError("usage");
+        }
+        const selectedStrategies = strategies.filter(
+          (strategy): strategy is ContextStrategy => strategy !== undefined,
+        );
+        const strategy = selectedStrategies[0];
         if (strategy === undefined) {
           throw new ContextCommandError("usage");
         }
@@ -175,6 +202,63 @@ export const contextCommand: CommandModule = {
             maxTokens: options.maxTokens,
             reserveOutputTokens: options.reserveOutput,
           };
+          if (options.compare !== undefined) {
+            const comparisons = await compareStrategies(events, selectedStrategies, {
+              budget,
+              model,
+              counter: new HeuristicTokenCounter(),
+            });
+            const first = comparisons[0];
+            const second = comparisons[1];
+            if (first === undefined || second === undefined) {
+              throw new ContextCommandError("usage");
+            }
+            const report = StrategyComparisonReportSchema.parse({
+              comparisons,
+              coverage: [
+                {
+                  strategy: first.strategy,
+                  comparedTo: second.strategy,
+                  retainedSeqCoverage: coverage(first, second),
+                },
+                {
+                  strategy: second.strategy,
+                  comparedTo: first.strategy,
+                  retainedSeqCoverage: coverage(second, first),
+                },
+              ],
+            });
+            context.out.json(StrategyComparisonReportSchema, report);
+            if (program.opts<{ json?: boolean }>().json !== true) {
+              context.out.table([
+                [
+                  "Strategy",
+                  "Version",
+                  "Tokens",
+                  "Messages",
+                  "Dropped",
+                  "Compacted ranges",
+                  "Retained seqs",
+                  "Coverage",
+                ],
+                ...report.comparisons.map((comparison, index) => [
+                  comparison.strategy,
+                  comparison.strategyVersion,
+                  comparison.estimatedTokens,
+                  comparison.messageCount,
+                  comparison.droppedGroups,
+                  comparison.compactedRanges
+                    .map(({ fromSeq, toSeq }) => `${String(fromSeq)}-${String(toSeq)}`)
+                    .join(", ") || "none",
+                  comparison.retainedSeqs.join(", ") || "none",
+                  `${String(
+                    (report.coverage[index]?.retainedSeqCoverage ?? 0) * 100,
+                  )}% covered`,
+                ]),
+              ]);
+            }
+            return;
+          }
           const built = await strategy.build({
             events,
             budget,

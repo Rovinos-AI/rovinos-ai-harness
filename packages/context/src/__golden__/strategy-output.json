@@ -1,0 +1,157 @@
+{
+  "naive": {
+    "version": "v3",
+    "output": {
+      "messages": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "synthetic goal"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "first"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "middle"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "latest"
+            }
+          ]
+        }
+      ],
+      "stats": {
+        "messageCount": 4,
+        "estimatedTokens": 4,
+        "droppedGroups": 0,
+        "compactedRanges": 0,
+        "offloadedResults": 0
+      },
+      "pinnedSeqs": [
+        0
+      ],
+      "retainedSeqs": [
+        0,
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  "sliding_window": {
+    "version": "v2",
+    "output": {
+      "messages": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "synthetic goal"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "[2 earlier steps omitted]"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "latest"
+            }
+          ]
+        }
+      ],
+      "stats": {
+        "messageCount": 3,
+        "estimatedTokens": 3,
+        "droppedGroups": 2,
+        "compactedRanges": 0,
+        "offloadedResults": 0
+      },
+      "pinnedSeqs": [
+        0
+      ],
+      "retainedSeqs": [
+        0,
+        3
+      ]
+    }
+  },
+  "summarizing": {
+    "version": "v1",
+    "output": {
+      "messages": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "synthetic goal"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "[2 earlier steps omitted]"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "latest"
+            }
+          ]
+        }
+      ],
+      "stats": {
+        "messageCount": 3,
+        "estimatedTokens": 3,
+        "droppedGroups": 2,
+        "compactedRanges": 0,
+        "offloadedResults": 0
+      },
+      "pinnedSeqs": [
+        0
+      ],
+      "retainedSeqs": [
+        0,
+        3
+      ]
+    }
+  }
+}

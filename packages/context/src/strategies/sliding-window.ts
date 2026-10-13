@@ -48,6 +48,7 @@ export class SlidingWindowStrategy implements ContextStrategy {
       return createResult({
         input,
         groups,
+        retainedGroups: new Set(groups),
         messages: fullMessages,
         droppedGroups: 0,
         estimatedTokens: fullEstimate,
@@ -96,19 +97,28 @@ export class SlidingWindowStrategy implements ContextStrategy {
       estimatedTokens = input.counter.count(messages, input.model);
     }
 
-    return createResult({ input, groups, messages, droppedGroups, estimatedTokens });
+    return createResult({
+      input,
+      groups,
+      retainedGroups,
+      messages,
+      droppedGroups,
+      estimatedTokens,
+    });
   }
 }
 
 function createResult({
   input,
   groups,
+  retainedGroups,
   messages,
   droppedGroups,
   estimatedTokens,
 }: {
   input: Parameters<ContextStrategy["build"]>[0];
   groups: ReturnType<typeof eventsToTranscript>;
+  retainedGroups: ReadonlySet<(typeof groups)[number]>;
   messages: Message[];
   droppedGroups: number;
   estimatedTokens: number;
@@ -123,6 +133,9 @@ function createResult({
       offloadedResults: countOffloadedResults(messages),
     },
     pinnedSeqs: groups.filter((group) => group.pinned).flatMap((group) => group.seqs),
+    retainedSeqs: groups
+      .filter((group) => group.pinned || retainedGroups.has(group))
+      .flatMap((group) => group.seqs),
   });
 }
 

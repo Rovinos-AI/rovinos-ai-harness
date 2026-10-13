@@ -63,6 +63,7 @@ function contextForRole(role: ResolvedRole): ContextPort {
   };
   return {
     build: async (events) => [systemMessage, ...(await strategyContext.build(events))],
+    buildMetadata: () => strategyContext.buildMetadata(),
     estimate: (messages) => strategyContext.estimate(messages),
     observeModelResponse: (model, estimated, actual) => {
       strategyContext.observeModelResponse(model, estimated, actual);

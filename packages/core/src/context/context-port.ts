@@ -36,6 +36,7 @@ class ContextSnapshotError extends HarnessError {
 export class StrategyContextPort implements ContextPort {
   private calibration: JsonValue;
   private readonly buildOptions: Omit<ContextStrategyInput, "events">;
+  private lastBuildMetadata: ReturnType<ContextPort["buildMetadata"]>;
 
   constructor(
     private readonly strategy: ContextStrategy,
@@ -48,6 +49,12 @@ export class StrategyContextPort implements ContextPort {
       (buildOptions.counter instanceof CalibratingTokenCounter
         ? buildOptions.counter.snapshot()
         : null);
+    this.lastBuildMetadata = {
+      strategyId: strategy.id,
+      strategyVersion: strategy.version,
+      estimatedTokens: 0,
+      messageCount: 0,
+    };
   }
 
   /** {@inheritDoc ContextPort.build} */
@@ -60,7 +67,18 @@ export class StrategyContextPort implements ContextPort {
       events,
       ...(previousEventLogs === undefined ? {} : { previousEventLogs }),
     });
+    this.lastBuildMetadata = {
+      strategyId: this.strategy.id,
+      strategyVersion: this.strategy.version,
+      estimatedTokens: result.stats.estimatedTokens,
+      messageCount: result.stats.messageCount,
+    };
     return result.messages;
+  }
+
+  /** {@inheritDoc ContextPort.buildMetadata} */
+  buildMetadata(): ReturnType<ContextPort["buildMetadata"]> {
+    return this.lastBuildMetadata;
   }
 
   /** {@inheritDoc ContextPort.estimate} */

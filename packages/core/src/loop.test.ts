@@ -1596,6 +1596,12 @@ describe("runLoop", () => {
     expect(runSpans).toHaveLength(1);
     expect(modelSpans).toHaveLength(1);
     expect(modelSpans[0]?.parentSpanId).toBe(runSpans[0]?.spanContextValue.spanId);
+    expect(modelSpans[0]?.attributes).toMatchObject({
+      "harness.context.strategy": "naive",
+      "harness.context.strategy_version": "v3",
+      "harness.context.estimated_tokens": 0,
+      "harness.context.message_count": 1,
+    });
     expect(runSpans[0]?.attributes["harness.event.seq"]).toBe(5);
 
     const actual = `${JSON.stringify(normalizeEvents(result.events), null, 2)}\n`;
@@ -2087,6 +2093,12 @@ describe("runLoop", () => {
     );
     const contextPort = {
       build: vi.fn(() => Promise.resolve([])),
+      buildMetadata: vi.fn(() => ({
+        strategyId: "naive",
+        strategyVersion: "v3",
+        estimatedTokens: 0,
+        messageCount: 0,
+      })),
       snapshot: vi.fn(() => Promise.resolve([])),
       restore: vi.fn(() => Promise.resolve()),
     };

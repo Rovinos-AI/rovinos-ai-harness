@@ -42,6 +42,7 @@ export class NaiveStrategy implements ContextStrategy {
         offloadedResults,
       },
       pinnedSeqs: groups.filter((group) => group.pinned).flatMap((group) => group.seqs),
+      retainedSeqs: groups.flatMap((group) => group.seqs),
     });
   }
 }

@@ -200,7 +200,13 @@ function createScenario(): Scenario {
             },
           ],
         },
-      ]),
+      ]      ),
+    buildMetadata: () => ({
+      strategyId: "naive",
+      strategyVersion: "v3",
+      estimatedTokens: 1,
+      messageCount: 1,
+    }),
     snapshot: () => Promise.resolve(null),
     restore: () => Promise.resolve(),
   };

@@ -247,6 +247,7 @@ async function runLoopSteps(
         ids: options.ids,
         runId: execution.runId,
         messages: prepared.context,
+        contextMetadata: prepared.contextMetadata,
         signal: options.signal,
         deadlineTs: prepared.deadlineTs,
         ...(options.role === undefined ? {} : { role: options.role }),
@@ -311,11 +312,17 @@ async function prepareModelStep(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
-): Promise<{ readonly context: Message[]; readonly deadlineTs: number; readonly event?: Event }> {
+): Promise<{
+  readonly context: Message[];
+  readonly contextMetadata: ReturnType<ContextPort["buildMetadata"]>;
+  readonly deadlineTs: number;
+  readonly event?: Event;
+}> {
   const context =
     options.previousEventLogs === undefined
       ? await options.context.build(events.slice())
       : await options.context.build(events.slice(), options.previousEventLogs);
+  const contextMetadata = options.context.buildMetadata();
   const preflight = await preflightModelBudget({
     budgetTracker: execution.budgetTracker,
     checkpointer: execution.checkpointer,
@@ -324,12 +331,12 @@ async function prepareModelStep(
     recorder: options.recorder,
   });
   if (preflight.event !== undefined) {
-    return { context, ...preflight };
+    return { context, contextMetadata, ...preflight };
   }
   const stopped = await suspendIfShutdown(options, events, execution);
   return stopped === undefined
-    ? { context, deadlineTs: preflight.deadlineTs }
-    : { context, ...preflight, event: stopped };
+    ? { context, contextMetadata, deadlineTs: preflight.deadlineTs }
+    : { context, contextMetadata, ...preflight, event: stopped };
 }
 
 async function runToolCalls(

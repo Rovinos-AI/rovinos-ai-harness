@@ -182,6 +182,18 @@ export interface ContextPort {
   ): Promise<Message[]>;
 
   /**
+   * Returns identity and statistics from the most recently built context.
+   *
+   * @returns Strategy identity and deterministic context statistics.
+   */
+  buildMetadata(): {
+    readonly strategyId: Code;
+    readonly strategyVersion: Code;
+    readonly estimatedTokens: number;
+    readonly messageCount: number;
+  };
+
+  /**
    * Estimates the exact messages about to be sent, when the port has a token counter.
    *
    * @param messages - Complete provider-neutral request messages.
