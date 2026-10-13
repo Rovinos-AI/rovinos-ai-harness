@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
 import { Id, type Event, type NewEvent, type RunStatus } from "@harness/schemas";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, type ContentCodec, type ContentCodecContext } from "./codec.js";
+import { StoreMigrationError } from "./errors.js";
 import {
   ContentDecryptFailedError,
   InvalidEventError,
@@ -80,10 +81,103 @@ describe("read-only SQLite inspection", () => {
     );
   });
 
+  it("rejects read-only databases with migration checksum drift", async () => {
+    const path = await temporaryDatabase();
+    const writer = new SqliteEventStore(path);
+    await writer.close();
+    const database = new Database(path);
+    database
+      .prepare("UPDATE schema_migrations SET checksum = ? WHERE version = ?")
+      .run("synthetic-checksum", "0001");
+    database.close();
+
+    expect(() => new SqliteEventStore(path, undefined, { readOnly: true })).toThrow(
+      expect.objectContaining({ code: "migration_checksum_mismatch" }),
+    );
+  });
+
+  it("rejects read-only databases with a schema newer than this code", async () => {
+    const path = await temporaryDatabase();
+    const writer = new SqliteEventStore(path);
+    await writer.close();
+    const database = new Database(path);
+    database
+      .prepare("INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (?, ?, ?)")
+      .run("9999", "synthetic-checksum", 1);
+    database.close();
+
+    expect(() => new SqliteEventStore(path, undefined, { readOnly: true })).toThrow(
+      expect.objectContaining({ code: "schema_newer_than_code" }),
+    );
+  });
+
+  it("rejects read-only databases with migrations pending", async () => {
+    const path = await temporaryDatabase();
+    const writer = new SqliteEventStore(path);
+    await writer.close();
+    const database = new Database(path);
+    database.exec("DROP TABLE schema_migrations");
+    database.close();
+
+    expect(() => new SqliteEventStore(path, undefined, { readOnly: true })).toThrow(
+      expect.objectContaining({ code: "schema_migration_pending" }),
+    );
+    expect(new StoreMigrationError("schema_migration_pending").code).toBe(
+      "schema_migration_pending",
+    );
+  });
+
   it("does not create a missing database in read-only mode", async () => {
     const path = await temporaryDatabase();
     expect(() => new SqliteEventStore(path, undefined, { readOnly: true })).toThrow();
     expect(existsSync(path)).toBe(false);
+  });
+});
+
+describe("legacy SQLite schema adoption", () => {
+  it("preserves events and records the initial migration", async () => {
+    const path = await temporaryDatabase();
+    const database = new Database(path);
+    database.exec(
+      readFileSync(new URL("./fixtures/legacy-sqlite-schema.sql", import.meta.url), "utf8"),
+    );
+    database
+      .prepare(
+        "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(runId, 1, "pending", 1, 1);
+    database
+      .prepare(
+        "INSERT INTO events (global_seq, run_id, seq, ts, type, trace_id, span_id, segment_id, meta_json, content_blob, key_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        1,
+        runId,
+        0,
+        1,
+        "run_created",
+        traceId,
+        spanId,
+        runId,
+        JSON.stringify({ v: 1, configHash: "a".repeat(64), policyVersion: "policy.v1", depth: 0 }),
+        "{}",
+        null,
+      );
+    database.close();
+
+    const store = new SqliteEventStore(path);
+    try {
+      await expect(collect(store.read(runId))).resolves.toMatchObject([
+        { type: "run_created", runId, seq: 0 },
+      ]);
+      const history = new Database(path);
+      expect(history.prepare("SELECT version FROM schema_migrations").get()).toEqual({
+        version: "0001",
+      });
+      history.close();
+    } finally {
+      await store.close();
+    }
   });
 });
 

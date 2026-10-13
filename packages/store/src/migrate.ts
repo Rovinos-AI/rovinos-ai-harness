@@ -53,17 +53,18 @@ function loadMigrations(dialect: "sqlite" | "postgres", directory?: string): Mig
     .filter((filename) => filename.endsWith(".sql"))
     .map((filename) => migrationFileSchema.parse(filename))
     .sort();
+  const versions = files.map((filename) => filename.slice(0, 4));
+  if (new Set(versions).size !== versions.length) {
+    throw new StoreMigrationError("migration_set_invalid");
+  }
   const migrations = files.map((filename) => {
     const sql = readFileSync(join(migrationDirectory, filename), "utf8");
     return {
-      version: filename.slice(0, -4),
+      version: filename.slice(0, 4),
       checksum: createHash("sha256").update(sql).digest("hex"),
       sql,
     };
   });
-  if (new Set(migrations.map(({ version }) => version)).size !== migrations.length) {
-    throw new StoreMigrationError("schema_newer_than_code");
-  }
   return migrations;
 }
 

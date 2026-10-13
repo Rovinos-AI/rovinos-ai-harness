@@ -23,7 +23,7 @@ import {
   type EncodedSnapshot,
   type SnapshotRow,
 } from "../codec.js";
-import { InvalidEventError, SeqConflictError } from "../errors.js";
+import { InvalidEventError, SeqConflictError, StoreMigrationError } from "../errors.js";
 import {
   systemClock,
   sqliteStoreOptionsSchema,
@@ -199,6 +199,9 @@ export class SqliteEventStore implements EventStore {
         migrate(this.db, "sqlite", { appliedAt: clock.now() });
         initializeEncryptionMetadata(this.db, this.codec.encrypted);
       } else {
+        if (migrate(this.db, "sqlite", { dryRun: true }).length > 0) {
+          throw new StoreMigrationError("schema_migration_pending");
+        }
         validateEncryptionMetadata(this.db, this.codec.encrypted);
       }
       this.db.pragma("busy_timeout = 5000");

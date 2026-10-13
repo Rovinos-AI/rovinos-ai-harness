@@ -78,16 +78,29 @@ export class StoreEncryptionMismatchError extends HarnessError {
 /** Raised when a store migration is missing from or modified relative to migration history. */
 export class StoreMigrationError extends HarnessError {
   /** Stable migration error code. */
-  readonly code: "migration_checksum_mismatch" | "schema_newer_than_code";
+  readonly code:
+    | "migration_checksum_mismatch"
+    | "migration_set_invalid"
+    | "schema_migration_pending"
+    | "schema_newer_than_code";
 
   /**
    * @param code Stable reason for rejecting the migration history.
    */
-  constructor(code: "migration_checksum_mismatch" | "schema_newer_than_code") {
+  constructor(
+    code:
+      | "migration_checksum_mismatch"
+      | "migration_set_invalid"
+      | "schema_migration_pending"
+      | "schema_newer_than_code",
+  ) {
     super(
-      code === "migration_checksum_mismatch"
-        ? "Migration checksum mismatch"
-        : "Database schema is newer than code",
+      {
+        migration_checksum_mismatch: "Migration checksum mismatch",
+        migration_set_invalid: "Migration set is invalid",
+        schema_migration_pending: "Database schema migrations are pending",
+        schema_newer_than_code: "Database schema is newer than code",
+      }[code],
     );
     this.code = code;
   }

@@ -56,6 +56,20 @@ describe("Docker image", () => {
     expect(version).toBe(HARNESS_VERSION);
   });
 
+  it("includes both dialect migrations and opens a SQLite store", async () => {
+    const output = await runDocker([
+      "run",
+      "--rm",
+      "--entrypoint",
+      "node",
+      imageName,
+      "--input-type=module",
+      "-e",
+      "import { existsSync } from 'node:fs'; import { SqliteEventStore } from '@harness/store'; const paths = ['/app/packages/store/migrations/sqlite/0001_init.sql', '/app/packages/store/migrations/postgres/0001_init.sql']; if (paths.some((path) => !existsSync(path))) throw new Error('migration_files_missing'); const path = '/tmp/harness-store-image-smoke.sqlite'; const store = new SqliteEventStore(path); await store.close(); if (!existsSync(path)) throw new Error('sqlite_store_not_created'); process.stdout.write('migration_files_and_sqlite_store_ok');",
+    ]);
+    expect(output.trim()).toBe("migration_files_and_sqlite_store_ok");
+  });
+
   it("starts healthy with a read-only root filesystem under Compose", async () => {
     composeStarted = true;
     await runDocker(

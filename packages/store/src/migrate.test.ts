@@ -104,7 +104,7 @@ describe("SQLite schema migrations", () => {
     const db = new Database(":memory:");
 
     expect(migrate(db, "sqlite", { migrationDirectory: directory, dryRun: true })).toEqual([
-      "0001_init",
+      "0001",
     ]);
     expect(
       db
@@ -114,13 +114,13 @@ describe("SQLite schema migrations", () => {
         .get("table")?.count,
     ).toBe(0);
     expect(migrate(db, "sqlite", { migrationDirectory: directory, appliedAt: 1 })).toEqual([
-      "0001_init",
+      "0001",
     ]);
     expect(migrate(db, "sqlite", { migrationDirectory: directory, appliedAt: 2 })).toEqual([]);
     expect(
       db.prepare("SELECT version, checksum, applied_at FROM schema_migrations").get(),
     ).toMatchObject({
-      version: "0001_init",
+      version: "0001",
       applied_at: 1,
     });
     db.close();
@@ -160,7 +160,7 @@ describe("SQLite schema migrations", () => {
 
   it("loads and applies the checked-in schema with the required indexes and tables", () => {
     const db = new Database(":memory:");
-    expect(migrate(db, "sqlite")).toEqual(["0001_init"]);
+    expect(migrate(db, "sqlite")).toEqual(["0001"]);
     const names = db
       .prepare<[], { name: string }>(
         "SELECT name FROM sqlite_master WHERE type IN ('table', 'index') ORDER BY name",
@@ -194,6 +194,17 @@ describe("SQLite schema migrations", () => {
     db.close();
   });
 
+  it("rejects migration files with duplicate numeric versions", async () => {
+    const directory = await temporaryMigrations("CREATE TABLE marker (id INTEGER PRIMARY KEY);");
+    await writeFile(join(directory, "0001_other.sql"), "SELECT 1;");
+    const db = new Database(":memory:");
+
+    expect(migrationErrorCode(() => migrate(db, "sqlite", { migrationDirectory: directory }))).toBe(
+      "migration_set_invalid",
+    );
+    db.close();
+  });
+
   it("keeps the migration source files readable from the package", async () => {
     const directory = new URL("../migrations/sqlite/", import.meta.url);
     expect(await readdir(directory)).toContain("0001_init.sql");
@@ -212,11 +223,11 @@ describe("Postgres schema migrations", () => {
 
     expect(
       await migrate(driver, "postgres", { migrationDirectory: directory, dryRun: true }),
-    ).toEqual(["0001_init"]);
+    ).toEqual(["0001"]);
     expect(driver.historyTable).toBe(false);
     expect(
       await migrate(driver, "postgres", { migrationDirectory: directory, appliedAt: 1 }),
-    ).toEqual(["0001_init"]);
+    ).toEqual(["0001"]);
     expect(
       await migrate(driver, "postgres", { migrationDirectory: directory, appliedAt: 2 }),
     ).toEqual([]);
