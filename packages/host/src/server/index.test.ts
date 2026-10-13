@@ -666,8 +666,9 @@ describe("createReferenceHost", () => {
     await host.close();
   });
 
-  it("returns a bounded unavailable error when opted-in telemetry has no handler", async () => {
+  it("validates app telemetry through the default host handler", async () => {
     const onAppRejected = vi.fn();
+    const spanStart = spanCollector.getFinishedSpans().length;
     const fixture = makeServer({ onAppRejected, idGenerator: () => sessionId });
     const host = await fixture.hostPromise;
     const launchedSessionId = await newAppSession(fixture, host);
@@ -679,13 +680,33 @@ describe("createReferenceHost", () => {
         appId: "approval",
         sessionId: launchedSessionId,
         toolName: APP_TELEMETRY_TOOL_NAME,
-        arguments: { spans: [] },
+        arguments: {
+          spans: [
+            { name: "ui.render", startOffsetMs: 0, durationMs: 1 },
+            { name: "ui.render", startOffsetMs: "INVALID-CANARY", durationMs: 1 },
+          ],
+        },
       }),
     );
 
-    expect(response.status).toBe(409);
-    expect(response.body).toBe('{"error":"app_telemetry_unavailable"}');
-    expect(onAppRejected).toHaveBeenCalledWith("telemetry_unavailable");
+    expect(response.status).toBe(200);
+    expect(parseJson(CallToolResultSchema, response.body)).toEqual({
+      content: [{ type: "text", text: '{"accepted":1,"dropped":1}' }],
+    });
+    expect(onAppRejected).toHaveBeenCalledWith("schema");
+    const exported = JSON.stringify(
+      spanCollector
+        .getFinishedSpans()
+        .slice(spanStart)
+        .map(({ name, attributes }) => ({ name, attributes })),
+    );
+    expect(exported).not.toContain("INVALID-CANARY");
+    expect(
+      spanCollector
+        .getFinishedSpans()
+        .slice(spanStart)
+        .map(({ name }) => name),
+    ).toContain("harness.ui.render");
     await host.close();
   });
 

@@ -77,6 +77,49 @@ Owner task: `4.1`.
 
 Owner task: `4.1`.
 
+### `harness.ui.decision`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.error.code` | Code | Optional | `@harness/host` |
+| `harness.ui.decision` | enum: `approve`, `deny`, `edit` | Required | `@harness/host` |
+| `harness.ui.duration_ms` | integer | Required | `@harness/host` |
+| `harness.ui.start_offset_ms` | integer | Required | `@harness/host` |
+
+Owner task: `3.4`.
+
+### `harness.ui.error`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.error.code` | Code | Optional | `@harness/host` |
+| `harness.ui.duration_ms` | integer | Required | `@harness/host` |
+| `harness.ui.start_offset_ms` | integer | Required | `@harness/host` |
+
+Owner task: `3.4`.
+
+### `harness.ui.interaction`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.error.code` | Code | Optional | `@harness/host` |
+| `harness.ui.duration_ms` | integer | Required | `@harness/host` |
+| `harness.ui.interaction.count` | integer | Required | `@harness/host` |
+| `harness.ui.interaction.kind` | enum: `click`, `focus`, `edit` | Required | `@harness/host` |
+| `harness.ui.start_offset_ms` | integer | Required | `@harness/host` |
+
+Owner task: `3.4`.
+
+### `harness.ui.render`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.error.code` | Code | Optional | `@harness/host` |
+| `harness.ui.duration_ms` | integer | Required | `@harness/host` |
+| `harness.ui.start_offset_ms` | integer | Required | `@harness/host` |
+
+Owner task: `3.4`.
+
 ### `harness.ui_session`
 
 | Attribute | Type | Presence | Owning package |

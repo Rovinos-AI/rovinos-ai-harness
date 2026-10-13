@@ -6,13 +6,14 @@ import { ToolSchema } from "@modelcontextprotocol/core";
 import { isToolVisibilityModelOnly } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { ModelToolCall, PolicyPort, RunContext, ToolPort } from "@harness/core";
 import { z } from "zod";
+import { AppSpanBatchSchema } from "./app-telemetry.js";
 import type { AppCall, AppInstance } from "./types.js";
 
 /** Name of the host-local telemetry tool exposed to MCP Apps. */
 export const APP_TELEMETRY_TOOL_NAME = "harness.telemetry.emit";
 
 /** Arguments accepted by the host-local telemetry tool before span validation. */
-export const AppTelemetryEmitArgsSchema = z.object({ spans: z.array(z.unknown()) }).strict();
+export const AppTelemetryEmitArgsSchema = AppSpanBatchSchema;
 
 /** MCP tool metadata marks this declaration as callable by the app, not the model. */
 export const APP_TELEMETRY_TOOL: Tool = ToolSchema.parse({
@@ -65,7 +66,7 @@ export interface AppCallRouterOptions {
   /** Consumes telemetry locally; this callback must not forward to an MCP server. */
   readonly onTelemetryEmit?: (
     session: AppInstance,
-    args: z.infer<typeof AppTelemetryEmitArgsSchema>,
+    args: unknown,
     context: AppCallExecutionContext,
   ) => Promise<CallToolResult>;
   /** Reads tools available to an app; the router applies its app-specific allowlist. */
@@ -241,11 +242,7 @@ export class AppCallRouter {
         this.#reject("telemetry_unavailable");
         throw new AppCallRouterError("app_telemetry_unavailable");
       }
-      const parsed = AppTelemetryEmitArgsSchema.safeParse(request.arguments);
-      if (!parsed.success) {
-        return { content: [], isError: true };
-      }
-      return this.#options.onTelemetryEmit(session, parsed.data, context);
+      return this.#options.onTelemetryEmit(session, request.arguments, context);
     }
 
     return (

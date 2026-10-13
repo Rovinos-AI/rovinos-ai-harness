@@ -89,7 +89,7 @@ export interface ReferenceHostDependencies {
   /** Handles app telemetry locally without forwarding it to an MCP server. */
   readonly onTelemetryEmit?: (
     session: AppInstance,
-    args: { readonly spans: readonly unknown[] },
+    args: unknown,
     context: AppCallExecutionContext,
   ) => Promise<CallToolResult>;
   /** Lists MCP tools for an app; the host router filters this result to its allowlist. */
