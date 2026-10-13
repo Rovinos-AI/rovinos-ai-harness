@@ -7,6 +7,7 @@ import {
   type Message,
   type ToolSpec,
 } from "@harness/schemas";
+import { requestHash } from "@harness/models";
 import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
@@ -82,6 +83,16 @@ function modelRunContext(options: ModelStepOptions): RunContext {
 export async function modelStep(options: ModelStepOptions): Promise<ModelStepResult> {
   const requestId = options.ids.next();
   const role = options.role;
+  const modelRequest = ModelRequestSchema.parse({
+    requestId,
+    model: {
+      provider: options.provider ?? "unknown",
+      model: options.modelName ?? "unknown",
+    },
+    messages: options.messages,
+    ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
+    ...(role === undefined ? {} : { role }),
+  });
   const requestPartial: EventPartial = {
     type: "model_request",
     v: 1,
@@ -89,6 +100,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
     provider: options.provider ?? "unknown",
     model: options.modelName ?? "unknown",
     messages: options.messages,
+    requestHash: requestHash(modelRequest),
     ...(role === undefined ? {} : { role }),
   };
   const recorded: Event[] = [];
@@ -100,19 +112,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
 
     let completion: ModelCompletion;
     try {
-      completion = await options.model.complete(
-        ModelRequestSchema.parse({
-          requestId,
-          model: {
-            provider: options.provider ?? "unknown",
-            model: options.modelName ?? "unknown",
-          },
-          messages: options.messages,
-          ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
-          ...(role === undefined ? {} : { role }),
-        }),
-        modelRunContext(options),
-      );
+      completion = await options.model.complete(modelRequest, modelRunContext(options));
     } catch (error) {
       if (options.signal.reason === "shutdown") {
         result = { outcome: "aborted", events: recorded };

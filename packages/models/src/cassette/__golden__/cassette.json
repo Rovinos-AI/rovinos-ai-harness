@@ -1,0 +1,39 @@
+{
+  "containsRealData": false,
+  "entries": [
+    {
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "response": {
+        "parts": [
+          {
+            "type": "text",
+            "text": "first"
+          }
+        ],
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 2
+        },
+        "finishReason": "stop",
+        "latencyMs": 3
+      }
+    },
+    {
+      "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "response": {
+        "parts": [
+          {
+            "type": "text",
+            "text": "second"
+          }
+        ],
+        "usage": {
+          "inputTokens": 4,
+          "outputTokens": 5
+        },
+        "finishReason": "stop",
+        "latencyMs": 6
+      }
+    }
+  ]
+}
