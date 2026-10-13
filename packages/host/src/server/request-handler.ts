@@ -18,16 +18,19 @@ import {
   writeJson,
 } from "./http-utils.js";
 import { UiSession } from "./ui-session.js";
+import { AppCallRouter, AppCallRouterError } from "./app-calls.js";
 
 const MAX_CALL_BYTES = 16_384;
 
 interface RequestHandlerOptions {
   readonly config: HostConfig;
   readonly dependencies: ReferenceHostDependencies;
+  readonly appCallRouter: AppCallRouter;
   readonly apps: ReadonlyMap<string, HostConfig["apps"][number]>;
   readonly appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>;
   readonly sessions: Map<string, AppInstance>;
   readonly nextSessionId: () => string;
+  readonly sessionRunId: AppInstance["runId"];
   readonly scheduleUiSessionExpiry: (callback: () => void, delayMs: number) => () => void;
   readonly token: string;
   readonly expectedOrigin: () => string;
@@ -94,6 +97,7 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
     id: app.id,
     resourceUri: app.resourceUri,
     sessionId,
+    ...(options.sessionRunId === undefined ? {} : { runId: options.sessionRunId }),
     ...(uiSession === undefined ? {} : { uiSession }),
     end,
   };
@@ -202,18 +206,33 @@ async function routeAppCall(
     writeError(response, 404, "app_unknown");
     return;
   }
-  if (options.appConfigs.get(session.id)?.allowedTools.includes(call.toolName) !== true) {
-    writeError(response, 403, "app_tool_not_allowed");
-    return;
-  }
-  if (options.dependencies.onAppCall === undefined) {
+  try {
+    writeJson(response, 200, await options.appCallRouter.handle(session, call));
+  } catch (error) {
+    if (error instanceof AppCallRouterError) {
+      writeError(response, error.code === "app_tool_not_allowed" ? 403 : 409, error.code);
+      return;
+    }
     writeJson(response, 200, { content: [], isError: true });
+  }
+}
+
+async function routeAppToolsList(
+  url: URL,
+  response: HostResponse,
+  options: RequestHandlerOptions,
+): Promise<void> {
+  const sessionId = url.searchParams.get("sessionId");
+  const session = sessionId === null ? undefined : options.sessions.get(sessionId);
+  if (session === undefined) {
+    writeError(response, 404, "app_unknown");
     return;
   }
   try {
-    writeJson(response, 200, await options.dependencies.onAppCall(call));
+    const cursor = url.searchParams.get("cursor") ?? undefined;
+    writeJson(response, 200, await options.appCallRouter.listTools(session, cursor));
   } catch {
-    writeJson(response, 200, { content: [], isError: true });
+    writeError(response, 502, "app_tools_unavailable");
   }
 }
 
@@ -252,6 +271,9 @@ export function createRequestHandler(
           return;
         case "POST /api/call":
           await routeAppCall(request, response, options);
+          return;
+        case "GET /api/tools":
+          await routeAppToolsList(url, response, options);
           return;
         case "POST /api/session/end":
           endAppSession(url, response, options);

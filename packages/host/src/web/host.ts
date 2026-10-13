@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CallToolResultSchema } from "@modelcontextprotocol/core";
+import {
+  CallToolResultSchema,
+  ListToolsResultSchema,
+} from "@modelcontextprotocol/core";
+import { INVALID_REQUEST, ProtocolError } from "@modelcontextprotocol/client";
 import { Code, Id, Traceparent, parseJson } from "@harness/schemas";
 import { z } from "zod";
 import { createAppBridge, type AppIframe, type AppToolCall } from "./bridge.js";
@@ -19,6 +23,11 @@ const AppPayloadSchema = z
   })
   .strict();
 const CallResponseSchema = CallToolResultSchema;
+const AppCallErrorSchema = z
+  .object({
+    error: z.enum(["app_tool_not_allowed", "app_run_mismatch", "app_run_unavailable"]),
+  })
+  .strict();
 const HostReadySchema = z.object({ appId: Code, sessionId: Id }).strict();
 
 /** Default restrictions placed on every reference-host app iframe. */
@@ -136,13 +145,21 @@ async function connectAppFrame(options: {
   root.onFrameRemoved(endSession);
   root.attachFrame();
   await loaded;
-  const bridge = createAppBridge(frame, (call) =>
-    routeToolCall(call, {
-      appId: app.appId,
-      sessionId: app.sessionId,
-      token: launch.token,
-      request,
-    }),
+  const bridge = createAppBridge(
+    frame,
+    (call) =>
+      routeToolCall(call, {
+        appId: app.appId,
+        sessionId: app.sessionId,
+        token: launch.token,
+        request,
+      }),
+    (cursor) =>
+      routeToolList(cursor, {
+        sessionId: app.sessionId,
+        token: launch.token,
+        request,
+      }),
   );
   await bridge.connect();
   await bridge.sendToolInput(app.toolInput);
@@ -156,6 +173,33 @@ interface ToolCallContext {
   readonly sessionId: string;
   readonly token: string;
   readonly request: typeof fetch;
+}
+
+interface ToolListContext {
+  readonly sessionId: string;
+  readonly token: string;
+  readonly request: typeof fetch;
+}
+
+async function routeToolList(
+  cursor: string | undefined,
+  context: ToolListContext,
+): Promise<z.infer<typeof ListToolsResultSchema>> {
+  const query = new URLSearchParams({ sessionId: context.sessionId });
+  if (cursor !== undefined) {
+    query.set("cursor", cursor);
+  }
+  try {
+    const response = await context.request(`/api/tools?${query.toString()}`, {
+      headers: authorizedHeaders(context.token),
+    });
+    if (!response.ok) {
+      return { tools: [] };
+    }
+    return parseJson(ListToolsResultSchema, await response.text());
+  } catch {
+    return { tools: [] };
+  }
 }
 
 async function routeToolCall(
@@ -174,10 +218,14 @@ async function routeToolCall(
       }),
     });
     if (!response.ok) {
-      return { content: [], isError: true };
+      const error = parseJson(AppCallErrorSchema, await response.text());
+      throw new ProtocolError(INVALID_REQUEST, error.error);
     }
     return parseJson(CallResponseSchema, await response.text());
-  } catch {
+  } catch (error) {
+    if (error instanceof ProtocolError) {
+      throw error;
+    }
     return { content: [], isError: true };
   }
 }

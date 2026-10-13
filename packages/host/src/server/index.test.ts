@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { trace } from "@opentelemetry/api";
-import { CallToolResultSchema } from "@modelcontextprotocol/core";
+import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/core";
 import { parseJson, Traceparent } from "@harness/schemas";
 import { createTestSpanCollector } from "@harness/telemetry/testing";
 import { z } from "zod";
 import {
+  APP_TELEMETRY_TOOL_NAME,
   createReferenceHost,
   ReferenceHostError,
   REFERENCE_CSP,
@@ -95,12 +96,17 @@ function makeServer(
     readonly closeError?: Error;
     readonly readResource?: (uri: string) => Promise<unknown>;
     readonly onAppCall?: ReferenceHostDependencies["onAppCall"];
+    readonly onTelemetryEmit?: ReferenceHostDependencies["onTelemetryEmit"];
+    readonly onAppToolsList?: ReferenceHostDependencies["onAppToolsList"];
+    readonly isIdOwnedByRun?: ReferenceHostDependencies["isIdOwnedByRun"];
+    readonly onAppRejected?: ReferenceHostDependencies["onAppRejected"];
     readonly onCode?: ReferenceHostDependencies["onCode"];
     readonly readStatic?: ReferenceHostDependencies["readStatic"];
     readonly config?: unknown;
     readonly idGenerator?: () => string;
     readonly randomBytes?: (size: number) => Buffer;
     readonly now?: () => number;
+    readonly runId?: ReferenceHostDependencies["runId"];
     readonly scheduleUiSessionExpiry?: ReferenceHostDependencies["scheduleUiSessionExpiry"];
     readonly uiSessionContext?: ReferenceHostDependencies["uiSessionContext"];
   } = {},
@@ -134,11 +140,24 @@ function makeServer(
     readResource: options.readResource ?? (() => Promise.resolve(resource)),
     onCode: options.onCode ?? (() => undefined),
     ...(options.onAppCall === undefined ? {} : { onAppCall: options.onAppCall }),
+    ...(options.onTelemetryEmit === undefined
+      ? {}
+      : { onTelemetryEmit: options.onTelemetryEmit }),
+    ...(options.onAppToolsList === undefined
+      ? {}
+      : { onAppToolsList: options.onAppToolsList }),
+    ...(options.isIdOwnedByRun === undefined
+      ? {}
+      : { isIdOwnedByRun: options.isIdOwnedByRun }),
+    ...(options.onAppRejected === undefined
+      ? {}
+      : { onAppRejected: options.onAppRejected }),
     ...(options.onCode === undefined ? {} : { onCode: options.onCode }),
     ...(options.readStatic === undefined ? {} : { readStatic: options.readStatic }),
     ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
     ...(options.randomBytes === undefined ? {} : { randomBytes: options.randomBytes }),
     ...(options.now === undefined ? {} : { now: options.now }),
+    runId: options.runId ?? sessionId,
     ...(options.scheduleUiSessionExpiry === undefined
       ? {}
       : { scheduleUiSessionExpiry: options.scheduleUiSessionExpiry }),
@@ -219,7 +238,9 @@ describe("createReferenceHost", () => {
       onAppCall: () =>
         Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "ok" }] })),
       idGenerator: () => sessionId,
+      runId: sessionId,
     });
+
     try {
       const page = await fetch(host.origin);
       expect(page.status).toBe(200);
@@ -276,6 +297,107 @@ describe("createReferenceHost", () => {
     } finally {
       await host.close();
     }
+  });
+
+  it("routes app telemetry locally, enforces policy context, filters discovery, and rejects cross-run ids", async () => {
+    const onAppCall = vi.fn(() =>
+      Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "ok" }] })),
+    );
+    const onTelemetryEmit = vi.fn(() =>
+      Promise.resolve(CallToolResultSchema.parse({ content: [{ type: "text", text: "accepted" }] })),
+    );
+    const onAppToolsList = vi.fn(() =>
+      Promise.resolve(ListToolsResultSchema.parse({
+        tools: [
+          { name: "approve", description: "allowed", inputSchema: { type: "object" } },
+          { name: "filesystem.write", description: "not allowed", inputSchema: { type: "object" } },
+        ],
+      })),
+    );
+    const onAppRejected = vi.fn();
+    const foreignId = "00000000000000000000000006";
+    const fixture = makeServer({
+      onAppCall,
+      onTelemetryEmit,
+      onAppToolsList,
+      onAppRejected,
+      isIdOwnedByRun: (_owner, id) => id !== foreignId,
+      idGenerator: () => sessionId,
+    });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+    const auth = authorization(host);
+    const local = await fixture.request(
+      "POST",
+      "/api/call",
+      auth,
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        toolName: APP_TELEMETRY_TOOL_NAME,
+        arguments: { spans: [{ name: "ui.render" }] },
+      }),
+    );
+    expect(local.status).toBe(200);
+    expect(onTelemetryEmit).toHaveBeenCalledOnce();
+    expect(onAppCall).not.toHaveBeenCalled();
+
+    const forwarded = await fixture.request(
+      "POST",
+      "/api/call",
+      auth,
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        toolName: "approve",
+        arguments: {},
+      }),
+    );
+    expect(forwarded.status).toBe(200);
+    expect(onAppCall).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: "approve" }),
+      { runId: sessionId, policyContext: { subagent: false, app: "approval" } },
+    );
+
+    const discovered = await fixture.request(
+      "GET",
+      `/api/tools?sessionId=${encodeURIComponent(launchedSessionId)}`,
+      auth,
+    );
+    const tools = parseJson(ListToolsResultSchema, discovered.body).tools;
+    expect(tools.map(({ name }) => name)).toEqual(["approve", APP_TELEMETRY_TOOL_NAME]);
+    expect(tools[1]?._meta).toEqual({ ui: { visibility: ["app"] } });
+
+    const crossRun = await fixture.request(
+      "POST",
+      "/api/call",
+      auth,
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        callId: foreignId,
+        toolName: "approve",
+        arguments: {},
+      }),
+    );
+    expect(crossRun.status).toBe(409);
+    expect(crossRun.body).toBe('{"error":"app_run_mismatch"}');
+
+    const disallowed = await fixture.request(
+      "POST",
+      "/api/call",
+      auth,
+      JSON.stringify({
+        appId: "approval",
+        sessionId: launchedSessionId,
+        toolName: "filesystem.write",
+        arguments: {},
+      }),
+    );
+    expect(disallowed.status).toBe(403);
+    expect(disallowed.body).toBe('{"error":"app_tool_not_allowed"}');
+    expect(onAppRejected).toHaveBeenCalledWith("unknown_tool");
+    await host.close();
   });
 
   it("sends anti-framing headers on JSON error responses", async () => {
@@ -646,12 +768,15 @@ describe("createReferenceHost", () => {
     });
     const result = await fixture.request("POST", "/api/call", headers, body);
     expect(result.status).toBe(200);
-    expect(onAppCall).toHaveBeenCalledExactlyOnceWith({
-      appId: "approval",
-      sessionId,
-      toolName: "approve",
-      arguments: { decision: "yes" },
-    });
+    expect(onAppCall).toHaveBeenCalledExactlyOnceWith(
+      {
+        appId: "approval",
+        sessionId,
+        toolName: "approve",
+        arguments: { decision: "yes" },
+      },
+      { runId: sessionId, policyContext: { subagent: false, app: "approval" } },
+    );
     const disallowed = await fixture.request(
       "POST",
       "/api/call",

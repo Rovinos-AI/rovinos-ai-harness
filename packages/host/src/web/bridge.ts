@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import { JSONRPCMessageSchema } from "@modelcontextprotocol/core";
+import {
+  JSONRPCMessageSchema,
+  ListToolsRequestSchema,
+  ListToolsResultSchema,
+} from "@modelcontextprotocol/core";
 import { AppBridge, type McpUiHostCapabilities } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type {
   CallToolRequest,
   CallToolResult,
   JSONRPCMessage,
+  ListToolsResult,
   Transport,
 } from "@modelcontextprotocol/client";
 
@@ -75,11 +80,14 @@ class AppPostMessageTransport implements Transport {
  *
  * @param frame - The sandboxed MCP App iframe.
  * @param onToolCall - Handler that routes calls through the host's local channel.
+ * @param onListTools - Lists only the tools exposed by the host to this app.
  * @returns Methods for connecting and delivering tool input and result notifications.
  */
 export function createAppBridge(
   frame: AppIframe,
   onToolCall: (call: AppToolCall) => Promise<CallToolResult>,
+  onListTools: (cursor: string | undefined) => Promise<ListToolsResult> = () =>
+    Promise.resolve({ tools: [] }),
 ): ReferenceAppBridge {
   const target = frame.contentWindow;
   if (target === null) {
@@ -92,6 +100,14 @@ export function createAppBridge(
     capabilities,
   );
   bridge.oncalltool = (params) => onToolCall(params);
+  bridge.setRequestHandler(
+    "tools/list",
+    {
+      params: ListToolsRequestSchema.shape.params,
+      result: ListToolsResultSchema,
+    },
+    (params) => onListTools(params?.cursor),
+  );
   const transport = new AppPostMessageTransport(target);
   return {
     connect: () => bridge.connect(transport),

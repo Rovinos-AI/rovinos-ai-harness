@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { HarnessError, HostConfigSchema, Id, type HostConfig } from "@harness/schemas";
+import { AppCallRouter } from "./app-calls.js";
 import { createRequestHandler } from "./request-handler.js";
 import { readStaticAsset, writeRequestFailure } from "./http-utils.js";
 import { REFERENCE_CSP } from "./resource.js";
@@ -14,6 +15,16 @@ import type {
 } from "./types.js";
 
 export { REFERENCE_CSP };
+export {
+  APP_TELEMETRY_TOOL,
+  APP_TELEMETRY_TOOL_NAME,
+  AppCallRouter,
+  AppCallRouterError,
+  AppTelemetryEmitArgsSchema,
+  type AppCallExecutionContext,
+  type AppCallPolicyContext,
+  type AppCallRejectedReason,
+} from "./app-calls.js";
 export type { AppCall, AppResourceReader, ReferenceHostDependencies } from "./types.js";
 export type { AppResourceRead, HostDiagnosticCode } from "./resource.js";
 export { UiSession, UI_SESSION_SPAN, type UiSessionContext } from "./ui-session.js";
@@ -174,6 +185,23 @@ export async function createReferenceHost(
   processToken ??= random(32).toString("base64url");
   const token = processToken;
   const registry = createAppRegistry(config);
+  const appCallRouter = new AppCallRouter({
+    apps: registry.appConfigs,
+    ...(dependencies.onAppCall === undefined ? {} : { onAppCall: dependencies.onAppCall }),
+    ...(dependencies.onTelemetryEmit === undefined
+      ? {}
+      : { onTelemetryEmit: dependencies.onTelemetryEmit }),
+    ...(dependencies.onAppToolsList === undefined
+      ? {}
+      : { onAppToolsList: dependencies.onAppToolsList }),
+    ...(dependencies.isIdOwnedByRun === undefined
+      ? {}
+      : { isIdOwnedByRun: dependencies.isIdOwnedByRun }),
+    ...(dependencies.onAppRejected === undefined
+      ? {}
+      : { onRejected: dependencies.onAppRejected }),
+  });
+  const sessionRunId = dependencies.runId ?? dependencies.uiSessionContext?.runId;
   const host = config.listen.host === "localhost" ? "127.0.0.1" : config.listen.host;
   let origin = "";
   let port = 0;
@@ -182,8 +210,10 @@ export async function createReferenceHost(
     createRequestHandler({
       config,
       dependencies: { ...dependencies, readStatic: dependencies.readStatic ?? readStaticAsset },
+      appCallRouter,
       ...registry,
       nextSessionId: nextId,
+      sessionRunId,
       token,
       expectedOrigin: () => origin,
       expectedHosts: () => [
