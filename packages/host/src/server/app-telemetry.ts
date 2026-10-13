@@ -6,6 +6,7 @@ import {
   type SpanDefinition,
   type SpanDefinitionShape,
 } from "@harness/telemetry";
+import { ROOT_CONTEXT, trace, type SpanContext } from "@opentelemetry/api";
 import { Code } from "@harness/schemas";
 import { z } from "zod";
 
@@ -58,7 +59,7 @@ export const AppSpanBatchSchema = z.object({ spans: z.array(AppSpanSchema).max(5
 export type AppSpanBatch = z.infer<typeof AppSpanBatchSchema>;
 
 /** Bounded reasons recorded when app telemetry is discarded. */
-export const AppTelemetryRejectReasonSchema = z.enum(["schema", "size", "unknown_span"]);
+export const AppTelemetryRejectReasonSchema = z.enum(["schema", "size", "rate", "unknown_span"]);
 
 /** Inferred bounded reasons recorded when app telemetry is discarded. */
 export type AppTelemetryRejectReason = z.infer<typeof AppTelemetryRejectReasonSchema>;
@@ -195,34 +196,45 @@ function reject(
   }
 }
 
-function startSpan(span: AppSpan): boolean {
+function startSpan(span: AppSpan, parent?: SpanContext): boolean {
   const timing = {
     "harness.ui.start_offset_ms": span.startOffsetMs,
     "harness.ui.duration_ms": span.durationMs,
   };
+  const options =
+    parent === undefined ? undefined : { parent: trace.setSpanContext(ROOT_CONTEXT, parent) };
   try {
     switch (span.name) {
       case "ui.render":
-        UI_RENDER_SPAN.start(timing).end();
+        UI_RENDER_SPAN.start(timing, options).end();
         return true;
       case "ui.decision":
-        UI_DECISION_SPAN.start({
-          ...timing,
-          "harness.ui.decision": span.decision,
-        }).end();
+        UI_DECISION_SPAN.start(
+          {
+            ...timing,
+            "harness.ui.decision": span.decision,
+          },
+          options,
+        ).end();
         return true;
       case "ui.error":
-        UI_ERROR_SPAN.start({
-          ...timing,
-          "harness.error.code": span.code,
-        }).end();
+        UI_ERROR_SPAN.start(
+          {
+            ...timing,
+            "harness.error.code": span.code,
+          },
+          options,
+        ).end();
         return true;
       case "ui.interaction":
-        UI_INTERACTION_SPAN.start({
-          ...timing,
-          "harness.ui.interaction.kind": span.kind,
-          "harness.ui.interaction.count": span.count,
-        }).end();
+        UI_INTERACTION_SPAN.start(
+          {
+            ...timing,
+            "harness.ui.interaction.kind": span.kind,
+            "harness.ui.interaction.count": span.count,
+          },
+          options,
+        ).end();
         return true;
     }
   } catch {
@@ -234,6 +246,7 @@ function startSpan(span: AppSpan): boolean {
 function ingestSpan(
   candidate: unknown,
   onRejected?: (reason: AppTelemetryRejectReason) => void,
+  parent?: SpanContext,
 ): boolean {
   try {
     const name = isRecord(candidate) ? candidate.name : undefined;
@@ -242,7 +255,7 @@ function ingestSpan(
       return false;
     }
     const parsed = AppSpanSchema.safeParse(candidate);
-    if (!parsed.success || !startSpan(parsed.data)) {
+    if (!parsed.success || !startSpan(parsed.data, parent)) {
       reject("schema", onRejected);
       return false;
     }
@@ -262,7 +275,10 @@ function ingestSpan(
  */
 export function ingestBatch(
   input: unknown,
-  options: { readonly onRejected?: (reason: AppTelemetryRejectReason) => void } = {},
+  options: {
+    readonly onRejected?: (reason: AppTelemetryRejectReason) => void;
+    readonly parent?: SpanContext;
+  } = {},
 ): AppSpanBatchAck {
   const inspection = inspectBatch(input);
   if ("reason" in inspection) {
@@ -273,11 +289,21 @@ export function ingestBatch(
   let accepted = 0;
   let dropped = 0;
   for (const candidate of inspection.spans) {
-    if (ingestSpan(candidate, options.onRejected)) {
+    if (ingestSpan(candidate, options.onRejected, options.parent)) {
       accepted += 1;
     } else {
       dropped += 1;
     }
   }
   return acknowledgment(accepted, dropped);
+}
+
+/** Drops an entire batch with a bounded rejection reason and an integer-only acknowledgment. */
+export function rejectBatch(
+  input: unknown,
+  reason: AppTelemetryRejectReason,
+  options: { readonly onRejected?: (reason: AppTelemetryRejectReason) => void } = {},
+): AppSpanBatchAck {
+  reject(reason, options.onRejected);
+  return acknowledgment(0, droppedBatchCount(input));
 }

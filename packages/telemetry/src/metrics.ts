@@ -20,6 +20,7 @@ export const HOST_APP_REJECTED_REASONS = [
   "telemetry_unavailable",
   "schema",
   "size",
+  "rate",
   "unknown_span",
 ] as const;
 
