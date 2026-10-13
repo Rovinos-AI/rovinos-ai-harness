@@ -34,7 +34,8 @@ RUN groupadd --gid 10002 sandbox \
     && mkdir -p /workspaces \
     && chown 10002:10002 /workspaces \
     && chmod 1777 /workspaces \
-    && command -v prlimit
+    && command -v prlimit \
+    && command -v setpriv
 COPY --from=build /app/node_modules/ ./node_modules/
 COPY --from=build /app/packages/sandbox/package.json ./packages/sandbox/package.json
 COPY --from=build /app/packages/sandbox/dist/ ./packages/sandbox/dist/

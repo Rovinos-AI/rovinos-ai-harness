@@ -167,14 +167,17 @@ describe("RemoteSandboxBackend", () => {
   });
 
   it("rejects runner tokens shorter than 32 UTF-8 bytes with a configuration error", () => {
-    expect(
-      () =>
-        new RemoteSandboxBackend({
-          url: "http://sandbox-runner:8080",
-          token: "short-synthetic-token",
-          fetcher: () => Promise.resolve(response(result)),
-        }),
-    ).toThrow(expect.objectContaining({ code: "sandbox_runner_config_invalid" }));
+    let configurationError: unknown;
+    try {
+      new RemoteSandboxBackend({
+        url: "http://sandbox-runner:8080",
+        token: "short-synthetic-token",
+        fetcher: () => Promise.resolve(response(result)),
+      });
+    } catch (error) {
+      configurationError = error;
+    }
+    expect(configurationError).toMatchObject({ code: "sandbox_runner_config_invalid" });
     expect(
       () =>
         new RemoteSandboxBackend({

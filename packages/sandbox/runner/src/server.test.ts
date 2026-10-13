@@ -344,9 +344,7 @@ describe("runner HTTP request handler", () => {
     expect(() =>
       createRunnerRequestHandler(makeOptions({ token: "short-synthetic-token" })),
     ).toThrow(RunnerConfigurationError);
-    expect(() =>
-      createRunnerRequestHandler(makeOptions({ token: "é".repeat(16) })),
-    ).not.toThrow();
+    expect(() => createRunnerRequestHandler(makeOptions({ token: "é".repeat(16) }))).not.toThrow();
     expect(() => createRunnerRequestHandler(makeOptions({ allowedHosts: [] }))).toThrow(
       RunnerConfigurationError,
     );

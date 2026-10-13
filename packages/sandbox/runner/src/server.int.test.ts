@@ -34,6 +34,10 @@ const ComposeSchema = z.object({
       cpus: z.number().optional(),
       cap_add: z.array(z.string()).optional(),
       cap_drop: z.array(z.string()).optional(),
+      entrypoint: z
+        .union([z.array(z.string()), z.string()])
+        .nullable()
+        .optional(),
       mem_limit: z.union([z.string(), z.number()]).optional(),
       networks: z.record(z.string(), z.unknown()).optional(),
       pids_limit: z.number().optional(),
@@ -189,7 +193,9 @@ describe("sandbox runner Compose service", () => {
     expect(config.networks.sandbox?.internal).toBe(true);
     expect(Object.keys(runner?.networks ?? {})).toEqual(["sandbox"]);
     expect(runner?.read_only).toBe(true);
-    expect(runner?.user).toBe(`${String(integrationUid)}:${String(integrationGid)}`);
+    expect(runner?.user).toBe("0:0");
+    expect(runner?.entrypoint).toContain(`--reuid=${String(integrationUid)}`);
+    expect(runner?.entrypoint).toContain(`--regid=${String(integrationGid)}`);
     expect(runner?.cap_drop).toEqual(["ALL"]);
     expect(runner?.cap_add).toEqual(["SETUID", "SETGID"]);
     expect(runner?.pids_limit).toBeGreaterThan(0);
@@ -201,6 +207,20 @@ describe("sandbox runner Compose service", () => {
     const result = await runExec(makeSpec(["/bin/echo", "runner-ready"]));
 
     expect(result).toMatchObject({ exitCode: 0, stdout: "runner-ready\n" });
+  });
+
+  // threat: T-02
+  it("runs commands under the dedicated execution uid and gid", async () => {
+    const result = await runExec(
+      makeSpec([
+        "node",
+        "-e",
+        "process.stdout.write(`${String(process.getuid())}:${String(process.getgid())}`)",
+      ]),
+    );
+
+    expect(result.stdout).toBe("10003:10003");
+    expect(result.stdout).not.toBe(`${String(integrationUid)}:${String(integrationGid)}`);
   });
 
   // threat: T-18

@@ -15,17 +15,11 @@ const RemoteOptionsSchema = z
 /** Error reported when a remote runner request fails. */
 export class RemoteSandboxError extends HarnessError {
   readonly code:
-    | "sandbox_unavailable"
-    | "sandbox_busy"
-    | "sandbox_timeout"
-    | "sandbox_runner_config_invalid";
+    "sandbox_unavailable" | "sandbox_busy" | "sandbox_timeout" | "sandbox_runner_config_invalid";
 
   constructor(
     code:
-      | "sandbox_unavailable"
-      | "sandbox_busy"
-      | "sandbox_timeout"
-      | "sandbox_runner_config_invalid",
+      "sandbox_unavailable" | "sandbox_busy" | "sandbox_timeout" | "sandbox_runner_config_invalid",
   ) {
     super("The remote sandbox request failed.");
     this.code = code;
