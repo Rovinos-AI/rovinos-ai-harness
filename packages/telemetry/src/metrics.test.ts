@@ -16,10 +16,13 @@ import {
 const meter = metrics.getMeter("@harness/telemetry");
 const counter = meter.createCounter("harness.telemetry.dropped");
 const getMeter = vi.spyOn(metrics, "getMeter").mockReturnValue(meter);
-const createCounter = vi.spyOn(meter, "createCounter").mockImplementation((name) => {
-  expect(Object.hasOwn(METRIC_ALLOWLIST, name)).toBe(true);
+function createAllowlistedCounter(name: string): typeof counter {
+  if (!Object.hasOwn(METRIC_ALLOWLIST, name)) {
+    throw new Error("metric_not_allowlisted");
+  }
   return counter;
-});
+}
+const createCounter = vi.spyOn(meter, "createCounter").mockImplementation(createAllowlistedCounter);
 const add = vi.spyOn(counter, "add");
 
 const dropReasons: readonly TelemetryDropReason[] = TELEMETRY_DROP_REASONS;
