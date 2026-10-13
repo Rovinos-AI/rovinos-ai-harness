@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessConfigSchema } from "@harness/config";
+import { CompositeSecretResolver, HarnessConfigSchema } from "@harness/config";
 import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,6 +60,7 @@ function createContext(
       stderr: (text) => stderr.push(text),
     }),
     clock: new FakeClock(options.now ?? 10 * DAY_MS),
+    secretResolver: new CompositeSecretResolver(),
     ...(options.vault === undefined ? {} : { createVaultResolver: options.vault }),
   };
   return { context, stdout, stderr };
@@ -211,7 +212,7 @@ describe("harness store migrate", () => {
       applied: [],
       pending: ["0001", "0002"],
     });
-    expect(migrate).toHaveBeenCalledWith(config(), expect.any(String), true, 10 * DAY_MS);
+    expect(migrate).toHaveBeenCalledWith(config(), true, 10 * DAY_MS, expect.any(Object));
     expect(stderr).toEqual([]);
   });
 
@@ -323,29 +324,25 @@ describe("harness store purge", () => {
     expect(stderr).toEqual(["retention_not_configured\n"]);
   });
 
-  it("includes hook failures in JSON and exits non-zero without leaking hook messages", async () => {
+  it("does not construct the vault while the separately typed purge hook is not wired", async () => {
     const store = new InMemoryEventStore();
     await seedRun(store, "completed", 1);
-    const hookMessage = "synthetic vault hook content";
-    const vault = {
-      resolve: () => Promise.resolve(undefined),
-      purge: () => Promise.reject(new Error(hookMessage)),
-    };
+    const createVaultResolver = vi.fn(() => Promise.resolve(undefined));
     const { context, stdout, stderr } = createContext(config(), {
       now: 3 * DAY_MS,
-      vault: () => Promise.resolve(vault),
+      vault: createVaultResolver,
     });
     const command = createStoreCommand({
       migrate: vi.fn(),
       openStore: () => Promise.resolve(store),
     });
 
-    const exitCode = await main(["--json", "store", "purge"], context, [command]);
+    const exitCode = await main(["--json", "store", "purge", "--dry-run"], context, [command]);
     const result = parseJson(StorePurgeResultSchema, stdout[0] ?? "");
 
-    expect(exitCode).toBe(ExitCode.failure);
-    expect(result).toMatchObject({ purged: 1, hookFailures: 1 });
-    expect(stderr).toEqual(["retention_hook_failed\n"]);
-    expect(stdout.join("") + stderr.join("")).not.toContain(hookMessage);
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(result).toMatchObject({ purged: 1, hookFailures: 0 });
+    expect(createVaultResolver).not.toHaveBeenCalled();
+    expect(stderr).toEqual([]);
   });
 });

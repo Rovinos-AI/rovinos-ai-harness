@@ -19,7 +19,11 @@ import {
   type SnapshotRow,
   validateSnapshotAppend,
 } from "../codec.js";
-import { InvalidEventError, StoreUnavailableError } from "../errors.js";
+import {
+  InvalidEventError,
+  StoreReadOnlyError,
+  StoreUnavailableError,
+} from "../errors.js";
 import {
   snapshotStoreOptionsSchema,
   systemClock,
@@ -117,6 +121,12 @@ export class PostgresEventStore implements EventStore {
     return this.initialized;
   }
 
+  private assertWritable(): void {
+    if (this.skipMigrations) {
+      throw new StoreReadOnlyError();
+    }
+  }
+
   private async initialize(): Promise<void> {
     await initializePostgresStore(this.pool, this.codec, this.clock, this.skipMigrations);
   }
@@ -127,6 +137,7 @@ export class PostgresEventStore implements EventStore {
     events: readonly NewEvent[],
     expectedSeq: number,
   ): Promise<{ nextSeq: number }> {
+    this.assertWritable();
     const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
     return this.appendEncoded(runId, encoded, expectedSeq);
   }
@@ -138,6 +149,7 @@ export class PostgresEventStore implements EventStore {
     expectedSeq: number,
     snapshot: Snapshot,
   ): Promise<{ nextSeq: number }> {
+    this.assertWritable();
     const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
     const [encoded, encodedSnapshot] = await Promise.all([
       encodeEvents(this.codec, runId, events, expectedSeq),
@@ -220,6 +232,7 @@ export class PostgresEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.deleteRun} */
   async deleteRun(runId: Id): Promise<number> {
+    this.assertWritable();
     try {
       await this.ensureInitialized();
       const client = await this.pool.connect();
@@ -347,6 +360,7 @@ export class PostgresEventStore implements EventStore {
     if (!Number.isSafeInteger(cursor) || cursor < 0) {
       throw new InvalidEventError([["cursor"]]);
     }
+    this.assertWritable();
     try {
       await this.ensureInitialized();
       await this.pool.query(
@@ -358,12 +372,26 @@ export class PostgresEventStore implements EventStore {
     }
   }
 
-  claimApprovalNotification: EventStore["claimApprovalNotification"] = (...args) =>
-    this.approvalNotifications.claim(...args);
-  markApprovalNotificationSent: EventStore["markApprovalNotificationSent"] = (...args) =>
-    this.approvalNotifications.markSent(...args);
-  releaseApprovalNotification: EventStore["releaseApprovalNotification"] = (...args) =>
-    this.approvalNotifications.release(...args);
+  async claimApprovalNotification(
+    ...args: Parameters<EventStore["claimApprovalNotification"]>
+  ): ReturnType<EventStore["claimApprovalNotification"]> {
+    this.assertWritable();
+    return this.approvalNotifications.claim(...args);
+  }
+
+  async markApprovalNotificationSent(
+    ...args: Parameters<EventStore["markApprovalNotificationSent"]>
+  ): ReturnType<EventStore["markApprovalNotificationSent"]> {
+    this.assertWritable();
+    return this.approvalNotifications.markSent(...args);
+  }
+
+  async releaseApprovalNotification(
+    ...args: Parameters<EventStore["releaseApprovalNotification"]>
+  ): ReturnType<EventStore["releaseApprovalNotification"]> {
+    this.assertWritable();
+    return this.approvalNotifications.release(...args);
+  }
 
   /** {@inheritDoc EventStore.close} */
   async close(): Promise<void> {

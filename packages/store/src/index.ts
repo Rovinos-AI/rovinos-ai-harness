@@ -7,6 +7,7 @@ export {
   SeqConflictError,
   StoreEncryptionMismatchError,
   StoreMigrationError,
+  StoreReadOnlyError,
   StoreUnavailableError,
 } from "./errors.js";
 export { migrate } from "./migrate.js";

@@ -1,25 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CompositeSecretResolver, EnvSecretResolver, FileSecretResolver } from "@harness/config";
-import {
-  HarnessError,
-  StoreMigrateResultSchema,
-  StorePurgeResultSchema,
-  type Id as RunId,
-} from "@harness/schemas";
+import { HarnessError, StoreMigrateResultSchema, StorePurgeResultSchema } from "@harness/schemas";
 import type { HarnessConfig } from "@harness/config";
 import type { EventStore } from "@harness/store";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import type { CliContext, CommandModule } from "../command.js";
 
 interface StoreCommandOperations {
   migrate(
     config: HarnessConfig,
-    databasePath: string,
     dryRun: boolean,
     appliedAt: number,
+    secretResolver: CliContext["secretResolver"],
   ): Promise<string[]>;
-  openStore(config: HarnessConfig, databasePath: string, dryRun: boolean): Promise<EventStore>;
+  openStore(
+    config: HarnessConfig,
+    dryRun: boolean,
+    secretResolver: CliContext["secretResolver"],
+  ): Promise<EventStore>;
 }
 
 class StoreCommandError extends HarnessError {
@@ -31,80 +27,45 @@ class StoreCommandError extends HarnessError {
   }
 }
 
-class StoreConfigError extends HarnessError {
-  override readonly code = "config_invalid";
-
-  constructor() {
-    super("The configured Postgres connection reference is unavailable.");
-  }
-}
-
 interface StoreCommandInput {
   context: CliContext;
   config: HarnessConfig;
-  databasePath: string;
   dryRun: boolean;
   jsonMode: boolean;
   operations: StoreCommandOperations;
 }
 
-function isVaultPurger(value: unknown): value is { purge(runId: RunId): Promise<unknown> } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "purge" in value &&
-    typeof value.purge === "function"
-  );
-}
-
-async function postgresConnectionString(config: HarnessConfig): Promise<string> {
-  const reference = config.store.connectionString;
-  if (reference === undefined) {
-    throw new StoreConfigError();
-  }
-  const resolver = new CompositeSecretResolver({
-    env: new EnvSecretResolver(process.env),
-    file: new FileSecretResolver(),
-  });
-  return (await resolver.resolve(reference)).reveal();
-}
-
 const defaultOperations: StoreCommandOperations = {
-  async migrate(config, databasePath, dryRun, appliedAt) {
-    const store = await import("@harness/store");
-    if (config.store.dialect === "postgres") {
-      const connectionString = await postgresConnectionString(config);
-      return store.migratePostgresConnection(connectionString, { dryRun, appliedAt });
-    }
-    return store.migrateSqliteFile(databasePath, { dryRun, appliedAt });
-  },
-  async openStore(config, databasePath, dryRun) {
-    const store = await import("@harness/store");
-    if (config.store.dialect === "postgres") {
-      const connectionString = await postgresConnectionString(config);
-      return new store.PostgresEventStore(connectionString, { skipMigrations: dryRun });
-    }
-    if (dryRun) {
-      const { existsSync } = await import("node:fs");
-      return existsSync(databasePath)
-        ? new store.SqliteEventStore(databasePath, undefined, { readOnly: true })
-        : new store.InMemoryEventStore();
-    }
+  async migrate(config, dryRun, appliedAt, secretResolver) {
     const core = await import("@harness/core");
-    await mkdir(core.resolveDataDir(process.env), { recursive: true });
-    return new store.SqliteEventStore(databasePath);
+    return core.migrateConfiguredStore(config, {
+      dryRun,
+      appliedAt,
+      ...(secretResolver === undefined ? {} : { secretResolver }),
+    });
+  },
+  async openStore(config, dryRun, secretResolver) {
+    const core = await import("@harness/core");
+    return core.openConfiguredStore(config, {
+      readOnly: dryRun,
+      ...(secretResolver === undefined ? {} : { secretResolver }),
+    });
   },
 };
 
 async function writeMigrateResult({
   context,
   config,
-  databasePath,
   dryRun,
   jsonMode,
   operations,
 }: StoreCommandInput): Promise<void> {
-  const versions = await operations.migrate(config, databasePath, dryRun, context.clock.now());
+  const versions = await operations.migrate(
+    config,
+    dryRun,
+    context.clock.now(),
+    context.secretResolver,
+  );
   const result = {
     applied: dryRun ? [] : versions,
     pending: dryRun ? versions : [],
@@ -130,7 +91,6 @@ async function writeMigrateResult({
 async function writePurgeResult({
   context,
   config,
-  databasePath,
   dryRun,
   jsonMode,
   operations,
@@ -139,22 +99,14 @@ async function writePurgeResult({
   if (policy === undefined) {
     throw new StoreCommandError("retention_not_configured");
   }
-  const store = await operations.openStore(config, databasePath, dryRun);
+  const store = await operations.openStore(config, dryRun, context.secretResolver);
   try {
-    const vault = await context.createVaultResolver?.(config);
     const { purgeExpiredRuns } = await import("@harness/store");
     const result = await purgeExpiredRuns({
       store,
       clock: context.clock,
       policy,
       dryRun,
-      ...(isVaultPurger(vault)
-        ? {
-            onRunPurged: async (runId: string) => {
-              await vault.purge(runId);
-            },
-          }
-        : {}),
     });
     context.out.json(StorePurgeResultSchema, result);
     if (!jsonMode) {
@@ -190,12 +142,9 @@ export function createStoreCommand(
         .option("--dry-run", "list pending migrations without applying them")
         .action(async (options: { readonly dryRun?: boolean }) => {
           const config = await context.loadConfig();
-          const core = await import("@harness/core");
-          const databasePath = join(core.resolveDataDir(process.env), "harness.db");
           await writeMigrateResult({
             context,
             config,
-            databasePath,
             dryRun: options.dryRun === true,
             jsonMode: program.opts<{ json?: boolean }>().json === true,
             operations,
@@ -207,12 +156,9 @@ export function createStoreCommand(
         .option("--dry-run", "count eligible runs without deleting them")
         .action(async (options: { readonly dryRun?: boolean }) => {
           const config = await context.loadConfig();
-          const core = await import("@harness/core");
-          const databasePath = join(core.resolveDataDir(process.env), "harness.db");
           await writePurgeResult({
             context,
             config,
-            databasePath,
             dryRun: options.dryRun === true,
             jsonMode: program.opts<{ json?: boolean }>().json === true,
             operations,

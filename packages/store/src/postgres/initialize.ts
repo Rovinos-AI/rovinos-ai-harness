@@ -21,15 +21,21 @@ async function migrateSchema(pool: Pool, clock: Clock, skipMigrations: boolean):
   }
 }
 
-async function initializeEncryptionMetadata(pool: Pool, codec: ContentCodec): Promise<void> {
+async function initializeEncryptionMetadata(
+  pool: Pool,
+  codec: ContentCodec,
+  readOnly: boolean,
+): Promise<void> {
   const client = await pool.connect().catch((error: unknown) => {
     throw storeError(error);
   });
   let transactionStarted = false;
   try {
-    await client.query("BEGIN");
+    await client.query(readOnly ? "BEGIN READ ONLY" : "BEGIN");
     transactionStarted = true;
-    await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
+    if (!readOnly) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
+    }
     const encryptionState = await client.query<{ metadata_value: string } & QueryResultRow>(
       "SELECT metadata_value FROM store_metadata WHERE metadata_key = $1",
       ["encrypted"],
@@ -43,10 +49,12 @@ async function initializeEncryptionMetadata(pool: Pool, codec: ContentCodec): Pr
       if (expectedEncryption === "true" && Number(contentCount.rows[0]?.count ?? "0") !== 0) {
         throw new StoreEncryptionMismatchError();
       }
-      await client.query(
-        "INSERT INTO store_metadata (metadata_key, metadata_value) VALUES ($1, $2) ON CONFLICT (metadata_key) DO NOTHING",
-        ["encrypted", expectedEncryption],
-      );
+      if (!readOnly) {
+        await client.query(
+          "INSERT INTO store_metadata (metadata_key, metadata_value) VALUES ($1, $2) ON CONFLICT (metadata_key) DO NOTHING",
+          ["encrypted", expectedEncryption],
+        );
+      }
     } else if (storedEncryption !== expectedEncryption) {
       throw new StoreEncryptionMismatchError();
     }
@@ -70,8 +78,5 @@ export async function initializePostgresStore(
   skipMigrations: boolean,
 ): Promise<void> {
   await migrateSchema(pool, clock, skipMigrations);
-  if (skipMigrations) {
-    return;
-  }
-  await initializeEncryptionMetadata(pool, codec);
+  await initializeEncryptionMetadata(pool, codec, skipMigrations);
 }

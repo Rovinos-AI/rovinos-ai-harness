@@ -11,6 +11,7 @@ import {
   type RunConfig,
   type RunInput,
   type SecretRef,
+  type StoreConfig,
 } from "@harness/schemas";
 import type { ProviderAdapter } from "@harness/models";
 import type { EventStore } from "@harness/store";
@@ -52,6 +53,7 @@ export interface RuntimeOverrides {
 /** Runtime configuration required by the currently implemented run loop. */
 export interface RuntimeConfig {
   readonly run: RunConfig;
+  readonly store?: StoreConfig;
   readonly models?: ModelsConfig;
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;
