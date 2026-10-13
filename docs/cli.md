@@ -124,6 +124,22 @@ counts.
 Exit codes: `0` completed, `1` failure, `2` usage (including a malformed id), `7` for
 `approval_not_found`, `approval_already_resolved`, or a run that is no longer suspended.
 
+## `harness policy`
+
+`harness policy test --policy <file> --calls <jsonl> [--expect <jsonl>] [--explain]`
+evaluates one tokenized call fixture per JSONL line without loading configuration, a store, or a
+model. Calls have `{ "id", "toolId", "args", "context?" }`; when present, context can contain
+`subagent`, `server`, and `app`. Arguments must already contain PII tokens such as `<EMAIL_1>`.
+Expectations have `{ "id", "decision", "ruleId?" }`. Missing or mismatched expectations fail with
+exit code `1`; without `--expect`, the command only reports the evaluations. `--explain` includes
+every matching rule. `--json` emits one validated report.
+
+`harness policy lint --policy <file>` checks for duplicate matchers, fully shadowed rules, allows
+covered by denies, missing reasons, and (when tool metadata is supplied to the linter) overly broad
+destructive allows and unused editable pointers. Lint errors exit `1`; warnings do not fail. Both
+commands operate offline and do not access runtime services. The runnable fixtures in
+[`examples/policy-tests`](../examples/policy-tests/) are tested in CI.
+
 ## `harness inspect`
 
 `harness inspect <runId> [--show-content]` displays the status, step count, token and cost usage,

@@ -1,0 +1,218 @@
+// SPDX-License-Identifier: Apache-2.0
+import { readFile } from "node:fs/promises";
+import {
+  HarnessError,
+  parseJson,
+  parseYaml,
+  PolicyLintResultSchema,
+  PolicyTestCallSchema,
+  PolicyTestExpectationSchema,
+  PolicyTestResultSchema,
+} from "@harness/schemas";
+import type { PolicyTestCall, PolicyTestExpectation, PolicyTestResult } from "@harness/schemas";
+import type { CompiledPolicy } from "@harness/policy";
+import { z } from "zod";
+import type { CliContext, CommandModule } from "../command.js";
+
+const TestOptionsSchema = z
+  .object({
+    policy: z.string(),
+    calls: z.string(),
+    expect: z.string().optional(),
+    explain: z.boolean().default(false),
+  })
+  .strict();
+
+const LintOptionsSchema = z.object({ policy: z.string() }).strict();
+
+class PolicyCommandError extends HarnessError {
+  override readonly code: string;
+
+  constructor(code: string) {
+    super(code);
+    this.code = code;
+  }
+}
+
+async function readPolicy(path: string) {
+  const { PolicyDocumentSchema } = await import("@harness/policy");
+  return parseYaml(PolicyDocumentSchema, await readFile(path, "utf8"));
+}
+
+async function readJsonLines<Schema extends z.ZodType>(
+  path: string,
+  schema: Schema,
+): Promise<z.infer<Schema>[]> {
+  const text = await readFile(path, "utf8");
+  return text
+    .split(/\r?\n/u)
+    .filter((line) => line.trim().length > 0)
+    .map((line) => parseJson(schema, line));
+}
+
+function ensureUniqueIds(items: readonly { readonly id: string }[], code: string): void {
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (ids.has(item.id)) {
+      throw new PolicyCommandError(code);
+    }
+    ids.add(item.id);
+  }
+}
+
+function testPolicyResult(
+  compiled: CompiledPolicy,
+  calls: readonly PolicyTestCall[],
+  expectations: readonly PolicyTestExpectation[],
+  checkExpectations: boolean,
+  explain: boolean,
+): PolicyTestResult {
+  const expectedById = new Map(expectations.map((expectation) => [expectation.id, expectation]));
+  const results: PolicyTestResult["results"] = [];
+  const mismatches: PolicyTestResult["mismatches"] = [];
+
+  for (const fixture of calls) {
+    const context = {
+      subagent: fixture.context?.subagent ?? false,
+      ...(fixture.context?.server === undefined ? {} : { server: fixture.context.server }),
+      ...(fixture.context?.app === undefined ? {} : { app: fixture.context.app }),
+    };
+    const explanation = compiled.evaluate({
+      toolId: fixture.toolId,
+      args: fixture.args,
+      context,
+    });
+    const result = {
+      id: fixture.id,
+      decision: explanation.decision,
+      ruleId: explanation.ruleId,
+      reason: explanation.reason,
+      ...(explain ? { matched: explanation.matched } : {}),
+    };
+    results.push(result);
+
+    if (!checkExpectations) {
+      continue;
+    }
+    const expected = expectedById.get(fixture.id);
+    if (expected === undefined) {
+      mismatches.push({ id: fixture.id, code: "expectation_missing", actual: result });
+      continue;
+    }
+    expectedById.delete(fixture.id);
+    if (result.decision !== expected.decision) {
+      mismatches.push({ id: fixture.id, code: "decision_mismatch", expected, actual: result });
+    } else if (expected.ruleId !== undefined && result.ruleId !== expected.ruleId) {
+      mismatches.push({ id: fixture.id, code: "rule_id_mismatch", expected, actual: result });
+    }
+  }
+
+  if (checkExpectations) {
+    for (const expected of expectedById.values()) {
+      mismatches.push({ id: expected.id, code: "call_missing", expected });
+    }
+  }
+  return PolicyTestResultSchema.parse({ results, mismatches });
+}
+
+function testSummary(result: PolicyTestResult): string {
+  const lines = result.results.map(
+    ({ id, decision, ruleId, reason, matched }) =>
+      `${id}\t${decision}\t${ruleId}\t${reason}${
+        matched === undefined
+          ? ""
+          : `\t${matched.map(({ ruleId: matchedId }) => matchedId).join(",")}`
+      }\n`,
+  );
+  for (const mismatch of result.mismatches) {
+    const expected = mismatch.expected;
+    const actual = mismatch.actual;
+    lines.push(
+      `FAIL ${mismatch.id}: expected ${expected?.decision ?? "call"}${
+        expected?.ruleId === undefined ? "" : ` (${expected.ruleId})`
+      }, got ${actual?.decision ?? "missing"}${
+        actual?.ruleId === undefined ? "" : ` (${actual.ruleId})`
+      }\n`,
+    );
+  }
+  if (lines.length === 0) {
+    return "No policy calls.\n";
+  }
+  return lines.join("");
+}
+
+async function runTest(rawOptions: unknown, context: CliContext, jsonMode: boolean): Promise<void> {
+  const options = TestOptionsSchema.parse(rawOptions);
+  const document = await readPolicy(options.policy);
+  const calls = await readJsonLines(options.calls, PolicyTestCallSchema);
+  const expectations =
+    options.expect === undefined
+      ? []
+      : await readJsonLines(options.expect, PolicyTestExpectationSchema);
+  ensureUniqueIds(calls, "policy_calls_duplicate_id");
+  ensureUniqueIds(expectations, "policy_expectations_duplicate_id");
+
+  const { compilePolicy } = await import("@harness/policy");
+  const result = testPolicyResult(
+    compilePolicy(document),
+    calls,
+    expectations,
+    options.expect !== undefined,
+    options.explain,
+  );
+  context.out.json(PolicyTestResultSchema, result);
+  if (!jsonMode) {
+    context.out.print(testSummary(result));
+  }
+  if (result.mismatches.length > 0) {
+    throw new PolicyCommandError("policy_test_failed");
+  }
+}
+
+async function runLint(rawOptions: unknown, context: CliContext, jsonMode: boolean): Promise<void> {
+  const options = LintOptionsSchema.parse(rawOptions);
+  const { lintPolicy } = await import("@harness/policy");
+  const input = parseYaml(z.unknown(), await readFile(options.policy, "utf8"));
+  const result = PolicyLintResultSchema.parse(lintPolicy(input));
+  context.out.json(PolicyLintResultSchema, result);
+  if (!jsonMode) {
+    const report =
+      result.diagnostics.length === 0
+        ? "Policy lint passed.\n"
+        : `${result.diagnostics
+            .map(
+              ({ severity, code, ruleId }) =>
+                `${severity}: ${code}${ruleId === undefined ? "" : ` ${ruleId}`}`,
+            )
+            .join("\n")}\n`;
+    context.out.print(report);
+  }
+  if (result.diagnostics.some(({ severity }) => severity === "error")) {
+    throw new PolicyCommandError("policy_lint_failed");
+  }
+}
+
+/** Registers offline policy test and lint commands. */
+export const policyCommand: CommandModule = {
+  name: "policy",
+  register(program, context) {
+    const policy = program.command("policy").description("Test and lint policy files");
+    policy
+      .command("test")
+      .description("Evaluate tokenized call fixtures against a policy")
+      .requiredOption("--policy <file>", "policy YAML or JSON file")
+      .requiredOption("--calls <jsonl>", "JSONL tokenized call fixture file")
+      .option("--expect <jsonl>", "JSONL expectation file")
+      .option("--explain", "include all matching rules")
+      .action(async (rawOptions: unknown) => {
+        await runTest(rawOptions, context, program.opts<{ json?: boolean }>().json === true);
+      });
+    policy
+      .command("lint")
+      .description("Check a policy for rule defects")
+      .requiredOption("--policy <file>", "policy YAML or JSON file")
+      .action(async (rawOptions: unknown) => {
+        await runLint(rawOptions, context, program.opts<{ json?: boolean }>().json === true);
+      });
+  },
+};

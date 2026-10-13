@@ -52,6 +52,11 @@ The pointer selects a tokenized argument. This rule matches values such as
 policy in [`examples/policy.yaml`](../examples/policy.yaml) is a complete
 validated document.
 
+Use `harness policy test` with tokenized JSONL call fixtures and optional expected decisions to
+regression-test a policy offline. `harness policy lint` reports rule defects without starting a
+runtime. The synthetic runnable example is in
+[`examples/policy-tests`](../examples/policy-tests/).
+
 ## Approval edits
 
 Approval edits are limited to the JSON Pointers listed by the matched rule.
