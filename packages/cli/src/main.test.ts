@@ -237,6 +237,7 @@ describe("CLI main", () => {
       "continue",
       "doctor",
       "keys",
+      "policy",
       "store",
     ]);
     expect(code).toBe(ExitCode.ok);

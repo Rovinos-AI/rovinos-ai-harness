@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Synthetic example only; containsRealData: false.
+version: 1
+defaultDecision: deny
+rules:
+  - id: allow_workspace_read
+    description: Allow a workspace file read
+    match:
+      tools:
+        - fs.read
+    decision: allow
+    reason: workspace_read
+  - id: ask_email_send
+    description: Ask before sending to a tokenized email address
+    match:
+      tools:
+        - mail.send
+      args:
+        - pointer: /to
+          op: tokenType
+          value: email
+    decision: ask
+    reason: outbound_email

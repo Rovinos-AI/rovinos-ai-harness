@@ -151,6 +151,17 @@ export {
   type RunResult,
 } from "./cli/run.js";
 export {
+  PolicyLintResultSchema,
+  PolicyTestCallSchema,
+  PolicyTestCaseResultSchema,
+  PolicyTestExpectationSchema,
+  PolicyTestResultSchema,
+  type PolicyLintResult,
+  type PolicyTestCall,
+  type PolicyTestExpectation,
+  type PolicyTestResult,
+} from "./cli/policy.js";
+export {
   InspectEventSchema,
   InspectResultSchema,
   type InspectEvent,
