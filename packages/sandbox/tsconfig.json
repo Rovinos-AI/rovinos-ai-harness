@@ -6,6 +6,6 @@
     "rootDir": ".",
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "runner/src/**/*.ts"],
+  "include": ["src/**/*.ts", "runner/src/**/*.ts", "egress-proxy/src/**/*.ts"],
   "exclude": []
 }
