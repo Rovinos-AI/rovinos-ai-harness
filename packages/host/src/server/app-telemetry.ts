@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  attr,
-  countHostAppRejected,
-  defineSpan,
-  type SpanDefinition,
-  type SpanDefinitionShape,
-} from "@harness/telemetry";
-import { ROOT_CONTEXT, trace, type SpanContext } from "@opentelemetry/api";
+import { countHostAppRejected } from "@harness/telemetry";
 import { Code } from "@harness/schemas";
 import { z } from "zod";
+import { stampAppSpan, type AppSpanStampContext } from "./stamp.js";
 
 const startOffset = z.number().int().nonnegative();
 const duration = z.number().int().min(0).max(3_600_000);
@@ -63,6 +57,7 @@ export const AppTelemetryRejectReasonSchema = z.enum([
   "schema",
   "size",
   "rate",
+  "unknown_app",
   "unknown_span",
   "session_cap",
 ]);
@@ -81,48 +76,7 @@ export const AppSpanBatchAckSchema = z
 /** Inferred minimal acknowledgment returned to the app. */
 export type AppSpanBatchAck = z.infer<typeof AppSpanBatchAckSchema>;
 
-/** Registered span definition for app render events. */
-export const UI_RENDER_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
-  "harness.ui.render",
-  {
-    "harness.ui.start_offset_ms": attr.nonnegativeInt(),
-    "harness.ui.duration_ms": attr.nonnegativeInt(),
-  },
-  { taskId: "3.4", packageName: "@harness/host" },
-);
-
-/** Registered span definition for app decision events. */
-export const UI_DECISION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
-  "harness.ui.decision",
-  {
-    "harness.ui.decision": attr.enum(["approve", "deny", "edit"]),
-    "harness.ui.start_offset_ms": attr.nonnegativeInt(),
-    "harness.ui.duration_ms": attr.nonnegativeInt(),
-  },
-  { taskId: "3.4", packageName: "@harness/host" },
-);
-
-/** Registered span definition for app error events. */
-export const UI_ERROR_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
-  "harness.ui.error",
-  {
-    "harness.ui.start_offset_ms": attr.nonnegativeInt(),
-    "harness.ui.duration_ms": attr.nonnegativeInt(),
-  },
-  { taskId: "3.4", packageName: "@harness/host" },
-);
-
-/** Registered span definition for app interaction events. */
-export const UI_INTERACTION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
-  "harness.ui.interaction",
-  {
-    "harness.ui.interaction.kind": attr.enum(["click", "focus", "edit"]),
-    "harness.ui.interaction.count": attr.nonnegativeInt(),
-    "harness.ui.start_offset_ms": attr.nonnegativeInt(),
-    "harness.ui.duration_ms": attr.nonnegativeInt(),
-  },
-  { taskId: "3.4", packageName: "@harness/host" },
-);
+export { UI_DECISION_SPAN, UI_ERROR_SPAN, UI_INTERACTION_SPAN, UI_RENDER_SPAN } from "./stamp.js";
 
 const spanNames = new Set(["ui.render", "ui.decision", "ui.error", "ui.interaction"]);
 const maxBatchBytes = 16 * 1024;
@@ -202,57 +156,10 @@ function reject(
   }
 }
 
-function startSpan(span: AppSpan, parent?: SpanContext): boolean {
-  const timing = {
-    "harness.ui.start_offset_ms": span.startOffsetMs,
-    "harness.ui.duration_ms": span.durationMs,
-  };
-  const options =
-    parent === undefined ? undefined : { parent: trace.setSpanContext(ROOT_CONTEXT, parent) };
-  try {
-    switch (span.name) {
-      case "ui.render":
-        UI_RENDER_SPAN.start(timing, options).end();
-        return true;
-      case "ui.decision":
-        UI_DECISION_SPAN.start(
-          {
-            ...timing,
-            "harness.ui.decision": span.decision,
-          },
-          options,
-        ).end();
-        return true;
-      case "ui.error":
-        UI_ERROR_SPAN.start(
-          {
-            ...timing,
-            "harness.error.code": span.code,
-          },
-          options,
-        ).end();
-        return true;
-      case "ui.interaction":
-        UI_INTERACTION_SPAN.start(
-          {
-            ...timing,
-            "harness.ui.interaction.kind": span.kind,
-            "harness.ui.interaction.count": span.count,
-          },
-          options,
-        ).end();
-        return true;
-    }
-  } catch {
-    return false;
-  }
-  return false;
-}
-
 function ingestSpan(
   candidate: unknown,
   onRejected?: (reason: AppTelemetryRejectReason) => void,
-  parent?: SpanContext,
+  stamp?: AppSpanStampContext,
   acceptSpan?: () => true | "rate" | "session_cap",
 ): boolean {
   try {
@@ -266,6 +173,10 @@ function ingestSpan(
       reject("schema", onRejected);
       return false;
     }
+    if (stamp === undefined) {
+      reject("unknown_app", onRejected);
+      return false;
+    }
     if (acceptSpan !== undefined) {
       const acceptance = acceptSpan();
       if (acceptance !== true) {
@@ -273,8 +184,9 @@ function ingestSpan(
         return false;
       }
     }
-    if (!startSpan(parsed.data, parent)) {
-      reject("schema", onRejected);
+    const rejected = stampAppSpan(parsed.data, stamp);
+    if (rejected !== undefined) {
+      reject(rejected, onRejected);
       return false;
     }
     return true;
@@ -288,14 +200,14 @@ function ingestSpan(
  * Validates and ingests an untrusted app telemetry batch without retaining or logging its payload.
  *
  * @param input - Untrusted decoded `harness.telemetry.emit` arguments.
- * @param options - Optional observer for bounded rejection reasons.
+ * @param options - Host stamp context, span limiter, and bounded rejection observer.
  * @returns Integer counts only; malformed spans are dropped independently.
  */
 export function ingestBatch(
   input: unknown,
   options: {
     readonly onRejected?: (reason: AppTelemetryRejectReason) => void;
-    readonly parent?: SpanContext;
+    readonly stamp?: AppSpanStampContext;
     readonly acceptSpan?: () => true | "rate" | "session_cap";
   } = {},
 ): AppSpanBatchAck {
@@ -308,7 +220,7 @@ export function ingestBatch(
   let accepted = 0;
   let dropped = 0;
   for (const candidate of inspection.spans) {
-    if (ingestSpan(candidate, options.onRejected, options.parent, options.acceptSpan)) {
+    if (ingestSpan(candidate, options.onRejected, options.stamp, options.acceptSpan)) {
       accepted += 1;
     } else {
       dropped += 1;

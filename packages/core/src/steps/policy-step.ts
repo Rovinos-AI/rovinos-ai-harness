@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, JsonValue, type Event } from "@harness/schemas";
+import { Code, HarnessError, JsonValue, type Event } from "@harness/schemas";
+import type { Span } from "@opentelemetry/api";
 import { buildApprovalPayload } from "@harness/policy";
+import {
+  emitSafeEventToDefaultLogger,
+  SafeEvent,
+  setActiveSpanAttribute,
+} from "@harness/telemetry";
 import { requestApproval } from "../approvals.js";
 import type { Checkpointer } from "../checkpoint.js";
 import { PolicyDecisionSchema } from "../ports.js";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import type { IdGenerator, ModelToolCall, PolicyDecision, PolicyPort, ToolPort } from "../ports.js";
-import type { RunState } from "../run-state.js";
+import type { RunState, ToolIntentEvent } from "../run-state.js";
 
 /** Decides whether a prepared call is allowed, needs approval, or is denied. */
 export function decidePolicy(
@@ -55,6 +61,39 @@ export function effectiveDecision(
     };
   }
   return decision;
+}
+
+/** Emits metadata for a policy re-evaluation that does not create another durable intent. */
+export function emitReevaluatedDecision(options: {
+  readonly intent: ToolIntentEvent;
+  readonly decision: PolicyDecision;
+  readonly span: Span;
+  readonly clock: Clock;
+  readonly policyVersion?: Code;
+}): void {
+  const spanContext = options.span.spanContext();
+  emitSafeEventToDefaultLogger(
+    SafeEvent.parse({
+      runId: options.intent.runId,
+      seq: options.intent.seq,
+      ts: Math.max(0, Math.floor(options.clock.now())),
+      traceId: spanContext.traceId,
+      spanId: spanContext.spanId,
+      policyVersion: options.policyVersion ?? Code.parse("unknown"),
+      kind: "policy_decision",
+      toolId: options.intent.toolId,
+      policyDecision: options.decision.decision,
+      ruleId: options.decision.ruleId,
+    }),
+  );
+}
+
+/** Sets the current policy result on the active tool-call span. */
+export function setPolicySpanAttributes(decision: "allow" | "ask" | "deny", ruleId?: Code): void {
+  setActiveSpanAttribute("harness.policy.decision", decision);
+  if (ruleId !== undefined) {
+    setActiveSpanAttribute("harness.policy.rule_id", ruleId);
+  }
 }
 
 /** Records a policy approval request and its durable suspension checkpoint. */

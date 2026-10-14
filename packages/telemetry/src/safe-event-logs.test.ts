@@ -50,9 +50,17 @@ const events = [
   }),
   SafeEvent.parse({
     ...common,
+    kind: "policy_decision",
+    toolId: "search",
+    policyDecision: "allow",
+    ruleId: "policy.rule",
+  }),
+  SafeEvent.parse({
+    ...common,
     kind: "approval_wait",
     decision: "approve",
     decidedBy: "human",
+    reason: "approved",
     waitMs: 10,
   }),
   SafeEvent.parse({ ...common, kind: "checkpoint", atSeq: 11, hasWorkspaceRef: true }),

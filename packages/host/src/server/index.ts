@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import { HarnessError, HostConfigSchema, Id, type HostConfig } from "@harness/schemas";
+import { Code, HarnessError, HostConfigSchema, Id, type HostConfig } from "@harness/schemas";
 import { countHostAppSpansAccepted } from "@harness/telemetry";
 import {
   AppCallRouter,
@@ -49,6 +49,7 @@ export {
   type AppSpanBatchAck,
   type AppTelemetryRejectReason,
 } from "./app-telemetry.js";
+export { stampAppSpan, type AppSpanStampContext } from "./stamp.js";
 export type { AppCall, AppResourceReader, ReferenceHostDependencies } from "./types.js";
 export type { AppResourceRead, HostDiagnosticCode } from "./resource.js";
 export { UiSession, UI_SESSION_SPAN, type UiSessionContext } from "./ui-session.js";
@@ -71,6 +72,14 @@ export class ReferenceHostError extends HarnessError {
   constructor(code: ReferenceHostErrorCode) {
     super("The reference host lifecycle operation failed.");
     this.code = code;
+  }
+}
+
+function hasPendingApproval(dependencies: ReferenceHostDependencies, runId: Id): boolean {
+  try {
+    return dependencies.hasPendingApproval?.(runId) === true;
+  } catch {
+    return false;
   }
 }
 
@@ -194,6 +203,7 @@ function createAppCallRouter(
   nextId: () => Id,
   rateLimiter: AppRateLimiter,
 ): AppCallRouter {
+  const now = dependencies.now ?? Date.now;
   const defaultOnAppCall =
     dependencies.policy !== undefined && dependencies.tool !== undefined
       ? createPolicyCheckedAppCallHandler({
@@ -206,11 +216,24 @@ function createAppCallRouter(
   const telemetryHandler =
     dependencies.onTelemetryEmit ??
     ((session, payload) => {
+      const parent = session.uiSession?.spanContext;
+      const stamp =
+        session.runId === undefined ||
+        session.sessionStartTime === undefined ||
+        parent === undefined
+          ? undefined
+          : {
+              appId: Code.parse(session.id),
+              runId: session.runId,
+              sessionId: Id.parse(session.sessionId),
+              sessionStartTime: session.sessionStartTime,
+              parent,
+              clock: { now },
+              hasPendingApproval: hasPendingApproval(dependencies, session.runId),
+            };
       const acknowledgment = ingestBatch(payload, {
         acceptSpan: () => rateLimiter.tryAcceptSpan(session.sessionId),
-        ...(session.uiSession?.spanContext === undefined
-          ? {}
-          : { parent: session.uiSession.spanContext }),
+        ...(stamp === undefined ? {} : { stamp }),
         onRejected: (reason) => dependencies.onAppRejected?.(reason),
       });
       countHostAppSpansAccepted(acknowledgment.accepted);

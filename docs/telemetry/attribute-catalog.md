@@ -77,6 +77,8 @@ Owner task: `4.1`.
 | --- | --- | --- | --- |
 | `harness.error.code` | Code | Optional | `@harness/core` |
 | `harness.event.seq` | integer | Optional | `@harness/core` |
+| `harness.policy.decision` | enum: `allow`, `ask`, `deny` | Optional | `@harness/core` |
+| `harness.policy.rule_id` | Code | Optional | `@harness/core` |
 | `harness.run.id` | Id | Required | `@harness/core` |
 
 Owner task: `4.1`.
@@ -85,44 +87,52 @@ Owner task: `4.1`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
+| `harness.app.id` | Code | Required | `@harness/host` |
 | `harness.error.code` | Code | Optional | `@harness/host` |
+| `harness.run.id` | Id | Required | `@harness/host` |
 | `harness.ui.decision` | enum: `approve`, `deny`, `edit` | Required | `@harness/host` |
 | `harness.ui.duration_ms` | integer | Required | `@harness/host` |
-| `harness.ui.start_offset_ms` | integer | Required | `@harness/host` |
+| `harness.ui.session_id` | Id | Required | `@harness/host` |
 
-Owner task: `3.4`.
+Owner task: `3.6`.
 
 ### `harness.ui.error`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
+| `harness.app.id` | Code | Required | `@harness/host` |
 | `harness.error.code` | Code | Optional | `@harness/host` |
+| `harness.run.id` | Id | Required | `@harness/host` |
 | `harness.ui.duration_ms` | integer | Required | `@harness/host` |
-| `harness.ui.start_offset_ms` | integer | Required | `@harness/host` |
+| `harness.ui.session_id` | Id | Required | `@harness/host` |
 
-Owner task: `3.4`.
+Owner task: `3.6`.
 
 ### `harness.ui.interaction`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
+| `harness.app.id` | Code | Required | `@harness/host` |
 | `harness.error.code` | Code | Optional | `@harness/host` |
+| `harness.run.id` | Id | Required | `@harness/host` |
 | `harness.ui.duration_ms` | integer | Required | `@harness/host` |
 | `harness.ui.interaction.count` | integer | Required | `@harness/host` |
 | `harness.ui.interaction.kind` | enum: `click`, `focus`, `edit` | Required | `@harness/host` |
-| `harness.ui.start_offset_ms` | integer | Required | `@harness/host` |
+| `harness.ui.session_id` | Id | Required | `@harness/host` |
 
-Owner task: `3.4`.
+Owner task: `3.6`.
 
 ### `harness.ui.render`
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
+| `harness.app.id` | Code | Required | `@harness/host` |
 | `harness.error.code` | Code | Optional | `@harness/host` |
+| `harness.run.id` | Id | Required | `@harness/host` |
 | `harness.ui.duration_ms` | integer | Required | `@harness/host` |
-| `harness.ui.start_offset_ms` | integer | Required | `@harness/host` |
+| `harness.ui.session_id` | Id | Required | `@harness/host` |
 
-Owner task: `3.4`.
+Owner task: `3.6`.
 
 ### `harness.ui_session`
 
@@ -141,7 +151,9 @@ Owner task: `3.2`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
+| `harness.approval.decided_by` | enum: `human`, `policy`, `expiry` | Required | `@harness/telemetry` |
 | `harness.approval.decision` | enum: `approve`, `deny`, `edit` | Required | `@harness/telemetry` |
+| `harness.approval.reason` | Code | Optional | `@harness/telemetry` |
 | `harness.approval.wait_ms` | integer | Required | `@harness/telemetry` |
 | `harness.event.seq` | integer | Required | `@harness/telemetry` |
 | `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
@@ -208,6 +220,20 @@ Owner task: `3.2`.
 | `harness.policy.version` | Code | Required | `@harness/telemetry` |
 | `harness.run.id` | Id | Required | `@harness/telemetry` |
 | `harness.span.id` | Code | Required | `@harness/telemetry` |
+| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+
+### `harness.safe.policy_decision`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.event.seq` | integer | Required | `@harness/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
+| `harness.policy.decision` | enum: `allow`, `ask`, `deny` | Required | `@harness/telemetry` |
+| `harness.policy.rule_id` | Code | Optional | `@harness/telemetry` |
+| `harness.policy.version` | Code | Required | `@harness/telemetry` |
+| `harness.run.id` | Id | Required | `@harness/telemetry` |
+| `harness.span.id` | Code | Required | `@harness/telemetry` |
+| `harness.tool.id` | Code | Required | `@harness/telemetry` |
 | `harness.trace.id` | Code | Required | `@harness/telemetry` |
 
 ### `harness.safe.run_created`

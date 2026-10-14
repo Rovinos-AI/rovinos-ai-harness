@@ -84,6 +84,7 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
     return;
   }
   const sessionId = Id.parse(options.nextSessionId());
+  const sessionStartTime = (options.dependencies.now ?? Date.now)();
   const uiSession = app.telemetry
     ? new UiSession(options.dependencies.uiSessionContext, app.id, sessionId, () => {
         options.dependencies.onCode("ui_trace_unavailable");
@@ -103,6 +104,7 @@ function sendAppEvents(url: URL, response: HostResponse, options: RequestHandler
     id: app.id,
     resourceUri: app.resourceUri,
     sessionId,
+    sessionStartTime,
     ...(options.sessionRunId === undefined ? {} : { runId: options.sessionRunId }),
     ...(uiSession === undefined ? {} : { uiSession }),
     end,

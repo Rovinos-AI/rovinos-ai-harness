@@ -5,9 +5,11 @@ import {
   TELEMETRY_DROP_REASONS,
   TELEMETRY_METRIC_STRING_ATTRIBUTES,
   HOST_APP_REJECTED_REASONS,
+  POLICY_DECISIONS,
   METRIC_ALLOWLIST,
   countHostAppRejected,
   countHostAppSpansAccepted,
+  countPolicyDecision,
   countDroppedTelemetry,
   countSentinelScopeReduced,
   countSkippedShortValues,
@@ -86,6 +88,19 @@ describe("countDroppedTelemetry", () => {
     expectAddCallsAreAllowlisted("harness.host.app_rejected");
   });
 
+  it("counts policy decisions with only the closed decision attribute", () => {
+    for (const decision of POLICY_DECISIONS) {
+      countPolicyDecision(decision);
+    }
+
+    expect(createCounter).toHaveBeenCalledWith("harness.policy.decisions");
+    expect(add.mock.calls).toEqual(
+      POLICY_DECISIONS.map((decision) => [1, { "harness.policy.decision": decision }]),
+    );
+    expect(TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.policy.decision"]).toEqual(POLICY_DECISIONS);
+    expectAddCallsAreAllowlisted("harness.policy.decisions");
+  });
+
   it("counts accepted app spans without attributes", () => {
     countHostAppSpansAccepted(3);
 
@@ -116,6 +131,7 @@ describe("countDroppedTelemetry", () => {
     expect(TELEMETRY_METRIC_STRING_ATTRIBUTES).toEqual({
       "harness.telemetry.dropped.reason": dropReasons,
       "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
+      "harness.policy.decision": POLICY_DECISIONS,
     });
     expect(
       TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.telemetry.dropped.reason"].length,

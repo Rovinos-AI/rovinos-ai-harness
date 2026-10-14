@@ -67,6 +67,25 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
   },
   {
     event: validEvent({
+      type: "tool_intent",
+      callId: "00000000000000000000000002",
+      toolId: "tool.test",
+      idempotent: true,
+      policyDecision: "allow",
+      ruleId: "policy.rule",
+      policyReason: "policy.reason",
+      argsHash: "c".repeat(64),
+      args: { description: "POLICY_DESCRIPTION_CANARY" },
+    }),
+    kind: "policy_decision",
+    fields: {
+      toolId: "tool.test",
+      policyDecision: "allow",
+      ruleId: "policy.rule",
+    },
+  },
+  {
+    event: validEvent({
       type: "tool_result",
       callId: "00000000000000000000000002",
       toolId: "tool.test",
@@ -203,15 +222,6 @@ const unexportedEvents = [
     messages: [{ role: "user", parts: [{ type: "text", text: "MODEL_REQUEST_CANARY" }] }],
   }),
   validEvent({
-    type: "tool_intent",
-    callId: "00000000000000000000000002",
-    toolId: "tool.test",
-    idempotent: true,
-    policyDecision: "allow",
-    argsHash: "c".repeat(64),
-    args: "TOOL_INTENT_CANARY",
-  }),
-  validEvent({
     type: "run_input",
     input: "RUN_INPUT_CANARY",
     inputKind: "initial",
@@ -285,6 +295,15 @@ describe("SafeEvent projection", () => {
       childRunId: "00000000000000000000000002",
       role: "reviewer",
     });
+    const noRuleIdIntent = validEvent({
+      type: "tool_intent",
+      callId: "00000000000000000000000002",
+      toolId: "tool.test",
+      idempotent: true,
+      policyDecision: "allow",
+      argsHash: "c".repeat(64),
+      args: {},
+    });
 
     expect(toSafeEvent(noErrorCode, "sanitizer.v1")).not.toHaveProperty("errorCode");
     expect(toSafeEvent(noWorkspaceRef, "sanitizer.v1")).toMatchObject({
@@ -292,6 +311,7 @@ describe("SafeEvent projection", () => {
       hasWorkspaceRef: false,
     });
     expect(toSafeEvent(noParentCallId, "sanitizer.v1")).not.toHaveProperty("parentCallId");
+    expect(toSafeEvent(noRuleIdIntent, "sanitizer.v1")).not.toHaveProperty("ruleId");
   });
 
   it("never exports canaries from any classified content field", () => {
@@ -312,6 +332,32 @@ describe("SafeEvent projection", () => {
     }
   });
 
+  it("projects only decision metadata from tool intents", () => {
+    const toolIntentMapping = mappedEvents.find(
+      ({ event: candidate }) => candidate.type === "tool_intent",
+    );
+    if (toolIntentMapping === undefined) {
+      throw new Error("The tool intent mapping is missing");
+    }
+    const toolIntent = toolIntentMapping.event;
+    const projected = toSafeEvent(toolIntent, "sanitizer.v1");
+
+    expect(projected).toEqual({
+      runId: envelope.runId,
+      seq: toolIntent.seq,
+      ts: toolIntent.ts,
+      traceId: envelope.traceId,
+      spanId: envelope.spanId,
+      policyVersion: "sanitizer.v1",
+      kind: "policy_decision",
+      toolId: "tool.test",
+      policyDecision: "allow",
+      ruleId: "policy.rule",
+    });
+    expect(JSON.stringify(projected)).not.toContain("POLICY_DESCRIPTION_CANARY");
+    expect(projected).not.toHaveProperty("policyReason");
+  });
+
   it("rejects negative repair-attempt counts in parsed SafeEvents", () => {
     const modelResponse = mappedEvents.find(({ event }) => event.type === "model_response");
     if (modelResponse === undefined) {
@@ -321,6 +367,30 @@ describe("SafeEvent projection", () => {
       SafeEvent.safeParse({
         ...toSafeEvent(modelResponse.event, "sanitizer.v1"),
         repairAttempts: -1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires outcome and latency for tool-call SafeEvents", () => {
+    const result = mappedEvents.find(({ event }) => event.type === "tool_result");
+    if (result === undefined) {
+      throw new Error("The tool result mapping is missing");
+    }
+    const projected = toSafeEvent(result.event, "sanitizer.v1");
+    if (projected === null) {
+      throw new Error("The tool result was not projected");
+    }
+
+    expect(
+      SafeEvent.safeParse({
+        ...projected,
+        outcome: undefined,
+      }).success,
+    ).toBe(false);
+    expect(
+      SafeEvent.safeParse({
+        ...projected,
+        latencyMs: undefined,
       }).success,
     ).toBe(false);
   });
