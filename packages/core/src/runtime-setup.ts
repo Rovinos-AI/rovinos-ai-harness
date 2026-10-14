@@ -7,7 +7,7 @@ import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import { SqliteVault, VaultOperationError } from "@harness/vault";
-import type { TokenType, VaultResolver } from "@harness/vault";
+import type { TokenType } from "@harness/vault";
 import type { EventStore } from "@harness/store";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";

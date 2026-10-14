@@ -14,10 +14,9 @@ import {
   type ApprovalSummary,
   type Event,
 } from "@harness/schemas";
-import type { VaultAuditPiiAction } from "@harness/vault";
 import type { CliContext, CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
-import { collectApprovalTokens, revealApprovalTokens } from "./approval-args.js";
+import { createApprovalResolverLease, revealApprovalArgs } from "./approval-reveal.js";
 import { runApprovalSweep } from "./approval-sweep.js";
 import { assertResumeStatus } from "./resume.js";
 
@@ -118,82 +117,6 @@ async function summarize(pending: PendingApproval, now: number): Promise<Approva
   };
 }
 
-function revealAudit(
-  store: Store,
-  context: CliContext,
-  pending: PendingApproval,
-): (actions: readonly VaultAuditPiiAction[]) => Promise<void> {
-  return async (actions) => {
-    if (actions.length === 0) {
-      return;
-    }
-    const lastEvent = pending.events.at(-1);
-    if (lastEvent === undefined) {
-      return;
-    }
-    const { APPROVAL_WAIT_SPAN, RunRecorder } = await import("@harness/core");
-    const recorder = new RunRecorder(
-      store,
-      pending.runId,
-      lastEvent.segmentId,
-      pending.state.nextSeq,
-      context.clock,
-    );
-    await recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () => {
-      const recorded = await recorder.recordBatch(actions.map((action) => ({ ...action, v: 1 })));
-      const last = recorded.at(-1);
-      if (last === undefined) {
-        throw new ApprovalsCodeError("failure");
-      }
-      return last;
-    });
-  };
-}
-
-interface RevealEnvironment {
-  readonly context: CliContext;
-  readonly resolver: Pick<Runtime["vault"], "resolveMany">;
-  readonly store: Store;
-}
-
-async function revealArgs(
-  { context, resolver, store }: RevealEnvironment,
-  pending: PendingApproval,
-  args: JsonValue,
-  toolId: string,
-): Promise<JsonValue> {
-  const { findTokens, vaultAuditToPiiAction } = await import("@harness/vault");
-  const audits: VaultAuditPiiAction[] = [];
-  const tokens = new Set<string>();
-  collectApprovalTokens(args, tokens, findTokens);
-  const values = new Map<string, string>();
-  try {
-    if (tokens.size > 0) {
-      const list = [...tokens];
-      const resolved = await resolver.resolveMany(
-        pending.runId,
-        list,
-        {
-          boundary: "ui",
-          ...(toolId === "unknown" ? {} : { toolId }),
-        },
-        (audit) => {
-          audits.push(vaultAuditToPiiAction(audit));
-        },
-      );
-      list.forEach((token, index) => {
-        const value = resolved[index];
-        if (value !== undefined) {
-          values.set(token, value);
-        }
-      });
-    }
-  } finally {
-    await revealAudit(store, context, pending)(audits);
-  }
-  return revealApprovalTokens(args, (token) => values.get(token), findTokens);
-}
-
 async function confirm(context: CliContext, yes: boolean | undefined, question: string) {
   if (yes === true) {
     return;
@@ -281,9 +204,9 @@ function registerShow(approvals: Command, context: CliContext): void {
           context,
           undefined,
           async (runtime, runtimeConfig) => {
-            const resolverOverride =
+            const resolverLease =
               options.reveal === true
-                ? await context.createVaultResolver?.(runtimeConfig)
+                ? await createApprovalResolverLease(context, runtime, runtimeConfig)
                 : undefined;
             try {
               const pending = await findPending(runtime.store, approvalId);
@@ -294,19 +217,18 @@ function registerShow(approvals: Command, context: CliContext): void {
               const args = payload.success ? payload.data.args : null;
               let revealed: JsonValue | undefined;
               if (options.reveal === true) {
-                const resolver =
-                  context.createVaultResolver === undefined
-                    ? runtime.vault
-                    : resolverOverride;
+                const resolver = resolverLease?.resolver;
                 if (resolver === undefined) {
                   throw new ApprovalsCodeError("reveal_unavailable");
                 }
-                revealed = await revealArgs(
-                  { context, resolver, store: runtime.store },
+                revealed = await revealApprovalArgs({
+                  context,
+                  resolver,
+                  store: runtime.store,
                   pending,
                   args,
-                  summary.toolId,
-                );
+                  toolId: summary.toolId,
+                });
               }
               if (revealed !== undefined) {
                 context.out.error("reveal_exposes_sensitive_values");
@@ -324,7 +246,7 @@ function registerShow(approvals: Command, context: CliContext): void {
                 context.out.print(`${JSON.stringify(result, null, 2)}\n`);
               }
             } finally {
-              resolverOverride?.close?.();
+              resolverLease?.close();
             }
           },
           config,
