@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
-// Not wired yet: approval escalation WebhookNotifier (17.13 -> #414)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: model-visible MCP descriptions through model-input PII (13.6 -> #150)
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
@@ -55,10 +54,11 @@ import {
   type SandboxBackend,
 } from "@harness/sandbox";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
-import { buildApprovalPayload } from "@harness/policy";
+import { ApprovalNotificationSchema, buildApprovalPayload } from "@harness/policy";
 import {
   ApprovalListResultSchema,
   ApprovalShowResultSchema,
+  ApprovalSweepResultSchema,
   Code,
   FakeClock,
   Id,
@@ -290,6 +290,16 @@ function jsonResult<Schema extends z.ZodType>(
   output: readonly string[],
 ): z.infer<Schema> {
   return parseJson(schema, output.join("").trim());
+}
+
+function headerValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return typeof value[0] === "string" ? value[0] : null;
+  }
+  return null;
 }
 
 function expectCanaryOnlyInRevealed(result: CliCapture, canary: string): void {
@@ -545,6 +555,7 @@ beforeAll(async () => {
       `      tools: [${ASK_TOOL}]`,
       "    decision: ask",
       "    reason: synthetic_approval",
+      "    escalateAfterMs: 1",
       "",
     ].join("\n"),
     "utf8",
@@ -939,6 +950,109 @@ describe("MCP runtime", () => {
 });
 
 describe("approval", () => {
+  it("delivers configured webhook metadata once with the approval idempotency key", async () => {
+    const current = fixture();
+    const approvalId = current.approvalId;
+    if (approvalId === undefined) {
+      throw new Error("The approval id is not available.");
+    }
+    const deliveries: {
+      readonly body: string;
+      readonly idempotencyKey: string | null;
+      readonly authorization: string | null;
+    }[] = [];
+    const server = createServer((request, response) => {
+      const chunks: Uint8Array[] = [];
+      request.on("data", (chunk: Uint8Array) => {
+        chunks.push(chunk);
+      });
+      request.on("end", () => {
+        deliveries.push({
+          body: Buffer.concat(chunks).toString("utf8"),
+          idempotencyKey: headerValue(request.headers["idempotency-key"]),
+          authorization: headerValue(request.headers.authorization),
+        });
+        response.writeHead(204).end();
+      });
+    });
+    const oldConfig = await readFile(current.configPath, "utf8");
+    const oldSecret = process.env.HARNESS_E2E_APPROVAL_TOKEN;
+    const secret = "E2E_APPROVAL_WEBHOOK_SECRET_CANARY";
+    let listening = false;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, "localhost", resolve);
+      });
+      listening = true;
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        throw new Error("The capture server did not bind a TCP port.");
+      }
+      const updatedConfig = oldConfig.replace(
+        "policy:\n  file: policy.yaml",
+        [
+          "policy:",
+          "  file: policy.yaml",
+          "  approvals:",
+          "    allowInsecureLocalhost: true",
+          "    notifier:",
+          "      kind: webhook",
+          `      url: http://localhost:${String(address.port)}/approval`,
+          "      secretRef: env:HARNESS_E2E_APPROVAL_TOKEN",
+          "      timeoutMs: 2000",
+        ].join("\n"),
+      );
+      if (updatedConfig === oldConfig) {
+        throw new Error("The integration config did not contain the policy fragment.");
+      }
+      await writeFile(current.configPath, updatedConfig, "utf8");
+      process.env.HARNESS_E2E_APPROVAL_TOKEN = secret;
+      current.clock.advance(1);
+
+      const result = await invokeCli(["--json", "approvals", "sweep"]);
+
+      expect(result.code).toBe(ExitCode.ok);
+      expect(jsonResult(ApprovalSweepResultSchema, result.stdout)).toMatchObject({
+        escalated: 1,
+        failed: 0,
+      });
+      expect(deliveries).toHaveLength(1);
+      const delivery = deliveries[0];
+      if (delivery === undefined) {
+        throw new Error("The capture server did not receive the escalation.");
+      }
+      const notification = parseJson(ApprovalNotificationSchema, delivery.body);
+      expect(notification.approvalId).toBe(approvalId);
+      expect(notification.idempotencyKey).toBe(approvalId);
+      expect(delivery.idempotencyKey).toBe(approvalId);
+      expect(delivery.authorization).toBe("Bearer " + secret);
+      expect(delivery.body).not.toContain(secret);
+      expect(delivery.body).not.toContain(current.canary);
+      expect(JSON.stringify({ result, spans: current.spans, logs: current.logs })).not.toContain(
+        secret,
+      );
+    } finally {
+      await writeFile(current.configPath, oldConfig, "utf8");
+      if (oldSecret === undefined) {
+        delete process.env.HARNESS_E2E_APPROVAL_TOKEN;
+      } else {
+        process.env.HARNESS_E2E_APPROVAL_TOKEN = oldSecret;
+      }
+      if (listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error === undefined) {
+              resolve();
+            } else {
+              reject(error);
+            }
+          });
+        });
+      }
+    }
+  });
+
   it("lists and shows tokenized approval details and does not execute the ask tool", async () => {
     const current = fixture();
     const approvalId = current.approvalId;

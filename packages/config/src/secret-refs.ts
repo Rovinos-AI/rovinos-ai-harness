@@ -28,5 +28,9 @@ export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
   const storeRefs =
     config.store.connectionString === undefined ? [] : [config.store.connectionString];
   const runnerRefs = config.sandbox.runner === undefined ? [] : [config.sandbox.runner.token];
-  return [...modelRefs, ...serverRefs, ...keyRefs, ...storeRefs, ...runnerRefs];
+  const approvalRefs =
+    config.policy.approvals?.notifier.kind === "webhook"
+      ? [config.policy.approvals.notifier.secretRef]
+      : [];
+  return [...modelRefs, ...serverRefs, ...keyRefs, ...storeRefs, ...runnerRefs, ...approvalRefs];
 }

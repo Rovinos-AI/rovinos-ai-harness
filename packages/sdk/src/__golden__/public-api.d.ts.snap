@@ -253,6 +253,17 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         }>>>>;
         policy: z.ZodPrefault<z.ZodObject<{
             file: z.ZodOptional<z.ZodString>;
+            approvals: z.ZodOptional<z.ZodObject<{
+                notifier: z.ZodDefault<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                    kind: z.ZodLiteral<"log">;
+                }, z.core.$strict>, z.ZodObject<{
+                    kind: z.ZodLiteral<"webhook">;
+                    url: z.ZodPipe<z.ZodURL, z.ZodString>;
+                    secretRef: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+                    timeoutMs: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+                }, z.core.$strict>], "kind">>;
+                allowInsecureLocalhost: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         pii: z.ZodPrefault<z.ZodObject<{
             defaultAction: z.ZodDefault<z.ZodEnum<{

@@ -59,6 +59,15 @@ describe("getConfigSecretRefs", () => {
       sandbox: {
         runner: { url: "http://sandbox-runner:8080", token: "env:SANDBOX_RUNNER_TOKEN" },
       },
+      policy: {
+        approvals: {
+          notifier: {
+            kind: "webhook",
+            url: "https://hooks.example.test/approval",
+            secretRef: "env:APPROVAL_WEBHOOK_TOKEN",
+          },
+        },
+      },
     });
 
     expect(getConfigSecretRefs(config)).toEqual([
@@ -69,6 +78,7 @@ describe("getConfigSecretRefs", () => {
       "file:/run/secrets/doctor-previous-key",
       "env:DOCTOR_STORE_URL",
       "env:SANDBOX_RUNNER_TOKEN",
+      "env:APPROVAL_WEBHOOK_TOKEN",
     ]);
   });
 });
