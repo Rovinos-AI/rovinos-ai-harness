@@ -1,0 +1,33 @@
+{
+  "name": "@harness/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json"
+  },
+  "dependencies": {
+    "@harness/config": "workspace:^",
+    "@harness/core": "workspace:^",
+    "@harness/models": "workspace:^",
+    "@harness/schemas": "workspace:^",
+    "@harness/store": "workspace:^",
+    "@harness/telemetry": "workspace:^",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "3.2.6"
+  }
+}

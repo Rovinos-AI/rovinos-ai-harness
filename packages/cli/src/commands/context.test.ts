@@ -5,7 +5,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ContextInspectionSchema, Event as EventSchema, parseJson } from "@harness/schemas";
+import { ContextInspectionSchema, Event as EventSchema, Id, parseJson } from "@harness/schemas";
 import { StrategyComparisonReportSchema } from "@harness/context";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
@@ -97,9 +97,15 @@ async function harness() {
     clock: { now: () => 0 },
     ids: { next: () => runId },
     run: modelCall,
+    start: () => ({
+      runId: Id.parse(runId),
+      started: Promise.resolve(),
+      completion: modelCall(),
+    }),
     continueRun: modelCall,
     resume: modelCall,
     cancel: modelCall,
+    resolveApproval: () => Promise.reject(new Error("Approval is not used by context tests.")),
   }));
   const context: CliContext = {
     loadConfig: () => Promise.resolve(config),
