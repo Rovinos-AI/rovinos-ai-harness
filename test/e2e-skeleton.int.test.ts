@@ -881,7 +881,7 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
         });
         const script = [
           'const http = require("node:http");',
-          `const request = http.request({ hostname: "sandbox-runner", port: 8080, path: "/exec", method: "POST", headers: ${JSON.stringify({ authorization: request.headers.authorization, "content-type": "application/json" })} }, (response) => {`,
+          `const request = http.request({ hostname: "127.0.0.1", port: 8080, path: "/exec", method: "POST", headers: ${JSON.stringify({ host: "sandbox-runner:8080", authorization: request.headers.authorization, "content-type": "application/json" })} }, (response) => {`,
           '  const chunks = []; let bytes = 0; response.on("data", (chunk) => { bytes += chunk.length; if (bytes > 2097152) { response.destroy(); process.exitCode = 1; } else { chunks.push(chunk); } });',
           '  response.on("end", () => process.stdout.write(JSON.stringify({ status: response.statusCode, body: Buffer.concat(chunks).toString() })));',
           "});",
