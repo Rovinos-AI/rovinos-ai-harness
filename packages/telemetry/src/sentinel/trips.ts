@@ -195,18 +195,19 @@ export class TripQueue {
   }
 
   private unlink(node: TripNode): void {
-    if (node.previous === undefined) {
-      this.first = node.next;
+    const current = node;
+    if (current.previous === undefined) {
+      this.first = current.next;
     } else {
-      node.previous.next = node.next;
+      current.previous.next = current.next;
     }
-    if (node.next === undefined) {
-      this.last = node.previous;
+    if (current.next === undefined) {
+      this.last = current.previous;
     } else {
-      node.next.previous = node.previous;
+      current.next.previous = current.previous;
     }
-    node.previous = undefined;
-    node.next = undefined;
+    current.previous = undefined;
+    current.next = undefined;
     this.entryCount -= 1;
   }
 }

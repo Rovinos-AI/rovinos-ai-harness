@@ -179,9 +179,7 @@ export class AhoCorasick {
       state = node.transitions.get(codeUnit) ?? 0;
       node = nodeAt(this.nodes, state);
 
-      let outputIndex = firstUnseenOutput(
-        node.outputs.length > 0 ? state : node.outputLink,
-      );
+      let outputIndex = firstUnseenOutput(node.outputs.length > 0 ? state : node.outputLink);
       while (outputIndex !== 0) {
         if (shouldStop()) {
           throw new AhoCorasickError("sentinel_scan_timeout");

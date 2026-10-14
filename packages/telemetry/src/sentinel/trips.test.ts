@@ -84,10 +84,9 @@ describe("TripQueue", () => {
   });
 
   it("drops the oldest trip when the bounded queue overflows", () => {
-    const queue = new TripQueue(
-      { emit: vi.fn(), enabled: () => true } satisfies Logger,
-      { maxEntries: 2 },
-    );
+    const queue = new TripQueue({ emit: vi.fn(), enabled: () => true } satisfies Logger, {
+      maxEntries: 2,
+    });
     const secondRunId = Id.parse("B".repeat(26));
 
     queue.enqueue({ runId, entities: [{ type: "email", count: 1 }] });
@@ -95,9 +94,7 @@ describe("TripQueue", () => {
     queue.enqueue({ runId, entities: [{ type: "email", count: 2 }] });
 
     expect(queue.size).toBe(2);
-    expect(queue.drainForRun(runId)).toEqual([
-      { runId, entities: [{ type: "email", count: 2 }] },
-    ]);
+    expect(queue.drainForRun(runId)).toEqual([{ runId, entities: [{ type: "email", count: 2 }] }]);
     expect(queue.drainForRun(secondRunId)).toEqual([
       { runId: secondRunId, entities: [{ type: "phone", count: 1 }] },
     ]);
@@ -106,10 +103,9 @@ describe("TripQueue", () => {
   });
 
   it("bounds trips for unknown runs and discards late trips for completed runs", () => {
-    const queue = new TripQueue(
-      { emit: vi.fn(), enabled: () => true } satisfies Logger,
-      { maxEntries: 2 },
-    );
+    const queue = new TripQueue({ emit: vi.fn(), enabled: () => true } satisfies Logger, {
+      maxEntries: 2,
+    });
     const unknownRunId = Id.parse("B".repeat(26));
 
     queue.enqueue({ runId: unknownRunId, entities: [{ type: "email", count: 1 }] });

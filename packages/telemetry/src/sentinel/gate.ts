@@ -49,10 +49,7 @@ export type SentinelGateInput = z.infer<typeof SentinelGateInputSchema>;
 
 /** Matcher surface used by the gate and injectable in failure tests. */
 export interface SentinelMatcherLike {
-  findAll(
-    text: string,
-    shouldStop?: () => boolean,
-  ): readonly { readonly patternIndex: number }[];
+  findAll(text: string, shouldStop?: () => boolean): readonly { readonly patternIndex: number }[];
 }
 
 /** Options for building a fail-closed export gate. */

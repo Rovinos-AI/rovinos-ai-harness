@@ -239,7 +239,7 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(metricMocks.record).toHaveBeenCalledWith("leak_sentinel");
   });
 
-  it("forwards exactly one sentinel alert without rescanning or re-enqueueing it", async () => {
+  it("forwards exactly one sentinel alert without sentinel scanning or re-enqueueing it", async () => {
     defineLogRecord("harness.sentinel.trip", {
       "harness.run.id": attr.optional(attr.id()),
       "harness.sentinel.trip.count": attr.nonnegativeInt(),
@@ -248,10 +248,10 @@ describe("AllowlistLogRecordProcessor", () => {
     const activeRuns = new ActiveRuns();
     activeRuns.register(runId);
     const canary = "harness.sentinel.trip";
-    let processor: AllowlistLogRecordProcessor | undefined;
+    const processorRef: { current?: AllowlistLogRecordProcessor } = {};
     const queue = new TripQueue({
       emit: (record) => {
-        processor?.onEmit(
+        processorRef.current?.onEmit(
           makeSdkLogRecord({
             body: record.body,
             attributes: record.attributes ?? {},
@@ -272,7 +272,8 @@ describe("AllowlistLogRecordProcessor", () => {
       { tripQueue: queue },
     );
     const check = vi.spyOn(gate, "check");
-    processor = new AllowlistLogRecordProcessor(next, { gate });
+    const processor = new AllowlistLogRecordProcessor(next, { gate });
+    processorRef.current = processor;
 
     queue.enqueue({ runId, entities: [{ type: "email", count: 1 }] });
     await processor.forceFlush();
@@ -293,16 +294,23 @@ describe("AllowlistLogRecordProcessor", () => {
       new ActiveRuns(),
       { tripQueue: makeTripQueue() },
     );
-    let releaseCheck: (result: { ok: true } | {
-      ok: false;
-      reason: "hit" | "error" | "timeout";
-    }) => void = () => undefined;
-    const pendingCheck = new Promise<{
-      ok: true;
-    } | {
-      ok: false;
-      reason: "hit" | "error" | "timeout";
-    }>((resolve) => {
+    let releaseCheck: (
+      result:
+        | { ok: true }
+        | {
+            ok: false;
+            reason: "hit" | "error" | "timeout";
+          },
+    ) => void = () => undefined;
+    const pendingCheck = new Promise<
+      | {
+          ok: true;
+        }
+      | {
+          ok: false;
+          reason: "hit" | "error" | "timeout";
+        }
+    >((resolve) => {
       releaseCheck = resolve;
     });
     vi.spyOn(gate, "check").mockReturnValue(pendingCheck);

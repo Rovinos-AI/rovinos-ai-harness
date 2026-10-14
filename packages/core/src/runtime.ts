@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { context, diag, ROOT_CONTEXT, trace } from "@opentelemetry/api";
+import { diag } from "@opentelemetry/api";
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
-import { countDroppedTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import type { ToolPort } from "./ports.js";
-import { LeaseLostError, RunRecorder, type Clock } from "./recorder.js";
+import { LeaseLostError, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
@@ -16,6 +15,7 @@ import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool } from "./subagent/runtime.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import { setupRuntime } from "./runtime-setup.js";
+import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
   Runtime,
   RuntimeComposition,
@@ -171,53 +171,6 @@ interface RunControlOptions {
   readonly operation: (signal: AbortSignal) => Promise<RunLoopResult>;
 }
 
-async function flushAndDrainTrips(options: {
-  readonly store: EventStore;
-  readonly runId: Id;
-  readonly clock: Clock;
-  readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
-}): Promise<Event[]> {
-  const { store, runId, clock, flushTelemetry } = options;
-  try {
-    try {
-      await flushTelemetry?.();
-    } catch {
-      countDroppedTelemetry("trip_flush_failed");
-    }
-    if (!sentinelTripQueue.hasForRun(runId)) {
-      return [];
-    }
-    const nextSeq = await store.head(runId);
-    if (nextSeq === 0) {
-      throw new Error("Sentinel trip has no run log.");
-    }
-    let tail: Event | undefined;
-    for await (const event of store.read(runId, {
-      fromSeq: nextSeq - 1,
-      toSeq: nextSeq - 1,
-    })) {
-      tail = event;
-      break;
-    }
-    if (tail === undefined) {
-      throw new Error("Sentinel trip has no run log tail.");
-    }
-    const recorder = new RunRecorder(store, runId, tail.segmentId, nextSeq, clock);
-    const spanContext = trace.setSpanContext(ROOT_CONTEXT, {
-      traceId: tail.traceId,
-      spanId: tail.spanId,
-      traceFlags: 0,
-    });
-    return await context.with(spanContext, () => recorder.drainTrips());
-  } catch {
-    countDroppedTelemetry("trip_append_failed");
-    sentinelTripQueue.drainForRun(runId);
-    return [];
-  } finally {
-    sentinelTripQueue.discardRun(runId);
-  }
-}
-
 async function withRunControl(options: RunControlOptions): Promise<RunLoopResult> {
   const controller = new AbortController();
   const stopWatcher = new AbortController();
@@ -281,26 +234,9 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
     if (cancellation.observed) {
       result = (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
     }
-    if (result === undefined) {
-      throw new Error("Expected a completed run operation.");
-    }
-    const tripEvents = await flushAndDrainTrips(options);
+    result = await appendFinalRunTrips(result, options);
     tripsFinalized = true;
-    if (tripEvents.length === 0) {
-      return result;
-    }
-    const events = [...result.events, ...tripEvents];
-    const lastTrip = tripEvents.at(-1);
-    const state =
-      lastTrip === undefined
-        ? result.state
-        : {
-            ...result.state,
-            nextSeq: lastTrip.seq + 1,
-            segmentId: lastTrip.segmentId,
-            lastTs: lastTrip.ts,
-          };
-    return { ...result, events, state };
+    return result;
   } finally {
     stopWatcher.abort();
     uninstall();
@@ -325,6 +261,27 @@ async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | und
     }
   }
   return undefined;
+}
+
+async function closeRuntimeResources(options: {
+  readonly store: EventStore;
+  readonly vault: RuntimeComposition["vault"];
+  readonly keys: RuntimeComposition["keys"];
+  readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
+}): Promise<void> {
+  try {
+    await options.flushTelemetry?.();
+  } finally {
+    try {
+      await options.store.close();
+    } finally {
+      try {
+        options.vault.close();
+      } finally {
+        options.keys.dispose();
+      }
+    }
+  }
 }
 
 function composeRuntime(
@@ -393,21 +350,15 @@ function composeRuntime(
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume,
     cancel: (runId) => cancelRun(store, runId, clock, ids),
-    close: async () => {
-      try {
-        await overrides.flushTelemetry?.();
-      } finally {
-        try {
-          await store.close();
-        } finally {
-          try {
-            vault.close();
-          } finally {
-            keys.dispose();
-          }
-        }
-      }
-    },
+    close: () =>
+      closeRuntimeResources({
+        store,
+        vault,
+        keys,
+        ...(overrides.flushTelemetry === undefined
+          ? {}
+          : { flushTelemetry: overrides.flushTelemetry }),
+      }),
   };
 }
 

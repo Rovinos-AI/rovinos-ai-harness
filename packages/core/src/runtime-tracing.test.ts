@@ -9,10 +9,7 @@ import {
   type Event as HarnessEvent,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import {
-  createTestContextManager,
-  createTestTracerProvider,
-} from "@harness/telemetry/testing";
+import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { sentinelTripQueue } from "@harness/telemetry";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "./recorder.js";
@@ -241,7 +238,7 @@ describe("runtime tracing fallback", () => {
         next: () => Id.parse(`100000000000000000000000${String(nextId++).padStart(2, "0")}`),
       },
       model: new FakeModelPort([completion()]),
-      flushTelemetry: async () => {
+      flushTelemetry: () => {
         flushCount += 1;
         if (!enqueued) {
           enqueued = true;
@@ -250,6 +247,7 @@ describe("runtime tracing fallback", () => {
             entities: [{ type: "email", count: 1 }],
           });
         }
+        return Promise.resolve();
       },
     });
 
