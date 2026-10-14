@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
-// Not wired yet: approval escalation WebhookNotifier (17.6 -> #125)
-// Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
+// Not wired yet: approval escalation WebhookNotifier (17.13 -> #414)
+// Not wired yet: RemoteSandboxBackend / sandbox.runner (19.11 -> #415)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: MCP registry and model-visible descriptions through model-input PII (-> #199, model-input PII 13.6 -> #150)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
+// Not wired yet: MCP call span around callTool (6.5 -> #199)
 // Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: reference host in core runtime/CLI (-> #207)
-// Not wired yet: runtime vault from config (13.12 -> #389)
-// Not wired yet: storage-boundary tokenization (13.8 -> #81)
-// Not wired yet: SDK and control-plane consumers of store watch/watchRuns (#230, 24.1)
-// Not wired yet: sentinel trip gate wired to the runtime vault (8.4 -> #74)
+// Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
+// Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
 // Not wired yet: reference-host app content callbacks in the core runtime/CLI (-> #207)
 import { Command } from "commander";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -29,11 +28,13 @@ import {
   type CliContext,
 } from "@harness/cli/programmatic";
 import { createControlPlaneServer } from "@harness/control-plane";
+import { createHarness } from "@harness/sdk";
 import {
   CompositeSecretResolver,
   EnvSecretResolver,
   FileSecretResolver,
   loadConfig,
+  HarnessConfigSchema,
 } from "@harness/config";
 import {
   Checkpointer,
@@ -952,6 +953,46 @@ describe("retention", () => {
       ).resolves.toBeUndefined();
     } finally {
       await runtime.close();
+    }
+  });
+});
+
+describe("SDK", () => {
+  it("starts, watches, and reads a run through the public SDK runtime", async () => {
+    const current = fixture();
+    const config = await current.context.loadConfig();
+    const harness = await createHarness({
+      config: HarnessConfigSchema.parse({
+        ...config,
+        policy: { ...config.policy, file: join(current.directory, "policy.yaml") },
+      }),
+      overrides: {
+        clock: current.clock,
+        ids: current.ids,
+        model: new FakeModelPort([completion([], "Synthetic SDK completion")]),
+        secretResolver: new CompositeSecretResolver(),
+      },
+    });
+
+    try {
+      const { runId } = await harness.startRun({ goal: "Synthetic SDK end-to-end run" });
+      const statuses: string[] = [];
+      for await (const event of harness.watch(runId, { fromSeq: 0 })) {
+        if (event.kind === "run_status") {
+          statuses.push(event.to);
+          if (event.to === "completed" || event.to === "failed" || event.to === "cancelled") {
+            break;
+          }
+        }
+      }
+
+      expect(statuses).toContain("completed");
+      await expect(harness.getRun(runId)).resolves.toMatchObject({
+        runId,
+        status: "completed",
+      });
+    } finally {
+      await harness.close();
     }
   });
 });

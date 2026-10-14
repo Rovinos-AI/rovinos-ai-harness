@@ -1144,8 +1144,10 @@ __metadata:
   resolution: "@harness/mcp@workspace:packages/mcp"
   dependencies:
     "@harness/schemas": "workspace:^"
+    "@harness/telemetry": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
     "@modelcontextprotocol/server": "npm:2.3.1"
+    "@opentelemetry/api": "npm:1.9.1"
     "@types/node": "npm:22.20.5"
     vitest: "npm:3.2.6"
   languageName: unknown
@@ -1216,6 +1218,22 @@ __metadata:
     ajv-formats: "npm:3.0.1"
     vitest: "npm:3.2.6"
     yaml: "npm:2.9.1"
+    zod: "npm:4.6.5"
+  languageName: unknown
+  linkType: soft
+
+"@harness/sdk@workspace:^, @harness/sdk@workspace:packages/sdk":
+  version: 0.0.0-use.local
+  resolution: "@harness/sdk@workspace:packages/sdk"
+  dependencies:
+    "@harness/config": "workspace:^"
+    "@harness/core": "workspace:^"
+    "@harness/models": "workspace:^"
+    "@harness/schemas": "workspace:^"
+    "@harness/store": "workspace:^"
+    "@harness/telemetry": "workspace:^"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   languageName: unknown
   linkType: soft
@@ -5429,6 +5447,7 @@ __metadata:
     "@harness/pii": "workspace:^"
     "@harness/policy": "workspace:^"
     "@harness/schemas": "workspace:^"
+    "@harness/sdk": "workspace:^"
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"

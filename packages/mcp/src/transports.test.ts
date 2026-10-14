@@ -3,10 +3,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { StreamableHTTPClientTransport, type CallToolResult } from "@modelcontextprotocol/client";
+import { context as otelContext, trace } from "@opentelemetry/api";
 import { ServerConfigSchema } from "@harness/schemas";
-import { describe, expect, it, vi } from "vitest";
+import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
 import { createMcpTransport, type McpLogEvent } from "./transports.js";
+
+const tracerProvider = createTestTracerProvider();
+
+beforeAll(() => {
+  otelContext.setGlobalContextManager(createTestContextManager());
+  trace.setGlobalTracerProvider(tracerProvider);
+});
+
+afterAll(() => {
+  otelContext.disable();
+  trace.disable();
+});
 
 const stdioServerScript = [
   "import { createInterface } from 'node:readline';",
@@ -41,6 +55,150 @@ function stdioConfig(inheritEnv: boolean) {
 }
 
 describe("MCP transports", () => {
+  it("sends HTTP trace metadata only in _meta and strips configured reserved headers", async () => {
+    interface CapturedRequest {
+      readonly headers: Headers;
+      readonly body: {
+        readonly id?: string | number;
+        readonly method?: string;
+        readonly params?: Record<string, unknown>;
+      };
+    }
+    function isRecord(value: unknown): value is Record<string, unknown> {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
+    const requests: CapturedRequest[] = [];
+    const fetch: typeof globalThis.fetch = (_input, init) => {
+      const requestText = typeof init?.body === "string" ? init.body : "";
+      const parsedBody: unknown = JSON.parse(requestText);
+      const request = isRecord(parsedBody) ? parsedBody : {};
+      const body: CapturedRequest["body"] = {
+        ...(typeof request.id === "string" || typeof request.id === "number"
+          ? { id: request.id }
+          : {}),
+        ...(typeof request.method === "string" ? { method: request.method } : {}),
+        ...(isRecord(request.params) ? { params: request.params } : {}),
+      };
+      requests.push({ headers: new Headers(init?.headers), body });
+      if (body.method === "initialize") {
+        return Promise.resolve(
+          Response.json({
+            jsonrpc: "2.0",
+            id: body.id ?? 0,
+            result: {
+              protocolVersion: "2025-11-25",
+              capabilities: { tools: {} },
+              serverInfo: { name: "http-test", version: "1.0.0" },
+            },
+          }),
+        );
+      }
+      if (body.method === "tools/call") {
+        return Promise.resolve(
+          Response.json({
+            jsonrpc: "2.0",
+            id: body.id ?? 0,
+            result: { content: [{ type: "text", text: "called" }] },
+          }),
+        );
+      }
+      return Promise.resolve(new Response(null, { status: 202 }));
+    };
+    vi.stubGlobal("fetch", fetch);
+    const trustedConfig = ServerConfigSchema.parse({
+      id: "http_trusted",
+      trust: "internal",
+      propagateTrace: true,
+      transport: { kind: "http", url: "https://mcp.example.test/rpc" },
+      protocol: "2025-11-25",
+      timeouts: { connectMs: 1_000, callMs: 1_000 },
+    });
+    const externalConfig = ServerConfigSchema.parse({
+      id: "http_external",
+      trust: "external",
+      transport: { kind: "http", url: "https://mcp.example.test/rpc" },
+      protocol: "2025-11-25",
+      timeouts: { connectMs: 1_000, callMs: 1_000 },
+    });
+    for (const config of [trustedConfig, externalConfig]) {
+      if (config.transport.kind !== "http") {
+        throw new Error("Expected HTTP transport");
+      }
+      Object.assign(
+        (config.transport.headers ??= {}),
+        config.trust === "internal"
+          ? {
+              TrAcEpArEnT: "env:TRACEPARENT",
+              TRACESTATE: "env:TRACESTATE",
+              bAgGaGe: "env:BAGGAGE",
+            }
+          : {
+              TRACEPARENT: "env:TRACEPARENT",
+              TraceState: "env:TRACESTATE",
+              Baggage: "env:BAGGAGE",
+            },
+      );
+    }
+    const resolveSecret = vi.fn(() => Promise.reject(new Error("reserved header was resolved")));
+    const trustedConnection = new McpConnection(trustedConfig, {
+      resolveSecret,
+    });
+    const externalConnection = new McpConnection(externalConfig, {
+      resolveSecret,
+    });
+
+    try {
+      await trace.getTracer("mcp-test").startActiveSpan("harness.mcp_call", async (span) => {
+        await trustedConnection.callTool(
+          {
+            name: "tool-1",
+            arguments: {},
+            _meta: {
+              progressToken: "trusted-progress",
+              traceparent: "00-stale",
+              tracestate: "stale=value",
+              baggage: "private=value",
+            },
+          },
+          { type: "object" },
+        );
+        await externalConnection.callTool(
+          {
+            name: "tool-1",
+            arguments: {},
+            _meta: {
+              progressToken: "external-progress",
+              traceparent: "00-stale",
+              tracestate: "stale=value",
+              baggage: "private=value",
+            },
+          },
+          { type: "object" },
+        );
+
+        const callRequests = requests.filter(({ body }) => body.method === "tools/call");
+        expect(callRequests.map(({ body }) => body.params?._meta)).toEqual([
+          {
+            progressToken: "trusted-progress",
+            traceparent: `00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`,
+          },
+          { progressToken: "external-progress" },
+        ]);
+      });
+      expect(resolveSecret).not.toHaveBeenCalled();
+      expect(
+        requests.every(
+          ({ headers }) =>
+            !headers.has("traceparent") && !headers.has("tracestate") && !headers.has("baggage"),
+        ),
+      ).toBe(true);
+    } finally {
+      await trustedConnection.close();
+      await externalConnection.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each([
     { inheritEnv: false, expectedPath: null },
     { inheritEnv: true, expectedPath: "safe-parent-path" },
