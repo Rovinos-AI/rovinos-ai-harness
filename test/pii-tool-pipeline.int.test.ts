@@ -149,6 +149,7 @@ async function pipeline(
     },
     {
       store,
+      transientVault: true,
       clock: new FakeClock(100),
       ids,
       tool,
@@ -197,9 +198,11 @@ describe("PII tool pipeline", () => {
     expect(execute.mock.calls[0]?.[0].args).toEqual({ to: email, note: "<EMAIL_1>" });
     const intent = result.events.find((event) => event.type === "tool_intent");
     expect(intent?.args).toEqual({ to: "<EMAIL_1>", note: "<EMAIL_1>" });
-    expect(
-      result.events.filter((event) => event.type === "pii_action").map((event) => event.boundary),
-    ).toEqual(["tool_input", "tool_output"]);
+    expect(result.events.filter((event) => event.type === "pii_action")).toMatchObject([
+      { boundary: "tool_input", action: "tokenized" },
+      { boundary: "tool_input", action: "detokenized", toolId: "mail.send" },
+      { boundary: "tool_output", action: "tokenized" },
+    ]);
     for (const event of result.events) {
       expect(JSON.stringify(event)).not.toContain(email);
       expect(JSON.stringify(event)).not.toContain(card);

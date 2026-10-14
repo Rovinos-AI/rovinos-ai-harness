@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
-import { SqliteVault } from "@harness/vault";
+import { SqliteVault, VaultOperationError } from "@harness/vault";
+import type { TokenType } from "@harness/vault";
 import type { EventStore } from "@harness/store";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
@@ -20,7 +22,12 @@ import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
 import type { RoleRegistry } from "./roles.js";
-import type { RuntimeComposition, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
+import type {
+  RuntimeComposition,
+  RuntimeConfig,
+  RuntimeOverrides,
+  RuntimeVault,
+} from "./runtime-config.js";
 import type { Clock } from "./recorder.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
@@ -52,6 +59,24 @@ class TransientVaultInProductionError extends HarnessError {
 
   constructor() {
     super("A transient vault cannot be used in production.");
+  }
+}
+
+class EmptyReadOnlyVault implements RuntimeVault {
+  private closed = false;
+
+  put(): Promise<TokenType> {
+    return Promise.reject(new VaultOperationError("vault_unavailable"));
+  }
+
+  resolve(): Promise<string | undefined> {
+    return this.closed
+      ? Promise.reject(new VaultOperationError("vault_unavailable"))
+      : Promise.resolve(undefined);
+  }
+
+  close(): void {
+    this.closed = true;
   }
 }
 
@@ -93,11 +118,14 @@ async function createRuntimeVault(
   overrides: RuntimeOverrides,
   keys: RuntimeComposition["keys"],
   clock: Clock,
-): Promise<SqliteVault> {
+): Promise<RuntimeVault> {
   const vaultPath = join(dataDir, "vault.db");
   const transient = overrides.transientVault === true && overrides.readOnlyStore !== true;
   if (transient && process.env.NODE_ENV === "production") {
     throw new TransientVaultInProductionError();
+  }
+  if (overrides.readOnlyStore === true && !existsSync(vaultPath)) {
+    return new EmptyReadOnlyVault();
   }
   if (overrides.readOnlyStore !== true && !transient) {
     await mkdir(dataDir, { recursive: true });
@@ -127,10 +155,7 @@ function persistedScopeResolver(store: EventStore, scopes: RunScopeRegistry) {
         break;
       }
     }
-    if (scopeId === undefined) {
-      scopeId =
-        parentRunId === undefined ? runId : await resolve(parentRunId, visited);
-    }
+    scopeId ??= parentRunId === undefined ? runId : await resolve(parentRunId, visited);
     scopes.register(runId, scopeId);
     return scopeId;
   };
@@ -166,7 +191,7 @@ export async function setupRuntime(
   const clock = overrides.clock ?? systemClock;
   const ids = overrides.ids ?? new SystemIdGenerator(clock);
   const keys = await createRuntimeKeys(runtimeConfig.keys, overrides);
-  let vault: SqliteVault | undefined;
+  let vault: RuntimeVault | undefined;
   let eventStore: EventStore | undefined;
   try {
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
@@ -187,14 +212,14 @@ export async function setupRuntime(
     );
     const rawStore = await createRuntimeStore(runtimeConfig, overrides, clock);
     eventStore = rawStore;
-    const piiRuntime = createRuntimePii(
-      piiConfig,
-      runtimeVault,
+    const piiRuntime = createRuntimePii({
+      config: piiConfig,
+      vault: runtimeVault,
       scopes,
-      persistedScopeResolver(rawStore, scopes),
-      policy.version,
+      scopeOf: persistedScopeResolver(rawStore, scopes),
+      policyVersion: policy.version,
       clock,
-    );
+    });
     const store = piiConfig.enabled ? new PiiEventStore(rawStore, piiRuntime.tokenizer) : rawStore;
     return {
       config: runtimeConfig,

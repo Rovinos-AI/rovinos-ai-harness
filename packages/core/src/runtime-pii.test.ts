@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +15,7 @@ import { InMemoryEventStore } from "@harness/store";
 import { AuditingVaultResolver, InMemoryVault, Token } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PiiToolPort, Tokenizer } from "@harness/pii";
+import * as telemetry from "@harness/telemetry";
 import type { ModelCompletion, ModelToolCall, ToolPort } from "./ports.js";
 import { createRuntime } from "./runtime.js";
 import type { RuntimeConfig } from "./runtime-config.js";
@@ -119,6 +121,19 @@ describe("createRuntime PII composition", () => {
       expect(received).toEqual([{ allowed: email, private: "<EMAIL_1>" }]);
       expect(JSON.stringify(result.events)).not.toContain(email);
       expect(JSON.stringify(result.events)).toContain("<EMAIL_1>");
+      expect(
+        result.events.filter(
+          (event) => event.type === "pii_action" && event.action === "detokenized",
+        ),
+      ).toMatchObject([
+        {
+          type: "pii_action",
+          boundary: "tool_input",
+          action: "detokenized",
+          toolId,
+          entities: [{ type: "email", count: 1 }],
+        },
+      ]);
       expect("put" in runtime.vault).toBe(false);
       await runtime.close();
       runtimeClosed = true;
@@ -148,6 +163,7 @@ describe("createRuntime PII composition", () => {
     const runtime = await createRuntime(config(PiiConfigSchema.parse({ enabled: false })), {
       dataDir: await dataDirectory(),
       store: new InMemoryEventStore(),
+      transientVault: true,
       tool: makeTool(received, null),
       model: scriptedModel({ value: email }),
       policy: allowAllPolicy,
@@ -168,6 +184,7 @@ describe("createRuntime PII composition", () => {
     await expect(
       createRuntime(config(PiiConfigSchema.parse({ enabled: false })), {
         store: new InMemoryEventStore(),
+        transientVault: true,
       }),
     ).rejects.toMatchObject({ code: "pii_disabled_in_production" });
   });
@@ -186,7 +203,117 @@ describe("createRuntime PII composition", () => {
     });
 
     await expect(
-      createRuntime(config(), { store: new InMemoryEventStore(), tool: wrapped }),
+      createRuntime(config(), {
+        store: new InMemoryEventStore(),
+        tool: wrapped,
+        transientVault: true,
+      }),
     ).rejects.toMatchObject({ code: "pii_tool_port_already_wrapped" });
+  });
+
+  it("persists an injected-store vault and emits one metadata-only resolver audit after reopen", async () => {
+    const directory = await dataDirectory();
+    vi.stubEnv("HARNESS_DATA_DIR", directory);
+    const emitSafeEventSpy = vi
+      .spyOn(telemetry, "emitSafeEventToDefaultLogger")
+      .mockImplementation(() => undefined);
+
+    const runtime = await createRuntime(config(), {
+      store: new InMemoryEventStore(),
+      tool: makeTool([], null),
+      model: scriptedModel({ value: email }),
+      policy: allowAllPolicy,
+      secretResolver,
+    });
+    let reopened: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    let runtimeClosed = false;
+    try {
+      const result = await runtime.run(email);
+      const runId = result.events[0]?.runId;
+      expect(runId).toBeDefined();
+      expect(existsSync(join(directory, "vault.db"))).toBe(true);
+      await runtime.close();
+      runtimeClosed = true;
+
+      reopened = await createRuntime(config(), {
+        store: new InMemoryEventStore(),
+        secretResolver,
+      });
+      if (runId === undefined) {
+        throw new Error("Expected the run to have an ID.");
+      }
+      await expect(
+        reopened.vault.resolve(runId, Token.parse("<EMAIL_1>"), { boundary: "ui" }),
+      ).resolves.toBe(email);
+      expect(emitSafeEventSpy).toHaveBeenCalledTimes(1);
+      const audit = emitSafeEventSpy.mock.calls[0]?.[0];
+      expect(audit).toMatchObject({
+        runId,
+        kind: "pii_action",
+        boundary: "ui",
+        action: "detokenized",
+        entities: [{ type: "email", count: 1 }],
+      });
+      expect(Object.keys(audit ?? {}).sort()).toEqual(
+        [
+          "action",
+          "boundary",
+          "entities",
+          "kind",
+          "policyVersion",
+          "runId",
+          "seq",
+          "spanId",
+          "traceId",
+          "ts",
+        ].sort(),
+      );
+      expect(JSON.stringify(audit)).not.toContain(email);
+    } finally {
+      emitSafeEventSpy.mockRestore();
+      if (reopened !== undefined) {
+        await reopened.close();
+      } else if (!runtimeClosed) {
+        await runtime.close();
+      }
+    }
+  });
+
+  it("opens vault and store read-only without modifying either database", async () => {
+    const directory = await dataDirectory();
+    const runtime = await createRuntime(config(), {
+      dataDir: directory,
+      model: new FakeModelPort([completion([{ type: "text", text: "done" }])]),
+      secretResolver,
+    });
+    let runId: ReturnType<typeof Id.parse> | undefined;
+    try {
+      const result = await runtime.run(email);
+      runId = result.events[0]?.runId;
+    } finally {
+      await runtime.close();
+    }
+    if (runId === undefined) {
+      throw new Error("Expected the run to have an ID.");
+    }
+    const vaultPath = join(directory, "vault.db");
+    const storePath = join(directory, "harness.db");
+    const vaultBefore = await readFile(vaultPath);
+    const storeBefore = await readFile(storePath);
+    const readOnlyRuntime = await createRuntime(config(), {
+      dataDir: directory,
+      readOnlyStore: true,
+      secretResolver,
+    });
+    try {
+      await expect(
+        readOnlyRuntime.vault.resolve(runId, Token.parse("<EMAIL_1>"), { boundary: "ui" }),
+      ).resolves.toBe(email);
+    } finally {
+      await readOnlyRuntime.close();
+    }
+
+    expect(await readFile(vaultPath)).toEqual(vaultBefore);
+    expect(await readFile(storePath)).toEqual(storeBefore);
   });
 });

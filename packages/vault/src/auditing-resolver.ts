@@ -12,6 +12,8 @@ import {
 
 /** Receives a metadata-only record for each detokenization action. */
 export type VaultAuditHandler = (audit: VaultAudit) => Promise<void> | void;
+
+/** Resolves the root vault scope for a run, including scopes restored from durable run data. */
 export type VaultScopeResolver = (runId: Id) => Id | Promise<Id>;
 
 /** Adds metadata-only audit records to a vault resolver. */

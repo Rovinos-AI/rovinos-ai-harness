@@ -3,6 +3,7 @@ import {
   Code,
   FakeClock,
   Id,
+  KeysConfigSchema,
   ModelsConfigSchema,
   PiiConfigSchema,
   RunConfigSchema,
@@ -11,13 +12,17 @@ import {
   type Event,
 } from "@harness/schemas";
 import type { ModelPort, ModelRequest, ModelCompletion, ToolPort } from "./ports.js";
-import { InMemoryEventStore } from "@harness/store";
-import { InMemoryVault, AuditingVaultResolver } from "@harness/vault";
+import { InMemoryEventStore, type EventStore } from "@harness/store";
+import { InMemoryVault, AuditingVaultResolver, Token } from "@harness/vault";
 import { PiiToolPort, Tokenizer } from "@harness/pii";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
+import type { RuntimeConfig } from "./runtime-config.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const email = "alice@example.test";
 const rootRunId = Id.parse("00000000000000000000000000");
@@ -119,6 +124,45 @@ function piiTool(
   });
 }
 
+function runtimePiiTool(resolvedValues: string[]): ToolPort {
+  return {
+    describe: (toolId) =>
+      toolId === "test.make" || toolId === "test.resolve"
+        ? { idempotent: true, timeoutMs: 10_000 }
+        : undefined,
+    getToolSpecs: () => [
+      {
+        toolId: "test.make",
+        description: "Create a synthetic token",
+        inputSchema: { type: "object" },
+      },
+      {
+        toolId: "test.resolve",
+        description: "Resolve a synthetic token",
+        inputSchema: { type: "object" },
+      },
+    ],
+    execute: (call) => {
+      if (call.toolId === "test.make") {
+        return Promise.resolve({ outcome: "ok", result: { value: email } });
+      }
+      const token =
+        call.args !== null && typeof call.args === "object" && !Array.isArray(call.args)
+          ? call.args.token
+          : undefined;
+      if (typeof token !== "string") {
+        return Promise.resolve({
+          outcome: "error",
+          errorCode: "test_token_missing",
+          result: null,
+        });
+      }
+      resolvedValues.push(token);
+      return Promise.resolve({ outcome: "ok", result: { value: token } });
+    },
+  };
+}
+
 class SpawnModel implements ModelPort {
   readonly requests: ModelRequest[] = [];
   private parentCall = 0;
@@ -175,7 +219,7 @@ class SpawnModel implements ModelPort {
   }
 }
 
-async function eventsFor(store: InMemoryEventStore, runId: Id): Promise<Event[]> {
+async function eventsFor(store: EventStore, runId: Id): Promise<Event[]> {
   const events: Event[] = [];
   for await (const event of store.read(runId)) {
     events.push(event);
@@ -220,6 +264,7 @@ describe("runtime subagent spawning", () => {
       },
       {
         store,
+        transientVault: true,
         clock: new FakeClock(4),
         ids: new SequentialIdGenerator(),
         model,
@@ -346,6 +391,7 @@ describe("runtime subagent spawning", () => {
       { run: RunConfigSchema.parse({}), pii: PiiConfigSchema.parse({ enabled: false }) },
       {
         store,
+        transientVault: true,
         clock: new FakeClock(4),
         ids: new SequentialIdGenerator(),
         model,
@@ -362,6 +408,87 @@ describe("runtime subagent spawning", () => {
       expect(resolvedValues).toEqual([email]);
     } finally {
       await runtime.close();
+    }
+  });
+
+  it("resolves a persisted child-run token through runtime.vault after reopening", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harness-runtime-child-vault-"));
+    const secretResolver = {
+      resolve: () => Promise.resolve({ reveal: () => Buffer.alloc(32, 19).toString("base64") }),
+    };
+    const config: RuntimeConfig = {
+      run: RunConfigSchema.parse({}),
+      keys: KeysConfigSchema.parse({
+        currentKeyId: "runtime-test",
+        keys: [{ id: "runtime-test", secret: "env:RUNTIME_TEST_KEY" }],
+      }),
+      pii: PiiConfigSchema.parse({
+        detokenize: [{ toolId: "test.resolve", args: ["/token"] }],
+      }),
+      models: ModelsConfigSchema.parse({
+        routing: {
+          default: [{ provider: "local", model: "parent" }],
+          roles: { worker: [{ provider: "local", model: "worker" }] },
+        },
+      }),
+      roles: [
+        {
+          id: "worker",
+          route: "worker",
+          systemPrompt: "Work carefully.",
+          tools: ["test.resolve"],
+          contextStrategy: "naive",
+          maxDepth: 2,
+          maxChildren: 2,
+        },
+      ],
+    };
+    const resolvedValues: string[] = [];
+    const runtime = await createRuntime(config, {
+      dataDir: directory,
+      clock: new FakeClock(4),
+      ids: new SequentialIdGenerator(),
+      model: new SpawnModel(),
+      tool: runtimePiiTool(resolvedValues),
+      policy: allowAllPolicy,
+      secretResolver,
+    });
+    let reopened: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    let runtimeClosed = false;
+    try {
+      const parent = await runtime.run("start");
+      const parentId = parent.events[0]?.runId;
+      const spawned = parent.events.find((event) => event.type === "subagent_spawned");
+      if (parentId === undefined || spawned?.type !== "subagent_spawned") {
+        throw new Error("Expected the parent run to spawn a child.");
+      }
+      const childCreated = await eventsFor(runtime.store, spawned.childRunId);
+      expect(childCreated[0]).toMatchObject({
+        type: "run_created",
+        parentRunId: parentId,
+        scopeId: parentId,
+      });
+      expect(resolvedValues).toEqual([email]);
+      await runtime.close();
+      runtimeClosed = true;
+
+      reopened = await createRuntime(config, {
+        dataDir: directory,
+        model: new SpawnModel(),
+        secretResolver,
+      });
+      await expect(
+        reopened.vault.resolve(spawned.childRunId, Token.parse("<EMAIL_1>"), {
+          boundary: "ui",
+        }),
+      ).resolves.toBe(email);
+    } finally {
+      if (reopened !== undefined) {
+        await reopened.close();
+      } else if (!runtimeClosed) {
+        await runtime.close();
+      }
+      await rm(directory, { recursive: true, force: true });
     }
   });
 });

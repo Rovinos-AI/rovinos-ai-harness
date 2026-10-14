@@ -58,9 +58,6 @@ export function toolRunContext(
       }
     },
     recordVaultAudit: async (audit: VaultAudit) => {
-      if (audit.runId !== context.runId) {
-        throw new Error("Vault audit run does not match the active run.");
-      }
       events.push(
         await recorder.record({
           type: "pii_action",

@@ -19,8 +19,8 @@ import type { EventStore } from "@harness/store";
 import type {
   AuditingVaultResolver,
   LocalKeyProvider,
-  SqliteVault,
   VaultResolver,
+  VaultWriter,
 } from "@harness/vault";
 import type { Tokenizer } from "@harness/pii";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
@@ -88,6 +88,11 @@ export interface Runtime {
   close(): Promise<void>;
 }
 
+/** Owned writer/resolver handle closed with its runtime. */
+export interface RuntimeVault extends VaultWriter, VaultResolver {
+  close(): void;
+}
+
 /** Resolved dependencies needed to assemble a running runtime. */
 export interface RuntimeComposition {
   readonly config: RuntimeConfig;
@@ -96,7 +101,7 @@ export interface RuntimeComposition {
   readonly ids: IdGenerator;
   readonly store: EventStore;
   readonly keys: LocalKeyProvider;
-  readonly vault: SqliteVault;
+  readonly vault: RuntimeVault;
   readonly vaultResolver: VaultResolver;
   readonly pii:
     | {

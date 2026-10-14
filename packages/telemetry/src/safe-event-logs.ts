@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, trace } from "@opentelemetry/api";
-import { SeverityNumber, type Logger } from "@opentelemetry/api-logs";
+import { logs, SeverityNumber, type Logger } from "@opentelemetry/api-logs";
 import { Code } from "@harness/schemas";
 import { attr } from "./attr.js";
 import { defineLogRecord, type LogRecordDefinition } from "./log-registry.js";
@@ -188,13 +188,7 @@ const logDefinitions = {
       "storage",
       "ui",
     ]),
-    "harness.pii.action": attr.enum([
-      "tokenized",
-      "redacted",
-      "blocked",
-      "allowed",
-      "detokenized",
-    ]),
+    "harness.pii.action": attr.enum(["tokenized", "redacted", "blocked", "allowed", "detokenized"]),
     "harness.pii.entity_count": attr.nonnegativeInt(),
   }),
   budget_exceeded: defineLogRecord("harness.safe.budget_exceeded", {
@@ -219,6 +213,8 @@ const logDefinitions = {
     "harness.run.config_hash": attr.hash(),
   }),
 } satisfies Record<SafeEventType["kind"], LogRecordDefinition>;
+
+const safeEventLogger = logs.getLogger("@harness/core");
 
 function scalarValue(value: unknown): string | number | boolean | undefined {
   if (
@@ -280,4 +276,9 @@ export function emitSafeEvent(logger: Logger, safeEvent: SafeEventType): void {
       traceFlags: 0,
     }),
   });
+}
+
+/** Emits a validated SafeEvent through the harness logger without exposing OTel to callers. */
+export function emitSafeEventToDefaultLogger(safeEvent: SafeEventType): void {
+  emitSafeEvent(safeEventLogger, safeEvent);
 }

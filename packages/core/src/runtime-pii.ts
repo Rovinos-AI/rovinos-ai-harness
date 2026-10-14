@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context, trace } from "@opentelemetry/api";
-import { logs } from "@opentelemetry/api-logs";
-import { Code, SpanId, TraceId, type PiiConfig } from "@harness/schemas";
+import { SpanId, TraceId, type Code, type PiiConfig } from "@harness/schemas";
 import {
   creditCardDetector,
   createCustomDetector,
@@ -20,11 +19,10 @@ import {
   type VaultResolver,
   type VaultWriter,
 } from "@harness/vault";
-import { emitSafeEvent, SafeEvent } from "@harness/telemetry";
+import { emitSafeEventToDefaultLogger, SafeEvent } from "@harness/telemetry";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { Clock } from "./recorder.js";
 
-const vaultAuditLogger = logs.getLogger("@harness/core");
 const fallbackTraceId = TraceId.parse("1".repeat(32));
 const fallbackSpanId = SpanId.parse("2".repeat(16));
 
@@ -38,15 +36,25 @@ const builtInDetectors: readonly Detector[] = [
   urlCredentialsDetector,
 ];
 
+/** Inputs for constructing the runtime's shared PII components. */
+export interface RuntimePiiOptions {
+  readonly config: PiiConfig;
+  readonly vault: VaultWriter & VaultResolver;
+  readonly scopes: RunScopeRegistry;
+  readonly scopeOf: VaultScopeResolver;
+  readonly policyVersion: Code;
+  readonly clock: Clock;
+}
+
 /** Builds the PII dependencies shared by the runtime's tool and storage boundaries. */
-export function createRuntimePii(
-  config: PiiConfig,
-  vault: VaultWriter & VaultResolver,
-  scopes: RunScopeRegistry,
-  scopeOf: VaultScopeResolver,
-  policyVersion: Code,
-  clock: Clock,
-): { readonly tokenizer: Tokenizer; readonly resolver: AuditingVaultResolver } {
+export function createRuntimePii({
+  config,
+  vault,
+  scopes,
+  scopeOf,
+  policyVersion,
+  clock,
+}: RuntimePiiOptions): { readonly tokenizer: Tokenizer; readonly resolver: AuditingVaultResolver } {
   const detectors = [
     ...builtInDetectors,
     ...(config.custom ?? []).map((detector) => createCustomDetector(detector)),
@@ -63,8 +71,7 @@ export function createRuntimePii(
     vault,
     (audit) => {
       const spanContext = trace.getSpan(context.active())?.spanContext();
-      emitSafeEvent(
-        vaultAuditLogger,
+      emitSafeEventToDefaultLogger(
         SafeEvent.parse({
           runId: audit.runId,
           seq: 0,

@@ -43,16 +43,30 @@ function decodePointerSegment(segment: string): string {
   return segment.replaceAll("~1", "/").replaceAll("~0", "~");
 }
 
+interface DetokenizationVisitorOptions {
+  readonly runId: Id;
+  readonly toolId: Code;
+  readonly onUnresolvable: "fail" | "leave";
+  readonly resolver: AuditingVaultResolver;
+  readonly onAudit: VaultAuditHandler | undefined;
+}
+
 class DetokenizationVisitor {
   private resolvedCount = 0;
 
-  constructor(
-    private readonly runId: Id,
-    private readonly toolId: Code,
-    private readonly onUnresolvable: "fail" | "leave",
-    private readonly resolver: AuditingVaultResolver,
-    private readonly onAudit?: VaultAuditHandler,
-  ) {}
+  private readonly runId: Id;
+  private readonly toolId: Code;
+  private readonly onUnresolvable: "fail" | "leave";
+  private readonly resolver: AuditingVaultResolver;
+  private readonly onAudit: VaultAuditHandler | undefined;
+
+  constructor(options: DetokenizationVisitorOptions) {
+    this.runId = options.runId;
+    this.toolId = options.toolId;
+    this.onUnresolvable = options.onUnresolvable;
+    this.resolver = options.resolver;
+    this.onAudit = options.onAudit;
+  }
 
   get count(): number {
     return this.resolvedCount;
@@ -190,7 +204,13 @@ export async function detokenizeArgs(
     return { args: copy, resolvedCount: 0 };
   }
 
-  const visitor = new DetokenizationVisitor(runId, toolId, entry.onUnresolvable, resolver, onAudit);
+  const visitor = new DetokenizationVisitor({
+    runId,
+    toolId,
+    onUnresolvable: entry.onUnresolvable,
+    resolver,
+    onAudit,
+  });
   for (const pointer of entry.args) {
     const segments = pointer === "" ? [] : pointer.slice(1).split("/");
     copy = await visitor.apply(copy, segments, 0);

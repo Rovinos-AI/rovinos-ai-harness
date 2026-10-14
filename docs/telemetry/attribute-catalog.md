@@ -202,7 +202,7 @@ Owner task: `3.2`.
 | --- | --- | --- | --- |
 | `harness.event.seq` | integer | Required | `@harness/telemetry` |
 | `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.pii.action` | enum: `tokenized`, `redacted`, `blocked`, `allowed` | Required | `@harness/telemetry` |
+| `harness.pii.action` | enum: `tokenized`, `redacted`, `blocked`, `allowed`, `detokenized` | Required | `@harness/telemetry` |
 | `harness.pii.boundary` | enum: `model_input`, `tool_input`, `tool_output`, `storage`, `ui` | Required | `@harness/telemetry` |
 | `harness.pii.entity_count` | integer | Required | `@harness/telemetry` |
 | `harness.policy.version` | Code | Required | `@harness/telemetry` |
