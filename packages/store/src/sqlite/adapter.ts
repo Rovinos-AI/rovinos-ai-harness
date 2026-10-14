@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
 import {
-  Event,
   Id,
   RunStatus,
   parseJson,
-  splitEvent,
   type TraceId,
   type Event as StoredEvent,
   type NewEvent,
@@ -30,7 +28,15 @@ import {
   type EventStore,
   type ListRunsOptions,
   type RunSummary,
+  type SqliteStoreOptions,
 } from "../types.js";
+import {
+  ChangeEmitter,
+  waitForChangeWithPolling,
+  watchEvents,
+  watchRunSummaries,
+  type ChangeSubscription,
+} from "../subscriptions.js";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
 import { migrate } from "../migrate.js";
 import {
@@ -40,6 +46,8 @@ import {
   validateEncryptionMetadata,
   insertSnapshot,
   parseStoredMeta,
+  prepareRunSummaryQuery,
+  readRunSummary,
   runListPage,
   type EventRow,
   type RunRow,
@@ -50,8 +58,7 @@ import { deleteRunTransaction } from "./retention.js";
 import { SqliteApprovalNotifications } from "./approval-notifications.js";
 import { SqliteConfirmationStates } from "./confirmation-states.js";
 import { findRunsByTrace } from "./traces.js";
-
-const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
+import { encodeEvents, type EncodedEvent } from "./event-encoding.js";
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
 const READ_PAGE_SIZE = 256;
 
@@ -66,58 +73,6 @@ type ListRunsQueryParams = [
   Id | null,
   number,
 ];
-
-interface EncodedEvent {
-  event: StoredEvent;
-  metaJson: string;
-  blob: string;
-  keyId: string | null;
-}
-
-async function encodeEvents(
-  codec: ContentCodec,
-  runId: Id,
-  events: readonly NewEvent[],
-  expectedSeq: number,
-): Promise<EncodedEvent[]> {
-  if (events.length === 0) {
-    throw new InvalidEventError([[]]);
-  }
-
-  const validated: StoredEvent[] = [];
-  for (const [index, event] of events.entries()) {
-    if (event.runId !== runId) {
-      throw new InvalidEventError([["runId"]]);
-    }
-
-    const result = Event.safeParse({ ...event, seq: expectedSeq + index });
-    if (!result.success) {
-      const paths = result.error.issues.map(({ path }) =>
-        path.flatMap((part) =>
-          typeof part === "string" || typeof part === "number" ? [part] : [],
-        ),
-      );
-      throw new InvalidEventError(paths);
-    }
-    validated.push(result.data);
-  }
-
-  return Promise.all(
-    validated.map(async (event) => {
-      const parts = splitEvent(event);
-      const content = await codec.encode({ runId, seq: event.seq }, parts.content);
-      const meta = Object.fromEntries(
-        Object.entries(parts.meta).filter(([key]) => !envelopeKeys.has(key)),
-      );
-      return {
-        event,
-        metaJson: JSON.stringify(meta),
-        blob: content.blob,
-        keyId: content.keyId ?? null,
-      };
-    }),
-  );
-}
 
 function decodeCursor(cursor: string): { createdAt: number; runId: Id } {
   try {
@@ -157,6 +112,7 @@ export class SqliteEventStore implements EventStore {
   private readonly codec: ContentCodec;
   private readonly insertRun: Database.Statement<[Id, number, number]>;
   private readonly getRun: Database.Statement<[Id], RunRow>;
+  private readonly getRunSummary: Database.Statement<[Id], RunSummaryRow>;
   private readonly insertEvent: Database.Statement<
     [Id, number, number, string, string, string, string, string, string, string | null]
   >;
@@ -174,6 +130,8 @@ export class SqliteEventStore implements EventStore {
   private readonly pruneSnapshots: Database.Statement<[Id, Id, number]>;
   private readonly latestSnapshotQuery: Database.Statement<[Id], SnapshotRow>;
   private readonly snapshotKeep: number;
+  private readonly pollIntervalMs: number;
+  private readonly changeEmitter = new ChangeEmitter();
   private readonly outbox: SqliteOutboxReader;
   private readonly approvalNotifications: SqliteApprovalNotifications;
   private readonly confirmationStates: SqliteConfirmationStates;
@@ -183,19 +141,20 @@ export class SqliteEventStore implements EventStore {
    *
    * @param path Database file path or `:memory:`.
    * @param codec Codec used to store content separately from event metadata.
-   * @param options Snapshot retention and read-only configuration; read-only opens an existing database without initialization.
+   * @param options Snapshot retention, read-only mode, and external-writer polling interval.
    * @param clock Clock supplying timestamps for sink-cursor updates.
    */
   constructor(
     path: string,
     codec: ContentCodec = new JsonContentCodec(),
-    options: z.input<typeof sqliteStoreOptionsSchema> = {},
+    options: SqliteStoreOptions = {},
     clock: Clock = systemClock,
   ) {
     const parsedOptions = sqliteStoreOptionsSchema.parse(options);
     this.db = parsedOptions.readOnly ? openReadOnlyDatabase(path) : new Database(path);
     this.codec = codec;
     this.snapshotKeep = snapshotKeep({ snapshotKeep: parsedOptions.snapshotKeep });
+    this.pollIntervalMs = parsedOptions.pollIntervalMs;
     try {
       if (!parsedOptions.readOnly) {
         this.db.pragma("journal_mode = WAL");
@@ -224,6 +183,7 @@ export class SqliteEventStore implements EventStore {
     this.getRun = this.db.prepare<[Id], RunRow>(
       "SELECT next_seq, status FROM runs WHERE run_id = ?",
     );
+    this.getRunSummary = prepareRunSummaryQuery(this.db);
     this.insertEvent = this.db.prepare<
       [Id, number, number, string, string, string, string, string, string, string | null]
     >(
@@ -340,6 +300,7 @@ export class SqliteEventStore implements EventStore {
         }
       });
       appendTransaction.immediate();
+      this.changeEmitter.notify(runId);
       return { nextSeq: expectedSeq + validated.length };
     } catch (error) {
       throw storeError(error);
@@ -365,6 +326,37 @@ export class SqliteEventStore implements EventStore {
     } catch (error) {
       throw storeError(error);
     }
+  }
+
+  private waitForChange(runId: Id | undefined, signal: AbortSignal): ChangeSubscription {
+    return waitForChangeWithPolling(this.changeEmitter, runId, signal, this.pollIntervalMs);
+  }
+
+  /** {@inheritDoc EventStore.watch} */
+  watch(runId: Id, options: Parameters<EventStore["watch"]>[1]): AsyncIterable<StoredEvent> {
+    return watchEvents(this, runId, options, {
+      subscribe: (watchedRunId, signal) => this.waitForChange(watchedRunId, signal),
+      isTerminal: (watchedRunId, observedNextSeq) => {
+        const current = this.getRun.get(watchedRunId);
+        return Promise.resolve(
+          current !== undefined &&
+            current.next_seq <= observedNextSeq &&
+            (current.status === "completed" ||
+              current.status === "failed" ||
+              current.status === "cancelled"),
+        );
+      },
+    });
+  }
+
+  /** {@inheritDoc EventStore.watchRuns} */
+  watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
+    return watchRunSummaries(
+      this,
+      options,
+      (runId, signal) => this.waitForChange(runId, signal),
+      (runId) => Promise.resolve(readRunSummary(this.getRunSummary, runId)),
+    );
   }
 
   /** {@inheritDoc EventStore.head} */

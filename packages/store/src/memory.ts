@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
-  Event,
   TraceId,
   type Event as StoredEvent,
   type Id,
@@ -24,68 +23,23 @@ import {
   type RunSummary,
   type SnapshotStoreOptions,
 } from "./types.js";
-
-function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): number | undefined {
-  if (cursor === undefined) {
-    return 0;
-  }
-
-  const cursorIndex = summaries.findIndex((summary) => summary.runId === cursor);
-  if (cursorIndex === -1) {
-    return undefined;
-  }
-  return cursorIndex + 1;
-}
-
-function matchesContinuation(
-  created: Extract<StoredEvent, { type: "run_created" }>,
-  continuationOf: Id | undefined,
-): boolean {
-  return continuationOf === undefined || created.continuationOf === continuationOf;
-}
-
-function validateEventBatch(
-  runId: Id,
-  events: readonly NewEvent[],
-  expectedSeq: number,
-  storedLength: number,
-): StoredEvent[] {
-  if (events.length === 0) {
-    throw new InvalidEventError([[]]);
-  }
-  const validated = events.map((event, index) => {
-    if (event.runId !== runId) {
-      throw new InvalidEventError([["runId"]]);
-    }
-    const result = Event.safeParse({ ...event, seq: expectedSeq + index });
-    if (!result.success) {
-      const paths = result.error.issues.map(({ path }) =>
-        path.flatMap((part) =>
-          typeof part === "string" || typeof part === "number" ? [part] : [],
-        ),
-      );
-      throw new InvalidEventError(paths);
-    }
-    return result.data;
-  });
-  if (storedLength === 0 && validated[0]?.type !== "run_created") {
-    throw new InvalidEventError([[0, "type"]]);
-  }
-  return validated;
-}
-
-function hasDuplicateSnapshot(
-  snapshotsByRun: ReadonlyMap<Id, readonly EncodedSnapshot[]>,
-  snapshotId: Id,
-): boolean {
-  return [...snapshotsByRun.values()].some((snapshots) =>
-    snapshots.some((snapshot) => snapshot.snapshot_id === snapshotId),
-  );
-}
+import {
+  ChangeEmitter,
+  summaryFromEvents,
+  watchEvents,
+  watchRunSummaries,
+} from "./subscriptions.js";
+import {
+  hasDuplicateSnapshot,
+  matchesContinuation,
+  startAfterCursor,
+  validateEventBatch,
+} from "./memory-helpers.js";
 
 /** In-memory reference implementation of the append-only event store contract. */
 export class InMemoryEventStore implements EventStore {
   private readonly runs = new Map<Id, StoredEvent[]>();
+  private readonly changeEmitter = new ChangeEmitter();
   private readonly traceRuns = new Map<TraceId, Map<Id, number>>();
   private readonly snapshots = new Map<Id, EncodedSnapshot[]>();
   private readonly outboxEvents: { globalSeq: number; event: StoredEvent }[] = [];
@@ -165,6 +119,7 @@ export class InMemoryEventStore implements EventStore {
           .slice(0, this.snapshotKeep),
       );
     }
+    this.changeEmitter.notify(runId);
     return { nextSeq: expectedSeq + validated.length };
   }
 
@@ -213,6 +168,33 @@ export class InMemoryEventStore implements EventStore {
         };
       },
     };
+  }
+
+  /** {@inheritDoc EventStore.watch} */
+  watch(runId: Id, options: Parameters<EventStore["watch"]>[1]): AsyncIterable<StoredEvent> {
+    return watchEvents(this, runId, options, {
+      subscribe: (watchedRunId, signal) => this.changeEmitter.subscribe(watchedRunId, signal),
+      isTerminal: (watchedRunId, observedNextSeq) => {
+        const stored = this.runs.get(watchedRunId);
+        const last = stored?.at(-1);
+        return Promise.resolve(
+          stored !== undefined &&
+            stored.length <= observedNextSeq &&
+            last?.type === "run_status_changed" &&
+            ["completed", "failed", "cancelled"].includes(last.to),
+        );
+      },
+    });
+  }
+
+  /** {@inheritDoc EventStore.watchRuns} */
+  watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
+    return watchRunSummaries(
+      this,
+      options,
+      (runId, signal) => this.changeEmitter.subscribe(runId, signal),
+      (runId) => Promise.resolve(summaryFromEvents(runId, this.runs.get(runId))),
+    );
   }
 
   /** {@inheritDoc EventStore.head} */

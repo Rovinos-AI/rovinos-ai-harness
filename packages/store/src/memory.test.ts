@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id, type Event, type HarnessError, type NewEvent, type RunStatus } from "@harness/schemas";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import {
   InvalidEventError,
@@ -110,6 +110,44 @@ describe("InMemoryEventStore", () => {
     expect(await collect(readEvents)).toEqual(events);
     await expect(store.head(runId)).resolves.toBe(2);
     await expect(store.head(otherRunId)).resolves.toBe(0);
+  });
+
+  it("refreshes only the run that changes while watching many idle runs", async () => {
+    const store = new InMemoryEventStore();
+    const builders = Array.from({ length: 40 }, (_, index) =>
+      Id.parse(String(index + 10).padStart(26, "0")),
+    );
+    for (const [index, id] of builders.entries()) {
+      await store.append(id, [runCreated(id, index + 1)], 0);
+    }
+    const listRuns = vi.spyOn(store, "listRuns");
+    const read = vi.spyOn(store, "read");
+    const controller = new AbortController();
+    const iterator = store.watchRuns({ signal: controller.signal })[Symbol.asyncIterator]();
+    try {
+      await Promise.all(builders.map(() => iterator.next()));
+      const changedRunId = builders[20];
+      if (changedRunId === undefined) {
+        throw new Error("Expected a changed run id");
+      }
+      await store.append(
+        changedRunId,
+        [runStatusChanged(changedRunId, 100, "pending", "running")],
+        1,
+      );
+
+      await expect(iterator.next()).resolves.toMatchObject({
+        done: false,
+        value: { runId: changedRunId, status: "running" },
+      });
+      expect(listRuns).toHaveBeenCalledTimes(1);
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(read).toHaveBeenCalledWith(changedRunId, { fromSeq: 1, toSeq: 1 });
+    } finally {
+      controller.abort();
+      await iterator.return?.();
+      await store.close();
+    }
   });
 
   it("rejects stale sequence numbers without appending", async () => {

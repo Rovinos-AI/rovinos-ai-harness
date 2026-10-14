@@ -23,6 +23,8 @@ function brokenFactory(): EventStoreFactory {
         reference.appendWithSnapshot(runId, events, expectedSeq, snapshot),
       latestSnapshot: (runId) => reference.latestSnapshot(runId),
       read: (runId, range) => reference.read(runId, range),
+      watch: (runId, options) => reference.watch(runId, options),
+      watchRuns: (options) => reference.watchRuns(options),
       head: (runId) => reference.head(runId),
       deleteRun: (runId) => reference.deleteRun(runId),
       consumeConfirmationState: (stateId, expiresAt, now) =>

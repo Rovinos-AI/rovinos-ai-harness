@@ -29,7 +29,11 @@ export {
   type EventStore,
   type ListRunsOptions,
   type RunSummary,
+  sqliteStoreOptionsSchema,
+  type SqliteStoreOptions,
   type SnapshotStoreOptions,
+  type WatchOptions,
+  type WatchRunsOptions,
 } from "./types.js";
 export {
   purgeExpiredRuns,
