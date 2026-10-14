@@ -134,6 +134,23 @@ describe("createAppTelemetry", () => {
     });
   });
 
+  it("never sends undeclared attribute values", async () => {
+    const canary = "synthetic-private-value";
+    const callTool = createCallTool();
+    const telemetry = createAppTelemetry({
+      bridge: { callTool },
+      manifest: { spans: ["ui.error"] as const },
+      now: () => 1,
+    });
+    const attrs = { code: "ui.failure", privateData: canary };
+
+    telemetry.record("ui.error", attrs);
+    await telemetry.flush();
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(JSON.stringify(callTool.mock.calls)).not.toContain(canary);
+  });
+
   it("rejects malformed attributes and limits a batch to the host schema", async () => {
     const callTool = createCallTool();
     const telemetry = createAppTelemetry({

@@ -26,8 +26,9 @@ type SchemaSpanAttrs<Name extends AppSpanName> = Omit<
 >;
 
 /** Attributes required for a particular app span, excluding host-generated timing fields. */
-export type SpanAttrs<Name extends AppSpanName> =
-  keyof SchemaSpanAttrs<Name> extends never ? Record<string, never> : SchemaSpanAttrs<Name>;
+export type SpanAttrs<Name extends AppSpanName> = keyof SchemaSpanAttrs<Name> extends never
+  ? Record<string, never>
+  : SchemaSpanAttrs<Name>;
 
 /** Minimal host bridge shape needed to emit app telemetry. */
 export interface AppTelemetryBridge {
