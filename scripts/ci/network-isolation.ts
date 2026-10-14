@@ -37,6 +37,32 @@ export function readRenderedComposeNetworkConfig(): z.infer<typeof composeConfig
   return parseJson(composeConfigSchema, rendered);
 }
 
+/** Build argv for a command against the main test Compose profile. */
+export function buildTestComposeCommand(args: readonly string[]): string[] {
+  return [
+    "compose",
+    "--env-file",
+    "infra/collector/VERSION",
+    "--file",
+    "infra/compose/docker-compose.test.yml",
+    ...args,
+  ];
+}
+
+/** Runs a command against the main test Compose profile. */
+export async function runTestComposeCommand(args: readonly string[]): Promise<string> {
+  const { stdout } = await execFileAsync("docker", buildTestComposeCommand(args), {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+    timeout: 180_000,
+  });
+  if (typeof stdout !== "string") {
+    throw new TypeError("Docker command did not return text output.");
+  }
+  return stdout;
+}
+
 /** Runs a command against the isolated network fixture's Compose project. */
 export async function runNetworkIsolationCompose(
   projectName: string,
