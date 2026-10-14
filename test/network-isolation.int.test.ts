@@ -23,6 +23,8 @@ it("limits the rendered Compose egress network to the collector", () => {
     "internal",
   ]);
   expect(Object.keys(config.services.postgres?.networks ?? {}).sort()).toEqual(["test-host"]);
+  expect(Object.keys(config.services["sample-mcp-server"]?.networks ?? {})).toEqual(["internal"]);
+  expect(config.networks.internal?.internal).toBe(true);
   expect(
     Object.entries(config.services)
       .filter(([, service]) => Object.hasOwn(service.networks ?? {}, "egress"))
