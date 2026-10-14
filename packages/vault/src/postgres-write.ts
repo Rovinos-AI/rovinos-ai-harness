@@ -192,8 +192,8 @@ export async function putPostgresEntry(
     const inserted = await client.query<{ token: string } & QueryResultRow>(
       `INSERT INTO vault_entries
         (run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (run_id, entity_type, lookup) DO NOTHING RETURNING token`,
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (run_id, entity_type, lookup) DO NOTHING RETURNING token`,
       [runId, token.data, entityType, lookup, valueEnc, key.keyId, keyId, context.now()],
     );
     const insertedToken = inserted.rows[0]?.token;
