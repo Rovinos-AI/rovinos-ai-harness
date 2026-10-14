@@ -22,6 +22,7 @@ import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
 import { McpConnectionError, McpToolPort } from "@harness/mcp";
+import type { McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
 import type {
   RuntimeComposition,
@@ -32,6 +33,16 @@ import type {
 import type { Clock } from "./recorder.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
+const mcpDiagnosticLogger = diag.createComponentLogger({ namespace: "harness.mcp" });
+const mcpLogger: McpLogger = {
+  log: (event) =>
+    mcpDiagnosticLogger.warn(
+      event.code,
+      event.code === "mcp_stderr"
+        ? { serverId: event.serverId, bytes: event.bytes }
+        : { serverId: event.serverId },
+    ),
+};
 
 /** Runtime dependencies ready to be assembled into the public runtime API. */
 export type RuntimeSetup = RuntimeComposition & {
@@ -223,12 +234,17 @@ export async function setupRuntime(
       const secretResolver = overrides.secretResolver ?? {
         resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
       };
-      mcpToolPort = await McpToolPort.create(runtimeConfig.servers ?? [], {
-        resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
-        ...(overrides.mcpTransportFactory === undefined
-          ? {}
-          : { createTransport: overrides.mcpTransportFactory }),
-      });
+      mcpToolPort = await McpToolPort.create(
+        runtimeConfig.servers ?? [],
+        {
+          resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
+          logger: mcpLogger,
+          ...(overrides.mcpTransportFactory === undefined
+            ? {}
+            : { createTransport: overrides.mcpTransportFactory }),
+        },
+        { offloadBinaryResults: overrides.workspace !== undefined },
+      );
     }
     const tool = overrides.tool ?? mcpToolPort ?? unavailableTool;
     const roles = await resolveRuntimeRoles(

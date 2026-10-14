@@ -284,7 +284,7 @@ async function decide(
         pending.runId,
         approvalId,
         resolution,
-        edits,
+        edits === undefined ? undefined : { edits },
       );
       const resumed = options.resume === true ? await runtime.resume(pending.runId) : undefined;
       context.out.json(ApprovalResolveResultSchema, {

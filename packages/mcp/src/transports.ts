@@ -24,6 +24,7 @@ export type McpLogEvent =
         | "mcp_connect_failed"
         | "mcp_connect_timeout"
         | "mcp_tools_refresh_failed"
+        | "mcp_discovery_failed"
         | "mcp_pool_connect_failed";
       readonly serverId: HarnessCode;
     };

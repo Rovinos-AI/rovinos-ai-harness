@@ -30,6 +30,7 @@ import type {
   VaultWriter,
 } from "@harness/vault";
 import type { Tokenizer } from "@harness/pii";
+import type { WorkspacePort } from "@harness/context";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
@@ -61,6 +62,8 @@ export interface RuntimeOverrides {
   readonly tool?: ToolPort;
   /** Optional MCP transport factory for embedded runtimes and in-memory tests. */
   readonly mcpTransportFactory?: McpConnectionDependencies["createTransport"];
+  /** Workspace used to persist offloaded tool results, including MCP binary outputs. */
+  readonly workspace?: WorkspacePort;
   /** Policy evaluator replacing the policy document configured for the runtime. */
   readonly policy?: PolicyPort;
   readonly context?: ContextPort;

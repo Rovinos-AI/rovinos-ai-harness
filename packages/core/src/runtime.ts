@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
+import { OffloadingToolPort } from "@harness/context";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
 import {
@@ -294,7 +295,7 @@ function composeRuntime(
     roles,
     scopes,
   });
-  const tool =
+  const piiTool =
     pii === undefined
       ? subagentTool
       : new PiiToolPort(subagentTool, {
@@ -302,6 +303,10 @@ function composeRuntime(
           config: pii.config,
           resolver: pii.resolver,
         });
+  const tool =
+    options.overrides.workspace === undefined
+      ? piiTool
+      : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, ids);
   const runWithControl = createTerminalAwareRunControl(options);
   const resume = createRuntimeResume(options, tool, runWithControl);
   return {

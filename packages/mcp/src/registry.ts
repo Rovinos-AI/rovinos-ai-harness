@@ -37,6 +37,7 @@ export interface RejectedTool {
 export interface ResolvedTool {
   readonly server: ServerConfig;
   readonly nativeName: string;
+  readonly tool: McpTool;
   readonly inputSchema: JsonValueType;
   readonly outputSchema?: JsonValueType;
 }
@@ -127,6 +128,7 @@ function schemaRejectionReason(
 interface RegisteredTool {
   readonly server: ServerConfig;
   readonly nativeName: string;
+  readonly tool: McpTool;
   readonly spec: ToolSpec;
   readonly inputSchema: JsonValueType;
   readonly outputSchema?: JsonValueType;
@@ -222,6 +224,7 @@ export class ToolRegistry {
     const registered: RegisteredTool = {
       server: config,
       nativeName: tool.name,
+      tool,
       spec,
       inputSchema,
       ...(outputSchema === undefined ? {} : { outputSchema }),
@@ -250,6 +253,7 @@ export class ToolRegistry {
     | {
         readonly idempotent: boolean;
         readonly timeoutMs: number;
+        readonly longRunning: true;
         readonly inputSchema: JsonValueType;
       }
     | undefined {
@@ -260,6 +264,7 @@ export class ToolRegistry {
     return {
       idempotent: tool.idempotent,
       timeoutMs: tool.server.timeouts.callMs,
+      longRunning: true,
       inputSchema: tool.inputSchema,
     };
   }
@@ -278,6 +283,7 @@ export class ToolRegistry {
     return {
       server: tool.server,
       nativeName: tool.nativeName,
+      tool: tool.tool,
       inputSchema: tool.inputSchema,
       ...(tool.outputSchema === undefined ? {} : { outputSchema: tool.outputSchema }),
     };

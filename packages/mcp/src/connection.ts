@@ -353,6 +353,7 @@ export class McpConnection {
     params: CallToolRequest["params"],
     inputSchema: unknown,
     options?: CallToolRequestOptions,
+    toolDefinition?: McpTool,
   ): Promise<CallToolResult> {
     let validate: ReturnType<typeof compileJsonSchema>;
     try {
@@ -364,7 +365,7 @@ export class McpConnection {
 
     await this.#ensureReady(options?.signal);
     try {
-      return await this.#invoke(params, options);
+      return await this.#invoke(params, options, toolDefinition);
     } catch (error) {
       if (error instanceof McpProtocolError) {
         throw error;
@@ -381,7 +382,7 @@ export class McpConnection {
       }
       await this.#reconnect(options?.signal);
       try {
-        return await this.#invoke(params, options);
+        return await this.#invoke(params, options, toolDefinition);
       } catch (retryError) {
         if (retryError instanceof McpProtocolError) {
           throw retryError;
@@ -394,6 +395,7 @@ export class McpConnection {
   async #invoke(
     params: CallToolRequest["params"],
     options?: CallToolRequestOptions,
+    toolDefinition?: McpTool,
   ): Promise<CallToolResult> {
     const client = this.#client;
     if (client === undefined || this.#state !== "ready") {
@@ -410,6 +412,7 @@ export class McpConnection {
         {
           timeout: this.#config.timeouts.callMs,
           allowInputRequired: true,
+          ...(toolDefinition === undefined ? {} : { toolDefinition }),
           ...options,
         },
       );

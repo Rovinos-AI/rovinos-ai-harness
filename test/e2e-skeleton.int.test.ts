@@ -3,7 +3,8 @@
 // Not wired yet: approval escalation WebhookNotifier (17.13 -> #414)
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.11 -> #415)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
-// Not wired yet: MCP registry and model-visible descriptions through model-input PII (-> #199, model-input PII 13.6 -> #150)
+// Not wired yet: model-visible MCP descriptions through model-input PII (13.6 -> #150)
+// Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: reference host in core runtime/CLI (-> #207)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
@@ -911,9 +912,9 @@ describe("MCP runtime", () => {
         expect(errorEvents.find((event) => event.type === "tool_result")).toMatchObject({
           outcome: "error",
           errorCode: "tool_reported_error",
-          result: null,
+          result: { content: [{ text: MCP_ERROR_CANARY }] },
         });
-        expect(JSON.stringify(errorEvents)).not.toContain(MCP_ERROR_CANARY);
+        expect(JSON.stringify(errorEvents)).toContain(MCP_ERROR_CANARY);
       } finally {
         await errorEventsStore.close();
       }

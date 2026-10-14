@@ -3,7 +3,8 @@ import { ProtocolError, type CallToolResult } from "@modelcontextprotocol/client
 import { Code, JsonValue, compileJsonSchema } from "@harness/schemas";
 import type { JsonValue as JsonValueType, ServerConfig } from "@harness/schemas";
 import { attr, defineSemconvSpan, withSpan } from "@harness/telemetry";
-import type { Span } from "@opentelemetry/api";
+import { countMcpDiscoveryFailed } from "@harness/telemetry";
+import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { McpConnectionError } from "./connection.js";
 import type { McpConnectionDependencies } from "./connection.js";
 import { McpProtocolError } from "./errors.js";
@@ -46,6 +47,11 @@ export interface McpToolExecutionResult {
 /** Dependencies for constructing a managed MCP tool port. */
 export type McpToolPortDependencies = McpConnectionDependencies;
 
+export type McpToolPortOptions = {
+  /** Set only when an outer OffloadingToolPort consumes binary payloads. */
+  readonly offloadBinaryResults?: boolean;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -87,6 +93,7 @@ interface NormalizedBlock {
   readonly block: JsonValueType;
   readonly offloadBlock: JsonValueType;
   readonly hasLargeBinary: boolean;
+  readonly binaryPayload?: Uint8Array;
 }
 
 function normalizeBlock(block: unknown): NormalizedBlock {
@@ -102,19 +109,23 @@ function normalizeBlock(block: unknown): NormalizedBlock {
     return { block: textBlock, offloadBlock: textBlock, hasLargeBinary: false };
   }
   const isResource = block.type === "resource";
-  const bytes = isResource
-    ? resourceBytes(block).bytes
-    : binaryBytes(block.data);
+  const resource = isResource ? resourceBytes(block) : undefined;
+  const genuineBinary = isResource
+    ? isRecord(block.resource) &&
+      typeof block.resource.blob === "string" &&
+      typeof block.resource.text !== "string"
+    : ["image", "audio", "blob"].includes(block.type);
+  const bytes = isResource ? resource?.bytes : genuineBinary ? binaryBytes(block.data) : undefined;
   const mimeType = isResource
-    ? resourceBytes(block).mimeType
+    ? (resource?.mimeType ?? "application/octet-stream")
     : typeof block.mimeType === "string"
       ? block.mimeType
       : "application/octet-stream";
   const byteCount = bytes?.byteLength ?? 0;
-  const hasLargeBinary = byteCount > SMALL_BINARY_BYTES;
+  const hasLargeBinary = genuineBinary && byteCount > SMALL_BINARY_BYTES;
   const type = block.type;
   const metadata = { type, mimeType, bytes: byteCount };
-  const rawBlockData = isResource ? resourceBytes(block).data : block.data;
+  const rawBlockData = isResource ? resource?.data : block.data;
   const blockData = typeof rawBlockData === "string" ? rawBlockData : undefined;
   const visibleBlock =
     blockData !== undefined && !hasLargeBinary
@@ -126,6 +137,7 @@ function normalizeBlock(block: unknown): NormalizedBlock {
     block: visibleBlock,
     offloadBlock,
     hasLargeBinary,
+    ...(hasLargeBinary && bytes !== undefined ? { binaryPayload: bytes } : {}),
   };
 }
 
@@ -133,6 +145,7 @@ function normalizedResult(result: CallToolResult): {
   readonly value: JsonValueType;
   readonly offloadValue: JsonValueType;
   readonly hasLargeBinary: boolean;
+  readonly binaryPayload?: Uint8Array;
 } {
   const blocks = result.content.map(normalizeBlock);
   const content = blocks.map(({ block }) => block);
@@ -150,6 +163,10 @@ function normalizedResult(result: CallToolResult): {
     value,
     offloadValue,
     hasLargeBinary: blocks.some(({ hasLargeBinary }) => hasLargeBinary),
+    ...(() => {
+      const block = blocks.find(({ hasLargeBinary }) => hasLargeBinary);
+      return block?.binaryPayload === undefined ? {} : { binaryPayload: block.binaryPayload };
+    })(),
   };
 }
 
@@ -197,31 +214,39 @@ function errorCode(error: unknown, signal: AbortSignal): string {
   return "mcp_error";
 }
 
-function failure(code: string): McpToolExecutionResult {
-  return { outcome: "error", errorCode: Code.parse(code), result: null };
+function failure(code: string, result: JsonValueType = null): McpToolExecutionResult {
+  return { outcome: "error", errorCode: Code.parse(code), result };
 }
 
-function setOutcome(span: Span, outcome: "ok" | "error"): void {
-  span.setAttribute("harness.outcome", outcome);
+function setOutcome(
+  span: Span,
+  outcome: McpToolExecutionResult,
+): void {
+  span.setAttribute("harness.outcome", outcome.outcome);
+  if (outcome.outcome === "error") {
+    span.setAttribute("harness.error.code", outcome.errorCode ?? "mcp_error");
+    span.setStatus({ code: SpanStatusCode.ERROR });
+  }
 }
 
 /**
  * Executes tools discovered from configured MCP servers using normalized registry identifiers.
  *
- * Server error content is intentionally discarded: tool errors may contain arbitrary server text,
- * and error outcomes are metadata rather than a trusted transcript channel.
+ * Tool error content remains a result value and flows through PII/offloading; error metadata is
+ * limited to stable codes and never copies server text into telemetry.
  */
 export class McpToolPort {
   private constructor(
     private readonly pool: McpPool,
     private readonly registry: ToolRegistry,
+    private readonly options: McpToolPortOptions,
   ) {}
 
   /**
    * Connects to configured servers to discover the tool registry.
    *
-   * Unreachable servers contribute no tools at startup; registered connections reconnect lazily
-   * when their tools are called.
+   * Discovery failure is logged and fails startup rather than silently omitting tools. Connections
+   * may reconnect lazily after successful discovery.
    *
    * @param servers - Validated server configurations.
    * @param dependencies - Secret resolver, safe logger, and optional transport factory.
@@ -230,16 +255,22 @@ export class McpToolPort {
   static async create(
     servers: readonly ServerConfig[],
     dependencies: McpToolPortDependencies,
+    options: McpToolPortOptions = {},
   ): Promise<McpToolPort> {
     const pool = new McpPool(servers, dependencies);
     try {
       const discovered = await Promise.all(
-        servers.map(async (server) => ({
-          config: server,
-          tools: await pool.listTools(server.id).catch(() => []),
-        })),
+        servers.map(async (server) => {
+          try {
+            return { config: server, tools: await pool.listTools(server.id) };
+          } catch {
+            dependencies.logger?.log({ code: "mcp_discovery_failed", serverId: server.id });
+            countMcpDiscoveryFailed();
+            throw new McpConnectionError("mcp_list_tools_failed");
+          }
+        }),
       );
-      return new McpToolPort(pool, new ToolRegistry(discovered));
+      return new McpToolPort(pool, new ToolRegistry(discovered), options);
     } catch (error) {
       await pool.close();
       throw error;
@@ -281,7 +312,8 @@ export class McpToolPort {
         "harness.tool.id": toolId.data,
         "harness.outcome": "error",
       },
-      async (span) => {
+      async (span) =>
+        otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
         let outcome: McpToolExecutionResult;
         try {
           if (signal.aborted) {
@@ -292,37 +324,41 @@ export class McpToolPort {
               validate(call.args);
             } catch {
               outcome = failure("args_invalid");
-              setOutcome(span, outcome.outcome);
+              setOutcome(span, outcome);
               return outcome;
             }
             if (!isRecord(call.args)) {
               outcome = failure("args_invalid");
-              setOutcome(span, outcome.outcome);
+              setOutcome(span, outcome);
               return outcome;
             }
             const result = await connection.callTool(
               { name: route.nativeName, arguments: call.args },
               route.inputSchema,
               { signal },
+              route.tool,
             );
-            if (result.isError === true) {
-              outcome = failure("tool_reported_error");
-            } else if (Reflect.get(result, "resultType") === "input_required") {
-              outcome = {
-                outcome: "ok",
-                result: JsonValue.parse({ resultType: "input_required" }),
-              };
+            if (Reflect.get(result, "resultType") === "input_required") {
+              outcome = failure("mcp_input_required_unsupported");
             } else {
               const mapped = normalizedResult(result);
               const serialized = JSON.stringify(mapped.offloadValue) ?? "null";
               if (Buffer.byteLength(serialized, "utf8") > route.server.maxResultBytes) {
                 outcome = failure("result_too_large");
               } else if (mapped.hasLargeBinary) {
-                outcome = {
-                  outcome: "ok",
-                  binary: true,
-                  result: Array.from(new TextEncoder().encode(serialized)),
-                };
+                outcome =
+                  this.options.offloadBinaryResults === true && mapped.binaryPayload !== undefined
+                    ? {
+                        outcome: result.isError === true ? "error" : "ok",
+                        ...(result.isError === true
+                          ? { errorCode: Code.parse("tool_reported_error") }
+                          : {}),
+                        binary: true,
+                        result: Array.from(mapped.binaryPayload),
+                      }
+                    : failure("binary_result_unavailable");
+              } else if (result.isError === true) {
+                outcome = failure("tool_reported_error", mapped.value);
               } else {
                 outcome = { outcome: "ok", result: mapped.value };
               }
@@ -331,9 +367,9 @@ export class McpToolPort {
         } catch (error) {
           outcome = failure(errorCode(error, signal));
         }
-        setOutcome(span, outcome.outcome);
+        setOutcome(span, outcome);
         return outcome;
-      },
+      }),
     );
   }
 
