@@ -3,12 +3,15 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { InMemoryTransport, McpServer, type Tool } from "@modelcontextprotocol/server";
 import {
   Code,
+  Id,
   JsonValue,
   ModelsConfigSchema,
   RolesConfigSchema,
   RunConfigSchema,
+  ServerConfigSchema,
   parseJson,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
@@ -18,7 +21,8 @@ import type { PolicyDocument } from "@harness/policy";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
 import type { ProviderAdapter } from "@harness/models";
 import { createConfiguredModelPort } from "./runtime-model.js";
-import type { ModelPort } from "./ports.js";
+import type { ModelCompletion, ModelPort } from "./ports.js";
+import { allowAllPolicy } from "./testing/allow-policy.js";
 
 const createRuntime = (
   config: Parameters<typeof createRuntimeImpl>[0],
@@ -45,6 +49,154 @@ afterEach(async () => {
 });
 
 describe("createRuntime model routing", () => {
+  it("registers and closes the MCP tool port for configured servers", async () => {
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = new McpServer({ name: "runtime-test", version: "1.0.0" });
+    const inputSchema = {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+      additionalProperties: false,
+    } satisfies Tool["inputSchema"];
+    server.server.registerCapabilities({ tools: { listChanged: true } });
+    server.server.setRequestHandler("tools/list", () => ({
+      tools: [{ name: "echo", inputSchema }],
+    }));
+    await server.connect(serverTransport);
+    const transportFactory = vi.fn(() => clientTransport);
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        servers: [
+          ServerConfigSchema.parse({
+            id: "runtime_mcp",
+            transport: { kind: "stdio", command: "not-spawned-by-test" },
+            protocol: "2025-11-25",
+          }),
+        ],
+      },
+      {
+        store: new InMemoryEventStore(),
+        mcpTransportFactory: transportFactory,
+      },
+    );
+
+    expect(transportFactory).toHaveBeenCalledOnce();
+    await runtime.close();
+    await server.close();
+    await serverTransport.close();
+  });
+
+  it("offloads large MCP binary results before they are written to run events", async () => {
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = new McpServer({ name: "binary-runtime-test", version: "1.0.0" });
+    const inputSchema = {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    } satisfies Tool["inputSchema"];
+    const bytes = Buffer.alloc(9_000, 37);
+    const encoded = bytes.toString("base64");
+    server.server.registerCapabilities({ tools: { listChanged: true } });
+    server.server.setRequestHandler("tools/list", () => ({
+      tools: [{ name: "image", inputSchema }],
+    }));
+    server.server.setRequestHandler("tools/call", () => ({
+      content: [{ type: "image", mimeType: "image/png", data: encoded }],
+    }));
+    await server.connect(serverTransport);
+
+    let completionIndex = 0;
+    const model: ModelPort = {
+      complete: (): Promise<ModelCompletion> => {
+        completionIndex += 1;
+        return Promise.resolve(
+          completionIndex === 1
+            ? {
+                parts: [
+                  {
+                    type: "tool_call",
+                    callId: Id.parse("11111111111111111111111111"),
+                    toolId: Code.parse("runtime_mcp.image"),
+                    args: {},
+                  },
+                ],
+                usage: { inputTokens: 1, outputTokens: 1 },
+                finishReason: "tool_calls",
+                provider: "test",
+                model: "test",
+                latencyMs: 0,
+                schemaValid: true,
+                repairAttempts: 0,
+                fallbackDepth: 0,
+                providerBlobs: null,
+              }
+            : {
+                parts: [{ type: "text", text: "completed" }],
+                usage: { inputTokens: 1, outputTokens: 1 },
+                finishReason: "stop",
+                provider: "test",
+                model: "test",
+                latencyMs: 0,
+                schemaValid: true,
+                repairAttempts: 0,
+                fallbackDepth: 0,
+                providerBlobs: null,
+              },
+        );
+      },
+    };
+    const files = new Map<string, Uint8Array>();
+    const workspace = {
+      write: (path: string, data: Uint8Array) => {
+        files.set(path, data);
+        return Promise.resolve();
+      },
+      read: (path: string) => {
+        const data = files.get(path);
+        return data === undefined
+          ? Promise.reject(new Error("offload_not_found"))
+          : Promise.resolve(data);
+      },
+    };
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        servers: [
+          ServerConfigSchema.parse({
+            id: "runtime_mcp",
+            transport: { kind: "stdio", command: "not-spawned-by-test" },
+            protocol: "2025-11-25",
+          }),
+        ],
+      },
+      {
+        store: new InMemoryEventStore(),
+        model,
+        policy: allowAllPolicy,
+        workspace,
+        mcpTransportFactory: () => clientTransport,
+      },
+    );
+
+    try {
+      const result = await runtime.run("goal");
+      const toolResult = result.events.find((event) => event.type === "tool_result");
+      expect(toolResult).toMatchObject({
+        type: "tool_result",
+        outcome: "ok",
+        result: { $offloaded: { preview: "" } },
+      });
+      expect(files.size).toBe(1);
+      expect(JSON.stringify(result.events)).not.toContain(encoded);
+      expect(JSON.stringify(result.events)).not.toContain(JSON.stringify(Array.from(bytes)));
+    } finally {
+      await runtime.close();
+      await server.close();
+      await serverTransport.close();
+    }
+  });
+
   it("loads the configured policy once and records its content version on run creation", async () => {
     const configDirectory = await mkdtemp(join(tmpdir(), "harness-runtime-policy-"));
     roleDirectories.push(configDirectory);

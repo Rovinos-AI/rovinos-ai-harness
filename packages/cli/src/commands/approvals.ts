@@ -266,12 +266,9 @@ async function decide(
     options.edit === undefined
       ? undefined
       : parseJson(JsonValue, await readFile(options.edit, { encoding: "utf8" }));
-  if (edits !== undefined && context.createToolPort === undefined) {
-    throw new ApprovalsCodeError("approval_edit_unavailable");
-  }
   const config = await context.loadConfig();
   const tool = edits === undefined ? undefined : await context.createToolPort?.(config);
-  if (edits !== undefined && tool === undefined) {
+  if (edits !== undefined && tool === undefined && config.servers.length === 0) {
     throw new ApprovalsCodeError("approval_edit_unavailable");
   }
   await withRuntime(
@@ -283,15 +280,11 @@ async function decide(
       const resolution = edited ? "edit" : decision;
       const action = { approve: "Approve", edit: "Approve with edits", deny: "Deny" }[resolution];
       await confirm(context, options.yes, `${action} approval ${approvalId}?`);
-      const { resolveApproval } = await import("@harness/core");
-      const resolved = await resolveApproval(
-        runtime.store,
+      const resolved = await runtime.resolveApproval(
         pending.runId,
         approvalId,
         resolution,
-        edits,
-        context.clock,
-        tool,
+        edits === undefined ? undefined : { edits },
       );
       const resumed = options.resume === true ? await runtime.resume(pending.runId) : undefined;
       context.out.json(ApprovalResolveResultSchema, {

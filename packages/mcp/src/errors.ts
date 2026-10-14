@@ -2,6 +2,16 @@
 import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
 import { HarnessError } from "@harness/schemas";
 
+/** Safe protocol failure retaining only the numeric JSON-RPC code. */
+export class McpProtocolError extends HarnessError {
+  override readonly code = "mcp_protocol_error";
+
+  /** Creates a protocol error without retaining the remote message or data. */
+  constructor(readonly protocolCode: number) {
+    super("mcp_protocol_error");
+  }
+}
+
 /** Stable failures raised by an MCP connection without exposing server text. */
 export type McpConnectionErrorCode =
   | "mcp_connect_failed"
