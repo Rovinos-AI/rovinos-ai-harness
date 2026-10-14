@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
+import { build, transform } from "esbuild";
 
 /**
  * Builds one self-contained app document, rejecting literal external URLs.
@@ -31,10 +31,15 @@ export async function buildApprovalHtml(options = {}) {
               return undefined;
             }
             const contents = await readFile(path, "utf8");
-            if (/https?:\/\//iu.test(contents)) {
+            const normalized = await transform(contents, {
+              loader: "ts",
+              legalComments: "none",
+              minifySyntax: true,
+            });
+            if (/https?:\/\//iu.test(normalized.code)) {
               throw new Error("approval_build_external_url");
             }
-            return { contents, loader: "ts" };
+            return { contents: normalized.code, loader: "js" };
           });
         },
       },

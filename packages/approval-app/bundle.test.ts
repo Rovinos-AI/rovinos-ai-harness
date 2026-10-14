@@ -44,6 +44,14 @@ describe("single-file approval app", () => {
     ).rejects.toThrow("approval_build_external_url");
   });
 
+  it("strips documentation URL comments before checking app source", async () => {
+    const html = await buildApprovalHtml({
+      entryPoint: new URL("./fixtures/documentation-url.ts", import.meta.url).pathname,
+    });
+    expect(html).not.toMatch(/https?:\/\//iu);
+    expect(html).toContain("content-sha256:");
+  });
+
   it("keeps both theme palettes above 4.5:1 and provides focus, reduced-motion, and wrapping styles", async () => {
     const html = await buildApprovalHtml();
     const style = new JSDOM(html).window.document.querySelector("style")?.textContent ?? "";
