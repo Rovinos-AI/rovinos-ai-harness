@@ -16,6 +16,7 @@ import type { Output } from "../output.js";
 const MCP_PROTOCOL_VERSION_SCHEMA = z.iso.date();
 const APPS_EXTENSION_WARNING = Code.parse("annotations_require_internal");
 const TRACE_DISABLED_WARNING = Code.parse("trace_propagation_disabled");
+const TOOL_HEADER_INVALID = Code.parse("tool_header_invalid");
 
 type ServersCommandOverrides = Pick<McpConnectionDependencies, "createTransport" | "now">;
 
@@ -25,6 +26,7 @@ interface DiscoveryResult {
   readonly protocolVersion: string | undefined;
   readonly supportsApps: boolean;
   readonly tools: readonly McpTool[];
+  readonly excludedToolCount: number;
   readonly toolCount: number;
   readonly connectLatencyMs: number;
   readonly reachable: boolean;
@@ -78,7 +80,7 @@ async function discoverServers(
     resolveSecret: async (ref, signal) =>
       context.secretResolver === undefined
         ? (await defaultResolver.resolve(ref, signal)).reveal()
-        : (await context.secretResolver.resolve(ref)).reveal(),
+        : (await context.secretResolver.resolve(ref, signal)).reveal(),
     env: process.env,
     ...(overrides?.createTransport === undefined
       ? {}
@@ -88,7 +90,17 @@ async function discoverServers(
 
   const discovered: DiscoveryResult[] = [];
   for (const config of servers) {
-    const connection = new McpConnection(config, dependencies);
+    let excludedToolCount = 0;
+    const connection = new McpConnection(config, {
+      ...dependencies,
+      logger: {
+        log(event) {
+          if (event.code === "mcp_tools_excluded") {
+            excludedToolCount += event.count;
+          }
+        },
+      },
+    });
     const startedAt = context.clock.now();
     let connectLatencyMs = 0;
     let protocolEra: DiscoveryResult["protocolEra"] = "unknown";
@@ -99,17 +111,20 @@ async function discoverServers(
     let reachable = false;
     let errorCode: string | undefined;
     try {
-      await connection.connect();
-      connectLatencyMs = Math.max(0, Math.round(context.clock.now() - startedAt));
+      try {
+        await connection.connect();
+      } finally {
+        connectLatencyMs = Math.max(0, Math.round(context.clock.now() - startedAt));
+      }
       protocolEra = connection.protocolEra ?? "unknown";
       const metadata = connection.serverMetadata;
       protocolVersion = metadata.protocolVersion;
       supportsApps = metadata.supportsApps;
       tools = await connection.listTools();
-      toolCount = tools.length;
+      toolCount = tools.length + excludedToolCount;
       reachable = true;
     } catch (error) {
-      connectLatencyMs = Math.max(0, Math.round(context.clock.now() - startedAt));
+      toolCount = tools.length + excludedToolCount;
       protocolEra = connection.protocolEra ?? protocolEra;
       const metadata = connection.serverMetadata;
       protocolVersion = metadata.protocolVersion ?? protocolVersion;
@@ -124,6 +139,7 @@ async function discoverServers(
       protocolVersion,
       supportsApps,
       tools,
+      excludedToolCount,
       toolCount,
       connectLatencyMs,
       reachable,
@@ -171,6 +187,7 @@ function createResult(discovered: readonly DiscoveryResult[]) {
       protocolEra,
       protocolVersion,
       supportsApps,
+      excludedToolCount,
       toolCount,
       connectLatencyMs,
       reachable,
@@ -186,7 +203,10 @@ function createResult(discovered: readonly DiscoveryResult[]) {
       reachable,
       toolCount,
       registeredToolIds: toolIdsByServer.get(config.id) ?? [],
-      rejectedTools: rejectedByServer.get(config.id) ?? [],
+      rejectedTools: [
+        ...(rejectedByServer.get(config.id) ?? []),
+        ...Array.from({ length: excludedToolCount }, () => ({ reason: TOOL_HEADER_INVALID })),
+      ],
       ...propagationFor(config),
       warnings: warningsFor(config),
       ...(errorCode === undefined ? {} : { errorCode: Code.parse(errorCode) }),

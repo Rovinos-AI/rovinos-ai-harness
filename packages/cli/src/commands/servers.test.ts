@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { InMemoryTransport } from "@modelcontextprotocol/client";
-import { McpServer } from "@modelcontextprotocol/server";
+import { InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { HarnessConfigSchema } from "@harness/config";
 import { parseJson, ServersCheckResultSchema } from "@harness/schemas";
 import { afterEach, describe, expect, it } from "vitest";
@@ -21,7 +21,10 @@ const inputSchema = {
 let serverTransports: InMemoryTransport[] = [];
 let toolCalls = 0;
 
-function createContext(loadConfigForTest: CliContext["loadConfig"]) {
+function createContext(
+  loadConfigForTest: CliContext["loadConfig"],
+  options: { readonly secretResolver?: CliContext["secretResolver"]; readonly now?: () => number } = {},
+) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const context: CliContext = {
@@ -30,24 +33,34 @@ function createContext(loadConfigForTest: CliContext["loadConfig"]) {
       stdout: (text) => stdout.push(text),
       stderr: (text) => stderr.push(text),
     }),
-    clock: { now: () => 20 },
+    ...(options.secretResolver === undefined ? {} : { secretResolver: options.secretResolver }),
+    clock: { now: options.now ?? (() => 20) },
   };
   return { context, stdout, stderr };
 }
 
-async function createPeer(tools?: { name: string; description?: string }[]) {
+async function createPeer(
+  tools?: { name: string; description?: string }[],
+  beforeList?: () => void | Promise<void>,
+) {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = new McpServer({ name: errorCanary, version: "1.0.0" });
   server.server.registerCapabilities({
     tools: {},
     extensions: { "io.modelcontextprotocol/ui": {} },
   });
-  server.server.setRequestHandler("tools/list", () => ({
-    tools: tools?.map((tool) => ({ ...tool, inputSchema })) ?? [
-      { name: "available", description: descriptionCanary, inputSchema },
-      { name: "filtered", description: errorCanary, inputSchema },
-    ],
-  }));
+  server.server.setRequestHandler("tools/list", async () => {
+    await beforeList?.();
+    return {
+      tools: tools?.map((tool) => ({
+        ...tool,
+        inputSchema,
+      })) ?? [
+        { name: "available", description: descriptionCanary, inputSchema },
+        { name: "filtered", description: errorCanary, inputSchema },
+      ],
+    };
+  });
   server.server.setRequestHandler("tools/call", () => {
     toolCalls += 1;
     return { content: [{ type: "text", text: errorCanary }] };
@@ -55,6 +68,35 @@ async function createPeer(tools?: { name: string; description?: string }[]) {
   await server.connect(serverTransport);
   serverTransports.push(serverTransport);
   return client;
+}
+
+function createModernHttpPeer(toolName: string) {
+  const serverFactory = () => {
+    const server = new McpServer(
+      { name: errorCanary, version: "1.0.0" },
+      { supportedProtocolVersions: ["2026-07-28"] },
+    );
+    server.server.registerCapabilities({
+      tools: {},
+      extensions: { "io.modelcontextprotocol/ui": {} },
+    });
+    server.server.setRequestHandler("tools/list", () => ({
+      tools: [
+        {
+          name: toolName,
+          inputSchema: {
+            type: "object",
+            properties: { token: { type: "string", "x-mcp-header": "traceparent" } },
+          },
+        },
+      ],
+    }));
+    return server;
+  };
+  const handler = createMcpHandler(serverFactory, { legacy: "reject" });
+  return new StreamableHTTPClientTransport(new URL("https://localhost/mcp"), {
+    fetch: async (input, init) => handler.fetch(new Request(input, init)),
+  });
 }
 
 function config(servers?: unknown) {
@@ -140,6 +182,137 @@ describe("harness servers check", () => {
     );
     expect(stderr).toEqual(["servers_check_failed\n"]);
     expect(stdout.join("") + stderr.join("")).not.toContain(errorCanary);
+  });
+
+  it("passes connect cancellation to secret resolution and continues with the next server", async () => {
+    const secretRefs: string[] = [];
+    const { context, stdout } = createContext(
+      () =>
+        Promise.resolve(
+          config(
+            ["stalled", "next"].map((id) => ({
+              id,
+              transport: {
+                kind: "http",
+                url: "http://127.0.0.1:1/mcp",
+                headers: { Authorization: `env:${id === "stalled" ? "STALL" : "NEXT"}` },
+              },
+              timeouts: { connectMs: 20, callMs: 100 },
+            })),
+          ),
+        ),
+      {
+        secretResolver: {
+          resolve(ref, signal) {
+            secretRefs.push(ref);
+            if (ref === "env:STALL") {
+              return new Promise((_resolve, reject) => {
+                if (signal?.aborted === true) {
+                  reject(new Error("cancelled"));
+                  return;
+                }
+                signal?.addEventListener(
+                  "abort",
+                  () => {
+                    reject(new Error("cancelled"));
+                  },
+                  { once: true },
+                );
+              });
+            }
+            return Promise.resolve({ reveal: () => "synthetic-secret" });
+          },
+        },
+      },
+    );
+
+    const exitCode = await main(["--json", "servers", "check"], context, [
+      createServersCommand(),
+    ]);
+    const result = parseJson(ServersCheckResultSchema, stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(secretRefs).toEqual(["env:STALL", "env:NEXT"]);
+    expect(result.servers).toEqual([
+      expect.objectContaining({ id: "stalled", reachable: false, errorCode: "mcp_connect_timeout" }),
+      expect.objectContaining({ id: "next", reachable: false, errorCode: "mcp_connect_failed" }),
+    ]);
+  });
+
+  it("reports tools excluded for invalid MCP header declarations", async () => {
+    const peer = createModernHttpPeer("native-secret-tool");
+    const { context, stdout } = createContext(() =>
+      Promise.resolve(
+        config([
+          {
+            id: "modern",
+            transport: { kind: "http", url: "http://127.0.0.1:1/mcp" },
+            protocol: "2026-07-28",
+          },
+        ]),
+      ),
+    );
+
+    const exitCode = await main(["--json", "servers", "check"], context, [
+      createServersCommand({ createTransport: () => peer }),
+    ]);
+    const result = parseJson(ServersCheckResultSchema, stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(result.servers).toEqual([
+      expect.objectContaining({
+        toolCount: 1,
+        registeredToolIds: [],
+        rejectedTools: [{ reason: "tool_header_invalid" }],
+      }),
+    ]);
+    expect(stdout.join("")).not.toContain("native-secret-tool");
+  });
+
+  it("preserves connect latency when tools/list times out", async () => {
+    let nowCalls = 0;
+    let currentTime = 100;
+    const peer = await createPeer(undefined, async () => {
+      currentTime = 5_000;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    const { context, stdout } = createContext(
+      () =>
+        Promise.resolve(
+          config([
+            {
+              id: "slow-list",
+              transport: { kind: "stdio", command: "not-spawned-by-memory-transport" },
+              timeouts: { connectMs: 1_000, callMs: 5 },
+            },
+          ]),
+        ),
+      {
+        now: () => {
+          if (nowCalls++ === 0) {
+            return 100;
+          }
+          if (nowCalls === 2) {
+            return 110;
+          }
+          return currentTime;
+        },
+      },
+    );
+
+    const exitCode = await main(["--json", "servers", "check"], context, [
+      createServersCommand({ createTransport: () => Promise.resolve(peer) }),
+    ]);
+    const result = parseJson(ServersCheckResultSchema, stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(result.servers).toEqual([
+      expect.objectContaining({
+        connectLatencyMs: 10,
+        reachable: false,
+        errorCode: "mcp_list_tools_failed",
+      }),
+    ]);
   });
 
   it("checks only the requested server", async () => {
