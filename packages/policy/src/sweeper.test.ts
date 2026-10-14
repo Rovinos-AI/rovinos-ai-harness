@@ -403,14 +403,16 @@ describe("sweepApprovals", () => {
       }),
     };
 
-    await expect(
-      sweepApprovals({ store: fixture.store, clock, notifier }),
-    ).resolves.toMatchObject({ failed: 1, escalated: 0 });
+    await expect(sweepApprovals({ store: fixture.store, clock, notifier })).resolves.toMatchObject({
+      failed: 1,
+      escalated: 0,
+    });
 
     clock.advance(60_000);
-    await expect(
-      sweepApprovals({ store: fixture.store, clock, notifier }),
-    ).resolves.toMatchObject({ failed: 0, escalated: 1 });
+    await expect(sweepApprovals({ store: fixture.store, clock, notifier })).resolves.toMatchObject({
+      failed: 0,
+      escalated: 1,
+    });
 
     expect(delivered).toEqual([
       { approvalId: fixture.approvalId, idempotencyKey: fixture.approvalId },
