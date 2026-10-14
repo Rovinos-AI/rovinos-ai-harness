@@ -118,6 +118,10 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 maxRepairs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
             }, z.core.$strict>>;
             maxConcurrent: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            pricing: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
+                inputMicrosPerMTok: z.ZodNumber;
+                outputMicrosPerMTok: z.ZodNumber;
+            }, z.core.$strict>>>;
             providers: z.ZodDefault<z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
                 kind: z.ZodEnum<{

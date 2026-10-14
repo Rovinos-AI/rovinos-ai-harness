@@ -13,7 +13,9 @@ import { listLogDefinitions } from "./log-registry.js";
 import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
 import { SafeEvent } from "./safe-event.js";
 import {
+  emitKeysRotated,
   emitSafeEvent,
+  emitPricingMissing,
   emitVaultMarkTerminalFailed,
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
@@ -112,6 +114,21 @@ const events = [
 ];
 
 describe("SafeEvent log projection", () => {
+  it("emits registered key-rotation counts only", () => {
+    const emit = vi.fn<(record: LogRecord) => void>();
+    const logger = { emit, enabled: () => true } satisfies Logger;
+
+    emitKeysRotated({ vault: 2, store: 3 }, logger);
+
+    const record = emit.mock.calls[0]?.[0];
+    expect(record?.eventName).toBe("harness.keys.rotated");
+    expect(record?.severityNumber).toBe(SeverityNumber.INFO);
+    expect(record?.attributes).toEqual({
+      "harness.keys.vault.rows_rotated": 2,
+      "harness.keys.store.rows_rotated": 3,
+    });
+  });
+
   it("emits terminal vault failures with only the run id and error code", () => {
     const emit = vi.fn<(record: LogRecord) => void>();
     const logger = { emit, enabled: () => true } satisfies Logger;
@@ -126,6 +143,22 @@ describe("SafeEvent log projection", () => {
     expect(record?.attributes).toEqual({
       "harness.run.id": runId,
       "harness.error.code": "vault_unavailable",
+    });
+  });
+
+  it("emits missing model pricing as a bounded provider/model diagnostic", () => {
+    const emit = vi.fn<(record: LogRecord) => void>();
+    const logger = { emit, enabled: () => true } satisfies Logger;
+
+    emitPricingMissing(Code.parse("sample"), Code.parse("model_a"), logger);
+
+    const record = emit.mock.calls[0]?.[0];
+    expect(record?.body).toBe("pricing_missing");
+    expect(record?.eventName).toBe("harness.model.pricing_missing");
+    expect(record?.severityNumber).toBe(SeverityNumber.WARN);
+    expect(record?.attributes).toEqual({
+      "harness.model.provider": "sample",
+      "harness.model.name": "model_a",
     });
   });
 
@@ -230,6 +263,7 @@ describe("SafeEvent log projection", () => {
         .sort(),
     ).toEqual([...new Set(events.map(({ kind }) => `harness.safe.${kind}`))].sort());
     expect(listLogDefinitions().map(({ name }) => name)).toContain("harness.sentinel.trip");
+    expect(listLogDefinitions().map(({ name }) => name)).toContain("harness.keys.rotated");
     expect(listLogDefinitions().map(({ name }) => name)).toContain(
       "harness.vault.mark_terminal_failed",
     );

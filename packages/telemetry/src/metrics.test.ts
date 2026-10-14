@@ -9,6 +9,7 @@ import {
   METRIC_ALLOWLIST,
   countHostAppRejected,
   countHostAppSpansAccepted,
+  countModelUsage,
   countMcpDiscoveryFailed,
   countPolicyDecision,
   countDroppedTelemetry,
@@ -108,6 +109,19 @@ describe("countDroppedTelemetry", () => {
     expect(createCounter).toHaveBeenCalledWith("harness.host.app_spans_accepted");
     expect(add).toHaveBeenCalledWith(3);
     expectAddCallsAreAllowlisted("harness.host.app_spans_accepted");
+  });
+
+  it("counts model tokens and cost using only namespaced provider and model attributes", () => {
+    countModelUsage({ inputTokens: 2, outputTokens: 3, costMicros: 11 }, "sample", "model-a");
+
+    expect(createCounter).toHaveBeenCalledWith("harness.model.tokens");
+    expect(createCounter).toHaveBeenCalledWith("harness.model.cost_micros");
+    expect(add.mock.calls).toEqual([
+      [5, { "harness.model.provider": "sample", "harness.model.name": "model-a" }],
+      [11, { "harness.model.provider": "sample", "harness.model.name": "model-a" }],
+    ]);
+    expectAddCallsAreAllowlisted("harness.model.tokens");
+    expectAddCallsAreAllowlisted("harness.model.cost_micros");
   });
 
   it("counts skipped short sentinel values without attributes", () => {

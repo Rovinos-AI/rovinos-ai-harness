@@ -21,7 +21,7 @@ import type { PolicyDocument } from "@harness/policy";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
 import type { ProviderAdapter } from "@harness/models";
 import { createConfiguredModelPort } from "./runtime-model.js";
-import type { ModelCompletion, ModelPort } from "./ports.js";
+import type { ModelCompletion, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
 
 const createRuntime = (
@@ -464,6 +464,70 @@ describe("createRuntime model routing", () => {
         model: "second-model",
         fallbackDepth: 1,
       });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("uses configured model cost to stop a run at its cost budget", async () => {
+    const callId = "00000000000000000000000001";
+    const adapter: ProviderAdapter = {
+      provider: "local",
+      kind: "openai",
+      complete: () =>
+        Promise.resolve({
+          parts: [{ type: "tool_call", callId, toolId: "budgeted_tool", args: {} }],
+          usage: { inputTokens: 1, outputTokens: 0 },
+          finishReason: "tool_calls",
+          latencyMs: 0,
+        }),
+    };
+    const execute = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));
+    const tool: ToolPort = {
+      describe: (toolId) =>
+        toolId === "budgeted_tool" ? { idempotent: true, timeoutMs: 1_000 } : undefined,
+      execute,
+      getToolSpecs: () => [
+        { toolId: "budgeted_tool", description: "Synthetic tool", inputSchema: {} },
+      ],
+    };
+    const policy: PolicyPort = {
+      version: Code.parse("test_policy"),
+      decide: () => ({
+        decision: "allow",
+        ruleId: Code.parse("test_allow"),
+        reason: Code.parse("test_allowed"),
+        editable: [],
+      }),
+    };
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({ budgets: { maxCostUsd: 0.000001 } }),
+        models: ModelsConfigSchema.parse({
+          pricing: {
+            "local/model": { inputMicrosPerMTok: 2_000_000, outputMicrosPerMTok: 0 },
+          },
+          routing: { default: [{ provider: "local", model: "model" }] },
+        }),
+      },
+      {
+        store: new InMemoryEventStore(),
+        providerAdapters: [adapter],
+        policy,
+        tool,
+      },
+    );
+
+    try {
+      const result = await runtime.run("budgeted goal");
+      const response = result.events.find(({ type }) => type === "model_response");
+
+      expect(result.status).toBe("failed");
+      expect(response).toMatchObject({ costMicros: 2 });
+      expect(result.events).toContainEqual(
+        expect.objectContaining({ type: "budget_exceeded", budget: "cost", observed: 2 }),
+      );
+      expect(execute).not.toHaveBeenCalled();
     } finally {
       await runtime.close();
     }

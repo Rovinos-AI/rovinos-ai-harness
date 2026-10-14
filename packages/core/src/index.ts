@@ -142,8 +142,11 @@ export {
 export { resolveDataDir } from "./runtime-data-dir.js";
 export {
   migrateConfiguredStore,
+  openConfiguredKeyRotation,
   openConfiguredVaultAdmin,
   openConfiguredStore,
+  type ConfiguredKeyRotation,
+  type ConfiguredKeyRotationOptions,
   type ConfiguredVaultAdmin,
   type ConfiguredVaultOptions,
   type ConfiguredStoreOptions,
