@@ -34,6 +34,7 @@ export const ERROR_EXIT_CODES: Readonly<Record<string, ExitCode>> = Object.freez
   policy_test_ids_duplicate: ExitCode.failure,
   policy_expectations_ids_duplicate: ExitCode.failure,
   doctor_failed: ExitCode.failure,
+  approval_sweep_partial: ExitCode.failure,
   migration_checksum_mismatch: ExitCode.failure,
   schema_newer_than_code: ExitCode.failure,
   migration_set_invalid: ExitCode.failure,

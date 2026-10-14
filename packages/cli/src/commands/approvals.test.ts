@@ -548,4 +548,22 @@ describe("harness approvals", () => {
     expect(fixture.stdout.join("")).toContain("approval_escalated");
     expect(fixture.stdout.join("")).not.toContain("APPROVAL_ARGS_CANARY");
   });
+
+  it("prints partial sweep results and exits with approval_sweep_partial", async () => {
+    const fixture = createFixture();
+    await seed(fixture, { to: "<EMAIL_1>" }, undefined, 5);
+    fixture.clock.advance(5);
+    fixture.store.markApprovalNotificationSent = () =>
+      Promise.reject(new Error("Synthetic sent marker failure."));
+
+    expect(await run(fixture, "--json", "approvals", "sweep")).toBe(ExitCode.failure);
+    expect(parseJson(ApprovalSweepResultSchema, fixture.stdout.join(""))).toEqual({
+      examined: 1,
+      expired: 0,
+      escalated: 0,
+      failed: 1,
+    });
+    expect(fixture.stderr.join("")).toContain("failed=1");
+    expect(fixture.stderr.at(-1)).toBe("approval_sweep_partial\n");
+  });
 });

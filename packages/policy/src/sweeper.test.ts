@@ -26,6 +26,7 @@ class FakeSweepStore implements ApprovalSweepStore {
   private readonly resolutions = new Set<Id>();
   readonly resolutionMetadata: ApprovalExpiryResolution[] = [];
   beforeResolve: ((runId: Id, approvalId: Id) => void) | undefined;
+  failNextNotificationSentMark = false;
 
   constructor(
     readonly runId: Id,
@@ -108,6 +109,10 @@ class FakeSweepStore implements ApprovalSweepStore {
     claimedAt: number,
     sentAt: number,
   ): Promise<boolean> {
+    if (this.failNextNotificationSentMark) {
+      this.failNextNotificationSentMark = false;
+      return Promise.reject(new Error("Synthetic sent marker failure."));
+    }
     const current = this.notificationClaims.get(approvalId);
     if (
       current?.runId !== runId ||
@@ -307,6 +312,7 @@ describe("sweepApprovals", () => {
     expect(notifier.notify).toHaveBeenCalledWith({
       runId: fixture.runId,
       approvalId: fixture.approvalId,
+      idempotencyKey: fixture.approvalId,
       toolId: Code.parse("mail.send"),
       ruleId: Code.parse("mail.ask"),
       ageMs: 10,
@@ -380,6 +386,36 @@ describe("sweepApprovals", () => {
     });
 
     expect(notifier.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("redelivers after a sent-marker failure with the same idempotency key", async () => {
+    const fixture = createStoreFixture({ now: 110, escalateAfterMs: 10 });
+    fixture.store.failNextNotificationSentMark = true;
+    const clock = new FakeClock(110);
+    const delivered: { readonly approvalId: Id; readonly idempotencyKey: Id }[] = [];
+    const notifier = {
+      notify: vi.fn((notification: { approvalId: Id; idempotencyKey: Id }) => {
+        delivered.push({
+          approvalId: notification.approvalId,
+          idempotencyKey: notification.idempotencyKey,
+        });
+        return Promise.resolve();
+      }),
+    };
+
+    await expect(
+      sweepApprovals({ store: fixture.store, clock, notifier }),
+    ).resolves.toMatchObject({ failed: 1, escalated: 0 });
+
+    clock.advance(60_000);
+    await expect(
+      sweepApprovals({ store: fixture.store, clock, notifier }),
+    ).resolves.toMatchObject({ failed: 0, escalated: 1 });
+
+    expect(delivered).toEqual([
+      { approvalId: fixture.approvalId, idempotencyKey: fixture.approvalId },
+      { approvalId: fixture.approvalId, idempotencyKey: fixture.approvalId },
+    ]);
   });
 
   it.each([
