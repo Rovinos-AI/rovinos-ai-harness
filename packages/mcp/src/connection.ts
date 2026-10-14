@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Client,
+  ProtocolError,
   specTypeSchemas,
   type CallToolRequest,
   type CallToolRequestOptions,
@@ -8,7 +9,7 @@ import {
   type Transport,
 } from "@modelcontextprotocol/client";
 import { compileJsonSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
-import { McpConnectionError, isConnectionLossError } from "./errors.js";
+import { McpConnectionError, McpProtocolError, isConnectionLossError } from "./errors.js";
 import { buildActiveRequestMeta } from "./trace-injection.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
 import { createMcpTransport, type McpLogger } from "./transports.js";
@@ -249,6 +250,7 @@ export class McpConnection {
       { name: "rovinos-ai-harness", version: "0.0.0" },
       {
         versionNegotiation: protocolOptions(this.#config.protocol),
+        inputRequired: { autoFulfill: false },
         listChanged: {
           tools: {
             autoRefresh: false,
@@ -364,6 +366,9 @@ export class McpConnection {
     try {
       return await this.#invoke(params, options);
     } catch (error) {
+      if (error instanceof McpProtocolError) {
+        throw error;
+      }
       const isLoss = isConnectionLossError(error) || this.#state === "unavailable";
       if (!isLoss) {
         throw new McpConnectionError("mcp_tool_call_failed");
@@ -377,7 +382,10 @@ export class McpConnection {
       await this.#reconnect(options?.signal);
       try {
         return await this.#invoke(params, options);
-      } catch {
+      } catch (retryError) {
+        if (retryError instanceof McpProtocolError) {
+          throw retryError;
+        }
         throw new McpConnectionError("mcp_connection_lost");
       }
     }
@@ -393,16 +401,24 @@ export class McpConnection {
     }
     const { _meta: existingMeta, ...callParams } = params;
     const requestMeta = buildActiveRequestMeta(this.#config, existingMeta);
-    return client.callTool(
-      {
-        ...callParams,
-        ...(requestMeta === undefined ? {} : { _meta: requestMeta }),
-      },
-      {
-        timeout: this.#config.timeouts.callMs,
-        ...options,
-      },
-    );
+    try {
+      return await client.callTool(
+        {
+          ...callParams,
+          ...(requestMeta === undefined ? {} : { _meta: requestMeta }),
+        },
+        {
+          timeout: this.#config.timeouts.callMs,
+          allowInputRequired: true,
+          ...options,
+        },
+      );
+    } catch (error) {
+      if (error instanceof ProtocolError) {
+        throw new McpProtocolError(error.code);
+      }
+      throw error;
+    }
   }
 
   async #ensureReady(signal?: AbortSignal): Promise<void> {
