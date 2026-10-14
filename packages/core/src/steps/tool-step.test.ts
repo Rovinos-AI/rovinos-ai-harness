@@ -22,6 +22,7 @@ import {
 import { InMemoryEventStore } from "@harness/store";
 import { PolicyEngine } from "@harness/policy";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import * as telemetry from "@harness/telemetry";
 import { RunRecorder, type EventPartial } from "../recorder.js";
 import { Checkpointer } from "../checkpoint.js";
 import { NaiveContext } from "../context/naive-context.js";
@@ -50,7 +51,9 @@ const configHash = "a".repeat(64);
 let nextSpanId = 0;
 
 class TestSpan implements Span {
+  static latest: TestSpan | undefined;
   private ended = false;
+  readonly attributes = new Map<string, string | number | boolean>();
   private readonly value: SpanContext = {
     traceId: "a".repeat(32),
     spanId: (++nextSpanId).toString(16).padStart(16, "0"),
@@ -62,6 +65,7 @@ class TestSpan implements Span {
   }
 
   setAttribute(_key: string, _value: string | number | boolean): this {
+    this.attributes.set(_key, _value);
     return this;
   }
 
@@ -111,7 +115,9 @@ class TestSpan implements Span {
 
 class TestTracer implements Tracer {
   startSpan(_name: string, _options?: SpanOptions, _parentContext?: Context): Span {
-    return new TestSpan();
+    const span = new TestSpan();
+    TestSpan.latest = span;
+    return span;
   }
 
   startActiveSpan<F extends (span: Span) => unknown>(name: string, fn: F): ReturnType<F>;
@@ -652,28 +658,67 @@ describe("tool-step resume handling", () => {
   });
 
   it.each([
-    ["deny", "blocked", "blocked_by_policy"],
-    ["ask", "needs_review", "approval_edit_requires_approval"],
+    {
+      decision: "allow",
+      subject: "approved",
+      ruleId: "allow_edited",
+      outcome: "ok",
+      errorCode: undefined,
+    },
+    {
+      decision: "deny",
+      subject: "blocked",
+      ruleId: "deny_edited",
+      outcome: "denied",
+      errorCode: "blocked_by_policy",
+    },
+    {
+      decision: "ask",
+      subject: "needs_review",
+      ruleId: "ask_edited",
+      outcome: "denied",
+      errorCode: "approval_edit_requires_approval",
+    },
   ] as const)(
-    "re-checks edited approval arguments when policy returns %s",
-    async (decision, subject, code) => {
+    "records the re-evaluated $decision decision after editing approval arguments",
+    async ({ decision, subject, ruleId, outcome, errorCode }) => {
       const policy = editPolicy();
       const { recorder, tool, intent, approval } = await createEditableApproval(policy);
       const resolution = await resolveEvent(recorder, approval.approvalId, "edit", {
         to: "unchanged",
         subject,
       });
+      const countDecision = vi.spyOn(telemetry, "countPolicyDecision");
+      const emitSafeEvent = vi.spyOn(telemetry, "emitSafeEventToDefaultLogger");
 
-      const result = await applyApprovalDecision(
+      const events = await applyApprovalDecision(
         { ...resumeOptions(recorder, tool), policy },
         intent,
         approval,
         resolution,
       );
 
-      expect(result[0]).toMatchObject({ type: "tool_result", outcome: "denied", errorCode: code });
-      expect(tool.calls).toHaveLength(0);
-      expect(decision).not.toBe("allow");
+      expect(events[0]).toMatchObject({
+        type: "tool_result",
+        outcome,
+        ...(errorCode === undefined ? {} : { errorCode }),
+      });
+      expect(tool.calls).toHaveLength(decision === "allow" ? 1 : 0);
+      expect(countDecision).toHaveBeenCalledWith(decision);
+      expect(emitSafeEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "policy_decision",
+          toolId: intent.toolId,
+          policyDecision: decision,
+          ruleId,
+        }),
+      );
+      expect(Object.fromEntries(TestSpan.latest?.attributes ?? [])).toMatchObject({
+        "harness.policy.decision": decision,
+        "harness.policy.rule_id": ruleId,
+      });
+      countDecision.mockRestore();
+      emitSafeEvent.mockRestore();
     },
   );
 
@@ -931,6 +976,15 @@ function editPolicy(): PolicyEngine {
         },
         decision: "deny",
         reason: "blocked_by_policy",
+      },
+      {
+        id: "allow_edited",
+        match: {
+          tools: ["reviewed"],
+          args: [{ pointer: "/subject", op: "equals", value: "approved" }],
+        },
+        decision: "allow",
+        reason: "edited_arguments_allowed",
       },
       {
         id: "ask_edited",

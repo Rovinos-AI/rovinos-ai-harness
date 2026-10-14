@@ -44,11 +44,16 @@ const events = [
     ...common,
     kind: "tool_call",
     toolId: "search",
-    policyDecision: "allow",
-    ruleId: "policy.rule",
     outcome: "ok",
     errorCode: "tool_error",
     latencyMs: 10,
+  }),
+  SafeEvent.parse({
+    ...common,
+    kind: "policy_decision",
+    toolId: "search",
+    policyDecision: "allow",
+    ruleId: "policy.rule",
   }),
   SafeEvent.parse({
     ...common,

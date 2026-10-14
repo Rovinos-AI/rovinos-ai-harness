@@ -32,11 +32,19 @@ const toolCall = z
     ...commonFields,
     kind: attr.enum(["tool_call"]),
     toolId: attr.code(),
-    policyDecision: attr.optional(attr.enum(["allow", "ask", "deny"])),
-    ruleId: attr.optional(attr.code()),
-    outcome: attr.optional(attr.enum(["ok", "error", "denied", "timeout"])),
+    outcome: attr.enum(["ok", "error", "denied", "timeout"]),
     errorCode: attr.optional(attr.code()),
-    latencyMs: attr.optional(attr.nonnegativeInt()),
+    latencyMs: attr.nonnegativeInt(),
+  })
+  .strict();
+
+const policyDecision = z
+  .object({
+    ...commonFields,
+    kind: attr.enum(["policy_decision"]),
+    toolId: attr.code(),
+    policyDecision: attr.enum(["allow", "ask", "deny"]),
+    ruleId: attr.optional(attr.code()),
   })
   .strict();
 
@@ -122,6 +130,7 @@ const runCreated = z
 export const safeEventSchemas = [
   modelCall,
   toolCall,
+  policyDecision,
   approvalWait,
   checkpoint,
   runStatus,
@@ -208,7 +217,7 @@ function projectToolIntent(
 ): SafeEvent {
   return SafeEvent.parse({
     ...envelope,
-    kind: "tool_call",
+    kind: "policy_decision",
     toolId: event.toolId,
     policyDecision: event.policyDecision,
     ...(event.ruleId === undefined ? {} : { ruleId: event.ruleId }),

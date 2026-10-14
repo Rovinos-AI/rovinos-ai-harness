@@ -3,15 +3,26 @@
 import { HarnessError, type Code, type Event, type Id } from "@harness/schemas";
 import type { Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@harness/pii";
-import { countPolicyDecision, setActiveSpanAttribute } from "@harness/telemetry";
+import { countPolicyDecision } from "@harness/telemetry";
 import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelToolCall, PolicyPort, ToolPort } from "../ports.js";
 import { foldRunState, type ToolIntentEvent } from "../run-state.js";
 import { prepareToolCall, toolRunContext, type PreparedToolCall } from "./prepare-tool.js";
-import { decidePolicy, effectiveDecision, requestPolicyApproval } from "./policy-step.js";
-import { executePreparedTool, hashArgs } from "./tool-execution.js";
+import {
+  decidePolicy,
+  effectiveDecision,
+  emitReevaluatedDecision,
+  requestPolicyApproval,
+  setPolicySpanAttributes,
+} from "./policy-step.js";
+import {
+  executePreparedTool,
+  executedArgsHashField,
+  executedArgsHashFor,
+  hashArgs,
+} from "./tool-execution.js";
 
 interface ToolStepExecutionOptions {
   readonly recorder: RunRecorder;
@@ -48,9 +59,6 @@ interface RunToolCallBehavior {
   readonly existingIntent?: ToolIntentEvent;
   readonly prepared?: PreparedToolCall;
 }
-
-const executedArgsHashField = (hash?: string): { readonly executedArgsHash?: string } =>
-  hash === undefined ? {} : { executedArgsHash: hash };
 
 function intentPartial(options: {
   readonly call: ModelToolCall;
@@ -188,13 +196,6 @@ async function decideAndRunToolCall(
   });
 }
 
-function setPolicySpanAttributes(decision: "allow" | "ask" | "deny", ruleId?: Code): void {
-  setActiveSpanAttribute("harness.policy.decision", decision);
-  if (ruleId !== undefined) {
-    setActiveSpanAttribute("harness.policy.rule_id", ruleId);
-  }
-}
-
 async function executeRecordedIntent(
   input: RunToolCallSpanOptions,
   call: ModelToolCall,
@@ -215,6 +216,20 @@ async function executeRecordedIntent(
       undefined,
       input.description,
     );
+    setPolicySpanAttributes(decision.decision, decision.ruleId);
+    countPolicyDecision(decision.decision);
+    const intent = input.behavior.existingIntent;
+    if (intent !== undefined) {
+      emitReevaluatedDecision({
+        intent,
+        decision,
+        span: input.span,
+        clock: input.options.clock,
+        ...(input.options.policy === undefined
+          ? {}
+          : { policyVersion: input.options.policy.version }),
+      });
+    }
     if (decision.decision !== "allow") {
       return recordDeniedResultAndPush(
         input,
@@ -351,19 +366,6 @@ async function prepareRunToolCall(
     return { call: { ...proposedCall, args: null }, errorCode: "pii_blocked" };
   }
   return behavior.prepared ?? prepareToolCall(options.tool, proposedCall, context);
-}
-
-function executedArgsHashFor(
-  call: ModelToolCall,
-  behavior: RunToolCallBehavior,
-): string | undefined {
-  if (behavior.compareArgsHash === undefined) {
-    return behavior.executedArgsHash;
-  }
-  const preparedArgsHash = hashArgs(call.args);
-  return preparedArgsHash === behavior.compareArgsHash
-    ? behavior.executedArgsHash
-    : preparedArgsHash;
 }
 
 function executionContext(options: ToolStepExecutionOptions, events: Event[]) {

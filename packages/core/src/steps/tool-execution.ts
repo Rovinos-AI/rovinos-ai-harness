@@ -38,6 +38,20 @@ export function hashArgs(args: JsonValue): string {
   return Sha256Hex.parse(createHash("sha256").update(canonicalJson(args)).digest("hex"));
 }
 
+/** Reuses the executed hash unless edited arguments differ from the original intent. */
+export function executedArgsHashFor(
+  call: ModelToolCall,
+  behavior: { readonly compareArgsHash?: string; readonly executedArgsHash?: string },
+): string | undefined {
+  if (behavior.compareArgsHash === undefined) {
+    return behavior.executedArgsHash;
+  }
+  const preparedArgsHash = hashArgs(call.args);
+  return preparedArgsHash === behavior.compareArgsHash
+    ? behavior.executedArgsHash
+    : preparedArgsHash;
+}
+
 /** Extracts typed tool codes, preserving recorder failure semantics. */
 export function toolErrorCode(error: unknown): Code {
   if (error instanceof SummaryRecordingError) {
@@ -200,7 +214,8 @@ export async function executePreparedTool(options: ExecutePreparedToolOptions): 
 const latencyMs = (clock: Clock, startedAt: number): number =>
   Math.max(0, Math.floor(clock.now() - startedAt));
 
-const executedArgsHashField = (hash?: string): { readonly executedArgsHash?: string } =>
+/** Builds the optional hash field shared by denied and executed tool results. */
+export const executedArgsHashField = (hash?: string): { readonly executedArgsHash?: string } =>
   hash === undefined ? {} : { executedArgsHash: hash };
 
 function executionPayload(
