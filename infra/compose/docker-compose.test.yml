@@ -14,6 +14,58 @@ services:
     extends:
       file: docker-compose.yml
       service: sandbox-runner
+  sample-mcp-server:
+    build:
+      context: ../..
+      dockerfile: test/fixtures/sample-mcp-server/Dockerfile
+    image: sample-mcp-server:local
+    environment:
+      SAMPLE_COUNTER_FILE: /data/messages.count
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    volumes:
+      - sample-mcp-state:/data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const socket=require('node:net').connect({host:'127.0.0.1',port:3333}); socket.once('connect',()=>{socket.end();process.exit(0)}).once('error',()=>process.exit(1))"
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - internal
+  integration-client:
+    image: sample-mcp-server:local
+    command: ["sleep", "infinity"]
+    environment:
+      HARNESS_DATA_DIR: /tmp/harness
+      SAMPLE_MCP_SERVER_HOST: ${SAMPLE_MCP_SERVER_HOST:-sample-mcp-server}
+    volumes:
+      - ../../test/mcp-servers.int-client.test.mjs:/app/test/mcp-servers.int-client.test.mjs:ro
+      - ../../test/mcp-servers.int-support.mjs:/app/test/mcp-servers.int-support.mjs:ro
+      - ../../test/canary/canaries.ts:/app/test/canary/canaries.ts:ro
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "--version"]
+    depends_on:
+      sample-mcp-server:
+        condition: service_healthy
+    networks:
+      - internal
   postgres:
     image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     user: postgres
@@ -48,8 +100,8 @@ networks:
   sandbox-egress:
     internal: true
   egress: {}
-  # Keep this test-only fixture off the internal network so Docker Desktop and Colima can publish
-  # its host port. PostgreSQL is not a harness sidecar and is not attached to egress.
+  # PostgreSQL is not a harness sidecar and is not attached to egress.
   test-host: {}
 volumes:
   harness-workspaces: {}
+  sample-mcp-state: {}
