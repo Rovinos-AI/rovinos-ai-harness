@@ -24,7 +24,11 @@ export default defineConfig({
     setupFiles: ["./test/setup/data-dir.ts"],
     coverage: {
       provider: "v8",
-      include: ["packages/*/src/**/*.ts", "packages/sandbox/runner/src/**/*.ts"],
+      include: [
+        "packages/*/src/**/*.ts",
+        "packages/sandbox/runner/src/**/*.ts",
+        "packages/sandbox/egress-proxy/src/**/*.ts",
+      ],
       reportOnFailure: true,
       thresholds: {
         perFile: true,

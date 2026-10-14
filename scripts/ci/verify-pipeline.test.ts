@@ -218,7 +218,7 @@ it("enforces package source line coverage per file", () => {
 
   expect(config).toContain('provider: "v8"');
   expect(config).toContain(
-    'include: ["packages/*/src/**/*.ts", "packages/sandbox/runner/src/**/*.ts"]',
+    '"packages/sandbox/egress-proxy/src/**/*.ts"',
   );
   expect(config).toContain("perFile: true");
   expect(config).toContain("lines: 85");

@@ -9,5 +9,10 @@
     "rootDir": ".",
     "skipLibCheck": true
   },
-  "include": ["src/**/*.test.ts", "runner/src/**/*.test.ts"]
+  "include": [
+    "src/**/*.test.ts",
+    "runner/src/**/*.test.ts",
+    "egress-proxy/src/**/*.test.ts",
+    "egress-proxy/src/**/*.int.test.ts"
+  ]
 }

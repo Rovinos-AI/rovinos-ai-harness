@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lookup } from "node:dns/promises";
+import { resolve } from "node:path";
 import {
   Agent as HttpAgent,
   request as createHttpRequest,
@@ -13,6 +14,7 @@ import process from "node:process";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseJson, SandboxEgressAllowEntrySchema, SandboxEgressAllowlistSchema } from "@harness/schemas";
+import { z } from "zod";
 
 const DEFAULT_PROXY_PORT = 3128;
 const MAX_AUTHORITY_LENGTH = 512;
@@ -411,7 +413,9 @@ async function handleConnectRequest(
   client.pipe(upstream);
   upstream.pipe(client);
   client.once("error", () => upstream.destroy());
+  client.once("close", () => upstream.destroy());
   upstream.once("error", () => client.destroy());
+  upstream.once("close", () => client.destroy());
 }
 
 /** Creates an HTTP proxy that forwards only pinned, allowlisted public destinations. */
@@ -436,21 +440,35 @@ export function createEgressProxy(options: EgressProxyOptions): Server {
   return server;
 }
 
-/** Starts the Compose egress proxy with a validated JSON allowlist. */
-export function startEgressProxy(): Server {
+/** Starts the Compose egress proxy with a validated JSON allowlist.
+ *
+ * @param options - Optional Unix socket path for local service tests.
+ * @returns The listening proxy server.
+ */
+export function startEgressProxy(options: { readonly socketPath?: string } = {}): Server {
   const text = process.env.SANDBOX_EGRESS_ALLOW;
   if (text === undefined) {
     throw new Error("invalid");
   }
   const allow = parseJson(SandboxEgressAllowlistSchema, text);
+  if (allow.length === 0) {
+    throw new Error("invalid");
+  }
   validateEgressAllowlist(allow);
   const port = Number(process.env.SANDBOX_EGRESS_PROXY_PORT ?? DEFAULT_PROXY_PORT);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error("invalid");
   }
-  return createEgressProxy({ allow, port });
+  return createEgressProxy({
+    allow,
+    port,
+    ...(options.socketPath === undefined ? {} : { socketPath: options.socketPath }),
+  });
 }
 
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (
+  process.argv[1] !== undefined &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
   startEgressProxy();
 }

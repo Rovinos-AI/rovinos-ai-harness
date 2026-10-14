@@ -15,7 +15,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json && tsc -b runner/tsconfig.build.json"
+    "build": "tsc -b tsconfig.build.json && tsc -b runner/tsconfig.build.json && tsc -b egress-proxy/tsconfig.build.json"
   },
   "dependencies": {
     "@harness/schemas": "workspace:^",

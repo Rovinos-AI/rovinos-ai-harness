@@ -2,6 +2,7 @@
 // Every task that wires a capability into the runtime or CLI extends this test.
 // Not wired yet: approval escalation WebhookNotifier (17.6 -> #125)
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
+// Not wired yet: sandbox egress config-to-Compose deployment (19.4 -> #95)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
 // Not wired yet: reference host in core runtime/CLI (-> #207)

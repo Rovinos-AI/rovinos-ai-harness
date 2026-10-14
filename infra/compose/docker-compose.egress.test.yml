@@ -15,7 +15,7 @@ services:
       - no-new-privileges:true
     networks:
       egress:
-        ipv4_address: 198.51.100.2
+        ipv4_address: 198.51.100.3
   sandbox-egress-proxy:
     extra_hosts:
       - metadata.example.test:169.254.169.254
