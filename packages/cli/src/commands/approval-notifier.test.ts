@@ -53,7 +53,7 @@ describe("createApprovalNotifier", () => {
 
       expect(notifier).toBeInstanceOf(WebhookNotifier);
       if (!(notifier instanceof WebhookNotifier)) {
-        throw new Error("Expected configured webhook notifier.");
+        throw new TypeError("Expected configured webhook notifier.");
       }
       await notifier.notify(notification);
 

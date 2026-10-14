@@ -292,6 +292,16 @@ function jsonResult<Schema extends z.ZodType>(
   return parseJson(schema, output.join("").trim());
 }
 
+function headerValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return typeof value[0] === "string" ? value[0] : null;
+  }
+  return null;
+}
+
 function expectCanaryOnlyInRevealed(result: CliCapture, canary: string): void {
   const displayed = jsonResult(ApprovalShowResultSchema, result.stdout);
   expect(result.stdout.join("")).toContain(canary);
@@ -952,19 +962,15 @@ describe("approval", () => {
       readonly authorization: string | null;
     }[] = [];
     const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      const chunks: Uint8Array[] = [];
+      request.on("data", (chunk: Uint8Array) => {
+        chunks.push(chunk);
+      });
       request.on("end", () => {
-        const idempotencyKey = request.headers["idempotency-key"];
-        const authorization = request.headers.authorization;
         deliveries.push({
           body: Buffer.concat(chunks).toString("utf8"),
-          idempotencyKey: Array.isArray(idempotencyKey)
-            ? (idempotencyKey[0] ?? null)
-            : (idempotencyKey ?? null),
-          authorization: Array.isArray(authorization)
-            ? (authorization[0] ?? null)
-            : (authorization ?? null),
+          idempotencyKey: headerValue(request.headers["idempotency-key"]),
+          authorization: headerValue(request.headers.authorization),
         });
         response.writeHead(204).end();
       });
@@ -1035,7 +1041,13 @@ describe("approval", () => {
       }
       if (listening) {
         await new Promise<void>((resolve, reject) => {
-          server.close((error) => (error === undefined ? resolve() : reject(error)));
+          server.close((error) => {
+            if (error === undefined) {
+              resolve();
+            } else {
+              reject(error);
+            }
+          });
         });
       }
     }

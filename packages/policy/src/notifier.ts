@@ -63,11 +63,10 @@ export type WebhookNotifierOptions = {
   readonly timeoutMs?: number;
   /** Allows HTTP only for localhost destinations. */
   readonly allowInsecureLocalhost?: boolean;
-} &
-  (
-    | { readonly url: string; readonly secretRef: SecretRef }
-    | { readonly url: SecretRef; readonly secretRef?: never }
-  );
+} & (
+  | { readonly url: string; readonly secretRef: SecretRef }
+  | { readonly url: SecretRef; readonly secretRef?: never }
+);
 
 /** Error raised when a webhook notification cannot be delivered. */
 export class WebhookNotificationError extends HarnessError {
