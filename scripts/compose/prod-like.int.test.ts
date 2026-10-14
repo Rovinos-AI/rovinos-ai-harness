@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
-import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { InspectResultSchema, RunResultSchema, parseJson } from "@harness/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -66,7 +65,11 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
   });
 
   beforeAll(async () => {
-    secretDirectory = await mkdtemp(join(tmpdir(), "harness-prod-like-"));
+    // Docker bind-mounts the secret file. Colima shares only $HOME with its VM, so os.tmpdir()
+    // (/var/folders on macOS) cannot be mounted; use a gitignored directory inside the checkout.
+    const mountableTemp = join(process.cwd(), ".tmp");
+    await mkdir(mountableTemp, { recursive: true });
+    secretDirectory = await mkdtemp(join(mountableTemp, "harness-prod-like-"));
     runnerTokenFile = resolvePath(secretDirectory, "sandbox-runner-token");
     await writeFile(runnerTokenFile, runnerToken, { encoding: "utf8", mode: 0o444 });
   });
