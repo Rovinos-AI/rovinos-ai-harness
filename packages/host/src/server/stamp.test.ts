@@ -12,6 +12,7 @@ const collector = createTestSpanCollector();
 const runId = "00000000000000000000000001";
 const appId = "approval";
 const sessionId = "00000000000000000000000002";
+const sessionStartTime = 1_700_000_000_000;
 
 beforeAll(() => {
   trace.setGlobalTracerProvider(collector.provider);
@@ -30,7 +31,7 @@ function createStampContext(
     appId,
     runId,
     sessionId,
-    sessionStartTime: 1_000,
+    sessionStartTime,
     parent: {
       traceId: "a".repeat(32),
       spanId: parentSpanId,
@@ -54,14 +55,16 @@ describe("stampAppSpan", () => {
       "harness.run.id": runId,
       "harness.ui.session_id": sessionId,
     });
-    const clock = new FakeClock(1_100);
+    const clock = new FakeClock(sessionStartTime + 100);
     const input = {
       name: "ui.render" as const,
       startOffsetMs: Number.MAX_SAFE_INTEGER,
       durationMs: 3_600_000,
     };
 
-    expect(stampAppSpan(input, createStampContext(clock, parent.spanContext().spanId))).toBeUndefined();
+    expect(
+      stampAppSpan(input, createStampContext(clock, parent.spanContext().spanId)),
+    ).toBeUndefined();
     parent.end();
 
     const finished = collector
@@ -77,8 +80,8 @@ describe("stampAppSpan", () => {
       {
         onStart: () => undefined,
         onEnd: (span) => allowlisted.push(span),
-        forceFlush: async () => undefined,
-        shutdown: async () => undefined,
+        forceFlush: () => Promise.resolve(),
+        shutdown: () => Promise.resolve(),
       },
       { telemetry: { sentinel: { minValueLength: 6, enabled: false } } },
     );
@@ -92,8 +95,8 @@ describe("stampAppSpan", () => {
       "harness.ui.duration_ms": 100,
     });
     expect(allowlisted[0]?.attributes["harness.ui.start_offset_ms"]).toBeUndefined();
-    expect(timeInMilliseconds(allowlisted[0]?.startTime)).toBe(1_000);
-    expect(timeInMilliseconds(allowlisted[0]?.endTime)).toBe(1_100);
+    expect(timeInMilliseconds(allowlisted[0]?.startTime)).toBe(sessionStartTime);
+    expect(timeInMilliseconds(allowlisted[0]?.endTime)).toBe(sessionStartTime + 100);
     expect(allowlisted[0]?.parentSpanContext?.spanId).toBe(parent.spanContext().spanId);
   });
 
@@ -112,7 +115,7 @@ describe("stampAppSpan", () => {
         ],
       },
       {
-        stamp: createStampContext(new FakeClock(1_100), "b".repeat(16)),
+        stamp: createStampContext(new FakeClock(sessionStartTime + 100), "b".repeat(16)),
         onRejected: (reason) => reasons.push(reason),
       },
     );
@@ -141,7 +144,7 @@ describe("stampAppSpan", () => {
         ],
       },
       {
-        stamp: createStampContext(new FakeClock(1_100), "b".repeat(16), {
+        stamp: createStampContext(new FakeClock(sessionStartTime + 100), "b".repeat(16), {
           hasPendingApproval: false,
         }),
         onRejected: (reason) => reasons.push(reason),
@@ -158,20 +161,30 @@ describe("stampAppSpan", () => {
     const parentSpanId = "b".repeat(16);
 
     expect(
+      stampAppSpan(span, createStampContext(new FakeClock(sessionStartTime - 1), parentSpanId)),
+    ).toBe("schema");
+    expect(
+      stampAppSpan(span, createStampContext(new FakeClock(sessionStartTime + 100), "0".repeat(16))),
+    ).toBe("schema");
+    expect(
       stampAppSpan(
         span,
-        createStampContext(new FakeClock(999), parentSpanId),
+        createStampContext(new FakeClock(sessionStartTime), parentSpanId, {
+          sessionStartTime: Number.MAX_SAFE_INTEGER,
+        }),
       ),
     ).toBe("schema");
     expect(
       stampAppSpan(
         span,
-        createStampContext(new FakeClock(1_100), "0".repeat(16)),
+        createStampContext(new FakeClock(sessionStartTime), parentSpanId, {
+          sessionStartTime: Number.NaN,
+        }),
       ),
     ).toBe("schema");
     expect(
       stampAppSpan(span, {
-        ...createStampContext(new FakeClock(1_100), parentSpanId),
+        ...createStampContext(new FakeClock(sessionStartTime + 100), parentSpanId),
         clock: {
           now: () => {
             throw new Error("synthetic clock failure");

@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ROOT_CONTEXT, isSpanContextValid, trace, type SpanContext } from "@opentelemetry/api";
-import { Code, Id } from "@harness/schemas";
-import { attr, defineSpan, type SpanDefinition, type SpanDefinitionShape } from "@harness/telemetry";
+import type { Code, Id } from "@harness/schemas";
+import {
+  attr,
+  defineSpan,
+  type SpanDefinition,
+  type SpanDefinitionShape,
+} from "@harness/telemetry";
 import type { AppSpan, AppTelemetryRejectReason } from "./app-telemetry.js";
 
 interface Clock {
@@ -64,35 +69,35 @@ export const UI_INTERACTION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSp
 function startStampedSpan(
   span: AppSpan,
   context: AppSpanStampContext,
-  startTime: number,
-  endTime: number,
-  durationMs: number,
+  timing: {
+    readonly startTime: Date;
+    readonly endTime: Date;
+    readonly durationMs: number;
+  },
 ): void {
   const identity = {
     "harness.app.id": context.appId,
     "harness.run.id": context.runId,
     "harness.ui.session_id": context.sessionId,
-    "harness.ui.duration_ms": durationMs,
+    "harness.ui.duration_ms": timing.durationMs,
   };
   const options = {
     parent: trace.setSpanContext(ROOT_CONTEXT, context.parent),
-    startTime,
+    startTime: timing.startTime,
   };
   switch (span.name) {
     case "ui.render":
-      UI_RENDER_SPAN.start(identity, options).end(endTime);
+      UI_RENDER_SPAN.start(identity, options).end(timing.endTime);
       return;
     case "ui.decision":
-      UI_DECISION_SPAN.start(
-        { ...identity, "harness.ui.decision": span.decision },
-        options,
-      ).end(endTime);
+      UI_DECISION_SPAN.start({ ...identity, "harness.ui.decision": span.decision }, options).end(
+        timing.endTime,
+      );
       return;
     case "ui.error":
-      UI_ERROR_SPAN.start(
-        { ...identity, "harness.error.code": span.code },
-        options,
-      ).end(endTime);
+      UI_ERROR_SPAN.start({ ...identity, "harness.error.code": span.code }, options).end(
+        timing.endTime,
+      );
       return;
     case "ui.interaction":
       UI_INTERACTION_SPAN.start(
@@ -102,7 +107,7 @@ function startStampedSpan(
           "harness.ui.interaction.count": span.count,
         },
         options,
-      ).end(endTime);
+      ).end(timing.endTime);
   }
 }
 
@@ -122,10 +127,7 @@ export function stampAppSpan(
   if (span.name === "ui.decision" && !context.hasPendingApproval) {
     return "unknown_span";
   }
-  if (
-    !Number.isSafeInteger(context.sessionStartTime) ||
-    !isSpanContextValid(context.parent)
-  ) {
+  if (!Number.isSafeInteger(context.sessionStartTime) || !isSpanContextValid(context.parent)) {
     return "schema";
   }
   try {
@@ -135,7 +137,19 @@ export function stampAppSpan(
     }
     const durationMs = Math.min(span.durationMs, endTime - context.sessionStartTime);
     const startTime = Math.max(context.sessionStartTime, endTime - durationMs);
-    startStampedSpan(span, context, startTime, endTime, durationMs);
+    const startTimestamp = new Date(startTime);
+    const endTimestamp = new Date(endTime);
+    if (
+      !Number.isSafeInteger(startTimestamp.getTime()) ||
+      !Number.isSafeInteger(endTimestamp.getTime())
+    ) {
+      return "schema";
+    }
+    startStampedSpan(span, context, {
+      startTime: startTimestamp,
+      endTime: endTimestamp,
+      durationMs,
+    });
     return undefined;
   } catch {
     return "schema";

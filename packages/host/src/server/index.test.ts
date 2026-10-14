@@ -468,7 +468,9 @@ describe("createReferenceHost", () => {
     let now = 1_000;
     let approvalPending = false;
     const initialCount = spanCollector.getFinishedSpans().length;
-    const parent = spanCollector.provider.getTracer("reference-host-test").startSpan("harness.tool_call");
+    const parent = spanCollector.provider
+      .getTracer("reference-host-test")
+      .startSpan("harness.tool_call");
     const onAppRejected = vi.fn();
     const fixture = makeServer({
       idGenerator: () => sessionId,

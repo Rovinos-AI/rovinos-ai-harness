@@ -199,7 +199,7 @@ function ingestSpan(
  * Validates and ingests an untrusted app telemetry batch without retaining or logging its payload.
  *
  * @param input - Untrusted decoded `harness.telemetry.emit` arguments.
- * @param options - Optional observer for bounded rejection reasons.
+ * @param options - Host stamp context, span limiter, and bounded rejection observer.
  * @returns Integer counts only; malformed spans are dropped independently.
  */
 export function ingestBatch(

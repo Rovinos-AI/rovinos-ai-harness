@@ -29,6 +29,19 @@ afterAll(async () => {
 });
 
 describe("ingestBatch", () => {
+  it("refuses valid spans without host session context", () => {
+    const initialCount = collector.getFinishedSpans().length;
+    const reasons: string[] = [];
+    const acknowledgment = ingestBatch(
+      { spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 1 }] },
+      { onRejected: (reason) => reasons.push(reason) },
+    );
+
+    expect(acknowledgment).toEqual({ accepted: 0, dropped: 1 });
+    expect(reasons).toEqual(["schema"]);
+    expect(collector.getFinishedSpans()).toHaveLength(initialCount);
+  });
+
   it("accepts all registered span kinds with validated attributes only", () => {
     const start = collector.getFinishedSpans().length;
     const acknowledgment = ingestBatch(

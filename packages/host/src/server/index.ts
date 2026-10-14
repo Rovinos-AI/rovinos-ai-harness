@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import { HarnessError, HostConfigSchema, Id, type HostConfig } from "@harness/schemas";
+import { Code, HarnessError, HostConfigSchema, Id, type HostConfig } from "@harness/schemas";
 import { countHostAppSpansAccepted } from "@harness/telemetry";
 import {
   AppCallRouter,
@@ -202,8 +202,8 @@ function createAppCallRouter(
   dependencies: ReferenceHostDependencies,
   nextId: () => Id,
   rateLimiter: AppRateLimiter,
-  now: () => number,
 ): AppCallRouter {
+  const now = dependencies.now ?? Date.now;
   const defaultOnAppCall =
     dependencies.policy !== undefined && dependencies.tool !== undefined
       ? createPolicyCheckedAppCallHandler({
@@ -218,12 +218,14 @@ function createAppCallRouter(
     ((session, payload) => {
       const parent = session.uiSession?.spanContext;
       const stamp =
-        session.runId === undefined || parent === undefined
+        session.runId === undefined ||
+        session.sessionStartTime === undefined ||
+        parent === undefined
           ? undefined
           : {
-              appId: session.id,
+              appId: Code.parse(session.id),
               runId: session.runId,
-              sessionId: session.sessionId,
+              sessionId: Id.parse(session.sessionId),
               sessionStartTime: session.sessionStartTime,
               parent,
               clock: { now },
@@ -289,13 +291,7 @@ export async function createReferenceHost(
   const registry = createAppRegistry(config);
   const sessionRunId = dependencies.uiSessionContext?.runId ?? dependencies.runId;
   const rateLimiter = new AppRateLimiter(config.limits, { now });
-  const appCallRouter = createAppCallRouter(
-    registry.appConfigs,
-    dependencies,
-    nextId,
-    rateLimiter,
-    now,
-  );
+  const appCallRouter = createAppCallRouter(registry.appConfigs, dependencies, nextId, rateLimiter);
   const host = config.listen.host === "localhost" ? "127.0.0.1" : config.listen.host;
   let origin = "";
   let port = 0;

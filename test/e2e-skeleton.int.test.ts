@@ -4,6 +4,7 @@
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
+// Not wired yet: reference host in core runtime/CLI (3.6 -> #187)
 import { Command } from "commander";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";

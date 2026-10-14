@@ -61,10 +61,10 @@ export type RequestListener = (request: HostRequest, response: HostResponse) => 
 
 /** One launched app instance and its process-local session identifier. */
 export interface AppInstance {
-  readonly id: Code;
+  readonly id: string;
   readonly resourceUri: string;
-  readonly sessionId: Id;
-  readonly sessionStartTime: number;
+  readonly sessionId: string;
+  readonly sessionStartTime?: number;
   readonly runId?: Id;
   readonly uiSession?: UiSession;
   readonly end: () => void;
