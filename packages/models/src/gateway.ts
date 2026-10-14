@@ -218,11 +218,15 @@ export class ModelGateway {
     private readonly dependencies: ModelGatewayDependencies,
     private readonly options: ModelGatewayOptions = {},
   ) {
-    this.accountUsage = createPricingAccountant(dependencies.pricing, (model) => {
-      emitPricingMissing(model.provider, model.model);
-    }, (model) => {
-      emitPricingCacheMissing(model.provider, model.model);
-    });
+    this.accountUsage = createPricingAccountant(
+      dependencies.pricing,
+      (model) => {
+        emitPricingMissing(model.provider, model.model);
+      },
+      (model) => {
+        emitPricingCacheMissing(model.provider, model.model);
+      },
+    );
     this.retryPolicy = ModelRetryConfigSchema.parse(
       dependencies.retryPolicy ?? ModelRetryConfigSchema.parse({}),
     );

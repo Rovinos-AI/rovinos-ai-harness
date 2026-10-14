@@ -47,7 +47,9 @@ export class SlidingWindowStrategy implements ContextStrategy {
   constructor(options: SlidingWindowStrategyOptions = {}) {
     this.cacheAware = options.cacheAware ?? false;
     this.dropChunkGroups = options.dropChunkGroups ?? 4;
-    this.version = `v5_cache_${this.cacheAware ? "aware" : "off"}_${String(this.dropChunkGroups)}`;
+    // Without cacheAware the window drops one group at a time and dropChunkGroups has no effect, so
+    // the behavior (and version) is unchanged from v4; only cache-aware windows get a new version.
+    this.version = this.cacheAware ? `v5_cache_aware_${String(this.dropChunkGroups)}` : "v4";
     if (!Number.isSafeInteger(this.dropChunkGroups) || this.dropChunkGroups < 1) {
       throw new RangeError("dropChunkGroups must be a positive integer.");
     }

@@ -309,12 +309,12 @@ describe("SlidingWindowStrategy", () => {
 
   it("keeps its strategy identity and version stable", () => {
     expect(strategy.id).toBe("sliding_window");
-    expect(strategy.version).toBe("v5_cache_off_4");
+    expect(strategy.version).toBe("v4");
   });
 
   it.each([
-    [false, 4, "v5_cache_off_4"],
-    [false, 2, "v5_cache_off_2"],
+    [false, 4, "v4"],
+    [false, 2, "v4"],
     [true, 4, "v5_cache_aware_4"],
     [true, 2, "v5_cache_aware_2"],
   ] as const)(

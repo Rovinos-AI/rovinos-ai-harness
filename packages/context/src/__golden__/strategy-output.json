@@ -121,7 +121,7 @@
     }
   },
   "sliding_window": {
-    "version": "v5_cache_off_4",
+    "version": "v4",
     "output": {
       "messages": [
         {

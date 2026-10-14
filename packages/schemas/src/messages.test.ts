@@ -50,9 +50,9 @@ describe("normalized model messages", () => {
       temperature: 0.2,
     };
     expect(ModelRequestSchema.parse(request)).toEqual(request);
-    expect(
-      ModelRequestSchema.safeParse({ ...request, stablePrefixMessages: 2 }).success,
-    ).toBe(false);
+    expect(ModelRequestSchema.safeParse({ ...request, stablePrefixMessages: 2 }).success).toBe(
+      false,
+    );
     expect(ToolSpecSchema.safeParse({ toolId: code, description: "tool" }).success).toBe(false);
 
     const response = {

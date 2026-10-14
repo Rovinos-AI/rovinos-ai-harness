@@ -43,12 +43,11 @@ describe("Event", () => {
       throw new Error("Missing model_response sample.");
     }
 
-    expect(
-      Event.parse({ ...response, cacheReadTokens: 4, cacheWriteTokens: 2 }),
-    ).toMatchObject({ cacheReadTokens: 4, cacheWriteTokens: 2 });
-    expect(
-      Event.safeParse({ ...response, cacheReadTokens: -1 }).success,
-    ).toBe(false);
+    expect(Event.parse({ ...response, cacheReadTokens: 4, cacheWriteTokens: 2 })).toMatchObject({
+      cacheReadTokens: 4,
+      cacheWriteTokens: 2,
+    });
+    expect(Event.safeParse({ ...response, cacheReadTokens: -1 }).success).toBe(false);
   });
 
   it("defaults legacy approval resolutions to human and accepts an optional reason code", () => {

@@ -66,10 +66,7 @@ function validateCacheUsageAndPricing(
  * @returns Rounded cost in micros, or undefined when prices are not configured.
  */
 export function calculateCostMicros(
-  usage: Pick<
-    ModelUsage,
-    "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens"
-  >,
+  usage: Pick<ModelUsage, "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens">,
   pricing: ModelPricingRate | undefined,
 ): number | undefined {
   if (pricing === undefined) {
@@ -83,8 +80,7 @@ export function calculateCostMicros(
   const numerator =
     (BigInt(usage.inputTokens) - BigInt(cacheReadTokens) - BigInt(cacheWriteTokens)) *
       BigInt(pricing.inputMicrosPerMTok) +
-    BigInt(cacheReadTokens) *
-      BigInt(pricing.cacheReadMicrosPerMTok ?? pricing.inputMicrosPerMTok) +
+    BigInt(cacheReadTokens) * BigInt(pricing.cacheReadMicrosPerMTok ?? pricing.inputMicrosPerMTok) +
     BigInt(cacheWriteTokens) *
       BigInt(pricing.cacheWriteMicrosPerMTok ?? pricing.inputMicrosPerMTok) +
     BigInt(usage.outputTokens) * BigInt(pricing.outputMicrosPerMTok);
@@ -144,9 +140,7 @@ export function createPricingAccountant(
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       ...(usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
-      ...(usage.cacheWriteTokens === undefined
-        ? {}
-        : { cacheWriteTokens: usage.cacheWriteTokens }),
+      ...(usage.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: usage.cacheWriteTokens }),
       costMicros,
     };
   };

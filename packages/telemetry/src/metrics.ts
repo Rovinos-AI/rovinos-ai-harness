@@ -257,10 +257,8 @@ function isValidModelUsage(
     isNonnegativeSafeInteger(usage.inputTokens) &&
     isNonnegativeSafeInteger(usage.outputTokens) &&
     Number.isSafeInteger(usage.inputTokens + usage.outputTokens) &&
-    (usage.cacheReadTokens === undefined ||
-      isNonnegativeSafeInteger(usage.cacheReadTokens)) &&
-    (usage.cacheWriteTokens === undefined ||
-      isNonnegativeSafeInteger(usage.cacheWriteTokens)) &&
+    (usage.cacheReadTokens === undefined || isNonnegativeSafeInteger(usage.cacheReadTokens)) &&
+    (usage.cacheWriteTokens === undefined || isNonnegativeSafeInteger(usage.cacheWriteTokens)) &&
     (usage.costMicros === undefined || isNonnegativeSafeInteger(usage.costMicros))
   );
 }
