@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { diag } from "@opentelemetry/api";
+import { context, diag, ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
+import { countDroppedTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import type { ToolPort } from "./ports.js";
-import { LeaseLostError } from "./recorder.js";
+import { LeaseLostError, RunRecorder, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
@@ -163,9 +164,58 @@ interface RunControlOptions {
   readonly store: EventStore;
   readonly runId: Id;
   readonly firstNewSeq: number;
+  readonly clock: Clock;
+  readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
   readonly processLike: ShutdownProcessLike;
   readonly graceMs: number;
   readonly operation: (signal: AbortSignal) => Promise<RunLoopResult>;
+}
+
+async function flushAndDrainTrips(options: {
+  readonly store: EventStore;
+  readonly runId: Id;
+  readonly clock: Clock;
+  readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
+}): Promise<Event[]> {
+  const { store, runId, clock, flushTelemetry } = options;
+  try {
+    try {
+      await flushTelemetry?.();
+    } catch {
+      countDroppedTelemetry("trip_flush_failed");
+    }
+    if (!sentinelTripQueue.hasForRun(runId)) {
+      return [];
+    }
+    const nextSeq = await store.head(runId);
+    if (nextSeq === 0) {
+      throw new Error("Sentinel trip has no run log.");
+    }
+    let tail: Event | undefined;
+    for await (const event of store.read(runId, {
+      fromSeq: nextSeq - 1,
+      toSeq: nextSeq - 1,
+    })) {
+      tail = event;
+      break;
+    }
+    if (tail === undefined) {
+      throw new Error("Sentinel trip has no run log tail.");
+    }
+    const recorder = new RunRecorder(store, runId, tail.segmentId, nextSeq, clock);
+    const spanContext = trace.setSpanContext(ROOT_CONTEXT, {
+      traceId: tail.traceId,
+      spanId: tail.spanId,
+      traceFlags: 0,
+    });
+    return await context.with(spanContext, () => recorder.drainTrips());
+  } catch {
+    countDroppedTelemetry("trip_append_failed");
+    sentinelTripQueue.drainForRun(runId);
+    return [];
+  } finally {
+    sentinelTripQueue.discardRun(runId);
+  }
 }
 
 async function withRunControl(options: RunControlOptions): Promise<RunLoopResult> {
@@ -174,6 +224,8 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
   const cursor = { nextSeq: options.firstNewSeq };
   const cancellation = { observed: false };
   let running: Promise<RunLoopResult> | undefined;
+  let result: RunLoopResult | undefined;
+  let tripsFinalized = false;
   const uninstall = installShutdownHandler({
     processLike: options.processLike,
     controller,
@@ -198,7 +250,6 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
 
   try {
     running = options.operation(controller.signal);
-    let result: RunLoopResult;
     try {
       result = await running;
     } catch (error) {
@@ -219,19 +270,44 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
       if (cancellation.observed) {
         const cancelled = await cancelledResult(options.store, options.runId, options.firstNewSeq);
         if (cancelled !== undefined) {
-          return cancelled;
+          result = cancelled;
+        } else {
+          throw error;
         }
+      } else {
+        throw error;
       }
-      throw error;
     }
     if (cancellation.observed) {
-      return (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
+      result = (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
     }
-    return result;
+    if (result === undefined) {
+      throw new Error("Expected a completed run operation.");
+    }
+    const tripEvents = await flushAndDrainTrips(options);
+    tripsFinalized = true;
+    if (tripEvents.length === 0) {
+      return result;
+    }
+    const events = [...result.events, ...tripEvents];
+    const lastTrip = tripEvents.at(-1);
+    const state =
+      lastTrip === undefined
+        ? result.state
+        : {
+            ...result.state,
+            nextSeq: lastTrip.seq + 1,
+            segmentId: lastTrip.segmentId,
+            lastTs: lastTrip.ts,
+          };
+    return { ...result, events, state };
   } finally {
     stopWatcher.abort();
     uninstall();
     await watcher;
+    if (running !== undefined && !tripsFinalized) {
+      await flushAndDrainTrips(options);
+    }
   }
 }
 
@@ -298,6 +374,10 @@ function composeRuntime(
       store,
       runId,
       firstNewSeq: 0,
+      clock,
+      ...(overrides.flushTelemetry === undefined
+        ? {}
+        : { flushTelemetry: overrides.flushTelemetry }),
       processLike: overrides.processLike ?? defaultProcessLike,
       graceMs: config.run.shutdownGraceMs,
       operation,
@@ -315,12 +395,16 @@ function composeRuntime(
     cancel: (runId) => cancelRun(store, runId, clock, ids),
     close: async () => {
       try {
-        await store.close();
+        await overrides.flushTelemetry?.();
       } finally {
         try {
-          vault.close();
+          await store.close();
         } finally {
-          keys.dispose();
+          try {
+            vault.close();
+          } finally {
+            keys.dispose();
+          }
         }
       }
     },
@@ -338,6 +422,10 @@ function createRuntimeResume(
       store,
       runId,
       firstNewSeq,
+      clock,
+      ...(overrides.flushTelemetry === undefined
+        ? {}
+        : { flushTelemetry: overrides.flushTelemetry }),
       processLike: overrides.processLike ?? defaultProcessLike,
       graceMs: config.run.shutdownGraceMs,
       operation: async (signal) => {

@@ -28,6 +28,8 @@ export interface TelemetrySdkOptions {
 export interface TelemetrySdk {
   readonly tracerProvider: BasicTracerProvider;
   readonly loggerProvider: LoggerProvider;
+  /** Flush pending span and log processors, including in-flight sentinel checks. */
+  forceFlush(): Promise<void>;
 }
 
 /**
@@ -56,5 +58,11 @@ export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
       ),
     ],
   });
-  return { tracerProvider, loggerProvider };
+  return {
+    tracerProvider,
+    loggerProvider,
+    forceFlush: async () => {
+      await Promise.all([tracerProvider.forceFlush(), loggerProvider.forceFlush()]);
+    },
+  };
 }

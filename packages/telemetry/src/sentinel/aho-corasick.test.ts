@@ -54,6 +54,31 @@ describe("AhoCorasick", () => {
     ]);
   });
 
+  it("reports each repetitive overlapping pattern index once without occurrence ranges", () => {
+    const patterns = Array.from({ length: 1_000 }, (_, index) => "a".repeat(index + 1));
+    const matcher = AhoCorasick.build(patterns);
+    const startedAt = performance.now();
+
+    const matches = matcher.findPatternIndexes("a".repeat(100_000));
+
+    expect(matches).toHaveLength(patterns.length);
+    expect(new Set(matches).size).toBe(patterns.length);
+    expect(performance.now() - startedAt).toBeLessThan(500);
+  });
+
+  it("checks the scan deadline while traversing text", () => {
+    let checks = 0;
+    const error = errorCodeOf(() =>
+      AhoCorasick.build(["not present"]).findPatternIndexes("x".repeat(1_000), () => {
+        checks += 1;
+        return checks > 8;
+      }),
+    );
+
+    expect(error).toBe("sentinel_scan_timeout");
+    expect(checks).toBe(9);
+  });
+
   it("uses UTF-16 code-unit offsets for surrogate pairs", () => {
     expect(AhoCorasick.build(["🧪"]).findAll("x🧪y")).toEqual([
       { patternIndex: 0, start: 1, end: 3 },

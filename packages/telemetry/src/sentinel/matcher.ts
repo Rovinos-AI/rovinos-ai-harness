@@ -60,13 +60,17 @@ export class SentinelMatcher {
   }
 
   /** Return matched vault-value indexes without returning the matched text. */
-  findAll(text: string): readonly { patternIndex: number }[] {
-    return (
-      this.automaton?.findAll(text).flatMap(({ patternIndex }) =>
-        (this.valueIndexesByPattern[patternIndex] ?? []).map((index) => ({
-          patternIndex: index,
-        })),
-      ) ?? []
-    );
+  findAll(
+    text: string,
+    shouldStop: () => boolean = () => false,
+  ): readonly { patternIndex: number }[] {
+    const patternIndexes = this.automaton?.findPatternIndexes(text, shouldStop) ?? [];
+    const matchedValueIndexes = new Set<number>();
+    for (const patternIndex of patternIndexes) {
+      for (const valueIndex of this.valueIndexesByPattern[patternIndex] ?? []) {
+        matchedValueIndexes.add(valueIndex);
+      }
+    }
+    return [...matchedValueIndexes].map((patternIndex) => ({ patternIndex }));
   }
 }

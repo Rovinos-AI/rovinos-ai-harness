@@ -9,7 +9,11 @@ import {
   type Event as HarnessEvent,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import {
+  createTestContextManager,
+  createTestTracerProvider,
+} from "@harness/telemetry/testing";
+import { sentinelTripQueue } from "@harness/telemetry";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "./recorder.js";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
@@ -223,6 +227,53 @@ describe("runtime tracing fallback", () => {
     await expect(runtime.resume(runId)).rejects.toMatchObject({ code: "run_already_terminal" });
     expect(readPastRequest).toBe(false);
     await runtime.close();
+  });
+
+  it("flushes telemetry before draining a trip that arrives after the run loop", async () => {
+    const store = new InMemoryEventStore();
+    const runId = Id.parse("10000000000000000000000000");
+    let nextId = 0;
+    let enqueued = false;
+    let flushCount = 0;
+    const runtime = await createRuntime(config, {
+      store,
+      ids: {
+        next: () => Id.parse(`100000000000000000000000${String(nextId++).padStart(2, "0")}`),
+      },
+      model: new FakeModelPort([completion()]),
+      flushTelemetry: async () => {
+        flushCount += 1;
+        if (!enqueued) {
+          enqueued = true;
+          sentinelTripQueue.enqueue({
+            runId,
+            entities: [{ type: "email", count: 1 }],
+          });
+        }
+      },
+    });
+
+    const result = await runtime.run("goal");
+    const appendedTrip = result.events.find(
+      (event) => event.type === "pii_action" && event.boundary === "telemetry_export",
+    );
+
+    expect(appendedTrip).toMatchObject({
+      runId,
+      type: "pii_action",
+      boundary: "telemetry_export",
+      action: "blocked",
+      entities: [{ type: "email", count: 1 }],
+    });
+    expect(appendedTrip?.seq).toBeGreaterThan(
+      result.events.find((event) => event.type === "run_status_changed" && event.to === "completed")
+        ?.seq ?? -1,
+    );
+    expect(sentinelTripQueue.hasForRun(runId)).toBe(false);
+    expect(sentinelTripQueue.size).toBe(0);
+    expect((await readRunEvents(store, runId)).at(-1)).toEqual(appendedTrip);
+    await runtime.close();
+    expect(flushCount).toBe(2);
   });
 
   it("aborts an in-flight tool when another process records cancellation", async () => {

@@ -49,7 +49,10 @@ export type SentinelGateInput = z.infer<typeof SentinelGateInputSchema>;
 
 /** Matcher surface used by the gate and injectable in failure tests. */
 export interface SentinelMatcherLike {
-  findAll(text: string): readonly { readonly patternIndex: number }[];
+  findAll(
+    text: string,
+    shouldStop?: () => boolean,
+  ): readonly { readonly patternIndex: number }[];
 }
 
 /** Options for building a fail-closed export gate. */
@@ -131,7 +134,10 @@ export class SentinelGate {
       const scanStartedAt = this.now();
       let matches: readonly { readonly patternIndex: number }[];
       try {
-        matches = preparedMatcher.matcher.findAll(request.text);
+        matches = preparedMatcher.matcher.findAll(
+          request.text,
+          () => this.scanStatus(scanStartedAt) !== "ok",
+        );
       } catch {
         const reason = this.scanStatus(scanStartedAt) === "timeout" ? "timeout" : "error";
         this.enqueueTrip(runId, []);
@@ -244,9 +250,9 @@ export class SentinelGate {
         entityTypesByValue.push(...runMatcher.entityTypesByValue);
       }
       const matcher: SentinelMatcherLike = {
-        findAll: (text) =>
+        findAll: (text, shouldStop) =>
           matchers.flatMap((runMatcher, index) =>
-            runMatcher.matcher.findAll(text).map(({ patternIndex }) => ({
+            runMatcher.matcher.findAll(text, shouldStop).map(({ patternIndex }) => ({
               patternIndex: patternIndex + (offsets[index] ?? 0),
             })),
           ),

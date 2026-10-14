@@ -239,6 +239,49 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(metricMocks.record).toHaveBeenCalledWith("leak_sentinel");
   });
 
+  it("forwards exactly one sentinel alert without rescanning or re-enqueueing it", async () => {
+    defineLogRecord("harness.sentinel.trip", {
+      "harness.run.id": attr.optional(attr.id()),
+      "harness.sentinel.trip.count": attr.nonnegativeInt(),
+    });
+    const next = createNextProcessor();
+    const activeRuns = new ActiveRuns();
+    activeRuns.register(runId);
+    const canary = "harness.sentinel.trip";
+    let processor: AllowlistLogRecordProcessor | undefined;
+    const queue = new TripQueue({
+      emit: (record) => {
+        processor?.onEmit(
+          makeSdkLogRecord({
+            body: record.body,
+            attributes: record.attributes ?? {},
+            ...(record.eventName === undefined ? {} : { eventName: record.eventName }),
+          }),
+          record.context,
+        );
+      },
+      enabled: () => true,
+    });
+    const gate = new SentinelGate(
+      new VaultRunView({
+        version: () => Promise.resolve(1),
+        listRawValueEntries: () =>
+          Promise.resolve([{ entityType: Code.parse("email"), rawValue: canary }]),
+      }),
+      activeRuns,
+      { tripQueue: queue },
+    );
+    const check = vi.spyOn(gate, "check");
+    processor = new AllowlistLogRecordProcessor(next, { gate });
+
+    queue.enqueue({ runId, entities: [{ type: "email", count: 1 }] });
+    await processor.forceFlush();
+
+    expect(check).not.toHaveBeenCalled();
+    expect(next.onEmit).toHaveBeenCalledOnce();
+    expect(queue.size).toBe(1);
+  });
+
   it("serializes log attributes in locale-independent ordinal order", async () => {
     defineLogRecord("harness.test.canonical_order", {
       "harness.test.a_": attr.enum(["first"]),

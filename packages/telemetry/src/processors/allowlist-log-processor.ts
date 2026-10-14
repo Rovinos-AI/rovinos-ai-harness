@@ -130,7 +130,10 @@ export class AllowlistLogRecordProcessor implements LogRecordProcessor {
         return;
       }
       const sanitized = sanitizedCopy(input, definition);
-      if (this.options.gate !== undefined) {
+      if (
+        this.options.gate !== undefined &&
+        definition.name !== "harness.sentinel.trip"
+      ) {
         const runId = Id.safeParse(sanitized.attributes["harness.run.id"]);
         const result = await this.options.gate.check({
           ...(runId.success ? { runId: runId.data } : {}),
