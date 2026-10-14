@@ -34,11 +34,12 @@ processors:
     error_mode: "ignore"
     logs:
       log_record:
-        - "not (body == \"harness.model.pricing_missing\" or body == \"harness.safe.approval_wait\" or body == \"harness.safe.budget_exceeded\" or body == \"harness.safe.checkpoint\" or body == \"harness.safe.model_call\" or body == \"harness.safe.pii_action\" or body == \"harness.safe.policy_decision\" or body == \"harness.safe.run_created\" or body == \"harness.safe.run_status\" or body == \"harness.safe.subagent_completed\" or body == \"harness.safe.subagent_spawned\" or body == \"harness.safe.tool_call\" or body == \"harness.sentinel.trip\" or body == \"harness.vault.mark_terminal_failed\")"
+        - "not (body == \"harness.keys.rotated\" or body == \"harness.model.pricing_missing\" or body == \"harness.safe.approval_wait\" or body == \"harness.safe.budget_exceeded\" or body == \"harness.safe.checkpoint\" or body == \"harness.safe.model_call\" or body == \"harness.safe.pii_action\" or body == \"harness.safe.policy_decision\" or body == \"harness.safe.run_created\" or body == \"harness.safe.run_status\" or body == \"harness.safe.subagent_completed\" or body == \"harness.safe.subagent_spawned\" or body == \"harness.safe.tool_call\" or body == \"harness.sentinel.trip\" or body == \"harness.vault.mark_terminal_failed\")"
   transform/log_attributes:
     error_mode: "ignore"
     log_statements:
       - "keep_keys(scope.attributes, [])"
+      - "keep_keys(log.attributes, [\"harness.keys.store.rows_rotated\", \"harness.keys.vault.rows_rotated\"]) where log.body == \"harness.keys.rotated\""
       - "keep_keys(log.attributes, [\"harness.model.name\", \"harness.model.provider\"]) where log.body == \"harness.model.pricing_missing\""
       - "keep_keys(log.attributes, [\"harness.approval.decided_by\", \"harness.approval.decision\", \"harness.approval.reason\", \"harness.approval.wait_ms\", \"harness.event.seq\", \"harness.event.timestamp_ms\", \"harness.policy.version\", \"harness.run.id\", \"harness.span.id\", \"harness.trace.id\"]) where log.body == \"harness.safe.approval_wait\""
       - "keep_keys(log.attributes, [\"harness.budget.kind\", \"harness.budget.limit\", \"harness.budget.observed\", \"harness.event.seq\", \"harness.event.timestamp_ms\", \"harness.policy.version\", \"harness.run.id\", \"harness.span.id\", \"harness.trace.id\"]) where log.body == \"harness.safe.budget_exceeded\""

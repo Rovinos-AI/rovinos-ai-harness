@@ -26,6 +26,7 @@ const expectedSpanNames = [
   "mcp.client.call",
 ];
 const expectedLogNames = [
+  "harness.keys.rotated",
   "harness.model.pricing_missing",
   "harness.safe.approval_wait",
   "harness.safe.budget_exceeded",

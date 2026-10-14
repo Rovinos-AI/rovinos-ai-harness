@@ -52,9 +52,14 @@ export interface ContentCodec {
    *
    * @param ctx Event identity used by contextual codecs.
    * @param content Content-classified event fields.
+   * @param targetKeyId Optional key identifier for explicit re-encryption.
    * @returns The encoded blob and optional key identifier.
    */
-  encode(ctx: ContentCodecContext, content: Record<string, unknown>): Promise<EncodedContent>;
+  encode(
+    ctx: ContentCodecContext,
+    content: Record<string, unknown>,
+    targetKeyId?: string,
+  ): Promise<EncodedContent>;
   /**
    * Decode content for an event.
    *

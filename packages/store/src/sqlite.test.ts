@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { Id, type Event, type NewEvent, type RunStatus } from "@harness/schemas";
+import { Id, type Event, type KeyProvider, type NewEvent, type RunStatus } from "@harness/schemas";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, type ContentCodec, type ContentCodecContext } from "./codec.js";
 import { StoreMigrationError } from "./errors.js";
+import { decodeStoreRotationCursor } from "./rotate.js";
 import {
   ContentDecryptFailedError,
   InvalidEventError,
@@ -738,6 +739,185 @@ describe("SqliteEventStore", () => {
       await expect(reopened.latestSnapshot(runId)).resolves.toEqual(snapshot);
     } finally {
       await reopened.close();
+    }
+  });
+
+  it("retries a row skipped after a concurrent event-store update", async () => {
+    const path = await temporaryDatabase();
+    let currentKeyId = "key-a";
+    let injectConcurrentUpdate = false;
+    const rotationKeys = new Map([
+      ["key-a", new Uint8Array(32).fill(41)],
+      ["key-b", new Uint8Array(32).fill(42)],
+    ]);
+    const rotationProvider: KeyProvider = {
+      currentKeyId: () => currentKeyId,
+      getKey: (keyId) => {
+        const key = rotationKeys.get(keyId);
+        return key === undefined
+          ? Promise.reject(new KeyNotFoundError())
+          : Promise.resolve(Uint8Array.from(key));
+      },
+    };
+    const baseCodec = new AesGcmContentCodec(rotationProvider);
+    const codec: ContentCodec = {
+      encrypted: true,
+      async encode(context, content, targetKeyId) {
+        if (injectConcurrentUpdate && targetKeyId === "key-b") {
+          injectConcurrentUpdate = false;
+          const concurrent = await baseCodec.encode(context, content, "key-a");
+          const database = new Database(path);
+          try {
+            database
+              .prepare("UPDATE events SET content_blob = ? WHERE run_id = ? AND seq = ?")
+              .run(concurrent.blob, context.runId, context.seq);
+          } finally {
+            database.close();
+          }
+        }
+        return baseCodec.encode(context, content, targetKeyId);
+      },
+      decode: (context, blob, keyId) => baseCodec.decode(context, blob, keyId),
+    };
+    const store = new SqliteEventStore(path, codec);
+    try {
+      await store.append(runId, [runCreated(runId, 10)], 0);
+      currentKeyId = "key-b";
+      injectConcurrentUpdate = true;
+
+      await expect(store.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+        processed: 0,
+      });
+      await expect(store.countRowsByKey()).resolves.toEqual([{ keyId: "key-a", count: 1 }]);
+      await expect(store.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+        processed: 1,
+      });
+      await expect(store.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 1 }]);
+      await expect(collect(store.read(runId))).resolves.toMatchObject([{ seq: 0 }]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("resumes event and snapshot key rotation while reads and new appends continue", async () => {
+    const path = await temporaryDatabase();
+    let currentKeyId = "key-a";
+    const rotationKeys = new Map([
+      ["key-a", new Uint8Array(32).fill(41)],
+      ["key-b", new Uint8Array(32).fill(42)],
+    ]);
+    const rotationProvider: KeyProvider = {
+      currentKeyId: () => currentKeyId,
+      getKey: (keyId) => {
+        const key = rotationKeys.get(keyId);
+        return key === undefined
+          ? Promise.reject(new KeyNotFoundError())
+          : Promise.resolve(Uint8Array.from(key));
+      },
+    };
+    const codec = new AesGcmContentCodec(rotationProvider);
+    const store = new SqliteEventStore(path, codec);
+    const snapshotId = Id.parse("00000000000000000000000004");
+    const snapshot = {
+      snapshotId,
+      runId,
+      atSeq: 1,
+      createdAt: 12,
+      traceparent: `00-${"a".repeat(32)}-${"b".repeat(16)}-01`,
+      context: { messages: ["synthetic rotation snapshot"] },
+      plan: ["synthetic rotation plan"],
+    };
+    await store.appendWithSnapshot(
+      runId,
+      [
+        runCreated(runId, 10),
+        modelRequest(runId, 11, "synthetic rotation content"),
+        {
+          runId,
+          ts: 12,
+          v: 1,
+          traceId,
+          spanId,
+          segmentId: runId,
+          type: "checkpoint_written",
+          checkpointId: snapshotId,
+          atSeq: 1,
+          traceparent: snapshot.traceparent,
+        },
+      ],
+      0,
+      snapshot,
+    );
+    currentKeyId = "key-b";
+
+    try {
+      const firstBatch = await store.reencryptBatch({ targetKeyId: currentKeyId, limit: 1 });
+      expect(firstBatch.processed).toBe(1);
+      expect(firstBatch.nextCursor).toBeDefined();
+      await expect(collect(store.read(runId))).resolves.toMatchObject([
+        { seq: 0 },
+        {
+          seq: 1,
+          messages: [
+            { role: "user", parts: [{ type: "text", text: "synthetic rotation content" }] },
+          ],
+        },
+        { seq: 2 },
+      ]);
+      await Promise.all([
+        store.append(runId, [modelRequest(runId, 13, "synthetic concurrent content")], 3),
+        store.reencryptBatch({
+          targetKeyId: currentKeyId,
+          limit: 1,
+          afterCursor: firstBatch.nextCursor,
+        }),
+      ]);
+
+      let cursor = firstBatch.nextCursor;
+      const cursorTables: string[] = [];
+      while (cursor !== undefined) {
+        cursorTables.push(decodeStoreRotationCursor(cursor).table);
+        const batch = await store.reencryptBatch({
+          targetKeyId: currentKeyId,
+          limit: 1,
+          afterCursor: cursor,
+        });
+        cursor = batch.nextCursor;
+      }
+
+      await expect(store.latestSnapshot(runId)).resolves.toEqual(snapshot);
+      const rotationDb = new Database(path);
+      const rotatedRows = rotationDb
+        .prepare<[], { seq: number; key_id: string | null }>(
+          "SELECT seq, key_id FROM events ORDER BY seq",
+        )
+        .all();
+      rotationDb.close();
+      expect(cursorTables).toContain("snapshots");
+      expect(rotatedRows).toEqual(
+        expect.arrayContaining([
+          { seq: 1, key_id: "key-b" },
+          { seq: 2, key_id: "key-b" },
+          { seq: 3, key_id: "key-b" },
+        ]),
+      );
+      await expect(store.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 5 }]);
+      await expect(store.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+        processed: 0,
+      });
+      await expect(collect(store.read(runId))).resolves.toMatchObject([
+        { seq: 0 },
+        { seq: 1 },
+        { seq: 2 },
+        {
+          seq: 3,
+          messages: [
+            { role: "user", parts: [{ type: "text", text: "synthetic concurrent content" }] },
+          ],
+        },
+      ]);
+    } finally {
+      await store.close();
     }
   });
 

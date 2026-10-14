@@ -162,6 +162,13 @@ Owner task: `6.5`.
 
 ## Log records
 
+### `harness.keys.rotated`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.keys.store.rows_rotated` | integer | Required | `@harness/telemetry` |
+| `harness.keys.vault.rows_rotated` | integer | Required | `@harness/telemetry` |
+
 ### `harness.model.pricing_missing`
 
 | Attribute | Type | Presence | Owning package |

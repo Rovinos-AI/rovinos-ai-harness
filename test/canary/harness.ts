@@ -27,6 +27,7 @@ import {
   captureWithoutSentinel,
   createCanaryTelemetry,
   emitCanaryBadLog,
+  emitCanaryKeysRotated,
   emitCanaryUnsafeSpan,
   type CanaryTelemetry,
 } from "./telemetry.js";
@@ -290,6 +291,11 @@ export class CanaryHarness {
     await emitCanaryBadLog(this.telemetry, runId, this.canaries.email.value);
     await emitCanaryUnsafeSpan(this.telemetry, runId, this.canaries.phone.value);
     await this.telemetry.sdk.forceFlush();
+  }
+
+  /** Exercise the registered key-rotation log with synthetic row counts. */
+  async exerciseKeysRotatedLog(): Promise<void> {
+    await emitCanaryKeysRotated(this.telemetry);
   }
 
   /** Return sink names containing plaintext or encoded canary values. */

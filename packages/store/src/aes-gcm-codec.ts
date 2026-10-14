@@ -65,10 +65,11 @@ export class AesGcmContentCodec implements ContentCodec {
   async encode(
     context: ContentCodecContext,
     content: Record<string, unknown>,
+    targetKeyId?: string,
   ): Promise<EncodedContent> {
     let keyId: string;
     try {
-      keyId = this.keyProvider.currentKeyId();
+      keyId = targetKeyId ?? this.keyProvider.currentKeyId();
     } catch {
       throw new ContentEncryptFailedError();
     }

@@ -19,6 +19,10 @@ const vaultMarkTerminalFailedDefinition = defineLogRecord("harness.vault.mark_te
   "harness.run.id": attr.id(),
   "harness.error.code": attr.code(),
 });
+const keysRotatedDefinition = defineLogRecord("harness.keys.rotated", {
+  "harness.keys.vault.rows_rotated": attr.nonnegativeInt(),
+  "harness.keys.store.rows_rotated": attr.nonnegativeInt(),
+});
 const pricingMissingDefinition = defineLogRecord("harness.model.pricing_missing", {
   "harness.model.provider": attr.code(),
   "harness.model.name": attr.code(),
@@ -354,6 +358,24 @@ export function emitVaultMarkTerminalFailed(
     body: Code.parse("vault_mark_terminal_failed"),
     eventName: vaultMarkTerminalFailedDefinition.name,
     severityNumber: SeverityNumber.ERROR,
+    attributes,
+    context: otelContext.active(),
+  });
+}
+
+/** Emits completed key-rotation counts without exporting key ids or content. */
+export function emitKeysRotated(
+  counts: { readonly vault: number; readonly store: number },
+  logger: Logger = safeEventLogger,
+): void {
+  const attributes = keysRotatedDefinition.schema.parse({
+    "harness.keys.vault.rows_rotated": counts.vault,
+    "harness.keys.store.rows_rotated": counts.store,
+  });
+  logger.emit({
+    body: Code.parse("keys_rotated"),
+    eventName: keysRotatedDefinition.name,
+    severityNumber: SeverityNumber.INFO,
     attributes,
     context: otelContext.active(),
   });
