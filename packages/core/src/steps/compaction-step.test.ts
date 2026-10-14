@@ -128,7 +128,7 @@ describe("compactionStep", () => {
       fromSeq: 2,
       toSeq: 7,
       strategy: "summarizing",
-      strategyVersion: "v2",
+      strategyVersion: "v3",
       summary: "summary <EMAIL_1>",
       inputTokens: 8,
       outputTokens: 2,

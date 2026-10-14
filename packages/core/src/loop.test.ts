@@ -1656,6 +1656,7 @@ describe("runLoop", () => {
           requestId: "00000000000000000000000000",
           model: { provider: "test_provider", model: "test_model" },
           messages: [{ role: "user", parts: [{ type: "text", text: "test goal" }] }],
+          stablePrefixMessages: 1,
           tools: [
             {
               toolId: "read_offloaded",
@@ -1677,7 +1678,7 @@ describe("runLoop", () => {
     expect(modelSpans[0]?.parentSpanId).toBe(runSpans[0]?.spanContextValue.spanId);
     expect(modelSpans[0]?.attributes).toMatchObject({
       "harness.context.strategy": "naive",
-      "harness.context.strategy_version": "v4",
+      "harness.context.strategy_version": "v5",
       "harness.context.estimated_tokens": 0,
       "harness.context.message_count": 1,
     });
@@ -1731,7 +1732,7 @@ describe("runLoop", () => {
       traceparent,
       context: {
         strategyId: "naive",
-        strategyVersion: "v4",
+        strategyVersion: "v5",
         calibration: null,
       },
       plan: null,
@@ -2179,6 +2180,7 @@ describe("runLoop", () => {
             strategyVersion: "v4",
             estimatedTokens: 0,
             messageCount: 0,
+            stablePrefixMessages: 0,
           },
         }),
       ),

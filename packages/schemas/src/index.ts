@@ -15,6 +15,7 @@ export {
   type JsonSchemaValidator,
 } from "./json-schema.js";
 export { JsonValue } from "./json.js";
+export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.js";
 export { ToolBinaryPayloadSchema, type ToolBinaryPayload } from "./tool-binary.js";
 export {
   MessageSchema,
@@ -125,7 +126,12 @@ export {
   type ServerConfig,
   type ServersConfig,
 } from "./config/servers.js";
-export { PolicyConfigSchema, type PolicyConfig } from "./config/policy.js";
+export {
+  ApprovalConfigSchema,
+  ApprovalNotifierConfigSchema,
+  PolicyConfigSchema,
+  type PolicyConfig,
+} from "./config/policy.js";
 export {
   JsonPointerSchema,
   PiiConfigSchema,
@@ -216,6 +222,12 @@ export {
   type KeyRetireResult,
   type KeyRotationResult,
 } from "./cli/keys.js";
+export {
+  ServersCheckResultSchema,
+  ServersCheckServerResultSchema,
+  type ServersCheckResult,
+  type ServersCheckServerResult,
+} from "./cli/servers.js";
 export { eventSamples, FakeClock, SequentialIdGenerator } from "./testing.js";
 
 /** The current harness version. */

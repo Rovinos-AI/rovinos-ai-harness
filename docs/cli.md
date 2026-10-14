@@ -55,6 +55,16 @@ write access. It returns `1` if any check fails; warnings do not fail the comman
 table of check IDs, statuses, and codes. `--json` returns a schema-validated array; see
 [Environment diagnostics](doctor.md) for check details and the registration pattern.
 
+## `harness servers check`
+
+`harness servers check [--server <id>] [--json]` connects to the configured MCP servers, lists their
+tools, and reports registered tool IDs, rejected-tool reason codes, negotiated protocol metadata,
+MCP Apps support, connection latency, and trace-propagation behavior. `--server` limits the check to
+one configured server. It never invokes tools or prints tool descriptions or server-provided text.
+Trusted servers with trace propagation disabled are marked with a warning. Unreachable servers or
+registry collisions return code `1`; `--json` emits one validated `ServersCheckResultSchema`
+document.
+
 ## `harness store migrate`
 
 `harness store migrate [--dry-run] [--json]` applies pending, checksummed SQLite or Postgres schema

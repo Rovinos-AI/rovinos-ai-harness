@@ -43,16 +43,17 @@ describe("StrategyContextPort", () => {
       messages: [{ role: "user", parts: [{ type: "text", text: "goal" }] }],
       metadata: {
         strategyId: "naive",
-        strategyVersion: "v4",
+        strategyVersion: "v5",
         estimatedTokens: 2,
         messageCount: 1,
+        stablePrefixMessages: 1,
       },
     });
     expect(build.mock.calls[0]?.[0]).not.toHaveProperty("calibration");
     const snapshot = await context.snapshot();
     expect(snapshot).toEqual({
       strategyId: "naive",
-      strategyVersion: "v4",
+      strategyVersion: "v5",
       calibration,
     });
 
@@ -62,9 +63,10 @@ describe("StrategyContextPort", () => {
       messages: [{ role: "user", parts: [{ type: "text", text: "goal" }] }],
       metadata: {
         strategyId: "naive",
-        strategyVersion: "v4",
+        strategyVersion: "v5",
         estimatedTokens: 2,
         messageCount: 1,
+        stablePrefixMessages: 1,
       },
     });
   });

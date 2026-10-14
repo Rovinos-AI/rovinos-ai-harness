@@ -2,7 +2,9 @@
 import type { Runtime } from "@harness/core";
 import type { ApprovalSweepStore } from "@harness/policy";
 import { ApprovalSweepResultSchema, HarnessError } from "@harness/schemas";
+import type { HarnessConfig } from "@harness/config";
 import type { CliContext } from "../command.js";
+import { createApprovalNotifier } from "./approval-notifier.js";
 
 class ApprovalSweepPartialError extends HarnessError {
   override readonly code = "approval_sweep_partial";
@@ -14,8 +16,12 @@ class ApprovalSweepPartialError extends HarnessError {
 }
 
 /** Runs the approval expiry and escalation sweep for the active CLI runtime. */
-export async function runApprovalSweep(runtime: Runtime, context: CliContext): Promise<void> {
-  const [{ LogNotifier, sweepApprovals }, { resolveApproval }] = await Promise.all([
+export async function runApprovalSweep(
+  runtime: Runtime,
+  context: CliContext,
+  config: HarnessConfig,
+): Promise<void> {
+  const [{ sweepApprovals }, { resolveApproval }] = await Promise.all([
     import("@harness/policy"),
     import("@harness/core"),
   ]);
@@ -40,14 +46,19 @@ export async function runApprovalSweep(runtime: Runtime, context: CliContext): P
         metadata,
       ),
   };
-  const result = await sweepApprovals({
-    store,
-    clock: context.clock,
-    notifier: new LogNotifier((notification) => {
+  const notifier = await createApprovalNotifier(
+    config.policy.approvals,
+    context.secretResolver,
+    (notification) => {
       context.out.print(
         `approval_escalated run_id=${notification.runId} approval_id=${notification.approvalId} tool_id=${notification.toolId} rule_id=${notification.ruleId} age_ms=${String(notification.ageMs)}\n`,
       );
-    }),
+    },
+  );
+  const result = await sweepApprovals({
+    store,
+    clock: context.clock,
+    notifier,
   });
   context.out.json(ApprovalSweepResultSchema, result);
   context.out.print(

@@ -57,7 +57,7 @@ export interface RuntimeOverrides {
   /** Provider adapters and secret resolution can be supplied by tests or embedders. */
   readonly providerAdapters?: readonly ProviderAdapter[];
   readonly secretResolver?: {
-    resolve(ref: SecretRef): Promise<{ reveal(): string }>;
+    resolve(ref: SecretRef, signal?: AbortSignal): Promise<{ reveal(): string }>;
   };
   /** Receives safe warnings raised during key-provider setup. */
   readonly onKeysWarning?: (code: "keys_ephemeral") => void;

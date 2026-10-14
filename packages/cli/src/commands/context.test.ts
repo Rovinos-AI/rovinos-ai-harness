@@ -388,7 +388,7 @@ describe("harness context", () => {
         ].join("\t"),
         [
           "naive",
-          "v4",
+          "v5",
           "101",
           "5",
           "0",
@@ -398,7 +398,7 @@ describe("harness context", () => {
         ].join("\t"),
         [
           "sliding_window",
-          "v3",
+          "v4",
           "42",
           "3",
           "2",

@@ -29,5 +29,9 @@ export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
     config.store.connectionString === undefined ? [] : [config.store.connectionString];
   const vaultRefs = config.vault.postgres === undefined ? [] : [config.vault.postgres.url];
   const runnerRefs = config.sandbox.runner === undefined ? [] : [config.sandbox.runner.token];
-  return [...modelRefs, ...serverRefs, ...keyRefs, ...storeRefs, ...vaultRefs, ...runnerRefs];
+  const approvalRefs =
+    config.policy.approvals?.notifier.kind === "webhook"
+      ? [config.policy.approvals.notifier.secretRef]
+      : [];
+  return [...modelRefs, ...serverRefs, ...keyRefs, ...storeRefs, ...vaultRefs, ...runnerRefs, ...approvalRefs];
 }

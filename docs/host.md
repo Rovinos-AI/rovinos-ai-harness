@@ -37,6 +37,28 @@ This setup assumes a trusted local host page and a browser that enforces iframe 
 
 ## UX
 
+### Approval screen (task 5.3)
+
+`yarn workspace @harness/approval-app build` produces `packages/approval-app/dist/approval.html`,
+a single document with inline script/style and a SHA-256 content comment. The view validates
+tool-input arguments, structured tool results, or JSON text results against the shared
+`ApprovalPayloadSchema` (`@harness/schemas/browser`). Invalid payloads replace the screen with
+a fixed error state and report only `ui.error` / `payload_invalid` through the host.
+
+The screen displays tokenized arguments as a collapsible tree. Pills label entity types and
+retain the exact token as their accessible name; the app does not resolve tokens or store
+payloads in browser storage. Expiry is checked on receipt and every second, disabling all
+actions when elapsed. The heading receives focus, status changes use a live region, and the
+layout supports narrow screens, light/dark preferences, and reduced motion.
+
+This task renders the buttons only: decision/edit/reveal handlers belong to task 5.4, and
+serving the resource and approval tools belongs to task 18.4 (#207). No decision is sent yet.
+The build rejects app-owned external URLs and scans the final HTML for HTTP(S) literals.
+SDK documentation/schema URL separators are escaped during inline serialization without
+changing their runtime string values; these are not resource requests. The sandbox/CSP
+remains the network boundary. Unit tests cover XSS, metadata-only errors, artifact references,
+and axe states; palette contrast is checked separately because jsdom has no layout engine.
+
 The reference host sends MCP Apps host context during `ui/initialize` and pushes host-context updates when the viewport, fullscreen state, locale, or preferred color scheme changes. Context includes the light or dark theme, the SDK's documented CSS variables, locale, time zone, current and available display modes, and maximum container dimensions. App size-change requests are clamped to those dimensions (at most 1024 by 768 CSS pixels, and no larger than the viewport). The host supports inline mode and fullscreen when the browser enables it. It does not advertise picture-in-picture because this reference host does not implement PiP iframe handling.
 
 ## App requests

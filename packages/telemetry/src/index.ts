@@ -18,6 +18,7 @@ export {
   emitKeysRotated,
   emitVaultMarkTerminalFailed,
   emitPricingMissing,
+  emitPricingCacheMissing,
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
 export {

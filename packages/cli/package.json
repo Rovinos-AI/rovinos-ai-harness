@@ -37,6 +37,8 @@
   },
   "devDependencies": {
     "@harness/telemetry": "workspace:^",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/server": "2.3.1",
     "@opentelemetry/api": "1.9.1",
     "pg": "8.23.1",
     "vitest": "3.2.6"

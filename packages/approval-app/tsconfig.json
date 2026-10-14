@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "rootDir": ".",
+    "noEmit": true,
+    "customConditions": ["source"],
+    "allowJs": true,
+    "paths": {
+      "eventsource": ["../../node_modules/eventsource/dist/index.d.ts"],
+      "eventsource-parser": ["../../node_modules/eventsource-parser/dist/index.d.ts"]
+    },
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*.ts", "*.test.ts", "fixtures/**/*.ts"],
+  "references": [
+    { "path": "../schemas/tsconfig.build.json" },
+    { "path": "../app-telemetry/tsconfig.build.json" }
+  ]
+}

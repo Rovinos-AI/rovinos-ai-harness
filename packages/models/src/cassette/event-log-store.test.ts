@@ -59,7 +59,13 @@ function requestEvent(
   };
 }
 
-function responseEvent(seq: number, id: string, text: string, costMicros?: number): Event {
+function responseEvent(
+  seq: number,
+  id: string,
+  text: string,
+  costMicros?: number,
+  cacheUsage: { readonly cacheReadTokens?: number; readonly cacheWriteTokens?: number } = {},
+): Event {
   return {
     runId,
     seq,
@@ -74,6 +80,12 @@ function responseEvent(seq: number, id: string, text: string, costMicros?: numbe
     model: "test",
     inputTokens: 2,
     outputTokens: 3,
+    ...(cacheUsage.cacheReadTokens === undefined
+      ? {}
+      : { cacheReadTokens: cacheUsage.cacheReadTokens }),
+    ...(cacheUsage.cacheWriteTokens === undefined
+      ? {}
+      : { cacheWriteTokens: cacheUsage.cacheWriteTokens }),
     ...(costMicros === undefined ? {} : { costMicros }),
     finishReason: "stop",
     latencyMs: 5,
@@ -86,6 +98,28 @@ function responseEvent(seq: number, id: string, text: string, costMicros?: numbe
 }
 
 describe("EventLogCassetteStore", () => {
+  it("round-trips cached usage from recorded model responses", async () => {
+    const provider = new CassetteProvider(
+      "replay",
+      new EventLogCassetteStore([
+        requestEvent(0, requestId, "hello", { role: "assistant" }),
+        responseEvent(1, requestId, "cached", undefined, {
+          cacheReadTokens: 7,
+          cacheWriteTokens: 2,
+        }),
+      ]),
+    );
+
+    const response = await provider.complete(request, context);
+
+    expect(response.usage).toEqual({
+      inputTokens: 2,
+      outputTokens: 3,
+      cacheReadTokens: 7,
+      cacheWriteTokens: 2,
+    });
+  });
+
   it("serves paired responses in recorded order", async () => {
     const events = [
       requestEvent(0, requestId, "hello", { role: "assistant" }),
