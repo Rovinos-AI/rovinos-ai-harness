@@ -2,14 +2,16 @@
 import { HarnessError, Id, Code, type SecretRef, SecretRefSchema } from "@harness/schemas";
 import { z } from "zod";
 
-const WebhookUrlSchema = z.url().refine((value) => {
-  const url = new URL(value);
-  return (
-    (url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "localhost")) &&
-    url.username.length === 0 &&
-    url.password.length === 0
-  );
-});
+const WebhookUrlSchema = z.url().pipe(
+  z.string().refine((value) => {
+    const url = new URL(value);
+    return (
+      (url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "localhost")) &&
+      url.username.length === 0 &&
+      url.password.length === 0
+    );
+  }),
+);
 
 /** Strict metadata-only body shared by approval notification implementations. */
 export const ApprovalNotificationSchema = z
@@ -99,6 +101,7 @@ export class WebhookNotifier implements Notifier {
   private readonly secrets: WebhookSecretResolver;
   private readonly fetcher: typeof globalThis.fetch;
   private readonly timeoutMs: number;
+  private readonly allowInsecureLocalhost: boolean;
 
   /** Creates a notifier with an injected secret resolver and optional fetch implementation. */
   constructor(options: WebhookNotifierOptions) {
@@ -113,6 +116,7 @@ export class WebhookNotifier implements Notifier {
     this.secrets = options.secrets;
     this.fetcher = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 5_000;
+    this.allowInsecureLocalhost = options.allowInsecureLocalhost === true;
   }
 
   /** {@inheritDoc Notifier.notify} */
@@ -125,7 +129,10 @@ export class WebhookNotifier implements Notifier {
         const url =
           this.urlSecretRef === undefined
             ? this.endpoint
-            : parseWebhookUrl(await this.secrets.resolve(this.urlSecretRef, signal), false);
+            : parseWebhookUrl(
+                await this.secrets.resolve(this.urlSecretRef, signal),
+                this.allowInsecureLocalhost,
+              );
         const authorization =
           this.secretRef === undefined
             ? undefined

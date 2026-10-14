@@ -81,6 +81,20 @@ describe("PolicyConfigSchema", () => {
     ).toBe(false);
   });
 
+  it("returns a validation failure for malformed webhook URLs without throwing", () => {
+    const result = PolicyConfigSchema.safeParse({
+      approvals: {
+        notifier: {
+          kind: "webhook",
+          url: "not-a-url",
+          secretRef: "env:APPROVAL_WEBHOOK_TOKEN",
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it("rejects empty paths and unknown config fields", () => {
     expect(PolicyConfigSchema.safeParse({ file: "" }).success).toBe(false);
     expect(PolicyConfigSchema.safeParse({ unknown: true }).success).toBe(false);

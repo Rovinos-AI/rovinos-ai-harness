@@ -14,6 +14,16 @@ pii: {}
 telemetry: {}
 sandbox: {}
 `;
+const webhookPolicyYaml = validYaml.replace(
+  "policy: {}",
+  `policy:
+  approvals:
+    notifier:
+      kind: webhook
+      url: https://hooks.example.test/approval
+      secretRef: env:APPROVAL_WEBHOOK_TOKEN
+      timeoutMs: 5000`,
+);
 const validJson = JSON.stringify({
   run: { budgets: { maxSteps: 12 } },
   store: {},
@@ -144,6 +154,79 @@ describe("loadConfig", () => {
       maxWallClockMs: 1000,
       countSuspendedTime: false,
     });
+  });
+
+  it.each([
+    [
+      "URL",
+      "https://hooks.example.test/overridden",
+      {
+        kind: "webhook",
+        url: "https://hooks.example.test/overridden",
+        secretRef: "env:APPROVAL_WEBHOOK_TOKEN",
+        timeoutMs: 5000,
+      },
+    ],
+    [
+      "secretRef",
+      "env:OTHER_APPROVAL_WEBHOOK_TOKEN",
+      {
+        kind: "webhook",
+        url: "https://hooks.example.test/approval",
+        secretRef: "env:OTHER_APPROVAL_WEBHOOK_TOKEN",
+        timeoutMs: 5000,
+      },
+    ],
+    [
+      "timeoutMs",
+      "2500",
+      {
+        kind: "webhook",
+        url: "https://hooks.example.test/approval",
+        secretRef: "env:APPROVAL_WEBHOOK_TOKEN",
+        timeoutMs: 2500,
+      },
+    ],
+  ])("applies the notifier %s environment override", async (field, value, expected) => {
+    const config = await loadConfig({
+      env: { [`HARNESS__POLICY__APPROVALS__NOTIFIER__${field}`]: value },
+      readFile: reader(webhookPolicyYaml),
+    });
+
+    expect(config.policy.approvals?.notifier).toEqual(expected);
+  });
+
+  it("uses the notifier kind from the same environment override set", async () => {
+    const config = await loadConfig({
+      env: {
+        HARNESS__POLICY__APPROVALS__NOTIFIER__URL: "https://hooks.example.test/approval",
+        HARNESS__POLICY__APPROVALS__NOTIFIER__secretRef: "env:APPROVAL_WEBHOOK_TOKEN",
+        HARNESS__POLICY__APPROVALS__NOTIFIER__timeoutMs: "5000",
+        HARNESS__POLICY__APPROVALS__NOTIFIER__KIND: "webhook",
+      },
+      readFile: reader(validYaml),
+    });
+
+    expect(config.policy.approvals?.notifier).toEqual({
+      kind: "webhook",
+      url: "https://hooks.example.test/approval",
+      secretRef: "env:APPROVAL_WEBHOOK_TOKEN",
+      timeoutMs: 5000,
+    });
+  });
+
+  it("rejects unknown notifier environment paths", async () => {
+    const error = await expectConfigError(
+      loadConfig({
+        env: { HARNESS__POLICY__APPROVALS__NOTIFIER__UNKNOWN: "private-value" },
+        readFile: reader(webhookPolicyYaml),
+      }),
+    );
+
+    expect(error.issues[0]).toContain(
+      "HARNESS__POLICY__APPROVALS__NOTIFIER__UNKNOWN: unknown, ambiguous, or unsupported configuration path (config_env_invalid)",
+    );
+    expect(error.message).not.toContain("private-value");
   });
 
   it.each([
