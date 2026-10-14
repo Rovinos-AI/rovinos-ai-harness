@@ -30,27 +30,37 @@ export const HOST_APP_REJECTED_REASONS = [
   "session_cap",
 ] as const;
 
+/** Policy outcomes used by the decision counter. */
+export const POLICY_DECISIONS = ["allow", "ask", "deny"] as const;
+
 /** Bounded reasons for dropping or stripping telemetry data. */
 export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];
 /** Bounded reasons counted when an app call is rejected by the host. */
 export type HostAppRejectedReason = (typeof HOST_APP_REJECTED_REASONS)[number];
+/** Bounded policy decision outcome. */
+export type PolicyDecision = (typeof POLICY_DECISIONS)[number];
 interface TelemetryDropAttributes extends Readonly<Record<string, TelemetryDropReason>> {
   readonly "harness.telemetry.dropped.reason": TelemetryDropReason;
 }
 interface HostAppRejectedAttributes extends Readonly<Record<string, HostAppRejectedReason>> {
   readonly "harness.host.app_rejected.reason": HostAppRejectedReason;
 }
+interface PolicyDecisionAttributes extends Readonly<Record<string, PolicyDecision>> {
+  readonly "harness.policy.decision": PolicyDecision;
+}
 
 /** String-valued metric attributes are explicitly closed enumerations. */
 export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
   "harness.telemetry.dropped.reason": TELEMETRY_DROP_REASONS,
   "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
+  "harness.policy.decision": POLICY_DECISIONS,
 } as const;
 
 /** Collector allowlist of metric names and their allowed datapoint attribute keys. */
 export const METRIC_ALLOWLIST = {
   "harness.host.app_rejected": ["harness.host.app_rejected.reason"],
   "harness.host.app_spans_accepted": [],
+  "harness.policy.decisions": ["harness.policy.decision"],
   "harness.sentinel.scope_reduced": [],
   "harness.sentinel.short_values_skipped": [],
   "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
@@ -58,6 +68,7 @@ export const METRIC_ALLOWLIST = {
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
 let hostAppRejectedCounter: Counter<HostAppRejectedAttributes> | undefined;
+let policyDecisionsCounter: Counter<PolicyDecisionAttributes> | undefined;
 let hostAppSpansAcceptedCounter: Counter<NoMetricAttributes> | undefined;
 let skippedShortValuesCounter: Counter<NoMetricAttributes> | undefined;
 let scopeReducedCounter: Counter<NoMetricAttributes> | undefined;
@@ -83,6 +94,14 @@ function getHostAppRejectedCounter(): Counter<HostAppRejectedAttributes> {
     (meter, name) => meter.createCounter<HostAppRejectedAttributes>(name),
   );
   return hostAppRejectedCounter;
+}
+
+function getPolicyDecisionsCounter(): Counter<PolicyDecisionAttributes> {
+  policyDecisionsCounter ??= createCounter<PolicyDecisionAttributes>(
+    "harness.policy.decisions",
+    (meter, name) => meter.createCounter<PolicyDecisionAttributes>(name),
+  );
+  return policyDecisionsCounter;
 }
 
 function getHostAppSpansAcceptedCounter(): Counter<NoMetricAttributes> {
@@ -122,6 +141,15 @@ export function countDroppedTelemetry(reason: TelemetryDropReason): void {
 export function countHostAppRejected(reason: HostAppRejectedReason): void {
   try {
     getHostAppRejectedCounter().add(1, { "harness.host.app_rejected.reason": reason });
+  } catch {
+    return;
+  }
+}
+
+/** Counts one policy decision using its bounded outcome. */
+export function countPolicyDecision(decision: PolicyDecision): void {
+  try {
+    getPolicyDecisionsCounter().add(1, { "harness.policy.decision": decision });
   } catch {
     return;
   }
