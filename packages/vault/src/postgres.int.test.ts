@@ -145,14 +145,14 @@ it("serializes a first put and purge across independent pools", async () => {
     await first.stats(runId);
     await admin.query(
       `CREATE FUNCTION "${schema}".pause_vault_insert() RETURNS trigger
-       LANGUAGE plpgsql AS $$ BEGIN
-         PERFORM pg_advisory_xact_lock(180120, 1);
-         RETURN NEW;
-       END $$`,
+        LANGUAGE plpgsql AS $$ BEGIN
+          PERFORM pg_advisory_xact_lock(180120, 1);
+          RETURN NEW;
+        END $$`,
     );
     await admin.query(
       `CREATE TRIGGER pause_vault_insert BEFORE INSERT ON "${schema}".vault_entries
-       FOR EACH ROW EXECUTE FUNCTION "${schema}".pause_vault_insert()`,
+        FOR EACH ROW EXECUTE FUNCTION "${schema}".pause_vault_insert()`,
     );
     await gate.query("SELECT pg_advisory_lock(180120, 1)");
     const put = first.put(runId, "email", "alice@example.test");
@@ -160,7 +160,7 @@ it("serializes a first put and purge across independent pools", async () => {
     for (let attempt = 0; attempt < 50; attempt += 1) {
       const waiting = await observer.query(
         `SELECT 1 FROM pg_stat_activity
-         WHERE wait_event_type = 'Lock' AND query ILIKE '%INSERT INTO vault_entries%' LIMIT 1`,
+          WHERE wait_event_type = 'Lock' AND query ILIKE '%INSERT INTO vault_entries%' LIMIT 1`,
       );
       if (waiting.rows.length > 0) {
         insertIsBlocked = true;
@@ -241,9 +241,9 @@ it("re-wraps scope keys during rotation without re-encrypting entries", async ()
     const token = await vault.put(runId, "email", "alice@example.test");
     const before = await database.query<{ value_enc: string; wrapped_dek: Buffer; key_id: string }>(
       `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
-       FROM vault_entries AS entries
-       JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
-       WHERE entries.run_id = $1 AND entries.token = $2`,
+        FROM vault_entries AS entries
+        JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
+        WHERE entries.run_id = $1 AND entries.token = $2`,
       [runId, token],
     );
     const original = before.rows[0];
@@ -257,9 +257,9 @@ it("re-wraps scope keys during rotation without re-encrypting entries", async ()
     });
     const after = await database.query<{ value_enc: string; wrapped_dek: Buffer; key_id: string }>(
       `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
-       FROM vault_entries AS entries
-       JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
-       WHERE entries.run_id = $1 AND entries.token = $2`,
+        FROM vault_entries AS entries
+        JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
+        WHERE entries.run_id = $1 AND entries.token = $2`,
       [runId, token],
     );
     expect(after.rows[0]).toMatchObject({ key_id: "key-b", value_enc: original.value_enc });
@@ -334,9 +334,9 @@ it("documents that a pre-purge backup with the scope-key row remains decryptable
       key_id: string;
     }>(
       `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
-       FROM vault_entries AS entries
-       JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
-       WHERE entries.run_id = $1 AND entries.token = $2`,
+        FROM vault_entries AS entries
+        JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
+        WHERE entries.run_id = $1 AND entries.token = $2`,
       [runId, token],
     );
     const row = backup.rows[0];

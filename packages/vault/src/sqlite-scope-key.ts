@@ -134,9 +134,9 @@ export async function convertSqliteLegacyScopes(
   const scopes = db
     .prepare<[], { run_id: string }>(
       `SELECT DISTINCT entries.run_id FROM vault_entries AS entries
-       WHERE NOT EXISTS (
-         SELECT 1 FROM vault_scope_keys AS scope_keys WHERE scope_keys.scope_id = entries.run_id
-       ) ORDER BY entries.run_id`,
+        WHERE NOT EXISTS (
+          SELECT 1 FROM vault_scope_keys AS scope_keys WHERE scope_keys.scope_id = entries.run_id
+        ) ORDER BY entries.run_id`,
     )
     .all();
   for (const { run_id } of scopes) {

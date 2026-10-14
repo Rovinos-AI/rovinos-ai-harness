@@ -76,7 +76,7 @@ async function createLegacyVault(path: string, applyScopeMigration = false): Pro
         .prepare(
           `INSERT INTO vault_entries
             (run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           runId,
@@ -384,9 +384,9 @@ describe("SqliteVault", () => {
       const before = database
         .prepare<[string, string], { value_enc: string; wrapped_dek: Buffer; key_id: string }>(
           `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
-           FROM vault_entries AS entries
-           JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
-           WHERE entries.run_id = ? AND entries.token = ?`,
+            FROM vault_entries AS entries
+            JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
+            WHERE entries.run_id = ? AND entries.token = ?`,
         )
         .get(runId, token);
       database.close();
@@ -402,9 +402,9 @@ describe("SqliteVault", () => {
       const after = rotatedDatabase
         .prepare<[string, string], { value_enc: string; wrapped_dek: Buffer; key_id: string }>(
           `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
-           FROM vault_entries AS entries
-           JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
-           WHERE entries.run_id = ? AND entries.token = ?`,
+            FROM vault_entries AS entries
+            JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
+            WHERE entries.run_id = ? AND entries.token = ?`,
         )
         .get(runId, token);
       rotatedDatabase.close();
@@ -541,9 +541,9 @@ describe("SqliteVault", () => {
     const backup = database
       .prepare<[string, string], { value_enc: string; wrapped_dek: Buffer; key_id: string }>(
         `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
-         FROM vault_entries AS entries
-         JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
-         WHERE entries.run_id = ? AND entries.token = ?`,
+          FROM vault_entries AS entries
+          JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
+          WHERE entries.run_id = ? AND entries.token = ?`,
       )
       .get(runId, token);
     database.close();

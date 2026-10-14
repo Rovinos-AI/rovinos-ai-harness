@@ -462,8 +462,8 @@ export class PostgresVault
       const inserted = await client.query<{ token: string } & QueryResultRow>(
         `INSERT INTO vault_entries
           (run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (run_id, entity_type, lookup) DO NOTHING RETURNING token`,
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (run_id, entity_type, lookup) DO NOTHING RETURNING token`,
         [runId, token.data, entityType, lookup, valueEnc, scopeKey.keyId, keyId, this.now()],
       );
       const insertedToken = inserted.rows[0]?.token;
@@ -697,10 +697,10 @@ export class PostgresVault
         { key_id: string; count: number | string } & QueryResultRow
       >(
         `SELECT key_id, COUNT(*) AS count FROM (
-           SELECT key_id, run_id, token FROM vault_entries
-           UNION
-           SELECT lookup_key_id AS key_id, run_id, token FROM vault_entries
-         ) AS keys_in_use GROUP BY key_id ORDER BY key_id`,
+            SELECT key_id, run_id, token FROM vault_entries
+            UNION
+            SELECT lookup_key_id AS key_id, run_id, token FROM vault_entries
+          ) AS keys_in_use GROUP BY key_id ORDER BY key_id`,
       );
       return result.rows.map(({ key_id, count }) =>
         VaultKeyRowCountSchema.parse({ keyId: key_id, count: safeInteger(count) }),

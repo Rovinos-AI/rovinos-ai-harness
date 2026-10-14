@@ -97,7 +97,7 @@ async function rotateEntry(rotation: EntryRotationContext, row: EntryRow): Promi
     );
     const updated = await client.query(
       `UPDATE vault_entries SET key_id = $1, lookup = $2, lookup_key_id = $1
-       WHERE run_id = $3 AND token = $4 AND key_id = $5 AND lookup_key_id = $6 AND value_enc = $7`,
+        WHERE run_id = $3 AND token = $4 AND key_id = $5 AND lookup_key_id = $6 AND value_enc = $7`,
       [
         targetKeyId,
         collision.rows.length === 0 ? lookup : null,
@@ -147,10 +147,10 @@ async function reencryptRows(input: ReencryptRowsInput): Promise<ReencryptBatchR
   await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
   const selected = await client.query<EntryRow>(
     `SELECT run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id
-     FROM vault_entries
-     WHERE (key_id <> $1 OR lookup_key_id <> $1)
-       AND ($2::text IS NULL OR run_id > $2 OR (run_id = $2 AND token > $3))
-     ORDER BY run_id, token LIMIT $4`,
+      FROM vault_entries
+      WHERE (key_id <> $1 OR lookup_key_id <> $1)
+        AND ($2::text IS NULL OR run_id > $2 OR (run_id = $2 AND token > $3))
+      ORDER BY run_id, token LIMIT $4`,
     [targetKeyId, cursor?.runId ?? null, cursor?.token ?? "", limit + 1],
   );
   const rows = selected.rows.slice(0, limit);
