@@ -10,6 +10,7 @@ import {
   type Span,
   SpanStatusCode,
   type SpanOptions,
+  type TimeInput,
   ROOT_CONTEXT,
   trace,
 } from "@opentelemetry/api";
@@ -53,13 +54,17 @@ export interface SpanDefinition<
    * Validates attributes before creating a span.
    *
    * @param attrs - Attribute values matching this definition's schema.
-   * @param opts - Optional parent context and span links.
+   * @param opts - Optional parent context, span links, and start timestamp.
    * @returns The newly created span.
    * @throws SpanRegistryError when attributes fail validation.
    */
   start(
     attrs: z.infer<Schema>,
-    opts?: { readonly parent?: Context; readonly links?: Link[] },
+    opts?: {
+      readonly parent?: Context;
+      readonly links?: Link[];
+      readonly startTime?: TimeInput;
+    },
   ): Span;
 }
 
@@ -250,6 +255,9 @@ function registerSpan<const Shape extends SpanShape>(
       const options: SpanOptions = { attributes };
       if (opts?.links !== undefined) {
         options.links = opts.links;
+      }
+      if (opts?.startTime !== undefined) {
+        options.startTime = opts.startTime;
       }
       const span = getTracer().startSpan(parsedName, options, opts?.parent);
       activeSpanDefinitions.set(span, definition);

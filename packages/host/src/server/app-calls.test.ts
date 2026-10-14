@@ -25,6 +25,7 @@ const session: AppInstance = {
   id: app.id,
   resourceUri: app.resourceUri,
   sessionId: Id.parse("00000000000000000000000005"),
+  sessionStartTime: 0,
   runId,
   end: () => undefined,
 };
@@ -224,6 +225,7 @@ describe("AppCallRouter", () => {
           id: session.id,
           resourceUri: session.resourceUri,
           sessionId: session.sessionId,
+          sessionStartTime: 0,
           end: session.end,
         },
         request({ toolName: APP_TELEMETRY_TOOL_NAME, arguments: { spans: [] } }),

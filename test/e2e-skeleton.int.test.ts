@@ -4,6 +4,7 @@
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
+// Not wired yet: reference host in core runtime/CLI (-> #207)
 // Not wired yet: runtime vault from config (13.12 -> #389)
 // Not wired yet: storage-boundary tokenization (13.8 -> #81)
 // Not wired yet: sentinel trip gate wired to the runtime vault (8.4 -> #74)
