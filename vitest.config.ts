@@ -7,6 +7,9 @@ export default defineConfig({
   resolve: {
     conditions: ["source", "module", "browser", "development|production"],
     alias: {
+      "@harness/schemas/browser": fileURLToPath(
+        new URL("./packages/schemas/src/browser.ts", import.meta.url),
+      ),
       "@harness/config": fileURLToPath(new URL("./packages/config/src/index.ts", import.meta.url)),
       "@harness/schemas": fileURLToPath(
         new URL("./packages/schemas/src/index.ts", import.meta.url),
