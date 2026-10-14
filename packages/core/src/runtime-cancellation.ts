@@ -36,6 +36,28 @@ export function composeAbortSignals(signals: readonly AbortSignal[]): {
   };
 }
 
+interface CancellationTailOptions {
+  readonly store: EventStore;
+  readonly runId: Id;
+  readonly fromSeq: number;
+  readonly controller: AbortController;
+  readonly onCursor: (nextSeq: number) => void;
+  readonly onCancellation: () => void;
+}
+
+interface CancellationWatchOptions extends Omit<CancellationTailOptions, "fromSeq"> {
+  readonly firstSeq: number;
+  readonly stopSignal: AbortSignal;
+}
+
+async function readTail(store: EventStore, runId: Id, fromSeq: number): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of store.read(runId, { fromSeq })) {
+    events.push(event);
+  }
+  return events;
+}
+
 function waitForWatcher(signal: AbortSignal, delayMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -54,22 +76,9 @@ function waitForWatcher(signal: AbortSignal, delayMs: number): Promise<boolean> 
   });
 }
 
-interface CancellationTailOptions {
-  readonly store: EventStore;
-  readonly runId: Id;
-  readonly fromSeq: number;
-  readonly controller: AbortController;
-  readonly onCursor: (nextSeq: number) => void;
-  readonly onCancellation: () => void;
-}
-
-/** Reads new events and aborts local work when durable cancellation is observed. */
+/** Inspect stored cancellation events after a monitor read fails. */
 export async function inspectCancellationTail(options: CancellationTailOptions): Promise<boolean> {
-  const events: Event[] = [];
-  for await (const event of options.store.read(options.runId, { fromSeq: options.fromSeq })) {
-    events.push(event);
-  }
-  for (const event of events) {
+  for (const event of await readTail(options.store, options.runId, options.fromSeq)) {
     options.onCursor(event.seq + 1);
     if (event.type === "run_status_changed" && event.to === "cancelled") {
       options.onCancellation();
@@ -80,14 +89,34 @@ export async function inspectCancellationTail(options: CancellationTailOptions):
   return false;
 }
 
-interface CancellationWatchOptions extends Omit<CancellationTailOptions, "fromSeq"> {
-  readonly firstSeq: number;
-  readonly stopSignal: AbortSignal;
-}
-
-/** Polls the event store for durable cancellation, backing off when reads fail. */
+/** Watch a run live, falling back to bounded polling if the subscription fails. */
 export async function watchCancellation(options: CancellationWatchOptions): Promise<void> {
   let nextSeq = options.firstSeq;
+  let watchFailed = false;
+  try {
+    for await (const event of options.store.watch(options.runId, {
+      fromSeq: nextSeq,
+      signal: options.stopSignal,
+    })) {
+      nextSeq = event.seq + 1;
+      options.onCursor(nextSeq);
+      if (event.type === "run_status_changed" && event.to === "cancelled") {
+        options.onCancellation();
+        options.controller.abort(CANCEL_REQUESTED);
+        return;
+      }
+    }
+  } catch {
+    watchFailed = true;
+    try {
+      cancellationMonitorLogger.warn(CANCEL_MONITOR_DEGRADED);
+    } catch {
+      // A diagnostic logger failure must not disable cooperative cancellation.
+    }
+  }
+  if (!watchFailed) {
+    return;
+  }
   let delayMs = CANCEL_POLL_INTERVAL_MS;
   while (!options.stopSignal.aborted) {
     if (!(await waitForWatcher(options.stopSignal, delayMs))) {

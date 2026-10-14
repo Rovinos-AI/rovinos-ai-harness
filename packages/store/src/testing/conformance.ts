@@ -317,6 +317,7 @@ function registerDeleteRun(factory: EventStoreFactory, builders: EventStoreTestB
   });
 }
 
+/** Registers the shared behavioral tests required of every EventStore adapter. */
 export function runEventStoreConformance(
   name: string,
   factory: EventStoreFactory,

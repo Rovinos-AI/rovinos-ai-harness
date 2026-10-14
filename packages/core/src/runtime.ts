@@ -22,7 +22,6 @@ import { createSubagentTool } from "./subagent/runtime.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import { setupRuntime } from "./runtime-setup.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
-import { inspectCancellationTail, watchCancellation } from "./runtime-cancellation-monitor.js";
 import type {
   Runtime,
   RuntimeComposition,
