@@ -9,6 +9,7 @@ import { Readable } from "node:stream";
 import { Id, parseJson } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { WebFetchResultSchema } from "../../src/web-fetch-contracts.js";
 import {
   createRunnerServer,
   createRunnerRequestHandler,
@@ -117,6 +118,20 @@ function makePayload(): string {
   return JSON.stringify({ runId, spec });
 }
 
+const fetchPayload = JSON.stringify({
+  runId,
+  request: { url: "https://docs.example.test/page?synthetic=canary", accept: "text/plain" },
+});
+const fetchResult = WebFetchResultSchema.parse({
+  url: "https://docs.example.test/page",
+  status: 200,
+  contentType: "text/plain",
+  text: "untrusted response",
+  truncated: false,
+  untrusted: true,
+  hiddenTextDropped: 0,
+});
+
 async function call(
   handler: ReturnType<typeof createRunnerRequestHandler>,
   request: ReturnType<typeof makeRequest>,
@@ -160,6 +175,77 @@ describe("runner HTTP request handler", () => {
     expect(responseBody(health)).toEqual({ status: "ok" });
     expect(missing.status).toBe(404);
     expect(responseBody(missing)).toMatchObject({ code: "sandbox_route_not_found" });
+  });
+
+  it("requires an allowlist and proxy before exposing the authenticated fetch endpoint", async () => {
+    const handler = createRunnerRequestHandler(makeOptions());
+    const response = await call(
+      handler,
+      makeRequest({
+        url: "/fetch",
+        authorization: ["Bearer", token].join(" "),
+        body: fetchPayload,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(responseBody(response)).toMatchObject({ code: "sandbox_fetch_egress_disabled" });
+  });
+
+  it("fetches only through the configured runner proxy and returns untrusted content", async () => {
+    const fetch = vi.fn(() => Promise.resolve(fetchResult));
+    const handler = createRunnerRequestHandler(
+      makeOptions({
+        proxyUrl: "http://sandbox-egress-proxy:3128",
+        egressAllowlist: [{ host: "docs.example.test", ports: [443] }],
+        fetch,
+      }),
+    );
+    const response = await call(
+      handler,
+      makeRequest({
+        url: "/fetch",
+        authorization: ["Bearer", token].join(" "),
+        body: fetchPayload,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(WebFetchResultSchema.parse(JSON.parse(response.body))).toEqual(fetchResult);
+    expect(fetch).toHaveBeenCalledWith(
+      { url: "https://docs.example.test/page?synthetic=canary", accept: "text/plain" },
+      {
+        proxyUrl: "http://sandbox-egress-proxy:3128",
+        allow: [{ host: "docs.example.test", ports: [443] }],
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("does not expose fetch URLs in runner errors or invoke the fetcher for malformed inputs", async () => {
+    const fetch = vi.fn(() => Promise.resolve(fetchResult));
+    const handler = createRunnerRequestHandler(
+      makeOptions({
+        proxyUrl: "http://sandbox-egress-proxy:3128",
+        egressAllowlist: [{ host: "docs.example.test", ports: [443] }],
+        fetch,
+      }),
+    );
+    const response = await call(
+      handler,
+      makeRequest({
+        url: "/fetch",
+        authorization: ["Bearer", token].join(" "),
+        body: JSON.stringify({
+          runId,
+          request: { url: "******docs.example.test/page?synthetic-canary" },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body).not.toContain("synthetic-canary");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("rejects missing and incorrect bearer credentials", async () => {

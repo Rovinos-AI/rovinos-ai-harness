@@ -1345,7 +1345,11 @@ __metadata:
   resolution: "@harness/sandbox@workspace:packages/sandbox"
   dependencies:
     "@harness/schemas": "workspace:^"
+    "@harness/telemetry": "workspace:^"
+    "@opentelemetry/api": "npm:1.9.1"
+    "@opentelemetry/core": "npm:2.12.0"
     "@types/node": "npm:22.20.5"
+    parse5: "npm:8.0.1"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   languageName: unknown
@@ -5266,7 +5270,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"parse5@npm:^8.0.0, parse5@npm:^8.0.1":
+"parse5@npm:8.0.1, parse5@npm:^8.0.0, parse5@npm:^8.0.1":
   version: 8.0.1
   resolution: "parse5@npm:8.0.1"
   dependencies:

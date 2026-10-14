@@ -9,6 +9,7 @@
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
 // Not wired yet: reference-host app content callbacks in the core runtime/CLI (-> #207)
 // Not wired yet: serve the approval app resource and decision tools (18.4 -> #207)
+// Not wired yet: web.fetch provider registration in the core runtime/CLI (19.10 -> #98)
 import { Command } from "commander";
 import { Client, InMemoryTransport, type Tool, type Transport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";

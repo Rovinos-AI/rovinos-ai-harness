@@ -3,6 +3,13 @@ import { HarnessError, SandboxRunnerUrlSchema, type Id, parseJson } from "@harne
 import { z } from "zod";
 import { ExecResultSchema, MAX_EXEC_TIMEOUT_MS } from "./types.js";
 import type { ExecResult, ExecSpec, SandboxBackend } from "./types.js";
+import {
+  MAX_WEB_FETCH_BYTES,
+  MAX_WEB_FETCH_TIMEOUT_MS,
+  WebFetchRequestSchema,
+  WebFetchResultSchema,
+} from "./web-fetch-contracts.js";
+import type { WebFetchRequest, WebFetchResult } from "./web-fetch-contracts.js";
 
 const RemoteOptionsSchema = z
   .object({
@@ -168,6 +175,70 @@ export class RemoteSandboxBackend implements SandboxBackend {
       }
       if (wasAborted(signal)) {
         return abortedResult();
+      }
+      throw new RemoteSandboxError("sandbox_unavailable");
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+    }
+  }
+
+  /** Fetches allowlisted content through the runner's authenticated `/fetch` endpoint. */
+  async fetch(runId: Id, request: WebFetchRequest, signal: AbortSignal): Promise<WebFetchResult> {
+    const parsed = WebFetchRequestSchema.safeParse(request);
+    if (!parsed.success) {
+      throw new RemoteSandboxError("sandbox_runner_config_invalid");
+    }
+    if (signal.aborted) {
+      throw new RemoteSandboxError("sandbox_timeout");
+    }
+    const controller = new AbortController();
+    const timeoutReason = new DOMException("The sandbox fetch timed out.", "TimeoutError");
+    const timeoutMs = MAX_WEB_FETCH_TIMEOUT_MS + this.#timeoutGraceMs;
+    const timer = setTimeout(() => {
+      controller.abort(timeoutReason);
+    }, timeoutMs);
+    const abort = (): void => {
+      controller.abort();
+    };
+    signal.addEventListener("abort", abort, { once: true });
+
+    try {
+      const response = await this.#fetcher(new URL("/fetch", this.#url), {
+        method: "POST",
+        redirect: "error",
+        headers: {
+          authorization: ["Bearer", this.#token].join(" "),
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify({ runId, request: parsed.data }),
+        signal: controller.signal,
+      });
+      if (response.status === 409) {
+        throw new RemoteSandboxError("sandbox_busy");
+      }
+      if (response.status === 408 || response.status === 504) {
+        throw new RemoteSandboxError("sandbox_timeout");
+      }
+      if (!response.ok) {
+        throw new RemoteSandboxError("sandbox_unavailable");
+      }
+      const maxResponseBytes = MAX_WEB_FETCH_BYTES * 5 + 1_048_576;
+      return parseJson(
+        WebFetchResultSchema,
+        await readBoundedResponse(response, maxResponseBytes),
+        { maxBytes: maxResponseBytes },
+      );
+    } catch (error) {
+      if (error instanceof RemoteSandboxError) {
+        throw error;
+      }
+      if (controller.signal.reason === timeoutReason) {
+        throw new RemoteSandboxError("sandbox_timeout");
+      }
+      if (wasAborted(signal)) {
+        throw new RemoteSandboxError("sandbox_timeout");
       }
       throw new RemoteSandboxError("sandbox_unavailable");
     } finally {
