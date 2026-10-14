@@ -121,6 +121,7 @@ async function resumeChild(persistScope: boolean): Promise<{
     { run: RunConfigSchema.parse({}) },
     {
       store,
+      transientVault: true,
       clock: new FakeClock(4),
       model,
       tool,

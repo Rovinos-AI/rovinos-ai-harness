@@ -8,6 +8,7 @@ const vaultOperationErrorCodeSchema = z.enum([
   "vault_unavailable",
   "vault_migration_checksum_mismatch",
   "vault_migration_newer_than_code",
+  "schema_migration_pending",
 ]);
 
 type VaultOperationErrorCode = z.infer<typeof vaultOperationErrorCodeSchema>;
@@ -18,6 +19,7 @@ const ERROR_MESSAGES: Record<VaultOperationErrorCode, string> = {
   vault_unavailable: "Vault operation failed",
   vault_migration_checksum_mismatch: "Vault migration checksum mismatch",
   vault_migration_newer_than_code: "Vault schema is newer than this version",
+  schema_migration_pending: "Vault schema migrations are pending",
 };
 
 /** A detail-free failure raised by the encrypted vault adapter. */

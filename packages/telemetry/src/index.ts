@@ -12,7 +12,11 @@ export {
   type LogRecordDefinition,
   type LogRecordShape,
 } from "./log-registry.js";
-export { emitSafeEvent, safeEventLogAttributeMap } from "./safe-event-logs.js";
+export {
+  emitSafeEvent,
+  emitSafeEventToDefaultLogger,
+  safeEventLogAttributeMap,
+} from "./safe-event-logs.js";
 export { countHostAppRejected, METRIC_ALLOWLIST, type HostAppRejectedReason } from "./metrics.js";
 export {
   __resetRegistryForTests,

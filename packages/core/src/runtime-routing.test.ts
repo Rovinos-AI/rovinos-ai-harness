@@ -15,10 +15,15 @@ import { InMemoryEventStore } from "@harness/store";
 import { ProviderError } from "@harness/models";
 import { PolicyDocumentSchema, policyVersion } from "@harness/policy";
 import type { PolicyDocument } from "@harness/policy";
-import { createRuntime } from "./runtime.js";
+import { createRuntime as createRuntimeImpl } from "./runtime.js";
 import type { ProviderAdapter } from "@harness/models";
 import { createConfiguredModelPort } from "./runtime-model.js";
 import type { ModelPort } from "./ports.js";
+
+const createRuntime = (
+  config: Parameters<typeof createRuntimeImpl>[0],
+  overrides: Parameters<typeof createRuntimeImpl>[1] = {},
+) => createRuntimeImpl(config, { ...overrides, transientVault: true });
 
 const models = ModelsConfigSchema.parse({
   retry: { maxAttempts: 1 },

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { RunConfigSchema, StoreConfigSchema } from "@harness/schemas";
-import { PostgresEventStore } from "@harness/store";
+import { PiiEventStore } from "@harness/pii";
 import { expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
 
@@ -34,10 +34,11 @@ it("creates the configured Postgres store and resolves its connection with the i
     },
     {
       secretResolver: { resolve },
+      transientVault: true,
     },
   );
 
-  expect(runtime.store).toBeInstanceOf(PostgresEventStore);
+  expect(runtime.store).toBeInstanceOf(PiiEventStore);
   expect(resolve).toHaveBeenCalledWith("env:TEST_POSTGRES_URL");
   await runtime.close();
   expect(postgresPool.ended).toBe(true);

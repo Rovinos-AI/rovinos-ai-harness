@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, trace } from "@opentelemetry/api";
-import { SeverityNumber, type Logger } from "@opentelemetry/api-logs";
+import { logs, SeverityNumber, type Logger } from "@opentelemetry/api-logs";
 import { Code, type Id } from "@harness/schemas";
 import { attr } from "./attr.js";
 import { defineLogRecord, type LogRecordDefinition } from "./log-registry.js";
@@ -219,6 +219,7 @@ const sentinelTripDefinition = defineLogRecord("harness.sentinel.trip", {
   "harness.run.id": attr.optional(attr.id()),
   "harness.sentinel.trip.count": attr.nonnegativeInt(),
 });
+const safeEventLogger = logs.getLogger("@harness/core");
 
 function scalarValue(value: unknown): string | number | boolean | undefined {
   if (
@@ -302,4 +303,9 @@ export function emitSentinelTrip(
     severityNumber: SeverityNumber.INFO,
     attributes,
   });
+}
+
+/** Emits a validated SafeEvent through the harness logger without exposing OTel to callers. */
+export function emitSafeEventToDefaultLogger(safeEvent: SafeEventType): void {
+  emitSafeEvent(safeEventLogger, safeEvent);
 }
