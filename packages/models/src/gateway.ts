@@ -16,7 +16,6 @@ import {
   type ModelRetryConfig,
 } from "@harness/schemas";
 import {
-  countModelUsage,
   emitPricingCacheMissing,
   emitPricingMissing,
   setActiveSpanAttribute,
@@ -53,6 +52,7 @@ import { enforcePromptOutput, withPromptOutput } from "./enforce/rung-prompt.js"
 import { lowerForProvider, schemaHash, toJsonSchema } from "./json-schema.js";
 import { appendRepairMessages } from "./enforce/repair.js";
 import { createPricingAccountant } from "./pricing.js";
+import { aggregateModelUsage, reportModelUsage } from "./usage.js";
 
 /** Dependencies injected into every provider adapter call by the gateway. */
 export interface ModelGatewayDependencies {
@@ -294,26 +294,9 @@ export class ModelGateway {
     });
   }
 
-  private reportUsage(model: ModelRef, usage: ModelUsage): void {
-    if (this.options.deferSpanUsage !== true) {
-      setActiveSpanAttribute("harness.model.input_tokens", usage.inputTokens);
-      setActiveSpanAttribute("harness.model.output_tokens", usage.outputTokens);
-      if (usage.cacheReadTokens !== undefined) {
-        setActiveSpanAttribute("harness.model.cache_read_tokens", usage.cacheReadTokens);
-      }
-      if (usage.cacheWriteTokens !== undefined) {
-        setActiveSpanAttribute("harness.model.cache_write_tokens", usage.cacheWriteTokens);
-      }
-      if (usage.costMicros !== undefined) {
-        setActiveSpanAttribute("harness.model.cost_micros", usage.costMicros);
-      }
-    }
-    countModelUsage(usage, model.provider, model.model);
-  }
-
   private accountAndReportUsage(model: ModelRef, usage: ModelUsage): ModelUsage {
     const accounted = this.accountUsage(model, usage);
-    this.reportUsage(model, accounted);
+    reportModelUsage(model, accounted, this.options.deferSpanUsage === true);
     return accounted;
   }
 
@@ -445,19 +428,4 @@ export class ModelGateway {
       semaphore,
     });
   }
-}
-
-function aggregateModelUsage(previous: ModelUsage | undefined, next: ModelUsage): ModelUsage {
-  const cacheReadTokens = (previous?.cacheReadTokens ?? 0) + (next.cacheReadTokens ?? 0);
-  const cacheWriteTokens = (previous?.cacheWriteTokens ?? 0) + (next.cacheWriteTokens ?? 0);
-  return {
-    inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
-    outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
-    ...((previous?.cacheReadTokens === undefined && next.cacheReadTokens === undefined)
-      ? {}
-      : { cacheReadTokens }),
-    ...((previous?.cacheWriteTokens === undefined && next.cacheWriteTokens === undefined)
-      ? {}
-      : { cacheWriteTokens }),
-  };
 }

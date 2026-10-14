@@ -83,6 +83,17 @@ export class SlidingWindowStrategy implements ContextStrategy {
       throw new ContextPinnedExceedsBudgetError();
     }
 
+    return this.buildWindow(input, groups, plan, planMessages, availableTokens, pinnedEstimate);
+  }
+
+  private buildWindow(
+    input: Parameters<ContextStrategy["build"]>[0],
+    groups: ReturnType<typeof eventsToTranscript>,
+    plan: ReturnType<typeof derivePlan>,
+    planMessages: Message[],
+    availableTokens: number,
+    pinnedEstimate: number,
+  ): Promise<ContextResult> {
     const nonPinnedGroups = groups.filter((group) => !group.pinned);
     const retainedGroups = new Set<(typeof nonPinnedGroups)[number]>();
     let retainedEstimate = 0;

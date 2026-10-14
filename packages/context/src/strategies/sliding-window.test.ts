@@ -316,7 +316,9 @@ describe("SlidingWindowStrategy", () => {
     const cacheAware = new SlidingWindowStrategy({ cacheAware: true });
     const events = [
       runInput(0),
-      ...Array.from({ length: 11 }, (_, index) => modelResponse(index + 1, `step-${index}`)),
+      ...Array.from({ length: 11 }, (_, index) =>
+        modelResponse(index + 1, `step-${String(index)}`),
+      ),
     ];
     const input: ContextStrategyInput = {
       events,
@@ -336,7 +338,7 @@ describe("SlidingWindowStrategy", () => {
     expect(second.stablePrefixMessages).toBe(first.messages.length);
   });
 
-  it("rejects a nonpositive cache-aware drop chunk", () => {
+  it("rejects a zero or negative cache-aware drop chunk", () => {
     expect(() => new SlidingWindowStrategy({ cacheAware: true, dropChunkGroups: 0 })).toThrow(
       RangeError,
     );

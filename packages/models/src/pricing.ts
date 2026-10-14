@@ -21,6 +21,43 @@ export function resolveModelPricing(
   return pricing?.[`${provider}/${model}`];
 }
 
+function isNonnegativeSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function validateBaseUsageAndPricing(
+  usage: Pick<ModelUsage, "inputTokens" | "outputTokens">,
+  pricing: ModelPricingRate,
+): void {
+  if (
+    !isNonnegativeSafeInteger(usage.inputTokens) ||
+    !isNonnegativeSafeInteger(usage.outputTokens) ||
+    !isNonnegativeSafeInteger(pricing.inputMicrosPerMTok) ||
+    !isNonnegativeSafeInteger(pricing.outputMicrosPerMTok)
+  ) {
+    throw new ModelUsageError();
+  }
+}
+
+function validateCacheUsageAndPricing(
+  usage: Pick<ModelUsage, "inputTokens" | "cacheReadTokens" | "cacheWriteTokens">,
+  pricing: ModelPricingRate,
+  cacheReadTokens: number,
+  cacheWriteTokens: number,
+): void {
+  if (
+    !isNonnegativeSafeInteger(cacheReadTokens) ||
+    !isNonnegativeSafeInteger(cacheWriteTokens) ||
+    BigInt(cacheReadTokens) + BigInt(cacheWriteTokens) > BigInt(usage.inputTokens) ||
+    (pricing.cacheReadMicrosPerMTok !== undefined &&
+      !isNonnegativeSafeInteger(pricing.cacheReadMicrosPerMTok)) ||
+    (pricing.cacheWriteMicrosPerMTok !== undefined &&
+      !isNonnegativeSafeInteger(pricing.cacheWriteMicrosPerMTok))
+  ) {
+    throw new ModelUsageError();
+  }
+}
+
 /**
  * Calculates the rounded integer-micro cost using exact integer arithmetic.
  *
@@ -38,36 +75,11 @@ export function calculateCostMicros(
   if (pricing === undefined) {
     return undefined;
   }
-  if (
-    !Number.isSafeInteger(usage.inputTokens) ||
-    usage.inputTokens < 0 ||
-    !Number.isSafeInteger(usage.outputTokens) ||
-    usage.outputTokens < 0 ||
-    !Number.isSafeInteger(pricing.inputMicrosPerMTok) ||
-    pricing.inputMicrosPerMTok < 0 ||
-    !Number.isSafeInteger(pricing.outputMicrosPerMTok) ||
-    pricing.outputMicrosPerMTok < 0
-  ) {
-    throw new ModelUsageError();
-  }
+  validateBaseUsageAndPricing(usage, pricing);
   const microsPerMillion = 1_000_000n;
   const cacheReadTokens = usage.cacheReadTokens ?? 0;
   const cacheWriteTokens = usage.cacheWriteTokens ?? 0;
-  if (
-    !Number.isSafeInteger(cacheReadTokens) ||
-    cacheReadTokens < 0 ||
-    !Number.isSafeInteger(cacheWriteTokens) ||
-    cacheWriteTokens < 0 ||
-    BigInt(cacheReadTokens) + BigInt(cacheWriteTokens) > BigInt(usage.inputTokens) ||
-    (pricing.cacheReadMicrosPerMTok !== undefined &&
-      (!Number.isSafeInteger(pricing.cacheReadMicrosPerMTok) ||
-        pricing.cacheReadMicrosPerMTok < 0)) ||
-    (pricing.cacheWriteMicrosPerMTok !== undefined &&
-      (!Number.isSafeInteger(pricing.cacheWriteMicrosPerMTok) ||
-        pricing.cacheWriteMicrosPerMTok < 0))
-  ) {
-    throw new ModelUsageError();
-  }
+  validateCacheUsageAndPricing(usage, pricing, cacheReadTokens, cacheWriteTokens);
   const numerator =
     (BigInt(usage.inputTokens) - BigInt(cacheReadTokens) - BigInt(cacheWriteTokens)) *
       BigInt(pricing.inputMicrosPerMTok) +

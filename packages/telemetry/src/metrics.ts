@@ -243,6 +243,28 @@ export function countSentinelScopeReduced(): void {
   }
 }
 
+function isNonnegativeSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function isValidModelUsage(
+  usage: Pick<
+    ModelUsage,
+    "inputTokens" | "outputTokens" | "costMicros" | "cacheReadTokens" | "cacheWriteTokens"
+  >,
+): boolean {
+  return (
+    isNonnegativeSafeInteger(usage.inputTokens) &&
+    isNonnegativeSafeInteger(usage.outputTokens) &&
+    Number.isSafeInteger(usage.inputTokens + usage.outputTokens) &&
+    (usage.cacheReadTokens === undefined ||
+      isNonnegativeSafeInteger(usage.cacheReadTokens)) &&
+    (usage.cacheWriteTokens === undefined ||
+      isNonnegativeSafeInteger(usage.cacheWriteTokens)) &&
+    (usage.costMicros === undefined || isNonnegativeSafeInteger(usage.costMicros))
+  );
+}
+
 /** Counts total input and output tokens and optional cost for one provider/model. */
 export function countModelUsage(
   usage: Pick<
@@ -252,19 +274,7 @@ export function countModelUsage(
   provider: string,
   model: string,
 ): void {
-  if (
-    !Number.isSafeInteger(usage.inputTokens) ||
-    usage.inputTokens < 0 ||
-    !Number.isSafeInteger(usage.outputTokens) ||
-    usage.outputTokens < 0 ||
-    !Number.isSafeInteger(usage.inputTokens + usage.outputTokens) ||
-    (usage.cacheReadTokens !== undefined &&
-      (!Number.isSafeInteger(usage.cacheReadTokens) || usage.cacheReadTokens < 0)) ||
-    (usage.cacheWriteTokens !== undefined &&
-      (!Number.isSafeInteger(usage.cacheWriteTokens) || usage.cacheWriteTokens < 0)) ||
-    (usage.costMicros !== undefined &&
-      (!Number.isSafeInteger(usage.costMicros) || usage.costMicros < 0))
-  ) {
+  if (!isValidModelUsage(usage)) {
     return;
   }
   try {
