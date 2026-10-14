@@ -110,7 +110,6 @@ describe("sandbox egress proxy Compose services", () => {
       "--detach",
       "--wait",
       "--pull=missing",
-      "--build",
       "sandbox-runner",
       "sandbox-egress-proxy",
       "egress-probe",

@@ -201,7 +201,7 @@ describe("sandbox runner Compose service", () => {
   });
 
   beforeAll(async () => {
-    await runCompose(["up", "--detach", "--wait", "--pull=missing", "--build", "sandbox-runner"]);
+    await runCompose(["up", "--detach", "--wait", "--pull=missing", "sandbox-runner"]);
   }, 180_000);
 
   afterAll(async () => {

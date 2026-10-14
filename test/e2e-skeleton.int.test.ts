@@ -5,6 +5,7 @@
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: model-visible MCP descriptions through model-input PII (13.6 -> #150)
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
+// Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: reference host in core runtime/CLI (-> #207)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
