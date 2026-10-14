@@ -19,6 +19,7 @@ export type RunControl = (
 export interface RuntimeRunOptions {
   readonly runId?: Id;
   readonly role?: Code;
+  readonly onStarted?: () => void;
 }
 
 /** Runtime control and optional metadata used to start one run. */
@@ -53,6 +54,7 @@ export function startRun(
       checkpointEveryEvents: config.run.checkpointEveryEvents,
       configHash: configHash(config),
       policyVersion,
+      ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
     });
   });
 }

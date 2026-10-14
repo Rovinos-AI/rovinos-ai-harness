@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Code,
-  HarnessError,
-  Id,
-  JsonValue,
-  RunStatus,
-} from "@harness/schemas";
+import { Code, HarnessError, Id, JsonValue, RunStatus } from "@harness/schemas";
 import type { RuntimeOverrides } from "@harness/core";
 import { HarnessConfigSchema } from "@harness/config";
 import { SafeEvent } from "@harness/telemetry";
@@ -24,27 +18,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const eventStoreSchema = z.custom<NonNullable<RuntimeOverrides["store"]>>(
-  (value) =>
-    [
-      "append",
-      "appendWithSnapshot",
-      "latestSnapshot",
-      "read",
-      "watch",
-      "watchRuns",
-      "head",
-      "deleteRun",
-      "listRuns",
-      "findRunsByTrace",
-      "fetchOutbox",
-      "ackOutbox",
-      "claimApprovalNotification",
-      "markApprovalNotificationSent",
-      "releaseApprovalNotification",
-      "consumeConfirmationState",
-      "close",
-    ].every((method) => hasMethod(value, method)),
+const eventStoreSchema = z.custom<NonNullable<RuntimeOverrides["store"]>>((value) =>
+  [
+    "append",
+    "appendWithSnapshot",
+    "latestSnapshot",
+    "read",
+    "watch",
+    "watchRuns",
+    "head",
+    "deleteRun",
+    "listRuns",
+    "findRunsByTrace",
+    "fetchOutbox",
+    "ackOutbox",
+    "claimApprovalNotification",
+    "markApprovalNotificationSent",
+    "releaseApprovalNotification",
+    "consumeConfirmationState",
+    "close",
+  ].every((method) => hasMethod(value, method)),
 );
 const clockSchema = z.custom<NonNullable<RuntimeOverrides["clock"]>>((value) =>
   hasMethod(value, "now"),
@@ -64,9 +57,7 @@ const policySchema = z.custom<NonNullable<RuntimeOverrides["policy"]>>((value) =
 const contextSchema = z.custom<NonNullable<RuntimeOverrides["context"]>>((value) =>
   hasMethod(value, "build"),
 );
-const providerAdapterSchema = z.custom<
-  NonNullable<RuntimeOverrides["providerAdapters"]>[number]
->(
+const providerAdapterSchema = z.custom<NonNullable<RuntimeOverrides["providerAdapters"]>[number]>(
   (value) =>
     isRecord(value) &&
     typeof value.provider === "string" &&
@@ -101,17 +92,21 @@ export const HarnessOverridesSchema = z
         hasMethod(value, "resolve"),
       )
       .optional(),
-    onKeysWarning: z.custom<NonNullable<RuntimeOverrides["onKeysWarning"]>>(
-      (value) => typeof value === "function",
-    ).optional(),
+    onKeysWarning: z
+      .custom<NonNullable<RuntimeOverrides["onKeysWarning"]>>(
+        (value) => typeof value === "function",
+      )
+      .optional(),
     tool: toolSchema.optional(),
     policy: policySchema.optional(),
     context: contextSchema.optional(),
     scopeRegistry: scopeRegistrySchema.optional(),
     processLike: processLikeSchema.optional(),
-    flushTelemetry: z.custom<NonNullable<RuntimeOverrides["flushTelemetry"]>>(
-      (value) => typeof value === "function",
-    ).optional(),
+    flushTelemetry: z
+      .custom<NonNullable<RuntimeOverrides["flushTelemetry"]>>(
+        (value) => typeof value === "function",
+      )
+      .optional(),
   })
   .strict();
 
@@ -170,6 +165,9 @@ export type ContinueRunOptions = z.infer<typeof ContinueRunOptionsSchema>;
 
 /** Run identifier accepted by SDK operations. */
 export const RunIdInputSchema = z.object({ runId: Id }).strict();
+
+/** Human-input request identifier accepted by {@link Harness.answerInput}. */
+export const RequestIdInputSchema = z.object({ requestId: Id }).strict();
 
 /** Approval identifier accepted by SDK operations. */
 export const ApprovalIdInputSchema = z.object({ approvalId: Id }).strict();
@@ -233,13 +231,15 @@ export type RunView = z.infer<typeof RunViewSchema>;
 export const WatchOptionsSchema = z
   .object({
     fromSeq: z.number().int().nonnegative().default(0),
-    signal: z.custom<AbortSignal>(
-      (value) =>
-        typeof value === "object" &&
-        value !== null &&
-        hasMethod(value, "addEventListener") &&
-        hasMethod(value, "removeEventListener"),
-    ).optional(),
+    signal: z
+      .custom<AbortSignal>(
+        (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          hasMethod(value, "addEventListener") &&
+          hasMethod(value, "removeEventListener"),
+      )
+      .optional(),
     maxBuffered: z.number().int().positive().optional(),
   })
   .strict();
@@ -248,9 +248,7 @@ export const WatchOptionsSchema = z
 export type WatchOptions = z.input<typeof WatchOptionsSchema>;
 
 /** Content access is intentionally restricted to the tokenized view. */
-export const GetRunContentOptionsSchema = z
-  .object({ reveal: z.literal(false) })
-  .strict();
+export const GetRunContentOptionsSchema = z.object({ reveal: z.literal(false) }).strict();
 
 /** Options accepted by {@link Harness.getRunContent}. */
 export type GetRunContentOptions = z.infer<typeof GetRunContentOptionsSchema>;
@@ -321,9 +319,7 @@ export const AnswerInputOptionsSchema = z
 export type AnswerInputOptions = z.infer<typeof AnswerInputOptionsSchema>;
 
 /** Metadata-only result returned by {@link Harness.startRun} and {@link Harness.continueRun}. */
-export const RunStartResultSchema = z
-  .object({ runId: Id, status: RunStatus })
-  .strict();
+export const RunStartResultSchema = z.object({ runId: Id, status: RunStatus }).strict();
 
 /** Inferred metadata-only run start result. */
 export type RunStartResult = z.infer<typeof RunStartResultSchema>;
@@ -336,7 +332,12 @@ export type CancelRunResult = z.infer<typeof CancelRunResultSchema>;
 
 /** Public stable SDK operations. */
 export interface Harness {
-  /** Start a detached run and immediately return its identifier and current status. */
+  /**
+   * Start a detached run and return after its initial events are durable.
+   *
+   * Idempotency keys are deduplicated only within this Harness instance.
+   * `requestedBy` is validated but not recorded by the current event contract.
+   */
   startRun(options: StartRunOptions): Promise<RunStartResult>;
   /** Start a linked follow-up run for a completed run. */
   continueRun(runId: RunId, options: ContinueRunOptions): Promise<RunStartResult>;
@@ -348,13 +349,16 @@ export interface Harness {
   resumeRun(runId: RunId): Promise<RunStartResult>;
   /** Request cooperative cancellation of a run. */
   cancelRun(runId: RunId): Promise<CancelRunResult>;
-  /** Resolve a pending approval; principal is validated but not persisted by the current event contract. */
+  /**
+   * Resolve a pending approval; `principal` is validated but not recorded by the current event contract.
+   * The event records `decidedBy: "human"`.
+   */
   resolveApproval(
     approvalId: RunId,
     decision: ApprovalDecision,
     options: ResolveApprovalOptions,
   ): Promise<ApprovalResolutionResult>;
-  /** Answer a human-input request when the runtime supports the epic 25 input contract. */
+  /** Answer a human-input request; validates `requestId` before reporting that epic 25 is unavailable. */
   answerInput(requestId: RunId, options: AnswerInputOptions): Promise<never>;
   /** Watch content-free safe events in sequence order. */
   watch(runId: RunId, options?: WatchOptions): AsyncIterable<SafeEvent>;
@@ -366,12 +370,11 @@ export interface Harness {
 
 /** Coded SDK failure that does not include untrusted input values. */
 export class SdkError extends HarnessError {
-  readonly code: "sdk_run_not_found" | "sdk_closed" | "sdk_content_unavailable" | "sdk_input_unavailable";
+  readonly code:
+    "sdk_run_not_found" | "sdk_closed" | "sdk_content_unavailable" | "sdk_input_unavailable";
 
   /** Creates a stable SDK error with a closed code. */
-  constructor(
-    code: SdkError["code"],
-  ) {
+  constructor(code: SdkError["code"]) {
     super(`SDK operation failed (${code}).`);
     this.code = code;
     this.name = "SdkError";

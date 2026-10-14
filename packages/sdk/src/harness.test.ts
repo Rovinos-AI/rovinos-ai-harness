@@ -2,7 +2,7 @@
 import type { ModelPort, PolicyPort, ToolPort } from "@harness/core";
 import { HarnessConfigSchema } from "@harness/config";
 import { InMemoryEventStore } from "@harness/store";
-import { Code, FakeClock, Id, SequentialIdGenerator } from "@harness/schemas";
+import { Code, FakeClock, Id, SequentialIdGenerator, type Event } from "@harness/schemas";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -92,12 +92,15 @@ const fakeTool: ToolPort = {
 
 const harnesses: Harness[] = [];
 
-async function createTestHarness(options: {
-  readonly model?: ModelPort;
-  readonly approval?: boolean;
-  readonly piiEnabled?: boolean;
-} = {}): Promise<{ readonly harness: Harness; readonly store: InMemoryEventStore }> {
-  const store = new InMemoryEventStore();
+async function createTestHarness(
+  options: {
+    readonly model?: ModelPort;
+    readonly approval?: boolean;
+    readonly piiEnabled?: boolean;
+    readonly store?: InMemoryEventStore;
+  } = {},
+): Promise<{ readonly harness: Harness; readonly store: InMemoryEventStore }> {
+  const store = options.store ?? new InMemoryEventStore();
   const harness = await createHarness({
     config: HarnessConfigSchema.parse({
       ...(options.piiEnabled === false ? { pii: { enabled: false } } : {}),
@@ -108,13 +111,42 @@ async function createTestHarness(options: {
       ids: new SequentialIdGenerator(),
       transientVault: true,
       model: options.model ?? (options.approval === true ? approvalModel() : fakeModel()),
-      ...(options.approval === true
-        ? { policy: askPolicy, tool: fakeTool }
-        : {}),
+      ...(options.approval === true ? { policy: askPolicy, tool: fakeTool } : {}),
     },
   });
   harnesses.push(harness);
   return { harness, store };
+}
+
+async function readStoredEvents(store: InMemoryEventStore, runId: string): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of store.read(Id.parse(runId))) {
+    events.push(event);
+  }
+  return events;
+}
+
+class DelayedAppendStore extends InMemoryEventStore {
+  private releaseAppend: () => void = () => undefined;
+  private signalAppendStarted: () => void = () => undefined;
+  private readonly appendGate = new Promise<void>((resolve) => {
+    this.releaseAppend = resolve;
+  });
+  readonly appendStarted = new Promise<void>((resolve) => {
+    this.signalAppendStarted = resolve;
+  });
+
+  release(): void {
+    this.releaseAppend();
+  }
+
+  override async append(
+    ...args: Parameters<InMemoryEventStore["append"]>
+  ): ReturnType<InMemoryEventStore["append"]> {
+    this.signalAppendStarted();
+    await this.appendGate;
+    return super.append(...args);
+  }
 }
 
 async function waitForRun(harness: Harness, runId: string, status?: string) {
@@ -137,7 +169,7 @@ afterEach(async () => {
 
 describe("@harness/sdk", () => {
   it("starts detached runs idempotently and exposes metadata only", async () => {
-    const { harness } = await createTestHarness();
+    const { harness, store } = await createTestHarness();
     const request = {
       goal: "Synthetic task",
       metadata: { source: "sdk" },
@@ -150,6 +182,16 @@ describe("@harness/sdk", () => {
     const second = await harness.startRun(request);
 
     expect(second.runId).toBe(first.runId);
+    const runInput = (await readStoredEvents(store, first.runId)).find(
+      (event) => event.type === "run_input",
+    );
+    expect(runInput?.type).toBe("run_input");
+    if (runInput?.type !== "run_input") {
+      throw new Error("Expected the initial run input.");
+    }
+    expect(runInput.input).toEqual({ goal: request.goal, metadata: request.metadata });
+    expect(JSON.stringify(runInput.input)).not.toContain("requestedBy");
+    expect(JSON.stringify(runInput.input)).not.toContain("role");
     expect(first.status).toBe("pending");
     const run = await waitForRun(harness, first.runId, "completed");
     expect(run).toMatchObject({
@@ -159,6 +201,36 @@ describe("@harness/sdk", () => {
     });
     expect(JSON.stringify(run)).not.toContain("Synthetic task");
     expect((await harness.startRun(request)).status).toBe("completed");
+  });
+
+  it("deduplicates concurrent starts with the same idempotency key", async () => {
+    const { harness } = await createTestHarness();
+    const request = { goal: "Synthetic concurrent task", idempotencyKey: "concurrent-key" };
+
+    const [first, second] = await Promise.all([
+      harness.startRun(request),
+      harness.startRun(request),
+    ]);
+
+    expect(first.runId).toBe(second.runId);
+  });
+
+  it("waits for the initial append before returning a run id", async () => {
+    const store = new DelayedAppendStore();
+    const { harness } = await createTestHarness({ store });
+    let resolved = false;
+    const start = harness.startRun({ goal: "Synthetic delayed append" }).then((result) => {
+      resolved = true;
+      return result;
+    });
+
+    await store.appendStarted;
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    store.release();
+    const { runId } = await start;
+
+    await expect(harness.getRun(runId)).resolves.toMatchObject({ runId });
   });
 
   it("loads configuration from a path", async () => {
@@ -238,7 +310,7 @@ describe("@harness/sdk", () => {
   });
 
   it("resolves approvals and resumes suspended runs", async () => {
-    const { harness } = await createTestHarness({ approval: true });
+    const { harness, store } = await createTestHarness({ approval: true });
     const started = await harness.startRun({ goal: "Synthetic approval task" });
     const suspended = await waitForRun(harness, started.runId, "suspended");
     const approvalId = suspended.pendingApprovals[0];
@@ -251,6 +323,11 @@ describe("@harness/sdk", () => {
       principal: Code.parse("human.test"),
     });
     expect(resolved).toMatchObject({ runId: started.runId, approvalId, decision: "approve" });
+    expect(
+      (await readStoredEvents(store, started.runId)).find(
+        (event) => event.type === "approval_resolved" && event.approvalId === approvalId,
+      ),
+    ).toMatchObject({ decidedBy: "human" });
     const resumed = await harness.resumeRun(started.runId);
     expect(resumed.status).toBe("completed");
   });
@@ -264,12 +341,30 @@ describe("@harness/sdk", () => {
         principal: Code.parse("human.test"),
       }),
     ).rejects.toMatchObject({ code: "sdk_input_unavailable" });
+    await expect(
+      harness.answerInput("invalid", {
+        action: Code.parse("answer"),
+        principal: Code.parse("human.test"),
+      }),
+    ).rejects.toThrow("requestId");
   });
 
   it("stops subscriptions and rejects operations after close", async () => {
     const { harness } = await createTestHarness();
+    const subscription = harness.watch("00000000000000000000000099");
     await harness.close();
     await expect(harness.listRuns()).rejects.toMatchObject({ code: "sdk_closed" });
+    await expect(async () => {
+      for await (const event of subscription) {
+        expect(event).toBeUndefined();
+      }
+    }).rejects.toMatchObject({ code: "sdk_closed" });
+    await expect(
+      harness.answerInput("00000000000000000000000099", {
+        action: Code.parse("answer"),
+        principal: Code.parse("human.test"),
+      }),
+    ).rejects.toMatchObject({ code: "sdk_closed" });
     await harness.close();
   });
 });

@@ -321,6 +321,12 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         }, z.core.$strict>>;
         sandbox: z.ZodPrefault<z.ZodObject<{
             allowUnsafeInProcess: z.ZodOptional<z.ZodBoolean>;
+            egress: z.ZodOptional<z.ZodObject<{
+                allow: z.ZodArray<z.ZodObject<{
+                    host: z.ZodString;
+                    ports: z.ZodArray<z.ZodNumber>;
+                }, z.core.$strict>>;
+            }, z.core.$strict>>;
             runner: z.ZodOptional<z.ZodObject<{
                 url: z.ZodURL;
                 token: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
@@ -408,6 +414,10 @@ export type ContinueRunOptions = z.infer<typeof ContinueRunOptionsSchema>;
 /** Run identifier accepted by SDK operations. */
 export declare const RunIdInputSchema: z.ZodObject<{
     runId: z.ZodString;
+}, z.core.$strict>;
+/** Human-input request identifier accepted by {@link Harness.answerInput}. */
+export declare const RequestIdInputSchema: z.ZodObject<{
+    requestId: z.ZodString;
 }, z.core.$strict>;
 /** Approval identifier accepted by SDK operations. */
 export declare const ApprovalIdInputSchema: z.ZodObject<{
@@ -797,7 +807,12 @@ export declare const CancelRunResultSchema: z.ZodEnum<{
 export type CancelRunResult = z.infer<typeof CancelRunResultSchema>;
 /** Public stable SDK operations. */
 export interface Harness {
-    /** Start a detached run and immediately return its identifier and current status. */
+    /**
+     * Start a detached run and return after its initial events are durable.
+     *
+     * Idempotency keys are deduplicated only within this Harness instance.
+     * `requestedBy` is validated but not recorded by the current event contract.
+     */
     startRun(options: StartRunOptions): Promise<RunStartResult>;
     /** Start a linked follow-up run for a completed run. */
     continueRun(runId: RunId, options: ContinueRunOptions): Promise<RunStartResult>;
@@ -809,9 +824,12 @@ export interface Harness {
     resumeRun(runId: RunId): Promise<RunStartResult>;
     /** Request cooperative cancellation of a run. */
     cancelRun(runId: RunId): Promise<CancelRunResult>;
-    /** Resolve a pending approval; principal is validated but not persisted by the current event contract. */
+    /**
+     * Resolve a pending approval; `principal` is validated but not recorded by the current event contract.
+     * The event records `decidedBy: "human"`.
+     */
     resolveApproval(approvalId: RunId, decision: ApprovalDecision, options: ResolveApprovalOptions): Promise<ApprovalResolutionResult>;
-    /** Answer a human-input request when the runtime supports the epic 25 input contract. */
+    /** Answer a human-input request; validates `requestId` before reporting that epic 25 is unavailable. */
     answerInput(requestId: RunId, options: AnswerInputOptions): Promise<never>;
     /** Watch content-free safe events in sequence order. */
     watch(runId: RunId, options?: WatchOptions): AsyncIterable<SafeEvent>;

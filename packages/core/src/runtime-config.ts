@@ -96,11 +96,15 @@ export interface Runtime {
   readonly clock: Clock;
   readonly ids: IdGenerator;
   run(goal: JsonValue, options?: { readonly role?: Code }): Promise<RunLoopResult>;
-  /** Starts a run and returns its id before asynchronous execution settles. */
+  /** Starts a run and exposes when its initial events are durable and when execution settles. */
   start(
     goal: JsonValue,
     options?: { readonly role?: Code },
-  ): { readonly runId: Id; readonly completion: Promise<RunLoopResult> };
+  ): {
+    readonly runId: Id;
+    readonly started: Promise<void>;
+    readonly completion: Promise<RunLoopResult>;
+  };
   /** Starts a follow-up run from an eligible terminal run. */
   continueRun(runId: Id, input: RunInput): Promise<RunLoopResult>;
   resume(runId: Id, options?: RuntimeResumeOptions): Promise<RunLoopResult>;

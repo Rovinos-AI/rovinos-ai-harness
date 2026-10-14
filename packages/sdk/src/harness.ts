@@ -1,23 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  createRuntime,
-  foldRunState,
-  type Runtime,
-  type RuntimeOverrides,
-} from "@harness/core";
+import { createRuntime, foldRunState, type Runtime, type RuntimeOverrides } from "@harness/core";
 import { loadConfig, type HarnessConfig } from "@harness/config";
 import {
   JsonValue as JsonValueSchema,
   RunInputSchema,
-  splitEvent,
-  type Code,
   type Event,
   type Id,
-  type JsonValue,
 } from "@harness/schemas";
 import type { SafeEvent } from "@harness/telemetry";
 import { toSafeEvent } from "@harness/telemetry";
 import { SdkError } from "./types.js";
+import { contentEntries, readEvents, safeEvents } from "./event-views.js";
 import {
   AnswerInputOptionsSchema,
   ApprovalIdInputSchema,
@@ -30,6 +23,7 @@ import {
   HarnessOverridesSchema,
   ListRunsFilterSchema,
   ResolveApprovalOptionsSchema,
+  RequestIdInputSchema,
   RunContentSchema,
   RunIdInputSchema,
   RunPageSchema,
@@ -50,45 +44,11 @@ import {
   type RunStartResult,
 } from "./types.js";
 
-async function readEvents(runtime: Runtime, runId: ReturnType<typeof Id.parse>): Promise<Event[]> {
-  const events: Event[] = [];
-  for await (const event of runtime.store.read(runId)) {
-    events.push(event);
-  }
-  return events;
-}
-
-function safeEvents(events: readonly Event[], policyVersion: ReturnType<typeof Code.parse>): SafeEvent[] {
-  return events.flatMap((event) => {
-    const safe = toSafeEvent(event, policyVersion);
-    return safe === null ? [] : [safe];
-  });
-}
-
-function runGoal(
-  goal: string,
-  metadata?: Record<string, string | number | boolean>,
-  role?: ReturnType<typeof Code.parse>,
-  requestedBy?: ReturnType<typeof Code.parse>,
-): JsonValue {
-  return JsonValueSchema.parse({
-    goal,
-    ...(metadata === undefined ? {} : { metadata }),
-    ...(role === undefined ? {} : { role }),
-    ...(requestedBy === undefined ? {} : { requestedBy }),
-  });
-}
-
-function contentEntries(events: readonly Event[]): unknown[] {
-  return events.flatMap((event) => {
-    const content = splitEvent(event).content;
-    if (Object.keys(content).length === 0) {
-      return [];
-    }
-    return [{ seq: event.seq, type: event.type, content: JsonValueSchema.parse(content) }];
-  });
-}
-
+/**
+ * Finds the suspended run for an approval by streaming its log.
+ *
+ * This lookup is O(suspended runs × events) until the store exposes a direct approval index.
+ */
 async function findPendingApprovalRun(
   runtime: Runtime,
   approvalId: ReturnType<typeof Id.parse>,
@@ -184,7 +144,7 @@ function runtimeOverridesFrom(options: HarnessOverrides): RuntimeOverrides {
 }
 
 class HarnessClient implements Harness {
-  private readonly idempotencyKeys = new Map<string, Id>();
+  private readonly idempotencyKeys = new Map<string, Promise<Id>>();
   private readonly activeRuns = new Map<string, Promise<void>>();
   private readonly watchers = new Set<AbortController>();
   private closed = false;
@@ -198,22 +158,35 @@ class HarnessClient implements Harness {
   async startRun(options: StartRunOptions): Promise<RunStartResult> {
     this.assertOpen();
     const input = StartRunOptionsSchema.parse(options);
-    const existingRunId =
+    const existingStart =
       input.idempotencyKey === undefined
         ? undefined
         : this.idempotencyKeys.get(input.idempotencyKey);
-    if (existingRunId !== undefined) {
-      return this.existingRunResult(existingRunId);
+    if (existingStart !== undefined) {
+      return this.existingRunResult(await existingStart);
     }
 
-    const { runId, completion } = this.runtime.start(
-      runGoal(input.goal, input.metadata, input.role, input.requestedBy),
-      { ...(input.role === undefined ? {} : { role: input.role }) },
+    const runInput = JsonValueSchema.parse(
+      RunInputSchema.parse({
+        goal: input.goal,
+        ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+      }),
     );
-    if (input.idempotencyKey !== undefined) {
-      this.idempotencyKeys.set(input.idempotencyKey, runId);
-    }
+    const { runId, started, completion } = this.runtime.start(runInput, {
+      ...(input.role === undefined ? {} : { role: input.role }),
+    });
     this.trackRun(runId, completion);
+    const start = started.then(() => runId);
+    const idempotencyKey = input.idempotencyKey;
+    if (idempotencyKey !== undefined) {
+      this.idempotencyKeys.set(idempotencyKey, start);
+      void start.catch(() => {
+        if (this.idempotencyKeys.get(idempotencyKey) === start) {
+          this.idempotencyKeys.delete(idempotencyKey);
+        }
+      });
+    }
+    await start;
     return RunStartResultSchema.parse({ runId, status: "pending" });
   }
 
@@ -296,6 +269,7 @@ class HarnessClient implements Harness {
     }
     await this.runtime.resolveApproval(runId, parsedApprovalId, parsedDecision, {
       ...(parsedOptions.edits === undefined ? {} : { edits: parsedOptions.edits }),
+      metadata: { decidedBy: "human" },
     });
     return ApprovalResolutionResultSchema.parse({
       runId,
@@ -304,11 +278,12 @@ class HarnessClient implements Harness {
     });
   }
 
-  answerInput(requestId: string, options: AnswerInputOptions): Promise<never> {
+  async answerInput(requestId: string, options: AnswerInputOptions): Promise<never> {
     this.assertOpen();
-    RunIdInputSchema.parse({ runId: requestId });
+    RequestIdInputSchema.parse({ requestId });
     AnswerInputOptionsSchema.parse(options);
-    return Promise.reject(new SdkError("sdk_input_unavailable"));
+    await Promise.resolve();
+    throw new SdkError("sdk_input_unavailable");
   }
 
   watch(runId: string, options: WatchOptions = {}): AsyncIterable<SafeEvent> {
@@ -381,9 +356,8 @@ class HarnessClient implements Harness {
   }
 
   private async *watchEvents(runId: Id, options: ReturnType<typeof WatchOptionsSchema.parse>) {
-    const created = (await readEvents(this.runtime, runId))[0];
-    if (created?.type !== "run_created") {
-      throw new SdkError("sdk_run_not_found");
+    if (this.closed) {
+      throw new SdkError("sdk_closed");
     }
     const controller = new AbortController();
     this.watchers.add(controller);
@@ -396,6 +370,17 @@ class HarnessClient implements Harness {
       options.signal?.addEventListener("abort", onAbort, { once: true });
     }
     try {
+      let created: Event | undefined;
+      for await (const event of this.runtime.store.read(runId)) {
+        created = event;
+        break;
+      }
+      if (created?.type !== "run_created") {
+        throw new SdkError("sdk_run_not_found");
+      }
+      if (controller.signal.aborted) {
+        return;
+      }
       for await (const event of this.runtime.store.watch(runId, {
         fromSeq: options.fromSeq,
         signal: controller.signal,

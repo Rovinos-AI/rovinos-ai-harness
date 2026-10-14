@@ -82,6 +82,7 @@ function createContext() {
     run: () => Promise.reject(new Error("Run is not used by serve tests.")),
     start: () => ({
       runId: Id.parse("00000000000000000000000000"),
+      started: Promise.resolve(),
       completion: Promise.reject(new Error("Start is not used by serve tests.")),
     }),
     continueRun: () => Promise.reject(new Error("Continue is not used by serve tests.")),

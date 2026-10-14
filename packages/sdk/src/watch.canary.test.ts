@@ -30,18 +30,19 @@ afterEach(async () => {
 describe("SDK safe-event canary", () => {
   it("never exposes input content through watch", async () => {
     const model: ModelPort = {
-      complete: () => Promise.resolve({
-        parts: [{ type: "text", text: "Synthetic completion" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-        finishReason: "stop",
-        provider: Code.parse("test"),
-        model: Code.parse("canary"),
-        latencyMs: 0,
-        schemaValid: true,
-        repairAttempts: 0,
-        fallbackDepth: 0,
-        providerBlobs: null,
-      }),
+      complete: () =>
+        Promise.resolve({
+          parts: [{ type: "text", text: "Synthetic completion" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "stop",
+          provider: Code.parse("test"),
+          model: Code.parse("canary"),
+          latencyMs: 0,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+          providerBlobs: null,
+        }),
     };
     const harness = await createHarness({
       config: HarnessConfigSchema.parse({}),

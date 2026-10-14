@@ -14,12 +14,13 @@ const { runId } = await harness.startRun({
 ```
 
 Without a configured run queue, `startRun` launches execution in-process and returns its id with
-`pending` status before execution settles. An idempotency key is scoped to this `Harness` instance;
-it is not persisted across restarts. Run the worker-backed queue mode only after task 24.2 is
-available.
+`pending` status after the initial run events are durable, while execution continues detached.
+An idempotency key is deduplicated only within this `Harness` instance; it is not persisted across
+instances or restarts. Run the worker-backed queue mode only after task 24.2 is available.
 
-An optional `role` is passed to model routing. `requestedBy` is retained as input metadata and is
-not an authorization mechanism.
+An optional `role` is passed to model routing. `requestedBy` is validated but not recorded because
+the current `run_created` event contract has no audit field for it. It is not an authorization
+mechanism.
 
 ## Metadata and events
 
@@ -38,18 +39,22 @@ detokenizes values. Set `pii.enabled` to `true` (the default) when content acces
 ## Approvals and human input
 
 `resolveApproval` resolves a pending approval by id and decision. The `principal` input is validated
-but is not recorded: the current `approval_resolved` event contract has no principal field. Do not
-use it as an authorization check; approval authority must be enforced by the embedding application.
-For `edit`, the runtime applies its PII-aware tool validation.
+but is not recorded: the current `approval_resolved` event contract has no principal field. The
+event records `decidedBy: "human"`. Do not use `principal` as an authorization check; approval
+authority must be enforced by the embedding application. For `edit`, the runtime applies its
+PII-aware tool validation.
 
-`answerInput` is reserved for the epic 25 human-input contract and currently rejects with the safe
-`sdk_input_unavailable` code. Its arguments are validated and are not included in that error.
+`answerInput(requestId, ...)` is reserved for the epic 25 human-input contract and currently rejects
+with the safe `sdk_input_unavailable` code. Its `requestId` and options are validated and are not
+included in that error.
 
 ## Decisions and scope
 
 - Idempotency is in-memory and instance-scoped until the durable queue in task 24.2 defines
-  persistent idempotency semantics.
+  persistent idempotency semantics; calls made by another `Harness` instance or after restart are
+  not deduplicated.
+- `requestedBy` is validated but not persisted until the event contract provides an audit field.
 - The SDK does not add principal data to an existing event schema. A future schema task must define
-  that audit field before the SDK can persist it.
+  that audit field before the SDK can persist the `resolveApproval` principal.
 - The input-answer API is present for the documented SDK shape but remains unavailable until its
-  owning human-input contract is implemented.
+  owning human-input contract is implemented (human input broker 25.3, issue #241).

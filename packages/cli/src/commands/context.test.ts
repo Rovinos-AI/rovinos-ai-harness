@@ -97,7 +97,11 @@ async function harness() {
     clock: { now: () => 0 },
     ids: { next: () => runId },
     run: modelCall,
-    start: () => ({ runId: Id.parse(runId), completion: modelCall() }),
+    start: () => ({
+      runId: Id.parse(runId),
+      started: Promise.resolve(),
+      completion: modelCall(),
+    }),
     continueRun: modelCall,
     resume: modelCall,
     cancel: modelCall,

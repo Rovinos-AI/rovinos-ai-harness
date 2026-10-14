@@ -227,17 +227,27 @@ function createRuntimeRunMethods(
   runWithControl: RunControl,
 ): Pick<Runtime, "run" | "start"> {
   return {
-    run: (goal, runOptions) =>
-      startRun(options, tool, goal, { runWithControl, ...runOptions }),
+    run: (goal, runOptions) => startRun(options, tool, goal, { runWithControl, ...runOptions }),
     start: (goal, runOptions) => {
       const runId = options.ids.next();
+      let resolveStarted: () => void = () => undefined;
+      let rejectStarted: (reason?: unknown) => void = () => undefined;
+      const started = new Promise<void>((resolve, reject) => {
+        resolveStarted = resolve;
+        rejectStarted = reject;
+      });
+      void started.catch(() => undefined);
+      const completion = startRun(options, tool, goal, {
+        runWithControl,
+        ...runOptions,
+        runId,
+        onStarted: resolveStarted,
+      });
+      void completion.catch(rejectStarted);
       return {
         runId,
-        completion: startRun(options, tool, goal, {
-          runWithControl,
-          ...runOptions,
-          runId,
-        }),
+        started,
+        completion,
       };
     },
   };
@@ -247,11 +257,11 @@ function composeRuntime(
   options: RuntimeComposition & {
     readonly roles: RoleRegistry;
     readonly scopes: RunScopeRegistry;
-    },
+  },
 ): Runtime {
-    const {
-      config,
-      clock,
+  const {
+    config,
+    clock,
     ids,
     store,
     keys,

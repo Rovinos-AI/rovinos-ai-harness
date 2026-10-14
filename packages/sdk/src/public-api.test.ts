@@ -31,13 +31,12 @@ function publicDeclarations(): string {
     noEmit: false,
     outDir: fileURLToPath(new URL("../dist", import.meta.url)),
   };
-  const rootNames = sourceFiles.map((file) =>
-    fileURLToPath(new URL(`./${file}`, import.meta.url)),
-  );
+  const rootNames = sourceFiles.map((file) => fileURLToPath(new URL(`./${file}`, import.meta.url)));
   const program = ts.createProgram({ rootNames, options });
   const diagnostics = ts.getPreEmitDiagnostics(program);
-  expect(diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")))
-    .toEqual([]);
+  expect(
+    diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
+  ).toEqual([]);
   const output = new Map<string, string>();
   const result = program.emit(
     undefined,
