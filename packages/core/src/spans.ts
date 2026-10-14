@@ -58,7 +58,11 @@ export const MODEL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
 /** Span for one tool call. */
 export const TOOL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.tool_call",
-  commonAttributes,
+  {
+    ...commonAttributes,
+    "harness.policy.decision": attr.optional(attr.enum(["allow", "ask", "deny"])),
+    "harness.policy.rule_id": attr.optional(attr.code()),
+  },
   { taskId: "4.1", packageName: "@harness/core" },
 );
 

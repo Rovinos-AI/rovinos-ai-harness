@@ -9,7 +9,11 @@ import {
   type Event as HarnessEvent,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import {
+  createTestContextManager,
+  createTestSpanCollector,
+  createTestTracerProvider,
+} from "@harness/telemetry/testing";
 import * as telemetry from "@harness/telemetry";
 import { SqliteVault, VaultOperationError } from "@harness/vault";
 import { sentinelTripQueue } from "@harness/telemetry";
@@ -148,6 +152,70 @@ describe("runtime tracing fallback", () => {
     setTracerProvider.mockRestore();
     setFallbackContextManager.mockRestore();
     diag.disable();
+  });
+
+  it("adds bounded policy decisions and rule ids to tool-call spans", async () => {
+    trace.disable();
+    otelContext.disable();
+    const collector = createTestSpanCollector();
+    trace.setGlobalTracerProvider(collector.provider);
+    otelContext.setGlobalContextManager(createTestContextManager());
+
+    try {
+      for (const [index, decision] of (["allow", "ask", "deny"] as const).entries()) {
+        const ruleId = `test.${decision}`;
+        const runtime = await createRuntime(config, {
+          store: new InMemoryEventStore(),
+          model: new FakeModelPort([
+            {
+              ...completion(),
+              parts: [
+                {
+                  type: "tool_call",
+                  callId: Id.parse(String(index + 2).repeat(26)),
+                  toolId: "test.tool",
+                  args: {},
+                },
+              ],
+            },
+          ]),
+          policy: {
+            version: "runtime_tracing_test",
+            decide: () => ({
+              decision,
+              ruleId,
+              reason: "test_reason",
+              editable: [],
+            }),
+          },
+          tool: {
+            describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+        });
+
+        await runtime.run("goal");
+        await runtime.close();
+
+        const decisionSpan = collector
+          .getFinishedSpans()
+          .find(
+            (span) =>
+              span.name === "harness.tool_call" &&
+              span.attributes["harness.policy.decision"] === decision,
+          );
+        expect(decisionSpan?.attributes).toMatchObject({
+          "harness.policy.decision": decision,
+          "harness.policy.rule_id": ruleId,
+        });
+      }
+    } finally {
+      await collector.provider.shutdown();
+      trace.disable();
+      otelContext.disable();
+      trace.setGlobalTracerProvider(createTestTracerProvider());
+      otelContext.setGlobalContextManager(createTestContextManager());
+    }
   });
 
   it("fails closed when a resumable run has no recorded model request", async () => {

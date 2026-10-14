@@ -1088,6 +1088,7 @@ __metadata:
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
     "@opentelemetry/api": "npm:1.9.1"
+    fast-check: "npm:4.10.2"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   languageName: unknown

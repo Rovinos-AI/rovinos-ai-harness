@@ -22,8 +22,11 @@ export {
   countDroppedTelemetry,
   countHostAppRejected,
   countHostAppSpansAccepted,
+  countPolicyDecision,
   METRIC_ALLOWLIST,
   type HostAppRejectedReason,
+  type PolicyDecision,
+  POLICY_DECISIONS,
   type TelemetryDropReason,
 } from "./metrics.js";
 export {
