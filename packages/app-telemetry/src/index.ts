@@ -236,7 +236,7 @@ export function createAppTelemetry<const Names extends readonly AppSpanName[]>(
     now,
     pending,
   };
-  let flushing = false;
+  let activeFlush: Promise<void> | undefined;
 
   return {
     active,
@@ -247,18 +247,29 @@ export function createAppTelemetry<const Names extends readonly AppSpanName[]>(
       recordAppSpan(context, { name, attrs, durationMs });
     },
     async flush() {
-      if (!active || bridge === undefined || pending.length === 0 || flushing) {
+      if (!active || bridge === undefined) {
+        return;
+      }
+      while (activeFlush !== undefined) {
+        await activeFlush;
+      }
+      if (pending.length === 0) {
         return;
       }
       const batch = pending.slice();
-      flushing = true;
+      const sending = Promise.resolve().then(async () => {
+        try {
+          await bridge.callTool("harness.telemetry.emit", { spans: batch });
+          pending.splice(0, batch.length);
+        } catch {
+          return;
+        }
+      });
+      activeFlush = sending;
       try {
-        await bridge.callTool("harness.telemetry.emit", { spans: batch });
-        pending.splice(0, batch.length);
-      } catch {
-        return;
+        await sending;
       } finally {
-        flushing = false;
+        activeFlush = undefined;
       }
     },
   };

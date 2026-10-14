@@ -9,7 +9,13 @@ import unicorn from "eslint-plugin-unicorn";
 import vitest from "@vitest/eslint-plugin";
 import prettier from "eslint-config-prettier/flat";
 import tseslint from "typescript-eslint";
-import { browserRestrictedImports, cliOutputConfiguration } from "./eslint-browser-boundaries.js";
+import {
+  browserRestrictedImports,
+  browserTypeOnlyImportConfiguration,
+  cliOutputConfiguration,
+  domProperties,
+  restrictedProperties,
+} from "./eslint-browser-boundaries.js";
 import { harnessPlugin } from "./eslint-layer-config.js";
 import { yamlLintConfiguration } from "./eslint-yaml.js";
 
@@ -44,20 +50,6 @@ const restrictedImportGroups = {
     message: "Use the schema parsing helpers in packages/schemas.",
   },
 };
-const restrictedProperties = [
-  {
-    object: "JSON",
-    property: "parse",
-    message: "Parse untrusted JSON through parseJson(schema, text).",
-  },
-];
-const domProperties = [
-  { property: "innerHTML", message: "Use textContent or safe DOM APIs." },
-  { property: "outerHTML", message: "Use safe DOM APIs." },
-  { property: "insertAdjacentHTML", message: "Use safe DOM APIs." },
-  { object: "document", property: "write", message: "Use safe DOM APIs." },
-];
-
 function restrictedImports({ telemetry = false, childProcess = false, parsers = false } = {}) {
   const patterns = [
     ...(!telemetry ? [restrictedImportGroups.observability] : []),
@@ -372,6 +364,11 @@ const configuration = [
       "no-restricted-properties": ["error", ...restrictedProperties, ...domProperties],
     },
   },
+  browserTypeOnlyImportConfiguration(
+    restrictedImports()[1].patterns,
+    "@harness/schemas",
+    ["packages/app-telemetry/src/**"],
+  ),
   {
     files: testFiles,
     plugins: { vitest },

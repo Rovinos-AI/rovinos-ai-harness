@@ -81,6 +81,68 @@ describe("createAppTelemetry", () => {
     });
   });
 
+  it("waits for active sends and flushes spans queued during the send", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let releaseSecond: (() => void) | undefined;
+    const firstSend = new Promise<unknown>((resolve) => {
+      releaseFirst = () => {
+        resolve({});
+      };
+    });
+    const secondSend = new Promise<unknown>((resolve) => {
+      releaseSecond = () => {
+        resolve({});
+      };
+    });
+    let calls = 0;
+    const callTool = vi.fn((..._args: Parameters<AppTelemetryBridge["callTool"]>) => {
+      calls += 1;
+      return calls === 1 ? firstSend : secondSend;
+    });
+    const telemetry = createAppTelemetry({
+      bridge: { callTool },
+      manifest: { spans: ["ui.render", "ui.error"] as const },
+      now: () => 10,
+    });
+
+    telemetry.record("ui.render", {});
+    const firstFlush = telemetry.flush();
+    telemetry.record("ui.error", { code: "during_send" });
+    const secondFlush = telemetry.flush();
+    let firstResolved = false;
+    let secondResolved = false;
+    const firstCompletion = firstFlush.then(() => {
+      firstResolved = true;
+    });
+    const secondCompletion = secondFlush.then(() => {
+      secondResolved = true;
+    });
+
+    await vi.waitFor(() => {
+      expect(callTool).toHaveBeenCalledTimes(1);
+    });
+    expect(callTool).toHaveBeenNthCalledWith(1, "harness.telemetry.emit", {
+      spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 0 }],
+    });
+    expect(firstResolved).toBe(false);
+    expect(secondResolved).toBe(false);
+
+    releaseFirst?.();
+    await firstCompletion;
+    await vi.waitFor(() => {
+      expect(callTool).toHaveBeenCalledTimes(2);
+    });
+    expect(callTool).toHaveBeenNthCalledWith(2, "harness.telemetry.emit", {
+      spans: [{ name: "ui.error", code: "during_send", startOffsetMs: 0, durationMs: 0 }],
+    });
+    expect(secondResolved).toBe(false);
+
+    releaseSecond?.();
+    await secondCompletion;
+    expect(firstResolved).toBe(true);
+    expect(secondResolved).toBe(true);
+  });
+
   it("silently ignores names not declared at runtime", async () => {
     const callTool = createCallTool();
     const spans: readonly AppSpanName[] = ["ui.render"];
