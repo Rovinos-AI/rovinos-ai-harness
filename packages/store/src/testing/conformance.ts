@@ -11,6 +11,8 @@ import { registerApprovalNotificationConformance } from "./conformance-approval-
 import { registerConfirmationStateConformance } from "./conformance-confirmation-states.js";
 import { registerTraceLookupConformance } from "./conformance-trace-lookup.js";
 import { registerOutboxConformance } from "./conformance-outbox.js";
+import { registerLazyRead } from "./conformance-read.js";
+import { registerWatchConformance } from "./conformance-watch.js";
 import { createEventBuilders, type EventStoreTestBuilders } from "./testing.js";
 
 /** Factory for a fresh store and its resource cleanup. */
@@ -315,30 +317,6 @@ function registerDeleteRun(factory: EventStoreFactory, builders: EventStoreTestB
   });
 }
 
-function registerLazyRead(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
-  it("reads the first 10 of 5,000 events quickly", async () => {
-    await withStore(factory, async (store) => {
-      const runId = builders.nextRunId();
-      const events = [
-        builders.runCreated(runId),
-        ...Array.from({ length: 4_999 }, () => builders.modelRequest(runId)),
-      ];
-      await store.append(runId, events, 0);
-
-      const startedAt = performance.now();
-      const iterator = store.read(runId)[Symbol.asyncIterator]();
-      for (let seq = 0; seq < 10; seq += 1) {
-        const result = await iterator.next();
-        expect(result.done).toBe(false);
-        if (result.done === false) {
-          expect(result.value.seq).toBe(seq);
-        }
-      }
-      expect(performance.now() - startedAt).toBeLessThan(1_000);
-    });
-  });
-}
-
 /** Registers the shared behavioral tests required of every EventStore adapter. */
 export function runEventStoreConformance(
   name: string,
@@ -365,6 +343,7 @@ export function runEventStoreConformance(
     registerTraceLookupConformance(factory, builders);
     registerOutboxConformance(factory, builders, caps.supportsFileReopen);
     registerLazyRead(factory, builders);
+    registerWatchConformance(factory, builders);
     registerSnapshotConformance(factory, builders);
     if (caps.supportsFileReopen) {
       registerSnapshotReopenConformance(factory, builders);

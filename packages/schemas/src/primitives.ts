@@ -13,6 +13,9 @@ export const Code = z.string().regex(/^[a-z0-9_.-]{1,64}$/u);
 /** Inferred code type. */
 export type Code = z.infer<typeof Code>;
 
+/** Safe tool id used when an event refers to an unknown model-proposed tool. */
+export const UNREGISTERED_TOOL_ID = Code.parse("unregistered_tool");
+
 /** Validates a lowercase SHA-256 hex digest. */
 export const Sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
 

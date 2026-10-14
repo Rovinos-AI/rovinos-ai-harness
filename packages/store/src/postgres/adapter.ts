@@ -28,13 +28,13 @@ import {
   type ListRunsOptions,
   type RunSummary,
 } from "../types.js";
+import { watchEvents, watchRunSummaries } from "../subscriptions.js";
 import {
   appendTransaction,
   decodeCursor,
   encodeEvents,
   eventFromRow,
   integer,
-  READ_PAGE_SIZE,
   runListPage,
   storeError,
   type EventRow,
@@ -45,6 +45,8 @@ import { deleteRunTransaction } from "./retention.js";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";
 import { PostgresConfirmationStates } from "./confirmation-states.js";
 import { initializePostgresStore } from "./initialize.js";
+import { readEvents } from "./reader.js";
+import { isRunTerminal, PostgresSubscriptions } from "./subscriptions.js";
 
 const connectionStringSchema = z
   .url()
@@ -75,6 +77,7 @@ export class PostgresEventStore implements EventStore {
   private readonly skipMigrations: boolean;
   private readonly approvalNotifications: PostgresApprovalNotifications;
   private readonly confirmationStates: PostgresConfirmationStates;
+  private readonly subscriptions: PostgresSubscriptions;
   private initialized: Promise<void> | undefined;
 
   /**
@@ -111,6 +114,12 @@ export class PostgresEventStore implements EventStore {
     );
     this.confirmationStates = new PostgresConfirmationStates(this.pool, () =>
       this.ensureInitialized(),
+    );
+    this.subscriptions = new PostgresSubscriptions(
+      this.pool,
+      parsedConnectionString.data,
+      parsedOptions.data.schema,
+      () => this.ensureInitialized(),
     );
   }
 
@@ -188,32 +197,43 @@ export class PostgresEventStore implements EventStore {
   }
 
   /** {@inheritDoc EventStore.read} */
-  async *read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event> {
-    const toSeq = range?.toSeq ?? null;
-    let nextSeq = range?.fromSeq ?? 0;
-    try {
-      await this.ensureInitialized();
-      let rows = (
-        await this.pool.query<EventRow>(
-          "SELECT run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id FROM events WHERE run_id = $1 AND seq >= $2 AND ($3::bigint IS NULL OR seq <= $3) ORDER BY seq LIMIT $4",
-          [runId, nextSeq, toSeq, READ_PAGE_SIZE],
-        )
-      ).rows;
-      while (rows.length !== 0) {
-        for (const row of rows) {
-          yield await eventFromRow(this.codec, runId, row);
-          nextSeq = integer(row.seq) + 1;
+  read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event> {
+    return readEvents(
+      { pool: this.pool, codec: this.codec, ensureInitialized: () => this.ensureInitialized() },
+      runId,
+      range,
+    );
+  }
+
+  /** {@inheritDoc EventStore.watch} */
+  watch(runId: Id, options: Parameters<EventStore["watch"]>[1]): AsyncIterable<Event> {
+    return watchEvents(this, runId, options, {
+      subscribe: (watchedRunId, signal) => this.subscriptions.subscribe(watchedRunId, signal),
+      isTerminal: (watchedRunId, observedNextSeq) =>
+        isRunTerminal(this.pool, () => this.ensureInitialized(), watchedRunId, observedNextSeq),
+    });
+  }
+
+  /** {@inheritDoc EventStore.watchRuns} */
+  watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
+    return watchRunSummaries(
+      this,
+      options,
+      (runId, signal) => this.subscriptions.subscribe(runId, signal),
+      async (runId) => {
+        try {
+          await this.ensureInitialized();
+          const result = await this.pool.query<RunSummaryRow>(
+            "SELECT run_id, created_at, status, next_seq - 1 AS last_seq, last_ts FROM runs WHERE run_id = $1",
+            [runId],
+          );
+          const row = result.rows[0];
+          return row === undefined ? undefined : runListPage([row], 1).runs[0];
+        } catch (error) {
+          throw storeError(error);
         }
-        rows = (
-          await this.pool.query<EventRow>(
-            "SELECT run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id FROM events WHERE run_id = $1 AND seq >= $2 AND ($3::bigint IS NULL OR seq <= $3) ORDER BY seq LIMIT $4",
-            [runId, nextSeq, toSeq, READ_PAGE_SIZE],
-          )
-        ).rows;
-      }
-    } catch (error) {
-      throw storeError(error);
-    }
+      },
+    );
   }
 
   /** {@inheritDoc EventStore.head} */
@@ -405,6 +425,7 @@ export class PostgresEventStore implements EventStore {
   /** {@inheritDoc EventStore.close} */
   async close(): Promise<void> {
     try {
+      await this.subscriptions.close();
       await this.pool.end();
     } catch (error) {
       throw storeError(error);

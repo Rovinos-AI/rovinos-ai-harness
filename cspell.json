@@ -11,7 +11,8 @@
     "onrequestdisplaymode",
     "onupdatemodelcontext",
     "sizechange",
-    "tldts"
+    "tldts",
+    "unlisten"
   ],
   "dictionaryDefinitions": [
     {

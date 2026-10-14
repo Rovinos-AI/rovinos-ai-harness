@@ -48,7 +48,16 @@ export {
   splitEvent,
   type EventFieldClass,
 } from "./classification.js";
-export { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
+export {
+  Code,
+  Id,
+  Sha256Hex,
+  SpanId,
+  TraceId,
+  Traceparent,
+  UNREGISTERED_TOOL_ID,
+  WorkspaceRef,
+} from "./primitives.js";
 export { isRegexSafePattern } from "./regex-safety.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
 export { KeyVersionConfigSchema, KeysConfigSchema, type KeysConfig } from "./config/keys.js";

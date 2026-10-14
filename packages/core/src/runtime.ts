@@ -29,8 +29,6 @@ import type {
   RuntimeResumeOptions,
   RuntimeOverrides,
 } from "./runtime-config.js";
-// TODO(7.14): Replace polling with the live EventStore.watch() subscription.
-
 export type {
   Runtime,
   RuntimeConfig,

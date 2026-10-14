@@ -32,6 +32,17 @@ interface ListRunsOptionsLike {
   readonly cursor?: string;
 }
 
+interface WatchOptionsLike {
+  readonly fromSeq: number;
+  readonly signal: AbortSignal;
+  readonly maxBuffered?: number;
+}
+
+interface WatchRunsOptionsLike {
+  readonly statuses?: readonly RunStatus[];
+  readonly signal: AbortSignal;
+}
+
 /** Structural event-store contract implemented by the wrapped store. */
 export interface EventStoreLike {
   append(runId: Id, events: readonly NewEvent[], expectedSeq: number): Promise<{ nextSeq: number }>;
@@ -43,6 +54,8 @@ export interface EventStoreLike {
   ): Promise<{ nextSeq: number }>;
   latestSnapshot(runId: Id): Promise<Snapshot | undefined>;
   read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event>;
+  watch(runId: Id, options: WatchOptionsLike): AsyncIterable<Event>;
+  watchRuns(options: WatchRunsOptionsLike): AsyncIterable<RunSummaryLike>;
   head(runId: Id): Promise<number>;
   deleteRun(runId: Id): Promise<number>;
   consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean>;
@@ -157,6 +170,14 @@ export class PiiEventStore implements EventStoreLike {
 
   read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event> {
     return this.inner.read(runId, range);
+  }
+
+  watch(runId: Id, options: WatchOptionsLike): AsyncIterable<Event> {
+    return this.inner.watch(runId, options);
+  }
+
+  watchRuns(options: WatchRunsOptionsLike): AsyncIterable<RunSummaryLike> {
+    return this.inner.watchRuns(options);
   }
 
   head(runId: Id): Promise<number> {
