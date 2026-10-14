@@ -58,7 +58,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 | --- | --- |
 | `schemas` | nothing (leaf) |
 | `crypto` | nothing (leaf) |
-| `app-telemetry` | nothing (leaf) |
+| `app-telemetry` | `schemas` |
 | `telemetry` | `schemas` |
 | `config` | `schemas` |
 | `store` | `schemas`, `telemetry`, `crypto` |
