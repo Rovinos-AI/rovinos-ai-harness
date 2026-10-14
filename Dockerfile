@@ -40,7 +40,9 @@ FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a
 
 WORKDIR /app
 RUN groupadd --gid 10001 harness \
-    && useradd --uid 10001 --gid harness --no-create-home --shell /usr/sbin/nologin harness
+    && useradd --uid 10001 --gid harness --no-create-home --shell /usr/sbin/nologin harness \
+    && mkdir -p /var/lib/harness/event-store /var/lib/harness/vault \
+    && chown -R 10001:10001 /var/lib/harness
 COPY --from=build --chown=10001:10001 /out/ ./
 USER 10001
 ENTRYPOINT ["node", "dist/bin.js"]

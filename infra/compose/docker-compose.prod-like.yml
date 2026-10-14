@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+services:
+  harness:
+    profiles: [prod-like]
+    environment:
+      HARNESS_DATA_DIR: /var/lib/harness/event-store
+      HARNESS_VAULT_DATA_DIR: /var/lib/harness/vault
+    volumes:
+      - harness-event-store:/var/lib/harness/event-store
+      - harness-vault:/var/lib/harness/vault
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    cpus: 2
+    mem_limit: 1g
+  sandbox-runner:
+    profiles: [prod-like]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+  otel-collector:
+    profiles: [prod-like]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    cpus: 1
+    mem_limit: 512m
+volumes:
+  harness-event-store: {}
+  harness-vault: {}

@@ -14,7 +14,7 @@ import { createConfiguredModelPort } from "./runtime-model.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimePii } from "./runtime-pii.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
-import { resolveDataDir } from "./runtime-data-dir.js";
+import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { missingModelPort, unavailableTool } from "./runtime-default-ports.js";
 import { NaiveContext } from "./context/naive-context.js";
@@ -212,7 +212,12 @@ export async function setupRuntime(
   try {
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    const runtimeVault = await createRuntimeVault(dataDir, overrides, keys, clock);
+    const runtimeVault = await createRuntimeVault(
+      resolveVaultDataDir(process.env, dataDir),
+      overrides,
+      keys,
+      clock,
+    );
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);

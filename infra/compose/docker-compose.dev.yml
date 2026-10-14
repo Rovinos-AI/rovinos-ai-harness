@@ -1,10 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 services:
-  otel-collector-dev:
-    extends:
-      file: docker-compose.yml
-      service: otel-collector
+  harness:
     profiles: [dev]
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    ports:
+      - "127.0.0.1:3000:3000"
+  otel-collector:
+    profiles: [dev]
+    command:
+      [
+        "--config=/etc/otel/base.yaml",
+        "--config=/etc/otel/allowlist.generated.yaml",
+        "--config=/etc/otel/profile-debug.yaml",
+      ]
     ports:
       - "127.0.0.1:4318:4318"
       - "127.0.0.1::13133"
