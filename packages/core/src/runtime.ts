@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
-import { emitVaultMarkTerminalFailed } from "@harness/telemetry";
-import { Code, HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
+import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import type { ToolPort } from "./ports.js";
@@ -30,36 +30,6 @@ const CANCEL_POLL_INTERVAL_MS = 25;
 const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
-
-function terminalMarkFailureCode(error: unknown): Code {
-  try {
-    if (typeof error === "object" && error !== null) {
-      const parsedCode = Code.safeParse(Reflect.get(error, "code"));
-      if (parsedCode.success) {
-        return parsedCode.data;
-      }
-    }
-  } catch {
-    // Error metadata must not prevent the run result from being returned.
-  }
-  return Code.parse("vault_unavailable");
-}
-
-async function markTerminalBestEffort(
-  vault: RuntimeComposition["vault"],
-  runId: Id,
-  timestamp: number,
-): Promise<void> {
-  try {
-    await vault.markTerminal(runId, timestamp);
-  } catch (error) {
-    try {
-      emitVaultMarkTerminalFailed(runId, terminalMarkFailureCode(error));
-    } catch {
-      // A diagnostic logger failure must not change the durable run result.
-    }
-  }
-}
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
 
@@ -294,27 +264,6 @@ async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | und
     }
   }
   return undefined;
-}
-
-async function closeRuntimeResources(options: {
-  readonly store: EventStore;
-  readonly vault: RuntimeComposition["vault"];
-  readonly keys: RuntimeComposition["keys"];
-  readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
-}): Promise<void> {
-  try {
-    await options.flushTelemetry?.();
-  } finally {
-    try {
-      await options.store.close();
-    } finally {
-      try {
-        options.vault.close();
-      } finally {
-        options.keys.dispose();
-      }
-    }
-  }
 }
 
 function createTerminalAwareRunControl({
