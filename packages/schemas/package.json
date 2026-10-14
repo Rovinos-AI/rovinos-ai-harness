@@ -5,6 +5,11 @@
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
+    "./browser": {
+      "source": "./src/browser.ts",
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
     ".": {
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",

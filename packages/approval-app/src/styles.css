@@ -1,0 +1,102 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  color: #172033;
+  background: #fff;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 60rem;
+  margin: auto;
+  padding: 1rem;
+  overflow-wrap: anywhere;
+}
+h1 {
+  font-size: 1.5rem;
+}
+dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.5rem 1rem;
+}
+dt {
+  font-weight: bold;
+}
+dd {
+  margin: 0;
+}
+ul {
+  padding-inline-start: 1.25rem;
+}
+summary {
+  cursor: pointer;
+  padding: 0.25rem;
+}
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: #edf2f7;
+  border: 1px solid #475569;
+  border-radius: 0.3rem;
+  padding: 0.6rem 1rem;
+  min-height: 44px;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 1;
+  color: #475569;
+  cursor: not-allowed;
+}
+:focus-visible,
+h1:focus {
+  outline: 3px solid #0757c9;
+  outline-offset: 3px;
+}
+.token {
+  display: inline-block;
+  background: #e2e8f0;
+  color: #172033;
+  border: 1px solid #475569;
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.3rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #f1f5f9;
+    background: #121826;
+  }
+  button,
+  .token {
+    background: #273449;
+    color: #f1f5f9;
+    border-color: #94a3b8;
+  }
+  button:disabled {
+    color: #cbd5e1;
+  }
+  :focus-visible,
+  h1:focus {
+    outline-color: #93c5fd;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none;
+    transition: none;
+    scroll-behavior: auto;
+  }
+}
