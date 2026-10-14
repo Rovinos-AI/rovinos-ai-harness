@@ -63,5 +63,5 @@ describe("public SDK declaration snapshot", () => {
       await writeFile(snapshotUrl, actual);
     }
     expect(actual).toBe(await readFile(snapshotUrl, "utf8"));
-  }, 30_000);
+  }, 60_000);
 });

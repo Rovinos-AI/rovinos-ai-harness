@@ -251,7 +251,20 @@ describe("RoutingModelGateway", () => {
     );
     const gateway = createRoutingModelGateway(
       [adapter("primary", primaryComplete), adapter("secondary", fallbackComplete)],
-      { ...dependencies, enforcement: { maxRepairs: 1 } },
+      {
+        ...dependencies,
+        enforcement: { maxRepairs: 1 },
+        pricing: {
+          "primary/model-one": {
+            inputMicrosPerMTok: 1_000_000,
+            outputMicrosPerMTok: 1_000_000,
+          },
+          "secondary/model-two": {
+            inputMicrosPerMTok: 2_000_000,
+            outputMicrosPerMTok: 2_000_000,
+          },
+        },
+      },
       routing({
         default: [
           { provider: "primary", model: "model-one" },
@@ -271,7 +284,7 @@ describe("RoutingModelGateway", () => {
       provider: "secondary",
       model: "model-two",
       fallbackDepth: 1,
-      usage: { inputTokens: 7, outputTokens: 13, costMicros: 11 },
+      usage: { inputTokens: 7, outputTokens: 13, costMicros: 28 },
       latencyMs: 16,
       repairAttempts: 1,
     });
@@ -336,7 +349,15 @@ describe("RoutingModelGateway", () => {
     const secondary = adapter("secondary", () => Promise.reject(finalError));
     const gateway = createRoutingModelGateway(
       [primary, secondary],
-      dependencies,
+      {
+        ...dependencies,
+        pricing: {
+          "primary/model-one": {
+            inputMicrosPerMTok: 1_000_000,
+            outputMicrosPerMTok: 2_000_000,
+          },
+        },
+      },
       routing({
         default: [
           { provider: "primary", model: "model-one" },
@@ -352,7 +373,7 @@ describe("RoutingModelGateway", () => {
       }),
     ).rejects.toMatchObject({
       code: "provider_unavailable",
-      usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+      usage: { inputTokens: 2, outputTokens: 3, costMicros: 8 },
       latencyMs: 5,
     });
   });

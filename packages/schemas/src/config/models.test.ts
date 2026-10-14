@@ -17,6 +17,7 @@ describe("ModelsConfigSchema", () => {
       },
       enforcement: { maxRepairs: 2 },
       maxConcurrent: 4,
+      pricing: {},
       providers: [],
       routing: {
         default: [],
@@ -47,6 +48,7 @@ describe("ModelsConfigSchema", () => {
       },
       enforcement: { maxRepairs: 1 },
       maxConcurrent: 2,
+      pricing: {},
       providers: [],
       routing: {
         default: [],
@@ -65,6 +67,28 @@ describe("ModelsConfigSchema", () => {
     expect(() => ModelRetryConfigSchema.parse({ maxAttempts: 0 })).toThrow();
     expect(() => ModelEnforcementConfigSchema.parse({ maxRepairs: -1 })).toThrow();
     expect(() => ModelsConfigSchema.parse({ retry: { unrecognized: true } })).toThrow();
+  });
+
+  it("validates per-model input and output prices", () => {
+    expect(
+      ModelsConfigSchema.parse({
+        pricing: {
+          "sample/model-a": { inputMicrosPerMTok: 125, outputMicrosPerMTok: 375 },
+        },
+      }).pricing,
+    ).toEqual({
+      "sample/model-a": { inputMicrosPerMTok: 125, outputMicrosPerMTok: 375 },
+    });
+    expect(() =>
+      ModelsConfigSchema.parse({
+        pricing: { "invalid/key/name": { inputMicrosPerMTok: 1, outputMicrosPerMTok: 2 } },
+      }),
+    ).toThrow();
+    expect(() =>
+      ModelsConfigSchema.parse({
+        pricing: { "sample/model-a": { inputMicrosPerMTok: -1, outputMicrosPerMTok: 2 } },
+      }),
+    ).toThrow();
   });
 
   it("validates ordered routing references and provider configuration", () => {

@@ -7,13 +7,15 @@ import {
   type Capabilities,
   type Id,
   type JsonValue,
+  type ModelsConfig,
+  type ModelRef,
   type ModelRequest,
   type ModelResponse,
   type ModelUsage,
   type ModelEnforcementConfig,
   type ModelRetryConfig,
 } from "@harness/schemas";
-import { setActiveSpanAttribute } from "@harness/telemetry";
+import { countModelUsage, emitPricingMissing, setActiveSpanAttribute } from "@harness/telemetry";
 import type { z } from "zod";
 import {
   ProviderResultSchema,
@@ -22,7 +24,12 @@ import {
   type ProviderAdapter,
 } from "./types.js";
 import type { AdapterRegistry } from "./registry.js";
-import { attachModelFailureMetadata, ModelOutputInvalidError, ProviderError } from "./errors.js";
+import {
+  attachModelFailureMetadata,
+  ModelOutputInvalidError,
+  ProviderError,
+  readModelFailureMetadata,
+} from "./errors.js";
 import { prepareMessagesForProvider } from "./blobs.js";
 import { TokenBucketRateLimiter } from "./resilience/limiter.js";
 import { abortableSleep, withRetries, type Random, type Sleep } from "./resilience/retry.js";
@@ -40,6 +47,7 @@ import { enforceToolOutput, withForcedOutputTool } from "./enforce/rung-tool.js"
 import { enforcePromptOutput, withPromptOutput } from "./enforce/rung-prompt.js";
 import { lowerForProvider, schemaHash, toJsonSchema } from "./json-schema.js";
 import { appendRepairMessages } from "./enforce/repair.js";
+import { createPricingAccountant } from "./pricing.js";
 
 /** Dependencies injected into every provider adapter call by the gateway. */
 export interface ModelGatewayDependencies {
@@ -51,6 +59,7 @@ export interface ModelGatewayDependencies {
   readonly sleep?: Sleep;
   readonly requestsPerMinute?: Readonly<Partial<Record<Code, number>>>;
   readonly maxConcurrent?: number;
+  readonly pricing?: ModelsConfig["pricing"];
 }
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
@@ -174,6 +183,14 @@ function enforceProviderOutput<OutputSchema extends z.ZodType>(
   };
 }
 
+function parseProviderResult(result: unknown): z.infer<typeof ProviderResultSchema> {
+  const parsed = ProviderResultSchema.safeParse(result);
+  if (!parsed.success) {
+    throw new ProviderError("provider_unknown");
+  }
+  return parsed.data;
+}
+
 /** Minimal provider-selecting model port implementation. */
 export class ModelGateway {
   private readonly retryPolicy: ModelRetryConfig;
@@ -183,6 +200,7 @@ export class ModelGateway {
   private readonly maxRepairs: number;
   private readonly limiters = new Map<Code, TokenBucketRateLimiter>();
   private readonly semaphores = new Map<Code, Semaphore>();
+  private readonly accountUsage: (model: ModelRef, usage: ModelUsage) => ModelUsage;
 
   /**
    * @param registry - Provider adapters available for requests.
@@ -193,6 +211,9 @@ export class ModelGateway {
     private readonly dependencies: ModelGatewayDependencies,
     private readonly options: ModelGatewayOptions = {},
   ) {
+    this.accountUsage = createPricingAccountant(dependencies.pricing, (model) => {
+      emitPricingMissing(model.provider, model.model);
+    });
     this.retryPolicy = ModelRetryConfigSchema.parse(
       dependencies.retryPolicy ?? ModelRetryConfigSchema.parse({}),
     );
@@ -224,9 +245,10 @@ export class ModelGateway {
       readonly limiter: TokenBucketRateLimiter | undefined;
       readonly semaphore: Semaphore;
       readonly onAttempt: () => void;
+      readonly onFailedAttempt: (error: unknown) => void;
     },
   ) {
-    const { request, context, limiter, semaphore, onAttempt } = options;
+    const { request, context, limiter, semaphore, onAttempt, onFailedAttempt } = options;
     return withRetries({
       policy: this.retryPolicy,
       clock: this.dependencies.clock,
@@ -240,22 +262,42 @@ export class ModelGateway {
         }
         return semaphore.acquire(signal);
       },
-      operation: (signal) => {
+      operation: async (signal) => {
         onAttempt();
-        return adapter.complete(
-          {
-            ...request,
-            messages: prepareMessagesForProvider(request.messages, adapter.provider),
-          },
-          {
-            signal,
-            ids: this.dependencies.ids,
-            clock: this.dependencies.clock,
-            ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-          },
-        );
+        try {
+          return await adapter.complete(
+            {
+              ...request,
+              messages: prepareMessagesForProvider(request.messages, adapter.provider),
+            },
+            {
+              signal,
+              ids: this.dependencies.ids,
+              clock: this.dependencies.clock,
+              ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+            },
+          );
+        } catch (error) {
+          onFailedAttempt(error);
+          throw error;
+        }
       },
     });
+  }
+
+  private reportUsage(model: ModelRef, usage: ModelUsage): void {
+    setActiveSpanAttribute("harness.model.input_tokens", usage.inputTokens);
+    setActiveSpanAttribute("harness.model.output_tokens", usage.outputTokens);
+    if (usage.costMicros !== undefined) {
+      setActiveSpanAttribute("harness.model.cost_micros", usage.costMicros);
+    }
+    countModelUsage(usage, model.provider, model.model);
+  }
+
+  private accountAndReportUsage(model: ModelRef, usage: ModelUsage): ModelUsage {
+    const accounted = this.accountUsage(model, usage);
+    this.reportUsage(model, accounted);
+    return accounted;
   }
 
   private async completePrepared<OutputSchema extends z.ZodType>(
@@ -279,12 +321,15 @@ export class ModelGateway {
             attempts += 1;
             setActiveSpanAttribute("harness.model.attempts", attempts);
           },
+          onFailedAttempt: (error) => {
+            const metadata = readModelFailureMetadata(error);
+            if (metadata.usage !== undefined) {
+              aggregateUsage = aggregateModelUsage(aggregateUsage, metadata.usage);
+            }
+            aggregateLatencyMs += metadata.latencyMs ?? 0;
+          },
         });
-        const parsedResult = ProviderResultSchema.safeParse(adapterResult);
-        if (!parsedResult.success) {
-          throw new ProviderError("provider_unknown");
-        }
-        const result = parsedResult.data;
+        const result = parseProviderResult(adapterResult);
         aggregateUsage = aggregateModelUsage(aggregateUsage, result.usage);
         aggregateLatencyMs += result.latencyMs;
 
@@ -309,9 +354,10 @@ export class ModelGateway {
           continue;
         }
 
+        const usage = this.accountAndReportUsage(request.model, aggregateUsage);
         return {
           parts: enforced.parts,
-          usage: aggregateUsage,
+          usage,
           finishReason: result.finishReason,
           provider: adapter.provider,
           model: request.model.model,
@@ -328,8 +374,9 @@ export class ModelGateway {
       if (aggregateUsage === undefined) {
         throw error;
       }
+      const usage = this.accountAndReportUsage(request.model, aggregateUsage);
       throw attachModelFailureMetadata(error, {
-        usage: aggregateUsage,
+        usage,
         latencyMs: aggregateLatencyMs,
         repairAttempts,
       });
@@ -384,15 +431,8 @@ export class ModelGateway {
 }
 
 function aggregateModelUsage(previous: ModelUsage | undefined, next: ModelUsage): ModelUsage {
-  let costMicros: number | undefined;
-  if (previous === undefined) {
-    costMicros = next.costMicros;
-  } else if (previous.costMicros !== undefined && next.costMicros !== undefined) {
-    costMicros = previous.costMicros + next.costMicros;
-  }
   return {
     inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
-    ...(costMicros === undefined ? {} : { costMicros }),
   };
 }

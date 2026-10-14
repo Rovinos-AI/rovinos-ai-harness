@@ -37,6 +37,7 @@ export {
   type ModelGatewayResponse,
 } from "./gateway.js";
 export { AdapterRegistry } from "./registry.js";
+export { calculateCostMicros, resolveModelPricing, type ModelPricing } from "./pricing.js";
 export {
   createRoutingModelGateway,
   RoutingModelGateway,

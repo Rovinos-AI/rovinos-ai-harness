@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type JsonValue, type ModelUsage } from "@harness/schemas";
+import { HarnessError, ModelUsageSchema, type JsonValue, type ModelUsage } from "@harness/schemas";
 import { z } from "zod";
 import type { EnforcementIssue } from "./enforce/index.js";
 import { redactIssuePath } from "./enforce/repair.js";
@@ -47,6 +47,27 @@ export interface ModelFailureMetadata {
   readonly usage?: ModelUsage;
   readonly latencyMs?: number;
   readonly repairAttempts?: number;
+}
+
+/** Extracts validated usage and latency from a failed provider attempt. */
+export function readModelFailureMetadata(
+  error: unknown,
+): Pick<ModelFailureMetadata, "usage" | "latencyMs"> {
+  if (typeof error !== "object" || error === null) {
+    return {};
+  }
+  const usage = "usage" in error ? ModelUsageSchema.safeParse(error.usage) : undefined;
+  const latencyMs =
+    "latencyMs" in error &&
+    typeof error.latencyMs === "number" &&
+    Number.isSafeInteger(error.latencyMs) &&
+    error.latencyMs >= 0
+      ? error.latencyMs
+      : undefined;
+  return {
+    ...(usage?.success === true ? { usage: usage.data } : {}),
+    ...(latencyMs === undefined ? {} : { latencyMs }),
+  };
 }
 
 /** Attaches accumulated accounting metadata to an existing gateway error. */

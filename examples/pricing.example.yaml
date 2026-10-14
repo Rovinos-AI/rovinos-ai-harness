@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# Illustrative synthetic rates only. Operators must review and replace them before use.
+models:
+  pricing:
+    sample-provider/sample-model:
+      inputMicrosPerMTok: 250000
+      outputMicrosPerMTok: 1000000

@@ -25,6 +25,7 @@ const expectedSpanNames = [
   "harness.ui_session",
 ];
 const expectedLogNames = [
+  "harness.model.pricing_missing",
   "harness.safe.approval_wait",
   "harness.safe.budget_exceeded",
   "harness.safe.checkpoint",
