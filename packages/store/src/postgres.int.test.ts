@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Pool } from "pg";
 import { randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { Code, Id, type KeyProvider, type NewEvent } from "@harness/schemas";
 import { afterAll, expect, it } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
@@ -15,6 +15,14 @@ import {
   runEventStoreConformance,
 } from "./testing/index.js";
 import type { EventStoreFactory, MultiEventStoreFactoryCreator } from "./testing/index.js";
+
+// Derived from the migration files so adding a migration does not break these assertions.
+const postgresMigrationVersions = (
+  await readdir(new URL("../migrations/postgres/", import.meta.url))
+)
+  .filter((file) => file.endsWith(".sql"))
+  .map((file) => file.slice(0, 4))
+  .sort();
 
 const connectionString =
   process.env.TEST_POSTGRES_URL ?? "postgresql://harness@127.0.0.1:5432/harness";
@@ -230,11 +238,11 @@ it("serializes concurrent Postgres migration startup", async () => {
       migrate(migrationPool, "postgres"),
       migrate(migrationPool, "postgres"),
     ]);
-    expect(results.flat()).toHaveLength(2);
+    expect(results.flat()).toHaveLength(postgresMigrationVersions.length);
     const versions = await migrationPool.query<{ version: string }>(
       "SELECT version FROM schema_migrations ORDER BY version",
     );
-    expect(versions.rows.map(({ version }) => version)).toEqual(["0001", "0002"]);
+    expect(versions.rows.map(({ version }) => version)).toEqual(postgresMigrationVersions);
   } finally {
     await migrationPool.end();
     await dropSchema(admin, schema);
@@ -294,7 +302,7 @@ async function verifyLegacyPostgresSchema(includeTxId: boolean): Promise<void> {
     const versions = await legacyPool.query<{ version: string }>(
       "SELECT version FROM schema_migrations ORDER BY version",
     );
-    expect(versions.rows.map(({ version }) => version)).toEqual(["0001", "0002"]);
+    expect(versions.rows.map(({ version }) => version)).toEqual(postgresMigrationVersions);
     const txIdColumn = await legacyPool.query<{ present: boolean }>(
       "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'events' AND column_name = 'tx_id') AS present",
     );

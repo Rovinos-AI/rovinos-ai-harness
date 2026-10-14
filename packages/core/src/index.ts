@@ -119,6 +119,7 @@ export {
   type Runtime,
   type RuntimeConfig,
   type RuntimeOverrides,
+  type RuntimeResumeOptions,
 } from "./runtime.js";
 export {
   BUILTIN_ROLE_DEFAULTS,
