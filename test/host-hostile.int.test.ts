@@ -12,6 +12,12 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import { createCanaries, type CanarySet } from "./canary/canaries.js";
 import { createCanaryTelemetry, type CanaryTelemetry } from "./canary/telemetry.js";
 
+declare global {
+  interface Window {
+    refillHostBatchWindow?: () => Promise<void>;
+  }
+}
+
 const runId = Id.parse("00000000000000000000000001");
 const oldSessionId = Id.parse("00000000000000000000000002");
 const parentContext: SpanContext = {
@@ -233,6 +239,8 @@ async function runFixture(
   const context: BrowserContext = await currentBrowser.newContext();
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   let host: ReferenceHost | undefined;
+  const isFloodFixture = filename === "flood.html";
+  let hostNow = Date.now();
 
   try {
     const fixturePath = new URL(`./fixtures/hostile-app/${filename}`, import.meta.url);
@@ -277,7 +285,7 @@ async function runFixture(
             contents: [{ mimeType: "text/html;profile=mcp-app", text: html }],
           }),
         idGenerator: () => String(++nextId).padStart(26, "0"),
-        now: Date.now,
+        now: isFloodFixture ? () => hostNow : Date.now,
         uiSessionContext: {
           runId,
           toolCallSpanContext: parentContext,
@@ -314,6 +322,38 @@ async function runFixture(
     });
     page.on("popup", (popup) => popups.push(popup.url()));
     page.on("console", (message) => browserConsole.push(message.text()));
+    if (isFloodFixture) {
+      await page.exposeFunction("refillHostBatchWindow", () => {
+        hostNow += 2_000;
+      });
+      await page.addInitScript(() => {
+        if (window !== window.top) {
+          return;
+        }
+        window.addEventListener("message", (event) => {
+          const data: unknown = event.data;
+          if (
+            data === null ||
+            typeof data !== "object" ||
+            !("type" in data) ||
+            data.type !== "hostile:flood-drained"
+          ) {
+            return;
+          }
+          const frame = document.querySelector("iframe");
+          if (frame === null) {
+            return;
+          }
+          const refillHostBatchWindow = window.refillHostBatchWindow;
+          if (refillHostBatchWindow === undefined) {
+            return;
+          }
+          void refillHostBatchWindow().then(() => {
+            frame.contentWindow?.postMessage({ type: "hostile:rate-window-refilled" }, "*");
+          });
+        });
+      });
+    }
     await page.goto(host.url, { waitUntil: "domcontentloaded" });
     const status = await waitForFixture(page);
 
