@@ -82,7 +82,19 @@ const HttpTransportSchema = z
     }),
     headers: z.record(z.string(), SecretRefSchema).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((transport, context) => {
+    for (const key of Object.keys(transport.headers ?? {})) {
+      if (["traceparent", "tracestate", "baggage"].includes(key.toLowerCase())) {
+        context.addIssue({
+          code: "custom",
+          path: ["headers", key],
+          message: "HTTP headers must not configure trace context or baggage.",
+          params: { errorCode: "server_http_header_reserved" },
+        });
+      }
+    }
+  });
 
 const ServerConfigObjectSchema = z
   .object({

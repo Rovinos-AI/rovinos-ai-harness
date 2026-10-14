@@ -5,6 +5,7 @@
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: MCP registry and model-visible descriptions through model-input PII (-> #199, model-input PII 13.6 -> #150)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
+// Not wired yet: MCP call span around callTool (6.5 -> #199)
 // Not wired yet: reference host in core runtime/CLI (-> #207)
 // Not wired yet: SDK and control-plane consumers of store watch/watchRuns (#230, 24.1)
 // Not wired yet: reference-host app content callbacks in the core runtime/CLI (-> #207)

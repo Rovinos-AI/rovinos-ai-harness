@@ -30,3 +30,4 @@ export {
   type ToolRegistryServer,
 } from "./registry.js";
 export { UNREGISTERED_TOOL_ID } from "./registry.js";
+export { buildRequestMeta } from "./trace-injection.js";
