@@ -96,6 +96,11 @@ const KEY_REF = "env:HARNESS_E2E_KEY";
 const KEY_ID = "e2e-test";
 const ALLOW_TOOL = "update_plan";
 const ASK_TOOL = "synthetic.ask";
+// Synthetic CLI/SDK fixtures never execute commands; their egress config only
+// exercises Compose rendering. The remote roundtrip below uses the real factory.
+const unusedSandboxBackend: SandboxBackend = {
+  exec: () => Promise.reject(new Error("The synthetic tool port does not execute commands.")),
+};
 const logDefinition = defineLogRecord("harness.e2e.skeleton", {
   "harness.error.code": attr.code(),
 });
@@ -227,6 +232,7 @@ async function invokeCli(args: readonly string[], captureOutput = true): Promise
       model: overrides?.model ?? current.model,
       roleConfigDirectory: current.directory,
       secretResolver: overrides?.secretResolver ?? new CompositeSecretResolver(),
+      sandboxBackend: unusedSandboxBackend,
       tool: syntheticTools(
         current.callsBeforeApproval,
         current.callsAfterApproval,
@@ -854,6 +860,16 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       runNetworkIsolationCompose(project, ["--profile", "sandbox", ...args]);
     const requestSchema = z.object({ runId: Id, spec: ExecSpecSchema }).strict();
     const responseSchema = z.object({ status: z.number().int(), body: z.string() }).strict();
+    const composeSchema = z.object({
+      networks: z.record(z.string(), z.object({ internal: z.boolean().optional() })),
+      services: z.record(
+        z.string(),
+        z.object({
+          ports: z.array(z.unknown()).optional(),
+          networks: z.record(z.string(), z.unknown()).optional(),
+        }),
+      ),
+    });
     const responses: z.infer<typeof responseSchema>[] = [];
     const forwarded: { body: z.infer<typeof requestSchema>; authorization: string | undefined }[] =
       [];
@@ -909,12 +925,17 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
     });
     let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
     try {
+      const compose = parseJson(composeSchema, await invokeCompose(["config", "--format", "json"]));
+      expect(compose.networks.sandbox?.internal).toBe(true);
+      expect(compose.services["sandbox-runner"]?.ports ?? []).toEqual([]);
+      expect(Object.keys(compose.services["sandbox-runner"]?.networks ?? {})).toEqual(["sandbox"]);
       await invokeCompose([
         "up",
         "--detach",
         "--wait",
+        "--wait-timeout",
+        "60",
         "--pull=missing",
-        "--build",
         "sandbox-runner",
       ]);
       await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
@@ -934,14 +955,19 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
           execute: async (call, context) => {
             const output = await tool.execute(call, context);
             executions.push(output);
-            const metadata = z
+            const boundedOutput = z
               .object({
                 exitCode: z.number().int().nullable(),
-                truncated: z.boolean(),
-                timedOut: z.boolean(),
+                stdout: z.string(),
               })
               .parse(output.result);
-            return { outcome: "ok", result: metadata };
+            return {
+              outcome: "ok",
+              result: {
+                exitCode: boundedOutput.exitCode,
+                bytes: Buffer.byteLength(boundedOutput.stdout, "utf8"),
+              },
+            };
           },
         };
       });
@@ -1008,7 +1034,7 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       });
       expect(result.events.find((event) => event.type === "tool_result")).toMatchObject({
         outcome: "ok",
-        result: { exitCode: 0, truncated: false, timedOut: false },
+        result: { exitCode: 0, bytes: Buffer.byteLength(`${current.canary}\n`, "utf8") },
       });
       const safeEvents = result.events
         .map((event) => toSafeEvent(event, Code.parse("e2e.sandbox")))
@@ -1026,24 +1052,27 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       }
       expect(JSON.stringify(safeEvents)).not.toContain("/bin/echo");
     } finally {
-      await runtime?.close();
-      if (bridge.listening) {
-        await new Promise<void>((resolve, reject) =>
-          bridge.close((error) => {
-            if (error === undefined) {
-              resolve();
-            } else {
-              reject(error);
-            }
-          }),
-        );
-      }
-      await invokeCompose(["down", "--volumes", "--remove-orphans"]);
-      await rm(directory, { recursive: true, force: true });
-      if (previousRunnerToken === undefined) {
-        delete process.env.SANDBOX_RUNNER_TOKEN;
-      } else {
-        process.env.SANDBOX_RUNNER_TOKEN = previousRunnerToken;
+      try {
+        await runtime?.close();
+        if (bridge.listening) {
+          await new Promise<void>((resolve, reject) =>
+            bridge.close((error) => {
+              if (error === undefined) {
+                resolve();
+              } else {
+                reject(error);
+              }
+            }),
+          );
+        }
+        await invokeCompose(["down", "--volumes", "--remove-orphans"]);
+      } finally {
+        if (previousRunnerToken === undefined) {
+          delete process.env.SANDBOX_RUNNER_TOKEN;
+        } else {
+          process.env.SANDBOX_RUNNER_TOKEN = previousRunnerToken;
+        }
+        await rm(directory, { recursive: true, force: true });
       }
     }
   }, 240_000);
@@ -1177,6 +1206,7 @@ describe("retention", () => {
       ids: current.ids,
       roleConfigDirectory: current.directory,
       secretResolver: new CompositeSecretResolver(),
+      sandboxBackend: unusedSandboxBackend,
     });
     try {
       await expect(
@@ -1195,6 +1225,7 @@ describe("SDK", () => {
     const harness = await createHarness({
       config: HarnessConfigSchema.parse({
         ...config,
+        sandbox: {},
         policy: { ...config.policy, file: join(current.directory, "policy.yaml") },
       }),
       overrides: {

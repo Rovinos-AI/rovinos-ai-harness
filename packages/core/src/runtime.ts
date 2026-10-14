@@ -264,8 +264,6 @@ function composeRuntime(
     clock,
     ids,
     store,
-    keys,
-    sandboxBackend,
     vault,
     vaultResolver,
     pii,
@@ -300,8 +298,8 @@ function composeRuntime(
   return {
     store,
     vault: vaultResolver,
-    keys,
-    sandboxBackend,
+    keys: options.keys,
+    sandboxBackend: options.sandboxBackend,
     clock,
     ids,
     ...createRuntimeRunMethods(options, tool, runWithControl),
@@ -329,8 +327,8 @@ function composeRuntime(
       closeRuntimeResources({
         store,
         vault,
-        keys,
-        sandboxBackend,
+        keys: options.keys,
+        sandboxBackend: options.sandboxBackend,
         flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,
       }),
   };
