@@ -101,15 +101,22 @@ vi.mock("@modelcontextprotocol/node", () => ({
     },
   toNodeHandler: () => mocks.httpRequestHandler,
 }));
-vi.mock("@modelcontextprotocol/server", () => ({
-  createMcpHandler: mocks.createMcpHandler,
-  McpServer: class {
-    server = { registerCapabilities: (_capabilities: unknown) => undefined };
-    registerTool(): void {
-      this.server.registerCapabilities({});
-    }
-  },
-}));
+vi.mock("@modelcontextprotocol/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@modelcontextprotocol/server")>();
+  return {
+    ...actual,
+    createMcpHandler: mocks.createMcpHandler,
+    McpServer: class {
+      server = {
+        getClientCapabilities: () => undefined,
+        registerCapabilities: (_capabilities: unknown) => undefined,
+      };
+      registerTool(): void {
+        this.server.registerCapabilities({});
+      }
+    },
+  };
+});
 vi.mock("@modelcontextprotocol/server/stdio", () => ({ serveStdio: mocks.serveStdio }));
 
 import { startControlPlaneHttp, startControlPlaneStdio } from "./server.js";

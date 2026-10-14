@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError } from "@harness/schemas";
+import type { Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import {
   localhostHostValidation,
@@ -7,14 +8,39 @@ import {
   toNodeHandler,
 } from "@modelcontextprotocol/node";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import type { ClientCapabilities, ServerContext } from "@modelcontextprotocol/server";
 import { serveStdio, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { createServer, type Server } from "node:http";
+import { ConfirmationGate, type ConfirmationGateOptions } from "./confirmation-gate.js";
+import { RunSupervisor } from "./run-supervisor.js";
 import { controlPlaneHttpPortSchema } from "./schemas.js";
+import type { ResolveApprovalOperation } from "./tools/approve.js";
+import { registerApproveTool } from "./tools/approve.js";
+import { registerCancelRunTool } from "./tools/cancel-run.js";
+import { registerDenyTool } from "./tools/deny.js";
 import { registerGetRunTool } from "./tools/get-run.js";
 import { registerListRunsTool } from "./tools/list-runs.js";
+import { registerResumeRunTool } from "./tools/resume-run.js";
 
 const HTTP_HOST = "127.0.0.1";
 const HTTP_PATH = "/mcp";
+
+/** Mutation operations supplied by the composed runtime. */
+export interface ControlPlaneOperations {
+  readonly resumeRun?: (runId: Id, signal: AbortSignal) => Promise<unknown>;
+  readonly cancelRun?: (runId: Id) => Promise<unknown>;
+  readonly resolveApproval?: ResolveApprovalOperation;
+}
+
+/** Optional dependencies for control-plane mutation and confirmation tools. */
+export interface ControlPlaneServerOptions {
+  readonly operations?: ControlPlaneOperations;
+  readonly maxConcurrentRuns?: number;
+  readonly confirmationGate?: ConfirmationGate;
+  readonly confirmation?: ConfirmationGateOptions;
+  /** Must reflect trusted host-side app provenance, not client-controlled request fields. */
+  readonly isAppContext?: (context: ServerContext, toolName: string) => boolean;
+}
 
 class ControlPlaneListenError extends HarnessError {
   override readonly code = "control_plane_listen_failed";
@@ -32,27 +58,82 @@ export interface ControlPlaneHttpHandle {
   close(): Promise<void>;
 }
 
-/** Creates the shared MCP server with metadata-only run inspection tools. */
-export function createControlPlaneServer(store: EventStore): McpServer {
-  const server = new McpServer({ name: "rovinos-ai-harness-control-plane", version: "0.0.0" });
+/** Creates the MCP server with metadata-only inspection and confirmation-gated mutation tools. */
+export function createControlPlaneServer(
+  store: EventStore,
+  options: ControlPlaneServerOptions = {},
+): McpServer {
+  const confirmationOptions = {
+    ...options.confirmation,
+    ...(options.isAppContext === undefined ? {} : { isAppContext: options.isAppContext }),
+  };
+  const confirmationGate = options.confirmationGate ?? new ConfirmationGate(confirmationOptions);
+  const server = new McpServer(
+    {
+      name: "rovinos-ai-harness-control-plane",
+      version: "0.0.0",
+    },
+    { requestState: { verify: confirmationGate.verifyRequestState } },
+  );
   server.server.registerCapabilities({ tools: {} });
   registerListRunsTool(server, store);
   registerGetRunTool(server, store);
+  const supervisor = new RunSupervisor({
+    ...(options.maxConcurrentRuns === undefined
+      ? {}
+      : { maxConcurrentRuns: options.maxConcurrentRuns }),
+    ...(options.operations?.resumeRun === undefined
+      ? {}
+      : { resumeRun: options.operations.resumeRun }),
+  });
+  const clientCapabilities = (): ClientCapabilities | undefined =>
+    server.server.getClientCapabilities();
+  registerApproveTool(server, {
+    store,
+    confirmationGate,
+    ...(options.operations?.resolveApproval === undefined
+      ? {}
+      : { resolveApproval: options.operations.resolveApproval }),
+    clientCapabilities,
+  });
+  registerDenyTool(server, {
+    store,
+    confirmationGate,
+    ...(options.operations?.resolveApproval === undefined
+      ? {}
+      : { resolveApproval: options.operations.resolveApproval }),
+    clientCapabilities,
+  });
+  registerResumeRunTool(server, { confirmationGate, supervisor, clientCapabilities });
+  registerCancelRunTool(server, {
+    confirmationGate,
+    supervisor,
+    ...(options.operations?.cancelRun === undefined
+      ? {}
+      : { cancelRun: options.operations.cancelRun }),
+    clientCapabilities,
+  });
   return server;
 }
 
-/** Starts the same read-only MCP server over stdio. */
-export function startControlPlaneStdio(store: EventStore): StdioServerHandle {
-  return serveStdio(() => createControlPlaneServer(store));
+/** Starts the same MCP server over stdio. */
+export function startControlPlaneStdio(
+  store: EventStore,
+  options: ControlPlaneServerOptions = {},
+): StdioServerHandle {
+  const sharedOptions = withSharedConfirmationGate(options);
+  return serveStdio(() => createControlPlaneServer(store, sharedOptions));
 }
 
 /** Starts a loopback-only stateless HTTP MCP endpoint with Host and Origin checks. */
 export async function startControlPlaneHttp(
   store: EventStore,
   port: number,
+  options: ControlPlaneServerOptions = {},
 ): Promise<ControlPlaneHttpHandle> {
   const checkedPort = controlPlaneHttpPortSchema.parse(port);
-  const handler = createMcpHandler(() => createControlPlaneServer(store));
+  const sharedOptions = withSharedConfirmationGate(options);
+  const handler = createMcpHandler(() => createControlPlaneServer(store, sharedOptions));
   const requestHandler = toNodeHandler(handler);
   const validateHost = localhostHostValidation();
   const validateOrigin = localhostOriginValidation();
@@ -61,6 +142,7 @@ export async function startControlPlaneHttp(
       response.writeHead(404).end();
       return;
     }
+
     if (!validateHost(request, response) || !validateOrigin(request, response)) {
       return;
     }
@@ -115,4 +197,16 @@ function listen(server: Server, port: number): Promise<void> {
       resolve();
     });
   });
+}
+
+function withSharedConfirmationGate(options: ControlPlaneServerOptions): ControlPlaneServerOptions {
+  return {
+    ...options,
+    confirmationGate:
+      options.confirmationGate ??
+      new ConfirmationGate({
+        ...options.confirmation,
+        ...(options.isAppContext === undefined ? {} : { isAppContext: options.isAppContext }),
+      }),
+  };
 }

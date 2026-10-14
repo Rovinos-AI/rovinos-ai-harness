@@ -40,7 +40,14 @@ describe("control-plane HTTP transport", () => {
       expect(new URL(server.endpoint).hostname).toBe("127.0.0.1");
       await client.connect(transport);
       const { tools } = await client.listTools();
-      expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
+      expect(tools.map(({ name }) => name).sort()).toEqual([
+        "approve",
+        "cancel_run",
+        "deny",
+        "get_run",
+        "list_runs",
+        "resume_run",
+      ]);
       await expect(client.callTool({ name: "list_runs", arguments: {} })).resolves.toMatchObject({
         structuredContent: { runs: [] },
         content: [{ text: "0 runs." }],

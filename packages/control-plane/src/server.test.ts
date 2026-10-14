@@ -170,15 +170,32 @@ describe("control-plane inspection tools", () => {
 
     const { tools } = await client.listTools();
 
-    expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
+    expect(tools.map(({ name }) => name).sort()).toEqual([
+      "approve",
+      "cancel_run",
+      "deny",
+      "get_run",
+      "list_runs",
+      "resume_run",
+    ]);
     expect(
-      tools.every(
-        ({ annotations }) =>
-          annotations?.readOnlyHint === true &&
-          annotations.idempotentHint === true &&
-          annotations.openWorldHint === false,
-      ),
+      tools
+        .filter(({ name }) => name === "list_runs" || name === "get_run")
+        .every(
+          ({ annotations }) =>
+            annotations?.readOnlyHint === true &&
+            annotations.idempotentHint === true &&
+            annotations.openWorldHint === false,
+        ),
     ).toBe(true);
+    expect(tools.find(({ name }) => name === "approve")?._meta).toEqual({
+      ui: { visibility: ["app"] },
+    });
+    expect(tools.find(({ name }) => name === "deny")?.annotations?.idempotentHint).toBe(true);
+    expect(tools.find(({ name }) => name === "cancel_run")?.annotations).toMatchObject({
+      destructiveHint: true,
+      idempotentHint: true,
+    });
     expect(client.getServerCapabilities()?.tools).toBeDefined();
     expect(client.getServerCapabilities()).not.toHaveProperty("extensions");
     expect(listRunsInputSchema.parse({})).toEqual({ limit: 20 });
