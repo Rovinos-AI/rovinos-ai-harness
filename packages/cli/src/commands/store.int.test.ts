@@ -5,10 +5,19 @@ import { migrate, PostgresEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
+import { readdir } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createStoreCommand } from "./store.js";
 import { ExitCode } from "../exit-codes.js";
 import { createOutput } from "../output.js";
+
+// Derived from the store's migration files so adding a migration does not break this assertion.
+const postgresMigrationVersions = (
+  await readdir(new URL("../../../store/migrations/postgres/", import.meta.url))
+)
+  .filter((file) => file.endsWith(".sql"))
+  .map((file) => file.slice(0, 4))
+  .sort();
 import { main } from "../main.js";
 
 const connectionString = process.env.TEST_POSTGRES_URL ?? "";
@@ -66,7 +75,7 @@ describe.skipIf(connectionString.length === 0)("store maintenance with Postgres"
       expect(migrateExitCode).toBe(ExitCode.ok);
       expect(parseJson(StoreMigrateResultSchema, stdout[0] ?? "")).toEqual({
         applied: [],
-        pending: ["0001", "0002"],
+        pending: postgresMigrationVersions,
       });
 
       stdout.length = 0;
