@@ -777,13 +777,12 @@ describe("MCP runtime", () => {
     ]);
 
     try {
-      const firstRun = await invokeMcpCli(
-        configPath,
-        dataDirectory,
-        model,
-        createTransport,
-        ["--json", "run", "--input", inputPath],
-      );
+      const firstRun = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "run",
+        "--input",
+        inputPath,
+      ]);
       expect(firstRun.code).toBe(ExitCode.suspended);
       const firstRunId = jsonResult(RunResultSchema, firstRun.stdout).runId;
       const store = new SqliteEventStore(join(dataDirectory, "harness.db"));
@@ -799,13 +798,15 @@ describe("MCP runtime", () => {
         await store.close();
       }
 
-      const invalidEdit = await invokeMcpCli(
-        configPath,
-        dataDirectory,
-        model,
-        createTransport,
-        ["--json", "approvals", "approve", firstApprovalId, "--yes", "--edit", invalidEditPath],
-      );
+      const invalidEdit = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "approvals",
+        "approve",
+        firstApprovalId,
+        "--yes",
+        "--edit",
+        invalidEditPath,
+      ]);
       expect(invalidEdit.code).toBe(ExitCode.usage);
       expect(invalidEdit.stderr.join("")).toContain("edit_invalid");
       expect(invalidEdit.stderr.join("")).not.toContain("in-memory");
@@ -820,22 +821,16 @@ describe("MCP runtime", () => {
         await firstEventsAfterInvalid.close();
       }
 
-      const approvedEdit = await invokeMcpCli(
-        configPath,
-        dataDirectory,
-        model,
-        createTransport,
-        [
-          "--json",
-          "approvals",
-          "approve",
-          firstApprovalId,
-          "--yes",
-          "--edit",
-          allowedEditPath,
-          "--resume",
-        ],
-      );
+      const approvedEdit = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "approvals",
+        "approve",
+        firstApprovalId,
+        "--yes",
+        "--edit",
+        allowedEditPath,
+        "--resume",
+      ]);
       const firstRunEventsStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
       let firstRunEvents: Event[];
       try {
@@ -870,22 +865,16 @@ describe("MCP runtime", () => {
       } finally {
         await secondStore.close();
       }
-      const deniedEdit = await invokeMcpCli(
-        configPath,
-        dataDirectory,
-        model,
-        createTransport,
-        [
-          "--json",
-          "approvals",
-          "approve",
-          secondApprovalId,
-          "--yes",
-          "--edit",
-          deniedEditPath,
-          "--resume",
-        ],
-      );
+      const deniedEdit = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "approvals",
+        "approve",
+        secondApprovalId,
+        "--yes",
+        "--edit",
+        deniedEditPath,
+        "--resume",
+      ]);
       expect(deniedEdit.code).toBe(ExitCode.ok);
       expect(serverCalls).toEqual([{ value: "edited" }]);
       const deniedEventsStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
@@ -927,9 +916,7 @@ describe("MCP runtime", () => {
       );
     } finally {
       await Promise.all(serverPeers.map(async ({ server }) => server.close()));
-      await Promise.all(
-        serverPeers.map(async ({ serverTransport }) => serverTransport.close()),
-      );
+      await Promise.all(serverPeers.map(async ({ serverTransport }) => serverTransport.close()));
     }
   }, 15_000);
 });

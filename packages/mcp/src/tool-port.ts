@@ -175,8 +175,7 @@ function normalizeBlock(block: unknown): NormalizedBlock {
   const metadata = { type, mimeType, bytes: byteCount };
   const data = blockData(block, isResource, resource);
   const visible = visibleBlock(metadata, data, hasLargeBinary);
-  const offloadBlock =
-    data === undefined ? metadata : { ...metadata, data };
+  const offloadBlock = data === undefined ? metadata : { ...metadata, data };
   return {
     block: visible,
     offloadBlock,
@@ -267,10 +266,7 @@ function failure(code: string, result: JsonValueType = null): McpToolExecutionRe
   return { outcome: "error", errorCode: Code.parse(code), result };
 }
 
-function setOutcome(
-  span: Span,
-  outcome: McpToolExecutionResult,
-): void {
+function setOutcome(span: Span, outcome: McpToolExecutionResult): void {
   span.setAttribute("harness.outcome", outcome.outcome);
   if (outcome.outcome === "error") {
     span.setAttribute("harness.error.code", outcome.errorCode ?? "mcp_error");
@@ -326,9 +322,7 @@ async function executeRegisteredTool(options: {
     }
     return {
       outcome: result.isError === true ? "error" : "ok",
-      ...(result.isError === true
-        ? { errorCode: Code.parse("tool_reported_error") }
-        : {}),
+      ...(result.isError === true ? { errorCode: Code.parse("tool_reported_error") } : {}),
       binary: true,
       result: Array.from(mapped.binaryPayload),
     };
@@ -410,10 +404,7 @@ export class McpToolPort {
       return failure("mcp_tool_not_found");
     }
     const connection = this.pool.connection(route.server.id);
-    const signal = AbortSignal.any([
-      context.signal,
-      AbortSignal.timeout(description.timeoutMs),
-    ]);
+    const signal = AbortSignal.any([context.signal, AbortSignal.timeout(description.timeoutMs)]);
     return withSpan(
       MCP_CALL_SPAN,
       {

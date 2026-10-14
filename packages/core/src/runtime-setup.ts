@@ -193,7 +193,8 @@ async function createRuntimeVault(
   keys: RuntimeComposition["keys"],
   clock: Clock,
 ): Promise<RuntimeVault> {
-  const vaultPath = join(dataDir, "vault.db");
+  const vaultDir = resolveVaultDataDir(process.env, dataDir);
+  const vaultPath = join(vaultDir, "vault.db");
   const transient = overrides.transientVault === true && overrides.readOnlyStore !== true;
   if (transient && process.env.NODE_ENV === "production") {
     throw new TransientVaultInProductionError();
@@ -202,7 +203,7 @@ async function createRuntimeVault(
     return new EmptyReadOnlyVault();
   }
   if (overrides.readOnlyStore !== true && !transient) {
-    await mkdir(dataDir, { recursive: true });
+    await mkdir(vaultDir, { recursive: true });
   }
   return new SqliteVault(transient ? ":memory:" : vaultPath, keys, () => clock.now(), {
     readonly: overrides.readOnlyStore === true,
@@ -271,12 +272,7 @@ export async function setupRuntime(
   try {
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    const runtimeVault = await createRuntimeVault(
-      resolveVaultDataDir(process.env, dataDir),
-      overrides,
-      keys,
-      clock,
-    );
+    const runtimeVault = await createRuntimeVault(dataDir, overrides, keys, clock);
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);

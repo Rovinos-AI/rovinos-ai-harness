@@ -299,16 +299,7 @@ function composeRuntime(
     readonly scopes: RunScopeRegistry;
   },
 ): Runtime {
-  const {
-    config,
-    clock,
-    ids,
-    store,
-    keys,
-    vault,
-    vaultResolver,
-    scopes,
-  } = options;
+  const { config, clock, ids, store, keys, vault, vaultResolver, scopes } = options;
   const tool = createRuntimeToolPort(options);
   const runWithControl = createTerminalAwareRunControl(options);
   const resume = createRuntimeResume(options, tool, runWithControl);

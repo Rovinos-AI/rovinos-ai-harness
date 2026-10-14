@@ -3,11 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  InMemoryTransport,
-  McpServer,
-  type Tool,
-} from "@modelcontextprotocol/server";
+import { InMemoryTransport, McpServer, type Tool } from "@modelcontextprotocol/server";
 import {
   Code,
   Id,
@@ -68,19 +64,22 @@ describe("createRuntime model routing", () => {
     }));
     await server.connect(serverTransport);
     const transportFactory = vi.fn(() => clientTransport);
-    const runtime = await createRuntime({
-      run: RunConfigSchema.parse({}),
-      servers: [
-        ServerConfigSchema.parse({
-          id: "runtime_mcp",
-          transport: { kind: "stdio", command: "not-spawned-by-test" },
-          protocol: "2025-11-25",
-        }),
-      ],
-    }, {
-      store: new InMemoryEventStore(),
-      mcpTransportFactory: transportFactory,
-    });
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        servers: [
+          ServerConfigSchema.parse({
+            id: "runtime_mcp",
+            transport: { kind: "stdio", command: "not-spawned-by-test" },
+            protocol: "2025-11-25",
+          }),
+        ],
+      },
+      {
+        store: new InMemoryEventStore(),
+        mcpTransportFactory: transportFactory,
+      },
+    );
 
     expect(transportFactory).toHaveBeenCalledOnce();
     await runtime.close();

@@ -11,10 +11,7 @@ import { context as otelContext, SpanStatusCode, trace } from "@opentelemetry/ap
 import type { SpanContext } from "@opentelemetry/api";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { JsonValue, ServerConfigSchema } from "@harness/schemas";
-import {
-  createTestContextManager,
-  createTestSpanCollector,
-} from "@harness/telemetry/testing";
+import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
 import { lookupSpanDefinition } from "@harness/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
@@ -42,14 +39,16 @@ interface Fixture {
   close(): Promise<void>;
 }
 
-async function fixture(options: {
-  readonly result?: CallToolResult;
-  readonly protocolError?: number;
-  readonly neverResolve?: boolean;
-  readonly callMs?: number;
-  readonly maxResultBytes?: number;
-  readonly offloadBinaryResults?: boolean;
-} = {}): Promise<Fixture> {
+async function fixture(
+  options: {
+    readonly result?: CallToolResult;
+    readonly protocolError?: number;
+    readonly neverResolve?: boolean;
+    readonly callMs?: number;
+    readonly maxResultBytes?: number;
+    readonly offloadBinaryResults?: boolean;
+  } = {},
+): Promise<Fixture> {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = new McpServer({ name: "tool-port-test", version: "1.0.0" });
   const calls: CallToolRequest["params"][] = [];
@@ -82,14 +81,18 @@ async function fixture(options: {
     timeouts: { callMs: options.callMs ?? 1_000 },
     maxResultBytes: options.maxResultBytes ?? 1_048_576,
   });
-  const port = await McpToolPort.create([config], {
-    resolveSecret: () => Promise.reject(new Error("unexpected secret")),
-    createTransport: () => client,
-  }, {
-    ...(options.offloadBinaryResults === undefined
-      ? {}
-      : { offloadBinaryResults: options.offloadBinaryResults }),
-  });
+  const port = await McpToolPort.create(
+    [config],
+    {
+      resolveSecret: () => Promise.reject(new Error("unexpected secret")),
+      createTransport: () => client,
+    },
+    {
+      ...(options.offloadBinaryResults === undefined
+        ? {}
+        : { offloadBinaryResults: options.offloadBinaryResults }),
+    },
+  );
   return {
     peer,
     port,
@@ -106,7 +109,11 @@ function context(signal = new AbortController().signal) {
   return { signal };
 }
 
-const call = { callId: "00000000000000000000000000", toolId: "mcp_test.echo", args: { value: "ok" } };
+const call = {
+  callId: "00000000000000000000000000",
+  toolId: "mcp_test.echo",
+  args: { value: "ok" },
+};
 
 beforeAll(() => {
   otelContext.setGlobalContextManager(createTestContextManager());
@@ -147,9 +154,7 @@ describe("McpToolPort", () => {
         "harness.tool.id",
         "mcp.method.name",
       ]);
-      expect(
-        lookupSpanDefinition("mcp.client.call")?.shape,
-      ).toHaveProperty("mcp.method.name");
+      expect(lookupSpanDefinition("mcp.client.call")?.shape).toHaveProperty("mcp.method.name");
     } finally {
       await current.close();
     }
@@ -166,10 +171,10 @@ describe("McpToolPort", () => {
         errorCode: "tool_reported_error",
         result: { content: [{ type: "text", text: canary }] },
       });
-      expect(JSON.stringify(spanCollector.getFinishedSpans().at(-1)?.attributes)).not.toContain(canary);
-      expect(
-        spanCollector.getFinishedSpans().at(-1)?.attributes["harness.outcome"],
-      ).toBe("error");
+      expect(JSON.stringify(spanCollector.getFinishedSpans().at(-1)?.attributes)).not.toContain(
+        canary,
+      );
+      expect(spanCollector.getFinishedSpans().at(-1)?.attributes["harness.outcome"]).toBe("error");
       expect(spanCollector.getFinishedSpans().at(-1)?.attributes["harness.error.code"]).toBe(
         "tool_reported_error",
       );
@@ -248,7 +253,9 @@ describe("McpToolPort", () => {
   it("keeps small binary blocks reduced to metadata and bounded data", async () => {
     const current = await fixture({
       result: {
-        content: [{ type: "image", mimeType: "image/png", data: Buffer.from([1, 2]).toString("base64") }],
+        content: [
+          { type: "image", mimeType: "image/png", data: Buffer.from([1, 2]).toString("base64") },
+        ],
       },
     });
     try {
@@ -268,9 +275,7 @@ describe("McpToolPort", () => {
     const current = await fixture({
       offloadBinaryResults: true,
       result: {
-        content: [
-          { type: "audio", mimeType: "audio/wav", data: bytes.toString("base64") },
-        ],
+        content: [{ type: "audio", mimeType: "audio/wav", data: bytes.toString("base64") }],
       },
     });
     try {
@@ -418,10 +423,9 @@ describe("McpToolPort", () => {
           const meta = request.params._meta;
           receivedTraceparent =
             typeof meta?.traceparent === "string" ? meta.traceparent : undefined;
-          const match =
-            /^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/u.exec(
-              receivedTraceparent ?? "",
-            );
+          const match = /^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/u.exec(
+            receivedTraceparent ?? "",
+          );
           if (match?.[1] !== undefined && match[2] !== undefined && match[3] !== undefined) {
             const parent: SpanContext = {
               traceId: match[1],
@@ -439,12 +443,9 @@ describe("McpToolPort", () => {
       },
       { legacy: "reject" },
     );
-    const clientTransport = new StreamableHTTPClientTransport(
-      new URL("https://localhost/mcp"),
-      {
-        fetch: async (input, init) => handler.fetch(new Request(input, init)),
-      },
-    );
+    const clientTransport = new StreamableHTTPClientTransport(new URL("https://localhost/mcp"), {
+      fetch: async (input, init) => handler.fetch(new Request(input, init)),
+    });
     const port = await McpToolPort.create(
       [
         ServerConfigSchema.parse({
@@ -464,8 +465,7 @@ describe("McpToolPort", () => {
       const before = spanCollector.getFinishedSpans().length;
       await expect(port.execute(call, context())).resolves.toMatchObject({ outcome: "ok" });
       const executionSpans = spanCollector.getFinishedSpans().slice(before);
-      const callSpan = executionSpans
-        .find(({ name }) => name === "mcp.client.call");
+      const callSpan = executionSpans.find(({ name }) => name === "mcp.client.call");
       const serverSpan = executionSpans.find(({ name }) => name === "server.tool");
       expect(receivedTraceparent).toBeDefined();
       expect(receivedTraceparent?.split("-")[2]).toBe(callSpan?.spanContext().spanId);
@@ -524,7 +524,9 @@ describe("McpToolPort", () => {
       await expect(current.port.execute(call, context())).resolves.toMatchObject({
         outcome: "ok",
         result: {
-          content: [{ type: "resource", mimeType: "application/octet-stream", bytes: 2, data: "AQI=" }],
+          content: [
+            { type: "resource", mimeType: "application/octet-stream", bytes: 2, data: "AQI=" },
+          ],
         },
       });
     } finally {

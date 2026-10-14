@@ -39,9 +39,7 @@ export async function invokeMcpTool(options: {
       {
         timeout: options.server.timeouts.callMs,
         allowInputRequired: true,
-        ...(options.toolDefinition === undefined
-          ? {}
-          : { toolDefinition: options.toolDefinition }),
+        ...(options.toolDefinition === undefined ? {} : { toolDefinition: options.toolDefinition }),
         ...options.requestOptions,
       },
     );

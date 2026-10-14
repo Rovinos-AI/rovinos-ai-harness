@@ -601,16 +601,13 @@ describe("McpConnection", () => {
       { legacy: "reject" },
     );
     const requestHeaders: Headers[] = [];
-    const clientTransport = new StreamableHTTPClientTransport(
-      new URL("https://localhost/mcp"),
-      {
-        fetch: async (input, init) => {
-          const request = new Request(input, init);
-          requestHeaders.push(request.headers);
-          return handler.fetch(request);
-        },
+    const clientTransport = new StreamableHTTPClientTransport(new URL("https://localhost/mcp"), {
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        requestHeaders.push(request.headers);
+        return handler.fetch(request);
       },
-    );
+    });
     const serverConfig = ServerConfigSchema.parse({
       id: "mcp_test",
       transport: { kind: "http", url: "https://localhost/mcp" },
@@ -630,9 +627,7 @@ describe("McpConnection", () => {
         undefined,
         listedTool,
       );
-      expect(requestHeaders.at(-1)?.get("Mcp-Param-Region")).toBe(
-        "<EMAIL_1>",
-      );
+      expect(requestHeaders.at(-1)?.get("Mcp-Param-Region")).toBe("<EMAIL_1>");
     } finally {
       await connection.close();
       await handler.close();
