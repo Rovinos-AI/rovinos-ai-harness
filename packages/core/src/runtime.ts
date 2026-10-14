@@ -251,6 +251,33 @@ async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | und
   return undefined;
 }
 
+function createTerminalAwareRunControl({
+  config,
+  overrides,
+  clock,
+  store,
+  vault,
+}: RuntimeComposition): RunControl {
+  return async (runId, operation, firstNewSeq = 0) => {
+    const result = await withRunControl({
+      store,
+      runId,
+      firstNewSeq,
+      processLike: overrides.processLike ?? defaultProcessLike,
+      graceMs: config.run.shutdownGraceMs,
+      operation,
+    });
+    if (
+      result.status === "completed" ||
+      result.status === "failed" ||
+      result.status === "cancelled"
+    ) {
+      await vault.markTerminal(runId, clock.now());
+    }
+    return result;
+  };
+}
+
 function composeRuntime(
   options: RuntimeComposition & {
     readonly roles: RoleRegistry;
@@ -259,7 +286,6 @@ function composeRuntime(
 ): Runtime {
   const {
     config,
-    overrides,
     clock,
     ids,
     store,
@@ -293,24 +319,7 @@ function composeRuntime(
           config: pii.config,
           resolver: pii.resolver,
         });
-  const runWithControl: RunControl = async (runId, operation, firstNewSeq = 0) => {
-    const result = await withRunControl({
-      store,
-      runId,
-      firstNewSeq,
-      processLike: overrides.processLike ?? defaultProcessLike,
-      graceMs: config.run.shutdownGraceMs,
-      operation,
-    });
-    if (
-      result.status === "completed" ||
-      result.status === "failed" ||
-      result.status === "cancelled"
-    ) {
-      await vault.markTerminal(runId, clock.now());
-    }
-    return result;
-  };
+  const runWithControl = createTerminalAwareRunControl(options);
   const resume = createRuntimeResume(options, tool, runWithControl);
   return {
     store,
@@ -347,7 +356,7 @@ function createRuntimeResume(
   tool: ToolPort,
   runWithControl: RunControl,
 ): Runtime["resume"] {
-  const { config, clock, ids, store, model, context, policy, scopes, overrides } = options;
+  const { config, clock, ids, store, model, context, policy, scopes } = options;
   return async (runId) => {
     const firstNewSeq = await store.head(runId);
     return runWithControl(

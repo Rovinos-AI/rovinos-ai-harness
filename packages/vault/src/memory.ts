@@ -111,9 +111,10 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
     const { terminalBefore, limit } = VaultTerminalRunsQuerySchema.parse(query);
     const runIds = [...this.terminalRuns.entries()]
       .filter(([, terminalAt]) => terminalAt < terminalBefore)
-      .sort(
-        ([leftId, leftAt], [rightId, rightAt]) => leftAt - rightAt || leftId.localeCompare(rightId),
-      )
+      .sort(([leftId, leftAt], [rightId, rightAt]) => {
+        const timeOrder = leftAt - rightAt;
+        return timeOrder === 0 ? leftId.localeCompare(rightId) : timeOrder;
+      })
       .slice(0, limit)
       .map(([runId]) => runId);
     return Promise.resolve(runIds);

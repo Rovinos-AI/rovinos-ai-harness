@@ -227,7 +227,7 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
   }
 
   /** Record when a run entered a terminal state for grace-period retention. */
-  async markTerminal(runId: Id, ts: number): Promise<void> {
+  markTerminal(runId: Id, ts: number): Promise<void> {
     const terminalAt = VaultTimestampSchema.parse(ts);
     try {
       this.db
@@ -235,13 +235,14 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
           "INSERT INTO run_meta (run_id, terminal_at) VALUES (?, ?) ON CONFLICT(run_id) DO UPDATE SET terminal_at = excluded.terminal_at",
         )
         .run(runId, terminalAt);
+      return Promise.resolve();
     } catch {
-      throw new VaultOperationError("vault_unavailable");
+      return Promise.reject(new VaultOperationError("vault_unavailable"));
     }
   }
 
   /** Find a stable batch of terminal runs older than the supplied timestamp. */
-  async listTerminalRunsBefore(query: {
+  listTerminalRunsBefore(query: {
     readonly terminalBefore: number;
     readonly limit: number;
   }): Promise<readonly Id[]> {
@@ -252,9 +253,9 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
           "SELECT run_id FROM run_meta WHERE terminal_at < ? ORDER BY terminal_at, run_id LIMIT ?",
         )
         .all(terminalBefore, limit);
-      return rows.map(({ run_id }) => Id.parse(run_id));
+      return Promise.resolve(rows.map(({ run_id }) => Id.parse(run_id)));
     } catch {
-      throw new VaultOperationError("vault_unavailable");
+      return Promise.reject(new VaultOperationError("vault_unavailable"));
     }
   }
 
