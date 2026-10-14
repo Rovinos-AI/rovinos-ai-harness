@@ -10,6 +10,10 @@ export const SANDBOX_ENV_FORBIDDEN_CODE = "sandbox_env_forbidden";
 
 const FORBIDDEN_ENVIRONMENT_KEYS = new Set([
   "PATH",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
   "BASH_ENV",
   "ENV",
   "NODE_OPTIONS",

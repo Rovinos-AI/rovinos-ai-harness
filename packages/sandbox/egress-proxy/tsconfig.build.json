@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "../dist/egress-proxy/src",
+    "tsBuildInfoFile": "../dist/egress-proxy/tsconfig.build.tsbuildinfo",
+    "types": ["node"],
+    "composite": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.int.test.ts"],
+  "references": [{ "path": "../../schemas/tsconfig.build.json" }]
+}
