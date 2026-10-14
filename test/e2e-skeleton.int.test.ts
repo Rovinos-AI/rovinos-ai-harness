@@ -8,6 +8,7 @@
 // Not wired yet: storage-boundary tokenization (13.8 -> #81)
 // Not wired yet: sentinel trip gate wired to the runtime vault (8.4 -> #74)
 import { Command } from "commander";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { ExportResultCode } from "@opentelemetry/core";
@@ -22,6 +23,7 @@ import {
   main,
   type CliContext,
 } from "@harness/cli/programmatic";
+import { createControlPlaneServer } from "@harness/control-plane";
 import { CompositeSecretResolver, EnvSecretResolver, FileSecretResolver } from "@harness/config";
 import {
   Checkpointer,
@@ -35,6 +37,7 @@ import {
   type ToolPort,
 } from "@harness/core";
 import { FakeModelPort } from "@harness/core/testing";
+import { InMemoryEventStore } from "@harness/store";
 import { buildApprovalPayload } from "@harness/policy";
 import {
   ApprovalListResultSchema,
@@ -781,6 +784,79 @@ describe("resume", () => {
         database.close();
       }
     } finally {
+      await store.close();
+    }
+  });
+});
+
+describe("control plane", () => {
+  it("exposes app-only decisions and supervises a runtime cancellation through MCP", async () => {
+    const store = new InMemoryEventStore();
+    const runId = Id.parse("00000000000000000000000042");
+    let resumeSignal: AbortSignal | undefined;
+    let markResumeStarted: () => void = () => undefined;
+    const resumeStarted = new Promise<void>((resolve) => {
+      markResumeStarted = resolve;
+    });
+    const operations = {
+      resumeRun: vi.fn((_runId: Id, signal: AbortSignal) => {
+        resumeSignal = signal;
+        markResumeStarted();
+        return new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      }),
+      cancelRun: vi.fn(async () => "cancelled"),
+    };
+    const server = createControlPlaneServer(store, {
+      isAppContext: () => true,
+      operations,
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client(
+      { name: "control-plane-e2e-test", version: "1.0.0" },
+      {
+        versionNegotiation: { mode: "auto" },
+        capabilities: {
+          extensions: {
+            "io.modelcontextprotocol/ui": {
+              mimeTypes: ["text/html;profile=mcp-app"],
+            },
+          },
+        },
+      },
+    );
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const { tools } = await client.listTools();
+      expect(tools.find(({ name }) => name === "approve")?._meta).toEqual({
+        ui: { visibility: ["app"] },
+      });
+      expect(tools.find(({ name }) => name === "deny")?._meta).toEqual({
+        ui: { visibility: ["app"] },
+      });
+
+      const resumed = await client.callTool({
+        name: "resume_run",
+        arguments: { runId },
+      });
+      expect(resumed.structuredContent).toEqual({ started: true });
+      await resumeStarted;
+      const cancelled = await client.callTool({
+        name: "cancel_run",
+        arguments: { runId },
+      });
+
+      expect(cancelled.structuredContent).toEqual({ ok: true });
+      expect(resumeSignal?.aborted).toBe(true);
+      expect(operations.resumeRun).toHaveBeenCalledOnce();
+      expect(operations.cancelRun).toHaveBeenCalledOnce();
+    } finally {
+      await client.close();
+      await server.close();
+      await clientTransport.close();
+      await serverTransport.close();
       await store.close();
     }
   });

@@ -110,6 +110,7 @@ vi.mock("@modelcontextprotocol/server", async (importOriginal) => {
       server = {
         getClientCapabilities: () => undefined,
         registerCapabilities: (_capabilities: unknown) => undefined,
+        setRequestHandler: (_method: string, _handler: unknown) => undefined,
       };
       registerTool(): void {
         this.server.registerCapabilities({});

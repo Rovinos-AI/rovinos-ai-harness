@@ -79,10 +79,26 @@ interface MemoryConnection {
 
 const connections: MemoryConnection[] = [];
 
-async function connect(store: InMemoryEventStore): Promise<MemoryConnection> {
+async function connect(
+  store: InMemoryEventStore,
+  mcpApps = false,
+): Promise<MemoryConnection> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createControlPlaneServer(store);
-  const client = new Client({ name: "control-plane-test", version: "1.0.0" });
+  const client = new Client(
+    { name: "control-plane-test", version: "1.0.0" },
+    mcpApps
+      ? {
+          capabilities: {
+            extensions: {
+              "io.modelcontextprotocol/ui": {
+                mimeTypes: ["text/html;profile=mcp-app"],
+              },
+            },
+          },
+        }
+      : {},
+  );
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   const connection = { client, server, clientTransport, serverTransport };
@@ -171,9 +187,7 @@ describe("control-plane inspection tools", () => {
     const { tools } = await client.listTools();
 
     expect(tools.map(({ name }) => name).sort()).toEqual([
-      "approve",
       "cancel_run",
-      "deny",
       "get_run",
       "list_runs",
       "resume_run",
@@ -188,10 +202,6 @@ describe("control-plane inspection tools", () => {
             annotations.openWorldHint === false,
         ),
     ).toBe(true);
-    expect(tools.find(({ name }) => name === "approve")?._meta).toEqual({
-      ui: { visibility: ["app"] },
-    });
-    expect(tools.find(({ name }) => name === "deny")?.annotations?.idempotentHint).toBe(true);
     expect(tools.find(({ name }) => name === "cancel_run")?.annotations).toMatchObject({
       destructiveHint: true,
       idempotentHint: true,
@@ -201,6 +211,20 @@ describe("control-plane inspection tools", () => {
     expect(listRunsInputSchema.parse({})).toEqual({ limit: 20 });
     expect(listRunsInputSchema.safeParse({ limit: 51 }).success).toBe(false);
     expect(getRunInputSchema.safeParse({ runId: "invalid" }).success).toBe(false);
+  });
+
+  it("lists app-only decision tools only for MCP Apps clients", async () => {
+    const store = new InMemoryEventStore();
+    const { client } = await connect(store, true);
+
+    const { tools } = await client.listTools();
+
+    expect(tools.find(({ name }) => name === "approve")?._meta).toEqual({
+      ui: { visibility: ["app"] },
+    });
+    expect(tools.find(({ name }) => name === "deny")?._meta).toEqual({
+      ui: { visibility: ["app"] },
+    });
   });
 
   it("lists metadata with pagination and status filtering", async () => {

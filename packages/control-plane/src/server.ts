@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError } from "@harness/schemas";
+import { HarnessError, JsonValue } from "@harness/schemas";
 import type { Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import {
@@ -8,12 +8,24 @@ import {
   toNodeHandler,
 } from "@modelcontextprotocol/node";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import type { ClientCapabilities, ServerContext } from "@modelcontextprotocol/server";
+import type { ClientCapabilities, ServerContext, Tool } from "@modelcontextprotocol/server";
 import { serveStdio, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { createServer, type Server } from "node:http";
+import { z } from "zod";
 import { ConfirmationGate, type ConfirmationGateOptions } from "./confirmation-gate.js";
 import { RunSupervisor } from "./run-supervisor.js";
-import { controlPlaneHttpPortSchema } from "./schemas.js";
+import {
+  approveInputSchema,
+  controlPlaneHttpPortSchema,
+  decisionOutputSchema,
+  denyInputSchema,
+  getRunInputSchema,
+  getRunOutputSchema,
+  listRunsInputSchema,
+  listRunsOutputSchema,
+  resumeRunOutputSchema,
+  runLifecycleInputSchema,
+} from "./schemas.js";
 import type { ResolveApprovalOperation } from "./tools/approve.js";
 import { registerApproveTool } from "./tools/approve.js";
 import { registerCancelRunTool } from "./tools/cancel-run.js";
@@ -24,6 +36,8 @@ import { registerResumeRunTool } from "./tools/resume-run.js";
 
 const HTTP_HOST = "127.0.0.1";
 const HTTP_PATH = "/mcp";
+const MCP_APP_EXTENSION = "io.modelcontextprotocol/ui";
+const MCP_APP_MIME = "text/html;profile=mcp-app";
 
 /** Mutation operations supplied by the composed runtime. */
 export interface ControlPlaneOperations {
@@ -113,6 +127,14 @@ export function createControlPlaneServer(
       : { cancelRun: options.operations.cancelRun }),
     clientCapabilities,
   });
+  const definitions = toolDefinitions();
+  server.server.setRequestHandler("tools/list", () => ({
+    tools: definitions.filter(
+      (tool) =>
+        tool._meta?.ui === undefined ||
+        supportsMcpApps(server.server.getClientCapabilities()),
+    ),
+  }));
   return server;
 }
 
@@ -209,4 +231,72 @@ function withSharedConfirmationGate(options: ControlPlaneServerOptions): Control
         ...(options.isAppContext === undefined ? {} : { isAppContext: options.isAppContext }),
       }),
   };
+}
+
+function supportsMcpApps(capabilities: ClientCapabilities | undefined): boolean {
+  const extension = z
+    .object({ mimeTypes: z.array(z.string()) })
+    .passthrough()
+    .safeParse(capabilities?.extensions?.[MCP_APP_EXTENSION]);
+  return extension.success && extension.data.mimeTypes.includes(MCP_APP_MIME);
+}
+
+function toolDefinitions(): Tool[] {
+  return [
+    {
+      name: "list_runs",
+      description: "List run status and metadata counts.",
+      inputSchema: objectInputSchema(listRunsInputSchema),
+      outputSchema: z.toJSONSchema(listRunsOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "get_run",
+      description: "Get run status, usage, approvals, and recent safe event metadata.",
+      inputSchema: objectInputSchema(getRunInputSchema),
+      outputSchema: z.toJSONSchema(getRunOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "approve",
+      description: "Approve a pending approval without resuming its run.",
+      inputSchema: objectInputSchema(approveInputSchema),
+      outputSchema: z.toJSONSchema(decisionOutputSchema),
+      annotations: { idempotentHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    {
+      name: "deny",
+      description: "Deny a pending approval without resuming its run.",
+      inputSchema: objectInputSchema(denyInputSchema),
+      outputSchema: z.toJSONSchema(decisionOutputSchema),
+      annotations: { idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    {
+      name: "resume_run",
+      description: "Resume a run asynchronously.",
+      inputSchema: objectInputSchema(runLifecycleInputSchema),
+      outputSchema: z.toJSONSchema(resumeRunOutputSchema),
+      annotations: { openWorldHint: false },
+    },
+    {
+      name: "cancel_run",
+      description: "Request cancellation of a run.",
+      inputSchema: objectInputSchema(runLifecycleInputSchema),
+      outputSchema: z.toJSONSchema(decisionOutputSchema),
+      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+  ];
+}
+
+function objectInputSchema(schema: z.ZodType): Tool["inputSchema"] {
+  return z
+    .object({
+      type: z.literal("object"),
+      properties: z.record(z.string(), JsonValue).optional(),
+      required: z.array(z.string()).optional(),
+    })
+    .passthrough()
+    .parse(z.toJSONSchema(schema));
 }

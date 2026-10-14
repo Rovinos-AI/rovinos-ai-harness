@@ -14,7 +14,7 @@ const RunSupervisorOptionsSchema = z
 export interface RunSupervisorOptions {
   readonly maxConcurrentRuns?: number;
   readonly resumeRun?: (runId: Id, signal: AbortSignal) => Promise<unknown>;
-  readonly activeRuns?: Pick<ActiveRuns, "register">;
+  readonly activeRuns?: Pick<ActiveRuns, "register" | "terminate">;
 }
 
 /** Starts resumptions asynchronously and cooperatively cancels locally supervised runs. */
@@ -22,7 +22,7 @@ export class RunSupervisor {
   private readonly active = new Map<Id, AbortController>();
   private readonly maxConcurrentRuns: number;
   private readonly resumeRun: RunSupervisorOptions["resumeRun"];
-  private readonly activeRuns: Pick<ActiveRuns, "register">;
+  private readonly activeRuns: Pick<ActiveRuns, "register" | "terminate">;
 
   /** Creates a supervisor with a bounded number of concurrent resumptions. */
   constructor(options: RunSupervisorOptions) {
@@ -54,6 +54,7 @@ export class RunSupervisor {
       .catch(() => undefined)
       .finally(() => {
         this.active.delete(runId);
+        this.activeRuns.terminate(runId);
       });
     return { started: true };
   }

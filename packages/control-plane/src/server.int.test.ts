@@ -41,9 +41,7 @@ describe("control-plane HTTP transport", () => {
       await client.connect(transport);
       const { tools } = await client.listTools();
       expect(tools.map(({ name }) => name).sort()).toEqual([
-        "approve",
         "cancel_run",
-        "deny",
         "get_run",
         "list_runs",
         "resume_run",

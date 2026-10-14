@@ -13,9 +13,10 @@ describe("RunSupervisor", () => {
     const signals = new Map<string, AbortSignal>();
     const finish = new Map<string, () => void>();
     const register = vi.fn();
+    const terminate = vi.fn();
     const supervisor = new RunSupervisor({
       maxConcurrentRuns: 2,
-      activeRuns: { register },
+      activeRuns: { register, terminate },
       resumeRun: (runId, signal) =>
         new Promise<void>((resolve) => {
           signals.set(runId, signal);
@@ -43,6 +44,7 @@ describe("RunSupervisor", () => {
 
     finish.get(firstRunId)?.();
     await vi.waitFor(() => expect(supervisor.isActive(firstRunId)).toBe(false));
+    expect(terminate).toHaveBeenCalledWith(firstRunId);
     expect(supervisor.start(thirdRunId)).toEqual({ started: true });
     finish.get(secondRunId)?.();
     finish.get(thirdRunId)?.();

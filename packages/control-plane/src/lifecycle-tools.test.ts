@@ -211,12 +211,62 @@ describe("confirmation-gated control-plane tools", () => {
       undefined,
       Code.parse("reviewed"),
     );
+    const repeatedDeny = await client.callTool({
+      name: "deny",
+      arguments: { approvalId: denied.approvalId },
+    });
+    expect(repeatedDeny.structuredContent).toEqual({
+      ok: false,
+      code: "approval_already_resolved",
+    });
     expect(await countResolutions(store, approved.runId)).toBe(1);
     expect(await countResolutions(store, denied.runId)).toBe(1);
     expect(`${JSON.stringify(approveResult)}${JSON.stringify(denyResult)}`).not.toContain(
       approvalCanary,
     );
     expect(resumeRun).not.toHaveBeenCalled();
+  });
+
+  it("returns safe denial errors for unavailable and failing resolution operations", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const unavailable = await addPendingApproval(store, builders);
+    const failing = await addPendingApproval(store, builders);
+    const resolveApproval = vi
+      .fn<ResolveApprovalOperation>()
+      .mockRejectedValueOnce({ code: Code.parse("resume_conflict") })
+      .mockRejectedValueOnce(new Error(approvalCanary));
+    const { client } = await connect(store, { isAppContext: () => true });
+    const { client: failingClient } = await connect(store, {
+      isAppContext: () => true,
+      operations: { resolveApproval },
+    });
+
+    const unavailableResult = await client.callTool({
+      name: "deny",
+      arguments: { approvalId: unavailable.approvalId },
+    });
+    const knownError = await failingClient.callTool({
+      name: "deny",
+      arguments: { approvalId: failing.approvalId },
+    });
+    const unknownError = await failingClient.callTool({
+      name: "deny",
+      arguments: { approvalId: failing.approvalId },
+    });
+
+    expect(unavailableResult.structuredContent).toEqual({
+      ok: false,
+      code: "control_plane_runtime_unavailable",
+    });
+    expect(knownError.structuredContent).toEqual({ ok: false, code: "resume_conflict" });
+    expect(unknownError.structuredContent).toEqual({
+      ok: false,
+      code: "approval_resolution_failed",
+    });
+    expect(`${JSON.stringify(knownError)}${JSON.stringify(unknownError)}`).not.toContain(
+      approvalCanary,
+    );
   });
 
   it.each(["decline", "cancel"] as const)(
@@ -314,5 +364,47 @@ describe("confirmation-gated control-plane tools", () => {
     expect(resumeSignal?.aborted).toBe(true);
     expect(operations.resumeRun).toHaveBeenCalledOnce();
     expect(operations.cancelRun).toHaveBeenCalledOnce();
+  });
+
+  it("returns safe cancellation outcomes for missing and failing runtime operations", async () => {
+    const store = new InMemoryEventStore();
+    const { client: unavailableClient } = await connect(store, { isAppContext: () => true });
+    const cancelRun = vi
+      .fn<(runId: Id) => Promise<unknown>>()
+      .mockResolvedValueOnce("already_terminal")
+      .mockRejectedValueOnce({ code: Code.parse("resume_conflict") })
+      .mockRejectedValueOnce(new Error(approvalCanary));
+    const { client } = await connect(store, {
+      isAppContext: () => true,
+      operations: { cancelRun },
+    });
+
+    const unavailable = await unavailableClient.callTool({
+      name: "cancel_run",
+      arguments: { runId: createEventBuilders().nextRunId() },
+    });
+    const alreadyTerminal = await client.callTool({
+      name: "cancel_run",
+      arguments: { runId: createEventBuilders().nextRunId() },
+    });
+    const knownError = await client.callTool({
+      name: "cancel_run",
+      arguments: { runId: createEventBuilders().nextRunId() },
+    });
+    const unknownError = await client.callTool({
+      name: "cancel_run",
+      arguments: { runId: createEventBuilders().nextRunId() },
+    });
+
+    expect(unavailable.structuredContent).toEqual({
+      ok: false,
+      code: "control_plane_runtime_unavailable",
+    });
+    expect(alreadyTerminal.structuredContent).toEqual({ ok: true, code: "already_terminal" });
+    expect(knownError.structuredContent).toEqual({ ok: false, code: "resume_conflict" });
+    expect(unknownError.structuredContent).toEqual({ ok: false, code: "cancel_failed" });
+    expect(`${JSON.stringify(knownError)}${JSON.stringify(unknownError)}`).not.toContain(
+      approvalCanary,
+    );
   });
 });
