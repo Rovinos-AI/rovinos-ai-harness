@@ -58,9 +58,7 @@ async function createMemoryPeer(
   const server = new McpServer({ name: "memory-server", version: "1.0.0" });
   server.server.registerCapabilities({
     tools: { listChanged: true },
-    ...(options.supportsApps === true
-      ? { extensions: { "io.modelcontextprotocol/ui": {} } }
-      : {}),
+    ...(options.supportsApps === true ? { extensions: { "io.modelcontextprotocol/ui": {} } } : {}),
   });
   if (options.modern === true) {
     server.server.setRequestHandler("server/discover", () => ({

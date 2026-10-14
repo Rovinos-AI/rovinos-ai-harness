@@ -43,12 +43,10 @@ async function createPeer(tools?: { name: string; description?: string }[]) {
     extensions: { "io.modelcontextprotocol/ui": {} },
   });
   server.server.setRequestHandler("tools/list", () => ({
-    tools:
-      tools?.map((tool) => ({ ...tool, inputSchema })) ??
-      [
-        { name: "available", description: descriptionCanary, inputSchema },
-        { name: "filtered", description: errorCanary, inputSchema },
-      ],
+    tools: tools?.map((tool) => ({ ...tool, inputSchema })) ?? [
+      { name: "available", description: descriptionCanary, inputSchema },
+      { name: "filtered", description: errorCanary, inputSchema },
+    ],
   }));
   server.server.setRequestHandler("tools/call", () => {
     toolCalls += 1;
@@ -151,9 +149,7 @@ describe("harness servers check", () => {
       { id: "second", transport: { kind: "stdio", command: "unused" } },
     ];
     const connected: string[] = [];
-    const { context, stdout } = createContext(() =>
-      Promise.resolve(config(serverConfigs)),
-    );
+    const { context, stdout } = createContext(() => Promise.resolve(config(serverConfigs)));
 
     const exitCode = await main(["--json", "servers", "check", "--server", "second"], context, [
       createServersCommand({
@@ -183,9 +179,7 @@ describe("harness servers check", () => {
       transport: { kind: "stdio", command: "unused" },
       trust: "internal",
     };
-    const { context, stdout } = createContext(() =>
-      Promise.resolve(config([serverConfig])),
-    );
+    const { context, stdout } = createContext(() => Promise.resolve(config([serverConfig])));
 
     const exitCode = await main(["servers", "check"], context, [
       createServersCommand({ createTransport: () => Promise.resolve(peer) }),

@@ -88,6 +88,7 @@ function protocolOptions(protocol: ServerConfig["protocol"]) {
 export class McpConnection {
   readonly #config: ServerConfig;
   readonly #dependencies: McpConnectionDependencies;
+  readonly #now = (): number => this.#dependencies.now?.() ?? Date.now();
   #client: Client | undefined;
   #currentTransport: Transport | undefined;
   #connectPromise: Promise<void> | undefined;
@@ -120,9 +121,8 @@ export class McpConnection {
   }
 
   /** Safe negotiated server metadata for diagnostics. */
-  get serverMetadata(): McpServerMetadata { return getServerMetadata(this.#client); }
-  #now(): number {
-    return this.#dependencies.now?.() ?? Date.now();
+  get serverMetadata(): McpServerMetadata {
+    return getServerMetadata(this.#client);
   }
 
   /** Connects once; concurrent callers share the same in-flight handshake. */

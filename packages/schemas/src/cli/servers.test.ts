@@ -35,6 +35,12 @@ describe("ServersCheckResultSchema", () => {
     expect(
       ServersCheckResultSchema.safeParse({
         ...result,
+        servers: [{ ...result.servers[0], protocolVersion: "2026-99-99" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      ServersCheckResultSchema.safeParse({
+        ...result,
         servers: [{ ...result.servers[0], rejectedTools: [{ reason: "denied", name: "private" }] }],
       }).success,
     ).toBe(false);

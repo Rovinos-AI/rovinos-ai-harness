@@ -8,16 +8,12 @@ import {
   type McpConnectionDependencies,
   type McpTool,
 } from "@harness/mcp";
-import {
-  Code,
-  HarnessError,
-  ServersCheckResultSchema,
-  type ServerConfig,
-} from "@harness/schemas";
+import { Code, HarnessError, ServersCheckResultSchema, type ServerConfig } from "@harness/schemas";
+import { z } from "zod";
 import type { CommandModule } from "../command.js";
 import type { Output } from "../output.js";
 
-const MCP_PROTOCOL_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const MCP_PROTOCOL_VERSION_SCHEMA = z.iso.date();
 const APPS_EXTENSION_WARNING = Code.parse("annotations_require_internal");
 const TRACE_DISABLED_WARNING = Code.parse("trace_propagation_disabled");
 
@@ -44,7 +40,9 @@ class ServersCheckFailedError extends HarnessError {
 }
 
 function protocolVersionOf(version: string | undefined): string {
-  return version !== undefined && MCP_PROTOCOL_VERSION_PATTERN.test(version) ? version : "unknown";
+  return version !== undefined && MCP_PROTOCOL_VERSION_SCHEMA.safeParse(version).success
+    ? version
+    : "unknown";
 }
 
 function propagationFor(server: ServerConfig): {
@@ -162,7 +160,9 @@ function createResult(discovered: readonly DiscoveryResult[]) {
       rejectedByServer.set(rejected.serverId, rejectedTools);
     }
   } catch (error) {
-    registryError = Code.parse(error instanceof ToolRegistryError ? error.code : "mcp_registry_failed");
+    registryError = Code.parse(
+      error instanceof ToolRegistryError ? error.code : "mcp_registry_failed",
+    );
   }
 
   const servers = discovered.map(
