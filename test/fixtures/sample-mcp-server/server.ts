@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { createServer as createHttpServer } from "node:http";
 import { toNodeHandler } from "@modelcontextprotocol/node";
-import { propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
+import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import type { TextMapGetter } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import {
@@ -12,15 +12,20 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/server";
+import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
 
 const counterPath = process.env.SAMPLE_COUNTER_FILE ?? "/data/messages.count";
-const tracer = trace.getTracer("sample-mcp-server");
+const spanCollector = createTestSpanCollector();
+const tracerProvider = spanCollector.provider;
+context.setGlobalContextManager(createTestContextManager());
+trace.setGlobalTracerProvider(tracerProvider);
+const tracer = tracerProvider.getTracer("sample-mcp-server");
 const propagator = new W3CTraceContextPropagator();
 const carrierGetter: TextMapGetter<Record<string, string>> = {
   get: (carrier, key) => carrier[key],
   keys: (carrier) => Object.keys(carrier),
 };
-const finishedServerSpans: { readonly name: string; readonly parentSpanId: string | null }[] = [];
+const cancelledRequests = new Set<string>();
 
 type SampleToolHandler = (
   args: Record<string, unknown>,
@@ -43,8 +48,17 @@ const valueSchema = {
 } satisfies Tool["inputSchema"];
 const slowSchema = {
   type: "object",
-  properties: { milliseconds: { type: "integer", minimum: 0, maximum: 60_000 } },
-  required: ["milliseconds"],
+  properties: {
+    milliseconds: { type: "integer", minimum: 0, maximum: 60_000 },
+    cancellationId: { type: "string" },
+  },
+  required: ["milliseconds", "cancellationId"],
+  additionalProperties: false,
+} satisfies Tool["inputSchema"];
+const cancellationSchema = {
+  type: "object",
+  properties: { cancellationId: { type: "string" } },
+  required: ["cancellationId"],
   additionalProperties: false,
 } satisfies Tool["inputSchema"];
 const messageSchema = {
@@ -69,8 +83,21 @@ const tools = [
     inputSchema: noArgsSchema,
   },
   { name: "get_spans", description: "Test-only finished server spans.", inputSchema: noArgsSchema },
-  { name: "get_count", description: "Test-only persisted message count.", inputSchema: noArgsSchema },
-  { name: "reset_count", description: "Test-only reset of the message count.", inputSchema: noArgsSchema },
+  {
+    name: "get_cancellation",
+    description: "Test-only cancellation status keyed by request id.",
+    inputSchema: cancellationSchema,
+  },
+  {
+    name: "get_count",
+    description: "Test-only persisted message count.",
+    inputSchema: noArgsSchema,
+  },
+  {
+    name: "reset_count",
+    description: "Test-only reset of the message count.",
+    inputSchema: noArgsSchema,
+  },
 ] satisfies Tool[];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,32 +113,54 @@ function traceProbe(metaValue: unknown): CallToolResult {
   const receivedTraceparent = typeof meta.traceparent === "string" ? meta.traceparent : null;
   const carrier = receivedTraceparent === null ? {} : { traceparent: receivedTraceparent };
   const parentContext = propagation.extract(ROOT_CONTEXT, carrier, carrierGetter);
-  const parentSpanId = trace.getSpanContext(parentContext)?.spanId ?? null;
-  const span = { name: "sample_mcp.trace_probe", parentSpanId };
-  tracer.startActiveSpan(span.name, {}, parentContext, (child) => {
+  const spanName = "sample_mcp.trace_probe";
+  tracer.startActiveSpan(spanName, {}, parentContext, (child) => {
     child.end();
-    finishedServerSpans.push(span);
   });
+  const serverSpan = spanCollector
+    .getFinishedSpans()
+    .filter(({ name }) => name === spanName)
+    .at(-1);
+  const childParentSpanId = serverSpan?.parentSpanContext?.spanId ?? null;
   return textResult({
     receivedTraceparent,
-    hasBaggage: propagation.getBaggage(parentContext) !== undefined,
-    childParentSpanId: span.parentSpanId,
+    hasBaggage: "baggage" in meta,
+    childParentSpanId,
   });
 }
 
-async function slowTool(args: Record<string, unknown>, signal: AbortSignal): Promise<CallToolResult> {
+async function slowTool(
+  args: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<CallToolResult> {
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, Number(args.milliseconds));
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    const cancellationId = args.cancellationId;
+    const onAbort = () => {
+      clearTimeout(timer);
+      if (typeof cancellationId === "string") {
+        cancelledRequests.add(cancellationId);
+      }
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, Number(args.milliseconds));
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   });
   return textResult({ cancelled: signal.aborted });
+}
+
+function exportedServerSpans(): { readonly name: string; readonly parentSpanId: string | null }[] {
+  return spanCollector.getFinishedSpans().map((span) => ({
+    name: span.name,
+    parentSpanId: span.parentSpanContext?.spanId ?? null,
+  }));
 }
 
 function readCounter(): number {
@@ -142,7 +191,12 @@ const toolHandlers: Record<string, SampleToolHandler> = {
   }),
   big: () => ({ content: [{ type: "text", text: "x".repeat(2 * 1024 * 1024) }] }),
   trace_probe: (_args, _signal, meta) => traceProbe(meta),
-  get_spans: () => textResult(finishedServerSpans),
+  get_spans: () => textResult(exportedServerSpans()),
+  get_cancellation: (args) =>
+    textResult({
+      cancelled:
+        typeof args.cancellationId === "string" && cancelledRequests.has(args.cancellationId),
+    }),
   get_count: () => textResult({ count: readCounter() }),
   reset_count: () => {
     writeCounter(0);

@@ -4,9 +4,6 @@ services:
     extends:
       file: docker-compose.yml
       service: harness
-    volumes:
-      - ../../test/mcp-servers.int-client.mjs:/app/mcp-integration-client.mjs:ro
-      - ../../test/canary/canaries.ts:/app/mcp-canaries.ts:ro
     healthcheck:
       test: ["CMD", "node", "dist/bin.js", "healthcheck"]
   otel-collector:
@@ -42,6 +39,31 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+    networks:
+      - internal
+  integration-client:
+    image: sample-mcp-server:local
+    command: ["sleep", "infinity"]
+    environment:
+      HARNESS_DATA_DIR: /tmp/harness
+      SAMPLE_MCP_SERVER_HOST: ${SAMPLE_MCP_SERVER_HOST:-sample-mcp-server}
+    volumes:
+      - ../../test/mcp-servers.int-client.test.mjs:/app/test/mcp-servers.int-client.test.mjs:ro
+      - ../../test/mcp-servers.int-support.mjs:/app/test/mcp-servers.int-support.mjs:ro
+      - ../../test/canary/canaries.ts:/app/test/canary/canaries.ts:ro
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "--version"]
+    depends_on:
+      sample-mcp-server:
+        condition: service_healthy
     networks:
       - internal
   postgres:

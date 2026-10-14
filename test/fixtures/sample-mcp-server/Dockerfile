@@ -1,13 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
-FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+FROM ghcr.io/jdx/mise:2026.10.4-debian@sha256:2fb7fa9a4120333531a8a70296d4ea152ffd3e7658dcf29ac75774a7d78dec24 AS manifests
+WORKDIR /src
+COPY packages packages
+COPY tools tools
+RUN mkdir -p /manifests \
+    && find packages tools -name package.json -not -path "*/node_modules/*" -exec cp --parents {} /manifests/ \;
 
+FROM ghcr.io/jdx/mise:2026.10.4-debian@sha256:2fb7fa9a4120333531a8a70296d4ea152ffd3e7658dcf29ac75774a7d78dec24 AS build
 WORKDIR /app
-RUN mkdir -p /data && chown node:node /data
-COPY test/fixtures/sample-mcp-server/package.json ./package.json
-COPY test/fixtures/sample-mcp-server/yarn.lock ./yarn.lock
-COPY .yarnrc.yml ./.yarnrc.yml
-RUN corepack yarn install --immutable
-COPY test/fixtures/sample-mcp-server/server.ts ./test/fixtures/sample-mcp-server/server.ts
-USER node
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential=12.12 python3=3.13.5-1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY mise.toml ./
+RUN mise install node npm:corepack
+ENV MISE_AUTO_INSTALL=false
+RUN mise exec -- corepack enable
+COPY package.json yarn.lock .yarnrc.yml ./
+COPY --from=manifests /manifests/ ./
+RUN mise exec -- yarn install --immutable
+COPY . .
+RUN mise exec -- yarn build
+
+FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+WORKDIR /app
+RUN groupadd --gid 10001 harness \
+    && useradd --uid 10001 --gid harness --no-create-home --shell /usr/sbin/nologin harness \
+    && mkdir -p /data \
+    && chown -R 10001:10001 /data
+COPY --from=build --chown=10001:10001 /app/ ./
+USER 10001
 EXPOSE 3333
-CMD ["node", "--experimental-strip-types", "test/fixtures/sample-mcp-server/server.ts"]
+CMD ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "test/fixtures/sample-mcp-server/server.ts"]

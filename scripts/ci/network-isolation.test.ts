@@ -20,7 +20,9 @@ const composeSchema = z.object({
 type ComposeService = z.infer<typeof serviceSchema>;
 
 it("builds argv for commands against the main test Compose profile", () => {
-  expect(buildTestComposeCommand(["exec", "--no-TTY", "harness", "node", "client.mjs"])).toEqual([
+  expect(
+    buildTestComposeCommand(["exec", "--no-TTY", "integration-client", "node", "client.mjs"]),
+  ).toEqual([
     "compose",
     "--env-file",
     "infra/collector/VERSION",
@@ -28,7 +30,7 @@ it("builds argv for commands against the main test Compose profile", () => {
     "infra/compose/docker-compose.test.yml",
     "exec",
     "--no-TTY",
-    "harness",
+    "integration-client",
     "node",
     "client.mjs",
   ]);
@@ -79,6 +81,7 @@ it("limits Compose egress to the collector and keeps Postgres host-publishable",
   expect(serviceNetworks.harness).toEqual(["internal", "sandbox"]);
   expect(serviceNetworks["otel-collector"]).toEqual(["egress", "internal"]);
   expect(serviceNetworks["sample-mcp-server"]).toEqual(["internal"]);
+  expect(serviceNetworks["integration-client"]).toEqual(["internal"]);
   expect(serviceNetworks.postgres).toEqual(["test-host"]);
   expect(base.networks.sandbox?.internal).toBe(true);
   expect(networkNames(base.services["sandbox-runner"] ?? {})).toEqual(["sandbox"]);

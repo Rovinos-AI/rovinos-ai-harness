@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from "node:crypto";
+import { createConnection, createServer as createTcpServer } from "node:net";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import {
   FakeClock,
@@ -21,12 +22,15 @@ import {
 import { McpToolPort } from "@harness/mcp";
 import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
 import { InMemoryEventStore } from "@harness/store";
-import { createCanaries } from "./mcp-canaries.ts";
+import { baggageTrace, spansContainCanary } from "./mcp-servers.int-support.mjs";
+import { createCanaries } from "./canary/canaries.ts";
 
 const spanCollector = createTestSpanCollector();
-const serverUrl = "http://sample-mcp-server:3333/mcp";
+const serverUrl = "http://127.0.0.1:3333/mcp";
+const serverHost = process.env.SAMPLE_MCP_SERVER_HOST ?? "sample-mcp-server";
 const runId = Id.parse("00000000000000000000000000");
 const sendMessageCallId = Id.parse("00000000000000000000000010");
+let failureCode = "sample_mcp_integration_setup_failed";
 const idempotentToolNames = [
   "echo",
   "slow",
@@ -34,6 +38,7 @@ const idempotentToolNames = [
   "big",
   "trace_probe",
   "get_spans",
+  "get_cancellation",
   "get_count",
   "reset_count",
 ];
@@ -161,10 +166,27 @@ class BoundaryEventStore extends InMemoryEventStore {
   }
 }
 
+async function startServerForwarder() {
+  const forwarder = createTcpServer((clientSocket) => {
+    const serverSocket = createConnection({ host: serverHost, port: 3333 });
+    clientSocket.pipe(serverSocket);
+    serverSocket.pipe(clientSocket);
+    clientSocket.on("error", () => serverSocket.destroy());
+    serverSocket.on("error", () => clientSocket.destroy());
+  });
+  await new Promise((resolve, reject) => {
+    forwarder.once("error", reject);
+    forwarder.listen(3333, "127.0.0.1", resolve);
+  });
+  return forwarder;
+}
+
 async function trustedTrace() {
+  failureCode = "sample_mcp_integration_trusted_trace_connect_failed";
   const port = await createPort();
   try {
     const before = spanCollector.getFinishedSpans().length;
+    failureCode = "sample_mcp_integration_trusted_trace_probe_failed";
     const probe = await callTool(port, "trace_probe");
     const callSpan = spanCollector
       .getFinishedSpans()
@@ -176,7 +198,9 @@ async function trustedTrace() {
         ? null
         : `00-${spanContext.traceId}-${spanContext.spanId}-${spanContext.traceFlags.toString(16).padStart(2, "0")}`;
     const probeValue = objectResult(probe);
+    failureCode = "sample_mcp_integration_trusted_trace_export_failed";
     const serverSpans = resultValue(await callTool(port, "get_spans"));
+    failureCode = "sample_mcp_integration_trusted_trace_result_failed";
     return {
       callSpanId: spanContext?.spanId ?? null,
       traceparent,
@@ -218,12 +242,15 @@ async function externalTrace() {
 }
 
 async function errorPrivacy() {
+  failureCode = "sample_mcp_integration_privacy_port_create_failed";
   const canary = createCanaries(randomUUID()).email.value;
   const logs = [];
   const port = await createPort({ logs });
   const before = spanCollector.getFinishedSpans().length;
   try {
+    failureCode = "sample_mcp_integration_privacy_raw_call_failed";
     const raw = await callTool(port, "fail", JsonValue.parse({ value: canary }));
+    failureCode = "sample_mcp_integration_privacy_runtime_create_failed";
     const runtime = await createRuntime(runtimeConfig({ detokenizeFailInput: true }), {
       store: new InMemoryEventStore(),
       transientVault: true,
@@ -234,17 +261,27 @@ async function errorPrivacy() {
       policy: allowAllPolicy,
     });
     try {
+      failureCode = "sample_mcp_integration_privacy_runtime_run_failed";
       const result = await runtime.run("check sample server error privacy");
-      const spans = spanCollector
-        .getFinishedSpans()
-        .slice(before)
-        .map(({ name, attributes, status }) => ({ name, attributes, status }));
+      const spans = spanCollector.getFinishedSpans().slice(before);
+      const exceptionBefore = spanCollector.getFinishedSpans().length;
+      failureCode = "sample_mcp_integration_privacy_exception_probe_failed";
+      const exceptionSpan = trace
+        .getTracer("sample-mcp-integration-client")
+        .startSpan("exception_canary_probe");
+      exceptionSpan.recordException(new Error(canary));
+      exceptionSpan.end();
+      const exceptionCanaryDetected = spansContainCanary(
+        spanCollector.getFinishedSpans().slice(exceptionBefore),
+        canary,
+      );
       return {
         outcome: raw.outcome,
         rawContainsCanary: JSON.stringify(raw.result).includes(canary),
         toolResultRecorded: result.events.some((event) => event.type === "tool_result"),
         eventsContainCanary: JSON.stringify(result.events).includes(canary),
-        spansContainCanary: JSON.stringify(spans).includes(canary),
+        spansContainCanary: spansContainCanary(spans, canary),
+        exceptionCanaryDetected,
         logsContainCanary: logs.join("\n").includes(canary),
       };
     } finally {
@@ -268,15 +305,30 @@ async function oversizedResult() {
 async function cancelledSlowCall() {
   const port = await createPort();
   const controller = new AbortController();
+  const cancellationId = randomUUID();
   const timeout = setTimeout(() => controller.abort(), 100);
   try {
     const result = await callTool(
       port,
       "slow",
-      JsonValue.parse({ milliseconds: 10_000 }),
+      JsonValue.parse({ milliseconds: 10_000, cancellationId }),
       controller.signal,
     );
-    return { outcome: result.outcome, errorCode: result.errorCode ?? null };
+    const cancellationDeadline = Date.now() + 2_000;
+    let serverCancelled = false;
+    while (!serverCancelled && Date.now() < cancellationDeadline) {
+      serverCancelled =
+        objectResult(await callTool(port, "get_cancellation", { cancellationId })).cancelled ===
+        true;
+      if (!serverCancelled) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+    return {
+      outcome: result.outcome,
+      errorCode: result.errorCode ?? null,
+      serverCancelled,
+    };
   } finally {
     clearTimeout(timeout);
     await port.close();
@@ -357,26 +409,43 @@ async function nonIdempotentResume() {
 }
 
 async function run() {
+  const forwarder = await startServerForwarder();
   otelContext.setGlobalContextManager(createTestContextManager());
   trace.setGlobalTracerProvider(spanCollector.provider);
   try {
+    failureCode = "sample_mcp_integration_trusted_trace_failed";
+    const trusted = await trustedTrace();
+    failureCode = "sample_mcp_integration_external_trace_failed";
+    const external = await externalTrace();
+    failureCode = "sample_mcp_integration_baggage_probe_failed";
+    const baggage = await baggageTrace(serverUrl);
+    failureCode = "sample_mcp_integration_privacy_probe_failed";
+    const privacy = await errorPrivacy();
+    failureCode = "sample_mcp_integration_oversized_result_failed";
+    const oversized = await oversizedResult();
+    failureCode = "sample_mcp_integration_cancellation_failed";
+    const cancellation = await cancelledSlowCall();
+    failureCode = "sample_mcp_integration_resume_failed";
+    const resume = await nonIdempotentResume();
     return {
-      trusted: await trustedTrace(),
-      external: await externalTrace(),
-      privacy: await errorPrivacy(),
-      oversized: await oversizedResult(),
-      cancellation: await cancelledSlowCall(),
-      resume: await nonIdempotentResume(),
+      trusted,
+      external,
+      baggage,
+      privacy,
+      oversized,
+      cancellation,
+      resume,
     };
   } finally {
     otelContext.disable();
     trace.disable();
+    await new Promise((resolve) => forwarder.close(resolve));
   }
 }
 
 try {
   process.stdout.write(JSON.stringify(await run()));
 } catch {
-  process.stderr.write("Sample MCP integration client failed.\n");
+  process.stderr.write(`${failureCode}\n`);
   process.exitCode = 1;
 }

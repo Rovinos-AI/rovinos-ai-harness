@@ -23,6 +23,7 @@ const fixtureResultsSchema = z
         childParentSpanId: z.string().nullable(),
       })
       .strict(),
+    baggage: z.object({ hasBaggage: z.boolean() }).strict(),
     privacy: z
       .object({
         outcome: z.enum(["ok", "error"]),
@@ -30,6 +31,7 @@ const fixtureResultsSchema = z
         toolResultRecorded: z.boolean(),
         eventsContainCanary: z.boolean(),
         spansContainCanary: z.boolean(),
+        exceptionCanaryDetected: z.boolean(),
         logsContainCanary: z.boolean(),
       })
       .strict(),
@@ -43,6 +45,7 @@ const fixtureResultsSchema = z
       .object({
         outcome: z.enum(["ok", "error"]),
         errorCode: z.string().nullable(),
+        serverCancelled: z.boolean(),
       })
       .strict(),
     resume: z
@@ -63,11 +66,11 @@ async function runFixtureClient(): Promise<FixtureResults> {
   const stdout = await runTestComposeCommand([
     "exec",
     "--no-TTY",
-    "harness",
+    "integration-client",
     "node",
     "--experimental-strip-types",
     "--disable-warning=ExperimentalWarning",
-    "/app/mcp-integration-client.mjs",
+    "/app/test/mcp-servers.int-client.test.mjs",
   ]);
   return parseJson(fixtureResultsSchema, stdout.trim());
 }
@@ -95,12 +98,29 @@ describe("sample MCP server integration", () => {
     expect(trusted.hasBaggage).toBe(false);
   });
 
+  it("executes every scenario and returns a result object for each", () => {
+    const scenarioResults = fixtureResults(results);
+    expect(Object.keys(scenarioResults)).toEqual([
+      "trusted",
+      "external",
+      "baggage",
+      "privacy",
+      "oversized",
+      "cancellation",
+      "resume",
+    ]);
+  });
+
   it("does not send trace context to external servers", () => {
     expect(fixtureResults(results).external).toEqual({
       receivedTraceparent: null,
       hasBaggage: false,
       childParentSpanId: null,
     });
+  });
+
+  it("detects baggage sent in raw request metadata", () => {
+    expect(fixtureResults(results).baggage.hasBaggage).toBe(true);
   });
 
   it("keeps server error canaries out of events, spans, and logs", () => {
@@ -110,6 +130,7 @@ describe("sample MCP server integration", () => {
       toolResultRecorded: true,
       eventsContainCanary: false,
       spansContainCanary: false,
+      exceptionCanaryDetected: true,
       logsContainCanary: false,
     });
   });
@@ -125,6 +146,7 @@ describe("sample MCP server integration", () => {
     expect(fixtureResults(results).cancellation).toEqual({
       outcome: "error",
       errorCode: "mcp_timeout",
+      serverCancelled: true,
     });
   });
 
