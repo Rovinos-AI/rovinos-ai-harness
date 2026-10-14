@@ -359,9 +359,9 @@ interface EventStore {
 **Implementation guidance:**
 
 1. `watch` first yields stored events from `fromSeq`, then new events in order with no gaps or duplicates, and ends when the signal aborts or the run reaches a terminal status (after yielding the terminal event).
-2. In-memory store: an internal emitter. SQLite: an in-process emitter for appends made through the same adapter instance plus a polling fallback (default 250 ms, configurable) for writers in other processes. Postgres: inside the append transaction, `NOTIFY harness_events, '<runId>:<seq>'` (ids only, never content); listeners wake on notification and read the new rows.
+2. In-memory store: an internal emitter. SQLite: an in-process emitter for appends made through the same adapter instance plus a polling fallback (default 250 ms, configurable) for writers in other processes. Postgres: inside the append transaction, send one `NOTIFY harness_events, '<runId>:<finalSeq>'` per append batch (ids only, never content); listeners wake on notification and read the new rows.
 3. Bounded buffering: if a consumer falls behind by more than `maxBuffered` (default 1,000) events, the iterator re-reads from the store instead of growing memory.
-4. `watchRuns` yields `RunSummary` changes for status transitions (used by the control plane console, 24.5).
+4. `watchRuns` yields `RunSummary` changes for status transitions (used by the control plane console, 24.5). In-process emitters and Postgres notifications identify the changed run so adapters refresh only its summary; SQLite's cross-process polling fallback may re-list all runs.
 5. Notifications carry no content; consumers read events through the normal decode path (including upcasting from 7.13).
 **Tests to write:** conformance: catch-up then live, ordering, no gaps under concurrent appends from another connection, termination on terminal status, abort, slow-consumer re-read path; Postgres notification path in the integration stage.
 **Acceptance Criteria:**

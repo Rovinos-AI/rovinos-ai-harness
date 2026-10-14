@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Pool } from "pg";
+import { Pool, type Notification } from "pg";
 import { randomBytes } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { Code, Id, type KeyProvider, type NewEvent } from "@harness/schemas";
@@ -426,15 +426,34 @@ it("hides later committed outbox rows until earlier transactions finish", async 
 });
 
 it("appends batches larger than PostgreSQL's bind-parameter limit", async () => {
-  const { store, cleanup } = await plaintextPostgresFactory();
+  const { admin, schema } = await createSchema();
+  const listenerClient = await admin.connect();
+  const store = new PostgresEventStore(connectionString, { schema }, new JsonContentCodec());
+  stores.add(store);
   const runId = schemaIds.nextRunId();
   const builders = createEventBuilders();
+  const payloads: string[] = [];
+  const receivedPayload = new Promise<string | undefined>((resolve) => {
+    listenerClient.on("notification", (message: Notification) => {
+      const payload = message.payload;
+      if (payload !== undefined) {
+        payloads.push(payload);
+      }
+      if (payloads.length === 1) {
+        resolve(payload);
+      }
+    });
+  });
   const events = [
     builders.runCreated(runId),
     ...Array.from({ length: 6_999 }, () => builders.modelRequest(runId)),
   ];
   try {
+    await listenerClient.query("LISTEN harness_events");
     await expect(store.append(runId, events, 0)).resolves.toEqual({ nextSeq: 7_000 });
+    await expect(receivedPayload).resolves.toBe(`${runId}:6999`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(payloads).toEqual([`${runId}:6999`]);
     await expect(store.head(runId)).resolves.toBe(7_000);
     let count = 0;
     for await (const event of store.read(runId)) {
@@ -443,9 +462,148 @@ it("appends batches larger than PostgreSQL's bind-parameter limit", async () => 
     }
     expect(count).toBe(7_000);
   } finally {
-    await cleanup();
+    listenerClient.release();
+    await closeStore(store);
+    await dropSchema(admin, schema);
   }
 });
+
+it("notifies listeners with only a run id and sequence after committed appends", async () => {
+  const { admin, schema } = await createSchema();
+  const listenerClient = await admin.connect();
+  const watcher = new PostgresEventStore(connectionString, { schema });
+  const writer = new PostgresEventStore(connectionString, { schema });
+  stores.add(watcher);
+  stores.add(writer);
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  const controller = new AbortController();
+  const iterator = watcher
+    .watch(runId, { fromSeq: 0, signal: controller.signal })
+    [Symbol.asyncIterator]();
+  try {
+    await listenerClient.query("LISTEN harness_events");
+    const createdNotification = new Promise<string | undefined>((resolve) => {
+      listenerClient.once("notification", (message: Notification) => {
+        resolve(message.payload);
+      });
+    });
+    await writer.append(runId, [builders.runCreated(runId)], 0);
+    await expect(createdNotification).resolves.toMatch(new RegExp(`^${runId}:\\d+$`));
+    await expect(createdNotification).resolves.toBe(`${runId}:0`);
+
+    const modelNotification = new Promise<string | undefined>((resolve) => {
+      listenerClient.once("notification", (message: Notification) => {
+        resolve(message.payload);
+      });
+    });
+    const modelEvent = iterator.next();
+    await writer.append(
+      runId,
+      [builders.modelRequest(runId, "synthetic private watch content")],
+      1,
+    );
+    await expect(modelNotification).resolves.toMatch(new RegExp(`^${runId}:\\d+$`));
+    await expect(modelNotification).resolves.toBe(`${runId}:1`);
+    await expect(modelEvent).resolves.toMatchObject({
+      done: false,
+      value: { seq: 0, type: "run_created" },
+    });
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { seq: 1, type: "model_request" },
+    });
+
+    const terminalEvent = iterator.next();
+    await writer.append(runId, [builders.runStatusChanged(runId, "pending", "completed")], 2);
+    await expect(terminalEvent).resolves.toMatchObject({
+      done: false,
+      value: { seq: 2, type: "run_status_changed", to: "completed" },
+    });
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+  } finally {
+    controller.abort();
+    await iterator.return?.();
+    listenerClient.release();
+    await Promise.all([closeStore(watcher), closeStore(writer)]);
+    await dropSchema(admin, schema);
+  }
+});
+
+it("supports fifty concurrent watchers with a one-connection pool", async () => {
+  const { admin, schema } = await createSchema();
+  const store = new PostgresEventStore(connectionString, { schema, poolSize: 1 });
+  stores.add(store);
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  const controller = new AbortController();
+  const iterators = Array.from({ length: 50 }, () =>
+    store.watch(runId, { fromSeq: 1, signal: controller.signal })[Symbol.asyncIterator](),
+  );
+  try {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    const pendingEvents = iterators.map((iterator) => iterator.next());
+    await store.append(runId, [builders.modelRequest(runId)], 1);
+    const results = await Promise.all(pendingEvents);
+    expect(results).toHaveLength(50);
+    const sequences = results.map((result) =>
+      result.done === false ? result.value.seq : undefined,
+    );
+    expect(sequences).toEqual(Array.from({ length: 50 }, () => 1));
+  } finally {
+    controller.abort();
+    for (const iterator of iterators) {
+      await iterator.return?.();
+    }
+    await closeStore(store);
+    await dropSchema(admin, schema);
+  }
+});
+
+it("reconnects the dedicated Postgres listener after its connection drops", async () => {
+  const { admin, schema } = await createSchema();
+  const store = new PostgresEventStore(connectionString, { schema, poolSize: 1 });
+  stores.add(store);
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  const controller = new AbortController();
+  const iterator = store
+    .watch(runId, { fromSeq: 1, signal: controller.signal })
+    [Symbol.asyncIterator]();
+  try {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    const firstEvent = iterator.next();
+    const listenerPid = await waitForListenerPid(admin);
+    await admin.query("SELECT pg_terminate_backend($1)", [listenerPid]);
+    await expect(waitForListenerPid(admin, listenerPid)).resolves.not.toBe(listenerPid);
+
+    await store.append(runId, [builders.modelRequest(runId)], 1);
+    await expect(firstEvent).resolves.toMatchObject({
+      done: false,
+      value: { seq: 1, type: "model_request" },
+    });
+  } finally {
+    controller.abort();
+    await iterator.return?.();
+    await closeStore(store);
+    await dropSchema(admin, schema);
+  }
+});
+
+async function waitForListenerPid(admin: Pool, previousPid?: number): Promise<number> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const result = await admin.query<{ pid: number }>(
+      "SELECT pid FROM pg_stat_activity WHERE application_name = $1 ORDER BY backend_start DESC LIMIT 1",
+      ["harness_event_store_listener"],
+    );
+    const pid = result.rows[0]?.pid;
+    if (pid !== undefined && pid !== previousPid) {
+      return pid;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Postgres event listener did not connect");
+}
 
 it("rejects reopening an encrypted Postgres store without its codec", async () => {
   const { admin, schema } = await createSchema();

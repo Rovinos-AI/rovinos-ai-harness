@@ -379,6 +379,12 @@ export async function appendTransaction(
       );
     }
 
+    const finalEvent = encoded.at(-1);
+    if (finalEvent === undefined) {
+      throw new StoreUnavailableError();
+    }
+    const finalSeq = finalEvent.event.seq.toString();
+    await client.query("SELECT pg_notify($1, $2)", ["harness_events", `${runId}:${finalSeq}`]);
     await client.query("COMMIT");
     transactionStarted = false;
     return expectedSeq + encoded.length;

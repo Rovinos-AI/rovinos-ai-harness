@@ -88,6 +88,24 @@ export interface RunSummaryRow {
   last_ts: number;
 }
 
+/** Prepare a lookup for one run summary without scanning the run listing. */
+export function prepareRunSummaryQuery(
+  db: Database.Database,
+): Database.Statement<[Id], RunSummaryRow> {
+  return db.prepare<[Id], RunSummaryRow>(
+    "SELECT run_id, created_at, status, next_seq - 1 AS last_seq, last_ts FROM runs WHERE run_id = ?",
+  );
+}
+
+/** Convert a single SQLite run row into its public summary. */
+export function readRunSummary(
+  query: Database.Statement<[Id], RunSummaryRow>,
+  runId: Id,
+): RunSummary | undefined {
+  const row = query.get(runId);
+  return row === undefined ? undefined : runListPage([row], 1).runs[0];
+}
+
 /** Convert a SQLite run-list page into the event-store result and opaque cursor. */
 export function runListPage(
   rows: readonly RunSummaryRow[],
