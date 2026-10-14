@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import {
+  emitVaultMarkTerminalFailed,
+} from "@harness/telemetry";
+import { Code, HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
@@ -27,6 +30,29 @@ const CANCEL_POLL_INTERVAL_MS = 25;
 const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
+
+async function markTerminalBestEffort(
+  vault: RuntimeComposition["vault"],
+  runId: Id,
+  timestamp: number,
+): Promise<void> {
+  try {
+    await vault.markTerminal(runId, timestamp);
+  } catch (error) {
+    const errorCode =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      Code.safeParse(error.code).success
+        ? Code.parse(error.code)
+        : Code.parse("vault_unavailable");
+    try {
+      emitVaultMarkTerminalFailed(runId, errorCode);
+    } catch {
+      // A diagnostic logger failure must not change the durable run result.
+    }
+  }
+}
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
 
@@ -272,7 +298,7 @@ function createTerminalAwareRunControl({
       result.status === "failed" ||
       result.status === "cancelled"
     ) {
-      await vault.markTerminal(runId, clock.now());
+      await markTerminalBestEffort(vault, runId, clock.now());
     }
     return result;
   };
@@ -333,7 +359,7 @@ function composeRuntime(
     cancel: async (runId) => {
       const result = await cancelRun(store, runId, clock, ids);
       if (result === "cancelled") {
-        await vault.markTerminal(runId, clock.now());
+        await markTerminalBestEffort(vault, runId, clock.now());
       }
       return result;
     },

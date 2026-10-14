@@ -99,7 +99,8 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
 
   /** Record when a run entered a terminal state for grace-period retention. */
   markTerminal(runId: Id, ts: number): Promise<void> {
-    this.terminalRuns.set(runId, VaultTimestampSchema.parse(ts));
+    const timestamp = VaultTimestampSchema.parse(ts);
+    this.terminalRuns.set(runId, Math.min(this.terminalRuns.get(runId) ?? timestamp, timestamp));
     return Promise.resolve();
   }
 

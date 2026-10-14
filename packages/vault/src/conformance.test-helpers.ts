@@ -117,6 +117,21 @@ export function runVaultConformance(name: string, createVault: VaultFactory): vo
         await harness.cleanup();
       }
     });
+
+    it("preserves the earliest terminal timestamp", async () => {
+      const harness = await createVault();
+      try {
+        await harness.vault.markTerminal(runId, 200);
+        await harness.vault.markTerminal(runId, 100);
+        await harness.vault.markTerminal(runId, 300);
+
+        await expect(
+          harness.vault.listTerminalRunsBefore({ terminalBefore: 150, limit: 100 }),
+        ).resolves.toEqual([runId]);
+      } finally {
+        await harness.cleanup();
+      }
+    });
     testPurgeInvalidatesView(createVault);
   });
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { VaultConfigSchema } from "@harness/schemas";
+import { VaultOperationError } from "./errors.js";
 import { VaultPurgeResultSchema, type VaultAdmin, type VaultPurgeResult } from "./types.js";
 
 const MILLIS_PER_DAY = 86_400_000;
@@ -35,6 +36,7 @@ export async function purgeExpired(options: VaultPurgerOptions): Promise<VaultPu
   let examined = 0;
   let purged = 0;
   let entriesPurged = 0;
+  const purgedRunIds = new Set<string>();
 
   for (;;) {
     const runIds = await options.vault.listTerminalRunsBefore({
@@ -45,9 +47,13 @@ export async function purgeExpired(options: VaultPurgerOptions): Promise<VaultPu
     if (runIds.length === 0) {
       break;
     }
+    if (runIds.every((runId) => purgedRunIds.has(runId))) {
+      throw new VaultOperationError("vault_purge_stalled");
+    }
     for (const runId of runIds) {
       entriesPurged += await options.vault.purge(runId);
       purged += 1;
+      purgedRunIds.add(runId);
     }
   }
 

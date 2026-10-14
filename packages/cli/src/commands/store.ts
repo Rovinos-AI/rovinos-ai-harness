@@ -134,18 +134,29 @@ async function writePurgeResult({
             },
           }),
     });
-    if (vaultAdmin !== undefined) {
-      await purgeExpired({
+    const vaultResult =
+      vaultAdmin === undefined
+        ? undefined
+        : await purgeExpired({
         vault: vaultAdmin,
         clock: context.clock,
         purgeAfterDays: config.vault.purgeAfterDays,
       });
-    }
-    context.out.json(StorePurgeResultSchema, result);
+    const output = {
+      ...result,
+      ...(vaultResult === undefined ? {} : { vault: vaultResult }),
+    };
+    context.out.json(StorePurgeResultSchema, output);
     if (!jsonMode) {
+      const header = ["examined", "purged", "skippedActive", "hookFailures"];
+      const values = [result.examined, result.purged, result.skippedActive, result.hookFailures];
+      if (vaultResult !== undefined) {
+        header.push("vault.examined", "vault.purged", "vault.entriesPurged");
+        values.push(vaultResult.examined, vaultResult.purged, vaultResult.entriesPurged);
+      }
       context.out.table([
-        ["examined", "purged", "skippedActive", "hookFailures"],
-        [result.examined, result.purged, result.skippedActive, result.hookFailures],
+        header,
+        values,
       ]);
     }
     if (result.hookFailures > 0) {

@@ -15,6 +15,7 @@ export {
 export {
   emitSafeEvent,
   emitSafeEventToDefaultLogger,
+  emitVaultMarkTerminalFailed,
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
 export {

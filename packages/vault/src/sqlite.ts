@@ -232,7 +232,7 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     try {
       this.db
         .prepare(
-          "INSERT INTO run_meta (run_id, terminal_at) VALUES (?, ?) ON CONFLICT(run_id) DO UPDATE SET terminal_at = excluded.terminal_at",
+          "INSERT INTO run_meta (run_id, terminal_at) VALUES (?, ?) ON CONFLICT(run_id) DO UPDATE SET terminal_at = MIN(terminal_at, excluded.terminal_at)",
         )
         .run(runId, terminalAt);
       return Promise.resolve();

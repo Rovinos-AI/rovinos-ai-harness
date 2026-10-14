@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { logs, SeverityNumber, type Logger } from "@opentelemetry/api-logs";
-import { Code } from "@harness/schemas";
+import { Code, Id } from "@harness/schemas";
 import { attr } from "./attr.js";
 import { defineLogRecord, type LogRecordDefinition } from "./log-registry.js";
 import { SafeEvent, type SafeEvent as SafeEventType } from "./safe-event.js";
@@ -131,6 +131,10 @@ export const safeEventLogAttributeMap = {
 } as const satisfies Record<SafeEventType["kind"], Readonly<Record<string, string>>>;
 
 const logDefinitions = {
+  vault_mark_terminal_failed: defineLogRecord("harness.vault.mark_terminal_failed", {
+    "harness.run.id": attr.id(),
+    "harness.error.code": attr.code(),
+  }),
   model_call: defineLogRecord("harness.safe.model_call", {
     ...commonShape,
     "harness.model.provider": attr.code(),
@@ -281,4 +285,24 @@ export function emitSafeEvent(logger: Logger, safeEvent: SafeEventType): void {
 /** Emits a validated SafeEvent through the harness logger without exposing OTel to callers. */
 export function emitSafeEventToDefaultLogger(safeEvent: SafeEventType): void {
   emitSafeEvent(safeEventLogger, safeEvent);
+}
+
+/** Emits a metadata-only diagnostic when terminal-run vault bookkeeping fails. */
+export function emitVaultMarkTerminalFailed(
+  runId: Id,
+  errorCode: Code,
+  logger: Logger = safeEventLogger,
+): void {
+  const definition = logDefinitions.vault_mark_terminal_failed;
+  const attributes = definition.schema.parse({
+    "harness.run.id": runId,
+    "harness.error.code": errorCode,
+  });
+  logger.emit({
+    body: Code.parse("vault_mark_terminal_failed"),
+    eventName: definition.name,
+    severityNumber: SeverityNumber.ERROR,
+    attributes,
+    context: otelContext.active(),
+  });
 }
