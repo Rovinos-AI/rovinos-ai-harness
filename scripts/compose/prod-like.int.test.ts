@@ -81,7 +81,7 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
   });
 
   it("checks service health and resumes a run checkpointed during container stop", async () => {
-    compose(["up", "--detach", "--wait", "--build"]);
+    compose(["up", "--detach", "--wait"]);
 
     expect(inspect("harness", "{{.State.Health.Status}}")).toBe("healthy");
     expect(inspect("sandbox-runner", "{{.State.Health.Status}}")).toBe("healthy");
