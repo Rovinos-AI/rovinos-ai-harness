@@ -293,16 +293,25 @@ function composeRuntime(
           config: pii.config,
           resolver: pii.resolver,
         });
-  const runWithControl: RunControl = (runId, operation) =>
-    withRunControl({
+  const runWithControl: RunControl = async (runId, operation, firstNewSeq = 0) => {
+    const result = await withRunControl({
       store,
       runId,
-      firstNewSeq: 0,
+      firstNewSeq,
       processLike: overrides.processLike ?? defaultProcessLike,
       graceMs: config.run.shutdownGraceMs,
       operation,
     });
-  const resume = createRuntimeResume(options, tool);
+    if (
+      result.status === "completed" ||
+      result.status === "failed" ||
+      result.status === "cancelled"
+    ) {
+      await vault.markTerminal(runId, clock.now());
+    }
+    return result;
+  };
+  const resume = createRuntimeResume(options, tool, runWithControl);
   return {
     store,
     vault: vaultResolver,
@@ -312,7 +321,13 @@ function composeRuntime(
     run: (goal) => startRun(options, tool, goal, runWithControl),
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume,
-    cancel: (runId) => cancelRun(store, runId, clock, ids),
+    cancel: async (runId) => {
+      const result = await cancelRun(store, runId, clock, ids);
+      if (result === "cancelled") {
+        await vault.markTerminal(runId, clock.now());
+      }
+      return result;
+    },
     close: async () => {
       try {
         await store.close();
@@ -330,17 +345,14 @@ function composeRuntime(
 function createRuntimeResume(
   options: RuntimeComposition & { readonly scopes: RunScopeRegistry },
   tool: ToolPort,
+  runWithControl: RunControl,
 ): Runtime["resume"] {
   const { config, clock, ids, store, model, context, policy, scopes, overrides } = options;
   return async (runId) => {
     const firstNewSeq = await store.head(runId);
-    return withRunControl({
-      store,
+    return runWithControl(
       runId,
-      firstNewSeq,
-      processLike: overrides.processLike ?? defaultProcessLike,
-      graceMs: config.run.shutdownGraceMs,
-      operation: async (signal) => {
+      async (signal) => {
         const goal = await storedGoal(store, runId);
         if (goal === undefined) {
           throw new RunInputMissingError();
@@ -362,7 +374,8 @@ function createRuntimeResume(
           resumePolicy: config.run.resume.onNonIdempotent,
         });
       },
-    });
+      firstNewSeq,
+    );
   };
 }
 

@@ -12,9 +12,11 @@ import {
   type Clock,
   type EventStore,
 } from "@harness/store";
-import type { SecretRef, StoreConfig } from "@harness/schemas";
+import { SqliteVault, type VaultAdmin, type VaultTerminalRunsQuery } from "@harness/vault";
+import type { Id, KeysConfig, SecretRef, StoreConfig } from "@harness/schemas";
 import type { RuntimeOverrides } from "./runtime-config.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
+import { createRuntimeKeys } from "./runtime-keys.js";
 
 /** Inputs shared by runtime and CLI configured-store operations. */
 export interface ConfiguredStoreOptions {
@@ -25,6 +27,63 @@ export interface ConfiguredStoreOptions {
   readonly secretResolver?: {
     resolve(ref: SecretRef): Promise<{ reveal(): string }>;
   };
+}
+
+/** Options for opening the configured vault for maintenance. */
+export interface ConfiguredVaultOptions {
+  readonly dataDir?: string;
+  readonly clock?: Clock;
+  readonly secretResolver?: {
+    resolve(ref: SecretRef): Promise<{ reveal(): string }>;
+  };
+}
+
+/** Vault administration handle with ownership of its SQLite and key resources. */
+export interface ConfiguredVaultAdmin extends VaultAdmin {
+  /** Close the vault database and dispose its cached keys. */
+  close(): void;
+}
+
+/** Opens the configured SQLite vault for retention maintenance. */
+export async function openConfiguredVaultAdmin(
+  config: { readonly keys?: KeysConfig | undefined },
+  options: ConfiguredVaultOptions = {},
+): Promise<ConfiguredVaultAdmin> {
+  const keyOptions: RuntimeOverrides =
+    options.secretResolver === undefined ? {} : { secretResolver: options.secretResolver };
+  const keys = await createRuntimeKeys(config.keys, keyOptions);
+  let vault: SqliteVault | undefined;
+  try {
+    const dataDir = resolveDataDir(process.env, options.dataDir);
+    await mkdir(dataDir, { recursive: true });
+    const openedVault = new SqliteVault(
+      join(dataDir, "vault.db"),
+      keys,
+      () => options.clock?.now() ?? Date.now(),
+    );
+    vault = openedVault;
+    return {
+      markTerminal: (runId: Id, ts: number) => openedVault.markTerminal(runId, ts),
+      listTerminalRunsBefore: (query: VaultTerminalRunsQuery) =>
+        openedVault.listTerminalRunsBefore(query),
+      purge: (runId: Id) => openedVault.purge(runId),
+      stats: (runId: Id) => openedVault.stats(runId),
+      close: () => {
+        try {
+          openedVault.close();
+        } finally {
+          keys.dispose();
+        }
+      },
+    };
+  } catch (error) {
+    try {
+      vault?.close();
+    } finally {
+      keys.dispose();
+    }
+    throw error;
+  }
 }
 
 /** Runtime store selection, including an optional embedding-provided store. */

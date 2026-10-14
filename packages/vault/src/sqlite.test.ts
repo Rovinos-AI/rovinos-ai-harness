@@ -3,13 +3,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Code, type KeyProvider } from "@harness/schemas";
+import { Code, FakeClock, type KeyProvider } from "@harness/schemas";
 import type { VaultRunReader } from "@harness/telemetry";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryVault } from "./memory.js";
 import { runVaultConformance } from "./conformance.test-helpers.js";
 import { VaultOperationError } from "./errors.js";
 import { SqliteVault } from "./sqlite.js";
+import { purgeExpired } from "./purger.js";
 
 const runId = "A".repeat(26);
 const anotherRunId = "B".repeat(26);
@@ -86,6 +87,29 @@ describe("SqliteVault", () => {
     await vault.put(runId, "email", canary);
     vault.close();
 
+    const bytes = await readFile(path);
+    expect(bytes.includes(Buffer.from(canary, "utf8"))).toBe(false);
+  });
+
+  it("deletes expired values securely and removes the canary after an explicit vacuum", async () => {
+    const { path } = await temporaryPath();
+    const canary = "purged-vault-canary-alice@example.test";
+    const vault = new SqliteVault(path, keyProvider);
+    const token = await vault.put(runId, "email", canary);
+    await vault.markTerminal(runId, 1);
+
+    await expect(
+      purgeExpired({ vault, clock: new FakeClock(8 * 86_400_000), purgeAfterDays: 7 }),
+    ).resolves.toEqual({ examined: 1, purged: 1, entriesPurged: 1 });
+    await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBeUndefined();
+    vault.close();
+
+    const database = new Database(path);
+    try {
+      database.exec("VACUUM");
+    } finally {
+      database.close();
+    }
     const bytes = await readFile(path);
     expect(bytes.includes(Buffer.from(canary, "utf8"))).toBe(false);
   });

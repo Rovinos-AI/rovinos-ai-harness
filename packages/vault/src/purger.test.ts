@@ -37,7 +37,9 @@ describe("VaultPurger", () => {
       entriesPurged: 1,
     });
     await expect(vault.resolve(expiredId, expiredToken, context)).resolves.toBeUndefined();
-    await expect(vault.resolve(boundaryId, boundaryToken, context)).resolves.toBe("alice@example.test");
+    await expect(vault.resolve(boundaryId, boundaryToken, context)).resolves.toBe(
+      "alice@example.test",
+    );
     await expect(vault.resolve(recentId, recentToken, context)).resolves.toBe("alice@example.test");
     await expect(vault.resolve(activeId, activeToken, context)).resolves.toBe("alice@example.test");
   });

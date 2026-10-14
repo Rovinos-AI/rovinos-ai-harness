@@ -8,7 +8,12 @@ export {
 } from "./auditing-resolver.js";
 export { InMemoryVault } from "./memory.js";
 export { SqliteVault } from "./sqlite.js";
-export { purgeExpired, VaultPurger, type VaultPurgeClock, type VaultPurgerOptions } from "./purger.js";
+export {
+  purgeExpired,
+  VaultPurger,
+  type VaultPurgeClock,
+  type VaultPurgerOptions,
+} from "./purger.js";
 export { normalize } from "./normalize.js";
 export { findTokens, isToken, Token, tokenType, tokenTypeName } from "./token.js";
 export type { Token as TokenType } from "./token.js";

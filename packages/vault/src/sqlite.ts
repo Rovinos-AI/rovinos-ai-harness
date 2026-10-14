@@ -231,7 +231,9 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     const terminalAt = VaultTimestampSchema.parse(ts);
     try {
       this.db
-        .prepare("INSERT INTO run_meta (run_id, terminal_at) VALUES (?, ?) ON CONFLICT(run_id) DO UPDATE SET terminal_at = excluded.terminal_at")
+        .prepare(
+          "INSERT INTO run_meta (run_id, terminal_at) VALUES (?, ?) ON CONFLICT(run_id) DO UPDATE SET terminal_at = excluded.terminal_at",
+        )
         .run(runId, terminalAt);
     } catch {
       throw new VaultOperationError("vault_unavailable");
@@ -239,9 +241,10 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
   }
 
   /** Find a stable batch of terminal runs older than the supplied timestamp. */
-  async listTerminalRunsBefore(
-    query: { readonly terminalBefore: number; readonly limit: number },
-  ): Promise<readonly Id[]> {
+  async listTerminalRunsBefore(query: {
+    readonly terminalBefore: number;
+    readonly limit: number;
+  }): Promise<readonly Id[]> {
     const { terminalBefore, limit } = VaultTerminalRunsQuerySchema.parse(query);
     try {
       const rows = this.db

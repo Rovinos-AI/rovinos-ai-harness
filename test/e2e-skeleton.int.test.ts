@@ -2,7 +2,6 @@
 // Every task that wires a capability into the runtime or CLI extends this test.
 // Not wired yet: approval escalation WebhookNotifier (17.6 -> #125)
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
-// Not wired yet: vault purge hook (12.6 -> #108)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: approvals --reveal (17.10 -> #373)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
@@ -36,6 +35,7 @@ import {
   parseJson,
 } from "@harness/schemas";
 import { SqliteEventStore } from "@harness/store";
+import { Token } from "@harness/vault";
 import {
   attr,
   createTelemetrySdk,
@@ -373,6 +373,7 @@ describe("config", () => {
     expect(loaded.policy.file).toBe("policy.yaml");
     expect(loaded.keys?.currentKeyId).toBe(KEY_ID);
     expect(loaded.pii.defaultAction).toBe("tokenize");
+    expect(loaded.vault).toEqual({ purgeAfterDays: 7 });
     expect(loaded.store.retention).toEqual({ completedRunsDays: 1, failedRunsDays: 1 });
     expect(await readFile(current.configPath, "utf8")).not.toContain(current.canary);
   });
@@ -464,6 +465,19 @@ describe("resume", () => {
         (event) => event.type === "tool_intent" || event.type === "tool_result",
       );
       expect(await store.latestSnapshot(runId)).toBeDefined();
+      const vaultDatabase = new Database(join(current.dataDirectory, "vault.db"), {
+        readonly: true,
+      });
+      try {
+        const terminal = vaultDatabase
+          .prepare<[string], { readonly terminal_at: number }>(
+            "SELECT terminal_at FROM run_meta WHERE run_id = ?",
+          )
+          .get(runId);
+        expect(terminal?.terminal_at).toBe(current.clock.now());
+      } finally {
+        vaultDatabase.close();
+      }
       const database = new Database(current.eventStorePath, { readonly: true });
       try {
         const eventRows = database
@@ -533,6 +547,21 @@ describe("retention", () => {
       expect(await store.head(runId)).toBe(0);
     } finally {
       await store.close();
+    }
+
+    const runtime = await createRuntime(await current.context.loadConfig(), {
+      dataDir: current.dataDirectory,
+      clock: current.clock,
+      ids: current.ids,
+      roleConfigDirectory: current.directory,
+      secretResolver: new CompositeSecretResolver(),
+    });
+    try {
+      await expect(
+        runtime.vault.resolve(runId, Token.parse("<EMAIL_1>"), { boundary: "ui" }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await runtime.close();
     }
   });
 });
