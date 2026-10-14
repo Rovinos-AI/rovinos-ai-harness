@@ -917,7 +917,9 @@ it("re-listens and catches up run changes missed while the listener was disconne
   const runId = builders.nextRunId();
   await store.append(runId, [builders.runCreated(runId)], 0);
   const controller = new AbortController();
-  const iterator = store.watch(runId, { fromSeq: 1, signal: controller.signal })[Symbol.asyncIterator]();
+  const iterator = store
+    .watch(runId, { fromSeq: 1, signal: controller.signal })
+    [Symbol.asyncIterator]();
   const pendingEvent = iterator.next();
   try {
     await vi.waitFor(() => {

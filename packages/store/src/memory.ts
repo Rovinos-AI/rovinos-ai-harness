@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
-  Event,
   TraceId,
   type Event as StoredEvent,
   type Id,
@@ -30,64 +29,12 @@ import {
   watchEvents,
   watchRunSummaries,
 } from "./subscriptions.js";
-
-function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): number | undefined {
-  if (cursor === undefined) {
-    return 0;
-  }
-
-  const cursorIndex = summaries.findIndex((summary) => summary.runId === cursor);
-  if (cursorIndex === -1) {
-    return undefined;
-  }
-  return cursorIndex + 1;
-}
-
-function matchesContinuation(
-  created: Extract<StoredEvent, { type: "run_created" }>,
-  continuationOf: Id | undefined,
-): boolean {
-  return continuationOf === undefined || created.continuationOf === continuationOf;
-}
-
-function validateEventBatch(
-  runId: Id,
-  events: readonly NewEvent[],
-  expectedSeq: number,
-  storedLength: number,
-): StoredEvent[] {
-  if (events.length === 0) {
-    throw new InvalidEventError([[]]);
-  }
-  const validated = events.map((event, index) => {
-    if (event.runId !== runId) {
-      throw new InvalidEventError([["runId"]]);
-    }
-    const result = Event.safeParse({ ...event, seq: expectedSeq + index });
-    if (!result.success) {
-      const paths = result.error.issues.map(({ path }) =>
-        path.flatMap((part) =>
-          typeof part === "string" || typeof part === "number" ? [part] : [],
-        ),
-      );
-      throw new InvalidEventError(paths);
-    }
-    return result.data;
-  });
-  if (storedLength === 0 && validated[0]?.type !== "run_created") {
-    throw new InvalidEventError([[0, "type"]]);
-  }
-  return validated;
-}
-
-function hasDuplicateSnapshot(
-  snapshotsByRun: ReadonlyMap<Id, readonly EncodedSnapshot[]>,
-  snapshotId: Id,
-): boolean {
-  return [...snapshotsByRun.values()].some((snapshots) =>
-    snapshots.some((snapshot) => snapshot.snapshot_id === snapshotId),
-  );
-}
+import {
+  hasDuplicateSnapshot,
+  matchesContinuation,
+  startAfterCursor,
+  validateEventBatch,
+} from "./memory-helpers.js";
 
 /** In-memory reference implementation of the append-only event store contract. */
 export class InMemoryEventStore implements EventStore {
