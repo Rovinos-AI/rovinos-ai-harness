@@ -17,7 +17,12 @@ export {
   emitSafeEventToDefaultLogger,
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
-export { countHostAppRejected, METRIC_ALLOWLIST, type HostAppRejectedReason } from "./metrics.js";
+export {
+  countHostAppRejected,
+  countHostAppSpansAccepted,
+  METRIC_ALLOWLIST,
+  type HostAppRejectedReason,
+} from "./metrics.js";
 export {
   __resetRegistryForTests,
   defineSpan,

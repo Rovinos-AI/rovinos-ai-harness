@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Reference host configuration is owned by task 3.1.
+// Reference host configuration is owned by tasks 3.1 and 3.5.
 import { z } from "zod";
 import { Code } from "../primitives.js";
 
@@ -60,6 +60,21 @@ const ListenConfigSchema = z
     }
   });
 
+const HostLimitsSchema = z
+  .object({
+    batchesPerSecond: z.number().int().positive().max(10_000).default(10),
+    batchBurst: z.number().int().positive().max(10_000).default(20),
+    spansPerMinute: z.number().int().nonnegative().max(1_000_000).default(200),
+    spansPerSessionLifetime: z.number().int().nonnegative().max(1_000_000).default(2_000),
+  })
+  .strict()
+  .default({
+    batchesPerSecond: 10,
+    batchBurst: 20,
+    spansPerMinute: 200,
+    spansPerSessionLifetime: 2_000,
+  });
+
 /** Validated MCP Apps reference-host configuration. */
 export const HostConfigSchema = z
   .object({
@@ -90,6 +105,7 @@ export const HostConfigSchema = z
           resources.add(app.resourceUri);
         }
       }),
+    limits: HostLimitsSchema,
     listen: ListenConfigSchema.default({ host: "127.0.0.1", port: 0 }),
     maxUiSessions: z.number().int().positive().max(1024).default(32),
     permissionAllowlist: z.array(AppPermissionSchema).default([]),

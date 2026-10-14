@@ -2,9 +2,14 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import { z } from "zod";
 import { HarnessError, HostConfigSchema, Id, type HostConfig } from "@harness/schemas";
-import { AppCallRouter, createPolicyCheckedAppCallHandler } from "./app-calls.js";
+import { countHostAppSpansAccepted } from "@harness/telemetry";
+import {
+  AppCallRouter,
+  AppCallRouterError,
+  createPolicyCheckedAppCallHandler,
+} from "./app-calls.js";
+import { AppRateLimiter } from "./app-limits.js";
 import { ingestBatch, rejectBatch } from "./app-telemetry.js";
 import { createRequestHandler } from "./request-handler.js";
 import { readStaticAsset, writeRequestFailure } from "./http-utils.js";
@@ -17,7 +22,7 @@ import type {
   HostRequest,
 } from "./types.js";
 
-export { REFERENCE_CSP };
+export { REFERENCE_CSP, AppRateLimiter };
 export {
   APP_TELEMETRY_TOOL,
   APP_TELEMETRY_TOOL_NAME,
@@ -49,32 +54,6 @@ export type { AppResourceRead, HostDiagnosticCode } from "./resource.js";
 export { UiSession, UI_SESSION_SPAN, type UiSessionContext } from "./ui-session.js";
 
 let processToken: string | undefined;
-
-const appTelemetryRateWindowMs = 60_000;
-
-class AppTelemetryRateLimiter {
-  readonly #batches = new WeakMap<AppInstance, number[]>();
-  readonly #maxBatches: number;
-  readonly #now: () => number;
-
-  constructor(maxBatches: number, now: () => number) {
-    this.#maxBatches = maxBatches;
-    this.#now = now;
-  }
-
-  tryAcquire(session: AppInstance): boolean {
-    const now = this.#now();
-    const cutoff = now - appTelemetryRateWindowMs;
-    const batches = (this.#batches.get(session) ?? []).filter((timestamp) => timestamp > cutoff);
-    if (batches.length >= this.#maxBatches) {
-      this.#batches.set(session, batches);
-      return false;
-    }
-    batches.push(now);
-    this.#batches.set(session, batches);
-    return true;
-  }
-}
 
 /** Closed failures that can occur while managing the reference host lifecycle. */
 export type ReferenceHostErrorCode =
@@ -213,7 +192,7 @@ function createAppCallRouter(
   appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>,
   dependencies: ReferenceHostDependencies,
   nextId: () => Id,
-  now: () => number,
+  rateLimiter: AppRateLimiter,
 ): AppCallRouter {
   const defaultOnAppCall =
     dependencies.policy !== undefined && dependencies.tool !== undefined
@@ -224,23 +203,17 @@ function createAppCallRouter(
         })
       : undefined;
   const onAppCall = dependencies.onAppCall ?? defaultOnAppCall;
-  const telemetryRateLimiter = new AppTelemetryRateLimiter(
-    z
-      .number()
-      .int()
-      .positive()
-      .parse(dependencies.maxAppTelemetryBatchesPerMinute ?? 20),
-    now,
-  );
   const telemetryHandler =
     dependencies.onTelemetryEmit ??
     ((session, payload) => {
       const acknowledgment = ingestBatch(payload, {
+        acceptSpan: () => rateLimiter.tryAcceptSpan(session.sessionId),
         ...(session.uiSession?.spanContext === undefined
           ? {}
           : { parent: session.uiSession.spanContext }),
         onRejected: (reason) => dependencies.onAppRejected?.(reason),
       });
+      countHostAppSpansAccepted(acknowledgment.accepted);
       return Promise.resolve({
         content: [{ type: "text", text: JSON.stringify(acknowledgment) }],
       });
@@ -250,13 +223,11 @@ function createAppCallRouter(
     payload: unknown,
     context: Parameters<NonNullable<ReferenceHostDependencies["onTelemetryEmit"]>>[2],
   ): Promise<CallToolResult> => {
-    if (!telemetryRateLimiter.tryAcquire(session)) {
-      const acknowledgment = rejectBatch(payload, "rate", {
+    if (!rateLimiter.tryAcquireBatch(session.sessionId)) {
+      rejectBatch(payload, "rate", {
         onRejected: (reason) => dependencies.onAppRejected?.(reason),
       });
-      return {
-        content: [{ type: "text", text: JSON.stringify(acknowledgment) }],
-      };
+      throw new AppCallRouterError("rate_limited");
     }
     return telemetryHandler(session, payload, context);
   };
@@ -296,7 +267,8 @@ export async function createReferenceHost(
   const token = processToken;
   const registry = createAppRegistry(config);
   const sessionRunId = dependencies.uiSessionContext?.runId ?? dependencies.runId;
-  const appCallRouter = createAppCallRouter(registry.appConfigs, dependencies, nextId, now);
+  const rateLimiter = new AppRateLimiter(config.limits, { now });
+  const appCallRouter = createAppCallRouter(registry.appConfigs, dependencies, nextId, rateLimiter);
   const host = config.listen.host === "localhost" ? "127.0.0.1" : config.listen.host;
   let origin = "";
   let port = 0;
@@ -306,6 +278,7 @@ export async function createReferenceHost(
       config,
       dependencies: { ...dependencies, readStatic: dependencies.readStatic ?? readStaticAsset },
       appCallRouter,
+      rateLimiter,
       ...registry,
       nextSessionId: nextId,
       sessionRunId,
