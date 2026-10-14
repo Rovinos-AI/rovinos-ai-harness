@@ -21,6 +21,9 @@ export function withPromptOutput(
       { role: "system", parts: [{ type: "text", text: instruction }] },
       ...request.messages,
     ],
+    ...(request.stablePrefixMessages === undefined
+      ? {}
+      : { stablePrefixMessages: request.stablePrefixMessages + 1 }),
     output,
   };
 }

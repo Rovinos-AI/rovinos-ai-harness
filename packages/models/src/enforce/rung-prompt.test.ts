@@ -27,6 +27,23 @@ describe("prompt-and-validate structured output", () => {
     expect(result.messages.slice(1)).toEqual(request.messages);
   });
 
+  it("shifts the stable-prefix boundary when prepending the instruction", () => {
+    const result = withPromptOutput(
+      {
+        ...request,
+        messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+        stablePrefixMessages: 1,
+      },
+      output,
+    );
+
+    expect(result.stablePrefixMessages).toBe(2);
+    expect(result.messages[1]).toEqual({
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+    });
+  });
+
   it("extracts and validates a JSON value from a text response", () => {
     expect(
       enforcePromptOutput(

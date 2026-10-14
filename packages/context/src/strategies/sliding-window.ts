@@ -35,7 +35,7 @@ export interface SlidingWindowStrategyOptions {
  */
 export class SlidingWindowStrategy implements ContextStrategy {
   readonly id: Code = "sliding_window";
-  readonly version: Code = "v4";
+  readonly version: Code;
   private readonly cacheAware: boolean;
   private readonly dropChunkGroups: number;
 
@@ -47,6 +47,7 @@ export class SlidingWindowStrategy implements ContextStrategy {
   constructor(options: SlidingWindowStrategyOptions = {}) {
     this.cacheAware = options.cacheAware ?? false;
     this.dropChunkGroups = options.dropChunkGroups ?? 4;
+    this.version = `v5_cache_${this.cacheAware ? "aware" : "off"}_${String(this.dropChunkGroups)}`;
     if (!Number.isSafeInteger(this.dropChunkGroups) || this.dropChunkGroups < 1) {
       throw new RangeError("dropChunkGroups must be a positive integer.");
     }
@@ -83,17 +84,31 @@ export class SlidingWindowStrategy implements ContextStrategy {
       throw new ContextPinnedExceedsBudgetError();
     }
 
-    return this.buildWindow(input, groups, plan, planMessages, availableTokens, pinnedEstimate);
+    return this.buildWindow({
+      input,
+      groups,
+      plan,
+      planMessages,
+      availableTokens,
+      pinnedEstimate,
+    });
   }
 
-  private buildWindow(
-    input: Parameters<ContextStrategy["build"]>[0],
-    groups: ReturnType<typeof eventsToTranscript>,
-    plan: ReturnType<typeof derivePlan>,
-    planMessages: Message[],
-    availableTokens: number,
-    pinnedEstimate: number,
-  ): Promise<ContextResult> {
+  private buildWindow({
+    input,
+    groups,
+    plan,
+    planMessages,
+    availableTokens,
+    pinnedEstimate,
+  }: {
+    input: Parameters<ContextStrategy["build"]>[0];
+    groups: ReturnType<typeof eventsToTranscript>;
+    plan: ReturnType<typeof derivePlan>;
+    planMessages: Message[];
+    availableTokens: number;
+    pinnedEstimate: number;
+  }): Promise<ContextResult> {
     const nonPinnedGroups = groups.filter((group) => !group.pinned);
     const retainedGroups = new Set<(typeof nonPinnedGroups)[number]>();
     let retainedEstimate = 0;
@@ -116,11 +131,7 @@ export class SlidingWindowStrategy implements ContextStrategy {
         nonPinnedGroups.length,
         Math.ceil(droppedGroups / this.dropChunkGroups) * this.dropChunkGroups,
       );
-      dropOldestGroups(
-        nonPinnedGroups,
-        retainedGroups,
-        chunkedDroppedGroups - droppedGroups,
-      );
+      dropOldestGroups(nonPinnedGroups, retainedGroups, chunkedDroppedGroups - droppedGroups);
       droppedGroups = chunkedDroppedGroups;
     }
     let messages = renderMessages(groups, retainedGroups, droppedGroups, planMessages);
@@ -194,6 +205,9 @@ function dropOldestGroups(
   retainedGroups: Set<(typeof groups)[number]>,
   count: number,
 ): number {
+  if (count === 0) {
+    return 0;
+  }
   let removed = 0;
   for (const group of groups) {
     if (!retainedGroups.has(group)) {

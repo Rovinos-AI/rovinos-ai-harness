@@ -87,10 +87,7 @@
         "compactedRanges": 1,
         "offloadedResults": 0
       },
-      "pinnedSeqs": [
-        0,
-        1
-      ],
+      "pinnedSeqs": [0, 1],
       "retainedSeqs": [
         {
           "runId": "00000000000000000000000000",
@@ -124,7 +121,7 @@
     }
   },
   "sliding_window": {
-    "version": "v4",
+    "version": "v5_cache_off_4",
     "output": {
       "messages": [
         {
@@ -202,10 +199,7 @@
         "compactedRanges": 1,
         "offloadedResults": 0
       },
-      "pinnedSeqs": [
-        0,
-        1
-      ],
+      "pinnedSeqs": [0, 1],
       "retainedSeqs": [
         {
           "runId": "00000000000000000000000000",
@@ -309,10 +303,7 @@
         "compactedRanges": 1,
         "offloadedResults": 0
       },
-      "pinnedSeqs": [
-        0,
-        1
-      ],
+      "pinnedSeqs": [0, 1],
       "retainedSeqs": [
         {
           "runId": "00000000000000000000000000",

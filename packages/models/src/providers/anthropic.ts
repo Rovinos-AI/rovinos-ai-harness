@@ -131,16 +131,18 @@ function buildMessages(request: ModelRequest, provider: string) {
     }
     const role = message.role === "assistant" ? "assistant" : "user";
     const content = buildMessageContent(request, index, provider);
-    const cacheStablePrefix =
-      request.stablePrefixMessages === index + 1 && content.length > 0;
+    const cacheStablePrefix = request.stablePrefixMessages === index + 1 && content.length > 0;
+    const outboundContent = cacheStablePrefix ? [...content] : content;
     if (cacheStablePrefix) {
-      content[content.length - 1] = withCacheControl(content[content.length - 1]);
+      outboundContent[outboundContent.length - 1] = withCacheControl(
+        outboundContent[outboundContent.length - 1],
+      );
     }
     const previous = messages.at(-1);
     if (previous?.role === role) {
-      previous.content.push(...content);
+      previous.content.push(...outboundContent);
     } else {
-      messages.push({ role, content: [...content] });
+      messages.push({ role, content: [...outboundContent] });
     }
   }
   return messages;
@@ -153,22 +155,35 @@ function withCacheControl(block: JsonValue | undefined): JsonValue {
   return { ...block, cache_control: { type: "ephemeral" } };
 }
 
+function mapCachedUsage(usage: Message["usage"]) {
+  return {
+    ...(typeof usage.cache_read_input_tokens === "number"
+      ? { cacheReadTokens: usage.cache_read_input_tokens }
+      : {}),
+    ...(typeof usage.cache_creation_input_tokens === "number"
+      ? { cacheWriteTokens: usage.cache_creation_input_tokens }
+      : {}),
+  };
+}
+
 function buildRequest(request: ModelRequest, provider: string): JsonValue {
   // The Messages API requires max_tokens, so do not silently choose a limit for callers.
   if (request.maxOutputTokens === undefined) {
     throw new ProviderError("provider_bad_request");
   }
-  const system = request.messages.flatMap((message) =>
-    message.role === "system"
-      ? message.parts.flatMap((part) =>
-          part.type === "text" ? [{ type: "text" as const, text: part.text }] : [],
-        )
-      : [],
-  ).map((block, index, blocks) =>
-    index === blocks.length - 1
-      ? { ...block, cache_control: { type: "ephemeral" as const } }
-      : block,
-  );
+  const system = request.messages
+    .flatMap((message) =>
+      message.role === "system"
+        ? message.parts.flatMap((part) =>
+            part.type === "text" ? [{ type: "text" as const, text: part.text }] : [],
+          )
+        : [],
+    )
+    .map((block, index, blocks) =>
+      index === blocks.length - 1
+        ? { ...block, cache_control: { type: "ephemeral" as const } }
+        : block,
+    );
   const messages = buildMessages(request, provider);
   // Tool IDs are already validated Codes; send names unchanged for round trips.
   const tools =
@@ -314,12 +329,7 @@ export class AnthropicAdapter implements ProviderAdapter {
             (response.usage.cache_creation_input_tokens ?? 0) +
             (response.usage.cache_read_input_tokens ?? 0),
           outputTokens: response.usage.output_tokens,
-          ...(response.usage.cache_read_input_tokens === null
-            ? {}
-            : { cacheReadTokens: response.usage.cache_read_input_tokens }),
-          ...(response.usage.cache_creation_input_tokens === null
-            ? {}
-            : { cacheWriteTokens: response.usage.cache_creation_input_tokens }),
+          ...mapCachedUsage(response.usage),
         },
         finishReason:
           response.stop_reason === "end_turn" ||
