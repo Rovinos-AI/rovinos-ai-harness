@@ -97,11 +97,13 @@ export {
 export { VaultConfigSchema, type VaultConfig } from "./config/vault.js";
 export {
   ModelEnforcementConfigSchema,
+  ModelPricingRateSchema,
   ModelRetryConfigSchema,
   ModelProviderConfigSchema,
   ModelRoutingConfigSchema,
   ModelsConfigSchema,
   type ModelEnforcementConfig,
+  type ModelPricingRate,
   type ModelProviderConfig,
   type ModelRoutingConfig,
   type ModelRetryConfig,

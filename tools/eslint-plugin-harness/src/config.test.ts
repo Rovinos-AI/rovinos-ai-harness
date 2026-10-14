@@ -109,6 +109,10 @@ ruleTester.run("metric-registry-only", harnessPlugin.rules["metric-registry-only
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
     },
     {
+      code: 'meter.createCounter<ModelUsageAttributes>("harness.model.tokens");',
+      filename: resolve(rootDirectory, "packages/telemetry/src/metrics.ts"),
+    },
+    {
       code: 'meter.createCounter("harness.test.count");',
       filename: resolve(rootDirectory, "packages/telemetry/src/metrics.test.ts"),
     },

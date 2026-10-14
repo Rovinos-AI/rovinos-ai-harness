@@ -52,6 +52,9 @@ Owner task: `4.1`.
 | `harness.error.code` | Code | Optional | `@harness/core` |
 | `harness.event.seq` | integer | Optional | `@harness/core` |
 | `harness.model.attempts` | integer | Optional | `@harness/core` |
+| `harness.model.cost_micros` | integer | Optional | `@harness/core` |
+| `harness.model.input_tokens` | integer | Optional | `@harness/core` |
+| `harness.model.output_tokens` | integer | Optional | `@harness/core` |
 | `harness.model.repair_attempts` | integer | Optional | `@harness/core` |
 | `harness.run.id` | Id | Required | `@harness/core` |
 
@@ -158,6 +161,13 @@ Owner task: `3.2`.
 Owner task: `6.5`.
 
 ## Log records
+
+### `harness.model.pricing_missing`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.model.name` | Code | Required | `@harness/telemetry` |
+| `harness.model.provider` | Code | Required | `@harness/telemetry` |
 
 ### `harness.safe.approval_wait`
 

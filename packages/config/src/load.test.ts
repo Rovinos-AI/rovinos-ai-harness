@@ -426,6 +426,7 @@ store: {}`,
           timeoutMs: 120_000,
         },
         maxConcurrent: 4,
+        pricing: {},
         providers: [],
         routing: {
           default: [],
