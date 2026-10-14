@@ -576,12 +576,72 @@ describe("createReferenceHost", () => {
     expect(denied.body).toBe('{"allowed":false}');
     expect(onAppContent).not.toHaveBeenCalled();
     const malformed = await fixture.request("POST", "/api/request", auth, '{"kind":"message"}');
+    const hostileImage = await fixture.request(
+      "POST",
+      "/api/request",
+      auth,
+      JSON.stringify({
+        sessionId: launchedSessionId,
+        kind: "message",
+        content: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+      }),
+    );
     expect(malformed.body).toBe('{"allowed":false}');
+    expect(hostileImage.body).toBe('{"allowed":false}');
     expect(onRejected.mock.calls.map(([reason]) => reason)).toEqual([
       "request_disabled",
       "request_invalid",
+      "request_invalid",
     ]);
     expect(JSON.stringify(onRejected.mock.calls)).not.toContain("private synthetic canary");
+    await host.close();
+  });
+
+  it("rate-limits app requests per session before tokenization and refills with the injected clock", async () => {
+    let now = 1_000;
+    const tokenizeAppContent: NonNullable<ReferenceHostDependencies["tokenizeAppContent"]> = vi.fn(
+      (_runId, content) => Promise.resolve(content),
+    );
+    const onRejected = vi.fn<(reason: HostAppRejectedReason) => void>();
+    const app = appConfig.apps[0];
+    if (app === undefined) {
+      throw new Error("Test app configuration is missing.");
+    }
+    const fixture = makeServer({
+      config: {
+        ...appConfig,
+        apps: [{ ...app, allow: { openLink: false, message: true, modelContext: false } }],
+        limits: { batchesPerSecond: 1, batchBurst: 1 },
+      },
+      now: () => now,
+      idGenerator: () => sessionId,
+      tokenizeAppContent,
+      onAppContent: () => Promise.resolve(),
+      onAppRejected: onRejected,
+    });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+    const auth = authorization(host);
+    const body = JSON.stringify({
+      sessionId: launchedSessionId,
+      kind: "message",
+      content: [{ type: "text", text: "synthetic" }],
+    });
+
+    const accepted = await fixture.request("POST", "/api/request", auth, body);
+    const rateLimited = await fixture.request("POST", "/api/request", auth, body);
+    now += 1_000;
+    const refilled = await fixture.request("POST", "/api/request", auth, body);
+
+    expect(accepted.status).toBe(200);
+    expect(accepted.body).toBe('{"allowed":true}');
+    expect(rateLimited.status).toBe(429);
+    expect(rateLimited.body).toBe('{"error":"rate_limited"}');
+    expect(refilled.status).toBe(200);
+    expect(refilled.body).toBe('{"allowed":true}');
+    expect(tokenizeAppContent).toHaveBeenCalledTimes(2);
+    expect(onRejected).toHaveBeenCalledOnce();
+    expect(onRejected).toHaveBeenCalledWith("rate");
     await host.close();
   });
 

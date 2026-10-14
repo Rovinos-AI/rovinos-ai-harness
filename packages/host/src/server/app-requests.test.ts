@@ -74,6 +74,13 @@ describe("AppRequestSchema", () => {
         unexpected: "value",
       }).success,
     ).toBe(false);
+    expect(
+      AppRequestSchema.safeParse({
+        kind: "message",
+        sessionId,
+        content: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+      }).success,
+    ).toBe(false);
   });
 });
 

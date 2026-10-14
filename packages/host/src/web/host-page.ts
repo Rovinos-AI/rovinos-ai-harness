@@ -66,21 +66,13 @@ function readDisplayModes(): ("inline" | "fullscreen")[] {
   return document.fullscreenEnabled ? ["inline", "fullscreen"] : ["inline"];
 }
 
-function browserHostContext(element: HTMLElement, displayMode: string): McpUiHostContext {
+function browserHostContext(displayMode: string): McpUiHostContext {
   const dark =
     typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-color-scheme: dark)").matches;
-  const width = Math.min(
-    MAX_FRAME_WIDTH,
-    readDimension(Reflect.get(element, "clientWidth"), readDimension(window.innerWidth, MAX_FRAME_WIDTH)),
-    readDimension(window.innerWidth, MAX_FRAME_WIDTH),
-  );
+  const width = Math.min(MAX_FRAME_WIDTH, readDimension(window.innerWidth, MAX_FRAME_WIDTH));
   const height = Math.min(
     MAX_FRAME_HEIGHT,
-    readDimension(
-      Reflect.get(element, "clientHeight"),
-      readDimension(window.innerHeight, MAX_FRAME_HEIGHT),
-    ),
     readDimension(window.innerHeight, MAX_FRAME_HEIGHT),
   );
   const locale =
@@ -228,7 +220,7 @@ function createHostPagePort(element: HTMLElement): {
   const listeners = new Set<(context: McpUiHostContext) => void>();
   const notifyContextChange = (): void => {
       state.setDisplayMode(document.fullscreenElement === pageElement ? "fullscreen" : "inline");
-      const context = browserHostContext(pageElement, state.getDisplayMode());
+      const context = browserHostContext(state.getDisplayMode());
     for (const listener of listeners) {
       listener(context);
     }
@@ -248,7 +240,7 @@ function createHostPagePort(element: HTMLElement): {
         pageElement.replaceChildren(frame);
       }
     },
-    getHostContext: () => browserHostContext(pageElement, state.getDisplayMode()),
+    getHostContext: () => browserHostContext(state.getDisplayMode()),
     onHostContextChange: (callback) => {
       listeners.add(callback);
       return () => listeners.delete(callback);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ContentBlockSchema } from "@modelcontextprotocol/core";
+import { TextContentSchema } from "@modelcontextprotocol/core";
 import { Code, Id, JsonValue, type HostConfig } from "@harness/schemas";
 import { countHostAppRejected, type HostAppRejectedReason } from "@harness/telemetry";
 import { AppRequestResultSchema } from "../shared/app-request.js";
@@ -24,7 +24,7 @@ const AppMessageRequestSchema = z
   .object({
     kind: z.literal("message"),
     sessionId: Id,
-    content: z.array(ContentBlockSchema).min(1).max(100),
+    content: z.array(TextContentSchema).min(1).max(100),
   })
   .strict();
 
@@ -32,7 +32,7 @@ const ModelContextRequestSchema = z
   .object({
     kind: z.literal("model_context"),
     sessionId: Id,
-    content: z.array(ContentBlockSchema).max(100).optional(),
+    content: z.array(TextContentSchema).max(100).optional(),
     structuredContent: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()

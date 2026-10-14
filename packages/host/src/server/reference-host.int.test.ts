@@ -36,7 +36,7 @@ const appHtml = `<!doctype html>
         contextState.updates += 1;
         updateContext();
       }
-      if ([2, 3, 4].includes(message?.id)) {
+      if ([2, 3, 4, 5].includes(message?.id)) {
         requests.push({
           id: message.id,
           denied: message.error !== undefined || message.result?.isError === true,
@@ -73,6 +73,12 @@ const appHtml = `<!doctype html>
           id: 4,
           method: "ui/update-model-context",
           params: { content: [{ type: "text", text: "private-canary@example.test" }] }
+        }, "*");
+        window.parent.postMessage({
+          jsonrpc: "2.0",
+          id: 5,
+          method: "ui/message",
+          params: { role: "user", content: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }] }
         }, "*");
       }
     });
@@ -141,7 +147,7 @@ const appHtml = `<!doctype html>
       params: {
         protocolVersion: "2026-01-26",
         appInfo: { name: "network-test", version: "1" },
-        appCapabilities: {}
+        appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] }
       }
     }, "*");
     setTimeout(update, 500);
@@ -331,10 +337,11 @@ describe("reference host browser security", () => {
     expect(initialContext).toContain('"--color-background-primary"');
     await app.locator("#requests").waitFor({ state: "visible" });
     await expectDeniedAppRequests(app.locator("#requests"));
-    expect(appRequestRejections).toEqual([
+    expect([...appRequestRejections].sort()).toEqual([
       "request_disabled",
       "request_disabled",
       "request_disabled",
+      "request_invalid",
     ]);
     expect(JSON.stringify(appRequestRejections)).not.toContain("private-canary@example.test");
     const iframeSize = await iframe.boundingBox();
@@ -376,6 +383,62 @@ describe("reference host browser security", () => {
       `"_meta":{"traceparent":"00-${sessionSpan.spanContext().traceId}-${sessionSpan.spanContext().spanId}-01"}`,
     );
     expect(diagnosticCodes).not.toContain("ui_trace_unavailable");
+  }, 20_000);
+
+  it("keeps iframe size limits independent while the app shrinks, grows, and enters fullscreen", async () => {
+    if (page === undefined || host === undefined) {
+      throw new Error("Browser test setup failed.");
+    }
+    await page.goto(host.url, { waitUntil: "domcontentloaded" });
+    const iframe = page.locator("iframe");
+    await iframe.waitFor({ state: "attached" });
+    const app = page.frameLocator("iframe");
+    const context = app.locator("#context");
+    await context.waitFor({ state: "visible" });
+    const initialContext = await context.textContent();
+    const initialMaxHeight = Number(initialContext?.match(/"maxHeight":(\d+)/u)?.[1]);
+    expect(initialMaxHeight).toBeGreaterThanOrEqual(600);
+
+    await app.locator("body").evaluate(() => {
+      window.parent.postMessage(
+        {
+          jsonrpc: "2.0",
+          method: "ui/notifications/size-changed",
+          params: { height: 100 },
+        },
+        "*",
+      );
+    });
+    await page.waitForFunction(
+      () => document.querySelector("iframe")?.style.height === "100px",
+    );
+    await waitForHostContextUpdate(context, initialContext ?? "");
+    await app.locator("body").evaluate(() => {
+      window.parent.postMessage(
+        {
+          jsonrpc: "2.0",
+          method: "ui/notifications/size-changed",
+          params: { height: 600 },
+        },
+        "*",
+      );
+    });
+    await page.waitForFunction(
+      () => document.querySelector("iframe")?.style.height === "600px",
+    );
+    await app.locator("body").evaluate(() => {
+      window.parent.postMessage(
+        {
+          jsonrpc: "2.0",
+          id: 42,
+          method: "ui/request-display-mode",
+          params: { mode: "fullscreen" },
+        },
+        "*",
+      );
+    });
+    await page.waitForFunction(() => document.fullscreenElement?.id === "host");
+    expect(await iframe.evaluate((element) => element.style.height)).toBe("600px");
   }, 20_000);
 
   it("refuses unknown resources and rejects missing-token and foreign-origin requests", async () => {

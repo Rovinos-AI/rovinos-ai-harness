@@ -154,6 +154,7 @@ function createAppBridgeHandlers(
           : { structuredContent: params.structuredContent }),
       }),
     onRequestDisplayMode: (mode) => root.setDisplayMode(mode),
+    getCurrentDisplayMode: () => getHostContext().displayMode,
     onSizeChange: ({ width, height }) => {
       const dimensions = getHostContext().containerDimensions;
       const maxWidth =
@@ -212,6 +213,7 @@ async function connectAppFrame(options: ConnectAppFrameOptions): Promise<void> {
     hostContext = context;
     bridge.setHostContext(context);
   });
+  await bridge.initialized;
   await bridge.sendToolInput(app.toolInput);
   if (app.toolResult !== null) {
     await bridge.sendToolResult(toolResultForApp(app.toolResult, app));

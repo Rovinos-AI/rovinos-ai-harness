@@ -292,6 +292,11 @@ async function routeAppRequest(
     writeJson(response, 200, { allowed: false });
     return;
   }
+  if (!options.rateLimiter.tryAcquireBatch(session.sessionId)) {
+    options.appRequestRouter.reject("rate");
+    writeError(response, 429, "rate_limited");
+    return;
+  }
   writeJson(response, 200, await options.appRequestRouter.handle(session, appRequest));
 }
 

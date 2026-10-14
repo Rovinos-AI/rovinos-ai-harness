@@ -19,6 +19,7 @@ import type { AppBridgeHandlers } from "./bridge.js";
 
 const bridgeMock = vi.hoisted(() => ({
   connect: vi.fn<() => Promise<void>>(),
+  initialized: vi.fn<() => Promise<void>>(),
   sendToolInput: vi.fn<(input: Readonly<Record<string, unknown>>) => Promise<void>>(),
   sendToolResult: vi.fn<(result: z.infer<typeof CallToolResultSchema>) => Promise<void>>(),
   setHostContext: vi.fn<(context: unknown) => void>(),
@@ -39,6 +40,7 @@ vi.mock("./bridge.js", () => ({
       bridgeMock.handlers(handlers);
       return {
         connect: bridgeMock.connect,
+        initialized: bridgeMock.initialized(),
         sendToolInput: bridgeMock.sendToolInput,
         sendToolResult: bridgeMock.sendToolResult,
         setHostContext: bridgeMock.setHostContext,
@@ -283,6 +285,7 @@ function hostReadyResponse(): Response {
 
 beforeEach(() => {
   bridgeMock.connect.mockReset().mockResolvedValue();
+  bridgeMock.initialized.mockReset().mockResolvedValue();
   bridgeMock.sendToolInput.mockReset().mockResolvedValue();
   bridgeMock.sendToolResult.mockReset().mockResolvedValue();
   bridgeMock.setHostContext.mockReset();
@@ -374,6 +377,9 @@ describe("reference app page", () => {
     }
     await expect(handlers.onOpenLink("https://example.test")).resolves.toBe(false);
     expect(open).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(request).toHaveBeenCalledTimes(4);
+    });
     expect(request.mock.calls[3]?.[1]?.body).toContain('"consented":false');
   });
 
@@ -434,6 +440,7 @@ describe("reference app page", () => {
     expect(request.mock.calls[0]?.[1]).toMatchObject({
       headers: { authorization: ["Bearer", "t".repeat(43)].join(" ") },
     });
+
     const handlers = bridgeMock.handlers.mock.calls[0]?.[0];
     expect(handlers?.hostContext).toMatchObject({
       theme: "light",
@@ -449,6 +456,28 @@ describe("reference app page", () => {
     handlers.onSizeChange({ width: 5000, height: 900 });
     expect(frame.attributes.get("width")).toBe("800");
     expect(frame.attributes.get("height")).toBe("600");
+  });
+
+  it("waits for initialized after iframe load before delivering tool input or result", async () => {
+    let resolveInitialized: (() => void) | undefined;
+    const initialized = new Promise<void>((resolve) => {
+      resolveInitialized = resolve;
+    });
+    bridgeMock.initialized.mockReturnValue(initialized);
+    const { root, frame } = createFakeRoot();
+    const mounting = mountReferenceApp(root, launchHash, successfulRequest());
+    await vi.waitFor(() => {
+      expect(frame.srcdoc).toContain(appPayload.html);
+    });
+    expect(bridgeMock.sendToolInput).not.toHaveBeenCalled();
+    expect(bridgeMock.sendToolResult).not.toHaveBeenCalled();
+    if (resolveInitialized === undefined) {
+      throw new Error("The initialized promise resolver was not created.");
+    }
+    resolveInitialized();
+    await expect(mounting).resolves.toBe(true);
+    expect(bridgeMock.sendToolInput).toHaveBeenCalledWith(appPayload.toolInput);
+    expect(bridgeMock.sendToolResult).toHaveBeenCalledWith(appPayload.toolResult);
   });
 
   it("sends only opted-in traceparent metadata and ends the session when its frame is removed", async () => {
@@ -760,11 +789,11 @@ describe("reference app page", () => {
       theme: "dark",
       locale: "en-CA",
       availableDisplayModes: ["inline", "fullscreen"],
-      containerDimensions: { maxWidth: 900, maxHeight: 600 },
+      containerDimensions: { maxWidth: 1024, maxHeight: 768 },
     });
     handlers.onSizeChange({ width: 2000, height: 2000 });
     const frame = created.find((node) => node.tagName === "IFRAME");
-    expect(frame?.style).toEqual({ width: "900px", height: "600px" });
+    expect(frame?.style).toEqual({ width: "1024px", height: "768px" });
 
     await expect(handlers.onRequestDisplayMode("fullscreen")).resolves.toBe("fullscreen");
     await expect(handlers.onRequestDisplayMode("inline")).resolves.toBe("inline");
@@ -828,7 +857,8 @@ describe("reference app page", () => {
     }
     activeDialog.dispatch("click", cancelButton);
     await expect(declining).resolves.toBe(false);
-    expect(open).toHaveBeenExactlyOnceWith(link, "_blank", "noopener,noreferrer");
+    expect(open).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledWith(link, "_blank", "noopener,noreferrer");
     expect(request.mock.calls.at(-1)?.[1]?.body).toContain('"consented":false');
 
     windowListeners.get("pagehide")?.();

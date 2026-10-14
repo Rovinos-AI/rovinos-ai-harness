@@ -27,6 +27,7 @@ export type AppToolCall = CallToolRequest["params"];
 /** Connected SDK bridge for one sandboxed app iframe. */
 export interface ReferenceAppBridge {
   connect(): Promise<void>;
+  readonly initialized: Promise<void>;
   sendToolInput(input: Readonly<Record<string, unknown>>): Promise<void>;
   sendToolResult(result: CallToolResult): Promise<void>;
   setHostContext(context: McpUiHostContext): void;
@@ -43,6 +44,7 @@ export interface AppBridgeHandlers {
   readonly onRequestDisplayMode: (
     mode: McpUiRequestDisplayModeRequest["params"]["mode"],
   ) => Promise<McpUiRequestDisplayModeRequest["params"]["mode"]>;
+  readonly getCurrentDisplayMode: () => McpUiRequestDisplayModeRequest["params"]["mode"];
   readonly onSizeChange: (params: { readonly width?: number; readonly height?: number }) => void;
 }
 
@@ -145,7 +147,12 @@ export function createAppBridge(
     return {};
   };
   bridge.onrequestdisplaymode = async (params) => ({
-    mode: handlers === undefined ? "inline" : await handlers.onRequestDisplayMode(params.mode),
+    mode:
+      bridge
+        .getAppCapabilities()
+        ?.availableDisplayModes?.includes(params.mode) === true && handlers !== undefined
+        ? await handlers.onRequestDisplayMode(params.mode)
+        : (handlers?.getCurrentDisplayMode() ?? "inline"),
   });
   bridge.addEventListener("sizechange", (params) => {
     handlers?.onSizeChange(params);
@@ -159,8 +166,12 @@ export function createAppBridge(
     (params) => onListTools(params?.cursor),
   );
   const transport = new AppPostMessageTransport(target);
+  const initialized = new Promise<void>((resolve) => {
+    bridge.addEventListener("initialized", () => resolve());
+  });
   return {
     connect: () => bridge.connect(transport),
+    initialized,
     sendToolInput: (input) => bridge.sendToolInput({ arguments: { ...input } }),
     sendToolResult: (result) => bridge.sendToolResult(result),
     setHostContext: (hostContext) => {
