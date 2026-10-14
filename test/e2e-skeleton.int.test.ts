@@ -850,7 +850,7 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
   // threat: T-18
   it("executes through the runtime-selected runner and records only safe metadata", async () => {
     const current = fixture();
-    const directory = await mkdtemp(join(process.cwd(), ".sandbox-e2e-"));
+    const directory = await mkdtemp(join(tmpdir(), "harness-sandbox-e2e-"));
     const token = "synthetic-e2e-runner-token-for-task-19.11";
     const tokenRef = SecretRefSchema.parse("env:HARNESS_SANDBOX_E2E_TOKEN");
     const project = `harness-sandbox-e2e-${String(process.pid)}`;
