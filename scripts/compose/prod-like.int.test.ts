@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { isIP } from "node:net";
 import { afterAll, describe, expect, it } from "vitest";
 
 const projectName = `harness-prod-like-${String(process.pid)}`;
@@ -37,6 +38,15 @@ function inspect(service: string, format: string): string {
   }).trim();
 }
 
+function serviceAddress(service: string, network: string): string {
+  const address = inspect(
+    service,
+    `{{(index .NetworkSettings.Networks "${projectName}_${network}").IPAddress}}`,
+  );
+  expect(isIP(address)).toBe(4);
+  return address;
+}
+
 describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
   afterAll(() => {
     try {
@@ -52,10 +62,25 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
     expect(inspect("harness", "{{.State.Health.Status}}")).toBe("healthy");
     expect(inspect("sandbox-runner", "{{.State.Health.Status}}")).toBe("healthy");
 
+    const collectorAddress = serviceAddress("otel-collector", "internal");
     const healthChecks = [
-      "fetch('http://127.0.0.1:3000/mcp').then((response) => { if (response.status >= 500) process.exitCode = 1; })",
-      "fetch('http://otel-collector:13133/').then((response) => { if (!response.ok) process.exitCode = 1; })",
-    ].join(";");
+      "const check = async (url, healthy) => {",
+      "for (let retry = 0; retry < 20; retry += 1) {",
+      "try { const response = await fetch(url); if (healthy(response)) return true; } catch {}",
+      "await new Promise((resolve) => setTimeout(resolve, 250));",
+      "}",
+      "return false;",
+      "};",
+      "Promise.all([",
+      "check('http://127.0.0.1:3000/mcp', (response) => response.status < 500),",
+      `check('http://${collectorAddress}:13133/', (response) => response.ok),`,
+      "]).then((results) => {",
+      "if (!results[0]) process.stdout.write('control_plane_unhealthy\\n');",
+      "if (!results[1]) process.stdout.write('collector_unhealthy\\n');",
+      "if (results.some((result) => !result)) process.exitCode = 1;",
+      "})",
+      ".catch(() => { process.exitCode = 1; });",
+    ].join("");
     compose(["exec", "--no-TTY", "harness", "node", "-e", healthChecks]);
     const container = compose(["ps", "--quiet", "harness"]).trim();
 
