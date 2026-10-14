@@ -26,13 +26,19 @@ export async function buildApprovalHtml(options = {}) {
       {
         name: "inline-dependency-metadata",
         setup(builder) {
-          builder.onLoad({ filter: /\.ts$/ }, async ({ path }) => {
+          builder.onLoad({ filter: /\.(ts|tsx|js|mjs|jsx)$/ }, async ({ path }) => {
             if (path.includes("/node_modules/")) {
               return undefined;
             }
             const contents = await readFile(path, "utf8");
             const normalized = await transform(contents, {
-              loader: "ts",
+              loader: {
+                ts: "ts",
+                tsx: "tsx",
+                js: "js",
+                mjs: "js",
+                jsx: "jsx",
+              }[path.slice(path.lastIndexOf(".") + 1)],
               legalComments: "none",
               minifySyntax: true,
             });

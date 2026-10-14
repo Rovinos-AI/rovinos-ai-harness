@@ -44,6 +44,14 @@ describe("single-file approval app", () => {
     ).rejects.toThrow("approval_build_external_url");
   });
 
+  it("refuses an external URL introduced by a JSX app module", async () => {
+    await expect(
+      buildApprovalHtml({
+        entryPoint: new URL("./fixtures/external-url.jsx", import.meta.url).pathname,
+      }),
+    ).rejects.toThrow("approval_build_external_url");
+  });
+
   it("strips documentation URL comments before checking app source", async () => {
     const html = await buildApprovalHtml({
       entryPoint: new URL("./fixtures/documentation-url.ts", import.meta.url).pathname,

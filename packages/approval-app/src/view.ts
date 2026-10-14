@@ -30,14 +30,19 @@ function element<K extends keyof HTMLElementTagNameMap>(
 function argumentNode(document: Document, value: JsonValue, label: string): HTMLElement {
   if (typeof value !== "object" || value === null) {
     const leaf = element(document, "div", `${label}: `);
-    appendTokenText(leaf, typeof value === "string" ? value : String(value));
+    appendTokenText(leaf, typeof value === "string" ? JSON.stringify(value) : String(value));
     return leaf;
   }
   const branch = element(document, "details");
   branch.open = true;
-  branch.append(element(document, "summary", label));
+  const entries = Object.entries(value);
+  const branchType = Array.isArray(value)
+    ? `array, ${String(value.length)} ${value.length === 1 ? "item" : "items"}`
+    : "object";
+  const empty = entries.length === 0 ? ", empty" : "";
+  branch.append(element(document, "summary", `${label} (${branchType}${empty})`));
   const children = element(document, "ul");
-  for (const [key, child] of Object.entries(value)) {
+  for (const [key, child] of entries) {
     const item = element(document, "li");
     item.append(argumentNode(document, child, key));
     children.append(item);
@@ -77,7 +82,9 @@ export function createApprovalView(root: HTMLElement, options: ApprovalViewOptio
     refresh = () => undefined;
     if (!parsed.success) {
       heading.textContent = "Approval unavailable";
-      status.textContent = "Invalid approval payload";
+      if (status.textContent !== "Invalid approval payload") {
+        status.textContent = "Invalid approval payload";
+      }
       options.onError("payload_invalid");
       heading.focus();
       return;

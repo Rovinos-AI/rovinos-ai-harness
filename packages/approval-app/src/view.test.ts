@@ -53,7 +53,10 @@ describe("approval view", () => {
     ]) {
       expect(document.body.textContent).toContain(text);
     }
-    expect(document.querySelector('[aria-label="<EMAIL_1>"]')?.textContent).toBe("email 1");
+    const emailToken = document.querySelector('[aria-label="<EMAIL_1>"]');
+    expect(emailToken?.textContent).toBe("email 1");
+    expect(emailToken?.previousElementSibling?.textContent).toBe('"');
+    expect(emailToken?.nextElementSibling?.textContent).toBe('"');
     expect(document.querySelector('[aria-label="<PHONE_2>"]')?.textContent).toBe("phone 2");
     expect(document.querySelectorAll("details").length).toBeGreaterThan(1);
     const details = document.querySelector("details");
@@ -82,6 +85,38 @@ describe("approval view", () => {
     ]);
     expect(document.body.textContent).toContain("No expiry");
     expect(document.body.textContent).toContain("plain text");
+  });
+
+  it("distinguishes JSON strings, primitives, arrays, objects, and empty containers", () => {
+    setup({
+      ...payload,
+      args: {
+        stringFalse: "false",
+        booleanFalse: false,
+        emptyArray: [],
+        emptyObject: {},
+        oneArray: ["x"],
+        numericObject: { "0": "x" },
+        escapedString: 'quote " backslash \\ line\n',
+      },
+    });
+    expect(document.body.textContent).toContain('stringFalse: "false"');
+    expect(document.body.textContent).toContain("booleanFalse: false");
+    expect(document.body.textContent).toContain(
+      `escapedString: ${JSON.stringify('quote " backslash \\ line\n')}`,
+    );
+    expect([...document.querySelectorAll("summary")].map((summary) => summary.textContent)).toEqual(
+      [
+        "Arguments (object)",
+        "emptyArray (array, 0 items, empty)",
+        "emptyObject (object, empty)",
+        "oneArray (array, 1 item)",
+        "numericObject (object)",
+      ],
+    );
+    expect(
+      [...document.querySelectorAll("div")].filter((div) => div.textContent === '0: "x"'),
+    ).toHaveLength(2);
   });
 
   it.each([4999, 5000, 7000])(
@@ -115,6 +150,16 @@ describe("approval view", () => {
     const expiredText = status?.firstChild;
     advance(6000);
     expect(status?.firstChild).toBe(expiredText);
+  });
+
+  it("preserves the live-region text node for repeated invalid payloads", () => {
+    const { view } = setup();
+    view.receive({});
+    const status = document.querySelector('[role="status"]');
+    const invalidText = status?.firstChild;
+    view.receive({});
+    expect(status?.textContent).toBe("Invalid approval payload");
+    expect(status?.firstChild).toBe(invalidText);
   });
 
   it("renders malicious strings and keys only as text, including tokens in the heading", () => {
