@@ -17,12 +17,13 @@ export const TELEMETRY_DROP_REASONS = [
 
 /** Closed rejection reasons used by the host app-call counter. */
 export const HOST_APP_REJECTED_REASONS = [
-  "unknown_tool",
-  "telemetry_unavailable",
   "schema",
   "size",
   "rate",
+  "unknown_app",
+  "unknown_tool",
   "unknown_span",
+  "session_cap",
 ] as const;
 
 /** Bounded reasons for dropping or stripping telemetry data. */
@@ -45,6 +46,7 @@ export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
 /** Collector allowlist of metric names and their allowed datapoint attribute keys. */
 export const METRIC_ALLOWLIST = {
   "harness.host.app_rejected": ["harness.host.app_rejected.reason"],
+  "harness.host.app_spans_accepted": [],
   "harness.sentinel.scope_reduced": [],
   "harness.sentinel.short_values_skipped": [],
   "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
@@ -52,6 +54,7 @@ export const METRIC_ALLOWLIST = {
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
 let hostAppRejectedCounter: Counter<HostAppRejectedAttributes> | undefined;
+let hostAppSpansAcceptedCounter: Counter<NoMetricAttributes> | undefined;
 let skippedShortValuesCounter: Counter<NoMetricAttributes> | undefined;
 let scopeReducedCounter: Counter<NoMetricAttributes> | undefined;
 
@@ -76,6 +79,14 @@ function getHostAppRejectedCounter(): Counter<HostAppRejectedAttributes> {
     (meter, name) => meter.createCounter<HostAppRejectedAttributes>(name),
   );
   return hostAppRejectedCounter;
+}
+
+function getHostAppSpansAcceptedCounter(): Counter<NoMetricAttributes> {
+  hostAppSpansAcceptedCounter ??= createCounter<NoMetricAttributes>(
+    "harness.host.app_spans_accepted",
+    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
+  );
+  return hostAppSpansAcceptedCounter;
 }
 
 function getSkippedShortValuesCounter(): Counter<NoMetricAttributes> {
@@ -107,6 +118,18 @@ export function countDroppedTelemetry(reason: TelemetryDropReason): void {
 export function countHostAppRejected(reason: HostAppRejectedReason): void {
   try {
     getHostAppRejectedCounter().add(1, { "harness.host.app_rejected.reason": reason });
+  } catch {
+    return;
+  }
+}
+
+/** Counts accepted app spans without high-cardinality attributes. */
+export function countHostAppSpansAccepted(count: number): void {
+  if (!Number.isSafeInteger(count) || count <= 0) {
+    return;
+  }
+  try {
+    getHostAppSpansAcceptedCounter().add(count);
   } catch {
     return;
   }

@@ -6,6 +6,12 @@ describe("HostConfigSchema", () => {
   it("applies loopback and deny-by-default settings", () => {
     expect(HostConfigSchema.parse({})).toEqual({
       apps: [],
+      limits: {
+        batchesPerSecond: 10,
+        batchBurst: 20,
+        spansPerMinute: 200,
+        spansPerSessionLifetime: 2_000,
+      },
       listen: { host: "127.0.0.1", port: 0 },
       maxUiSessions: 32,
       permissionAllowlist: [],
@@ -49,6 +55,29 @@ describe("HostConfigSchema", () => {
     expect(HostConfigSchema.safeParse({ maxUiSessions: 1025 }).success).toBe(false);
     expect(HostConfigSchema.safeParse({ uiSessionMaxMs: 0 }).success).toBe(false);
     expect(HostConfigSchema.safeParse({ uiSessionMaxMs: 2_147_483_648 }).success).toBe(false);
+  });
+
+  it("accepts configurable telemetry limits and rejects invalid values", () => {
+    expect(
+      HostConfigSchema.parse({
+        limits: {
+          batchesPerSecond: 5,
+          batchBurst: 12,
+          spansPerMinute: 100,
+          spansPerSessionLifetime: 500,
+        },
+      }).limits,
+    ).toEqual({
+      batchesPerSecond: 5,
+      batchBurst: 12,
+      spansPerMinute: 100,
+      spansPerSessionLifetime: 500,
+    });
+    expect(HostConfigSchema.safeParse({ limits: { batchesPerSecond: 0 } }).success).toBe(false);
+    expect(HostConfigSchema.safeParse({ limits: { spansPerMinute: -1 } }).success).toBe(false);
+    expect(
+      HostConfigSchema.safeParse({ limits: { spansPerSessionLifetime: 1_000_001 } }).success,
+    ).toBe(false);
   });
 
   it("rejects non-loopback addresses and unknown keys", () => {

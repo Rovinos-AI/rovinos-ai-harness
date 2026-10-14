@@ -59,7 +59,13 @@ export const AppSpanBatchSchema = z.object({ spans: z.array(AppSpanSchema).max(5
 export type AppSpanBatch = z.infer<typeof AppSpanBatchSchema>;
 
 /** Bounded reasons recorded when app telemetry is discarded. */
-export const AppTelemetryRejectReasonSchema = z.enum(["schema", "size", "rate", "unknown_span"]);
+export const AppTelemetryRejectReasonSchema = z.enum([
+  "schema",
+  "size",
+  "rate",
+  "unknown_span",
+  "session_cap",
+]);
 
 /** Inferred bounded reasons recorded when app telemetry is discarded. */
 export type AppTelemetryRejectReason = z.infer<typeof AppTelemetryRejectReasonSchema>;
@@ -247,6 +253,7 @@ function ingestSpan(
   candidate: unknown,
   onRejected?: (reason: AppTelemetryRejectReason) => void,
   parent?: SpanContext,
+  acceptSpan?: () => true | "rate" | "session_cap",
 ): boolean {
   try {
     const name = isRecord(candidate) ? candidate.name : undefined;
@@ -255,7 +262,18 @@ function ingestSpan(
       return false;
     }
     const parsed = AppSpanSchema.safeParse(candidate);
-    if (!parsed.success || !startSpan(parsed.data, parent)) {
+    if (!parsed.success) {
+      reject("schema", onRejected);
+      return false;
+    }
+    if (acceptSpan !== undefined) {
+      const acceptance = acceptSpan();
+      if (acceptance !== true) {
+        reject(acceptance, onRejected);
+        return false;
+      }
+    }
+    if (!startSpan(parsed.data, parent)) {
       reject("schema", onRejected);
       return false;
     }
@@ -278,6 +296,7 @@ export function ingestBatch(
   options: {
     readonly onRejected?: (reason: AppTelemetryRejectReason) => void;
     readonly parent?: SpanContext;
+    readonly acceptSpan?: () => true | "rate" | "session_cap";
   } = {},
 ): AppSpanBatchAck {
   const inspection = inspectBatch(input);
@@ -289,7 +308,7 @@ export function ingestBatch(
   let accepted = 0;
   let dropped = 0;
   for (const candidate of inspection.spans) {
-    if (ingestSpan(candidate, options.onRejected, options.parent)) {
+    if (ingestSpan(candidate, options.onRejected, options.parent, options.acceptSpan)) {
       accepted += 1;
     } else {
       dropped += 1;

@@ -7,6 +7,7 @@ import {
   HOST_APP_REJECTED_REASONS,
   METRIC_ALLOWLIST,
   countHostAppRejected,
+  countHostAppSpansAccepted,
   countDroppedTelemetry,
   countSentinelScopeReduced,
   countSkippedShortValues,
@@ -85,6 +86,14 @@ describe("countDroppedTelemetry", () => {
     expectAddCallsAreAllowlisted("harness.host.app_rejected");
   });
 
+  it("counts accepted app spans without attributes", () => {
+    countHostAppSpansAccepted(3);
+
+    expect(createCounter).toHaveBeenCalledWith("harness.host.app_spans_accepted");
+    expect(add).toHaveBeenCalledWith(3);
+    expectAddCallsAreAllowlisted("harness.host.app_spans_accepted");
+  });
+
   it("counts skipped short sentinel values without attributes", () => {
     countSkippedShortValues(3);
 
@@ -95,6 +104,15 @@ describe("countDroppedTelemetry", () => {
   });
 
   it("uses only closed-enum string attributes for metric instruments", () => {
+    expect(HOST_APP_REJECTED_REASONS).toEqual([
+      "schema",
+      "size",
+      "rate",
+      "unknown_app",
+      "unknown_tool",
+      "unknown_span",
+      "session_cap",
+    ]);
     expect(TELEMETRY_METRIC_STRING_ATTRIBUTES).toEqual({
       "harness.telemetry.dropped.reason": dropReasons,
       "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
