@@ -5,7 +5,7 @@ import {
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import type { Id } from "@harness/schemas";
+import type { Id, VaultValueEntry } from "@harness/schemas";
 import type { VaultRunReader } from "./sentinel/run-values.js";
 
 /** Creates a no-export tracer provider with deterministic identifiers for tests. */
@@ -44,18 +44,26 @@ export function createTestContextManager(): AsyncLocalStorageContextManager {
 
 /** Read-only vault fixture backed by a fixed map of run IDs to raw values. */
 export class StaticVaultReader implements VaultRunReader {
-  private readonly valuesByRun: ReadonlyMap<Id, readonly string[]>;
+  private readonly valuesByRun: ReadonlyMap<Id, readonly VaultValueEntry[]>;
 
-  /** @param valuesByRun Values returned for each requested run. */
-  constructor(valuesByRun: ReadonlyMap<Id, readonly string[]>) {
+  /** @param valuesByRun Typed vault entries returned for each requested run. */
+  constructor(valuesByRun: ReadonlyMap<Id, readonly VaultValueEntry[]>) {
     this.valuesByRun = new Map(
-      [...valuesByRun].map(([runId, values]) => [runId, Object.freeze([...values])]),
+      [...valuesByRun].map(
+        ([runId, values]) =>
+          [runId, Object.freeze(values.map((entry) => Object.freeze({ ...entry })))] as const,
+      ),
     );
   }
 
   /** Return the fixture's detached value list. */
   listRawValues(runId: Id): Promise<readonly string[]> {
-    return Promise.resolve([...(this.valuesByRun.get(runId) ?? [])]);
+    return Promise.resolve((this.valuesByRun.get(runId) ?? []).map(({ rawValue }) => rawValue));
+  }
+
+  /** Return the fixture's detached typed value list. */
+  listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
+    return Promise.resolve((this.valuesByRun.get(runId) ?? []).map((entry) => ({ ...entry })));
   }
 
   /** Return the fixed number of fixture values for this run. */

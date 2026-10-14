@@ -66,6 +66,10 @@ describe("InMemoryVault", () => {
 
     expect(values).toEqual(["alice@example.test"]);
     expect(values).not.toBe(await vault.listRawValues(runId));
+    await expect(vault.listRawValueEntries(runId)).resolves.toEqual([
+      { entityType: "email", rawValue: "alice@example.test" },
+    ]);
+    await expect(vault.listRawValueEntries(anotherRunId)).resolves.toEqual([]);
     await expect(vault.listRawValues(anotherRunId)).resolves.toEqual([]);
     await expect(vault.stats(anotherRunId)).resolves.toEqual({ entries: 0 });
   });

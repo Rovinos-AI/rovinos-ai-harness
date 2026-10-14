@@ -4,6 +4,9 @@
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
+// Not wired yet: runtime vault from config (13.12 -> #389)
+// Not wired yet: storage-boundary tokenization (13.8 -> #81)
+// Not wired yet: sentinel trip gate wired to the runtime vault (8.4 -> #74)
 import { Command } from "commander";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
@@ -36,6 +39,7 @@ import { buildApprovalPayload } from "@harness/policy";
 import {
   ApprovalListResultSchema,
   ApprovalShowResultSchema,
+  Code,
   FakeClock,
   Id,
   JsonValue,
@@ -51,13 +55,17 @@ import {
   attr,
   createTelemetrySdk,
   defineLogRecord,
+  defineSpan,
   listLogDefinitions,
   listSpanDefinitions,
+  SentinelGate,
   type TelemetrySdkOptions,
+  VaultRunView,
+  withSpan,
 } from "@harness/telemetry";
 import type { Event } from "@harness/schemas";
 import type { z } from "zod";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const DAY_MS = 86_400_000;
 const KEY_REF = "env:HARNESS_E2E_KEY";
@@ -88,6 +96,7 @@ interface Skeleton {
   readonly callsBeforeApproval: string[];
   readonly callsAfterApproval: string[];
   readonly argsAfterApproval: JsonValue[];
+  readonly sentinelProbe: { enabled: boolean };
   readonly stdout: string[];
   readonly stderr: string[];
   readonly approvalOutput: string[];
@@ -310,6 +319,21 @@ beforeAll(async () => {
   process.env.HARNESS_E2E_KEY = key;
   const spans: ExportedSpan[] = [];
   const records: ExportedLogRecord[] = [];
+  let canaryAvailable = false;
+  let probePending = false;
+  const sentinelProbe = { enabled: false };
+  let releaseProbeScan: () => void = () => undefined;
+  const probeScanReady = new Promise<void>((resolve) => {
+    releaseProbeScan = resolve;
+  });
+  const canaryProbeSpan = defineSpan(
+    "harness.e2e.sentinel_probe",
+    {
+      "harness.run.id": attr.id(),
+      "harness.e2e.canary": attr.enum([canary]),
+    },
+    { taskId: "8.4", packageName: "@harness/telemetry" },
+  );
   const spanExporter: TelemetrySdkOptions["spanExporter"] = {
     export: (finished, callback) => {
       spans.push(...finished);
@@ -328,10 +352,37 @@ beforeAll(async () => {
   const telemetry = createTelemetrySdk({
     spanExporter,
     logExporter,
-    telemetry: { sentinel: { minValueLength: 6, enabled: false } },
+    gate: new SentinelGate(
+      new VaultRunView({
+        listRawValueEntries: async () => {
+          if (canaryAvailable) {
+            await probeScanReady;
+            return [{ rawValue: canary, entityType: Code.parse("email") }];
+          }
+          return [];
+        },
+        version: () => Promise.resolve(canaryAvailable ? 1 : 0),
+      }),
+      undefined,
+      { maxPrepareMs: 1_000 },
+    ),
+    telemetry: { sentinel: { minValueLength: 6, enabled: true } },
   });
-  trace.setGlobalTracerProvider(telemetry.tracerProvider);
+  const forceFlush = telemetry.tracerProvider.forceFlush.bind(telemetry.tracerProvider);
+  vi.spyOn(telemetry.tracerProvider, "forceFlush").mockImplementation(async () => {
+    if (probePending) {
+      probePending = false;
+      releaseProbeScan();
+    }
+    await forceFlush();
+  });
+  if (!trace.setGlobalTracerProvider(telemetry.tracerProvider)) {
+    throw new Error("The end-to-end tracer provider could not be registered.");
+  }
   logs.setGlobalLoggerProvider(telemetry.loggerProvider);
+  if (logs.getLoggerProvider() !== telemetry.loggerProvider) {
+    throw new Error("The end-to-end logger provider could not be registered.");
+  }
   const logger = logs.getLogger("@harness/telemetry");
   logger.emit({
     eventName: logDefinition.name,
@@ -358,6 +409,20 @@ beforeAll(async () => {
     ),
     completion([], "completed"),
   ]);
+  const complete = model.complete.bind(model);
+  model.complete = async (request, context) => {
+    const response = await complete(request, context);
+    if (response.finishReason === "stop" && sentinelProbe.enabled) {
+      canaryAvailable = true;
+      probePending = true;
+      await withSpan(
+        canaryProbeSpan,
+        { "harness.run.id": context.runId, "harness.e2e.canary": canary },
+        () => undefined,
+      );
+    }
+    return response;
+  };
   const clock = new FakeClock(1_000);
   const ids = new SequentialIdGenerator();
   const callsBeforeApproval: string[] = [];
@@ -426,6 +491,7 @@ beforeAll(async () => {
     callsBeforeApproval,
     callsAfterApproval,
     argsAfterApproval,
+    sentinelProbe,
     stdout: [],
     stderr: [],
     approvalOutput: [],
@@ -641,6 +707,7 @@ describe("resume", () => {
     if (runId === undefined) {
       throw new Error("The run id is not available.");
     }
+    current.sentinelProbe.enabled = true;
     const result = await invokeCli(["--json", "resume", runId]);
     expect(result.code).toBe(ExitCode.ok);
     expect(jsonResult(RunResultSchema, result.stdout).status).toBe("completed");
@@ -658,7 +725,18 @@ describe("resume", () => {
       );
       expect(resolved).toBeGreaterThanOrEqual(0);
       expect(executed).toBeGreaterThan(resolved);
-      expect(events.at(-1)).toMatchObject({ type: "run_status_changed", to: "completed" });
+      expect(events.at(-1)).toMatchObject({
+        type: "pii_action",
+        boundary: "telemetry_export",
+        action: "blocked",
+        entities: [{ type: "email", count: 1 }],
+      });
+      expect(JSON.stringify(events.at(-1))).not.toContain(current.canary);
+      expect(JSON.stringify(current.spans)).not.toContain(current.canary);
+      expect(JSON.stringify(current.logs)).not.toContain(current.canary);
+      expect(
+        events.some((event) => event.type === "run_status_changed" && event.to === "completed"),
+      ).toBe(true);
       expect(
         events.find((event) => event.type === "tool_result" && event.toolId === ASK_TOOL),
       ).toMatchObject({ result: { ok: true, email: "<EMAIL_1>" } });

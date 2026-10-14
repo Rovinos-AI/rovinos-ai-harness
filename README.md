@@ -269,6 +269,9 @@ Every event carries a schema version `v`. Readers upcast older versions on read,
 5. If the model returned tool calls, run the tool pipeline for each one. Otherwise complete with `final_answer`.
 6. Drain sentinel trips into `pii_action` events and checkpoint on cadence.
 
+Sentinel trips use the `telemetry_export` boundary and record only entity types
+and counts. Runless trips are logged as metadata but are not attached to a run.
+
 All events go through one `RunRecorder`, which fills the envelope (`ts`, `traceId`, `spanId`, `segmentId`) and pairs each step with a registered span.
 
 ---
@@ -401,7 +404,7 @@ flowchart LR
   POLY --> TOK["Tokenizer: idempotent, run-scoped tokens"]
   TOK --> VW["VaultWriter.put"]
   VR["VaultResolver.resolve (audited)"] --> DETOK["Detokenize only at allowlisted tool argument pointers"]
-  VRD["VaultReader.listRawValues"] --> SEN["Leak sentinel"]
+  VRD["VaultReader.listRawValueEntries"] --> SEN["Leak sentinel"]
   MI --> DET
   TI --> DET
   TO --> DET

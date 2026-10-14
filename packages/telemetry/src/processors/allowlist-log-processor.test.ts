@@ -2,7 +2,7 @@
 import { ROOT_CONTEXT, type Context, type SpanContext } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { Id, type TelemetryConfig } from "@harness/schemas";
+import { Code, Id, type TelemetryConfig } from "@harness/schemas";
 import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { attr } from "../attr.js";
@@ -11,6 +11,7 @@ import { AllowlistLogRecordProcessor } from "./allowlist-log-processor.js";
 import { ActiveRuns } from "../sentinel/active-runs.js";
 import { SentinelGate, SentinelRequiredError } from "../sentinel/gate.js";
 import { VaultRunView } from "../sentinel/run-values.js";
+import { TripQueue } from "../sentinel/trips.js";
 
 const metricMocks = vi.hoisted(() => ({
   record: vi.fn<(reason: string) => void>(),
@@ -29,6 +30,10 @@ const disabledTelemetry: TelemetryConfig = {
   sentinel: { minValueLength: 6, enabled: false },
 };
 const runId = Id.parse("A".repeat(26));
+
+function makeTripQueue(): TripQueue {
+  return new TripQueue({ emit: vi.fn(), enabled: () => true });
+}
 
 function defineTestLogRecord() {
   return defineLogRecord("harness.test.log_record", {
@@ -209,9 +214,11 @@ describe("AllowlistLogRecordProcessor", () => {
     const gate = new SentinelGate(
       new VaultRunView({
         version: () => Promise.resolve(1),
-        listRawValues: () => Promise.resolve([canary]),
+        listRawValueEntries: () =>
+          Promise.resolve([{ entityType: Code.parse("email"), rawValue: canary }]),
       }),
       activeRuns,
+      { tripQueue: makeTripQueue() },
     );
     const processor = new AllowlistLogRecordProcessor(next, { gate });
 
@@ -232,6 +239,96 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(metricMocks.record).toHaveBeenCalledWith("leak_sentinel");
   });
 
+  it("forwards exactly one sentinel alert without sentinel scanning or re-enqueueing it", async () => {
+    defineLogRecord("harness.sentinel.trip", {
+      "harness.run.id": attr.optional(attr.id()),
+      "harness.sentinel.trip.count": attr.nonnegativeInt(),
+    });
+    const next = createNextProcessor();
+    const activeRuns = new ActiveRuns();
+    activeRuns.register(runId);
+    const canary = "harness.sentinel.trip";
+    const processorRef: { current?: AllowlistLogRecordProcessor } = {};
+    const queue = new TripQueue({
+      emit: (record) => {
+        processorRef.current?.onEmit(
+          makeSdkLogRecord({
+            body: record.body,
+            attributes: record.attributes ?? {},
+            ...(record.eventName === undefined ? {} : { eventName: record.eventName }),
+          }),
+          record.context,
+        );
+      },
+      enabled: () => true,
+    });
+    const gate = new SentinelGate(
+      new VaultRunView({
+        version: () => Promise.resolve(1),
+        listRawValueEntries: () =>
+          Promise.resolve([{ entityType: Code.parse("email"), rawValue: canary }]),
+      }),
+      activeRuns,
+      { tripQueue: queue },
+    );
+    const check = vi.spyOn(gate, "check");
+    const processor = new AllowlistLogRecordProcessor(next, { gate });
+    processorRef.current = processor;
+
+    queue.enqueue({ runId, entities: [{ type: "email", count: 1 }] });
+    await processor.forceFlush();
+
+    expect(check).not.toHaveBeenCalled();
+    expect(next.onEmit).toHaveBeenCalledOnce();
+    expect(queue.size).toBe(1);
+  });
+
+  it("waits for in-flight gate checks before completing a telemetry flush", async () => {
+    defineTestLogRecord();
+    const next = createNextProcessor();
+    const gate = new SentinelGate(
+      new VaultRunView({
+        version: () => Promise.resolve(0),
+        listRawValueEntries: () => Promise.resolve([]),
+      }),
+      new ActiveRuns(),
+      { tripQueue: makeTripQueue() },
+    );
+    let releaseCheck: (
+      result:
+        | { ok: true }
+        | {
+            ok: false;
+            reason: "hit" | "error" | "timeout";
+          },
+    ) => void = () => undefined;
+    const pendingCheck = new Promise<
+      | {
+          ok: true;
+        }
+      | {
+          ok: false;
+          reason: "hit" | "error" | "timeout";
+        }
+    >((resolve) => {
+      releaseCheck = resolve;
+    });
+    vi.spyOn(gate, "check").mockReturnValue(pendingCheck);
+    const processor = new AllowlistLogRecordProcessor(next, { gate });
+    processor.onEmit(makeSdkLogRecord());
+
+    let flushCompleted = false;
+    const flushing = processor.forceFlush().then(() => {
+      flushCompleted = true;
+    });
+    await Promise.resolve();
+
+    expect(flushCompleted).toBe(false);
+    releaseCheck({ ok: true });
+    await flushing;
+    expect(next.onEmit).toHaveBeenCalledOnce();
+  });
+
   it("serializes log attributes in locale-independent ordinal order", async () => {
     defineLogRecord("harness.test.canonical_order", {
       "harness.test.a_": attr.enum(["first"]),
@@ -241,9 +338,10 @@ describe("AllowlistLogRecordProcessor", () => {
     const gate = new SentinelGate(
       new VaultRunView({
         version: () => Promise.resolve(0),
-        listRawValues: () => Promise.resolve([]),
+        listRawValueEntries: () => Promise.resolve([]),
       }),
       new ActiveRuns(),
+      { tripQueue: makeTripQueue() },
     );
     const check = vi.spyOn(gate, "check");
     const processor = new AllowlistLogRecordProcessor(next, { gate });

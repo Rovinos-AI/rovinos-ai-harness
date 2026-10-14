@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { CryptoError, aesGcmDecrypt, aesGcmEncrypt, hkdfSha256, hmacSha256 } from "@harness/crypto";
-import { Id, KEY_PROVIDER_KEY_BYTES, type Code, type KeyProvider } from "@harness/schemas";
+import { CryptoError, aesGcmEncrypt, hkdfSha256, hmacSha256 } from "@harness/crypto";
+import {
+  Id,
+  KEY_PROVIDER_KEY_BYTES,
+  VaultValueEntrySchema,
+  type Code,
+  type KeyProvider,
+  type VaultValueEntry,
+} from "@harness/schemas";
 import { normalize } from "./normalize.js";
 import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
 import { VaultOperationError } from "./errors.js";
+import { decryptSqliteEntry, ENCRYPTION_INFO } from "./sqlite-decrypt.js";
 import { migrateVault, validateReadOnlyVaultMigrations } from "./sqlite-migrations.js";
 import {
   VaultValueError,
@@ -19,10 +27,10 @@ import {
 
 const MAX_VALUE_BYTES = 8 * 1024;
 const MAX_TOKEN_NUMBER = 999_999;
-const ENCRYPTION_INFO = "harness/vault/enc";
 const LOOKUP_INFO = "harness/vault/lookup";
 interface VaultEntryRow {
   token: string;
+  entity_type?: string;
   value_enc: string;
   key_id: string;
 }
@@ -213,17 +221,32 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
 
   /** Return a detached list of decrypted values for leak detection. */
   async listRawValues(runId: Id): Promise<readonly string[]> {
-    let rows: VaultEntryRow[];
+    return Promise.all(this.readValueRows(runId).map((row) => this.decryptEntry(runId, row)));
+  }
+
+  /** Return detached values and entity types for metadata-only sentinel alerts. */
+  async listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
+    const rows = this.readValueRows(runId);
+    return Promise.all(
+      rows.map(async (row) =>
+        VaultValueEntrySchema.parse({
+          entityType: row.entity_type,
+          rawValue: await this.decryptEntry(runId, row),
+        }),
+      ),
+    );
+  }
+
+  private readValueRows(runId: Id): VaultEntryRow[] {
     try {
-      rows = this.db
+      return this.db
         .prepare<[Id], VaultEntryRow>(
-          "SELECT token, value_enc, key_id FROM vault_entries WHERE run_id = ? ORDER BY token",
+          "SELECT token, entity_type, value_enc, key_id FROM vault_entries WHERE run_id = ? ORDER BY token",
         )
         .all(runId);
     } catch {
       throw new VaultOperationError("vault_unavailable");
     }
-    return Promise.all(rows.map((row) => this.decryptEntry(runId, row)));
   }
 
   /** Record when a run entered a terminal state for grace-period retention. */
@@ -410,24 +433,6 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
   }
 
   private async decryptEntry(runId: Id, row: VaultEntryRow): Promise<string> {
-    let key: Uint8Array | undefined;
-    let plaintext: Uint8Array | undefined;
-    try {
-      key = await loadMasterKey(this.keyProvider, row.key_id, "vault_decrypt_failed");
-      const encryptionKey = hkdfSha256(key, ENCRYPTION_INFO);
-      key.fill(0);
-      key = encryptionKey;
-      const encrypted = Buffer.from(row.value_enc, "base64");
-      if (encrypted.toString("base64") !== row.value_enc) {
-        throw new Error("Invalid encrypted value");
-      }
-      plaintext = aesGcmDecrypt(key, encrypted, Buffer.from(`${runId}:${row.token}`, "utf8"));
-      return new TextDecoder().decode(plaintext);
-    } catch {
-      throw new VaultOperationError("vault_decrypt_failed");
-    } finally {
-      key?.fill(0);
-      plaintext?.fill(0);
-    }
+    return decryptSqliteEntry(runId, row, this.keyProvider, loadMasterKey);
   }
 }
