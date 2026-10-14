@@ -139,7 +139,6 @@ export {
   type DoctorContext,
 } from "./doctor.js";
 export { resolveDataDir } from "./runtime-data-dir.js";
-export { createRuntimeVaultResolver } from "./runtime-setup.js";
 export {
   migrateConfiguredStore,
   openConfiguredStore,

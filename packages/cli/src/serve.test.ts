@@ -3,6 +3,7 @@ import { HarnessConfigSchema } from "@harness/config";
 import type * as ControlPlane from "@harness/control-plane";
 import type { Runtime } from "@harness/core";
 import { InMemoryEventStore } from "@harness/store";
+import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "./command.js";
 import { ExitCode } from "./exit-codes.js";
@@ -61,7 +62,7 @@ function createContext() {
   const closeRuntime = vi.fn(() => Promise.resolve());
   const runtime: Runtime = {
     store,
-    vault: { resolve: () => Promise.resolve(undefined) },
+    vault: new AuditingVaultResolver(new InMemoryVault(), () => undefined),
     keys: {
       currentKeyId: () => "test-key",
       getKey: () => Promise.resolve(new Uint8Array(32)),

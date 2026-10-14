@@ -14,7 +14,7 @@ import {
   type ApprovalSummary,
   type Event,
 } from "@harness/schemas";
-import type { VaultAuditPiiAction, VaultResolver } from "@harness/vault";
+import type { VaultAuditPiiAction } from "@harness/vault";
 import type { CliContext, CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 import { collectApprovalTokens, revealApprovalTokens } from "./approval-args.js";
@@ -152,32 +152,35 @@ function revealAudit(
 
 interface RevealEnvironment {
   readonly context: CliContext;
-  readonly resolver: VaultResolver;
+  readonly resolver: Pick<Runtime["vault"], "resolveMany">;
   readonly store: Store;
 }
 
 async function revealArgs(
-  { context, resolver: inner, store }: RevealEnvironment,
+  { context, resolver, store }: RevealEnvironment,
   pending: PendingApproval,
   args: JsonValue,
   toolId: string,
 ): Promise<JsonValue> {
-  const { AuditingVaultResolver, findTokens, vaultAuditToPiiAction } =
-    await import("@harness/vault");
+  const { findTokens, vaultAuditToPiiAction } = await import("@harness/vault");
   const audits: VaultAuditPiiAction[] = [];
-  const resolver = new AuditingVaultResolver(inner, (audit) => {
-    audits.push(vaultAuditToPiiAction(audit));
-  });
   const tokens = new Set<string>();
   collectApprovalTokens(args, tokens, findTokens);
   const values = new Map<string, string>();
   try {
     if (tokens.size > 0) {
       const list = [...tokens];
-      const resolved = await resolver.resolveMany(pending.runId, list, {
-        boundary: "ui",
-        ...(toolId === "unknown" ? {} : { toolId }),
-      });
+      const resolved = await resolver.resolveMany(
+        pending.runId,
+        list,
+        {
+          boundary: "ui",
+          ...(toolId === "unknown" ? {} : { toolId }),
+        },
+        (audit) => {
+          audits.push(vaultAuditToPiiAction(audit));
+        },
+      );
       list.forEach((token, index) => {
         const value = resolved[index];
         if (value !== undefined) {
@@ -266,22 +269,23 @@ function registerShow(approvals: Command, context: CliContext): void {
         options: { readonly showArgs?: boolean; readonly reveal?: boolean },
       ) => {
         const approvalId = parseId(value);
-        if (options.reveal === true && context.createVaultResolver === undefined) {
-          throw new ApprovalsCodeError("reveal_unavailable");
-        }
         const config = options.reveal === true ? await context.loadConfig() : undefined;
-        const resolver =
-          options.reveal === true && config !== undefined
-            ? await context.createVaultResolver?.(config)
-            : undefined;
-        if (options.reveal === true && resolver === undefined) {
+        if (
+          options.reveal === true &&
+          config?.keys === undefined &&
+          context.createVaultResolver === undefined
+        ) {
           throw new ApprovalsCodeError("reveal_unavailable");
         }
-        try {
-          await withRuntime(
-            context,
-            undefined,
-            async (runtime) => {
+        await withRuntime(
+          context,
+          undefined,
+          async (runtime, runtimeConfig) => {
+            const resolverOverride =
+              options.reveal === true
+                ? await context.createVaultResolver?.(runtimeConfig)
+                : undefined;
+            try {
               const pending = await findPending(runtime.store, approvalId);
               const summary = await summarize(pending, context.clock.now());
               const { ApprovalPayloadSchema } = await import("@harness/policy");
@@ -290,6 +294,10 @@ function registerShow(approvals: Command, context: CliContext): void {
               const args = payload.success ? payload.data.args : null;
               let revealed: JsonValue | undefined;
               if (options.reveal === true) {
+                const resolver =
+                  context.createVaultResolver === undefined
+                    ? runtime.vault
+                    : resolverOverride;
                 if (resolver === undefined) {
                   throw new ApprovalsCodeError("reveal_unavailable");
                 }
@@ -312,13 +320,15 @@ function registerShow(approvals: Command, context: CliContext): void {
                 ...(revealed === undefined ? {} : { revealed }),
               };
               context.out.json(ApprovalShowResultSchema, result);
-              context.out.print(`${JSON.stringify(result, null, 2)}\n`);
-            },
-            config,
-          );
-        } finally {
-          resolver?.close?.();
-        }
+              if (approvals.optsWithGlobals().json !== true) {
+                context.out.print(`${JSON.stringify(result, null, 2)}\n`);
+              }
+            } finally {
+              resolverOverride?.close?.();
+            }
+          },
+          config,
+        );
       },
     );
 }

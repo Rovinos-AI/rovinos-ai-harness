@@ -70,13 +70,6 @@ export function createDefaultContext(program: Command, out: Output): CliContext 
         secretResolver: overrides?.secretResolver ?? secretResolver,
       });
     },
-    createVaultResolver: async (config) => {
-      if (config.keys === undefined) {
-        return undefined;
-      }
-      const { createRuntimeVaultResolver } = await import("@harness/core");
-      return createRuntimeVaultResolver(config, { secretResolver });
-    },
   };
 }
 

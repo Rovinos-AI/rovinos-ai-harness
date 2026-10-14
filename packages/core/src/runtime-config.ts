@@ -74,7 +74,7 @@ export interface RuntimeConfig {
 export interface Runtime {
   readonly store: EventStore;
   /** Read-only resolver for audited vault access by runtime consumers. */
-  readonly vault: VaultResolver;
+  readonly vault: AuditingVaultResolver;
   /** Key provider shared by encryption consumers in the composed runtime. */
   readonly keys: KeyProvider;
   readonly clock: Clock;
@@ -102,7 +102,7 @@ export interface RuntimeComposition {
   readonly store: EventStore;
   readonly keys: LocalKeyProvider;
   readonly vault: RuntimeVault;
-  readonly vaultResolver: VaultResolver;
+  readonly vaultResolver: AuditingVaultResolver;
   readonly pii:
     | {
         readonly config: PiiConfig;

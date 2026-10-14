@@ -26,7 +26,7 @@ import {
   type Event,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
-import { InMemoryVault } from "@harness/vault";
+import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -105,12 +105,14 @@ function createFixture(
     out,
     clock,
     ...(interactive === undefined ? {} : { interactive }),
-    createVaultResolver: () => (withVault ? vault : undefined),
+    createVaultResolver: () =>
+      withVault ? new AuditingVaultResolver(vault, () => undefined) : undefined,
     createToolPort: () => new EditableToolPort(),
     createRuntime: async (runtimeConfig, overrides) => {
       runtimeCalls += 1;
       const runtime = await createRuntime(runtimeConfig, {
         store,
+        transientVault: true,
         clock,
         context: new NaiveContext(),
         tool: overrides?.tool ?? new FakeToolPort(),

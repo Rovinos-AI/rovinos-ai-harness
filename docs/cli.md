@@ -111,10 +111,11 @@ run needs no live process. Output carries tokenized values only unless `--reveal
   `approvalId`, `runId`, `toolId`, `ruleId`, `ageMs`, and `expiresAt` (`-` when it never expires).
 - `harness approvals show <approvalId> [--show-args] [--reveal]` prints metadata. Tokenized
   arguments need `--show-args`. `--reveal` implies `--show-args`, resolves tokens through the
-  auditing vault resolver with boundary `ui`, writes `reveal_exposes_sensitive_values` to stderr,
-  and appends a `pii_action` audit event (counts only) to the run log. It fails with
-  `reveal_unavailable` when no vault resolver is supplied. The default CLI resolver is pending
-  task 12.3; until then `--reveal` is unavailable unless a caller supplies the resolver.
+  runtime's scope-aware auditing vault resolver with boundary `ui`, writes
+  `reveal_exposes_sensitive_values` to stderr, and appends metadata-only `pii_action` audit events
+  (entity counts only) to the run log. It requires configured keys; otherwise it fails with
+  `reveal_unavailable`. Only tokens in the approval's run scope can be revealed, including subagent
+  approvals resolved through their root run's scope; tokens from other runs remain tokenized.
 - `harness approvals approve <approvalId> [--edit <json-file>] [--yes] [--resume]` approves. With
   `--edit`, the file holds the complete replacement (tokenized) arguments; they are validated
   against the rule's editable fields and the tool schema, and the decision is recorded as `edit`.

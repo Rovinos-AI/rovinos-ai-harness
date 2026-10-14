@@ -135,55 +135,6 @@ async function createRuntimeVault(
   });
 }
 
-/**
- * Opens the runtime's vault read-only for CLI operations that reveal run-scoped tokens.
- * @param config - Validated runtime configuration.
- * @param overrides - Optional secret resolver, clock, and data-directory override.
- * @returns A resolver lease, or undefined when no keys are configured.
- */
-export async function createRuntimeVaultResolver(
-  config: RuntimeConfig,
-  overrides: RuntimeOverrides = {},
-): Promise<(VaultResolver & { close(): void }) | undefined> {
-  if (config.keys === undefined) {
-    return undefined;
-  }
-  const keys = await createRuntimeKeys(config.keys, overrides);
-  let vault: RuntimeVault | undefined;
-  try {
-    const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    const resolverVault = await createRuntimeVault(
-      dataDir,
-      { ...overrides, readOnlyStore: true },
-      keys,
-      overrides.clock ?? systemClock,
-    );
-    vault = resolverVault;
-    let closed = false;
-    return {
-      resolve: (runId, token, context) => resolverVault.resolve(runId, token, context),
-      close: () => {
-        if (closed) {
-          return;
-        }
-        closed = true;
-        try {
-          resolverVault.close();
-        } finally {
-          keys.dispose();
-        }
-      },
-    };
-  } catch (error) {
-    try {
-      vault?.close();
-    } finally {
-      keys.dispose();
-    }
-    throw error;
-  }
-}
-
 function persistedScopeResolver(store: EventStore, scopes: RunScopeRegistry) {
   const pending = new Map<Id, Promise<Id>>();
   const resolve = async (runId: Id, visited: Set<Id>): Promise<Id> => {
