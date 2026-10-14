@@ -64,6 +64,7 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["**/*.int.test.ts"],
+          globalSetup: ["./scripts/compose/build-images.ts"],
         },
       },
       {

@@ -58,8 +58,8 @@ it("validates the base configuration and debug profile with the pinned collector
 
 it("serves the health endpoint on a loopback-only published port", async () => {
   try {
-    await compose(["up", "--detach", "--pull=never", "otel-collector-dev"]);
-    const containerId = (await compose(["ps", "--quiet", "otel-collector-dev"])).trim();
+    await compose(["up", "--detach", "--pull=never", "otel-collector"]);
+    const containerId = (await compose(["ps", "--quiet", "otel-collector"])).trim();
     expect(containerId).not.toBe("");
     const readonlyRoot = await execFileAsync(
       "docker",
@@ -74,7 +74,7 @@ it("serves the health endpoint on a loopback-only published port", async () => {
     );
     expect(requireStdout(droppedCapabilities.stdout).trim()).toContain("ALL");
 
-    const publishedPort = await compose(["port", "otel-collector-dev", "13133"]);
+    const publishedPort = await compose(["port", "otel-collector", "13133"]);
     const hostPort = publishedPort.trim().split(":").at(-1);
     if (hostPort === undefined || !/^\d+$/u.test(hostPort)) {
       throw new Error("Collector health endpoint did not receive a published port");

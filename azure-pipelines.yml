@@ -44,6 +44,8 @@ stages:
             displayName: Typecheck
           - script: yarn build
             displayName: Build packages for policy fixture commands
+          - script: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/compose/validate.ts
+            displayName: Validate Compose security profiles
           - script: >
               node packages/cli/dist/bin.js policy test
               --policy examples/policy-tests/policy.yaml

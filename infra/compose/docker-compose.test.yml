@@ -5,7 +5,7 @@ services:
       file: docker-compose.yml
       service: harness
     healthcheck:
-      test: ["CMD", "node", "dist/bin.js", "--version"]
+      test: ["CMD", "node", "dist/bin.js", "healthcheck"]
   otel-collector:
     extends:
       file: docker-compose.yml

@@ -30,6 +30,7 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     directories.map((directory) => rm(directory, { recursive: true, force: true })),
   );
@@ -70,6 +71,23 @@ describe("openConfiguredVaultAdmin", () => {
       [],
     );
     expect(existsSync(join(directory, "vault.db"))).toBe(false);
+    admin.close();
+  });
+
+  it("opens the vault from its separate configured data directory", async () => {
+    const eventDirectory = await temporaryDirectory();
+    const vaultDirectory = await temporaryDirectory();
+    const seed = new SqliteVault(join(vaultDirectory, "vault.db"), keyProvider, () => 100);
+    await seed.put(runId, "email", "alice@example.test");
+    seed.close();
+    vi.stubEnv("HARNESS_VAULT_DATA_DIR", vaultDirectory);
+
+    const admin = await openConfiguredVaultAdmin(
+      { keys },
+      { dataDir: eventDirectory, secretResolver },
+    );
+    await expect(admin.stats(runId)).resolves.toEqual({ entries: 1 });
+    expect(existsSync(join(eventDirectory, "vault.db"))).toBe(false);
     admin.close();
   });
 

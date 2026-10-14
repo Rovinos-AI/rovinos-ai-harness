@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { EventEmitter } from "node:events";
+import { createServer as createNetServer } from "node:net";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import process from "node:process";
 import { Readable } from "node:stream";
 import { Id, parseJson } from "@harness/schemas";
@@ -428,6 +432,63 @@ describe("runner HTTP request handler", () => {
     expect(() => startRunnerServer()).toThrow(RunnerConfigurationError);
   });
 
+  it("reads a runner token from a file and removes both token settings from the environment", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "sandbox-runner-token-"));
+    const tokenPath = join(directory, "token");
+    await writeFile(tokenPath, `${token}\n`, { encoding: "utf8" });
+    const port = await availablePort();
+    vi.stubEnv("SANDBOX_RUNNER_TOKEN_FILE", tokenPath);
+    vi.stubEnv("SANDBOX_RUNNER_PORT", String(port));
+    vi.stubEnv("SANDBOX_ALLOWED_HOSTS", `127.0.0.1:${String(port)}`);
+    let server: ReturnType<typeof startRunnerServer> | undefined;
+
+    try {
+      server = startRunnerServer();
+      await new Promise<void>((resolve, reject) => {
+        server?.once("listening", resolve);
+        server?.once("error", reject);
+      });
+      const response = await fetch(`http://127.0.0.1:${String(port)}/exec`, {
+        method: "POST",
+        headers: { authorization: ["Bearer", token].join(" ") },
+        body: "{}",
+      });
+
+      expect(response.status).toBe(400);
+      expect(process.env.SANDBOX_RUNNER_TOKEN).toBeUndefined();
+      expect(process.env.SANDBOX_RUNNER_TOKEN_FILE).toBeUndefined();
+    } finally {
+      if (server?.listening === true) {
+        await new Promise<void>((resolve, reject) => {
+          server?.close((error) => {
+            if (error === undefined) {
+              resolve();
+            } else {
+              reject(error);
+            }
+          });
+        });
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects both token settings and an empty token file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "sandbox-runner-token-"));
+    const tokenPath = join(directory, "empty-token");
+    await writeFile(tokenPath, "", { encoding: "utf8" });
+    vi.stubEnv("SANDBOX_RUNNER_TOKEN", token);
+    vi.stubEnv("SANDBOX_RUNNER_TOKEN_FILE", tokenPath);
+    expect(() => startRunnerServer()).toThrow(RunnerConfigurationError);
+
+    vi.stubEnv("SANDBOX_RUNNER_TOKEN", "");
+    expect(() => startRunnerServer()).toThrow(RunnerConfigurationError);
+
+    delete process.env.SANDBOX_RUNNER_TOKEN;
+    expect(() => startRunnerServer()).toThrow(RunnerConfigurationError);
+    await rm(directory, { recursive: true, force: true });
+  });
+
   it("refuses a proxy URL when the egress allowlist is empty", () => {
     vi.stubEnv("SANDBOX_RUNNER_TOKEN", token);
     vi.stubEnv("SANDBOX_RUNNER_PORT", "8080");
@@ -448,3 +509,25 @@ describe("runner HTTP request handler", () => {
     expect(formatRunnerConfigurationError(caught)).toBe("proxy_url_without_allowlist\n");
   });
 });
+
+async function availablePort(): Promise<number> {
+  const server = createNetServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("Expected a TCP address.");
+  }
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error === undefined) {
+        resolve();
+      } else {
+        reject(error);
+      }
+    });
+  });
+  return address.port;
+}
