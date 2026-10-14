@@ -71,7 +71,11 @@ SANDBOX_RUNNER_TOKEN="$(cat /secure/sandbox-runner-token)" \
   --file infra/compose/docker-compose.yml --profile sandbox up --detach --build
 ```
 
-`limits.outputBytes` also limits the maximum size of any file written by a command through its file-size resource limit; this coupling remains until task 19.5 adds per-run workspace quotas. The runner's per-run workspace isolation is also deferred to task 19.5. The `sandbox.runner` setting is not yet wired into `core.createRuntime`; task #385 (2.15) tracks that integration.
+`limits.outputBytes` also limits the maximum size of any file written by a command through its file-size resource limit; this coupling remains until task 19.5 adds per-run workspace quotas. The runner's per-run workspace isolation is also deferred to task 19.5.
+
+`core.createRuntime` constructs one backend from `sandbox`: a `RemoteSandboxBackend` when `runner` is configured, resolving its token through the supplied `secretResolver`, or the development-only `InProcessBackend` otherwise. The CLI supplies its config secret resolver automatically. Local execution does not enforce network, filesystem, CPU, memory, or process-count isolation and refuses production startup unless `sandbox.allowUnsafeInProcess` is explicitly enabled.
+
+The runtime exposes `sandboxBackend`. Applications can compose sandbox-backed tool ports with `RuntimeOverrides.createTool(backend)`; an explicit `tool` override takes precedence. This does not automatically register workspace or web tools. Tool adapters must keep the existing policy, approval, PII, and output-offloading boundaries. `RuntimeOverrides.sandboxBackend` replaces the backend for tests or embedding; the runtime owns its optional `close()` hook, including cleanup after setup failure. Closing the runtime also releases storage and keys if backend cleanup fails. The lower-level `createSandboxBackend(sandboxConfig, deps)` factory is exported by `@harness/sandbox`.
 
 ### Sandbox egress
 
@@ -86,6 +90,8 @@ sandbox:
 ```
 
 The sandbox Compose profile remains offline by default. `yarn compose:sandbox` reads `sandbox.egress.allow`, serializes it as `SANDBOX_EGRESS_ALLOW`, and adds the egress overlay and profile only when the list is non-empty. The overlay connects the runner to the internal proxy-only network; exec children receive the proxy variables without `NO_PROXY` bypasses. The runner has no external network attachment, so direct connections do not use the proxy's egress route. See [Sandbox egress](sandbox-egress.md) for the complete setup and security behavior.
+
+A non-empty allowlist requires `sandbox.runner`; the factory rejects local fallback with `sandbox_runner_config_invalid`. Point `sandbox.runner.url` at the runner deployed by `yarn compose:sandbox` using the **same configuration**, including its egress overlay. Runtime configuration does not provision or inspect the runner's network topology; the operator must maintain this pairing.
 
 Key versions are configured under `keys`. Each key must be a base64-encoded 32-byte secret reference. Keep old versions configured while stored content still uses them; new content uses `currentKeyId`.
 

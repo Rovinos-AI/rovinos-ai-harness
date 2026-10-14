@@ -11,6 +11,7 @@ import {
 const notification = {
   runId: Id.parse("00000000000000000000000001"),
   approvalId: Id.parse("00000000000000000000000002"),
+  idempotencyKey: Id.parse("00000000000000000000000002"),
   toolId: Code.parse("mail.send"),
   ruleId: Code.parse("mail.ask"),
   ageMs: 500,
@@ -27,10 +28,17 @@ describe("approval notifiers", () => {
     expect(() =>
       ApprovalNotificationSchema.parse({ ...notification, args: { recipient: "private" } }),
     ).toThrow();
+    expect(() =>
+      ApprovalNotificationSchema.parse({
+        ...notification,
+        idempotencyKey: Id.parse("00000000000000000000000003"),
+      }),
+    ).toThrow();
   });
 
   it("posts a strict notification body to the secret-resolved URL", async () => {
     const bodies: string[] = [];
+    const idempotencyKeys: (string | null)[] = [];
     const notifier = new WebhookNotifier({
       url: SecretRefSchema.parse("env:APPROVAL_WEBHOOK"),
       secrets: {
@@ -44,6 +52,7 @@ describe("approval notifiers", () => {
           throw new TypeError("Expected a JSON body.");
         }
         bodies.push(init.body);
+        idempotencyKeys.push(new Headers(init.headers).get("Idempotency-Key"));
         return Promise.resolve(new Response(null, { status: 204 }));
       },
     });
@@ -52,6 +61,7 @@ describe("approval notifiers", () => {
 
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toBe(JSON.stringify(notification));
+    expect(idempotencyKeys).toEqual([notification.approvalId]);
     expect(bodies[0]).not.toContain("args");
   });
 
