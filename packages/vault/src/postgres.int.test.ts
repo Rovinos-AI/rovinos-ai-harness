@@ -138,11 +138,15 @@ it("serializes a first put and purge across independent pools", async () => {
   const { admin, schema } = await createSchema();
   const first = createVault(schema);
   const second = createVault(schema);
-  const observer = new Pool({ connectionString: vaultUrl, max: 1 });
+  const observer = new Pool({
+    connectionString: vaultUrl,
+    max: 1,
+    options: `-c search_path="${schema}"`,
+  });
   const gatePool = new Pool({ connectionString: vaultUrl, max: 1 });
   const gate = await gatePool.connect();
   try {
-    await first.stats(runId);
+    await Promise.all([first.stats(runId), second.stats(runId)]);
     await admin.query(
       `CREATE FUNCTION "${schema}".pause_vault_insert() RETURNS trigger
         LANGUAGE plpgsql AS $$ BEGIN

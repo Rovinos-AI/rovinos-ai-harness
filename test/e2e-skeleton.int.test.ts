@@ -46,7 +46,7 @@ import {
   type ModelCompletion,
   type ToolPort,
 } from "@harness/core";
-import { FakeModelPort } from "@harness/core/testing";
+import { allowAllPolicy, FakeModelPort } from "@harness/core/testing";
 import {
   ExecSpecSchema,
   RemoteSandboxBackend,
@@ -706,6 +706,7 @@ describe("Postgres vault", () => {
       tool: syntheticTools([], [], []),
       sandboxBackend: unusedSandboxBackend,
       secretResolver,
+      policy: allowAllPolicy,
     };
     const first = await createRuntime(postgresConfig, overrides);
     const second = await createRuntime(postgresConfig, {
