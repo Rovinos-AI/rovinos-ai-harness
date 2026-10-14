@@ -8,6 +8,7 @@ import {
   createTelemetrySdk,
   defineSpan,
   defineLogRecord,
+  emitKeysRotated,
   SentinelGate,
   type VaultRunReader,
   VaultRunView,
@@ -89,6 +90,12 @@ export async function emitCanaryBadLog(
       "harness.error.code": canary,
     },
   });
+  await telemetry.sdk.forceFlush();
+}
+
+/** Exercise the registered key-rotation log with counts only. */
+export async function emitCanaryKeysRotated(telemetry: CanaryTelemetry): Promise<void> {
+  emitKeysRotated({ vault: 3, store: 5 }, logs.getLogger("@harness/cli"));
   await telemetry.sdk.forceFlush();
 }
 

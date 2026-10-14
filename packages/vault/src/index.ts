@@ -35,6 +35,17 @@ export {
 } from "./types.js";
 export { VaultOperationError } from "./errors.js";
 export {
+  ReencryptBatchResultSchema,
+  VaultKeyRowCountSchema,
+  VaultReencryptBatchInputSchema,
+  decodeVaultRotationCursor,
+  encodeVaultRotationCursor,
+  type ReencryptBatchResult,
+  type VaultKeyRotation,
+  type VaultKeyRowCount,
+  type VaultReencryptBatchInput,
+} from "./rotate.js";
+export {
   LocalKeyProvider,
   LocalKeyProviderError,
   type KeySecretResolver,

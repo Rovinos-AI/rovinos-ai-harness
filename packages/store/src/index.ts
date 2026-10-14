@@ -17,6 +17,18 @@ export {
   type StoreFileMigrationOptions,
 } from "./migrate-file.js";
 export { AesGcmContentCodec } from "./aes-gcm-codec.js";
+export {
+  ReencryptBatchInputSchema,
+  StoreKeyRowCountSchema,
+  StoreReencryptBatchResultSchema,
+  decodeStoreRotationCursor,
+  encodeStoreRotationCursor,
+  type ReencryptBatchInput,
+  type StoreKeyRotation,
+  type StoreKeyRowCount,
+  type StoreReencryptBatchResult,
+  type StoreRotationCursor,
+} from "./rotate.js";
 export { JsonContentCodec } from "./codec.js";
 export { InMemoryEventStore } from "./memory.js";
 export { PostgresEventStore } from "./postgres/adapter.js";

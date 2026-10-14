@@ -15,6 +15,7 @@ export {
 export {
   emitSafeEvent,
   emitSafeEventToDefaultLogger,
+  emitKeysRotated,
   emitVaultMarkTerminalFailed,
   emitPricingMissing,
   safeEventLogAttributeMap,

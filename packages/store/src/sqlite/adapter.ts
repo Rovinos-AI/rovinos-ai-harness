@@ -59,6 +59,8 @@ import { SqliteApprovalNotifications } from "./approval-notifications.js";
 import { SqliteConfirmationStates } from "./confirmation-states.js";
 import { findRunsByTrace } from "./traces.js";
 import { encodeEvents, type EncodedEvent } from "./event-encoding.js";
+import type { StoreKeyRotation } from "../rotate.js";
+import { countSqliteRowsByKey, reencryptSqliteBatch } from "./rotation.js";
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
 const READ_PAGE_SIZE = 256;
 
@@ -107,7 +109,7 @@ function continuationRunParams(continuationOf: Id | undefined): [Id | null, Id |
 }
 
 /** Durable SQLite implementation of the append-only event store. */
-export class SqliteEventStore implements EventStore {
+export class SqliteEventStore implements EventStore, StoreKeyRotation {
   private readonly db: Database.Database;
   private readonly codec: ContentCodec;
   private readonly insertRun: Database.Statement<[Id, number, number]>;
@@ -214,6 +216,13 @@ export class SqliteEventStore implements EventStore {
       "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT 1",
     );
   }
+
+  /** {@inheritDoc StoreKeyRotation.reencryptBatch} */
+  reencryptBatch: StoreKeyRotation["reencryptBatch"] = (input) =>
+    reencryptSqliteBatch(this.db, this.codec, input);
+
+  /** Count event and snapshot rows that still use each key. */
+  countRowsByKey: StoreKeyRotation["countRowsByKey"] = () => countSqliteRowsByKey(this.db);
 
   /** {@inheritDoc EventStore.append} */
   async append(
