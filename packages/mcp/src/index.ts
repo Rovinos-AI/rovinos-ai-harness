@@ -21,3 +21,12 @@ export {
   type McpLogEvent,
   type McpTransportDependencies,
 } from "./transports.js";
+export {
+  ToolRegistry,
+  ToolRegistryError,
+  normalizeToolId,
+  type RejectedTool,
+  type ResolvedTool,
+  type ToolRegistryServer,
+} from "./registry.js";
+export { UNREGISTERED_TOOL_ID } from "./registry.js";

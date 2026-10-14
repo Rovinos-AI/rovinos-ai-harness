@@ -7,6 +7,7 @@ import {
   type Event,
   type Part,
 } from "@harness/schemas";
+import { UNREGISTERED_TOOL_ID } from "@harness/schemas";
 import type { ModelCompletion, ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import type { RunRecorder } from "../recorder.js";
 import type { VaultAudit } from "@harness/vault";
@@ -15,6 +16,22 @@ import type { VaultAudit } from "@harness/vault";
 export interface PreparedToolCall {
   readonly call: ModelToolCall;
   readonly errorCode?: Code;
+}
+
+/** Replaces unknown tool ids before they can be persisted or attributed to a tool span. */
+export function normalizeUnregisteredToolCall(
+  call: ModelToolCall,
+  description: ReturnType<ToolPort["describe"]>,
+  prepared?: PreparedToolCall,
+): { readonly call: ModelToolCall; readonly prepared: PreparedToolCall } | undefined {
+  if (description !== undefined) {
+    return undefined;
+  }
+  const safeCall = { ...(prepared?.call ?? call), toolId: UNREGISTERED_TOOL_ID };
+  return {
+    call: safeCall,
+    prepared: { call: safeCall, errorCode: prepared?.errorCode ?? "unknown_tool" },
+  };
 }
 
 const preparationCodes = new Set([
@@ -120,8 +137,16 @@ export async function prepareCompletion(
       parts.push(part);
       continue;
     }
-    const call = { callId: part.callId, toolId: part.toolId, args: part.args };
-    const prepared = tool === undefined ? { call } : await prepareToolCall(tool, call, context);
+    const unregistered = tool?.describe(part.toolId) === undefined;
+    const call = {
+      callId: part.callId,
+      toolId: unregistered ? UNREGISTERED_TOOL_ID : part.toolId,
+      args: part.args,
+    };
+    const prepared =
+      tool === undefined || unregistered
+        ? { call, errorCode: "unknown_tool" }
+        : await prepareToolCall(tool, call, context);
     preparedCalls.push(prepared);
     parts.push({ type: "tool_call", ...prepared.call });
   }

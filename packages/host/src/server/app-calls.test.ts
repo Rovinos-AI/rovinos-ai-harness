@@ -49,7 +49,7 @@ function makeTool(name: string, metadata?: Tool["_meta"]): Tool {
 }
 
 describe("AppCallRouter", () => {
-  it("handles telemetry locally and never forwards it to the MCP pool", async () => {
+  it("handles app-originated telemetry locally and never forwards it to MCP tools", async () => {
     const onAppCall = vi.fn(() => Promise.resolve({ content: [] }));
     const onTelemetryEmit = vi.fn(() => Promise.resolve({ content: [] }));
     const router = new AppCallRouter({
@@ -73,6 +73,7 @@ describe("AppCallRouter", () => {
       { spans: [{ name: "ui.render" }] },
       { runId, policyContext: { subagent: false, app: app.id } },
     );
+    expect(onTelemetryEmit).toHaveBeenCalledTimes(1);
     expect(onAppCall).not.toHaveBeenCalled();
   });
 

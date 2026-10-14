@@ -165,8 +165,12 @@ describe("McpConnection", () => {
       "McpConnectionError",
       "McpPool",
       "McpPoolError",
+      "ToolRegistry",
+      "ToolRegistryError",
+      "UNREGISTERED_TOOL_ID",
       "createMcpTransport",
       "createServersReachableChecks",
+      "normalizeToolId",
     ]);
   });
 
