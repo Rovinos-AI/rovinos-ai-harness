@@ -115,7 +115,10 @@ export function createApprovalView(root: HTMLElement, options: ApprovalViewOptio
         remaining === undefined
           ? "No expiry"
           : `${String(Math.max(0, Math.ceil(remaining / 1000)))} seconds remaining`;
-      status.textContent = expired ? "Approval expired" : "Pending approval";
+      const nextStatus = expired ? "Approval expired" : "Pending approval";
+      if (status.textContent !== nextStatus) {
+        status.textContent = nextStatus;
+      }
       for (const button of buttons) {
         button.disabled = expired;
       }

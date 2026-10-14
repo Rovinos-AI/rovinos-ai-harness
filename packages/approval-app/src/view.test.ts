@@ -104,6 +104,19 @@ describe("approval view", () => {
     expect([...document.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
   });
 
+  it("updates the live region only when status changes, not on every countdown tick", () => {
+    const { advance } = setup();
+    const status = document.querySelector('[role="status"]');
+    const pendingText = status?.firstChild;
+    advance(2000);
+    expect(status?.firstChild).toBe(pendingText);
+    advance(5000);
+    expect(status?.textContent).toBe("Approval expired");
+    const expiredText = status?.firstChild;
+    advance(6000);
+    expect(status?.firstChild).toBe(expiredText);
+  });
+
   it("renders malicious strings and keys only as text, including tokens in the heading", () => {
     const hostile = "<img src=x onerror=alert(1)> javascript:alert(1)";
     setup({
