@@ -77,11 +77,7 @@ describe("canary release gate", () => {
     expect(current.captured.toolBoundary.join("\n")).toContain(current.canaries.card.value);
     expect(current.captured.toolErrors.join("\n")).toContain(current.canaries.card.value);
     expect(current.captured.toolOutputs.join("\n")).toContain(current.canaries.email.value);
-    expect(current.executedTools).toEqual([
-      "canary.echo",
-      "canary.fail",
-      "sample_mcp.fail",
-    ]);
+    expect(current.executedTools).toEqual(["canary.echo", "canary.fail", "sample_mcp.fail"]);
     expect(await current.findLeaks()).toEqual([]);
     expect(
       current.captured.logs.some(
