@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   ModelsConfigSchema,
+  type SandboxConfigSchema,
   type Code,
   type Event,
   type PolicyConfig,
@@ -18,6 +19,8 @@ import {
   type StoreConfig,
   type VaultConfig,
 } from "@harness/schemas";
+import type { z } from "zod";
+import type { SandboxBackend } from "@harness/sandbox";
 import type { ProviderAdapter } from "@harness/models";
 import type { McpConnectionDependencies } from "@harness/mcp";
 import type { EventStore } from "@harness/store";
@@ -59,6 +62,10 @@ export interface RuntimeOverrides {
   /** Receives safe warnings raised during key-provider setup. */
   readonly onKeysWarning?: (code: "keys_ephemeral") => void;
   readonly tool?: ToolPort;
+  /** Runtime-owned backend override, including its optional shutdown hook. */
+  readonly sandboxBackend?: SandboxBackend;
+  /** Composes tool adapters with the shared backend; `tool` takes precedence. */
+  readonly createTool?: (backend: SandboxBackend) => ToolPort;
   /** Optional MCP transport factory for embedded runtimes and in-memory tests. */
   readonly mcpTransportFactory?: McpConnectionDependencies["createTransport"];
   /** Workspace used to persist offloaded tool results, including MCP binary outputs. */
@@ -83,6 +90,7 @@ export interface RuntimeConfig {
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;
   readonly keys?: KeysConfig | undefined;
+  readonly sandbox?: z.infer<typeof SandboxConfigSchema>;
   readonly servers?: ServersConfig;
 }
 
@@ -101,6 +109,8 @@ export interface Runtime {
   readonly vault: AuditingVaultResolver;
   /** Key provider shared by encryption consumers in the composed runtime. */
   readonly keys: KeyProvider;
+  /** Shared backend for sandbox-backed tool adapters. */
+  readonly sandboxBackend: SandboxBackend;
   readonly clock: Clock;
   readonly ids: IdGenerator;
   run(goal: JsonValue, options?: { readonly role?: Code }): Promise<RunLoopResult>;
@@ -144,6 +154,7 @@ export interface RuntimeComposition {
   readonly ids: IdGenerator;
   readonly store: EventStore;
   readonly keys: LocalKeyProvider;
+  readonly sandboxBackend: SandboxBackend;
   readonly vault: RuntimeVault;
   readonly vaultResolver: AuditingVaultResolver;
   readonly pii:

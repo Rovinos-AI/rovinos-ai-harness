@@ -700,6 +700,8 @@ describe("runtime tracing fallback", () => {
     expect(readAttempts).toBe(3);
     expect(diagnosticWarnings).toEqual([
       ["harness.core", "keys_ephemeral"],
+      ["harness.sandbox", "sandbox_inprocess_unsafe"],
+      ["harness.sandbox", "sandbox_inprocess_limits_unenforced"],
       ["harness.core", "cancel_monitor_degraded"],
       ["harness.core", "cancel_monitor_degraded"],
     ]);

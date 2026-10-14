@@ -15,6 +15,7 @@ docs/api/
 .yarn/install-state.gz
 .yarn/build-state.yml
 reports/
+.lint-*-fixture-*/
 # Runtime databases written to the default data directory (HARNESS_DATA_DIR, else cwd)
 harness.db*
 vault.db*

@@ -83,7 +83,10 @@ not a background service.
 The CLI emits escalation notifications as metadata-only log lines. The policy
 package also provides `WebhookNotifier` for integrations that resolve its URL
 from a `SecretRef`; its strict payload contains run, approval, tool, and rule
-IDs plus approval age, never tool arguments. Selecting the webhook from CLI
-configuration is a follow-up; `harness approvals sweep` currently uses the log
-notifier.
+IDs plus approval age, never tool arguments. Webhook delivery is at least once:
+each delivery uses the approval ID as its `Idempotency-Key` header and
+`idempotencyKey` body field. Receivers must ignore duplicate notifications with
+the same key, since a delivery can be repeated if the sweeper cannot persist its
+sent marker. Selecting the webhook from CLI configuration is a follow-up;
+`harness approvals sweep` currently uses the log notifier.
 Control-plane integrations can invoke the sweep periodically.
