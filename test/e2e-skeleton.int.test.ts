@@ -7,6 +7,7 @@
 // Not wired yet: production tool port (MCP 6.5 -> #199)
 // Not wired yet: runtime vault from config (13.12 -> #389)
 // Not wired yet: storage-boundary tokenization (13.8 -> #81)
+// Not wired yet: sentinel trip gate wired to the runtime vault (8.4 -> #74)
 import { Command } from "commander";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
