@@ -14,7 +14,11 @@ const RunSupervisorOptionsSchema = z
 /** Dependencies for supervising in-process run resumes. */
 export interface RunSupervisorOptions {
   readonly maxConcurrentRuns?: number;
-  readonly resumeRun?: (runId: Id, signal: AbortSignal) => Promise<unknown>;
+  readonly resumeRun?: (
+    runId: Id,
+    signal: AbortSignal,
+    onClaimed: () => void,
+  ) => Promise<unknown>;
   readonly activeRuns?: Pick<ActiveRuns, "register" | "terminate">;
 }
 
@@ -35,29 +39,54 @@ export class RunSupervisor {
   }
 
   /** Queues a resume and returns without waiting for the run to finish. */
-  start(runId: Id): ResumeRunOutput {
+  start(runId: Id): Promise<ResumeRunOutput> {
     Id.parse(runId);
     if (this.resumeRun === undefined) {
-      return { started: false, code: Code.parse("control_plane_runtime_unavailable") };
+      return Promise.resolve({
+        started: false,
+        code: Code.parse("control_plane_runtime_unavailable"),
+      });
     }
     if (this.active.has(runId)) {
-      return { started: false, code: Code.parse("resume_conflict") };
+      return Promise.resolve({ started: false, code: Code.parse("resume_conflict") });
     }
     if (this.active.size >= this.maxConcurrentRuns) {
-      return { started: false, code: Code.parse("capacity_exceeded") };
+      return Promise.resolve({ started: false, code: Code.parse("capacity_exceeded") });
     }
 
     const controller = new AbortController();
     this.active.set(runId, controller);
     this.activeRuns.register(runId);
+    let claimed = false;
+    let resolveStarted: (result: ResumeRunOutput) => void = () => undefined;
+    const started = new Promise<ResumeRunOutput>((resolve) => {
+      resolveStarted = resolve;
+    });
+    const onClaimed = (): void => {
+      if (!claimed) {
+        claimed = true;
+        resolveStarted({ started: true });
+      }
+    };
     void Promise.resolve()
-      .then(() => this.resumeRun?.(runId, controller.signal))
-      .catch(() => undefined)
+      .then(() => this.resumeRun?.(runId, controller.signal, onClaimed))
+      .then((result) => {
+        if (!claimed) {
+          onClaimed();
+        }
+        if (isTerminalResumeResult(result)) {
+          this.activeRuns.terminate(runId);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!claimed) {
+          resolveStarted({ started: false, code: resumeErrorCode(error) });
+        }
+      })
       .finally(() => {
         this.active.delete(runId);
-        this.activeRuns.terminate(runId);
       });
-    return { started: true };
+    return started;
   }
 
   /** Aborts a locally supervised resume if one is active. */
@@ -74,4 +103,21 @@ export class RunSupervisor {
   isActive(runId: Id): boolean {
     return this.active.has(runId);
   }
+}
+
+function resumeErrorCode(error: unknown): Code {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const parsed = Code.safeParse(error.code);
+    if (parsed.success) {
+      return parsed.data;
+    }
+  }
+  return Code.parse("resume_failed");
+}
+
+function isTerminalResumeResult(result: unknown): boolean {
+  return z
+    .object({ status: z.enum(["completed", "failed", "cancelled"]) })
+    .passthrough()
+    .safeParse(result).success;
 }

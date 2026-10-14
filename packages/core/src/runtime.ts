@@ -22,6 +22,7 @@ import type {
   Runtime,
   RuntimeComposition,
   RuntimeConfig,
+  RuntimeResumeOptions,
   RuntimeOverrides,
 } from "./runtime-config.js";
 const CANCEL_REQUESTED = "cancel_requested";
@@ -31,7 +32,12 @@ const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
-export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
+export type {
+  Runtime,
+  RuntimeConfig,
+  RuntimeOverrides,
+  RuntimeResumeOptions,
+} from "./runtime-config.js";
 
 class RunInputMissingError extends HarnessError {
   readonly code = "run_input_missing";
@@ -103,6 +109,30 @@ function waitForWatcher(signal: AbortSignal, delayMs: number): Promise<boolean> 
       abort();
     }
   });
+}
+
+function composeAbortSignals(signals: readonly AbortSignal[]): {
+  readonly signal: AbortSignal;
+  readonly dispose: () => void;
+} {
+  const controller = new AbortController();
+  const listeners = signals.map((signal) => {
+    const abort = (): void => controller.abort(signal.reason);
+    if (signal.aborted) {
+      abort();
+    } else {
+      signal.addEventListener("abort", abort, { once: true });
+    }
+    return { signal, abort };
+  });
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      for (const { signal, abort } of listeners) {
+        signal.removeEventListener("abort", abort);
+      }
+    },
+  };
 }
 
 interface CancellationTailOptions {
@@ -373,7 +403,7 @@ function createRuntimeResume(
   runWithControl: RunControl,
 ): Runtime["resume"] {
   const { config, clock, ids, store, model, context, policy, scopes } = options;
-  return async (runId) => {
+  return async (runId, resumeOptions: RuntimeResumeOptions = {}) => {
     const firstNewSeq = await store.head(runId);
     return runWithControl(
       runId,
@@ -382,22 +412,33 @@ function createRuntimeResume(
         if (goal === undefined) {
           throw new RunInputMissingError();
         }
-        return resumeRun({
-          store,
-          runId,
-          clock,
-          ids,
-          goal,
-          model,
-          tool,
-          policy,
-          context,
+        const composed = composeAbortSignals([
           signal,
-          scopes,
-          budgets: config.run.budgets,
-          checkpointEveryEvents: config.run.checkpointEveryEvents,
-          resumePolicy: config.run.resume.onNonIdempotent,
-        });
+          ...(resumeOptions.signal === undefined ? [] : [resumeOptions.signal]),
+        ]);
+        try {
+          return await resumeRun({
+            store,
+            runId,
+            clock,
+            ids,
+            goal,
+            model,
+            tool,
+            policy,
+            context,
+            signal: composed.signal,
+            scopes,
+            budgets: config.run.budgets,
+            checkpointEveryEvents: config.run.checkpointEveryEvents,
+            resumePolicy: config.run.resume.onNonIdempotent,
+            ...(resumeOptions.onClaimed === undefined
+              ? {}
+              : { onClaimed: resumeOptions.onClaimed }),
+          });
+        } finally {
+          composed.dispose();
+        }
       },
       firstNewSeq,
     );

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { Id } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { request } from "node:http";
 import { describe, expect, it } from "vitest";
@@ -62,6 +63,71 @@ describe("control-plane HTTP transport", () => {
       });
     } finally {
       await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
+  it("shares resume supervision across requests and propagates later cancellation", async () => {
+    const store = new InMemoryEventStore();
+    let resumeSignal: AbortSignal | undefined;
+    let markStarted: () => void = () => undefined;
+    let markAborted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const aborted = new Promise<void>((resolve) => {
+      markAborted = resolve;
+    });
+    const server = await startControlPlaneHttp(store, 0, {
+      maxConcurrentRuns: 1,
+      isAppContext: () => true,
+      operations: {
+        resumeRun: (_runId, signal, onClaimed) => {
+          resumeSignal = signal;
+          onClaimed();
+          markStarted();
+          return new Promise((resolve) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                markAborted();
+                resolve({ status: "suspended" });
+              },
+              { once: true },
+            );
+          });
+        },
+        cancelRun: () => Promise.resolve("cancelled"),
+      },
+    });
+    const firstClient = new Client({ name: "control-plane-http-first", version: "1.0.0" });
+    const secondClient = new Client({ name: "control-plane-http-second", version: "1.0.0" });
+    try {
+      await firstClient.connect(new StreamableHTTPClientTransport(new URL(server.endpoint)));
+      await secondClient.connect(new StreamableHTTPClientTransport(new URL(server.endpoint)));
+      const firstRunId = Id.parse("00000000000000000000000001");
+      const secondRunId = Id.parse("00000000000000000000000002");
+
+      await expect(
+        firstClient.callTool({ name: "resume_run", arguments: { runId: firstRunId } }),
+      ).resolves.toMatchObject({ structuredContent: { started: true } });
+      await started;
+      await expect(
+        secondClient.callTool({ name: "resume_run", arguments: { runId: secondRunId } }),
+      ).resolves.toMatchObject({
+        isError: true,
+        structuredContent: { started: false, code: "capacity_exceeded" },
+      });
+      await expect(
+        secondClient.callTool({ name: "cancel_run", arguments: { runId: firstRunId } }),
+      ).resolves.toMatchObject({ structuredContent: { ok: true, code: "cancelled" } });
+      await aborted;
+
+      expect(resumeSignal?.aborted).toBe(true);
+    } finally {
+      await firstClient.close();
+      await secondClient.close();
       await server.close();
       await store.close();
     }

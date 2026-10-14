@@ -50,7 +50,11 @@ const MCP_APP_MIME = "text/html;profile=mcp-app";
 
 /** Mutation operations supplied by the composed runtime. */
 export interface ControlPlaneOperations {
-  readonly resumeRun?: (runId: Id, signal: AbortSignal) => Promise<unknown>;
+  readonly resumeRun?: (
+    runId: Id,
+    signal: AbortSignal,
+    onClaimed: () => void,
+  ) => Promise<unknown>;
   readonly cancelRun?: (runId: Id) => Promise<unknown>;
   readonly resolveApproval?: ResolveApprovalOperation;
 }
@@ -59,6 +63,7 @@ export interface ControlPlaneOperations {
 export interface ControlPlaneServerOptions {
   readonly operations?: ControlPlaneOperations;
   readonly maxConcurrentRuns?: number;
+  readonly runSupervisor?: RunSupervisor;
   readonly confirmationGate?: ConfirmationGate;
   readonly confirmation?: ConfirmationGateOptions;
   /** Must reflect trusted host-side app provenance, not client-controlled request fields. */
@@ -90,7 +95,8 @@ export function createControlPlaneServer(
     ...options.confirmation,
     ...(options.isAppContext === undefined ? {} : { isAppContext: options.isAppContext }),
   };
-  const confirmationGate = options.confirmationGate ?? new ConfirmationGate(confirmationOptions);
+  const confirmationGate =
+    options.confirmationGate ?? new ConfirmationGate({ ...confirmationOptions, store });
   const server = new McpServer(
     {
       name: "rovinos-ai-harness-control-plane",
@@ -101,14 +107,7 @@ export function createControlPlaneServer(
   server.server.registerCapabilities({ tools: {} });
   registerListRunsTool(server, store);
   registerGetRunTool(server, store);
-  const supervisor = new RunSupervisor({
-    ...(options.maxConcurrentRuns === undefined
-      ? {}
-      : { maxConcurrentRuns: options.maxConcurrentRuns }),
-    ...(options.operations?.resumeRun === undefined
-      ? {}
-      : { resumeRun: options.operations.resumeRun }),
-  });
+  const supervisor = options.runSupervisor ?? createRunSupervisor(options);
   const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
     requestClientCapabilities(context, server);
   registerApproveTool(server, {
@@ -151,7 +150,7 @@ export function startControlPlaneStdio(
   store: EventStore,
   options: ControlPlaneServerOptions = {},
 ): StdioServerHandle {
-  const sharedOptions = withSharedConfirmationGate(options);
+  const sharedOptions = withSharedControlPlaneState(store, options);
   return serveStdio(() => createControlPlaneServer(store, sharedOptions));
 }
 
@@ -162,7 +161,7 @@ export async function startControlPlaneHttp(
   options: ControlPlaneServerOptions = {},
 ): Promise<ControlPlaneHttpHandle> {
   const checkedPort = controlPlaneHttpPortSchema.parse(port);
-  const sharedOptions = withSharedConfirmationGate(options);
+  const sharedOptions = withSharedControlPlaneState(store, options);
   const handler = createMcpHandler(() => createControlPlaneServer(store, sharedOptions));
   const requestHandler = toNodeHandler(handler);
   const validateHost = localhostHostValidation();
@@ -229,15 +228,31 @@ function listen(server: Server, port: number): Promise<void> {
   });
 }
 
-function withSharedConfirmationGate(options: ControlPlaneServerOptions): ControlPlaneServerOptions {
+function createRunSupervisor(options: ControlPlaneServerOptions): RunSupervisor {
+  return new RunSupervisor({
+    ...(options.maxConcurrentRuns === undefined
+      ? {}
+      : { maxConcurrentRuns: options.maxConcurrentRuns }),
+    ...(options.operations?.resumeRun === undefined
+      ? {}
+      : { resumeRun: options.operations.resumeRun }),
+  });
+}
+
+function withSharedControlPlaneState(
+  store: EventStore,
+  options: ControlPlaneServerOptions,
+): ControlPlaneServerOptions {
   return {
     ...options,
     confirmationGate:
       options.confirmationGate ??
       new ConfirmationGate({
         ...options.confirmation,
+        store,
         ...(options.isAppContext === undefined ? {} : { isAppContext: options.isAppContext }),
       }),
+    runSupervisor: options.runSupervisor ?? createRunSupervisor(options),
   };
 }
 

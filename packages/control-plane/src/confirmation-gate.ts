@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, Id, JsonValue } from "@harness/schemas";
+import type { EventStore } from "@harness/store";
+import { canonicalJson } from "@harness/models";
 import {
   acceptedContent,
   createRequestStateCodec,
@@ -51,6 +53,8 @@ export interface ConfirmationRequest {
 
 /** Options for the fail-closed confirmation gate. */
 export interface ConfirmationGateOptions {
+  /** Store used to atomically persist consumed request-state identifiers. */
+  readonly store?: Pick<EventStore, "consumeConfirmationState">;
   /** Stable HMAC key shared by server instances that handle the same retry. */
   readonly key?: Uint8Array | string;
   /** Provides epoch milliseconds for expiry checks. */
@@ -81,11 +85,12 @@ export class ConfirmationGate {
   private readonly tokenId: (context: ServerContext) => string;
   private readonly isAppContext: (context: ServerContext, toolName: string) => boolean;
   private readonly nextStateId: () => string;
-  private readonly consumed = new Map<string, number>();
+  private readonly store: ConfirmationGateOptions["store"];
 
   /** Creates an HMAC-sealed confirmation gate. */
   constructor(options: ConfirmationGateOptions = {}) {
     this.now = options.now ?? Date.now;
+    this.store = options.store;
     this.tokenId =
       options.tokenId ??
       ((context) => context.http?.authInfo?.clientId ?? context.sessionId ?? "local");
@@ -148,23 +153,33 @@ export class ConfirmationGate {
     };
   }
 
-  private acceptRetry(
+  private async acceptRetry(
     context: ServerContext,
     request: ConfirmationRequest,
     stateValue: unknown,
-  ): ConfirmationGateResult {
+  ): Promise<ConfirmationGateResult> {
     const parsedState = confirmationStateSchema.safeParse(stateValue);
     if (!parsedState.success) {
       return { status: "denied", code: Code.parse("confirmation_state_invalid") };
     }
     const state = parsedState.data;
-    this.expireConsumedStates();
-    if (this.consumed.has(state.stateId)) {
+    const now = this.now();
+    if (state.expiresAt <= now) {
+      return { status: "denied", code: Code.parse("confirmation_state_mismatch") };
+    }
+    if (this.store === undefined) {
+      return { status: "denied", code: Code.parse("confirmation_state_unavailable") };
+    }
+    let consumed: boolean;
+    try {
+      consumed = await this.store.consumeConfirmationState(state.stateId, state.expiresAt, now);
+    } catch {
+      return { status: "denied", code: Code.parse("confirmation_state_unavailable") };
+    }
+    if (!consumed) {
       return { status: "denied", code: Code.parse("confirmation_state_replayed") };
     }
-    this.consumed.set(state.stateId, state.expiresAt);
     if (
-      state.expiresAt <= this.now() ||
       state.tokenId !== this.tokenId(context) ||
       state.toolName !== request.toolName ||
       state.targetId !== request.targetId ||
@@ -179,15 +194,6 @@ export class ConfirmationGate {
     }
     return { status: "allowed" };
   }
-
-  private expireConsumedStates(): void {
-    const now = this.now();
-    for (const [stateId, expiresAt] of this.consumed) {
-      if (expiresAt <= now) {
-        this.consumed.delete(stateId);
-      }
-    }
-  }
 }
 
 function supportsFormElicitation(
@@ -197,5 +203,5 @@ function supportsFormElicitation(
 }
 
 function digestArguments(argumentsValue: Readonly<Record<string, unknown>>): string {
-  return createHash("sha256").update(JSON.stringify(argumentsValue)).digest("hex");
+  return createHash("sha256").update(canonicalJson(argumentsValue) ?? "null").digest("hex");
 }

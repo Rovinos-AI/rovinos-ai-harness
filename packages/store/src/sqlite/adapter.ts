@@ -48,6 +48,7 @@ import {
 import { openReadOnlyDatabase } from "./read-only.js";
 import { deleteRunTransaction } from "./retention.js";
 import { SqliteApprovalNotifications } from "./approval-notifications.js";
+import { SqliteConfirmationStates } from "./confirmation-states.js";
 import { findRunsByTrace } from "./traces.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
@@ -175,6 +176,7 @@ export class SqliteEventStore implements EventStore {
   private readonly snapshotKeep: number;
   private readonly outbox: SqliteOutboxReader;
   private readonly approvalNotifications: SqliteApprovalNotifications;
+  private readonly confirmationStates: SqliteConfirmationStates;
 
   /**
    * Open a SQLite database and initialize its initial schema.
@@ -210,6 +212,7 @@ export class SqliteEventStore implements EventStore {
       this.db.pragma("foreign_keys = ON");
       this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
       this.approvalNotifications = new SqliteApprovalNotifications(this.db);
+      this.confirmationStates = new SqliteConfirmationStates(this.db);
     } catch (error) {
       this.db.close();
       throw error;
@@ -434,6 +437,8 @@ export class SqliteEventStore implements EventStore {
     this.approvalNotifications.markSent(...args);
   releaseApprovalNotification: EventStore["releaseApprovalNotification"] = (...args) =>
     this.approvalNotifications.release(...args);
+  consumeConfirmationState: EventStore["consumeConfirmationState"] = (...args) =>
+    this.confirmationStates.consume(...args);
 
   /** {@inheritDoc EventStore.close} */
   close(): Promise<void> {

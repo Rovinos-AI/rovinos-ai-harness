@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@harness/core": "workspace:^",
+    "@harness/models": "workspace:^",
     "@harness/schemas": "workspace:^",
     "@harness/store": "workspace:^",
     "@harness/telemetry": "workspace:^",
@@ -27,6 +28,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@harness/policy": "workspace:^",
     "@modelcontextprotocol/client": "2.3.1",
     "@types/node": "22.20.5",
     "fast-check": "4.10.2",

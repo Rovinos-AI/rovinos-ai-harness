@@ -11,32 +11,33 @@ describe("RunSupervisor", () => {
     const secondRunId = builders.nextRunId();
     const thirdRunId = builders.nextRunId();
     const signals = new Map<string, AbortSignal>();
-    const finish = new Map<string, () => void>();
+    const finish = new Map<string, (result?: unknown) => void>();
     const register = vi.fn((_runId: Id) => undefined);
     const terminate = vi.fn((_runId: Id) => undefined);
     const supervisor = new RunSupervisor({
       maxConcurrentRuns: 2,
       activeRuns: { register, terminate },
-      resumeRun: (runId, signal) =>
-        new Promise<void>((resolve) => {
+      resumeRun: (runId, signal, onClaimed) =>
+        new Promise<unknown>((resolve) => {
           signals.set(runId, signal);
           finish.set(runId, resolve);
+          onClaimed();
         }),
     });
 
-    expect(supervisor.start(firstRunId)).toEqual({ started: true });
+    await expect(supervisor.start(firstRunId)).resolves.toEqual({ started: true });
     await vi.waitFor(() => {
       expect(signals.has(firstRunId)).toBe(true);
     });
-    expect(supervisor.start(firstRunId)).toEqual({
+    await expect(supervisor.start(firstRunId)).resolves.toEqual({
       started: false,
       code: "resume_conflict",
     });
-    expect(supervisor.start(secondRunId)).toEqual({ started: true });
+    await expect(supervisor.start(secondRunId)).resolves.toEqual({ started: true });
     await vi.waitFor(() => {
       expect(signals.has(secondRunId)).toBe(true);
     });
-    expect(supervisor.start(thirdRunId)).toEqual({
+    await expect(supervisor.start(thirdRunId)).resolves.toEqual({
       started: false,
       code: "capacity_exceeded",
     });
@@ -47,20 +48,20 @@ describe("RunSupervisor", () => {
     expect(signals.get(firstRunId)?.aborted).toBe(true);
     expect(supervisor.abort(thirdRunId)).toBe(false);
 
-    finish.get(firstRunId)?.();
+    finish.get(firstRunId)?.({ status: "completed" });
     await vi.waitFor(() => {
       expect(supervisor.isActive(firstRunId)).toBe(false);
     });
     expect(terminate).toHaveBeenCalledWith(firstRunId);
-    expect(supervisor.start(thirdRunId)).toEqual({ started: true });
-    finish.get(secondRunId)?.();
-    finish.get(thirdRunId)?.();
+    await expect(supervisor.start(thirdRunId)).resolves.toEqual({ started: true });
+    finish.get(secondRunId)?.({ status: "suspended" });
+    finish.get(thirdRunId)?.({ status: "completed" });
   });
 
   it("fails closed without resume operations and releases failed work", async () => {
     const runId = Id.parse("00000000000000000000000001");
     const unavailable = new RunSupervisor({});
-    expect(unavailable.start(runId)).toEqual({
+    await expect(unavailable.start(runId)).resolves.toEqual({
       started: false,
       code: "control_plane_runtime_unavailable",
     });
@@ -68,10 +69,47 @@ describe("RunSupervisor", () => {
     const failed = new RunSupervisor({
       resumeRun: () => Promise.reject(new Error("synthetic failure")),
     });
-    expect(failed.start(runId)).toEqual({ started: true });
+    await expect(failed.start(runId)).resolves.toEqual({
+      started: false,
+      code: "resume_failed",
+    });
     await vi.waitFor(() => {
       expect(failed.isActive(runId)).toBe(false);
     });
+
+  });
+
+  it("returns a claim conflict before acknowledging the resume", async () => {
+    const runId = Id.parse("00000000000000000000000001");
+    const supervisor = new RunSupervisor({
+      resumeRun: () => Promise.reject({ code: "resume_conflict" }),
+    });
+
+    await expect(supervisor.start(runId)).resolves.toEqual({
+      started: false,
+      code: "resume_conflict",
+    });
+  });
+
+  it("keeps suspended resumptions registered with the sentinel", async () => {
+    const runId = Id.parse("00000000000000000000000002");
+    const register = vi.fn((_runId: Id) => undefined);
+    const terminate = vi.fn((_runId: Id) => undefined);
+    const supervisor = new RunSupervisor({
+      activeRuns: { register, terminate },
+      resumeRun: (_id, _signal, onClaimed) => {
+        onClaimed();
+        return Promise.resolve({ status: "suspended" });
+      },
+    });
+
+    await expect(supervisor.start(runId)).resolves.toEqual({ started: true });
+    await vi.waitFor(() => {
+      expect(supervisor.isActive(runId)).toBe(false);
+    });
+
+    expect(register).toHaveBeenCalledWith(runId);
+    expect(terminate).not.toHaveBeenCalled();
   });
 
   it("rejects invalid concurrency limits", () => {

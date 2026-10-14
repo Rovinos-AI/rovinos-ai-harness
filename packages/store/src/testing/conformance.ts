@@ -374,6 +374,27 @@ function registerTraceLookup(factory: EventStoreFactory, builders: EventStoreTes
   });
 }
 
+function registerConfirmationStateConsumption(factory: EventStoreFactory): void {
+  it("atomically consumes single-use confirmation states and prunes expired entries", () =>
+    withStore(factory, async (store) => {
+      await expect(store.consumeConfirmationState("confirmation-state-a", 200, 100)).resolves.toBe(
+        true,
+      );
+      await expect(store.consumeConfirmationState("confirmation-state-a", 200, 100)).resolves.toBe(
+        false,
+      );
+      await expect(store.consumeConfirmationState("confirmation-state-a", 300, 200)).resolves.toBe(
+        true,
+      );
+      const results = await Promise.all(
+        Array.from({ length: 4 }, () =>
+          store.consumeConfirmationState("confirmation-state-race", 400, 200),
+        ),
+      );
+      expect(results.filter(Boolean)).toHaveLength(1);
+    }));
+}
+
 function registerLazyRead(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
   it("reads the first 10 of 5,000 events quickly", async () => {
     await withStore(factory, async (store) => {
@@ -415,6 +436,25 @@ function registerFileReopen(factory: EventStoreFactory, builders: EventStoreTest
   });
 }
 
+function registerConfirmationStateReopen(factory: EventStoreFactory): void {
+  it("preserves consumed confirmation states after reopening a file-backed store", async () => {
+    const first = await factory();
+    try {
+      await expect(
+        first.store.consumeConfirmationState("confirmation-state-reopen", 200, 100),
+      ).resolves.toBe(true);
+    } finally {
+      await first.cleanup();
+    }
+
+    await withStore(factory, async (store) => {
+      await expect(
+        store.consumeConfirmationState("confirmation-state-reopen", 200, 100),
+      ).resolves.toBe(false);
+    });
+  });
+}
+
 /** Registers the shared behavioral tests required of every EventStore adapter. */
 export function runEventStoreConformance(
   name: string,
@@ -437,12 +477,14 @@ export function runEventStoreConformance(
     registerStatusSummary(factory, builders);
     registerDeleteRun(factory, builders);
     registerApprovalNotificationConformance(factory, builders);
+    registerConfirmationStateConsumption(factory);
     registerTraceLookup(factory, builders);
     registerOutboxConformance(factory, builders, caps.supportsFileReopen);
     registerLazyRead(factory, builders);
     registerSnapshotConformance(factory, builders);
     if (caps.supportsFileReopen) {
       registerFileReopen(factory, builders);
+      registerConfirmationStateReopen(factory);
       registerSnapshotReopenConformance(factory, builders);
     }
   });

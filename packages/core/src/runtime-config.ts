@@ -75,6 +75,14 @@ export interface RuntimeConfig {
   readonly keys?: KeysConfig | undefined;
 }
 
+/** Optional cooperative cancellation and claim notification for a resumed run. */
+export interface RuntimeResumeOptions {
+  /** Additional signal composed with the runtime's cancellation and shutdown signals. */
+  readonly signal?: AbortSignal;
+  /** Called after the resume claim has been written durably. */
+  readonly onClaimed?: () => void;
+}
+
 /** Composed run-loop operations and their shared dependencies. */
 export interface Runtime {
   readonly store: EventStore;
@@ -87,7 +95,7 @@ export interface Runtime {
   run(goal: JsonValue): Promise<RunLoopResult>;
   /** Starts a follow-up run from an eligible terminal run. */
   continueRun(runId: Id, input: RunInput): Promise<RunLoopResult>;
-  resume(runId: Id): Promise<RunLoopResult>;
+  resume(runId: Id, options?: RuntimeResumeOptions): Promise<RunLoopResult>;
   /** Requests durable cancellation and reports if the run was already terminal. */
   cancel(runId: Id): Promise<CancelRunResult>;
   close(): Promise<void>;

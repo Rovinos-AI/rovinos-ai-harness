@@ -94,7 +94,8 @@ function createControlPlaneOperations(
   tool: ToolPort | undefined,
 ): ControlPlaneOperations {
   return {
-    resumeRun: (runId) => runtime.resume(runId),
+    resumeRun: (runId, signal, onClaimed) =>
+      runtime.resume(runId, { signal, onClaimed }),
     cancelRun: (runId) => runtime.cancel(runId),
     resolveApproval: async ({ runId, approvalId, decision, edits, reason }) => {
       const { resolveApproval } = await import("@harness/core");

@@ -133,7 +133,7 @@ describe("serve command", () => {
     }
     const runId = Id.parse("00000000000000000000000001");
     const abortSignal = new AbortController().signal;
-    await expect(operations.resumeRun(runId, abortSignal)).rejects.toThrow();
+    await expect(operations.resumeRun(runId, abortSignal, () => undefined)).rejects.toThrow();
     await expect(operations.cancelRun(runId)).rejects.toThrow();
     await expect(
       operations.resolveApproval({

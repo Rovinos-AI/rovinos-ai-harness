@@ -39,7 +39,7 @@ export function registerResumeRunTool(server: McpServer, options: ResumeRunToolO
       if (gate.status === "denied") {
         return resumeResult(false, gate.code);
       }
-      const result = options.supervisor.start(parsed.runId);
+      const result = await options.supervisor.start(parsed.runId);
       return resumeResult(result.started, result.code);
     },
   );

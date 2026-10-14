@@ -5,7 +5,12 @@ import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { Code, JsonValue, type Id, type NewEvent } from "@harness/schemas";
 import { ApprovalEditError } from "@harness/policy";
+import type { ServerContext } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  ConfirmationGate,
+  type ConfirmationRequest,
+} from "./confirmation-gate.js";
 import { createControlPlaneServer } from "./server.js";
 import type { ResolveApprovalOperation } from "./tools/approve.js";
 import { findApprovalRequest } from "./tools/run-state.js";
@@ -364,9 +369,10 @@ describe("confirmation-gated control-plane tools", () => {
       markStarted = resolve;
     });
     const operations = {
-      resumeRun: vi.fn((_runId: Id, signal: AbortSignal) => {
+      resumeRun: vi.fn((_runId: Id, signal: AbortSignal, onClaimed: () => void) => {
         resumeSignal = signal;
         markStarted();
+        onClaimed();
         return new Promise<void>((resolve) => {
           signal.addEventListener(
             "abort",
@@ -376,6 +382,7 @@ describe("confirmation-gated control-plane tools", () => {
             { once: true },
           );
         });
+
       }),
       cancelRun: vi.fn(() => Promise.resolve("cancelled")),
     };
@@ -390,6 +397,61 @@ describe("confirmation-gated control-plane tools", () => {
     expect(resumeSignal?.aborted).toBe(true);
     expect(operations.resumeRun).toHaveBeenCalledOnce();
     expect(operations.cancelRun).toHaveBeenCalledOnce();
+  });
+
+  it("persists single-use confirmation state across gate instances and canonicalizes arguments", async () => {
+    const store = new InMemoryEventStore();
+    const key = Buffer.alloc(32, 19);
+    let capturedContext: ServerContext | undefined;
+    const gate = new ConfirmationGate({
+      store,
+      key,
+      isAppContext: (context) => {
+        capturedContext = context;
+        return false;
+      },
+    });
+    const { client } = await connect(store, { confirmationGate: gate });
+    const targetId = createEventBuilders().nextRunId();
+    await client.callTool({ name: "resume_run", arguments: { runId: targetId } });
+    if (capturedContext === undefined) {
+      throw new Error("Expected an MCP request context.");
+    }
+
+    const request: ConfirmationRequest = {
+      toolName: "test_decision",
+      targetId,
+      arguments: { first: "one", second: "two" },
+      summary: "Confirm test decision?",
+      clientCapabilities: { elicitation: { form: {} } },
+    };
+    const challenge = await gate.requireHuman(capturedContext, request);
+    if (challenge.status !== "input_required") {
+      throw new Error("Expected a confirmation challenge.");
+    }
+    const decodedState = await gate.verifyRequestState(
+      challenge.result.requestState ?? "",
+      capturedContext,
+    );
+    const retryContext: ServerContext = {
+      ...capturedContext,
+      mcpReq: {
+        ...capturedContext.mcpReq,
+        requestState: () => decodedState,
+        inputResponses: { confirm: { action: "accept", content: { confirm: true } } },
+      },
+    };
+    const reorderedRequest = {
+      ...request,
+      arguments: { second: "two", first: "one" },
+    };
+
+    await expect(gate.requireHuman(retryContext, reorderedRequest)).resolves.toEqual({
+      status: "allowed",
+    });
+    await expect(
+      new ConfirmationGate({ store, key }).requireHuman(retryContext, reorderedRequest),
+    ).resolves.toEqual({ status: "denied", code: "confirmation_state_replayed" });
   });
 
   it("returns safe cancellation outcomes for missing and failing runtime operations", async () => {

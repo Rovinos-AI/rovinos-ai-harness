@@ -94,6 +94,7 @@ export class InMemoryEventStore implements EventStore {
     Id,
     { readonly runId: Id; readonly claimedAt: number; readonly sentAt?: number }
   >();
+  private readonly confirmationStates = new Map<string, number>();
   private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -408,6 +409,20 @@ export class InMemoryEventStore implements EventStore {
       this.approvalNotifications.delete(approvalId);
     }
     return Promise.resolve();
+  }
+
+  /** {@inheritDoc EventStore.consumeConfirmationState} */
+  consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean> {
+    for (const [consumedStateId, consumedExpiry] of this.confirmationStates) {
+      if (consumedExpiry <= now) {
+        this.confirmationStates.delete(consumedStateId);
+      }
+    }
+    if (this.confirmationStates.has(stateId)) {
+      return Promise.resolve(false);
+    }
+    this.confirmationStates.set(stateId, expiresAt);
+    return Promise.resolve(true);
   }
 
   /** {@inheritDoc EventStore.close} */
