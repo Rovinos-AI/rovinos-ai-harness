@@ -10,6 +10,7 @@ import {
 import { compileJsonSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
 import { McpConnectionError, McpProtocolError, isConnectionLossError } from "./errors.js";
 import { invokeMcpTool } from "./mcp-call.js";
+import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
 import { createMcpTransport, type McpLogger } from "./transports.js";
 
@@ -81,10 +82,6 @@ function protocolOptions(protocol: ServerConfig["protocol"]) {
   return { mode: "legacy" as const };
 }
 
-function isAborted(signal: AbortSignal | undefined): boolean {
-  return signal?.aborted === true;
-}
-
 /**
  * Manages one MCP SDK client, its transport, tool discovery, and reconnection.
  */
@@ -122,6 +119,8 @@ export class McpConnection {
     return this.#protocolEra;
   }
 
+  /** Safe negotiated server metadata for diagnostics. */
+  get serverMetadata(): McpServerMetadata { return getServerMetadata(this.#client); }
   #now(): number {
     return this.#dependencies.now?.() ?? Date.now();
   }
@@ -424,7 +423,7 @@ export class McpConnection {
     if (this.#closed) {
       throw new McpConnectionError("mcp_connection_lost");
     }
-    if (isAborted(signal)) {
+    if (signal?.aborted === true) {
       throw new McpConnectionError("mcp_connect_timeout");
     }
   }

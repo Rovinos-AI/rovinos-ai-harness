@@ -206,6 +206,12 @@ export {
   type DoctorStatus,
 } from "./cli/doctor.js";
 export { KeyGenerateResultSchema, type KeyGenerateResult } from "./cli/keys.js";
+export {
+  ServersCheckResultSchema,
+  ServersCheckServerResultSchema,
+  type ServersCheckResult,
+  type ServersCheckServerResult,
+} from "./cli/servers.js";
 export { eventSamples, FakeClock, SequentialIdGenerator } from "./testing.js";
 
 /** The current harness version. */
