@@ -29,6 +29,10 @@ export function setup(): void {
       "--file",
       "infra/compose/docker-compose.yml",
       "build",
+      // sandbox-runner and sandbox-egress-proxy share the harness-sandbox:local tag; building both
+      // services would build that image twice in parallel and race. One service per image.
+      "harness",
+      "sandbox-runner",
     ],
     { stdio: "inherit", timeout: BUILD_TIMEOUT_MS },
   );
