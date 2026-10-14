@@ -379,6 +379,9 @@ export async function appendTransaction(
       );
     }
 
+    for (const { event } of encoded) {
+      await client.query("SELECT pg_notify($1, $2)", ["harness_events", `${runId}:${event.seq}`]);
+    }
     await client.query("COMMIT");
     transactionStarted = false;
     return expectedSeq + encoded.length;

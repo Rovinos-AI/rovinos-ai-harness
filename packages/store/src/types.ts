@@ -13,7 +13,11 @@ export type SnapshotStoreOptions = z.input<typeof snapshotStoreOptionsSchema>;
 /** SQLite-specific snapshot and offline inspection options. */
 export const sqliteStoreOptionsSchema = snapshotStoreOptionsSchema.extend({
   readOnly: z.boolean().default(false),
+  pollIntervalMs: z.number().int().min(1).default(250),
 });
+
+/** SQLite adapter options for snapshot retention and cross-process watch polling. */
+export type SqliteStoreOptions = z.input<typeof sqliteStoreOptionsSchema>;
 
 /** Source of epoch-millisecond timestamps used for store metadata. */
 export interface Clock {
@@ -48,6 +52,24 @@ export interface ListRunsOptions {
   limit: number;
   /** Opaque cursor returned by a previous call to listRuns. */
   cursor?: string;
+}
+
+/** Options for watching a run's event log. */
+export interface WatchOptions {
+  /** First sequence number to yield. */
+  fromSeq: number;
+  /** Stops the subscription when aborted. */
+  signal: AbortSignal;
+  /** Maximum notification backlog before the iterator re-reads from storage. */
+  maxBuffered?: number;
+}
+
+/** Options for watching run summaries and status transitions. */
+export interface WatchRunsOptions {
+  /** Restrict emitted summaries to these current or newly entered statuses. */
+  statuses?: readonly RunStatus[];
+  /** Stops the subscription when aborted. */
+  signal: AbortSignal;
 }
 
 /** Append-only event storage contract. */
@@ -92,6 +114,22 @@ export interface EventStore {
    * @returns An async iterable of detached event copies.
    */
   read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event>;
+
+  /**
+   * Follow a run's event log, yielding stored events before live events in sequence order.
+   * The iterator ends after yielding a terminal status event or when the signal aborts.
+   * @param runId Run identifier to watch.
+   * @param options Starting sequence, abort signal, and optional notification backlog limit.
+   * @returns An ordered stream of decoded events.
+   */
+  watch(runId: Id, options: WatchOptions): AsyncIterable<Event>;
+
+  /**
+   * Follow run summaries, yielding their current state and subsequent status transitions.
+   * @param options Optional status filter and abort signal.
+   * @returns A stream of run summaries.
+   */
+  watchRuns(options: WatchRunsOptions): AsyncIterable<RunSummary>;
 
   /**
    * Return the next free sequence number for a run.

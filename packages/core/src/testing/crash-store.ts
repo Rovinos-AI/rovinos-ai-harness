@@ -86,6 +86,14 @@ export class CrashingEventStore implements EventStore {
     return this.inner.read(runId, range);
   }
 
+  watch(...args: Parameters<EventStore["watch"]>): ReturnType<EventStore["watch"]> {
+    return this.inner.watch(...args);
+  }
+
+  watchRuns(...args: Parameters<EventStore["watchRuns"]>): ReturnType<EventStore["watchRuns"]> {
+    return this.inner.watchRuns(...args);
+  }
+
   head(runId: Id): Promise<number> {
     return this.inner.head(runId);
   }

@@ -398,6 +398,143 @@ function registerLazyRead(factory: EventStoreFactory, builders: EventStoreTestBu
   });
 }
 
+function registerWatchConformance(
+  factory: EventStoreFactory,
+  builders: EventStoreTestBuilders,
+): void {
+  it("catches up, follows appended events in order, and ends after a terminal event", async () => {
+    await withStore(factory, async (store) => {
+      const runId = builders.nextRunId();
+      await store.append(runId, [builders.runCreated(runId), builders.modelRequest(runId)], 0);
+      const controller = new AbortController();
+      const iterator = store
+        .watch(runId, {
+          fromSeq: 1,
+          signal: controller.signal,
+          maxBuffered: 1,
+        })
+        [Symbol.asyncIterator]();
+
+      await expect(iterator.next()).resolves.toMatchObject({
+        done: false,
+        value: { seq: 1 },
+      });
+      const liveEvent = iterator.next();
+      await store.append(
+        runId,
+        [builders.modelRequest(runId), builders.runStatusChanged(runId, "pending", "completed")],
+        2,
+      );
+      await expect(liveEvent).resolves.toMatchObject({ done: false, value: { seq: 2 } });
+      await expect(iterator.next()).resolves.toMatchObject({
+        done: false,
+        value: { seq: 3, type: "run_status_changed", to: "completed" },
+      });
+      await expect(iterator.next()).resolves.toMatchObject({ done: true });
+    });
+  });
+
+  it("ends a waiting subscription when its signal aborts", async () => {
+    await withStore(factory, async (store) => {
+      const controller = new AbortController();
+      const iterator = store
+        .watch(builders.nextRunId(), { fromSeq: 0, signal: controller.signal })
+        [Symbol.asyncIterator]();
+      const waiting = iterator.next();
+      controller.abort();
+      await expect(waiting).resolves.toMatchObject({ done: true });
+    });
+  });
+
+  it("rejects an invalid watch offset and buffer limit", async () => {
+    await withStore(factory, async (store) => {
+      const signal = new AbortController().signal;
+      await expect(
+        store.watch(builders.nextRunId(), { fromSeq: -1, signal })[Symbol.asyncIterator]().next(),
+      ).rejects.toMatchObject({ code: "event_invalid" });
+      await expect(
+        store
+          .watch(builders.nextRunId(), { fromSeq: 0, signal, maxBuffered: 0 })
+          [Symbol.asyncIterator]()
+          .next(),
+      ).rejects.toMatchObject({ code: "event_invalid" });
+    });
+  });
+
+  it("re-reads stored rows instead of buffering when the consumer is slow", async () => {
+    await withStore(factory, async (store) => {
+      const runId = builders.nextRunId();
+      await store.append(runId, [builders.runCreated(runId)], 0);
+      const controller = new AbortController();
+      const iterator = store
+        .watch(runId, {
+          fromSeq: 0,
+          signal: controller.signal,
+          maxBuffered: 1,
+        })
+        [Symbol.asyncIterator]();
+      const received: number[] = [];
+      const first = await iterator.next();
+      if (first.done || first.value === undefined) {
+        throw new Error("Expected the run-created event");
+      }
+      received.push(first.value.seq);
+
+      await store.append(
+        runId,
+        [
+          builders.modelRequest(runId),
+          builders.modelRequest(runId),
+          builders.runStatusChanged(runId, "pending", "completed"),
+        ],
+        1,
+      );
+      for (;;) {
+        const next = await iterator.next();
+        if (next.done) {
+          break;
+        }
+        received.push(next.value.seq);
+      }
+      expect(received).toEqual([0, 1, 2, 3]);
+    });
+  });
+
+  it("reports each status transition and honors the status filter", async () => {
+    await withStore(factory, async (store) => {
+      const runId = builders.nextRunId();
+      await store.append(runId, [builders.runCreated(runId)], 0);
+      const controller = new AbortController();
+      const iterator = store
+        .watchRuns({
+          statuses: ["failed", "cancelled"],
+          signal: controller.signal,
+        })
+        [Symbol.asyncIterator]();
+      const firstTransition = iterator.next();
+      await store.append(
+        runId,
+        [
+          builders.runStatusChanged(runId, "pending", "running"),
+          builders.runStatusChanged(runId, "running", "failed"),
+          builders.runStatusChanged(runId, "failed", "cancelled"),
+        ],
+        1,
+      );
+      await expect(firstTransition).resolves.toMatchObject({
+        done: false,
+        value: { runId, status: "failed", lastSeq: 2 },
+      });
+      await expect(iterator.next()).resolves.toMatchObject({
+        done: false,
+        value: { runId, status: "cancelled", lastSeq: 3 },
+      });
+      controller.abort();
+      await expect(iterator.next()).resolves.toMatchObject({ done: true });
+    });
+  });
+}
+
 function registerFileReopen(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
   it("preserves data after closing and reopening the store", async () => {
     const first = await factory();
@@ -440,6 +577,7 @@ export function runEventStoreConformance(
     registerTraceLookup(factory, builders);
     registerOutboxConformance(factory, builders, caps.supportsFileReopen);
     registerLazyRead(factory, builders);
+    registerWatchConformance(factory, builders);
     registerSnapshotConformance(factory, builders);
     if (caps.supportsFileReopen) {
       registerFileReopen(factory, builders);

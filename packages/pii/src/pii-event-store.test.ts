@@ -133,6 +133,12 @@ function createInnerStore(): EventStoreLike {
     head() {
       return Promise.resolve(events.length);
     },
+    watch() {
+      return (async function* () {})();
+    },
+    watchRuns() {
+      return (async function* () {})();
+    },
     deleteRun() {
       const count = events.length;
       events = [];

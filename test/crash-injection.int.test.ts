@@ -282,6 +282,14 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.read(forRun, range);
   }
 
+  watch(...args: Parameters<EventStore["watch"]>) {
+    return this.inner.watch(...args);
+  }
+
+  watchRuns(...args: Parameters<EventStore["watchRuns"]>) {
+    return this.inner.watchRuns(...args);
+  }
+
   head(forRun: Id) {
     return this.inner.head(forRun);
   }
@@ -476,6 +484,14 @@ class PreIntentExecutionStore implements EventStore {
 
   read(forRun: Id, range?: Parameters<EventStore["read"]>[1]) {
     return this.inner.read(forRun, range);
+  }
+
+  watch(...args: Parameters<EventStore["watch"]>) {
+    return this.inner.watch(...args);
+  }
+
+  watchRuns(...args: Parameters<EventStore["watchRuns"]>) {
+    return this.inner.watchRuns(...args);
   }
 
   head(forRun: Id) {

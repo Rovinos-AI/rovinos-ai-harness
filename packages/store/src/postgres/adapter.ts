@@ -2,13 +2,14 @@
 import {
   Code,
   Id,
+  RunStatus,
   TraceId,
   type Code as SinkId,
   type Event,
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
-import { Pool, type PoolClient, type QueryResultRow } from "pg";
+import { Pool, type Notification, type PoolClient, type QueryResultRow } from "pg";
 import { z } from "zod";
 import {
   JsonContentCodec,
@@ -27,6 +28,8 @@ import {
   type EventStore,
   type ListRunsOptions,
   type RunSummary,
+  type WatchOptions,
+  type WatchRunsOptions,
 } from "../types.js";
 import {
   appendTransaction,
@@ -73,6 +76,7 @@ export class PostgresEventStore implements EventStore {
   private readonly clock: Clock;
   private readonly skipMigrations: boolean;
   private readonly approvalNotifications: PostgresApprovalNotifications;
+  private readonly runWatchers = new Map<Id, Set<() => void>>();
   private initialized: Promise<void> | undefined;
 
   /**
@@ -208,6 +212,226 @@ export class PostgresEventStore implements EventStore {
       }
     } catch (error) {
       throw storeError(error);
+    }
+  }
+
+  private async listen(onNotification: (message: Notification) => void): Promise<{
+    client: PoolClient;
+    close: () => Promise<void>;
+  }> {
+    await this.ensureInitialized();
+    let client: PoolClient;
+    try {
+      client = await this.pool.connect();
+    } catch (error) {
+      throw storeError(error);
+    }
+    client.on("notification", onNotification);
+    try {
+      await client.query("LISTEN harness_events");
+    } catch (error) {
+      client.removeListener("notification", onNotification);
+      client.release();
+      throw storeError(error);
+    }
+    return {
+      client,
+      async close() {
+        client.removeListener("notification", onNotification);
+        await client.query("UNLISTEN harness_events").catch(() => undefined);
+        client.release();
+      },
+    };
+  }
+
+  /** {@inheritDoc EventStore.watch} */
+  async *watch(runId: Id, options: WatchOptions): AsyncIterable<Event> {
+    if (!Number.isSafeInteger(options.fromSeq) || options.fromSeq < 0) {
+      throw new InvalidEventError([["fromSeq"]]);
+    }
+    if (
+      options.maxBuffered !== undefined &&
+      (!Number.isSafeInteger(options.maxBuffered) || options.maxBuffered < 1)
+    ) {
+      throw new InvalidEventError([["maxBuffered"]]);
+    }
+    const maxBuffered = options.maxBuffered ?? 1_000;
+    if (options.signal.aborted) {
+      return;
+    }
+    let wake = (): void => undefined;
+    let notificationPending = false;
+    const listener = await this.listen((message) => {
+      if (message.payload?.startsWith(`${runId}:`) === true) {
+        notificationPending = true;
+        wake();
+      }
+    });
+    const onAbort = (): void => wake();
+    options.signal.addEventListener("abort", onAbort, { once: true });
+    let nextSeq = options.fromSeq;
+    try {
+      while (!options.signal.aborted) {
+        notificationPending = false;
+        let resolveWake: () => void = () => undefined;
+        const changed = new Promise<void>((resolve) => {
+          resolveWake = resolve;
+        });
+        wake = resolveWake;
+        const head = await this.head(runId);
+        const toSeq = Math.min(head - 1, nextSeq + maxBuffered - 1);
+        for await (const event of this.read(runId, { fromSeq: nextSeq, toSeq })) {
+          if (options.signal.aborted) {
+            return;
+          }
+          nextSeq = event.seq + 1;
+          yield event;
+          if (
+            event.type === "run_status_changed" &&
+            ["completed", "failed", "cancelled"].includes(event.to)
+          ) {
+            return;
+          }
+        }
+        if (nextSeq < head) {
+          continue;
+        }
+        if (await this.isRunTerminal(runId, nextSeq)) {
+          return;
+        }
+        if (!notificationPending) {
+          await changed;
+        }
+      }
+    } finally {
+      options.signal.removeEventListener("abort", onAbort);
+      await listener.close();
+    }
+  }
+
+  private async isRunTerminal(runId: Id, observedNextSeq: number): Promise<boolean> {
+    try {
+      const result = await this.pool.query<{ next_seq: number | string; status: string }>(
+        "SELECT next_seq, status FROM runs WHERE run_id = $1",
+        [runId],
+      );
+      const row = result.rows[0];
+      return (
+        row !== undefined &&
+        integer(row.next_seq) <= observedNextSeq &&
+        (row.status === "completed" || row.status === "failed" || row.status === "cancelled")
+      );
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
+  private async allRunSummaries(): Promise<RunSummary[]> {
+    const summaries = new Map<Id, RunSummary>();
+    let cursor: string | undefined;
+    do {
+      const page = await this.listRuns({
+        limit: 100,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      for (const summary of page.runs) {
+        summaries.set(summary.runId, summary);
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== undefined);
+    return [...summaries.values()];
+  }
+
+  /** {@inheritDoc EventStore.watchRuns} */
+  async *watchRuns(options: WatchRunsOptions): AsyncIterable<RunSummary> {
+    if (options.statuses?.some((status) => !RunStatus.safeParse(status).success)) {
+      throw new InvalidEventError([["statuses"]]);
+    }
+    if (options.signal.aborted) {
+      return;
+    }
+    let wake = (): void => undefined;
+    const listener = await this.listen(() => wake());
+    const onAbort = (): void => wake();
+    options.signal.addEventListener("abort", onAbort, { once: true });
+    let seen = new Map<Id, RunSummary>();
+    let initialized = false;
+    try {
+      while (!options.signal.aborted) {
+        let resolveWake: () => void = () => undefined;
+        const changed = new Promise<void>((resolve) => {
+          resolveWake = resolve;
+        });
+        wake = resolveWake;
+        const summaries = await this.allRunSummaries();
+        if (!initialized) {
+          for (const summary of summaries) {
+            if (options.signal.aborted) {
+              return;
+            }
+            if (options.statuses === undefined || options.statuses.includes(summary.status)) {
+              yield summary;
+            }
+          }
+          seen = new Map(summaries.map((summary) => [summary.runId, summary]));
+          initialized = true;
+        } else {
+          for (const summary of summaries) {
+            const previous = seen.get(summary.runId);
+            if (previous === undefined) {
+              for await (const event of this.read(summary.runId, {
+                fromSeq: 0,
+                toSeq: summary.lastSeq,
+              })) {
+                if (options.signal.aborted) {
+                  return;
+                }
+                const status =
+                  event.type === "run_created"
+                    ? "pending"
+                    : event.type === "run_status_changed"
+                      ? event.to
+                      : undefined;
+                if (
+                  status !== undefined &&
+                  (options.statuses === undefined || options.statuses.includes(status))
+                ) {
+                  yield {
+                    ...summary,
+                    status,
+                    lastSeq: event.seq,
+                    lastTs: event.ts,
+                  };
+                }
+              }
+            } else if (summary.lastSeq > previous.lastSeq) {
+              for await (const event of this.read(summary.runId, {
+                fromSeq: previous.lastSeq + 1,
+                toSeq: summary.lastSeq,
+              })) {
+                if (options.signal.aborted) {
+                  return;
+                }
+                if (event.type === "run_status_changed") {
+                  if (options.statuses === undefined || options.statuses.includes(event.to)) {
+                    yield {
+                      ...summary,
+                      status: event.to,
+                      lastSeq: event.seq,
+                      lastTs: event.ts,
+                    };
+                  }
+                }
+              }
+            }
+            seen.set(summary.runId, summary);
+          }
+        }
+        await changed;
+      }
+    } finally {
+      options.signal.removeEventListener("abort", onAbort);
+      await listener.close();
     }
   }
 

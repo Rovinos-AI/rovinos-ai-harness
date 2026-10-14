@@ -30,6 +30,9 @@ import {
   type EventStore,
   type ListRunsOptions,
   type RunSummary,
+  type SqliteStoreOptions,
+  type WatchOptions,
+  type WatchRunsOptions,
 } from "../types.js";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
 import { migrate } from "../migrate.js";
@@ -173,6 +176,9 @@ export class SqliteEventStore implements EventStore {
   private readonly pruneSnapshots: Database.Statement<[Id, Id, number]>;
   private readonly latestSnapshotQuery: Database.Statement<[Id], SnapshotRow>;
   private readonly snapshotKeep: number;
+  private readonly pollIntervalMs: number;
+  private readonly runWatchers = new Map<Id, Set<() => void>>();
+  private readonly runListWatchers = new Set<() => void>();
   private readonly outbox: SqliteOutboxReader;
   private readonly approvalNotifications: SqliteApprovalNotifications;
 
@@ -181,19 +187,20 @@ export class SqliteEventStore implements EventStore {
    *
    * @param path Database file path or `:memory:`.
    * @param codec Codec used to store content separately from event metadata.
-   * @param options Snapshot retention and read-only configuration; read-only opens an existing database without initialization.
+   * @param options Snapshot retention, read-only mode, and external-writer polling interval.
    * @param clock Clock supplying timestamps for sink-cursor updates.
    */
   constructor(
     path: string,
     codec: ContentCodec = new JsonContentCodec(),
-    options: z.input<typeof sqliteStoreOptionsSchema> = {},
+    options: SqliteStoreOptions = {},
     clock: Clock = systemClock,
   ) {
     const parsedOptions = sqliteStoreOptionsSchema.parse(options);
     this.db = parsedOptions.readOnly ? openReadOnlyDatabase(path) : new Database(path);
     this.codec = codec;
     this.snapshotKeep = snapshotKeep({ snapshotKeep: parsedOptions.snapshotKeep });
+    this.pollIntervalMs = parsedOptions.pollIntervalMs;
     try {
       if (!parsedOptions.readOnly) {
         this.db.pragma("journal_mode = WAL");
@@ -337,6 +344,7 @@ export class SqliteEventStore implements EventStore {
         }
       });
       appendTransaction.immediate();
+      this.notifyRunChange(runId);
       return { nextSeq: expectedSeq + validated.length };
     } catch (error) {
       throw storeError(error);
@@ -361,6 +369,199 @@ export class SqliteEventStore implements EventStore {
       }
     } catch (error) {
       throw storeError(error);
+    }
+  }
+
+  private notifyRunChange(runId: Id): void {
+    for (const notify of this.runWatchers.get(runId) ?? []) {
+      notify();
+    }
+    for (const notify of this.runListWatchers) {
+      notify();
+    }
+  }
+
+  private waitForChange(
+    runId: Id | undefined,
+    signal: AbortSignal,
+  ): { changed: Promise<void>; cancel: () => void } {
+    let resolveChanged: () => void = () => undefined;
+    let settled = false;
+    const changed = new Promise<void>((resolve) => {
+      resolveChanged = resolve;
+    });
+    const watchers =
+      runId === undefined
+        ? this.runListWatchers
+        : (this.runWatchers.get(runId) ?? new Set<() => void>());
+    const onChange = (): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onChange);
+      watchers.delete(onChange);
+      if (runId !== undefined && watchers.size === 0) {
+        this.runWatchers.delete(runId);
+      }
+      resolveChanged();
+    };
+    const timer = setTimeout(onChange, this.pollIntervalMs);
+    watchers.add(onChange);
+    if (runId !== undefined) {
+      this.runWatchers.set(runId, watchers);
+    }
+    signal.addEventListener("abort", onChange, { once: true });
+    if (signal.aborted) {
+      onChange();
+    }
+    return { changed, cancel: onChange };
+  }
+
+  /** {@inheritDoc EventStore.watch} */
+  async *watch(runId: Id, options: WatchOptions): AsyncIterable<StoredEvent> {
+    if (!Number.isSafeInteger(options.fromSeq) || options.fromSeq < 0) {
+      throw new InvalidEventError([["fromSeq"]]);
+    }
+    if (
+      options.maxBuffered !== undefined &&
+      (!Number.isSafeInteger(options.maxBuffered) || options.maxBuffered < 1)
+    ) {
+      throw new InvalidEventError([["maxBuffered"]]);
+    }
+    const maxBuffered = options.maxBuffered ?? 1_000;
+    let nextSeq = options.fromSeq;
+    while (!options.signal.aborted) {
+      const subscription = this.waitForChange(runId, options.signal);
+      try {
+        const head = await this.head(runId);
+        const toSeq = Math.min(head - 1, nextSeq + maxBuffered - 1);
+        for await (const event of this.read(runId, { fromSeq: nextSeq, toSeq })) {
+          if (options.signal.aborted) {
+            return;
+          }
+          nextSeq = event.seq + 1;
+          yield event;
+          if (
+            event.type === "run_status_changed" &&
+            ["completed", "failed", "cancelled"].includes(event.to)
+          ) {
+            return;
+          }
+        }
+        if (nextSeq < head) {
+          continue;
+        }
+        const current = this.getRun.get(runId);
+        if (
+          current !== undefined &&
+          ["completed", "failed", "cancelled"].includes(current.status) &&
+          current.next_seq <= nextSeq
+        ) {
+          return;
+        }
+        await subscription.changed;
+      } finally {
+        subscription.cancel();
+      }
+    }
+  }
+
+  private async allRunSummaries(): Promise<RunSummary[]> {
+    const summaries = new Map<Id, RunSummary>();
+    let cursor: string | undefined;
+    do {
+      const page = await this.listRuns({
+        limit: 100,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      for (const summary of page.runs) {
+        summaries.set(summary.runId, summary);
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== undefined);
+    return [...summaries.values()];
+  }
+
+  /** {@inheritDoc EventStore.watchRuns} */
+  async *watchRuns(options: WatchRunsOptions): AsyncIterable<RunSummary> {
+    if (options.statuses?.some((status) => !RunStatus.safeParse(status).success)) {
+      throw new InvalidEventError([["statuses"]]);
+    }
+    let seen = new Map<Id, RunSummary>();
+    let initialized = false;
+    while (!options.signal.aborted) {
+      const subscription = this.waitForChange(undefined, options.signal);
+      try {
+        const summaries = await this.allRunSummaries();
+        if (!initialized) {
+          for (const summary of summaries) {
+            if (options.signal.aborted) {
+              return;
+            }
+            if (options.statuses === undefined || options.statuses.includes(summary.status)) {
+              yield summary;
+            }
+          }
+          seen = new Map(summaries.map((summary) => [summary.runId, summary]));
+          initialized = true;
+        } else {
+          for (const summary of summaries) {
+            const previous = seen.get(summary.runId);
+            if (previous === undefined) {
+              for await (const event of this.read(summary.runId, {
+                fromSeq: 0,
+                toSeq: summary.lastSeq,
+              })) {
+                if (options.signal.aborted) {
+                  return;
+                }
+                const status =
+                  event.type === "run_created"
+                    ? "pending"
+                    : event.type === "run_status_changed"
+                      ? event.to
+                      : undefined;
+                if (
+                  status !== undefined &&
+                  (options.statuses === undefined || options.statuses.includes(status))
+                ) {
+                  yield {
+                    ...summary,
+                    status,
+                    lastSeq: event.seq,
+                    lastTs: event.ts,
+                  };
+                }
+              }
+            } else if (summary.lastSeq > previous.lastSeq) {
+              for await (const event of this.read(summary.runId, {
+                fromSeq: previous.lastSeq + 1,
+                toSeq: summary.lastSeq,
+              })) {
+                if (options.signal.aborted) {
+                  return;
+                }
+                if (event.type === "run_status_changed") {
+                  if (options.statuses === undefined || options.statuses.includes(event.to)) {
+                    yield {
+                      ...summary,
+                      status: event.to,
+                      lastSeq: event.seq,
+                      lastTs: event.ts,
+                    };
+                  }
+                }
+              }
+            }
+            seen.set(summary.runId, summary);
+          }
+        }
+        await subscription.changed;
+      } finally {
+        subscription.cancel();
+      }
     }
   }
 

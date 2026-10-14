@@ -2,6 +2,7 @@
 import {
   Code,
   Event,
+  RunStatus,
   TraceId,
   type Event as StoredEvent,
   type Id,
@@ -23,6 +24,8 @@ import {
   type ListRunsOptions,
   type RunSummary,
   type SnapshotStoreOptions,
+  type WatchOptions,
+  type WatchRunsOptions,
 } from "./types.js";
 
 function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): number | undefined {
@@ -86,6 +89,8 @@ function hasDuplicateSnapshot(
 /** In-memory reference implementation of the append-only event store contract. */
 export class InMemoryEventStore implements EventStore {
   private readonly runs = new Map<Id, StoredEvent[]>();
+  private readonly runWatchers = new Map<Id, Set<() => void>>();
+  private readonly runListWatchers = new Set<() => void>();
   private readonly traceRuns = new Map<TraceId, Map<Id, number>>();
   private readonly snapshots = new Map<Id, EncodedSnapshot[]>();
   private readonly outboxEvents: { globalSeq: number; event: StoredEvent }[] = [];
@@ -164,7 +169,46 @@ export class InMemoryEventStore implements EventStore {
           .slice(0, this.snapshotKeep),
       );
     }
+    this.notifyRunChange(runId);
     return { nextSeq: expectedSeq + validated.length };
+  }
+
+  private notifyRunChange(runId: Id): void {
+    for (const notify of this.runWatchers.get(runId) ?? []) {
+      notify();
+    }
+    for (const notify of this.runListWatchers) {
+      notify();
+    }
+  }
+
+  private subscribeRun(runId: Id, notify: () => void, signal: AbortSignal): () => void {
+    const watchers = this.runWatchers.get(runId) ?? new Set<() => void>();
+    watchers.add(notify);
+    this.runWatchers.set(runId, watchers);
+    signal.addEventListener("abort", notify, { once: true });
+    if (signal.aborted) {
+      notify();
+    }
+    return () => {
+      watchers.delete(notify);
+      signal.removeEventListener("abort", notify);
+      if (watchers.size === 0) {
+        this.runWatchers.delete(runId);
+      }
+    };
+  }
+
+  private subscribeRunList(notify: () => void, signal: AbortSignal): () => void {
+    this.runListWatchers.add(notify);
+    signal.addEventListener("abort", notify, { once: true });
+    if (signal.aborted) {
+      notify();
+    }
+    return () => {
+      this.runListWatchers.delete(notify);
+      signal.removeEventListener("abort", notify);
+    };
   }
 
   private recordTraceRuns(runId: Id, events: readonly StoredEvent[]): void {
@@ -212,6 +256,161 @@ export class InMemoryEventStore implements EventStore {
         };
       },
     };
+  }
+
+  /** {@inheritDoc EventStore.watch} */
+  async *watch(runId: Id, options: WatchOptions): AsyncIterable<StoredEvent> {
+    if (!Number.isSafeInteger(options.fromSeq) || options.fromSeq < 0) {
+      throw new InvalidEventError([["fromSeq"]]);
+    }
+    if (
+      options.maxBuffered !== undefined &&
+      (!Number.isSafeInteger(options.maxBuffered) || options.maxBuffered < 1)
+    ) {
+      throw new InvalidEventError([["maxBuffered"]]);
+    }
+    const maxBuffered = options.maxBuffered ?? 1_000;
+    let nextSeq = options.fromSeq;
+    while (!options.signal.aborted) {
+      let wake: () => void = () => undefined;
+      const changed = new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+      const unsubscribe = this.subscribeRun(runId, wake, options.signal);
+      try {
+        const head = await this.head(runId);
+        const toSeq = Math.min(head - 1, nextSeq + maxBuffered - 1);
+        for await (const event of this.read(runId, { fromSeq: nextSeq, toSeq })) {
+          if (options.signal.aborted) {
+            return;
+          }
+          nextSeq = event.seq + 1;
+          yield event;
+          if (
+            event.type === "run_status_changed" &&
+            ["completed", "failed", "cancelled"].includes(event.to)
+          ) {
+            return;
+          }
+        }
+        if (nextSeq < head) {
+          continue;
+        }
+        const stored = this.runs.get(runId);
+        const last = stored?.at(-1);
+        if (
+          last?.type === "run_status_changed" &&
+          ["completed", "failed", "cancelled"].includes(last.to) &&
+          (stored?.length ?? 0) <= nextSeq
+        ) {
+          return;
+        }
+        await changed;
+      } finally {
+        unsubscribe();
+      }
+    }
+  }
+
+  private async allRunSummaries(): Promise<RunSummary[]> {
+    const summaries = new Map<Id, RunSummary>();
+    let cursor: string | undefined;
+    do {
+      const page = await this.listRuns({
+        limit: 100,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      for (const summary of page.runs) {
+        summaries.set(summary.runId, summary);
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== undefined);
+    return [...summaries.values()];
+  }
+
+  /** {@inheritDoc EventStore.watchRuns} */
+  async *watchRuns(options: WatchRunsOptions): AsyncIterable<RunSummary> {
+    if (options.statuses?.some((status) => !RunStatus.safeParse(status).success)) {
+      throw new InvalidEventError([["statuses"]]);
+    }
+    let seen = new Map<Id, RunSummary>();
+    let initialized = false;
+    while (!options.signal.aborted) {
+      let wake: () => void = () => undefined;
+      const changed = new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+      const unsubscribe = this.subscribeRunList(wake, options.signal);
+      try {
+        const summaries = await this.allRunSummaries();
+        if (!initialized) {
+          for (const summary of summaries) {
+            if (options.signal.aborted) {
+              return;
+            }
+            if (options.statuses === undefined || options.statuses.includes(summary.status)) {
+              yield summary;
+            }
+          }
+          seen = new Map(summaries.map((summary) => [summary.runId, summary]));
+          initialized = true;
+        } else {
+          for (const summary of summaries) {
+            const previous = seen.get(summary.runId);
+            if (previous === undefined) {
+              for await (const event of this.read(summary.runId, {
+                fromSeq: 0,
+                toSeq: summary.lastSeq,
+              })) {
+                if (options.signal.aborted) {
+                  return;
+                }
+                const status =
+                  event.type === "run_created"
+                    ? "pending"
+                    : event.type === "run_status_changed"
+                      ? event.to
+                      : undefined;
+                if (
+                  status !== undefined &&
+                  (options.statuses === undefined || options.statuses.includes(status))
+                ) {
+                  yield {
+                    ...summary,
+                    status,
+                    lastSeq: event.seq,
+                    lastTs: event.ts,
+                  };
+                }
+              }
+            } else if (summary.lastSeq > previous.lastSeq) {
+              for await (const event of this.read(summary.runId, {
+                fromSeq: previous.lastSeq + 1,
+                toSeq: summary.lastSeq,
+              })) {
+                if (options.signal.aborted) {
+                  return;
+                }
+                if (event.type === "run_status_changed") {
+                  if (options.statuses === undefined || options.statuses.includes(event.to)) {
+                    yield {
+                      ...summary,
+                      status: event.to,
+                      lastSeq: event.seq,
+                      lastTs: event.ts,
+                    };
+                  }
+                }
+              }
+            }
+            seen.set(summary.runId, summary);
+          }
+        }
+        await changed;
+      } finally {
+        unsubscribe();
+      }
+    }
   }
 
   /** {@inheritDoc EventStore.head} */

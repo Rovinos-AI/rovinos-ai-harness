@@ -51,6 +51,14 @@ interface FakeQueryResult {
   rowCount?: number | null;
 }
 
+interface FakeNotification {
+  processId: number;
+  channel: string;
+  payload?: string;
+}
+
+type FakeNotificationListener = (notification: FakeNotification) => void;
+
 let transactionBackup:
   | {
       runs: Map<string, FakeRun>;
@@ -71,6 +79,7 @@ const fakePg = vi.hoisted(() => ({
   migrationHistory: new Map<string, string>(),
   encryptionValue: "",
   handler: (_sql: string, _values: unknown[]): FakeQueryResult => ({ rows: [] }),
+  notificationListeners: new Set<FakeNotificationListener>(),
   connectError: new Error("connection refused"),
   connectErrorCode: "ECONNREFUSED",
   shouldFailConnect: false,
@@ -88,6 +97,8 @@ vi.mock("pg", () => ({
 
     connect(): Promise<{
       query: (sql: string, values?: unknown[]) => Promise<FakeQueryResult>;
+      on: (event: "notification", listener: FakeNotificationListener) => void;
+      removeListener: (event: "notification", listener: FakeNotificationListener) => void;
       release: () => void;
     }> {
       if (fakePg.shouldFailConnect) {
@@ -97,6 +108,12 @@ vi.mock("pg", () => ({
       }
       return Promise.resolve({
         query: (sql, values) => this.query(sql, values),
+        on: (_event, listener) => {
+          fakePg.notificationListeners.add(listener);
+        },
+        removeListener: (_event, listener) => {
+          fakePg.notificationListeners.delete(listener);
+        },
         release: () => undefined,
       });
     }
@@ -133,6 +150,17 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   }
   if (query.startsWith("SELECT to_regclass('schema_migrations')")) {
     return { rows: [{ present: fakePg.migrationHistory.size > 0 || fakePg.schemaInitialized }] };
+  }
+  if (query === "LISTEN harness_events" || query === "UNLISTEN harness_events") {
+    return { rows: [] };
+  }
+  if (query === "SELECT pg_notify($1, $2)") {
+    const channel = text(values[0]);
+    const payload = text(values[1]);
+    for (const listener of fakePg.notificationListeners) {
+      listener({ processId: 1, channel, payload });
+    }
+    return { rows: [] };
   }
   if (query.startsWith("SELECT version, checksum FROM schema_migrations")) {
     return {
@@ -222,6 +250,12 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   if (query.startsWith("SELECT next_seq, status FROM runs")) {
     const run = fakePg.runs.get(text(values[0]));
     return { rows: run === undefined ? [] : [{ next_seq: run.next_seq, status: run.status }] };
+  }
+  if (query.startsWith("SELECT status, next_seq FROM runs")) {
+    const run = fakePg.runs.get(text(values[0]));
+    return {
+      rows: run === undefined ? [] : [{ status: run.status, next_seq: run.next_seq }],
+    };
   }
   if (query.startsWith("SELECT status FROM runs")) {
     const run = fakePg.runs.get(text(values[0]));
@@ -503,6 +537,7 @@ beforeEach(() => {
   fakePg.schemaInitialized = false;
   fakePg.migrationHistory.clear();
   fakePg.encryptionValue = "";
+  fakePg.notificationListeners.clear();
   fakePg.handler = fakeQuery;
   fakePg.connectErrorCode = "ECONNREFUSED";
   fakePg.shouldFailConnect = false;

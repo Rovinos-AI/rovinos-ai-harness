@@ -439,6 +439,62 @@ it("appends batches larger than PostgreSQL's bind-parameter limit", async () => 
   }
 });
 
+it("notifies listeners with only a run id and sequence after committed appends", async () => {
+  const { admin, schema } = await createSchema();
+  const listenerClient = await admin.connect();
+  const watcher = new PostgresEventStore(connectionString, { schema });
+  const writer = new PostgresEventStore(connectionString, { schema });
+  stores.add(watcher);
+  stores.add(writer);
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  const controller = new AbortController();
+  const iterator = watcher
+    .watch(runId, { fromSeq: 0, signal: controller.signal })
+    [Symbol.asyncIterator]();
+  try {
+    await listenerClient.query("LISTEN harness_events");
+    const createdNotification = new Promise<string | undefined>((resolve) => {
+      listenerClient.once("notification", (message) => resolve(message.payload));
+    });
+    await writer.append(runId, [builders.runCreated(runId)], 0);
+    await expect(createdNotification).resolves.toBe(`${runId}:0`);
+
+    const modelNotification = new Promise<string | undefined>((resolve) => {
+      listenerClient.once("notification", (message) => resolve(message.payload));
+    });
+    const modelEvent = iterator.next();
+    await writer.append(
+      runId,
+      [builders.modelRequest(runId, "synthetic private watch content")],
+      1,
+    );
+    await expect(modelNotification).resolves.toBe(`${runId}:1`);
+    await expect(modelEvent).resolves.toMatchObject({
+      done: false,
+      value: { seq: 0, type: "run_created" },
+    });
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { seq: 1, type: "model_request" },
+    });
+
+    const terminalEvent = iterator.next();
+    await writer.append(runId, [builders.runStatusChanged(runId, "pending", "completed")], 2);
+    await expect(terminalEvent).resolves.toMatchObject({
+      done: false,
+      value: { seq: 2, type: "run_status_changed", to: "completed" },
+    });
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+  } finally {
+    controller.abort();
+    await iterator.return?.();
+    listenerClient.release();
+    await Promise.all([closeStore(watcher), closeStore(writer)]);
+    await dropSchema(admin, schema);
+  }
+});
+
 it("rejects reopening an encrypted Postgres store without its codec", async () => {
   const { admin, schema } = await createSchema();
   const runId = schemaIds.nextRunId();
