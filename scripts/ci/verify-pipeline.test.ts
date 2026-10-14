@@ -83,7 +83,7 @@ it("enables pull request validation on main", () => {
   expect(pipeline.trigger).toBe("none");
 });
 
-it("runs static checks before unit tests", () => {
+it("runs static checks before tests and executes the release gates", () => {
   const stages = readStages(readPipeline());
 
   expect(
@@ -91,7 +91,7 @@ it("runs static checks before unit tests", () => {
       .filter(isRecord)
       .map((stage) => stage.stage)
       .filter((stage): stage is string => typeof stage === "string"),
-  ).toEqual(["static", "unit", "integration"]);
+  ).toEqual(["static", "unit", "integration", "gates"]);
 
   const staticSteps = readSteps(findStage(stages, "static"));
   expect(
@@ -129,6 +129,14 @@ it("runs static checks before unit tests", () => {
   expect(dcoStep?.condition).toBe("eq(variables['Build.Reason'], 'PullRequest')");
   expect(dcoStep?.env).toEqual({ TARGET_BRANCH: "$(System.PullRequest.TargetBranch)" });
   expect(staticSteps.some((step) => step.checkout === "self" && step.fetchDepth === 0)).toBe(true);
+
+  const gatesStage = findStage(stages, "gates");
+  expect(gatesStage.dependsOn).toBe("integration");
+  expect(
+    readSteps(gatesStage).some(
+      (step) => typeof step.script === "string" && step.script.includes("yarn test:canary"),
+    ),
+  ).toBe(true);
 });
 
 it("publishes JUnit results after success or failure", () => {
