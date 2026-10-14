@@ -202,8 +202,8 @@ Owner task: `3.2`.
 | --- | --- | --- | --- |
 | `harness.event.seq` | integer | Required | `@harness/telemetry` |
 | `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.pii.action` | enum: `tokenized`, `redacted`, `blocked`, `allowed` | Required | `@harness/telemetry` |
-| `harness.pii.boundary` | enum: `model_input`, `tool_input`, `tool_output`, `storage`, `ui` | Required | `@harness/telemetry` |
+| `harness.pii.action` | enum: `tokenized`, `redacted`, `blocked`, `allowed`, `detokenized` | Required | `@harness/telemetry` |
+| `harness.pii.boundary` | enum: `model_input`, `tool_input`, `tool_output`, `storage`, `ui`, `telemetry_export` | Required | `@harness/telemetry` |
 | `harness.pii.entity_count` | integer | Required | `@harness/telemetry` |
 | `harness.policy.version` | Code | Required | `@harness/telemetry` |
 | `harness.run.id` | Id | Required | `@harness/telemetry` |
@@ -277,3 +277,10 @@ Owner task: `3.2`.
 | `harness.tool.latency_ms` | integer | Required | `@harness/telemetry` |
 | `harness.tool.outcome` | enum: `ok`, `error`, `denied`, `timeout` | Required | `@harness/telemetry` |
 | `harness.trace.id` | Code | Required | `@harness/telemetry` |
+
+### `harness.sentinel.trip`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.run.id` | Id | Optional | `@harness/telemetry` |
+| `harness.sentinel.trip.count` | integer | Required | `@harness/telemetry` |

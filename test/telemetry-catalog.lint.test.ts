@@ -35,6 +35,7 @@ const expectedLogNames = [
   "harness.safe.subagent_completed",
   "harness.safe.subagent_spawned",
   "harness.safe.tool_call",
+  "harness.sentinel.trip",
 ];
 
 async function importProductionRegistrationSources(root: string): Promise<void> {
