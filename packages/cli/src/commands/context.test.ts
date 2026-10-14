@@ -87,6 +87,7 @@ async function harness() {
   const config = HarnessConfigSchema.parse({});
   const createRuntime = vi.fn((_config: unknown, _overrides?: RuntimeOverrides) => ({
     store,
+    vault: { resolve: () => Promise.resolve(undefined) },
     keys: {
       currentKeyId: () => "fake",
       getKey: () => Promise.resolve(new Uint8Array(32)),

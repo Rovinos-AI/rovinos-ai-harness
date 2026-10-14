@@ -3,10 +3,9 @@
 // Not wired yet: approval escalation WebhookNotifier (17.6 -> #125)
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
 // Not wired yet: vault purge hook (12.6 -> #108)
+// Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: approvals --reveal (17.10 -> #373)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
-// Not wired yet: runtime vault from config (13.12 -> #389)
-// Not wired yet: storage-boundary tokenization (13.8 -> #81)
 import { Command } from "commander";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
@@ -77,6 +76,7 @@ interface Skeleton {
   readonly model: FakeModelPort;
   readonly callsBeforeApproval: string[];
   readonly callsAfterApproval: string[];
+  readonly argsAfterApproval: JsonValue[];
   readonly stdout: string[];
   readonly stderr: string[];
   readonly approvalOutput: string[];
@@ -124,7 +124,11 @@ function completion(
   };
 }
 
-function syntheticTools(callsBeforeApproval: string[], callsAfterApproval: string[]): ToolPort {
+function syntheticTools(
+  callsBeforeApproval: string[],
+  callsAfterApproval: string[],
+  argsAfterApproval: JsonValue[],
+): ToolPort {
   return {
     describe: (toolId) =>
       toolId === ALLOW_TOOL || toolId === ASK_TOOL
@@ -135,8 +139,17 @@ function syntheticTools(callsBeforeApproval: string[], callsAfterApproval: strin
         callsBeforeApproval.push(call.toolId);
       } else if (call.toolId === ASK_TOOL) {
         callsAfterApproval.push(call.toolId);
+        argsAfterApproval.push(call.args);
       }
-      return Promise.resolve({ outcome: "ok", result: { ok: true } });
+      const result =
+        call.toolId === ASK_TOOL &&
+        call.args !== null &&
+        typeof call.args === "object" &&
+        !Array.isArray(call.args) &&
+        typeof call.args.email === "string"
+          ? { ok: true, email: call.args.email }
+          : { ok: true };
+      return Promise.resolve({ outcome: "ok", result });
     },
   };
 }
@@ -170,7 +183,11 @@ async function invokeCli(args: readonly string[], captureOutput = true): Promise
       model: overrides?.model ?? current.model,
       roleConfigDirectory: current.directory,
       secretResolver: overrides?.secretResolver ?? new CompositeSecretResolver(),
-      tool: syntheticTools(current.callsBeforeApproval, current.callsAfterApproval),
+      tool: syntheticTools(
+        current.callsBeforeApproval,
+        current.callsAfterApproval,
+        current.argsAfterApproval,
+      ),
     });
   };
   const code = await main(args, cliContext);
@@ -251,6 +268,7 @@ beforeAll(async () => {
   const ids = new SequentialIdGenerator();
   const callsBeforeApproval: string[] = [];
   const callsAfterApproval: string[] = [];
+  const argsAfterApproval: JsonValue[] = [];
   await writeFile(
     configPath,
     [
@@ -313,6 +331,7 @@ beforeAll(async () => {
     model,
     callsBeforeApproval,
     callsAfterApproval,
+    argsAfterApproval,
     stdout: [],
     stderr: [],
     approvalOutput: [],
@@ -424,6 +443,7 @@ describe("resume", () => {
     expect(result.code).toBe(ExitCode.ok);
     expect(jsonResult(RunResultSchema, result.stdout).status).toBe("completed");
     expect(current.callsAfterApproval).toEqual([ASK_TOOL]);
+    expect(current.argsAfterApproval).toEqual([{ email: current.canary }]);
 
     const store = new SqliteEventStore(current.eventStorePath);
     try {
@@ -437,6 +457,9 @@ describe("resume", () => {
       expect(resolved).toBeGreaterThanOrEqual(0);
       expect(executed).toBeGreaterThan(resolved);
       expect(events.at(-1)).toMatchObject({ type: "run_status_changed", to: "completed" });
+      expect(
+        events.find((event) => event.type === "tool_result" && event.toolId === ASK_TOOL),
+      ).toMatchObject({ result: { ok: true, email: "<EMAIL_1>" } });
       current.toolCallEvents = events.filter(
         (event) => event.type === "tool_intent" || event.type === "tool_result",
       );
@@ -548,14 +571,12 @@ describe("invariants", () => {
     expect(JSON.stringify(current.stderr)).not.toContain(current.canary);
   });
 
-  // Not wired yet: runtime vault + PII tool boundary (13.12 -> #389)
-  it.fails("does not expose the synthetic canary in approval list or show output", () => {
+  it("does not expose the synthetic canary in approval list or show output", () => {
     const current = fixture();
     expect(current.approvalOutput.join("")).not.toContain(current.canary);
   });
 
-  // Not wired yet: PII tool boundary in core.createRuntime (13.12 -> #389)
-  it.fails("does not expose the synthetic canary in tool-call events", () => {
+  it("does not expose the synthetic canary in tool-call events", () => {
     const current = fixture();
     expect(current.toolCallEvents).toBeDefined();
     expect(JSON.stringify(current.toolCallEvents)).not.toContain(current.canary);
@@ -567,18 +588,14 @@ describe("invariants", () => {
     expect(JSON.stringify(current.model.requests)).not.toContain(current.canary);
   });
 
-  // Not wired yet: runtime vault + PII tool boundary (13.12 -> #389)
-  // Not wired yet: storage-boundary tokenization (13.8 -> #81)
-  it.fails("does not persist the synthetic canary in SQLite event-store content bytes", () => {
+  it("does not persist the synthetic canary in SQLite event-store content bytes", () => {
     const current = fixture();
     expect(current.eventStoreBytes).toBeDefined();
     const bytes = Buffer.from(current.eventStoreBytes ?? new Uint8Array()).toString("utf8");
     expect(bytes).not.toContain(current.canary);
   });
 
-  // Not wired yet: runtime vault + PII tool boundary (13.12 -> #389)
-  // Not wired yet: storage-boundary tokenization (13.8 -> #81)
-  it.fails("does not persist the synthetic canary in SQLite snapshot content bytes", () => {
+  it("does not persist the synthetic canary in SQLite snapshot content bytes", () => {
     const current = fixture();
     expect(current.snapshotBytes).toBeDefined();
     const bytes = Buffer.from(current.snapshotBytes ?? new Uint8Array()).toString("utf8");

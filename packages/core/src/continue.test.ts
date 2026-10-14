@@ -98,6 +98,7 @@ function runtimeOptions(
     config: { run: RunConfigSchema.parse(run) },
     overrides: {
       store,
+      transientVault: true,
       clock: new FakeClock(1_000),
       ids: new SequentialIdGenerator(),
       model,

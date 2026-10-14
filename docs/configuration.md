@@ -37,6 +37,10 @@ store:
 
 The Postgres connection URL is resolved only when a store command needs it and is never printed.
 
+The vault remains a local SQLite `vault.db` under the resolved data directory, even when
+`store.dialect` is `postgres`. Separate runtime instances therefore do not share vault mappings;
+the Postgres vault adapter is not wired yet (12.9, #140).
+
 Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. `harness store purge` supports dry runs; it does not yet purge vault mappings for deleted runs (12.6, #108).
 
 Configure `sandbox.runner` to use the isolated runner instead of the development-only in-process backend. Its URL must be an HTTP(S) origin, and `token` must be a secret reference:
@@ -181,6 +185,10 @@ contain the submitted pattern or detected value.
 See [Secret references](./secrets.md) for environment, file, and Key Vault reference forms and resolver behavior.
 
 ## PII tokenization
+
+Runtime tool and storage boundaries are protected by default. Set
+`pii.enabled: false` only for non-production development or testing; runtime
+startup rejects that setting when `NODE_ENV=production`.
 
 `Tokenizer` applies policy before writing detected values to the vault. JSON
 string values are processed without changing structure. Keys remain unchanged:

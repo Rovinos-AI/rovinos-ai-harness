@@ -17,6 +17,7 @@ import { inspectCommand } from "./commands/inspect.js";
 import { resumeCommand } from "./commands/resume.js";
 import { runCommand } from "./commands/run.js";
 import { keysCommand } from "./commands/keys.js";
+import { policyCommand } from "./commands/policy.js";
 import { storeCommand } from "./commands/store.js";
 
 /** Static command registry; later epics add their owned commands here. */
@@ -31,6 +32,7 @@ export const COMMANDS: CommandModule[] = [
   continueCommand,
   doctorCommand,
   keysCommand,
+  policyCommand,
   storeCommand,
 ];
 

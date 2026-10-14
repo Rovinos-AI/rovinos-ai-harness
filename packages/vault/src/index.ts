@@ -4,6 +4,7 @@ export {
   vaultAuditToPiiAction,
   type VaultAuditHandler,
   type VaultAuditPiiAction,
+  type VaultScopeResolver,
 } from "./auditing-resolver.js";
 export { InMemoryVault } from "./memory.js";
 export { SqliteVault } from "./sqlite.js";

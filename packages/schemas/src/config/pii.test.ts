@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { JsonPointerSchema, PiiConfigSchema } from "./pii.js";
 
 describe("JSON Pointer and PII detokenization config", () => {
+  it("enables runtime PII boundaries by default and accepts an explicit disable", () => {
+    expect(PiiConfigSchema.parse({}).enabled).toBe(true);
+    expect(PiiConfigSchema.parse({ enabled: false }).enabled).toBe(false);
+  });
+
   it.each(["", "/to", "/attachments/0/name", "/a~1b", "/a~0b", "/recipients/*"])(
     "accepts pointer %s",
     (pointer) => {

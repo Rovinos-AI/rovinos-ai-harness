@@ -190,6 +190,43 @@ describe("SqliteVault", () => {
     expect(newerSchema).toMatchObject({ code: "vault_migration_newer_than_code" });
   });
 
+  it("opens an existing database read-only without changing it", async () => {
+    const { path } = await temporaryPath();
+    const writable = new SqliteVault(path, keyProvider);
+    const token = await writable.put(runId, Code.parse("email"), "alice@example.test");
+    writable.close();
+    const original = await readFile(path);
+    const readOnly = new SqliteVault(path, keyProvider, Date.now, { readonly: true });
+
+    await expect(readOnly.resolve(runId, token, { boundary: "ui" })).resolves.toBe(
+      "alice@example.test",
+    );
+    await expect(
+      readOnly.put(runId, Code.parse("email"), "bob@example.test"),
+    ).rejects.toMatchObject({
+      code: "vault_unavailable",
+    });
+    readOnly.close();
+
+    expect(await readFile(path)).toEqual(original);
+  });
+
+  it("rejects a pending schema without applying migrations in read-only mode", async () => {
+    const { path } = await temporaryPath();
+    const database = new Database(path);
+    database.close();
+    const original = await readFile(path);
+
+    let error: unknown;
+    try {
+      new SqliteVault(path, keyProvider, Date.now, { readonly: true });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: "schema_migration_pending" });
+    expect(await readFile(path)).toEqual(original);
+  });
+
   it("returns a coded error after its connection is closed", async () => {
     const vault = new SqliteVault(":memory:", keyProvider);
     vault.close();

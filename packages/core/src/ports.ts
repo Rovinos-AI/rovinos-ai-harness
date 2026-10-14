@@ -15,6 +15,7 @@ import type {
   ToolSpec,
 } from "@harness/schemas";
 import type { TranscriptGroup } from "@harness/context";
+import type { VaultAuditHandler } from "@harness/vault";
 import { z } from "zod";
 
 /** Provider-neutral request contract shared with the model gateway. */
@@ -38,6 +39,8 @@ export interface RunContext {
   readonly deadlineTs?: number;
   /** Durable metadata-only PII summary sink supplied by the loop. */
   readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
+  /** Durable metadata-only sink for vault detokenization audits. */
+  readonly recordVaultAudit?: VaultAuditHandler;
 }
 
 /** A tool invocation proposed by the model. */

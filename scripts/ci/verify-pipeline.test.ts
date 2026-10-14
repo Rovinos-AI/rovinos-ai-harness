@@ -109,6 +109,20 @@ it("runs static checks before unit tests", () => {
       (step) => typeof step.script === "string" && step.script.includes("yarn check:licenses"),
     ),
   ).toBe(true);
+  expect(
+    staticSteps.some(
+      (step) =>
+        typeof step.script === "string" &&
+        step.script.includes("node packages/cli/dist/bin.js policy test"),
+    ),
+  ).toBe(true);
+  expect(
+    staticSteps.some(
+      (step) =>
+        typeof step.script === "string" &&
+        step.script.includes("node packages/cli/dist/bin.js policy lint"),
+    ),
+  ).toBe(true);
   const dcoStep = staticSteps.find(
     (step) => typeof step.script === "string" && step.script.includes("yarn check:dco"),
   );

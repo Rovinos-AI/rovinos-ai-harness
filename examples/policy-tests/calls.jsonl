@@ -1,0 +1,3 @@
+{"id":"workspace_read","toolId":"fs.read","args":{"path":"/workspace/README.md"}}
+{"id":"email_send","toolId":"mail.send","args":{"to":"<EMAIL_1>","subject":"Synthetic test"}}
+{"id":"unmatched_write","toolId":"fs.write","args":{"path":"/workspace/output.txt","content":"synthetic"}}
