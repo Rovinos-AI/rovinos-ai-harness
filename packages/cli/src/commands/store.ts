@@ -138,10 +138,10 @@ async function writePurgeResult({
       vaultAdmin === undefined
         ? undefined
         : await purgeExpired({
-        vault: vaultAdmin,
-        clock: context.clock,
-        purgeAfterDays: config.vault.purgeAfterDays,
-      });
+            vault: vaultAdmin,
+            clock: context.clock,
+            purgeAfterDays: config.vault.purgeAfterDays,
+          });
     const output = {
       ...result,
       ...(vaultResult === undefined ? {} : { vault: vaultResult }),
@@ -154,10 +154,7 @@ async function writePurgeResult({
         header.push("vault.examined", "vault.purged", "vault.entriesPurged");
         values.push(vaultResult.examined, vaultResult.purged, vaultResult.entriesPurged);
       }
-      context.out.table([
-        header,
-        values,
-      ]);
+      context.out.table([header, values]);
     }
     if (result.hookFailures > 0) {
       throw new StoreCommandError("retention_hook_failed");

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
-import {
-  emitVaultMarkTerminalFailed,
-} from "@harness/telemetry";
+import { emitVaultMarkTerminalFailed } from "@harness/telemetry";
 import { Code, HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
 import { type EventStore } from "@harness/store";

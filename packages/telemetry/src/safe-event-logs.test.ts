@@ -209,7 +209,10 @@ describe("SafeEvent log projection", () => {
         .map(({ name }) => name)
         .sort(),
     ).toEqual(
-      [...events.map(({ kind }) => `harness.safe.${kind}`), "harness.vault.mark_terminal_failed"].sort(),
+      [
+        ...events.map(({ kind }) => `harness.safe.${kind}`),
+        "harness.vault.mark_terminal_failed",
+      ].sort(),
     );
     const logger = {
       emit: vi.fn<(record: LogRecord) => void>(),
