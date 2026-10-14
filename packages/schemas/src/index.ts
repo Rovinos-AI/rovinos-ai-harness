@@ -142,7 +142,13 @@ export {
 } from "./pii-detection.js";
 export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
 export { HostConfigSchema, type HostConfig } from "./config/host.js";
-export { SandboxConfigSchema, SandboxRunnerUrlSchema } from "./config/sandbox.js";
+export {
+  SandboxConfigSchema,
+  SandboxEgressAllowEntrySchema,
+  SandboxEgressAllowlistSchema,
+  SandboxEgressConfigSchema,
+  SandboxRunnerUrlSchema,
+} from "./config/sandbox.js";
 export { ServeResultSchema, type ServeResult } from "./cli/serve.js";
 export { ContextInspectionSchema, type ContextInspection } from "./cli/context.js";
 export {

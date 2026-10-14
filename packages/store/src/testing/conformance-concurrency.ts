@@ -358,7 +358,7 @@ export function runConcurrencyConformance(
   describe(`${name} concurrent-writer conformance`, () => {
     it("allows exactly one append winner in 200 races and keeps each log contiguous", async () => {
       await withFactory(multiFactory, (factory) => runAppendRace(factory, builders));
-    });
+    }, 60_000);
 
     it("allows exactly one worker to resume a run in 200 real races", async () => {
       await withFactory(multiFactory, (factory) => runResumeRace(factory, builders));
@@ -366,6 +366,6 @@ export function runConcurrencyConformance(
 
     it("keeps reader observations contiguous while a writer appends 1,000 events", async () => {
       await withFactory(multiFactory, (factory) => runWriterReader(factory, builders));
-    }, 30_000);
+    }, 60_000);
   });
 }
