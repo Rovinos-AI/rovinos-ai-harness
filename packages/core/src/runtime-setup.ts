@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
@@ -32,6 +32,7 @@ import type {
 import type { Clock } from "./recorder.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
+const sandboxLogger = diag.createComponentLogger({ namespace: "harness.sandbox" });
 
 /** Runtime dependencies ready to be assembled into the public runtime API. */
 export type RuntimeSetup = RuntimeComposition & {
@@ -192,20 +193,22 @@ function persistedScopeResolver(store: EventStore, scopes: RunScopeRegistry) {
 }
 
 async function createRuntimeSandbox(config: RuntimeConfig, overrides: RuntimeOverrides) {
-  return (
-    overrides.sandboxBackend ??
-    (await createSandboxBackend(config.sandbox, {
-      workspaceRoot: process.cwd(),
-      logger: {
-        log: (code) => {
-          roleConfigLogger.warn(code);
-        },
+  if (overrides.sandboxBackend !== undefined) {
+    return overrides.sandboxBackend;
+  }
+  const workspaceRoot = join(resolveDataDir(process.env, overrides.dataDir), "workspaces");
+  await mkdir(workspaceRoot, { recursive: true, mode: 0o700 });
+  await chmod(workspaceRoot, 0o700);
+  return createSandboxBackend(config.sandbox, {
+    // Keep default commands inside runtime-owned state, never the caller's working tree.
+    workspaceRoot,
+    logger: {
+      log: (code) => {
+        sandboxLogger.warn(code);
       },
-      ...(overrides.secretResolver === undefined
-        ? {}
-        : { secretResolver: overrides.secretResolver }),
-    }))
-  );
+    },
+    ...(overrides.secretResolver === undefined ? {} : { secretResolver: overrides.secretResolver }),
+  });
 }
 
 function createRuntimeTool(

@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { existsSync } from "node:fs";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   Code,
   FakeClock,
@@ -10,6 +14,7 @@ import {
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { InProcessBackend, RemoteSandboxBackend, type SandboxBackend } from "@harness/sandbox";
+import { SqliteVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
 import type { ModelCompletion, ToolPort } from "./ports.js";
@@ -92,6 +97,77 @@ afterEach(() => {
 });
 
 describe("createRuntime sandbox composition", () => {
+  // threat: T-12
+  it("creates a private workspace under the data directory and rejects outside paths", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-workspace-"));
+    const runtime = await createRuntime({ run }, { ...overrides(), dataDir });
+    try {
+      const execution = await runtime.sandboxBackend.exec(
+        Id.parse("00000000000000000000000041"),
+        {
+          argv: [process.execPath, "-e", "process.stdout.write(process.cwd())"],
+          timeoutMs: 2000,
+          limits: { memoryMb: 128, pids: 16, outputBytes: 1024, cpuSeconds: 5 },
+        },
+        new AbortController().signal,
+      );
+      const workspaceRoot = join(dataDir, "workspaces");
+      expect(execution.stdout).toBe(workspaceRoot);
+      expect((await stat(workspaceRoot)).mode & 0o777).toBe(0o700);
+      await expect(
+        runtime.sandboxBackend.exec(
+          Id.parse("00000000000000000000000041"),
+          {
+            argv: [process.execPath, "-e", ""],
+            cwd: "../outside",
+            timeoutMs: 2000,
+            limits: { memoryMb: 128, pids: 16, outputBytes: 1024, cpuSeconds: 5 },
+          },
+          new AbortController().signal,
+        ),
+      ).rejects.toMatchObject({ code: "sandbox_workspace_path_invalid" });
+    } finally {
+      await runtime.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  // threat: T-05
+  // threat: T-18
+  it.each([
+    {
+      sandbox: {
+        egress: { allow: [{ host: "api.example.com", ports: [443] }] },
+      },
+    },
+    {
+      sandbox: {
+        runner: { url: "http://sandbox-runner:8080", token: SecretRefSchema.parse("env:RUNNER") },
+      },
+    },
+  ])("closes the vault when sandbox configuration fails closed", async ({ sandbox }) => {
+    const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-failure-"));
+    const closeVault = vi.spyOn(SqliteVault.prototype, "close");
+    try {
+      await expect(
+        createRuntime(
+          { run, sandbox: SandboxConfigSchema.parse(sandbox) },
+          {
+            dataDir,
+            transientVault: true,
+            clock: new FakeClock(100),
+            ids: new SequentialIdGenerator(),
+          },
+        ),
+      ).rejects.toMatchObject({ code: "sandbox_runner_config_invalid" });
+      expect(closeVault).toHaveBeenCalledOnce();
+      expect(existsSync(join(dataDir, "harness.db"))).toBe(false);
+    } finally {
+      closeVault.mockRestore();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   // threat: T-10
   // threat: T-11
   it.each([false, true])(

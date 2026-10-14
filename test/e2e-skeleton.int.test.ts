@@ -1053,26 +1053,32 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       expect(JSON.stringify(safeEvents)).not.toContain("/bin/echo");
     } finally {
       try {
-        await runtime?.close();
-        if (bridge.listening) {
-          await new Promise<void>((resolve, reject) =>
-            bridge.close((error) => {
-              if (error === undefined) {
-                resolve();
-              } else {
-                reject(error);
-              }
-            }),
-          );
+        try {
+          await runtime?.close();
+        } finally {
+          if (bridge.listening) {
+            await new Promise<void>((resolve, reject) =>
+              bridge.close((error) => {
+                if (error === undefined) {
+                  resolve();
+                } else {
+                  reject(error);
+                }
+              }),
+            );
+          }
         }
-        await invokeCompose(["down", "--volumes", "--remove-orphans"]);
       } finally {
-        if (previousRunnerToken === undefined) {
-          delete process.env.SANDBOX_RUNNER_TOKEN;
-        } else {
-          process.env.SANDBOX_RUNNER_TOKEN = previousRunnerToken;
+        try {
+          await invokeCompose(["down", "--volumes", "--remove-orphans"]);
+        } finally {
+          if (previousRunnerToken === undefined) {
+            delete process.env.SANDBOX_RUNNER_TOKEN;
+          } else {
+            process.env.SANDBOX_RUNNER_TOKEN = previousRunnerToken;
+          }
+          await rm(directory, { recursive: true, force: true });
         }
-        await rm(directory, { recursive: true, force: true });
       }
     }
   }, 240_000);
