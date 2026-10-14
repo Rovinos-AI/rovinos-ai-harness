@@ -27,6 +27,14 @@ export interface AppSpanStampContext {
 type BoundAppSpanStampContext = AppSpanStampContext &
   Required<Pick<AppSpanStampContext, "runId" | "sessionStartTime" | "parent">>;
 
+function hasHostStampBinding(context: AppSpanStampContext): context is BoundAppSpanStampContext {
+  return (
+    context.runId !== undefined &&
+    context.sessionStartTime !== undefined &&
+    context.parent !== undefined
+  );
+}
+
 const identityShape = {
   "harness.app.id": attr.code(),
   "harness.run.id": attr.id(),
@@ -127,11 +135,7 @@ export function stampAppSpan(
   span: AppSpan,
   context: AppSpanStampContext,
 ): AppTelemetryRejectReason | undefined {
-  if (
-    context.runId === undefined ||
-    context.sessionStartTime === undefined ||
-    context.parent === undefined
-  ) {
+  if (!hasHostStampBinding(context)) {
     return "unknown_app";
   }
   if (span.name === "ui.decision" && !context.hasPendingApproval) {

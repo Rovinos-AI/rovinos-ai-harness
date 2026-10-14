@@ -57,6 +57,7 @@ export const AppTelemetryRejectReasonSchema = z.enum([
   "schema",
   "size",
   "rate",
+  "unknown_app",
   "unknown_span",
   "session_cap",
 ]);

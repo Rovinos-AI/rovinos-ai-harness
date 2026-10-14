@@ -13,6 +13,29 @@ const runId = "00000000000000000000000001";
 const appId = "approval";
 const sessionId = "00000000000000000000000002";
 const sessionStartTime = 1_700_000_000_000;
+const missingStampBindings: readonly [
+  string,
+  (context: AppSpanStampContext) => AppSpanStampContext,
+][] = [
+  [
+    "runId",
+    ({ runId: _omitted, ...context }) => {
+      return context;
+    },
+  ],
+  [
+    "sessionStartTime",
+    ({ sessionStartTime: _omitted, ...context }) => {
+      return context;
+    },
+  ],
+  [
+    "parent",
+    ({ parent: _omitted, ...context }) => {
+      return context;
+    },
+  ],
+];
 
 beforeAll(() => {
   trace.setGlobalTracerProvider(collector.provider);
@@ -166,14 +189,14 @@ describe("stampAppSpan", () => {
     expect(collector.getFinishedSpans()).toHaveLength(initialCount);
   });
 
-  it.each(["runId", "sessionStartTime", "parent"] as const)(
+  it.each(missingStampBindings)(
     "rejects spans when the host stamp is missing %s",
-    (field) => {
-      const context = createStampContext(new FakeClock(sessionStartTime + 100), "b".repeat(16));
-      delete context[field];
-
+    (_field, omitBinding) => {
       expect(
-        stampAppSpan({ name: "ui.render", startOffsetMs: 0, durationMs: 1 }, context),
+        stampAppSpan(
+          { name: "ui.render", startOffsetMs: 0, durationMs: 1 },
+          omitBinding(createStampContext(new FakeClock(sessionStartTime + 100), "b".repeat(16))),
+        ),
       ).toBe("unknown_app");
     },
   );
