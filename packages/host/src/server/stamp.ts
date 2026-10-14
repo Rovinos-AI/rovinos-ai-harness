@@ -16,13 +16,16 @@ interface Clock {
 /** Trusted host state used to stamp a validated span received from an MCP App. */
 export interface AppSpanStampContext {
   readonly appId: Code;
-  readonly runId: Id;
+  readonly runId?: Id;
   readonly sessionId: Id;
-  readonly sessionStartTime: number;
-  readonly parent: SpanContext;
+  readonly sessionStartTime?: number;
+  readonly parent?: SpanContext;
   readonly clock: Clock;
   readonly hasPendingApproval: boolean;
 }
+
+type BoundAppSpanStampContext = AppSpanStampContext &
+  Required<Pick<AppSpanStampContext, "runId" | "sessionStartTime" | "parent">>;
 
 const identityShape = {
   "harness.app.id": attr.code(),
@@ -68,7 +71,7 @@ export const UI_INTERACTION_SPAN: SpanDefinition<SpanDefinitionShape> = defineSp
 
 function startStampedSpan(
   span: AppSpan,
-  context: AppSpanStampContext,
+  context: BoundAppSpanStampContext,
   timing: {
     readonly startTime: Date;
     readonly endTime: Date;
@@ -124,6 +127,13 @@ export function stampAppSpan(
   span: AppSpan,
   context: AppSpanStampContext,
 ): AppTelemetryRejectReason | undefined {
+  if (
+    context.runId === undefined ||
+    context.sessionStartTime === undefined ||
+    context.parent === undefined
+  ) {
+    return "unknown_app";
+  }
   if (span.name === "ui.decision" && !context.hasPendingApproval) {
     return "unknown_span";
   }

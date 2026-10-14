@@ -173,7 +173,7 @@ function ingestSpan(
       return false;
     }
     if (stamp === undefined) {
-      reject("schema", onRejected);
+      reject("unknown_app", onRejected);
       return false;
     }
     if (acceptSpan !== undefined) {

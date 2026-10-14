@@ -166,6 +166,18 @@ describe("stampAppSpan", () => {
     expect(collector.getFinishedSpans()).toHaveLength(initialCount);
   });
 
+  it.each(["runId", "sessionStartTime", "parent"] as const)(
+    "rejects spans when the host stamp is missing %s",
+    (field) => {
+      const context = createStampContext(new FakeClock(sessionStartTime + 100), "b".repeat(16));
+      delete context[field];
+
+      expect(
+        stampAppSpan({ name: "ui.render", startOffsetMs: 0, durationMs: 1 }, context),
+      ).toBe("unknown_app");
+    },
+  );
+
   it("fails closed when host timing is invalid or the host clock fails", () => {
     const span = { name: "ui.render" as const, startOffsetMs: 0, durationMs: 1 };
     const parentSpanId = "b".repeat(16);

@@ -38,7 +38,7 @@ describe("ingestBatch", () => {
     );
 
     expect(acknowledgment).toEqual({ accepted: 0, dropped: 1 });
-    expect(reasons).toEqual(["schema"]);
+    expect(reasons).toEqual(["unknown_app"]);
     expect(collector.getFinishedSpans()).toHaveLength(initialCount);
   });
 
@@ -133,6 +133,17 @@ describe("ingestBatch", () => {
 
     expect(acknowledgment).toEqual({ accepted: 1, dropped: 1 });
     expect(reasons).toEqual(["session_cap"]);
+  });
+
+  it("reports a missing host stamp as an unknown app", () => {
+    const reasons: string[] = [];
+    expect(
+      ingestBatch(
+        { spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 1 }] },
+        { onRejected: (reason) => reasons.push(reason) },
+      ),
+    ).toEqual({ accepted: 0, dropped: 1 });
+    expect(reasons).toEqual(["unknown_app"]);
   });
 
   it("rejects malformed batches, extra keys, and arrays over fifty spans", () => {
