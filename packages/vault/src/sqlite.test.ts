@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import Database from "better-sqlite3";
 import { aesGcmEncrypt, hmacSha256 } from "@harness/crypto";
 import { Code, FakeClock, Id, type KeyProvider } from "@harness/schemas";
-import type { VaultRunReader } from "@harness/telemetry";
+import { VaultRunView, type VaultRunReader } from "@harness/telemetry";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryVault } from "./memory.js";
 import { runVaultConformance } from "./conformance.test-helpers.js";
@@ -428,6 +428,26 @@ describe("SqliteVault", () => {
     expect(memoryReader).toBeInstanceOf(InMemoryVault);
     expect(sqliteReader).toBe(sqliteVault);
     sqliteVault.close();
+  });
+
+  it("lists scope-key encrypted values with entity types for telemetry readers", async () => {
+    const vault = new SqliteVault(":memory:", keyProvider);
+    try {
+      await vault.put(runId, "email", "alice@example.test");
+      await vault.put(runId, "phone", "+12025550123");
+
+      await expect(vault.listRawValueEntries(runId)).resolves.toEqual([
+        { entityType: "email", rawValue: "alice@example.test" },
+        { entityType: "phone", rawValue: "+12025550123" },
+      ]);
+
+      const values = await new VaultRunView(vault).valuesFor(runId);
+      expect(values.values).toEqual(["alice@example.test", "+12025550123"]);
+      expect(values.entityTypesForValue(0)).toEqual([Code.parse("email")]);
+      expect(values.entityTypesForValue(1)).toEqual([Code.parse("phone")]);
+    } finally {
+      vault.close();
+    }
   });
 
   it("resolves migrations relative to the compiled module location", async () => {
