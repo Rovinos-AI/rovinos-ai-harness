@@ -100,7 +100,7 @@ describe("context strategy comparison", () => {
     expect(comparisons).toMatchObject([
       {
         strategy: "naive",
-        strategyVersion: "v4",
+        strategyVersion: "v5",
         estimatedTokens: 4,
         messageCount: 4,
         droppedGroups: 0,
@@ -109,7 +109,7 @@ describe("context strategy comparison", () => {
       },
       {
         strategy: "sliding_window",
-        strategyVersion: "v3",
+        strategyVersion: "v4",
         estimatedTokens: 3,
         messageCount: 3,
         droppedGroups: 2,

@@ -533,7 +533,9 @@ describe("AnthropicAdapter", () => {
         tools: z.array(JsonValue),
       })
       .parse(call.getRequestBody());
-    expect(requestBody.system).toEqual([{ type: "text", text: "system rule" }]);
+    expect(requestBody.system).toEqual([
+      { type: "text", text: "system rule", cache_control: { type: "ephemeral" } },
+    ]);
     expect(requestBody.tool_choice).toEqual({ type: "tool", name: "lookup" });
     expect(requestBody.tools).toHaveLength(1);
 
