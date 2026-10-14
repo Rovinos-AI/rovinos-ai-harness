@@ -1,6 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { builtinModules } from "node:module";
 
+export const restrictedProperties = [
+  {
+    object: "JSON",
+    property: "parse",
+    message: "Parse untrusted JSON through parseJson(schema, text).",
+  },
+];
+export const domProperties = [
+  { property: "innerHTML", message: "Use textContent or safe DOM APIs." },
+  { property: "outerHTML", message: "Use safe DOM APIs." },
+  { property: "insertAdjacentHTML", message: "Use safe DOM APIs." },
+  { object: "document", property: "write", message: "Use safe DOM APIs." },
+];
+
 const nodeModuleNames = [
   ...new Set(
     builtinModules.flatMap((moduleName) => {
@@ -24,6 +38,29 @@ export function browserRestrictedImports(restrictedPatterns) {
       ],
     },
   ];
+}
+
+/** Creates a browser import restriction that permits type-only imports from one package. */
+export function browserTypeOnlyImportConfiguration(restrictedPatterns, moduleName, files) {
+  const [severity, options] = browserRestrictedImports(restrictedPatterns);
+  return {
+    files,
+    rules: {
+      "no-restricted-imports": [
+        severity,
+        {
+          ...options,
+          paths: [
+            {
+              name: moduleName,
+              allowTypeImports: true,
+              message: `Import only types from ${moduleName} in browser code.`,
+            },
+          ],
+        },
+      ],
+    },
+  };
 }
 
 /** Creates CLI output stream restrictions and permits the output boundary. */

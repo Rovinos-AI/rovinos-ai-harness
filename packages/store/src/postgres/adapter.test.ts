@@ -774,7 +774,9 @@ it("resumes encrypted Postgres event and snapshot rotation", async () => {
     getKey: (keyId) => {
       const key = rotationKeys.get(keyId);
       return key === undefined
-        ? Promise.reject(Object.assign(new Error("Synthetic key not found"), { code: "key_not_found" }))
+        ? Promise.reject(
+            Object.assign(new Error("Synthetic key not found"), { code: "key_not_found" }),
+          )
         : Promise.resolve(Uint8Array.from(key));
     },
   };

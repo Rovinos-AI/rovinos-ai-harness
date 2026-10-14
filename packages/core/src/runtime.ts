@@ -307,6 +307,7 @@ function composeRuntime(
     store,
     vault: vaultResolver,
     keys,
+    sandboxBackend: options.sandboxBackend,
     clock,
     ids,
     ...createRuntimeRunMethods(options, tool, runWithControl),
@@ -344,6 +345,7 @@ function composeRuntime(
         ...(options.closeToolPort === undefined ? {} : { closeToolPort: options.closeToolPort }),
         vault,
         keys,
+        sandboxBackend: options.sandboxBackend,
         flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,
       }),
   };

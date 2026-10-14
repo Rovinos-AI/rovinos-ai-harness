@@ -46,9 +46,7 @@ export interface VaultKeyRotation {
   countRowsByKey(): Promise<readonly VaultKeyRowCount[]>;
 }
 
-const cursorSchema = z
-  .object({ runId: z.string().min(1), token: z.string().min(1) })
-  .strict();
+const cursorSchema = z.object({ runId: z.string().min(1), token: z.string().min(1) }).strict();
 
 /** Decode a stable, opaque cursor for vault entry ordering. */
 export function decodeVaultRotationCursor(cursor: string): z.infer<typeof cursorSchema> {

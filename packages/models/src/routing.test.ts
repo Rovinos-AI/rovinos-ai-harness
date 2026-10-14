@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
 import { ModelsConfigSchema, type ModelRequest } from "@harness/schemas";
+import { attr, defineSpan, withSpan } from "@harness/telemetry";
+import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import { context, trace } from "@opentelemetry/api";
 import { z } from "zod";
 import { ModelOutputInvalidError, ProviderError } from "./errors.js";
 import { createRoutingModelGateway, RoutingProviderUnknownError } from "./routing.js";
@@ -234,6 +237,21 @@ describe("RoutingModelGateway", () => {
   });
 
   it("adds failed repair usage and latency to the successful fallback response", async () => {
+    const provider = createTestTracerProvider();
+    trace.setGlobalTracerProvider(provider);
+    context.setGlobalContextManager(createTestContextManager());
+    const spanDefinition = defineSpan(
+      "harness.model_routing_accounting_test",
+      {
+        "harness.run.id": attr.id(),
+        "harness.model.attempts": attr.optional(attr.int()),
+        "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
+        "harness.model.input_tokens": attr.optional(attr.nonnegativeInt()),
+        "harness.model.output_tokens": attr.optional(attr.nonnegativeInt()),
+        "harness.model.cost_micros": attr.optional(attr.nonnegativeInt()),
+      },
+      { taskId: "14.14", packageName: "@harness/models" },
+    );
     const invalidResult: ProviderResult = {
       parts: [{ type: "text", text: '{"answer":"invalid"}' }],
       usage: { inputTokens: 2, outputTokens: 4, costMicros: 3 },
@@ -251,7 +269,20 @@ describe("RoutingModelGateway", () => {
     );
     const gateway = createRoutingModelGateway(
       [adapter("primary", primaryComplete), adapter("secondary", fallbackComplete)],
-      { ...dependencies, enforcement: { maxRepairs: 1 } },
+      {
+        ...dependencies,
+        enforcement: { maxRepairs: 1 },
+        pricing: {
+          "primary/model-one": {
+            inputMicrosPerMTok: 1_000_000,
+            outputMicrosPerMTok: 1_000_000,
+          },
+          "secondary/model-two": {
+            inputMicrosPerMTok: 2_000_000,
+            outputMicrosPerMTok: 2_000_000,
+          },
+        },
+      },
       routing({
         default: [
           { provider: "primary", model: "model-one" },
@@ -260,21 +291,45 @@ describe("RoutingModelGateway", () => {
       }),
     );
 
-    const response = await gateway.complete(request, {
-      runId: request.requestId,
-      signal: new AbortController().signal,
-      outputSchema: z.object({ answer: z.number() }),
-    });
+    try {
+      await withSpan(spanDefinition, { "harness.run.id": request.requestId }, async (span) => {
+        const setAttribute = vi.spyOn(span, "setAttribute");
+        const response = await context.with(trace.setSpan(context.active(), span), () =>
+          gateway.complete(request, {
+            runId: request.requestId,
+            signal: new AbortController().signal,
+            outputSchema: z.object({ answer: z.number() }),
+          }),
+        );
 
-    expect(primaryComplete).toHaveBeenCalledTimes(2);
-    expect(response).toMatchObject({
-      provider: "secondary",
-      model: "model-two",
-      fallbackDepth: 1,
-      usage: { inputTokens: 7, outputTokens: 13, costMicros: 11 },
-      latencyMs: 16,
-      repairAttempts: 1,
-    });
+        expect(primaryComplete).toHaveBeenCalledTimes(2);
+        expect(response).toMatchObject({
+          provider: "secondary",
+          model: "model-two",
+          fallbackDepth: 1,
+          usage: { inputTokens: 7, outputTokens: 13, costMicros: 28 },
+          latencyMs: 16,
+          repairAttempts: 1,
+        });
+        expect(
+          setAttribute.mock.calls.filter(([name]) =>
+            [
+              "harness.model.input_tokens",
+              "harness.model.output_tokens",
+              "harness.model.cost_micros",
+            ].includes(name),
+          ),
+        ).toEqual([
+          ["harness.model.input_tokens", 7],
+          ["harness.model.output_tokens", 13],
+          ["harness.model.cost_micros", 28],
+        ]);
+      });
+    } finally {
+      await provider.shutdown();
+      trace.disable();
+      context.disable();
+    }
   });
 
   it("retains usage when a later repair call fails after an earlier response", async () => {
@@ -336,7 +391,15 @@ describe("RoutingModelGateway", () => {
     const secondary = adapter("secondary", () => Promise.reject(finalError));
     const gateway = createRoutingModelGateway(
       [primary, secondary],
-      dependencies,
+      {
+        ...dependencies,
+        pricing: {
+          "primary/model-one": {
+            inputMicrosPerMTok: 1_000_000,
+            outputMicrosPerMTok: 2_000_000,
+          },
+        },
+      },
       routing({
         default: [
           { provider: "primary", model: "model-one" },
@@ -352,7 +415,7 @@ describe("RoutingModelGateway", () => {
       }),
     ).rejects.toMatchObject({
       code: "provider_unavailable",
-      usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+      usage: { inputTokens: 2, outputTokens: 3, costMicros: 8 },
       latencyMs: 5,
     });
   });

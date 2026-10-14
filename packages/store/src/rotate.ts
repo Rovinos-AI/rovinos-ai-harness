@@ -48,9 +48,7 @@ export interface StoreKeyRotation {
 
 const rotationCursorSchema = z.discriminatedUnion("table", [
   z.object({ table: z.literal("events"), after: z.number().int().nonnegative() }).strict(),
-  z
-    .object({ table: z.literal("snapshots"), after: z.string().optional() })
-    .strict(),
+  z.object({ table: z.literal("snapshots"), after: z.string().optional() }).strict(),
 ]);
 
 /** Inferred event-store rotation cursor. */
@@ -59,11 +57,9 @@ export type StoreRotationCursor = z.infer<typeof rotationCursorSchema>;
 /** Parse and validate an opaque event-store rotation cursor. */
 export function decodeStoreRotationCursor(cursor: string): StoreRotationCursor {
   try {
-    return parseJson(
-      rotationCursorSchema,
-      Buffer.from(cursor, "base64url").toString("utf8"),
-      { maxBytes: 1024 },
-    );
+    return parseJson(rotationCursorSchema, Buffer.from(cursor, "base64url").toString("utf8"), {
+      maxBytes: 1024,
+    });
   } catch {
     throw new StoreUnavailableError();
   }

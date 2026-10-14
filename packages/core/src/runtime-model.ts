@@ -124,6 +124,7 @@ export async function createConfiguredModelPort(
       enforcement: models.enforcement,
       maxConcurrent: models.maxConcurrent,
       requestsPerMinute,
+      pricing: models.pricing,
     },
     models.routing,
   );

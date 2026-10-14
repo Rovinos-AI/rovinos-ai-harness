@@ -18,8 +18,8 @@ describe("key command result schemas", () => {
       keyId: "key-a",
       status: "safe_to_remove",
     });
-    expect(
-      KeyRetireResultSchema.safeParse({ keyId: "key-a", status: "retired" }).success,
-    ).toBe(false);
+    expect(KeyRetireResultSchema.safeParse({ keyId: "key-a", status: "retired" }).success).toBe(
+      false,
+    );
   });
 });

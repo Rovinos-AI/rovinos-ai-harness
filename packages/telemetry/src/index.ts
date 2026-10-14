@@ -17,12 +17,14 @@ export {
   emitSafeEventToDefaultLogger,
   emitKeysRotated,
   emitVaultMarkTerminalFailed,
+  emitPricingMissing,
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
 export {
   countDroppedTelemetry,
   countHostAppRejected,
   countHostAppSpansAccepted,
+  countModelUsage,
   countMcpDiscoveryFailed,
   countPolicyDecision,
   METRIC_ALLOWLIST,

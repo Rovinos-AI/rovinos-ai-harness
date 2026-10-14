@@ -15,6 +15,7 @@ import { SafeEvent } from "./safe-event.js";
 import {
   emitKeysRotated,
   emitSafeEvent,
+  emitPricingMissing,
   emitVaultMarkTerminalFailed,
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
@@ -142,6 +143,22 @@ describe("SafeEvent log projection", () => {
     expect(record?.attributes).toEqual({
       "harness.run.id": runId,
       "harness.error.code": "vault_unavailable",
+    });
+  });
+
+  it("emits missing model pricing as a bounded provider/model diagnostic", () => {
+    const emit = vi.fn<(record: LogRecord) => void>();
+    const logger = { emit, enabled: () => true } satisfies Logger;
+
+    emitPricingMissing(Code.parse("sample"), Code.parse("model_a"), logger);
+
+    const record = emit.mock.calls[0]?.[0];
+    expect(record?.body).toBe("pricing_missing");
+    expect(record?.eventName).toBe("harness.model.pricing_missing");
+    expect(record?.severityNumber).toBe(SeverityNumber.WARN);
+    expect(record?.attributes).toEqual({
+      "harness.model.provider": "sample",
+      "harness.model.name": "model_a",
     });
   });
 

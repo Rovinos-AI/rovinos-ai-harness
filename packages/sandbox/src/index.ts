@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+export { createSandboxBackend } from "./factory.js";
+export type { SandboxBackendDependencies } from "./factory.js";
 export { SandboxExecTool, ExecToolInputSchema } from "./exec-tool.js";
 export type { SandboxExecToolOptions } from "./exec-tool.js";
 export {

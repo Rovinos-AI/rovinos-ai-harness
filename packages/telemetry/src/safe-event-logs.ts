@@ -23,6 +23,10 @@ const keysRotatedDefinition = defineLogRecord("harness.keys.rotated", {
   "harness.keys.vault.rows_rotated": attr.nonnegativeInt(),
   "harness.keys.store.rows_rotated": attr.nonnegativeInt(),
 });
+const pricingMissingDefinition = defineLogRecord("harness.model.pricing_missing", {
+  "harness.model.provider": attr.code(),
+  "harness.model.name": attr.code(),
+});
 
 /** SafeEvent fields mapped to bounded OpenTelemetry attribute names. */
 export const safeEventLogAttributeMap = {
@@ -375,4 +379,27 @@ export function emitKeysRotated(
     attributes,
     context: otelContext.active(),
   });
+}
+
+/** Emits a bounded diagnostic when a model has no configured price. */
+export function emitPricingMissing(
+  provider: Code,
+  model: Code,
+  logger: Logger = safeEventLogger,
+): void {
+  const attributes = pricingMissingDefinition.schema.parse({
+    "harness.model.provider": provider,
+    "harness.model.name": model,
+  });
+  try {
+    logger.emit({
+      body: Code.parse("pricing_missing"),
+      eventName: pricingMissingDefinition.name,
+      severityNumber: SeverityNumber.WARN,
+      attributes,
+      context: otelContext.active(),
+    });
+  } catch {
+    return;
+  }
 }
