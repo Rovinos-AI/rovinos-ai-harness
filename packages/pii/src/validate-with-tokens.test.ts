@@ -24,7 +24,7 @@ describe("validateWithTokens", () => {
     const token = await vault.put(runId, "email", "alice@example.test");
     const tokenized: JsonValue = { email: token };
     const original = structuredClone(tokenized);
-    const schema = z.object({ email: z.string().email() }).strict();
+    const schema = z.object({ email: z.email() }).strict();
 
     const result = await validateWithTokens(schema, tokenized, { runId, resolver });
 
@@ -51,7 +51,7 @@ describe("validateWithTokens", () => {
     const raw = "not-an-email-canary";
     const token = await vault.put(runId, "email", raw);
     const result = await validateWithTokens(
-      z.object({ email: z.string().email() }),
+      z.object({ email: z.email() }),
       { email: token },
       { runId, resolver },
     );
@@ -67,7 +67,7 @@ describe("validateWithTokens", () => {
     const { audits, resolver } = makeResolver();
     const token = "<EMAIL_9>";
 
-    const result = await validateWithTokens(z.string().email(), token, { runId, resolver });
+    const result = await validateWithTokens(z.email(), token, { runId, resolver });
 
     expect(result).toEqual({
       ok: false,
@@ -91,11 +91,11 @@ describe("validateWithTokens", () => {
     const token = await vault.put(runId, "email", raw);
     const tokenized: JsonValue = { email: token };
 
-    const result = await validateWithTokens(
-      z.object({ email: z.string().email() }),
-      tokenized,
-      { runId, resolver, wantRaw: true },
-    );
+    const result = await validateWithTokens(z.object({ email: z.email() }), tokenized, {
+      runId,
+      resolver,
+      wantRaw: true,
+    });
 
     expect(result).toEqual({ ok: true, tokenized, raw: { email: raw } });
     expect(audits).toMatchObject([
@@ -112,7 +112,7 @@ describe("validateWithTokens", () => {
       entries: [{ email: first, note: `Send ${first} or ${second}`, untouched: 7 }],
     };
     const schema = z.object({
-      entries: z.array(z.object({ email: z.string().email(), note: z.string(), untouched: z.number() })),
+      entries: z.array(z.object({ email: z.email(), note: z.string(), untouched: z.number() })),
     });
 
     const result = await validateWithTokens(schema, tokenized, {
@@ -144,7 +144,7 @@ describe("validateWithTokens", () => {
     const token = await vault.put(runId, "email", "resolver-failure-canary@example.test");
     vi.spyOn(vault, "resolve").mockRejectedValue(new Error("resolver-failure-canary@example.test"));
 
-    const result = await validateWithTokens(z.string().email(), token, { runId, resolver });
+    const result = await validateWithTokens(z.email(), token, { runId, resolver });
 
     expect(result).toEqual({
       ok: false,

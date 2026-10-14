@@ -2,6 +2,7 @@
 import { Code, JsonValue, safeParseJson, type ModelRequest, type Part } from "@harness/schemas";
 import type { z } from "zod";
 import {
+  applyValueTransform,
   EnforcementIssueSchema,
   enforcementIssuesFromError,
   parseEnforcementResult,
@@ -56,7 +57,7 @@ export async function enforceNativeOutput<Schema extends z.ZodType>(
     });
   }
   if (valueTransform !== undefined) {
-    const transformed = await valueTransform(outputSchema, json.data);
+    const transformed = await applyValueTransform(valueTransform, outputSchema, json.data);
     if (!transformed.ok) {
       return parseEnforcementResult(outputSchema, {
         valid: false,

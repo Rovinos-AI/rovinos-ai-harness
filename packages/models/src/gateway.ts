@@ -74,7 +74,7 @@ export interface ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType>
   readonly signal: AbortSignal;
   readonly deadlineTs?: number;
   readonly outputSchema?: OutputSchema;
-  /** Optional asynchronous validator that preserves the tokenized model output. */
+  /** Optional async validator that preserves the tokenized model output. */
   readonly valueTransform?: ValueTransform;
 }
 
@@ -166,16 +166,16 @@ function prepareRequestForRung(
 
 async function enforceProviderOutput<OutputSchema extends z.ZodType>(
   parts: ModelResponse["parts"],
-  outputSchema: OutputSchema | undefined,
+  context: ModelGatewayContext<OutputSchema>,
   rung: EnforcementRung | undefined,
-  valueTransform?: ValueTransform,
 ): Promise<{
   readonly parts: ModelResponse["parts"];
   readonly result?: EnforcementResult<OutputSchema>;
 }> {
-  if (outputSchema === undefined || rung === undefined) {
+  if (context.outputSchema === undefined || rung === undefined) {
     return { parts };
   }
+  const { outputSchema, valueTransform } = context;
   if (rung === "native") {
     const hasToolCall = parts.some((part) => part.type === "tool_call");
     return {
@@ -341,12 +341,7 @@ export class ModelGateway {
         aggregateUsage = aggregateModelUsage(aggregateUsage, result.usage);
         aggregateLatencyMs += result.latencyMs;
 
-        const enforced = await enforceProviderOutput(
-          result.parts,
-          context.outputSchema,
-          prepared.rung,
-          context.valueTransform,
-        );
+        const enforced = await enforceProviderOutput(result.parts, context, prepared.rung);
         const enforcement = enforced.result;
         if (enforcement !== undefined && "issues" in enforcement) {
           if (repairAttempts >= this.maxRepairs) {

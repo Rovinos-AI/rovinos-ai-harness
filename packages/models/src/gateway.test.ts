@@ -677,14 +677,17 @@ describe("ModelGateway", () => {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
     });
-    const outputSchema = z.object({ email: z.string().email() });
+    const outputSchema = z.object({ email: z.email() });
     let transformedValue: JsonValueType | undefined;
-    const valueTransform: ValueTransform = async (schema, value) => {
+    const valueTransform: ValueTransform = (schema, value) => {
       transformedValue = value;
       if (!schema.safeParse(raw).success) {
-        return { ok: false, issues: [{ path: ["email"], code: "invalid_format" }] };
+        return Promise.resolve({
+          ok: false,
+          issues: [{ path: ["email"], code: "invalid_format" }],
+        });
       }
-      return { ok: true, tokenized: value };
+      return Promise.resolve({ ok: true, tokenized: value });
     };
 
     const completion = await gateway.complete(
@@ -708,7 +711,7 @@ describe("ModelGateway", () => {
 
   it("repairs unresolvable tokens from paths only", async () => {
     const tokenized: JsonValueType = { email: "<EMAIL_9>" };
-    const complete = vi.fn(() =>
+    const complete = vi.fn((_request: ModelRequest) =>
       Promise.resolve({
         parts: [{ type: "text" as const, text: JSON.stringify(tokenized) }],
         usage: { inputTokens: 1, outputTokens: 1 },
@@ -722,11 +725,13 @@ describe("ModelGateway", () => {
       enforcement: { maxRepairs: 1 },
     });
     let validationAttempts = 0;
-    const valueTransform: ValueTransform = async (_schema, value) => {
+    const valueTransform: ValueTransform = (_schema, value) => {
       validationAttempts += 1;
-      return validationAttempts === 1
-        ? { ok: false, issues: [{ path: ["email"], code: "pii_token_unresolvable" }] }
-        : { ok: true, tokenized: value };
+      return Promise.resolve(
+        validationAttempts === 1
+          ? { ok: false, issues: [{ path: ["email"], code: "pii_token_unresolvable" }] }
+          : { ok: true, tokenized: value },
+      );
     };
 
     const completion = await gateway.complete(
@@ -734,7 +739,7 @@ describe("ModelGateway", () => {
       {
         runId: request.requestId,
         signal: new AbortController().signal,
-        outputSchema: z.object({ email: z.string().email() }),
+        outputSchema: z.object({ email: z.email() }),
         valueTransform,
       },
     );

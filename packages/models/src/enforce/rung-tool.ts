@@ -2,6 +2,7 @@
 import { Code, JsonValue, type ModelRequest, type Part } from "@harness/schemas";
 import type { z } from "zod";
 import {
+  applyValueTransform,
   EnforcementIssueSchema,
   enforcementIssuesFromError,
   parseEnforcementResult,
@@ -57,37 +58,12 @@ export async function enforceToolOutput<Schema extends z.ZodType>(
   }
 
   if (valueTransform !== undefined) {
-    const transformed = await valueTransform(outputSchema, calls[0].args);
-    if (!transformed.ok) {
-      return {
-        parts: withoutSyntheticCall,
-        result: parseEnforcementResult(outputSchema, {
-          valid: false,
-          issues: transformed.issues,
-          rungUsed: "tool",
-        }),
-      };
-    }
-
-    const jsonValue = JsonValue.safeParse(transformed.tokenized);
-    if (!jsonValue.success) {
-      return {
-        parts: withoutSyntheticCall,
-        result: parseEnforcementResult(outputSchema, {
-          valid: false,
-          issues: enforcementIssuesFromError(jsonValue.error),
-          rungUsed: "tool",
-        }),
-      };
-    }
-    return {
-      parts: [...withoutSyntheticCall, { type: "text", text: canonicalJson(jsonValue.data) }],
-      result: parseTokenizedEnforcementResult<Schema>({
-        value: jsonValue.data,
-        valid: true,
-        rungUsed: "tool",
-      }),
-    };
+    return enforceTransformedToolOutput(
+      calls[0].args,
+      withoutSyntheticCall,
+      outputSchema,
+      valueTransform,
+    );
   }
 
   const parsed = outputSchema.safeParse(calls[0].args);
@@ -118,6 +94,44 @@ export async function enforceToolOutput<Schema extends z.ZodType>(
     parts: [...withoutSyntheticCall, { type: "text", text: canonicalJson(jsonValue.data) }],
     result: parseEnforcementResult(outputSchema, {
       value: parsed.data,
+      valid: true,
+      rungUsed: "tool",
+    }),
+  };
+}
+
+async function enforceTransformedToolOutput<Schema extends z.ZodType>(
+  args: JsonValue,
+  parts: Part[],
+  outputSchema: Schema,
+  valueTransform: ValueTransform,
+): Promise<{ readonly parts: Part[]; readonly result: EnforcementResult<Schema> }> {
+  const transformed = await applyValueTransform(valueTransform, outputSchema, args);
+  if (!transformed.ok) {
+    return {
+      parts,
+      result: parseEnforcementResult(outputSchema, {
+        valid: false,
+        issues: transformed.issues,
+        rungUsed: "tool",
+      }),
+    };
+  }
+  const jsonValue = JsonValue.safeParse(transformed.tokenized);
+  if (!jsonValue.success) {
+    return {
+      parts,
+      result: parseEnforcementResult(outputSchema, {
+        valid: false,
+        issues: enforcementIssuesFromError(jsonValue.error),
+        rungUsed: "tool",
+      }),
+    };
+  }
+  return {
+    parts: [...parts, { type: "text", text: canonicalJson(jsonValue.data) }],
+    result: parseTokenizedEnforcementResult<Schema>({
+      value: jsonValue.data,
       valid: true,
       rungUsed: "tool",
     }),

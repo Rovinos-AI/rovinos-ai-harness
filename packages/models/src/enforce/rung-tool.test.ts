@@ -208,7 +208,10 @@ describe("forced-tool structured output", () => {
   });
 
   it("returns structured issues and strips the synthetic call for invalid args", async () => {
-    const response = await enforceToolOutput([{ ...resultCall, args: { answer: 2 } }], outputSchema);
+    const response = await enforceToolOutput(
+      [{ ...resultCall, args: { answer: 2 } }],
+      outputSchema,
+    );
     expect(response.result.valid).toBe(false);
     expect(response.parts).toEqual([]);
   });
@@ -243,8 +246,8 @@ describe("forced-tool structured output", () => {
 
     const response = await enforceToolOutput(
       [{ ...resultCall, args: tokenized }],
-      z.object({ answer: z.string().email() }),
-      async (_schema, value) => ({ ok: true, tokenized: value }),
+      z.object({ answer: z.email() }),
+      (_schema, value) => Promise.resolve({ ok: true, tokenized: value }),
     );
 
     expect(response.result).toEqual({

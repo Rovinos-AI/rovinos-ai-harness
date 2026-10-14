@@ -104,8 +104,8 @@ describe("prompt-and-validate structured output", () => {
     await expect(
       enforcePromptOutput(
         [{ type: "text", text: JSON.stringify(tokenized) }],
-        z.object({ answer: z.string().email() }),
-        async (_schema, value) => ({ ok: true, tokenized: value }),
+        z.object({ answer: z.email() }),
+        (_schema, value) => Promise.resolve({ ok: true, tokenized: value }),
       ),
     ).resolves.toEqual({ value: tokenized, valid: true, rungUsed: "prompt" });
   });

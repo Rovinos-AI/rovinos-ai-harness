@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Code,
-  JsonValue as JsonValueSchema,
-  type Id,
-  type JsonValue,
-} from "@harness/schemas";
+import { Code, JsonValue as JsonValueSchema, type Id, type JsonValue } from "@harness/schemas";
 import { findTokens, type AuditingVaultResolver } from "@harness/vault";
-import type { z } from "zod";
+import { z } from "zod";
 
 /** A value-free validation issue. */
-export interface TokenValidationIssue {
-  readonly path: (string | number)[];
-  readonly code: Code;
-}
+export const TokenValidationIssueSchema = z
+  .object({
+    path: z.array(z.union([z.string(), z.number()])),
+    code: Code,
+  })
+  .strict();
+
+/** Inferred value-free validation issue. */
+export type TokenValidationIssue = z.infer<typeof TokenValidationIssueSchema>;
 
 /** Result of validating a tokenized JSON value against a Zod schema. */
 export type ValidateWithTokensResult<Schema extends z.ZodType> =
@@ -130,7 +130,10 @@ async function resolveString(
   } catch {
     return { value, issues: [{ path, code: Code.parse("pii_token_unresolvable") }] };
   }
-  if (resolvedValues.length !== matches.length || resolvedValues.some((item) => item === undefined)) {
+  if (
+    resolvedValues.length !== matches.length ||
+    resolvedValues.some((item) => item === undefined)
+  ) {
     return { value, issues: [{ path, code: Code.parse("pii_token_unresolvable") }] };
   }
 
@@ -147,11 +150,13 @@ async function resolveString(
 function toTokenValidationIssues(
   issues: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[],
 ): TokenValidationIssue[] {
-  return issues.map((issue) => ({
-    path: issue.path.filter(
-      (segment): segment is string | number =>
-        typeof segment === "string" || typeof segment === "number",
-    ),
-    code: Code.parse(issue.code),
-  }));
+  return issues.map((issue) =>
+    TokenValidationIssueSchema.parse({
+      path: issue.path.filter(
+        (segment): segment is string | number =>
+          typeof segment === "string" || typeof segment === "number",
+      ),
+      code: issue.code,
+    }),
+  );
 }

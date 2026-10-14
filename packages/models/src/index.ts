@@ -82,6 +82,7 @@ export {
   type ProviderSchemaRule,
 } from "./provider-schema-rules.js";
 export {
+  applyValueTransform,
   createEnforcementResultSchema,
   EnforcementIssueSchema,
   EnforcementRungSchema,
@@ -89,6 +90,7 @@ export {
   OutputWithToolsUnsupportedError,
   parseEnforcementResult,
   selectEnforcementRung,
+  ValueTransformResultSchema,
   type EnforcementIssue,
   type EnforcementResult,
   type EnforcementRung,
