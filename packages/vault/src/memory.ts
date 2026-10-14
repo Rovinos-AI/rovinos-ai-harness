@@ -4,6 +4,8 @@ import { normalize } from "./normalize.js";
 import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
 import {
   VaultValueError,
+  VaultTerminalRunsQuerySchema,
+  VaultTimestampSchema,
   type VaultAdmin,
   type VaultReader,
   type VaultResolver,
@@ -26,6 +28,7 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
   private readonly entries = new Map<Id, Map<TokenValue, Entry>>();
   private readonly counters = new Map<Id, Map<string, number>>();
   private readonly purgeEpochs = new Map<Id, number>();
+  private readonly terminalRuns = new Map<Id, number>();
 
   /** Store a trimmed value or return the matching token already in the run. */
   put(runId: Id, entityType: Code, raw: string): Promise<TokenValue> {
@@ -94,10 +97,35 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
     return Promise.resolve(version);
   }
 
+  /** Record when a run entered a terminal state for grace-period retention. */
+  markTerminal(runId: Id, ts: number): Promise<void> {
+    const timestamp = VaultTimestampSchema.parse(ts);
+    this.terminalRuns.set(runId, Math.min(this.terminalRuns.get(runId) ?? timestamp, timestamp));
+    return Promise.resolve();
+  }
+
+  /** Find a stable batch of terminal runs older than the supplied timestamp. */
+  listTerminalRunsBefore(query: {
+    readonly terminalBefore: number;
+    readonly limit: number;
+  }): Promise<readonly Id[]> {
+    const { terminalBefore, limit } = VaultTerminalRunsQuerySchema.parse(query);
+    const runIds = [...this.terminalRuns.entries()]
+      .filter(([, terminalAt]) => terminalAt < terminalBefore)
+      .sort(([leftId, leftAt], [rightId, rightAt]) => {
+        const timeOrder = leftAt - rightAt;
+        return timeOrder === 0 ? leftId.localeCompare(rightId) : timeOrder;
+      })
+      .slice(0, limit)
+      .map(([runId]) => runId);
+    return Promise.resolve(runIds);
+  }
+
   /** Purge entries, advance the version, and preserve counters so token numbers are never reused. */
   purge(runId: Id): Promise<number> {
     const removed = this.entries.get(runId)?.size ?? 0;
     this.entries.delete(runId);
+    this.terminalRuns.delete(runId);
     if (removed > 0) {
       this.purgeEpochs.set(runId, (this.purgeEpochs.get(runId) ?? 0) + 1);
     }

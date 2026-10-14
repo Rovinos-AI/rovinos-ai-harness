@@ -47,7 +47,7 @@ import {
   parseJson,
 } from "@harness/schemas";
 import { SqliteEventStore } from "@harness/store";
-import { LocalKeyProvider, SqliteVault } from "@harness/vault";
+import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
 import {
   attr,
   createTelemetrySdk,
@@ -468,6 +468,7 @@ describe("config", () => {
     expect(loaded.policy.file).toBe("policy.yaml");
     expect(loaded.keys?.currentKeyId).toBe(KEY_ID);
     expect(loaded.pii.defaultAction).toBe("tokenize");
+    expect(loaded.vault).toEqual({ purgeAfterDays: 7 });
     expect(loaded.store.retention).toEqual({ completedRunsDays: 1, failedRunsDays: 1 });
     expect(await readFile(current.configPath, "utf8")).not.toContain(current.canary);
   });
@@ -666,6 +667,19 @@ describe("resume", () => {
         (event) => event.type === "tool_intent" || event.type === "tool_result",
       );
       expect(await store.latestSnapshot(runId)).toBeDefined();
+      const vaultDatabase = new Database(join(current.dataDirectory, "vault.db"), {
+        readonly: true,
+      });
+      try {
+        const terminal = vaultDatabase
+          .prepare<[string], { readonly terminal_at: number }>(
+            "SELECT terminal_at FROM run_meta WHERE run_id = ?",
+          )
+          .get(runId);
+        expect(terminal?.terminal_at).toBe(current.clock.now());
+      } finally {
+        vaultDatabase.close();
+      }
       const database = new Database(current.eventStorePath, { readonly: true });
       try {
         const eventRows = database
@@ -735,6 +749,21 @@ describe("retention", () => {
       expect(await store.head(runId)).toBe(0);
     } finally {
       await store.close();
+    }
+
+    const runtime = await createRuntime(await current.context.loadConfig(), {
+      dataDir: current.dataDirectory,
+      clock: current.clock,
+      ids: current.ids,
+      roleConfigDirectory: current.directory,
+      secretResolver: new CompositeSecretResolver(),
+    });
+    try {
+      await expect(
+        runtime.vault.resolve(runId, Token.parse("<EMAIL_1>"), { boundary: "ui" }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await runtime.close();
     }
   });
 });

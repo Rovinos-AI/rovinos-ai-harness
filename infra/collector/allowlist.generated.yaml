@@ -33,7 +33,7 @@ processors:
     error_mode: "ignore"
     logs:
       log_record:
-        - "not (body == \"harness.safe.approval_wait\" or body == \"harness.safe.budget_exceeded\" or body == \"harness.safe.checkpoint\" or body == \"harness.safe.model_call\" or body == \"harness.safe.pii_action\" or body == \"harness.safe.run_created\" or body == \"harness.safe.run_status\" or body == \"harness.safe.subagent_completed\" or body == \"harness.safe.subagent_spawned\" or body == \"harness.safe.tool_call\")"
+        - "not (body == \"harness.safe.approval_wait\" or body == \"harness.safe.budget_exceeded\" or body == \"harness.safe.checkpoint\" or body == \"harness.safe.model_call\" or body == \"harness.safe.pii_action\" or body == \"harness.safe.run_created\" or body == \"harness.safe.run_status\" or body == \"harness.safe.subagent_completed\" or body == \"harness.safe.subagent_spawned\" or body == \"harness.safe.tool_call\" or body == \"harness.vault.mark_terminal_failed\")"
   transform/log_attributes:
     error_mode: "ignore"
     log_statements:
@@ -48,6 +48,7 @@ processors:
       - "keep_keys(log.attributes, [\"harness.event.seq\", \"harness.event.timestamp_ms\", \"harness.policy.version\", \"harness.run.id\", \"harness.span.id\", \"harness.subagent.outcome\", \"harness.subagent.run.id\", \"harness.trace.id\"]) where log.body == \"harness.safe.subagent_completed\""
       - "keep_keys(log.attributes, [\"harness.event.seq\", \"harness.event.timestamp_ms\", \"harness.policy.version\", \"harness.run.id\", \"harness.span.id\", \"harness.subagent.parent_call.id\", \"harness.subagent.role\", \"harness.subagent.run.id\", \"harness.trace.id\"]) where log.body == \"harness.safe.subagent_spawned\""
       - "keep_keys(log.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.event.timestamp_ms\", \"harness.policy.version\", \"harness.run.id\", \"harness.span.id\", \"harness.tool.id\", \"harness.tool.latency_ms\", \"harness.tool.outcome\", \"harness.trace.id\"]) where log.body == \"harness.safe.tool_call\""
+      - "keep_keys(log.attributes, [\"harness.error.code\", \"harness.run.id\"]) where log.body == \"harness.vault.mark_terminal_failed\""
   filter/drop_unregistered_metrics:
     error_mode: "ignore"
     metrics:

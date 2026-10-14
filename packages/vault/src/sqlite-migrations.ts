@@ -14,6 +14,10 @@ const MIGRATIONS = [
     version: "0002_purge_epochs",
     path: fileURLToPath(new URL("../migrations/sqlite/0002_purge_epochs.sql", import.meta.url)),
   },
+  {
+    version: "0003_run_meta",
+    path: fileURLToPath(new URL("../migrations/sqlite/0003_run_meta.sql", import.meta.url)),
+  },
 ] as const;
 
 interface MigrationRow {

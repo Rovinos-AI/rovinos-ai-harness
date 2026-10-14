@@ -11,6 +11,7 @@ import {
   ServersConfigSchema,
   StoreConfigSchema,
   TelemetryConfigSchema,
+  VaultConfigSchema,
 } from "@harness/schemas";
 
 /** The complete, strictly validated harness configuration. */
@@ -24,6 +25,7 @@ export const HarnessConfigSchema = z
     servers: ServersConfigSchema,
     policy: PolicyConfigSchema,
     pii: PiiConfigSchema,
+    vault: VaultConfigSchema,
     telemetry: TelemetryConfigSchema,
     sandbox: SandboxConfigSchema,
   })

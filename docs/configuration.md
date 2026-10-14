@@ -41,7 +41,14 @@ The vault remains a local SQLite `vault.db` under the resolved data directory, e
 `store.dialect` is `postgres`. Separate runtime instances therefore do not share vault mappings;
 the Postgres vault adapter is not wired yet (12.9, #140).
 
-Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. `harness store purge` supports dry runs; it does not yet purge vault mappings for deleted runs (12.6, #108).
+Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. `harness store purge` supports dry runs and purges corresponding vault mappings.
+
+Vault entries are retained for seven days after a run reaches a terminal status by default. Override the grace period with `vault.purgeAfterDays`; `harness store purge` removes mappings immediately for deleted runs and also purges expired terminal-run mappings during the same job. The event content may still contain tokens after a vault-only purge, but detokenization returns `undefined`. SQLite securely deletes rows; after a large purge, stop writers and run `VACUUM` separately to reclaim pages and remove remnants from the database file.
+
+```yaml
+vault:
+  purgeAfterDays: 14
+```
 
 Configure `sandbox.runner` to use the isolated runner instead of the development-only in-process backend. Its URL must be an HTTP(S) origin, and `token` must be a secret reference:
 
@@ -65,8 +72,6 @@ SANDBOX_RUNNER_TOKEN="$(cat /secure/sandbox-runner-token)" \
 ```
 
 `limits.outputBytes` also limits the maximum size of any file written by a command through its file-size resource limit; this coupling remains until task 19.5 adds per-run workspace quotas. The runner's per-run workspace isolation is also deferred to task 19.5. The `sandbox.runner` setting is not yet wired into `core.createRuntime`; task #385 (2.15) tracks that integration.
-
-Run retention is opt-in under `store.retention`. When configured, provide positive `completedRunsDays` and `failedRunsDays`; cancelled runs use the failed-run window. Snapshot pruning is configured separately through the store adapter's `snapshotKeep` option (default `5`) and runs on each snapshot write. CLI scheduling and vault-purge wiring are deferred to task 20.x; the retention job supports dry runs and invokes a per-run purge hook after deletion.
 
 Key versions are configured under `keys`. Each key must be a base64-encoded 32-byte secret reference. Keep old versions configured while stored content still uses them; new content uses `currentKeyId`.
 

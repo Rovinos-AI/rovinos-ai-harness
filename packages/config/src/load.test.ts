@@ -441,6 +441,7 @@ store: {}`,
       servers: [],
       policy: {},
       pii: { defaultAction: "tokenize", rules: [], enabled: true },
+      vault: { purgeAfterDays: 7 },
       telemetry: { sentinel: { minValueLength: 6 } },
       sandbox: {},
     });

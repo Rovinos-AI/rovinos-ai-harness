@@ -12,6 +12,7 @@ import { configHash } from "./runtime-ids.js";
 export type RunControl = (
   runId: Id,
   operation: (signal: AbortSignal) => Promise<RunLoopResult>,
+  firstNewSeq?: number,
 ) => Promise<RunLoopResult>;
 
 /** Starts a root run through the runtime's cancellation-control boundary. */

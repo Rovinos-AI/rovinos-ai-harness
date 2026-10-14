@@ -13,6 +13,7 @@ import {
 } from "@harness/schemas";
 import { InMemoryEventStore, StoreMigrationError } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
+import { InMemoryVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
@@ -308,6 +309,113 @@ describe("harness store purge", () => {
     });
     await expect(store.listRuns({ limit: 10 })).resolves.toEqual(before);
     expect(stderr).toEqual([]);
+  });
+
+  it("purges vault mappings immediately when the retention hook deletes a run", async () => {
+    const store = new InMemoryEventStore();
+    const runId = await seedRun(store, "completed", 1);
+    const vault = new InMemoryVault();
+    const token = await vault.put(runId, "email", "alice@example.test");
+    const closeVault = vi.fn();
+    const vaultAdmin = Object.assign(vault, { close: closeVault });
+    const { context, stdout, stderr } = createContext(config(), { now: 3 * DAY_MS });
+    const command = createStoreCommand({
+      migrate: vi.fn(),
+      openStore: () => Promise.resolve(store),
+      openVaultAdmin: () => Promise.resolve(vaultAdmin),
+    });
+
+    const exitCode = await main(["--json", "store", "purge"], context, [command]);
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(parseJson(StorePurgeResultSchema, stdout[0] ?? "")).toMatchObject({
+      purged: 1,
+      hookFailures: 0,
+    });
+    await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBeUndefined();
+    expect(closeVault).toHaveBeenCalledOnce();
+    expect(stderr).toEqual([]);
+  });
+
+  it("reports terminal vault purge counts in JSON and table output", async () => {
+    const store = new InMemoryEventStore();
+    const runId = await seedRun(store, "completed", 10 * DAY_MS);
+    const vault = new InMemoryVault();
+    await vault.put(runId, "email", "alice@example.test");
+    await vault.markTerminal(runId, 1);
+    const vaultAdmin = Object.assign(vault, { close: vi.fn() });
+    const { context, stdout, stderr } = createContext(config(), { now: 10 * DAY_MS });
+    const command = createStoreCommand({
+      migrate: vi.fn(),
+      openStore: () => Promise.resolve(store),
+      openVaultAdmin: () => Promise.resolve(vaultAdmin),
+    });
+
+    const exitCode = await main(["--json", "store", "purge"], context, [command]);
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(parseJson(StorePurgeResultSchema, stdout[0] ?? "")).toEqual({
+      examined: 1,
+      purged: 0,
+      skippedActive: 0,
+      hookFailures: 0,
+      vault: { examined: 1, purged: 1, entriesPurged: 1 },
+    });
+    expect(stderr).toEqual([]);
+    expect(vaultAdmin.close).toHaveBeenCalledOnce();
+  });
+
+  it("prints terminal vault purge counts in human-readable mode", async () => {
+    const store = new InMemoryEventStore();
+    const runId = await seedRun(store, "completed", 10 * DAY_MS);
+    const vault = new InMemoryVault();
+    await vault.put(runId, "email", "alice@example.test");
+    await vault.markTerminal(runId, 1);
+    const vaultAdmin = Object.assign(vault, { close: vi.fn() });
+    const { context, stdout, stderr } = createContext(config(), { now: 10 * DAY_MS });
+    const command = createStoreCommand({
+      migrate: vi.fn(),
+      openStore: () => Promise.resolve(store),
+      openVaultAdmin: () => Promise.resolve(vaultAdmin),
+    });
+
+    const exitCode = await main(["store", "purge"], context, [command]);
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(stdout).toEqual([
+      "examined\tpurged\tskippedActive\thookFailures\tvault.examined\tvault.purged\tvault.entriesPurged\n1\t0\t0\t0\t1\t1\t1\n",
+    ]);
+    expect(stderr).toEqual([]);
+  });
+
+  it("counts a failed vault retention hook in the purge result", async () => {
+    const store = new InMemoryEventStore();
+    await seedRun(store, "completed", 1);
+    const vaultAdmin = {
+      markTerminal: () => Promise.resolve(),
+      listTerminalRunsBefore: () => Promise.resolve([]),
+      purge: () => Promise.reject(new Error("synthetic hook failure")),
+      stats: () => Promise.resolve({ entries: 0 }),
+      close: vi.fn(),
+    };
+    const { context, stdout, stderr } = createContext(config(), { now: 3 * DAY_MS });
+    const command = createStoreCommand({
+      migrate: vi.fn(),
+      openStore: () => Promise.resolve(store),
+      openVaultAdmin: () => Promise.resolve(vaultAdmin),
+    });
+
+    const exitCode = await main(["--json", "store", "purge"], context, [command]);
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(parseJson(StorePurgeResultSchema, stdout[0] ?? "")).toEqual({
+      examined: 1,
+      purged: 1,
+      skippedActive: 0,
+      hookFailures: 1,
+      vault: { examined: 0, purged: 0, entriesPurged: 0 },
+    });
+    expect(stderr).toEqual(["retention_hook_failed\n"]);
   });
 
   it("requires configured retention before opening the store", async () => {

@@ -285,3 +285,10 @@ Owner task: `3.2`.
 | `harness.tool.latency_ms` | integer | Required | `@harness/telemetry` |
 | `harness.tool.outcome` | enum: `ok`, `error`, `denied`, `timeout` | Required | `@harness/telemetry` |
 | `harness.trace.id` | Code | Required | `@harness/telemetry` |
+
+### `harness.vault.mark_terminal_failed`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.error.code` | Code | Required | `@harness/telemetry` |
+| `harness.run.id` | Id | Required | `@harness/telemetry` |
