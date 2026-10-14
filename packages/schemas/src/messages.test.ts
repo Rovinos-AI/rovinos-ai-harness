@@ -42,6 +42,7 @@ describe("normalized model messages", () => {
       requestId: id,
       model: { provider: code, model: code },
       messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+      stablePrefixMessages: 1,
       tools: [{ toolId: code, description: "tool", inputSchema: { type: "object" } }],
       output: { name: code, schema: {}, schemaHash: sha256 },
       toolChoice: { forced: code },
@@ -49,11 +50,14 @@ describe("normalized model messages", () => {
       temperature: 0.2,
     };
     expect(ModelRequestSchema.parse(request)).toEqual(request);
+    expect(
+      ModelRequestSchema.safeParse({ ...request, stablePrefixMessages: 2 }).success,
+    ).toBe(false);
     expect(ToolSpecSchema.safeParse({ toolId: code, description: "tool" }).success).toBe(false);
 
     const response = {
       parts: [{ type: "text", text: "hello" }],
-      usage: { inputTokens: 1, outputTokens: 2 },
+      usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 1, cacheWriteTokens: 0 },
       finishReason: "stop",
       provider: code,
       model: code,
@@ -64,5 +68,11 @@ describe("normalized model messages", () => {
     };
     expect(ModelResponseSchema.parse(response)).toEqual(response);
     expect(ModelResponseSchema.safeParse({ ...response, fallbackDepth: -1 }).success).toBe(false);
+    expect(
+      ModelResponseSchema.safeParse({
+        ...response,
+        usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: -1 },
+      }).success,
+    ).toBe(false);
   });
 });

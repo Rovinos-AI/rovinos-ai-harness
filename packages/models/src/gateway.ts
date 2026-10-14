@@ -15,7 +15,12 @@ import {
   type ModelEnforcementConfig,
   type ModelRetryConfig,
 } from "@harness/schemas";
-import { countModelUsage, emitPricingMissing, setActiveSpanAttribute } from "@harness/telemetry";
+import {
+  countModelUsage,
+  emitPricingCacheMissing,
+  emitPricingMissing,
+  setActiveSpanAttribute,
+} from "@harness/telemetry";
 import type { z } from "zod";
 import {
   ProviderResultSchema,
@@ -215,6 +220,8 @@ export class ModelGateway {
   ) {
     this.accountUsage = createPricingAccountant(dependencies.pricing, (model) => {
       emitPricingMissing(model.provider, model.model);
+    }, (model) => {
+      emitPricingCacheMissing(model.provider, model.model);
     });
     this.retryPolicy = ModelRetryConfigSchema.parse(
       dependencies.retryPolicy ?? ModelRetryConfigSchema.parse({}),
@@ -291,6 +298,12 @@ export class ModelGateway {
     if (this.options.deferSpanUsage !== true) {
       setActiveSpanAttribute("harness.model.input_tokens", usage.inputTokens);
       setActiveSpanAttribute("harness.model.output_tokens", usage.outputTokens);
+      if (usage.cacheReadTokens !== undefined) {
+        setActiveSpanAttribute("harness.model.cache_read_tokens", usage.cacheReadTokens);
+      }
+      if (usage.cacheWriteTokens !== undefined) {
+        setActiveSpanAttribute("harness.model.cache_write_tokens", usage.cacheWriteTokens);
+      }
       if (usage.costMicros !== undefined) {
         setActiveSpanAttribute("harness.model.cost_micros", usage.costMicros);
       }
@@ -435,8 +448,16 @@ export class ModelGateway {
 }
 
 function aggregateModelUsage(previous: ModelUsage | undefined, next: ModelUsage): ModelUsage {
+  const cacheReadTokens = (previous?.cacheReadTokens ?? 0) + (next.cacheReadTokens ?? 0);
+  const cacheWriteTokens = (previous?.cacheWriteTokens ?? 0) + (next.cacheWriteTokens ?? 0);
   return {
     inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
+    ...((previous?.cacheReadTokens === undefined && next.cacheReadTokens === undefined)
+      ? {}
+      : { cacheReadTokens }),
+    ...((previous?.cacheWriteTokens === undefined && next.cacheWriteTokens === undefined)
+      ? {}
+      : { cacheWriteTokens }),
   };
 }

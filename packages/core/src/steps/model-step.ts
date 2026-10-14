@@ -34,6 +34,7 @@ export interface ModelStepOptions {
     readonly strategyVersion: Code;
     readonly estimatedTokens: number;
     readonly messageCount: number;
+    readonly stablePrefixMessages: number;
   };
 }
 
@@ -96,6 +97,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       model: options.modelName ?? "unknown",
     },
     messages: options.messages,
+    stablePrefixMessages: options.contextMetadata.stablePrefixMessages,
     ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
     ...(role === undefined ? {} : { role }),
   });
@@ -180,6 +182,12 @@ function responsePayload(requestId: Id, completion: ModelCompletion): EventParti
     model: completion.model,
     inputTokens: completion.usage.inputTokens,
     outputTokens: completion.usage.outputTokens,
+    ...(completion.usage.cacheReadTokens === undefined
+      ? {}
+      : { cacheReadTokens: completion.usage.cacheReadTokens }),
+    ...(completion.usage.cacheWriteTokens === undefined
+      ? {}
+      : { cacheWriteTokens: completion.usage.cacheWriteTokens }),
     ...(completion.usage.costMicros === undefined
       ? {}
       : { costMicros: completion.usage.costMicros }),

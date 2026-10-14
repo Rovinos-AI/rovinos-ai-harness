@@ -22,12 +22,35 @@ export class ContextMarkerExceedsBudgetError extends HarnessError {
   }
 }
 
+/** Optional cache-prefix preservation settings for sliding-window context. */
+export interface SlidingWindowStrategyOptions {
+  /** Drop groups in cache-aligned chunks instead of shifting the prefix one group at a time. */
+  readonly cacheAware?: boolean;
+  /** Number of groups to drop together when cacheAware is enabled. Defaults to 4. */
+  readonly dropChunkGroups?: number;
+}
+
 /**
  * Keeps pinned groups and the newest contiguous window that fits the token budget.
  */
 export class SlidingWindowStrategy implements ContextStrategy {
   readonly id: Code = "sliding_window";
-  readonly version: Code = "v3";
+  readonly version: Code = "v4";
+  private readonly cacheAware: boolean;
+  private readonly dropChunkGroups: number;
+
+  /**
+   * Creates a sliding window strategy.
+   *
+   * @param options - Optional cache-prefix preservation settings.
+   */
+  constructor(options: SlidingWindowStrategyOptions = {}) {
+    this.cacheAware = options.cacheAware ?? false;
+    this.dropChunkGroups = options.dropChunkGroups ?? 4;
+    if (!Number.isSafeInteger(this.dropChunkGroups) || this.dropChunkGroups < 1) {
+      throw new RangeError("dropChunkGroups must be a positive integer.");
+    }
+  }
 
   /** {@inheritDoc ContextStrategy.build} */
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
@@ -77,12 +100,28 @@ export class SlidingWindowStrategy implements ContextStrategy {
     }
 
     let droppedGroups = nonPinnedGroups.length - retainedGroups.size;
+    if (this.cacheAware && droppedGroups > 0) {
+      const chunkedDroppedGroups = Math.min(
+        nonPinnedGroups.length,
+        Math.ceil(droppedGroups / this.dropChunkGroups) * this.dropChunkGroups,
+      );
+      dropOldestGroups(
+        nonPinnedGroups,
+        retainedGroups,
+        chunkedDroppedGroups - droppedGroups,
+      );
+      droppedGroups = chunkedDroppedGroups;
+    }
     let messages = renderMessages(groups, retainedGroups, droppedGroups, planMessages);
     let estimatedTokens = input.counter.count(messages, input.model);
 
     while (estimatedTokens > availableTokens) {
-      const oldestRetainedGroup = nonPinnedGroups.find((group) => retainedGroups.has(group));
-      if (oldestRetainedGroup === undefined) {
+      const removedGroups = dropOldestGroups(
+        nonPinnedGroups,
+        retainedGroups,
+        this.cacheAware ? this.dropChunkGroups : 1,
+      );
+      if (removedGroups === 0) {
         if (droppedGroups > 0) {
           if (plan !== undefined) {
             throw new ContextPinnedExceedsBudgetError();
@@ -91,8 +130,7 @@ export class SlidingWindowStrategy implements ContextStrategy {
         }
         throw new ContextPinnedExceedsBudgetError();
       }
-      retainedGroups.delete(oldestRetainedGroup);
-      droppedGroups += 1;
+      droppedGroups += removedGroups;
       messages = renderMessages(groups, retainedGroups, droppedGroups, planMessages);
       estimatedTokens = input.counter.count(messages, input.model);
     }
@@ -125,6 +163,7 @@ function createResult({
 }): Promise<ContextResult> {
   return ContextResultSchema.parseAsync({
     messages,
+    stablePrefixMessages: countStablePrefixMessages(groups, retainedGroups, droppedGroups),
     stats: {
       messageCount: messages.length,
       estimatedTokens,
@@ -137,6 +176,42 @@ function createResult({
       .filter((group) => group.pinned || retainedGroups.has(group))
       .flatMap(({ runId, seqs }) => seqs.map((seq) => ({ runId, seq }))),
   });
+}
+
+function dropOldestGroups(
+  groups: ReturnType<typeof eventsToTranscript>,
+  retainedGroups: Set<(typeof groups)[number]>,
+  count: number,
+): number {
+  let removed = 0;
+  for (const group of groups) {
+    if (!retainedGroups.has(group)) {
+      continue;
+    }
+    retainedGroups.delete(group);
+    removed += 1;
+    if (removed === count) {
+      break;
+    }
+  }
+  return removed;
+}
+
+function countStablePrefixMessages(
+  groups: ReturnType<typeof eventsToTranscript>,
+  retainedGroups: ReadonlySet<(typeof groups)[number]>,
+  droppedGroups: number,
+): number {
+  const latestGroupIndex = groups.findLastIndex(
+    (group) => !group.pinned && retainedGroups.has(group),
+  );
+  const prefixEnd = latestGroupIndex < 0 ? groups.length : latestGroupIndex;
+  const messageCount = groups
+    .slice(0, prefixEnd)
+    .filter((group) => group.pinned || retainedGroups.has(group))
+    .reduce((count, group) => count + group.messages.length, 0);
+  const hasRetainedGroups = groups.some((group) => !group.pinned && retainedGroups.has(group));
+  return messageCount + (droppedGroups > 0 && hasRetainedGroups ? 1 : 0);
 }
 
 function createMarker(droppedGroups: number): Message[] {

@@ -1731,7 +1731,7 @@ describe("runLoop", () => {
       traceparent,
       context: {
         strategyId: "naive",
-        strategyVersion: "v4",
+        strategyVersion: "v5",
         calibration: null,
       },
       plan: null,
@@ -2179,6 +2179,7 @@ describe("runLoop", () => {
             strategyVersion: "v4",
             estimatedTokens: 0,
             messageCount: 0,
+            stablePrefixMessages: 0,
           },
         }),
       ),

@@ -37,6 +37,20 @@ describe("Event", () => {
     expect(Event.parse(legacyResponse)).toMatchObject({ fallbackDepth: 0 });
   });
 
+  it("records cached token usage as optional model response metadata", () => {
+    const response = eventSamples.find(({ type }) => type === "model_response");
+    if (response?.type !== "model_response") {
+      throw new Error("Missing model_response sample.");
+    }
+
+    expect(
+      Event.parse({ ...response, cacheReadTokens: 4, cacheWriteTokens: 2 }),
+    ).toMatchObject({ cacheReadTokens: 4, cacheWriteTokens: 2 });
+    expect(
+      Event.safeParse({ ...response, cacheReadTokens: -1 }).success,
+    ).toBe(false);
+  });
+
   it("defaults legacy approval resolutions to human and accepts an optional reason code", () => {
     const resolution = eventSamples.find(({ type }) => type === "approval_resolved");
     if (resolution?.type !== "approval_resolved") {

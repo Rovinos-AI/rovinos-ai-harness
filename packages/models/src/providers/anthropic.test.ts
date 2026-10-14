@@ -143,6 +143,70 @@ function fixtureFactory(
 runProviderContract("Anthropic Messages API contract", fixtureFactory, fixtures);
 
 describe("AnthropicAdapter", () => {
+  it("places three cache breakpoints and maps cached usage without mutating recorded content", async () => {
+    const call = makeRequest({
+      ...responseBody,
+      usage: {
+        input_tokens: 7,
+        output_tokens: 11,
+        cache_read_input_tokens: 5,
+        cache_creation_input_tokens: 3,
+      },
+    });
+    const request: ModelRequest = {
+      ...baseRequest,
+      messages: [
+        { role: "system", parts: [{ type: "text", text: "system rule" }] },
+        { role: "user", parts: [{ type: "text", text: "hello" }] },
+      ],
+      stablePrefixMessages: 2,
+    };
+    const originalRequest = JSON.stringify(request);
+
+    const result = await call.adapter.complete(request, context());
+    const body = z
+      .object({
+        system: z.array(JsonValue),
+        tools: z.array(JsonValue),
+        messages: z.array(JsonValue),
+      })
+      .parse(call.getRequestBody());
+
+    expect(body.system[0]).toMatchObject({ cache_control: { type: "ephemeral" } });
+    expect(body.tools.at(-1)).toMatchObject({ cache_control: { type: "ephemeral" } });
+    expect(body.messages[0]).toMatchObject({
+      role: "user",
+      content: [{ type: "text", text: "hello", cache_control: { type: "ephemeral" } }],
+    });
+    expect(JSON.stringify(body).match(/"cache_control"/gu)).toHaveLength(3);
+    expect(result.usage).toEqual({
+      inputTokens: 15,
+      outputTokens: 11,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 3,
+    });
+    expect(result.parts.find((part) => part.type === "opaque")).toMatchObject({
+      blob: { content: rawContent },
+    });
+    expect(JSON.stringify(request)).toBe(originalRequest);
+  });
+
+  it("omits cache breakpoints when the request has no stable prefix, system prompt, or tools", async () => {
+    const call = makeRequest();
+    await call.adapter.complete(
+      {
+        ...baseRequest,
+        messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+        tools: [],
+        toolChoice: "none",
+        stablePrefixMessages: 0,
+      },
+      context(),
+    );
+
+    expect(JSON.stringify(call.getRequestBody())).not.toContain("cache_control");
+  });
+
   it("exposes capability overrides to the gateway", () => {
     const adapter = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },

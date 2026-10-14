@@ -130,6 +130,7 @@ describe("SlidingWindowStrategy", () => {
 
     expect(result.messages.map(messageText)).toEqual(["goal", "first", "last"]);
     expect(result.stats).toMatchObject({ estimatedTokens: 3, droppedGroups: 0 });
+    expect(result.stablePrefixMessages).toBe(2);
     expect(result.messages.some((message) => messageText(message).includes("omitted"))).toBe(false);
 
     const heuristicResult = await strategy.build({
@@ -308,7 +309,37 @@ describe("SlidingWindowStrategy", () => {
 
   it("keeps its strategy identity and version stable", () => {
     expect(strategy.id).toBe("sliding_window");
-    expect(strategy.version).toBe("v3");
+    expect(strategy.version).toBe("v4");
+  });
+
+  it("keeps the retained prefix stable across cache-aware chunk drops", async () => {
+    const cacheAware = new SlidingWindowStrategy({ cacheAware: true });
+    const events = [
+      runInput(0),
+      ...Array.from({ length: 11 }, (_, index) => modelResponse(index + 1, `step-${index}`)),
+    ];
+    const input: ContextStrategyInput = {
+      events,
+      budget: { maxTokens: 8, reserveOutputTokens: 0 },
+      model,
+      counter,
+    };
+    const first = await cacheAware.build(input);
+    const second = await cacheAware.build({
+      ...input,
+      events: [...events, modelResponse(12, "step-11")],
+    });
+
+    expect(first.stats.droppedGroups).toBe(8);
+    expect(second.stats.droppedGroups).toBe(8);
+    expect(second.messages.slice(0, first.messages.length)).toEqual(first.messages);
+    expect(second.stablePrefixMessages).toBe(first.messages.length);
+  });
+
+  it("rejects a nonpositive cache-aware drop chunk", () => {
+    expect(() => new SlidingWindowStrategy({ cacheAware: true, dropChunkGroups: 0 })).toThrow(
+      RangeError,
+    );
   });
 
   it("estimates each group in linear time", async () => {

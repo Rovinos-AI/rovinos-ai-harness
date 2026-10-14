@@ -56,7 +56,20 @@ function fixture(
   scenario: ProviderContractFixture["scenario"],
   status: number,
 ): ProviderContractFixture {
-  const response = scenario === "tool_call" ? completion(rawToolMessage) : completion(textMessage);
+  const response =
+    scenario === "tool_call"
+      ? completion(rawToolMessage)
+      : scenario === "usage_mapping"
+        ? {
+            ...completion(textMessage),
+            usage: {
+              prompt_tokens: 2,
+              completion_tokens: 3,
+              total_tokens: 5,
+              prompt_tokens_details: { cached_tokens: 1 },
+            },
+          }
+        : completion(textMessage);
   const expectedParts: Part[] =
     scenario === "tool_call"
       ? [
@@ -86,7 +99,10 @@ function fixture(
       };
       break;
     case "usage_mapping":
-      expected = { usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" };
+      expected = {
+        usage: { inputTokens: 2, outputTokens: 3, cacheReadTokens: 1 },
+        finishReason: "stop",
+      };
       break;
     case "error_429":
       expected = { retryAfterMs: 2_000, status };

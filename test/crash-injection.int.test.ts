@@ -206,9 +206,10 @@ function createScenario(): Scenario {
         messages,
         metadata: {
           strategyId: "naive",
-          strategyVersion: "v4",
+          strategyVersion: "v5",
           estimatedTokens: 1,
           messageCount: 1,
+          stablePrefixMessages: 0,
         },
       });
     },

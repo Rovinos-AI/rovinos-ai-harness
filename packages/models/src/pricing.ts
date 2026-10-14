@@ -29,7 +29,10 @@ export function resolveModelPricing(
  * @returns Rounded cost in micros, or undefined when prices are not configured.
  */
 export function calculateCostMicros(
-  usage: Pick<ModelUsage, "inputTokens" | "outputTokens">,
+  usage: Pick<
+    ModelUsage,
+    "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens"
+  >,
   pricing: ModelPricingRate | undefined,
 ): number | undefined {
   if (pricing === undefined) {
@@ -48,8 +51,30 @@ export function calculateCostMicros(
     throw new ModelUsageError();
   }
   const microsPerMillion = 1_000_000n;
+  const cacheReadTokens = usage.cacheReadTokens ?? 0;
+  const cacheWriteTokens = usage.cacheWriteTokens ?? 0;
+  if (
+    !Number.isSafeInteger(cacheReadTokens) ||
+    cacheReadTokens < 0 ||
+    !Number.isSafeInteger(cacheWriteTokens) ||
+    cacheWriteTokens < 0 ||
+    BigInt(cacheReadTokens) + BigInt(cacheWriteTokens) > BigInt(usage.inputTokens) ||
+    (pricing.cacheReadMicrosPerMTok !== undefined &&
+      (!Number.isSafeInteger(pricing.cacheReadMicrosPerMTok) ||
+        pricing.cacheReadMicrosPerMTok < 0)) ||
+    (pricing.cacheWriteMicrosPerMTok !== undefined &&
+      (!Number.isSafeInteger(pricing.cacheWriteMicrosPerMTok) ||
+        pricing.cacheWriteMicrosPerMTok < 0))
+  ) {
+    throw new ModelUsageError();
+  }
   const numerator =
-    BigInt(usage.inputTokens) * BigInt(pricing.inputMicrosPerMTok) +
+    (BigInt(usage.inputTokens) - BigInt(cacheReadTokens) - BigInt(cacheWriteTokens)) *
+      BigInt(pricing.inputMicrosPerMTok) +
+    BigInt(cacheReadTokens) *
+      BigInt(pricing.cacheReadMicrosPerMTok ?? pricing.inputMicrosPerMTok) +
+    BigInt(cacheWriteTokens) *
+      BigInt(pricing.cacheWriteMicrosPerMTok ?? pricing.inputMicrosPerMTok) +
     BigInt(usage.outputTokens) * BigInt(pricing.outputMicrosPerMTok);
   const roundedCost = (numerator + microsPerMillion / 2n) / microsPerMillion;
   if (roundedCost > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -68,8 +93,10 @@ export function calculateCostMicros(
 export function createPricingAccountant(
   pricing: ModelPricing | undefined,
   onMissingPrice: (model: ModelRef) => void,
+  onMissingCachePrice?: (model: ModelRef) => void,
 ): (model: ModelRef, usage: ModelUsage) => ModelUsage {
   const missingPriceModels = new Set<string>();
+  const missingCachePriceModels = new Set<string>();
   return (model, usage) => {
     const rate = resolveModelPricing(model.provider, model.model, pricing);
     if (rate === undefined) {
@@ -78,12 +105,37 @@ export function createPricingAccountant(
         missingPriceModels.add(key);
         onMissingPrice(model);
       }
-      return { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
+      return {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        ...(usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
+        ...(usage.cacheWriteTokens === undefined
+          ? {}
+          : { cacheWriteTokens: usage.cacheWriteTokens }),
+      };
+    }
+    const cacheReadMissing =
+      usage.cacheReadTokens !== undefined &&
+      usage.cacheReadTokens > 0 &&
+      rate.cacheReadMicrosPerMTok === undefined;
+    const cacheWriteMissing =
+      usage.cacheWriteTokens !== undefined &&
+      usage.cacheWriteTokens > 0 &&
+      rate.cacheWriteMicrosPerMTok === undefined;
+    const costMicros = calculateCostMicros(usage, rate);
+    const key = `${model.provider}/${model.model}`;
+    if ((cacheReadMissing || cacheWriteMissing) && !missingCachePriceModels.has(key)) {
+      missingCachePriceModels.add(key);
+      onMissingCachePrice?.(model);
     }
     return {
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      costMicros: calculateCostMicros(usage, rate),
+      ...(usage.cacheReadTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadTokens }),
+      ...(usage.cacheWriteTokens === undefined
+        ? {}
+        : { cacheWriteTokens: usage.cacheWriteTokens }),
+      costMicros,
     };
   };
 }
