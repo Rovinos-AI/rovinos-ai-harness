@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { context as otelContext, diag, isSpanContextValid, trace } from "@opentelemetry/api";
 import {
   FakeClock,
@@ -8,7 +11,7 @@ import {
   Sha256Hex,
   type Event as HarnessEvent,
 } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import {
   createTestContextManager,
   createTestSpanCollector,
@@ -19,6 +22,7 @@ import { SqliteVault, VaultOperationError } from "@harness/vault";
 import { sentinelTripQueue } from "@harness/telemetry";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "./recorder.js";
+import { cancelRun } from "./cancel.js";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
 import { RUN_SPAN } from "./spans.js";
 import { FakeModelPort } from "./testing/fake-model.js";
@@ -424,6 +428,81 @@ describe("runtime tracing fallback", () => {
     logFailure.mockRestore();
   });
 
+  it("stops promptly when another SQLite connection records cancellation", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harness-live-cancel-"));
+    const databasePath = join(directory, "events.sqlite");
+    const store = new SqliteEventStore(databasePath, undefined, { pollIntervalMs: 1 });
+    const cancellationStore = new SqliteEventStore(databasePath, undefined, { pollIntervalMs: 1 });
+    const clock = new FakeClock(1_000);
+    let signalToolStarted: () => void = () => undefined;
+    let signalToolAborted: () => void = () => undefined;
+    const toolStarted = new Promise<void>((resolve) => {
+      signalToolStarted = resolve;
+    });
+    const toolAborted = new Promise<void>((resolve) => {
+      signalToolAborted = resolve;
+    });
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: false, timeoutMs: 60_000 }),
+      execute: (_call, { signal }) =>
+        new Promise<ToolExecutionResult>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              signalToolAborted();
+              reject(new Error("tool cancelled"));
+            },
+            { once: true },
+          );
+          signalToolStarted();
+        }),
+    };
+    const model = new FakeModelPort([
+      {
+        ...completion(),
+        parts: [
+          ...completion().parts,
+          {
+            type: "tool_call",
+            callId: Id.parse("22222222222222222222222222"),
+            toolId: "slow_tool",
+            args: {},
+          },
+        ],
+      },
+    ]);
+    const watch = vi.spyOn(store, "watch");
+    const runtime = await createRuntime(config, {
+      store,
+      clock,
+      ids: new SequentialIdGenerator(),
+      model,
+      policy: allowPolicy,
+      tool,
+    });
+    try {
+      const running = runtime.run("goal");
+      await toolStarted;
+      const runId = (await store.listRuns({ status: "running", limit: 1 })).runs[0]?.runId;
+      if (runId === undefined) {
+        throw new Error("Expected an active run");
+      }
+
+      await expect(
+        cancelRun(cancellationStore, runId, clock, new SequentialIdGenerator()),
+      ).resolves.toBe("cancelled");
+      await toolAborted;
+      await expect(running).resolves.toMatchObject({ status: "cancelled" });
+      const watchOptions = watch.mock.calls.find(([watchedRunId]) => watchedRunId === runId)?.[1];
+      expect(watchOptions?.fromSeq).toBeTypeOf("number");
+      expect(watchOptions?.signal).toBeInstanceOf(AbortSignal);
+    } finally {
+      await runtime.close();
+      await cancellationStore.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("returns a completed run when terminal vault marking fails", async () => {
     const markTerminal = vi
       .spyOn(SqliteVault.prototype, "markTerminal")
@@ -464,10 +543,10 @@ describe("runtime tracing fallback", () => {
       (async function* () {
         for await (const event of read(runId, range)) {
           const isCancellation = event.type === "run_status_changed" && event.to === "cancelled";
-          yield event;
           if (isCancellation) {
             signalCancellationObserved();
           }
+          yield event;
         }
       })(),
     );

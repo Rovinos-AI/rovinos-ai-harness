@@ -59,6 +59,14 @@ interface FakeNotification {
 
 type FakeNotificationListener = (notification: FakeNotification) => void;
 
+function isNotificationListener(listener: unknown): listener is FakeNotificationListener {
+  return typeof listener === "function";
+}
+
+function isEndListener(listener: unknown): listener is () => void {
+  return typeof listener === "function";
+}
+
 let transactionBackup:
   | {
       runs: Map<string, FakeRun>;
@@ -80,12 +88,52 @@ const fakePg = vi.hoisted(() => ({
   encryptionValue: "",
   handler: (_sql: string, _values: unknown[]): FakeQueryResult => ({ rows: [] }),
   notificationListeners: new Set<FakeNotificationListener>(),
+  listenerEndListeners: new Set<() => void>(),
+  listenerListenCount: 0,
+  terminalChecks: 0,
   connectError: new Error("connection refused"),
   connectErrorCode: "ECONNREFUSED",
   shouldFailConnect: false,
 }));
 
 vi.mock("pg", () => ({
+  Client: class {
+    on(event: "notification", listener: FakeNotificationListener): this;
+    on(event: "end", listener: () => void): this;
+    on(event: "error", listener: (error: Error) => void): this;
+    on(event: string, listener: unknown): this {
+      if (event === "notification" && isNotificationListener(listener)) {
+        fakePg.notificationListeners.add(listener);
+      } else if (event === "end" && isEndListener(listener)) {
+        fakePg.listenerEndListeners.add(listener);
+      }
+      return this;
+    }
+
+    removeListener(event: "notification", listener: FakeNotificationListener): this;
+    removeListener(event: "end", listener: () => void): this;
+    removeListener(event: "error", listener: (error: Error) => void): this;
+    removeListener(event: string, listener: unknown): this {
+      if (event === "notification" && isNotificationListener(listener)) {
+        fakePg.notificationListeners.delete(listener);
+      } else if (event === "end" && isEndListener(listener)) {
+        fakePg.listenerEndListeners.delete(listener);
+      }
+      return this;
+    }
+
+    connect(): Promise<void> {
+      return Promise.resolve();
+    }
+
+    query(sql: string, values: unknown[] = []): Promise<FakeQueryResult> {
+      return Promise.resolve().then(() => fakePg.handler(sql, values));
+    }
+
+    end(): Promise<void> {
+      return Promise.resolve();
+    }
+  },
   Pool: class {
     on(): this {
       return this;
@@ -152,7 +200,36 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     return { rows: [{ present: fakePg.migrationHistory.size > 0 || fakePg.schemaInitialized }] };
   }
   if (query === "LISTEN harness_events" || query === "UNLISTEN harness_events") {
+    if (query === "LISTEN harness_events") {
+      fakePg.listenerListenCount += 1;
+    }
     return { rows: [] };
+  }
+  if (query === "SELECT next_seq, status FROM runs WHERE run_id = $1") {
+    fakePg.terminalChecks += 1;
+    const run = fakePg.runs.get(text(values[0]));
+    return { rows: run === undefined ? [] : [{ next_seq: run.next_seq, status: run.status }] };
+  }
+  if (query === "SELECT COALESCE(MAX(global_seq), 0) AS global_seq FROM events") {
+    return { rows: [{ global_seq: fakePg.events.at(-1)?.global_seq ?? 0 }] };
+  }
+  if (
+    query ===
+    "SELECT run_id, MAX(global_seq) AS global_seq FROM events WHERE global_seq > $1 GROUP BY run_id"
+  ) {
+    const lastGlobalSeq = number(values[0]);
+    const changedRuns = new Map<string, number>();
+    for (const event of fakePg.events) {
+      if (event.global_seq > lastGlobalSeq) {
+        changedRuns.set(
+          event.run_id,
+          Math.max(changedRuns.get(event.run_id) ?? 0, event.global_seq),
+        );
+      }
+    }
+    return {
+      rows: [...changedRuns].map(([run_id, global_seq]) => ({ run_id, global_seq })),
+    };
   }
   if (query === "SELECT pg_notify($1, $2)") {
     const channel = text(values[0]);
@@ -524,6 +601,23 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
         })),
     };
   }
+  if (query.startsWith("SELECT run_id, created_at, status, next_seq - 1 AS last_seq")) {
+    const run = fakePg.runs.get(text(values[0]));
+    return {
+      rows:
+        run === undefined
+          ? []
+          : [
+              {
+                run_id: run.run_id,
+                created_at: run.created_at,
+                status: run.status,
+                last_seq: run.next_seq - 1,
+                last_ts: run.last_ts,
+              },
+            ],
+    };
+  }
   throw new Error("Unexpected SQL statement");
 }
 
@@ -538,6 +632,9 @@ beforeEach(() => {
   fakePg.migrationHistory.clear();
   fakePg.encryptionValue = "";
   fakePg.notificationListeners.clear();
+  fakePg.listenerEndListeners.clear();
+  fakePg.listenerListenCount = 0;
+  fakePg.terminalChecks = 0;
   fakePg.handler = fakeQuery;
   fakePg.connectErrorCode = "ECONNREFUSED";
   fakePg.shouldFailConnect = false;
@@ -715,6 +812,111 @@ it("retries initialization after a transient connection failure", async () => {
   fakePg.shouldFailConnect = false;
   await expect(store.head(runId)).resolves.toBe(0);
   await store.close();
+});
+
+it("fails a watch when the dedicated listener cannot LISTEN", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  fakePg.handler = (sql, values) => {
+    if (sql === "LISTEN harness_events") {
+      throw new Error("synthetic listen failure");
+    }
+    return fakeQuery(sql, values);
+  };
+  const controller = new AbortController();
+  const iterator = store
+    .watch(createEventBuilders().nextRunId(), { fromSeq: 0, signal: controller.signal })
+    [Symbol.asyncIterator]();
+
+  await expect(iterator.next()).rejects.toMatchObject({ code: "store_unavailable" });
+  await store.close();
+});
+
+it.each([
+  ["missing run", false],
+  ["non-terminal head", true],
+])("checks terminal state for a %s", async (_label, createRun) => {
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  if (createRun) {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+  }
+  const controller = new AbortController();
+  const iterator = store
+    .watch(runId, { fromSeq: createRun ? 1 : 0, signal: controller.signal })
+    [Symbol.asyncIterator]();
+  const pending = iterator.next();
+  try {
+    await vi.waitFor(() => {
+      expect(fakePg.terminalChecks).toBe(1);
+    });
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({ done: true });
+  } finally {
+    controller.abort();
+    await iterator.return?.();
+    await store.close();
+  }
+});
+
+it("ignores UNLISTEN failure when closing the dedicated listener", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  await store.append(runId, [builders.runCreated(runId)], 0);
+  const controller = new AbortController();
+  const iterator = store
+    .watch(runId, { fromSeq: 1, signal: controller.signal })
+    [Symbol.asyncIterator]();
+  const pending = iterator.next();
+  await vi.waitFor(() => {
+    expect(fakePg.listenerListenCount).toBe(1);
+  });
+  fakePg.handler = (sql, values) => {
+    if (sql === "UNLISTEN harness_events") {
+      throw new Error("synthetic unlisten failure");
+    }
+    return fakeQuery(sql, values);
+  };
+  controller.abort();
+  await expect(pending).resolves.toMatchObject({ done: true });
+  await iterator.return?.();
+
+  await expect(store.close()).resolves.toBeUndefined();
+});
+
+it("re-listens and catches up run changes missed while the listener was disconnected", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  await store.append(runId, [builders.runCreated(runId)], 0);
+  const controller = new AbortController();
+  const iterator = store.watch(runId, { fromSeq: 1, signal: controller.signal })[Symbol.asyncIterator]();
+  const pendingEvent = iterator.next();
+  try {
+    await vi.waitFor(() => {
+      expect(fakePg.listenerListenCount).toBe(1);
+    });
+    const disconnect = fakePg.listenerEndListeners.values().next().value;
+    if (disconnect === undefined) {
+      throw new Error("Expected a listener end handler");
+    }
+    disconnect();
+    fakePg.notificationListeners.clear();
+    await store.append(runId, [builders.modelRequest(runId)], 1);
+    await vi.waitFor(() => {
+      expect(fakePg.listenerListenCount).toBe(2);
+    });
+
+    await expect(pendingEvent).resolves.toMatchObject({
+      done: false,
+      value: { seq: 1, type: "model_request" },
+    });
+  } finally {
+    controller.abort();
+    await iterator.return?.();
+    await store.close();
+  }
 });
 
 it("does not map an event insert unique violation to a sequence conflict at the expected head", async () => {

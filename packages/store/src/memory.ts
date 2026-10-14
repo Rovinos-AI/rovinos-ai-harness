@@ -24,7 +24,12 @@ import {
   type RunSummary,
   type SnapshotStoreOptions,
 } from "./types.js";
-import { ChangeEmitter, watchEvents, watchRunSummaries } from "./subscriptions.js";
+import {
+  ChangeEmitter,
+  summaryFromEvents,
+  watchEvents,
+  watchRunSummaries,
+} from "./subscriptions.js";
 
 function startAfterCursor(summaries: readonly RunSummary[], cursor?: string): number | undefined {
   if (cursor === undefined) {
@@ -236,8 +241,11 @@ export class InMemoryEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.watchRuns} */
   watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
-    return watchRunSummaries(this, options, (runId, signal) =>
-      this.changeEmitter.subscribe(runId, signal),
+    return watchRunSummaries(
+      this,
+      options,
+      (runId, signal) => this.changeEmitter.subscribe(runId, signal),
+      (runId) => Promise.resolve(summaryFromEvents(runId, this.runs.get(runId))),
     );
   }
 

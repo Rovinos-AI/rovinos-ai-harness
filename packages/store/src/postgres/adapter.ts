@@ -28,7 +28,7 @@ import {
   type ListRunsOptions,
   type RunSummary,
 } from "../types.js";
-import { watchEvents, watchRunSummaries, type ChangeSubscription } from "../subscriptions.js";
+import { watchEvents, watchRunSummaries } from "../subscriptions.js";
 import {
   appendTransaction,
   decodeCursor,
@@ -45,7 +45,7 @@ import { deleteRunTransaction } from "./retention.js";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";
 import { initializePostgresStore } from "./initialize.js";
 import { readEvents } from "./reader.js";
-import { isRunTerminal, listenForChanges } from "./subscriptions.js";
+import { isRunTerminal, PostgresSubscriptions } from "./subscriptions.js";
 
 const connectionStringSchema = z
   .url()
@@ -75,7 +75,7 @@ export class PostgresEventStore implements EventStore {
   private readonly clock: Clock;
   private readonly skipMigrations: boolean;
   private readonly approvalNotifications: PostgresApprovalNotifications;
-  private readonly runWatchers = new Map<Id, Set<() => void>>();
+  private readonly subscriptions: PostgresSubscriptions;
   private initialized: Promise<void> | undefined;
 
   /**
@@ -109,6 +109,12 @@ export class PostgresEventStore implements EventStore {
     this.skipMigrations = parsedOptions.data.skipMigrations;
     this.approvalNotifications = new PostgresApprovalNotifications(this.pool, () =>
       this.ensureInitialized(),
+    );
+    this.subscriptions = new PostgresSubscriptions(
+      this.pool,
+      parsedConnectionString.data,
+      parsedOptions.data.schema,
+      () => this.ensureInitialized(),
     );
   }
 
@@ -194,48 +200,10 @@ export class PostgresEventStore implements EventStore {
     );
   }
 
-  private async waitForChange(
-    runId: Id | undefined,
-    signal: AbortSignal,
-  ): Promise<ChangeSubscription> {
-    let resolveChanged: () => void = () => undefined;
-    const changed = new Promise<void>((resolve) => {
-      resolveChanged = resolve;
-    });
-    const onAbort = (): void => {
-      resolveChanged();
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) {
-      onAbort();
-    }
-    try {
-      const listener = await listenForChanges(
-        this.pool,
-        () => this.ensureInitialized(),
-        (message) => {
-          if (runId === undefined || message.payload?.startsWith(`${runId}:`) === true) {
-            resolveChanged();
-          }
-        },
-      );
-      return {
-        changed,
-        async cancel() {
-          signal.removeEventListener("abort", onAbort);
-          await listener.close();
-        },
-      };
-    } catch (error) {
-      signal.removeEventListener("abort", onAbort);
-      throw error;
-    }
-  }
-
   /** {@inheritDoc EventStore.watch} */
   watch(runId: Id, options: Parameters<EventStore["watch"]>[1]): AsyncIterable<Event> {
     return watchEvents(this, runId, options, {
-      subscribe: (watchedRunId, signal) => this.waitForChange(watchedRunId, signal),
+      subscribe: (watchedRunId, signal) => this.subscriptions.subscribe(watchedRunId, signal),
       isTerminal: (watchedRunId, observedNextSeq) =>
         isRunTerminal(this.pool, () => this.ensureInitialized(), watchedRunId, observedNextSeq),
     });
@@ -243,7 +211,24 @@ export class PostgresEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.watchRuns} */
   watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
-    return watchRunSummaries(this, options, (runId, signal) => this.waitForChange(runId, signal));
+    return watchRunSummaries(
+      this,
+      options,
+      (runId, signal) => this.subscriptions.subscribe(runId, signal),
+      async (runId) => {
+        try {
+          await this.ensureInitialized();
+          const result = await this.pool.query<RunSummaryRow>(
+            "SELECT run_id, created_at, status, next_seq - 1 AS last_seq, last_ts FROM runs WHERE run_id = $1",
+            [runId],
+          );
+          const row = result.rows[0];
+          return row === undefined ? undefined : runListPage([row], 1).runs[0];
+        } catch (error) {
+          throw storeError(error);
+        }
+      },
+    );
   }
 
   /** {@inheritDoc EventStore.head} */
@@ -427,6 +412,7 @@ export class PostgresEventStore implements EventStore {
   /** {@inheritDoc EventStore.close} */
   async close(): Promise<void> {
     try {
+      await this.subscriptions.close();
       await this.pool.end();
     } catch (error) {
       throw storeError(error);

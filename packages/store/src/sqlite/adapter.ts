@@ -32,6 +32,7 @@ import {
 } from "../types.js";
 import {
   ChangeEmitter,
+  waitForChangeWithPolling,
   watchEvents,
   watchRunSummaries,
   type ChangeSubscription,
@@ -45,6 +46,8 @@ import {
   validateEncryptionMetadata,
   insertSnapshot,
   parseStoredMeta,
+  prepareRunSummaryQuery,
+  readRunSummary,
   runListPage,
   type EventRow,
   type RunRow,
@@ -108,6 +111,7 @@ export class SqliteEventStore implements EventStore {
   private readonly codec: ContentCodec;
   private readonly insertRun: Database.Statement<[Id, number, number]>;
   private readonly getRun: Database.Statement<[Id], RunRow>;
+  private readonly getRunSummary: Database.Statement<[Id], RunSummaryRow>;
   private readonly insertEvent: Database.Statement<
     [Id, number, number, string, string, string, string, string, string, string | null]
   >;
@@ -176,6 +180,7 @@ export class SqliteEventStore implements EventStore {
     this.getRun = this.db.prepare<[Id], RunRow>(
       "SELECT next_seq, status FROM runs WHERE run_id = ?",
     );
+    this.getRunSummary = prepareRunSummaryQuery(this.db);
     this.insertEvent = this.db.prepare<
       [Id, number, number, string, string, string, string, string, string, string | null]
     >(
@@ -321,20 +326,7 @@ export class SqliteEventStore implements EventStore {
   }
 
   private waitForChange(runId: Id | undefined, signal: AbortSignal): ChangeSubscription {
-    const localSubscription = this.changeEmitter.subscribe(runId, signal);
-    let resolveChanged: () => void = () => undefined;
-    const changed = new Promise<void>((resolve) => {
-      resolveChanged = resolve;
-    });
-    const timer = setTimeout(resolveChanged, this.pollIntervalMs);
-    void localSubscription.changed.then(resolveChanged);
-    return {
-      changed,
-      async cancel() {
-        clearTimeout(timer);
-        await localSubscription.cancel();
-      },
-    };
+    return waitForChangeWithPolling(this.changeEmitter, runId, signal, this.pollIntervalMs);
   }
 
   /** {@inheritDoc EventStore.watch} */
@@ -356,7 +348,12 @@ export class SqliteEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.watchRuns} */
   watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
-    return watchRunSummaries(this, options, (runId, signal) => this.waitForChange(runId, signal));
+    return watchRunSummaries(
+      this,
+      options,
+      (runId, signal) => this.waitForChange(runId, signal),
+      (runId) => Promise.resolve(readRunSummary(this.getRunSummary, runId)),
+    );
   }
 
   /** {@inheritDoc EventStore.head} */
