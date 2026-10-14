@@ -4,6 +4,7 @@ import { JsonValue, ModelRetryConfigSchema, parseJson, type ModelRequest } from 
 import { attr, defineSpan, withSpan } from "@harness/telemetry";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { context, trace } from "@opentelemetry/api";
+import * as telemetry from "@harness/telemetry";
 import { z } from "zod";
 import { ModelOutputInvalidError, ProviderError } from "./errors.js";
 import { ModelGateway } from "./gateway.js";
@@ -204,6 +205,9 @@ describe("ModelGateway", () => {
         "harness.event.seq": attr.optional(attr.int()),
         "harness.model.attempts": attr.optional(attr.int()),
         "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
+        "harness.model.input_tokens": attr.optional(attr.nonnegativeInt()),
+        "harness.model.output_tokens": attr.optional(attr.nonnegativeInt()),
+        "harness.model.cost_micros": attr.optional(attr.nonnegativeInt()),
       },
       { taskId: "4.7", packageName: "@harness/models" },
     );
@@ -211,7 +215,13 @@ describe("ModelGateway", () => {
     const complete = vi.fn((_request: ModelRequest, _context: ProviderContext) => {
       calls += 1;
       if (calls < 3) {
-        return Promise.reject(new ProviderError("provider_unavailable"));
+        const error = new ProviderError("provider_unavailable");
+        if (calls === 1) {
+          Object.defineProperty(error, "usage", {
+            value: { inputTokens: 1, outputTokens: 2 },
+          });
+        }
+        return Promise.reject(error);
       }
       if (calls === 3) {
         return Promise.resolve({
@@ -234,6 +244,9 @@ describe("ModelGateway", () => {
       retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 3 }),
       random: () => 0,
       sleep: () => Promise.resolve(),
+      pricing: {
+        "sample/model-a": { inputMicrosPerMTok: 1_000_000, outputMicrosPerMTok: 2_000_000 },
+      },
     });
 
     try {
@@ -256,7 +269,7 @@ describe("ModelGateway", () => {
         expect(completion).toMatchObject({
           schemaValid: true,
           repairAttempts: 1,
-          usage: { inputTokens: 7, outputTokens: 9, costMicros: 12 },
+          usage: { inputTokens: 8, outputTokens: 11, costMicros: 30 },
           latencyMs: 16,
         });
         expect(recordedAttribute.mock.calls).toEqual([
@@ -266,6 +279,9 @@ describe("ModelGateway", () => {
           ["harness.model.attempts", 3],
           ["harness.model.repair_attempts", 1],
           ["harness.model.attempts", 4],
+          ["harness.model.input_tokens", 8],
+          ["harness.model.output_tokens", 11],
+          ["harness.model.cost_micros", 30],
         ]);
       });
     } finally {
@@ -273,6 +289,34 @@ describe("ModelGateway", () => {
       trace.disable();
       context.disable();
     }
+  });
+
+  it("omits missing prices and logs each model only once", async () => {
+    const pricingMissing = vi.spyOn(telemetry, "emitPricingMissing");
+    const provider: ProviderAdapter = {
+      provider: "sample",
+      kind: "openai",
+      complete: () =>
+        Promise.resolve({
+          parts: [],
+          usage: { inputTokens: 2, outputTokens: 3, costMicros: 99 },
+          finishReason: "stop",
+          latencyMs: 0,
+        }),
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([provider]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 1 }),
+    });
+    const signal = new AbortController().signal;
+
+    const first = await gateway.complete(request, { runId: request.requestId, signal });
+    const second = await gateway.complete(request, { runId: request.requestId, signal });
+
+    expect(first.usage).toEqual({ inputTokens: 2, outputTokens: 3 });
+    expect(second.usage).toEqual({ inputTokens: 2, outputTokens: 3 });
+    expect(pricingMissing).toHaveBeenCalledExactlyOnceWith("sample", "model-a");
   });
 
   it("fails fast for non-retryable provider failures", async () => {
@@ -716,6 +760,9 @@ describe("ModelGateway", () => {
     const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
+      pricing: {
+        "openai/model-a": { inputMicrosPerMTok: 1_000_000, outputMicrosPerMTok: 1_000_000 },
+      },
     });
     const completion = await gateway.complete(
       { ...request, model: { provider: "openai", model: "model-a" } },
@@ -746,7 +793,7 @@ describe("ModelGateway", () => {
     expect(completion).toMatchObject({
       schemaValid: true,
       repairAttempts: 1,
-      usage: { inputTokens: 13, outputTokens: 16, costMicros: 22 },
+      usage: { inputTokens: 13, outputTokens: 16, costMicros: 29 },
       latencyMs: 26,
     });
   });

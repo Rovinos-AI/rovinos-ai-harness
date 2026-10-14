@@ -7,6 +7,7 @@ import {
   type ModelUsage,
   type ModelRoutingConfigSchema,
 } from "@harness/schemas";
+import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { z } from "zod";
 import {
   attachModelFailureMetadata,
@@ -98,6 +99,14 @@ function aggregateUsage(previous: ModelUsage | undefined, next: ModelUsage | und
   };
 }
 
+function reportSpanUsage(usage: ModelUsage): void {
+  setActiveSpanAttribute("harness.model.input_tokens", usage.inputTokens);
+  setActiveSpanAttribute("harness.model.output_tokens", usage.outputTokens);
+  if (usage.costMicros !== undefined) {
+    setActiveSpanAttribute("harness.model.cost_micros", usage.costMicros);
+  }
+}
+
 function shouldFallback(options: {
   readonly error: unknown;
   readonly code: string | undefined;
@@ -135,7 +144,10 @@ export class RoutingModelGateway {
     private readonly routing: ModelRoutingConfig,
     options?: ModelGatewayOptions,
   ) {
-    this.gateway = new ModelGateway(registry, dependencies, options);
+    this.gateway = new ModelGateway(registry, dependencies, {
+      ...options,
+      deferSpanUsage: true,
+    });
     for (const candidate of [...routing.default, ...Object.values(routing.roles).flat()]) {
       try {
         registry.get(candidate.provider);
@@ -163,9 +175,11 @@ export class RoutingModelGateway {
     for (const [index, model] of candidates.entries()) {
       try {
         const result = await this.gateway.complete({ ...request, model }, context);
+        const usage = aggregateUsage(accumulatedUsage, result.usage) ?? result.usage;
+        reportSpanUsage(usage);
         return {
           ...result,
-          usage: aggregateUsage(accumulatedUsage, result.usage) ?? result.usage,
+          usage,
           latencyMs: accumulatedLatencyMs + result.latencyMs,
           repairAttempts: accumulatedRepairAttempts + result.repairAttempts,
           fallbackDepth: index,
@@ -188,6 +202,7 @@ export class RoutingModelGateway {
           if (accumulatedUsage === undefined) {
             throw error;
           }
+          reportSpanUsage(accumulatedUsage);
           throw attachModelFailureMetadata(error, {
             usage: accumulatedUsage,
             latencyMs: accumulatedLatencyMs,
