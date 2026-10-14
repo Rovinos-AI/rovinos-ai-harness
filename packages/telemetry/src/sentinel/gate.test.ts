@@ -34,9 +34,7 @@ function makeTripQueue(): TripQueue {
 function matcherFor(values: readonly string[]) {
   return {
     findAll: (text: string) =>
-      values.flatMap((value, patternIndex) =>
-        text.includes(value) ? [{ patternIndex }] : [],
-      ),
+      values.flatMap((value, patternIndex) => (text.includes(value) ? [{ patternIndex }] : [])),
   };
 }
 
@@ -144,9 +142,7 @@ describe("SentinelGate", () => {
     const reader: VaultRunReader = {
       version: () => Promise.resolve(version),
       listRawValueEntries: () =>
-        Promise.resolve(
-          values.map((rawValue) => ({ entityType: Code.parse("email"), rawValue })),
-        ),
+        Promise.resolve(values.map((rawValue) => ({ entityType: Code.parse("email"), rawValue }))),
     };
     const gate = new SentinelGate(new VaultRunView(reader), new ActiveRuns(), {
       tripQueue: makeTripQueue(),

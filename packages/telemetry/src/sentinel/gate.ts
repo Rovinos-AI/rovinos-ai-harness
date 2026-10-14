@@ -87,8 +87,7 @@ export class SentinelGate {
   private readonly matcherForValues: (values: readonly string[]) => SentinelMatcherLike;
   private readonly tripQueue: TripQueue;
   private readonly runMatchers = new Map<Id, CachedMatcher>();
-  private combinedMatcher:
-    ({ readonly key: string } & PreparedMatcher) | undefined;
+  private combinedMatcher: ({ readonly key: string } & PreparedMatcher) | undefined;
 
   /**
    * @param values Versioned, read-only vault values.
@@ -206,7 +205,9 @@ export class SentinelGate {
       return cached;
     }
     const matcher = this.matcherForValues(valueSet.values);
-    const entityTypesByValue = valueSet.values.map((_, index) => valueSet.entityTypesForValue(index));
+    const entityTypesByValue = valueSet.values.map((_, index) =>
+      valueSet.entityTypesForValue(index),
+    );
     const prepared = { version: valueSet.version, matcher, entityTypesByValue };
     this.runMatchers.delete(runId);
     this.runMatchers.set(runId, prepared);
@@ -245,11 +246,9 @@ export class SentinelGate {
       const matcher: SentinelMatcherLike = {
         findAll: (text) =>
           matchers.flatMap((runMatcher, index) =>
-            runMatcher.matcher
-              .findAll(text)
-              .map(({ patternIndex }) => ({
-                patternIndex: patternIndex + (offsets[index] ?? 0),
-              })),
+            runMatcher.matcher.findAll(text).map(({ patternIndex }) => ({
+              patternIndex: patternIndex + (offsets[index] ?? 0),
+            })),
           ),
       };
       this.combinedMatcher = { key, matcher, entityTypesByValue };
@@ -261,7 +260,10 @@ export class SentinelGate {
     return this.combinedMatcher;
   }
 
-  private enqueueTrip(runId: Id | undefined, entities: readonly { type: EntityCode; count: number }[]): void {
+  private enqueueTrip(
+    runId: Id | undefined,
+    entities: readonly { type: EntityCode; count: number }[],
+  ): void {
     this.tripQueue.enqueue({
       ...(runId === undefined ? {} : { runId }),
       entities: [...entities],
@@ -284,16 +286,22 @@ function combineValueSets(valueSets: readonly RunValueSet[]): {
         values.push(value);
         entityTypesByValue.push([...valueSet.entityTypesForValue(index)]);
       } else {
-        const types = entityTypesByValue[existingIndex];
-        for (const type of valueSet.entityTypesForValue(index)) {
-          if (types !== undefined && !types.includes(type)) {
-            types.push(type);
-          }
-        }
+        mergeEntityTypes(entityTypesByValue[existingIndex], valueSet.entityTypesForValue(index));
       }
     }
   }
   return { values, entityTypesByValue };
+}
+
+function mergeEntityTypes(target: EntityCode[] | undefined, source: readonly EntityCode[]): void {
+  if (target === undefined) {
+    return;
+  }
+  for (const type of source) {
+    if (!target.includes(type)) {
+      target.push(type);
+    }
+  }
 }
 
 function entitiesForMatches(

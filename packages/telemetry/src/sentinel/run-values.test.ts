@@ -73,9 +73,7 @@ describe("VaultRunView", () => {
       version: vi.fn().mockResolvedValue(1),
       listRawValueEntries: vi
         .fn()
-        .mockResolvedValue(
-          typedEntries(["short", "  long-value  ", "long-value", "x", "   "]),
-        ),
+        .mockResolvedValue(typedEntries(["short", "  long-value  ", "long-value", "x", "   "])),
     };
     const view = new VaultRunView(reader);
 
@@ -186,13 +184,13 @@ describe("VaultRunView", () => {
   });
 
   it("uses the read-only static test reader", async () => {
-    const reader = new StaticVaultReader(
-      new Map([[runId, typedEntries(["static-value"])]]),
-    );
+    const reader = new StaticVaultReader(new Map([[runId, typedEntries(["static-value"])]]));
 
     await expect(reader.version(runId)).resolves.toBe(1);
     await expect(reader.listRawValues(runId)).resolves.toEqual(["static-value"]);
-    await expect(reader.listRawValueEntries(runId)).resolves.toEqual(typedEntries(["static-value"]));
+    await expect(reader.listRawValueEntries(runId)).resolves.toEqual(
+      typedEntries(["static-value"]),
+    );
     expect("put" in reader).toBe(false);
   });
 

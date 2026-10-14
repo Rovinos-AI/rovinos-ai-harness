@@ -21,6 +21,7 @@ import { preflightModelBudget, recordBudgetFailureAndCheckpoint } from "./steps/
 import { toolStep } from "./steps/tool-step.js";
 import type { PreparedToolCall } from "./steps/prepare-tool.js";
 import { suspendedOutcome } from "./steps/suspended-outcome.js";
+import { suspendForShutdown } from "./steps/shutdown.js";
 import type {
   ContextPort,
   IdGenerator,
@@ -399,7 +400,7 @@ async function suspendIfShutdown(
   if (options.signal.reason !== "shutdown") {
     throw new RunAbortedError();
   }
-  return suspendForShutdown(options, events, execution);
+  return suspendForShutdown(options.recorder, events, execution.checkpointer);
 }
 
 async function suspendAfterModel(
@@ -409,31 +410,12 @@ async function suspendAfterModel(
   result: ModelStepResult,
 ): Promise<Event | undefined> {
   if (result.outcome === "aborted") {
-    return suspendForShutdown(options, events, execution);
+    return suspendForShutdown(options.recorder, events, execution.checkpointer);
   }
   if (result.outcome === "failed") {
     return undefined;
   }
   return suspendIfShutdown(options, events, execution);
-}
-
-async function suspendForShutdown(
-  options: RunLoopExecutionOptions,
-  events: Event[],
-  execution: RunLoopExecution,
-): Promise<Event> {
-  await drainSentinelTrips(options.recorder, events);
-  const suspended = await options.recorder.record({
-    type: "run_status_changed",
-    v: 1,
-    from: "running",
-    to: "suspended",
-    reason: "shutdown",
-  });
-  events.push(suspended);
-  await drainSentinelTrips(options.recorder, events);
-  await checkpointAfterStep(execution.checkpointer, events);
-  return suspended;
 }
 
 async function drainSentinelTrips(recorder: RunRecorder, events: Event[]): Promise<void> {

@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { inspect } from "node:util";
-import {
-  VaultValueEntrySchema,
-  type Code,
-  type Id,
-  type VaultValueEntry,
-} from "@harness/schemas";
+import { VaultValueEntrySchema, type Code, type Id, type VaultValueEntry } from "@harness/schemas";
 import { z } from "zod";
 import { countSkippedShortValues } from "../metrics.js";
 
@@ -136,8 +131,11 @@ export class VaultRunView {
         valueIndexes.set(value, values.length);
         values.push(value);
         entityTypesByValue.push([entityType]);
-      } else if (!entityTypesByValue[existingIndex]?.includes(entityType)) {
-        entityTypesByValue[existingIndex]?.push(entityType);
+      } else {
+        const entityTypes = entityTypesByValue[existingIndex];
+        if (entityTypes !== undefined && !entityTypes.includes(entityType)) {
+          entityTypes.push(entityType);
+        }
       }
     }
 

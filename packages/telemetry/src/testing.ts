@@ -49,8 +49,9 @@ export class StaticVaultReader implements VaultRunReader {
   /** @param valuesByRun Typed vault entries returned for each requested run. */
   constructor(valuesByRun: ReadonlyMap<Id, readonly VaultValueEntry[]>) {
     this.valuesByRun = new Map(
-      [...valuesByRun].map(([runId, values]) =>
-        [runId, Object.freeze(values.map((entry) => Object.freeze({ ...entry })))] as const,
+      [...valuesByRun].map(
+        ([runId, values]) =>
+          [runId, Object.freeze(values.map((entry) => Object.freeze({ ...entry })))] as const,
       ),
     );
   }

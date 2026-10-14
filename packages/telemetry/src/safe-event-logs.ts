@@ -189,13 +189,7 @@ const logDefinitions = {
       "ui",
       "telemetry_export",
     ]),
-    "harness.pii.action": attr.enum([
-      "tokenized",
-      "redacted",
-      "blocked",
-      "allowed",
-      "detokenized",
-    ]),
+    "harness.pii.action": attr.enum(["tokenized", "redacted", "blocked", "allowed", "detokenized"]),
     "harness.pii.entity_count": attr.nonnegativeInt(),
   }),
   budget_exceeded: defineLogRecord("harness.safe.budget_exceeded", {

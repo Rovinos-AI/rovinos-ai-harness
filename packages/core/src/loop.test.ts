@@ -1151,9 +1151,7 @@ describe("runLoop", () => {
     });
     expect(JSON.stringify(trips)).not.toContain("synthetic run goal");
     expect(result.status).toBe("completed");
-    expect(result.events.map(({ seq }) => seq)).toEqual(
-      result.events.map((_, index) => index),
-    );
+    expect(result.events.map(({ seq }) => seq)).toEqual(result.events.map((_, index) => index));
   });
 
   it("compacts before making the next model call", async () => {

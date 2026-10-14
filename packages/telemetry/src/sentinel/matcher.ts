@@ -40,8 +40,11 @@ export class SentinelMatcher {
           patternIndexes.set(pattern, patterns.length);
           patterns.push(pattern);
           valueIndexesByPattern.push([valueIndex]);
-        } else if (!valueIndexesByPattern[existingPatternIndex]?.includes(valueIndex)) {
-          valueIndexesByPattern[existingPatternIndex]?.push(valueIndex);
+        } else {
+          const valueIndexes = valueIndexesByPattern[existingPatternIndex];
+          if (valueIndexes !== undefined && !valueIndexes.includes(valueIndex)) {
+            valueIndexes.push(valueIndex);
+          }
         }
       }
     }
@@ -59,13 +62,11 @@ export class SentinelMatcher {
   /** Return matched vault-value indexes without returning the matched text. */
   findAll(text: string): readonly { patternIndex: number }[] {
     return (
-      this.automaton
-        ?.findAll(text)
-        .flatMap(({ patternIndex }) =>
-          (this.valueIndexesByPattern[patternIndex] ?? []).map((index) => ({
-            patternIndex: index,
-          })),
-        ) ?? []
+      this.automaton?.findAll(text).flatMap(({ patternIndex }) =>
+        (this.valueIndexesByPattern[patternIndex] ?? []).map((index) => ({
+          patternIndex: index,
+        })),
+      ) ?? []
     );
   }
 }
