@@ -3,7 +3,11 @@
   "compilerOptions": {
     "composite": false,
     "customConditions": ["source"],
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "eventsource": ["../../node_modules/eventsource/dist/index.d.ts"],
+      "eventsource-parser": ["../../node_modules/eventsource-parser/dist/index.d.ts"]
+    }
   },
   "include": ["basic.ts"]
 }

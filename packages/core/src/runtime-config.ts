@@ -14,10 +14,12 @@ import {
   type RunConfig,
   type RunInput,
   type SecretRef,
+  type ServersConfig,
   type StoreConfig,
   type VaultConfig,
 } from "@harness/schemas";
 import type { ProviderAdapter } from "@harness/models";
+import type { McpConnectionDependencies } from "@harness/mcp";
 import type { EventStore } from "@harness/store";
 import type {
   AuditingVaultResolver,
@@ -27,6 +29,7 @@ import type {
   VaultWriter,
 } from "@harness/vault";
 import type { Tokenizer } from "@harness/pii";
+import type { WorkspacePort } from "@harness/context";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
@@ -56,6 +59,10 @@ export interface RuntimeOverrides {
   /** Receives safe warnings raised during key-provider setup. */
   readonly onKeysWarning?: (code: "keys_ephemeral") => void;
   readonly tool?: ToolPort;
+  /** Optional MCP transport factory for embedded runtimes and in-memory tests. */
+  readonly mcpTransportFactory?: McpConnectionDependencies["createTransport"];
+  /** Workspace used to persist offloaded tool results, including MCP binary outputs. */
+  readonly workspace?: WorkspacePort;
   /** Policy evaluator replacing the policy document configured for the runtime. */
   readonly policy?: PolicyPort;
   readonly context?: ContextPort;
@@ -76,6 +83,7 @@ export interface RuntimeConfig {
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;
   readonly keys?: KeysConfig | undefined;
+  readonly servers?: ServersConfig;
 }
 
 /** Optional cooperative cancellation and claim notification for a resumed run. */
@@ -147,6 +155,7 @@ export interface RuntimeComposition {
     | undefined;
   readonly model: ModelPort;
   readonly tool: ToolPort;
+  readonly closeToolPort?: () => Promise<void>;
   readonly policy: PolicyPort;
   readonly policyVersion: PolicyPort["version"];
   readonly context: ContextPort;

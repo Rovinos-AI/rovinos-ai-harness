@@ -68,6 +68,7 @@ export const METRIC_ALLOWLIST = {
   "harness.sentinel.scope_reduced": [],
   "harness.sentinel.short_values_skipped": [],
   "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
+  "harness.mcp.discovery_failed": [],
 } as const satisfies Record<Code, readonly Code[]>;
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
@@ -76,6 +77,7 @@ let policyDecisionsCounter: Counter<PolicyDecisionAttributes> | undefined;
 let hostAppSpansAcceptedCounter: Counter<NoMetricAttributes> | undefined;
 let skippedShortValuesCounter: Counter<NoMetricAttributes> | undefined;
 let scopeReducedCounter: Counter<NoMetricAttributes> | undefined;
+let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
 
 function createCounter<TAttributes extends Attributes>(
   name: keyof typeof METRIC_ALLOWLIST,
@@ -132,6 +134,14 @@ function getScopeReducedCounter(): Counter<NoMetricAttributes> {
   return scopeReducedCounter;
 }
 
+function getMcpDiscoveryFailedCounter(): Counter<NoMetricAttributes> {
+  mcpDiscoveryFailedCounter ??= createCounter<NoMetricAttributes>(
+    "harness.mcp.discovery_failed",
+    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
+  );
+  return mcpDiscoveryFailedCounter;
+}
+
 /** Counts a telemetry drop using its bounded reason code. */
 export function countDroppedTelemetry(reason: TelemetryDropReason): void {
   try {
@@ -184,6 +194,15 @@ export function countSkippedShortValues(count: number): void {
 export function countSentinelScopeReduced(): void {
   try {
     getScopeReducedCounter().add(1);
+  } catch {
+    return;
+  }
+}
+
+/** Counts an MCP tool-discovery failure without server identifiers. */
+export function countMcpDiscoveryFailed(): void {
+  try {
+    getMcpDiscoveryFailedCounter().add(1);
   } catch {
     return;
   }
