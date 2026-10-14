@@ -13,3 +13,8 @@ scanned for canary-like patterns.
 
 The hostile MCP App integration tests send run-seeded canaries through rejected telemetry fields
 and scan the host's exported spans, logs, metrics, diagnostics, and captured stdout.
+
+The approval-screen unit tests inject synthetic canaries in invalid payloads and bridge
+errors, checking that the DOM error state and telemetry contain only fixed status text/codes.
+Hostile markup remains text, token display does not call approval/reveal tools, and no
+payload is written to browser storage.

@@ -1,0 +1,30 @@
+{
+  "name": "@harness/approval-app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json && node build.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@harness/app-telemetry": "workspace:^",
+    "@harness/schemas": "workspace:^",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/core": "2.3.1",
+    "@modelcontextprotocol/ext-apps": "2.0.3",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/jsdom": "30.0.0",
+    "axe-core": "4.14.0",
+    "esbuild": "0.28.2",
+    "jsdom": "30.1.2",
+    "typescript": "5.9.3",
+    "vitest": "3.2.6"
+  }
+}

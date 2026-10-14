@@ -15,6 +15,24 @@
   "deny": ["GPL-*", "AGPL-*", "LGPL-*", "SSPL-*", "BUSL-*", "CC-BY-NC*"],
   "exceptions": [
     {
+      "package": "axe-core",
+      "version": "4.14.0",
+      "reason": "Task 5.3 requires this MPL-2.0 accessibility scanner for development-only approval UI tests.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "@csstools/color-helpers",
+      "version": "6.1.2",
+      "reason": "MIT-0 transitive dependency of jsdom used only by task 5.3 browser rendering tests.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "@csstools/css-syntax-patches-for-csstree",
+      "version": "1.1.15",
+      "reason": "MIT-0 transitive dependency of jsdom used only by task 5.3 browser rendering tests.",
+      "expires": "2027-10-14"
+    },
+    {
       "package": "caniuse-lite",
       "reason": "Existing Browserslist tooling dependency declares CC-BY-4.0.",
       "expires": "2027-10-08"

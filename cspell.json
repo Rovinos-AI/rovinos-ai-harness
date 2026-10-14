@@ -11,6 +11,8 @@
     "onrequestdisplaymode",
     "onupdatemodelcontext",
     "sizechange",
+    "toolinput",
+    "toolresult",
     "tldts",
     "unlisten"
   ],
