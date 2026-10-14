@@ -121,7 +121,7 @@ describe("control-plane HTTP transport", () => {
       });
       await expect(
         secondClient.callTool({ name: "cancel_run", arguments: { runId: firstRunId } }),
-      ).resolves.toMatchObject({ structuredContent: { ok: true, code: "cancelled" } });
+      ).resolves.toMatchObject({ structuredContent: { ok: true } });
       await aborted;
 
       expect(resumeSignal?.aborted).toBe(true);

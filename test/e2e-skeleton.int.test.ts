@@ -799,8 +799,9 @@ describe("control plane", () => {
       markResumeStarted = resolve;
     });
     const operations = {
-      resumeRun: vi.fn((_runId: Id, signal: AbortSignal) => {
+      resumeRun: vi.fn((_runId: Id, signal: AbortSignal, onClaimed: () => void) => {
         resumeSignal = signal;
+        onClaimed();
         markResumeStarted();
         return new Promise<void>((resolve) => {
           signal.addEventListener(
