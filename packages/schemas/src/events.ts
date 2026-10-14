@@ -87,6 +87,8 @@ const modelResponseEvent = z
     model: Code,
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
+    cacheReadTokens: z.number().int().nonnegative().optional(),
+    cacheWriteTokens: z.number().int().nonnegative().optional(),
     costMicros: z.number().int().nonnegative().optional(),
     finishReason: Code,
     latencyMs: z.number().int().nonnegative(),

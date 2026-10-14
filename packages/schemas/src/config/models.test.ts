@@ -73,11 +73,21 @@ describe("ModelsConfigSchema", () => {
     expect(
       ModelsConfigSchema.parse({
         pricing: {
-          "sample/model-a": { inputMicrosPerMTok: 125, outputMicrosPerMTok: 375 },
+          "sample/model-a": {
+            inputMicrosPerMTok: 125,
+            outputMicrosPerMTok: 375,
+            cacheReadMicrosPerMTok: 25,
+            cacheWriteMicrosPerMTok: 200,
+          },
         },
       }).pricing,
     ).toEqual({
-      "sample/model-a": { inputMicrosPerMTok: 125, outputMicrosPerMTok: 375 },
+      "sample/model-a": {
+        inputMicrosPerMTok: 125,
+        outputMicrosPerMTok: 375,
+        cacheReadMicrosPerMTok: 25,
+        cacheWriteMicrosPerMTok: 200,
+      },
     });
     expect(() =>
       ModelsConfigSchema.parse({

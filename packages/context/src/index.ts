@@ -53,6 +53,7 @@ export {
   ContextMarkerExceedsBudgetError,
   ContextPinnedExceedsBudgetError,
   SlidingWindowStrategy,
+  type SlidingWindowStrategyOptions,
 } from "./strategies/sliding-window.js";
 export { SummarizingStrategy, type SummarizingStrategyOptions } from "./strategies/summarizing.js";
 export {

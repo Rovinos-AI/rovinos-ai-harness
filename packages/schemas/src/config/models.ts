@@ -73,11 +73,13 @@ export const ModelRetryConfigSchema = z
   .strict()
   .prefault({});
 
-/** Configured input and output prices in integer micros per million tokens. */
+/** Configured input, output, and optional cached-token prices in integer micros per million tokens. */
 export const ModelPricingRateSchema = z
   .object({
     inputMicrosPerMTok: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     outputMicrosPerMTok: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    cacheReadMicrosPerMTok: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    cacheWriteMicrosPerMTok: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   })
   .strict();
 

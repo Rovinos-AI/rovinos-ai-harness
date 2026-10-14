@@ -207,6 +207,8 @@ describe("ModelGateway", () => {
         "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
         "harness.model.input_tokens": attr.optional(attr.nonnegativeInt()),
         "harness.model.output_tokens": attr.optional(attr.nonnegativeInt()),
+        "harness.model.cache_read_tokens": attr.optional(attr.nonnegativeInt()),
+        "harness.model.cache_write_tokens": attr.optional(attr.nonnegativeInt()),
         "harness.model.cost_micros": attr.optional(attr.nonnegativeInt()),
       },
       { taskId: "4.7", packageName: "@harness/models" },
@@ -233,7 +235,13 @@ describe("ModelGateway", () => {
       }
       return Promise.resolve({
         parts: [{ type: "text" as const, text: '{"answer":"ok"}' }],
-        usage: { inputTokens: 5, outputTokens: 6, costMicros: 8 },
+        usage: {
+          inputTokens: 5,
+          outputTokens: 6,
+          cacheReadTokens: 2,
+          cacheWriteTokens: 1,
+          costMicros: 8,
+        },
         finishReason: "stop",
         latencyMs: 9,
       });
@@ -245,7 +253,12 @@ describe("ModelGateway", () => {
       random: () => 0,
       sleep: () => Promise.resolve(),
       pricing: {
-        "sample/model-a": { inputMicrosPerMTok: 1_000_000, outputMicrosPerMTok: 2_000_000 },
+        "sample/model-a": {
+          inputMicrosPerMTok: 1_000_000,
+          outputMicrosPerMTok: 2_000_000,
+          cacheReadMicrosPerMTok: 500_000,
+          cacheWriteMicrosPerMTok: 250_000,
+        },
       },
     });
 
@@ -269,7 +282,13 @@ describe("ModelGateway", () => {
         expect(completion).toMatchObject({
           schemaValid: true,
           repairAttempts: 1,
-          usage: { inputTokens: 8, outputTokens: 11, costMicros: 30 },
+          usage: {
+            inputTokens: 8,
+            outputTokens: 11,
+            cacheReadTokens: 2,
+            cacheWriteTokens: 1,
+            costMicros: 28,
+          },
           latencyMs: 16,
         });
         expect(recordedAttribute.mock.calls).toEqual([
@@ -281,7 +300,9 @@ describe("ModelGateway", () => {
           ["harness.model.attempts", 4],
           ["harness.model.input_tokens", 8],
           ["harness.model.output_tokens", 11],
-          ["harness.model.cost_micros", 30],
+          ["harness.model.cache_read_tokens", 2],
+          ["harness.model.cache_write_tokens", 1],
+          ["harness.model.cost_micros", 28],
         ]);
       });
     } finally {
@@ -317,6 +338,42 @@ describe("ModelGateway", () => {
     expect(first.usage).toEqual({ inputTokens: 2, outputTokens: 3 });
     expect(second.usage).toEqual({ inputTokens: 2, outputTokens: 3 });
     expect(pricingMissing).toHaveBeenCalledExactlyOnceWith("sample", "model-a");
+  });
+
+  it("falls back to input pricing and reports a missing cache price once", async () => {
+    const pricingCacheMissing = vi.spyOn(telemetry, "emitPricingCacheMissing");
+    const provider: ProviderAdapter = {
+      provider: "sample",
+      kind: "openai",
+      complete: () =>
+        Promise.resolve({
+          parts: [],
+          usage: { inputTokens: 10_000, outputTokens: 0, cacheReadTokens: 2_000 },
+          finishReason: "stop",
+          latencyMs: 0,
+        }),
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([provider]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 1 }),
+      pricing: {
+        "sample/model-a": { inputMicrosPerMTok: 100, outputMicrosPerMTok: 0 },
+      },
+    });
+    const signal = new AbortController().signal;
+
+    const first = await gateway.complete(request, { runId: request.requestId, signal });
+    const second = await gateway.complete(request, { runId: request.requestId, signal });
+
+    expect(first.usage).toEqual({
+      inputTokens: 10_000,
+      outputTokens: 0,
+      cacheReadTokens: 2_000,
+      costMicros: 1,
+    });
+    expect(second.usage).toEqual(first.usage);
+    expect(pricingCacheMissing).toHaveBeenCalledExactlyOnceWith("sample", "model-a");
   });
 
   it("fails fast for non-retryable provider failures", async () => {

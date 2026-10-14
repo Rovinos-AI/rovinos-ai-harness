@@ -112,15 +112,30 @@ describe("countDroppedTelemetry", () => {
   });
 
   it("counts model tokens and cost using only namespaced provider and model attributes", () => {
-    countModelUsage({ inputTokens: 2, outputTokens: 3, costMicros: 11 }, "sample", "model-a");
-
+    countModelUsage(
+      {
+        inputTokens: 2,
+        outputTokens: 3,
+        cacheReadTokens: 1,
+        cacheWriteTokens: 2,
+        costMicros: 11,
+      },
+      "sample",
+      "model-a",
+    );
     expect(createCounter).toHaveBeenCalledWith("harness.model.tokens");
+    expect(createCounter).toHaveBeenCalledWith("harness.model.cache_read_tokens");
+    expect(createCounter).toHaveBeenCalledWith("harness.model.cache_write_tokens");
     expect(createCounter).toHaveBeenCalledWith("harness.model.cost_micros");
     expect(add.mock.calls).toEqual([
       [5, { "harness.model.provider": "sample", "harness.model.name": "model-a" }],
+      [1, { "harness.model.provider": "sample", "harness.model.name": "model-a" }],
+      [2, { "harness.model.provider": "sample", "harness.model.name": "model-a" }],
       [11, { "harness.model.provider": "sample", "harness.model.name": "model-a" }],
     ]);
     expectAddCallsAreAllowlisted("harness.model.tokens");
+    expectAddCallsAreAllowlisted("harness.model.cache_read_tokens");
+    expectAddCallsAreAllowlisted("harness.model.cache_write_tokens");
     expectAddCallsAreAllowlisted("harness.model.cost_micros");
   });
 

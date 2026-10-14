@@ -12,6 +12,7 @@ import {
   type ProviderContractFixture,
 } from "../contract.js";
 import { ProviderError } from "../errors.js";
+import { withPromptOutput } from "../enforce/rung-prompt.js";
 import { ProviderResultSchema } from "../types.js";
 import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { AnthropicAdapter } from "./anthropic.js";
@@ -143,6 +144,102 @@ function fixtureFactory(
 runProviderContract("Anthropic Messages API contract", fixtureFactory, fixtures);
 
 describe("AnthropicAdapter", () => {
+  it("places three cache breakpoints and maps cached usage without mutating recorded content", async () => {
+    const call = makeRequest({
+      ...responseBody,
+      usage: {
+        input_tokens: 7,
+        output_tokens: 11,
+        cache_read_input_tokens: 5,
+        cache_creation_input_tokens: 3,
+      },
+    });
+    const request: ModelRequest = {
+      ...baseRequest,
+      messages: [
+        { role: "system", parts: [{ type: "text", text: "system rule" }] },
+        { role: "user", parts: [{ type: "text", text: "hello" }] },
+      ],
+      stablePrefixMessages: 2,
+    };
+    const originalRequest = JSON.stringify(request);
+
+    const result = await call.adapter.complete(request, context());
+    const body = z
+      .object({
+        system: z.array(JsonValue),
+        tools: z.array(JsonValue),
+        messages: z.array(JsonValue),
+      })
+      .parse(call.getRequestBody());
+
+    expect(body.system[0]).toMatchObject({ cache_control: { type: "ephemeral" } });
+    expect(body.tools.at(-1)).toMatchObject({ cache_control: { type: "ephemeral" } });
+    expect(body.messages[0]).toMatchObject({
+      role: "user",
+      content: [{ type: "text", text: "hello", cache_control: { type: "ephemeral" } }],
+    });
+    expect(JSON.stringify(body).match(/"cache_control"/gu)).toHaveLength(3);
+    expect(result.usage).toEqual({
+      inputTokens: 15,
+      outputTokens: 11,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 3,
+    });
+    expect(result.parts.find((part) => part.type === "opaque")).toMatchObject({
+      blob: { content: rawContent },
+    });
+    expect(JSON.stringify(request)).toBe(originalRequest);
+  });
+
+  it("omits cache breakpoints when the request has no stable prefix, system prompt, or tools", async () => {
+    const call = makeRequest();
+    await call.adapter.complete(
+      {
+        ...baseRequest,
+        messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+        tools: [],
+        toolChoice: "none",
+        stablePrefixMessages: 0,
+      },
+      context(),
+    );
+
+    expect(JSON.stringify(call.getRequestBody())).not.toContain("cache_control");
+  });
+
+  it("places a conversation breakpoint after a prepended prompt-output instruction", async () => {
+    const request = withPromptOutput(
+      {
+        ...baseRequest,
+        messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+        stablePrefixMessages: 1,
+      },
+      { name: "result", schema: { type: "object" }, schemaHash: "a".repeat(64) },
+    );
+    const call = makeRequest();
+
+    await call.adapter.complete(request, context());
+
+    const body = z.object({ messages: JsonValue }).parse(call.getRequestBody());
+    expect(body.messages).toMatchObject([
+      {
+        role: "user",
+        content: [{ type: "text", text: "hello", cache_control: { type: "ephemeral" } }],
+      },
+    ]);
+  });
+
+  it("omits cache usage fields when the provider response does not include them", async () => {
+    const call = makeRequest();
+
+    const result = await call.adapter.complete(baseRequest, context());
+
+    expect(result.usage).toEqual({ inputTokens: 7, outputTokens: 11 });
+    expect(Object.hasOwn(result.usage, "cacheReadTokens")).toBe(false);
+    expect(Object.hasOwn(result.usage, "cacheWriteTokens")).toBe(false);
+  });
+
   it("exposes capability overrides to the gateway", () => {
     const adapter = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
@@ -400,6 +497,7 @@ describe("AnthropicAdapter", () => {
         },
         { role: "assistant", parts: [{ type: "text", text: "continuation" }] },
       ],
+      stablePrefixMessages: 2,
     };
     const original = JSON.stringify(request);
     const first = makeRequest();
@@ -411,7 +509,20 @@ describe("AnthropicAdapter", () => {
     const body = z.object({ messages: JsonValue }).parse(first.getRequestBody());
     expect(body.messages).toEqual([
       { role: "user", content: [{ type: "text", text: "hello" }] },
-      { role: "assistant", content: [...rawContent, { type: "text", text: "continuation" }] },
+      {
+        role: "assistant",
+        content: [
+          ...rawContent.slice(0, -1),
+          {
+            type: "tool_use",
+            id: "toolu_fixture",
+            name: "lookup",
+            input: { query: "x" },
+            cache_control: { type: "ephemeral" },
+          },
+          { type: "text", text: "continuation" },
+        ],
+      },
     ]);
   });
 
@@ -469,7 +580,9 @@ describe("AnthropicAdapter", () => {
         tools: z.array(JsonValue),
       })
       .parse(call.getRequestBody());
-    expect(requestBody.system).toEqual([{ type: "text", text: "system rule" }]);
+    expect(requestBody.system).toEqual([
+      { type: "text", text: "system rule", cache_control: { type: "ephemeral" } },
+    ]);
     expect(requestBody.tool_choice).toEqual({ type: "tool", name: "lookup" });
     expect(requestBody.tools).toHaveLength(1);
 

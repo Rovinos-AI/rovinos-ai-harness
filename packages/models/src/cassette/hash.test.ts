@@ -51,6 +51,17 @@ describe("requestHash", () => {
     ).not.toBe(requestHash(request));
   });
 
+  it("hashes the stable-prefix boundary so cache placement is replay deterministic", () => {
+    const request: ModelRequest = {
+      requestId,
+      model: { provider: "cassette", model: "test" },
+      messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
+      stablePrefixMessages: 1,
+    };
+
+    expect(requestHash({ ...request, stablePrefixMessages: 0 })).not.toBe(requestHash(request));
+  });
+
   it("omits undefined object fields like JSON serialization", () => {
     const request: ModelRequest = {
       requestId,

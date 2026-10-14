@@ -57,6 +57,7 @@ export interface ChatCompletionLike {
   readonly usage?: {
     readonly prompt_tokens: number;
     readonly completion_tokens: number;
+    readonly prompt_tokens_details?: { readonly cached_tokens?: number } | null;
   } | null;
 }
 
@@ -297,6 +298,19 @@ function mapFinishReason(reason: string | null, invalidArguments: boolean): stri
   }
 }
 
+function mapUsage(usage: ChatCompletionLike["usage"]): {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens?: number;
+} {
+  const cachedTokens = usage?.prompt_tokens_details?.cached_tokens;
+  return {
+    inputTokens: usage?.prompt_tokens ?? 0,
+    outputTokens: usage?.completion_tokens ?? 0,
+    ...(cachedTokens === undefined ? {} : { cacheReadTokens: cachedTokens }),
+  };
+}
+
 /**
  * Converts an OpenAI Chat Completions response into normalized parts and usage.
  *
@@ -317,10 +331,7 @@ export function fromChatResponse(
   if (choice === undefined) {
     return {
       parts: [],
-      usage: {
-        inputTokens: response.usage?.prompt_tokens ?? 0,
-        outputTokens: response.usage?.completion_tokens ?? 0,
-      },
+      usage: mapUsage(response.usage),
       finishReason: "other",
     };
   }
@@ -343,10 +354,7 @@ export function fromChatResponse(
 
   return {
     parts,
-    usage: {
-      inputTokens: response.usage?.prompt_tokens ?? 0,
-      outputTokens: response.usage?.completion_tokens ?? 0,
-    },
+    usage: mapUsage(response.usage),
     finishReason: mapFinishReason(choice.finish_reason, mappedCalls.invalidArguments),
   };
 }

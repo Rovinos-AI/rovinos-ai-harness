@@ -15,7 +15,11 @@ import {
   type ModelEnforcementConfig,
   type ModelRetryConfig,
 } from "@harness/schemas";
-import { countModelUsage, emitPricingMissing, setActiveSpanAttribute } from "@harness/telemetry";
+import {
+  emitPricingCacheMissing,
+  emitPricingMissing,
+  setActiveSpanAttribute,
+} from "@harness/telemetry";
 import type { z } from "zod";
 import {
   ProviderResultSchema,
@@ -48,6 +52,7 @@ import { enforcePromptOutput, withPromptOutput } from "./enforce/rung-prompt.js"
 import { lowerForProvider, schemaHash, toJsonSchema } from "./json-schema.js";
 import { appendRepairMessages } from "./enforce/repair.js";
 import { createPricingAccountant } from "./pricing.js";
+import { aggregateModelUsage, reportModelUsage } from "./usage.js";
 
 /** Dependencies injected into every provider adapter call by the gateway. */
 export interface ModelGatewayDependencies {
@@ -213,9 +218,15 @@ export class ModelGateway {
     private readonly dependencies: ModelGatewayDependencies,
     private readonly options: ModelGatewayOptions = {},
   ) {
-    this.accountUsage = createPricingAccountant(dependencies.pricing, (model) => {
-      emitPricingMissing(model.provider, model.model);
-    });
+    this.accountUsage = createPricingAccountant(
+      dependencies.pricing,
+      (model) => {
+        emitPricingMissing(model.provider, model.model);
+      },
+      (model) => {
+        emitPricingCacheMissing(model.provider, model.model);
+      },
+    );
     this.retryPolicy = ModelRetryConfigSchema.parse(
       dependencies.retryPolicy ?? ModelRetryConfigSchema.parse({}),
     );
@@ -287,20 +298,9 @@ export class ModelGateway {
     });
   }
 
-  private reportUsage(model: ModelRef, usage: ModelUsage): void {
-    if (this.options.deferSpanUsage !== true) {
-      setActiveSpanAttribute("harness.model.input_tokens", usage.inputTokens);
-      setActiveSpanAttribute("harness.model.output_tokens", usage.outputTokens);
-      if (usage.costMicros !== undefined) {
-        setActiveSpanAttribute("harness.model.cost_micros", usage.costMicros);
-      }
-    }
-    countModelUsage(usage, model.provider, model.model);
-  }
-
   private accountAndReportUsage(model: ModelRef, usage: ModelUsage): ModelUsage {
     const accounted = this.accountUsage(model, usage);
-    this.reportUsage(model, accounted);
+    reportModelUsage(model, accounted, this.options.deferSpanUsage === true);
     return accounted;
   }
 
@@ -432,11 +432,4 @@ export class ModelGateway {
       semaphore,
     });
   }
-}
-
-function aggregateModelUsage(previous: ModelUsage | undefined, next: ModelUsage): ModelUsage {
-  return {
-    inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
-    outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
-  };
 }

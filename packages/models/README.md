@@ -31,6 +31,20 @@ at the next step boundary.
 with a `reveal()` method; the adapter disables SDK retries and retains Anthropic content blocks
 in an opaque response part so thinking signatures and tool-use ids can be replayed.
 
+## Prompt caching
+
+Context strategies report a stable-prefix message count on each build. The Anthropic adapter uses
+that boundary, the system prompt, and the tools block for cache breakpoints; OpenAI-compatible
+providers report their automatically cached input tokens. Cached reads and writes are available as
+optional `cacheReadTokens` and `cacheWriteTokens` usage fields and are included in model response
+events, telemetry, and cost calculations.
+
+Per-model pricing may set `cacheReadMicrosPerMTok` and `cacheWriteMicrosPerMTok`. When a cached
+token price is omitted, the corresponding tokens use the configured input price and the gateway
+emits one `pricing_cache_missing` diagnostic per model. `SlidingWindowStrategy` accepts
+`{ cacheAware: true }` to drop old transcript groups in chunks of four by default, reducing
+prefix churn.
+
 | Code | Retryable | Typical HTTP status |
 | --- | --- | --- |
 | `provider_rate_limited` | Yes | 429 |

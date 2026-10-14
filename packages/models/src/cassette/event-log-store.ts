@@ -53,6 +53,12 @@ function collectPairs(events: readonly Event[]): EventLogPair[] {
         usage: {
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
+          ...(event.cacheReadTokens === undefined
+            ? {}
+            : { cacheReadTokens: event.cacheReadTokens }),
+          ...(event.cacheWriteTokens === undefined
+            ? {}
+            : { cacheWriteTokens: event.cacheWriteTokens }),
           ...(event.costMicros === undefined ? {} : { costMicros: event.costMicros }),
         },
         finishReason: event.finishReason,
