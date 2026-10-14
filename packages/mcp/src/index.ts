@@ -7,6 +7,14 @@ export {
   type McpConnectionState,
   type McpTool,
 } from "./connection.js";
+export { McpProtocolError } from "./errors.js";
+export {
+  McpToolPort,
+  type McpToolCall,
+  type McpToolCallContext,
+  type McpToolExecutionResult,
+  type McpToolPortDependencies,
+} from "./tool-port.js";
 export {
   McpPool,
   McpPoolError,

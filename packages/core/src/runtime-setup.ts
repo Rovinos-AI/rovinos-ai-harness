@@ -21,6 +21,8 @@ import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
+import { McpConnectionError, McpToolPort } from "@harness/mcp";
+import type { McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
 import type {
   RuntimeComposition,
@@ -31,6 +33,62 @@ import type {
 import type { Clock } from "./recorder.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
+const mcpDiagnosticLogger = diag.createComponentLogger({ namespace: "harness.mcp" });
+const mcpLogger: McpLogger = {
+  log: (event) => {
+    mcpDiagnosticLogger.warn(
+      event.code,
+      event.code === "mcp_stderr"
+        ? { serverId: event.serverId, bytes: event.bytes }
+        : { serverId: event.serverId },
+    );
+  },
+};
+
+async function createConfiguredMcpToolPort(
+  config: RuntimeConfig,
+  overrides: RuntimeOverrides,
+): Promise<McpToolPort | undefined> {
+  const servers = config.servers ?? [];
+  if (overrides.tool !== undefined || servers.length === 0) {
+    return undefined;
+  }
+  const secretResolver = overrides.secretResolver ?? {
+    resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
+  };
+  return McpToolPort.create(
+    servers,
+    {
+      resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
+      logger: mcpLogger,
+      ...(overrides.mcpTransportFactory === undefined
+        ? {}
+        : { createTransport: overrides.mcpTransportFactory }),
+    },
+    { offloadBinaryResults: overrides.workspace !== undefined },
+  );
+}
+
+async function closeSetupResources(options: {
+  readonly mcpToolPort: McpToolPort | undefined;
+  readonly eventStore: EventStore | undefined;
+  readonly vault: RuntimeVault | undefined;
+  readonly disposeKeys: () => void;
+}): Promise<void> {
+  try {
+    await options.mcpToolPort?.close();
+  } finally {
+    try {
+      await options.eventStore?.close();
+    } finally {
+      try {
+        options.vault?.close();
+      } finally {
+        options.disposeKeys();
+      }
+    }
+  }
+}
 
 /** Runtime dependencies ready to be assembled into the public runtime API. */
 export type RuntimeSetup = RuntimeComposition & {
@@ -135,7 +193,8 @@ async function createRuntimeVault(
   keys: RuntimeComposition["keys"],
   clock: Clock,
 ): Promise<RuntimeVault> {
-  const vaultPath = join(dataDir, "vault.db");
+  const vaultDir = resolveVaultDataDir(process.env, dataDir);
+  const vaultPath = join(vaultDir, "vault.db");
   const transient = overrides.transientVault === true && overrides.readOnlyStore !== true;
   if (transient && process.env.NODE_ENV === "production") {
     throw new TransientVaultInProductionError();
@@ -144,7 +203,7 @@ async function createRuntimeVault(
     return new EmptyReadOnlyVault();
   }
   if (overrides.readOnlyStore !== true && !transient) {
-    await mkdir(dataDir, { recursive: true });
+    await mkdir(vaultDir, { recursive: true });
   }
   return new SqliteVault(transient ? ":memory:" : vaultPath, keys, () => clock.now(), {
     readonly: overrides.readOnlyStore === true,
@@ -209,20 +268,17 @@ export async function setupRuntime(
   const keys = await createRuntimeKeys(runtimeConfig.keys, overrides);
   let vault: RuntimeVault | undefined;
   let eventStore: EventStore | undefined;
+  let mcpToolPort: McpToolPort | undefined;
   try {
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    const runtimeVault = await createRuntimeVault(
-      resolveVaultDataDir(process.env, dataDir),
-      overrides,
-      keys,
-      clock,
-    );
+    const runtimeVault = await createRuntimeVault(dataDir, overrides, keys, clock);
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
     const context = overrides.context ?? new NaiveContext();
-    const tool = overrides.tool ?? unavailableTool;
+    mcpToolPort = await createConfiguredMcpToolPort(runtimeConfig, overrides);
+    const tool = overrides.tool ?? mcpToolPort ?? unavailableTool;
     const roles = await resolveRuntimeRoles(
       runtimeConfig,
       overrides.roleConfigDirectory ?? process.cwd(),
@@ -242,6 +298,7 @@ export async function setupRuntime(
       clock,
     });
     const store = piiConfig.enabled ? new PiiEventStore(rawStore, piiRuntime.tokenizer) : rawStore;
+    const managedMcpToolPort = mcpToolPort;
     return {
       config: runtimeConfig,
       overrides,
@@ -254,6 +311,9 @@ export async function setupRuntime(
       pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
       model,
       tool,
+      ...(managedMcpToolPort === undefined
+        ? {}
+        : { closeToolPort: () => managedMcpToolPort.close() }),
       policy,
       policyVersion: policy.version,
       context,
@@ -261,15 +321,14 @@ export async function setupRuntime(
       scopes,
     };
   } catch (error) {
-    try {
-      await eventStore?.close();
-    } finally {
-      try {
-        vault?.close();
-      } finally {
+    await closeSetupResources({
+      mcpToolPort,
+      eventStore,
+      vault,
+      disposeKeys: () => {
         keys.dispose();
-      }
-    }
+      },
+    });
     throw error;
   }
 }

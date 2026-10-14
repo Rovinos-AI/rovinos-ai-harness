@@ -148,6 +148,18 @@ Owner task: `3.6`.
 
 Owner task: `3.2`.
 
+### `mcp.client.call`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.error.code` | Code | Optional | `@harness/mcp` |
+| `harness.mcp.server_id` | Code | Required | `@harness/mcp` |
+| `harness.outcome` | enum: `ok`, `error` | Required | `@harness/mcp` |
+| `harness.tool.id` | Code | Required | `@harness/mcp` |
+| `mcp.method.name` | enum: `tools/call` | Required | `@harness/mcp` |
+
+Owner task: `6.5`.
+
 ## Log records
 
 ### `harness.model.pricing_missing`

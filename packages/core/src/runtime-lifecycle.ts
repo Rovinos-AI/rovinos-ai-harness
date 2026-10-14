@@ -39,6 +39,7 @@ export async function markTerminalBestEffort(
 /** Flush telemetry, then close the store, vault and keys, even if an earlier step fails. */
 export async function closeRuntimeResources(options: {
   readonly store: EventStore;
+  readonly closeToolPort?: () => Promise<void>;
   readonly vault: RuntimeComposition["vault"];
   readonly keys: RuntimeComposition["keys"];
   readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
@@ -47,12 +48,16 @@ export async function closeRuntimeResources(options: {
     await options.flushTelemetry?.();
   } finally {
     try {
-      await options.store.close();
+      await options.closeToolPort?.();
     } finally {
       try {
-        options.vault.close();
+        await options.store.close();
       } finally {
-        options.keys.dispose();
+        try {
+          options.vault.close();
+        } finally {
+          options.keys.dispose();
+        }
       }
     }
   }

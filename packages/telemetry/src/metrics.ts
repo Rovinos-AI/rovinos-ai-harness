@@ -74,6 +74,7 @@ export const METRIC_ALLOWLIST = {
   "harness.sentinel.scope_reduced": [],
   "harness.sentinel.short_values_skipped": [],
   "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
+  "harness.mcp.discovery_failed": [],
 } as const satisfies Record<Code, readonly Code[]>;
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
@@ -82,8 +83,12 @@ let policyDecisionsCounter: Counter<PolicyDecisionAttributes> | undefined;
 let hostAppSpansAcceptedCounter: Counter<NoMetricAttributes> | undefined;
 let skippedShortValuesCounter: Counter<NoMetricAttributes> | undefined;
 let scopeReducedCounter: Counter<NoMetricAttributes> | undefined;
+<<<<<<< HEAD
 let modelTokensCounter: Counter<ModelUsageAttributes> | undefined;
 let modelCostCounter: Counter<ModelUsageAttributes> | undefined;
+=======
+let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
+>>>>>>> origin/main
 
 function createCounter<TAttributes extends Attributes>(
   name: keyof typeof METRIC_ALLOWLIST,
@@ -140,6 +145,7 @@ function getScopeReducedCounter(): Counter<NoMetricAttributes> {
   return scopeReducedCounter;
 }
 
+<<<<<<< HEAD
 function getModelTokensCounter(): Counter<ModelUsageAttributes> {
   modelTokensCounter ??= createCounter<ModelUsageAttributes>(
     "harness.model.tokens",
@@ -154,6 +160,14 @@ function getModelCostCounter(): Counter<ModelUsageAttributes> {
     (meter, name) => meter.createCounter<ModelUsageAttributes>(name),
   );
   return modelCostCounter;
+=======
+function getMcpDiscoveryFailedCounter(): Counter<NoMetricAttributes> {
+  mcpDiscoveryFailedCounter ??= createCounter<NoMetricAttributes>(
+    "harness.mcp.discovery_failed",
+    (meter, name) => meter.createCounter<NoMetricAttributes>(name),
+  );
+  return mcpDiscoveryFailedCounter;
+>>>>>>> origin/main
 }
 
 /** Counts a telemetry drop using its bounded reason code. */
@@ -213,6 +227,7 @@ export function countSentinelScopeReduced(): void {
   }
 }
 
+<<<<<<< HEAD
 /** Counts total input and output tokens and optional cost for one provider/model. */
 export function countModelUsage(
   usage: Pick<ModelUsage, "inputTokens" | "outputTokens" | "costMicros">,
@@ -239,6 +254,12 @@ export function countModelUsage(
     if (usage.costMicros !== undefined) {
       getModelCostCounter().add(usage.costMicros, attributes);
     }
+=======
+/** Counts an MCP tool-discovery failure without server identifiers. */
+export function countMcpDiscoveryFailed(): void {
+  try {
+    getMcpDiscoveryFailedCounter().add(1);
+>>>>>>> origin/main
   } catch {
     return;
   }
