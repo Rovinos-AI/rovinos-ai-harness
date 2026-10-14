@@ -1082,6 +1082,7 @@ __metadata:
   resolution: "@harness/core@workspace:packages/core"
   dependencies:
     "@harness/context": "workspace:^"
+    "@harness/mcp": "workspace:^"
     "@harness/models": "workspace:^"
     "@harness/pii": "workspace:^"
     "@harness/policy": "workspace:^"
@@ -1090,6 +1091,7 @@ __metadata:
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
+    "@modelcontextprotocol/server": "npm:2.3.1"
     "@opentelemetry/api": "npm:1.9.1"
     fast-check: "npm:4.10.2"
     vitest: "npm:3.2.6"
@@ -5454,6 +5456,7 @@ __metadata:
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/server": "npm:2.3.1"
     "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@opentelemetry/core": "npm:2.12.0"

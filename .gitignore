@@ -19,3 +19,4 @@ reports/
 # Runtime databases written to the default data directory (HARNESS_DATA_DIR, else cwd)
 harness.db*
 vault.db*
+.tmp/

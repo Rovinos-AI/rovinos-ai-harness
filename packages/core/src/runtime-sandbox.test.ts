@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -112,7 +112,8 @@ describe("createRuntime sandbox composition", () => {
         new AbortController().signal,
       );
       const workspaceRoot = join(dataDir, "workspaces");
-      expect(execution.stdout).toBe(workspaceRoot);
+      // macOS resolves /var to /private/var; compare canonical paths.
+      expect(execution.stdout).toBe(await realpath(workspaceRoot));
       expect((await stat(workspaceRoot)).mode & 0o777).toBe(0o700);
       await expect(
         runtime.sandboxBackend.exec(

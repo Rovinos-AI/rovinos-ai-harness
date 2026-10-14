@@ -225,6 +225,7 @@ describe("ToolRegistry", () => {
     expect(registry.describe("internal.annotated")).toMatchObject({
       idempotent: true,
       timeoutMs: 123,
+      longRunning: true,
     });
     expect(registry.describe("internal.read_only")?.idempotent).toBe(true);
     expect(registry.describe("external.annotated")?.idempotent).toBe(false);

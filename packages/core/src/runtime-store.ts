@@ -21,7 +21,7 @@ import {
 } from "@harness/vault";
 import type { Id, KeysConfig, SecretRef, StoreConfig } from "@harness/schemas";
 import type { RuntimeOverrides } from "./runtime-config.js";
-import { resolveDataDir } from "./runtime-data-dir.js";
+import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
 
 /** Inputs shared by runtime and CLI configured-store operations. */
@@ -55,7 +55,7 @@ export async function openConfiguredVaultAdmin(
   config: { readonly keys?: KeysConfig | undefined },
   options: ConfiguredVaultOptions = {},
 ): Promise<ConfiguredVaultAdmin> {
-  const dataDir = resolveDataDir(process.env, options.dataDir);
+  const dataDir = resolveVaultDataDir(process.env, resolveDataDir(process.env, options.dataDir));
   const vaultPath = join(dataDir, "vault.db");
   if (!existsSync(vaultPath)) {
     return Object.assign(new InMemoryVault(), { close: () => undefined });

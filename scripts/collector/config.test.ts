@@ -100,7 +100,7 @@ it("sets the receiver, processors, health endpoint, and debug pipelines", () => 
     "otel-collector": { mem_limit: "512m", pids_limit: 256 },
   });
   expect(readYaml("infra/compose/docker-compose.dev.yml").services).toMatchObject({
-    "otel-collector-dev": {
+    "otel-collector": {
       profiles: ["dev"],
       ports: ["127.0.0.1:4318:4318", "127.0.0.1::13133"],
     },

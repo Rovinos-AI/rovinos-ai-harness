@@ -24,6 +24,13 @@ environment variable or secret store; the command never writes files. `--help` i
 storage guidance. In `--json` mode the key and storage instructions are returned as one
 `KeyGenerateResultSchema` document. Treat either output format as secret material.
 
+## `harness healthcheck`
+
+`harness healthcheck` checks that the configured local data and vault directories exist, are
+directories, and are readable and writable. It does not load configuration or make network calls.
+It prints `healthy` on success and returns code `1` with only a safe error code if the check fails.
+In `--json` mode it emits one schema-validated status document.
+
 ## `harness doctor`
 
 `harness doctor` checks the Node.js version, configuration, secret references, and data-directory

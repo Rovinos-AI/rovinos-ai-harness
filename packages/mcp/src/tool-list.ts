@@ -8,26 +8,96 @@ export type McpTool = ListToolsResult["tools"][number];
 
 const MAX_TOOLS = 1_000;
 const MAX_HEADER_SCAN_DEPTH = 32;
+const RESERVED_HEADER_NAMES = new Set(["traceparent", "tracestate", "baggage"]);
+const HEADER_TOKEN = /^[!#$%&'*+.^`|~\w-]+$/u;
 
-function declaresMcpHeader(value: unknown, depth = 0): boolean {
-  if (typeof value !== "object" || value === null || depth > MAX_HEADER_SCAN_DEPTH) {
-    return depth > MAX_HEADER_SCAN_DEPTH;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasInvalidHeaderDeclaration(
+  schema: ReadonlyMap<string, unknown>,
+  reachable: boolean,
+  seen: Set<string>,
+): boolean {
+  if (!schema.has("x-mcp-header")) {
+    return false;
+  }
+  const header = schema.get("x-mcp-header");
+  const type = schema.get("type");
+  if (
+    !reachable ||
+    typeof header !== "string" ||
+    !HEADER_TOKEN.test(header) ||
+    RESERVED_HEADER_NAMES.has(header.toLowerCase()) ||
+    !["string", "integer", "boolean"].includes(String(type)) ||
+    seen.has(header.toLowerCase())
+  ) {
+    return true;
+  }
+  seen.add(header.toLowerCase());
+  return false;
+}
+
+function hasInvalidNestedHeaders(
+  entries: readonly [string, unknown][],
+  depth: number,
+  seen: Set<string>,
+  reachable: boolean,
+): boolean {
+  for (const [key, value] of entries) {
+    if (key === "x-mcp-header") {
+      continue;
+    }
+    if (key === "properties") {
+      if (!isRecord(value) && !Array.isArray(value)) {
+        continue;
+      }
+      const properties = Array.isArray(value) ? value : Object.values(value);
+      if (
+        properties.some((property) => hasInvalidMcpHeader(property, depth + 1, seen, reachable))
+      ) {
+        return true;
+      }
+    } else if (isRecord(value) || Array.isArray(value)) {
+      if (hasInvalidMcpHeader(value, depth + 1, seen, false)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function hasInvalidMcpHeader(
+  value: unknown,
+  depth = 0,
+  seen = new Set<string>(),
+  reachable = true,
+): boolean {
+  if (depth > MAX_HEADER_SCAN_DEPTH) {
+    return true;
+  }
+  if (typeof value !== "object" || value === null) {
+    return false;
   }
   if (Array.isArray(value)) {
-    return value.some((item) => declaresMcpHeader(item, depth + 1));
+    return value.some((item) => hasInvalidMcpHeader(item, depth + 1, seen, false));
   }
-  return Object.entries(value).some(
-    ([key, item]) => key === "x-mcp-header" || declaresMcpHeader(item, depth + 1),
+  const entries = Object.entries(value);
+  const schema = new Map(entries);
+  return (
+    hasInvalidHeaderDeclaration(schema, reachable, seen) ||
+    hasInvalidNestedHeaders(entries, depth, seen, reachable)
   );
 }
 
 /**
- * Drops tools that declare SEP-2243 `x-mcp-header` parameters on modern Streamable HTTP.
+ * Retains valid SEP-2243 `x-mcp-header` declarations on modern Streamable HTTP.
  *
  * The raw `tools/list` path bypasses the SDK's exclusion (which logs the server-provided tool
- * name through `console.warn`), so this conservatively excludes every declaring tool instead
- * of only invalid ones; overly deep schemas are excluded too. Returns the kept tools and the
- * number excluded so callers can log a count, never a name.
+ * name through `console.warn`), so invalid declarations and overly deep schemas are excluded
+ * here. Valid argument declarations are passed to the SDK for request-header mapping. Returns
+ * the kept tools and the number excluded so callers can log a count, never a name.
  */
 export function excludeHeaderDeclaringTools(
   tools: readonly McpTool[],
@@ -36,7 +106,7 @@ export function excludeHeaderDeclaringTools(
   if (options.era !== "modern" || options.transport !== "http") {
     return { tools: [...tools], excluded: 0 };
   }
-  const kept = tools.filter((tool) => !declaresMcpHeader(tool.inputSchema));
+  const kept = tools.filter((tool) => !hasInvalidMcpHeader(tool.inputSchema));
   return { tools: kept, excluded: tools.length - kept.length };
 }
 
