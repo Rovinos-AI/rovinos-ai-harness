@@ -298,6 +298,71 @@ describe("SqliteVault", () => {
     vault.close();
   });
 
+  it("re-wraps scope keys without re-encrypting entry values", async () => {
+    let currentKeyId = "key-a";
+    const rotationKeys = new Map([
+      ["key-a", new Uint8Array(32).fill(31)],
+      ["key-b", new Uint8Array(32).fill(32)],
+    ]);
+    const rotatingProvider: KeyProvider = {
+      currentKeyId: () => currentKeyId,
+      getKey: (requestedKeyId) => {
+        const key = rotationKeys.get(requestedKeyId);
+        return key === undefined
+          ? Promise.reject(new Error("synthetic unavailable key"))
+          : Promise.resolve(Uint8Array.from(key));
+      },
+    };
+    const { path } = await temporaryPath();
+    const vault = new SqliteVault(path, rotatingProvider);
+    try {
+      const token = await vault.put(runId, "email", "alice@example.test");
+      const database = new Database(path);
+      const before = database
+        .prepare<
+          [string, string],
+          { value_enc: string; wrapped_dek: Buffer; key_id: string }
+        >(
+          `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
+           FROM vault_entries AS entries
+           JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
+           WHERE entries.run_id = ? AND entries.token = ?`,
+        )
+        .get(runId, token);
+      database.close();
+      if (before === undefined) {
+        throw new Error("synthetic encrypted entry is missing");
+      }
+
+      currentKeyId = "key-b";
+      await expect(vault.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+        processed: 1,
+      });
+      const rotatedDatabase = new Database(path);
+      const after = rotatedDatabase
+        .prepare<
+          [string, string],
+          { value_enc: string; wrapped_dek: Buffer; key_id: string }
+        >(
+          `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
+           FROM vault_entries AS entries
+           JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
+           WHERE entries.run_id = ? AND entries.token = ?`,
+        )
+        .get(runId, token);
+      rotatedDatabase.close();
+
+      expect(after?.key_id).toBe("key-b");
+      expect(after?.wrapped_dek).not.toEqual(before.wrapped_dek);
+      expect(after?.value_enc).toBe(before.value_enc);
+      await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBe(
+        "alice@example.test",
+      );
+    } finally {
+      vault.close();
+    }
+  });
+
   it("satisfies the telemetry read-only reader interface", () => {
     const memoryReader: VaultRunReader = new InMemoryVault();
     const sqliteVault = new SqliteVault(":memory:", keyProvider);

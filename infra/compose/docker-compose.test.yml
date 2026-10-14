@@ -23,6 +23,8 @@ services:
       POSTGRES_USER: harness
       POSTGRES_HOST_AUTH_METHOD: trust
       PGDATA: /tmp/pgdata
+    volumes:
+      - ./init-vault.sql:/docker-entrypoint-initdb.d/10-vault.sql:ro
     ports:
       - "127.0.0.1:5432:5432"
     read_only: true

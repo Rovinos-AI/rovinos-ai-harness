@@ -396,16 +396,19 @@ export class SqliteVault
         encryptScopeValue(scopeDataKey, rawValue, `${runId}:${token.data}`),
         "base64",
       );
-      this.insertEntry({
-        runId,
-        entityType,
-        token: token.data,
-        lookup: lookups[0] ?? Buffer.alloc(0),
-        encrypted,
-        keyId: scopeKeyId,
-        lookupKeyId: keyId,
-      });
-      encrypted.fill(0);
+      try {
+        this.insertEntry({
+          runId,
+          entityType,
+          token: token.data,
+          lookup: lookups[0] ?? Buffer.alloc(0),
+          encrypted,
+          keyId: scopeKeyId,
+          lookupKeyId: keyId,
+        });
+      } finally {
+        encrypted.fill(0);
+      }
       this.incrementCounter(runId, typeName, nextNumber + 1);
       return token.data;
     });

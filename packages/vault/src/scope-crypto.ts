@@ -24,12 +24,13 @@ export async function wrapScopeKey(
   let wrapped: Uint8Array | undefined;
   try {
     keys = await deriveVaultKeys(keyProvider, keyId, "vault_encrypt_failed");
-    wrapped = aesGcmEncrypt(
+    const encrypted = aesGcmEncrypt(
       keys.encryption,
       dataKey,
       Buffer.from(`${SCOPE_KEY_AAD_PREFIX}${scopeId}`, "utf8"),
     );
-    return Buffer.from(wrapped);
+    wrapped = encrypted;
+    return Buffer.from(encrypted);
   } catch {
     throw new VaultOperationError("vault_encrypt_failed");
   } finally {
@@ -46,7 +47,12 @@ export async function createWrappedScopeKey(
   scopeId: Id,
   random: () => Uint8Array = () => randomBytes(32),
 ): Promise<WrappedScopeKey> {
-  const generated = random();
+  let generated: Uint8Array;
+  try {
+    generated = random();
+  } catch {
+    throw new VaultOperationError("vault_encrypt_failed");
+  }
   if (generated.byteLength !== 32) {
     generated.fill(0);
     throw new VaultOperationError("vault_encrypt_failed");
@@ -72,15 +78,17 @@ export async function unwrapScopeKey(
   let dataKey: Uint8Array | undefined;
   try {
     keys = await deriveVaultKeys(keyProvider, keyId, "vault_decrypt_failed");
-    dataKey = aesGcmDecrypt(
+    const unwrapped = aesGcmDecrypt(
       keys.encryption,
       wrappedDek,
       Buffer.from(`${SCOPE_KEY_AAD_PREFIX}${scopeId}`, "utf8"),
     );
-    if (dataKey.byteLength !== 32) {
+    if (unwrapped.byteLength !== 32) {
+      unwrapped.fill(0);
       throw new Error("Invalid scope key");
     }
-    return dataKey;
+    dataKey = unwrapped;
+    return unwrapped;
   } catch {
     dataKey?.fill(0);
     throw new VaultOperationError("vault_decrypt_failed");
@@ -95,8 +103,9 @@ export function encryptScopeValue(dataKey: Uint8Array, value: string, aad: strin
   const plaintext = Buffer.from(value, "utf8");
   let encrypted: Uint8Array | undefined;
   try {
-    encrypted = aesGcmEncrypt(dataKey, plaintext, Buffer.from(aad, "utf8"));
-    return Buffer.from(encrypted).toString("base64");
+    const ciphertext = aesGcmEncrypt(dataKey, plaintext, Buffer.from(aad, "utf8"));
+    encrypted = ciphertext;
+    return Buffer.from(ciphertext).toString("base64");
   } catch {
     throw new VaultOperationError("vault_encrypt_failed");
   } finally {

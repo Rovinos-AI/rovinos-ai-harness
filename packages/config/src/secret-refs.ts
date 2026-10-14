@@ -27,6 +27,7 @@ export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
   const keyRefs = config.keys?.keys.map(({ secret }) => secret) ?? [];
   const storeRefs =
     config.store.connectionString === undefined ? [] : [config.store.connectionString];
+  const vaultRefs = config.vault.postgres === undefined ? [] : [config.vault.postgres.url];
   const runnerRefs = config.sandbox.runner === undefined ? [] : [config.sandbox.runner.token];
-  return [...modelRefs, ...serverRefs, ...keyRefs, ...storeRefs, ...runnerRefs];
+  return [...modelRefs, ...serverRefs, ...keyRefs, ...storeRefs, ...vaultRefs, ...runnerRefs];
 }

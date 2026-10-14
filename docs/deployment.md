@@ -35,6 +35,26 @@ non-production copy.
 `HARNESS_DATA_DIR` selects the event-store directory; `HARNESS_VAULT_DATA_DIR` optionally selects
 the vault directory and otherwise defaults to `HARNESS_DATA_DIR`.
 
+## Postgres vault
+
+Set `vault.backend` to `postgres` and configure `vault.postgres.url` with a `SecretRef`. Resolve that
+reference to a Postgres URL separate from the event-store URL. The adapter rejects startup when both
+URLs identify the same database and schema. A separate database is recommended; if a database is
+shared, use a dedicated vault schema and role with no event-store or analytics permissions.
+
+Grant the harness vault role access only to its vault database or schema and tables. Analytics roles
+must not receive `USAGE` on the vault schema or `SELECT`/write grants on vault tables. Keep vault
+credentials and master keys in the configured secret provider, not in Compose files or environment
+files committed to source control.
+
+Each root run scope has an independent random data-encryption key. The vault stores only that key's
+AES-GCM-wrapped form; entry ciphertext is encrypted with the scope key. Purging a scope deletes its
+wrapped key before its entry rows, so a copied ciphertext row without the wrapper cannot be decrypted
+with the master key. Database backups and write-ahead logs may retain historical pages; apply a
+separate retention policy to them and keep master keys available for the backups that must remain
+restorable. Key rotation re-wraps scope keys and rotates lookup HMACs without re-encrypting every
+value.
+
 ## Keys and secrets
 
 Do not put tokens, passwords, or encryption keys in Compose YAML or commit them in an env file.

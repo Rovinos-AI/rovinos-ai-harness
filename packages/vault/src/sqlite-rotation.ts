@@ -233,8 +233,9 @@ export async function reencryptVaultBatch(
   const rows = selectRows(db, targetKeyId, cursor, limit + 1);
   const selected = rows.slice(0, limit);
   const updates = await encryptRows(selected, keyProvider, targetKeyId, decryptEntry);
-  const scopeUpdates = await rewrapScopeKeys(db, selected, keyProvider, targetKeyId);
+  let scopeUpdates: ScopeKeyUpdate[] = [];
   try {
+    scopeUpdates = await rewrapScopeKeys(db, selected, keyProvider, targetKeyId);
     const processed = updateRows(db, updates, scopeUpdates, targetKeyId);
     const last = selected.at(-1);
     const nextCursor =
