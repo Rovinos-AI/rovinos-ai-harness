@@ -166,8 +166,7 @@ describe("ServerConfigSchema", () => {
         !result.success &&
           result.error.issues.some(
             (issue) =>
-              issue.code === "custom" &&
-              issue.params?.errorCode === "server_http_header_reserved",
+              issue.code === "custom" && issue.params?.errorCode === "server_http_header_reserved",
           ),
       ).toBe(true);
     },

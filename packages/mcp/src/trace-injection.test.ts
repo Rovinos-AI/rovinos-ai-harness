@@ -101,9 +101,9 @@ describe("buildRequestMeta", () => {
 
     expect(result?.tracestate).toBe(expected);
     expect(debug).toHaveBeenCalledTimes(expected === undefined ? 1 : 0);
-    if (expected === undefined) {
-      expect(debug).toHaveBeenCalledWith("mcp_tracestate_dropped");
-    }
+    expect(debug.mock.calls.map(([message]) => message)).toEqual(
+      expected === undefined ? ["mcp_tracestate_dropped"] : [],
+    );
     debug.mockRestore();
   });
 
