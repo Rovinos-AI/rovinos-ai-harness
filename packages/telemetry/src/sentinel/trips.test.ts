@@ -116,5 +116,11 @@ describe("TripQueue", () => {
     queue.discardRun(unknownRunId);
     queue.enqueue({ runId: unknownRunId, entities: [{ type: "email", count: 1 }] });
     expect(queue.size).toBe(0);
+
+    queue.beginRun(unknownRunId);
+    queue.enqueue({ runId: unknownRunId, entities: [{ type: "email", count: 1 }] });
+    expect(queue.drainForRun(unknownRunId)).toEqual([
+      { runId: unknownRunId, entities: [{ type: "email", count: 1 }] },
+    ]);
   });
 });

@@ -2,6 +2,7 @@
 import { diag } from "@opentelemetry/api";
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
+import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import type { ToolPort } from "./ports.js";
@@ -172,6 +173,7 @@ interface RunControlOptions {
 }
 
 async function withRunControl(options: RunControlOptions): Promise<RunLoopResult> {
+  sentinelTripQueue.beginRun(options.runId);
   const controller = new AbortController();
   const stopWatcher = new AbortController();
   const cursor = { nextSeq: options.firstNewSeq };
@@ -306,6 +308,7 @@ function composeRuntime(
     roles,
     scopes,
   } = options;
+  const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   const subagentTool = createSubagentTool({
     config,
     clock,
@@ -332,9 +335,7 @@ function composeRuntime(
       runId,
       firstNewSeq: 0,
       clock,
-      ...(overrides.flushTelemetry === undefined
-        ? {}
-        : { flushTelemetry: overrides.flushTelemetry }),
+      flushTelemetry,
       processLike: overrides.processLike ?? defaultProcessLike,
       graceMs: config.run.shutdownGraceMs,
       operation,
@@ -355,9 +356,7 @@ function composeRuntime(
         store,
         vault,
         keys,
-        ...(overrides.flushTelemetry === undefined
-          ? {}
-          : { flushTelemetry: overrides.flushTelemetry }),
+        flushTelemetry,
       }),
   };
 }
@@ -367,6 +366,7 @@ function createRuntimeResume(
   tool: ToolPort,
 ): Runtime["resume"] {
   const { config, clock, ids, store, model, context, policy, scopes, overrides } = options;
+  const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   return async (runId) => {
     const firstNewSeq = await store.head(runId);
     return withRunControl({
@@ -374,9 +374,7 @@ function createRuntimeResume(
       runId,
       firstNewSeq,
       clock,
-      ...(overrides.flushTelemetry === undefined
-        ? {}
-        : { flushTelemetry: overrides.flushTelemetry }),
+      flushTelemetry,
       processLike: overrides.processLike ?? defaultProcessLike,
       graceMs: config.run.shutdownGraceMs,
       operation: async (signal) => {

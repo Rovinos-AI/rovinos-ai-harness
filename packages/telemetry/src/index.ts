@@ -71,4 +71,9 @@ export {
   type SentinelTrip,
 } from "./sentinel/trips.js";
 export { emitSentinelTrip } from "./safe-event-logs.js";
-export { createTelemetrySdk, type TelemetrySdk, type TelemetrySdkOptions } from "./sdk.js";
+export {
+  createTelemetrySdk,
+  forceFlushTelemetry,
+  type TelemetrySdk,
+  type TelemetrySdkOptions,
+} from "./sdk.js";

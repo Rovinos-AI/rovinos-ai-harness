@@ -13,8 +13,9 @@ export async function flushAndDrainTrips(options: {
   readonly runId: Id;
   readonly clock: Clock;
   readonly flushTelemetry?: (() => Promise<void>) | undefined;
+  readonly discardRun?: boolean | undefined;
 }): Promise<Event[]> {
-  const { store, runId, clock, flushTelemetry } = options;
+  const { store, runId, clock, flushTelemetry, discardRun = true } = options;
   try {
     try {
       await flushTelemetry?.();
@@ -51,7 +52,9 @@ export async function flushAndDrainTrips(options: {
     sentinelTripQueue.drainForRun(runId);
     return [];
   } finally {
-    sentinelTripQueue.discardRun(runId);
+    if (discardRun) {
+      sentinelTripQueue.discardRun(runId);
+    }
   }
 }
 
@@ -60,7 +63,9 @@ export async function appendFinalRunTrips(
   result: RunLoopResult,
   options: Parameters<typeof flushAndDrainTrips>[0],
 ): Promise<RunLoopResult> {
-  const tripEvents = await flushAndDrainTrips(options);
+  const terminal =
+    result.status === "completed" || result.status === "failed" || result.status === "cancelled";
+  const tripEvents = await flushAndDrainTrips({ ...options, discardRun: terminal });
   const lastTrip = tripEvents.at(-1);
   if (lastTrip === undefined) {
     return result;

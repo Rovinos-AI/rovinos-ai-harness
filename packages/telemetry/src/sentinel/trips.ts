@@ -120,6 +120,11 @@ export class TripQueue {
     return (this.tripsByRun.get(runId)?.length ?? 0) > 0;
   }
 
+  /** Allow trips again when a run starts or resumes. */
+  beginRun(runId: Id): void {
+    this.discardedRuns.delete(runId);
+  }
+
   /**
    * Discard retained trips and prevent late checks from refilling a completed run's queue.
    * The suppression set is bounded by the same limit as the queue.
