@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { countHostAppRejected } from "@harness/telemetry";
-import { AppSpanSchema, Code, type AppSpan } from "@harness/schemas";
+import { AppSpanSchema, type AppSpan } from "@harness/schemas";
 import { z } from "zod";
 import { stampAppSpan, type AppSpanStampContext } from "./stamp.js";
 

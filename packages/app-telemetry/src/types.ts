@@ -4,11 +4,30 @@ import type { AppSpan } from "@harness/schemas";
 /** Closed set of span names accepted by the host. */
 export type AppSpanName = AppSpan["name"];
 
-/** Attributes required for a particular app span, excluding host-generated timing fields. */
-export type SpanAttrs<Name extends AppSpanName> = Omit<
+/** Checks whether a runtime span name was declared by the app manifest. */
+export function isManifestSpanName(
+  value: unknown,
+  declared: ReadonlySet<AppSpanName>,
+): value is AppSpanName {
+  if (typeof value !== "string") {
+    return false;
+  }
+  for (const name of declared) {
+    if (name === value) {
+      return true;
+    }
+  }
+  return false;
+}
+
+type SchemaSpanAttrs<Name extends AppSpanName> = Omit<
   Extract<AppSpan, { name: Name }>,
   "name" | "startOffsetMs" | "durationMs"
 >;
+
+/** Attributes required for a particular app span, excluding host-generated timing fields. */
+export type SpanAttrs<Name extends AppSpanName> =
+  keyof SchemaSpanAttrs<Name> extends never ? Record<string, never> : SchemaSpanAttrs<Name>;
 
 /** Minimal host bridge shape needed to emit app telemetry. */
 export interface AppTelemetryBridge {
@@ -35,7 +54,9 @@ export interface AppTelemetry<Names extends readonly AppSpanName[]> {
   /** Whether a callable host bridge was supplied. */
   readonly active: boolean;
   /** Starts timing a declared span; ending it records its attributes and duration. */
-  start<Name extends Names[number]>(name: Name): {
+  start<Name extends Names[number]>(
+    name: Name,
+  ): {
     end(attrs?: SpanAttrs<Name>): void;
   };
   /** Records a declared span whose duration has already been measured. */

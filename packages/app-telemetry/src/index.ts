@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AppSpan } from "@harness/schemas";
+import { isManifestSpanName } from "./types.js";
 import type {
   AppSpanName,
   AppTelemetry,
+  AppTelemetryBridge,
   CreateAppTelemetryOptions,
+  SpanAttrs,
 } from "./types.js";
 export type {
   AppSpanName,
@@ -19,6 +22,21 @@ const maxPendingSpans = 50;
 
 type MutableAppSpan = AppSpan;
 
+interface RecorderContext {
+  readonly active: boolean;
+  readonly createdAt: number | undefined;
+  readonly declared: ReadonlySet<AppSpanName>;
+  readonly now: () => number;
+  readonly pending: MutableAppSpan[];
+}
+
+interface RecordAppSpanInput {
+  readonly name: AppSpanName;
+  readonly attrs: unknown;
+  readonly durationMs: number;
+  readonly startedAt?: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -28,40 +46,84 @@ function hasOnlyKeys(value: Record<string, unknown>, expected: readonly string[]
   return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
+function makeRenderSpan(
+  attrs: Record<string, unknown>,
+  startOffsetMs: number,
+  durationMs: number,
+): AppSpan | undefined {
+  return hasOnlyKeys(attrs, []) ? { name: "ui.render", startOffsetMs, durationMs } : undefined;
+}
+
+function makeDecisionSpan(
+  attrs: Record<string, unknown>,
+  startOffsetMs: number,
+  durationMs: number,
+): AppSpan | undefined {
+  if (!hasOnlyKeys(attrs, ["decision"])) {
+    return undefined;
+  }
+  const decision = attrs.decision;
+  if (decision !== "approve" && decision !== "deny" && decision !== "edit") {
+    return undefined;
+  }
+  return { name: "ui.decision", decision, startOffsetMs, durationMs };
+}
+
+function makeErrorSpan(
+  attrs: Record<string, unknown>,
+  startOffsetMs: number,
+  durationMs: number,
+): AppSpan | undefined {
+  if (
+    !hasOnlyKeys(attrs, ["code"]) ||
+    typeof attrs.code !== "string" ||
+    !/^[a-z0-9_.-]{1,64}$/u.test(attrs.code)
+  ) {
+    return undefined;
+  }
+  return { name: "ui.error", code: attrs.code, startOffsetMs, durationMs };
+}
+
+function makeInteractionSpan(
+  attrs: Record<string, unknown>,
+  startOffsetMs: number,
+  durationMs: number,
+): AppSpan | undefined {
+  if (!hasOnlyKeys(attrs, ["kind", "count"])) {
+    return undefined;
+  }
+  const kind = attrs.kind;
+  const count = attrs.count;
+  if (
+    (kind !== "click" && kind !== "focus" && kind !== "edit") ||
+    typeof count !== "number" ||
+    !Number.isInteger(count) ||
+    count < 0 ||
+    count > 1000
+  ) {
+    return undefined;
+  }
+  return { name: "ui.interaction", kind, count, startOffsetMs, durationMs };
+}
+
 function makeSpan(
   name: AppSpanName,
   attrs: unknown,
   startOffsetMs: number,
   durationMs: number,
-): MutableAppSpan | undefined {
+): AppSpan | undefined {
   if (!isRecord(attrs)) {
     return undefined;
   }
   switch (name) {
     case "ui.render":
-      return hasOnlyKeys(attrs, [])
-        ? { name, startOffsetMs, durationMs }
-        : undefined;
+      return makeRenderSpan(attrs, startOffsetMs, durationMs);
     case "ui.decision":
-      return hasOnlyKeys(attrs, ["decision"]) &&
-        (attrs.decision === "approve" || attrs.decision === "deny" || attrs.decision === "edit")
-        ? { name, decision: attrs.decision, startOffsetMs, durationMs }
-        : undefined;
+      return makeDecisionSpan(attrs, startOffsetMs, durationMs);
     case "ui.error":
-      return hasOnlyKeys(attrs, ["code"]) &&
-        typeof attrs.code === "string" &&
-        /^[a-z0-9_.-]{1,64}$/u.test(attrs.code)
-        ? { name, code: attrs.code, startOffsetMs, durationMs }
-        : undefined;
+      return makeErrorSpan(attrs, startOffsetMs, durationMs);
     case "ui.interaction":
-      return hasOnlyKeys(attrs, ["kind", "count"]) &&
-        (attrs.kind === "click" || attrs.kind === "focus" || attrs.kind === "edit") &&
-        typeof attrs.count === "number" &&
-        Number.isInteger(attrs.count) &&
-        attrs.count >= 0 &&
-        attrs.count <= 1000
-        ? { name, kind: attrs.kind, count: attrs.count, startOffsetMs, durationMs }
-        : undefined;
+      return makeInteractionSpan(attrs, startOffsetMs, durationMs);
   }
 }
 
@@ -70,6 +132,72 @@ function roundedDuration(durationMs: number): number | undefined {
     return undefined;
   }
   return Math.round(durationMs);
+}
+
+function readNow(now: () => number): number | undefined {
+  try {
+    const value = now();
+    return Number.isFinite(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function recordAppSpan(context: RecorderContext, input: RecordAppSpanInput): void {
+  if (
+    !context.active ||
+    !isManifestSpanName(input.name, context.declared) ||
+    context.pending.length >= maxPendingSpans
+  ) {
+    return;
+  }
+  try {
+    const duration = roundedDuration(input.durationMs);
+    const currentTime = input.startedAt ?? readNow(context.now);
+    if (duration === undefined || context.createdAt === undefined || currentTime === undefined) {
+      return;
+    }
+    const startOffsetMs = Math.round(currentTime - context.createdAt);
+    if (startOffsetMs < 0) {
+      return;
+    }
+    const span = makeSpan(input.name, input.attrs, startOffsetMs, duration);
+    if (span !== undefined) {
+      context.pending.push(span);
+    }
+  } catch {
+    return;
+  }
+}
+
+function createStart<Name extends AppSpanName>(
+  context: RecorderContext,
+  name: Name,
+): { end(attrs?: SpanAttrs<Name>): void } {
+  if (
+    !context.active ||
+    !isManifestSpanName(name, context.declared) ||
+    context.createdAt === undefined
+  ) {
+    return { end: () => undefined };
+  }
+  const startedAt = readNow(context.now);
+  return {
+    end(attrs?: SpanAttrs<Name>) {
+      if (startedAt === undefined || (attrs === undefined && name !== "ui.render")) {
+        return;
+      }
+      const endedAt = readNow(context.now);
+      if (endedAt !== undefined) {
+        recordAppSpan(context, {
+          name,
+          attrs: attrs ?? {},
+          durationMs: endedAt - startedAt,
+          startedAt,
+        });
+      }
+    },
+  };
 }
 
 /**
@@ -91,95 +219,46 @@ export function createAppTelemetry<const Names extends readonly AppSpanName[]>(
     declared.clear();
   }
 
-  let bridgeIsActive = false;
-  let bridge = options.bridge;
+  let bridge: AppTelemetryBridge | undefined;
+  let active = false;
   try {
-    bridgeIsActive = typeof bridge?.callTool === "function";
+    bridge = options.bridge;
+    active = typeof bridge?.callTool === "function";
   } catch {
-    bridgeIsActive = false;
     bridge = undefined;
   }
 
   const now = options.now ?? (() => performance.now());
-  let createdAt: number | undefined;
-  try {
-    const initialTime = now();
-    createdAt = Number.isFinite(initialTime) ? initialTime : undefined;
-  } catch {
-    createdAt = undefined;
-  }
-
-  function recordSpan(
-    name: AppSpanName,
-    attrs: unknown,
-    durationMs: number,
-    startedAt?: number,
-  ): void {
-    if (!bridgeIsActive || !declared.has(name) || pending.length >= maxPendingSpans) {
-      return;
-    }
-    try {
-      const duration = roundedDuration(durationMs);
-      const currentTime = startedAt ?? now();
-      if (duration === undefined || createdAt === undefined || !Number.isFinite(currentTime)) {
-        return;
-      }
-      const startOffsetMs = Math.round(currentTime - createdAt);
-      if (startOffsetMs < 0) {
-        return;
-      }
-      const span = makeSpan(name, attrs, startOffsetMs, duration);
-      if (span !== undefined) {
-        pending.push(span);
-      }
-    } catch {
-      return;
-    }
-  }
+  const context: RecorderContext = {
+    active,
+    createdAt: readNow(now),
+    declared,
+    now,
+    pending,
+  };
+  let flushing = false;
 
   return {
-    active: bridgeIsActive,
-    start<Name extends Names[number]>(name: Name) {
-      if (!bridgeIsActive || !declared.has(name) || createdAt === undefined) {
-        return { end: () => undefined };
-      }
-      let startedAt: number | undefined;
-      try {
-        const currentTime = now();
-        startedAt = Number.isFinite(currentTime) ? currentTime : undefined;
-      } catch {
-        startedAt = undefined;
-      }
-      return {
-        end(attrs?: Parameters<typeof recordSpan>[1]) {
-          if (startedAt === undefined || (attrs === undefined && name !== "ui.render")) {
-            return;
-          }
-          try {
-            const currentTime = now();
-            if (!Number.isFinite(currentTime)) {
-              return;
-            }
-            recordSpan(name, attrs ?? {}, currentTime - startedAt, startedAt);
-          } catch {
-            return;
-          }
-        },
-      };
+    active,
+    start<Name extends Names[number]>(name: Name): { end(attrs?: SpanAttrs<Name>): void } {
+      return createStart(context, name);
     },
-    record<Name extends Names[number]>(name: Name, attrs: Parameters<typeof recordSpan>[1], durationMs = 0) {
-      recordSpan(name, attrs, durationMs);
+    record(name: Names[number], attrs: unknown, durationMs = 0) {
+      recordAppSpan(context, { name, attrs, durationMs });
     },
     async flush() {
-      if (!bridgeIsActive || bridge === undefined || pending.length === 0) {
+      if (!active || bridge === undefined || pending.length === 0 || flushing) {
         return;
       }
       const batch = pending.slice();
+      flushing = true;
       try {
         await bridge.callTool("harness.telemetry.emit", { spans: batch });
         pending.splice(0, batch.length);
       } catch {
         return;
+      } finally {
+        flushing = false;
       }
     },
   };

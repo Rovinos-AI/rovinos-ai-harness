@@ -1,29 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
-import type { AppTelemetryBridge } from "./types.js";
-import type { AppSpanName } from "./types.js";
 import { createAppTelemetry } from "./index.js";
-import type { SpanAttrs } from "./types.js";
+import {
+  isManifestSpanName,
+  type AppTelemetryBridge,
+  type AppSpanName,
+  type SpanAttrs,
+} from "./types.js";
 
 function createCallTool() {
-  return vi.fn(async (..._args: Parameters<AppTelemetryBridge["callTool"]>) => ({}));
+  return vi.fn((..._args: Parameters<AppTelemetryBridge["callTool"]>) => Promise.resolve({}));
 }
 
 describe("createAppTelemetry", () => {
+  it("validates span names against the app manifest", () => {
+    const declared = new Set<AppSpanName>(["ui.render"]);
+    expect(isManifestSpanName("ui.render", declared)).toBe(true);
+    expect(isManifestSpanName("ui.other", declared)).toBe(false);
+    expect(isManifestSpanName(1, declared)).toBe(false);
+  });
+
   it("binds attributes to each schema span name", () => {
     type DecisionAttrs = SpanAttrs<"ui.decision">;
     type ErrorAttrs = SpanAttrs<"ui.error">;
+    type RenderAttrs = SpanAttrs<"ui.render">;
     expectTypeOf<DecisionAttrs>().toEqualTypeOf<{
       decision: "approve" | "deny" | "edit";
     }>();
     expectTypeOf<ErrorAttrs>().toEqualTypeOf<{ code: string }>();
+    expectTypeOf<RenderAttrs>().toEqualTypeOf<Record<string, never>>();
 
     const telemetry = createAppTelemetry({
-      bridge: { callTool: async () => ({}) },
+      bridge: { callTool: () => Promise.resolve({}) },
       manifest: {
         spans: ["ui.render", "ui.decision", "ui.error", "ui.interaction"] as const,
       },
     });
+    expect(telemetry.active).toBe(true);
     telemetry.record("ui.render", {});
     telemetry.record("ui.decision", { decision: "approve" });
     telemetry.record("ui.error", { code: "payload_invalid" });
@@ -34,6 +47,8 @@ describe("createAppTelemetry", () => {
     telemetry.record("ui.decision", {});
     // @ts-expect-error An error span requires a code attribute.
     telemetry.record("ui.error", {});
+    // @ts-expect-error A render span has no custom attributes.
+    telemetry.record("ui.render", { code: "extra" });
     // @ts-expect-error Span names must be declared in the manifest.
     telemetry.start("ui.other");
   });
@@ -46,6 +61,7 @@ describe("createAppTelemetry", () => {
       manifest: { spans: ["ui.render", "ui.interaction"] as const },
       now: () => times.shift() ?? 150,
     });
+    expect(telemetry.active).toBe(true);
 
     telemetry.start("ui.render").end();
     telemetry.record("ui.interaction", { kind: "click", count: 2 }, 7.2);
@@ -95,11 +111,11 @@ describe("createAppTelemetry", () => {
 
   it("swallows bridge errors and keeps the batch available for retry", async () => {
     let fail = true;
-    const callTool = vi.fn(async (..._args: Parameters<AppTelemetryBridge["callTool"]>) => {
+    const callTool = vi.fn((..._args: Parameters<AppTelemetryBridge["callTool"]>) => {
       if (fail) {
-        throw new Error("host unavailable");
+        return Promise.reject(new Error("host unavailable"));
       }
-      return {};
+      return Promise.resolve({});
     });
     const telemetry = createAppTelemetry({
       bridge: { callTool },
