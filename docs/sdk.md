@@ -50,9 +50,8 @@ included in that error.
 
 ## Decisions and scope
 
-- Idempotency is in-memory and instance-scoped until the durable queue in task 24.2 defines
-  persistent idempotency semantics; calls made by another `Harness` instance or after restart are
-  not deduplicated.
+- Idempotency is in-memory and instance-scoped until durable keys land in task 24.12 (#418);
+  calls made by another `Harness` instance or after restart are not deduplicated.
 - `requestedBy` is validated but not persisted until the event contract provides an audit field.
 - The SDK does not add principal data to an existing event schema. A future schema task must define
   that audit field before the SDK can persist the `resolveApproval` principal.
