@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { diag } from "@opentelemetry/api";
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
+import {
+  composeAbortSignals,
+  inspectCancellationTail,
+  watchCancellation,
+} from "./runtime-cancellation.js";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import type { ToolPort } from "./ports.js";
@@ -22,16 +26,17 @@ import type {
   Runtime,
   RuntimeComposition,
   RuntimeConfig,
+  RuntimeResumeOptions,
   RuntimeOverrides,
 } from "./runtime-config.js";
-const CANCEL_REQUESTED = "cancel_requested";
-const CANCEL_MONITOR_DEGRADED = "cancel_monitor_degraded";
-const CANCEL_POLL_INTERVAL_MS = 25;
-const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
-const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
-export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
+export type {
+  Runtime,
+  RuntimeConfig,
+  RuntimeOverrides,
+  RuntimeResumeOptions,
+} from "./runtime-config.js";
 
 class RunInputMissingError extends HarnessError {
   readonly code = "run_input_missing";
@@ -65,10 +70,6 @@ async function readEvents(store: EventStore, runId: Id, fromSeq = 0): Promise<Ev
   return events;
 }
 
-async function inspectTail(store: EventStore, runId: Id, fromSeq: number): Promise<Event[]> {
-  return readEvents(store, runId, fromSeq);
-}
-
 async function cancelledResult(
   store: EventStore,
   runId: Id,
@@ -85,81 +86,6 @@ async function cancelledResult(
     state,
     events: events.filter((event) => event.seq >= firstNewSeq),
   };
-}
-
-function waitForWatcher(signal: AbortSignal, delayMs: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", abort);
-      resolve(!signal.aborted);
-    }, delayMs);
-    const abort = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", abort);
-      resolve(false);
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) {
-      abort();
-    }
-  });
-}
-
-interface CancellationTailOptions {
-  readonly store: EventStore;
-  readonly runId: Id;
-  readonly fromSeq: number;
-  readonly controller: AbortController;
-  readonly onCursor: (nextSeq: number) => void;
-  readonly onCancellation: () => void;
-}
-
-async function inspectCancellationTail(options: CancellationTailOptions): Promise<boolean> {
-  for (const event of await inspectTail(options.store, options.runId, options.fromSeq)) {
-    options.onCursor(event.seq + 1);
-    if (event.type === "run_status_changed" && event.to === "cancelled") {
-      options.onCancellation();
-      options.controller.abort(CANCEL_REQUESTED);
-      return true;
-    }
-  }
-  return false;
-}
-
-interface CancellationWatchOptions extends Omit<CancellationTailOptions, "fromSeq"> {
-  readonly firstSeq: number;
-  readonly stopSignal: AbortSignal;
-}
-
-async function watchCancellation(options: CancellationWatchOptions): Promise<void> {
-  let nextSeq = options.firstSeq;
-  let delayMs = CANCEL_POLL_INTERVAL_MS;
-  while (!options.stopSignal.aborted) {
-    if (!(await waitForWatcher(options.stopSignal, delayMs))) {
-      return;
-    }
-    try {
-      const cancelled = await inspectCancellationTail({
-        ...options,
-        fromSeq: nextSeq,
-        onCursor: (value) => {
-          nextSeq = value;
-          options.onCursor(value);
-        },
-      });
-      delayMs = CANCEL_POLL_INTERVAL_MS;
-      if (cancelled) {
-        return;
-      }
-    } catch {
-      try {
-        cancellationMonitorLogger.warn(CANCEL_MONITOR_DEGRADED);
-      } catch {
-        // A diagnostic logger failure must not disable cooperative cancellation.
-      }
-      delayMs = Math.min(delayMs * 2, CANCEL_POLL_MAX_INTERVAL_MS);
-    }
-  }
 }
 
 interface RunControlOptions {
@@ -373,7 +299,7 @@ function createRuntimeResume(
   runWithControl: RunControl,
 ): Runtime["resume"] {
   const { config, clock, ids, store, model, context, policy, scopes } = options;
-  return async (runId) => {
+  return async (runId, resumeOptions: RuntimeResumeOptions = {}) => {
     const firstNewSeq = await store.head(runId);
     return runWithControl(
       runId,
@@ -382,22 +308,33 @@ function createRuntimeResume(
         if (goal === undefined) {
           throw new RunInputMissingError();
         }
-        return resumeRun({
-          store,
-          runId,
-          clock,
-          ids,
-          goal,
-          model,
-          tool,
-          policy,
-          context,
+        const composed = composeAbortSignals([
           signal,
-          scopes,
-          budgets: config.run.budgets,
-          checkpointEveryEvents: config.run.checkpointEveryEvents,
-          resumePolicy: config.run.resume.onNonIdempotent,
-        });
+          ...(resumeOptions.signal === undefined ? [] : [resumeOptions.signal]),
+        ]);
+        try {
+          return await resumeRun({
+            store,
+            runId,
+            clock,
+            ids,
+            goal,
+            model,
+            tool,
+            policy,
+            context,
+            signal: composed.signal,
+            scopes,
+            budgets: config.run.budgets,
+            checkpointEveryEvents: config.run.checkpointEveryEvents,
+            resumePolicy: config.run.resume.onNonIdempotent,
+            ...(resumeOptions.onClaimed === undefined
+              ? {}
+              : { onClaimed: resumeOptions.onClaimed }),
+          });
+        } finally {
+          composed.dispose();
+        }
       },
       firstNewSeq,
     );

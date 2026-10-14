@@ -2,6 +2,7 @@
 import { HarnessConfigSchema } from "@harness/config";
 import type * as ControlPlane from "@harness/control-plane";
 import type { Runtime } from "@harness/core";
+import { Code, Id } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,10 +14,19 @@ import { serveCommand } from "./serve.js";
 
 const controlPlaneMocks = vi.hoisted(() => {
   const closeHttp = vi.fn(() => Promise.resolve());
+  let httpOptions: ControlPlane.ControlPlaneServerOptions | undefined;
   return {
     closeHttp,
-    startHttp: vi.fn(() =>
-      Promise.resolve({ endpoint: "http://127.0.0.1:3000/mcp", close: closeHttp }),
+    httpOptions: () => httpOptions,
+    startHttp: vi.fn(
+      (
+        _store: InMemoryEventStore,
+        _port: number,
+        options?: ControlPlane.ControlPlaneServerOptions,
+      ) => {
+        httpOptions = options;
+        return Promise.resolve({ endpoint: "http://127.0.0.1:3000/mcp", close: closeHttp });
+      },
     ),
   };
 });
@@ -110,7 +120,29 @@ describe("serve command", () => {
 
     expect(waitingForSignal).toBe(true);
     await expect(result).resolves.toBe(ExitCode.ok);
-    expect(controlPlaneMocks.startHttp).toHaveBeenCalledWith(runtime.store, 3_000);
+    expect(controlPlaneMocks.startHttp).toHaveBeenCalledTimes(1);
+    expect(controlPlaneMocks.startHttp.mock.calls[0]?.[0]).toBe(runtime.store);
+    expect(controlPlaneMocks.startHttp.mock.calls[0]?.[1]).toBe(3_000);
+    const operations = controlPlaneMocks.httpOptions()?.operations;
+    if (
+      operations?.resumeRun === undefined ||
+      operations.cancelRun === undefined ||
+      operations.resolveApproval === undefined
+    ) {
+      throw new Error("Serve command did not configure all control-plane operations.");
+    }
+    const runId = Id.parse("00000000000000000000000001");
+    const abortSignal = new AbortController().signal;
+    await expect(operations.resumeRun(runId, abortSignal, () => undefined)).rejects.toThrow();
+    await expect(operations.cancelRun(runId)).rejects.toThrow();
+    await expect(
+      operations.resolveApproval({
+        runId,
+        approvalId: runId,
+        decision: "deny",
+        reason: Code.parse("reviewed"),
+      }),
+    ).rejects.toThrow();
     expect(controlPlaneMocks.closeHttp.mock.calls).toHaveLength(1);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermListeners);
     expect(stdout).toEqual(["http://127.0.0.1:3000/mcp\n"]);

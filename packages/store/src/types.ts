@@ -176,6 +176,15 @@ export interface EventStore {
    */
   releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void>;
 
+  /**
+   * Atomically consume a single-use request state, pruning expired entries first.
+   * @param stateId Request-state identifier.
+   * @param expiresAt Expiry timestamp in epoch milliseconds.
+   * @param now Current timestamp in epoch milliseconds.
+   * @returns True only when this call consumed an unused state.
+   */
+  consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean>;
+
   /** Release resources held by the store. */
   close(): Promise<void>;
 }

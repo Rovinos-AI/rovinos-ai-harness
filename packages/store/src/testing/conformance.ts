@@ -8,6 +8,8 @@ import {
   registerSnapshotReopenConformance,
 } from "./conformance-snapshots.js";
 import { registerApprovalNotificationConformance } from "./conformance-approval-notifications.js";
+import { registerConfirmationStateConformance } from "./conformance-confirmation-states.js";
+import { registerTraceLookupConformance } from "./conformance-trace-lookup.js";
 import { registerOutboxConformance } from "./conformance-outbox.js";
 import { createEventBuilders, type EventStoreTestBuilders } from "./testing.js";
 
@@ -29,13 +31,6 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
     result.push(event);
   }
   return result;
-}
-
-let traceLookupId = 0;
-
-function nextTraceLookupId(): string {
-  traceLookupId += 1;
-  return traceLookupId.toString(16).padStart(32, "0");
 }
 
 async function withStore<T>(
@@ -320,60 +315,6 @@ function registerDeleteRun(factory: EventStoreFactory, builders: EventStoreTestB
   });
 }
 
-function registerTraceLookup(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
-  it("finds the run containing a trace", async () => {
-    await withStore(factory, async (store) => {
-      const runId = builders.nextRunId();
-      const traceId = nextTraceLookupId();
-      await store.append(runId, [{ ...builders.runCreated(runId), traceId }], 0);
-
-      await expect(store.findRunsByTrace(traceId)).resolves.toEqual([runId]);
-    });
-  });
-
-  it("returns no runs for an unknown trace", async () => {
-    await withStore(factory, async (store) => {
-      await expect(store.findRunsByTrace("f".repeat(32))).resolves.toEqual([]);
-    });
-  });
-
-  it("returns runs sharing a trace in order of first appearance", async () => {
-    await withStore(factory, async (store) => {
-      const firstRunId = builders.nextRunId();
-      const secondRunId = builders.nextRunId();
-      const sharedTraceId = nextTraceLookupId();
-      await store.append(
-        firstRunId,
-        [{ ...builders.runCreated(firstRunId), traceId: nextTraceLookupId() }],
-        0,
-      );
-      await store.append(
-        secondRunId,
-        [{ ...builders.runCreated(secondRunId), traceId: sharedTraceId }],
-        0,
-      );
-      await store.append(
-        firstRunId,
-        [{ ...builders.modelRequest(firstRunId), traceId: sharedTraceId }],
-        1,
-      );
-
-      await expect(store.findRunsByTrace(sharedTraceId)).resolves.toEqual([
-        secondRunId,
-        firstRunId,
-      ]);
-    });
-  });
-
-  it("rejects an invalid trace identifier", async () => {
-    await withStore(factory, async (store) => {
-      await expect(store.findRunsByTrace("invalid")).rejects.toMatchObject({
-        code: "event_invalid",
-      });
-    });
-  });
-}
-
 function registerLazyRead(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
   it("reads the first 10 of 5,000 events quickly", async () => {
     await withStore(factory, async (store) => {
@@ -394,23 +335,6 @@ function registerLazyRead(factory: EventStoreFactory, builders: EventStoreTestBu
         }
       }
       expect(performance.now() - startedAt).toBeLessThan(1_000);
-    });
-  });
-}
-
-function registerFileReopen(factory: EventStoreFactory, builders: EventStoreTestBuilders): void {
-  it("preserves data after closing and reopening the store", async () => {
-    const first = await factory();
-    const runId = builders.nextRunId();
-    const event = builders.runCreated(runId);
-    try {
-      await first.store.append(runId, [event], 0);
-    } finally {
-      await first.cleanup();
-    }
-
-    await withStore(factory, async (store) => {
-      expect(await collect(store.read(runId))).toEqual([{ ...event, seq: 0 }]);
     });
   });
 }
@@ -437,12 +361,12 @@ export function runEventStoreConformance(
     registerStatusSummary(factory, builders);
     registerDeleteRun(factory, builders);
     registerApprovalNotificationConformance(factory, builders);
-    registerTraceLookup(factory, builders);
+    registerConfirmationStateConformance(factory, builders, caps.supportsFileReopen);
+    registerTraceLookupConformance(factory, builders);
     registerOutboxConformance(factory, builders, caps.supportsFileReopen);
     registerLazyRead(factory, builders);
     registerSnapshotConformance(factory, builders);
     if (caps.supportsFileReopen) {
-      registerFileReopen(factory, builders);
       registerSnapshotReopenConformance(factory, builders);
     }
   });

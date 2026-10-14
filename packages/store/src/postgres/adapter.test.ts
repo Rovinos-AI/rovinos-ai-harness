@@ -58,6 +58,7 @@ let transactionBackup:
       sinkCursors: Map<string, number>;
       snapshots: FakeSnapshot[];
       approvalNotifications: Map<string, FakeApprovalNotification>;
+      confirmationStates: Map<string, number>;
     }
   | undefined;
 
@@ -67,6 +68,7 @@ const fakePg = vi.hoisted(() => ({
   sinkCursors: new Map<string, number>(),
   snapshots: new Array<FakeSnapshot>(),
   approvalNotifications: new Map<string, FakeApprovalNotification>(),
+  confirmationStates: new Map<string, number>(),
   schemaInitialized: false,
   migrationHistory: new Map<string, string>(),
   encryptionValue: "",
@@ -150,6 +152,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       sinkCursors: structuredClone(fakePg.sinkCursors),
       snapshots: structuredClone(fakePg.snapshots),
       approvalNotifications: structuredClone(fakePg.approvalNotifications),
+      confirmationStates: structuredClone(fakePg.confirmationStates),
     };
     return { rows: [] };
   }
@@ -163,6 +166,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       sinkCursors: structuredClone(fakePg.sinkCursors),
       snapshots: structuredClone(fakePg.snapshots),
       approvalNotifications: structuredClone(fakePg.approvalNotifications),
+      confirmationStates: structuredClone(fakePg.confirmationStates),
     };
     return { rows: [] };
   }
@@ -185,6 +189,10 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       fakePg.approvalNotifications.clear();
       for (const [approvalId, runId] of transactionBackup.approvalNotifications) {
         fakePg.approvalNotifications.set(approvalId, runId);
+      }
+      fakePg.confirmationStates.clear();
+      for (const [stateId, expiresAt] of transactionBackup.confirmationStates) {
+        fakePg.confirmationStates.set(stateId, expiresAt);
       }
       transactionBackup = undefined;
     }
@@ -305,6 +313,23 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       }
     }
     return { rows: [] };
+  }
+  if (query === "DELETE FROM control_plane_consumed_states WHERE expires_at <= $1") {
+    const now = number(values[0]);
+    for (const [stateId, expiresAt] of fakePg.confirmationStates) {
+      if (expiresAt <= now) {
+        fakePg.confirmationStates.delete(stateId);
+      }
+    }
+    return { rows: [] };
+  }
+  if (query.startsWith("INSERT INTO control_plane_consumed_states")) {
+    const stateId = text(values[0]);
+    if (fakePg.confirmationStates.has(stateId)) {
+      return { rows: [] };
+    }
+    fakePg.confirmationStates.set(stateId, number(values[1]));
+    return { rows: [{ state_id: stateId }] };
   }
   if (
     query ===
@@ -499,6 +524,7 @@ beforeEach(() => {
   fakePg.sinkCursors.clear();
   fakePg.snapshots.length = 0;
   fakePg.approvalNotifications.clear();
+  fakePg.confirmationStates.clear();
   transactionBackup = undefined;
   fakePg.schemaInitialized = false;
   fakePg.migrationHistory.clear();

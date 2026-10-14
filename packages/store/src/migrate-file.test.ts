@@ -58,7 +58,7 @@ describe("migrateSqliteFile", () => {
 
     const pending = migrateSqliteFile(path, { dryRun: true });
 
-    expect(pending).toEqual(["0001", "0002"]);
+    expect(pending).toEqual(["0001", "0002", "0003"]);
     expect(existsSync(path)).toBe(false);
   });
 
@@ -66,7 +66,7 @@ describe("migrateSqliteFile", () => {
     const directory = join(await makeDirectory(), "nested");
     const path = join(directory, "harness.db");
 
-    expect(migrateSqliteFile(path, { appliedAt: 1 })).toEqual(["0001", "0002"]);
+    expect(migrateSqliteFile(path, { appliedAt: 1 })).toEqual(["0001", "0002", "0003"]);
     const filesBeforeDryRun = readdirSync(directory);
     expect(migrateSqliteFile(path, { dryRun: true })).toEqual([]);
     expect(readdirSync(directory)).toEqual(filesBeforeDryRun);
@@ -84,7 +84,7 @@ describe("migratePostgresConnection", () => {
       dryRun: true,
     });
 
-    expect(pending).toEqual(["0001", "0002"]);
+    expect(pending).toEqual(["0001", "0002", "0003"]);
     expect(postgresState.queries).toEqual([
       "SELECT to_regclass('schema_migrations') IS NOT NULL AS present",
     ]);
