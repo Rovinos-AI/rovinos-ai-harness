@@ -12,6 +12,7 @@ export { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 export { PiiStorageFailedError } from "./errors.js";
 export {
   validateWithTokens,
+  createValidateWithTokensResultSchema,
   TokenValidationIssueSchema,
   type TokenValidationIssue,
   type ValidateWithTokensOptions,

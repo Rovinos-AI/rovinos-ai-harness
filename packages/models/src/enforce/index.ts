@@ -66,13 +66,14 @@ export function createEnforcementResultSchema<Schema extends z.ZodType>(
 }
 
 /** Inferred structured-output result for the caller's output schema. */
-export type EnforcementResult<Schema extends z.ZodType = z.ZodType> =
-  | z.infer<ReturnType<typeof createEnforcementResultSchema<Schema>>>
-  | {
-      readonly value: JsonValueType;
-      readonly valid: true;
-      readonly rungUsed: EnforcementRung;
-    };
+export type EnforcementResult<Schema extends z.ZodType = z.ZodType> = z.infer<
+  ReturnType<typeof createEnforcementResultSchema<Schema>>
+>;
+
+/** Inferred result for output validated while preserving its tokenized JSON value. */
+export type TokenizedEnforcementResult = z.infer<
+  ReturnType<typeof createEnforcementResultSchema<typeof JsonValue>>
+>;
 
 /** Value-preserving result returned by an asynchronous structured-output validator. */
 export const ValueTransformResultSchema = z.discriminatedUnion("ok", [
@@ -119,9 +120,7 @@ export function parseEnforcementResult<Schema extends z.ZodType>(
  * Parses a valid result whose tokenized value was validated by a caller-provided transform.
  * The transform has already checked the caller schema against its temporary in-memory value.
  */
-export function parseTokenizedEnforcementResult<Schema extends z.ZodType>(
-  result: unknown,
-): EnforcementResult<Schema> {
+export function parseTokenizedEnforcementResult(result: unknown): TokenizedEnforcementResult {
   return createEnforcementResultSchema(JsonValue).parse(result);
 }
 

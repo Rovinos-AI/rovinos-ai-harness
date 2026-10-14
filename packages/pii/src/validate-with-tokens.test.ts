@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "@harness/schemas";
 import { AuditingVaultResolver, InMemoryVault, type VaultAudit } from "@harness/vault";
 import { z } from "zod";
-import { validateWithTokens } from "./validate-with-tokens.js";
+import {
+  createValidateWithTokensResultSchema,
+  validateWithTokens,
+} from "./validate-with-tokens.js";
 
 const runId = "00000000000000000000000001";
 
@@ -63,6 +66,39 @@ describe("validateWithTokens", () => {
     expect(JSON.stringify(result)).not.toContain(raw);
   });
 
+  it("replaces refinement and transformed record-key paths with wildcards", async () => {
+    const { resolver, vault } = makeResolver();
+    const raw = "path-canary@example.test";
+    const token = await vault.put(runId, "email", raw);
+    const refinement = z.string().superRefine((value, context) => {
+      context.addIssue({ code: "custom", path: [value], message: "invalid" });
+    });
+    const recordKey = z
+      .string()
+      .transform((value) => ({ [value]: "value" }))
+      .pipe(
+        z.record(z.string(), z.string()).superRefine((record, context) => {
+          const key = Object.keys(record)[0];
+          if (key !== undefined) {
+            context.addIssue({ code: "custom", path: [key], message: "invalid" });
+          }
+        }),
+      );
+
+    const refinementResult = await validateWithTokens(refinement, token, { runId, resolver });
+    const recordResult = await validateWithTokens(recordKey, token, { runId, resolver });
+
+    expect(refinementResult).toEqual({
+      ok: false,
+      issues: [{ path: ["*"], code: "custom" }],
+    });
+    expect(recordResult).toEqual({
+      ok: false,
+      issues: [{ path: ["*"], code: "custom" }],
+    });
+    expect(JSON.stringify([refinementResult, recordResult])).not.toContain(raw);
+  });
+
   it("fails closed with the unresolvable code and a value-free audit", async () => {
     const { audits, resolver } = makeResolver();
     const token = "<EMAIL_9>";
@@ -102,6 +138,31 @@ describe("validateWithTokens", () => {
       { boundary: "tool_input", action: "detokenized", entities: [{ type: "email", count: 1 }] },
     ]);
     expect(JSON.stringify(audits)).not.toContain(raw);
+  });
+
+  it("does not re-run caller transforms when parsing the result contract", async () => {
+    const { resolver, vault } = makeResolver();
+    const token = await vault.put(runId, "email", "alice@example.test");
+    let transformations = 0;
+    const schema = z.string().transform((value) => {
+      transformations += 1;
+      return { value };
+    });
+
+    const result = await validateWithTokens(schema, token, {
+      runId,
+      resolver,
+      wantRaw: true,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      tokenized: token,
+      raw: { value: "alice@example.test" },
+    });
+    expect(transformations).toBe(1);
+    expect(createValidateWithTokensResultSchema(schema).parse(result)).toEqual(result);
+    expect(transformations).toBe(1);
   });
 
   it("resolves tokens in nested JSON strings without mutating the input", async () => {

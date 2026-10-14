@@ -14,10 +14,46 @@ export const TokenValidationIssueSchema = z
 /** Inferred value-free validation issue. */
 export type TokenValidationIssue = z.infer<typeof TokenValidationIssueSchema>;
 
+function validateWithTokensSuccessSchema<Schema extends z.ZodType>(_schema: Schema) {
+  return z
+    .object({
+      ok: z.literal(true),
+      tokenized: JsonValueSchema,
+      // The caller schema already parsed this value; validating it again could rerun transforms.
+      raw: z.custom<z.output<Schema>>().optional(),
+    })
+    .strict();
+}
+
+function validateWithTokensFailureSchema() {
+  return z
+    .object({
+      ok: z.literal(false),
+      issues: z.array(TokenValidationIssueSchema),
+    })
+    .strict();
+}
+
+/** Creates the runtime contract for token-aware validation results. */
+export function createValidateWithTokensResultSchema<Schema extends z.ZodType>(
+  schema: Schema,
+): z.ZodDiscriminatedUnion<
+  [
+    ReturnType<typeof validateWithTokensSuccessSchema<Schema>>,
+    ReturnType<typeof validateWithTokensFailureSchema>,
+  ],
+  "ok"
+> {
+  return z.discriminatedUnion("ok", [
+    validateWithTokensSuccessSchema(schema),
+    validateWithTokensFailureSchema(),
+  ]);
+}
+
 /** Result of validating a tokenized JSON value against a Zod schema. */
-export type ValidateWithTokensResult<Schema extends z.ZodType> =
-  | { readonly ok: true; readonly tokenized: JsonValue; readonly raw?: z.output<Schema> }
-  | { readonly ok: false; readonly issues: TokenValidationIssue[] };
+export type ValidateWithTokensResult<Schema extends z.ZodType> = z.infer<
+  ReturnType<typeof createValidateWithTokensResultSchema<Schema>>
+>;
 
 /** Options for validating tokenized output using a run-scoped, audited resolver. */
 export interface ValidateWithTokensOptions {
@@ -46,26 +82,36 @@ export async function validateWithTokens<Schema extends z.ZodType>(
   tokenizedValue: JsonValue,
   options: ValidateWithTokensOptions,
 ): Promise<ValidateWithTokensResult<Schema>> {
+  const resultSchema = createValidateWithTokensResultSchema(schema);
   const input = JsonValueSchema.safeParse(tokenizedValue);
   if (!input.success) {
-    return { ok: false, issues: toTokenValidationIssues(input.error.issues) };
+    return resultSchema.parse({
+      ok: false,
+      issues: toTokenValidationIssues(input.error.issues, null),
+    });
   }
 
   const resolved = await resolveValue(input.data, [], options);
   if (resolved.issues.length > 0) {
-    return { ok: false, issues: resolved.issues };
+    return resultSchema.parse({ ok: false, issues: resolved.issues });
   }
 
   try {
     const parsed = schema.safeParse(resolved.value);
     if (!parsed.success) {
-      return { ok: false, issues: toTokenValidationIssues(parsed.error.issues) };
+      return resultSchema.parse({
+        ok: false,
+        issues: toTokenValidationIssues(parsed.error.issues, input.data),
+      });
     }
     return options.wantRaw === true
-      ? { ok: true, tokenized: tokenizedValue, raw: parsed.data }
-      : { ok: true, tokenized: tokenizedValue };
+      ? resultSchema.parse({ ok: true, tokenized: input.data, raw: parsed.data })
+      : resultSchema.parse({ ok: true, tokenized: input.data });
   } catch {
-    return { ok: false, issues: [{ path: [], code: Code.parse("custom") }] };
+    return resultSchema.parse({
+      ok: false,
+      issues: [{ path: [], code: Code.parse("custom") }],
+    });
   }
 }
 
@@ -149,14 +195,41 @@ async function resolveString(
 
 function toTokenValidationIssues(
   issues: readonly { readonly path: readonly PropertyKey[]; readonly code: string }[],
+  tokenizedValue: JsonValue | null,
 ): TokenValidationIssue[] {
   return issues.map((issue) =>
     TokenValidationIssueSchema.parse({
-      path: issue.path.filter(
-        (segment): segment is string | number =>
-          typeof segment === "string" || typeof segment === "number",
-      ),
+      path: tokenizedPath(issue.path, tokenizedValue),
       code: issue.code,
     }),
   );
+}
+
+function tokenizedPath(path: readonly PropertyKey[], tokenizedValue: JsonValue | null) {
+  const safePath: (string | number)[] = [];
+  let current: JsonValue | undefined = tokenizedValue ?? undefined;
+  for (const segment of path) {
+    if (Array.isArray(current) && typeof segment === "number") {
+      if (Number.isInteger(segment) && segment >= 0 && segment < current.length) {
+        safePath.push(segment);
+        current = current[segment];
+      } else {
+        safePath.push("*");
+        current = undefined;
+      }
+    } else if (
+      current !== null &&
+      typeof current === "object" &&
+      !Array.isArray(current) &&
+      typeof segment === "string" &&
+      Object.hasOwn(current, segment)
+    ) {
+      safePath.push(segment);
+      current = current[segment];
+    } else {
+      safePath.push("*");
+      current = undefined;
+    }
+  }
+  return safePath;
 }

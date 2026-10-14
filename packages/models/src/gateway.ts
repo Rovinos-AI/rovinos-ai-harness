@@ -4,7 +4,6 @@ import {
   lookupCapabilities,
   ModelEnforcementConfigSchema,
   ModelRetryConfigSchema,
-  type Capabilities,
   type Id,
   type JsonValue,
   type ModelsConfig,
@@ -38,19 +37,19 @@ import { prepareMessagesForProvider } from "./blobs.js";
 import { TokenBucketRateLimiter } from "./resilience/limiter.js";
 import { abortableSleep, withRetries, type Random, type Sleep } from "./resilience/retry.js";
 import { Semaphore } from "./resilience/semaphore.js";
-import { providerSchemaRules } from "./provider-schema-rules.js";
 import {
-  EnforcementRungUnavailableError,
-  OutputWithToolsUnsupportedError,
-  selectEnforcementRung,
   type EnforcementResult,
+  type EnforcementIssue,
   type EnforcementRung,
+  type TokenizedEnforcementResult,
   type ValueTransform,
 } from "./enforce/index.js";
-import { enforceNativeOutput, withNativeOutputSchema } from "./enforce/rung-native.js";
-import { enforceToolOutput, withForcedOutputTool } from "./enforce/rung-tool.js";
-import { enforcePromptOutput, withPromptOutput } from "./enforce/rung-prompt.js";
-import { lowerForProvider, schemaHash, toJsonSchema } from "./json-schema.js";
+import {
+  enforceProviderOutput,
+  prepareEnforcementRequest,
+  type PreparedEnforcement,
+} from "./enforce/provider-output.js";
+import { awaitRunValidation } from "./enforce/validation-deadline.js";
 import { appendRepairMessages } from "./enforce/repair.js";
 import { createPricingAccountant } from "./pricing.js";
 import { aggregateModelUsage, reportModelUsage } from "./usage.js";
@@ -69,14 +68,21 @@ export interface ModelGatewayDependencies {
 }
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
-export interface ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType> {
+interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
   readonly runId: Id;
   readonly signal: AbortSignal;
   readonly deadlineTs?: number;
   readonly outputSchema?: OutputSchema;
-  /** Optional async validator that preserves the tokenized model output. */
-  readonly valueTransform?: ValueTransform;
 }
+
+/** Runtime context supplied to a gateway call, optionally including a typed output contract. */
+export type ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType> =
+  ModelGatewayContextBase<OutputSchema> &
+    ({ readonly valueTransform?: undefined } | { readonly valueTransform: ValueTransform });
+
+/** Gateway context used when the caller provides an async token-preserving validator. */
+export type TokenizedModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType> =
+  ModelGatewayContextBase<OutputSchema> & { readonly valueTransform: ValueTransform };
 
 /** Gateway enforcement configuration. */
 export interface ModelGatewayOptions {
@@ -92,16 +98,14 @@ export type ModelGatewayResponse<OutputSchema extends z.ZodType = z.ZodType> = M
   readonly enforcement?: EnforcementResult<OutputSchema>;
 };
 
-interface PreparedEnforcement {
-  readonly request: ModelRequest;
-  readonly rung?: EnforcementRung;
-}
+/** Provider completion whose successful enforcement value remains tokenized JSON. */
+export type TokenizedModelGatewayResponse = ModelResponse & {
+  readonly providerBlobs: JsonValue;
+  readonly enforcement?: TokenizedEnforcementResult;
+};
 
-interface ProviderEnforcement {
-  readonly kind: string;
-  readonly capabilities: Capabilities;
-  readonly maxRung?: EnforcementRung;
-}
+type AnyModelGatewayResponse<OutputSchema extends z.ZodType> =
+  ModelGatewayResponse<OutputSchema> | TokenizedModelGatewayResponse;
 
 interface PreparedCompletionOptions<OutputSchema extends z.ZodType> {
   readonly request: ModelRequest;
@@ -112,86 +116,34 @@ interface PreparedCompletionOptions<OutputSchema extends z.ZodType> {
   readonly semaphore: Semaphore;
 }
 
-function prepareEnforcementRequest(
-  request: ModelRequest,
-  outputSchema: z.ZodType | undefined,
-  provider: ProviderEnforcement,
-): PreparedEnforcement {
-  if (outputSchema === undefined) {
-    return { request };
-  }
-  if (request.tools !== undefined && request.tools.length > 0) {
-    throw new OutputWithToolsUnsupportedError();
-  }
-
-  const schemaRules = providerSchemaRules(provider.kind);
-  let rung: EnforcementRung | undefined;
-  if (schemaRules === undefined) {
-    rung = provider.maxRung === "native" || provider.maxRung === "tool" ? undefined : "prompt";
-  } else {
-    rung = selectEnforcementRung(provider.capabilities, provider.maxRung);
-  }
-  if (rung === undefined) {
-    throw new EnforcementRungUnavailableError();
-  }
-
-  const schema =
-    schemaRules === undefined
-      ? toJsonSchema(outputSchema)
-      : lowerForProvider(outputSchema, provider.kind).schema;
-  const output = {
-    name: request.output?.name ?? "result",
-    schema,
-    schemaHash: schemaHash(schema),
-  };
-  return {
-    request: prepareRequestForRung(request, output, rung),
-    rung,
-  };
-}
-
-function prepareRequestForRung(
-  request: ModelRequest,
-  output: NonNullable<ModelRequest["output"]>,
-  rung: EnforcementRung,
-): ModelRequest {
-  if (rung === "native") {
-    return withNativeOutputSchema(request, output);
-  }
-  if (rung === "tool") {
-    return withForcedOutputTool(request, output);
-  }
-  return withPromptOutput(request, output);
-}
-
-async function enforceProviderOutput<OutputSchema extends z.ZodType>(
-  parts: ModelResponse["parts"],
-  context: ModelGatewayContext<OutputSchema>,
-  rung: EnforcementRung | undefined,
-): Promise<{
+function appendRepairOrThrow(options: {
+  readonly currentRequest: ModelRequest;
   readonly parts: ModelResponse["parts"];
-  readonly result?: EnforcementResult<OutputSchema>;
-}> {
-  if (context.outputSchema === undefined || rung === undefined) {
-    return { parts };
+  readonly issues: readonly EnforcementIssue[];
+  readonly rungUsed?: EnforcementRung;
+  readonly outputSchema: JsonValue | undefined;
+  readonly repairAttempts: number;
+  readonly maxRepairs: number;
+  readonly usage: ModelUsage | undefined;
+  readonly latencyMs: number;
+}): ModelRequest {
+  if (options.repairAttempts >= options.maxRepairs) {
+    throw new ModelOutputInvalidError(
+      options.repairAttempts,
+      options.issues,
+      options.outputSchema,
+      {
+        ...(options.usage === undefined ? {} : { usage: options.usage }),
+        latencyMs: options.latencyMs,
+      },
+    );
   }
-  const { outputSchema, valueTransform } = context;
-  if (rung === "native") {
-    const hasToolCall = parts.some((part) => part.type === "tool_call");
-    return {
-      parts: hasToolCall ? parts.filter((part) => part.type !== "tool_call") : parts,
-      result: await enforceNativeOutput(parts, outputSchema, valueTransform),
-    };
-  }
-  if (rung === "tool") {
-    const enforced = await enforceToolOutput(parts, outputSchema, valueTransform);
-    return { parts: enforced.parts, result: enforced.result };
-  }
-  const hasToolCall = parts.some((part) => part.type === "tool_call");
-  return {
-    parts: hasToolCall ? parts.filter((part) => part.type !== "tool_call") : parts,
-    result: await enforcePromptOutput(parts, outputSchema, valueTransform),
-  };
+  return appendRepairMessages(
+    options.currentRequest,
+    options.parts,
+    options.issues,
+    options.rungUsed,
+  );
 }
 
 function parseProviderResult(result: unknown): z.infer<typeof ProviderResultSchema> {
@@ -310,7 +262,7 @@ export class ModelGateway {
 
   private async completePrepared<OutputSchema extends z.ZodType>(
     options: PreparedCompletionOptions<OutputSchema>,
-  ): Promise<ModelGatewayResponse<OutputSchema>> {
+  ): Promise<AnyModelGatewayResponse<OutputSchema>> {
     const { request, context, adapter, prepared, limiter, semaphore } = options;
     let attempts = 0;
     let repairAttempts = 0;
@@ -341,23 +293,21 @@ export class ModelGateway {
         aggregateUsage = aggregateModelUsage(aggregateUsage, result.usage);
         aggregateLatencyMs += result.latencyMs;
 
-        const enforced = await enforceProviderOutput(result.parts, context, prepared.rung);
+        const validateOutput = () => enforceProviderOutput(result.parts, context, prepared.rung);
+        const enforced = await awaitRunValidation(validateOutput, context, this.dependencies.clock);
         const enforcement = enforced.result;
         if (enforcement !== undefined && "issues" in enforcement) {
-          if (repairAttempts >= this.maxRepairs) {
-            throw new ModelOutputInvalidError(
-              repairAttempts,
-              enforcement.issues,
-              currentRequest.output?.schema,
-              { usage: aggregateUsage, latencyMs: aggregateLatencyMs },
-            );
-          }
-          currentRequest = appendRepairMessages(
+          currentRequest = appendRepairOrThrow({
             currentRequest,
-            result.parts,
-            enforcement.issues,
-            enforcement.rungUsed,
-          );
+            parts: result.parts,
+            issues: enforcement.issues,
+            ...(enforcement.rungUsed === undefined ? {} : { rungUsed: enforcement.rungUsed }),
+            outputSchema: currentRequest.output?.schema,
+            repairAttempts,
+            maxRepairs: this.maxRepairs,
+            usage: aggregateUsage,
+            latencyMs: aggregateLatencyMs,
+          });
           repairAttempts += 1;
           continue;
         }
@@ -398,10 +348,24 @@ export class ModelGateway {
    * @param context - Run identifier, cancellation signal, optional deadline, and output schema.
    * @returns Provider completion with validation details when output enforcement is requested.
    */
+  complete<OutputSchema extends z.ZodType = z.ZodType>(
+    request: ModelRequest,
+    context: ModelGatewayContextBase<OutputSchema> & {
+      readonly valueTransform?: undefined;
+    },
+  ): Promise<ModelGatewayResponse<OutputSchema>>;
+  complete<OutputSchema extends z.ZodType = z.ZodType>(
+    request: ModelRequest,
+    context: TokenizedModelGatewayContext<OutputSchema>,
+  ): Promise<TokenizedModelGatewayResponse>;
+  complete<OutputSchema extends z.ZodType = z.ZodType>(
+    request: ModelRequest,
+    context: ModelGatewayContext<OutputSchema>,
+  ): Promise<AnyModelGatewayResponse<OutputSchema>>;
   async complete<OutputSchema extends z.ZodType = z.ZodType>(
     request: ModelRequest,
     context: ModelGatewayContext<OutputSchema>,
-  ): Promise<ModelGatewayResponse<OutputSchema>> {
+  ): Promise<AnyModelGatewayResponse<OutputSchema>> {
     const adapter = this.registry.get(request.model.provider);
     const effectiveRequest =
       request.maxOutputTokens === undefined

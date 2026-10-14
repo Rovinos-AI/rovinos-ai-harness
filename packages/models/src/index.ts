@@ -36,6 +36,8 @@ export {
   type ModelGatewayDependencies,
   type ModelGatewayOptions,
   type ModelGatewayResponse,
+  type TokenizedModelGatewayContext,
+  type TokenizedModelGatewayResponse,
 } from "./gateway.js";
 export { AdapterRegistry } from "./registry.js";
 export { calculateCostMicros, resolveModelPricing, type ModelPricing } from "./pricing.js";
@@ -94,6 +96,7 @@ export {
   type EnforcementIssue,
   type EnforcementResult,
   type EnforcementRung,
+  type TokenizedEnforcementResult,
   type ValueTransform,
   type ValueTransformResult,
 } from "./enforce/index.js";

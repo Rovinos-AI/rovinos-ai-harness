@@ -9,6 +9,7 @@ import {
   parseTokenizedEnforcementResult,
   stripSyntheticToolCall,
   type EnforcementResult,
+  type TokenizedEnforcementResult,
   type ValueTransform,
 } from "./index.js";
 
@@ -34,13 +35,30 @@ export function withForcedOutputTool(
 }
 
 /** Validates the synthetic tool arguments and removes the synthetic call from response parts. */
+export function enforceToolOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+): Promise<{ readonly parts: Part[]; readonly result: EnforcementResult<Schema> }>;
+export function enforceToolOutput(
+  parts: readonly Part[],
+  outputSchema: z.ZodType,
+  valueTransform: ValueTransform,
+): Promise<{ readonly parts: Part[]; readonly result: TokenizedEnforcementResult }>;
+export function enforceToolOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+  valueTransform?: ValueTransform,
+): Promise<{
+  readonly parts: Part[];
+  readonly result: EnforcementResult<Schema> | TokenizedEnforcementResult;
+}>;
 export async function enforceToolOutput<Schema extends z.ZodType>(
   parts: readonly Part[],
   outputSchema: Schema,
   valueTransform?: ValueTransform,
 ): Promise<{
   readonly parts: Part[];
-  readonly result: EnforcementResult<Schema>;
+  readonly result: EnforcementResult<Schema> | TokenizedEnforcementResult;
 }> {
   const calls = parts.filter(
     (part) => part.type === "tool_call" && part.toolId === SYNTHETIC_TOOL_ID,
@@ -105,7 +123,10 @@ async function enforceTransformedToolOutput<Schema extends z.ZodType>(
   parts: Part[],
   outputSchema: Schema,
   valueTransform: ValueTransform,
-): Promise<{ readonly parts: Part[]; readonly result: EnforcementResult<Schema> }> {
+): Promise<{
+  readonly parts: Part[];
+  readonly result: EnforcementResult<Schema> | TokenizedEnforcementResult;
+}> {
   const transformed = await applyValueTransform(valueTransform, outputSchema, args);
   if (!transformed.ok) {
     return {
@@ -130,7 +151,7 @@ async function enforceTransformedToolOutput<Schema extends z.ZodType>(
   }
   return {
     parts: [...parts, { type: "text", text: canonicalJson(jsonValue.data) }],
-    result: parseTokenizedEnforcementResult<Schema>({
+    result: parseTokenizedEnforcementResult({
       value: jsonValue.data,
       valid: true,
       rungUsed: "tool",

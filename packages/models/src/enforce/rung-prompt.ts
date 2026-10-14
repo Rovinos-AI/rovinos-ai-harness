@@ -9,6 +9,7 @@ import {
   parseEnforcementResult,
   parseTokenizedEnforcementResult,
   type EnforcementResult,
+  type TokenizedEnforcementResult,
   type ValueTransform,
 } from "./index.js";
 
@@ -32,11 +33,25 @@ export function withPromptOutput(
 }
 
 /** Extracts a JSON value from the single model text part and validates it against the caller schema. */
+export function enforcePromptOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+): Promise<EnforcementResult<Schema>>;
+export function enforcePromptOutput(
+  parts: readonly Part[],
+  outputSchema: z.ZodType,
+  valueTransform: ValueTransform,
+): Promise<TokenizedEnforcementResult>;
+export function enforcePromptOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+  valueTransform?: ValueTransform,
+): Promise<EnforcementResult<Schema> | TokenizedEnforcementResult>;
 export async function enforcePromptOutput<Schema extends z.ZodType>(
   parts: readonly Part[],
   outputSchema: Schema,
   valueTransform?: ValueTransform,
-): Promise<EnforcementResult<Schema>> {
+): Promise<EnforcementResult<Schema> | TokenizedEnforcementResult> {
   if (parts.some((part) => part.type === "tool_call")) {
     return parseEnforcementResult(outputSchema, {
       valid: false,
@@ -78,7 +93,7 @@ export async function enforcePromptOutput<Schema extends z.ZodType>(
         rungUsed: "prompt",
       });
     }
-    return parseTokenizedEnforcementResult<Schema>({
+    return parseTokenizedEnforcementResult({
       value: transformed.tokenized,
       valid: true,
       rungUsed: "prompt",

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   JsonValue,
   ModelRetryConfigSchema,
@@ -660,6 +660,9 @@ describe("ModelGateway", () => {
       rungUsed: "native",
       enforcement: { valid: true, value: { answer: "ok" } },
     });
+    if (completion.enforcement?.valid === true) {
+      expectTypeOf(completion.enforcement.value.answer).toEqualTypeOf<string>();
+    }
   });
 
   it("uses a value transform and keeps the tokenized result in the gateway response", async () => {
@@ -706,7 +709,100 @@ describe("ModelGateway", () => {
       schemaValid: true,
       enforcement: { valid: true, value: tokenized },
     });
+    if (completion.enforcement?.valid === true) {
+      expectTypeOf(completion.enforcement.value).toEqualTypeOf<JsonValueType>();
+    }
     expect(JSON.stringify(completion)).not.toContain("alice@example.test");
+  });
+
+  it("cancels a pending value transform with the run signal", async () => {
+    const tokenized: JsonValueType = { answer: "ok" };
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: JSON.stringify(tokenized) }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    let finishValidation = (): void => undefined;
+    let validationStarted = false;
+    const valueTransform: ValueTransform = () =>
+      new Promise((resolve) => {
+        validationStarted = true;
+        finishValidation = () => {
+          resolve({ ok: true, tokenized });
+        };
+      });
+    const controller = new AbortController();
+    const completion = gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: controller.signal,
+        outputSchema: z.object({ answer: z.string() }),
+        valueTransform,
+      },
+    );
+    await vi.waitFor(() => {
+      expect(validationStarted).toBe(true);
+    });
+    const cancelled = new Error("run cancelled");
+    controller.abort(cancelled);
+
+    await expect(completion).rejects.toBe(cancelled);
+    finishValidation();
+  });
+
+  it("expires a pending value transform at the run deadline", async () => {
+    useFakeClock();
+    const tokenized: JsonValueType = { answer: "ok" };
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: JSON.stringify(tokenized) }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => Date.now() },
+    });
+    let finishValidation = (): void => undefined;
+    let startValidation = (): void => undefined;
+    const validationStarted = new Promise<void>((resolve) => {
+      startValidation = () => {
+        resolve();
+      };
+    });
+    const valueTransform: ValueTransform = () =>
+      new Promise((resolve) => {
+        startValidation();
+        finishValidation = () => {
+          resolve({ ok: true, tokenized });
+        };
+      });
+    const completion = gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        deadlineTs: 1_000,
+        outputSchema: z.object({ answer: z.string() }),
+        valueTransform,
+      },
+    );
+    await validationStarted;
+    const result = completion.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(await result).toMatchObject({ code: "deadline_exceeded" });
+    finishValidation();
   });
 
   it("repairs unresolvable tokens from paths only", async () => {
