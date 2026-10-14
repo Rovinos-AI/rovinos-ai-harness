@@ -1,0 +1,3 @@
+{"id":"workspace_read","decision":"allow","ruleId":"allow_workspace_read"}
+{"id":"email_send","decision":"ask","ruleId":"ask_email_send"}
+{"id":"unmatched_write","decision":"deny","ruleId":"default"}

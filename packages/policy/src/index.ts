@@ -14,6 +14,7 @@ export {
   type PolicyCall,
 } from "./evaluate.js";
 export { PolicyEngine } from "./engine.js";
+export { lintPolicy } from "./lint.js";
 export { policyVersion } from "./version.js";
 export { buildApprovalPayload, type ApprovalPayloadBuildOptions } from "./approval-payload.js";
 export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.js";
