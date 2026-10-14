@@ -20,6 +20,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Keep runtime databases out of the repository root (see test/setup/data-dir.ts).
+    setupFiles: ["./test/setup/data-dir.ts"],
     coverage: {
       provider: "v8",
       include: ["packages/*/src/**/*.ts", "packages/sandbox/runner/src/**/*.ts"],
