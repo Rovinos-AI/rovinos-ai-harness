@@ -1,0 +1,23 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ call, emit }) => {
+        await call("harness.telemetry.emit", {
+          spans: [
+            {
+              name: "ui.error",
+              code: "x".repeat(100 * 1024),
+              startOffsetMs: 0,
+              durationMs: 0,
+            },
+          ],
+        });
+        await emit([
+          { name: "ui.error", code: "oversized_batch_blocked", startOffsetMs: 0, durationMs: 0 },
+        ]);
+      };
+    </script>
+  </body>
+</html>

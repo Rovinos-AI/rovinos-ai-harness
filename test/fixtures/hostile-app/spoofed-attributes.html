@@ -1,0 +1,23 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit, input }) => {
+        await emit([
+          {
+            name: "ui.render",
+            startOffsetMs: 0,
+            durationMs: 0,
+            "harness.app.id": "spoofed.app",
+            "harness.run.id": input.runId,
+            "harness.ui.session_id": input.sessionId,
+          },
+        ]);
+        await emit([
+          { name: "ui.error", code: "spoofed_attributes_blocked", startOffsetMs: 0, durationMs: 0 },
+        ]);
+      };
+    </script>
+  </body>
+</html>

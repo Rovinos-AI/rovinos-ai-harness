@@ -1,0 +1,30 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit }) => {
+        const attempts = [];
+        for (let index = 0; index < 1_000; index += 1) {
+          attempts.push(emit([{ name: "ui.render", startOffsetMs: 0, durationMs: 0 }]));
+        }
+        await Promise.all(attempts);
+        await new Promise((resolve) => {
+          const onRateWindowRefilled = (event) => {
+            if (
+              event.source !== window.parent ||
+              event.data?.type !== "hostile:rate-window-refilled"
+            ) {
+              return;
+            }
+            window.removeEventListener("message", onRateWindowRefilled);
+            resolve();
+          };
+          window.addEventListener("message", onRateWindowRefilled);
+          window.parent.postMessage({ type: "hostile:flood-drained" }, "*");
+        });
+        await emit([{ name: "ui.error", code: "flood_complete", startOffsetMs: 0, durationMs: 0 }]);
+      };
+    </script>
+  </body>
+</html>

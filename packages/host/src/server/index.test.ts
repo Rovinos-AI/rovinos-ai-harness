@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { trace } from "@opentelemetry/api";
+import { metrics, trace } from "@opentelemetry/api";
 import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/core";
 import { Code, parseJson, Traceparent } from "@harness/schemas";
-import { createTestSpanCollector } from "@harness/telemetry/testing";
+import { createTestMetricCollector, createTestSpanCollector } from "@harness/telemetry/testing";
 import type { HostAppRejectedReason } from "@harness/telemetry";
 import type { PolicyPort, ToolPort } from "@harness/core";
 import { z } from "zod";
@@ -20,8 +20,13 @@ import {
 const appResourceUri = "ui://approval/index.html";
 const spanCollector = createTestSpanCollector();
 trace.setGlobalTracerProvider(spanCollector.provider);
+const metricCollector = createTestMetricCollector();
+if (!metrics.setGlobalMeterProvider(metricCollector.provider)) {
+  throw new Error("The host test metrics provider could not be registered.");
+}
 afterAll(async () => {
   await spanCollector.provider.shutdown();
+  await metricCollector.provider.shutdown();
 });
 const appConfig = {
   apps: [
@@ -238,6 +243,28 @@ function appPath(appSession: string): string {
 
 function authorization(host: { readonly token: string; readonly origin: string }) {
   return { authorization: ["Bearer", host.token].join(" "), origin: host.origin };
+}
+
+async function hostAppRejectedCount(reason: string): Promise<number> {
+  await metricCollector.forceFlush();
+  const latest = metricCollector.getMetrics().at(-1);
+  let count = 0;
+  for (const scope of latest?.scopeMetrics ?? []) {
+    for (const metric of scope.metrics) {
+      if (metric.descriptor.name !== "harness.host.app_rejected") {
+        continue;
+      }
+      for (const point of metric.dataPoints) {
+        if (
+          point.attributes["harness.host.app_rejected.reason"] === reason &&
+          typeof point.value === "number"
+        ) {
+          count += point.value;
+        }
+      }
+    }
+  }
+  return count;
 }
 
 function telemetryCallBody(appSession: string, batch: unknown): string {
@@ -1251,6 +1278,39 @@ describe("createReferenceHost", () => {
     expect(mismatched.status).toBe(404);
     const large = await fixture.request("POST", "/api/call", headers, "x".repeat(32_769));
     expect(large.status).toBe(413);
+    await host.close();
+  });
+
+  it("counts malformed /api/call bodies and reports schema rejection", async () => {
+    const onAppRejected = vi.fn();
+    const fixture = makeServer({ onAppRejected });
+    const host = await fixture.hostPromise;
+    const before = await hostAppRejectedCount("schema");
+
+    const malformed = await fixture.request("POST", "/api/call", authorization(host), "{");
+
+    expect(malformed.status).toBe(400);
+    expect(onAppRejected).toHaveBeenCalledExactlyOnceWith("schema");
+    expect((await hostAppRejectedCount("schema")) - before).toBe(1);
+    await host.close();
+  });
+
+  it("counts oversized /api/call bodies and reports size rejection", async () => {
+    const onAppRejected = vi.fn();
+    const fixture = makeServer({ onAppRejected });
+    const host = await fixture.hostPromise;
+    const before = await hostAppRejectedCount("size");
+
+    const oversized = await fixture.request(
+      "POST",
+      "/api/call",
+      authorization(host),
+      "x".repeat(32_769),
+    );
+
+    expect(oversized.status).toBe(413);
+    expect(onAppRejected).toHaveBeenCalledExactlyOnceWith("size");
+    expect((await hostAppRejectedCount("size")) - before).toBe(1);
     await host.close();
   });
 
