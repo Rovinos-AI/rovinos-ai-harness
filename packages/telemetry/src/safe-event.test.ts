@@ -67,6 +67,25 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
   },
   {
     event: validEvent({
+      type: "tool_intent",
+      callId: "00000000000000000000000002",
+      toolId: "tool.test",
+      idempotent: true,
+      policyDecision: "allow",
+      ruleId: "policy.rule",
+      policyReason: "policy.reason",
+      argsHash: "c".repeat(64),
+      args: { description: "POLICY_DESCRIPTION_CANARY" },
+    }),
+    kind: "tool_call",
+    fields: {
+      toolId: "tool.test",
+      policyDecision: "allow",
+      ruleId: "policy.rule",
+    },
+  },
+  {
+    event: validEvent({
       type: "tool_result",
       callId: "00000000000000000000000002",
       toolId: "tool.test",
@@ -189,15 +208,6 @@ const unexportedEvents = [
     messages: [{ role: "user", parts: [{ type: "text", text: "MODEL_REQUEST_CANARY" }] }],
   }),
   validEvent({
-    type: "tool_intent",
-    callId: "00000000000000000000000002",
-    toolId: "tool.test",
-    idempotent: true,
-    policyDecision: "allow",
-    argsHash: "c".repeat(64),
-    args: "TOOL_INTENT_CANARY",
-  }),
-  validEvent({
     type: "run_input",
     input: "RUN_INPUT_CANARY",
     inputKind: "initial",
@@ -271,6 +281,15 @@ describe("SafeEvent projection", () => {
       childRunId: "00000000000000000000000002",
       role: "reviewer",
     });
+    const noRuleIdIntent = validEvent({
+      type: "tool_intent",
+      callId: "00000000000000000000000002",
+      toolId: "tool.test",
+      idempotent: true,
+      policyDecision: "allow",
+      argsHash: "c".repeat(64),
+      args: {},
+    });
 
     expect(toSafeEvent(noErrorCode, "sanitizer.v1")).not.toHaveProperty("errorCode");
     expect(toSafeEvent(noWorkspaceRef, "sanitizer.v1")).toMatchObject({
@@ -278,6 +297,7 @@ describe("SafeEvent projection", () => {
       hasWorkspaceRef: false,
     });
     expect(toSafeEvent(noParentCallId, "sanitizer.v1")).not.toHaveProperty("parentCallId");
+    expect(toSafeEvent(noRuleIdIntent, "sanitizer.v1")).not.toHaveProperty("ruleId");
   });
 
   it("never exports canaries from any classified content field", () => {
@@ -296,6 +316,29 @@ describe("SafeEvent projection", () => {
 
       expect(JSON.stringify(toSafeEvent(event, "sanitizer.v1"))).not.toContain(canary);
     }
+  });
+
+  it("projects only decision metadata from tool intents", () => {
+    const event = mappedEvents.find(({ event }) => event.type === "tool_intent");
+    if (event === undefined) {
+      throw new Error("The tool intent mapping is missing");
+    }
+    const projected = toSafeEvent(event.event, "sanitizer.v1");
+
+    expect(projected).toEqual({
+      runId: envelope.runId,
+      seq: event.event.seq,
+      ts: event.event.ts,
+      traceId: envelope.traceId,
+      spanId: envelope.spanId,
+      policyVersion: "sanitizer.v1",
+      kind: "tool_call",
+      toolId: "tool.test",
+      policyDecision: "allow",
+      ruleId: "policy.rule",
+    });
+    expect(JSON.stringify(projected)).not.toContain("POLICY_DESCRIPTION_CANARY");
+    expect(projected).not.toHaveProperty("policyReason");
   });
 
   it("rejects negative repair-attempt counts in parsed SafeEvents", () => {

@@ -46,6 +46,8 @@ export const safeEventLogAttributeMap = {
     traceId: "harness.trace.id",
     spanId: "harness.span.id",
     toolId: "harness.tool.id",
+    policyDecision: "harness.policy.decision",
+    ruleId: "harness.policy.rule_id",
     outcome: "harness.tool.outcome",
     errorCode: "harness.error.code",
     latencyMs: "harness.tool.latency_ms",
@@ -58,6 +60,8 @@ export const safeEventLogAttributeMap = {
     traceId: "harness.trace.id",
     spanId: "harness.span.id",
     decision: "harness.approval.decision",
+    decidedBy: "harness.approval.decided_by",
+    reason: "harness.approval.reason",
     waitMs: "harness.approval.wait_ms",
   },
   checkpoint: {
@@ -150,13 +154,17 @@ const logDefinitions = {
   tool_call: defineLogRecord("harness.safe.tool_call", {
     ...commonShape,
     "harness.tool.id": attr.code(),
-    "harness.tool.outcome": attr.enum(["ok", "error", "denied", "timeout"]),
+    "harness.policy.decision": attr.optional(attr.enum(["allow", "ask", "deny"])),
+    "harness.policy.rule_id": attr.optional(attr.code()),
+    "harness.tool.outcome": attr.optional(attr.enum(["ok", "error", "denied", "timeout"])),
     "harness.error.code": attr.optional(attr.code()),
-    "harness.tool.latency_ms": attr.nonnegativeInt(),
+    "harness.tool.latency_ms": attr.optional(attr.nonnegativeInt()),
   }),
   approval_wait: defineLogRecord("harness.safe.approval_wait", {
     ...commonShape,
     "harness.approval.decision": attr.enum(["approve", "deny", "edit"]),
+    "harness.approval.decided_by": attr.enum(["human", "policy", "expiry"]),
+    "harness.approval.reason": attr.optional(attr.code()),
     "harness.approval.wait_ms": attr.nonnegativeInt(),
   }),
   checkpoint: defineLogRecord("harness.safe.checkpoint", {

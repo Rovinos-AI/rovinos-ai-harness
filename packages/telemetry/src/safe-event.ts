@@ -32,9 +32,11 @@ const toolCall = z
     ...commonFields,
     kind: attr.enum(["tool_call"]),
     toolId: attr.code(),
-    outcome: attr.enum(["ok", "error", "denied", "timeout"]),
+    policyDecision: attr.optional(attr.enum(["allow", "ask", "deny"])),
+    ruleId: attr.optional(attr.code()),
+    outcome: attr.optional(attr.enum(["ok", "error", "denied", "timeout"])),
     errorCode: attr.optional(attr.code()),
-    latencyMs: attr.nonnegativeInt(),
+    latencyMs: attr.optional(attr.nonnegativeInt()),
   })
   .strict();
 
@@ -144,7 +146,7 @@ type UnexportedEvent = Extract<
   Event,
   {
     type:
-      "run_input" | "model_request" | "tool_intent" | "approval_requested" | "context_compacted";
+      "run_input" | "model_request" | "approval_requested" | "context_compacted";
   }
 >;
 
@@ -164,7 +166,6 @@ function isUnexportedEvent(event: Event): event is UnexportedEvent {
   return (
     event.type === "run_input" ||
     event.type === "model_request" ||
-    event.type === "tool_intent" ||
     event.type === "approval_requested" ||
     event.type === "context_compacted"
   );
@@ -199,6 +200,19 @@ function projectToolResult(
     outcome: event.outcome,
     ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
     latencyMs: event.latencyMs,
+  });
+}
+
+function projectToolIntent(
+  event: Extract<Event, { type: "tool_intent" }>,
+  envelope: SafeEventEnvelope,
+): SafeEvent {
+  return SafeEvent.parse({
+    ...envelope,
+    kind: "tool_call",
+    toolId: event.toolId,
+    policyDecision: event.policyDecision,
+    ...(event.ruleId === undefined ? {} : { ruleId: event.ruleId }),
   });
 }
 
@@ -323,6 +337,8 @@ export function toSafeEvent(event: Event, policyVersion: EventCode): SafeEvent |
       return projectModelResponse(event, envelope);
     case "tool_result":
       return projectToolResult(event, envelope);
+    case "tool_intent":
+      return projectToolIntent(event, envelope);
     case "approval_resolved":
       return projectApprovalResolved(event, envelope);
     case "checkpoint_written":

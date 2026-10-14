@@ -244,6 +244,14 @@ describe("control-plane inspection tools", () => {
     });
     expect(output.pendingApprovals[0]?.approvalId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(output.recentEvents.length).toBeGreaterThan(0);
+    expect(output.recentEvents).toContainEqual(
+      expect.objectContaining({
+        kind: "tool_call",
+        toolId: "tool.execute",
+        policyDecision: "ask",
+        ruleId: "approval.rule",
+      }),
+    );
     expect(output.recentEvents.every(({ policyVersion }) => policyVersion === "policy.v1")).toBe(
       true,
     );

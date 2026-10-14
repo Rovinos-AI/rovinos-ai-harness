@@ -7,6 +7,7 @@ import {
   diffToEdits,
 } from "@harness/policy";
 import { SpanStatusCode } from "@opentelemetry/api";
+import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { EventPartial } from "../recorder.js";
 import type { ModelToolCall, PolicyDecision } from "../ports.js";
 import { requestPolicyApproval } from "./policy-step.js";
@@ -64,6 +65,7 @@ async function recordDanglingFailure(
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
+    setPolicySpanAttributes(intent);
     const result = await options.recorder.record({
       type: "tool_result",
       v: 1,
@@ -87,8 +89,9 @@ async function recordPolicyDenied(
   intent: ToolIntentEvent,
   errorCode: string,
 ): Promise<readonly Event[]> {
-  const result = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
-    options.recorder.record({
+  const result = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, () => {
+    setPolicySpanAttributes(intent);
+    return options.recorder.record({
       type: "tool_result",
       v: 1,
       callId: intent.callId,
@@ -98,9 +101,16 @@ async function recordPolicyDenied(
       latencyMs: 0,
       executedArgsHash: intent.argsHash,
       result: null,
-    }),
-  );
+    });
+  });
   return [result];
+}
+
+function setPolicySpanAttributes(intent: ToolIntentEvent): void {
+  setActiveSpanAttribute("harness.policy.decision", intent.policyDecision);
+  if (intent.ruleId !== undefined) {
+    setActiveSpanAttribute("harness.policy.rule_id", intent.ruleId);
+  }
 }
 
 function policyDecisionFromIntent(intent: ToolIntentEvent): PolicyDecision {
@@ -225,8 +235,9 @@ export async function applyApprovalDecision(
     throw new ResumeActionMismatchError();
   }
   if (resolution.decision === "deny") {
-    const result = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async () =>
-      options.recorder.record({
+    const result = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async () => {
+      setPolicySpanAttributes(intent);
+      return options.recorder.record({
         type: "tool_result",
         v: 1,
         callId: intent.callId,
@@ -235,8 +246,8 @@ export async function applyApprovalDecision(
         errorCode: "approval_denied",
         latencyMs: 0,
         result: null,
-      }),
-    );
+      });
+    });
     return [result];
   }
   let args = intent.args;

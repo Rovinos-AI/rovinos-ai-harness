@@ -3,6 +3,7 @@
 import { HarnessError, type Code, type Event, type Id } from "@harness/schemas";
 import type { Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@harness/pii";
+import { countPolicyDecision, setActiveSpanAttribute } from "@harness/telemetry";
 import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
@@ -123,6 +124,12 @@ interface RunToolCallSpanOptions {
 }
 
 async function runToolCallWithinSpan(input: RunToolCallSpanOptions): Promise<Event> {
+  if (input.behavior.existingIntent !== undefined) {
+    setPolicySpanAttributes(
+      input.behavior.existingIntent.policyDecision,
+      input.behavior.existingIntent.ruleId,
+    );
+  }
   const prepared = await prepareRunToolCall(
     input.options,
     input.proposedCall,
@@ -145,6 +152,8 @@ async function decideAndRunToolCall(
     preparationError,
     input.description,
   );
+  setPolicySpanAttributes(decision.decision, decision.ruleId);
+  countPolicyDecision(decision.decision);
   const executedArgsHash = hashArgs(call.args);
   const intent = intentPartial({
     call,
@@ -177,6 +186,13 @@ async function decideAndRunToolCall(
     intentEvent,
     executedArgsHash,
   });
+}
+
+function setPolicySpanAttributes(decision: "allow" | "ask" | "deny", ruleId?: Code): void {
+  setActiveSpanAttribute("harness.policy.decision", decision);
+  if (ruleId !== undefined) {
+    setActiveSpanAttribute("harness.policy.rule_id", ruleId);
+  }
 }
 
 async function executeRecordedIntent(
