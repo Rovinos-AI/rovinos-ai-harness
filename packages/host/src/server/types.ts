@@ -61,9 +61,10 @@ export type RequestListener = (request: HostRequest, response: HostResponse) => 
 
 /** One launched app instance and its process-local session identifier. */
 export interface AppInstance {
-  readonly id: string;
+  readonly id: Code;
   readonly resourceUri: string;
-  readonly sessionId: string;
+  readonly sessionId: Id;
+  readonly sessionStartTime: number;
   readonly runId?: Id;
   readonly uiSession?: UiSession;
   readonly end: () => void;
@@ -100,6 +101,8 @@ export interface ReferenceHostDependencies {
   ) => Promise<ListToolsResult>;
   /** Confirms that a call or approval identifier belongs to the active run. */
   readonly isIdOwnedByRun?: (runId: Id, id: Id) => boolean | Promise<boolean>;
+  /** Confirms that this run currently has a pending approval requiring human action. */
+  readonly hasPendingApproval?: (runId: Id) => boolean;
   /** Counts a rejected app tool call using a bounded reason. */
   readonly onAppRejected?: (reason: AppCallRejectedReason) => void;
   /** Injectable static asset reader for tests. */

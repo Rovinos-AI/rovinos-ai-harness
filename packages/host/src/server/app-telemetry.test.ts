@@ -2,9 +2,23 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { trace } from "@opentelemetry/api";
 import { createTestSpanCollector } from "@harness/telemetry/testing";
+import type { AppSpanStampContext } from "./stamp.js";
 import { ingestBatch } from "./app-telemetry.js";
 
 const collector = createTestSpanCollector();
+const validStamp: AppSpanStampContext = {
+  appId: "approval",
+  runId: "00000000000000000000000001",
+  sessionId: "00000000000000000000000002",
+  sessionStartTime: 0,
+  parent: {
+    traceId: "a".repeat(32),
+    spanId: "b".repeat(16),
+    traceFlags: 1,
+  },
+  clock: { now: () => 100 },
+  hasPendingApproval: true,
+};
 
 beforeAll(() => {
   trace.setGlobalTracerProvider(collector.provider);
@@ -17,14 +31,17 @@ afterAll(async () => {
 describe("ingestBatch", () => {
   it("accepts all registered span kinds with validated attributes only", () => {
     const start = collector.getFinishedSpans().length;
-    const acknowledgment = ingestBatch({
-      spans: [
-        { name: "ui.render", startOffsetMs: 0, durationMs: 5 },
-        { name: "ui.decision", decision: "approve", startOffsetMs: 5, durationMs: 10 },
-        { name: "ui.error", code: "ui.failure", startOffsetMs: 15, durationMs: 20 },
-        { name: "ui.interaction", kind: "click", count: 2, startOffsetMs: 35, durationMs: 25 },
-      ],
-    });
+    const acknowledgment = ingestBatch(
+      {
+        spans: [
+          { name: "ui.render", startOffsetMs: 0, durationMs: 5 },
+          { name: "ui.decision", decision: "approve", startOffsetMs: 5, durationMs: 10 },
+          { name: "ui.error", code: "ui.failure", startOffsetMs: 15, durationMs: 20 },
+          { name: "ui.interaction", kind: "click", count: 2, startOffsetMs: 35, durationMs: 25 },
+        ],
+      },
+      { stamp: validStamp },
+    );
     const spans = collector.getFinishedSpans().slice(start);
 
     expect(acknowledgment).toEqual({ accepted: 4, dropped: 0 });
@@ -35,9 +52,12 @@ describe("ingestBatch", () => {
       "harness.ui.interaction",
     ]);
     expect(spans[0]?.attributes).toMatchObject({
-      "harness.ui.start_offset_ms": 0,
+      "harness.app.id": "approval",
+      "harness.run.id": validStamp.runId,
+      "harness.ui.session_id": validStamp.sessionId,
       "harness.ui.duration_ms": 5,
     });
+    expect(spans[0]?.attributes["harness.ui.start_offset_ms"]).toBeUndefined();
     expect(spans[1]?.attributes["harness.ui.decision"]).toBe("approve");
     expect(spans[2]?.attributes["harness.error.code"]).toBe("ui.failure");
     expect(spans[3]?.attributes).toMatchObject({
@@ -66,7 +86,7 @@ describe("ingestBatch", () => {
           { name: "ui.render", startOffsetMs: 0, durationMs: 1 },
         ],
       },
-      { onRejected: (reason) => reasons.push(reason) },
+      { stamp: validStamp, onRejected: (reason) => reasons.push(reason) },
     );
     const spans = collector.getFinishedSpans().slice(start);
     const exported = JSON.stringify(spans.map(({ name, attributes }) => ({ name, attributes })));
@@ -93,6 +113,7 @@ describe("ingestBatch", () => {
           accepted += 1;
           return accepted === 1 ? true : "session_cap";
         },
+        stamp: validStamp,
         onRejected: (reason) => reasons.push(reason),
       },
     );
@@ -103,14 +124,16 @@ describe("ingestBatch", () => {
 
   it("rejects malformed batches, extra keys, and arrays over fifty spans", () => {
     const reasons: string[] = [];
-    expect(ingestBatch(null, { onRejected: (reason) => reasons.push(reason) })).toEqual({
+    expect(
+      ingestBatch(null, { stamp: validStamp, onRejected: (reason) => reasons.push(reason) }),
+    ).toEqual({
       accepted: 0,
       dropped: 1,
     });
     expect(
       ingestBatch(
         { spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 1 }], extra: true },
-        { onRejected: (reason) => reasons.push(reason) },
+        { stamp: validStamp, onRejected: (reason) => reasons.push(reason) },
       ),
     ).toEqual({ accepted: 0, dropped: 1 });
     expect(
@@ -148,11 +171,15 @@ describe("ingestBatch", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
     const acknowledgments = [
-      ingestBatch(undefined, { onRejected: (reason) => reasons.push(reason) }),
-      ingestBatch(cyclic, { onRejected: (reason) => reasons.push(reason) }),
+      ingestBatch(undefined, {
+        stamp: validStamp,
+        onRejected: (reason) => reasons.push(reason),
+      }),
+      ingestBatch(cyclic, { stamp: validStamp, onRejected: (reason) => reasons.push(reason) }),
       ingestBatch(
         { spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 0 }] },
         {
+          stamp: validStamp,
           onRejected: () => {
             throw new Error("observer failure");
           },

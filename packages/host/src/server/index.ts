@@ -49,6 +49,7 @@ export {
   type AppSpanBatchAck,
   type AppTelemetryRejectReason,
 } from "./app-telemetry.js";
+export { stampAppSpan, type AppSpanStampContext } from "./stamp.js";
 export type { AppCall, AppResourceReader, ReferenceHostDependencies } from "./types.js";
 export type { AppResourceRead, HostDiagnosticCode } from "./resource.js";
 export { UiSession, UI_SESSION_SPAN, type UiSessionContext } from "./ui-session.js";
@@ -71,6 +72,14 @@ export class ReferenceHostError extends HarnessError {
   constructor(code: ReferenceHostErrorCode) {
     super("The reference host lifecycle operation failed.");
     this.code = code;
+  }
+}
+
+function hasPendingApproval(dependencies: ReferenceHostDependencies, runId: Id): boolean {
+  try {
+    return dependencies.hasPendingApproval?.(runId) === true;
+  } catch {
+    return false;
   }
 }
 
@@ -193,6 +202,7 @@ function createAppCallRouter(
   dependencies: ReferenceHostDependencies,
   nextId: () => Id,
   rateLimiter: AppRateLimiter,
+  now: () => number,
 ): AppCallRouter {
   const defaultOnAppCall =
     dependencies.policy !== undefined && dependencies.tool !== undefined
@@ -206,11 +216,22 @@ function createAppCallRouter(
   const telemetryHandler =
     dependencies.onTelemetryEmit ??
     ((session, payload) => {
+      const parent = session.uiSession?.spanContext;
+      const stamp =
+        session.runId === undefined || parent === undefined
+          ? undefined
+          : {
+              appId: session.id,
+              runId: session.runId,
+              sessionId: session.sessionId,
+              sessionStartTime: session.sessionStartTime,
+              parent,
+              clock: { now },
+              hasPendingApproval: hasPendingApproval(dependencies, session.runId),
+            };
       const acknowledgment = ingestBatch(payload, {
         acceptSpan: () => rateLimiter.tryAcceptSpan(session.sessionId),
-        ...(session.uiSession?.spanContext === undefined
-          ? {}
-          : { parent: session.uiSession.spanContext }),
+        ...(stamp === undefined ? {} : { stamp }),
         onRejected: (reason) => dependencies.onAppRejected?.(reason),
       });
       countHostAppSpansAccepted(acknowledgment.accepted);
@@ -268,7 +289,13 @@ export async function createReferenceHost(
   const registry = createAppRegistry(config);
   const sessionRunId = dependencies.uiSessionContext?.runId ?? dependencies.runId;
   const rateLimiter = new AppRateLimiter(config.limits, { now });
-  const appCallRouter = createAppCallRouter(registry.appConfigs, dependencies, nextId, rateLimiter);
+  const appCallRouter = createAppCallRouter(
+    registry.appConfigs,
+    dependencies,
+    nextId,
+    rateLimiter,
+    now,
+  );
   const host = config.listen.host === "localhost" ? "127.0.0.1" : config.listen.host;
   let origin = "";
   let port = 0;
