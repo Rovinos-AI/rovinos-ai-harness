@@ -319,16 +319,19 @@ describe("SafeEvent projection", () => {
   });
 
   it("projects only decision metadata from tool intents", () => {
-    const event = mappedEvents.find(({ event }) => event.type === "tool_intent");
-    if (event === undefined) {
+    const toolIntentMapping = mappedEvents.find(
+      ({ event: candidate }) => candidate.type === "tool_intent",
+    );
+    if (toolIntentMapping === undefined) {
       throw new Error("The tool intent mapping is missing");
     }
-    const projected = toSafeEvent(event.event, "sanitizer.v1");
+    const toolIntent = toolIntentMapping.event;
+    const projected = toSafeEvent(toolIntent, "sanitizer.v1");
 
     expect(projected).toEqual({
       runId: envelope.runId,
-      seq: event.event.seq,
-      ts: event.event.ts,
+      seq: toolIntent.seq,
+      ts: toolIntent.ts,
       traceId: envelope.traceId,
       spanId: envelope.spanId,
       policyVersion: "sanitizer.v1",

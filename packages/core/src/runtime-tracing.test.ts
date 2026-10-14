@@ -171,7 +171,7 @@ describe("runtime tracing fallback", () => {
               parts: [
                 {
                   type: "tool_call",
-                  callId: Id.parse(`${String(index + 2).repeat(26)}`),
+                  callId: Id.parse(String(index + 2).repeat(26)),
                   toolId: "test.tool",
                   args: {},
                 },
@@ -189,7 +189,7 @@ describe("runtime tracing fallback", () => {
           },
           tool: {
             describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
-            execute: async () => ({ outcome: "ok", result: null }),
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
           },
         });
 

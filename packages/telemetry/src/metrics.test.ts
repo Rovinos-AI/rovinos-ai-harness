@@ -97,9 +97,7 @@ describe("countDroppedTelemetry", () => {
     expect(add.mock.calls).toEqual(
       POLICY_DECISIONS.map((decision) => [1, { "harness.policy.decision": decision }]),
     );
-    expect(TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.policy.decision"]).toEqual(
-      POLICY_DECISIONS,
-    );
+    expect(TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.policy.decision"]).toEqual(POLICY_DECISIONS);
     expectAddCallsAreAllowlisted("harness.policy.decisions");
   });
 

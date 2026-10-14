@@ -145,8 +145,7 @@ type SafeEventEnvelope = Pick<Event, "runId" | "seq" | "ts" | "traceId" | "spanI
 type UnexportedEvent = Extract<
   Event,
   {
-    type:
-      "run_input" | "model_request" | "approval_requested" | "context_compacted";
+    type: "run_input" | "model_request" | "approval_requested" | "context_compacted";
   }
 >;
 
