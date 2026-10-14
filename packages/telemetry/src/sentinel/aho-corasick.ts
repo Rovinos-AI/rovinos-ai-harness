@@ -10,7 +10,7 @@ interface TrieNode {
   readonly outputs: { patternIndex: number; patternLength: number }[];
 }
 
-/** Closed error codes for invalid sentinel patterns. */
+/** Closed error codes for sentinel matcher failures. */
 export class AhoCorasickError extends HarnessError {
   readonly code:
     | "sentinel_pattern_empty"

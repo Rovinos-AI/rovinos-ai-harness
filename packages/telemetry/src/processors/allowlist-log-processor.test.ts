@@ -282,6 +282,45 @@ describe("AllowlistLogRecordProcessor", () => {
     expect(queue.size).toBe(1);
   });
 
+  it("waits for in-flight gate checks before completing a telemetry flush", async () => {
+    defineTestLogRecord();
+    const next = createNextProcessor();
+    const gate = new SentinelGate(
+      new VaultRunView({
+        version: () => Promise.resolve(0),
+        listRawValueEntries: () => Promise.resolve([]),
+      }),
+      new ActiveRuns(),
+      { tripQueue: makeTripQueue() },
+    );
+    let releaseCheck: (result: { ok: true } | {
+      ok: false;
+      reason: "hit" | "error" | "timeout";
+    }) => void = () => undefined;
+    const pendingCheck = new Promise<{
+      ok: true;
+    } | {
+      ok: false;
+      reason: "hit" | "error" | "timeout";
+    }>((resolve) => {
+      releaseCheck = resolve;
+    });
+    vi.spyOn(gate, "check").mockReturnValue(pendingCheck);
+    const processor = new AllowlistLogRecordProcessor(next, { gate });
+    processor.onEmit(makeSdkLogRecord());
+
+    let flushCompleted = false;
+    const flushing = processor.forceFlush().then(() => {
+      flushCompleted = true;
+    });
+    await Promise.resolve();
+
+    expect(flushCompleted).toBe(false);
+    releaseCheck({ ok: true });
+    await flushing;
+    expect(next.onEmit).toHaveBeenCalledOnce();
+  });
+
   it("serializes log attributes in locale-independent ordinal order", async () => {
     defineLogRecord("harness.test.canonical_order", {
       "harness.test.a_": attr.enum(["first"]),
