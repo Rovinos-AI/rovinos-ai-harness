@@ -16,11 +16,13 @@ export const ApprovalNotificationSchema = z
   .object({
     runId: Id,
     approvalId: Id,
+    idempotencyKey: Id,
     toolId: Code,
     ruleId: Code,
     ageMs: z.number().int().nonnegative(),
   })
-  .strict();
+  .strict()
+  .refine(({ approvalId, idempotencyKey }) => idempotencyKey === approvalId);
 
 /** Metadata delivered when a pending approval reaches its escalation threshold. */
 export type ApprovalNotification = z.infer<typeof ApprovalNotificationSchema>;
@@ -95,14 +97,18 @@ export class WebhookNotifier implements Notifier {
 
   /** {@inheritDoc Notifier.notify} */
   async notify(notification: ApprovalNotification): Promise<void> {
-    const body = JSON.stringify(ApprovalNotificationSchema.parse(notification));
+    const validated = ApprovalNotificationSchema.parse(notification);
+    const body = JSON.stringify(validated);
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const signal = AbortSignal.timeout(5_000);
         const url = parseWebhookUrl(await this.secrets.resolve(this.url, signal));
         const response = await this.fetcher(url, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            "Idempotency-Key": validated.idempotencyKey,
+          },
           body,
           signal,
           redirect: "error",

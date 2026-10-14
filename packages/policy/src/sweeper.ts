@@ -236,6 +236,7 @@ async function sweepPendingApproval(options: {
     const notification = ApprovalNotificationSchema.parse({
       runId: options.runId,
       approvalId: request.approvalId,
+      idempotencyKey: request.approvalId,
       toolId: payload.data.toolId,
       ruleId: payload.data.ruleId,
       ageMs: options.now - request.ts,
@@ -255,7 +256,7 @@ async function sweepPendingApproval(options: {
 }
 
 /**
- * Deny expired approvals and send each due escalation notification once.
+ * Deny expired approvals and send due escalation notifications at least once.
  *
  * Expiry takes precedence over escalation at the same instant. The store port
  * delegates resolution to core so event recording continues through RunRecorder.

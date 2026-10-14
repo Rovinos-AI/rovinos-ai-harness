@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Runtime } from "@harness/core";
 import type { ApprovalSweepStore } from "@harness/policy";
-import { ApprovalSweepResultSchema } from "@harness/schemas";
+import { ApprovalSweepResultSchema, HarnessError } from "@harness/schemas";
 import type { CliContext } from "../command.js";
+
+class ApprovalSweepPartialError extends HarnessError {
+  override readonly code = "approval_sweep_partial";
+
+  constructor() {
+    super("Approval sweep partially failed.");
+    this.name = "ApprovalSweepPartialError";
+  }
+}
 
 /** Runs the approval expiry and escalation sweep for the active CLI runtime. */
 export async function runApprovalSweep(runtime: Runtime, context: CliContext): Promise<void> {
@@ -44,4 +53,7 @@ export async function runApprovalSweep(runtime: Runtime, context: CliContext): P
   context.out.print(
     `examined=${String(result.examined)} expired=${String(result.expired)} escalated=${String(result.escalated)} failed=${String(result.failed)}\n`,
   );
+  if (result.failed > 0) {
+    throw new ApprovalSweepPartialError();
+  }
 }

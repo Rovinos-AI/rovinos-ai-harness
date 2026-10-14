@@ -143,6 +143,8 @@ resolving, the command prints `harness resume <runId>`; `--resume` resumes at on
 `ApprovalResolveResultSchema` and `ApprovalSweepResultSchema` in
 `packages/schemas/src/cli/approvals.ts`; `sweep` returns examined, expired, escalated, and failed
 counts.
+If any approval fails during a sweep, the result is still printed and the
+command exits with `approval_sweep_partial` (code `1`).
 
 Exit codes: `0` completed, `1` failure, `2` usage (including a malformed id), `7` for
 `approval_not_found`, `approval_already_resolved`, or a run that is no longer suspended.
@@ -240,7 +242,7 @@ never included in CLI error output.
 | --- | --- |
 | `usage`, `confirmation_required`, `edit_not_allowed`, `edit_invalid` | `2` |
 | `serve_options_invalid`, `serve_port_invalid`, `stdio_json_unsupported` | `2` |
-| `doctor_failed`, `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
+| `doctor_failed`, `approval_sweep_partial`, `run_already_terminal`, `run_not_terminal`, `continuation_chain_too_long`, `cancel_conflict` | `1` |
 | `approval_edit_unavailable`, `reveal_unavailable` | `1` |
 | `migration_checksum_mismatch`, `schema_newer_than_code`, `migration_set_invalid`, `schema_migration_pending`, `retention_not_configured`, `retention_hook_failed` | `1` |
 | `config_invalid` | `3` |
