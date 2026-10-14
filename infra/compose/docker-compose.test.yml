@@ -14,6 +14,35 @@ services:
     extends:
       file: docker-compose.yml
       service: sandbox-runner
+  sample-mcp-server:
+    build:
+      context: ../..
+      dockerfile: test/fixtures/sample-mcp-server/Dockerfile
+    image: sample-mcp-server:local
+    environment:
+      SAMPLE_COUNTER_FILE: /data/messages.count
+    ports:
+      - "127.0.0.1:3333:3333"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    volumes:
+      - sample-mcp-state:/data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const socket=require('node:net').connect({host:'127.0.0.1',port:3333}); socket.once('connect',()=>{socket.end();process.exit(0)}).once('error',()=>process.exit(1))"
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - test-host
   postgres:
     image: postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
     user: postgres
@@ -53,3 +82,4 @@ networks:
   test-host: {}
 volumes:
   harness-workspaces: {}
+  sample-mcp-state: {}

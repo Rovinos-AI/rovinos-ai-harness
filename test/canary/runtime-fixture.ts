@@ -5,10 +5,12 @@ import { Code, Id } from "@harness/schemas";
 import type { VaultValueEntry } from "@harness/schemas";
 import { findTokens, tokenType } from "@harness/vault";
 import type { Token } from "@harness/vault";
+import { sampleFailureText } from "../fixtures/sample-mcp-failure.js";
 import type { CanarySet } from "./canaries.js";
 
 export const ECHO_TOOL = Code.parse("canary.echo");
 export const FAIL_TOOL = Code.parse("canary.fail");
+export const SAMPLE_MCP_FAIL_TOOL = Code.parse("sample_mcp.fail");
 export const ASK_TOOL = Code.parse("canary.ask");
 export const TEST_KEY_REF = "env:CANARY_TEST_KEY";
 
@@ -16,6 +18,7 @@ export const TEST_KEY_REF = "env:CANARY_TEST_KEY";
 export interface CanaryToolCapture {
   readonly toolBoundary: string[];
   readonly toolErrors: string[];
+  readonly toolOutputs: string[];
 }
 
 /** Resolve vault values from events persisted by the production runtime. */
@@ -92,7 +95,7 @@ export function createCanaryToolPort(
 ): ToolPort {
   return {
     describe: (toolId) =>
-      [ECHO_TOOL, FAIL_TOOL, ASK_TOOL].includes(toolId)
+      [ECHO_TOOL, FAIL_TOOL, SAMPLE_MCP_FAIL_TOOL, ASK_TOOL].includes(toolId)
         ? { idempotent: true, timeoutMs: 1_000 }
         : undefined,
     execute: (call) => {
@@ -104,6 +107,15 @@ export function createCanaryToolPort(
         );
         captured.toolErrors.push(error.message);
         return Promise.reject(error);
+      }
+      if (call.toolId === SAMPLE_MCP_FAIL_TOOL) {
+        const text = sampleFailureText(canaries.email.value);
+        captured.toolOutputs.push(text);
+        return Promise.resolve({
+          outcome: "error",
+          errorCode: Code.parse("tool_reported_error"),
+          result: { content: [{ type: "text", text }] },
+        });
       }
       if (call.toolId === ECHO_TOOL) {
         return Promise.resolve({
@@ -137,6 +149,12 @@ export function createCanaryModel(canaries: CanarySet): FakeModelPort {
       {
         type: "tool_call",
         callId: callId(3),
+        toolId: SAMPLE_MCP_FAIL_TOOL,
+        args: { value: canaries.email.value },
+      },
+      {
+        type: "tool_call",
+        callId: callId(4),
         toolId: ASK_TOOL,
         args: { value: canaries.person.value },
       },
