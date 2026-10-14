@@ -25,7 +25,12 @@ import {
   type CliContext,
 } from "@harness/cli/programmatic";
 import { createControlPlaneServer } from "@harness/control-plane";
-import { CompositeSecretResolver, EnvSecretResolver, FileSecretResolver } from "@harness/config";
+import {
+  CompositeSecretResolver,
+  EnvSecretResolver,
+  FileSecretResolver,
+  loadConfig,
+} from "@harness/config";
 import {
   Checkpointer,
   createRuntime,
@@ -68,6 +73,7 @@ import {
 } from "@harness/telemetry";
 import type { Event } from "@harness/schemas";
 import type { z } from "zod";
+import { createSandboxComposeInvocation } from "../scripts/compose/sandbox.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const DAY_MS = 86_400_000;
@@ -456,6 +462,11 @@ beforeAll(async () => {
       "telemetry:",
       "  sentinel:",
       "    enabled: false",
+      "sandbox:",
+      "  egress:",
+      "    allow:",
+      "      - host: e2e-egress.example.test",
+      "        ports: [443]",
       "",
     ].join("\n"),
     "utf8",
@@ -539,6 +550,19 @@ describe("config", () => {
     expect(loaded.vault).toEqual({ purgeAfterDays: 7 });
     expect(loaded.store.retention).toEqual({ completedRunsDays: 1, failedRunsDays: 1 });
     expect(await readFile(current.configPath, "utf8")).not.toContain(current.canary);
+  });
+
+  it("maps sandbox egress config to the optional Compose overlay", async () => {
+    const current = fixture();
+    const config = await loadConfig({ configPath: current.configPath });
+    const allow = [{ host: "e2e-egress.example.test", ports: [443] }];
+    const invocation = createSandboxComposeInvocation(config.sandbox.egress, ["config"], {});
+
+    expect(config.sandbox.egress?.allow).toEqual(allow);
+    expect(invocation.env.SANDBOX_EGRESS_ALLOW).toBe(JSON.stringify(allow));
+    expect(invocation.args).toContain("--profile");
+    expect(invocation.args).toContain("sandbox-egress");
+    expect(invocation.args).toContain("infra/compose/docker-compose.egress.yml");
   });
 });
 
