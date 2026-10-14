@@ -12,7 +12,13 @@ import {
   type Clock,
   type EventStore,
 } from "@harness/store";
-import { SqliteVault, type VaultAdmin, type VaultTerminalRunsQuery } from "@harness/vault";
+import {
+  InMemoryVault,
+  SqliteVault,
+  VaultOperationError,
+  type VaultAdmin,
+  type VaultTerminalRunsQuery,
+} from "@harness/vault";
 import type { Id, KeysConfig, SecretRef, StoreConfig } from "@harness/schemas";
 import type { RuntimeOverrides } from "./runtime-config.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
@@ -49,18 +55,17 @@ export async function openConfiguredVaultAdmin(
   config: { readonly keys?: KeysConfig | undefined },
   options: ConfiguredVaultOptions = {},
 ): Promise<ConfiguredVaultAdmin> {
+  const dataDir = resolveDataDir(process.env, options.dataDir);
+  const vaultPath = join(dataDir, "vault.db");
+  if (!existsSync(vaultPath)) {
+    return Object.assign(new InMemoryVault(), { close: () => undefined });
+  }
   const keyOptions: RuntimeOverrides =
     options.secretResolver === undefined ? {} : { secretResolver: options.secretResolver };
   const keys = await createRuntimeKeys(config.keys, keyOptions);
   let vault: SqliteVault | undefined;
   try {
-    const dataDir = resolveDataDir(process.env, options.dataDir);
-    await mkdir(dataDir, { recursive: true });
-    const openedVault = new SqliteVault(
-      join(dataDir, "vault.db"),
-      keys,
-      () => options.clock?.now() ?? Date.now(),
-    );
+    const openedVault = new SqliteVault(vaultPath, keys, () => options.clock?.now() ?? Date.now());
     vault = openedVault;
     return {
       markTerminal: (runId: Id, ts: number) => openedVault.markTerminal(runId, ts),
@@ -82,7 +87,10 @@ export async function openConfiguredVaultAdmin(
     } finally {
       keys.dispose();
     }
-    throw error;
+    if (error instanceof VaultOperationError) {
+      throw error;
+    }
+    throw new VaultOperationError("vault_unavailable");
   }
 }
 

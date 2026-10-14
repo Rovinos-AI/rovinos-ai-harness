@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FakeClock, Id, KeysConfigSchema } from "@harness/schemas";
+import { SqliteVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openConfiguredVaultAdmin } from "./runtime-store.js";
 
@@ -13,6 +15,10 @@ const keys = KeysConfigSchema.parse({
 });
 const secretResolver = {
   resolve: () => Promise.resolve({ reveal: () => Buffer.alloc(32, 41).toString("base64") }),
+};
+const keyProvider = {
+  currentKeyId: () => "maintenance-test",
+  getKey: () => Promise.resolve(new Uint8Array(32).fill(41)),
 };
 
 let directories: string[] = [];
@@ -33,6 +39,10 @@ afterEach(async () => {
 describe("openConfiguredVaultAdmin", () => {
   it("opens the configured vault with injected time and closes its maintenance handle", async () => {
     const directory = await temporaryDirectory();
+    const seed = new SqliteVault(join(directory, "vault.db"), keyProvider, () => 100);
+    await seed.put(runId, "email", "alice@example.test");
+    await seed.markTerminal(runId, 50);
+    seed.close();
     const resolve = vi.fn(secretResolver.resolve);
     const admin = await openConfiguredVaultAdmin(
       { keys },
@@ -44,21 +54,31 @@ describe("openConfiguredVaultAdmin", () => {
     await expect(admin.listTerminalRunsBefore({ terminalBefore: 51, limit: 100 })).resolves.toEqual(
       [runId],
     );
-    await expect(admin.stats(runId)).resolves.toEqual({ entries: 0 });
-    await expect(admin.purge(runId)).resolves.toBe(0);
+    await expect(admin.stats(runId)).resolves.toEqual({ entries: 1 });
+    await expect(admin.purge(runId)).resolves.toBe(1);
     await expect(admin.listTerminalRunsBefore({ terminalBefore: 51, limit: 100 })).resolves.toEqual(
       [],
     );
     admin.close();
   });
 
-  it("disposes keys when the vault database directory cannot be created", async () => {
+  it("does not create a database or key when no vault exists", async () => {
+    const directory = await temporaryDirectory();
+    const admin = await openConfiguredVaultAdmin({}, { dataDir: directory });
+
+    await expect(admin.listTerminalRunsBefore({ terminalBefore: 1, limit: 100 })).resolves.toEqual(
+      [],
+    );
+    expect(existsSync(join(directory, "vault.db"))).toBe(false);
+    admin.close();
+  });
+
+  it("disposes keys when an existing vault database cannot be opened", async () => {
     const parent = await temporaryDirectory();
-    const invalidDirectory = join(parent, "not-a-directory");
-    await writeFile(invalidDirectory, "synthetic");
+    await writeFile(join(parent, "vault.db"), "synthetic");
 
     await expect(
-      openConfiguredVaultAdmin({ keys }, { dataDir: invalidDirectory, secretResolver }),
-    ).rejects.toBeDefined();
+      openConfiguredVaultAdmin({ keys }, { dataDir: parent, secretResolver }),
+    ).rejects.toMatchObject({ code: "vault_unavailable" });
   });
 });
