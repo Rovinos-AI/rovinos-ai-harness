@@ -1,28 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { CryptoError, hmacSha256 } from "@harness/crypto";
+import { CryptoError } from "@harness/crypto";
 import { Id, VaultValueEntrySchema } from "@harness/schemas";
 import type { Code, KeyProvider, VaultValueEntry } from "@harness/schemas";
 import { normalize } from "./normalize.js";
 import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
 import { VaultOperationError } from "./errors.js";
 import { decryptSqliteEntry } from "./sqlite-decrypt.js";
-import {
-  createWrappedScopeKey,
-  decryptScopeValue,
-  encryptScopeValue,
-  unwrapScopeKey,
-} from "./scope-crypto.js";
+import { decryptScopeValue, encryptScopeValue, unwrapScopeKey } from "./scope-crypto.js";
 import { migrateVault, validateReadOnlyVaultMigrations } from "./sqlite-migrations.js";
 import type { ReencryptBatchResult, VaultKeyRotation, VaultReencryptBatchInput } from "./rotate.js";
-import {
-  currentKeyId,
-  deriveVaultKeys,
-  loadMasterKey,
-  lookupMessage,
-  type VaultKeys,
-} from "./sqlite-crypto.js";
+import { currentKeyId, deriveVaultKeys, loadMasterKey, lookupMessage } from "./sqlite-crypto.js";
+import { appendLookupCandidates } from "./sqlite-lookup.js";
 import { countVaultRowsByKey, reencryptVaultBatch } from "./sqlite-rotation.js";
+import { convertSqliteLegacyScopes, ensureSqliteScopeDataKey } from "./sqlite-scope-key.js";
 import {
   VaultValueError,
   type VaultAdmin,
@@ -36,6 +27,7 @@ import {
 
 const MAX_VALUE_BYTES = 8 * 1024;
 const MAX_TOKEN_NUMBER = 999_999;
+
 interface VaultEntryRow {
   token: string;
   entity_type?: string;
@@ -50,7 +42,6 @@ interface PutTransactionInput {
   rawValue: string;
   lookups: readonly Buffer[];
   keyId: string;
-  keys: VaultKeys;
   scopeDataKey: Uint8Array;
   scopeKeyId: string;
   wrappedScopeKey: Buffer;
@@ -72,13 +63,18 @@ interface ScopeKeyRow {
   key_id: string;
 }
 
-interface ScopeDataKey {
-  readonly dataKey: Uint8Array;
-  readonly keyId: string;
-  readonly wrappedDek: Buffer;
-}
+class RetryScopeKeyError extends Error {}
 
-const RETRY_SCOPE_KEY = Symbol("retry_scope_key");
+function validateRawValue(raw: string): string {
+  const value = raw.trim();
+  if (value.length === 0) {
+    throw new VaultValueError("vault_value_empty");
+  }
+  if (new TextEncoder().encode(value).byteLength > MAX_VALUE_BYTES) {
+    throw new VaultValueError("vault_value_too_large");
+  }
+  return value;
+}
 
 /** SQLite-backed encrypted vault isolated in its own database file. */
 export class SqliteVault
@@ -128,13 +124,7 @@ export class SqliteVault
    * records the HMAC key independently so idempotency works across key rotation.
    */
   async put(runId: Id, entityType: Code, raw: string): Promise<TokenValue> {
-    const rawValue = raw.trim();
-    if (rawValue.length === 0) {
-      throw new VaultValueError("vault_value_empty");
-    }
-    if (new TextEncoder().encode(rawValue).byteLength > MAX_VALUE_BYTES) {
-      throw new VaultValueError("vault_value_too_large");
-    }
+    const rawValue = validateRawValue(raw);
 
     const normalizedValue = normalize(entityType, rawValue);
     const typeName = tokenTypeName(entityType);
@@ -146,32 +136,20 @@ export class SqliteVault
     let scopeDataKey: Uint8Array | undefined;
 
     try {
-      const referencedKeyIds = this.db
-        .prepare<[], { lookup_key_id: string }>(
-          "SELECT DISTINCT lookup_key_id FROM vault_entries ORDER BY lookup_key_id",
-        )
-        .all()
-        .map(({ lookup_key_id }) => lookup_key_id);
-      const keyIds = Array.from(new Set([keyId, ...referencedKeyIds]));
-      for (const lookupKeyId of keyIds) {
-        if (lookupKeyId === keyId) {
-          lookups.push(Buffer.from(hmacSha256(keys.lookup, message)));
-          continue;
-        }
-        const historicalKeys = await deriveVaultKeys(
-          this.keyProvider,
-          lookupKeyId,
-          "vault_encrypt_failed",
-        );
-        try {
-          lookups.push(Buffer.from(hmacSha256(historicalKeys.lookup, message)));
-        } finally {
-          historicalKeys.encryption.fill(0);
-          historicalKeys.lookup.fill(0);
-        }
-      }
+      await appendLookupCandidates(this.db, this.keyProvider, {
+        keyId,
+        lookupKey: keys.lookup,
+        message,
+        lookups,
+      });
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const scopeKey = await this.ensureScopeDataKey(runId, keyId);
+        const scopeKey = await ensureSqliteScopeDataKey({
+          db: this.db,
+          keyProvider: this.keyProvider,
+          now: this.now,
+          scopeId: runId,
+          masterKeyId: keyId,
+        });
         scopeDataKey = scopeKey.dataKey;
         try {
           return this.putTransaction({
@@ -181,13 +159,12 @@ export class SqliteVault
             rawValue,
             lookups,
             keyId,
-            keys,
             scopeDataKey,
             scopeKeyId: scopeKey.keyId,
             wrappedScopeKey: scopeKey.wrappedDek,
           });
         } catch (error) {
-          if (error !== RETRY_SCOPE_KEY) {
+          if (!(error instanceof RetryScopeKeyError)) {
             throw error;
           }
         } finally {
@@ -246,19 +223,20 @@ export class SqliteVault
   async listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
     await this.ensureLegacyConverted();
     const rows = this.readValueRows(runId);
-    const wrapped = rows.length === 0
-      ? undefined
-      : this.db
-          .prepare<[Id], ScopeKeyRow>(
-            "SELECT scope_id, wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = ?",
-          )
-          .get(runId);
+    const wrapped =
+      rows.length === 0
+        ? undefined
+        : this.db
+            .prepare<[Id], ScopeKeyRow>(
+              "SELECT scope_id, wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = ?",
+            )
+            .get(runId);
     const dataKey =
       wrapped === undefined
         ? undefined
         : await unwrapScopeKey(this.keyProvider, wrapped.key_id, runId, wrapped.wrapped_dek);
     try {
-      return Promise.all(
+      return await Promise.all(
         rows.map(async (row) =>
           VaultValueEntrySchema.parse({
             entityType: row.entity_type,
@@ -397,7 +375,6 @@ export class SqliteVault
     rawValue,
     lookups,
     keyId,
-    keys,
     scopeDataKey,
     scopeKeyId,
     wrappedScopeKey,
@@ -409,11 +386,10 @@ export class SqliteVault
         )
         .get(runId);
       if (
-        currentScopeKey === undefined ||
-        currentScopeKey.key_id !== scopeKeyId ||
+        currentScopeKey?.key_id !== scopeKeyId ||
         !currentScopeKey.wrapped_dek.equals(wrappedScopeKey)
       ) {
-        throw RETRY_SCOPE_KEY;
+        throw new RetryScopeKeyError();
       }
       const findExisting = this.db.prepare<[Id, Code, Buffer], { token: string }>(
         "SELECT token FROM vault_entries WHERE run_id = ? AND entity_type = ? AND lookup = ?",
@@ -525,117 +501,19 @@ export class SqliteVault
     }
   }
 
-  private async ensureScopeDataKey(
-    scopeId: Id,
-    currentMasterKeyId = currentKeyId(this.keyProvider),
-  ): Promise<ScopeDataKey> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const existing = this.db
-        .prepare<[Id], ScopeKeyRow>(
-          "SELECT scope_id, wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = ?",
-        )
-        .get(scopeId);
-      if (existing !== undefined) {
-        return {
-          dataKey: await unwrapScopeKey(
-            this.keyProvider,
-            existing.key_id,
-            scopeId,
-            existing.wrapped_dek,
-          ),
-          keyId: existing.key_id,
-          wrappedDek: Buffer.from(existing.wrapped_dek),
-        };
-      }
-
-      const candidate = await createWrappedScopeKey(this.keyProvider, currentMasterKeyId, scopeId);
-      const wrappedDek = Buffer.from(candidate.wrappedDek);
-      let committed = false;
-      try {
-        const legacyRows = this.db
-          .prepare<[Id], VaultEntryRow>("SELECT token, value_enc, key_id FROM vault_entries WHERE run_id = ?")
-          .all(scopeId);
-        const replacements: { token: string; oldValue: string; oldKeyId: string; value: string }[] =
-          [];
-        for (const row of legacyRows) {
-          const rawValue = await decryptSqliteEntry(scopeId, row, this.keyProvider, loadMasterKey);
-          replacements.push({
-            token: row.token,
-            oldValue: row.value_enc,
-            oldKeyId: row.key_id,
-            value: encryptScopeValue(candidate.dataKey, rawValue, `${scopeId}:${row.token}`),
-          });
-        }
-        const install = this.db.transaction(() => {
-          const result = this.db
-            .prepare(
-              "INSERT INTO vault_scope_keys (scope_id, wrapped_dek, key_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(scope_id) DO NOTHING",
-            )
-            .run(scopeId, candidate.wrappedDek, currentMasterKeyId, this.now());
-          if (result.changes === 0) {
-            return false;
-          }
-          const update = this.db.prepare(
-            "UPDATE vault_entries SET value_enc = ?, key_id = ? WHERE run_id = ? AND token = ? AND value_enc = ? AND key_id = ?",
-          );
-          for (const row of replacements) {
-            update.run(
-              row.value,
-              currentMasterKeyId,
-              scopeId,
-              row.token,
-              row.oldValue,
-              row.oldKeyId,
-            );
-          }
-          return true;
-        });
-        committed = install.immediate();
-      } finally {
-        candidate.wrappedDek.fill(0);
-        if (!committed) {
-          candidate.dataKey.fill(0);
-          wrappedDek.fill(0);
-        }
-      }
-      if (committed) {
-        return {
-          dataKey: candidate.dataKey,
-          keyId: currentMasterKeyId,
-          wrappedDek,
-        };
-      }
-    }
-    throw new VaultOperationError("vault_unavailable");
-  }
-
   private ensureLegacyConverted(): Promise<void> {
     if (this.readOnly) {
       return Promise.resolve();
     }
-    this.legacyConversion ??= this.convertLegacyScopes().catch((error: unknown) => {
-      this.legacyConversion = undefined;
-      if (error instanceof VaultOperationError) {
-        throw error;
-      }
-      throw new VaultOperationError("vault_unavailable");
-    });
+    this.legacyConversion ??= convertSqliteLegacyScopes(this.db, this.keyProvider, this.now).catch(
+      (error: unknown) => {
+        this.legacyConversion = undefined;
+        if (error instanceof VaultOperationError) {
+          throw error;
+        }
+        throw new VaultOperationError("vault_unavailable");
+      },
+    );
     return this.legacyConversion;
-  }
-
-  private async convertLegacyScopes(): Promise<void> {
-    const scopes = this.db
-      .prepare<[], { run_id: string }>(
-        `SELECT DISTINCT entries.run_id FROM vault_entries AS entries
-         WHERE NOT EXISTS (
-           SELECT 1 FROM vault_scope_keys AS scope_keys WHERE scope_keys.scope_id = entries.run_id
-         ) ORDER BY entries.run_id`,
-      )
-      .all();
-    for (const { run_id } of scopes) {
-      const scopeKey = await this.ensureScopeDataKey(Id.parse(run_id));
-      scopeKey.dataKey.fill(0);
-      scopeKey.wrappedDek.fill(0);
-    }
   }
 }

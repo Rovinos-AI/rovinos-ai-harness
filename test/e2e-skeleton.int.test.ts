@@ -606,7 +606,7 @@ describe("config", () => {
     expect(loaded.policy.file).toBe("policy.yaml");
     expect(loaded.keys?.currentKeyId).toBe(KEY_ID);
     expect(loaded.pii.defaultAction).toBe("tokenize");
-    expect(loaded.vault).toEqual({ purgeAfterDays: 7 });
+    expect(loaded.vault).toEqual({ backend: "sqlite", purgeAfterDays: 7 });
     expect(loaded.store.retention).toEqual({ completedRunsDays: 1, failedRunsDays: 1 });
     expect(await readFile(current.configPath, "utf8")).not.toContain(current.canary);
   });
@@ -702,8 +702,12 @@ describe("Postgres vault", () => {
     });
     try {
       const result = await first.run(current.canary);
+      const runCreated = result.events.find((event) => event.type === "run_created");
+      if (runCreated === undefined) {
+        throw new Error("The synthetic Postgres vault run did not create its run event.");
+      }
       await expect(
-        second.vault.resolve(result.runId, "<EMAIL_1>", { boundary: "ui" }),
+        second.vault.resolve(runCreated.runId, "<EMAIL_1>", { boundary: "ui" }),
       ).resolves.toBe(current.canary);
     } finally {
       await Promise.all([first.close(), second.close()]);

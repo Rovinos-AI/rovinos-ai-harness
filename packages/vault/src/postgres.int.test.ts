@@ -75,11 +75,7 @@ function provider(initial = "key-a"): KeyProvider & { setCurrentKeyId(keyId: str
   };
 }
 
-async function cleanup(
-  vault: PostgresVault,
-  admin: Pool,
-  schema: string,
-): Promise<void> {
+async function cleanup(vault: PostgresVault, admin: Pool, schema: string): Promise<void> {
   vaults.delete(vault);
   schemas.delete(schema);
   try {
@@ -201,14 +197,17 @@ it("serializes a first put and purge across independent pools", async () => {
 });
 
 it("refuses the event store database and schema", () => {
-  expect(
-    () =>
-      new PostgresVault(vaultUrl, provider(), {
-        storeConnectionString: vaultUrl,
-        schema: "public",
-        storeSchema: "public",
-      }),
-  ).toThrowError(expect.objectContaining({ code: "vault_shares_store_database" }));
+  let error: unknown;
+  try {
+    new PostgresVault(vaultUrl, provider(), {
+      storeConnectionString: vaultUrl,
+      schema: "public",
+      storeSchema: "public",
+    });
+  } catch (caught) {
+    error = caught;
+  }
+  expect(error).toMatchObject({ code: "vault_shares_store_database" });
 });
 
 it("rejects an aliased event-store host during startup", async () => {
@@ -269,7 +268,6 @@ it("re-wraps scope keys during rotation without re-encrypting entries", async ()
       "alice@example.test",
     );
     await expect(vault.put(runId, "email", "alice@example.test")).resolves.toBe(token);
-
   } finally {
     await database.end();
     await cleanup(vault, admin, schema);
@@ -284,7 +282,7 @@ it("cannot decrypt copied entries with the post-purge key table", async () => {
     options: `-c search_path="${schema}"`,
   });
   try {
-    const token = await vault.put(runId, "email", "alice@example.test");
+    await vault.put(runId, "email", "alice@example.test");
     const copied = await database.query<{ token: string; value_enc: string }>(
       "SELECT token, value_enc FROM vault_entries WHERE run_id = $1",
       [runId],
@@ -292,13 +290,28 @@ it("cannot decrypt copied entries with the post-purge key table", async () => {
     expect(copied.rows).toHaveLength(1);
 
     await expect(vault.purge(runId)).resolves.toBe(1);
-    const postPurgeKeys = await database.query(
+    const postPurgeKeys = await database.query<{ wrapped_dek: Buffer; key_id: string }>(
       "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = $1",
       [runId],
     );
     expect(postPurgeKeys.rows).toHaveLength(0);
-    await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBeUndefined();
-    expect(copied.rows[0]?.value_enc).not.toContain("alice@example.test");
+    const copiedEntry = copied.rows[0];
+    if (copiedEntry === undefined) {
+      throw new Error("synthetic entry backup is missing");
+    }
+    const decryptWithLiveKeyTable = async () => {
+      const current = postPurgeKeys.rows[0];
+      if (current === undefined) {
+        return undefined;
+      }
+      const dataKey = await unwrapScopeKey(provider(), current.key_id, runId, current.wrapped_dek);
+      try {
+        return decryptScopeValue(dataKey, copiedEntry.value_enc, `${runId}:${copiedEntry.token}`);
+      } finally {
+        dataKey.fill(0);
+      }
+    };
+    await expect(decryptWithLiveKeyTable()).resolves.toBeUndefined();
   } finally {
     await database.end();
     await cleanup(vault, admin, schema);

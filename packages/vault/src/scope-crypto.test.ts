@@ -30,11 +30,8 @@ function provider(current = "key-a"): KeyProvider {
 
 describe("scope key encryption", () => {
   it("wraps random data keys to their scope and supports master-key rewrapping", async () => {
-    const first = await createWrappedScopeKey(
-      provider(),
-      "key-a",
-      scopeId,
-      () => new Uint8Array(32).fill(31),
+    const first = await createWrappedScopeKey(provider(), "key-a", scopeId, () =>
+      new Uint8Array(32).fill(31),
     );
     const unwrapped = await unwrapScopeKey(provider(), "key-a", scopeId, first.wrappedDek);
     const rewrapped = await createWrappedScopeKey(provider("key-b"), "key-b", scopeId, () =>
@@ -52,20 +49,25 @@ describe("scope key encryption", () => {
   });
 
   it("binds wrapped keys and value ciphertext to their scope and token", async () => {
-    const wrapped = await createWrappedScopeKey(
-      provider(),
-      "key-a",
-      scopeId,
-      () => new Uint8Array(32).fill(41),
+    const wrapped = await createWrappedScopeKey(provider(), "key-a", scopeId, () =>
+      new Uint8Array(32).fill(41),
     );
-    const ciphertext = encryptScopeValue(wrapped.dataKey, "alice@example.test", `${scopeId}:<EMAIL_1>`);
+    const ciphertext = encryptScopeValue(
+      wrapped.dataKey,
+      "alice@example.test",
+      `${scopeId}:<EMAIL_1>`,
+    );
 
     expect(decryptScopeValue(wrapped.dataKey, ciphertext, `${scopeId}:<EMAIL_1>`)).toBe(
       "alice@example.test",
     );
-    expect(() =>
-      decryptScopeValue(wrapped.dataKey, ciphertext, `${scopeId}:<EMAIL_2>`),
-    ).toThrowError(expect.objectContaining({ code: "vault_decrypt_failed" }));
+    let decryptError: unknown;
+    try {
+      decryptScopeValue(wrapped.dataKey, ciphertext, `${scopeId}:<EMAIL_2>`);
+    } catch (error) {
+      decryptError = error;
+    }
+    expect(decryptError).toMatchObject({ code: "vault_decrypt_failed" });
     await expect(
       unwrapScopeKey(provider(), "key-a", Id.parse("B".repeat(26)), wrapped.wrappedDek),
     ).rejects.toMatchObject({ code: "vault_decrypt_failed" });
@@ -73,11 +75,8 @@ describe("scope key encryption", () => {
   });
 
   it("uses a distinct derived key for wrapped data keys", async () => {
-    const wrapped = await createWrappedScopeKey(
-      provider(),
-      "key-a",
-      scopeId,
-      () => new Uint8Array(32).fill(41),
+    const wrapped = await createWrappedScopeKey(provider(), "key-a", scopeId, () =>
+      new Uint8Array(32).fill(41),
     );
     const valueKeys = await deriveVaultKeys(provider(), "key-a", "vault_encrypt_failed");
     try {

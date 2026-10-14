@@ -337,6 +337,42 @@ describe("harness store purge", () => {
     expect(stderr).toEqual([]);
   });
 
+  it("waits for asynchronous vault cleanup before completing retention", async () => {
+    const store = new InMemoryEventStore();
+    await seedRun(store, "completed", 1);
+    const vault = new InMemoryVault();
+    let closeStarted: (() => void) | undefined;
+    let releaseClose: (() => void) | undefined;
+    let completed = false;
+    const closeStartedPromise = new Promise<void>((resolve) => {
+      closeStarted = resolve;
+    });
+    const closeGate = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const vaultAdmin = Object.assign(vault, {
+      close: async () => {
+        closeStarted?.();
+        await closeGate;
+      },
+    });
+    const { context } = createContext(config(), { now: 3 * DAY_MS });
+    const command = createStoreCommand({
+      migrate: vi.fn(),
+      openStore: () => Promise.resolve(store),
+      openVaultAdmin: () => Promise.resolve(vaultAdmin),
+    });
+    const execution = main(["--json", "store", "purge"], context, [command]).then((result) => {
+      completed = true;
+      return result;
+    });
+
+    await closeStartedPromise;
+    expect(completed).toBe(false);
+    releaseClose?.();
+    await expect(execution).resolves.toBe(ExitCode.ok);
+  });
+
   it("reports terminal vault purge counts in JSON and table output", async () => {
     const store = new InMemoryEventStore();
     const runId = await seedRun(store, "completed", 10 * DAY_MS);

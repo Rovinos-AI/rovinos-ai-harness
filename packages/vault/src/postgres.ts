@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { hmacSha256 } from "@harness/crypto";
 import {
-  Code,
   Id,
   VaultValueEntrySchema,
+  type Code,
   type KeyProvider,
   type VaultValueEntry,
 } from "@harness/schemas";
@@ -25,21 +25,17 @@ import {
   type VaultWriter,
 } from "./types.js";
 import {
-  ReencryptBatchResultSchema,
   VaultKeyRowCountSchema,
-  VaultReencryptBatchInputSchema,
-  decodeVaultRotationCursor,
-  encodeVaultRotationCursor,
   type ReencryptBatchResult,
   type VaultKeyRotation,
   type VaultReencryptBatchInput,
 } from "./rotate.js";
+import { reencryptPostgresBatch } from "./postgres-rotation.js";
 import {
   createWrappedScopeKey,
   decryptScopeValue,
   encryptScopeValue,
   unwrapScopeKey,
-  wrapScopeKey,
 } from "./scope-crypto.js";
 import { currentKeyId, deriveVaultKeys, lookupMessage } from "./sqlite-crypto.js";
 
@@ -94,6 +90,15 @@ interface ScopeDataKey {
   readonly wrappedDek: Buffer;
 }
 
+interface PutInput {
+  readonly runId: Id;
+  readonly entityType: Code;
+  readonly rawValue: string;
+  readonly typeName: string;
+  readonly keyId: string;
+  readonly lookupKey: Uint8Array;
+}
+
 interface DatabaseIdentity extends QueryResultRow {
   system_identifier: string;
   database_name: string;
@@ -103,7 +108,7 @@ interface DatabaseIdentity extends QueryResultRow {
 
 function databaseIdentity(connectionString: string): string {
   const url = new URL(connectionString);
-  const port = url.port || "5432";
+  const port = url.port.length === 0 ? "5432" : url.port;
   const database = url.pathname.replace(/^\/+/, "");
   return `${url.hostname.toLowerCase()}:${port}/${database}`;
 }
@@ -126,6 +131,17 @@ function entryToken(value: string): TokenValue {
     throw new VaultOperationError("vault_unavailable");
   }
   return parsed.data;
+}
+
+function validateRawValue(raw: string): string {
+  const value = raw.trim();
+  if (value.length === 0) {
+    throw new VaultValueError("vault_value_empty");
+  }
+  if (new TextEncoder().encode(value).byteLength > MAX_VALUE_BYTES) {
+    throw new VaultValueError("vault_value_too_large");
+  }
+  return value;
 }
 
 function mapVaultError(error: unknown): never {
@@ -162,8 +178,7 @@ export class PostgresVault
     }
     const storeUrl = parsedOptions.data.storeConnectionString;
     if (storeUrl !== undefined) {
-      const sameDatabase =
-        databaseIdentity(parsedUrl.data) === databaseIdentity(storeUrl);
+      const sameDatabase = databaseIdentity(parsedUrl.data) === databaseIdentity(storeUrl);
       const sameSchema = parsedOptions.data.schema === parsedOptions.data.storeSchema;
       const sameRole = databaseRole(parsedUrl.data) === databaseRole(storeUrl);
       if (sameDatabase && (sameSchema || sameRole)) {
@@ -202,7 +217,7 @@ export class PostgresVault
     });
     let transactionStarted = false;
     try {
-      await this.assertSeparateDatabase();
+      await this.assertSeparateDatabase(client);
       await client.query("BEGIN");
       transactionStarted = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
@@ -234,14 +249,14 @@ export class PostgresVault
     }
   }
 
-  private async assertSeparateDatabase(): Promise<void> {
+  private async assertSeparateDatabase(client: PoolClient): Promise<void> {
     if (this.storePool === undefined) {
       return;
     }
     const identityQuery =
       "SELECT (SELECT system_identifier::text FROM pg_control_system()) AS system_identifier, current_database() AS database_name, current_schema() AS schema_name, current_user AS role_name";
     const [vaultIdentityResult, storeIdentityResult] = await Promise.all([
-      this.pool.query<DatabaseIdentity>(identityQuery),
+      client.query<DatabaseIdentity>(identityQuery),
       this.storePool.query<DatabaseIdentity>(identityQuery),
     ]);
     const vaultIdentity = vaultIdentityResult.rows[0];
@@ -277,11 +292,7 @@ export class PostgresVault
     }
   }
 
-  private async scopeKey(
-    client: PoolClient,
-    scopeId: Id,
-    keyId: string,
-  ): Promise<ScopeDataKey> {
+  private async scopeKey(client: PoolClient, scopeId: Id, keyId: string): Promise<ScopeDataKey> {
     const existing = await client.query<ScopeKeyRow>(
       "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = $1 FOR UPDATE",
       [scopeId],
@@ -335,23 +346,27 @@ export class PostgresVault
 
   private async lookupKeys(
     client: PoolClient,
-    scopeId: Id,
-    entityType: Code,
-    normalizedValue: string,
-    keyId: string,
-    currentLookupKey: Uint8Array,
+    scope: {
+      readonly id: Id;
+      readonly entityType: Code;
+      readonly normalizedValue: string;
+      readonly keyId: string;
+      readonly lookupKey: Uint8Array;
+    },
   ): Promise<Buffer[]> {
     const result = await client.query<{ lookup_key_id: string } & QueryResultRow>(
       "SELECT DISTINCT lookup_key_id FROM vault_entries WHERE run_id = $1 ORDER BY lookup_key_id",
-      [scopeId],
+      [scope.id],
     );
-    const message = lookupMessage(scopeId, entityType, normalizedValue);
+    const message = lookupMessage(scope.id, scope.entityType, scope.normalizedValue);
     const lookupKeys: Buffer[] = [];
     try {
-      const keyIds = Array.from(new Set([keyId, ...result.rows.map(({ lookup_key_id }) => lookup_key_id)]));
+      const keyIds = Array.from(
+        new Set([scope.keyId, ...result.rows.map(({ lookup_key_id }) => lookup_key_id)]),
+      );
       for (const lookupKeyId of keyIds) {
-        if (lookupKeyId === keyId) {
-          lookupKeys.push(Buffer.from(hmacSha256(currentLookupKey, message)));
+        if (lookupKeyId === scope.keyId) {
+          lookupKeys.push(Buffer.from(hmacSha256(scope.lookupKey, message)));
           continue;
         }
         const oldKeys = await deriveVaultKeys(
@@ -377,94 +392,99 @@ export class PostgresVault
 
   /** Store a trimmed value or reuse its idempotent scope token. */
   async put(runId: Id, entityType: Code, raw: string): Promise<TokenValue> {
-    const rawValue = raw.trim();
-    if (rawValue.length === 0) {
-      throw new VaultValueError("vault_value_empty");
-    }
-    if (new TextEncoder().encode(rawValue).byteLength > MAX_VALUE_BYTES) {
-      throw new VaultValueError("vault_value_too_large");
-    }
+    const rawValue = validateRawValue(raw);
     const typeName = tokenTypeName(entityType);
     const keyId = currentKeyId(this.keyProvider);
     const keys = await deriveVaultKeys(this.keyProvider, keyId, "vault_encrypt_failed");
     try {
-      return await this.transaction(async (client) => {
-        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [runId]);
-        const scopeKey = await this.scopeKey(client, runId, keyId);
-        let lookups: Buffer[] = [];
-        try {
-          lookups = await this.lookupKeys(
-            client,
-            runId,
-            entityType,
-            normalize(entityType, rawValue),
-            keyId,
-            keys.lookup,
-          );
-          for (const lookup of lookups) {
-            const existing = await client.query<{ token: string } & QueryResultRow>(
-              "SELECT token FROM vault_entries WHERE run_id = $1 AND entity_type = $2 AND lookup = $3",
-              [runId, entityType, lookup],
-            );
-            const token = existing.rows[0]?.token;
-            if (token !== undefined) {
-              return entryToken(token);
-            }
-          }
-          await client.query(
-            "INSERT INTO vault_counters (run_id, entity_type, next_n) VALUES ($1, $2, 1) ON CONFLICT (run_id, entity_type) DO NOTHING",
-            [runId, typeName],
-          );
-          const allocated = await client.query<{ next_n: number | string } & QueryResultRow>(
-            "UPDATE vault_counters SET next_n = next_n + 1 WHERE run_id = $1 AND entity_type = $2 RETURNING next_n - 1 AS next_n",
-            [runId, typeName],
-          );
-          const number = safeInteger(allocated.rows[0]?.next_n);
-          if (number < 1 || number > MAX_TOKEN_NUMBER) {
-            throw new VaultValueError("vault_token_space_exhausted");
-          }
-          const token = Token.safeParse(`<${typeName}_${String(number)}>`);
-          if (!token.success) {
-            throw new VaultValueError("vault_entity_type_invalid");
-          }
-          const lookup = lookups[0];
-          if (lookup === undefined) {
-            throw new VaultOperationError("vault_encrypt_failed");
-          }
-          const valueEnc = encryptScopeValue(scopeKey.dataKey, rawValue, `${runId}:${token.data}`);
-          const inserted = await client.query<{ token: string } & QueryResultRow>(
-            `INSERT INTO vault_entries
-              (run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT (run_id, entity_type, lookup) DO NOTHING RETURNING token`,
-            [runId, token.data, entityType, lookup, valueEnc, scopeKey.keyId, keyId, this.now()],
-          );
-          const insertedToken = inserted.rows[0]?.token;
-          if (insertedToken !== undefined) {
-            return entryToken(insertedToken);
-          }
-          for (const candidate of lookups) {
-            const duplicate = await client.query<{ token: string } & QueryResultRow>(
-              "SELECT token FROM vault_entries WHERE run_id = $1 AND entity_type = $2 AND lookup = $3",
-              [runId, entityType, candidate],
-            );
-            const duplicateToken = duplicate.rows[0]?.token;
-            if (duplicateToken !== undefined) {
-              return entryToken(duplicateToken);
-            }
-          }
-          throw new VaultOperationError("vault_unavailable");
-        } finally {
-          scopeKey.dataKey.fill(0);
-          scopeKey.wrappedDek.fill(0);
-          lookups.forEach((lookup) => lookup.fill(0));
-        }
-      });
+      return await this.transaction((client) =>
+        this.putInTransaction(client, {
+          runId,
+          entityType,
+          rawValue,
+          typeName,
+          keyId,
+          lookupKey: keys.lookup,
+        }),
+      );
     } catch (error) {
       mapVaultError(error);
     } finally {
       keys.encryption.fill(0);
       keys.lookup.fill(0);
+    }
+  }
+
+  private async putInTransaction(client: PoolClient, input: PutInput): Promise<TokenValue> {
+    const { runId, entityType, rawValue, typeName, keyId, lookupKey } = input;
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [runId]);
+    const scopeKey = await this.scopeKey(client, runId, keyId);
+    let lookups: Buffer[] = [];
+    try {
+      lookups = await this.lookupKeys(client, {
+        id: runId,
+        entityType,
+        normalizedValue: normalize(entityType, rawValue),
+        keyId,
+        lookupKey,
+      });
+      for (const lookup of lookups) {
+        const existing = await client.query<{ token: string } & QueryResultRow>(
+          "SELECT token FROM vault_entries WHERE run_id = $1 AND entity_type = $2 AND lookup = $3",
+          [runId, entityType, lookup],
+        );
+        const token = existing.rows[0]?.token;
+        if (token !== undefined) {
+          return entryToken(token);
+        }
+      }
+      await client.query(
+        "INSERT INTO vault_counters (run_id, entity_type, next_n) VALUES ($1, $2, 1) ON CONFLICT (run_id, entity_type) DO NOTHING",
+        [runId, typeName],
+      );
+      const allocated = await client.query<{ next_n: number | string } & QueryResultRow>(
+        "UPDATE vault_counters SET next_n = next_n + 1 WHERE run_id = $1 AND entity_type = $2 RETURNING next_n - 1 AS next_n",
+        [runId, typeName],
+      );
+      const number = safeInteger(allocated.rows[0]?.next_n);
+      if (number < 1 || number > MAX_TOKEN_NUMBER) {
+        throw new VaultValueError("vault_token_space_exhausted");
+      }
+      const token = Token.safeParse(`<${typeName}_${String(number)}>`);
+      if (!token.success) {
+        throw new VaultValueError("vault_entity_type_invalid");
+      }
+      const lookup = lookups[0];
+      if (lookup === undefined) {
+        throw new VaultOperationError("vault_encrypt_failed");
+      }
+      const valueEnc = encryptScopeValue(scopeKey.dataKey, rawValue, `${runId}:${token.data}`);
+      const inserted = await client.query<{ token: string } & QueryResultRow>(
+        `INSERT INTO vault_entries
+          (run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (run_id, entity_type, lookup) DO NOTHING RETURNING token`,
+        [runId, token.data, entityType, lookup, valueEnc, scopeKey.keyId, keyId, this.now()],
+      );
+      const insertedToken = inserted.rows[0]?.token;
+      if (insertedToken !== undefined) {
+        return entryToken(insertedToken);
+      }
+      for (const candidate of lookups) {
+        const duplicate = await client.query<{ token: string } & QueryResultRow>(
+          "SELECT token FROM vault_entries WHERE run_id = $1 AND entity_type = $2 AND lookup = $3",
+          [runId, entityType, candidate],
+        );
+        const duplicateToken = duplicate.rows[0]?.token;
+        if (duplicateToken !== undefined) {
+          return entryToken(duplicateToken);
+        }
+      }
+      throw new VaultOperationError("vault_unavailable");
+    } finally {
+      scopeKey.dataKey.fill(0);
+      scopeKey.wrappedDek.fill(0);
+      lookups.forEach((lookup) => lookup.fill(0));
     }
   }
 
@@ -537,7 +557,7 @@ export class PostgresVault
           decryptScopeValue(dataKey, row.value_enc, `${runId}:${row.token}`),
         );
       } finally {
-        dataKey?.fill(0);
+        dataKey.fill(0);
       }
     } catch (error) {
       mapVaultError(error);
@@ -560,7 +580,7 @@ export class PostgresVault
           }),
         );
       } finally {
-        dataKey?.fill(0);
+        dataKey.fill(0);
       }
     } catch (error) {
       mapVaultError(error);
@@ -660,132 +680,22 @@ export class PostgresVault
 
   /** Re-wrap each selected scope DEK and rotate its lookup HMACs atomically. */
   async reencryptBatch(input: VaultReencryptBatchInput): Promise<ReencryptBatchResult> {
-    const { targetKeyId, limit, afterCursor } = VaultReencryptBatchInputSchema.parse(input);
-    const cursor = afterCursor === undefined ? undefined : decodeVaultRotationCursor(afterCursor);
-    return this.transaction(async (client) => {
-      await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
-      const selected = await client.query<EntryRow>(
-        `SELECT run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id
-         FROM vault_entries
-         WHERE (key_id <> $1 OR lookup_key_id <> $1)
-           AND ($2::text IS NULL OR run_id > $2 OR (run_id = $2 AND token > $3))
-         ORDER BY run_id, token LIMIT $4`,
-        [targetKeyId, cursor?.runId ?? null, cursor?.token ?? "", limit + 1],
-      );
-      const rows = selected.rows.slice(0, limit);
-      const targetKeys = await deriveVaultKeys(
-        this.keyProvider,
-        targetKeyId,
-        "vault_encrypt_failed",
-      );
-      const scopeKeys = new Map<string, ScopeDataKey>();
-      let processed = 0;
-      try {
-        for (const row of rows) {
-          const scopeId = Id.parse(row.run_id);
-          let scopeKey = scopeKeys.get(scopeId);
-          if (scopeKey === undefined) {
-            const keyResult = await client.query<ScopeKeyRow>(
-              "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = $1 FOR UPDATE",
-              [scopeId],
-            );
-            const wrapped = keyResult.rows[0];
-            if (wrapped === undefined) {
-              throw new VaultOperationError("vault_decrypt_failed");
-            }
-            scopeKey = {
-              dataKey: await unwrapScopeKey(
-                this.keyProvider,
-                wrapped.key_id,
-                scopeId,
-                wrapped.wrapped_dek,
-              ),
-              keyId: wrapped.key_id,
-              wrappedDek: Buffer.from(wrapped.wrapped_dek),
-            };
-            scopeKeys.set(scopeId, scopeKey);
-          }
-          const rawValue = decryptScopeValue(
-            scopeKey.dataKey,
-            row.value_enc,
-            `${scopeId}:${row.token}`,
-          );
-          const message = lookupMessage(scopeId, Code.parse(row.entity_type), normalize(
-            Code.parse(row.entity_type),
-            rawValue,
-          ));
-          let lookup: Buffer | undefined;
-          try {
-            lookup = Buffer.from(hmacSha256(targetKeys.lookup, message));
-            const collision = await client.query<{ token: string } & QueryResultRow>(
-              "SELECT token FROM vault_entries WHERE run_id = $1 AND entity_type = $2 AND lookup = $3 AND token <> $4",
-              [scopeId, row.entity_type, lookup, row.token],
-            );
-            const result = await client.query(
-              `UPDATE vault_entries SET key_id = $1, lookup = $2, lookup_key_id = $1
-               WHERE run_id = $3 AND token = $4 AND key_id = $5 AND lookup_key_id = $6 AND value_enc = $7`,
-              [
-                targetKeyId,
-                collision.rows.length === 0 ? lookup : null,
-                scopeId,
-                row.token,
-                row.key_id,
-                row.lookup_key_id,
-                row.value_enc,
-              ],
-            );
-            processed += result.rowCount ?? 0;
-          } finally {
-            message.fill(0);
-            lookup?.fill(0);
-          }
-        }
-        for (const [scope, scopeKey] of scopeKeys) {
-          if (scopeKey.keyId !== targetKeyId) {
-            const scopeId = Id.parse(scope);
-            const wrappedDek = await wrapScopeKey(
-              this.keyProvider,
-              targetKeyId,
-              scopeId,
-              scopeKey.dataKey,
-            );
-            try {
-              await client.query(
-                "UPDATE vault_scope_keys SET wrapped_dek = $1, key_id = $2 WHERE scope_id = $3 AND key_id = $4 AND wrapped_dek = $5",
-                [wrappedDek, targetKeyId, scopeId, scopeKey.keyId, scopeKey.wrappedDek],
-              );
-              await client.query("UPDATE vault_entries SET key_id = $1 WHERE run_id = $2", [
-                targetKeyId,
-                scopeId,
-              ]);
-            } finally {
-              wrappedDek.fill(0);
-            }
-          }
-        }
-        const last = rows.at(-1);
-        return ReencryptBatchResultSchema.parse({
-          processed,
-          ...(selected.rows.length > limit && last !== undefined
-            ? { nextCursor: encodeVaultRotationCursor({ runId: last.run_id, token: last.token }) }
-            : {}),
-        });
-      } finally {
-        targetKeys.encryption.fill(0);
-        targetKeys.lookup.fill(0);
-        for (const scopeKey of scopeKeys.values()) {
-          scopeKey.dataKey.fill(0);
-          scopeKey.wrappedDek.fill(0);
-        }
-      }
-    });
+    return reencryptPostgresBatch(
+      {
+        keyProvider: this.keyProvider,
+        transaction: (work) => this.transaction(work),
+      },
+      input,
+    );
   }
 
   /** Count entries still referencing an encryption or lookup key. */
   async countRowsByKey(): Promise<readonly { keyId: string; count: number }[]> {
     try {
       await this.ensureInitialized();
-      const result = await this.pool.query<{ key_id: string; count: number | string } & QueryResultRow>(
+      const result = await this.pool.query<
+        { key_id: string; count: number | string } & QueryResultRow
+      >(
         `SELECT key_id, COUNT(*) AS count FROM (
            SELECT key_id, run_id, token FROM vault_entries
            UNION

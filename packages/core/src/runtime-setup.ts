@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync } from "node:fs";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
-import { HarnessError, PiiConfigSchema, VaultConfigSchema } from "@harness/schemas";
-import type { Id, PiiConfig, StoreConfig } from "@harness/schemas";
+import { HarnessError, PiiConfigSchema } from "@harness/schemas";
+import type { Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
-import { PostgresVault, SqliteVault, VaultOperationError } from "@harness/vault";
-import type { TokenType, VaultTerminalRunsQuery } from "@harness/vault";
 import type { EventStore } from "@harness/store";
 import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
 import { createRuntimeStore } from "./runtime-store.js";
@@ -15,7 +12,8 @@ import { createConfiguredModelPort } from "./runtime-model.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimePii } from "./runtime-pii.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
-import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
+import { resolveDataDir } from "./runtime-data-dir.js";
+import { createRuntimeVault } from "./runtime-vault.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { missingModelPort, unavailableTool } from "./runtime-default-ports.js";
 import { NaiveContext } from "./context/naive-context.js";
@@ -177,6 +175,21 @@ async function createRuntimeTools(
   }
 }
 
+function createRuntimeRoles(
+  config: RuntimeConfig,
+  overrides: RuntimeOverrides,
+  tool: ToolPort,
+): Promise<RoleRegistry> {
+  return resolveRuntimeRoles(
+    config,
+    overrides.roleConfigDirectory ?? process.cwd(),
+    tool,
+    (code) => {
+      roleConfigLogger.warn(code);
+    },
+  );
+}
+
 /** Runtime dependencies ready to be assembled into the public runtime API. */
 export type RuntimeSetup = RuntimeComposition & {
   readonly roles: RoleRegistry;
@@ -196,48 +209,6 @@ class PiiToolPortAlreadyWrappedError extends HarnessError {
 
   constructor() {
     super("The runtime cannot accept an already wrapped PII tool port.");
-  }
-}
-
-class TransientVaultInProductionError extends HarnessError {
-  readonly code = "transient_vault_in_production";
-
-  constructor() {
-    super("A transient vault cannot be used in production.");
-  }
-}
-
-class EmptyReadOnlyVault implements RuntimeVault {
-  private closed = false;
-
-  put(): Promise<TokenType> {
-    return Promise.reject(new VaultOperationError("vault_unavailable"));
-  }
-
-  resolve(): Promise<string | undefined> {
-    return this.closed
-      ? Promise.reject(new VaultOperationError("vault_unavailable"))
-      : Promise.resolve(undefined);
-  }
-
-  markTerminal(): Promise<void> {
-    return Promise.reject(new VaultOperationError("vault_unavailable"));
-  }
-
-  listTerminalRunsBefore(_query: VaultTerminalRunsQuery): Promise<readonly Id[]> {
-    return Promise.resolve([]);
-  }
-
-  purge(): Promise<number> {
-    return Promise.reject(new VaultOperationError("vault_unavailable"));
-  }
-
-  stats(): Promise<{ entries: number }> {
-    return Promise.reject(new VaultOperationError("vault_unavailable"));
-  }
-
-  close(): void {
-    this.closed = true;
   }
 }
 
@@ -272,60 +243,6 @@ async function createRuntimeModel(
     })) ??
     missingModelPort
   );
-}
-
-async function createRuntimeVault(
-  dataDir: string,
-  config: RuntimeConfig,
-  overrides: RuntimeOverrides,
-  keys: RuntimeComposition["keys"],
-  clock: Clock,
-): Promise<RuntimeVault> {
-  const vaultConfig = VaultConfigSchema.parse(config.vault ?? {});
-  if (vaultConfig.backend === "postgres") {
-    const resolver = overrides.secretResolver;
-    const vaultUrl = vaultConfig.postgres?.url;
-    const vaultConnectionString =
-      resolver === undefined || vaultUrl === undefined
-        ? undefined
-        : (await resolver.resolve(vaultUrl)).reveal();
-    let storeConnectionString: string | undefined;
-    if (config.store?.dialect === "postgres") {
-      if (resolver === undefined || config.store.connectionString === undefined) {
-        throw new VaultOperationError("vault_unavailable");
-      }
-      storeConnectionString = (await resolver.resolve(config.store.connectionString)).reveal();
-    }
-    if (vaultConnectionString === undefined) {
-      throw new VaultOperationError("vault_unavailable");
-    }
-    const vault = new PostgresVault(vaultConnectionString, keys, {
-      ...(storeConnectionString === undefined ? {} : { storeConnectionString }),
-      now: () => clock.now(),
-    });
-    try {
-      await vault.initialize();
-      return vault;
-    } catch (error) {
-      await vault.close();
-      throw error;
-    }
-  }
-  const vaultDir = resolveVaultDataDir(process.env, dataDir);
-  const vaultPath = join(vaultDir, "vault.db");
-  const transient = overrides.transientVault === true && overrides.readOnlyStore !== true;
-  if (transient && process.env.NODE_ENV === "production") {
-    throw new TransientVaultInProductionError();
-  }
-  if (overrides.readOnlyStore === true && !existsSync(vaultPath)) {
-    return new EmptyReadOnlyVault();
-  }
-  if (overrides.readOnlyStore !== true && !transient) {
-    await mkdir(vaultDir, { recursive: true });
-  }
-  return new SqliteVault(transient ? ":memory:" : vaultPath, keys, () => clock.now(), {
-    readonly: overrides.readOnlyStore === true,
-  });
 }
 
 function persistedScopeResolver(store: EventStore, scopes: RunScopeRegistry) {
@@ -390,21 +307,20 @@ export async function setupRuntime(
   try {
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    const runtimeVault = await createRuntimeVault(dataDir, runtimeConfig, overrides, keys, clock);
+    const runtimeVault = await createRuntimeVault({
+      dataDir,
+      config: runtimeConfig,
+      overrides,
+      keys,
+      clock,
+    });
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
     const context = overrides.context ?? new NaiveContext();
     tools = await createRuntimeTools(runtimeConfig, overrides);
     const { tool, sandboxBackend } = tools;
-    const roles = await resolveRuntimeRoles(
-      runtimeConfig,
-      overrides.roleConfigDirectory ?? process.cwd(),
-      tool,
-      (code) => {
-        roleConfigLogger.warn(code);
-      },
-    );
+    const roles = await createRuntimeRoles(runtimeConfig, overrides, tool);
     const rawStore = await createRuntimeStore(runtimeConfig, overrides, clock);
     eventStore = rawStore;
     const piiRuntime = createRuntimePii({

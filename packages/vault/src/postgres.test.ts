@@ -5,7 +5,7 @@ import { runVaultConformance } from "./conformance.test-helpers.js";
 import { PostgresVault } from "./postgres.js";
 
 const fakePg = vi.hoisted(() => {
-  type Entry = {
+  interface Entry {
     run_id: string;
     token: string;
     entity_type: string;
@@ -14,22 +14,22 @@ const fakePg = vi.hoisted(() => {
     key_id: string;
     lookup_key_id: string;
     created_at: number;
-  };
-  type State = {
+  }
+  interface State {
     migrations: string[];
     scopeKeys: Map<string, { wrapped_dek: Buffer; key_id: string; created_at: number }>;
     entries: Entry[];
     counters: Map<string, number>;
     epochs: Map<string, number>;
     terminalRuns: Map<string, number>;
-  };
+  }
   const databases = new Map<string, State>();
   const unavailableSchemas = new Set<string>();
   let identityQueries = 0;
   let scopeKeyReads = 0;
   const bufferValue = (value: unknown): Buffer => {
     if (!Buffer.isBuffer(value)) {
-      throw new Error("Synthetic SQL value is not a buffer");
+      throw new TypeError("Synthetic SQL value is not a buffer");
     }
     return value;
   };
@@ -64,9 +64,7 @@ const fakePg = vi.hoisted(() => {
       identityQueries += 1;
       const url = new URL(connectionString);
       const host =
-        url.hostname === "localhost" || url.hostname === "127.0.0.1"
-          ? "loopback"
-          : url.hostname;
+        url.hostname === "localhost" || url.hostname === "127.0.0.1" ? "loopback" : url.hostname;
       return {
         rows: [
           {
@@ -90,7 +88,10 @@ const fakePg = vi.hoisted(() => {
       return { rows, rowCount };
     }
     if (sql === "SELECT version FROM vault_schema_migrations") {
-      return { rows: state.migrations.map((version) => ({ version })), rowCount: state.migrations.length };
+      return {
+        rows: state.migrations.map((version) => ({ version })),
+        rowCount: state.migrations.length,
+      };
     }
     if (sql.startsWith("INSERT INTO vault_schema_migrations")) {
       state.migrations.push(String(values[0]));
@@ -102,7 +103,10 @@ const fakePg = vi.hoisted(() => {
       }
       const key = state.scopeKeys.get(String(values[0]));
       return {
-        rows: key === undefined ? [] : [{ wrapped_dek: Buffer.from(key.wrapped_dek), key_id: key.key_id }],
+        rows:
+          key === undefined
+            ? []
+            : [{ wrapped_dek: Buffer.from(key.wrapped_dek), key_id: key.key_id }],
         rowCount: key === undefined ? 0 : 1,
       };
     }
@@ -125,17 +129,24 @@ const fakePg = vi.hoisted(() => {
           .filter((entry) => entry.run_id === String(values[0]))
           .map(({ lookup_key_id }) => lookup_key_id),
       );
-      return { rows: [...keyIds].sort().map((lookup_key_id) => ({ lookup_key_id })), rowCount: keyIds.size };
+      return {
+        rows: [...keyIds].sort().map((lookup_key_id) => ({ lookup_key_id })),
+        rowCount: keyIds.size,
+      };
     }
     if (sql.startsWith("SELECT token FROM vault_entries")) {
+      const excludedToken = typeof values[3] === "string" ? values[3] : "";
       const entry = state.entries.find(
         (candidate) =>
           candidate.run_id === String(values[0]) &&
           candidate.entity_type === String(values[1]) &&
-          candidate.token !== String(values[3] ?? "") &&
+          candidate.token !== excludedToken &&
           equalBytes(candidate.lookup, values[2]),
       );
-      return { rows: entry === undefined ? [] : [{ token: entry.token }], rowCount: entry === undefined ? 0 : 1 };
+      return {
+        rows: entry === undefined ? [] : [{ token: entry.token }],
+        rowCount: entry === undefined ? 0 : 1,
+      };
     }
     if (sql.startsWith("INSERT INTO vault_counters")) {
       const key = `${String(values[0])}:${String(values[1])}`;
@@ -174,12 +185,19 @@ const fakePg = vi.hoisted(() => {
       }
       return { rows, rowCount };
     }
-    if (sql.startsWith("SELECT run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id FROM vault_entries")) {
+    if (
+      sql.startsWith(
+        "SELECT run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id FROM vault_entries",
+      )
+    ) {
       if (sql.includes("token = $2")) {
         const entry = state.entries.find(
           ({ run_id, token }) => run_id === String(values[0]) && token === String(values[1]),
         );
-        return { rows: entry === undefined ? [] : [{ ...entry }], rowCount: entry === undefined ? 0 : 1 };
+        return {
+          rows: entry === undefined ? [] : [{ ...entry }],
+          rowCount: entry === undefined ? 0 : 1,
+        };
       }
       if (sql.includes("ORDER BY token")) {
         const entries = state.entries
@@ -188,18 +206,20 @@ const fakePg = vi.hoisted(() => {
         return { rows: entries.map((entry) => ({ ...entry })), rowCount: entries.length };
       }
       const [target, cursorRun, cursorToken, limit] = values;
+      const afterRunId = typeof cursorRun === "string" ? cursorRun : undefined;
+      const afterToken = typeof cursorToken === "string" ? cursorToken : "";
       const entries = state.entries
         .filter(
           (entry) =>
             (entry.key_id !== String(target) || entry.lookup_key_id !== String(target)) &&
-            (cursorRun === null ||
-              entry.run_id > String(cursorRun) ||
-              (entry.run_id === String(cursorRun) && entry.token > String(cursorToken))),
+            (afterRunId === undefined ||
+              entry.run_id > afterRunId ||
+              (entry.run_id === afterRunId && entry.token > afterToken)),
         )
-        .sort(
-          (left, right) =>
-            left.run_id.localeCompare(right.run_id) || left.token.localeCompare(right.token),
-        )
+        .sort((left, right) => {
+          const runOrder = left.run_id.localeCompare(right.run_id);
+          return runOrder === 0 ? left.token.localeCompare(right.token) : runOrder;
+        })
         .slice(0, Number(limit));
       return { rows: entries.map((entry) => ({ ...entry })), rowCount: entries.length };
     }
@@ -213,13 +233,19 @@ const fakePg = vi.hoisted(() => {
     if (sql.startsWith("INSERT INTO run_meta")) {
       const runId = String(values[0]);
       const terminalAt = Number(values[1]);
-      state.terminalRuns.set(runId, Math.min(state.terminalRuns.get(runId) ?? terminalAt, terminalAt));
+      state.terminalRuns.set(
+        runId,
+        Math.min(state.terminalRuns.get(runId) ?? terminalAt, terminalAt),
+      );
       return { rows, rowCount: 1 };
     }
     if (sql.startsWith("SELECT run_id FROM run_meta")) {
       const eligible = [...state.terminalRuns.entries()]
         .filter(([, ts]) => ts < Number(values[0]))
-        .sort(([leftId, leftTs], [rightId, rightTs]) => leftTs - rightTs || leftId.localeCompare(rightId))
+        .sort(([leftId, leftTs], [rightId, rightTs]) => {
+          const timeOrder = leftTs - rightTs;
+          return timeOrder === 0 ? leftId.localeCompare(rightId) : timeOrder;
+        })
         .slice(0, Number(values[1]))
         .map(([run_id]) => ({ run_id }));
       return { rows: eligible, rowCount: eligible.length };
@@ -244,7 +270,11 @@ const fakePg = vi.hoisted(() => {
       const entries = state.entries.filter(({ run_id }) => run_id === String(values[0])).length;
       return { rows: [{ entries }], rowCount: 1 };
     }
-    if (sql.startsWith("SELECT token FROM vault_entries WHERE run_id = $1 AND entity_type = $2 AND lookup = $3 AND token <> $4")) {
+    if (
+      sql.startsWith(
+        "SELECT token FROM vault_entries WHERE run_id = $1 AND entity_type = $2 AND lookup = $3 AND token <> $4",
+      )
+    ) {
       const match = state.entries.find(
         (entry) =>
           entry.run_id === String(values[0]) &&
@@ -252,7 +282,10 @@ const fakePg = vi.hoisted(() => {
           entry.token !== String(values[3]) &&
           equalBytes(entry.lookup, values[2]),
       );
-      return { rows: match === undefined ? [] : [{ token: match.token }], rowCount: match === undefined ? 0 : 1 };
+      return {
+        rows: match === undefined ? [] : [{ token: match.token }],
+        rowCount: match === undefined ? 0 : 1,
+      };
     }
     if (sql.startsWith("UPDATE vault_entries SET key_id = $1, lookup = $2")) {
       const entry = state.entries.find(
@@ -273,11 +306,7 @@ const fakePg = vi.hoisted(() => {
     }
     if (sql.startsWith("UPDATE vault_scope_keys SET wrapped_dek")) {
       const key = state.scopeKeys.get(String(values[2]));
-      if (
-        key !== undefined &&
-        key.key_id === String(values[3]) &&
-        key.wrapped_dek.equals(bufferValue(values[4]))
-      ) {
+      if (key?.key_id === String(values[3]) && key.wrapped_dek.equals(bufferValue(values[4]))) {
         key.wrapped_dek = Buffer.from(bufferValue(values[0]));
         key.key_id = String(values[1]);
         rowCount = 1;
@@ -344,9 +373,7 @@ vi.mock("pg", () => ({
     }
 
     query(statement: string, values: unknown[] = []) {
-      return Promise.resolve(
-        fakePg.handle(this.schema, statement, values, this.connectionString),
-      );
+      return Promise.resolve(fakePg.handle(this.schema, statement, values, this.connectionString));
     }
 
     connect() {
@@ -355,9 +382,7 @@ vi.mock("pg", () => ({
       }
       return Promise.resolve({
         query: (statement: string, values: unknown[] = []) =>
-          Promise.resolve(
-            fakePg.handle(this.schema, statement, values, this.connectionString),
-          ),
+          Promise.resolve(fakePg.handle(this.schema, statement, values, this.connectionString)),
         release: () => undefined,
       });
     }
@@ -393,7 +418,16 @@ function keyProvider(): KeyProvider & { setCurrentKeyId(keyId: string): void } {
 
 function nextSchema(): string {
   schemaIndex += 1;
-  return `unit_vault_${schemaIndex}`;
+  return `unit_vault_${String(schemaIndex)}`;
+}
+
+function constructionError(create: () => unknown): unknown {
+  try {
+    create();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
 }
 
 function vaultFor(
@@ -415,9 +449,9 @@ beforeEach(() => {
   fakePg.resetReadCounts();
 });
 
-runVaultConformance("PostgresVault with a connection-pool double", async () => {
+runVaultConformance("PostgresVault with a connection-pool double", () => {
   const vault = vaultFor(nextSchema());
-  return { vault, cleanup: () => vault.close() };
+  return Promise.resolve({ vault, cleanup: () => vault.close() });
 });
 
 it("uses scope-key rewrapping without re-encrypting values", async () => {
@@ -433,9 +467,7 @@ it("uses scope-key rewrapping without re-encrypting values", async () => {
   await expect(vault.reencryptBatch({ targetKeyId: "key-b" })).resolves.toMatchObject({
     processed: 1,
   });
-  await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBe(
-    "alice@example.test",
-  );
+  await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBe("alice@example.test");
   expect(state?.entries[0]?.value_enc).toBe(originalValue);
   expect(state?.scopeKeys.get(runId)?.wrapped_dek).not.toEqual(originalWrapped);
   await expect(vault.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 1 }]);
@@ -443,32 +475,33 @@ it("uses scope-key rewrapping without re-encrypting values", async () => {
 });
 
 it("rejects a shared database/schema, invalid configuration, and unavailable database", async () => {
-  expect(() =>
-    vaultFor(
-      "public",
-      keyProvider(),
-      "postgresql://vault@db/harness",
-      "postgresql://store@db/harness",
-      "public",
+  expect(
+    constructionError(() =>
+      vaultFor(
+        "public",
+        keyProvider(),
+        "postgresql://vault@db/harness",
+        "postgresql://store@db/harness",
+        "public",
+      ),
     ),
-  ).toThrowError(expect.objectContaining({ code: "vault_shares_store_database" }));
-  expect(() =>
-    vaultFor(
-      "vault_schema",
-      keyProvider(),
-      "postgresql://vault@db/harness",
-      "postgresql://vault@db/harness",
-      "event_schema",
+  ).toMatchObject({ code: "vault_shares_store_database" });
+  expect(
+    constructionError(() =>
+      vaultFor(
+        "vault_schema",
+        keyProvider(),
+        "postgresql://vault@db/harness",
+        "postgresql://vault@db/harness",
+        "event_schema",
+      ),
     ),
-  ).toThrowError(expect.objectContaining({ code: "vault_shares_store_database" }));
-  expect(() =>
-    vaultFor(
-      "public",
-      keyProvider(),
-      "sqlite:///not-postgres",
-      "postgresql://store@db/harness",
+  ).toMatchObject({ code: "vault_shares_store_database" });
+  expect(
+    constructionError(() =>
+      vaultFor("public", keyProvider(), "sqlite:///not-postgres", "postgresql://store@db/harness"),
     ),
-  ).toThrowError(expect.objectContaining({ code: "vault_unavailable" }));
+  ).toMatchObject({ code: "vault_unavailable" });
 
   const schema = nextSchema();
   fakePg.unavailableSchemas.add(schema);
@@ -546,9 +579,9 @@ it("validates values and masks corrupt ciphertext and unsupported migration hist
   if (entry !== undefined) {
     entry.value_enc = "not-base64";
   }
-  await expect(
-    vault.resolve(runId, "<EMAIL_1>", { boundary: "ui" }),
-  ).rejects.toMatchObject({ code: "vault_decrypt_failed" });
+  await expect(vault.resolve(runId, "<EMAIL_1>", { boundary: "ui" })).rejects.toMatchObject({
+    code: "vault_decrypt_failed",
+  });
   await vault.close();
 
   const unsupportedSchema = nextSchema();

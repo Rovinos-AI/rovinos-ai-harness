@@ -21,7 +21,7 @@ interface StoreCommandOperations {
     config: HarnessConfig,
     clock: CliContext["clock"],
     secretResolver: CliContext["secretResolver"],
-  ): Promise<VaultAdmin & { close(): void }>;
+  ): Promise<VaultAdmin & { close(): void | Promise<void> }>;
 }
 
 class StoreCommandError extends HarnessError {
@@ -113,7 +113,7 @@ async function writePurgeResult({
     throw new StoreCommandError("retention_not_configured");
   }
   const store = await operations.openStore(config, dryRun, context.secretResolver);
-  let vault: (VaultAdmin & { close(): void }) | undefined;
+  let vault: (VaultAdmin & { close(): void | Promise<void> }) | undefined;
   try {
     const vaultAdmin =
       dryRun || operations.openVaultAdmin === undefined
@@ -163,7 +163,7 @@ async function writePurgeResult({
     try {
       await store.close();
     } finally {
-      vault?.close();
+      await vault?.close();
     }
   }
 }

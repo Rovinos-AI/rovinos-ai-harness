@@ -52,7 +52,10 @@ async function createLegacyVault(path: string, applyScopeMigration = false): Pro
       "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (?, ?, ?)",
     );
     for (const [version, filename] of migrations) {
-      const sql = await readFile(new URL(`../migrations/sqlite/${filename}`, import.meta.url), "utf8");
+      const sql = await readFile(
+        new URL(`../migrations/sqlite/${filename}`, import.meta.url),
+        "utf8",
+      );
       database.exec(sql);
       record.run(version, createHash("sha256").update(sql).digest("hex"), 0);
     }
@@ -264,16 +267,7 @@ describe("SqliteVault", () => {
               (run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .run(
-            runId,
-            token,
-            "email",
-            lookup,
-            encrypted.toString("base64"),
-            "key-a",
-            "key-b",
-            0,
-          );
+          .run(runId, token, "email", lookup, encrypted.toString("base64"), "key-a", "key-b", 0);
         database
           .prepare("UPDATE vault_counters SET next_n = 3 WHERE run_id = ? AND entity_type = ?")
           .run(runId, "EMAIL");
@@ -388,10 +382,7 @@ describe("SqliteVault", () => {
       const token = await vault.put(runId, "email", "alice@example.test");
       const database = new Database(path);
       const before = database
-        .prepare<
-          [string, string],
-          { value_enc: string; wrapped_dek: Buffer; key_id: string }
-        >(
+        .prepare<[string, string], { value_enc: string; wrapped_dek: Buffer; key_id: string }>(
           `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
            FROM vault_entries AS entries
            JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
@@ -409,10 +400,7 @@ describe("SqliteVault", () => {
       });
       const rotatedDatabase = new Database(path);
       const after = rotatedDatabase
-        .prepare<
-          [string, string],
-          { value_enc: string; wrapped_dek: Buffer; key_id: string }
-        >(
+        .prepare<[string, string], { value_enc: string; wrapped_dek: Buffer; key_id: string }>(
           `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
            FROM vault_entries AS entries
            JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
@@ -551,10 +539,7 @@ describe("SqliteVault", () => {
     const token = await vault.put(runId, "email", "alice@example.test");
     const database = new Database(path);
     const backup = database
-      .prepare<
-        [string, string],
-        { value_enc: string; wrapped_dek: Buffer; key_id: string }
-      >(
+      .prepare<[string, string], { value_enc: string; wrapped_dek: Buffer; key_id: string }>(
         `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
          FROM vault_entries AS entries
          JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
