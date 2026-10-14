@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Pool, type Notification } from "pg";
+import { Pool, type Notification, type PoolClient } from "pg";
 import { randomBytes } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { Code, Id, type KeyProvider, type NewEvent } from "@harness/schemas";
@@ -435,10 +435,12 @@ it("appends batches larger than PostgreSQL's bind-parameter limit", async () => 
   const payloads: string[] = [];
   const receivedPayload = new Promise<string | undefined>((resolve) => {
     listenerClient.on("notification", (message: Notification) => {
+      // LISTEN is database-wide: ignore notifications from other schemas and concurrent test runs.
       const payload = message.payload;
-      if (payload !== undefined) {
-        payloads.push(payload);
+      if (payload?.startsWith(`${runId}:`) !== true) {
+        return;
       }
+      payloads.push(payload);
       if (payloads.length === 1) {
         resolve(payload);
       }
@@ -468,6 +470,28 @@ it("appends batches larger than PostgreSQL's bind-parameter limit", async () => 
   }
 });
 
+/**
+ * Resolves with the next `harness_events` payload for `runId`. LISTEN is database-wide, so other
+ * schemas and concurrent test runs also notify; every payload seen must still be ids-only.
+ */
+function nextRunNotification(client: PoolClient, runId: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const onNotification = (message: Notification): void => {
+      const payload = message.payload ?? "";
+      if (!/^[0-9A-HJKMNP-TV-Z]{26}:\d+$/u.test(payload)) {
+        client.removeListener("notification", onNotification);
+        reject(new Error(`non-id notification payload: ${payload}`));
+        return;
+      }
+      if (payload.startsWith(`${runId}:`)) {
+        client.removeListener("notification", onNotification);
+        resolve(payload);
+      }
+    };
+    client.on("notification", onNotification);
+  });
+}
+
 it("notifies listeners with only a run id and sequence after committed appends", async () => {
   const { admin, schema } = await createSchema();
   const listenerClient = await admin.connect();
@@ -483,20 +507,12 @@ it("notifies listeners with only a run id and sequence after committed appends",
     [Symbol.asyncIterator]();
   try {
     await listenerClient.query("LISTEN harness_events");
-    const createdNotification = new Promise<string | undefined>((resolve) => {
-      listenerClient.once("notification", (message: Notification) => {
-        resolve(message.payload);
-      });
-    });
+    const createdNotification = nextRunNotification(listenerClient, runId);
     await writer.append(runId, [builders.runCreated(runId)], 0);
     await expect(createdNotification).resolves.toMatch(new RegExp(`^${runId}:\\d+$`));
     await expect(createdNotification).resolves.toBe(`${runId}:0`);
 
-    const modelNotification = new Promise<string | undefined>((resolve) => {
-      listenerClient.once("notification", (message: Notification) => {
-        resolve(message.payload);
-      });
-    });
+    const modelNotification = nextRunNotification(listenerClient, runId);
     const modelEvent = iterator.next();
     await writer.append(
       runId,
