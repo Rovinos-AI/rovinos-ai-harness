@@ -58,9 +58,7 @@ export interface RunnerServerOptions {
 
 /** Closed runner startup error codes. */
 export type RunnerConfigurationErrorCode =
-  | "sandbox_runner_config_invalid"
-  | "proxy_url_without_allowlist"
-  | "allowlist_without_proxy_url";
+  "sandbox_runner_config_invalid" | "proxy_url_without_allowlist" | "allowlist_without_proxy_url";
 
 /** Error raised when the runner server configuration is invalid. */
 export class RunnerConfigurationError extends HarnessError {

@@ -105,10 +105,7 @@ function forwardedResponseHeaders(
   );
 }
 
-function pipeUpstreamResponse(
-  upstreamResponse: IncomingMessage,
-  response: ServerResponse,
-): void {
+function pipeUpstreamResponse(upstreamResponse: IncomingMessage, response: ServerResponse): void {
   response.writeHead(
     upstreamResponse.statusCode ?? 502,
     forwardedResponseHeaders(upstreamResponse.headers, upstreamResponse.headers.connection),
@@ -176,7 +173,8 @@ async function handleHttpRequest(
     counter("egress_allowed", "allowed");
   });
   const path = new URL(request.url ?? "");
-  const host = isIP(destination.hostname) === 6 ? `[${destination.hostname}]` : destination.hostname;
+  const host =
+    isIP(destination.hostname) === 6 ? `[${destination.hostname}]` : destination.hostname;
   const hopByHop = hopByHopHeaders(request.headers.connection);
   hopByHop.add("host");
   const headers = Object.fromEntries(

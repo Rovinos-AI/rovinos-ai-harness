@@ -46,9 +46,7 @@ export class EgressProxyConfigurationError extends HarnessError {
  * @param error - Validated egress proxy configuration error.
  * @returns The closed error code followed by a newline.
  */
-export function formatEgressProxyConfigurationError(
-  error: EgressProxyConfigurationError,
-): string {
+export function formatEgressProxyConfigurationError(error: EgressProxyConfigurationError): string {
   return `${error.code}\n`;
 }
 

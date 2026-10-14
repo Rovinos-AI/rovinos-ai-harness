@@ -274,9 +274,9 @@ describe("runner HTTP request handler", () => {
     });
     expect(executedSpec?.env).not.toHaveProperty("NO_PROXY");
     expect(executedSpec?.env).not.toHaveProperty("no_proxy");
-    expect(() => createRunnerRequestHandler(makeOptions({ proxyUrl: "file:///tmp/proxy" }))).toThrow(
-      RunnerConfigurationError,
-    );
+    expect(() =>
+      createRunnerRequestHandler(makeOptions({ proxyUrl: "file:///tmp/proxy" })),
+    ).toThrow(RunnerConfigurationError);
   });
 
   it("removes both proxy bypass spellings from a child environment", () => {

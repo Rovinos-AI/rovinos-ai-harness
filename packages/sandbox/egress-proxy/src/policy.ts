@@ -89,7 +89,10 @@ function ipv6Bytes(address: string): readonly number[] {
     return [];
   }
   const groups = [...left, ...Array.from({ length: omitted }, () => 0), ...right];
-  if (groups.length !== 8 || groups.some((group) => !Number.isInteger(group) || group < 0 || group > 0xffff)) {
+  if (
+    groups.length !== 8 ||
+    groups.some((group) => !Number.isInteger(group) || group < 0 || group > 0xffff)
+  ) {
     return [];
   }
   return groups.flatMap((group) => [group >>> 8, group & 0xff]);
@@ -101,9 +104,7 @@ function startsWithBytes(bytes: readonly number[], prefix: readonly number[]): b
 
 function embeddedIPv4(bytes: readonly number[]): readonly number[] | undefined {
   const mapped =
-    bytes.slice(0, 10).every((byte) => byte === 0) &&
-    bytes[10] === 0xff &&
-    bytes[11] === 0xff;
+    bytes.slice(0, 10).every((byte) => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
   const compatible = bytes.slice(0, 12).every((byte) => byte === 0);
   if (mapped || compatible) {
     return bytes.slice(12);
@@ -184,7 +185,9 @@ function normalizeHost(host: string): string {
 }
 
 /** Validates configured hosts and rejects wildcard and private IP-literal entries. */
-export function validateEgressAllowlist(entries: readonly EgressAllowEntry[]): readonly EgressAllowEntry[] {
+export function validateEgressAllowlist(
+  entries: readonly EgressAllowEntry[],
+): readonly EgressAllowEntry[] {
   const normalized = entries.map((entry) => {
     const host = normalizeHost(entry.host);
     if (isIP(host) !== 0 && isBlockedEgressAddress(host)) {

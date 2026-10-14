@@ -557,11 +557,7 @@ describe("config", () => {
     const current = fixture();
     const config = await loadConfig({ configPath: current.configPath });
     const allow = [{ host: "e2e-egress.example.test", ports: [443] }];
-    const invocation = createSandboxComposeInvocation(
-      config.sandbox.egress,
-      ["config"],
-      {},
-    );
+    const invocation = createSandboxComposeInvocation(config.sandbox.egress, ["config"], {});
 
     expect(config.sandbox.egress?.allow).toEqual(allow);
     expect(invocation.env.SANDBOX_EGRESS_ALLOW).toBe(JSON.stringify(allow));

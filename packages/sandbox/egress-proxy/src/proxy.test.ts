@@ -198,7 +198,9 @@ afterEach(async () => {
         }),
     ),
   );
-  await Promise.all(socketDirectories.splice(0).map((directory) => rm(directory, { recursive: true })));
+  await Promise.all(
+    socketDirectories.splice(0).map((directory) => rm(directory, { recursive: true })),
+  );
 });
 
 describe("egress destination classifier", () => {
@@ -246,9 +248,7 @@ describe("egress destination classifier", () => {
   });
 
   it("rejects wildcard and private IP-literal allowlist entries", () => {
-    expect(() =>
-      validateEgressAllowlist([{ host: "*.example.test", ports: [443] }]),
-    ).toThrow();
+    expect(() => validateEgressAllowlist([{ host: "*.example.test", ports: [443] }])).toThrow();
     expect(() => validateEgressAllowlist([{ host: "10.0.0.1", ports: [443] }])).toThrow();
     expect(() => validateEgressAllowlist([{ host: "api.example.test", ports: [] }])).toThrow();
     expect(() => validateEgressAllowlist([{ host: " api.example.test", ports: [443] }])).toThrow();

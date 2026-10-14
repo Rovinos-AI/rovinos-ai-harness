@@ -20,14 +20,10 @@ describe("sandbox Compose configuration", () => {
   });
 
   it("omits the egress profile and stale proxy environment without an allowlist", () => {
-    const invocation = createSandboxComposeInvocation(
-      { allow: [] },
-      ["config"],
-      {
-        SANDBOX_EGRESS_ALLOW: "stale",
-        SANDBOX_EGRESS_PROXY_URL: "http://stale-proxy:3128",
-      },
-    );
+    const invocation = createSandboxComposeInvocation({ allow: [] }, ["config"], {
+      SANDBOX_EGRESS_ALLOW: "stale",
+      SANDBOX_EGRESS_PROXY_URL: "http://stale-proxy:3128",
+    });
 
     expect(invocation.args).not.toContain("sandbox-egress");
     expect(invocation.args).not.toContain("infra/compose/docker-compose.egress.yml");

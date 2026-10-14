@@ -39,12 +39,7 @@ export function createSandboxComposeInvocation(
 
   if (allow.length > 0) {
     env.SANDBOX_EGRESS_ALLOW = JSON.stringify(allow);
-    args.push(
-      "--profile",
-      "sandbox-egress",
-      "--file",
-      "infra/compose/docker-compose.egress.yml",
-    );
+    args.push("--profile", "sandbox-egress", "--file", "infra/compose/docker-compose.egress.yml");
   } else {
     delete env.SANDBOX_EGRESS_ALLOW;
     delete env.SANDBOX_EGRESS_PROXY_URL;
@@ -53,15 +48,9 @@ export function createSandboxComposeInvocation(
   return { args: [...args, ...composeArgs], env };
 }
 
-if (
-  process.argv[1] !== undefined &&
-  fileURLToPath(import.meta.url) === resolve(process.argv[1])
-) {
+if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const config = await loadConfig();
-  const invocation = createSandboxComposeInvocation(
-    config.sandbox.egress,
-    process.argv.slice(2),
-  );
+  const invocation = createSandboxComposeInvocation(config.sandbox.egress, process.argv.slice(2));
   execFileSync("docker", [...invocation.args], {
     env: invocation.env,
     stdio: "inherit",

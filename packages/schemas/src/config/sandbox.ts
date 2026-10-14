@@ -26,7 +26,11 @@ const SandboxRunnerConfigSchema = z
 /** Exact host and port pairs that the sandbox egress proxy may reach. */
 export const SandboxEgressAllowEntrySchema = z
   .object({
-    host: z.string().min(1).max(253).refine((host) => host.trim() === host && !host.includes("*")),
+    host: z
+      .string()
+      .min(1)
+      .max(253)
+      .refine((host) => host.trim() === host && !host.includes("*")),
     ports: z.array(z.number().int().min(1).max(65_535)).min(1).max(128),
   })
   .strict();
