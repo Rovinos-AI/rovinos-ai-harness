@@ -1,2 +1,0 @@
-import rootConfig from "file:///home/runner/work/rovinos-ai-harness/rovinos-ai-harness/vitest.config.ts";
-export default { ...rootConfig, root: "/home/runner/work/rovinos-ai-harness/rovinos-ai-harness/.coverage-fixture-idFgNj", test: { ...rootConfig.test, projects: [{ extends: true, test: { name: "coverage-fixture", globals: true, include: ["packages/coverage-fixture/src/*.test.ts"] } }], coverage: { ...rootConfig.test.coverage, reportsDirectory: "/home/runner/work/rovinos-ai-harness/rovinos-ai-harness/.coverage-fixture-idFgNj/coverage" } } };

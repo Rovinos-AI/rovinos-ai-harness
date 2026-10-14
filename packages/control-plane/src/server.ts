@@ -50,11 +50,7 @@ const MCP_APP_MIME = "text/html;profile=mcp-app";
 
 /** Mutation operations supplied by the composed runtime. */
 export interface ControlPlaneOperations {
-  readonly resumeRun?: (
-    runId: Id,
-    signal: AbortSignal,
-    onClaimed: () => void,
-  ) => Promise<unknown>;
+  readonly resumeRun?: (runId: Id, signal: AbortSignal, onClaimed: () => void) => Promise<unknown>;
   readonly cancelRun?: (runId: Id) => Promise<unknown>;
   readonly resolveApproval?: ResolveApprovalOperation;
 }

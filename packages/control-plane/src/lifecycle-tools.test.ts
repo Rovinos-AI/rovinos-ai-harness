@@ -7,10 +7,7 @@ import { Code, JsonValue, type Id, type NewEvent } from "@harness/schemas";
 import { ApprovalEditError } from "@harness/policy";
 import type { ServerContext } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  ConfirmationGate,
-  type ConfirmationRequest,
-} from "./confirmation-gate.js";
+import { ConfirmationGate, type ConfirmationRequest } from "./confirmation-gate.js";
 import { createControlPlaneServer } from "./server.js";
 import type { ResolveApprovalOperation } from "./tools/approve.js";
 import { findApprovalRequest } from "./tools/run-state.js";
@@ -382,7 +379,6 @@ describe("confirmation-gated control-plane tools", () => {
             { once: true },
           );
         });
-
       }),
       cancelRun: vi.fn(() => Promise.resolve("cancelled")),
     };
@@ -429,15 +425,14 @@ describe("confirmation-gated control-plane tools", () => {
     if (challenge.status !== "input_required") {
       throw new Error("Expected a confirmation challenge.");
     }
-    const decodedState = await gate.verifyRequestState(
-      challenge.result.requestState ?? "",
-      capturedContext,
-    );
+    const requestStateToken = challenge.result.requestState;
+    if (requestStateToken === undefined) {
+      throw new Error("Expected a confirmation request state.");
+    }
     const retryContext: ServerContext = {
       ...capturedContext,
       mcpReq: {
         ...capturedContext.mcpReq,
-        requestState: <T>() => decodedState as T,
         inputResponses: { confirm: { action: "accept", content: { confirm: true } } },
       },
     };
@@ -446,11 +441,15 @@ describe("confirmation-gated control-plane tools", () => {
       arguments: { second: "two", first: "one" },
     };
 
-    await expect(gate.requireHuman(retryContext, reorderedRequest)).resolves.toEqual({
-      status: "allowed",
-    });
     await expect(
-      new ConfirmationGate({ store, key }).requireHuman(retryContext, reorderedRequest),
+      gate.requireHuman(retryContext, reorderedRequest, requestStateToken),
+    ).resolves.toEqual({ status: "allowed" });
+    await expect(
+      new ConfirmationGate({ store, key }).requireHuman(
+        retryContext,
+        reorderedRequest,
+        requestStateToken,
+      ),
     ).resolves.toEqual({ status: "denied", code: "confirmation_state_replayed" });
   });
 

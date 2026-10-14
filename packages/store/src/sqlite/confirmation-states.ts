@@ -11,9 +11,9 @@ export class SqliteConfirmationStates {
   /** Prepares atomic confirmation-state consumption for the open database. */
   constructor(db: Database.Database) {
     this.consumeTransaction = db.transaction((stateId: string, expiresAt: number, now: number) => {
-      db.prepare<[number]>(
-        "DELETE FROM control_plane_consumed_states WHERE expires_at <= ?",
-      ).run(now);
+      db.prepare<[number]>("DELETE FROM control_plane_consumed_states WHERE expires_at <= ?").run(
+        now,
+      );
       return (
         db
           .prepare<[string, number], { state_id: string }>(

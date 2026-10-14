@@ -107,16 +107,32 @@ export class ConfirmationGate {
   readonly verifyRequestState = (state: string, context: ServerContext): Promise<unknown> =>
     this.codec.verify(state, context);
 
-  /** Requires an app-host assertion or a fresh human-confirmed elicitation. */
+  /**
+   * Requires an app-host assertion or a fresh human-confirmed elicitation.
+   * @param requestStateToken - Optional opaque token verified for hosts outside the SDK retry flow.
+   */
   async requireHuman(
     context: ServerContext,
     request: ConfirmationRequest,
+    requestStateToken?: string,
   ): Promise<ConfirmationGateResult> {
     if (this.isAppContext(context, request.toolName)) {
       return { status: "allowed" };
     }
 
-    const stateValue = context.mcpReq.requestState();
+    let stateValue: unknown;
+    if (requestStateToken === undefined) {
+      stateValue = context.mcpReq.requestState();
+    } else {
+      try {
+        stateValue = await this.codec.verify(requestStateToken, context);
+      } catch {
+        return { status: "denied", code: Code.parse("confirmation_state_invalid") };
+      }
+      if (stateValue === undefined) {
+        return { status: "denied", code: Code.parse("confirmation_state_invalid") };
+      }
+    }
     if (stateValue !== undefined) {
       return this.acceptRetry(context, request, stateValue);
     }
@@ -203,5 +219,7 @@ function supportsFormElicitation(
 }
 
 function digestArguments(argumentsValue: Readonly<Record<string, unknown>>): string {
-  return createHash("sha256").update(canonicalJson(argumentsValue) ?? "null").digest("hex");
+  return createHash("sha256")
+    .update(canonicalJson(argumentsValue) ?? "null")
+    .digest("hex");
 }

@@ -14,11 +14,7 @@ const RunSupervisorOptionsSchema = z
 /** Dependencies for supervising in-process run resumes. */
 export interface RunSupervisorOptions {
   readonly maxConcurrentRuns?: number;
-  readonly resumeRun?: (
-    runId: Id,
-    signal: AbortSignal,
-    onClaimed: () => void,
-  ) => Promise<unknown>;
+  readonly resumeRun?: (runId: Id, signal: AbortSignal, onClaimed: () => void) => Promise<unknown>;
   readonly activeRuns?: Pick<ActiveRuns, "register" | "terminate">;
 }
 
@@ -118,6 +114,6 @@ function resumeErrorCode(error: unknown): Code {
 function isTerminalResumeResult(result: unknown): boolean {
   return z
     .object({ status: z.enum(["completed", "failed", "cancelled"]) })
-    .passthrough()
+    .loose()
     .safeParse(result).success;
 }

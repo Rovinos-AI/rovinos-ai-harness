@@ -76,13 +76,13 @@ describe("RunSupervisor", () => {
     await vi.waitFor(() => {
       expect(failed.isActive(runId)).toBe(false);
     });
-
   });
 
   it("returns a claim conflict before acknowledging the resume", async () => {
     const runId = Id.parse("00000000000000000000000001");
     const supervisor = new RunSupervisor({
-      resumeRun: () => Promise.reject({ code: "resume_conflict" }),
+      resumeRun: () =>
+        Promise.reject(Object.assign(new Error("synthetic conflict"), { code: "resume_conflict" })),
     });
 
     await expect(supervisor.start(runId)).resolves.toEqual({
