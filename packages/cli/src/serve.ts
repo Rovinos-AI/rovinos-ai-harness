@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, ServeResultSchema } from "@harness/schemas";
+import type { ControlPlaneOperations } from "@harness/control-plane";
+import type { Runtime, ToolPort } from "@harness/core";
 import { z } from "zod";
 import type { CommandModule } from "./command.js";
 import { createCommandRuntime } from "./command.js";
@@ -53,19 +55,25 @@ export const serveCommand: CommandModule = {
           }
 
           const config = await context.loadConfig();
-          const runtime = await createCommandRuntime(context, config);
+          const tool = await context.createToolPort?.(config);
+          const runtime = await createCommandRuntime(
+            context,
+            config,
+            tool === undefined ? undefined : { tool },
+          );
           let closeServer: (() => Promise<void>) | undefined;
           try {
             const { startControlPlaneHttp, startControlPlaneStdio } =
               await import("@harness/control-plane");
+            const operations = createControlPlaneOperations(runtime, tool);
             if (http) {
-              const handle = await startControlPlaneHttp(runtime.store, port);
+              const handle = await startControlPlaneHttp(runtime.store, port, { operations });
               closeServer = () => handle.close();
               context.out.json(ServeResultSchema, { status: "serving" });
               context.out.print(`${handle.endpoint}\n`);
               await waitForShutdown(false);
             } else {
-              const handle = startControlPlaneStdio(runtime.store);
+              const handle = startControlPlaneStdio(runtime.store, { operations });
               closeServer = () => handle.close();
               await waitForShutdown(true);
             }
@@ -80,6 +88,29 @@ export const serveCommand: CommandModule = {
       );
   },
 };
+
+function createControlPlaneOperations(
+  runtime: Runtime,
+  tool: ToolPort | undefined,
+): ControlPlaneOperations {
+  return {
+    resumeRun: (runId, signal, onClaimed) => runtime.resume(runId, { signal, onClaimed }),
+    cancelRun: (runId) => runtime.cancel(runId),
+    resolveApproval: async ({ runId, approvalId, decision, edits, reason }) => {
+      const { resolveApproval } = await import("@harness/core");
+      await resolveApproval(
+        runtime.store,
+        runId,
+        approvalId,
+        decision,
+        edits,
+        runtime.clock,
+        tool,
+        { decidedBy: "human", ...(reason === undefined ? {} : { reason }) },
+      );
+    },
+  };
+}
 
 function waitForShutdown(stdio: boolean): Promise<void> {
   return new Promise((resolve) => {

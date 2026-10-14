@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InMemoryEventStore } from "@harness/store";
 import { Id } from "@harness/schemas";
+import type * as McpServerModule from "@modelcontextprotocol/server";
 import { describe, expect, it, vi } from "vitest";
 
 interface MockRequest {
@@ -101,15 +102,23 @@ vi.mock("@modelcontextprotocol/node", () => ({
     },
   toNodeHandler: () => mocks.httpRequestHandler,
 }));
-vi.mock("@modelcontextprotocol/server", () => ({
-  createMcpHandler: mocks.createMcpHandler,
-  McpServer: class {
-    server = { registerCapabilities: (_capabilities: unknown) => undefined };
-    registerTool(): void {
-      this.server.registerCapabilities({});
-    }
-  },
-}));
+vi.mock("@modelcontextprotocol/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof McpServerModule>();
+  return {
+    ...actual,
+    createMcpHandler: mocks.createMcpHandler,
+    McpServer: class {
+      server = {
+        getClientCapabilities: () => undefined,
+        registerCapabilities: (_capabilities: unknown) => undefined,
+        setRequestHandler: (_method: string, _handler: unknown) => undefined,
+      };
+      registerTool(): void {
+        this.server.registerCapabilities({});
+      }
+    },
+  };
+});
 vi.mock("@modelcontextprotocol/server/stdio", () => ({ serveStdio: mocks.serveStdio }));
 
 import { startControlPlaneHttp, startControlPlaneStdio } from "./server.js";

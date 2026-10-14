@@ -298,6 +298,10 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.deleteRun(forRun);
   }
 
+  consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean> {
+    return this.inner.consumeConfirmationState(stateId, expiresAt, now);
+  }
+
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {
     return this.inner.listRuns(options);
   }
@@ -500,6 +504,10 @@ class PreIntentExecutionStore implements EventStore {
 
   deleteRun(forRun: Id) {
     return this.inner.deleteRun(forRun);
+  }
+
+  consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean> {
+    return this.inner.consumeConfirmationState(stateId, expiresAt, now);
   }
 
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {

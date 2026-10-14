@@ -225,7 +225,7 @@ async function routeToolList(
     query.set("cursor", cursor);
   }
   try {
-    const response = await request(`/api/tools?${query.toString()}`, {
+    const response = await request.call(globalThis, `/api/tools?${query.toString()}`, {
       headers: authorizedHeaders(token),
     });
     if (!response.ok) {
@@ -244,7 +244,7 @@ async function routeToolCall(
   request: typeof fetch,
 ): Promise<z.infer<typeof CallResponseSchema>> {
   try {
-    const response = await request("/api/call", {
+    const response = await request.call(globalThis, "/api/call", {
       method: "POST",
       headers: { ...authorizedHeaders(launch.token), "content-type": "application/json" },
       body: JSON.stringify({

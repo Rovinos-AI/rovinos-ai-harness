@@ -27,6 +27,8 @@ function brokenFactory(): EventStoreFactory {
       watchRuns: (options) => reference.watchRuns(options),
       head: (runId) => reference.head(runId),
       deleteRun: (runId) => reference.deleteRun(runId),
+      consumeConfirmationState: (stateId, expiresAt, now) =>
+        reference.consumeConfirmationState(stateId, expiresAt, now),
       listRuns: (options) => reference.listRuns(options),
       findRunsByTrace: (traceId) => reference.findRunsByTrace(traceId),
       fetchOutbox: (sinkId, limit) => reference.fetchOutbox(sinkId, limit),

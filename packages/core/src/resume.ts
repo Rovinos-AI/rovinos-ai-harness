@@ -66,6 +66,8 @@ export interface ResumeRunOptions extends Omit<RunLoopExecutionOptions, "recorde
   readonly scopes?: RunScopeRegistry;
   /** Policy for dangling non-idempotent tool intents; defaults to escalation. */
   readonly resumePolicy?: ResumePolicy;
+  /** Called immediately after this worker wins the durable resume claim. */
+  readonly onClaimed?: () => void;
 }
 
 async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
@@ -349,6 +351,7 @@ class ResumeBudgetExceededError extends Error {}
 async function claimAndContinue(execution: ResumeExecution): Promise<Event> {
   try {
     execution.events.push(...(await execution.recorder.recordBatch(claimEvents(execution.state))));
+    execution.options.onClaimed?.();
   } catch (error) {
     if (error instanceof LeaseLostError) {
       throw new ResumeConflictError();

@@ -1062,6 +1062,8 @@ __metadata:
   resolution: "@harness/control-plane@workspace:packages/control-plane"
   dependencies:
     "@harness/core": "workspace:^"
+    "@harness/models": "workspace:^"
+    "@harness/policy": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
@@ -1248,6 +1250,7 @@ __metadata:
     "@opentelemetry/context-async-hooks": "npm:2.12.0"
     "@opentelemetry/resources": "npm:2.12.0"
     "@opentelemetry/sdk-logs": "npm:0.223.0"
+    "@opentelemetry/sdk-metrics": "npm:2.12.0"
     "@opentelemetry/sdk-trace-base": "npm:2.12.0"
     "@opentelemetry/semantic-conventions": "npm:1.43.0"
     "@types/node": "npm:22.20.5"
@@ -1559,6 +1562,18 @@ __metadata:
   peerDependencies:
     "@opentelemetry/api": ">=1.4.0 <1.10.0"
   checksum: 10c0/18f7b608f52845a0404c2eacc03e3156f75bb6e901a53c4c0ba43e6bf103f7760e4e4e932d971a6ed6e8ab82db124f6dad7381f920fb6060516e09a8d7b33445
+  languageName: node
+  linkType: hard
+
+"@opentelemetry/sdk-metrics@npm:2.12.0":
+  version: 2.12.0
+  resolution: "@opentelemetry/sdk-metrics@npm:2.12.0"
+  dependencies:
+    "@opentelemetry/core": "npm:2.12.0"
+    "@opentelemetry/resources": "npm:2.12.0"
+  peerDependencies:
+    "@opentelemetry/api": ">=1.9.0 <1.10.0"
+  checksum: 10c0/ade35092d89de10ff3fe5058c632bf26c2dc21a74336e7946bd46156f58f85aab048fb30367cb091494b099242711895b27624efb31e78551ee6b2d05eee0c52
   languageName: node
   linkType: hard
 
@@ -5406,6 +5421,7 @@ __metadata:
     "@harness/cli": "workspace:^"
     "@harness/config": "workspace:^"
     "@harness/context": "workspace:^"
+    "@harness/control-plane": "workspace:^"
     "@harness/core": "workspace:^"
     "@harness/eslint-plugin-harness": "workspace:^"
     "@harness/host": "workspace:^"
@@ -5416,6 +5432,7 @@ __metadata:
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
+    "@modelcontextprotocol/client": "npm:2.3.1"
     "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"
     "@opentelemetry/core": "npm:2.12.0"
@@ -5436,6 +5453,7 @@ __metadata:
     eslint-plugin-unicorn: "npm:65.0.0"
     eslint-plugin-yml: "npm:3.9.0"
     markdownlint-cli2: "npm:0.23.3"
+    playwright: "npm:1.64.0"
     prettier: "npm:3.9.9"
     spdx-expression-parse: "npm:5.0.0"
     typescript: "npm:5.9.3"

@@ -2,7 +2,12 @@
 import { createHash } from "node:crypto";
 import { Sha256Hex, type ModelRequest } from "@harness/schemas";
 
-function canonicalJson(value: unknown): string | undefined {
+/**
+ * Serialize JSON-compatible values with object keys in ordinal order.
+ * @param value JSON-compatible value.
+ * @returns Canonical JSON text, or undefined for an undefined root.
+ */
+export function canonicalJson(value: unknown): string | undefined {
   if (Array.isArray(value)) {
     return `[${value.map((entry) => canonicalJson(entry) ?? "null").join(",")}]`;
   }

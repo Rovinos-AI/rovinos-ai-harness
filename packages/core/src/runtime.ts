@@ -3,6 +3,11 @@ import { HarnessError, type Event, type Id, type JsonValue } from "@harness/sche
 import { PiiToolPort } from "@harness/pii";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
+import {
+  composeAbortSignals,
+  inspectCancellationTail,
+  watchCancellation,
+} from "./runtime-cancellation.js";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import type { ToolPort } from "./ports.js";
@@ -22,9 +27,15 @@ import type {
   Runtime,
   RuntimeComposition,
   RuntimeConfig,
+  RuntimeResumeOptions,
   RuntimeOverrides,
 } from "./runtime-config.js";
-export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
+export type {
+  Runtime,
+  RuntimeConfig,
+  RuntimeOverrides,
+  RuntimeResumeOptions,
+} from "./runtime-config.js";
 
 class RunInputMissingError extends HarnessError {
   readonly code = "run_input_missing";
@@ -287,7 +298,7 @@ function createRuntimeResume(
   runWithControl: RunControl,
 ): Runtime["resume"] {
   const { config, clock, ids, store, model, context, policy, scopes } = options;
-  return async (runId) => {
+  return async (runId, resumeOptions: RuntimeResumeOptions = {}) => {
     const firstNewSeq = await store.head(runId);
     return runWithControl(
       runId,
@@ -296,22 +307,33 @@ function createRuntimeResume(
         if (goal === undefined) {
           throw new RunInputMissingError();
         }
-        return resumeRun({
-          store,
-          runId,
-          clock,
-          ids,
-          goal,
-          model,
-          tool,
-          policy,
-          context,
+        const composed = composeAbortSignals([
           signal,
-          scopes,
-          budgets: config.run.budgets,
-          checkpointEveryEvents: config.run.checkpointEveryEvents,
-          resumePolicy: config.run.resume.onNonIdempotent,
-        });
+          ...(resumeOptions.signal === undefined ? [] : [resumeOptions.signal]),
+        ]);
+        try {
+          return await resumeRun({
+            store,
+            runId,
+            clock,
+            ids,
+            goal,
+            model,
+            tool,
+            policy,
+            context,
+            signal: composed.signal,
+            scopes,
+            budgets: config.run.budgets,
+            checkpointEveryEvents: config.run.checkpointEveryEvents,
+            resumePolicy: config.run.resume.onNonIdempotent,
+            ...(resumeOptions.onClaimed === undefined
+              ? {}
+              : { onClaimed: resumeOptions.onClaimed }),
+          });
+        } finally {
+          composed.dispose();
+        }
       },
       firstNewSeq,
     );

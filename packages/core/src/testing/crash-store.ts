@@ -102,6 +102,10 @@ export class CrashingEventStore implements EventStore {
     return this.inner.deleteRun(runId);
   }
 
+  consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean> {
+    return this.inner.consumeConfirmationState(stateId, expiresAt, now);
+  }
+
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
     return this.inner.listRuns(opts);
   }

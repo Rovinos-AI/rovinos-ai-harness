@@ -1,0 +1,27 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit }) => {
+        window.parent.postMessage(
+          {
+            jsonrpc: "1.0",
+            id: {},
+            method: "tools/call",
+            params: { name: "harness.telemetry.emit" },
+          },
+          "*",
+        );
+        window.parent.postMessage(
+          { jsonrpc: "2.0", id: 9_999, method: "tools/call", params: { name: 17 } },
+          "*",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await emit([
+          { name: "ui.error", code: "malformed_jsonrpc_blocked", startOffsetMs: 0, durationMs: 0 },
+        ]);
+      };
+    </script>
+  </body>
+</html>

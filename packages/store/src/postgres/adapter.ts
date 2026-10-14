@@ -43,6 +43,7 @@ import {
 } from "./helpers.js";
 import { deleteRunTransaction } from "./retention.js";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";
+import { PostgresConfirmationStates } from "./confirmation-states.js";
 import { initializePostgresStore } from "./initialize.js";
 import { readEvents } from "./reader.js";
 import { isRunTerminal, PostgresSubscriptions } from "./subscriptions.js";
@@ -75,6 +76,7 @@ export class PostgresEventStore implements EventStore {
   private readonly clock: Clock;
   private readonly skipMigrations: boolean;
   private readonly approvalNotifications: PostgresApprovalNotifications;
+  private readonly confirmationStates: PostgresConfirmationStates;
   private readonly subscriptions: PostgresSubscriptions;
   private initialized: Promise<void> | undefined;
 
@@ -108,6 +110,9 @@ export class PostgresEventStore implements EventStore {
     this.clock = clock;
     this.skipMigrations = parsedOptions.data.skipMigrations;
     this.approvalNotifications = new PostgresApprovalNotifications(this.pool, () =>
+      this.ensureInitialized(),
+    );
+    this.confirmationStates = new PostgresConfirmationStates(this.pool, () =>
       this.ensureInitialized(),
     );
     this.subscriptions = new PostgresSubscriptions(
@@ -407,6 +412,14 @@ export class PostgresEventStore implements EventStore {
   ): ReturnType<EventStore["releaseApprovalNotification"]> {
     this.assertWritable();
     return this.approvalNotifications.release(...args);
+  }
+
+  /** {@inheritDoc EventStore.consumeConfirmationState} */
+  consumeConfirmationState(
+    ...args: Parameters<EventStore["consumeConfirmationState"]>
+  ): ReturnType<EventStore["consumeConfirmationState"]> {
+    this.assertWritable();
+    return this.confirmationStates.consume(...args);
   }
 
   /** {@inheritDoc EventStore.close} */

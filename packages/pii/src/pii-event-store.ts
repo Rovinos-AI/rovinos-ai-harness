@@ -58,6 +58,7 @@ export interface EventStoreLike {
   watchRuns(options: WatchRunsOptionsLike): AsyncIterable<RunSummaryLike>;
   head(runId: Id): Promise<number>;
   deleteRun(runId: Id): Promise<number>;
+  consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean>;
   listRuns(opts: ListRunsOptionsLike): Promise<{ runs: RunSummaryLike[]; nextCursor?: string }>;
   findRunsByTrace(traceId: TraceId): Promise<Id[]>;
   fetchOutbox(sinkId: Code, limit: number): Promise<{ events: Event[]; cursor: number }>;
@@ -185,6 +186,10 @@ export class PiiEventStore implements EventStoreLike {
 
   deleteRun(runId: Id): Promise<number> {
     return this.inner.deleteRun(runId);
+  }
+
+  consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean> {
+    return this.inner.consumeConfirmationState(stateId, expiresAt, now);
   }
 
   listRuns(opts: ListRunsOptionsLike): Promise<{ runs: RunSummaryLike[]; nextCursor?: string }> {

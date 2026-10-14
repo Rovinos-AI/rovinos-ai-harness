@@ -5,13 +5,16 @@ import { join } from "node:path";
 import { context as otelContext, diag, isSpanContextValid, trace } from "@opentelemetry/api";
 import {
   FakeClock,
+  Code,
   Id,
+  type NewEvent,
   RunConfigSchema,
   SequentialIdGenerator,
   Sha256Hex,
   type Event as HarnessEvent,
 } from "@harness/schemas";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
+import { createEventBuilders } from "@harness/store/testing";
 import {
   createTestContextManager,
   createTestSpanCollector,
@@ -113,6 +116,7 @@ describe("runtime tracing fallback", () => {
       store: new InMemoryEventStore(),
       model: new FakeModelPort([completion()]),
     });
+
     const providerResult = await runtimeWithProvider.run("goal");
 
     expect(providerResult.status).toBe("completed");
@@ -762,6 +766,110 @@ describe("runtime tracing fallback", () => {
     expect(
       events.some((event) => event.type === "run_status_changed" && event.to === "cancelled"),
     ).toBe(false);
+    await runtime.close();
+  });
+});
+
+describe("runtime resume cancellation signal", () => {
+  it("bridges an external abort signal to a slow resumed tool", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    const callId = builders.nextRunId();
+    const toolId = Code.parse("tool.slow");
+    const events: NewEvent[] = [
+      builders.runCreated(runId),
+      {
+        runId,
+        ts: 2,
+        v: 1,
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        segmentId: runId,
+        type: "run_input",
+        input: "resume goal",
+        inputKind: "initial",
+      },
+      builders.runStatusChanged(runId, "pending", "running"),
+      {
+        runId,
+        ts: 3,
+        v: 1,
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        segmentId: runId,
+        type: "tool_intent",
+        callId,
+        toolId,
+        idempotent: true,
+        policyDecision: "allow",
+        ruleId: Code.parse("test.allow"),
+        argsHash: "a".repeat(64),
+        args: {},
+      },
+    ];
+    await store.append(runId, events, 0);
+
+    let receivedSignal: AbortSignal | undefined;
+    let markStarted: () => void = () => undefined;
+    let markInterrupted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const interrupted = new Promise<void>((resolve) => {
+      markInterrupted = resolve;
+    });
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: true, timeoutMs: 60_000 }),
+      execute: (_call, context) =>
+        new Promise<ToolExecutionResult>((resolve) => {
+          receivedSignal = context.signal;
+          markStarted();
+          const onAbort = (): void => {
+            markInterrupted();
+            resolve({
+              outcome: "error",
+              result: null,
+              errorCode: Code.parse("run_aborted"),
+            });
+          };
+          context.signal.addEventListener("abort", onAbort, { once: true });
+          if (context.signal.aborted) {
+            onAbort();
+          }
+        }),
+    };
+    const runtime = await createRuntime(config, {
+      store,
+      clock: new FakeClock(100),
+      ids: new SequentialIdGenerator(),
+      model: new FakeModelPort([completion()]),
+      policy: allowPolicy,
+      tool,
+    });
+    const external = new AbortController();
+    let claimed = false;
+    const resumed = runtime.resume(runId, {
+      signal: external.signal,
+      onClaimed: () => {
+        claimed = true;
+      },
+    });
+
+    const firstResumeOutcome = await Promise.race([
+      started.then(() => "tool_started"),
+      resumed.then(
+        () => "resume_completed",
+        () => "resume_failed",
+      ),
+    ]);
+    expect(firstResumeOutcome).toBe("tool_started");
+    expect(claimed).toBe(true);
+    external.abort();
+    await interrupted;
+    await resumed.catch(() => undefined);
+
+    expect(receivedSignal?.aborted).toBe(true);
     await runtime.close();
   });
 });

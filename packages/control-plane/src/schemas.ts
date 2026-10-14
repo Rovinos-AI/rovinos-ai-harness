@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, RunStatus } from "@harness/schemas";
+import { Code, Id, JsonValue, RunStatus } from "@harness/schemas";
 import { SafeEvent } from "@harness/telemetry";
 import { z } from "zod";
 
@@ -35,6 +35,41 @@ export const listRunsOutputSchema = z
 
 /** Validated input for the `get_run` tool. */
 export const getRunInputSchema = z.object({ runId: Id }).strict();
+
+/** Validated input for the `approve` tool. */
+export const approveInputSchema = z
+  .object({
+    approvalId: Id,
+    edits: JsonValue.optional(),
+  })
+  .strict();
+
+/** Validated input for the `deny` tool. */
+export const denyInputSchema = z
+  .object({
+    approvalId: Id,
+    reason: Code.optional(),
+  })
+  .strict();
+
+/** Validated input for run lifecycle tools. */
+export const runLifecycleInputSchema = z.object({ runId: Id }).strict();
+
+/** Metadata-only output for decision tools. */
+export const decisionOutputSchema = z
+  .object({
+    ok: z.boolean(),
+    code: Code.optional(),
+  })
+  .strict();
+
+/** Metadata-only output for `resume_run`. */
+export const resumeRunOutputSchema = z
+  .object({
+    started: z.boolean(),
+    code: Code.optional(),
+  })
+  .strict();
 
 /** Validated TCP port for the loopback HTTP listener; zero requests an ephemeral port. */
 export const controlPlaneHttpPortSchema = z.number().int().min(0).max(65_535);
@@ -78,3 +113,11 @@ export type ListRunsOutput = z.infer<typeof listRunsOutputSchema>;
 export type GetRunInput = z.input<typeof getRunInputSchema>;
 /** Inferred structured output for `get_run`. */
 export type GetRunOutput = z.infer<typeof getRunOutputSchema>;
+/** Inferred input for `approve`. */
+export type ApproveInput = z.input<typeof approveInputSchema>;
+/** Inferred input for `deny`. */
+export type DenyInput = z.input<typeof denyInputSchema>;
+/** Inferred metadata-only decision output. */
+export type DecisionOutput = z.infer<typeof decisionOutputSchema>;
+/** Inferred metadata-only resume output. */
+export type ResumeRunOutput = z.infer<typeof resumeRunOutputSchema>;

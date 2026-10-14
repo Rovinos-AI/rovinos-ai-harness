@@ -4,6 +4,13 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
+import {
+  AggregationTemporality,
+  InMemoryMetricExporter,
+  MeterProvider,
+  PeriodicExportingMetricReader,
+  type ResourceMetrics,
+} from "@opentelemetry/sdk-metrics";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import type { Id, VaultValueEntry } from "@harness/schemas";
 import type { VaultRunReader } from "./sentinel/run-values.js";
@@ -34,6 +41,28 @@ export function createTestSpanCollector(): {
   return {
     provider,
     getFinishedSpans: () => exporter.getFinishedSpans(),
+  };
+}
+
+/** In-memory metric provider for integration tests that inspect exported counters. */
+export interface TestMetricCollector {
+  readonly provider: MeterProvider;
+  getMetrics(): ResourceMetrics[];
+  forceFlush(): Promise<void>;
+}
+
+/** Creates a metric provider whose reader exports snapshots to an in-memory exporter. */
+export function createTestMetricCollector(): TestMetricCollector {
+  const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+  const reader = new PeriodicExportingMetricReader({
+    exporter,
+    exportIntervalMillis: 60_000,
+  });
+  const provider = new MeterProvider({ readers: [reader] });
+  return {
+    provider,
+    getMetrics: () => exporter.getMetrics(),
+    forceFlush: () => provider.forceFlush(),
   };
 }
 
