@@ -64,13 +64,8 @@ export class ApprovalEditNotAllowedError extends HarnessError {
   }
 }
 
-function resultToolId(
-  options: Pick<ResumeToolStepOptions, "tool">,
-  intent: ToolIntentEvent,
-): Code {
-  return options.tool.describe(intent.toolId) === undefined
-    ? UNREGISTERED_TOOL_ID
-    : intent.toolId;
+function resultToolId(options: Pick<ResumeToolStepOptions, "tool">, intent: ToolIntentEvent): Code {
+  return options.tool.describe(intent.toolId) === undefined ? UNREGISTERED_TOOL_ID : intent.toolId;
 }
 
 async function recordDanglingFailure(
