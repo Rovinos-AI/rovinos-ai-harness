@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { ContextInspectionSchema, Event as EventSchema, parseJson } from "@harness/schemas";
 import { StrategyComparisonReportSchema } from "@harness/context";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
+import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { main } from "../main.js";
@@ -87,7 +88,7 @@ async function harness() {
   const config = HarnessConfigSchema.parse({});
   const createRuntime = vi.fn((_config: unknown, _overrides?: RuntimeOverrides) => ({
     store,
-    vault: { resolve: () => Promise.resolve(undefined) },
+    vault: new AuditingVaultResolver(new InMemoryVault(), () => undefined),
     keys: {
       currentKeyId: () => "fake",
       getKey: () => Promise.resolve(new Uint8Array(32)),

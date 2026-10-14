@@ -3,7 +3,6 @@
 // Not wired yet: approval escalation WebhookNotifier (17.6 -> #125)
 // Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
-// Not wired yet: approvals --reveal (17.10 -> #373)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
 import { Command } from "commander";
 import { trace } from "@opentelemetry/api";
@@ -20,14 +19,26 @@ import {
   main,
   type CliContext,
 } from "@harness/cli/programmatic";
-import { CompositeSecretResolver } from "@harness/config";
-import { createRuntime, type ModelCompletion, type ToolPort } from "@harness/core";
+import { CompositeSecretResolver, EnvSecretResolver, FileSecretResolver } from "@harness/config";
+import {
+  Checkpointer,
+  createRuntime,
+  foldRunState,
+  NaiveContext,
+  requestApproval,
+  RunRecorder,
+  RUN_SPAN,
+  type ModelCompletion,
+  type ToolPort,
+} from "@harness/core";
 import { FakeModelPort } from "@harness/core/testing";
+import { buildApprovalPayload } from "@harness/policy";
 import {
   ApprovalListResultSchema,
   ApprovalShowResultSchema,
   FakeClock,
   Id,
+  JsonValue,
   RunResultSchema,
   SequentialIdGenerator,
   StoreMigrateResultSchema,
@@ -35,7 +46,7 @@ import {
   parseJson,
 } from "@harness/schemas";
 import { SqliteEventStore } from "@harness/store";
-import { Token } from "@harness/vault";
+import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
 import {
   attr,
   createTelemetrySdk,
@@ -44,7 +55,7 @@ import {
   listSpanDefinitions,
   type TelemetrySdkOptions,
 } from "@harness/telemetry";
-import type { JsonValue, Event } from "@harness/schemas";
+import type { Event } from "@harness/schemas";
 import type { z } from "zod";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -205,6 +216,85 @@ function jsonResult<Schema extends z.ZodType>(
   return parseJson(schema, output.join("").trim());
 }
 
+function expectCanaryOnlyInRevealed(result: CliCapture, canary: string): void {
+  const displayed = jsonResult(ApprovalShowResultSchema, result.stdout);
+  expect(result.stdout.join("")).toContain(canary);
+  expect(JSON.stringify(displayed.revealed ?? null)).toContain(canary);
+  expect(JSON.stringify({ ...displayed, revealed: undefined })).not.toContain(canary);
+  expect(result.stderr.join("")).not.toContain(canary);
+}
+
+async function seedChildApproval(current: Skeleton, rootRunId: Id) {
+  const childRunId = Id.parse(current.ids.next());
+  const segmentId = Id.parse(current.ids.next());
+  const parentCallId = Id.parse(current.ids.next());
+  const callId = Id.parse(current.ids.next());
+  const approvalId = Id.parse(current.ids.next());
+  const args = { email: "<EMAIL_1>", foreign: "<PHONE_1>" };
+  const store = new SqliteEventStore(current.eventStorePath);
+  const recorder = new RunRecorder(store, childRunId, segmentId, 0, current.clock);
+  try {
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      const recorded = await recorder.recordBatch([
+        {
+          type: "run_created",
+          v: 1,
+          configHash: "a".repeat(64),
+          policyVersion: "e2e.synthetic",
+          parentRunId: rootRunId,
+          parentCallId,
+          scopeId: rootRunId,
+          depth: 1,
+        },
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "pending",
+          to: "running",
+          reason: "start",
+        },
+        {
+          type: "tool_intent",
+          v: 1,
+          callId,
+          toolId: ASK_TOOL,
+          idempotent: true,
+          policyDecision: "ask",
+          argsHash: "b".repeat(64),
+          args,
+        },
+      ]);
+      const last = recorded.at(-1);
+      if (last === undefined) {
+        throw new Error("The synthetic child run was not recorded.");
+      }
+      return last;
+    });
+    const events = await readEvents(store, childRunId);
+    const payload = buildApprovalPayload({
+      call: { callId, toolId: ASK_TOOL, args },
+      rule: { id: "ask_synthetic", reason: "synthetic_approval" },
+      now: current.clock.now(),
+    });
+    await requestApproval(recorder, {
+      approvalId,
+      callId,
+      payload: JsonValue.parse(payload),
+      state: foldRunState(events),
+      checkpointer: new Checkpointer({
+        recorder,
+        runId: childRunId,
+        context: new NaiveContext(),
+        ids: current.ids,
+        clock: current.clock,
+      }),
+    });
+  } finally {
+    await store.close();
+  }
+  return { childRunId, approvalId };
+}
+
 beforeAll(async () => {
   const directory = await mkdtemp(join(tmpdir(), "harness-e2e-skeleton-"));
   const configPath = join(directory, "harness.yaml");
@@ -258,7 +348,11 @@ beforeAll(async () => {
           toolId: ALLOW_TOOL,
           args: { plan: { items: [], notes: canary } },
         },
-        { callId: id(11), toolId: ASK_TOOL, args: { email: canary } },
+        {
+          callId: id(11),
+          toolId: ASK_TOOL,
+          args: { email: canary, foreign: "<PHONE_1>" },
+        },
       ],
       "awaiting approval",
     ),
@@ -427,9 +521,116 @@ describe("approval", () => {
     current.approvalOutput.push(...list.stdout, ...list.stderr, ...show.stdout, ...show.stderr);
     expect(current.callsAfterApproval).toEqual([]);
 
+    const runId = current.runId;
+    if (runId === undefined) {
+      throw new Error("The run id is not available.");
+    }
+    const config = await current.context.loadConfig();
+    if (config.keys === undefined) {
+      throw new Error("The integration fixture requires configured encryption keys.");
+    }
+    const keys = new LocalKeyProvider({
+      config: config.keys,
+      secretResolver: new CompositeSecretResolver({
+        env: new EnvSecretResolver(process.env),
+        file: new FileSecretResolver(),
+      }),
+      env: process.env,
+      onWarning: () => undefined,
+    });
+    const foreignVault = new SqliteVault(join(current.dataDirectory, "vault.db"), keys, () =>
+      current.clock.now(),
+    );
+    try {
+      expect(
+        await foreignVault.put(Id.parse("00000000000000000000000099"), "phone", "555-0101"),
+      ).toBe("<PHONE_1>");
+    } finally {
+      foreignVault.close();
+      keys.dispose();
+    }
+
+    const reveal = await invokeCli(["--json", "approvals", "show", approvalId, "--reveal"], false);
+    expect(reveal.code).toBe(ExitCode.ok);
+    expect(reveal.stderr.join("")).toContain("reveal_exposes_sensitive_values");
+    const revealed = jsonResult(ApprovalShowResultSchema, reveal.stdout);
+    expect(revealed.args).toEqual({ email: "<EMAIL_1>", foreign: "<PHONE_1>" });
+    expect(revealed.revealed).toEqual({ email: current.canary, foreign: "<PHONE_1>" });
+    expectCanaryOnlyInRevealed(reveal, current.canary);
+
+    const child = await seedChildApproval(current, runId);
+    const childReveal = await invokeCli(
+      ["--json", "approvals", "show", child.approvalId, "--reveal"],
+      false,
+    );
+    expect(childReveal.code).toBe(ExitCode.ok);
+    expect(childReveal.stderr.join("")).toContain("reveal_exposes_sensitive_values");
+    const childRevealed = jsonResult(ApprovalShowResultSchema, childReveal.stdout);
+    expect(childRevealed.runId).toBe(child.childRunId);
+    expect(childRevealed.args).toEqual({ email: "<EMAIL_1>", foreign: "<PHONE_1>" });
+    expect(childRevealed.revealed).toEqual({ email: current.canary, foreign: "<PHONE_1>" });
+    expectCanaryOnlyInRevealed(childReveal, current.canary);
+
+    const store = new SqliteEventStore(current.eventStorePath);
+    try {
+      const audit = (await readEvents(store, runId)).filter(
+        (event): event is Extract<Event, { type: "pii_action" }> =>
+          event.type === "pii_action" && event.boundary === "ui",
+      );
+      expect(audit).toHaveLength(2);
+      expect(audit.map(({ action, entities }) => ({ action, entities }))).toEqual(
+        expect.arrayContaining([
+          { action: "detokenized", entities: [{ type: "email", count: 1 }] },
+          { action: "blocked", entities: [{ type: "phone", count: 1 }] },
+        ]),
+      );
+      expect(JSON.stringify(audit)).not.toContain(current.canary);
+
+      const childAudit = (await readEvents(store, child.childRunId)).filter(
+        (event): event is Extract<Event, { type: "pii_action" }> =>
+          event.type === "pii_action" && event.boundary === "ui",
+      );
+      expect(childAudit).toHaveLength(2);
+      expect(childAudit.map(({ action, entities }) => ({ action, entities }))).toEqual(
+        expect.arrayContaining([
+          { action: "detokenized", entities: [{ type: "email", count: 1 }] },
+          { action: "blocked", entities: [{ type: "phone", count: 1 }] },
+        ]),
+      );
+      expect(JSON.stringify(childAudit)).not.toContain(current.canary);
+    } finally {
+      await store.close();
+    }
+
     const approved = await invokeCli(["--json", "approvals", "approve", approvalId, "--yes"]);
     expect(approved.code).toBe(ExitCode.ok);
     expect(current.callsAfterApproval).toEqual([]);
+  });
+
+  it("returns reveal_unavailable when keys are not configured", async () => {
+    const current = fixture();
+    const approvalId = current.approvalId;
+    if (approvalId === undefined) {
+      throw new Error("The approval id is not available.");
+    }
+    const config = { ...(await current.context.loadConfig()) };
+    delete config.keys;
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const context: CliContext = {
+      ...current.context,
+      loadConfig: () => Promise.resolve(config),
+      out: createOutput({
+        stdout: (text) => stdout.push(text),
+        stderr: (text) => stderr.push(text),
+      }),
+    };
+
+    expect(await main(["--json", "approvals", "show", approvalId, "--reveal"], context)).toBe(
+      ExitCode.failure,
+    );
+    expect(stderr).toEqual(["reveal_unavailable\n"]);
+    expect(stdout).toEqual([]);
   });
 });
 
@@ -444,7 +645,7 @@ describe("resume", () => {
     expect(result.code).toBe(ExitCode.ok);
     expect(jsonResult(RunResultSchema, result.stdout).status).toBe("completed");
     expect(current.callsAfterApproval).toEqual([ASK_TOOL]);
-    expect(current.argsAfterApproval).toEqual([{ email: current.canary }]);
+    expect(current.argsAfterApproval).toEqual([{ email: current.canary, foreign: "<PHONE_1>" }]);
 
     const store = new SqliteEventStore(current.eventStorePath);
     try {
@@ -536,9 +737,9 @@ describe("retention", () => {
     const purge = await invokeCli(["--json", "store", "purge"]);
     expect(purge.code).toBe(ExitCode.ok);
     expect(jsonResult(StorePurgeResultSchema, purge.stdout)).toMatchObject({
-      examined: 1,
+      examined: 2,
       purged: 1,
-      skippedActive: 0,
+      skippedActive: 1,
       hookFailures: 0,
     });
 
