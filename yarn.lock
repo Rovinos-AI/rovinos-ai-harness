@@ -1012,6 +1012,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@harness/app-telemetry@workspace:packages/app-telemetry":
+  version: 0.0.0-use.local
+  resolution: "@harness/app-telemetry@workspace:packages/app-telemetry"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    esbuild: "npm:0.28.2"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+  languageName: unknown
+  linkType: soft
+
 "@harness/cli@workspace:^, @harness/cli@workspace:packages/cli":
   version: 0.0.0-use.local
   resolution: "@harness/cli@workspace:packages/cli"

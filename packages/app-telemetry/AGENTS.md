@@ -10,7 +10,7 @@ Tiny browser-safe telemetry shim used inside MCP Apps. Part of epic 5 (tasks 5.1
 
 ## Allowed internal imports
 
-- None (leaf package).
+- `@harness/schemas`. Nothing else from `@harness/*`.
 - Source: `docs/engineering/layers.json` (lint enforces it; change it there, never here).
 
 <!-- END GENERATED: agents-index -->
