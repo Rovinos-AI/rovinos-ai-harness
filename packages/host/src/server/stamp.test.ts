@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { trace } from "@opentelemetry/api";
 import { FakeClock } from "@harness/schemas";
-import { AllowlistSpanProcessor } from "@harness/telemetry";
+import { ActiveRuns, AllowlistSpanProcessor, SentinelGate, VaultRunView } from "@harness/telemetry";
 import { createTestSpanCollector } from "@harness/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ingestBatch } from "./app-telemetry.js";
@@ -48,7 +48,7 @@ function timeInMilliseconds(time: readonly [number, number] | undefined): number
 }
 
 describe("stampAppSpan", () => {
-  it("uses host identity and trusted clamped timing and parent through the allowlist processor", () => {
+  it("uses host identity and trusted timing through the allowlist and sentinel", async () => {
     const initialCount = collector.getFinishedSpans().length;
     const parent = UI_SESSION_SPAN.start({
       "harness.app.id": appId,
@@ -75,6 +75,15 @@ describe("stampAppSpan", () => {
     if (finished === undefined) {
       throw new Error("The stamped span was not exported.");
     }
+    const activeRuns = new ActiveRuns();
+    activeRuns.register(runId);
+    const gate = new SentinelGate(
+      new VaultRunView({
+        version: () => Promise.resolve(0),
+        listRawValues: () => Promise.resolve([]),
+      }),
+      activeRuns,
+    );
     const allowlisted: Parameters<AllowlistSpanProcessor["onEnd"]>[0][] = [];
     const processor = new AllowlistSpanProcessor(
       {
@@ -83,9 +92,10 @@ describe("stampAppSpan", () => {
         forceFlush: () => Promise.resolve(),
         shutdown: () => Promise.resolve(),
       },
-      { telemetry: { sentinel: { minValueLength: 6, enabled: false } } },
+      { gate },
     );
     processor.onEnd(finished);
+    await processor.forceFlush();
 
     expect(allowlisted).toHaveLength(1);
     expect(allowlisted[0]?.attributes).toMatchObject({
