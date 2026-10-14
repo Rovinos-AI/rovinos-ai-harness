@@ -85,9 +85,9 @@ export interface HostPagePort {
   onHostContextChange(callback: (context: McpUiHostContext) => void): () => void;
   confirmOpenLink(details: OpenLinkDetails, open: (url: string) => boolean): Promise<boolean>;
   resizeFrame(width: number | undefined, height: number | undefined): void;
-  setDisplayMode(mode: McpUiRequestDisplayModeRequest["params"]["mode"]): Promise<
-    McpUiRequestDisplayModeRequest["params"]["mode"]
-  >;
+  setDisplayMode(
+    mode: McpUiRequestDisplayModeRequest["params"]["mode"],
+  ): Promise<McpUiRequestDisplayModeRequest["params"]["mode"]>;
 }
 
 /** Reads and validates the non-secret resource selection and bearer token from the URL fragment. */

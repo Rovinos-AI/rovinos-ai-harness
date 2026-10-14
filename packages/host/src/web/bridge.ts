@@ -148,9 +148,8 @@ export function createAppBridge(
   };
   bridge.onrequestdisplaymode = async (params) => ({
     mode:
-      bridge
-        .getAppCapabilities()
-        ?.availableDisplayModes?.includes(params.mode) === true && handlers !== undefined
+      bridge.getAppCapabilities()?.availableDisplayModes?.includes(params.mode) === true &&
+      handlers !== undefined
         ? await handlers.onRequestDisplayMode(params.mode)
         : (handlers?.getCurrentDisplayMode() ?? "inline"),
   });

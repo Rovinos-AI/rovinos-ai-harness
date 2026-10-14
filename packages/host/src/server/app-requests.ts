@@ -181,9 +181,13 @@ export class AppRequestRouter {
                 ? {}
                 : { structuredContent: request.structuredContent }),
             };
-      const tokenized = await this.#options.tokenizeAppContent(session.runId, JsonValue.parse(content), {
-        boundary: "model_input",
-      });
+      const tokenized = await this.#options.tokenizeAppContent(
+        session.runId,
+        JsonValue.parse(content),
+        {
+          boundary: "model_input",
+        },
+      );
       await this.#options.onAppContent(
         AppContentEnvelopeSchema.parse({
           kind: request.kind,

@@ -13,6 +13,7 @@ import {
   createReferenceHost,
   ReferenceHostError,
   REFERENCE_CSP,
+  type AppCallRejectedReason,
   type ReferenceHostDependencies,
 } from "./index.js";
 
@@ -472,7 +473,7 @@ describe("createReferenceHost", () => {
   });
 
   it("denies gated requests by default and records only tokenized app content after opt-in", async () => {
-    const onRejected = vi.fn<(reason: HostAppRejectedReason) => void>();
+    const onRejected = vi.fn<(reason: HostAppRejectedReason | AppCallRejectedReason) => void>();
     const tokenizeAppContent: NonNullable<ReferenceHostDependencies["tokenizeAppContent"]> = vi.fn(
       (_runId, content, context) => {
         expect(context).toEqual({ boundary: "model_input" });
@@ -557,7 +558,7 @@ describe("createReferenceHost", () => {
   });
 
   it("denies requests by default and counts malformed payloads without retaining content", async () => {
-    const onRejected = vi.fn<(reason: HostAppRejectedReason) => void>();
+    const onRejected = vi.fn<(reason: HostAppRejectedReason | AppCallRejectedReason) => void>();
     const onAppContent = vi.fn(() => Promise.resolve());
     const fixture = makeServer({ onAppRejected: onRejected, onAppContent });
     const host = await fixture.hostPromise;
@@ -602,7 +603,7 @@ describe("createReferenceHost", () => {
     const tokenizeAppContent: NonNullable<ReferenceHostDependencies["tokenizeAppContent"]> = vi.fn(
       (_runId, content) => Promise.resolve(content),
     );
-    const onRejected = vi.fn<(reason: HostAppRejectedReason) => void>();
+    const onRejected = vi.fn<(reason: HostAppRejectedReason | AppCallRejectedReason) => void>();
     const app = appConfig.apps[0];
     if (app === undefined) {
       throw new Error("Test app configuration is missing.");

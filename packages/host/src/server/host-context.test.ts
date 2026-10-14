@@ -49,7 +49,9 @@ describe("createHostContext", () => {
   it("rejects invalid modes and dimensions", () => {
     expect(() => createHostContext({ ...options, displayMode: "pip" })).toThrow();
     expect(() => createHostContext({ ...options, maxWidth: 5000 })).toThrow();
-    expect(() => createHostContext({ ...options, availableDisplayModes: ["fullscreen"] })).toThrow();
+    expect(() =>
+      createHostContext({ ...options, availableDisplayModes: ["fullscreen"] }),
+    ).toThrow();
     expect(() => createHostContext({ ...options, displayMode: "unsupported" })).toThrow();
   });
 });

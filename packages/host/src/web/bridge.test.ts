@@ -35,9 +35,7 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
     sendToolResult = bridgeMocks.sendResult;
     addEventListener = bridgeMocks.addEventListener;
     getAppCapabilities = bridgeMocks.getAppCapabilities;
-    set onrequestdisplaymode(
-      handler: (params: { readonly mode: string }) => Promise<unknown>,
-    ) {
+    set onrequestdisplaymode(handler: (params: { readonly mode: string }) => Promise<unknown>) {
       bridgeMocks.handleDisplayMode.mockImplementation(handler);
     }
   },
@@ -81,10 +79,7 @@ describe("createAppBridge", () => {
     expect(bridgeMocks.connect).toHaveBeenCalledOnce();
     expect(bridgeMocks.sendInput).toHaveBeenCalledWith({ arguments: { city: "Seattle" } });
     expect(bridgeMocks.sendResult).toHaveBeenCalledWith(result);
-    expect(bridgeMocks.addEventListener).toHaveBeenCalledWith(
-      "sizechange",
-      expect.any(Function),
-    );
+    expect(bridgeMocks.addEventListener).toHaveBeenCalledWith("sizechange", expect.any(Function));
     await expect(
       bridgeMocks.handleCall({ name: "approve", arguments: { ok: true } }),
     ).resolves.toBe(result);
@@ -143,8 +138,8 @@ describe("createAppBridge", () => {
       removeEventListener: vi.fn(),
       postMessage: vi.fn(),
     });
-    const onRequestDisplayMode = vi.fn(
-      (mode: "inline" | "fullscreen" | "pip") => Promise.resolve(mode),
+    const onRequestDisplayMode = vi.fn((mode: "inline" | "fullscreen" | "pip") =>
+      Promise.resolve(mode),
     );
     const bridge = createAppBridge(
       { contentWindow: window },

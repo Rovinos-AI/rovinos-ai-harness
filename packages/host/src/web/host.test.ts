@@ -34,7 +34,7 @@ vi.mock("./bridge.js", () => ({
       _frame: unknown,
       handler: (call: { name: string; arguments?: Record<string, unknown> }) => Promise<unknown>,
       _listTools: unknown,
-      handlers: unknown,
+      handlers: AppBridgeHandlers,
     ) => {
       bridgeMock.toolCall.mockImplementation(handler);
       bridgeMock.handlers(handlers);
@@ -137,7 +137,7 @@ class FakeDomNode extends EventTarget {
     this.append(...nodes);
   }
 
-  addEventListener(
+  override addEventListener(
     type: string,
     listener: EventListenerOrEventListenerObject | null,
     _options?: boolean | AddEventListenerOptions,
@@ -181,7 +181,10 @@ class FakeDomNode extends EventTarget {
   }
 }
 
-function createFakeRoot(frameEvent: "load" | "error" = "load", consentOpenLink = false): {
+function createFakeRoot(
+  frameEvent: "load" | "error" = "load",
+  consentOpenLink = false,
+): {
   readonly root: HostPagePort;
   readonly frame: FakeFrame;
   readonly status: () => string;
@@ -754,25 +757,31 @@ describe("reference app page", () => {
       }),
       open,
     });
-    vi.stubGlobal("ResizeObserver", class {
-      constructor(callback: () => void) {
-        resizeCallbacks.push(callback);
-      }
-      observe(): void {
-        resizeObserved = true;
-      }
-    });
-    vi.stubGlobal("MutationObserver", class {
-      constructor(callback: () => void) {
-        mutationCallbacks.push(callback);
-      }
-      observe(): void {
-        mutationObserved = true;
-      }
-      disconnect(): void {
-        mutationDisconnected = true;
-      }
-    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resizeCallbacks.push(callback);
+        }
+        observe(): void {
+          resizeObserved = true;
+        }
+      },
+    );
+    vi.stubGlobal(
+      "MutationObserver",
+      class {
+        constructor(callback: () => void) {
+          mutationCallbacks.push(callback);
+        }
+        observe(): void {
+          mutationObserved = true;
+        }
+        disconnect(): void {
+          mutationDisconnected = true;
+        }
+      },
+    );
     const request = successfulRequest({
       ...appPayload,
       allow: { openLink: true, message: true, modelContext: true },
@@ -800,9 +809,9 @@ describe("reference app page", () => {
     await expect(handlers.onRequestDisplayMode("fullscreen")).resolves.toBe("fullscreen");
     await expect(handlers.onRequestDisplayMode("inline")).resolves.toBe("inline");
     await expect(handlers.onRequestDisplayMode("pip")).resolves.toBe("inline");
-    windowListeners.get("resize")?.();
-    windowListeners.get("languagechange")?.();
-    windowListeners.get("fullscreenchange")?.();
+    windowListeners.get("resize")?.(new Event("resize"));
+    windowListeners.get("languagechange")?.(new Event("languagechange"));
+    windowListeners.get("fullscreenchange")?.(new Event("fullscreenchange"));
     mediaListeners[0]?.();
     resizeCallbacks[0]?.();
     expect(resizeObserved).toBe(true);
@@ -812,8 +821,9 @@ describe("reference app page", () => {
     const link = "https://xn--bcher-kva.example.test/path?q=1";
     const opening = handlers.onOpenLink(link);
     await vi.waitFor(() => {
-      expect(body.children.some((node) => node instanceof FakeDomNode && node.tagName === "DIALOG"))
-        .toBe(true);
+      expect(
+        body.children.some((node) => node instanceof FakeDomNode && node.tagName === "DIALOG"),
+      ).toBe(true);
     });
     const dialog = body.children.find(
       (node): node is FakeDomNode => node instanceof FakeDomNode && node.tagName === "DIALOG",
@@ -849,7 +859,9 @@ describe("reference app page", () => {
         ),
       ).toHaveLength(1);
     });
-    const cancelButton = created.find((node) => node.dataset.action === "cancel" && node.isConnected);
+    const cancelButton = created.find(
+      (node) => node.dataset.action === "cancel" && node.isConnected,
+    );
     const activeDialog = body.children.find(
       (node): node is FakeDomNode =>
         node instanceof FakeDomNode && node.tagName === "DIALOG" && node.open,
@@ -862,7 +874,7 @@ describe("reference app page", () => {
     expect(open.mock.calls).toEqual([[link, "_blank", "noopener,noreferrer"]]);
     expect(request.mock.calls.at(-1)?.[1]?.body).toContain('"consented":false');
 
-    windowListeners.get("pagehide")?.();
+    windowListeners.get("pagehide")?.(new Event("pagehide"));
     const mutationCallback = mutationCallbacks[0];
     if (mutationCallback === undefined || frame === undefined) {
       throw new Error("Host lifecycle observers were not installed.");

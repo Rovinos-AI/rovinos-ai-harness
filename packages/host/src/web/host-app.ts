@@ -4,11 +4,7 @@ import { INVALID_REQUEST, ProtocolError } from "@modelcontextprotocol/client";
 import { Code, Id, Traceparent, parseJson } from "@harness/schemas";
 import { AppRequestResultSchema } from "../shared/app-request.js";
 import { z } from "zod";
-import {
-  createAppBridge,
-  type AppBridgeHandlers,
-  type AppToolCall,
-} from "./bridge.js";
+import { createAppBridge, type AppBridgeHandlers, type AppToolCall } from "./bridge.js";
 import {
   MAX_FRAME_HEIGHT,
   MAX_FRAME_WIDTH,
@@ -90,9 +86,9 @@ interface AppRequestContext {
   readonly request: typeof fetch;
 }
 
-function createAppRequest(context: AppRequestContext): (
-  body: Readonly<Record<string, unknown>>,
-) => Promise<boolean> {
+function createAppRequest(
+  context: AppRequestContext,
+): (body: Readonly<Record<string, unknown>>) => Promise<boolean> {
   const request = context.request;
   const headers = authorizedHeaders(context.launch.token);
   const sessionId = context.app.sessionId;
@@ -162,9 +158,7 @@ function createAppBridgeHandlers(
           ? dimensions.maxWidth
           : MAX_FRAME_WIDTH;
       const maxHeight =
-        dimensions !== undefined &&
-        "maxHeight" in dimensions &&
-        dimensions.maxHeight !== undefined
+        dimensions !== undefined && "maxHeight" in dimensions && dimensions.maxHeight !== undefined
           ? dimensions.maxHeight
           : MAX_FRAME_HEIGHT;
       const size = clampAppSize(width, height, maxWidth, maxHeight);

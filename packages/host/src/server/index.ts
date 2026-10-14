@@ -293,12 +293,8 @@ function createAppRequestRouter(
     ...(dependencies.tokenizeAppContent === undefined
       ? {}
       : { tokenizeAppContent: dependencies.tokenizeAppContent }),
-    ...(dependencies.onAppContent === undefined
-      ? {}
-      : { onAppContent: dependencies.onAppContent }),
-    ...(dependencies.onAppRejected === undefined
-      ? {}
-      : { onRejected: dependencies.onAppRejected }),
+    ...(dependencies.onAppContent === undefined ? {} : { onAppContent: dependencies.onAppContent }),
+    ...(dependencies.onAppRejected === undefined ? {} : { onRejected: dependencies.onAppRejected }),
   });
 }
 

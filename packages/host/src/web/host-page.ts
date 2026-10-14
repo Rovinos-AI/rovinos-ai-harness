@@ -67,14 +67,12 @@ function readDisplayModes(): ("inline" | "fullscreen")[] {
 }
 
 function browserHostContext(displayMode: string): McpUiHostContext {
+  // Keep the advertised limit independent of the iframe's requested dimensions.
   const dark =
     typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-color-scheme: dark)").matches;
   const width = Math.min(MAX_FRAME_WIDTH, readDimension(window.innerWidth, MAX_FRAME_WIDTH));
-  const height = Math.min(
-    MAX_FRAME_HEIGHT,
-    readDimension(window.innerHeight, MAX_FRAME_HEIGHT),
-  );
+  const height = Math.min(MAX_FRAME_HEIGHT, readDimension(window.innerHeight, MAX_FRAME_HEIGHT));
   const locale =
     typeof navigator !== "undefined" && navigator.language.length > 0 ? navigator.language : "en";
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -219,8 +217,8 @@ function createHostPagePort(element: HTMLElement): {
   const pageElement = element;
   const listeners = new Set<(context: McpUiHostContext) => void>();
   const notifyContextChange = (): void => {
-      state.setDisplayMode(document.fullscreenElement === pageElement ? "fullscreen" : "inline");
-      const context = browserHostContext(state.getDisplayMode());
+    state.setDisplayMode(document.fullscreenElement === pageElement ? "fullscreen" : "inline");
+    const context = browserHostContext(state.getDisplayMode());
     for (const listener of listeners) {
       listener(context);
     }

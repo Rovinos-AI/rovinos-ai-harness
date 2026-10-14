@@ -16,7 +16,7 @@ const appHtml = `<!doctype html>
   <pre id="requests"></pre>
   <script>
     const state = { fetch: "pending", xhr: "pending", websocket: "pending", image: "pending" };
-    const contextState = { initial: undefined, updates: 0 };
+    const contextState = { initial: undefined, latest: undefined, updates: 0 };
     const requests = [];
     const update = () => {
       document.getElementById("network").textContent = JSON.stringify(state);
@@ -34,6 +34,7 @@ const appHtml = `<!doctype html>
       }
       if (message?.method === "ui/notifications/host-context-changed") {
         contextState.updates += 1;
+        contextState.latest = message.params;
         updateContext();
       }
       if ([2, 3, 4, 5].includes(message?.id)) {
@@ -322,9 +323,12 @@ describe("reference host browser security", () => {
     expect(networkResult).toContain('"websocket":"blocked"');
     expect(networkResult).toContain('"image":"blocked"');
     expect(networkResult).toContain('"csp":');
-    await app.locator("#context").waitFor({ state: "visible", timeout: 2_000 }).catch(() => {
-      throw new Error("App did not receive host context.");
-    });
+    await app
+      .locator("#context")
+      .waitFor({ state: "visible", timeout: 2_000 })
+      .catch(() => {
+        throw new Error("App did not receive host context.");
+      });
     expect(await app.locator("#input").textContent()).toBe('{"decision":"approve"}');
     const resultNotification = await app.locator("#result").textContent();
     expect(resultNotification).toContain("complete");
@@ -455,12 +459,15 @@ describe("reference host browser security", () => {
       });
       document.body.append(button);
     });
+    const beforeFullscreenContext = await context.textContent();
     await sizePage.getByRole("button", { name: "Enter fullscreen" }).click({ timeout: 3_000 });
-    await sizePage.waitForFunction(
-      () => document.fullscreenElement?.id === "host",
-      undefined,
-      { timeout: 3_000 },
-    );
+    await sizePage.waitForFunction(() => document.fullscreenElement?.id === "host", undefined, {
+      timeout: 3_000,
+    });
+    await waitForHostContextUpdate(context, beforeFullscreenContext ?? "");
+    const fullscreenContext = await context.textContent();
+    expect(fullscreenContext).toContain('"displayMode":"fullscreen"');
+    expect(fullscreenContext).toContain('"maxHeight":600');
     expect(await iframe.evaluate((element) => element.style.height)).toBe("600px");
   }, 20_000);
 

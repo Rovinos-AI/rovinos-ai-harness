@@ -97,7 +97,11 @@ describe("AppRequestRouter", () => {
   });
 
   it("allows only safe HTTP(S) links after app opt-in and counts user denial", async () => {
-    const { router, rejected } = createRouter({ openLink: true, message: false, modelContext: false });
+    const { router, rejected } = createRouter({
+      openLink: true,
+      message: false,
+      modelContext: false,
+    });
     await expect(
       router.handle(
         createSession(),
@@ -227,9 +231,15 @@ describe("AppRequestRouter", () => {
       sessionId,
       content: [{ type: "text", text: "synthetic" }],
     });
-    await expect(
-      noRun.router.handle(createSession({ runId: undefined }), request),
-    ).resolves.toEqual({ allowed: false });
+    const sessionWithoutRun: AppInstance = {
+      id: appId,
+      resourceUri,
+      sessionId,
+      end: () => undefined,
+    };
+    await expect(noRun.router.handle(sessionWithoutRun, request)).resolves.toEqual({
+      allowed: false,
+    });
     const missing = createRouter({ openLink: false, message: true, modelContext: false });
     await expect(missing.router.handle(createSession(), request)).resolves.toEqual({
       allowed: false,
@@ -252,7 +262,11 @@ describe("AppRequestRouter", () => {
   it("rejects mismatched sessions and isolates rejection observer failures", async () => {
     const { router, rejected } = createRouter(
       { openLink: true, message: false, modelContext: false },
-      { onRejected: () => { throw new Error("observer failure"); } },
+      {
+        onRejected: () => {
+          throw new Error("observer failure");
+        },
+      },
     );
     await expect(
       router.handle(

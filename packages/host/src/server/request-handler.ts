@@ -48,8 +48,7 @@ const HOST_PAGE_CSP =
 
 function isAuthorizedApiRequest(request: HostRequest, options: RequestHandlerOptions): boolean {
   return (
-    isSameOrigin(request, options.expectedOrigin()) &&
-    authorizationMatches(request, options.token)
+    isSameOrigin(request, options.expectedOrigin()) && authorizationMatches(request, options.token)
   );
 }
 
