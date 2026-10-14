@@ -122,7 +122,12 @@ export {
   type ServerConfig,
   type ServersConfig,
 } from "./config/servers.js";
-export { PolicyConfigSchema, type PolicyConfig } from "./config/policy.js";
+export {
+  ApprovalConfigSchema,
+  ApprovalNotifierConfigSchema,
+  PolicyConfigSchema,
+  type PolicyConfig,
+} from "./config/policy.js";
 export {
   JsonPointerSchema,
   PiiConfigSchema,

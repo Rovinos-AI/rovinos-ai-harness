@@ -327,7 +327,11 @@ function registerSweep(approvals: Command, context: CliContext): void {
   approvals
     .command("sweep")
     .description("Expire and escalate pending approvals")
-    .action(() => withRuntime(context, undefined, (runtime) => runApprovalSweep(runtime, context)));
+    .action(() =>
+      withRuntime(context, undefined, (runtime, config) =>
+        runApprovalSweep(runtime, context, config),
+      ),
+    );
 }
 
 /** Registers the `harness approvals` command group. */

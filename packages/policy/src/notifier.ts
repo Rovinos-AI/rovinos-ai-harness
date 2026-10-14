@@ -5,7 +5,7 @@ import { z } from "zod";
 const WebhookUrlSchema = z.url().refine((value) => {
   const url = new URL(value);
   return (
-    ["https:", "http:"].includes(url.protocol) &&
+    (url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "localhost")) &&
     url.username.length === 0 &&
     url.password.length === 0
   );
@@ -54,14 +54,20 @@ export interface WebhookSecretResolver {
 }
 
 /** Dependencies for a metadata-only webhook notifier. */
-export interface WebhookNotifierOptions {
-  /** SecretRef whose value is the webhook URL. */
-  readonly url: SecretRef;
-  /** Resolver for the webhook URL SecretRef. */
+export type WebhookNotifierOptions = {
+  /** Resolver for webhook authorization secrets or a legacy URL SecretRef. */
   readonly secrets: WebhookSecretResolver;
   /** Fetch implementation, injectable for tests. */
   readonly fetch?: typeof globalThis.fetch;
-}
+  /** Maximum duration of each delivery attempt. */
+  readonly timeoutMs?: number;
+  /** Allows HTTP only for localhost destinations. */
+  readonly allowInsecureLocalhost?: boolean;
+} &
+  (
+    | { readonly url: string; readonly secretRef: SecretRef }
+    | { readonly url: SecretRef; readonly secretRef?: never }
+  );
 
 /** Error raised when a webhook notification cannot be delivered. */
 export class WebhookNotificationError extends HarnessError {
@@ -74,25 +80,40 @@ export class WebhookNotificationError extends HarnessError {
   }
 }
 
-function parseWebhookUrl(value: string): string {
+function parseWebhookUrl(value: string, allowInsecureLocalhost: boolean): string {
   const result = WebhookUrlSchema.safeParse(value);
   if (!result.success) {
     throw new WebhookNotificationError();
   }
-  return new URL(result.data).href;
+  const url = new URL(result.data);
+  if (url.protocol === "http:" && (!allowInsecureLocalhost || url.hostname !== "localhost")) {
+    throw new WebhookNotificationError();
+  }
+  return url.href;
 }
 
-/** Posts metadata-only approval notifications to a URL resolved from a SecretRef. */
+/** Posts metadata-only approval notifications to a configured or secret-resolved URL. */
 export class WebhookNotifier implements Notifier {
-  private readonly url: SecretRef;
+  private readonly endpoint: string | undefined;
+  private readonly urlSecretRef: SecretRef | undefined;
+  private readonly secretRef: SecretRef | undefined;
   private readonly secrets: WebhookSecretResolver;
   private readonly fetcher: typeof globalThis.fetch;
+  private readonly timeoutMs: number;
 
   /** Creates a notifier with an injected secret resolver and optional fetch implementation. */
   constructor(options: WebhookNotifierOptions) {
-    this.url = SecretRefSchema.parse(options.url);
+    this.secretRef =
+      options.secretRef === undefined ? undefined : SecretRefSchema.parse(options.secretRef);
+    this.urlSecretRef =
+      this.secretRef === undefined ? SecretRefSchema.parse(options.url) : undefined;
+    this.endpoint =
+      this.secretRef === undefined
+        ? undefined
+        : parseWebhookUrl(options.url, options.allowInsecureLocalhost === true);
     this.secrets = options.secrets;
     this.fetcher = options.fetch ?? globalThis.fetch;
+    this.timeoutMs = options.timeoutMs ?? 5_000;
   }
 
   /** {@inheritDoc Notifier.notify} */
@@ -101,13 +122,24 @@ export class WebhookNotifier implements Notifier {
     const body = JSON.stringify(validated);
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const signal = AbortSignal.timeout(5_000);
-        const url = parseWebhookUrl(await this.secrets.resolve(this.url, signal));
+        const signal = AbortSignal.timeout(this.timeoutMs);
+        const url =
+          this.urlSecretRef === undefined
+            ? this.endpoint
+            : parseWebhookUrl(await this.secrets.resolve(this.urlSecretRef, signal), false);
+        const authorization =
+          this.secretRef === undefined
+            ? undefined
+            : await this.secrets.resolve(this.secretRef, signal);
+        if (url === undefined) {
+          throw new WebhookNotificationError();
+        }
         const response = await this.fetcher(url, {
           method: "POST",
           headers: {
             "content-type": "application/json",
             "Idempotency-Key": validated.idempotencyKey,
+            ...(authorization === undefined ? {} : { authorization: "Bearer " + authorization }),
           },
           body,
           signal,

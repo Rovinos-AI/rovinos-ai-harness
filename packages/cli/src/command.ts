@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Command } from "commander";
-import type { HarnessConfig } from "@harness/config";
+import type { HarnessConfig, SecretResolver } from "@harness/config";
 import type { Runtime, RuntimeOverrides, ToolPort } from "@harness/core";
 import type { AuditingVaultResolver } from "@harness/vault";
 import type { Output } from "./output.js";
@@ -32,7 +32,7 @@ export interface CliContext {
   /** Writes human, JSON, and safe error output. */
   out: Output;
   /** Shared secret resolver used for runtime and configured store operations. */
-  secretResolver?: RuntimeOverrides["secretResolver"];
+  secretResolver?: SecretResolver;
   /** Provides the current time without direct clock access in commands. */
   clock: Clock;
   /** Creates a composed run-loop runtime, optionally replacing its ports. */
