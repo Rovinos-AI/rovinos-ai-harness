@@ -1,18 +1,53 @@
 // SPDX-License-Identifier: Apache-2.0
 // Task 5.3 renders only; decision and reveal handlers belong to task 5.4.
-import { ApprovalPayloadSchema, type JsonValue } from "@harness/schemas/browser";
+import {
+  ApprovalAppInputSchema,
+  ApprovalPayloadSchema,
+  type ApprovalPayload,
+  type JsonValue,
+} from "@harness/schemas/browser";
 import { appendTokenText } from "./tokens.js";
+
+/** Payload DOM and reveal renderer passed to the host action wiring. */
+export interface ApprovalPayloadContext {
+  readonly payload: ApprovalPayload;
+  readonly approvalId: string | undefined;
+  readonly isExpired: () => boolean;
+  readonly actions: HTMLElement;
+  readonly editHost: HTMLElement;
+  readonly renderRevealed: (values: ReadonlyMap<string, string>) => void;
+}
 
 /** Injected view dependencies; errors contain only the closed payload-invalid code. */
 export interface ApprovalViewOptions {
   readonly clock: { now(): number };
   readonly onError: (code: "payload_invalid") => void;
+  readonly onPayload?: (context: ApprovalPayloadContext) => (() => void) | undefined;
 }
 
 /** One approval view with an explicit refresh hook for its injected clock. */
 export interface ApprovalView {
   receive(input: unknown): void;
   tick(): void;
+  dispose(): void;
+}
+
+interface ApprovalViewDom {
+  readonly document: Document;
+  readonly heading: HTMLElement;
+  readonly status: HTMLElement;
+  readonly content: HTMLElement;
+}
+
+interface ArgumentRenderState {
+  readonly pointer: string;
+  readonly revealed: ReadonlyMap<string, string>;
+}
+
+interface PayloadRenderOptions extends ApprovalViewDom {
+  readonly payload: ApprovalPayload;
+  readonly approvalId: string | undefined;
+  readonly viewOptions: ApprovalViewOptions;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -27,7 +62,22 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function argumentNode(document: Document, value: JsonValue, label: string): HTMLElement {
+function pointerSegment(segment: string): string {
+  return segment.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function argumentNode(
+  document: Document,
+  value: JsonValue,
+  label: string,
+  state: ArgumentRenderState,
+): HTMLElement {
+  const raw = state.revealed.get(state.pointer);
+  if (raw !== undefined) {
+    const revealed = document.createElement("div");
+    revealed.textContent = `${label}: ${raw}`;
+    return revealed;
+  }
   if (typeof value !== "object" || value === null) {
     const leaf = element(document, "div", `${label}: `);
     appendTokenText(leaf, typeof value === "string" ? JSON.stringify(value) : String(value));
@@ -44,7 +94,13 @@ function argumentNode(document: Document, value: JsonValue, label: string): HTML
   const children = element(document, "ul");
   for (const [key, child] of entries) {
     const item = element(document, "li");
-    item.append(argumentNode(document, child, key));
+    const segment = Array.isArray(value) ? key : pointerSegment(key);
+    item.append(
+      argumentNode(document, child, key, {
+        pointer: `${state.pointer}/${segment}`,
+        revealed: state.revealed,
+      }),
+    );
     children.append(item);
   }
   branch.append(children);
@@ -55,14 +111,7 @@ function addMetadata(document: Document, row: HTMLElement, label: string, value:
   row.append(element(document, "dt", label), element(document, "dd", value));
 }
 
-/**
- * Mounts the token-only approval screen and validates every delivered payload.
- *
- * @param root - Empty app container.
- * @param options - Injected wall clock and metadata-only error reporter.
- * @returns Payload receiver and countdown refresh hook.
- */
-export function createApprovalView(root: HTMLElement, options: ApprovalViewOptions): ApprovalView {
+function createViewDom(root: HTMLElement): ApprovalViewDom {
   const document = root.ownerDocument;
   const main = element(document, "main");
   const heading = element(document, "h1", "Waiting for approval");
@@ -74,70 +123,133 @@ export function createApprovalView(root: HTMLElement, options: ApprovalViewOptio
   main.append(heading, status, content);
   root.replaceChildren(main);
   heading.focus();
+  return { document, heading, status, content };
+}
+
+function createPayloadView(options: PayloadRenderOptions): {
+  readonly refresh: () => void;
+  readonly cleanup: () => void;
+} {
+  const { document, heading, status, content, payload, approvalId, viewOptions } = options;
+  heading.replaceChildren();
+  appendTokenText(heading, payload.summary);
+  const metadata = element(document, "dl");
+  addMetadata(document, metadata, "Tool", payload.toolId);
+  addMetadata(document, metadata, "Rule", payload.ruleId);
+  addMetadata(document, metadata, "Reason", payload.reason);
+  const expiry = element(document, "dd");
+  metadata.append(element(document, "dt", "Expiry"), expiry);
+
+  const args = element(document, "section");
+  args.setAttribute("aria-label", "Arguments");
+  const argumentTree = element(document, "div");
+  args.append(element(document, "h2", "Arguments"), argumentTree);
+  const renderRevealed = (revealed: ReadonlyMap<string, string>): void => {
+    argumentTree.replaceChildren(
+      argumentNode(document, payload.args, "Arguments", { pointer: "", revealed }),
+    );
+  };
+  const isExpired = (): boolean =>
+    payload.expiresAt !== undefined && payload.expiresAt <= viewOptions.clock.now();
+  renderRevealed(new Map());
+
+  const actions = element(document, "nav");
+  actions.setAttribute("aria-label", "Approval actions");
+  const labels =
+    payload.editableFields.length > 0 ? ["Approve", "Deny", "Edit"] : ["Approve", "Deny"];
+  for (const label of labels) {
+    const control = element(document, "button", label);
+    control.type = "button";
+    actions.append(control);
+  }
+  const editHost = element(document, "div");
+  content.append(metadata, args, actions, editHost);
+  const cleanup =
+    viewOptions.onPayload?.({
+      payload,
+      approvalId,
+      isExpired,
+      actions,
+      editHost,
+      renderRevealed,
+    }) ?? (() => undefined);
+
+  const refresh = (): void => {
+    const remaining =
+      payload.expiresAt === undefined ? undefined : payload.expiresAt - viewOptions.clock.now();
+    const expired = isExpired();
+    expiry.textContent =
+      remaining === undefined
+        ? "No expiry"
+        : `${String(Math.max(0, Math.ceil(remaining / 1000)))} seconds remaining`;
+    const nextStatus = expired ? "Approval expired" : "Pending approval";
+    if (status.textContent !== nextStatus) {
+      status.textContent = nextStatus;
+    }
+    if (expired) {
+      for (const control of actions.querySelectorAll("button")) {
+        control.disabled = true;
+      }
+      for (const control of editHost.querySelectorAll<
+        HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
+      >("button, input, textarea")) {
+        control.disabled = true;
+      }
+    }
+  };
+  return { refresh, cleanup };
+}
+
+/**
+ * Mounts the token-only approval screen and validates every delivered payload.
+ *
+ * @param root - Empty app container.
+ * @param options - Injected wall clock and metadata-only error reporter.
+ * @returns Payload receiver and countdown refresh hook.
+ */
+export function createApprovalView(root: HTMLElement, options: ApprovalViewOptions): ApprovalView {
+  const dom = createViewDom(root);
   let refresh = (): void => undefined;
+  let cleanupActions = (): void => undefined;
 
   function receive(input: unknown): void {
-    const parsed = ApprovalPayloadSchema.safeParse(input);
-    content.replaceChildren();
-    refresh = () => undefined;
+    cleanupActions();
+    cleanupActions = (): void => undefined;
+    const appInput = ApprovalAppInputSchema.safeParse(input);
+    const parsed = ApprovalPayloadSchema.safeParse(
+      appInput.success ? appInput.data.payload : input,
+    );
+    dom.content.replaceChildren();
+    refresh = (): void => undefined;
     if (!parsed.success) {
-      heading.textContent = "Approval unavailable";
-      if (status.textContent !== "Invalid approval payload") {
-        status.textContent = "Invalid approval payload";
+      dom.heading.textContent = "Approval unavailable";
+      if (dom.status.textContent !== "Invalid approval payload") {
+        dom.status.textContent = "Invalid approval payload";
       }
       options.onError("payload_invalid");
-      heading.focus();
+      dom.heading.focus();
       return;
     }
-    const payload = parsed.data;
-    heading.replaceChildren();
-    appendTokenText(heading, payload.summary);
-    const metadata = element(document, "dl");
-    addMetadata(document, metadata, "Tool", payload.toolId);
-    addMetadata(document, metadata, "Rule", payload.ruleId);
-    addMetadata(document, metadata, "Reason", payload.reason);
-    const expiry = element(document, "dd");
-    metadata.append(element(document, "dt", "Expiry"), expiry);
-    const args = element(document, "section");
-    args.setAttribute("aria-label", "Arguments");
-    args.append(
-      element(document, "h2", "Arguments"),
-      argumentNode(document, payload.args, "Arguments"),
-    );
-    const actions = element(document, "nav");
-    actions.setAttribute("aria-label", "Approval actions");
-    const labels =
-      payload.editableFields.length > 0 ? ["Approve", "Deny", "Edit"] : ["Approve", "Deny"];
-    const buttons = labels.map((label) => element(document, "button", label));
-    for (const button of buttons) {
-      button.type = "button";
-      actions.append(button);
-    }
-    content.append(metadata, args, actions);
-    refresh = () => {
-      const remaining =
-        payload.expiresAt === undefined ? undefined : payload.expiresAt - options.clock.now();
-      const expired = remaining !== undefined && remaining <= 0;
-      expiry.textContent =
-        remaining === undefined
-          ? "No expiry"
-          : `${String(Math.max(0, Math.ceil(remaining / 1000)))} seconds remaining`;
-      const nextStatus = expired ? "Approval expired" : "Pending approval";
-      if (status.textContent !== nextStatus) {
-        status.textContent = nextStatus;
-      }
-      for (const button of buttons) {
-        button.disabled = expired;
-      }
-    };
+    const rendered = createPayloadView({
+      ...dom,
+      payload: parsed.data,
+      approvalId: appInput.success ? appInput.data.approvalId : undefined,
+      viewOptions: options,
+    });
+    cleanupActions = rendered.cleanup;
+    refresh = rendered.refresh;
     refresh();
-    heading.focus();
+    dom.heading.focus();
   }
 
   return {
     receive,
-    tick: () => {
+    tick() {
       refresh();
+    },
+    dispose() {
+      cleanupActions();
+      cleanupActions = (): void => undefined;
     },
   };
 }
