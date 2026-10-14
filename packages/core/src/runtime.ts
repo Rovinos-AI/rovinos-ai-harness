@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { emitVaultMarkTerminalFailed } from "@harness/telemetry";
+import { Code, HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import { type EventStore } from "@harness/store";
@@ -29,6 +30,36 @@ const CANCEL_POLL_INTERVAL_MS = 25;
 const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
+
+function terminalMarkFailureCode(error: unknown): Code {
+  try {
+    if (typeof error === "object" && error !== null) {
+      const parsedCode = Code.safeParse(Reflect.get(error, "code"));
+      if (parsedCode.success) {
+        return parsedCode.data;
+      }
+    }
+  } catch {
+    // Error metadata must not prevent the run result from being returned.
+  }
+  return Code.parse("vault_unavailable");
+}
+
+async function markTerminalBestEffort(
+  vault: RuntimeComposition["vault"],
+  runId: Id,
+  timestamp: number,
+): Promise<void> {
+  try {
+    await vault.markTerminal(runId, timestamp);
+  } catch (error) {
+    try {
+      emitVaultMarkTerminalFailed(runId, terminalMarkFailureCode(error));
+    } catch {
+      // A diagnostic logger failure must not change the durable run result.
+    }
+  }
+}
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
 
@@ -286,6 +317,36 @@ async function closeRuntimeResources(options: {
   }
 }
 
+function createTerminalAwareRunControl({
+  config,
+  overrides,
+  clock,
+  store,
+  vault,
+}: RuntimeComposition): RunControl {
+  const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
+  return async (runId, operation, firstNewSeq = 0) => {
+    const result = await withRunControl({
+      store,
+      runId,
+      firstNewSeq,
+      clock,
+      flushTelemetry,
+      processLike: overrides.processLike ?? defaultProcessLike,
+      graceMs: config.run.shutdownGraceMs,
+      operation,
+    });
+    if (
+      result.status === "completed" ||
+      result.status === "failed" ||
+      result.status === "cancelled"
+    ) {
+      await markTerminalBestEffort(vault, runId, clock.now());
+    }
+    return result;
+  };
+}
+
 function composeRuntime(
   options: RuntimeComposition & {
     readonly roles: RoleRegistry;
@@ -329,18 +390,8 @@ function composeRuntime(
           config: pii.config,
           resolver: pii.resolver,
         });
-  const runWithControl: RunControl = (runId, operation) =>
-    withRunControl({
-      store,
-      runId,
-      firstNewSeq: 0,
-      clock,
-      flushTelemetry,
-      processLike: overrides.processLike ?? defaultProcessLike,
-      graceMs: config.run.shutdownGraceMs,
-      operation,
-    });
-  const resume = createRuntimeResume(options, tool);
+  const runWithControl = createTerminalAwareRunControl(options);
+  const resume = createRuntimeResume(options, tool, runWithControl);
   return {
     store,
     vault: vaultResolver,
@@ -350,7 +401,13 @@ function composeRuntime(
     run: (goal) => startRun(options, tool, goal, runWithControl),
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume,
-    cancel: (runId) => cancelRun(store, runId, clock, ids),
+    cancel: async (runId) => {
+      const result = await cancelRun(store, runId, clock, ids);
+      if (result === "cancelled") {
+        await markTerminalBestEffort(vault, runId, clock.now());
+      }
+      return result;
+    },
     close: () =>
       closeRuntimeResources({
         store,
@@ -364,20 +421,14 @@ function composeRuntime(
 function createRuntimeResume(
   options: RuntimeComposition & { readonly scopes: RunScopeRegistry },
   tool: ToolPort,
+  runWithControl: RunControl,
 ): Runtime["resume"] {
-  const { config, clock, ids, store, model, context, policy, scopes, overrides } = options;
-  const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
+  const { config, clock, ids, store, model, context, policy, scopes } = options;
   return async (runId) => {
     const firstNewSeq = await store.head(runId);
-    return withRunControl({
-      store,
+    return runWithControl(
       runId,
-      firstNewSeq,
-      clock,
-      flushTelemetry,
-      processLike: overrides.processLike ?? defaultProcessLike,
-      graceMs: config.run.shutdownGraceMs,
-      operation: async (signal) => {
+      async (signal) => {
         const goal = await storedGoal(store, runId);
         if (goal === undefined) {
           throw new RunInputMissingError();
@@ -399,7 +450,8 @@ function createRuntimeResume(
           resumePolicy: config.run.resume.onNonIdempotent,
         });
       },
-    });
+      firstNewSeq,
+    );
   };
 }
 

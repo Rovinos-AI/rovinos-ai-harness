@@ -141,7 +141,10 @@ export {
 export { resolveDataDir } from "./runtime-data-dir.js";
 export {
   migrateConfiguredStore,
+  openConfiguredVaultAdmin,
   openConfiguredStore,
+  type ConfiguredVaultAdmin,
+  type ConfiguredVaultOptions,
   type ConfiguredStoreOptions,
 } from "./runtime-store.js";
 export { RunScopeConflictError, RunScopeRegistry } from "./subagent/scope.js";

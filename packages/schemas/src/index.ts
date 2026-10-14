@@ -83,6 +83,7 @@ export {
   type StoreConfig,
   type StoreRetentionConfig,
 } from "./config/store.js";
+export { VaultConfigSchema, type VaultConfig } from "./config/vault.js";
 export {
   ModelEnforcementConfigSchema,
   ModelRetryConfigSchema,

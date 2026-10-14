@@ -41,6 +41,32 @@ export const VaultAuditSchema = z
 /** Inferred metadata-only vault audit record. */
 export type VaultAudit = z.infer<typeof VaultAuditSchema>;
 
+/** Runtime schema for a nonnegative epoch-millisecond timestamp. */
+export const VaultTimestampSchema = z.number().int().nonnegative();
+
+/** Validated query for terminal runs eligible for vault retention purge. */
+export const VaultTerminalRunsQuerySchema = z
+  .object({
+    terminalBefore: z.number().int(),
+    limit: z.number().int().positive().max(100),
+  })
+  .strict();
+
+/** Inferred terminal-run query. */
+export type VaultTerminalRunsQuery = z.infer<typeof VaultTerminalRunsQuerySchema>;
+
+/** Counts returned after purging terminal vault runs. */
+export const VaultPurgeResultSchema = z
+  .object({
+    examined: z.number().int().nonnegative(),
+    purged: z.number().int().nonnegative(),
+    entriesPurged: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Inferred terminal-vault purge counts. */
+export type VaultPurgeResult = z.infer<typeof VaultPurgeResultSchema>;
+
 const vaultValueErrorCodeSchema = z.enum([
   "vault_value_empty",
   "vault_value_too_large",
@@ -119,6 +145,20 @@ export interface VaultReader {
 
 /** Performs administrative operations on one run's vault data. */
 export interface VaultAdmin {
+  /**
+   * Mark a run as terminal for post-completion vault retention.
+   * @param runId Run that entered a terminal status.
+   * @param ts Terminal transition time in epoch milliseconds.
+   */
+  markTerminal(runId: Id, ts: number): Promise<void>;
+
+  /**
+   * List terminal runs older than a timestamp in stable batches.
+   * @param query Expiration boundary and maximum batch size.
+   * @returns Terminal run identifiers ordered by terminal time and run ID.
+   */
+  listTerminalRunsBefore(query: VaultTerminalRunsQuery): Promise<readonly Id[]>;
+
   /**
    * Remove all entries for a run without resetting its token counters.
    * @param runId Run to purge.

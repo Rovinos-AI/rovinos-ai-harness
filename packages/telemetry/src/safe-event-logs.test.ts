@@ -7,12 +7,16 @@ import {
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import type { TelemetryConfig } from "@harness/schemas";
+import { Code, Id, type TelemetryConfig } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { listLogDefinitions } from "./log-registry.js";
 import { AllowlistLogRecordProcessor } from "./processors/allowlist-log-processor.js";
 import { SafeEvent } from "./safe-event.js";
-import { emitSafeEvent, safeEventLogAttributeMap } from "./safe-event-logs.js";
+import {
+  emitSafeEvent,
+  emitVaultMarkTerminalFailed,
+  safeEventLogAttributeMap,
+} from "./safe-event-logs.js";
 
 const common = {
   runId: "00000000000000000000000000",
@@ -100,6 +104,23 @@ const events = [
 ];
 
 describe("SafeEvent log projection", () => {
+  it("emits terminal vault failures with only the run id and error code", () => {
+    const emit = vi.fn<(record: LogRecord) => void>();
+    const logger = { emit, enabled: () => true } satisfies Logger;
+    const runId = Id.parse("00000000000000000000000000");
+
+    emitVaultMarkTerminalFailed(runId, Code.parse("vault_unavailable"), logger);
+
+    const record = emit.mock.calls[0]?.[0];
+    expect(record?.body).toBe("vault_mark_terminal_failed");
+    expect(record?.eventName).toBe("harness.vault.mark_terminal_failed");
+    expect(record?.severityNumber).toBe(SeverityNumber.ERROR);
+    expect(record?.attributes).toEqual({
+      "harness.run.id": runId,
+      "harness.error.code": "vault_unavailable",
+    });
+  });
+
   it.each(events)("registers and emits every SafeEvent kind with its mapped fields", (event) => {
     const emit = vi.fn<(record: LogRecord) => void>();
     const logger = { emit, enabled: () => true } satisfies Logger;
@@ -201,6 +222,9 @@ describe("SafeEvent log projection", () => {
         .sort(),
     ).toEqual([...new Set(events.map(({ kind }) => `harness.safe.${kind}`))].sort());
     expect(listLogDefinitions().map(({ name }) => name)).toContain("harness.sentinel.trip");
+    expect(listLogDefinitions().map(({ name }) => name)).toContain(
+      "harness.vault.mark_terminal_failed",
+    );
     const logger = {
       emit: vi.fn<(record: LogRecord) => void>(),
       enabled: () => true,

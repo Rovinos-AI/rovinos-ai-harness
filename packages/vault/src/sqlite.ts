@@ -2,10 +2,10 @@
 import Database from "better-sqlite3";
 import { CryptoError, aesGcmEncrypt, hkdfSha256, hmacSha256 } from "@harness/crypto";
 import {
+  Id,
   KEY_PROVIDER_KEY_BYTES,
   VaultValueEntrySchema,
   type Code,
-  type Id,
   type KeyProvider,
   type VaultValueEntry,
 } from "@harness/schemas";
@@ -19,6 +19,8 @@ import {
   type VaultAdmin,
   type VaultReader,
   type VaultResolver,
+  VaultTerminalRunsQuerySchema,
+  VaultTimestampSchema,
   type VaultWriter,
   type VaultResolveContext,
 } from "./types.js";
@@ -247,6 +249,39 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     }
   }
 
+  /** Record when a run entered a terminal state for grace-period retention. */
+  markTerminal(runId: Id, ts: number): Promise<void> {
+    const terminalAt = VaultTimestampSchema.parse(ts);
+    try {
+      this.db
+        .prepare(
+          "INSERT INTO run_meta (run_id, terminal_at) VALUES (?, ?) ON CONFLICT(run_id) DO UPDATE SET terminal_at = MIN(terminal_at, excluded.terminal_at)",
+        )
+        .run(runId, terminalAt);
+      return Promise.resolve();
+    } catch {
+      return Promise.reject(new VaultOperationError("vault_unavailable"));
+    }
+  }
+
+  /** Find a stable batch of terminal runs older than the supplied timestamp. */
+  listTerminalRunsBefore(query: {
+    readonly terminalBefore: number;
+    readonly limit: number;
+  }): Promise<readonly Id[]> {
+    const { terminalBefore, limit } = VaultTerminalRunsQuerySchema.parse(query);
+    try {
+      const rows = this.db
+        .prepare<[number, number], { run_id: string }>(
+          "SELECT run_id FROM run_meta WHERE terminal_at < ? ORDER BY terminal_at, run_id LIMIT ?",
+        )
+        .all(terminalBefore, limit);
+      return Promise.resolve(rows.map(({ run_id }) => Id.parse(run_id)));
+    } catch {
+      return Promise.reject(new VaultOperationError("vault_unavailable"));
+    }
+  }
+
   /** Return a monotonic version for entries ever added to or purged from a run. */
   version(runId: Id): Promise<number> {
     try {
@@ -268,6 +303,7 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
         const result = this.db
           .prepare<[Id]>("DELETE FROM vault_entries WHERE run_id = ?")
           .run(runId);
+        this.db.prepare<[Id]>("DELETE FROM run_meta WHERE run_id = ?").run(runId);
         if (result.changes > 0) {
           this.db
             .prepare<[Id]>(

@@ -3,13 +3,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Code, type KeyProvider } from "@harness/schemas";
+import { Code, FakeClock, type KeyProvider } from "@harness/schemas";
 import type { VaultRunReader } from "@harness/telemetry";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryVault } from "./memory.js";
 import { runVaultConformance } from "./conformance.test-helpers.js";
 import { VaultOperationError } from "./errors.js";
 import { SqliteVault } from "./sqlite.js";
+import { purgeExpired } from "./purger.js";
 
 const runId = "A".repeat(26);
 const anotherRunId = "B".repeat(26);
@@ -70,10 +71,26 @@ describe("SqliteVault", () => {
     const database = new Database(":memory:");
     try {
       database.exec(sql);
+      const runMetaMigration = await readFile(
+        new URL("../migrations/sqlite/0003_run_meta.sql", compiledModule),
+        "utf8",
+      );
+      database.exec(runMetaMigration);
       const tables = database
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
         .all();
-      expect(tables).toEqual([{ name: "vault_counters" }, { name: "vault_entries" }]);
+      expect(tables).toEqual([
+        { name: "run_meta" },
+        { name: "vault_counters" },
+        { name: "vault_entries" },
+      ]);
+      expect(
+        database
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'run_meta_terminal_at_idx'",
+          )
+          .get(),
+      ).toEqual({ name: "run_meta_terminal_at_idx" });
     } finally {
       database.close();
     }
@@ -86,6 +103,29 @@ describe("SqliteVault", () => {
     await vault.put(runId, "email", canary);
     vault.close();
 
+    const bytes = await readFile(path);
+    expect(bytes.includes(Buffer.from(canary, "utf8"))).toBe(false);
+  });
+
+  it("deletes expired values securely and removes the canary after an explicit vacuum", async () => {
+    const { path } = await temporaryPath();
+    const canary = "purged-vault-canary-alice@example.test";
+    const vault = new SqliteVault(path, keyProvider);
+    const token = await vault.put(runId, "email", canary);
+    await vault.markTerminal(runId, 1);
+
+    await expect(
+      purgeExpired({ vault, clock: new FakeClock(8 * 86_400_000), purgeAfterDays: 7 }),
+    ).resolves.toEqual({ examined: 1, purged: 1, entriesPurged: 1 });
+    await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBeUndefined();
+    vault.close();
+
+    const database = new Database(path);
+    try {
+      database.exec("VACUUM");
+    } finally {
+      database.close();
+    }
     const bytes = await readFile(path);
     expect(bytes.includes(Buffer.from(canary, "utf8"))).toBe(false);
   });

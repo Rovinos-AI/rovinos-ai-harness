@@ -19,6 +19,14 @@ export const StorePurgeResultSchema = z
     purged: z.number().int().nonnegative(),
     skippedActive: z.number().int().nonnegative(),
     hookFailures: z.number().int().nonnegative(),
+    vault: z
+      .object({
+        examined: z.number().int().nonnegative(),
+        purged: z.number().int().nonnegative(),
+        entriesPurged: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

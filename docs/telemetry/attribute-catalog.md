@@ -284,3 +284,10 @@ Owner task: `3.2`.
 | --- | --- | --- | --- |
 | `harness.run.id` | Id | Optional | `@harness/telemetry` |
 | `harness.sentinel.trip.count` | integer | Required | `@harness/telemetry` |
+
+### `harness.vault.mark_terminal_failed`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.error.code` | Code | Required | `@harness/telemetry` |
+| `harness.run.id` | Id | Required | `@harness/telemetry` |

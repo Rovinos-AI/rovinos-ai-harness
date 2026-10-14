@@ -15,6 +15,11 @@ const commonShape = {
   "harness.span.id": attr.code(),
 };
 
+const vaultMarkTerminalFailedDefinition = defineLogRecord("harness.vault.mark_terminal_failed", {
+  "harness.run.id": attr.id(),
+  "harness.error.code": attr.code(),
+});
+
 /** SafeEvent fields mapped to bounded OpenTelemetry attribute names. */
 export const safeEventLogAttributeMap = {
   model_call: {
@@ -308,4 +313,23 @@ export function emitSentinelTrip(
 /** Emits a validated SafeEvent through the harness logger without exposing OTel to callers. */
 export function emitSafeEventToDefaultLogger(safeEvent: SafeEventType): void {
   emitSafeEvent(safeEventLogger, safeEvent);
+}
+
+/** Emits a metadata-only diagnostic when terminal-run vault bookkeeping fails. */
+export function emitVaultMarkTerminalFailed(
+  runId: Id,
+  errorCode: Code,
+  logger: Logger = safeEventLogger,
+): void {
+  const attributes = vaultMarkTerminalFailedDefinition.schema.parse({
+    "harness.run.id": runId,
+    "harness.error.code": errorCode,
+  });
+  logger.emit({
+    body: Code.parse("vault_mark_terminal_failed"),
+    eventName: vaultMarkTerminalFailedDefinition.name,
+    severityNumber: SeverityNumber.ERROR,
+    attributes,
+    context: otelContext.active(),
+  });
 }

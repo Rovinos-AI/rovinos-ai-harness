@@ -36,6 +36,7 @@ const expectedLogNames = [
   "harness.safe.subagent_spawned",
   "harness.safe.tool_call",
   "harness.sentinel.trip",
+  "harness.vault.mark_terminal_failed",
 ];
 
 async function importProductionRegistrationSources(root: string): Promise<void> {
@@ -67,7 +68,7 @@ describe("production telemetry definition catalog", () => {
     }
   });
 
-  it("loads every known production span and SafeEvent log definition", () => {
+  it("loads every known production span and log definition", () => {
     expect(
       listSpanDefinitions()
         .map(({ name }) => name)

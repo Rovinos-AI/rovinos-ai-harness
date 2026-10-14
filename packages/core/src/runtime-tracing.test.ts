@@ -10,6 +10,8 @@ import {
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import * as telemetry from "@harness/telemetry";
+import { SqliteVault, VaultOperationError } from "@harness/vault";
 import { sentinelTripQueue } from "@harness/telemetry";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "./recorder.js";
@@ -275,6 +277,10 @@ describe("runtime tracing fallback", () => {
   });
 
   it("aborts an in-flight tool when another process records cancellation", async () => {
+    const markTerminal = vi
+      .spyOn(SqliteVault.prototype, "markTerminal")
+      .mockRejectedValue(new VaultOperationError("vault_unavailable"));
+    const logFailure = vi.spyOn(telemetry, "emitVaultMarkTerminalFailed");
     const store = new InMemoryEventStore();
     const clock = new FakeClock(1_000);
     let signalToolStarted: () => void = () => undefined;
@@ -343,7 +349,34 @@ describe("runtime tracing fallback", () => {
     expect(events.some((event) => event.type === "tool_intent")).toBe(true);
     expect(events.some((event) => event.type === "tool_result")).toBe(false);
     expect(await store.head(runId)).toBe((events.at(-1)?.seq ?? -1) + 1);
+    expect(logFailure).toHaveBeenCalledWith(runId, "vault_unavailable");
+    expect(markTerminal).toHaveBeenCalled();
     await runtime.close();
+    markTerminal.mockRestore();
+    logFailure.mockRestore();
+  });
+
+  it("returns a completed run when terminal vault marking fails", async () => {
+    const markTerminal = vi
+      .spyOn(SqliteVault.prototype, "markTerminal")
+      .mockRejectedValue(new VaultOperationError("vault_unavailable"));
+    const logFailure = vi.spyOn(telemetry, "emitVaultMarkTerminalFailed");
+    const runtime = await createRuntime(config, {
+      store: new InMemoryEventStore(),
+      model: new FakeModelPort([completion()]),
+    });
+
+    const result = await runtime.run("goal");
+    const runId = result.events[0]?.runId;
+    if (runId === undefined) {
+      throw new Error("Expected the completed run to include its run id.");
+    }
+
+    expect(result.status).toBe("completed");
+    expect(logFailure).toHaveBeenCalledWith(runId, "vault_unavailable");
+    await runtime.close();
+    markTerminal.mockRestore();
+    logFailure.mockRestore();
   });
 
   it("returns cancelled when shutdown aborts before cancellation is observed", async () => {
