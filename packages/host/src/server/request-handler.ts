@@ -199,6 +199,13 @@ async function routeAppCall(
 ): Promise<void> {
   const body = await readBody(request, MAX_CALL_BYTES);
   if (body === undefined) {
+    countHostAppRejected("size");
+    try {
+      options.dependencies.onAppRejected?.("size");
+    } catch {
+      writeError(response, 413, "app_call_too_large");
+      return;
+    }
     writeError(response, 413, "app_call_too_large");
     return;
   }
@@ -206,6 +213,13 @@ async function routeAppCall(
   try {
     call = parseJson(AppCallSchema, body, { maxBytes: MAX_CALL_BYTES });
   } catch {
+    countHostAppRejected("schema");
+    try {
+      options.dependencies.onAppRejected?.("schema");
+    } catch {
+      writeError(response, 400, "app_call_invalid");
+      return;
+    }
     writeError(response, 400, "app_call_invalid");
     return;
   }

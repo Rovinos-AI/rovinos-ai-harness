@@ -1,0 +1,17 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit }) => {
+        const attempts = [];
+        for (let index = 0; index < 1_000; index += 1) {
+          attempts.push(emit([{ name: "ui.render", startOffsetMs: 0, durationMs: 0 }]));
+        }
+        await Promise.all(attempts);
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        await emit([{ name: "ui.error", code: "flood_complete", startOffsetMs: 0, durationMs: 0 }]);
+      };
+    </script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit, input }) => {
+        await emit([{ name: "ui.render", startOffsetMs: 0, durationMs: 0 }], {
+          sessionId: input.oldSessionId,
+        });
+        await emit([
+          { name: "ui.error", code: "session_replay_blocked", startOffsetMs: 0, durationMs: 0 },
+        ]);
+      };
+    </script>
+  </body>
+</html>

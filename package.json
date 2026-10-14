@@ -89,6 +89,7 @@
     "eslint-plugin-unicorn": "65.0.0",
     "eslint-plugin-yml": "3.9.0",
     "markdownlint-cli2": "0.23.3",
+    "playwright": "1.64.0",
     "prettier": "3.9.9",
     "spdx-expression-parse": "5.0.0",
     "typescript": "5.9.3",

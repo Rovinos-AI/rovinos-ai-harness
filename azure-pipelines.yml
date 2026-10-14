@@ -106,8 +106,12 @@ stages:
             displayName: Build schemas for worker-thread tests
           - script: yarn build:host
             displayName: Build reference host browser bundle
+          - script: yarn workspace @harness/host exec playwright install --with-deps chromium
+            displayName: Install Chromium and Linux dependencies
+            condition: eq(variables['Agent.OS'], 'Linux')
           - script: yarn workspace @harness/host exec playwright install chromium
-            displayName: Install Chromium for host security tests
+            displayName: Install Chromium for macOS host security tests
+            condition: ne(variables['Agent.OS'], 'Linux')
           - script: >
               yarn test:integration --reporter=junit
               --outputFile=reports/integration-junit.xml
@@ -116,6 +120,19 @@ stages:
             env:
               TEST_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness
               LINT_PULL_IMAGES: "1"
+          - bash: |
+              mkdir -p "$(Build.ArtifactStagingDirectory)/playwright-traces"
+              if [ -d reports/playwright-traces ]; then
+                cp -R reports/playwright-traces/. "$(Build.ArtifactStagingDirectory)/playwright-traces/"
+              fi
+            condition: failed()
+            displayName: Stage Playwright traces on failure
+          - task: PublishBuildArtifacts@1
+            condition: failed()
+            inputs:
+              PathtoPublish: $(Build.ArtifactStagingDirectory)/playwright-traces
+              ArtifactName: playwright-traces
+              publishLocation: Container
           - task: PublishTestResults@2
             condition: succeededOrFailed()
             inputs:

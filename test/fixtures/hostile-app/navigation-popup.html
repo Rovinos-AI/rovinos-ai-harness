@@ -1,0 +1,26 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit }) => {
+        let topNavigationBlocked = false;
+        let popupBlocked = false;
+        try {
+          window.top.location.href = "https://example.test/top-navigation";
+        } catch {
+          topNavigationBlocked = true;
+        }
+        try {
+          popupBlocked = window.open("https://example.test/popup") === null;
+        } catch {
+          popupBlocked = true;
+        }
+        await emit([
+          { name: "ui.error", code: "navigation_blocked", startOffsetMs: 0, durationMs: 0 },
+        ]);
+        return { topNavigationBlocked, popupBlocked };
+      };
+    </script>
+  </body>
+</html>

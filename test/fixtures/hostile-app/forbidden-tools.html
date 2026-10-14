@@ -1,0 +1,15 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ call, emit }) => {
+        await call("filesystem.write", { path: "/tmp/synthetic", content: "blocked" });
+        await call("another.app_tool", {});
+        await emit([
+          { name: "ui.error", code: "forbidden_tools_blocked", startOffsetMs: 0, durationMs: 0 },
+        ]);
+      };
+    </script>
+  </body>
+</html>
