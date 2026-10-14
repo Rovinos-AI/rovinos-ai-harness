@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { FakeClock, Id } from "@harness/schemas";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryVault } from "./memory.js";
 import { purgeExpired, VaultPurger } from "./purger.js";
 import type { VaultAdmin } from "./types.js";
@@ -69,16 +69,18 @@ describe("VaultPurger", () => {
 
   it("stops when a purge batch contains only terminal runs already purged in this call", async () => {
     const id = runId(1);
+    const purge = vi.fn(() => Promise.resolve(1));
     const vault: VaultAdmin = {
       markTerminal: () => Promise.resolve(),
       listTerminalRunsBefore: () => Promise.resolve([id]),
-      purge: () => Promise.resolve(1),
+      purge,
       stats: () => Promise.resolve({ entries: 1 }),
     };
 
     await expect(
       purgeExpired({ vault, clock: new FakeClock(10 * DAY_MS), purgeAfterDays: 7 }),
     ).rejects.toMatchObject({ code: "vault_purge_stalled" });
+    expect(purge).toHaveBeenCalledOnce();
   });
 
   it("validates the configured grace period", () => {

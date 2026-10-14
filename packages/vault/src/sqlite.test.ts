@@ -71,10 +71,26 @@ describe("SqliteVault", () => {
     const database = new Database(":memory:");
     try {
       database.exec(sql);
+      const runMetaMigration = await readFile(
+        new URL("../migrations/sqlite/0003_run_meta.sql", compiledModule),
+        "utf8",
+      );
+      database.exec(runMetaMigration);
       const tables = database
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
         .all();
-      expect(tables).toEqual([{ name: "vault_counters" }, { name: "vault_entries" }]);
+      expect(tables).toEqual([
+        { name: "run_meta" },
+        { name: "vault_counters" },
+        { name: "vault_entries" },
+      ]);
+      expect(
+        database
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'run_meta_terminal_at_idx'",
+          )
+          .get(),
+      ).toEqual({ name: "run_meta_terminal_at_idx" });
     } finally {
       database.close();
     }

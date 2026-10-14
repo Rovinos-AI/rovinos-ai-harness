@@ -31,6 +31,20 @@ const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
+function terminalMarkFailureCode(error: unknown): Code {
+  try {
+    if (typeof error === "object" && error !== null) {
+      const parsedCode = Code.safeParse(Reflect.get(error, "code"));
+      if (parsedCode.success) {
+        return parsedCode.data;
+      }
+    }
+  } catch {
+    // Error metadata must not prevent the run result from being returned.
+  }
+  return Code.parse("vault_unavailable");
+}
+
 async function markTerminalBestEffort(
   vault: RuntimeComposition["vault"],
   runId: Id,
@@ -39,15 +53,8 @@ async function markTerminalBestEffort(
   try {
     await vault.markTerminal(runId, timestamp);
   } catch (error) {
-    const errorCode =
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      Code.safeParse(error.code).success
-        ? Code.parse(error.code)
-        : Code.parse("vault_unavailable");
     try {
-      emitVaultMarkTerminalFailed(runId, errorCode);
+      emitVaultMarkTerminalFailed(runId, terminalMarkFailureCode(error));
     } catch {
       // A diagnostic logger failure must not change the durable run result.
     }
