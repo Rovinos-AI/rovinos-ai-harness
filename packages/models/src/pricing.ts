@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ModelPricingRate, ModelRef, ModelUsage } from "@harness/schemas";
+import { ModelUsageError } from "./errors.js";
 
 /** Prices keyed by the configured `provider/model` reference. */
 export type ModelPricing = Readonly<Record<string, ModelPricingRate>>;
@@ -36,11 +37,15 @@ export function calculateCostMicros(
   }
   if (
     !Number.isSafeInteger(usage.inputTokens) ||
+    usage.inputTokens < 0 ||
     !Number.isSafeInteger(usage.outputTokens) ||
+    usage.outputTokens < 0 ||
     !Number.isSafeInteger(pricing.inputMicrosPerMTok) ||
-    !Number.isSafeInteger(pricing.outputMicrosPerMTok)
+    pricing.inputMicrosPerMTok < 0 ||
+    !Number.isSafeInteger(pricing.outputMicrosPerMTok) ||
+    pricing.outputMicrosPerMTok < 0
   ) {
-    throw new RangeError("Model usage and pricing must be safe integers.");
+    throw new ModelUsageError();
   }
   const microsPerMillion = 1_000_000n;
   const numerator =
@@ -48,7 +53,7 @@ export function calculateCostMicros(
     BigInt(usage.outputTokens) * BigInt(pricing.outputMicrosPerMTok);
   const roundedCost = (numerator + microsPerMillion / 2n) / microsPerMillion;
   if (roundedCost > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new RangeError("Model cost exceeds the safe integer range.");
+    throw new ModelUsageError();
   }
   return Number(roundedCost);
 }

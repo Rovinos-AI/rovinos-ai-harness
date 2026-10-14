@@ -21,12 +21,9 @@ import type { PolicyDocument } from "@harness/policy";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
 import type { ProviderAdapter } from "@harness/models";
 import { createConfiguredModelPort } from "./runtime-model.js";
-<<<<<<< HEAD
-import type { ModelPort, PolicyPort, ToolPort } from "./ports.js";
-=======
 import type { ModelCompletion, ModelPort } from "./ports.js";
+import type { PolicyPort, ToolPort } from "./ports.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
->>>>>>> origin/main
 
 const createRuntime = (
   config: Parameters<typeof createRuntimeImpl>[0],

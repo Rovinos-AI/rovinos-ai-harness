@@ -74,6 +74,8 @@ export interface ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType>
 export interface ModelGatewayOptions {
   /** Highest rung on the native (1) < tool (2) < prompt (3) ladder. */
   readonly maxRung?: EnforcementRung;
+  /** Defers model usage span attributes to the caller after routing aggregation. */
+  readonly deferSpanUsage?: boolean;
 }
 
 /** Provider completion with optional structured-output validation details. */
@@ -286,10 +288,12 @@ export class ModelGateway {
   }
 
   private reportUsage(model: ModelRef, usage: ModelUsage): void {
-    setActiveSpanAttribute("harness.model.input_tokens", usage.inputTokens);
-    setActiveSpanAttribute("harness.model.output_tokens", usage.outputTokens);
-    if (usage.costMicros !== undefined) {
-      setActiveSpanAttribute("harness.model.cost_micros", usage.costMicros);
+    if (this.options.deferSpanUsage !== true) {
+      setActiveSpanAttribute("harness.model.input_tokens", usage.inputTokens);
+      setActiveSpanAttribute("harness.model.output_tokens", usage.outputTokens);
+      if (usage.costMicros !== undefined) {
+        setActiveSpanAttribute("harness.model.cost_micros", usage.costMicros);
+      }
     }
     countModelUsage(usage, model.provider, model.model);
   }

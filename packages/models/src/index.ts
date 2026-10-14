@@ -3,6 +3,7 @@ export {
   ProviderError,
   ProviderErrorCodeSchema,
   ModelOutputInvalidError,
+  ModelUsageError,
   ProviderNotRegisteredError,
   type ProviderErrorCode,
   type ProviderErrorOptions,

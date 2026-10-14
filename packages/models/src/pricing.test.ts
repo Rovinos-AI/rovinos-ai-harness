@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
+import { HarnessError } from "@harness/schemas";
+import { ModelUsageError } from "./errors.js";
 import { calculateCostMicros, resolveModelPricing } from "./pricing.js";
 
 describe("model pricing", () => {
@@ -32,22 +34,55 @@ describe("model pricing", () => {
     ).toBe(9_000_000_000);
   });
 
+  it.each([
+    {
+      usage: { inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 0 },
+      rate: { inputMicrosPerMTok: 1, outputMicrosPerMTok: 0 },
+    },
+    {
+      usage: { inputTokens: 0, outputTokens: Number.MAX_SAFE_INTEGER + 1 },
+      rate: { inputMicrosPerMTok: 0, outputMicrosPerMTok: 1 },
+    },
+    {
+      usage: { inputTokens: -1, outputTokens: 0 },
+      rate: { inputMicrosPerMTok: 1, outputMicrosPerMTok: 0 },
+    },
+    {
+      usage: { inputTokens: 0, outputTokens: -1 },
+      rate: { inputMicrosPerMTok: 0, outputMicrosPerMTok: 1 },
+    },
+    {
+      usage: { inputTokens: 1, outputTokens: 0 },
+      rate: { inputMicrosPerMTok: -1, outputMicrosPerMTok: 0 },
+    },
+    {
+      usage: { inputTokens: 0, outputTokens: 1 },
+      rate: { inputMicrosPerMTok: 0, outputMicrosPerMTok: -1 },
+    },
+    {
+      usage: { inputTokens: 1, outputTokens: 0 },
+      rate: { inputMicrosPerMTok: Number.MAX_SAFE_INTEGER + 1, outputMicrosPerMTok: 0 },
+    },
+  ])("rejects invalid usage or pricing with a typed error: $usage / $rate", ({ usage, rate }) => {
+    let thrown: unknown;
+    try {
+      calculateCostMicros(usage, rate);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(HarnessError);
+    expect(thrown).toBeInstanceOf(ModelUsageError);
+    expect(thrown).toMatchObject({ code: "model_usage_out_of_range" });
+  });
+
   it("rejects costs that cannot be represented as safe integer micros", () => {
     expect(() =>
       calculateCostMicros(
         { inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 0 },
         { inputMicrosPerMTok: Number.MAX_SAFE_INTEGER, outputMicrosPerMTok: 0 },
       ),
-    ).toThrow(RangeError);
-  });
-
-  it("rejects token counts that are not safe integers", () => {
-    expect(() =>
-      calculateCostMicros(
-        { inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 0 },
-        { inputMicrosPerMTok: 1, outputMicrosPerMTok: 0 },
-      ),
-    ).toThrow(RangeError);
+    ).toThrow(ModelUsageError);
   });
 
   it("omits costs without a configured price", () => {

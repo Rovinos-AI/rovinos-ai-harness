@@ -141,6 +141,15 @@ export class ProviderNotRegisteredError extends HarnessError {
   }
 }
 
+/** Raised when model usage or calculated cost exceeds the safe accounting range. */
+export class ModelUsageError extends HarnessError {
+  readonly code = "model_usage_out_of_range";
+
+  constructor() {
+    super("model_usage_out_of_range");
+  }
+}
+
 /** Raised when structured output remains invalid after the configured repair limit. */
 export class ModelOutputInvalidError extends HarnessError {
   /** Stable structured-output failure code. */

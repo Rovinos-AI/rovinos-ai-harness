@@ -53,8 +53,8 @@ interface PolicyDecisionAttributes extends Readonly<Record<string, PolicyDecisio
   readonly "harness.policy.decision": PolicyDecision;
 }
 interface ModelUsageAttributes extends Readonly<Record<string, CodeType>> {
-  readonly provider: CodeType;
-  readonly model: CodeType;
+  readonly "harness.model.provider": CodeType;
+  readonly "harness.model.name": CodeType;
 }
 
 /** String-valued metric attributes are explicitly closed enumerations. */
@@ -68,8 +68,8 @@ export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
 export const METRIC_ALLOWLIST = {
   "harness.host.app_rejected": ["harness.host.app_rejected.reason"],
   "harness.host.app_spans_accepted": [],
-  "harness.model.tokens": ["provider", "model"],
-  "harness.model.cost_micros": ["provider", "model"],
+  "harness.model.tokens": ["harness.model.provider", "harness.model.name"],
+  "harness.model.cost_micros": ["harness.model.provider", "harness.model.name"],
   "harness.policy.decisions": ["harness.policy.decision"],
   "harness.sentinel.scope_reduced": [],
   "harness.sentinel.short_values_skipped": [],
@@ -83,12 +83,9 @@ let policyDecisionsCounter: Counter<PolicyDecisionAttributes> | undefined;
 let hostAppSpansAcceptedCounter: Counter<NoMetricAttributes> | undefined;
 let skippedShortValuesCounter: Counter<NoMetricAttributes> | undefined;
 let scopeReducedCounter: Counter<NoMetricAttributes> | undefined;
-<<<<<<< HEAD
 let modelTokensCounter: Counter<ModelUsageAttributes> | undefined;
 let modelCostCounter: Counter<ModelUsageAttributes> | undefined;
-=======
 let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
->>>>>>> origin/main
 
 function createCounter<TAttributes extends Attributes>(
   name: keyof typeof METRIC_ALLOWLIST,
@@ -145,7 +142,6 @@ function getScopeReducedCounter(): Counter<NoMetricAttributes> {
   return scopeReducedCounter;
 }
 
-<<<<<<< HEAD
 function getModelTokensCounter(): Counter<ModelUsageAttributes> {
   modelTokensCounter ??= createCounter<ModelUsageAttributes>(
     "harness.model.tokens",
@@ -160,14 +156,14 @@ function getModelCostCounter(): Counter<ModelUsageAttributes> {
     (meter, name) => meter.createCounter<ModelUsageAttributes>(name),
   );
   return modelCostCounter;
-=======
+}
+
 function getMcpDiscoveryFailedCounter(): Counter<NoMetricAttributes> {
   mcpDiscoveryFailedCounter ??= createCounter<NoMetricAttributes>(
     "harness.mcp.discovery_failed",
     (meter, name) => meter.createCounter<NoMetricAttributes>(name),
   );
   return mcpDiscoveryFailedCounter;
->>>>>>> origin/main
 }
 
 /** Counts a telemetry drop using its bounded reason code. */
@@ -227,7 +223,6 @@ export function countSentinelScopeReduced(): void {
   }
 }
 
-<<<<<<< HEAD
 /** Counts total input and output tokens and optional cost for one provider/model. */
 export function countModelUsage(
   usage: Pick<ModelUsage, "inputTokens" | "outputTokens" | "costMicros">,
@@ -247,19 +242,22 @@ export function countModelUsage(
   }
   try {
     const attributes: ModelUsageAttributes = {
-      provider: Code.parse(provider),
-      model: Code.parse(model),
+      "harness.model.provider": Code.parse(provider),
+      "harness.model.name": Code.parse(model),
     };
     getModelTokensCounter().add(usage.inputTokens + usage.outputTokens, attributes);
     if (usage.costMicros !== undefined) {
       getModelCostCounter().add(usage.costMicros, attributes);
     }
-=======
+  } catch {
+    return;
+  }
+}
+
 /** Counts an MCP tool-discovery failure without server identifiers. */
 export function countMcpDiscoveryFailed(): void {
   try {
     getMcpDiscoveryFailedCounter().add(1);
->>>>>>> origin/main
   } catch {
     return;
   }
