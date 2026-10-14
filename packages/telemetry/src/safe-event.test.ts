@@ -135,6 +135,20 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
   },
   {
     event: validEvent({
+      type: "pii_action",
+      boundary: "telemetry_export",
+      action: "blocked",
+      entities: [{ type: "email", count: 2 }],
+    }),
+    kind: "pii_action",
+    fields: {
+      boundary: "telemetry_export",
+      action: "blocked",
+      entities: [{ type: "email", count: 2 }],
+    },
+  },
+  {
+    event: validEvent({
       type: "budget_exceeded",
       budget: "steps",
       limit: 10,

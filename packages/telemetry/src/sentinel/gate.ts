@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, Id as IdSchema, type Id, type TelemetryConfig } from "@harness/schemas";
+import {
+  Code,
+  HarnessError,
+  Id as IdSchema,
+  type Code as EntityCode,
+  type Id,
+  type TelemetryConfig,
+} from "@harness/schemas";
 import { z } from "zod";
 import { countSentinelScopeReduced } from "../metrics.js";
 import { activeRuns, type ActiveRuns } from "./active-runs.js";
 import { SentinelMatcher } from "./matcher.js";
-import type { VaultRunView } from "./run-values.js";
+import { sentinelTripQueue, type TripQueue } from "./trips.js";
+import type { RunValueSet, VaultRunView } from "./run-values.js";
 
 const SentinelGateOptionsSchema = z
   .object({
@@ -36,23 +44,12 @@ export const SentinelGateResultSchema = z.discriminatedUnion("ok", [
 /** The fail-closed result of scanning a sanitized telemetry payload. */
 export type SentinelGateResult = z.infer<typeof SentinelGateResultSchema>;
 
-/** Metadata-only notification for the trip queue introduced by task 8.4. */
-export const SentinelTripSchema = z
-  .object({
-    runId: IdSchema.optional(),
-    reason: z.enum(["hit", "error", "timeout"]),
-  })
-  .strict();
-
-/** Trip metadata containing no matched values or tokens. */
-export type SentinelTrip = z.infer<typeof SentinelTripSchema>;
-
 /** Input passed to the sentinel gate. */
 export type SentinelGateInput = z.infer<typeof SentinelGateInputSchema>;
 
 /** Matcher surface used by the gate and injectable in failure tests. */
 export interface SentinelMatcherLike {
-  hasMatch(text: string): boolean;
+  findAll(text: string, shouldStop?: () => boolean): readonly { readonly patternIndex: number }[];
 }
 
 /** Options for building a fail-closed export gate. */
@@ -62,12 +59,18 @@ export interface SentinelGateOptions {
   readonly maxScanMs?: number;
   readonly now?: () => number;
   readonly matcherForValues?: (values: readonly string[]) => SentinelMatcherLike;
-  readonly onTrip?: (trip: SentinelTrip) => void;
+  readonly tripQueue?: TripQueue;
 }
 
 interface CachedMatcher {
   readonly version: number;
   readonly matcher: SentinelMatcherLike;
+  readonly entityTypesByValue: readonly (readonly EntityCode[])[];
+}
+
+interface PreparedMatcher {
+  readonly matcher: SentinelMatcherLike;
+  readonly entityTypesByValue: readonly (readonly EntityCode[])[];
 }
 
 class SentinelPreparationTimeoutError extends Error {}
@@ -82,11 +85,9 @@ export class SentinelGate {
   private readonly maxScanMs: number;
   private readonly now: () => number;
   private readonly matcherForValues: (values: readonly string[]) => SentinelMatcherLike;
-  private readonly onTrip: ((trip: SentinelTrip) => void) | undefined;
+  private readonly tripQueue: TripQueue;
   private readonly runMatchers = new Map<Id, CachedMatcher>();
-  private combinedMatcher:
-    { readonly key: string; readonly matcher: SentinelMatcherLike } | undefined;
-  private readonly trips: SentinelTrip[] = [];
+  private combinedMatcher: ({ readonly key: string } & PreparedMatcher) | undefined;
 
   /**
    * @param values Versioned, read-only vault values.
@@ -109,7 +110,7 @@ export class SentinelGate {
     this.now = options.now ?? (() => performance.now());
     this.matcherForValues =
       options.matcherForValues ?? ((patterns) => SentinelMatcher.forValues(patterns));
-    this.onTrip = options.onTrip;
+    this.tripQueue = options.tripQueue ?? sentinelTripQueue;
   }
 
   /** Check canonicalized sanitized text against the relevant vault values. */
@@ -118,47 +119,45 @@ export class SentinelGate {
     try {
       const request = SentinelGateInputSchema.parse(input);
       runId = request.runId;
-      let matcher: SentinelMatcherLike;
+      let preparedMatcher: PreparedMatcher;
       try {
-        matcher = await this.prepareMatcher(request);
+        preparedMatcher = await this.prepareMatcher(request);
       } catch (error) {
         const reason = error instanceof SentinelPreparationTimeoutError ? "timeout" : "error";
-        this.enqueueTrip(runId, reason);
+        this.enqueueTrip(runId, []);
         return { ok: false, reason };
       }
 
       const scanStartedAt = this.now();
-      let matched: boolean;
+      let matches: readonly { readonly patternIndex: number }[];
       try {
-        matched = matcher.hasMatch(request.text);
+        matches = preparedMatcher.matcher.findAll(
+          request.text,
+          () => this.scanStatus(scanStartedAt) !== "ok",
+        );
       } catch {
         const reason = this.scanStatus(scanStartedAt) === "timeout" ? "timeout" : "error";
-        this.enqueueTrip(runId, reason);
+        this.enqueueTrip(runId, []);
         return { ok: false, reason };
       }
       const scanStatus = this.scanStatus(scanStartedAt);
       if (scanStatus !== "ok") {
         const reason = scanStatus === "timeout" ? "timeout" : "error";
-        this.enqueueTrip(runId, reason);
+        this.enqueueTrip(runId, []);
         return { ok: false, reason };
       }
-      if (matched) {
-        this.enqueueTrip(runId, "hit");
+      if (matches.length > 0) {
+        this.enqueueTrip(runId, entitiesForMatches(matches, preparedMatcher.entityTypesByValue));
         return { ok: false, reason: "hit" };
       }
       return { ok: true };
     } catch {
-      this.enqueueTrip(runId, "error");
+      this.enqueueTrip(runId, []);
       return { ok: false, reason: "error" };
     }
   }
 
-  /** Drain queued metadata-only trip notifications for the run loop. */
-  drainTrips(): readonly SentinelTrip[] {
-    return this.trips.splice(0).map((trip) => ({ ...trip }));
-  }
-
-  private async prepareMatcher(request: SentinelGateInput): Promise<SentinelMatcherLike> {
+  private async prepareMatcher(request: SentinelGateInput): Promise<PreparedMatcher> {
     const startedAt = this.now();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -200,17 +199,21 @@ export class SentinelGate {
     }
   }
 
-  private async runMatcher(runId: Id): Promise<SentinelMatcherLike> {
+  private async runMatcher(runId: Id): Promise<CachedMatcher> {
     const valueSet = await this.values.valuesFor(runId);
     const cached = this.runMatchers.get(runId);
     if (cached?.version === valueSet.version) {
       this.runMatchers.delete(runId);
       this.runMatchers.set(runId, cached);
-      return cached.matcher;
+      return cached;
     }
     const matcher = this.matcherForValues(valueSet.values);
+    const entityTypesByValue = valueSet.values.map((_, index) =>
+      valueSet.entityTypesForValue(index),
+    );
+    const prepared = { version: valueSet.version, matcher, entityTypesByValue };
     this.runMatchers.delete(runId);
-    this.runMatchers.set(runId, { version: valueSet.version, matcher });
+    this.runMatchers.set(runId, prepared);
     while (this.runMatchers.size > 64) {
       const oldestRunId = this.runMatchers.keys().next().value;
       if (oldestRunId === undefined) {
@@ -218,10 +221,10 @@ export class SentinelGate {
       }
       this.runMatchers.delete(oldestRunId);
     }
-    return matcher;
+    return prepared;
   }
 
-  private async globalMatcher(): Promise<SentinelMatcherLike> {
+  private async globalMatcher(): Promise<PreparedMatcher> {
     const runIds = this.runs.runIds();
     const valueSets = await Promise.all(
       runIds.map(async (runId) => ({
@@ -231,32 +234,97 @@ export class SentinelGate {
     );
     const key = JSON.stringify(valueSets.map(({ runId, valueSet }) => [runId, valueSet.version]));
     if (this.combinedMatcher?.key === key) {
-      return this.combinedMatcher.matcher;
+      return this.combinedMatcher;
     }
-    const combined = [...new Set(valueSets.flatMap(({ valueSet }) => [...valueSet.values]))];
-    if (combined.length > this.maxCombinedValues) {
+    const combined = combineValueSets(valueSets.map(({ valueSet }) => valueSet));
+    if (combined.values.length > this.maxCombinedValues) {
       const matchers = await Promise.all(valueSets.map(({ runId }) => this.runMatcher(runId)));
-      const matcher = {
-        hasMatch: (text: string) => matchers.some((runMatcher) => runMatcher.hasMatch(text)),
+      const offsets: number[] = [];
+      const entityTypesByValue: (readonly EntityCode[])[] = [];
+      for (const runMatcher of matchers) {
+        const offset = entityTypesByValue.length;
+        offsets.push(offset);
+        entityTypesByValue.push(...runMatcher.entityTypesByValue);
+      }
+      const matcher: SentinelMatcherLike = {
+        findAll: (text, shouldStop) =>
+          matchers.flatMap((runMatcher, index) =>
+            runMatcher.matcher.findAll(text, shouldStop).map(({ patternIndex }) => ({
+              patternIndex: patternIndex + (offsets[index] ?? 0),
+            })),
+          ),
       };
-      this.combinedMatcher = { key, matcher };
+      this.combinedMatcher = { key, matcher, entityTypesByValue };
       countSentinelScopeReduced();
-      return matcher;
+      return this.combinedMatcher;
     }
-    const matcher = this.matcherForValues(combined);
-    this.combinedMatcher = { key, matcher };
-    return matcher;
+    const matcher = this.matcherForValues(combined.values);
+    this.combinedMatcher = { key, matcher, entityTypesByValue: combined.entityTypesByValue };
+    return this.combinedMatcher;
   }
 
-  private enqueueTrip(runId: Id | undefined, reason: SentinelTrip["reason"]): void {
-    const trip = SentinelTripSchema.parse({ ...(runId === undefined ? {} : { runId }), reason });
-    this.trips.push(trip);
-    try {
-      this.onTrip?.(trip);
-    } catch {
-      return;
+  private enqueueTrip(
+    runId: Id | undefined,
+    entities: readonly { type: EntityCode; count: number }[],
+  ): void {
+    this.tripQueue.enqueue({
+      ...(runId === undefined ? {} : { runId }),
+      entities: [...entities],
+    });
+  }
+}
+
+function combineValueSets(valueSets: readonly RunValueSet[]): {
+  readonly values: readonly string[];
+  readonly entityTypesByValue: readonly (readonly EntityCode[])[];
+} {
+  const values: string[] = [];
+  const entityTypesByValue: EntityCode[][] = [];
+  const indexes = new Map<string, number>();
+  for (const valueSet of valueSets) {
+    for (const [index, value] of valueSet.values.entries()) {
+      const existingIndex = indexes.get(value);
+      if (existingIndex === undefined) {
+        indexes.set(value, values.length);
+        values.push(value);
+        entityTypesByValue.push([...valueSet.entityTypesForValue(index)]);
+      } else {
+        mergeEntityTypes(entityTypesByValue[existingIndex], valueSet.entityTypesForValue(index));
+      }
     }
   }
+  return { values, entityTypesByValue };
+}
+
+function mergeEntityTypes(target: EntityCode[] | undefined, source: readonly EntityCode[]): void {
+  if (target === undefined) {
+    return;
+  }
+  for (const type of source) {
+    if (!target.includes(type)) {
+      target.push(type);
+    }
+  }
+}
+
+function entitiesForMatches(
+  matches: readonly { readonly patternIndex: number }[],
+  entityTypesByValue: readonly (readonly EntityCode[])[],
+): { type: EntityCode; count: number }[] {
+  const counts = new Map<EntityCode, number>();
+  const matchedIndexes = new Set<number>();
+  for (const { patternIndex } of matches) {
+    if (matchedIndexes.has(patternIndex)) {
+      continue;
+    }
+    matchedIndexes.add(patternIndex);
+    for (const type of entityTypesByValue[patternIndex] ?? []) {
+      counts.set(type, (counts.get(type) ?? 0) + 1);
+    }
+  }
+  return [...counts]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([type, count]) => ({ type: Code.parse(type), count }));
 }
 
 /** Ensure SDK processor pipelines fail closed unless explicitly disabled outside production. */

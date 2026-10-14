@@ -21,7 +21,12 @@ import {
   type Snapshot,
 } from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
-import type { SpanDefinition, SpanDefinitionShape } from "@harness/telemetry";
+import {
+  sentinelTripQueue,
+  type SpanDefinition,
+  type SpanDefinitionShape,
+  type TripQueue,
+} from "@harness/telemetry";
 import { RUN_SPAN } from "./spans.js";
 
 /** Clock used to timestamp recorded events. */
@@ -94,6 +99,7 @@ export class RunRecorder {
     private readonly segmentId: Id,
     startSeq: number,
     private readonly clock: Clock,
+    private readonly tripQueue: TripQueue = sentinelTripQueue,
   ) {
     this.nextSequence = startSeq;
   }
@@ -139,6 +145,32 @@ export class RunRecorder {
     const spanContext = this.activeSpanContext();
     const events = await this.enqueue(() => this.append(partials, spanContext));
     return events;
+  }
+
+  /**
+   * Append this run's queued sentinel trips through the recorder's serialized write path.
+   *
+   * @returns The metadata-only `pii_action` events appended for this run.
+   */
+  async drainTrips(): Promise<Event[]> {
+    const trips = this.tripQueue.drainForRun(this.runId);
+    if (trips.length === 0) {
+      return [];
+    }
+    try {
+      return await this.recordBatch(
+        trips.map(({ entities }) => ({
+          type: "pii_action",
+          v: 1,
+          boundary: "telemetry_export",
+          action: "blocked",
+          entities: entities.map(({ type, count }) => ({ type, count })),
+        })),
+      );
+    } catch (error) {
+      this.tripQueue.restore(trips);
+      throw error;
+    }
   }
 
   /**

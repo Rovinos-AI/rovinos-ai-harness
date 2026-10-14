@@ -30,6 +30,7 @@ describe("createTelemetrySdk", () => {
       logExporter: new InMemoryLogRecordExporter(),
       telemetry: TelemetryConfigSchema.parse({ sentinel: { enabled: false } }),
     });
+    await sdk.forceFlush();
     await sdk.tracerProvider.shutdown();
     await sdk.loggerProvider.shutdown();
   });

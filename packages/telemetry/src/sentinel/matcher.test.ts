@@ -13,8 +13,9 @@ describe("SentinelMatcher", () => {
     const matcher = SentinelMatcher.forValues([]);
 
     expect(matcher.hasMatch("anything")).toBe(false);
+    expect(matcher.findAll("anything")).toEqual([]);
     expect(build).not.toHaveBeenCalled();
-    expect("findAll" in matcher).toBe(false);
+    expect("findAll" in matcher).toBe(true);
   });
 
   it("matches vault values case-sensitively without returning match text", () => {
@@ -22,7 +23,8 @@ describe("SentinelMatcher", () => {
 
     expect(matcher.hasMatch("before Raw-Value after")).toBe(true);
     expect(matcher.hasMatch("raw-value")).toBe(false);
-    expect("findAll" in matcher).toBe(false);
+    expect(matcher.findAll("before Raw-Value after")).toEqual([{ patternIndex: 0 }]);
+    expect(JSON.stringify(matcher.findAll("before Raw-Value after"))).not.toContain("Raw-Value");
   });
 
   it("uses supplied variants", () => {

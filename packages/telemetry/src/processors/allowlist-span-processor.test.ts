@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, type Context } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { Id, type TelemetryConfig } from "@harness/schemas";
+import { Code, Id, type TelemetryConfig } from "@harness/schemas";
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
@@ -17,6 +17,7 @@ import { AllowlistSpanProcessor, sanitizeSpan } from "./allowlist-span-processor
 import { ActiveRuns } from "../sentinel/active-runs.js";
 import { SentinelGate, SentinelRequiredError } from "../sentinel/gate.js";
 import { VaultRunView } from "../sentinel/run-values.js";
+import { TripQueue } from "../sentinel/trips.js";
 
 const metricMocks = vi.hoisted(() => ({
   record: vi.fn<(reason: string) => void>(),
@@ -35,6 +36,10 @@ const disabledTelemetry: TelemetryConfig = {
   sentinel: { minValueLength: 6, enabled: false },
 };
 const runId = Id.parse("A".repeat(26));
+
+function makeTripQueue(): TripQueue {
+  return new TripQueue({ emit: vi.fn(), enabled: () => true });
+}
 const testOwnerTask = { taskId: "4.7", packageName: "@harness/telemetry" } as const;
 
 function defineTestSpan() {
@@ -475,9 +480,11 @@ describe("AllowlistSpanProcessor", () => {
     const gate = new SentinelGate(
       new VaultRunView({
         version: () => Promise.resolve(1),
-        listRawValues: () => Promise.resolve([canary]),
+        listRawValueEntries: () =>
+          Promise.resolve([{ entityType: Code.parse("email"), rawValue: canary }]),
       }),
       activeRuns,
+      { tripQueue: makeTripQueue() },
     );
     const processor = new AllowlistSpanProcessor(next, { gate });
 
@@ -503,7 +510,7 @@ describe("AllowlistSpanProcessor", () => {
       result: "error",
       gateOptions: {
         matcherForValues: () => ({
-          hasMatch: () => {
+          findAll: () => {
             throw new Error("matcher failed");
           },
         }),
@@ -527,10 +534,11 @@ describe("AllowlistSpanProcessor", () => {
     const gate = new SentinelGate(
       new VaultRunView({
         version: () => Promise.resolve(1),
-        listRawValues: () => Promise.resolve(["known-value"]),
+        listRawValueEntries: () =>
+          Promise.resolve([{ entityType: Code.parse("email"), rawValue: "known-value" }]),
       }),
       activeRuns,
-      gateOptions,
+      { ...gateOptions, tripQueue: makeTripQueue() },
     );
     const processor = new AllowlistSpanProcessor(next, { gate });
 
@@ -554,9 +562,10 @@ describe("AllowlistSpanProcessor", () => {
     const gate = new SentinelGate(
       new VaultRunView({
         version: () => Promise.resolve(0),
-        listRawValues: () => Promise.resolve([]),
+        listRawValueEntries: () => Promise.resolve([]),
       }),
       new ActiveRuns(),
+      { tripQueue: makeTripQueue() },
     );
     const check = vi.spyOn(gate, "check");
     const processor = new AllowlistSpanProcessor(next, { gate });

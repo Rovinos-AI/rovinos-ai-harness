@@ -10,10 +10,13 @@ interface TrieNode {
   readonly outputs: { patternIndex: number; patternLength: number }[];
 }
 
-/** Closed error codes for invalid sentinel patterns. */
+/** Closed error codes for sentinel matcher failures. */
 export class AhoCorasickError extends HarnessError {
   readonly code:
-    "sentinel_pattern_empty" | "sentinel_patterns_too_large" | "sentinel_matcher_invalid";
+    | "sentinel_pattern_empty"
+    | "sentinel_patterns_too_large"
+    | "sentinel_matcher_invalid"
+    | "sentinel_scan_timeout";
 
   constructor(code: AhoCorasickError["code"]) {
     super(code);
@@ -37,7 +40,10 @@ function nodeAt(nodes: readonly TrieNode[], index: number): TrieNode {
  * A case-sensitive multi-pattern matcher using UTF-16 code-unit offsets.
  */
 export class AhoCorasick {
-  private constructor(private readonly nodes: readonly TrieNode[]) {}
+  private constructor(
+    private readonly nodes: readonly TrieNode[],
+    private readonly patternCount: number,
+  ) {}
 
   /**
    * Build a trie and its failure and dictionary links.
@@ -105,7 +111,7 @@ export class AhoCorasick {
       }
     }
 
-    return new AhoCorasick(nodes);
+    return new AhoCorasick(nodes, patterns.length);
   }
 
   /** Return immediately when any pattern is found without exposing matched text. */
@@ -126,6 +132,74 @@ export class AhoCorasick {
       }
     }
     return false;
+  }
+
+  /**
+   * Return each matching pattern index at most once without allocating occurrence ranges.
+   * @param text Text to scan.
+   * @param shouldStop Optional deadline check, called during scanning and output traversal.
+   */
+  findPatternIndexes(text: string, shouldStop: () => boolean = () => false): number[] {
+    if (this.patternCount === 0) {
+      return [];
+    }
+    const matches: number[] = [];
+    const seen = new Uint8Array(this.patternCount);
+    const skippedOutputs = new Map<number, number>();
+    let matchedCount = 0;
+    let state = 0;
+
+    const firstUnseenOutput = (nodeIndex: number): number => {
+      let current = nodeIndex;
+      const path: number[] = [];
+      while (current !== 0) {
+        const next = skippedOutputs.get(current);
+        if (next === undefined) {
+          break;
+        }
+        path.push(current);
+        current = next;
+      }
+      for (const skipped of path) {
+        skippedOutputs.set(skipped, current);
+      }
+      return current;
+    };
+
+    for (let index = 0; index < text.length; index += 1) {
+      if (shouldStop()) {
+        throw new AhoCorasickError("sentinel_scan_timeout");
+      }
+      const codeUnit = text.charCodeAt(index);
+      let node = nodeAt(this.nodes, state);
+      while (state !== 0 && node.transitions.get(codeUnit) === undefined) {
+        state = node.failure;
+        node = nodeAt(this.nodes, state);
+      }
+      state = node.transitions.get(codeUnit) ?? 0;
+      node = nodeAt(this.nodes, state);
+
+      let outputIndex = firstUnseenOutput(node.outputs.length > 0 ? state : node.outputLink);
+      while (outputIndex !== 0) {
+        if (shouldStop()) {
+          throw new AhoCorasickError("sentinel_scan_timeout");
+        }
+        const outputNode = nodeAt(this.nodes, outputIndex);
+        for (const { patternIndex } of outputNode.outputs) {
+          if (seen[patternIndex] === 0) {
+            seen[patternIndex] = 1;
+            matches.push(patternIndex);
+            matchedCount += 1;
+          }
+        }
+        skippedOutputs.set(outputIndex, outputNode.outputLink);
+        outputIndex = firstUnseenOutput(outputNode.outputLink);
+      }
+      if (matchedCount === this.patternCount) {
+        break;
+      }
+    }
+    return matches;
   }
 
   /**

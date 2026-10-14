@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
-import { emitVaultMarkTerminalFailed } from "@harness/telemetry";
-import { Code, HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
+import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
+import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import type { ToolPort } from "./ports.js";
-import { LeaseLostError } from "./recorder.js";
+import { LeaseLostError, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
@@ -16,6 +17,7 @@ import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool } from "./subagent/runtime.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import { setupRuntime } from "./runtime-setup.js";
+import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
   Runtime,
   RuntimeComposition,
@@ -28,36 +30,6 @@ const CANCEL_POLL_INTERVAL_MS = 25;
 const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
-
-function terminalMarkFailureCode(error: unknown): Code {
-  try {
-    if (typeof error === "object" && error !== null) {
-      const parsedCode = Code.safeParse(Reflect.get(error, "code"));
-      if (parsedCode.success) {
-        return parsedCode.data;
-      }
-    }
-  } catch {
-    // Error metadata must not prevent the run result from being returned.
-  }
-  return Code.parse("vault_unavailable");
-}
-
-async function markTerminalBestEffort(
-  vault: RuntimeComposition["vault"],
-  runId: Id,
-  timestamp: number,
-): Promise<void> {
-  try {
-    await vault.markTerminal(runId, timestamp);
-  } catch (error) {
-    try {
-      emitVaultMarkTerminalFailed(runId, terminalMarkFailureCode(error));
-    } catch {
-      // A diagnostic logger failure must not change the durable run result.
-    }
-  }
-}
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
 
@@ -194,17 +166,22 @@ interface RunControlOptions {
   readonly store: EventStore;
   readonly runId: Id;
   readonly firstNewSeq: number;
+  readonly clock: Clock;
+  readonly flushTelemetry?: RuntimeOverrides["flushTelemetry"];
   readonly processLike: ShutdownProcessLike;
   readonly graceMs: number;
   readonly operation: (signal: AbortSignal) => Promise<RunLoopResult>;
 }
 
 async function withRunControl(options: RunControlOptions): Promise<RunLoopResult> {
+  sentinelTripQueue.beginRun(options.runId);
   const controller = new AbortController();
   const stopWatcher = new AbortController();
   const cursor = { nextSeq: options.firstNewSeq };
   const cancellation = { observed: false };
   let running: Promise<RunLoopResult> | undefined;
+  let result: RunLoopResult | undefined;
+  let tripsFinalized = false;
   const uninstall = installShutdownHandler({
     processLike: options.processLike,
     controller,
@@ -229,7 +206,6 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
 
   try {
     running = options.operation(controller.signal);
-    let result: RunLoopResult;
     try {
       result = await running;
     } catch (error) {
@@ -250,19 +226,27 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
       if (cancellation.observed) {
         const cancelled = await cancelledResult(options.store, options.runId, options.firstNewSeq);
         if (cancelled !== undefined) {
-          return cancelled;
+          result = cancelled;
+        } else {
+          throw error;
         }
+      } else {
+        throw error;
       }
-      throw error;
     }
     if (cancellation.observed) {
-      return (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
+      result = (await cancelledResult(options.store, options.runId, options.firstNewSeq)) ?? result;
     }
+    result = await appendFinalRunTrips(result, options);
+    tripsFinalized = true;
     return result;
   } finally {
     stopWatcher.abort();
     uninstall();
     await watcher;
+    if (running !== undefined && !tripsFinalized) {
+      await flushAndDrainTrips(options);
+    }
   }
 }
 
@@ -289,11 +273,14 @@ function createTerminalAwareRunControl({
   store,
   vault,
 }: RuntimeComposition): RunControl {
+  const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   return async (runId, operation, firstNewSeq = 0) => {
     const result = await withRunControl({
       store,
       runId,
       firstNewSeq,
+      clock,
+      flushTelemetry,
       processLike: overrides.processLike ?? defaultProcessLike,
       graceMs: config.run.shutdownGraceMs,
       operation,
@@ -317,6 +304,7 @@ function composeRuntime(
 ): Runtime {
   const {
     config,
+    overrides,
     clock,
     ids,
     store,
@@ -330,6 +318,7 @@ function composeRuntime(
     roles,
     scopes,
   } = options;
+  const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   const subagentTool = createSubagentTool({
     config,
     clock,
@@ -368,17 +357,13 @@ function composeRuntime(
       }
       return result;
     },
-    close: async () => {
-      try {
-        await store.close();
-      } finally {
-        try {
-          vault.close();
-        } finally {
-          keys.dispose();
-        }
-      }
-    },
+    close: () =>
+      closeRuntimeResources({
+        store,
+        vault,
+        keys,
+        flushTelemetry,
+      }),
   };
 }
 

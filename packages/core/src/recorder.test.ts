@@ -13,8 +13,9 @@ import {
   type Tracer,
   type TracerProvider,
 } from "@opentelemetry/api";
-import { FakeClock, type Event } from "@harness/schemas";
+import { FakeClock, Id, type Event } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
+import { TripQueue } from "@harness/telemetry";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   LeaseLostError,
@@ -198,8 +199,16 @@ function checkpointWritten(atSeq: number): EventPartial {
   };
 }
 
-function makeRecorder(store: InMemoryEventStore, clock: Clock = new FakeClock(100)): RunRecorder {
-  return new RunRecorder(store, runId, segmentId, 0, clock);
+function makeTripQueue(): TripQueue {
+  return new TripQueue({ emit: vi.fn(), enabled: () => true });
+}
+
+function makeRecorder(
+  store: InMemoryEventStore,
+  clock: Clock = new FakeClock(100),
+  tripQueue = makeTripQueue(),
+): RunRecorder {
+  return new RunRecorder(store, runId, segmentId, 0, clock, tripQueue);
 }
 
 async function recordInSpan(recorder: RunRecorder, partial: EventPartial): Promise<Event> {
@@ -346,6 +355,50 @@ describe("RunRecorder", () => {
 
     expect(last.seq).toBe(1);
     expect(recorder.nextSeq).toBe(2);
+  });
+
+  it("appends trips queued during a store write without a sequence conflict", async () => {
+    const store = new InMemoryEventStore();
+    const tripQueue = makeTripQueue();
+    const recorder = makeRecorder(store, new FakeClock(100), tripQueue);
+    const append = store.append.bind(store);
+    let enqueued = false;
+    vi.spyOn(store, "append").mockImplementation(async (requestedRunId, partials, expectedSeq) => {
+      if (!enqueued && partials.some(({ type }) => type === "run_created")) {
+        enqueued = true;
+        tripQueue.enqueue({
+          runId: Id.parse(runId),
+          entities: [{ type: "email", count: 1 }],
+        });
+      }
+      return append(requestedRunId, partials, expectedSeq);
+    });
+
+    const recorded: Event[] = [];
+    await recorder.withStepSpan(RUN_SPAN, {}, async () => {
+      const created = await recorder.record(runCreated());
+      const trips = await recorder.drainTrips();
+      recorded.push(created, ...trips);
+      const trip = trips.at(-1);
+      if (trip === undefined) {
+        throw new Error("Expected a queued sentinel trip.");
+      }
+      return trip;
+    });
+
+    expect(recorded.map(({ type }) => type)).toEqual(["run_created", "pii_action"]);
+    expect(recorded[1]).toMatchObject({
+      runId,
+      seq: 1,
+      type: "pii_action",
+      boundary: "telemetry_export",
+      action: "blocked",
+      entities: [{ type: "email", count: 1 }],
+    });
+    expect(JSON.stringify(recorded)).not.toContain("alice@example.test");
+    expect(recorder.nextSeq).toBe(2);
+    expect(await store.head(runId)).toBe(2);
+    expect(tripQueue.drainForRun(Id.parse(runId))).toEqual([]);
   });
 
   it("rejects when recording without a valid active span", async () => {

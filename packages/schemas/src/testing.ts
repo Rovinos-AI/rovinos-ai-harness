@@ -94,6 +94,13 @@ export const eventSamples = [
     action: "tokenized",
     entities: [{ type: "email", count: 1 }],
   },
+  {
+    ...envelope,
+    type: "pii_action",
+    boundary: "telemetry_export",
+    action: "blocked",
+    entities: [{ type: "email", count: 1 }],
+  },
   { ...envelope, type: "budget_exceeded", budget: "steps", limit: 1, observed: 2 },
   { ...envelope, type: "subagent_spawned", childRunId: id, role: "researcher" },
   { ...envelope, type: "subagent_completed", childRunId: id, outcome: "completed" },

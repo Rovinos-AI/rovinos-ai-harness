@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { logs } from "@opentelemetry/api-logs";
 import type { TelemetryConfig } from "@harness/schemas";
 import {
   BatchLogRecordProcessor,
@@ -16,6 +17,8 @@ import { assertSentinelGate, type SentinelGate } from "./sentinel/gate.js";
 import { SEMCONV_STABILITY_OPT_IN } from "./semconv.js";
 import { env } from "node:process";
 
+const sdkFlushersByLoggerProvider = new WeakMap<WeakKey, () => Promise<void>>();
+
 /** Inputs for constructing the guarded trace and log SDK providers. */
 export interface TelemetrySdkOptions {
   readonly spanExporter: SpanExporter;
@@ -28,6 +31,8 @@ export interface TelemetrySdkOptions {
 export interface TelemetrySdk {
   readonly tracerProvider: BasicTracerProvider;
   readonly loggerProvider: LoggerProvider;
+  /** Flush pending span and log processors, including in-flight sentinel checks. */
+  forceFlush(): Promise<void>;
 }
 
 /**
@@ -56,5 +61,18 @@ export function createTelemetrySdk(options: TelemetrySdkOptions): TelemetrySdk {
       ),
     ],
   });
-  return { tracerProvider, loggerProvider };
+  const forceFlush = async (): Promise<void> => {
+    await Promise.all([tracerProvider.forceFlush(), loggerProvider.forceFlush()]);
+  };
+  sdkFlushersByLoggerProvider.set(loggerProvider, forceFlush);
+  return {
+    tracerProvider,
+    loggerProvider,
+    forceFlush,
+  };
+}
+
+/** Flush the span and log processors belonging to the globally registered telemetry SDK. */
+export async function forceFlushTelemetry(): Promise<void> {
+  await sdkFlushersByLoggerProvider.get(logs.getLoggerProvider())?.();
 }

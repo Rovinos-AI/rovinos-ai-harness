@@ -59,6 +59,8 @@ export interface RuntimeOverrides {
   /** Shared token-scope registry used by the runtime and its tool adapters. */
   readonly scopeRegistry?: RunScopeRegistry;
   readonly processLike?: ShutdownProcessLike;
+  /** Flush the embedding telemetry SDK before final run-trip drains and runtime shutdown. */
+  readonly flushTelemetry?: () => Promise<void>;
 }
 
 /** Runtime configuration required by the currently implemented run loop. */

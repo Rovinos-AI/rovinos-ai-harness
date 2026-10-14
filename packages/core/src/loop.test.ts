@@ -42,7 +42,7 @@ import {
   NaiveStrategy,
   SummarizingStrategy,
 } from "@harness/context";
-import { activeRuns } from "@harness/telemetry";
+import { activeRuns, TripQueue } from "@harness/telemetry";
 import { buildApprovalPayload, sweepApprovals, type ApprovalSweepStore } from "@harness/policy";
 import { emailDetector, PiiToolPort, Tokenizer } from "@harness/pii";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
@@ -1111,6 +1111,49 @@ describe("approval lifecycle", () => {
 });
 
 describe("runLoop", () => {
+  it("drains a concurrent sentinel trip into the run log without exposing its canary", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const tripQueue = new TripQueue({ emit: vi.fn(), enabled: () => true });
+    const append = store.append.bind(store);
+    let enqueued = false;
+    vi.spyOn(store, "append").mockImplementation(async (requestedRunId, partials, expectedSeq) => {
+      if (!enqueued && partials.some(({ type }) => type === "model_request")) {
+        enqueued = true;
+        tripQueue.enqueue({
+          runId: Id.parse(runId),
+          entities: [{ type: "email", count: 1 }],
+        });
+      }
+      return append(requestedRunId, partials, expectedSeq);
+    });
+
+    const result = await runLoop({
+      recorder: new RunRecorder(store, runId, segmentId, 0, clock, tripQueue),
+      clock,
+      model: new FakeModelPort([completion()]),
+      tool: new FakeToolPort(),
+      context: new NaiveContext(),
+      ids: new SequentialIdGenerator(),
+      goal: "synthetic run goal",
+      signal: new AbortController().signal,
+      budgets: defaultBudgets,
+      configHash,
+      policyVersion: "test.policy",
+    });
+    const trips = result.events.filter((event) => event.type === "pii_action");
+
+    expect(trips).toHaveLength(1);
+    expect(trips[0]).toMatchObject({
+      boundary: "telemetry_export",
+      action: "blocked",
+      entities: [{ type: "email", count: 1 }],
+    });
+    expect(JSON.stringify(trips)).not.toContain("synthetic run goal");
+    expect(result.status).toBe("completed");
+    expect(result.events.map(({ seq }) => seq)).toEqual(result.events.map((_, index) => index));
+  });
+
   it("compacts before making the next model call", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
