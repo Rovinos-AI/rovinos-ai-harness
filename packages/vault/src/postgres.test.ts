@@ -27,6 +27,8 @@ const fakePg = vi.hoisted(() => {
   const unavailableSchemas = new Set<string>();
   let identityQueries = 0;
   let scopeKeyReads = 0;
+  let conflictScopeKeyInsert = false;
+  let conflictEntryInsert = false;
   const bufferValue = (value: unknown): Buffer => {
     if (!Buffer.isBuffer(value)) {
       throw new TypeError("Synthetic SQL value is not a buffer");
@@ -118,8 +120,12 @@ const fakePg = vi.hoisted(() => {
           key_id: String(values[2]),
           created_at: Number(values[3]),
         });
-        rows.push({ scope_id: scopeId });
-        rowCount = 1;
+        if (conflictScopeKeyInsert) {
+          conflictScopeKeyInsert = false;
+        } else {
+          rows.push({ scope_id: scopeId });
+          rowCount = 1;
+        }
       }
       return { rows, rowCount };
     }
@@ -180,8 +186,12 @@ const fakePg = vi.hoisted(() => {
       );
       if (!duplicate) {
         state.entries.push(entry);
-        rows.push({ token: entry.token });
-        rowCount = 1;
+        if (conflictEntryInsert) {
+          conflictEntryInsert = false;
+        } else {
+          rows.push({ token: entry.token });
+          rowCount = 1;
+        }
       }
       return { rows, rowCount };
     }
@@ -353,6 +363,14 @@ const fakePg = vi.hoisted(() => {
     resetReadCounts() {
       identityQueries = 0;
       scopeKeyReads = 0;
+      conflictScopeKeyInsert = false;
+      conflictEntryInsert = false;
+    },
+    conflictNextScopeKeyInsert() {
+      conflictScopeKeyInsert = true;
+    },
+    conflictNextEntryInsert() {
+      conflictEntryInsert = true;
     },
     handle,
   };
@@ -552,6 +570,56 @@ it("fetches one scope key per value-list operation", async () => {
     { entityType: "email", rawValue: "bob@example.test" },
   ]);
   expect(fakePg.scopeKeyReads).toBe(2);
+  await vault.close();
+});
+
+it("covers empty lists and read failures", async () => {
+  const schema = nextSchema();
+  const vault = vaultFor(schema);
+  const emptyRunId = Id.parse("B".repeat(26));
+  await expect(vault.listRawValues(emptyRunId)).resolves.toEqual([]);
+  await expect(vault.listRawValueEntries(emptyRunId)).resolves.toEqual([]);
+  await vault.close();
+  const failedSchema = nextSchema();
+  fakePg.unavailableSchemas.add(failedSchema);
+  const unavailable = vaultFor(failedSchema);
+  await expect(unavailable.listRawValues(runId)).rejects.toMatchObject({
+    code: "vault_unavailable",
+  });
+  await unavailable.close();
+});
+
+it("recovers concurrent inserts for scope keys and entries", async () => {
+  const schema = nextSchema();
+  const vault = vaultFor(schema);
+  fakePg.conflictNextScopeKeyInsert();
+  fakePg.conflictNextEntryInsert();
+  await expect(vault.put(runId, "email", "alice@example.test")).resolves.toBe("<EMAIL_1>");
+  await vault.close();
+});
+
+it("maps invalid counters and stored tokens to closed vault errors", async () => {
+  const schema = nextSchema();
+  const keys = keyProvider();
+  const vault = vaultFor(schema, keys);
+  await vault.stats(runId);
+  const state = fakePg.databases.get(schema);
+  state?.counters.set(`${runId}:EMAIL`, Number.NaN);
+  await expect(vault.put(runId, "email", "alice@example.test")).rejects.toMatchObject({
+    code: "vault_unavailable",
+  });
+  state?.counters.delete(`${runId}:EMAIL`);
+  await vault.put(runId, "email", "alice@example.test");
+  keys.setCurrentKeyId("key-b");
+  await expect(vault.put(runId, "email", "alice@example.test")).resolves.toBe("<EMAIL_1>");
+  keys.setCurrentKeyId("key-a");
+  const entry = state?.entries[0];
+  if (entry !== undefined) {
+    entry.token = "not-a-token";
+  }
+  await expect(vault.put(runId, "email", "alice@example.test")).rejects.toMatchObject({
+    code: "vault_unavailable",
+  });
   await vault.close();
 });
 

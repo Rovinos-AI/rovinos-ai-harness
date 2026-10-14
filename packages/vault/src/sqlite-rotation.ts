@@ -150,9 +150,9 @@ function updateRows(
       WHERE run_id = ? AND token = ? AND key_id = ? AND lookup_key_id = ? AND value_enc = ?`,
   );
   const rotate = db.transaction(() => {
-    const processed = updates.reduce(
-      (processed, row) =>
-        processed +
+    const processedCount = updates.reduce(
+      (total, row) =>
+        total +
         update.run(
           targetKeyId,
           findLookupOwner.get(row.runId, row.entityType, row.lookup, row.token) === undefined
@@ -184,7 +184,7 @@ function updateRows(
         updateScopeEntries.run(targetKeyId, row.scopeId);
       }
     }
-    return processed;
+    return processedCount;
   });
   return rotate.immediate();
 }

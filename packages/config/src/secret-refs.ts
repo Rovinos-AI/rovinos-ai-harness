@@ -33,5 +33,13 @@ export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
     config.policy.approvals?.notifier.kind === "webhook"
       ? [config.policy.approvals.notifier.secretRef]
       : [];
-  return [...modelRefs, ...serverRefs, ...keyRefs, ...storeRefs, ...vaultRefs, ...runnerRefs, ...approvalRefs];
+  return [
+    ...modelRefs,
+    ...serverRefs,
+    ...keyRefs,
+    ...storeRefs,
+    ...vaultRefs,
+    ...runnerRefs,
+    ...approvalRefs,
+  ];
 }

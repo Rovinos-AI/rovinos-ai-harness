@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { hmacSha256 } from "@harness/crypto";
-import {
-  Id,
-  VaultValueEntrySchema,
-  type Code,
-  type KeyProvider,
-  type VaultValueEntry,
-} from "@harness/schemas";
+import { Id, type Code, type KeyProvider, type VaultValueEntry } from "@harness/schemas";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { z } from "zod";
 import { VaultOperationError } from "./errors.js";
-import { normalize } from "./normalize.js";
-import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
+import { tokenTypeName, type Token as TokenValue } from "./token.js";
 import {
   VaultValueError,
   VaultTerminalRunsQuerySchema,
@@ -31,19 +21,16 @@ import {
   type VaultReencryptBatchInput,
 } from "./rotate.js";
 import { reencryptPostgresBatch } from "./postgres-rotation.js";
+import { initializePostgresVault } from "./postgres-initialize.js";
+import { putPostgresEntry } from "./postgres-write.js";
 import {
-  createWrappedScopeKey,
-  decryptScopeValue,
-  encryptScopeValue,
-  unwrapScopeKey,
-} from "./scope-crypto.js";
-import { currentKeyId, deriveVaultKeys, lookupMessage } from "./sqlite-crypto.js";
+  listPostgresValueEntries,
+  listPostgresValues,
+  readPostgresValue,
+} from "./postgres-reader.js";
+import { currentKeyId, deriveVaultKeys } from "./sqlite-crypto.js";
 
 const MAX_VALUE_BYTES = 8 * 1024;
-const MAX_TOKEN_NUMBER = 999_999;
-const POSTGRES_MIGRATION = fileURLToPath(
-  new URL("../migrations/postgres/0001_init.sql", import.meta.url),
-);
 const postgresUrlSchema = z
   .url()
   .refine(
@@ -79,33 +66,6 @@ interface EntryRow extends QueryResultRow {
   lookup_key_id: string;
 }
 
-interface ScopeKeyRow extends QueryResultRow {
-  wrapped_dek: Buffer;
-  key_id: string;
-}
-
-interface ScopeDataKey {
-  readonly dataKey: Uint8Array;
-  readonly keyId: string;
-  readonly wrappedDek: Buffer;
-}
-
-interface PutInput {
-  readonly runId: Id;
-  readonly entityType: Code;
-  readonly rawValue: string;
-  readonly typeName: string;
-  readonly keyId: string;
-  readonly lookupKey: Uint8Array;
-}
-
-interface DatabaseIdentity extends QueryResultRow {
-  system_identifier: string;
-  database_name: string;
-  schema_name: string;
-  role_name: string;
-}
-
 function databaseIdentity(connectionString: string): string {
   const url = new URL(connectionString);
   const port = url.port.length === 0 ? "5432" : url.port;
@@ -123,14 +83,6 @@ function safeInteger(value: number | string | undefined): number {
     throw new VaultOperationError("vault_unavailable");
   }
   return parsed;
-}
-
-function entryToken(value: string): TokenValue {
-  const parsed = Token.safeParse(value);
-  if (!parsed.success) {
-    throw new VaultOperationError("vault_unavailable");
-  }
-  return parsed.data;
 }
 
 function validateRawValue(raw: string): string {
@@ -212,66 +164,9 @@ export class PostgresVault
   }
 
   private async initializePool(): Promise<void> {
-    const client = await this.pool.connect().catch(() => {
-      throw new VaultOperationError("vault_unavailable");
-    });
-    let transactionStarted = false;
-    try {
-      await this.assertSeparateDatabase(client);
-      await client.query("BEGIN");
-      transactionStarted = true;
-      await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
-      await client.query(
-        "CREATE TABLE IF NOT EXISTS vault_schema_migrations (version text PRIMARY KEY)",
-      );
-      const applied = await client.query<{ version: string } & QueryResultRow>(
-        "SELECT version FROM vault_schema_migrations",
-      );
-      if (applied.rows.some(({ version }) => version !== "0001_init")) {
-        throw new VaultOperationError("vault_migration_newer_than_code");
-      }
-      if (applied.rows.length === 0) {
-        const migration = readFileSync(POSTGRES_MIGRATION, "utf8");
-        await client.query(migration);
-        await client.query("INSERT INTO vault_schema_migrations (version) VALUES ($1)", [
-          "0001_init",
-        ]);
-      }
-      await client.query("COMMIT");
-      transactionStarted = false;
-    } catch (error) {
-      if (transactionStarted) {
-        await client.query("ROLLBACK").catch(() => undefined);
-      }
+    await initializePostgresVault(this.pool, this.storePool).catch((error: unknown) => {
       mapVaultError(error);
-    } finally {
-      client.release();
-    }
-  }
-
-  private async assertSeparateDatabase(client: PoolClient): Promise<void> {
-    if (this.storePool === undefined) {
-      return;
-    }
-    const identityQuery =
-      "SELECT (SELECT system_identifier::text FROM pg_control_system()) AS system_identifier, current_database() AS database_name, current_schema() AS schema_name, current_user AS role_name";
-    const [vaultIdentityResult, storeIdentityResult] = await Promise.all([
-      client.query<DatabaseIdentity>(identityQuery),
-      this.storePool.query<DatabaseIdentity>(identityQuery),
-    ]);
-    const vaultIdentity = vaultIdentityResult.rows[0];
-    const storeIdentity = storeIdentityResult.rows[0];
-    if (vaultIdentity === undefined || storeIdentity === undefined) {
-      throw new VaultOperationError("vault_unavailable");
-    }
-    if (
-      vaultIdentity.system_identifier === storeIdentity.system_identifier &&
-      vaultIdentity.database_name === storeIdentity.database_name &&
-      (vaultIdentity.schema_name === storeIdentity.schema_name ||
-        vaultIdentity.role_name === storeIdentity.role_name)
-    ) {
-      throw new VaultOperationError("vault_shares_store_database");
-    }
+    });
   }
 
   private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -292,104 +187,6 @@ export class PostgresVault
     }
   }
 
-  private async scopeKey(client: PoolClient, scopeId: Id, keyId: string): Promise<ScopeDataKey> {
-    const existing = await client.query<ScopeKeyRow>(
-      "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = $1 FOR UPDATE",
-      [scopeId],
-    );
-    const row = existing.rows[0];
-    if (row !== undefined) {
-      const dataKey = await unwrapScopeKey(this.keyProvider, row.key_id, scopeId, row.wrapped_dek);
-      return { dataKey, keyId: row.key_id, wrappedDek: Buffer.from(row.wrapped_dek) };
-    }
-
-    const candidate = await createWrappedScopeKey(this.keyProvider, keyId, scopeId);
-    let installed = false;
-    try {
-      const inserted = await client.query(
-        "INSERT INTO vault_scope_keys (scope_id, wrapped_dek, key_id, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT (scope_id) DO NOTHING RETURNING scope_id",
-        [scopeId, candidate.wrappedDek, keyId, this.now()],
-      );
-      if (inserted.rows.length > 0) {
-        installed = true;
-        return {
-          dataKey: candidate.dataKey,
-          keyId,
-          wrappedDek: Buffer.from(candidate.wrappedDek),
-        };
-      }
-    } finally {
-      candidate.wrappedDek.fill(0);
-      if (!installed) {
-        candidate.dataKey.fill(0);
-      }
-    }
-    const raced = await client.query<ScopeKeyRow>(
-      "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = $1 FOR UPDATE",
-      [scopeId],
-    );
-    const racedRow = raced.rows[0];
-    if (racedRow === undefined) {
-      throw new VaultOperationError("vault_unavailable");
-    }
-    return {
-      dataKey: await unwrapScopeKey(
-        this.keyProvider,
-        racedRow.key_id,
-        scopeId,
-        racedRow.wrapped_dek,
-      ),
-      keyId: racedRow.key_id,
-      wrappedDek: Buffer.from(racedRow.wrapped_dek),
-    };
-  }
-
-  private async lookupKeys(
-    client: PoolClient,
-    scope: {
-      readonly id: Id;
-      readonly entityType: Code;
-      readonly normalizedValue: string;
-      readonly keyId: string;
-      readonly lookupKey: Uint8Array;
-    },
-  ): Promise<Buffer[]> {
-    const result = await client.query<{ lookup_key_id: string } & QueryResultRow>(
-      "SELECT DISTINCT lookup_key_id FROM vault_entries WHERE run_id = $1 ORDER BY lookup_key_id",
-      [scope.id],
-    );
-    const message = lookupMessage(scope.id, scope.entityType, scope.normalizedValue);
-    const lookupKeys: Buffer[] = [];
-    try {
-      const keyIds = Array.from(
-        new Set([scope.keyId, ...result.rows.map(({ lookup_key_id }) => lookup_key_id)]),
-      );
-      for (const lookupKeyId of keyIds) {
-        if (lookupKeyId === scope.keyId) {
-          lookupKeys.push(Buffer.from(hmacSha256(scope.lookupKey, message)));
-          continue;
-        }
-        const oldKeys = await deriveVaultKeys(
-          this.keyProvider,
-          lookupKeyId,
-          "vault_encrypt_failed",
-        );
-        try {
-          lookupKeys.push(Buffer.from(hmacSha256(oldKeys.lookup, message)));
-        } finally {
-          oldKeys.encryption.fill(0);
-          oldKeys.lookup.fill(0);
-        }
-      }
-      return lookupKeys;
-    } catch (error) {
-      lookupKeys.forEach((lookup) => lookup.fill(0));
-      mapVaultError(error);
-    } finally {
-      message.fill(0);
-    }
-  }
-
   /** Store a trimmed value or reuse its idempotent scope token. */
   async put(runId: Id, entityType: Code, raw: string): Promise<TokenValue> {
     const rawValue = validateRawValue(raw);
@@ -398,7 +195,7 @@ export class PostgresVault
     const keys = await deriveVaultKeys(this.keyProvider, keyId, "vault_encrypt_failed");
     try {
       return await this.transaction((client) =>
-        this.putInTransaction(client, {
+        putPostgresEntry({ keyProvider: this.keyProvider, now: this.now }, client, {
           runId,
           entityType,
           rawValue,
@@ -415,79 +212,6 @@ export class PostgresVault
     }
   }
 
-  private async putInTransaction(client: PoolClient, input: PutInput): Promise<TokenValue> {
-    const { runId, entityType, rawValue, typeName, keyId, lookupKey } = input;
-    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [runId]);
-    const scopeKey = await this.scopeKey(client, runId, keyId);
-    let lookups: Buffer[] = [];
-    try {
-      lookups = await this.lookupKeys(client, {
-        id: runId,
-        entityType,
-        normalizedValue: normalize(entityType, rawValue),
-        keyId,
-        lookupKey,
-      });
-      for (const lookup of lookups) {
-        const existing = await client.query<{ token: string } & QueryResultRow>(
-          "SELECT token FROM vault_entries WHERE run_id = $1 AND entity_type = $2 AND lookup = $3",
-          [runId, entityType, lookup],
-        );
-        const token = existing.rows[0]?.token;
-        if (token !== undefined) {
-          return entryToken(token);
-        }
-      }
-      await client.query(
-        "INSERT INTO vault_counters (run_id, entity_type, next_n) VALUES ($1, $2, 1) ON CONFLICT (run_id, entity_type) DO NOTHING",
-        [runId, typeName],
-      );
-      const allocated = await client.query<{ next_n: number | string } & QueryResultRow>(
-        "UPDATE vault_counters SET next_n = next_n + 1 WHERE run_id = $1 AND entity_type = $2 RETURNING next_n - 1 AS next_n",
-        [runId, typeName],
-      );
-      const number = safeInteger(allocated.rows[0]?.next_n);
-      if (number < 1 || number > MAX_TOKEN_NUMBER) {
-        throw new VaultValueError("vault_token_space_exhausted");
-      }
-      const token = Token.safeParse(`<${typeName}_${String(number)}>`);
-      if (!token.success) {
-        throw new VaultValueError("vault_entity_type_invalid");
-      }
-      const lookup = lookups[0];
-      if (lookup === undefined) {
-        throw new VaultOperationError("vault_encrypt_failed");
-      }
-      const valueEnc = encryptScopeValue(scopeKey.dataKey, rawValue, `${runId}:${token.data}`);
-      const inserted = await client.query<{ token: string } & QueryResultRow>(
-        `INSERT INTO vault_entries
-          (run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id, created_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          ON CONFLICT (run_id, entity_type, lookup) DO NOTHING RETURNING token`,
-        [runId, token.data, entityType, lookup, valueEnc, scopeKey.keyId, keyId, this.now()],
-      );
-      const insertedToken = inserted.rows[0]?.token;
-      if (insertedToken !== undefined) {
-        return entryToken(insertedToken);
-      }
-      for (const candidate of lookups) {
-        const duplicate = await client.query<{ token: string } & QueryResultRow>(
-          "SELECT token FROM vault_entries WHERE run_id = $1 AND entity_type = $2 AND lookup = $3",
-          [runId, entityType, candidate],
-        );
-        const duplicateToken = duplicate.rows[0]?.token;
-        if (duplicateToken !== undefined) {
-          return entryToken(duplicateToken);
-        }
-      }
-      throw new VaultOperationError("vault_unavailable");
-    } finally {
-      scopeKey.dataKey.fill(0);
-      scopeKey.wrappedDek.fill(0);
-      lookups.forEach((lookup) => lookup.fill(0));
-    }
-  }
-
   /** Resolve one token only within its owning scope. */
   async resolve(
     runId: Id,
@@ -501,103 +225,30 @@ export class PostgresVault
         [runId, token],
       );
       const row = result.rows[0];
-      return row === undefined ? undefined : await this.decryptEntry(runId, row);
+      return row === undefined
+        ? undefined
+        : await readPostgresValue(this.readerContext(), runId, row.token, row.value_enc);
     } catch (error) {
       mapVaultError(error);
     }
-  }
-
-  private async decryptEntry(runId: Id, row: EntryRow): Promise<string> {
-    const scopeKey = await this.pool.query<ScopeKeyRow>(
-      "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = $1",
-      [runId],
-    );
-    const wrapped = scopeKey.rows[0];
-    if (wrapped === undefined) {
-      throw new VaultOperationError("vault_decrypt_failed");
-    }
-    const dataKey = await unwrapScopeKey(
-      this.keyProvider,
-      wrapped.key_id,
-      runId,
-      wrapped.wrapped_dek,
-    );
-    try {
-      return decryptScopeValue(dataKey, row.value_enc, `${runId}:${row.token}`);
-    } finally {
-      dataKey.fill(0);
-    }
-  }
-
-  private async decryptRows(runId: Id, rows: readonly EntryRow[]): Promise<Uint8Array | undefined> {
-    if (rows.length === 0) {
-      return undefined;
-    }
-    const scopeKey = await this.pool.query<ScopeKeyRow>(
-      "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = $1",
-      [runId],
-    );
-    const wrapped = scopeKey.rows[0];
-    if (wrapped === undefined) {
-      throw new VaultOperationError("vault_decrypt_failed");
-    }
-    return unwrapScopeKey(this.keyProvider, wrapped.key_id, runId, wrapped.wrapped_dek);
   }
 
   /** Return detached values for leak detection. */
-  async listRawValues(runId: Id): Promise<readonly string[]> {
-    try {
-      const rows = await this.readRows(runId);
-      const dataKey = await this.decryptRows(runId, rows);
-      if (dataKey === undefined) {
-        return [];
-      }
-      try {
-        return rows.map((row) =>
-          decryptScopeValue(dataKey, row.value_enc, `${runId}:${row.token}`),
-        );
-      } finally {
-        dataKey.fill(0);
-      }
-    } catch (error) {
-      mapVaultError(error);
-    }
+  listRawValues(runId: Id): Promise<readonly string[]> {
+    return listPostgresValues(this.readerContext(), runId);
   }
 
   /** Return detached values with entity types. */
-  async listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
-    try {
-      const rows = await this.readRows(runId);
-      const dataKey = await this.decryptRows(runId, rows);
-      if (dataKey === undefined) {
-        return [];
-      }
-      try {
-        return rows.map((row) =>
-          VaultValueEntrySchema.parse({
-            entityType: row.entity_type,
-            rawValue: decryptScopeValue(dataKey, row.value_enc, `${runId}:${row.token}`),
-          }),
-        );
-      } finally {
-        dataKey.fill(0);
-      }
-    } catch (error) {
-      mapVaultError(error);
-    }
+  listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
+    return listPostgresValueEntries(this.readerContext(), runId);
   }
 
-  private async readRows(runId: Id): Promise<EntryRow[]> {
-    try {
-      await this.ensureInitialized();
-      const result = await this.pool.query<EntryRow>(
-        "SELECT run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id FROM vault_entries WHERE run_id = $1 ORDER BY token",
-        [runId],
-      );
-      return result.rows;
-    } catch (error) {
-      mapVaultError(error);
-    }
+  private readerContext() {
+    return {
+      pool: this.pool,
+      keyProvider: this.keyProvider,
+      ensureInitialized: () => this.ensureInitialized(),
+    };
   }
 
   /** Return the sum of allocated token counters and completed purge epochs. */
