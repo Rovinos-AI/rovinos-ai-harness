@@ -89,7 +89,6 @@ function createContext() {
     resume: () => Promise.reject(new Error("Resume is not used by serve tests.")),
     resolveApproval: () => Promise.reject(new Error("Approval is not used by serve tests.")),
     cancel: () => Promise.reject(new Error("Cancel is not used by serve tests.")),
-    resolveApproval: () => Promise.reject(new Error("Approval is not used by serve tests.")),
     close: closeRuntime,
   };
   const context: CliContext = {

@@ -9,7 +9,64 @@ export type McpTool = ListToolsResult["tools"][number];
 const MAX_TOOLS = 1_000;
 const MAX_HEADER_SCAN_DEPTH = 32;
 const RESERVED_HEADER_NAMES = new Set(["traceparent", "tracestate", "baggage"]);
-const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
+const HEADER_TOKEN = /^[!#$%&'*+.^`|~\w-]+$/u;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasInvalidHeaderDeclaration(
+  schema: ReadonlyMap<string, unknown>,
+  reachable: boolean,
+  seen: Set<string>,
+): boolean {
+  if (!schema.has("x-mcp-header")) {
+    return false;
+  }
+  const header = schema.get("x-mcp-header");
+  const type = schema.get("type");
+  if (
+    !reachable ||
+    typeof header !== "string" ||
+    !HEADER_TOKEN.test(header) ||
+    RESERVED_HEADER_NAMES.has(header.toLowerCase()) ||
+    !["string", "integer", "boolean"].includes(String(type)) ||
+    seen.has(header.toLowerCase())
+  ) {
+    return true;
+  }
+  seen.add(header.toLowerCase());
+  return false;
+}
+
+function hasInvalidNestedHeaders(
+  entries: readonly [string, unknown][],
+  depth: number,
+  seen: Set<string>,
+  reachable: boolean,
+): boolean {
+  for (const [key, value] of entries) {
+    if (key === "x-mcp-header") {
+      continue;
+    }
+    if (key === "properties") {
+      if (!isRecord(value) && !Array.isArray(value)) {
+        continue;
+      }
+      const properties = Array.isArray(value) ? value : Object.values(value);
+      if (
+        properties.some((property) => hasInvalidMcpHeader(property, depth + 1, seen, reachable))
+      ) {
+        return true;
+      }
+    } else if (isRecord(value) || Array.isArray(value)) {
+      if (hasInvalidMcpHeader(value, depth + 1, seen, false)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 function hasInvalidMcpHeader(
   value: unknown,
@@ -17,44 +74,21 @@ function hasInvalidMcpHeader(
   seen = new Set<string>(),
   reachable = true,
 ): boolean {
-  if (typeof value !== "object" || value === null || depth > MAX_HEADER_SCAN_DEPTH) {
-    return depth > MAX_HEADER_SCAN_DEPTH;
+  if (depth > MAX_HEADER_SCAN_DEPTH) {
+    return true;
+  }
+  if (typeof value !== "object" || value === null) {
+    return false;
   }
   if (Array.isArray(value)) {
     return value.some((item) => hasInvalidMcpHeader(item, depth + 1, seen, false));
   }
-  const schema = value as Record<string, unknown>;
-  if (Object.hasOwn(schema, "x-mcp-header")) {
-    const header = schema["x-mcp-header"];
-    const type = schema.type;
-    if (
-      !reachable ||
-      typeof header !== "string" ||
-      !HEADER_TOKEN.test(header) ||
-      RESERVED_HEADER_NAMES.has(header.toLowerCase()) ||
-      !["string", "integer", "boolean"].includes(String(type)) ||
-      seen.has(header.toLowerCase())
-    ) {
-      return true;
-    }
-    seen.add(header.toLowerCase());
-  }
-  for (const [key, item] of Object.entries(schema)) {
-    if (key === "properties" && typeof item === "object" && item !== null) {
-      if (
-        Object.values(item).some((property) =>
-          hasInvalidMcpHeader(property, depth + 1, seen, reachable),
-        )
-      ) {
-        return true;
-      }
-    } else if (key !== "x-mcp-header" && typeof item === "object" && item !== null) {
-      if (hasInvalidMcpHeader(item, depth + 1, seen, false)) {
-        return true;
-      }
-    }
-  }
-  return false;
+  const entries = Object.entries(value);
+  const schema = new Map(entries);
+  return (
+    hasInvalidHeaderDeclaration(schema, reachable, seen) ||
+    hasInvalidNestedHeaders(entries, depth, seen, reachable)
+  );
 }
 
 /**

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Client,
-  ProtocolError,
   specTypeSchemas,
   type CallToolRequest,
   type CallToolRequestOptions,
@@ -10,7 +9,7 @@ import {
 } from "@modelcontextprotocol/client";
 import { compileJsonSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
 import { McpConnectionError, McpProtocolError, isConnectionLossError } from "./errors.js";
-import { buildActiveRequestMeta } from "./trace-injection.js";
+import { invokeMcpTool } from "./mcp-call.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
 import { createMcpTransport, type McpLogger } from "./transports.js";
 
@@ -377,7 +376,7 @@ export class McpConnection {
       this.#state = "unavailable";
       this.#protocolEra = undefined;
       this.#cachedTools = undefined;
-      if (!this.#isIdempotent(params.name)) {
+      if (this.#config.idempotentTools?.includes(params.name) !== true) {
         throw new McpConnectionError("mcp_connection_lost");
       }
       await this.#reconnect(options?.signal);
@@ -392,7 +391,7 @@ export class McpConnection {
     }
   }
 
-  async #invoke(
+  #invoke(
     params: CallToolRequest["params"],
     options?: CallToolRequestOptions,
     toolDefinition?: McpTool,
@@ -401,27 +400,13 @@ export class McpConnection {
     if (client === undefined || this.#state !== "ready") {
       throw new McpConnectionError("mcp_connection_lost");
     }
-    const { _meta: existingMeta, ...callParams } = params;
-    const requestMeta = buildActiveRequestMeta(this.#config, existingMeta);
-    try {
-      return await client.callTool(
-        {
-          ...callParams,
-          ...(requestMeta === undefined ? {} : { _meta: requestMeta }),
-        },
-        {
-          timeout: this.#config.timeouts.callMs,
-          allowInputRequired: true,
-          ...(toolDefinition === undefined ? {} : { toolDefinition }),
-          ...options,
-        },
-      );
-    } catch (error) {
-      if (error instanceof ProtocolError) {
-        throw new McpProtocolError(error.code);
-      }
-      throw error;
-    }
+    return invokeMcpTool({
+      client,
+      server: this.#config,
+      params,
+      ...(options === undefined ? {} : { requestOptions: options }),
+      ...(toolDefinition === undefined ? {} : { toolDefinition }),
+    });
   }
 
   async #ensureReady(signal?: AbortSignal): Promise<void> {
@@ -457,14 +442,9 @@ export class McpConnection {
         lastError = error;
       }
     }
-    if (lastError instanceof McpConnectionError) {
-      throw lastError;
-    }
-    throw new McpConnectionError("mcp_connect_failed");
-  }
-
-  #isIdempotent(name: string): boolean {
-    return this.#config.idempotentTools?.includes(name) === true;
+    throw lastError instanceof McpConnectionError
+      ? lastError
+      : new McpConnectionError("mcp_connect_failed");
   }
 
   /** Closes the SDK client and marks the connection unavailable. */

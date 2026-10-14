@@ -267,6 +267,28 @@ async function readState(
   return { state: foldRunState(events), lastEvent };
 }
 
+async function retryApprovalResolution(options: {
+  readonly store: EventStore;
+  readonly runId: Id;
+  readonly approvalId: Id;
+  readonly attempt: number;
+  readonly error: unknown;
+}): Promise<void> {
+  const { store, runId, approvalId, attempt, error } = options;
+  if (!(error instanceof LeaseLostError) && !(error instanceof SeqConflictError)) {
+    throw error;
+  }
+  if (attempt < 2) {
+    return;
+  }
+  const { state } = await readState(store, runId);
+  pendingApproval(state, approvalId);
+  if (state.status !== "suspended") {
+    throw new ApprovalRunNotSuspendedError();
+  }
+  throw new ApprovalResolutionConflictError();
+}
+
 /**
  * Resolves a pending approval by appending to the run log without a live loop.
  *
@@ -348,17 +370,7 @@ export async function resolveApproval(
       }
       return event;
     } catch (error) {
-      if (!(error instanceof LeaseLostError) && !(error instanceof SeqConflictError)) {
-        throw error;
-      }
-      if (attempt === 2) {
-        const { state: latestState } = await readState(store, runId);
-        pendingApproval(latestState, approvalId);
-        if (latestState.status !== "suspended") {
-          throw new ApprovalRunNotSuspendedError();
-        }
-        throw new ApprovalResolutionConflictError();
-      }
+      await retryApprovalResolution({ store, runId, approvalId, attempt, error });
     }
   }
   throw new ApprovalResolutionConflictError();

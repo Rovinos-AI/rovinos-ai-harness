@@ -35,14 +35,60 @@ import type { Clock } from "./recorder.js";
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 const mcpDiagnosticLogger = diag.createComponentLogger({ namespace: "harness.mcp" });
 const mcpLogger: McpLogger = {
-  log: (event) =>
+  log: (event) => {
     mcpDiagnosticLogger.warn(
       event.code,
       event.code === "mcp_stderr"
         ? { serverId: event.serverId, bytes: event.bytes }
         : { serverId: event.serverId },
-    ),
+    );
+  },
 };
+
+async function createConfiguredMcpToolPort(
+  config: RuntimeConfig,
+  overrides: RuntimeOverrides,
+): Promise<McpToolPort | undefined> {
+  const servers = config.servers ?? [];
+  if (overrides.tool !== undefined || servers.length === 0) {
+    return undefined;
+  }
+  const secretResolver = overrides.secretResolver ?? {
+    resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
+  };
+  return McpToolPort.create(
+    servers,
+    {
+      resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
+      logger: mcpLogger,
+      ...(overrides.mcpTransportFactory === undefined
+        ? {}
+        : { createTransport: overrides.mcpTransportFactory }),
+    },
+    { offloadBinaryResults: overrides.workspace !== undefined },
+  );
+}
+
+async function closeSetupResources(options: {
+  readonly mcpToolPort: McpToolPort | undefined;
+  readonly eventStore: EventStore | undefined;
+  readonly vault: RuntimeVault | undefined;
+  readonly disposeKeys: () => void;
+}): Promise<void> {
+  try {
+    await options.mcpToolPort?.close();
+  } finally {
+    try {
+      await options.eventStore?.close();
+    } finally {
+      try {
+        options.vault?.close();
+      } finally {
+        options.disposeKeys();
+      }
+    }
+  }
+}
 
 /** Runtime dependencies ready to be assembled into the public runtime API. */
 export type RuntimeSetup = RuntimeComposition & {
@@ -230,22 +276,7 @@ export async function setupRuntime(
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
     const context = overrides.context ?? new NaiveContext();
-    if (overrides.tool === undefined && (runtimeConfig.servers?.length ?? 0) > 0) {
-      const secretResolver = overrides.secretResolver ?? {
-        resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
-      };
-      mcpToolPort = await McpToolPort.create(
-        runtimeConfig.servers ?? [],
-        {
-          resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
-          logger: mcpLogger,
-          ...(overrides.mcpTransportFactory === undefined
-            ? {}
-            : { createTransport: overrides.mcpTransportFactory }),
-        },
-        { offloadBinaryResults: overrides.workspace !== undefined },
-      );
-    }
+    mcpToolPort = await createConfiguredMcpToolPort(runtimeConfig, overrides);
     const tool = overrides.tool ?? mcpToolPort ?? unavailableTool;
     const roles = await resolveRuntimeRoles(
       runtimeConfig,
@@ -289,19 +320,14 @@ export async function setupRuntime(
       scopes,
     };
   } catch (error) {
-    try {
-      await mcpToolPort?.close();
-    } finally {
-      try {
-        await eventStore?.close();
-      } finally {
-        try {
-          vault?.close();
-        } finally {
-          keys.dispose();
-        }
-      }
-    }
+    await closeSetupResources({
+      mcpToolPort,
+      eventStore,
+      vault,
+      disposeKeys: () => {
+        keys.dispose();
+      },
+    });
     throw error;
   }
 }

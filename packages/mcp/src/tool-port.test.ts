@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   InMemoryTransport,
+  StreamableHTTPClientTransport,
   ProtocolError,
   type CallToolRequest,
   type CallToolResult,
@@ -8,7 +9,7 @@ import {
 } from "@modelcontextprotocol/client";
 import { context as otelContext, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SpanContext } from "@opentelemetry/api";
-import { McpServer } from "@modelcontextprotocol/server";
+import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { JsonValue, ServerConfigSchema } from "@harness/schemas";
 import {
   createTestContextManager,
@@ -47,11 +48,7 @@ async function fixture(options: {
   readonly neverResolve?: boolean;
   readonly callMs?: number;
   readonly maxResultBytes?: number;
-  readonly protocol?: "2025-11-25" | "2026-07-28";
-  readonly trust?: "internal" | "external";
-  readonly propagateTrace?: boolean;
   readonly offloadBinaryResults?: boolean;
-  readonly onCall?: (params: CallToolRequest["params"]) => void;
 } = {}): Promise<Fixture> {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = new McpServer({ name: "tool-port-test", version: "1.0.0" });
@@ -64,7 +61,6 @@ async function fixture(options: {
   server.server.setRequestHandler("tools/call", (request) => {
     calls.push(request.params);
     receivedMeta.push(request.params._meta);
-    options.onCall?.(request.params);
     if (options.protocolError !== undefined) {
       throw new ProtocolError(options.protocolError, canary);
     }
@@ -77,27 +73,23 @@ async function fixture(options: {
       }
     );
   });
-  if (options.protocol === "2026-07-28") {
-    server.server.setRequestHandler("server/discover", () => ({
-      supportedVersions: ["2026-07-28"],
-      capabilities: { tools: { listChanged: true } },
-    }));
-  }
   await server.connect(serverTransport);
   const peer = { client, serverTransport };
   const config = ServerConfigSchema.parse({
     id: "mcp_test",
     transport: { kind: "stdio", command: "not-spawned-by-test" },
-    protocol: options.protocol ?? "2025-11-25",
-    trust: options.trust ?? "external",
-    propagateTrace: options.propagateTrace ?? false,
+    protocol: "2025-11-25",
     timeouts: { callMs: options.callMs ?? 1_000 },
     maxResultBytes: options.maxResultBytes ?? 1_048_576,
   });
   const port = await McpToolPort.create([config], {
     resolveSecret: () => Promise.reject(new Error("unexpected secret")),
     createTransport: () => client,
-  }, { offloadBinaryResults: options.offloadBinaryResults });
+  }, {
+    ...(options.offloadBinaryResults === undefined
+      ? {}
+      : { offloadBinaryResults: options.offloadBinaryResults }),
+  });
   return {
     peer,
     port,
@@ -163,7 +155,7 @@ describe("McpToolPort", () => {
     }
   });
 
-  it("maps isError to a code and drops untrusted error text", async () => {
+  it("preserves isError result content while keeping error text out of telemetry", async () => {
     const current = await fixture({
       result: { isError: true, content: [{ type: "text", text: canary }] },
     });
@@ -339,38 +331,12 @@ describe("McpToolPort", () => {
     const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockResolvedValue({
       content: [],
       resultType: "input_required",
-    } as CallToolResult);
+    });
     try {
       await expect(current.port.execute(call, context())).resolves.toEqual({
         outcome: "error",
         errorCode: "mcp_input_required_unsupported",
         result: null,
-      });
-
-      it("logs discovery failures by server id and fails startup instead of dropping the server", async () => {
-        const log = vi.fn();
-        await expect(
-          McpToolPort.create(
-            [
-              ServerConfigSchema.parse({
-                id: "mcp_test",
-                transport: { kind: "stdio", command: "not-spawned-by-test" },
-                protocol: "2025-11-25",
-              }),
-            ],
-            {
-              resolveSecret: () => Promise.reject(new Error("unexpected secret")),
-              logger: { log },
-              createTransport: () => Promise.reject(new Error("untrusted transport error")),
-              sleep: () => Promise.resolve(),
-            },
-          ),
-        ).rejects.toMatchObject({ code: "mcp_list_tools_failed" });
-        expect(log).toHaveBeenCalledWith({
-          code: "mcp_discovery_failed",
-          serverId: "mcp_test",
-        });
-        expect(JSON.stringify(log.mock.calls)).not.toContain("untrusted transport error");
       });
     } finally {
       callTool.mockRestore();
@@ -378,17 +344,49 @@ describe("McpToolPort", () => {
     }
   });
 
+  it("logs discovery failures by server id and fails startup instead of dropping the server", async () => {
+    const log = vi.fn();
+    await expect(
+      McpToolPort.create(
+        [
+          ServerConfigSchema.parse({
+            id: "mcp_test",
+            transport: { kind: "stdio", command: "not-spawned-by-test" },
+            protocol: "2025-11-25",
+          }),
+        ],
+        {
+          resolveSecret: () => Promise.reject(new Error("unexpected secret")),
+          logger: { log },
+          createTransport: () => Promise.reject(new Error("untrusted transport error")),
+          sleep: () => Promise.resolve(),
+        },
+      ),
+    ).rejects.toMatchObject({ code: "mcp_list_tools_failed" });
+    expect(log).toHaveBeenCalledWith({
+      code: "mcp_discovery_failed",
+      serverId: "mcp_test",
+    });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("untrusted transport error");
+  });
+
   it("keeps large text resources on the normal JSON result path", async () => {
     const text = "synthetic resource ".repeat(600);
     const current = await fixture({
       result: {
-        content: [{ type: "resource", resource: { mimeType: "text/plain", text } }],
-      } as CallToolResult,
+        content: [
+          {
+            type: "resource",
+            resource: { uri: "file:///synthetic", mimeType: "text/plain", text },
+          },
+        ],
+      },
     });
     try {
-      await expect(current.port.execute(call, context())).resolves.toMatchObject({
+      const result = await current.port.execute(call, context());
+      expect(result.binary).toBeUndefined();
+      expect(result).toMatchObject({
         outcome: "ok",
-        binary: undefined,
         result: {
           content: [{ type: "resource", mimeType: "text/plain", data: text }],
         },
@@ -400,40 +398,81 @@ describe("McpToolPort", () => {
 
   it("propagates the MCP call span as the parent of trusted server spans", async () => {
     let receivedTraceparent: string | undefined;
-    const current = await fixture({
-      protocol: "2026-07-28",
-      trust: "internal",
-      propagateTrace: true,
-      onCall: (params) => {
-        const meta = params._meta;
-        const header = typeof meta?.traceparent === "string" ? meta.traceparent : undefined;
-        receivedTraceparent = header;
-        const match = /^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/u.exec(header ?? "");
-        if (match?.[1] !== undefined && match[2] !== undefined && match[3] !== undefined) {
-          const parent: SpanContext = {
-            traceId: match[1],
-            spanId: match[2],
-            traceFlags: Number.parseInt(match[3], 16),
-            isRemote: true,
-          };
-          otelContext.with(trace.setSpanContext(otelContext.active(), parent), () => {
-            trace.getTracer("mcp-server-test").startSpan("server.tool").end();
-          });
-        }
+    const schema = {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+      additionalProperties: false,
+    } satisfies Tool["inputSchema"];
+    const handler = createMcpHandler(
+      () => {
+        const server = new McpServer(
+          { name: "trace-server", version: "1.0.0" },
+          { supportedProtocolVersions: ["2026-07-28"] },
+        );
+        server.server.registerCapabilities({ tools: { listChanged: true } });
+        server.server.setRequestHandler("tools/list", () => ({
+          tools: [{ name: "echo", inputSchema: schema }],
+        }));
+        server.server.setRequestHandler("tools/call", (request) => {
+          const meta = request.params._meta;
+          receivedTraceparent =
+            typeof meta?.traceparent === "string" ? meta.traceparent : undefined;
+          const match =
+            /^00-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})$/u.exec(
+              receivedTraceparent ?? "",
+            );
+          if (match?.[1] !== undefined && match[2] !== undefined && match[3] !== undefined) {
+            const parent: SpanContext = {
+              traceId: match[1],
+              spanId: match[2],
+              traceFlags: Number.parseInt(match[3], 16),
+              isRemote: true,
+            };
+            otelContext.with(trace.setSpanContext(otelContext.active(), parent), () => {
+              trace.getTracer("mcp-server-test").startSpan("server.tool").end();
+            });
+          }
+          return { content: [{ type: "text", text: "called" }] };
+        });
+        return server;
       },
-    });
+      { legacy: "reject" },
+    );
+    const clientTransport = new StreamableHTTPClientTransport(
+      new URL("https://localhost/mcp"),
+      {
+        fetch: async (input, init) => handler.fetch(new Request(input, init)),
+      },
+    );
+    const port = await McpToolPort.create(
+      [
+        ServerConfigSchema.parse({
+          id: "mcp_test",
+          transport: { kind: "http", url: "https://localhost/mcp" },
+          protocol: "2026-07-28",
+          trust: "internal",
+          propagateTrace: true,
+        }),
+      ],
+      {
+        resolveSecret: () => Promise.reject(new Error("unexpected secret")),
+        createTransport: () => Promise.resolve(clientTransport),
+      },
+    );
     try {
       const before = spanCollector.getFinishedSpans().length;
-      await current.port.execute(call, context());
-      const spans = spanCollector.getFinishedSpans().slice(before);
-      const callSpan = spans
+      await expect(port.execute(call, context())).resolves.toMatchObject({ outcome: "ok" });
+      const executionSpans = spanCollector.getFinishedSpans().slice(before);
+      const callSpan = executionSpans
         .find(({ name }) => name === "mcp.client.call");
-      const serverSpan = spans.find(({ name }) => name === "server.tool");
+      const serverSpan = executionSpans.find(({ name }) => name === "server.tool");
       expect(receivedTraceparent).toBeDefined();
       expect(receivedTraceparent?.split("-")[2]).toBe(callSpan?.spanContext().spanId);
       expect(serverSpan?.parentSpanContext?.spanId).toBe(callSpan?.spanContext().spanId);
     } finally {
-      await current.close();
+      await port.close();
+      await handler.close();
     }
   });
 
@@ -451,7 +490,7 @@ describe("McpToolPort", () => {
           },
         ],
         structuredContent: { status: "ok" },
-      } as CallToolResult,
+      },
     });
     try {
       await expect(current.port.execute(call, context())).resolves.toEqual({

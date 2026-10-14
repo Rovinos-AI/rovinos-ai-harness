@@ -189,46 +189,7 @@ export class PiiToolPort implements PiiToolPortLike {
     if (execution.binary === true) {
       return binaryResult(execution);
     }
-    try {
-      const tokenized = await this.deps.tokenizer.tokenizeJson(context.runId, execution.result, {
-        boundary: "tool_output",
-        destination: { tool: call.toolId },
-      });
-      for (const summary of tokenized.actions) {
-        await context.recordPiiAction?.(summary);
-      }
-      const stored = tokenized.actions.some(({ action }) => action === "allow")
-        ? await this.deps.tokenizer.tokenizeJson(context.runId, tokenized.value, {
-            boundary: "storage",
-            destination: { tool: call.toolId },
-          })
-        : tokenized;
-      const result = {
-        outcome: execution.outcome,
-        result: markJsonSanitized(stored.value),
-        ...(execution.outcome === "error"
-          ? {
-              errorCode:
-                execution.errorCode !== undefined && safeToolErrorCodes.has(execution.errorCode)
-                  ? execution.errorCode
-                  : "tool_failed",
-            }
-          : {}),
-      };
-      return markSanitizedField(result, "result");
-    } catch (error) {
-      if (error instanceof PiiBlockedError || error instanceof PiiTokenizerError) {
-        if (error instanceof PiiBlockedError) {
-          await context.recordPiiAction?.({
-            boundary: "tool_output",
-            action: "block",
-            entities: [...error.entities],
-          });
-        }
-        return { outcome: "error", errorCode: error.code, result: null };
-      }
-      throw error;
-    }
+    return tokenizeToolOutput(execution, call, context, this.deps.tokenizer);
   }
 }
 
@@ -247,4 +208,51 @@ function binaryResult(execution: PiiToolResult): PiiToolResult {
 
 function markJsonSanitized(value: JsonValue): JsonValue {
   return typeof value === "object" && value !== null ? markSanitized(value) : value;
+}
+
+function safeToolErrorCode(code: Code | undefined): Code {
+  return code !== undefined && safeToolErrorCodes.has(code) ? code : "tool_failed";
+}
+
+async function tokenizeToolOutput(
+  execution: PiiToolResult,
+  call: PiiToolCall,
+  context: PiiToolContext,
+  tokenizer: Tokenizer,
+): Promise<PiiToolResult> {
+  try {
+    const tokenized = await tokenizer.tokenizeJson(context.runId, execution.result, {
+      boundary: "tool_output",
+      destination: { tool: call.toolId },
+    });
+    for (const summary of tokenized.actions) {
+      await context.recordPiiAction?.(summary);
+    }
+    const stored = tokenized.actions.some(({ action }) => action === "allow")
+      ? await tokenizer.tokenizeJson(context.runId, tokenized.value, {
+          boundary: "storage",
+          destination: { tool: call.toolId },
+        })
+      : tokenized;
+    const result = {
+      outcome: execution.outcome,
+      result: markJsonSanitized(stored.value),
+      ...(execution.outcome === "error"
+        ? { errorCode: safeToolErrorCode(execution.errorCode) }
+        : {}),
+    };
+    return markSanitizedField(result, "result");
+  } catch (error) {
+    if (error instanceof PiiBlockedError) {
+      await context.recordPiiAction?.({
+        boundary: "tool_output",
+        action: "block",
+        entities: [...error.entities],
+      });
+    }
+    if (error instanceof PiiBlockedError || error instanceof PiiTokenizerError) {
+      return { outcome: "error", errorCode: error.code, result: null };
+    }
+    throw error;
+  }
 }

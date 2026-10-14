@@ -2,14 +2,13 @@
 import { ProtocolError, type CallToolResult } from "@modelcontextprotocol/client";
 import { Code, JsonValue, compileJsonSchema } from "@harness/schemas";
 import type { JsonValue as JsonValueType, ServerConfig } from "@harness/schemas";
-import { attr, defineSemconvSpan, withSpan } from "@harness/telemetry";
-import { countMcpDiscoveryFailed } from "@harness/telemetry";
+import { attr, countMcpDiscoveryFailed, defineSemconvSpan, withSpan } from "@harness/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { McpConnectionError } from "./connection.js";
-import type { McpConnectionDependencies } from "./connection.js";
+import type { McpConnection, McpConnectionDependencies } from "./connection.js";
 import { McpProtocolError } from "./errors.js";
 import { McpPool } from "./pool.js";
-import { ToolRegistry } from "./registry.js";
+import { ToolRegistry, type ResolvedTool } from "./registry.js";
 
 const MCP_CALL_SPAN = defineSemconvSpan(
   "mcp.client.call",
@@ -47,10 +46,11 @@ export interface McpToolExecutionResult {
 /** Dependencies for constructing a managed MCP tool port. */
 export type McpToolPortDependencies = McpConnectionDependencies;
 
-export type McpToolPortOptions = {
+/** Execution options for the MCP tool port. */
+export interface McpToolPortOptions {
   /** Set only when an outer OffloadingToolPort consumes binary payloads. */
   readonly offloadBinaryResults?: boolean;
-};
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -67,11 +67,13 @@ function binaryBytes(value: unknown): Uint8Array | undefined {
   }
 }
 
-function resourceBytes(block: Record<string, unknown>): {
+interface ResourceBytes {
   readonly bytes?: Uint8Array;
   readonly data?: string;
   readonly mimeType: string;
-} {
+}
+
+function resourceBytes(block: Record<string, unknown>): ResourceBytes {
   const resource = block.resource;
   if (!isRecord(resource)) {
     return { mimeType: "application/octet-stream" };
@@ -96,6 +98,60 @@ interface NormalizedBlock {
   readonly binaryPayload?: Uint8Array;
 }
 
+function isGenuineBinary(block: Record<string, unknown>, isResource: boolean): boolean {
+  if (!isResource) {
+    return block.type === "image" || block.type === "audio" || block.type === "blob";
+  }
+  return (
+    isRecord(block.resource) &&
+    typeof block.resource.blob === "string" &&
+    typeof block.resource.text !== "string"
+  );
+}
+
+function blockBytes(
+  block: Record<string, unknown>,
+  isResource: boolean,
+  resource: ResourceBytes | undefined,
+  genuineBinary: boolean,
+): Uint8Array | undefined {
+  if (isResource) {
+    return resource?.bytes;
+  }
+  return genuineBinary ? binaryBytes(block.data) : undefined;
+}
+
+function blockMimeType(
+  block: Record<string, unknown>,
+  isResource: boolean,
+  resource: ResourceBytes | undefined,
+): string {
+  if (isResource) {
+    return resource?.mimeType ?? "application/octet-stream";
+  }
+  return typeof block.mimeType === "string" ? block.mimeType : "application/octet-stream";
+}
+
+function blockData(
+  block: Record<string, unknown>,
+  isResource: boolean,
+  resource: ResourceBytes | undefined,
+): string | undefined {
+  const value = isResource ? resource?.data : block.data;
+  return typeof value === "string" ? value : undefined;
+}
+
+function visibleBlock(
+  metadata: { readonly type: string; readonly mimeType: string; readonly bytes: number },
+  data: string | undefined,
+  hasLargeBinary: boolean,
+): JsonValueType {
+  if (data === undefined || hasLargeBinary) {
+    return metadata;
+  }
+  return { ...metadata, data };
+}
+
 function normalizeBlock(block: unknown): NormalizedBlock {
   if (!isRecord(block) || typeof block.type !== "string") {
     return {
@@ -110,31 +166,19 @@ function normalizeBlock(block: unknown): NormalizedBlock {
   }
   const isResource = block.type === "resource";
   const resource = isResource ? resourceBytes(block) : undefined;
-  const genuineBinary = isResource
-    ? isRecord(block.resource) &&
-      typeof block.resource.blob === "string" &&
-      typeof block.resource.text !== "string"
-    : ["image", "audio", "blob"].includes(block.type);
-  const bytes = isResource ? resource?.bytes : genuineBinary ? binaryBytes(block.data) : undefined;
-  const mimeType = isResource
-    ? (resource?.mimeType ?? "application/octet-stream")
-    : typeof block.mimeType === "string"
-      ? block.mimeType
-      : "application/octet-stream";
+  const genuineBinary = isGenuineBinary(block, isResource);
+  const bytes = blockBytes(block, isResource, resource, genuineBinary);
+  const mimeType = blockMimeType(block, isResource, resource);
   const byteCount = bytes?.byteLength ?? 0;
   const hasLargeBinary = genuineBinary && byteCount > SMALL_BINARY_BYTES;
   const type = block.type;
   const metadata = { type, mimeType, bytes: byteCount };
-  const rawBlockData = isResource ? resource?.data : block.data;
-  const blockData = typeof rawBlockData === "string" ? rawBlockData : undefined;
-  const visibleBlock =
-    blockData !== undefined && !hasLargeBinary
-      ? { ...metadata, data: blockData }
-      : metadata;
+  const data = blockData(block, isResource, resource);
+  const visible = visibleBlock(metadata, data, hasLargeBinary);
   const offloadBlock =
-    blockData === undefined ? metadata : { ...metadata, data: blockData };
+    data === undefined ? metadata : { ...metadata, data };
   return {
-    block: visibleBlock,
+    block: visible,
     offloadBlock,
     hasLargeBinary,
     ...(hasLargeBinary && bytes !== undefined ? { binaryPayload: bytes } : {}),
@@ -159,14 +203,14 @@ function normalizedResult(result: CallToolResult): {
     content: offloadContent,
     ...(structuredContent === undefined ? {} : { structured: structuredContent }),
   });
+  const largeBinaryBlock = blocks.find(({ hasLargeBinary }) => hasLargeBinary);
   return {
     value,
     offloadValue,
     hasLargeBinary: blocks.some(({ hasLargeBinary }) => hasLargeBinary),
-    ...(() => {
-      const block = blocks.find(({ hasLargeBinary }) => hasLargeBinary);
-      return block?.binaryPayload === undefined ? {} : { binaryPayload: block.binaryPayload };
-    })(),
+    ...(largeBinaryBlock?.binaryPayload === undefined
+      ? {}
+      : { binaryPayload: largeBinaryBlock.binaryPayload }),
   };
 }
 
@@ -207,6 +251,11 @@ function errorCode(error: unknown, signal: AbortSignal): string {
         return "mcp_timeout";
       case "mcp_connection_lost":
         return "mcp_connection_lost";
+      case "mcp_connect_failed":
+      case "mcp_list_tools_failed":
+      case "mcp_too_many_tools":
+      case "mcp_tool_call_failed":
+        return "mcp_error";
       default:
         return "mcp_error";
     }
@@ -227,6 +276,67 @@ function setOutcome(
     span.setAttribute("harness.error.code", outcome.errorCode ?? "mcp_error");
     span.setStatus({ code: SpanStatusCode.ERROR });
   }
+}
+
+function validToolArgs(inputSchema: JsonValueType, args: JsonValueType): boolean {
+  try {
+    compileJsonSchema(inputSchema)(args);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function executeRegisteredTool(options: {
+  readonly connection: McpConnection;
+  readonly route: ResolvedTool;
+  readonly call: McpToolCall;
+  readonly signal: AbortSignal;
+  readonly offloadBinaryResults: boolean;
+}): Promise<McpToolExecutionResult> {
+  const { connection, route, call, signal, offloadBinaryResults } = options;
+  if (signal.aborted) {
+    return failure("mcp_timeout");
+  }
+  if (!isRecord(call.args) || !validToolArgs(route.inputSchema, call.args)) {
+    return failure("args_invalid");
+  }
+  let result: CallToolResult;
+  try {
+    result = await connection.callTool(
+      { name: route.nativeName, arguments: call.args },
+      route.inputSchema,
+      { signal },
+      route.tool,
+    );
+  } catch (error) {
+    return failure(errorCode(error, signal));
+  }
+  if (Reflect.get(result, "resultType") === "input_required") {
+    return failure("mcp_input_required_unsupported");
+  }
+  const mapped = normalizedResult(result);
+  const serialized = JSON.stringify(mapped.offloadValue);
+  if (Buffer.byteLength(serialized, "utf8") > route.server.maxResultBytes) {
+    return failure("result_too_large");
+  }
+  if (mapped.hasLargeBinary) {
+    if (!offloadBinaryResults || mapped.binaryPayload === undefined) {
+      return failure("binary_result_unavailable");
+    }
+    return {
+      outcome: result.isError === true ? "error" : "ok",
+      ...(result.isError === true
+        ? { errorCode: Code.parse("tool_reported_error") }
+        : {}),
+      binary: true,
+      result: Array.from(mapped.binaryPayload),
+    };
+  }
+  if (result.isError === true) {
+    return failure("tool_reported_error", mapped.value);
+  }
+  return { outcome: "ok", result: mapped.value };
 }
 
 /**
@@ -312,64 +422,18 @@ export class McpToolPort {
         "harness.tool.id": toolId.data,
         "harness.outcome": "error",
       },
-      async (span) =>
+      (span) =>
         otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
-        let outcome: McpToolExecutionResult;
-        try {
-          if (signal.aborted) {
-            outcome = failure("mcp_timeout");
-          } else {
-            const validate = compileJsonSchema(route.inputSchema);
-            try {
-              validate(call.args);
-            } catch {
-              outcome = failure("args_invalid");
-              setOutcome(span, outcome);
-              return outcome;
-            }
-            if (!isRecord(call.args)) {
-              outcome = failure("args_invalid");
-              setOutcome(span, outcome);
-              return outcome;
-            }
-            const result = await connection.callTool(
-              { name: route.nativeName, arguments: call.args },
-              route.inputSchema,
-              { signal },
-              route.tool,
-            );
-            if (Reflect.get(result, "resultType") === "input_required") {
-              outcome = failure("mcp_input_required_unsupported");
-            } else {
-              const mapped = normalizedResult(result);
-              const serialized = JSON.stringify(mapped.offloadValue) ?? "null";
-              if (Buffer.byteLength(serialized, "utf8") > route.server.maxResultBytes) {
-                outcome = failure("result_too_large");
-              } else if (mapped.hasLargeBinary) {
-                outcome =
-                  this.options.offloadBinaryResults === true && mapped.binaryPayload !== undefined
-                    ? {
-                        outcome: result.isError === true ? "error" : "ok",
-                        ...(result.isError === true
-                          ? { errorCode: Code.parse("tool_reported_error") }
-                          : {}),
-                        binary: true,
-                        result: Array.from(mapped.binaryPayload),
-                      }
-                    : failure("binary_result_unavailable");
-              } else if (result.isError === true) {
-                outcome = failure("tool_reported_error", mapped.value);
-              } else {
-                outcome = { outcome: "ok", result: mapped.value };
-              }
-            }
-          }
-        } catch (error) {
-          outcome = failure(errorCode(error, signal));
-        }
-        setOutcome(span, outcome);
-        return outcome;
-      }),
+          const outcome = await executeRegisteredTool({
+            connection,
+            route,
+            call,
+            signal,
+            offloadBinaryResults: this.options.offloadBinaryResults === true,
+          });
+          setOutcome(span, outcome);
+          return outcome;
+        }),
     );
   }
 

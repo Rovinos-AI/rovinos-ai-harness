@@ -7,7 +7,6 @@ import {
   type PiiConfig,
   type RolesConfig,
   type Id,
-  type Event,
   type JsonValue,
   type KeyProvider,
   type KeysConfig,

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   InMemoryTransport,
+  StreamableHTTPClientTransport,
   type CallToolRequest,
   type CallToolResult,
   type Tool,
   type Transport,
-  type TransportSendOptions,
 } from "@modelcontextprotocol/client";
 import { context as otelContext, trace } from "@opentelemetry/api";
-import { McpServer } from "@modelcontextprotocol/server";
+import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { ServerConfigSchema, type JsonValue } from "@harness/schemas";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -568,83 +568,6 @@ describe("McpConnection", () => {
       excluded: 1,
     });
 
-    it("maps tokenized x-mcp-header arguments to the modern HTTP request headers", async () => {
-      const headerSchema = {
-        type: "object",
-        properties: { region: { type: "string", "x-mcp-header": "Region" } },
-        required: ["region"],
-      } satisfies Tool["inputSchema"];
-      const headerTool: Tool = { name: "header-tool", inputSchema: headerSchema };
-      const peer = await createMemoryPeer({ modern: true, count: 1, tools: [headerTool] });
-      const requestHeaders: Readonly<Record<string, string>>[] = [];
-      const client = peer.client;
-      const capture: Transport = {
-        start: () => client.start(),
-        send: async (message, options?: TransportSendOptions) => {
-          if (options?.headers !== undefined) {
-            requestHeaders.push(options.headers);
-          }
-          await client.send(message, options);
-        },
-        close: () => client.close(),
-        get hasPerRequestStream() {
-          return client.hasPerRequestStream;
-        },
-        get onclose() {
-          return client.onclose;
-        },
-        set onclose(value) {
-          client.onclose = value;
-        },
-        get onerror() {
-          return client.onerror;
-        },
-        set onerror(value) {
-          client.onerror = value;
-        },
-        get onmessage() {
-          return client.onmessage;
-        },
-        set onmessage(value) {
-          client.onmessage = value;
-        },
-        get sessionId() {
-          return client.sessionId;
-        },
-        set sessionId(value) {
-          client.sessionId = value;
-        },
-        setProtocolVersion: (version) => client.setProtocolVersion?.(version),
-        setSupportedProtocolVersions: (versions) =>
-          client.setSupportedProtocolVersions?.(versions),
-      };
-      const serverConfig = ServerConfigSchema.parse({
-        id: "mcp_test",
-        transport: { kind: "http", url: "https://localhost/mcp" },
-        protocol: "2026-07-28",
-      });
-      const connection = connectionFor(serverConfig, () => Promise.resolve(capture));
-
-      try {
-        await connection.connect();
-        const [listedTool] = await connection.listTools();
-        if (listedTool === undefined) {
-          throw new Error("missing header tool");
-        }
-        await connection.callTool(
-          { name: listedTool.name, arguments: { region: "<EMAIL_1>" } },
-          headerSchema,
-          undefined,
-          listedTool,
-        );
-        expect(requestHeaders.at(-1)?.["Mcp-Param-Region"]).toBe(
-          `=?base64?${Buffer.from("<EMAIL_1>").toString("base64")}?=`,
-        );
-      } finally {
-        await connection.close();
-        await peer.serverTransport.close();
-      }
-    });
     expect(excludeHeaderDeclaringTools(tools, { era: "legacy", transport: "http" })).toEqual({
       tools,
       excluded: 0,
@@ -653,6 +576,67 @@ describe("McpConnection", () => {
       tools,
       excluded: 0,
     });
+  });
+
+  it("maps tokenized x-mcp-header arguments to the modern HTTP request headers", async () => {
+    const headerSchema = {
+      type: "object",
+      properties: { region: { type: "string", "x-mcp-header": "Region" } },
+      required: ["region"],
+    } satisfies Tool["inputSchema"];
+    const headerTool: Tool = { name: "header-tool", inputSchema: headerSchema };
+    const handler = createMcpHandler(
+      () => {
+        const server = new McpServer(
+          { name: "http-server", version: "1.0.0" },
+          { supportedProtocolVersions: ["2026-07-28"] },
+        );
+        server.server.registerCapabilities({ tools: { listChanged: true } });
+        server.server.setRequestHandler("tools/list", () => ({ tools: [headerTool] }));
+        server.server.setRequestHandler("tools/call", () => ({
+          content: [{ type: "text", text: "called" }],
+        }));
+        return server;
+      },
+      { legacy: "reject" },
+    );
+    const requestHeaders: Headers[] = [];
+    const clientTransport = new StreamableHTTPClientTransport(
+      new URL("https://localhost/mcp"),
+      {
+        fetch: async (input, init) => {
+          const request = new Request(input, init);
+          requestHeaders.push(request.headers);
+          return handler.fetch(request);
+        },
+      },
+    );
+    const serverConfig = ServerConfigSchema.parse({
+      id: "mcp_test",
+      transport: { kind: "http", url: "https://localhost/mcp" },
+      protocol: "2026-07-28",
+    });
+    const connection = connectionFor(serverConfig, () => Promise.resolve(clientTransport));
+
+    try {
+      await connection.connect();
+      const [listedTool] = await connection.listTools();
+      if (listedTool === undefined) {
+        throw new Error("missing header tool");
+      }
+      await connection.callTool(
+        { name: listedTool.name, arguments: { region: "<EMAIL_1>" } },
+        headerSchema,
+        undefined,
+        listedTool,
+      );
+      expect(requestHeaders.at(-1)?.get("Mcp-Param-Region")).toBe(
+        "<EMAIL_1>",
+      );
+    } finally {
+      await connection.close();
+      await handler.close();
+    }
   });
 
   it("excludes tools whose schemas are too deep to scan", () => {

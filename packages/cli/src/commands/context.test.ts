@@ -104,7 +104,6 @@ async function harness() {
     }),
     continueRun: modelCall,
     resume: modelCall,
-    resolveApproval: () => Promise.reject(new Error("Approval resolution is not used.")),
     cancel: modelCall,
     resolveApproval: () => Promise.reject(new Error("Approval is not used by context tests.")),
   }));

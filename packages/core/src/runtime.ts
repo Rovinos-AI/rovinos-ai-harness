@@ -262,6 +262,37 @@ function createRuntimeRunMethods(
   };
 }
 
+function createRuntimeToolPort(
+  options: RuntimeComposition & {
+    readonly roles: RoleRegistry;
+    readonly scopes: RunScopeRegistry;
+  },
+): ToolPort {
+  const subagentTool = createSubagentTool({
+    config: options.config,
+    clock: options.clock,
+    ids: options.ids,
+    store: options.store,
+    model: options.model,
+    parentTool: options.tool,
+    policy: options.policy,
+    policyVersion: options.policyVersion,
+    roles: options.roles,
+    scopes: options.scopes,
+  });
+  const piiTool =
+    options.pii === undefined
+      ? subagentTool
+      : new PiiToolPort(subagentTool, {
+          tokenizer: options.pii.tokenizer,
+          config: options.pii.config,
+          resolver: options.pii.resolver,
+        });
+  return options.overrides.workspace === undefined
+    ? piiTool
+    : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, options.ids);
+}
+
 function composeRuntime(
   options: RuntimeComposition & {
     readonly roles: RoleRegistry;
@@ -276,37 +307,9 @@ function composeRuntime(
     keys,
     vault,
     vaultResolver,
-    pii,
-    model,
-    policy,
-    policyVersion,
-    roles,
     scopes,
   } = options;
-  const subagentTool = createSubagentTool({
-    config,
-    clock,
-    ids,
-    store,
-    model,
-    parentTool: options.tool,
-    policy,
-    policyVersion,
-    roles,
-    scopes,
-  });
-  const piiTool =
-    pii === undefined
-      ? subagentTool
-      : new PiiToolPort(subagentTool, {
-          tokenizer: pii.tokenizer,
-          config: pii.config,
-          resolver: pii.resolver,
-        });
-  const tool =
-    options.overrides.workspace === undefined
-      ? piiTool
-      : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, ids);
+  const tool = createRuntimeToolPort(options);
   const runWithControl = createTerminalAwareRunControl(options);
   const resume = createRuntimeResume(options, tool, runWithControl);
   return {
@@ -328,7 +331,7 @@ function composeRuntime(
     resolveApproval: (runId, approvalId, decision, resolveOptions) => {
       if (
         decision === "edit" &&
-        overrides.tool === undefined &&
+        options.overrides.tool === undefined &&
         (config.servers?.length ?? 0) === 0
       ) {
         throw new ApprovalEditUnavailableError();
