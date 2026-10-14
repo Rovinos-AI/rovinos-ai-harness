@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { EVENT_FIELD_CLASS, Event, eventSamples } from "@harness/schemas";
-import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { SafeEvent, safeEventSchemas, toSafeEvent } from "./safe-event.js";
 import { z } from "zod";
@@ -343,30 +342,6 @@ describe("SafeEvent projection", () => {
     });
     expect(JSON.stringify(projected)).not.toContain("POLICY_DESCRIPTION_CANARY");
     expect(projected).not.toHaveProperty("policyReason");
-  });
-
-  it("keeps rule-description canaries out and projects one event of each tool kind", () => {
-    fc.assert(
-      fc.property(fc.string({ minLength: 1, maxLength: 40 }), (description) => {
-        const intentMapping = mappedEvents.find(({ event }) => event.type === "tool_intent");
-        const resultMapping = mappedEvents.find(({ event }) => event.type === "tool_result");
-        if (intentMapping === undefined || resultMapping === undefined) {
-          throw new Error("The tool event mappings are missing");
-        }
-        const canary = `RULE_DESCRIPTION_CANARY_${description}`;
-        const intent = Event.parse({
-          ...intentMapping.event,
-          args: { description: canary },
-        });
-        const events = [intent, resultMapping.event].flatMap((event) => {
-          const projected = toSafeEvent(event, "sanitizer.v1");
-          return projected === null ? [] : [projected];
-        });
-
-        expect(events.map(({ kind }) => kind).sort()).toEqual(["policy_decision", "tool_call"]);
-        expect(JSON.stringify(events)).not.toContain(canary);
-      }),
-    );
   });
 
   it("rejects negative repair-attempt counts in parsed SafeEvents", () => {

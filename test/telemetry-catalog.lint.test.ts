@@ -30,6 +30,7 @@ const expectedLogNames = [
   "harness.safe.checkpoint",
   "harness.safe.model_call",
   "harness.safe.pii_action",
+  "harness.safe.policy_decision",
   "harness.safe.run_created",
   "harness.safe.run_status",
   "harness.safe.subagent_completed",

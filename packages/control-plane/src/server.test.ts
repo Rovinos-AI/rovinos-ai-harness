@@ -246,7 +246,7 @@ describe("control-plane inspection tools", () => {
     expect(output.recentEvents.length).toBeGreaterThan(0);
     expect(output.recentEvents).toContainEqual(
       expect.objectContaining({
-        kind: "tool_call",
+        kind: "policy_decision",
         toolId: "tool.execute",
         policyDecision: "ask",
         ruleId: "approval.rule",

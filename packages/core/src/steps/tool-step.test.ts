@@ -21,6 +21,7 @@ import {
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { PolicyEngine } from "@harness/policy";
+import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as telemetry from "@harness/telemetry";
 import { RunRecorder, type EventPartial } from "../recorder.js";
@@ -308,6 +309,51 @@ function resumeOptions(
 }
 
 describe("tool-step resume handling", () => {
+  it("projects one result and one policy decision without rule descriptions", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.string({ minLength: 1, maxLength: 40 }), async (description) => {
+        const { recorder } = createRecorder();
+        const history = await createRun(recorder, []);
+        const tool = new FakeToolPort(
+          new Map([
+            [
+              "described",
+              {
+                idempotent: true,
+                timeoutMs: 1_000,
+                execute: () => Promise.resolve({ outcome: "ok", result: null }),
+              },
+            ],
+          ]),
+        );
+        const policy = new PolicyEngine({
+          version: 1,
+          defaultDecision: "deny",
+          rules: [
+            {
+              id: "described_allow",
+              description: `RULE_DESCRIPTION_CANARY_${description}`,
+              match: { tools: ["described"] },
+              decision: "allow",
+              reason: "test_allowed",
+            },
+          ],
+        });
+        const events = await toolStep({
+          ...toolStepDependencies(recorder, tool, history, policy),
+          calls: [{ callId: callIds.idempotent, toolId: "described", args: null }],
+        });
+        const safeEvents = events.flatMap((event) => {
+          const projected = telemetry.toSafeEvent(event, "sanitizer.v1");
+          return projected === null ? [] : [projected];
+        });
+
+        expect(safeEvents.map(({ kind }) => kind).sort()).toEqual(["policy_decision", "tool_call"]);
+        expect(JSON.stringify(safeEvents)).not.toContain(`RULE_DESCRIPTION_CANARY_${description}`);
+      }),
+    );
+  });
+
   it("prepares direct tool calls inside their tool-call span without an ambient span", async () => {
     const { recorder } = createRecorder();
     const history = await createRun(recorder, []);

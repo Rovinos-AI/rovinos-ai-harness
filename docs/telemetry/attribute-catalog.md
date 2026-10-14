@@ -214,6 +214,20 @@ Owner task: `3.2`.
 | `harness.span.id` | Code | Required | `@harness/telemetry` |
 | `harness.trace.id` | Code | Required | `@harness/telemetry` |
 
+### `harness.safe.policy_decision`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.event.seq` | integer | Required | `@harness/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
+| `harness.policy.decision` | enum: `allow`, `ask`, `deny` | Required | `@harness/telemetry` |
+| `harness.policy.rule_id` | Code | Optional | `@harness/telemetry` |
+| `harness.policy.version` | Code | Required | `@harness/telemetry` |
+| `harness.run.id` | Id | Required | `@harness/telemetry` |
+| `harness.span.id` | Code | Required | `@harness/telemetry` |
+| `harness.tool.id` | Code | Required | `@harness/telemetry` |
+| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+
 ### `harness.safe.run_created`
 
 | Attribute | Type | Presence | Owning package |
@@ -274,14 +288,12 @@ Owner task: `3.2`.
 | `harness.error.code` | Code | Optional | `@harness/telemetry` |
 | `harness.event.seq` | integer | Required | `@harness/telemetry` |
 | `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
-| `harness.policy.decision` | enum: `allow`, `ask`, `deny` | Optional | `@harness/telemetry` |
-| `harness.policy.rule_id` | Code | Optional | `@harness/telemetry` |
 | `harness.policy.version` | Code | Required | `@harness/telemetry` |
 | `harness.run.id` | Id | Required | `@harness/telemetry` |
 | `harness.span.id` | Code | Required | `@harness/telemetry` |
 | `harness.tool.id` | Code | Required | `@harness/telemetry` |
-| `harness.tool.latency_ms` | integer | Optional | `@harness/telemetry` |
-| `harness.tool.outcome` | enum: `ok`, `error`, `denied`, `timeout` | Optional | `@harness/telemetry` |
+| `harness.tool.latency_ms` | integer | Required | `@harness/telemetry` |
+| `harness.tool.outcome` | enum: `ok`, `error`, `denied`, `timeout` | Required | `@harness/telemetry` |
 | `harness.trace.id` | Code | Required | `@harness/telemetry` |
 
 ### `harness.vault.mark_terminal_failed`
