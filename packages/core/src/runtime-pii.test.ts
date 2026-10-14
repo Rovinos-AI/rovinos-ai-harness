@@ -189,7 +189,8 @@ describe("createRuntime PII composition", () => {
     ).rejects.toMatchObject({ code: "pii_disabled_in_production" });
   });
 
-  it("rejects a pre-wrapped tool port instead of silently nesting runtime boundaries", async () => {
+  // threat: T-10
+  it.each(["tool", "createTool"])("rejects a pre-wrapped port supplied by %s", async (source) => {
     const piiConfig = PiiConfigSchema.parse({});
     const vault = new InMemoryVault();
     const wrapped = new PiiToolPort(makeTool([], null), {
@@ -205,8 +206,9 @@ describe("createRuntime PII composition", () => {
     await expect(
       createRuntime(config(), {
         store: new InMemoryEventStore(),
-        tool: wrapped,
+        ...(source === "tool" ? { tool: wrapped } : { createTool: () => wrapped }),
         transientVault: true,
+        secretResolver,
       }),
     ).rejects.toMatchObject({ code: "pii_tool_port_already_wrapped" });
   });

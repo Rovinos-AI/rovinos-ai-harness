@@ -72,6 +72,9 @@ function createContext() {
   const closeRuntime = vi.fn(() => Promise.resolve());
   const runtime: Runtime = {
     store,
+    sandboxBackend: {
+      exec: () => Promise.reject(new Error("Sandbox is not used by serve tests.")),
+    },
     vault: new AuditingVaultResolver(new InMemoryVault(), () => undefined),
     keys: {
       currentKeyId: () => "test-key",
