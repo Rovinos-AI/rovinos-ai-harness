@@ -9,7 +9,12 @@ import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelToolCall, PolicyPort, ToolPort } from "../ports.js";
 import { foldRunState, type ToolIntentEvent } from "../run-state.js";
-import { prepareToolCall, toolRunContext, type PreparedToolCall } from "./prepare-tool.js";
+import {
+  normalizeUnregisteredToolCall,
+  prepareToolCall,
+  toolRunContext,
+  type PreparedToolCall,
+} from "./prepare-tool.js";
 import {
   decidePolicy,
   effectiveDecision,
@@ -101,13 +106,17 @@ export async function runToolCall(
   behavior: RunToolCallBehavior = {},
 ): Promise<readonly Event[]> {
   const events: Event[] = [];
+  const unregistered = normalizeUnregisteredToolCall(proposedCall, description, behavior.prepared);
+  const call = unregistered?.call ?? proposedCall;
+  const safeBehavior =
+    unregistered === undefined ? behavior : { ...behavior, prepared: unregistered.prepared };
   const context = executionContext(options, events);
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, (span) =>
     runToolCallWithinSpan({
       options,
-      proposedCall,
+      proposedCall: call,
       description,
-      behavior,
+      behavior: safeBehavior,
       context,
       events,
       span,
@@ -407,14 +416,8 @@ export async function toolStep(options: ToolStepOptions): Promise<readonly Event
     const description =
       call.toolId === "harness.telemetry.emit" ? undefined : options.tool.describe(call.toolId);
     const prepared = options.preparedCalls?.[index];
-    events.push(
-      ...(await runToolCall(
-        options,
-        call,
-        description,
-        prepared === undefined ? {} : { prepared },
-      )),
-    );
+    const behavior = prepared === undefined ? {} : { prepared };
+    events.push(...(await runToolCall(options, call, description, behavior)));
   }
   return events;
 }

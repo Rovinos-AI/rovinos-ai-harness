@@ -28,6 +28,7 @@ import {
   SequentialIdGenerator,
   HarnessError,
   Traceparent,
+  UNREGISTERED_TOOL_ID,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
 import {
@@ -2253,7 +2254,7 @@ describe("runLoop", () => {
     expect(result.events).toContainEqual(
       expect.objectContaining({
         type: "tool_intent",
-        toolId: "unknown_tool",
+        toolId: UNREGISTERED_TOOL_ID,
         idempotent: false,
         policyDecision: "deny",
       }),
@@ -2261,11 +2262,17 @@ describe("runLoop", () => {
     expect(result.events).toContainEqual(
       expect.objectContaining({
         type: "tool_result",
-        toolId: "unknown_tool",
+        toolId: UNREGISTERED_TOOL_ID,
         outcome: "denied",
         errorCode: "unknown_tool",
       }),
     );
+    const response = result.events.find((event) => event.type === "model_response");
+    const responseToolIds =
+      response?.type === "model_response"
+        ? response.content.flatMap((part) => (part.type === "tool_call" ? [part.toolId] : []))
+        : [];
+    expect(responseToolIds).toEqual([UNREGISTERED_TOOL_ID]);
   });
 
   it("suspends an ask decision durably and executes only after approval on resume", async () => {

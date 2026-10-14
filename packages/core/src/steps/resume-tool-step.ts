@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, JsonValue as JsonValueSchema, type Event } from "@harness/schemas";
+import {
+  HarnessError,
+  JsonValue as JsonValueSchema,
+  UNREGISTERED_TOOL_ID,
+  type Code,
+  type Event,
+} from "@harness/schemas";
 import {
   ApprovalPayloadSchema,
   approvalEditsAreAllowed,
@@ -58,6 +64,10 @@ export class ApprovalEditNotAllowedError extends HarnessError {
   }
 }
 
+function resultToolId(options: Pick<ResumeToolStepOptions, "tool">, intent: ToolIntentEvent): Code {
+  return options.tool.describe(intent.toolId) === undefined ? UNREGISTERED_TOOL_ID : intent.toolId;
+}
+
 async function recordDanglingFailure(
   options: Omit<ResumeToolStepOptions, "ids">,
   intent: ToolIntentEvent,
@@ -70,7 +80,7 @@ async function recordDanglingFailure(
       type: "tool_result",
       v: 1,
       callId: intent.callId,
-      toolId: intent.toolId,
+      toolId: resultToolId(options, intent),
       outcome: "error",
       errorCode: code,
       latencyMs: 0,
@@ -95,7 +105,7 @@ async function recordPolicyDenied(
       type: "tool_result",
       v: 1,
       callId: intent.callId,
-      toolId: intent.toolId,
+      toolId: resultToolId(options, intent),
       outcome: "denied",
       errorCode,
       latencyMs: 0,
@@ -241,7 +251,7 @@ export async function applyApprovalDecision(
         type: "tool_result",
         v: 1,
         callId: intent.callId,
-        toolId: intent.toolId,
+        toolId: resultToolId(options, intent),
         outcome: "denied",
         errorCode: "approval_denied",
         latencyMs: 0,
