@@ -24,7 +24,7 @@ export interface SummarizingStrategyOptions {
  */
 export class SummarizingStrategy implements ContextStrategy {
   readonly id: Code = "summarizing";
-  readonly version: Code = "v2";
+  readonly version: Code = "v3";
   private readonly triggerRatio: number;
   private readonly slidingWindow = new SlidingWindowStrategy();
   private readonly model: ModelRef;

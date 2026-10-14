@@ -49,6 +49,8 @@ export const MODEL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
     "harness.model.input_tokens": attr.optional(attr.nonnegativeInt()),
     "harness.model.output_tokens": attr.optional(attr.nonnegativeInt()),
+    "harness.model.cache_read_tokens": attr.optional(attr.nonnegativeInt()),
+    "harness.model.cache_write_tokens": attr.optional(attr.nonnegativeInt()),
     "harness.model.cost_micros": attr.optional(attr.nonnegativeInt()),
     "harness.context.strategy": attr.code(),
     "harness.context.strategy_version": attr.code(),

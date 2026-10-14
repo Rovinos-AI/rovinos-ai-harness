@@ -68,6 +68,8 @@ export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
 export const METRIC_ALLOWLIST = {
   "harness.host.app_rejected": ["harness.host.app_rejected.reason"],
   "harness.host.app_spans_accepted": [],
+  "harness.model.cache_read_tokens": ["harness.model.provider", "harness.model.name"],
+  "harness.model.cache_write_tokens": ["harness.model.provider", "harness.model.name"],
   "harness.model.tokens": ["harness.model.provider", "harness.model.name"],
   "harness.model.cost_micros": ["harness.model.provider", "harness.model.name"],
   "harness.policy.decisions": ["harness.policy.decision"],
@@ -85,6 +87,8 @@ let skippedShortValuesCounter: Counter<NoMetricAttributes> | undefined;
 let scopeReducedCounter: Counter<NoMetricAttributes> | undefined;
 let modelTokensCounter: Counter<ModelUsageAttributes> | undefined;
 let modelCostCounter: Counter<ModelUsageAttributes> | undefined;
+let modelCacheReadCounter: Counter<ModelUsageAttributes> | undefined;
+let modelCacheWriteCounter: Counter<ModelUsageAttributes> | undefined;
 let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
 
 function createCounter<TAttributes extends Attributes>(
@@ -158,6 +162,22 @@ function getModelCostCounter(): Counter<ModelUsageAttributes> {
   return modelCostCounter;
 }
 
+function getModelCacheReadCounter(): Counter<ModelUsageAttributes> {
+  modelCacheReadCounter ??= createCounter<ModelUsageAttributes>(
+    "harness.model.cache_read_tokens",
+    (meter, name) => meter.createCounter<ModelUsageAttributes>(name),
+  );
+  return modelCacheReadCounter;
+}
+
+function getModelCacheWriteCounter(): Counter<ModelUsageAttributes> {
+  modelCacheWriteCounter ??= createCounter<ModelUsageAttributes>(
+    "harness.model.cache_write_tokens",
+    (meter, name) => meter.createCounter<ModelUsageAttributes>(name),
+  );
+  return modelCacheWriteCounter;
+}
+
 function getMcpDiscoveryFailedCounter(): Counter<NoMetricAttributes> {
   mcpDiscoveryFailedCounter ??= createCounter<NoMetricAttributes>(
     "harness.mcp.discovery_failed",
@@ -223,21 +243,36 @@ export function countSentinelScopeReduced(): void {
   }
 }
 
+function isNonnegativeSafeInteger(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function isValidModelUsage(
+  usage: Pick<
+    ModelUsage,
+    "inputTokens" | "outputTokens" | "costMicros" | "cacheReadTokens" | "cacheWriteTokens"
+  >,
+): boolean {
+  return (
+    isNonnegativeSafeInteger(usage.inputTokens) &&
+    isNonnegativeSafeInteger(usage.outputTokens) &&
+    Number.isSafeInteger(usage.inputTokens + usage.outputTokens) &&
+    (usage.cacheReadTokens === undefined || isNonnegativeSafeInteger(usage.cacheReadTokens)) &&
+    (usage.cacheWriteTokens === undefined || isNonnegativeSafeInteger(usage.cacheWriteTokens)) &&
+    (usage.costMicros === undefined || isNonnegativeSafeInteger(usage.costMicros))
+  );
+}
+
 /** Counts total input and output tokens and optional cost for one provider/model. */
 export function countModelUsage(
-  usage: Pick<ModelUsage, "inputTokens" | "outputTokens" | "costMicros">,
+  usage: Pick<
+    ModelUsage,
+    "inputTokens" | "outputTokens" | "costMicros" | "cacheReadTokens" | "cacheWriteTokens"
+  >,
   provider: string,
   model: string,
 ): void {
-  if (
-    !Number.isSafeInteger(usage.inputTokens) ||
-    usage.inputTokens < 0 ||
-    !Number.isSafeInteger(usage.outputTokens) ||
-    usage.outputTokens < 0 ||
-    !Number.isSafeInteger(usage.inputTokens + usage.outputTokens) ||
-    (usage.costMicros !== undefined &&
-      (!Number.isSafeInteger(usage.costMicros) || usage.costMicros < 0))
-  ) {
+  if (!isValidModelUsage(usage)) {
     return;
   }
   try {
@@ -246,6 +281,12 @@ export function countModelUsage(
       "harness.model.name": Code.parse(model),
     };
     getModelTokensCounter().add(usage.inputTokens + usage.outputTokens, attributes);
+    if (usage.cacheReadTokens !== undefined) {
+      getModelCacheReadCounter().add(usage.cacheReadTokens, attributes);
+    }
+    if (usage.cacheWriteTokens !== undefined) {
+      getModelCacheWriteCounter().add(usage.cacheWriteTokens, attributes);
+    }
     if (usage.costMicros !== undefined) {
       getModelCostCounter().add(usage.costMicros, attributes);
     }

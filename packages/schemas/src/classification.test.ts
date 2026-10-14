@@ -40,6 +40,13 @@ function captureContractError(action: () => unknown): ContractError {
 }
 
 describe("EVENT_FIELD_CLASS", () => {
+  it("classifies cached token counts as model response metadata", () => {
+    expect(EVENT_FIELD_CLASS.model_response).toMatchObject({
+      cacheReadTokens: "meta",
+      cacheWriteTokens: "meta",
+    });
+  });
+
   it("classifies every payload field in every event schema", () => {
     for (const eventSchema of EventSchema.options) {
       const type = eventSchema.shape.type.value;

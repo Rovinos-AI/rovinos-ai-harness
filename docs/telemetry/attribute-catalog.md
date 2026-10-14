@@ -52,6 +52,8 @@ Owner task: `4.1`.
 | `harness.error.code` | Code | Optional | `@harness/core` |
 | `harness.event.seq` | integer | Optional | `@harness/core` |
 | `harness.model.attempts` | integer | Optional | `@harness/core` |
+| `harness.model.cache_read_tokens` | integer | Optional | `@harness/core` |
+| `harness.model.cache_write_tokens` | integer | Optional | `@harness/core` |
 | `harness.model.cost_micros` | integer | Optional | `@harness/core` |
 | `harness.model.input_tokens` | integer | Optional | `@harness/core` |
 | `harness.model.output_tokens` | integer | Optional | `@harness/core` |
@@ -168,6 +170,13 @@ Owner task: `6.5`.
 | --- | --- | --- | --- |
 | `harness.keys.store.rows_rotated` | integer | Required | `@harness/telemetry` |
 | `harness.keys.vault.rows_rotated` | integer | Required | `@harness/telemetry` |
+
+### `harness.model.pricing_cache_missing`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.model.name` | Code | Required | `@harness/telemetry` |
+| `harness.model.provider` | Code | Required | `@harness/telemetry` |
 
 ### `harness.model.pricing_missing`
 

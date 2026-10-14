@@ -39,6 +39,30 @@ function adapter(provider: string, complete: ProviderAdapter["complete"]): Provi
 }
 
 describe("RoutingModelGateway", () => {
+  it("preserves cached usage for a single route", async () => {
+    const cachedResult: ProviderResult = {
+      ...result,
+      usage: { inputTokens: 2, outputTokens: 3, cacheReadTokens: 4, cacheWriteTokens: 1 },
+    };
+    const gateway = createRoutingModelGateway(
+      [adapter("primary", () => Promise.resolve(cachedResult))],
+      dependencies,
+      routing({ default: [{ provider: "primary", model: "model-one" }] }),
+    );
+
+    const response = await gateway.complete(request, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+    });
+
+    expect(response.usage).toEqual({
+      inputTokens: 2,
+      outputTokens: 3,
+      cacheReadTokens: 4,
+      cacheWriteTokens: 1,
+    });
+  });
+
   it("falls through candidates in order and reports the actual model and fallback depth", async () => {
     const primary = adapter("primary", () =>
       Promise.reject(new ProviderError("provider_unavailable")),
@@ -248,13 +272,21 @@ describe("RoutingModelGateway", () => {
         "harness.model.repair_attempts": attr.optional(attr.nonnegativeInt()),
         "harness.model.input_tokens": attr.optional(attr.nonnegativeInt()),
         "harness.model.output_tokens": attr.optional(attr.nonnegativeInt()),
+        "harness.model.cache_read_tokens": attr.optional(attr.nonnegativeInt()),
+        "harness.model.cache_write_tokens": attr.optional(attr.nonnegativeInt()),
         "harness.model.cost_micros": attr.optional(attr.nonnegativeInt()),
       },
       { taskId: "14.14", packageName: "@harness/models" },
     );
     const invalidResult: ProviderResult = {
       parts: [{ type: "text", text: '{"answer":"invalid"}' }],
-      usage: { inputTokens: 2, outputTokens: 4, costMicros: 3 },
+      usage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 1,
+        costMicros: 3,
+      },
       finishReason: "stop",
       latencyMs: 7,
     };
@@ -262,7 +294,13 @@ describe("RoutingModelGateway", () => {
     const fallbackComplete = vi.fn(() =>
       Promise.resolve({
         parts: [{ type: "text" as const, text: '{"answer":42}' }],
-        usage: { inputTokens: 3, outputTokens: 5, costMicros: 5 },
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 3,
+          cacheWriteTokens: 2,
+          costMicros: 5,
+        },
         finishReason: "stop",
         latencyMs: 2,
       }),
@@ -307,7 +345,13 @@ describe("RoutingModelGateway", () => {
           provider: "secondary",
           model: "model-two",
           fallbackDepth: 1,
-          usage: { inputTokens: 7, outputTokens: 13, costMicros: 28 },
+          usage: {
+            inputTokens: 30,
+            outputTokens: 13,
+            cacheReadTokens: 7,
+            cacheWriteTokens: 4,
+            costMicros: 58,
+          },
           latencyMs: 16,
           repairAttempts: 1,
         });
@@ -316,13 +360,17 @@ describe("RoutingModelGateway", () => {
             [
               "harness.model.input_tokens",
               "harness.model.output_tokens",
+              "harness.model.cache_read_tokens",
+              "harness.model.cache_write_tokens",
               "harness.model.cost_micros",
             ].includes(name),
           ),
         ).toEqual([
-          ["harness.model.input_tokens", 7],
+          ["harness.model.input_tokens", 30],
           ["harness.model.output_tokens", 13],
-          ["harness.model.cost_micros", 28],
+          ["harness.model.cache_read_tokens", 7],
+          ["harness.model.cache_write_tokens", 4],
+          ["harness.model.cost_micros", 58],
         ]);
       });
     } finally {
@@ -382,7 +430,13 @@ describe("RoutingModelGateway", () => {
     const primary = adapter("primary", () =>
       Promise.reject(
         new ModelOutputInvalidError(0, [{ path: ["answer"], code: "invalid_type" }], undefined, {
-          usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+          usage: {
+            inputTokens: 10,
+            outputTokens: 3,
+            cacheReadTokens: 5,
+            cacheWriteTokens: 2,
+            costMicros: 4,
+          },
           latencyMs: 5,
         }),
       ),
@@ -415,7 +469,13 @@ describe("RoutingModelGateway", () => {
       }),
     ).rejects.toMatchObject({
       code: "provider_unavailable",
-      usage: { inputTokens: 2, outputTokens: 3, costMicros: 8 },
+      usage: {
+        inputTokens: 10,
+        outputTokens: 3,
+        cacheReadTokens: 5,
+        cacheWriteTokens: 2,
+        costMicros: 16,
+      },
       latencyMs: 5,
     });
   });

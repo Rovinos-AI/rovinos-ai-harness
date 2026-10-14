@@ -81,6 +81,8 @@ export type RetainedEventRef = z.infer<typeof RetainedEventRefSchema>;
 export const ContextResultSchema = z
   .object({
     messages: z.array(MessageSchema),
+    /** Count of leading prompt messages stable across consecutive context builds. */
+    stablePrefixMessages: z.number().int().nonnegative(),
     stats: ContextStatsSchema,
     pinnedSeqs: z.array(z.number().int().nonnegative()),
     retainedSeqs: z.array(RetainedEventRefSchema),
