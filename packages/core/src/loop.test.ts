@@ -2267,14 +2267,12 @@ describe("runLoop", () => {
         errorCode: "unknown_tool",
       }),
     );
-    expect(result.events).toContainEqual(
-      expect.objectContaining({
-        type: "model_response",
-        content: expect.arrayContaining([
-          expect.objectContaining({ type: "tool_call", toolId: UNREGISTERED_TOOL_ID }),
-        ]),
-      }),
-    );
+    const response = result.events.find((event) => event.type === "model_response");
+    const responseToolIds =
+      response?.type === "model_response"
+        ? response.content.flatMap((part) => (part.type === "tool_call" ? [part.toolId] : []))
+        : [];
+    expect(responseToolIds).toEqual([UNREGISTERED_TOOL_ID]);
   });
 
   it("suspends an ask decision durably and executes only after approval on resume", async () => {

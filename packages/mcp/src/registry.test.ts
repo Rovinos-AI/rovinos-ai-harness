@@ -52,11 +52,20 @@ function tool(
   };
 }
 
+function thrownBy(operation: () => unknown): unknown {
+  try {
+    operation();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
 describe("normalizeToolId", () => {
   it.each([
     ["UPPER_CASE", "server.upper_case"],
     ["Read Tool", "server.read_tool"],
-    ["schön", "server.sch_n"],
+    ["sch\u00f6n", "server.sch_n"],
     ["one___two", "server.one_two"],
   ])("normalizes %s", (nativeName, expected) => {
     expect(normalizeToolId("server", nativeName)).toBe(expected);
@@ -91,19 +100,18 @@ describe("ToolRegistry", () => {
   });
 
   it("fails startup with both server ids when normalized ids collide", () => {
-    try {
+    const build = () =>
       new ToolRegistry([
         { config: config("first", { toolPrefix: "shared" }), tools: [tool("A B")] },
         { config: config("second", { toolPrefix: "shared" }), tools: [tool("a_b")] },
       ]);
-      expect.fail("Expected a normalized tool id collision.");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ToolRegistryError);
-      expect(error).toMatchObject({
-        code: "tool_id_collision",
-        serverIds: ["first", "second"],
-      });
-    }
+    const error = thrownBy(build);
+
+    expect(error).toBeInstanceOf(ToolRegistryError);
+    expect(error).toMatchObject({
+      code: "tool_id_collision",
+      serverIds: ["first", "second"],
+    });
   });
 
   it("rejects schemas over 64 KiB and unsupported remote references", () => {

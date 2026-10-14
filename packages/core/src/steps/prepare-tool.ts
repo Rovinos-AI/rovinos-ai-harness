@@ -18,6 +18,22 @@ export interface PreparedToolCall {
   readonly errorCode?: Code;
 }
 
+/** Replaces unknown tool ids before they can be persisted or attributed to a tool span. */
+export function normalizeUnregisteredToolCall(
+  call: ModelToolCall,
+  description: ReturnType<ToolPort["describe"]>,
+  prepared?: PreparedToolCall,
+): { readonly call: ModelToolCall; readonly prepared: PreparedToolCall } | undefined {
+  if (description !== undefined) {
+    return undefined;
+  }
+  const safeCall = { ...(prepared?.call ?? call), toolId: UNREGISTERED_TOOL_ID };
+  return {
+    call: safeCall,
+    prepared: { call: safeCall, errorCode: prepared?.errorCode ?? "unknown_tool" },
+  };
+}
+
 const preparationCodes = new Set([
   "pii_blocked",
   "pii_depth_exceeded",
@@ -121,7 +137,7 @@ export async function prepareCompletion(
       parts.push(part);
       continue;
     }
-    const unregistered = tool === undefined || tool.describe(part.toolId) === undefined;
+    const unregistered = tool?.describe(part.toolId) === undefined;
     const call = {
       callId: part.callId,
       toolId: unregistered ? UNREGISTERED_TOOL_ID : part.toolId,

@@ -62,8 +62,8 @@ export class ToolRegistryError extends HarnessError {
 function sanitizeComponent(value: string): string {
   return value
     .toLowerCase()
-    .replace(/[^a-z0-9_.-]/gu, "_")
-    .replace(/_+/gu, "_");
+    .replaceAll(/[^a-z0-9_.-]/gu, "_")
+    .replaceAll(/_+/gu, "_");
 }
 
 /**
@@ -94,8 +94,8 @@ function safeDescription(description: unknown): string {
     return "";
   }
   return description
-    .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
-    .replace(/\s+/gu, " ")
+    .replaceAll(/\p{Cc}/gu, " ")
+    .replaceAll(/\s+/gu, " ")
     .trim()
     .slice(0, 1_024);
 }
@@ -144,68 +144,87 @@ export class ToolRegistry {
   constructor(servers: readonly ToolRegistryServer[]) {
     for (const { config, tools } of servers) {
       for (const tool of tools) {
-        if (config.toolAllowlist !== undefined && !config.toolAllowlist.includes(tool.name)) {
-          this.#rejected.push({
-            serverId: config.id,
-            nativeName: tool.name,
-            reason: "tool_not_allowlisted",
-          });
-          continue;
-        }
-        const normalizedId = normalizeToolId(config.toolPrefix, tool.name);
-        const parsedId = Code.safeParse(normalizedId);
-        if (!parsedId.success || tool.name.length === 0) {
-          this.#rejected.push({
-            serverId: config.id,
-            nativeName: tool.name,
-            reason: "tool_name_invalid",
-          });
-          continue;
-        }
-        const previous = this.#byId.get(parsedId.data);
-        if (previous !== undefined) {
-          throw new ToolRegistryError(previous.server.id, config.id);
-        }
-
-        let inputSchema: JsonValueType;
-        let outputSchema: JsonValueType | undefined;
-        try {
-          inputSchema = compileSchema(tool.inputSchema);
-          if (tool.outputSchema !== undefined) {
-            outputSchema = compileSchema(tool.outputSchema);
-          }
-        } catch (error) {
-          this.#rejected.push({
-            serverId: config.id,
-            nativeName: tool.name,
-            reason: schemaRejectionReason(error),
-          });
-          continue;
-        }
-
-        const spec = ToolSpecSchema.parse({
-          toolId: parsedId.data,
-          description: safeDescription(tool.description),
-          inputSchema,
-        });
-        const annotations = tool.annotations;
-        const idempotent =
-          config.idempotentTools?.includes(tool.name) === true ||
-          (config.trust === "internal" &&
-            config.useAnnotations &&
-            (annotations?.idempotentHint === true || annotations?.readOnlyHint === true));
-        const registered: RegisteredTool = {
-          server: config,
-          nativeName: tool.name,
-          spec,
-          inputSchema,
-          ...(outputSchema === undefined ? {} : { outputSchema }),
-          idempotent,
-        };
-        this.#tools.push(registered);
-        this.#byId.set(parsedId.data, registered);
+        this.#register(config, tool);
       }
     }
+  }
+
+  #register(config: ServerConfig, tool: McpTool): void {
+    if (config.toolAllowlist !== undefined && !config.toolAllowlist.includes(tool.name)) {
+      this.#reject(config, tool, "tool_not_allowlisted");
+      return;
+    }
+    const toolId = this.#normalizeId(config, tool);
+    if (toolId === undefined) {
+      return;
+    }
+    const schemas = this.#compileSchemas(config, tool);
+    if (schemas === undefined) {
+      return;
+    }
+    this.#store(config, tool, toolId, schemas);
+  }
+
+  #normalizeId(config: ServerConfig, tool: McpTool): Code | undefined {
+    const parsedId = Code.safeParse(normalizeToolId(config.toolPrefix, tool.name));
+    if (!parsedId.success || tool.name.length === 0) {
+      this.#reject(config, tool, "tool_name_invalid");
+      return undefined;
+    }
+    const previous = this.#byId.get(parsedId.data);
+    if (previous !== undefined) {
+      throw new ToolRegistryError(previous.server.id, config.id);
+    }
+    return parsedId.data;
+  }
+
+  #compileSchemas(
+    config: ServerConfig,
+    tool: McpTool,
+  ): { readonly inputSchema: JsonValueType; readonly outputSchema?: JsonValueType } | undefined {
+    try {
+      const inputSchema = compileSchema(tool.inputSchema);
+      const outputSchema =
+        tool.outputSchema === undefined ? undefined : compileSchema(tool.outputSchema);
+      return { inputSchema, ...(outputSchema === undefined ? {} : { outputSchema }) };
+    } catch (error) {
+      this.#reject(config, tool, schemaRejectionReason(error));
+      return undefined;
+    }
+  }
+
+  #store(
+    config: ServerConfig,
+    tool: McpTool,
+    toolId: Code,
+    schemas: { readonly inputSchema: JsonValueType; readonly outputSchema?: JsonValueType },
+  ): void {
+    const { inputSchema, outputSchema } = schemas;
+    const spec = ToolSpecSchema.parse({
+      toolId,
+      description: safeDescription(tool.description),
+      inputSchema,
+    });
+    const annotations = tool.annotations;
+    const idempotent =
+      config.idempotentTools?.includes(tool.name) === true ||
+      (config.trust === "internal" &&
+        config.useAnnotations &&
+        (annotations?.idempotentHint === true || annotations?.readOnlyHint === true));
+    const registered: RegisteredTool = {
+      server: config,
+      nativeName: tool.name,
+      spec,
+      inputSchema,
+      ...(outputSchema === undefined ? {} : { outputSchema }),
+      idempotent,
+    };
+    this.#tools.push(registered);
+    this.#byId.set(toolId, registered);
+  }
+
+  #reject(config: ServerConfig, tool: McpTool, reason: Code): void {
+    this.#rejected.push({ serverId: config.id, nativeName: tool.name, reason });
   }
 
   /** Returns model-visible tool specs in server and native list order. */
@@ -219,9 +238,7 @@ export class ToolRegistry {
    * @param toolId - Normalized tool id.
    * @returns Retry metadata and the external input schema, or undefined for unknown ids.
    */
-  describe(
-    toolId: Code,
-  ):
+  describe(toolId: Code):
     | {
         readonly idempotent: boolean;
         readonly timeoutMs: number;
