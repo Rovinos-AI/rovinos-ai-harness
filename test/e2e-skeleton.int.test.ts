@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
-// Not wired yet: approval escalation WebhookNotifier (17.6 -> #125)
-// Not wired yet: RemoteSandboxBackend / sandbox.runner (19.3 -> #94)
+// Not wired yet: approval escalation WebhookNotifier (17.13 -> #414)
+// Not wired yet: RemoteSandboxBackend / sandbox.runner (19.11 -> #415)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: MCP registry and model-visible descriptions through model-input PII (-> #199, model-input PII 13.6 -> #150)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
 // Not wired yet: reference host in core runtime/CLI (-> #207)
-// Not wired yet: runtime vault from config (13.12 -> #389)
-// Not wired yet: storage-boundary tokenization (13.8 -> #81)
 // Not wired yet: SDK and control-plane consumers of store watch/watchRuns (#230, 24.1)
-// Not wired yet: sentinel trip gate wired to the runtime vault (8.4 -> #74)
 // Not wired yet: reference-host app content callbacks in the core runtime/CLI (-> #207)
 import { Command } from "commander";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
