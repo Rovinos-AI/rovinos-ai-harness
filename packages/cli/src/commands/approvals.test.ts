@@ -34,6 +34,7 @@ import type { CliContext, Interactive } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
 import { main } from "../main.js";
 import { createOutput } from "../output.js";
+import { createApprovalResolverLease } from "./approval-reveal.js";
 import { approvalsCommand } from "./approvals.js";
 
 const EMAIL = "ada@example.test";
@@ -289,6 +290,24 @@ describe("harness approvals", () => {
       true,
     );
     expect(JSON.stringify(audits)).not.toContain(EMAIL);
+  });
+
+  it("uses the runtime vault when no test resolver override is supplied", async () => {
+    const fixture = createFixture();
+    const runtimeConfig = await fixture.context.loadConfig();
+    if (fixture.context.createRuntime === undefined) {
+      throw new Error("The CLI fixture did not create a runtime.");
+    }
+    const runtime = await fixture.context.createRuntime(runtimeConfig);
+    const context = { ...fixture.context };
+    delete context.createVaultResolver;
+    try {
+      const lease = await createApprovalResolverLease(context, runtime, runtimeConfig);
+      expect(lease.resolver).toBe(runtime.vault);
+      lease.close();
+    } finally {
+      await runtime.close();
+    }
   });
 
   it("fails reveal when no vault is available", async () => {
