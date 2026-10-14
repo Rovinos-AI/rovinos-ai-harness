@@ -77,6 +77,23 @@ describe("AppRateLimiter", () => {
     }
   });
 
+  it("compacts timestamps after pruning a large expired prefix", () => {
+    let now = 0;
+    const limiter = new AppRateLimiter(
+      { ...defaultLimits, spansPerMinute: 2_000, spansPerSessionLifetime: 2_000 },
+      { now: () => now },
+    );
+    let allSpansAccepted = true;
+    for (let span = 0; span < 1_024; span += 1) {
+      allSpansAccepted = limiter.tryAcceptSpan("session-a") === true && allSpansAccepted;
+    }
+
+    now = 60_000;
+    expect(allSpansAccepted).toBe(true);
+    expect(limiter.tryAcceptSpan("session-a")).toBe(true);
+    expect(limiter.tryAcceptSpan("session-a")).toBe(true);
+  });
+
   it("releases batch and span state when a session ends", () => {
     const limiter = new AppRateLimiter(
       { ...defaultLimits, spansPerSessionLifetime: 1 },

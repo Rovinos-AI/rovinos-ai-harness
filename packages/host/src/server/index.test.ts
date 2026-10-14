@@ -1148,15 +1148,11 @@ describe("createReferenceHost", () => {
   it("releases limiter state when an app session ends", async () => {
     let now = 0;
     const onAppRejected = vi.fn();
-    const sessionCountsAtEnd: number[] = [];
-    const endLimiterSession = AppRateLimiter.prototype.endSession;
-    vi.spyOn(AppRateLimiter.prototype, "endSession").mockImplementation(function (
-      this: AppRateLimiter,
-      endedSessionId,
-    ) {
-      endLimiterSession.call(this, endedSessionId);
-      sessionCountsAtEnd.push(this.activeSessionCount);
-    });
+    const endLimiterSession = vi.spyOn(AppRateLimiter.prototype, "endSession");
+    const endedSessionCounts = (): number[] =>
+      endLimiterSession.mock.contexts.map((context: unknown) =>
+        context instanceof AppRateLimiter ? context.activeSessionCount : -1,
+      );
     const fixture = makeServer({
       config: {
         ...appConfig,
@@ -1190,7 +1186,7 @@ describe("createReferenceHost", () => {
         )
       ).status,
     ).toBe(200);
-    expect(sessionCountsAtEnd).toEqual([0]);
+    expect(endedSessionCounts()).toEqual([0]);
 
     const nextSession = await newAppSession(fixture, host);
     expect(nextSession).toBe(firstSession);
@@ -1201,7 +1197,7 @@ describe("createReferenceHost", () => {
     );
     expect(onAppRejected).toHaveBeenCalledExactlyOnceWith("session_cap");
     await host.close();
-    expect(sessionCountsAtEnd).toEqual([0, 0]);
+    expect(endedSessionCounts()).toEqual([0, 0]);
   });
 
   it("returns a bounded error result if app calls are not handled or fail", async () => {
