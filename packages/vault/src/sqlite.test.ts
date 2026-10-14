@@ -3,8 +3,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { aesGcmEncrypt, hkdfSha256, hmacSha256 } from "@harness/crypto";
-import { Code, FakeClock, type KeyProvider } from "@harness/schemas";
+import { aesGcmDecrypt, hmacSha256 } from "@harness/crypto";
+import { Code, FakeClock, Id, type KeyProvider } from "@harness/schemas";
 import type { VaultRunReader } from "@harness/telemetry";
 import { afterEach, describe, expect, it } from "vitest";
 import { InMemoryVault } from "./memory.js";
@@ -14,7 +14,7 @@ import { SqliteVault } from "./sqlite.js";
 import { purgeExpired } from "./purger.js";
 import { deriveVaultKeys, lookupMessage } from "./sqlite-crypto.js";
 import { normalize } from "./normalize.js";
-import { ENCRYPTION_INFO } from "./sqlite-decrypt.js";
+import { encryptScopeValue, unwrapScopeKey } from "./scope-crypto.js";
 import type { Token as TokenValue } from "./token.js";
 
 const runId = "A".repeat(26);
@@ -70,38 +70,43 @@ describe("SqliteVault", () => {
     const { path } = await temporaryPath();
     const rotatingProvider: KeyProvider = {
       currentKeyId: () => currentKeyId,
-      getKey: (requestedKeyId) => {
+      getKey: async (requestedKeyId) => {
         const key = rotationKeys.get(requestedKeyId);
         if (key === undefined) {
           return Promise.reject(new Error("synthetic unavailable key"));
         }
         if (requestedKeyId === "key-b" && injectConcurrentUpdate && token !== undefined) {
           injectConcurrentUpdate = false;
-          const oldKey = rotationKeys.get("key-a");
-          if (oldKey === undefined) {
-            throw new Error("synthetic old key is missing");
-          }
-          const encryptionKey = hkdfSha256(oldKey, ENCRYPTION_INFO);
-          const plaintext = Buffer.from("alice@example.test", "utf8");
-          let encrypted: Uint8Array | undefined;
+          const database = new Database(path);
           try {
-            encrypted = aesGcmEncrypt(
-              encryptionKey,
-              plaintext,
-              Buffer.from(`${runId}:${token}`, "utf8"),
+            const scopeKey = database
+              .prepare<[string], { wrapped_dek: Buffer; key_id: string }>(
+                "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = ?",
+              )
+              .get(runId);
+            if (scopeKey === undefined) {
+              throw new Error("synthetic scope key is missing");
+            }
+            const dataKey = await unwrapScopeKey(
+              rotatingProvider,
+              scopeKey.key_id,
+              Id.parse(runId),
+              scopeKey.wrapped_dek,
             );
-            const database = new Database(path);
             try {
+              const encrypted = Buffer.from(
+                encryptScopeValue(dataKey, "alice@example.test", `${runId}:${token}`),
+                "base64",
+              );
               database
                 .prepare("UPDATE vault_entries SET value_enc = ? WHERE run_id = ? AND token = ?")
-                .run(Buffer.from(encrypted).toString("base64"), runId, token);
+                .run(encrypted.toString("base64"), runId, token);
+              encrypted.fill(0);
             } finally {
-              database.close();
+              dataKey.fill(0);
             }
           } finally {
-            encryptionKey.fill(0);
-            plaintext.fill(0);
-            encrypted?.fill(0);
+            database.close();
           }
         }
         return Promise.resolve(Uint8Array.from(key));
@@ -152,22 +157,38 @@ describe("SqliteVault", () => {
       const olderToken = await vault.put(runId, "email", "alice@example.test");
       currentKeyId = "key-b";
       const keys = await deriveVaultKeys(rotatingProvider, "key-b", "vault_encrypt_failed");
-      const plaintext = Buffer.from("alice@example.test", "utf8");
       const lookupMessageBytes = lookupMessage(
         runId,
         Code.parse("email"),
         normalize(Code.parse("email"), "alice@example.test"),
       );
       const lookup = Buffer.from(hmacSha256(keys.lookup, lookupMessageBytes));
-      let encrypted: Uint8Array | undefined;
+      const database = new Database(path);
+      let encrypted: Buffer | undefined;
       try {
         const token = "<EMAIL_2>";
-        encrypted = aesGcmEncrypt(
-          keys.encryption,
-          plaintext,
-          Buffer.from(`${runId}:${token}`, "utf8"),
+        const scopeKey = database
+          .prepare<[string], { wrapped_dek: Buffer; key_id: string }>(
+            "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = ?",
+          )
+          .get(runId);
+        if (scopeKey === undefined) {
+          throw new Error("synthetic scope key is missing");
+        }
+        const dataKey = await unwrapScopeKey(
+          rotatingProvider,
+          scopeKey.key_id,
+          Id.parse(runId),
+          scopeKey.wrapped_dek,
         );
-        const database = new Database(path);
+        try {
+          encrypted = Buffer.from(
+            encryptScopeValue(dataKey, "alice@example.test", `${runId}:${token}`),
+            "base64",
+          );
+        } finally {
+          dataKey.fill(0);
+        }
         database
           .prepare(
             `INSERT INTO vault_entries
@@ -179,17 +200,16 @@ describe("SqliteVault", () => {
             token,
             "email",
             lookup,
-            Buffer.from(encrypted).toString("base64"),
-            "key-b",
+            encrypted.toString("base64"),
+            "key-a",
             "key-b",
             0,
           );
         database
           .prepare("UPDATE vault_counters SET next_n = 3 WHERE run_id = ? AND entity_type = ?")
           .run(runId, "EMAIL");
-        database.close();
       } finally {
-        plaintext.fill(0);
+        database.close();
         keys.encryption.fill(0);
         keys.lookup.fill(0);
         lookupMessageBytes.fill(0);
@@ -199,7 +219,7 @@ describe("SqliteVault", () => {
 
       const canonicalToken = "<EMAIL_2>";
       await expect(vault.reencryptBatch({ targetKeyId: "key-b" })).resolves.toEqual({
-        processed: 1,
+        processed: 2,
       });
       await expect(vault.resolve(runId, olderToken, { boundary: "ui" })).resolves.toBe(
         "alice@example.test",
@@ -209,16 +229,16 @@ describe("SqliteVault", () => {
       );
       await expect(vault.put(runId, "email", "alice@example.test")).resolves.toBe(canonicalToken);
       await expect(vault.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 2 }]);
-      const database = new Database(path);
+      const inspectionDatabase = new Database(path);
       try {
-        const alias = database
+        const alias = inspectionDatabase
           .prepare<[string, string], { lookup: Buffer | null }>(
             "SELECT lookup FROM vault_entries WHERE run_id = ? AND token = ?",
           )
           .get(runId, olderToken);
         expect(alias?.lookup).toBeNull();
       } finally {
-        database.close();
+        inspectionDatabase.close();
       }
     } finally {
       vault.close();
@@ -288,7 +308,7 @@ describe("SqliteVault", () => {
     sqliteVault.close();
   });
 
-  it("resolves the migration relative to the compiled module location", async () => {
+  it("resolves migrations relative to the compiled module location", async () => {
     const compiledModule = new URL("../dist/sqlite.js", import.meta.url);
     const migrationPath = new URL("../migrations/sqlite/0001_init.sql", compiledModule);
     const sql = await readFile(migrationPath, "utf8");
@@ -300,6 +320,11 @@ describe("SqliteVault", () => {
         "utf8",
       );
       database.exec(runMetaMigration);
+      const scopeKeyMigration = await readFile(
+        new URL("../migrations/sqlite/0006_scope_keys.sql", compiledModule),
+        "utf8",
+      );
+      database.exec(scopeKeyMigration);
       const tables = database
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
         .all();
@@ -307,6 +332,7 @@ describe("SqliteVault", () => {
         { name: "run_meta" },
         { name: "vault_counters" },
         { name: "vault_entries" },
+        { name: "vault_scope_keys" },
       ]);
       expect(
         database
@@ -352,6 +378,35 @@ describe("SqliteVault", () => {
     }
     const bytes = await readFile(path);
     expect(bytes.includes(Buffer.from(canary, "utf8"))).toBe(false);
+  });
+
+  it("shreds copied ciphertext by deleting the scope key before purge", async () => {
+    const { path } = await temporaryPath();
+    const vault = new SqliteVault(path, keyProvider);
+    const token = await vault.put(runId, "email", "alice@example.test");
+    const database = new Database(path);
+    const row = database
+      .prepare<[string, string], { value_enc: string }>(
+        "SELECT value_enc FROM vault_entries WHERE run_id = ? AND token = ?",
+      )
+      .get(runId, token);
+    database.close();
+    if (row === undefined) {
+      throw new Error("synthetic ciphertext is missing");
+    }
+    const copiedCiphertext = Buffer.from(row.value_enc, "base64");
+
+    await expect(vault.purge(runId)).resolves.toBe(1);
+    const masterKey = await keyProvider.getKey(keyId);
+    try {
+      expect(() =>
+        aesGcmDecrypt(masterKey, copiedCiphertext, Buffer.from(`${runId}:${token}`, "utf8")),
+      ).toThrow();
+    } finally {
+      masterKey.fill(0);
+      copiedCiphertext.fill(0);
+      vault.close();
+    }
   });
 
   it("rejects ciphertext moved to a different run and token", async () => {

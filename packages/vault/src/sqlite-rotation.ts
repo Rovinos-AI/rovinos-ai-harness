@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
-import { aesGcmEncrypt, hmacSha256 } from "@harness/crypto";
+import { hmacSha256 } from "@harness/crypto";
 import { Code, Id, type KeyProvider } from "@harness/schemas";
 import { normalize } from "./normalize.js";
 import { VaultOperationError } from "./errors.js";
 import { deriveVaultKeys, lookupMessage, type VaultKeys } from "./sqlite-crypto.js";
+import { unwrapScopeKey, wrapScopeKey } from "./scope-crypto.js";
 import {
   decodeVaultRotationCursor,
   encodeVaultRotationCursor,
@@ -38,8 +39,14 @@ interface RotationUpdate {
   readonly oldKeyId: string;
   readonly oldLookupKeyId: string;
   readonly oldValueEnc: string;
-  readonly valueEnc: string;
   readonly lookup: Buffer;
+}
+
+interface ScopeKeyUpdate {
+  readonly scopeId: Id;
+  readonly oldKeyId: string;
+  readonly oldWrappedDek: Buffer;
+  readonly wrappedDek: Buffer;
 }
 
 type DecryptEntry = (runId: Id, row: EncryptedEntry) => Promise<string>;
@@ -107,16 +114,9 @@ async function encryptRow(
   const entityType = Code.parse(row.entity_type);
   const rawValue = await decryptEntry(runId, row);
   const normalizedValue = normalize(entityType, rawValue);
-  const plaintext = Buffer.from(rawValue, "utf8");
   const message = lookupMessage(runId, entityType, normalizedValue);
-  let encrypted: Uint8Array | undefined;
   let lookup: Buffer | undefined;
   try {
-    encrypted = aesGcmEncrypt(
-      targetKeys.encryption,
-      plaintext,
-      Buffer.from(`${runId}:${row.token}`, "utf8"),
-    );
     lookup = Buffer.from(hmacSha256(targetKeys.lookup, message));
     const update = {
       runId,
@@ -125,14 +125,11 @@ async function encryptRow(
       oldKeyId: row.key_id,
       oldLookupKeyId: row.lookup_key_id,
       oldValueEnc: row.value_enc,
-      valueEnc: Buffer.from(encrypted).toString("base64"),
       lookup,
     };
     lookup = undefined;
     return update;
   } finally {
-    plaintext.fill(0);
-    encrypted?.fill(0);
     message.fill(0);
     lookup?.fill(0);
   }
@@ -141,6 +138,7 @@ async function encryptRow(
 function updateRows(
   db: Database.Database,
   updates: readonly RotationUpdate[],
+  scopeUpdates: readonly ScopeKeyUpdate[],
   targetKeyId: string,
 ): number {
   const findLookupOwner = db.prepare<[Id, Code, Buffer, string], { token: string }>(
@@ -148,15 +146,14 @@ function updateRows(
   );
   const update = db.prepare(
     `UPDATE vault_entries
-      SET value_enc = ?, key_id = ?, lookup = ?, lookup_key_id = ?
+      SET key_id = ?, lookup = ?, lookup_key_id = ?
       WHERE run_id = ? AND token = ? AND key_id = ? AND lookup_key_id = ? AND value_enc = ?`,
   );
-  const rotate = db.transaction(() =>
-    updates.reduce(
+  const rotate = db.transaction(() => {
+    const processed = updates.reduce(
       (processed, row) =>
         processed +
         update.run(
-          row.valueEnc,
           targetKeyId,
           findLookupOwner.get(row.runId, row.entityType, row.lookup, row.token) === undefined
             ? row.lookup
@@ -169,9 +166,59 @@ function updateRows(
           row.oldValueEnc,
         ).changes,
       0,
-    ),
-  );
+    );
+    const updateScopeKey = db.prepare(
+      "UPDATE vault_scope_keys SET wrapped_dek = ?, key_id = ? WHERE scope_id = ? AND key_id = ? AND wrapped_dek = ?",
+    );
+    const updateScopeEntries = db.prepare("UPDATE vault_entries SET key_id = ? WHERE run_id = ?");
+    for (const row of scopeUpdates) {
+      if (
+        updateScopeKey.run(
+          row.wrappedDek,
+          targetKeyId,
+          row.scopeId,
+          row.oldKeyId,
+          row.oldWrappedDek,
+        ).changes > 0
+      ) {
+        updateScopeEntries.run(targetKeyId, row.scopeId);
+      }
+    }
+    return processed;
+  });
   return rotate.immediate();
+}
+
+async function rewrapScopeKeys(
+  db: Database.Database,
+  rows: readonly RotationRow[],
+  keyProvider: KeyProvider,
+  targetKeyId: string,
+): Promise<ScopeKeyUpdate[]> {
+  const updates: ScopeKeyUpdate[] = [];
+  const scopeIds = new Set(rows.map(({ run_id }) => Id.parse(run_id)));
+  for (const scopeId of scopeIds) {
+    const row = db
+      .prepare<[Id], { wrapped_dek: Buffer; key_id: string }>(
+        "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = ?",
+      )
+      .get(scopeId);
+    if (row === undefined || row.key_id === targetKeyId) {
+      continue;
+    }
+    const dataKey = await unwrapScopeKey(keyProvider, row.key_id, scopeId, row.wrapped_dek);
+    try {
+      updates.push({
+        scopeId,
+        oldKeyId: row.key_id,
+        oldWrappedDek: Buffer.from(row.wrapped_dek),
+        wrappedDek: await wrapScopeKey(keyProvider, targetKeyId, scopeId, dataKey),
+      });
+    } finally {
+      dataKey.fill(0);
+    }
+  }
+  return updates;
 }
 
 /** Re-encrypt one bounded vault batch and rotate its lookup HMACs atomically. */
@@ -186,8 +233,9 @@ export async function reencryptVaultBatch(
   const rows = selectRows(db, targetKeyId, cursor, limit + 1);
   const selected = rows.slice(0, limit);
   const updates = await encryptRows(selected, keyProvider, targetKeyId, decryptEntry);
+  const scopeUpdates = await rewrapScopeKeys(db, selected, keyProvider, targetKeyId);
   try {
-    const processed = updateRows(db, updates, targetKeyId);
+    const processed = updateRows(db, updates, scopeUpdates, targetKeyId);
     const last = selected.at(-1);
     const nextCursor =
       rows.length > limit && last !== undefined
@@ -201,6 +249,10 @@ export async function reencryptVaultBatch(
     throw new VaultOperationError("vault_unavailable");
   } finally {
     updates.forEach(({ lookup }) => lookup.fill(0));
+    scopeUpdates.forEach(({ oldWrappedDek, wrappedDek }) => {
+      oldWrappedDek.fill(0);
+      wrappedDek.fill(0);
+    });
   }
 }
 
