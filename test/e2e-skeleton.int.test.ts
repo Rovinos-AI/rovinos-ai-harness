@@ -7,7 +7,7 @@
 // Not wired yet: reference host in core runtime/CLI (-> #207)
 // Not wired yet: runtime vault from config (13.12 -> #389)
 // Not wired yet: storage-boundary tokenization (13.8 -> #81)
-// Not wired yet: SDK and control-plane consumers of store watch/watchRuns (#230, 24.1)
+// Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #230)
 // Not wired yet: sentinel trip gate wired to the runtime vault (8.4 -> #74)
 // Not wired yet: reference-host app content callbacks in the core runtime/CLI (-> #207)
 import { Command } from "commander";

@@ -10,6 +10,7 @@ import {
 } from "./runtime-cancellation.js";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
+import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
 import type { ToolPort } from "./ports.js";
 import { LeaseLostError, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
@@ -220,16 +221,37 @@ function createTerminalAwareRunControl({
   };
 }
 
+function createRuntimeRunMethods(
+  options: RuntimeComposition,
+  tool: ToolPort,
+  runWithControl: RunControl,
+): Pick<Runtime, "run" | "start"> {
+  return {
+    run: (goal, runOptions) =>
+      startRun(options, tool, goal, { runWithControl, ...runOptions }),
+    start: (goal, runOptions) => {
+      const runId = options.ids.next();
+      return {
+        runId,
+        completion: startRun(options, tool, goal, {
+          runWithControl,
+          ...runOptions,
+          runId,
+        }),
+      };
+    },
+  };
+}
+
 function composeRuntime(
   options: RuntimeComposition & {
     readonly roles: RoleRegistry;
     readonly scopes: RunScopeRegistry;
-  },
+    },
 ): Runtime {
-  const {
-    config,
-    overrides,
-    clock,
+    const {
+      config,
+      clock,
     ids,
     store,
     keys,
@@ -242,7 +264,6 @@ function composeRuntime(
     roles,
     scopes,
   } = options;
-  const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   const subagentTool = createSubagentTool({
     config,
     clock,
@@ -271,7 +292,7 @@ function composeRuntime(
     keys,
     clock,
     ids,
-    run: (goal) => startRun(options, tool, goal, runWithControl),
+    ...createRuntimeRunMethods(options, tool, runWithControl),
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume,
     cancel: async (runId) => {
@@ -281,12 +302,23 @@ function composeRuntime(
       }
       return result;
     },
+    resolveApproval: (runId, approvalId, decision, resolveOptions) =>
+      resolveApprovalEvent(
+        store,
+        runId,
+        approvalId,
+        decision,
+        resolveOptions?.edits,
+        clock,
+        tool,
+        resolveOptions?.metadata,
+      ),
     close: () =>
       closeRuntimeResources({
         store,
         vault,
         keys,
-        flushTelemetry,
+        flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,
       }),
   };
 }

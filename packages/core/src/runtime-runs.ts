@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { type Id, type JsonValue, type RunInput } from "@harness/schemas";
+import { type Code, type Id, type JsonValue, type RunInput } from "@harness/schemas";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ToolPort } from "./ports.js";
 import { continueRun as startContinuation } from "./continue.js";
@@ -15,16 +15,27 @@ export type RunControl = (
   firstNewSeq?: number,
 ) => Promise<RunLoopResult>;
 
+/** Optional id and role assigned to a new root run. */
+export interface RuntimeRunOptions {
+  readonly runId?: Id;
+  readonly role?: Code;
+}
+
+/** Runtime control and optional metadata used to start one run. */
+export interface StartRunExecutionOptions extends RuntimeRunOptions {
+  readonly runWithControl: RunControl;
+}
+
 /** Starts a root run through the runtime's cancellation-control boundary. */
 export function startRun(
   composition: RuntimeComposition,
   tool: ToolPort,
   goal: JsonValue,
-  runWithControl: RunControl,
+  options: StartRunExecutionOptions,
 ): Promise<RunLoopResult> {
   const { config, clock, ids, store, model, context, policy, policyVersion } = composition;
-  const runId = ids.next();
-  return runWithControl(runId, (signal) => {
+  const runId = options.runId ?? ids.next();
+  return options.runWithControl(runId, (signal) => {
     const recorder = new RunRecorder(store, runId, ids.next(), 0, clock);
     return runLoop({
       recorder,
@@ -36,6 +47,7 @@ export function startRun(
       ids,
       goal,
       signal,
+      ...(options.role === undefined ? {} : { role: options.role }),
       scopeId: runId,
       budgets: config.run.budgets,
       checkpointEveryEvents: config.run.checkpointEveryEvents,

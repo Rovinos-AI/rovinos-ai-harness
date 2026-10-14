@@ -1,0 +1,828 @@
+// SPDX-License-Identifier: Apache-2.0
+export { createHarness } from "./harness.js";
+export { SdkError, type ApprovalDecision, type AnswerInputOptions, type CancelRunResult, type ContinueRunOptions, type CreateHarnessOptions, type GetRunContentOptions, type Harness, type HarnessOverrides, type ListRunsFilter, type ResolveApprovalOptions, type RunContent, type RunPage, type RunId, type RunStartResult, type RunSummary, type RunView, type StartRunOptions, type WatchOptions, } from "./types.js";
+export type { SafeEvent } from "@harness/telemetry";
+
+import { type Harness, type CreateHarnessOptions } from "./types.js";
+/**
+ * Creates a validated public SDK around the internal runtime.
+ *
+ * @param options - Validated config object or config path and optional runtime adapters.
+ * @returns Programmatic run, metadata, approval, and subscription operations.
+ */
+export declare function createHarness(options: CreateHarnessOptions): Promise<Harness>;
+
+import { HarnessError, Id } from "@harness/schemas";
+import { SafeEvent } from "@harness/telemetry";
+import { z } from "zod";
+/** Runtime adapters and deterministic dependencies injectable by applications and tests. */
+export declare const HarnessOverridesSchema: z.ZodObject<{
+    store: z.ZodOptional<z.ZodCustom<import("@harness/store").EventStore, import("@harness/store").EventStore>>;
+    dataDir: z.ZodOptional<z.ZodString>;
+    roleConfigDirectory: z.ZodOptional<z.ZodString>;
+    readOnlyStore: z.ZodOptional<z.ZodBoolean>;
+    transientVault: z.ZodOptional<z.ZodBoolean>;
+    clock: z.ZodOptional<z.ZodCustom<import("@harness/core").Clock, import("@harness/core").Clock>>;
+    ids: z.ZodOptional<z.ZodCustom<import("@harness/core").IdGenerator, import("@harness/core").IdGenerator>>;
+    model: z.ZodOptional<z.ZodCustom<import("@harness/core").ModelPort, import("@harness/core").ModelPort>>;
+    providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@harness/models").ProviderAdapter, import("@harness/models").ProviderAdapter>>>;
+    secretResolver: z.ZodOptional<z.ZodCustom<{
+        resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+            reveal(): string;
+        }>;
+    }, {
+        resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+            reveal(): string;
+        }>;
+    }>>;
+    onKeysWarning: z.ZodOptional<z.ZodCustom<(code: "keys_ephemeral") => void, (code: "keys_ephemeral") => void>>;
+    tool: z.ZodOptional<z.ZodCustom<import("@harness/core").ToolPort, import("@harness/core").ToolPort>>;
+    policy: z.ZodOptional<z.ZodCustom<import("@harness/core").PolicyPort, import("@harness/core").PolicyPort>>;
+    context: z.ZodOptional<z.ZodCustom<import("@harness/core").ContextPort, import("@harness/core").ContextPort>>;
+    scopeRegistry: z.ZodOptional<z.ZodCustom<import("@harness/core").RunScopeRegistry, import("@harness/core").RunScopeRegistry>>;
+    processLike: z.ZodOptional<z.ZodCustom<import("@harness/core").ShutdownProcessLike, import("@harness/core").ShutdownProcessLike>>;
+    flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
+}, z.core.$strict>;
+/** Dependencies used when embedding or testing the harness. */
+export type HarnessOverrides = z.infer<typeof HarnessOverridesSchema>;
+/** Configuration object or path and optional injectable runtime adapters. */
+export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObject<{
+    config: z.ZodObject<{
+        run: z.ZodPrefault<z.ZodObject<{
+            checkpointEveryEvents: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            shutdownGraceMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            continuations: z.ZodPrefault<z.ZodObject<{
+                allowFromFailed: z.ZodDefault<z.ZodBoolean>;
+                maxChainLength: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+                inheritBudgets: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>>;
+            resume: z.ZodPrefault<z.ZodObject<{
+                onNonIdempotent: z.ZodDefault<z.ZodEnum<{
+                    fail: "fail";
+                    escalate: "escalate";
+                }>>;
+            }, z.core.$strict>>;
+            budgets: z.ZodPrefault<z.ZodObject<{
+                maxSteps: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+                maxCostUsd: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+                maxWallClockMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+                countSuspendedTime: z.ZodDefault<z.ZodUnion<readonly [z.ZodBoolean, z.ZodPipe<z.ZodEnum<{
+                    false: "false";
+                    true: "true";
+                }>, z.ZodTransform<boolean, "false" | "true">>]>>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+        roles: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            route: z.ZodOptional<z.ZodString>;
+            systemPrompt: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+                file: z.ZodString;
+            }, z.core.$strict>]>>;
+            tools: z.ZodUnion<readonly [z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodString]>>, z.ZodLiteral<"*">]>;
+            budgets: z.ZodOptional<z.ZodObject<{
+                maxSteps: z.ZodOptional<z.ZodNumber>;
+                maxCostUsd: z.ZodOptional<z.ZodNumber>;
+                maxWallClockMs: z.ZodOptional<z.ZodNumber>;
+            }, z.core.$strict>>;
+            contextStrategy: z.ZodOptional<z.ZodString>;
+            resultSchema: z.ZodOptional<z.ZodString>;
+            maxDepth: z.ZodDefault<z.ZodNumber>;
+            maxChildren: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>>;
+        store: z.ZodPrefault<z.ZodObject<{
+            dialect: z.ZodOptional<z.ZodEnum<{
+                sqlite: "sqlite";
+                postgres: "postgres";
+            }>>;
+            connectionString: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>;
+            retention: z.ZodOptional<z.ZodObject<{
+                completedRunsDays: z.ZodCoercedNumber<unknown>;
+                failedRunsDays: z.ZodCoercedNumber<unknown>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+        keys: z.ZodOptional<z.ZodObject<{
+            currentKeyId: z.ZodString;
+            keys: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                secret: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+        models: z.ZodPrefault<z.ZodObject<{
+            retry: z.ZodPrefault<z.ZodObject<{
+                maxAttempts: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+                baseDelayMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+                maxDelayMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+                timeoutMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            }, z.core.$strict>>;
+            enforcement: z.ZodPrefault<z.ZodObject<{
+                maxRepairs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            }, z.core.$strict>>;
+            maxConcurrent: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            providers: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                kind: z.ZodEnum<{
+                    anthropic: "anthropic";
+                    openai: "openai";
+                    openai_compatible: "openai_compatible";
+                }>;
+                apiKey: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>;
+                baseUrl: z.ZodOptional<z.ZodURL>;
+                maxOutputTokens: z.ZodDefault<z.ZodNumber>;
+                requestsPerMinute: z.ZodOptional<z.ZodNumber>;
+                capabilities: z.ZodOptional<z.ZodObject<{
+                    structuredOutput: z.ZodOptional<z.ZodEnum<{
+                        native: "native";
+                        none: "none";
+                        tool: "tool";
+                        json_mode: "json_mode";
+                    }>>;
+                    forcedToolChoice: z.ZodOptional<z.ZodBoolean>;
+                    parallelToolCalls: z.ZodOptional<z.ZodBoolean>;
+                    maxContextTokens: z.ZodOptional<z.ZodNumber>;
+                    opaqueRoundTrip: z.ZodOptional<z.ZodBoolean>;
+                }, z.core.$strict>>;
+                trust: z.ZodDefault<z.ZodEnum<{
+                    local: "local";
+                    hosted: "hosted";
+                }>>;
+            }, z.core.$strict>>>;
+            routing: z.ZodPrefault<z.ZodObject<{
+                default: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                    provider: z.ZodString;
+                    model: z.ZodString;
+                }, z.core.$strict>>>;
+                roles: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodObject<{
+                    provider: z.ZodString;
+                    model: z.ZodString;
+                }, z.core.$strict>>>>;
+                fallbackOn: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+        servers: z.ZodDefault<z.ZodArray<z.ZodPipe<z.ZodObject<{
+            id: z.ZodString;
+            transport: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                kind: z.ZodLiteral<"stdio">;
+                command: z.ZodString;
+                args: z.ZodDefault<z.ZodArray<z.ZodString>>;
+                env: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.core.$ZodBranded<z.ZodString, "SecretRef", "out">]>>>;
+                cwd: z.ZodOptional<z.ZodString>;
+                inheritEnv: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>, z.ZodObject<{
+                kind: z.ZodLiteral<"http">;
+                url: z.ZodURL;
+                headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>>;
+            }, z.core.$strict>], "kind">;
+            protocol: z.ZodDefault<z.ZodEnum<{
+                auto: "auto";
+                "2026-07-28": "2026-07-28";
+                "2025-11-25": "2025-11-25";
+            }>>;
+            apps: z.ZodDefault<z.ZodBoolean>;
+            trust: z.ZodDefault<z.ZodEnum<{
+                internal: "internal";
+                external: "external";
+            }>>;
+            propagateTrace: z.ZodDefault<z.ZodBoolean>;
+            toolAllowlist: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            toolPrefix: z.ZodOptional<z.ZodString>;
+            idempotentTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            useAnnotations: z.ZodDefault<z.ZodBoolean>;
+            timeouts: z.ZodPrefault<z.ZodObject<{
+                connectMs: z.ZodDefault<z.ZodNumber>;
+                callMs: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
+            maxResultBytes: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>, z.ZodTransform<{
+            toolPrefix: string;
+            id: string;
+            transport: {
+                kind: "stdio";
+                command: string;
+                args: string[];
+                inheritEnv: boolean;
+                env?: Record<string, string | (string & z.core.$brand<"SecretRef">)> | undefined;
+                cwd?: string | undefined;
+            } | {
+                kind: "http";
+                url: string;
+                headers?: Record<string, string & z.core.$brand<"SecretRef">> | undefined;
+            };
+            protocol: "auto" | "2026-07-28" | "2025-11-25";
+            apps: boolean;
+            trust: "internal" | "external";
+            propagateTrace: boolean;
+            useAnnotations: boolean;
+            timeouts: {
+                connectMs: number;
+                callMs: number;
+            };
+            maxResultBytes: number;
+            toolAllowlist?: string[] | undefined;
+            idempotentTools?: string[] | undefined;
+        }, {
+            id: string;
+            transport: {
+                kind: "stdio";
+                command: string;
+                args: string[];
+                inheritEnv: boolean;
+                env?: Record<string, string | (string & z.core.$brand<"SecretRef">)> | undefined;
+                cwd?: string | undefined;
+            } | {
+                kind: "http";
+                url: string;
+                headers?: Record<string, string & z.core.$brand<"SecretRef">> | undefined;
+            };
+            protocol: "auto" | "2026-07-28" | "2025-11-25";
+            apps: boolean;
+            trust: "internal" | "external";
+            propagateTrace: boolean;
+            useAnnotations: boolean;
+            timeouts: {
+                connectMs: number;
+                callMs: number;
+            };
+            maxResultBytes: number;
+            toolAllowlist?: string[] | undefined;
+            toolPrefix?: string | undefined;
+            idempotentTools?: string[] | undefined;
+        }>>>>;
+        policy: z.ZodPrefault<z.ZodObject<{
+            file: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
+        pii: z.ZodPrefault<z.ZodObject<{
+            defaultAction: z.ZodDefault<z.ZodEnum<{
+                block: "block";
+                tokenize: "tokenize";
+                redact: "redact";
+                allow: "allow";
+            }>>;
+            rules: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                entities: z.ZodUnion<readonly [z.ZodArray<z.ZodUnion<readonly [z.ZodEnum<{
+                    location: "location";
+                    email: "email";
+                    credit_card: "credit_card";
+                    iban: "iban";
+                    phone: "phone";
+                    national_id: "national_id";
+                    ip_address: "ip_address";
+                    person_name: "person_name";
+                    api_key: "api_key";
+                    url_credentials: "url_credentials";
+                }>, z.ZodString]>>, z.ZodLiteral<"*">]>;
+                boundaries: z.ZodUnion<readonly [z.ZodArray<z.ZodEnum<{
+                    storage: "storage";
+                    model_input: "model_input";
+                    tool_input: "tool_input";
+                    tool_output: "tool_output";
+                    ui: "ui";
+                }>>, z.ZodLiteral<"*">]>;
+                destinations: z.ZodUnion<readonly [z.ZodArray<z.ZodUnion<readonly [z.ZodEnum<{
+                    any: "any";
+                    local: "local";
+                    hosted: "hosted";
+                }>, z.ZodObject<{
+                    tool: z.ZodString;
+                }, z.core.$strict>]>>, z.ZodLiteral<"*">]>;
+                action: z.ZodEnum<{
+                    block: "block";
+                    tokenize: "tokenize";
+                    redact: "redact";
+                    allow: "allow";
+                }>;
+            }, z.core.$strict>>>;
+            enabled: z.ZodDefault<z.ZodBoolean>;
+            custom: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                name: z.ZodString;
+                pattern: z.ZodString;
+                flags: z.ZodOptional<z.ZodString>;
+                validator: z.ZodOptional<z.ZodEnum<{
+                    luhn: "luhn";
+                    mod97: "mod97";
+                }>>;
+            }, z.core.$strict>>>;
+            detokenize: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                toolId: z.ZodString;
+                args: z.ZodArray<z.ZodString>;
+                onUnresolvable: z.ZodDefault<z.ZodEnum<{
+                    fail: "fail";
+                    leave: "leave";
+                }>>;
+            }, z.core.$strict>>>;
+        }, z.core.$strict>>;
+        vault: z.ZodPrefault<z.ZodObject<{
+            purgeAfterDays: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+        }, z.core.$strict>>;
+        telemetry: z.ZodPrefault<z.ZodObject<{
+            sentinel: z.ZodPrefault<z.ZodObject<{
+                minValueLength: z.ZodDefault<z.ZodNumber>;
+                enabled: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+        sandbox: z.ZodPrefault<z.ZodObject<{
+            allowUnsafeInProcess: z.ZodOptional<z.ZodBoolean>;
+            runner: z.ZodOptional<z.ZodObject<{
+                url: z.ZodURL;
+                token: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+            }, z.core.$strict>>;
+        }, z.core.$strict>>;
+    }, z.core.$strict>;
+    overrides: z.ZodOptional<z.ZodObject<{
+        store: z.ZodOptional<z.ZodCustom<import("@harness/store").EventStore, import("@harness/store").EventStore>>;
+        dataDir: z.ZodOptional<z.ZodString>;
+        roleConfigDirectory: z.ZodOptional<z.ZodString>;
+        readOnlyStore: z.ZodOptional<z.ZodBoolean>;
+        transientVault: z.ZodOptional<z.ZodBoolean>;
+        clock: z.ZodOptional<z.ZodCustom<import("@harness/core").Clock, import("@harness/core").Clock>>;
+        ids: z.ZodOptional<z.ZodCustom<import("@harness/core").IdGenerator, import("@harness/core").IdGenerator>>;
+        model: z.ZodOptional<z.ZodCustom<import("@harness/core").ModelPort, import("@harness/core").ModelPort>>;
+        providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@harness/models").ProviderAdapter, import("@harness/models").ProviderAdapter>>>;
+        secretResolver: z.ZodOptional<z.ZodCustom<{
+            resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+                reveal(): string;
+            }>;
+        }, {
+            resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+                reveal(): string;
+            }>;
+        }>>;
+        onKeysWarning: z.ZodOptional<z.ZodCustom<(code: "keys_ephemeral") => void, (code: "keys_ephemeral") => void>>;
+        tool: z.ZodOptional<z.ZodCustom<import("@harness/core").ToolPort, import("@harness/core").ToolPort>>;
+        policy: z.ZodOptional<z.ZodCustom<import("@harness/core").PolicyPort, import("@harness/core").PolicyPort>>;
+        context: z.ZodOptional<z.ZodCustom<import("@harness/core").ContextPort, import("@harness/core").ContextPort>>;
+        scopeRegistry: z.ZodOptional<z.ZodCustom<import("@harness/core").RunScopeRegistry, import("@harness/core").RunScopeRegistry>>;
+        processLike: z.ZodOptional<z.ZodCustom<import("@harness/core").ShutdownProcessLike, import("@harness/core").ShutdownProcessLike>>;
+        flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>, z.ZodObject<{
+    configPath: z.ZodString;
+    overrides: z.ZodOptional<z.ZodObject<{
+        store: z.ZodOptional<z.ZodCustom<import("@harness/store").EventStore, import("@harness/store").EventStore>>;
+        dataDir: z.ZodOptional<z.ZodString>;
+        roleConfigDirectory: z.ZodOptional<z.ZodString>;
+        readOnlyStore: z.ZodOptional<z.ZodBoolean>;
+        transientVault: z.ZodOptional<z.ZodBoolean>;
+        clock: z.ZodOptional<z.ZodCustom<import("@harness/core").Clock, import("@harness/core").Clock>>;
+        ids: z.ZodOptional<z.ZodCustom<import("@harness/core").IdGenerator, import("@harness/core").IdGenerator>>;
+        model: z.ZodOptional<z.ZodCustom<import("@harness/core").ModelPort, import("@harness/core").ModelPort>>;
+        providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@harness/models").ProviderAdapter, import("@harness/models").ProviderAdapter>>>;
+        secretResolver: z.ZodOptional<z.ZodCustom<{
+            resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+                reveal(): string;
+            }>;
+        }, {
+            resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+                reveal(): string;
+            }>;
+        }>>;
+        onKeysWarning: z.ZodOptional<z.ZodCustom<(code: "keys_ephemeral") => void, (code: "keys_ephemeral") => void>>;
+        tool: z.ZodOptional<z.ZodCustom<import("@harness/core").ToolPort, import("@harness/core").ToolPort>>;
+        policy: z.ZodOptional<z.ZodCustom<import("@harness/core").PolicyPort, import("@harness/core").PolicyPort>>;
+        context: z.ZodOptional<z.ZodCustom<import("@harness/core").ContextPort, import("@harness/core").ContextPort>>;
+        scopeRegistry: z.ZodOptional<z.ZodCustom<import("@harness/core").RunScopeRegistry, import("@harness/core").RunScopeRegistry>>;
+        processLike: z.ZodOptional<z.ZodCustom<import("@harness/core").ShutdownProcessLike, import("@harness/core").ShutdownProcessLike>>;
+        flushTelemetry: z.ZodOptional<z.ZodCustom<() => Promise<void>, () => Promise<void>>>;
+    }, z.core.$strict>>;
+}, z.core.$strict>]>;
+/** Validated options accepted by {@link createHarness}. */
+export type CreateHarnessOptions = z.input<typeof CreateHarnessOptionsSchema>;
+/** Branded ULID accepted by public run and approval operations. */
+export type RunId = z.infer<typeof Id>;
+/** Input for starting a run. */
+export declare const StartRunOptionsSchema: z.ZodObject<{
+    goal: z.ZodString;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>>;
+    role: z.ZodOptional<z.ZodString>;
+    idempotencyKey: z.ZodOptional<z.ZodString>;
+    requestedBy: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+/** Inferred input for {@link Harness.startRun}. */
+export type StartRunOptions = z.infer<typeof StartRunOptionsSchema>;
+/** Input for continuing a terminal run. */
+export declare const ContinueRunOptionsSchema: z.ZodObject<{
+    goal: z.ZodString;
+    metadata: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnion<readonly [z.ZodString, z.ZodNumber, z.ZodBoolean]>>>;
+}, z.core.$strict>;
+/** Inferred input for {@link Harness.continueRun}. */
+export type ContinueRunOptions = z.infer<typeof ContinueRunOptionsSchema>;
+/** Run identifier accepted by SDK operations. */
+export declare const RunIdInputSchema: z.ZodObject<{
+    runId: z.ZodString;
+}, z.core.$strict>;
+/** Approval identifier accepted by SDK operations. */
+export declare const ApprovalIdInputSchema: z.ZodObject<{
+    approvalId: z.ZodString;
+}, z.core.$strict>;
+/** Filtering and pagination options for listing run metadata. */
+export declare const ListRunsFilterSchema: z.ZodObject<{
+    status: z.ZodOptional<z.ZodEnum<{
+        failed: "failed";
+        completed: "completed";
+        running: "running";
+        suspended: "suspended";
+        pending: "pending";
+        cancelled: "cancelled";
+    }>>;
+    continuationOf: z.ZodOptional<z.ZodString>;
+    limit: z.ZodDefault<z.ZodNumber>;
+    cursor: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+/** Inferred run listing filter. */
+export type ListRunsFilter = z.input<typeof ListRunsFilterSchema>;
+/** Metadata-only run summary. */
+export declare const RunSummarySchema: z.ZodObject<{
+    runId: z.ZodString;
+    createdAt: z.ZodNumber;
+    status: z.ZodEnum<{
+        failed: "failed";
+        completed: "completed";
+        running: "running";
+        suspended: "suspended";
+        pending: "pending";
+        cancelled: "cancelled";
+    }>;
+    lastSeq: z.ZodNumber;
+    lastTs: z.ZodNumber;
+}, z.core.$strict>;
+/** Inferred metadata-only run summary. */
+export type RunSummary = z.infer<typeof RunSummarySchema>;
+/** Metadata-only page of run summaries. */
+export declare const RunPageSchema: z.ZodObject<{
+    runs: z.ZodArray<z.ZodObject<{
+        runId: z.ZodString;
+        createdAt: z.ZodNumber;
+        status: z.ZodEnum<{
+            failed: "failed";
+            completed: "completed";
+            running: "running";
+            suspended: "suspended";
+            pending: "pending";
+            cancelled: "cancelled";
+        }>;
+        lastSeq: z.ZodNumber;
+        lastTs: z.ZodNumber;
+    }, z.core.$strict>>;
+    nextCursor: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+/** Inferred page returned by {@link Harness.listRuns}. */
+export type RunPage = z.infer<typeof RunPageSchema>;
+/** Metadata-only run details and content-free event projections. */
+export declare const RunViewSchema: z.ZodObject<{
+    runId: z.ZodString;
+    createdAt: z.ZodNumber;
+    status: z.ZodEnum<{
+        failed: "failed";
+        completed: "completed";
+        running: "running";
+        suspended: "suspended";
+        pending: "pending";
+        cancelled: "cancelled";
+    }>;
+    lastSeq: z.ZodNumber;
+    lastTs: z.ZodNumber;
+    steps: z.ZodNumber;
+    usage: z.ZodObject<{
+        inputTokens: z.ZodNumber;
+        outputTokens: z.ZodNumber;
+        costMicros: z.ZodNumber;
+    }, z.core.$strict>;
+    pendingApprovals: z.ZodArray<z.ZodString>;
+    recentEvents: z.ZodArray<z.core.$ZodBranded<z.ZodDiscriminatedUnion<readonly [z.ZodObject<{
+        kind: z.ZodEnum<{
+            model_call: "model_call";
+        }>;
+        provider: z.ZodString;
+        model: z.ZodString;
+        inputTokens: z.ZodNumber;
+        outputTokens: z.ZodNumber;
+        latencyMs: z.ZodNumber;
+        schemaValid: z.ZodBoolean;
+        repairAttempts: z.ZodNumber;
+        finishReason: z.ZodString;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            tool_call: "tool_call";
+        }>;
+        toolId: z.ZodString;
+        outcome: z.ZodEnum<{
+            error: "error";
+            denied: "denied";
+            timeout: "timeout";
+            ok: "ok";
+        }>;
+        errorCode: z.ZodOptional<z.ZodString>;
+        latencyMs: z.ZodNumber;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            policy_decision: "policy_decision";
+        }>;
+        toolId: z.ZodString;
+        policyDecision: z.ZodEnum<{
+            allow: "allow";
+            ask: "ask";
+            deny: "deny";
+        }>;
+        ruleId: z.ZodOptional<z.ZodString>;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            approval_wait: "approval_wait";
+        }>;
+        decision: z.ZodEnum<{
+            deny: "deny";
+            approve: "approve";
+            edit: "edit";
+        }>;
+        decidedBy: z.ZodEnum<{
+            human: "human";
+            policy: "policy";
+            expiry: "expiry";
+        }>;
+        reason: z.ZodOptional<z.ZodString>;
+        waitMs: z.ZodNumber;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            checkpoint: "checkpoint";
+        }>;
+        atSeq: z.ZodNumber;
+        hasWorkspaceRef: z.ZodBoolean;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            run_status: "run_status";
+        }>;
+        from: z.ZodEnum<{
+            failed: "failed";
+            completed: "completed";
+            running: "running";
+            suspended: "suspended";
+            pending: "pending";
+            cancelled: "cancelled";
+        }>;
+        to: z.ZodEnum<{
+            failed: "failed";
+            completed: "completed";
+            running: "running";
+            suspended: "suspended";
+            pending: "pending";
+            cancelled: "cancelled";
+        }>;
+        reason: z.ZodString;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            pii_action: "pii_action";
+        }>;
+        boundary: z.ZodEnum<{
+            storage: "storage";
+            model_input: "model_input";
+            tool_input: "tool_input";
+            tool_output: "tool_output";
+            ui: "ui";
+            telemetry_export: "telemetry_export";
+        }>;
+        action: z.ZodEnum<{
+            blocked: "blocked";
+            tokenized: "tokenized";
+            redacted: "redacted";
+            allowed: "allowed";
+            detokenized: "detokenized";
+        }>;
+        toolId: z.ZodOptional<z.ZodString>;
+        entities: z.ZodArray<z.ZodObject<{
+            type: z.ZodString;
+            count: z.ZodNumber;
+        }, z.core.$strict>>;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            budget_exceeded: "budget_exceeded";
+        }>;
+        budget: z.ZodEnum<{
+            steps: "steps";
+            cost: "cost";
+            wall_clock: "wall_clock";
+        }>;
+        limit: z.ZodNumber;
+        observed: z.ZodNumber;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            subagent_spawned: "subagent_spawned";
+        }>;
+        childRunId: z.ZodString;
+        role: z.ZodString;
+        parentCallId: z.ZodOptional<z.ZodString>;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            subagent_completed: "subagent_completed";
+        }>;
+        childRunId: z.ZodString;
+        outcome: z.ZodEnum<{
+            failed: "failed";
+            completed: "completed";
+            cancelled: "cancelled";
+        }>;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
+            run_created: "run_created";
+        }>;
+        configHash: z.ZodString;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>], "kind">, "SafeEvent", "out">>;
+}, z.core.$strict>;
+/** Inferred run details returned by {@link Harness.getRun}. */
+export type RunView = z.infer<typeof RunViewSchema>;
+/** Options for starting an SDK event subscription. */
+export declare const WatchOptionsSchema: z.ZodObject<{
+    fromSeq: z.ZodDefault<z.ZodNumber>;
+    signal: z.ZodOptional<z.ZodCustom<AbortSignal, AbortSignal>>;
+    maxBuffered: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strict>;
+/** Options accepted by {@link Harness.watch}. */
+export type WatchOptions = z.input<typeof WatchOptionsSchema>;
+/** Content access is intentionally restricted to the tokenized view. */
+export declare const GetRunContentOptionsSchema: z.ZodObject<{
+    reveal: z.ZodLiteral<false>;
+}, z.core.$strict>;
+/** Options accepted by {@link Harness.getRunContent}. */
+export type GetRunContentOptions = z.infer<typeof GetRunContentOptionsSchema>;
+/** A single tokenized content entry from the event log. */
+export declare const RunContentEntrySchema: z.ZodObject<{
+    seq: z.ZodNumber;
+    type: z.ZodEnum<{
+        tool_result: "tool_result";
+        run_input: "run_input";
+        model_request: "model_request";
+        model_response: "model_response";
+        tool_intent: "tool_intent";
+        approval_requested: "approval_requested";
+        approval_resolved: "approval_resolved";
+        context_compacted: "context_compacted";
+    }>;
+    content: z.ZodJSONSchema;
+}, z.core.$strict>;
+/** Tokenized run content returned only by explicit request. */
+export declare const RunContentSchema: z.ZodArray<z.ZodObject<{
+    seq: z.ZodNumber;
+    type: z.ZodEnum<{
+        tool_result: "tool_result";
+        run_input: "run_input";
+        model_request: "model_request";
+        model_response: "model_response";
+        tool_intent: "tool_intent";
+        approval_requested: "approval_requested";
+        approval_resolved: "approval_resolved";
+        context_compacted: "context_compacted";
+    }>;
+    content: z.ZodJSONSchema;
+}, z.core.$strict>>;
+/** Inferred tokenized content result. Treat values as sensitive. */
+export type RunContent = z.infer<typeof RunContentSchema>;
+/** A decision that can be applied to a pending approval. */
+export declare const ApprovalDecisionSchema: z.ZodEnum<{
+    deny: "deny";
+    approve: "approve";
+    edit: "edit";
+}>;
+/** Inferred human approval decision. */
+export type ApprovalDecision = z.infer<typeof ApprovalDecisionSchema>;
+/** Options used to resolve a human approval. */
+export declare const ResolveApprovalOptionsSchema: z.ZodObject<{
+    edits: z.ZodOptional<z.ZodJSONSchema>;
+    principal: z.ZodString;
+}, z.core.$strict>;
+/** Options accepted by {@link Harness.resolveApproval}. */
+export type ResolveApprovalOptions = z.infer<typeof ResolveApprovalOptionsSchema>;
+/** Metadata-only result of resolving an approval. */
+export declare const ApprovalResolutionResultSchema: z.ZodObject<{
+    runId: z.ZodString;
+    approvalId: z.ZodString;
+    decision: z.ZodEnum<{
+        deny: "deny";
+        approve: "approve";
+        edit: "edit";
+    }>;
+}, z.core.$strict>;
+/** Inferred metadata-only approval result. */
+export type ApprovalResolutionResult = z.infer<typeof ApprovalResolutionResultSchema>;
+/** Input accepted by the future human-input answer API. */
+export declare const AnswerInputOptionsSchema: z.ZodObject<{
+    action: z.ZodString;
+    content: z.ZodOptional<z.ZodJSONSchema>;
+    principal: z.ZodString;
+}, z.core.$strict>;
+/** Options accepted by {@link Harness.answerInput}. */
+export type AnswerInputOptions = z.infer<typeof AnswerInputOptionsSchema>;
+/** Metadata-only result returned by {@link Harness.startRun} and {@link Harness.continueRun}. */
+export declare const RunStartResultSchema: z.ZodObject<{
+    runId: z.ZodString;
+    status: z.ZodEnum<{
+        failed: "failed";
+        completed: "completed";
+        running: "running";
+        suspended: "suspended";
+        pending: "pending";
+        cancelled: "cancelled";
+    }>;
+}, z.core.$strict>;
+/** Inferred metadata-only run start result. */
+export type RunStartResult = z.infer<typeof RunStartResultSchema>;
+/** Result of a cooperative run cancellation. */
+export declare const CancelRunResultSchema: z.ZodEnum<{
+    cancelled: "cancelled";
+    already_terminal: "already_terminal";
+}>;
+/** Inferred cancellation result returned by {@link Harness.cancelRun}. */
+export type CancelRunResult = z.infer<typeof CancelRunResultSchema>;
+/** Public stable SDK operations. */
+export interface Harness {
+    /** Start a detached run and immediately return its identifier and current status. */
+    startRun(options: StartRunOptions): Promise<RunStartResult>;
+    /** Start a linked follow-up run for a completed run. */
+    continueRun(runId: RunId, options: ContinueRunOptions): Promise<RunStartResult>;
+    /** Read run status, usage, approval identifiers, and recent safe events. */
+    getRun(runId: RunId): Promise<RunView>;
+    /** List metadata-only run summaries using an opaque continuation cursor. */
+    listRuns(filter?: ListRunsFilter): Promise<RunPage>;
+    /** Resume a suspended run in-process and return its resulting status. */
+    resumeRun(runId: RunId): Promise<RunStartResult>;
+    /** Request cooperative cancellation of a run. */
+    cancelRun(runId: RunId): Promise<CancelRunResult>;
+    /** Resolve a pending approval; principal is validated but not persisted by the current event contract. */
+    resolveApproval(approvalId: RunId, decision: ApprovalDecision, options: ResolveApprovalOptions): Promise<ApprovalResolutionResult>;
+    /** Answer a human-input request when the runtime supports the epic 25 input contract. */
+    answerInput(requestId: RunId, options: AnswerInputOptions): Promise<never>;
+    /** Watch content-free safe events in sequence order. */
+    watch(runId: RunId, options?: WatchOptions): AsyncIterable<SafeEvent>;
+    /** Explicitly read tokenized content. This method returns sensitive data. */
+    getRunContent(runId: RunId, options: GetRunContentOptions): Promise<RunContent>;
+    /** Stop subscriptions, wait for detached operations, and release runtime resources. */
+    close(): Promise<void>;
+}
+/** Coded SDK failure that does not include untrusted input values. */
+export declare class SdkError extends HarnessError {
+    readonly code: "sdk_run_not_found" | "sdk_closed" | "sdk_content_unavailable" | "sdk_input_unavailable";
+    /** Creates a stable SDK error with a closed code. */
+    constructor(code: SdkError["code"]);
+}
