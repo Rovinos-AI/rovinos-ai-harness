@@ -27,6 +27,7 @@ const expectedSpanNames = [
 ];
 const expectedLogNames = [
   "harness.keys.rotated",
+  "harness.model.pricing_cache_missing",
   "harness.model.pricing_missing",
   "harness.safe.approval_wait",
   "harness.safe.budget_exceeded",
