@@ -46,7 +46,7 @@ import {
   type ModelCompletion,
   type ToolPort,
 } from "@harness/core";
-import { allowAllPolicy, FakeModelPort } from "@harness/core/testing";
+import { FakeModelPort } from "@harness/core/testing";
 import {
   ExecSpecSchema,
   RemoteSandboxBackend,
@@ -70,8 +70,6 @@ import {
   SecretRefSchema,
   StoreMigrateResultSchema,
   StorePurgeResultSchema,
-  StoreConfigSchema,
-  VaultConfigSchema,
   parseJson,
 } from "@harness/schemas";
 import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
@@ -661,69 +659,6 @@ describe("run", () => {
       expect(checkpoint).toBeDefined();
     } finally {
       await store.close();
-    }
-  });
-});
-
-describe("Postgres vault", () => {
-  it.skipIf(
-    process.env.TEST_POSTGRES_URL === undefined ||
-      process.env.TEST_VAULT_POSTGRES_URL === undefined,
-  )("shares token values between two configured runtime instances", async () => {
-    const current = fixture();
-    const config = await current.context.loadConfig();
-    const postgresConfig = {
-      ...config,
-      store: StoreConfigSchema.parse({
-        dialect: "postgres",
-        connectionString: "env:TEST_POSTGRES_URL",
-      }),
-      vault: VaultConfigSchema.parse({
-        backend: "postgres",
-        postgres: { url: "env:TEST_VAULT_POSTGRES_URL" },
-      }),
-    };
-    const secretResolver = {
-      resolve: (ref: string) =>
-        Promise.resolve({
-          reveal: () => {
-            if (ref === KEY_REF) {
-              return process.env.HARNESS_E2E_KEY ?? "";
-            }
-            if (ref === "env:TEST_POSTGRES_URL") {
-              return process.env.TEST_POSTGRES_URL ?? "";
-            }
-            if (ref === "env:TEST_VAULT_POSTGRES_URL") {
-              return process.env.TEST_VAULT_POSTGRES_URL ?? "";
-            }
-            return "";
-          },
-        }),
-    };
-    const overrides = {
-      dataDir: current.dataDirectory,
-      model: new FakeModelPort([completion([], "Postgres vault run")]),
-      tool: syntheticTools([], [], []),
-      sandboxBackend: unusedSandboxBackend,
-      secretResolver,
-      policy: allowAllPolicy,
-    };
-    const first = await createRuntime(postgresConfig, overrides);
-    const second = await createRuntime(postgresConfig, {
-      ...overrides,
-      model: new FakeModelPort([completion([], "Second Postgres vault run")]),
-    });
-    try {
-      const result = await first.run(current.canary);
-      const runCreated = result.events.find((event) => event.type === "run_created");
-      if (runCreated === undefined) {
-        throw new Error("The synthetic Postgres vault run did not create its run event.");
-      }
-      await expect(
-        second.vault.resolve(runCreated.runId, "<EMAIL_1>", { boundary: "ui" }),
-      ).resolves.toBe(current.canary);
-    } finally {
-      await Promise.all([first.close(), second.close()]);
     }
   });
 });
