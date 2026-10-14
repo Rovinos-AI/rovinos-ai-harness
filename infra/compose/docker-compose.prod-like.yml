@@ -5,6 +5,8 @@ services:
     environment:
       HARNESS_DATA_DIR: /var/lib/harness/event-store
       HARNESS_VAULT_DATA_DIR: /var/lib/harness/vault
+      SANDBOX_RUNNER_TOKEN: null
+      SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
     volumes:
       - harness-event-store:/var/lib/harness/event-store
       - harness-vault:/var/lib/harness/vault
@@ -15,6 +17,11 @@ services:
     mem_limit: 1g
   sandbox-runner:
     profiles: [prod-like]
+    environment:
+      SANDBOX_RUNNER_TOKEN: null
+      SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
+    secrets:
+      - sandbox_runner_token
     restart: unless-stopped
     stop_grace_period: 30s
     stop_signal: SIGTERM
@@ -28,3 +35,6 @@ services:
 volumes:
   harness-event-store: {}
   harness-vault: {}
+secrets:
+  sandbox_runner_token:
+    file: ${SANDBOX_RUNNER_TOKEN_SECRET_FILE:-/dev/null}

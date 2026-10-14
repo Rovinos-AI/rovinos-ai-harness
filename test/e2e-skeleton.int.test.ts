@@ -5,6 +5,7 @@
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: MCP registry and model-visible descriptions through model-input PII (-> #199, model-input PII 13.6 -> #150)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
+// Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: reference host in core runtime/CLI (-> #207)
 // Not wired yet: runtime vault from config (13.12 -> #389)
 // Not wired yet: storage-boundary tokenization (13.8 -> #81)

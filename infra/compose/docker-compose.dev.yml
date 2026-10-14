@@ -4,8 +4,6 @@ services:
     profiles: [dev]
     stop_grace_period: 30s
     stop_signal: SIGTERM
-    ports:
-      - "127.0.0.1:3000:3000"
   otel-collector:
     profiles: [dev]
     command:

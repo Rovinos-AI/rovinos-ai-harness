@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { parseJson } from "@harness/schemas";
+import { parseJson, RunConfigSchema } from "@harness/schemas";
 import { z } from "zod";
 
 const composeConfigSchema = z.object({
@@ -19,6 +19,7 @@ const profileFiles: Readonly<Record<ComposeProfile, readonly string[]>> = {
   test: ["infra/compose/docker-compose.test.yml"],
   "prod-like": ["infra/compose/docker-compose.yml", "infra/compose/docker-compose.prod-like.yml"],
 };
+const minimumStopGracePeriodMs = RunConfigSchema.parse({}).shutdownGraceMs + 5_000;
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -55,6 +56,24 @@ function hasNoNewPrivileges(service: Record<string, unknown>): boolean {
 
 function hasTmpfs(service: Record<string, unknown>): boolean {
   return stringList(service.tmpfs).length > 0;
+}
+
+function hasHealthcheck(service: Record<string, unknown>): boolean {
+  const healthcheck = service.healthcheck;
+  if (property(healthcheck, "disable") === true) {
+    return false;
+  }
+  const test = property(healthcheck, "test");
+  if (typeof test === "string") {
+    return test.trim() !== "" && test.trim().toUpperCase() !== "NONE";
+  }
+  return (
+    Array.isArray(test) &&
+    test.length > 0 &&
+    test.every((part) => typeof part === "string") &&
+    (test[0]?.trim() ?? "") !== "" &&
+    test[0]?.trim().toUpperCase() !== "NONE"
+  );
 }
 
 function hasDockerSocketMount(service: Record<string, unknown>): boolean {
@@ -182,7 +201,7 @@ function productionViolations(name: string, service: Record<string, unknown>): s
   if (service.stop_signal !== "SIGTERM") {
     violations.push(`${name}: stop_signal_invalid`);
   }
-  if ((durationMilliseconds(service.stop_grace_period) ?? 0) <= 25_000) {
+  if ((durationMilliseconds(service.stop_grace_period) ?? 0) <= minimumStopGracePeriodMs) {
     violations.push(`${name}: stop_grace_period_too_short`);
   }
   return violations;
@@ -203,6 +222,9 @@ function serviceViolations(
   }
   if (service.network_mode === "host") {
     violations.push(`${name}: host_network`);
+  }
+  if (name !== "otel-collector" && !hasHealthcheck(service)) {
+    violations.push(`${name}: healthcheck_missing`);
   }
   if (name !== "otel-collector") {
     violations.push(...hardeningViolations(name, service));

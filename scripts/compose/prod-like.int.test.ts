@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
-import { afterAll, describe, expect, it } from "vitest";
+import { tmpdir } from "node:os";
+import { join, resolve as resolvePath } from "node:path";
+import { InspectResultSchema, RunResultSchema, parseJson } from "@harness/schemas";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const projectName = `harness-prod-like-${String(process.pid)}`;
 const runnerToken = randomBytes(32).toString("base64url");
+let secretDirectory = "";
+let runnerTokenFile = "";
 const composeArgs = [
   "compose",
   "--env-file",
@@ -23,10 +29,13 @@ const dockerAvailable =
   spawnSync("docker", ["info"], { stdio: "ignore", timeout: 5_000 }).status === 0;
 
 function compose(args: readonly string[]): string {
+  const environment = { ...process.env };
+  delete environment.SANDBOX_RUNNER_TOKEN;
+  environment.SANDBOX_RUNNER_TOKEN_SECRET_FILE = runnerTokenFile;
   return execFileSync("docker", [...composeArgs, ...args], {
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
-    env: { ...process.env, SANDBOX_RUNNER_TOKEN: runnerToken },
+    env: environment,
   });
 }
 
@@ -56,7 +65,19 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
     }
   });
 
-  it("waits for service health and stops the harness cleanly within its grace period", () => {
+  beforeAll(async () => {
+    secretDirectory = await mkdtemp(join(tmpdir(), "harness-prod-like-"));
+    runnerTokenFile = resolvePath(secretDirectory, "sandbox-runner-token");
+    await writeFile(runnerTokenFile, runnerToken, { encoding: "utf8", mode: 0o444 });
+  });
+
+  afterAll(async () => {
+    if (secretDirectory !== "") {
+      await rm(secretDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("checks service health and resumes a run checkpointed during container stop", async () => {
     compose(["up", "--detach", "--wait", "--build"]);
 
     expect(inspect("harness", "{{.State.Health.Status}}")).toBe("healthy");
@@ -82,13 +103,87 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
       ".catch(() => { process.exitCode = 1; });",
     ].join("");
     compose(["exec", "--no-TTY", "harness", "node", "-e", healthChecks]);
-    const container = compose(["ps", "--quiet", "harness"]).trim();
 
-    execFileSync("docker", ["stop", "--time", "30", container], { encoding: "utf8" });
-    expect(
-      execFileSync("docker", ["inspect", "--format", "{{.State.ExitCode}}", container], {
-        encoding: "utf8",
-      }).trim(),
-    ).toBe("0");
-  }, 180_000);
+    const runContainer = `${projectName}-shutdown-run`;
+    const shutdownRunScript = [
+      'import { Command } from "commander";',
+      'import { writeFileSync } from "node:fs";',
+      'import { createDefaultContext, createOutput, main } from "@harness/cli/programmatic";',
+      'import { FakeModelPort } from "@harness/core/testing";',
+      "const action = process.env.HARNESS_E2E_ACTION;",
+      'const scriptedModel = new FakeModelPort([{ parts: [{ type: "text", text: "resumed" }], usage: { inputTokens: 1, outputTokens: 1 }, finishReason: "stop", provider: "scripted", model: "shutdown-test", latencyMs: 1, schemaValid: true, repairAttempts: 0, fallbackDepth: 0, providerBlobs: null }]);',
+      "const context = createDefaultContext(new Command(), createOutput());",
+      "const createRuntime = context.createRuntime;",
+      'context.createRuntime = async (config, overrides) => createRuntime(config, { ...overrides, model: { complete: async (request, runContext) => { if (action === "run") { process.stdout.write(`RUN_STARTED ${runContext.runId}\\n`); await new Promise((resolve, reject) => { const timer = setTimeout(resolve, 60000); runContext.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("synthetic slow model interrupted")); }, { once: true }); }); } return scriptedModel.complete(request, runContext); } } });',
+      'const args = action === "run" ? (writeFileSync("/tmp/harness-shutdown-input.json", JSON.stringify({ goal: "resume after container stop" })), ["run", "--input", "/tmp/harness-shutdown-input.json"]) : ["--json", "resume", process.env.HARNESS_E2E_RUN_ID];',
+      "process.exitCode = await main(args, context);",
+    ].join("\n");
+    compose([
+      "run",
+      "--detach",
+      "--no-deps",
+      "--name",
+      runContainer,
+      "--entrypoint",
+      "node",
+      "-e",
+      "HARNESS_E2E_ACTION=run",
+      "harness",
+      "--input-type=module",
+      "-e",
+      shutdownRunScript,
+    ]);
+
+    const runId = await waitForRunStart(runContainer);
+    const stopStarted = Date.now();
+    execFileSync("docker", ["stop", "--time", "30", runContainer], {
+      encoding: "utf8",
+      timeout: 35_000,
+    });
+    expect(Date.now() - stopStarted).toBeLessThan(30_000);
+    const suspended = parseJson(
+      InspectResultSchema,
+      compose(["run", "--rm", "--no-deps", "harness", "--json", "inspect", runId]),
+    );
+    expect(suspended.status).toBe("suspended");
+    expect(suspended.lastCheckpoint).not.toBeNull();
+    expect(suspended.events.map(({ type }) => type)).toContain("checkpoint_written");
+
+    try {
+      const resumedOutput = compose([
+        "run",
+        "--rm",
+        "--no-deps",
+        "--entrypoint",
+        "node",
+        "-e",
+        "HARNESS_E2E_ACTION=resume",
+        "-e",
+        `HARNESS_E2E_RUN_ID=${runId}`,
+        "harness",
+        "--input-type=module",
+        "-e",
+        shutdownRunScript,
+      ]);
+      expect(parseJson(RunResultSchema, resumedOutput).status).toBe("completed");
+    } finally {
+      execFileSync("docker", ["rm", "-f", runContainer], { encoding: "utf8" });
+    }
+  }, 300_000);
 });
+
+async function waitForRunStart(container: string): Promise<string> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const logs = execFileSync("docker", ["logs", container], {
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const match = /RUN_STARTED ([0-9A-Z]{26})/u.exec(logs);
+    if (match?.[1] !== undefined) {
+      return match[1];
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("The slow fake run did not start in time.");
+}

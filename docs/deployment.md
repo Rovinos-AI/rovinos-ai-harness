@@ -4,16 +4,16 @@ The Compose configurations are starting points for local development, integratio
 prod-like deployment:
 
 - `infra/compose/docker-compose.yml` defines the shared services and their restrictive defaults.
-- `infra/compose/docker-compose.dev.yml` adds the `dev` profile and loopback port bindings.
+- `infra/compose/docker-compose.dev.yml` adds the `dev` profile and loopback-published collector ports.
 - `infra/compose/docker-compose.test.yml` adds the integration-test services, including PostgreSQL.
 - `infra/compose/docker-compose.prod-like.yml` adds resource limits, persistent state, and graceful
   shutdown settings.
 
 The `prod-like` harness has no published port. The control-plane HTTP server currently binds to
 loopback inside the container, so a separate TLS proxy container cannot reach it. Do not publish the
-control-plane directly; a network-accessible listener and proxy integration need a separately
-reviewed design that preserves the control-plane's host and origin checks. In particular, the
-development port declaration does not change the server's loopback bind behavior.
+control-plane directly. Network exposure and the TLS proxy example arrive with 18.5 (#178),
+"Authentication, scoping, and network binding", which owns the bind host and the authentication
+required for remote exposure.
 
 ## Upgrade and shutdown
 
@@ -38,7 +38,10 @@ the vault directory and otherwise defaults to `HARNESS_DATA_DIR`.
 ## Keys and secrets
 
 Do not put tokens, passwords, or encryption keys in Compose YAML or commit them in an env file.
-Use deployment-managed Docker secrets or protected env files, restrict access to the files and
+The prod-like sandbox runner reads `SANDBOX_RUNNER_TOKEN_FILE` from the mounted
+`sandbox_runner_token` Docker secret. Set `SANDBOX_RUNNER_TOKEN_SECRET_FILE` to a protected host-side
+file before starting the prod-like profile; ensure the file is readable by the runner's runtime UID
+10002. Without a valid token file the runner fails closed. Restrict access to secret files and
 volumes, and rotate keys according to the deployment's retention and recovery policy. An encrypted
 vault backup is not recoverable without its corresponding key material.
 
