@@ -2,6 +2,7 @@
 import {
   ModelsConfigSchema,
   type PolicyConfig,
+  type PiiConfig,
   type RolesConfig,
   type Id,
   type JsonValue,
@@ -15,7 +16,13 @@ import {
 } from "@harness/schemas";
 import type { ProviderAdapter } from "@harness/models";
 import type { EventStore } from "@harness/store";
-import type { LocalKeyProvider } from "@harness/vault";
+import type {
+  AuditingVaultResolver,
+  LocalKeyProvider,
+  VaultResolver,
+  VaultWriter,
+} from "@harness/vault";
+import type { Tokenizer } from "@harness/pii";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
@@ -31,6 +38,8 @@ export interface RuntimeOverrides {
   readonly roleConfigDirectory?: string;
   /** Open existing storage without schema initialization or writes. */
   readonly readOnlyStore?: boolean;
+  /** Use an in-memory vault explicitly, for tests that do not need persistence. */
+  readonly transientVault?: boolean;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
   readonly model?: ModelPort;
@@ -53,6 +62,7 @@ export interface RuntimeOverrides {
 /** Runtime configuration required by the currently implemented run loop. */
 export interface RuntimeConfig {
   readonly run: RunConfig;
+  readonly pii?: PiiConfig;
   readonly store?: StoreConfig;
   readonly models?: ModelsConfig;
   readonly roles?: RolesConfig;
@@ -63,6 +73,8 @@ export interface RuntimeConfig {
 /** Composed run-loop operations and their shared dependencies. */
 export interface Runtime {
   readonly store: EventStore;
+  /** Read-only resolver for audited vault access by runtime consumers. */
+  readonly vault: VaultResolver;
   /** Key provider shared by encryption consumers in the composed runtime. */
   readonly keys: KeyProvider;
   readonly clock: Clock;
@@ -76,6 +88,11 @@ export interface Runtime {
   close(): Promise<void>;
 }
 
+/** Owned writer/resolver handle closed with its runtime. */
+export interface RuntimeVault extends VaultWriter, VaultResolver {
+  close(): void;
+}
+
 /** Resolved dependencies needed to assemble a running runtime. */
 export interface RuntimeComposition {
   readonly config: RuntimeConfig;
@@ -84,6 +101,15 @@ export interface RuntimeComposition {
   readonly ids: IdGenerator;
   readonly store: EventStore;
   readonly keys: LocalKeyProvider;
+  readonly vault: RuntimeVault;
+  readonly vaultResolver: VaultResolver;
+  readonly pii:
+    | {
+        readonly config: PiiConfig;
+        readonly tokenizer: Tokenizer;
+        readonly resolver: AuditingVaultResolver;
+      }
+    | undefined;
   readonly model: ModelPort;
   readonly tool: ToolPort;
   readonly policy: PolicyPort;

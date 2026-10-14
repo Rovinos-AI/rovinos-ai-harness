@@ -2,9 +2,13 @@
 import { KeysConfigSchema, RunConfigSchema } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRuntime } from "./runtime.js";
+import { createRuntime as createRuntimeImpl } from "./runtime.js";
 
 const config = { run: RunConfigSchema.parse({}) };
+const createRuntime = (
+  runtimeConfig: Parameters<typeof createRuntimeImpl>[0],
+  overrides: Parameters<typeof createRuntimeImpl>[1] = {},
+) => createRuntimeImpl(runtimeConfig, { ...overrides, transientVault: true });
 
 afterEach(() => {
   vi.unstubAllEnvs();

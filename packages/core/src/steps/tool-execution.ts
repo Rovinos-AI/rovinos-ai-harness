@@ -101,6 +101,22 @@ export async function executeWithTimeout(
             }
           },
         }),
+    ...(context.recordVaultAudit === undefined
+      ? {}
+      : {
+          recordVaultAudit: async (audit) => {
+            if (!active || signal.aborted || context.recordVaultAudit === undefined) {
+              return;
+            }
+            const pending = Promise.resolve(context.recordVaultAudit(audit));
+            pendingSummaries.add(pending);
+            try {
+              await pending;
+            } finally {
+              pendingSummaries.delete(pending);
+            }
+          },
+        }),
   };
   try {
     return await Promise.race([tool.execute(call, attemptContext), timeout]);

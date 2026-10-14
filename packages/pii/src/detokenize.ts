@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { type Code, HarnessError, type Id, type JsonValue, type PiiConfig } from "@harness/schemas";
 import { findTokens } from "@harness/vault";
-import type { AuditingVaultResolver } from "@harness/vault";
+import type { AuditingVaultResolver, VaultAuditHandler } from "@harness/vault";
 
 /** Result of detokenizing an allowlisted tool argument copy. */
 export interface DetokenizeArgsResult {
@@ -43,15 +43,30 @@ function decodePointerSegment(segment: string): string {
   return segment.replaceAll("~1", "/").replaceAll("~0", "~");
 }
 
+interface DetokenizationVisitorOptions {
+  readonly runId: Id;
+  readonly toolId: Code;
+  readonly onUnresolvable: "fail" | "leave";
+  readonly resolver: AuditingVaultResolver;
+  readonly onAudit: VaultAuditHandler | undefined;
+}
+
 class DetokenizationVisitor {
   private resolvedCount = 0;
 
-  constructor(
-    private readonly runId: Id,
-    private readonly toolId: Code,
-    private readonly onUnresolvable: "fail" | "leave",
-    private readonly resolver: AuditingVaultResolver,
-  ) {}
+  private readonly runId: Id;
+  private readonly toolId: Code;
+  private readonly onUnresolvable: "fail" | "leave";
+  private readonly resolver: AuditingVaultResolver;
+  private readonly onAudit: VaultAuditHandler | undefined;
+
+  constructor(options: DetokenizationVisitorOptions) {
+    this.runId = options.runId;
+    this.toolId = options.toolId;
+    this.onUnresolvable = options.onUnresolvable;
+    this.resolver = options.resolver;
+    this.onAudit = options.onAudit;
+  }
 
   get count(): number {
     return this.resolvedCount;
@@ -140,6 +155,7 @@ class DetokenizationVisitor {
       this.runId,
       matches.map(({ token }) => token),
       { boundary: "tool_input", toolId: this.toolId },
+      this.onAudit,
     );
     let result = "";
     let offset = 0;
@@ -180,6 +196,7 @@ export async function detokenizeArgs(
   args: JsonValue,
   config: PiiConfig,
   resolver: AuditingVaultResolver,
+  onAudit?: VaultAuditHandler,
 ): Promise<DetokenizeArgsResult> {
   let copy = cloneJsonValue(args);
   const entry = config.detokenize?.find((candidate) => candidate.toolId === toolId);
@@ -187,7 +204,13 @@ export async function detokenizeArgs(
     return { args: copy, resolvedCount: 0 };
   }
 
-  const visitor = new DetokenizationVisitor(runId, toolId, entry.onUnresolvable, resolver);
+  const visitor = new DetokenizationVisitor({
+    runId,
+    toolId,
+    onUnresolvable: entry.onUnresolvable,
+    resolver,
+    onAudit,
+  });
   for (const pointer of entry.args) {
     const segments = pointer === "" ? [] : pointer.slice(1).split("/");
     copy = await visitor.apply(copy, segments, 0);

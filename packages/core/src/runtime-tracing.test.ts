@@ -12,7 +12,7 @@ import { InMemoryEventStore } from "@harness/store";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "./recorder.js";
-import { createRuntime } from "./runtime.js";
+import { createRuntime as createRuntimeImpl } from "./runtime.js";
 import { RUN_SPAN } from "./spans.js";
 import { FakeModelPort } from "./testing/fake-model.js";
 import type {
@@ -24,6 +24,11 @@ import type {
   ToolPort,
 } from "./ports.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
+
+const createRuntime = (
+  config: Parameters<typeof createRuntimeImpl>[0],
+  overrides: Parameters<typeof createRuntimeImpl>[1] = {},
+) => createRuntimeImpl(config, { ...overrides, transientVault: true });
 
 const config = { run: RunConfigSchema.parse({}) };
 const allowPolicy: PolicyPort = {

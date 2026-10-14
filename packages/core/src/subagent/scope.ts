@@ -38,4 +38,9 @@ export class RunScopeRegistry {
   scopeOf = (runId: Id): Id => {
     return this.scopes.get(runId) ?? runId;
   };
+
+  /** Return an explicitly registered scope without falling back to the run ID. */
+  registeredScopeOf(runId: Id): Id | undefined {
+    return this.scopes.get(runId);
+  }
 }

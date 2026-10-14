@@ -440,7 +440,7 @@ store: {}`,
       },
       servers: [],
       policy: {},
-      pii: { defaultAction: "tokenize", rules: [] },
+      pii: { defaultAction: "tokenize", rules: [], enabled: true },
       telemetry: { sentinel: { minValueLength: 6 } },
       sandbox: {},
     });

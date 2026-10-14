@@ -10,7 +10,7 @@ import {
   type PiiConfig,
   type ToolSpec,
 } from "@harness/schemas";
-import { type AuditingVaultResolver } from "@harness/vault";
+import { type AuditingVaultResolver, type VaultAuditHandler } from "@harness/vault";
 import { detokenizeArgs, PiiTokenUnresolvableError } from "./detokenize.js";
 import { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import { markSanitized, markSanitizedField } from "./pii-event-store.js";
@@ -28,6 +28,7 @@ export interface PiiToolContext {
   readonly runId: Id;
   readonly signal: AbortSignal;
   readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
+  readonly recordVaultAudit?: VaultAuditHandler;
 }
 
 /** JSON execution contract with a validated numeric-byte binary representation. */
@@ -94,6 +95,7 @@ export class PiiToolPort implements PiiToolPortLike {
         args,
         this.deps.config,
         this.deps.resolver,
+        context.recordVaultAudit,
       );
       compileJsonSchema(schema)(resolved);
       return true;
@@ -151,6 +153,7 @@ export class PiiToolPort implements PiiToolPortLike {
         call.args,
         this.deps.config,
         this.deps.resolver,
+        context.recordVaultAudit,
       );
       args = resolved.args;
     } catch (error) {

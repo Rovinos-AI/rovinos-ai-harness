@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { CryptoError, aesGcmDecrypt, aesGcmEncrypt, hkdfSha256, hmacSha256 } from "@harness/crypto";
 import { KEY_PROVIDER_KEY_BYTES, type Code, type Id, type KeyProvider } from "@harness/schemas";
 import { normalize } from "./normalize.js";
 import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
 import { VaultOperationError } from "./errors.js";
+import { migrateVault, validateReadOnlyVaultMigrations } from "./sqlite-migrations.js";
 import {
   VaultValueError,
   type VaultAdmin,
@@ -21,22 +19,6 @@ const MAX_VALUE_BYTES = 8 * 1024;
 const MAX_TOKEN_NUMBER = 999_999;
 const ENCRYPTION_INFO = "harness/vault/enc";
 const LOOKUP_INFO = "harness/vault/lookup";
-const MIGRATIONS = [
-  {
-    version: "0001_init",
-    path: fileURLToPath(new URL("../migrations/sqlite/0001_init.sql", import.meta.url)),
-  },
-  {
-    version: "0002_purge_epochs",
-    path: fileURLToPath(new URL("../migrations/sqlite/0002_purge_epochs.sql", import.meta.url)),
-  },
-] as const;
-
-interface MigrationRow {
-  version: string;
-  checksum: string;
-}
-
 interface VaultEntryRow {
   token: string;
   value_enc: string;
@@ -65,48 +47,6 @@ interface InsertEntryInput {
   lookup: Buffer;
   encrypted: Uint8Array;
   keyId: string;
-}
-
-function readMigration(path: string): { checksum: string; sql: string } {
-  const sql = readFileSync(path, "utf8");
-  return { checksum: createHash("sha256").update(sql).digest("hex"), sql };
-}
-
-function migrate(db: Database.Database): void {
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL)",
-  );
-  const knownVersions = new Set<string>(MIGRATIONS.map(({ version }) => version));
-  const appliedVersions = db
-    .prepare<[], MigrationRow>("SELECT version, checksum FROM schema_migrations ORDER BY version")
-    .all();
-  if (appliedVersions.some(({ version }) => !knownVersions.has(version))) {
-    throw new VaultOperationError("vault_migration_newer_than_code");
-  }
-
-  const readApplied = db.prepare<[string], MigrationRow>(
-    "SELECT version, checksum FROM schema_migrations WHERE version = ?",
-  );
-  const recordApplied = db.prepare<[string, string, number]>(
-    "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (?, ?, ?)",
-  );
-
-  for (const migration of MIGRATIONS) {
-    const { checksum, sql } = readMigration(migration.path);
-    const applied = readApplied.get(migration.version);
-    if (applied !== undefined) {
-      if (applied.checksum !== checksum) {
-        throw new VaultOperationError("vault_migration_checksum_mismatch");
-      }
-      continue;
-    }
-
-    const apply = db.transaction(() => {
-      db.exec(sql);
-      recordApplied.run(migration.version, checksum, Date.now());
-    });
-    apply.immediate();
-  }
 }
 
 function lookupMessage(runId: Id, entityType: Code, normalizedValue: string): Buffer {
@@ -178,12 +118,24 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     path: string,
     private readonly keyProvider: KeyProvider,
     private readonly now: () => number = Date.now,
+    options: { readonly readonly?: boolean } = {},
   ) {
-    this.db = new Database(path);
+    const readOnly = options.readonly === true;
     try {
-      this.db.pragma("secure_delete = ON");
-      this.db.pragma("busy_timeout = 5000");
-      migrate(this.db);
+      this.db = new Database(path, {
+        ...(readOnly ? { readonly: true, fileMustExist: true } : {}),
+      });
+    } catch {
+      throw new VaultOperationError("vault_unavailable");
+    }
+    try {
+      if (readOnly) {
+        validateReadOnlyVaultMigrations(this.db);
+      } else {
+        this.db.pragma("secure_delete = ON");
+        this.db.pragma("busy_timeout = 5000");
+        migrateVault(this.db);
+      }
     } catch (error) {
       this.db.close();
       throw error;

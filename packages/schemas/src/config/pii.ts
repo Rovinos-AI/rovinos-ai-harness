@@ -37,6 +37,7 @@ export const PiiDetokenizeRuleSchema = z
 export type PiiDetokenizeRule = z.infer<typeof PiiDetokenizeRuleSchema>;
 
 export const PiiConfigSchema = PiiPolicySchema.safeExtend({
+  enabled: z.boolean().default(true),
   custom: z.array(CustomDetectorSchema).optional(),
   detokenize: z
     .array(PiiDetokenizeRuleSchema)

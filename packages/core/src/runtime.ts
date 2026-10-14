@@ -1,26 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { diag } from "@opentelemetry/api";
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { PiiToolPort } from "@harness/pii";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
-import { NaiveContext } from "./context/naive-context.js";
 import type { ToolPort } from "./ports.js";
-import { missingModelPort, unavailableTool } from "./runtime-default-ports.js";
 import { LeaseLostError } from "./recorder.js";
 import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
-import { createConfiguredModelPort } from "./runtime-model.js";
 import type { RoleRegistry } from "./roles.js";
 import { foldRunState } from "./run-state.js";
-import { SystemIdGenerator, systemClock } from "./runtime-ids.js";
-import { RunScopeRegistry } from "./subagent/scope.js";
-import { createSubagentTool, resolveRuntimeRoles } from "./subagent/runtime.js";
-import { createRuntimeStore } from "./runtime-store.js";
-import { ensureTracing } from "./runtime-tracing-init.js";
+import type { RunScopeRegistry } from "./subagent/scope.js";
+import { createSubagentTool } from "./subagent/runtime.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
-import { createRuntimeKeys } from "./runtime-keys.js";
-import { createRuntimePolicy } from "./runtime-policy.js";
+import { setupRuntime } from "./runtime-setup.js";
 import type {
   Runtime,
   RuntimeComposition,
@@ -32,7 +26,6 @@ const CANCEL_MONITOR_DEGRADED = "cancel_monitor_degraded";
 const CANCEL_POLL_INTERVAL_MS = 25;
 const CANCEL_POLL_MAX_INTERVAL_MS = 5_000;
 const cancellationMonitorLogger = diag.createComponentLogger({ namespace: "harness.core" });
-const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 // TODO(7.14): Replace polling with the live EventStore.watch() subscription.
 
 export type { Runtime, RuntimeConfig, RuntimeOverrides } from "./runtime-config.js";
@@ -271,13 +264,16 @@ function composeRuntime(
     ids,
     store,
     keys,
+    vault,
+    vaultResolver,
+    pii,
     model,
     policy,
     policyVersion,
     roles,
     scopes,
   } = options;
-  const tool = createSubagentTool({
+  const subagentTool = createSubagentTool({
     config,
     clock,
     ids,
@@ -289,6 +285,14 @@ function composeRuntime(
     roles,
     scopes,
   });
+  const tool =
+    pii === undefined
+      ? subagentTool
+      : new PiiToolPort(subagentTool, {
+          tokenizer: pii.tokenizer,
+          config: pii.config,
+          resolver: pii.resolver,
+        });
   const runWithControl: RunControl = (runId, operation) =>
     withRunControl({
       store,
@@ -301,6 +305,7 @@ function composeRuntime(
   const resume = createRuntimeResume(options, tool);
   return {
     store,
+    vault: vaultResolver,
     keys,
     clock,
     ids,
@@ -312,7 +317,11 @@ function composeRuntime(
       try {
         await store.close();
       } finally {
-        keys.dispose();
+        try {
+          vault.close();
+        } finally {
+          keys.dispose();
+        }
       }
     },
   };
@@ -371,54 +380,5 @@ export async function createRuntime(
   config: RuntimeConfig,
   overrides: RuntimeOverrides = {},
 ): Promise<Runtime> {
-  ensureTracing();
-  const clock = overrides.clock ?? systemClock;
-  const ids = overrides.ids ?? new SystemIdGenerator(clock);
-  const keys = await createRuntimeKeys(config.keys, overrides);
-  try {
-    const model =
-      overrides.model ??
-      (await createConfiguredModelPort(config.models, {
-        ids,
-        clock,
-        ...(overrides.providerAdapters === undefined
-          ? {}
-          : { providerAdapters: overrides.providerAdapters }),
-        ...(overrides.secretResolver === undefined
-          ? {}
-          : { secretResolver: overrides.secretResolver }),
-      })) ??
-      missingModelPort;
-    const tool = overrides.tool ?? unavailableTool;
-    const policy = await createRuntimePolicy(config, overrides);
-    const context = overrides.context ?? new NaiveContext();
-    const roles = await resolveRuntimeRoles(
-      config,
-      overrides.roleConfigDirectory ?? process.cwd(),
-      tool,
-      (code) => {
-        roleConfigLogger.warn(code);
-      },
-    );
-    const store = await createRuntimeStore(config, overrides, clock);
-    const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
-    return composeRuntime({
-      config,
-      overrides,
-      clock,
-      ids,
-      store,
-      keys,
-      model,
-      tool,
-      policy,
-      policyVersion: policy.version,
-      context,
-      roles,
-      scopes,
-    });
-  } catch (error) {
-    keys.dispose();
-    throw error;
-  }
+  return composeRuntime(await setupRuntime(config, overrides));
 }
