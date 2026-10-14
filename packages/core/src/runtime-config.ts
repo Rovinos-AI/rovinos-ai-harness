@@ -13,6 +13,7 @@ import {
   type RunInput,
   type SecretRef,
   type StoreConfig,
+  type VaultConfig,
 } from "@harness/schemas";
 import type { ProviderAdapter } from "@harness/models";
 import type { EventStore } from "@harness/store";
@@ -20,6 +21,7 @@ import type {
   AuditingVaultResolver,
   LocalKeyProvider,
   VaultResolver,
+  VaultAdmin,
   VaultWriter,
 } from "@harness/vault";
 import type { Tokenizer } from "@harness/pii";
@@ -64,6 +66,7 @@ export interface RuntimeConfig {
   readonly run: RunConfig;
   readonly pii?: PiiConfig;
   readonly store?: StoreConfig;
+  readonly vault?: VaultConfig;
   readonly models?: ModelsConfig;
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;
@@ -89,7 +92,7 @@ export interface Runtime {
 }
 
 /** Owned writer/resolver handle closed with its runtime. */
-export interface RuntimeVault extends VaultWriter, VaultResolver {
+export interface RuntimeVault extends VaultWriter, VaultResolver, VaultAdmin {
   close(): void;
 }
 

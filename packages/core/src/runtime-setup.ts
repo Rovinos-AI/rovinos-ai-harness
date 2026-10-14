@@ -7,7 +7,7 @@ import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import { SqliteVault, VaultOperationError } from "@harness/vault";
-import type { TokenType } from "@harness/vault";
+import type { TokenType, VaultTerminalRunsQuery } from "@harness/vault";
 import type { EventStore } from "@harness/store";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
@@ -73,6 +73,22 @@ class EmptyReadOnlyVault implements RuntimeVault {
     return this.closed
       ? Promise.reject(new VaultOperationError("vault_unavailable"))
       : Promise.resolve(undefined);
+  }
+
+  markTerminal(): Promise<void> {
+    return Promise.reject(new VaultOperationError("vault_unavailable"));
+  }
+
+  listTerminalRunsBefore(_query: VaultTerminalRunsQuery): Promise<readonly Id[]> {
+    return Promise.resolve([]);
+  }
+
+  purge(): Promise<number> {
+    return Promise.reject(new VaultOperationError("vault_unavailable"));
+  }
+
+  stats(): Promise<{ entries: number }> {
+    return Promise.reject(new VaultOperationError("vault_unavailable"));
   }
 
   close(): void {

@@ -2,6 +2,7 @@
 import { HarnessError, StoreMigrateResultSchema, StorePurgeResultSchema } from "@harness/schemas";
 import type { HarnessConfig } from "@harness/config";
 import type { EventStore } from "@harness/store";
+import { purgeExpired, type VaultAdmin } from "@harness/vault";
 import type { CliContext, CommandModule } from "../command.js";
 
 interface StoreCommandOperations {
@@ -16,6 +17,11 @@ interface StoreCommandOperations {
     dryRun: boolean,
     secretResolver: CliContext["secretResolver"],
   ): Promise<EventStore>;
+  openVaultAdmin?(
+    config: HarnessConfig,
+    clock: CliContext["clock"],
+    secretResolver: CliContext["secretResolver"],
+  ): Promise<VaultAdmin & { close(): void }>;
 }
 
 class StoreCommandError extends HarnessError {
@@ -48,6 +54,13 @@ const defaultOperations: StoreCommandOperations = {
     const core = await import("@harness/core");
     return core.openConfiguredStore(config, {
       readOnly: dryRun,
+      ...(secretResolver === undefined ? {} : { secretResolver }),
+    });
+  },
+  async openVaultAdmin(config, clock, secretResolver) {
+    const core = await import("@harness/core");
+    return core.openConfiguredVaultAdmin(config, {
+      clock,
       ...(secretResolver === undefined ? {} : { secretResolver }),
     });
   },
@@ -100,26 +113,58 @@ async function writePurgeResult({
     throw new StoreCommandError("retention_not_configured");
   }
   const store = await operations.openStore(config, dryRun, context.secretResolver);
+  let vault: (VaultAdmin & { close(): void }) | undefined;
   try {
+    const vaultAdmin =
+      dryRun || operations.openVaultAdmin === undefined
+        ? undefined
+        : await operations.openVaultAdmin(config, context.clock, context.secretResolver);
+    vault = vaultAdmin;
     const { purgeExpiredRuns } = await import("@harness/store");
     const result = await purgeExpiredRuns({
       store,
       clock: context.clock,
       policy,
       dryRun,
+      ...(vaultAdmin === undefined
+        ? {}
+        : {
+            onRunPurged: async (runId) => {
+              await vaultAdmin.purge(runId);
+            },
+          }),
     });
-    context.out.json(StorePurgeResultSchema, result);
+    const vaultResult =
+      vaultAdmin === undefined
+        ? undefined
+        : await purgeExpired({
+            vault: vaultAdmin,
+            clock: context.clock,
+            purgeAfterDays: config.vault.purgeAfterDays,
+          });
+    const output = {
+      ...result,
+      ...(vaultResult === undefined ? {} : { vault: vaultResult }),
+    };
+    context.out.json(StorePurgeResultSchema, output);
     if (!jsonMode) {
-      context.out.table([
-        ["examined", "purged", "skippedActive", "hookFailures"],
-        [result.examined, result.purged, result.skippedActive, result.hookFailures],
-      ]);
+      const header = ["examined", "purged", "skippedActive", "hookFailures"];
+      const values = [result.examined, result.purged, result.skippedActive, result.hookFailures];
+      if (vaultResult !== undefined) {
+        header.push("vault.examined", "vault.purged", "vault.entriesPurged");
+        values.push(vaultResult.examined, vaultResult.purged, vaultResult.entriesPurged);
+      }
+      context.out.table([header, values]);
     }
     if (result.hookFailures > 0) {
       throw new StoreCommandError("retention_hook_failed");
     }
   } finally {
-    await store.close();
+    try {
+      await store.close();
+    } finally {
+      vault?.close();
+    }
   }
 }
 
