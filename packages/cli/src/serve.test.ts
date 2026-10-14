@@ -82,6 +82,7 @@ function createContext() {
     run: () => Promise.reject(new Error("Run is not used by serve tests.")),
     continueRun: () => Promise.reject(new Error("Continue is not used by serve tests.")),
     resume: () => Promise.reject(new Error("Resume is not used by serve tests.")),
+    resolveApproval: () => Promise.reject(new Error("Approval is not used by serve tests.")),
     cancel: () => Promise.reject(new Error("Cancel is not used by serve tests.")),
     close: closeRuntime,
   };

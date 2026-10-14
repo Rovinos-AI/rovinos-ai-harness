@@ -12,6 +12,7 @@ import { ServerConfigSchema, type JsonValue } from "@harness/schemas";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection, McpConnectionError, excludeHeaderDeclaringTools } from "./connection.js";
+import { isConnectionLossError } from "./errors.js";
 import * as mcpPackage from "./index.js";
 
 const tracerProvider = createTestTracerProvider();
@@ -179,12 +180,24 @@ function deferredTransport(transport: Transport) {
 }
 
 describe("McpConnection", () => {
+  it.each([
+    [new McpConnectionError("mcp_connection_lost"), true],
+    [new McpConnectionError("mcp_connect_failed"), false],
+    [{ code: "ECONNRESET" }, true],
+    [{ code: "remote_failure" }, false],
+    [new Error("remote failure"), false],
+  ])("classifies safe connection-loss errors", (error, expected) => {
+    expect(isConnectionLossError(error)).toBe(expected);
+  });
+
   it("exports the MCP connection, pool, and transport APIs from the package entry point", () => {
     expect(Object.keys(mcpPackage).sort()).toEqual([
       "McpConnection",
       "McpConnectionError",
       "McpPool",
       "McpPoolError",
+      "McpProtocolError",
+      "McpToolPort",
       "ToolRegistry",
       "ToolRegistryError",
       "UNREGISTERED_TOOL_ID",
@@ -420,7 +433,7 @@ describe("McpConnection", () => {
 
     await expect(
       connection.callTool({ name: "tool-1", arguments: { value: "ok" } }, inputSchema),
-    ).rejects.toMatchObject({ code: "mcp_tool_call_failed" });
+    ).rejects.toMatchObject({ code: "mcp_protocol_error", protocolCode: -32603 });
     expect(connection.state).toBe("ready");
     await connection.close();
     await peer.serverTransport.close();

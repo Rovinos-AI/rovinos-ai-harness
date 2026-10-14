@@ -14,7 +14,8 @@ import {
   createTestSpanCollector,
 } from "@harness/telemetry/testing";
 import { lookupSpanDefinition } from "@harness/telemetry";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { McpConnection } from "./connection.js";
 import { McpToolPort } from "./tool-port.js";
 
 const spanCollector = createTestSpanCollector();
@@ -283,6 +284,79 @@ describe("McpToolPort", () => {
       });
     } finally {
       await complete.close();
+    }
+  });
+
+  it("preserves input-required results as successful handoff markers", async () => {
+    const current = await fixture();
+    const callTool = vi.spyOn(McpConnection.prototype, "callTool").mockResolvedValue({
+      content: [],
+      resultType: "input_required",
+    } as CallToolResult);
+    try {
+      await expect(current.port.execute(call, context())).resolves.toEqual({
+        outcome: "ok",
+        result: { resultType: "input_required" },
+      });
+    } finally {
+      callTool.mockRestore();
+      await current.close();
+    }
+  });
+
+  it("preserves structured results and normalizes embedded text resources", async () => {
+    const current = await fixture({
+      result: {
+        content: [
+          {
+            type: "resource",
+            resource: {
+              uri: "file:///synthetic",
+              mimeType: "text/plain",
+              text: "resource text",
+            },
+          },
+        ],
+        structuredContent: { status: "ok" },
+      } as CallToolResult,
+    });
+    try {
+      await expect(current.port.execute(call, context())).resolves.toEqual({
+        outcome: "ok",
+        result: {
+          content: [{ type: "resource", mimeType: "text/plain", bytes: 13, data: "resource text" }],
+          structured: { status: "ok" },
+        },
+      });
+    } finally {
+      await current.close();
+    }
+  });
+
+  it("reduces malformed and absent resource data to safe metadata", async () => {
+    const current = await fixture({
+      result: {
+        content: [
+          {
+            type: "resource",
+            resource: {
+              uri: "file:///synthetic",
+              mimeType: "application/octet-stream",
+              blob: "AQI=",
+            },
+          },
+        ],
+      },
+    });
+    try {
+      await expect(current.port.execute(call, context())).resolves.toMatchObject({
+        outcome: "ok",
+        result: {
+          content: [{ type: "resource", mimeType: "application/octet-stream", bytes: 2, data: "AQI=" }],
+        },
+      });
+    } finally {
+      await current.close();
     }
   });
 });

@@ -99,6 +99,7 @@ async function harness() {
     run: modelCall,
     continueRun: modelCall,
     resume: modelCall,
+    resolveApproval: () => Promise.reject(new Error("Approval resolution is not used.")),
     cancel: modelCall,
   }));
   const context: CliContext = {

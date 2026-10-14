@@ -21,6 +21,7 @@ import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
+import { McpConnectionError, McpToolPort } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
 import type {
   RuntimeComposition,
@@ -209,6 +210,7 @@ export async function setupRuntime(
   const keys = await createRuntimeKeys(runtimeConfig.keys, overrides);
   let vault: RuntimeVault | undefined;
   let eventStore: EventStore | undefined;
+  let mcpToolPort: McpToolPort | undefined;
   try {
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
@@ -217,7 +219,18 @@ export async function setupRuntime(
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
     const context = overrides.context ?? new NaiveContext();
-    const tool = overrides.tool ?? unavailableTool;
+    if (overrides.tool === undefined && (runtimeConfig.servers?.length ?? 0) > 0) {
+      const secretResolver = overrides.secretResolver ?? {
+        resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
+      };
+      mcpToolPort = await McpToolPort.create(runtimeConfig.servers ?? [], {
+        resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
+        ...(overrides.mcpTransportFactory === undefined
+          ? {}
+          : { createTransport: overrides.mcpTransportFactory }),
+      });
+    }
+    const tool = overrides.tool ?? mcpToolPort ?? unavailableTool;
     const roles = await resolveRuntimeRoles(
       runtimeConfig,
       overrides.roleConfigDirectory ?? process.cwd(),
@@ -237,6 +250,7 @@ export async function setupRuntime(
       clock,
     });
     const store = piiConfig.enabled ? new PiiEventStore(rawStore, piiRuntime.tokenizer) : rawStore;
+    const managedMcpToolPort = mcpToolPort;
     return {
       config: runtimeConfig,
       overrides,
@@ -249,6 +263,9 @@ export async function setupRuntime(
       pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
       model,
       tool,
+      ...(managedMcpToolPort === undefined
+        ? {}
+        : { closeToolPort: () => managedMcpToolPort.close() }),
       policy,
       policyVersion: policy.version,
       context,
@@ -257,12 +274,16 @@ export async function setupRuntime(
     };
   } catch (error) {
     try {
-      await eventStore?.close();
+      await mcpToolPort?.close();
     } finally {
       try {
-        vault?.close();
+        await eventStore?.close();
       } finally {
-        keys.dispose();
+        try {
+          vault?.close();
+        } finally {
+          keys.dispose();
+        }
       }
     }
     throw error;

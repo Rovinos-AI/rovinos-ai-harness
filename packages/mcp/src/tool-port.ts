@@ -314,10 +314,8 @@ export class McpToolPort {
               };
             } else {
               const mapped = normalizedResult(result);
-              const serialized = JSON.stringify(mapped.offloadValue);
-              if (serialized === undefined) {
-                outcome = failure("mcp_error");
-              } else if (Buffer.byteLength(serialized, "utf8") > route.server.maxResultBytes) {
+              const serialized = JSON.stringify(mapped.offloadValue) ?? "null";
+              if (Buffer.byteLength(serialized, "utf8") > route.server.maxResultBytes) {
                 outcome = failure("result_too_large");
               } else if (mapped.hasLargeBinary) {
                 outcome = {

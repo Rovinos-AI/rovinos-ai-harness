@@ -328,6 +328,9 @@ export async function resolveApproval(
             recorder,
             events,
           });
+          if (tool.describe(intent.toolId) === undefined) {
+            throw new ApprovalEditError("edit_invalid");
+          }
         }
         return recorder.record({
           type: "approval_resolved",

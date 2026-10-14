@@ -61,6 +61,22 @@ export interface PiiToolPortDependencies {
   readonly resolver: AuditingVaultResolver;
 }
 
+const safeToolErrorCodes = new Set([
+  "args_invalid",
+  "mcp_capability_missing",
+  "mcp_connection_lost",
+  "mcp_error",
+  "mcp_header_mismatch",
+  "mcp_internal_error",
+  "mcp_invalid_params",
+  "mcp_method_not_found",
+  "mcp_protocol_unsupported",
+  "mcp_timeout",
+  "mcp_tool_not_found",
+  "result_too_large",
+  "tool_reported_error",
+]);
+
 /** Tokenizes before persistence and resolves only allowlisted pointers in memory. */
 export class PiiToolPort implements PiiToolPortLike {
   constructor(
@@ -190,7 +206,14 @@ export class PiiToolPort implements PiiToolPortLike {
       const result = {
         outcome: execution.outcome,
         result: markJsonSanitized(stored.value),
-        ...(execution.outcome === "error" ? { errorCode: "tool_failed" } : {}),
+        ...(execution.outcome === "error"
+          ? {
+              errorCode:
+                execution.errorCode !== undefined && safeToolErrorCodes.has(execution.errorCode)
+                  ? execution.errorCode
+                  : "tool_failed",
+            }
+          : {}),
       };
       return markSanitizedField(result, "result");
     } catch (error) {

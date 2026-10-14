@@ -21,6 +21,7 @@ import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool } from "./subagent/runtime.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import { setupRuntime } from "./runtime-setup.js";
+import { resolveApproval as resolveApprovalInRun } from "./approvals.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
   Runtime,
@@ -41,6 +42,14 @@ class RunInputMissingError extends HarnessError {
 
   constructor() {
     super("The run input is unavailable.");
+  }
+}
+
+class ApprovalEditUnavailableError extends HarnessError {
+  readonly code = "approval_edit_unavailable";
+
+  constructor() {
+    super("approval_edit_unavailable");
   }
 }
 
@@ -284,10 +293,21 @@ function composeRuntime(
     close: () =>
       closeRuntimeResources({
         store,
+        ...(options.closeToolPort === undefined ? {} : { closeToolPort: options.closeToolPort }),
         vault,
         keys,
         flushTelemetry,
       }),
+    resolveApproval: (runId, approvalId, decision, edits) => {
+      if (
+        decision === "edit" &&
+        overrides.tool === undefined &&
+        (config.servers?.length ?? 0) === 0
+      ) {
+        throw new ApprovalEditUnavailableError();
+      }
+      return resolveApprovalInRun(store, runId, approvalId, decision, edits, clock, tool);
+    },
   };
 }
 

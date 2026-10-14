@@ -5,6 +5,7 @@ import {
   type PiiConfig,
   type RolesConfig,
   type Id,
+  type Event,
   type JsonValue,
   type KeyProvider,
   type KeysConfig,
@@ -12,10 +13,12 @@ import {
   type RunConfig,
   type RunInput,
   type SecretRef,
+  type ServersConfig,
   type StoreConfig,
   type VaultConfig,
 } from "@harness/schemas";
 import type { ProviderAdapter } from "@harness/models";
+import type { McpConnectionDependencies } from "@harness/mcp";
 import type { EventStore } from "@harness/store";
 import type {
   AuditingVaultResolver,
@@ -30,6 +33,7 @@ import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
 import type { CancelRunResult } from "./cancel.js";
+import type { ApprovalDecision } from "./approvals.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
@@ -53,6 +57,8 @@ export interface RuntimeOverrides {
   /** Receives safe warnings raised during key-provider setup. */
   readonly onKeysWarning?: (code: "keys_ephemeral") => void;
   readonly tool?: ToolPort;
+  /** Optional MCP transport factory for embedded runtimes and in-memory tests. */
+  readonly mcpTransportFactory?: McpConnectionDependencies["createTransport"];
   /** Policy evaluator replacing the policy document configured for the runtime. */
   readonly policy?: PolicyPort;
   readonly context?: ContextPort;
@@ -73,6 +79,7 @@ export interface RuntimeConfig {
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;
   readonly keys?: KeysConfig | undefined;
+  readonly servers?: ServersConfig;
 }
 
 /** Optional cooperative cancellation and claim notification for a resumed run. */
@@ -98,6 +105,21 @@ export interface Runtime {
   resume(runId: Id, options?: RuntimeResumeOptions): Promise<RunLoopResult>;
   /** Requests durable cancellation and reports if the run was already terminal. */
   cancel(runId: Id): Promise<CancelRunResult>;
+  /**
+   * Resolves a pending approval using the runtime's PII-aware tool port.
+   *
+   * @param runId - Run containing the approval.
+   * @param approvalId - Pending approval identifier.
+   * @param decision - Human approval decision.
+   * @param edits - Replacement arguments for an edit decision.
+   * @returns The durable approval resolution event.
+   */
+  resolveApproval(
+    runId: Id,
+    approvalId: Id,
+    decision: ApprovalDecision,
+    edits?: JsonValue,
+  ): Promise<Extract<Event, { type: "approval_resolved" }>>;
   close(): Promise<void>;
 }
 
@@ -125,6 +147,7 @@ export interface RuntimeComposition {
     | undefined;
   readonly model: ModelPort;
   readonly tool: ToolPort;
+  readonly closeToolPort?: () => Promise<void>;
   readonly policy: PolicyPort;
   readonly policyVersion: PolicyPort["version"];
   readonly context: ContextPort;

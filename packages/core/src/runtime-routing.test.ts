@@ -4,11 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  InMemoryTransport,
+  McpServer,
+  type Tool,
+} from "@modelcontextprotocol/server";
+import {
   Code,
   JsonValue,
   ModelsConfigSchema,
   RolesConfigSchema,
   RunConfigSchema,
+  ServerConfigSchema,
   parseJson,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
@@ -45,6 +51,41 @@ afterEach(async () => {
 });
 
 describe("createRuntime model routing", () => {
+  it("registers and closes the MCP tool port for configured servers", async () => {
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = new McpServer({ name: "runtime-test", version: "1.0.0" });
+    const inputSchema = {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+      additionalProperties: false,
+    } satisfies Tool["inputSchema"];
+    server.server.registerCapabilities({ tools: { listChanged: true } });
+    server.server.setRequestHandler("tools/list", () => ({
+      tools: [{ name: "echo", inputSchema }],
+    }));
+    await server.connect(serverTransport);
+    const transportFactory = vi.fn(() => clientTransport);
+    const runtime = await createRuntime({
+      run: RunConfigSchema.parse({}),
+      servers: [
+        ServerConfigSchema.parse({
+          id: "runtime_mcp",
+          transport: { kind: "stdio", command: "not-spawned-by-test" },
+          protocol: "2025-11-25",
+        }),
+      ],
+    }, {
+      store: new InMemoryEventStore(),
+      mcpTransportFactory: transportFactory,
+    });
+
+    expect(transportFactory).toHaveBeenCalledOnce();
+    await runtime.close();
+    await server.close();
+    await serverTransport.close();
+  });
+
   it("loads the configured policy once and records its content version on run creation", async () => {
     const configDirectory = await mkdtemp(join(tmpdir(), "harness-runtime-policy-"));
     roleDirectories.push(configDirectory);
