@@ -126,7 +126,7 @@ export function createEditForm(
     const original = pointerValue(payload.args, pointer);
     const id = `approval-edit-${String(index)}`;
     const field = element(document, "div");
-    const label = element(document, "label", pointer);
+    const label = element(document, "label", pointer === "" ? "All arguments" : pointer);
     label.htmlFor = id;
     const control = createControl(document, original, id);
     const fieldControl: FieldControl = { pointer, original, control, touched: false };

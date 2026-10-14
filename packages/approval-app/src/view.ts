@@ -8,6 +8,8 @@ import {
 } from "@harness/schemas/browser";
 import { appendTokenText } from "./tokens.js";
 
+type ApprovalDecision = "approve" | "deny" | "edit";
+
 /** Payload DOM and reveal renderer passed to the host action wiring. */
 export interface ApprovalPayloadContext {
   readonly payload: ApprovalPayload;
@@ -16,6 +18,7 @@ export interface ApprovalPayloadContext {
   readonly actions: HTMLElement;
   readonly editHost: HTMLElement;
   readonly renderRevealed: (values: ReadonlyMap<string, string>) => void;
+  readonly onDecision: (decision: ApprovalDecision) => void;
 }
 
 /** Injected view dependencies; errors contain only the closed payload-invalid code. */
@@ -111,6 +114,22 @@ function addMetadata(document: Document, row: HTMLElement, label: string, value:
   row.append(element(document, "dt", label), element(document, "dd", value));
 }
 
+function decisionStatus(decision: ApprovalDecision): string {
+  return {
+    approve: "Approval granted.",
+    deny: "Approval denied.",
+    edit: "Edits submitted.",
+  }[decision];
+}
+
+function updatePendingStatus(status: HTMLElement, expired: boolean): void {
+  const nextStatus = expired ? "Approval expired" : "Pending approval";
+  const liveStatus = status;
+  if (liveStatus.textContent !== nextStatus) {
+    liveStatus.textContent = nextStatus;
+  }
+}
+
 function createViewDom(root: HTMLElement): ApprovalViewDom {
   const document = root.ownerDocument;
   const main = element(document, "main");
@@ -164,6 +183,22 @@ function createPayloadView(options: PayloadRenderOptions): {
   }
   const editHost = element(document, "div");
   content.append(metadata, args, actions, editHost);
+  let terminalDecision: ApprovalDecision | undefined;
+  const onDecision = (decision: ApprovalDecision): void => {
+    terminalDecision = decision;
+    status.textContent = decisionStatus(decision);
+    disableActions();
+  };
+  const disableActions = (): void => {
+    for (const control of actions.querySelectorAll("button")) {
+      control.disabled = true;
+    }
+    for (const control of editHost.querySelectorAll<
+      HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
+    >("button, input, textarea")) {
+      control.disabled = true;
+    }
+  };
   const cleanup =
     viewOptions.onPayload?.({
       payload,
@@ -172,6 +207,7 @@ function createPayloadView(options: PayloadRenderOptions): {
       actions,
       editHost,
       renderRevealed,
+      onDecision,
     }) ?? (() => undefined);
 
   const refresh = (): void => {
@@ -182,19 +218,11 @@ function createPayloadView(options: PayloadRenderOptions): {
       remaining === undefined
         ? "No expiry"
         : `${String(Math.max(0, Math.ceil(remaining / 1000)))} seconds remaining`;
-    const nextStatus = expired ? "Approval expired" : "Pending approval";
-    if (status.textContent !== nextStatus) {
-      status.textContent = nextStatus;
+    if (terminalDecision === undefined) {
+      updatePendingStatus(status, expired);
     }
-    if (expired) {
-      for (const control of actions.querySelectorAll("button")) {
-        control.disabled = true;
-      }
-      for (const control of editHost.querySelectorAll<
-        HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
-      >("button, input, textarea")) {
-        control.disabled = true;
-      }
+    if (expired || terminalDecision !== undefined) {
+      disableActions();
     }
   };
   return { refresh, cleanup };

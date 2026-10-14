@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
+import axe from "axe-core";
 import { describe, expect, it, vi } from "vitest";
 import type { ApprovalPayload } from "@harness/schemas/browser";
 import { createEditForm } from "./edit-form.js";
@@ -95,5 +96,32 @@ describe("approval edit form", () => {
     document.body.append(form);
     form.querySelector<HTMLButtonElement>("button:last-child")?.click();
     expect(document.body.contains(form)).toBe(false);
+  });
+
+  it("labels the root pointer as all arguments and passes axe", async () => {
+    const rootPayload: ApprovalPayload = {
+      ...payload,
+      args: { name: "before" },
+      editableFields: [""],
+    };
+    const onSubmit = vi.fn();
+    const form = createEditForm(document, rootPayload, onSubmit);
+    const label = form.querySelector("label");
+    const input = form.querySelector<HTMLTextAreaElement>("textarea");
+    expect(label?.textContent).toBe("All arguments");
+    expect(label?.htmlFor).toBe("approval-edit-0");
+    expect(input?.id).toBe("approval-edit-0");
+    if (input === null) {
+      throw new Error("Expected a root JSON edit control");
+    }
+    input.value = '{"name":"after"}';
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith([{ pointer: "", value: { name: "after" } }]);
+
+    document.documentElement.lang = "en";
+    document.title = "Approval edit";
+    document.body.replaceChildren(form);
+    const result = await axe.run(form);
+    expect(result.violations).toEqual([]);
   });
 });

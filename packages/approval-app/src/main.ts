@@ -50,7 +50,15 @@ const view = createApprovalView(document.body, {
     telemetry.record("ui.error", { code });
     void telemetry.flush();
   },
-  onPayload: ({ payload, approvalId, isExpired, actions, editHost, renderRevealed }) => {
+  onPayload: ({
+    payload,
+    approvalId,
+    isExpired,
+    actions,
+    editHost,
+    renderRevealed,
+    onDecision,
+  }) => {
     if (approvalId === undefined) {
       for (const button of actions.querySelectorAll("button")) {
         button.disabled = true;
@@ -70,6 +78,7 @@ const view = createApprovalView(document.body, {
       },
       telemetry,
       renderRevealed,
+      onDecision,
     });
     return () => {
       mountedActions.dispose();

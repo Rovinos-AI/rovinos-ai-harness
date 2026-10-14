@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalPayload } from "@harness/schemas/browser";
 import {
   mountApprovalActions,
@@ -11,6 +11,7 @@ import {
 const approvalId = "00000000000000000000000001";
 const tokenizedEmail = "<EMAIL_1>";
 const rawEmail = "SYNTHETIC_RAW_VALUE_CANARY@example.test";
+let modalCalls = 0;
 
 const payload: ApprovalPayload = {
   payloadVersion: 1,
@@ -39,6 +40,7 @@ interface ActionFixture {
   };
   readonly recordCalls: { readonly name: string; readonly attrs: Record<string, unknown> }[];
   readonly flush: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  readonly onDecision: ReturnType<typeof vi.fn<(decision: "approve" | "deny" | "edit") => void>>;
   readonly rendered: HTMLElement;
   readonly mount: ApprovalActions;
   readonly setExpired: (expired: boolean) => void;
@@ -68,6 +70,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     recordCalls.push({ name, attrs });
   };
   const flush = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const onDecision = vi.fn<(decision: "approve" | "deny" | "edit") => void>();
   const mount = mountApprovalActions(actions, editHost, {
     approvalId,
     payload: input,
@@ -77,6 +80,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     renderRevealed: (values) => {
       rendered.textContent = values.get("/email") ?? tokenizedEmail;
     },
+    onDecision,
   });
   return {
     actions,
@@ -84,6 +88,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     bridge,
     recordCalls,
     flush,
+    onDecision,
     rendered,
     mount,
     setExpired: (value) => {
@@ -92,16 +97,47 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
   };
 }
 
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "showModal");
+const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "close");
+
+beforeEach(() => {
+  modalCalls = 0;
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      modalCalls += 1;
+      this.open = true;
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      this.open = false;
+      this.dispatchEvent(new Event("close"));
+    },
+  });
+});
+
 afterEach(() => {
   vi.useRealTimers();
   document.body.replaceChildren();
   window.localStorage.clear();
   window.sessionStorage.clear();
+  if (originalShowModal === undefined) {
+    Reflect.deleteProperty(HTMLDialogElement.prototype, "showModal");
+  } else {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", originalShowModal);
+  }
+  if (originalClose === undefined) {
+    Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
+  } else {
+    Object.defineProperty(HTMLDialogElement.prototype, "close", originalClose);
+  }
 });
 
 describe("approval actions", () => {
   it("approves once, disables all actions while pending, and records only a successful decision", async () => {
-    const { actions, bridge, recordCalls, flush } = setup();
+    const { actions, bridge, recordCalls, flush, onDecision } = setup();
     let finish: (result: unknown) => void = () => undefined;
     bridge.callTool.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     actions.querySelector<HTMLButtonElement>("button")?.click();
@@ -117,12 +153,13 @@ describe("approval actions", () => {
       ).toBe("Approval granted.");
     });
     expect(recordCalls).toEqual([{ name: "ui.decision", attrs: { decision: "approve" } }]);
+    expect(onDecision).toHaveBeenCalledExactlyOnceWith("approve");
     expect(flush).toHaveBeenCalledOnce();
     expect(JSON.stringify(recordCalls)).not.toContain(rawEmail);
   });
 
   it("denies with the host-local resolve tool and reports the final state", async () => {
-    const { actions, bridge, recordCalls } = setup();
+    const { actions, bridge, recordCalls, onDecision } = setup();
     bridge.callTool.mockResolvedValue({ ok: true });
     actions.querySelectorAll<HTMLButtonElement>("button")[1]?.click();
     await vi.waitFor(() => {
@@ -135,6 +172,7 @@ describe("approval actions", () => {
       decision: "deny",
     });
     expect(recordCalls).toEqual([{ name: "ui.decision", attrs: { decision: "deny" } }]);
+    expect(onDecision).toHaveBeenCalledExactlyOnceWith("deny");
   });
 
   it("submits only changed typed edits and keeps the tokenized value visible initially", async () => {
@@ -197,15 +235,39 @@ describe("approval actions", () => {
     });
     const reveal = actions.querySelector<HTMLButtonElement>("button:last-child");
     reveal?.click();
-    const confirmation = document.querySelector<HTMLElement>('[role="alertdialog"]');
+    const confirmation = document.querySelector<HTMLDialogElement>("dialog");
     expect(confirmation?.textContent).toContain("Show raw values for 2 fields? This is logged.");
+    expect(confirmation?.open).toBe(true);
+    expect(modalCalls).toBe(1);
     expect(bridge.callTool).not.toHaveBeenCalled();
-    confirmation?.querySelector<HTMLButtonElement>("button:last-child")?.click();
+    const confirmButton = confirmation?.querySelector<HTMLButtonElement>("button:first-of-type");
+    const cancelButton = confirmation?.querySelector<HTMLButtonElement>("button:last-child");
+    expect(document.activeElement).toBe(confirmButton);
+    expect(
+      [...actions.querySelectorAll("button")].slice(0, 2).every((button) => button.disabled),
+    ).toBe(true);
+    actions.querySelector<HTMLButtonElement>("button:first-child")?.click();
     expect(bridge.callTool).not.toHaveBeenCalled();
-    expect(confirmation?.hidden).toBe(true);
+    const shiftTab = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    confirmation?.dispatchEvent(shiftTab);
+    expect(shiftTab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(cancelButton);
+    const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    confirmation?.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(confirmButton);
+    cancelButton?.click();
+    expect(bridge.callTool).not.toHaveBeenCalled();
+    expect(confirmation?.open).toBe(false);
+    expect(document.activeElement).toBe(reveal);
 
     reveal?.click();
-    document.querySelector<HTMLButtonElement>('[role="alertdialog"] button')?.click();
+    document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
     await vi.waitFor(() => {
       expect(rendered.textContent).toBe(rawEmail);
     });
@@ -224,7 +286,56 @@ describe("approval actions", () => {
     expect(document.body.textContent).not.toContain(rawEmail);
     expect(mount.revealedValueCount()).toBe(0);
     reveal?.click();
-    expect(document.querySelector<HTMLElement>('[role="alertdialog"]')?.hidden).toBe(false);
+    expect(document.querySelector<HTMLDialogElement>("dialog")?.open).toBe(true);
+    mount.dispose();
+  });
+
+  it("re-masks after a decision without replacing its final status", async () => {
+    vi.useFakeTimers();
+    const { actions, bridge, rendered } = setup();
+    bridge.callTool.mockImplementation((name) =>
+      Promise.resolve(
+        name === "harness.approvals.reveal"
+          ? { values: [{ pointer: "/email", value: rawEmail }] }
+          : { ok: true },
+      ),
+    );
+    actions.querySelector<HTMLButtonElement>("button:last-child")?.click();
+    document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
+    await vi.waitFor(() => {
+      expect(rendered.textContent).toBe(rawEmail);
+    });
+    actions.querySelector<HTMLButtonElement>("button:first-child")?.click();
+    await vi.waitFor(() => {
+      expect(
+        actions.parentElement?.querySelector<HTMLElement>('[role="status"]')?.textContent,
+      ).toBe("Approval granted.");
+    });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(rendered.textContent).toBe(tokenizedEmail);
+    expect(actions.parentElement?.querySelector<HTMLElement>('[role="status"]')?.textContent).toBe(
+      "Approval granted.",
+    );
+  });
+
+  it("replaces previously revealed values after another successful reveal", async () => {
+    const { actions, bridge, rendered, mount } = setup();
+    bridge.callTool
+      .mockResolvedValueOnce({ values: [{ pointer: "/email", value: rawEmail }] })
+      .mockResolvedValueOnce({ values: [] });
+    const reveal = actions.querySelector<HTMLButtonElement>("button:last-child");
+    reveal?.click();
+    document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
+    await vi.waitFor(() => {
+      expect(mount.revealedValueCount()).toBe(1);
+    });
+    reveal?.click();
+    document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
+    await vi.waitFor(() => {
+      expect(mount.revealedValueCount()).toBe(0);
+    });
+    expect(rendered.textContent).toBe(tokenizedEmail);
     mount.dispose();
   });
 
@@ -294,7 +405,7 @@ describe("approval actions", () => {
     const { actions, bridge, recordCalls, rendered, mount } = setup();
     bridge.callTool.mockResolvedValue({ values: [{ pointer: "/email", value: 42 }] });
     actions.querySelector<HTMLButtonElement>("button:last-child")?.click();
-    document.querySelector<HTMLButtonElement>('[role="alertdialog"] button')?.click();
+    document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
     await vi.waitFor(() => {
       expect(
         actions.parentElement?.querySelector<HTMLElement>('[role="status"]')?.textContent,
@@ -307,7 +418,7 @@ describe("approval actions", () => {
       values: [{ pointer: "/email", value: rawEmail }],
     });
     actions.querySelector<HTMLButtonElement>("button:last-child")?.click();
-    document.querySelector<HTMLButtonElement>('[role="alertdialog"] button')?.click();
+    document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
     await vi.waitFor(() => {
       expect(rendered.textContent).toBe(rawEmail);
     });
@@ -322,7 +433,7 @@ describe("approval actions", () => {
     const reveal = actions.querySelector<HTMLButtonElement>("button:last-child");
     expect(reveal?.disabled).toBe(true);
     reveal?.click();
-    expect(document.querySelector<HTMLElement>('[role="alertdialog"]')?.hidden).toBe(true);
+    expect(document.querySelector<HTMLDialogElement>("dialog")?.open).toBe(false);
     expect(bridge.callTool).not.toHaveBeenCalled();
   });
 });

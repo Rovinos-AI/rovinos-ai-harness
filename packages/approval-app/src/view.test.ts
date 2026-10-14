@@ -175,6 +175,36 @@ describe("approval view", () => {
     expect(status?.firstChild).toBe(expiredText);
   });
 
+  it.each([
+    ["approve", "Approval granted."],
+    ["deny", "Approval denied."],
+    ["edit", "Edits submitted."],
+  ] as const)("keeps the %s decision status terminal after expiry", (decision, message) => {
+    let now = 1000;
+    let markDecision: ((value: "approve" | "deny" | "edit") => void) | undefined;
+    const view = createApprovalView(document.body, {
+      clock: { now: () => now },
+      onError: vi.fn(),
+      onPayload: ({ onDecision }) => {
+        markDecision = onDecision;
+        return undefined;
+      },
+    });
+    view.receive(payload);
+    if (markDecision === undefined) {
+      throw new Error("Expected the decision callback");
+    }
+    markDecision(decision);
+    expect(document.querySelector('[role="status"]')?.textContent).toBe(message);
+    expect([...document.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
+
+    now = 6000;
+    view.tick();
+    expect(document.querySelector('[role="status"]')?.textContent).toBe(message);
+    expect(document.body.textContent).not.toContain("Approval expired");
+    expect(document.body.textContent).not.toContain("Pending approval");
+  });
+
   it("preserves the live-region text node for repeated invalid payloads", () => {
     const { view } = setup();
     view.receive({});
