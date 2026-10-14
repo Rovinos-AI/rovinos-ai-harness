@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
@@ -9,6 +9,7 @@ import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import { SqliteVault, VaultOperationError } from "@harness/vault";
 import type { TokenType, VaultTerminalRunsQuery } from "@harness/vault";
 import type { EventStore } from "@harness/store";
+import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
@@ -21,7 +22,10 @@ import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
+import { McpConnectionError, McpToolPort } from "@harness/mcp";
+import type { McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
+import type { ToolPort } from "./ports.js";
 import type {
   RuntimeComposition,
   RuntimeConfig,
@@ -31,6 +35,147 @@ import type {
 import type { Clock } from "./recorder.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
+const sandboxLogger = diag.createComponentLogger({ namespace: "harness.sandbox" });
+const mcpDiagnosticLogger = diag.createComponentLogger({ namespace: "harness.mcp" });
+const mcpLogger: McpLogger = {
+  log: (event) => {
+    mcpDiagnosticLogger.warn(
+      event.code,
+      event.code === "mcp_stderr"
+        ? { serverId: event.serverId, bytes: event.bytes }
+        : { serverId: event.serverId },
+    );
+  },
+};
+
+async function createConfiguredMcpToolPort(
+  config: RuntimeConfig,
+  overrides: RuntimeOverrides,
+): Promise<McpToolPort | undefined> {
+  const servers = config.servers ?? [];
+  if (overrides.tool !== undefined || servers.length === 0) {
+    return undefined;
+  }
+  const secretResolver = overrides.secretResolver ?? {
+    resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
+  };
+  return McpToolPort.create(
+    servers,
+    {
+      resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
+      logger: mcpLogger,
+      ...(overrides.mcpTransportFactory === undefined
+        ? {}
+        : { createTransport: overrides.mcpTransportFactory }),
+    },
+    { offloadBinaryResults: overrides.workspace !== undefined },
+  );
+}
+
+async function closeSetupResources(options: {
+  readonly mcpToolPort?: McpToolPort | undefined;
+  readonly sandboxBackend?: SandboxBackend | undefined;
+  readonly eventStore: EventStore | undefined;
+  readonly vault: RuntimeVault | undefined;
+  readonly disposeKeys: () => void;
+}): Promise<void> {
+  try {
+    try {
+      await options.mcpToolPort?.close();
+    } finally {
+      await options.sandboxBackend?.close?.();
+    }
+  } finally {
+    try {
+      await options.eventStore?.close();
+    } finally {
+      try {
+        options.vault?.close();
+      } finally {
+        options.disposeKeys();
+      }
+    }
+  }
+}
+
+async function createRuntimeSandbox(config: RuntimeConfig, overrides: RuntimeOverrides) {
+  if (overrides.sandboxBackend !== undefined) {
+    return overrides.sandboxBackend;
+  }
+  const workspaceRoot = join(resolveDataDir(process.env, overrides.dataDir), "workspaces");
+  // Read-only commands (harness context, store inspection) must not create runtime state.
+  if (overrides.readOnlyStore !== true) {
+    await mkdir(workspaceRoot, { recursive: true, mode: 0o700 });
+    await chmod(workspaceRoot, 0o700);
+  }
+  return createSandboxBackend(config.sandbox, {
+    // Keep default commands inside runtime-owned state, never the caller's working tree.
+    workspaceRoot,
+    logger: {
+      log: (code) => {
+        sandboxLogger.warn(code);
+      },
+    },
+    ...(overrides.secretResolver === undefined ? {} : { secretResolver: overrides.secretResolver }),
+  });
+}
+
+function createRuntimeTool(
+  config: RuntimeConfig,
+  backend: SandboxBackend,
+  overrides: RuntimeOverrides,
+  mcpToolPort: McpToolPort | undefined,
+) {
+  const tool = overrides.tool ?? mcpToolPort ?? overrides.createTool?.(backend) ?? unavailableTool;
+  if (config.pii?.enabled !== false && tool instanceof PiiToolPort) {
+    throw new PiiToolPortAlreadyWrappedError();
+  }
+  return tool;
+}
+
+/** Creates runtime keys, closing a caller-supplied sandbox backend if key resolution fails. */
+async function createKeysClosingSandbox(
+  config: RuntimeConfig,
+  overrides: RuntimeOverrides,
+): Promise<RuntimeComposition["keys"]> {
+  try {
+    return await createRuntimeKeys(config.keys, overrides);
+  } catch (error) {
+    await overrides.sandboxBackend?.close?.();
+    throw error;
+  }
+}
+
+/** Runtime-owned sandbox backend, MCP port and the composed tool port. */
+interface RuntimeTools {
+  readonly tool: ToolPort;
+  readonly sandboxBackend: SandboxBackend;
+  readonly mcpToolPort: McpToolPort | undefined;
+}
+
+/** Creates the sandbox backend and MCP port, closing whatever was created if a later step fails. */
+async function createRuntimeTools(
+  config: RuntimeConfig,
+  overrides: RuntimeOverrides,
+): Promise<RuntimeTools> {
+  const sandboxBackend = await createRuntimeSandbox(config, overrides);
+  let mcpToolPort: McpToolPort | undefined;
+  try {
+    mcpToolPort = await createConfiguredMcpToolPort(config, overrides);
+    const tool = createRuntimeTool(config, sandboxBackend, overrides, mcpToolPort);
+    return { tool, sandboxBackend, mcpToolPort };
+  } catch (error) {
+    try {
+      await mcpToolPort?.close();
+    } finally {
+      // A caller-supplied backend is closed once by setupRuntime's cleanup; close only our own.
+      if (sandboxBackend !== overrides.sandboxBackend) {
+        await sandboxBackend.close?.();
+      }
+    }
+    throw error;
+  }
+}
 
 /** Runtime dependencies ready to be assembled into the public runtime API. */
 export type RuntimeSetup = RuntimeComposition & {
@@ -135,7 +280,8 @@ async function createRuntimeVault(
   keys: RuntimeComposition["keys"],
   clock: Clock,
 ): Promise<RuntimeVault> {
-  const vaultPath = join(dataDir, "vault.db");
+  const vaultDir = resolveVaultDataDir(process.env, dataDir);
+  const vaultPath = join(vaultDir, "vault.db");
   const transient = overrides.transientVault === true && overrides.readOnlyStore !== true;
   if (transient && process.env.NODE_ENV === "production") {
     throw new TransientVaultInProductionError();
@@ -144,7 +290,7 @@ async function createRuntimeVault(
     return new EmptyReadOnlyVault();
   }
   if (overrides.readOnlyStore !== true && !transient) {
-    await mkdir(dataDir, { recursive: true });
+    await mkdir(vaultDir, { recursive: true });
   }
   return new SqliteVault(transient ? ":memory:" : vaultPath, keys, () => clock.now(), {
     readonly: overrides.readOnlyStore === true,
@@ -206,23 +352,20 @@ export async function setupRuntime(
   ensureTracing();
   const clock = overrides.clock ?? systemClock;
   const ids = overrides.ids ?? new SystemIdGenerator(clock);
-  const keys = await createRuntimeKeys(runtimeConfig.keys, overrides);
+  const keys = await createKeysClosingSandbox(runtimeConfig, overrides);
   let vault: RuntimeVault | undefined;
   let eventStore: EventStore | undefined;
+  let tools: RuntimeTools | undefined;
   try {
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    const runtimeVault = await createRuntimeVault(
-      resolveVaultDataDir(process.env, dataDir),
-      overrides,
-      keys,
-      clock,
-    );
+    const runtimeVault = await createRuntimeVault(dataDir, overrides, keys, clock);
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
     const context = overrides.context ?? new NaiveContext();
-    const tool = overrides.tool ?? unavailableTool;
+    tools = await createRuntimeTools(runtimeConfig, overrides);
+    const { tool, sandboxBackend } = tools;
     const roles = await resolveRuntimeRoles(
       runtimeConfig,
       overrides.roleConfigDirectory ?? process.cwd(),
@@ -242,6 +385,7 @@ export async function setupRuntime(
       clock,
     });
     const store = piiConfig.enabled ? new PiiEventStore(rawStore, piiRuntime.tokenizer) : rawStore;
+    const managedMcpToolPort = tools.mcpToolPort;
     return {
       config: runtimeConfig,
       overrides,
@@ -249,11 +393,15 @@ export async function setupRuntime(
       ids,
       store,
       keys,
+      sandboxBackend,
       vault: runtimeVault,
       vaultResolver: piiRuntime.resolver,
       pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
       model,
       tool,
+      ...(managedMcpToolPort === undefined
+        ? {}
+        : { closeToolPort: () => managedMcpToolPort.close() }),
       policy,
       policyVersion: policy.version,
       context,
@@ -261,15 +409,15 @@ export async function setupRuntime(
       scopes,
     };
   } catch (error) {
-    try {
-      await eventStore?.close();
-    } finally {
-      try {
-        vault?.close();
-      } finally {
+    await closeSetupResources({
+      mcpToolPort: tools?.mcpToolPort,
+      sandboxBackend: tools?.sandboxBackend ?? overrides.sandboxBackend,
+      eventStore,
+      vault,
+      disposeKeys: () => {
         keys.dispose();
-      }
-    }
+      },
+    });
     throw error;
   }
 }

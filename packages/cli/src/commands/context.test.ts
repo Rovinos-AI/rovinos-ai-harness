@@ -88,6 +88,9 @@ async function harness() {
   const config = HarnessConfigSchema.parse({});
   const createRuntime = vi.fn((_config: unknown, _overrides?: RuntimeOverrides) => ({
     store,
+    sandboxBackend: {
+      exec: () => Promise.reject(new Error("Sandbox is not used by context tests.")),
+    },
     vault: new AuditingVaultResolver(new InMemoryVault(), () => undefined),
     keys: {
       currentKeyId: () => "fake",

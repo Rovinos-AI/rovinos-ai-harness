@@ -9,6 +9,7 @@ import {
   METRIC_ALLOWLIST,
   countHostAppRejected,
   countHostAppSpansAccepted,
+  countMcpDiscoveryFailed,
   countPolicyDecision,
   countDroppedTelemetry,
   countSentinelScopeReduced,
@@ -116,6 +117,14 @@ describe("countDroppedTelemetry", () => {
     expect(createCounter).toHaveBeenCalledWith("harness.sentinel.short_values_skipped");
     expect(add).toHaveBeenCalledWith(3);
     expectAddCallsAreAllowlisted("harness.sentinel.short_values_skipped");
+  });
+
+  it("counts MCP discovery failures without server-id attributes", () => {
+    countMcpDiscoveryFailed();
+
+    expect(createCounter).toHaveBeenCalledWith("harness.mcp.discovery_failed");
+    expect(add).toHaveBeenCalledWith(1);
+    expectAddCallsAreAllowlisted("harness.mcp.discovery_failed");
   });
 
   it("uses only closed-enum string attributes for metric instruments", () => {

@@ -24,9 +24,11 @@
   },
   "dependencies": {
     "@harness/context": "workspace:^",
+    "@harness/mcp": "workspace:^",
     "@harness/models": "workspace:^",
     "@harness/pii": "workspace:^",
     "@harness/policy": "workspace:^",
+    "@harness/sandbox": "workspace:^",
     "@harness/schemas": "workspace:^",
     "@harness/store": "workspace:^",
     "@harness/telemetry": "workspace:^",
@@ -35,6 +37,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
     "fast-check": "4.10.2",
     "vitest": "3.2.6"
   }

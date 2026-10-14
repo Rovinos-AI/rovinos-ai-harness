@@ -72,6 +72,9 @@ function createContext() {
   const closeRuntime = vi.fn(() => Promise.resolve());
   const runtime: Runtime = {
     store,
+    sandboxBackend: {
+      exec: () => Promise.reject(new Error("Sandbox is not used by serve tests.")),
+    },
     vault: new AuditingVaultResolver(new InMemoryVault(), () => undefined),
     keys: {
       currentKeyId: () => "test-key",
@@ -87,8 +90,8 @@ function createContext() {
     }),
     continueRun: () => Promise.reject(new Error("Continue is not used by serve tests.")),
     resume: () => Promise.reject(new Error("Resume is not used by serve tests.")),
-    cancel: () => Promise.reject(new Error("Cancel is not used by serve tests.")),
     resolveApproval: () => Promise.reject(new Error("Approval is not used by serve tests.")),
+    cancel: () => Promise.reject(new Error("Cancel is not used by serve tests.")),
     close: closeRuntime,
   };
   const context: CliContext = {

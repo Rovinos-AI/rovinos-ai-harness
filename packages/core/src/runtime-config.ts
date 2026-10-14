@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   ModelsConfigSchema,
+  type SandboxConfigSchema,
   type Code,
   type Event,
   type PolicyConfig,
@@ -14,10 +15,14 @@ import {
   type RunConfig,
   type RunInput,
   type SecretRef,
+  type ServersConfig,
   type StoreConfig,
   type VaultConfig,
 } from "@harness/schemas";
+import type { z } from "zod";
+import type { SandboxBackend } from "@harness/sandbox";
 import type { ProviderAdapter } from "@harness/models";
+import type { McpConnectionDependencies } from "@harness/mcp";
 import type { EventStore } from "@harness/store";
 import type {
   AuditingVaultResolver,
@@ -27,6 +32,7 @@ import type {
   VaultWriter,
 } from "@harness/vault";
 import type { Tokenizer } from "@harness/pii";
+import type { WorkspacePort } from "@harness/context";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
@@ -56,6 +62,14 @@ export interface RuntimeOverrides {
   /** Receives safe warnings raised during key-provider setup. */
   readonly onKeysWarning?: (code: "keys_ephemeral") => void;
   readonly tool?: ToolPort;
+  /** Runtime-owned backend override, including its optional shutdown hook. */
+  readonly sandboxBackend?: SandboxBackend;
+  /** Composes tool adapters with the shared backend; `tool` takes precedence. */
+  readonly createTool?: (backend: SandboxBackend) => ToolPort;
+  /** Optional MCP transport factory for embedded runtimes and in-memory tests. */
+  readonly mcpTransportFactory?: McpConnectionDependencies["createTransport"];
+  /** Workspace used to persist offloaded tool results, including MCP binary outputs. */
+  readonly workspace?: WorkspacePort;
   /** Policy evaluator replacing the policy document configured for the runtime. */
   readonly policy?: PolicyPort;
   readonly context?: ContextPort;
@@ -76,6 +90,8 @@ export interface RuntimeConfig {
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;
   readonly keys?: KeysConfig | undefined;
+  readonly sandbox?: z.infer<typeof SandboxConfigSchema>;
+  readonly servers?: ServersConfig;
 }
 
 /** Optional cooperative cancellation and claim notification for a resumed run. */
@@ -93,6 +109,8 @@ export interface Runtime {
   readonly vault: AuditingVaultResolver;
   /** Key provider shared by encryption consumers in the composed runtime. */
   readonly keys: KeyProvider;
+  /** Shared backend for sandbox-backed tool adapters. */
+  readonly sandboxBackend: SandboxBackend;
   readonly clock: Clock;
   readonly ids: IdGenerator;
   run(goal: JsonValue, options?: { readonly role?: Code }): Promise<RunLoopResult>;
@@ -136,6 +154,7 @@ export interface RuntimeComposition {
   readonly ids: IdGenerator;
   readonly store: EventStore;
   readonly keys: LocalKeyProvider;
+  readonly sandboxBackend: SandboxBackend;
   readonly vault: RuntimeVault;
   readonly vaultResolver: AuditingVaultResolver;
   readonly pii:
@@ -147,6 +166,7 @@ export interface RuntimeComposition {
     | undefined;
   readonly model: ModelPort;
   readonly tool: ToolPort;
+  readonly closeToolPort?: () => Promise<void>;
   readonly policy: PolicyPort;
   readonly policyVersion: PolicyPort["version"];
   readonly context: ContextPort;

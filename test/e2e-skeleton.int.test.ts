@@ -1,25 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
 // Not wired yet: approval escalation WebhookNotifier (17.13 -> #414)
-// Not wired yet: RemoteSandboxBackend / sandbox.runner (19.11 -> #415)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
-// Not wired yet: MCP registry and model-visible descriptions through model-input PII (-> #199, model-input PII 13.6 -> #150)
-// Not wired yet: production tool port (MCP 6.5 -> #199)
-// Not wired yet: MCP call span around callTool (6.5 -> #199)
+// Not wired yet: model-visible MCP descriptions through model-input PII (13.6 -> #150)
+// Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: reference host in core runtime/CLI (-> #207)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
 // Not wired yet: reference-host app content callbacks in the core runtime/CLI (-> #207)
 import { Command } from "commander";
-import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { Client, InMemoryTransport, type Tool, type Transport } from "@modelcontextprotocol/client";
+import { McpServer } from "@modelcontextprotocol/server";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { ExportResultCode } from "@opentelemetry/core";
 import Database from "better-sqlite3";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   createDefaultContext,
   createOutput,
@@ -48,6 +48,12 @@ import {
   type ToolPort,
 } from "@harness/core";
 import { FakeModelPort } from "@harness/core/testing";
+import {
+  ExecSpecSchema,
+  RemoteSandboxBackend,
+  SandboxExecTool,
+  type SandboxBackend,
+} from "@harness/sandbox";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { buildApprovalPayload } from "@harness/policy";
 import {
@@ -57,8 +63,11 @@ import {
   FakeClock,
   Id,
   JsonValue,
+  PiiConfigSchema,
+  RunConfigSchema,
   RunResultSchema,
   SequentialIdGenerator,
+  SecretRefSchema,
   StoreMigrateResultSchema,
   StorePurgeResultSchema,
   parseJson,
@@ -72,13 +81,15 @@ import {
   listLogDefinitions,
   listSpanDefinitions,
   SentinelGate,
+  toSafeEvent,
   type TelemetrySdkOptions,
   VaultRunView,
   withSpan,
 } from "@harness/telemetry";
 import type { Event } from "@harness/schemas";
-import type { z } from "zod";
+import { z } from "zod";
 import { createSandboxComposeInvocation } from "../scripts/compose/sandbox.js";
+import { runNetworkIsolationCompose } from "../scripts/ci/network-isolation.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const DAY_MS = 86_400_000;
@@ -86,6 +97,12 @@ const KEY_REF = "env:HARNESS_E2E_KEY";
 const KEY_ID = "e2e-test";
 const ALLOW_TOOL = "update_plan";
 const ASK_TOOL = "synthetic.ask";
+// Synthetic CLI/SDK fixtures never execute commands; their egress config only
+// exercises Compose rendering. The remote roundtrip below uses the real factory.
+const unusedSandboxBackend: SandboxBackend = {
+  exec: () => Promise.reject(new Error("The synthetic tool port does not execute commands.")),
+};
+const MCP_ERROR_CANARY = "MCP_SERVER_ERROR_CANARY";
 const logDefinition = defineLogRecord("harness.e2e.skeleton", {
   "harness.error.code": attr.code(),
 });
@@ -217,6 +234,7 @@ async function invokeCli(args: readonly string[], captureOutput = true): Promise
       model: overrides?.model ?? current.model,
       roleConfigDirectory: current.directory,
       secretResolver: overrides?.secretResolver ?? new CompositeSecretResolver(),
+      sandboxBackend: unusedSandboxBackend,
       tool: syntheticTools(
         current.callsBeforeApproval,
         current.callsAfterApproval,
@@ -229,6 +247,41 @@ async function invokeCli(args: readonly string[], captureOutput = true): Promise
     current.stdout.push(...stdout);
     current.stderr.push(...stderr);
   }
+  return { code, stdout, stderr };
+}
+
+async function invokeMcpCli(
+  configPath: string,
+  dataDirectory: string,
+  model: FakeModelPort,
+  createTransport: () => Promise<Transport>,
+  args: readonly string[],
+): Promise<CliCapture> {
+  const current = fixture();
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const out = createOutput({
+    stdout: (text) => stdout.push(text),
+    stderr: (text) => stderr.push(text),
+  });
+  const program = new Command();
+  program.option("-c, --config <path>", "path to harness configuration");
+  program.setOptionValue("config", configPath);
+  const cliContext = createDefaultContext(program, out);
+  cliContext.loadConfig = () => loadConfig({ configPath });
+  cliContext.createRuntime = (config, overrides) => {
+    return createRuntime(config, {
+      ...overrides,
+      dataDir: dataDirectory,
+      clock: current.clock,
+      ids: current.ids,
+      model,
+      roleConfigDirectory: dirname(configPath),
+      secretResolver: overrides?.secretResolver ?? new CompositeSecretResolver(),
+      mcpTransportFactory: createTransport,
+    });
+  };
+  const code = await main(args, cliContext);
   return { code, stdout, stderr };
 }
 
@@ -599,6 +652,292 @@ describe("run", () => {
   });
 });
 
+describe("MCP runtime", () => {
+  it("executes MCP tools through the CLI and validates edited approvals before recording", async () => {
+    const current = fixture();
+    const directory = join(current.directory, "mcp");
+    const configPath = join(directory, "harness.yaml");
+    const dataDirectory = join(directory, "data");
+    const inputPath = join(directory, "input.json");
+    const invalidEditPath = join(directory, "invalid.json");
+    const allowedEditPath = join(directory, "allowed.json");
+    const deniedEditPath = join(directory, "denied.json");
+    await mkdir(directory, { recursive: true });
+    await writeFile(inputPath, JSON.stringify({ goal: "call an MCP tool" }), "utf8");
+    await writeFile(invalidEditPath, '{"value":42}', "utf8");
+    await writeFile(allowedEditPath, '{"value":"edited"}', "utf8");
+    await writeFile(deniedEditPath, '{"value":"blocked"}', "utf8");
+    await writeFile(
+      configPath,
+      [
+        "run:",
+        "  checkpointEveryEvents: 2",
+        "keys:",
+        `  currentKeyId: ${KEY_ID}`,
+        "  keys:",
+        `    - id: ${KEY_ID}`,
+        `      secret: ${KEY_REF}`,
+        "servers:",
+        "  - id: e2e_mcp",
+        "    transport:",
+        "      kind: stdio",
+        "      command: in-memory",
+        "    toolAllowlist: [send]",
+        "    timeouts:",
+        "      connectMs: 1000",
+        "      callMs: 1000",
+        "policy:",
+        "  file: policy.yaml",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(directory, "policy.yaml"),
+      [
+        "version: 1",
+        "defaultDecision: deny",
+        "rules:",
+        "  - id: ask_original",
+        "    match:",
+        "      tools: [e2e_mcp.send]",
+        "      args:",
+        "        - pointer: /value",
+        "          op: equals",
+        "          value: original",
+        "    decision: ask",
+        "    reason: approval_required",
+        "    editable: [/value]",
+        "  - id: allow_edited",
+        "    match:",
+        "      tools: [e2e_mcp.send]",
+        "      args:",
+        "        - pointer: /value",
+        "          op: equals",
+        "          value: edited",
+        "    decision: allow",
+        "    reason: edited_allowed",
+        "  - id: allow_server_error",
+        "    match:",
+        "      tools: [e2e_mcp.send]",
+        "      args:",
+        "        - pointer: /value",
+        "          op: equals",
+        "          value: server_error",
+        "    decision: allow",
+        "    reason: server_error_test",
+        "  - id: deny_blocked",
+        "    match:",
+        "      tools: [e2e_mcp.send]",
+        "      args:",
+        "        - pointer: /value",
+        "          op: equals",
+        "          value: blocked",
+        "    decision: deny",
+        "    reason: edited_denied",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    expect((await loadConfig({ configPath })).servers).toHaveLength(1);
+
+    const inputSchema = {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+      additionalProperties: false,
+    } satisfies Tool["inputSchema"];
+    const serverPeers: {
+      readonly server: McpServer;
+      readonly serverTransport: Transport;
+    }[] = [];
+    const serverCalls: JsonValue[] = [];
+    const createTransport = async () => {
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = new McpServer({ name: "e2e-server", version: "1.0.0" });
+      serverPeers.push({ server, serverTransport });
+      server.server.registerCapabilities({ tools: { listChanged: true } });
+      server.server.setRequestHandler("tools/list", () => ({
+        tools: [{ name: "send", inputSchema }],
+      }));
+      server.server.setRequestHandler("tools/call", (request) => {
+        const args = JsonValue.parse(request.params.arguments ?? null);
+        serverCalls.push(args);
+        if (
+          args !== null &&
+          typeof args === "object" &&
+          !Array.isArray(args) &&
+          args.value === "server_error"
+        ) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: MCP_ERROR_CANARY }],
+          };
+        }
+        return { content: [{ type: "text", text: "sent" }] };
+      });
+      await server.connect(serverTransport);
+      return clientTransport;
+    };
+    const toolCall = (value: string) => ({
+      callId: current.ids.next(),
+      toolId: "e2e_mcp.send",
+      args: { value },
+    });
+    const model = new FakeModelPort([
+      completion([toolCall("original")], "request approval"),
+      completion([], "completed"),
+      completion([toolCall("original")], "request approval"),
+      completion([], "completed"),
+      completion([toolCall("server_error")], "call MCP"),
+      completion([], "completed"),
+    ]);
+
+    try {
+      const firstRun = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "run",
+        "--input",
+        inputPath,
+      ]);
+      expect(firstRun.code).toBe(ExitCode.suspended);
+      const firstRunId = jsonResult(RunResultSchema, firstRun.stdout).runId;
+      const store = new SqliteEventStore(join(dataDirectory, "harness.db"));
+      let firstApprovalId: Id;
+      try {
+        const firstEvents = await readEvents(store, firstRunId);
+        const approval = firstEvents.find((event) => event.type === "approval_requested");
+        if (approval?.type !== "approval_requested") {
+          throw new Error("The MCP call did not request approval.");
+        }
+        firstApprovalId = approval.approvalId;
+      } finally {
+        await store.close();
+      }
+
+      const invalidEdit = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "approvals",
+        "approve",
+        firstApprovalId,
+        "--yes",
+        "--edit",
+        invalidEditPath,
+      ]);
+      expect(invalidEdit.code).toBe(ExitCode.usage);
+      expect(invalidEdit.stderr.join("")).toContain("edit_invalid");
+      expect(invalidEdit.stderr.join("")).not.toContain("in-memory");
+      const firstEventsAfterInvalid = new SqliteEventStore(join(dataDirectory, "harness.db"));
+      try {
+        expect(
+          (await readEvents(firstEventsAfterInvalid, firstRunId)).some(
+            (event) => event.type === "approval_resolved",
+          ),
+        ).toBe(false);
+      } finally {
+        await firstEventsAfterInvalid.close();
+      }
+
+      const approvedEdit = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "approvals",
+        "approve",
+        firstApprovalId,
+        "--yes",
+        "--edit",
+        allowedEditPath,
+        "--resume",
+      ]);
+      const firstRunEventsStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
+      let firstRunEvents: Event[];
+      try {
+        firstRunEvents = await readEvents(firstRunEventsStore, firstRunId);
+      } finally {
+        await firstRunEventsStore.close();
+      }
+      expect(approvedEdit.code).toBe(ExitCode.ok);
+      expect(serverCalls).toEqual([{ value: "edited" }]);
+      expect(firstRunEvents.find((event) => event.type === "approval_resolved")).toMatchObject({
+        decision: "edit",
+        edits: { value: "edited" },
+      });
+
+      const secondRun = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "run",
+        "--input",
+        inputPath,
+      ]);
+      expect(secondRun.code).toBe(ExitCode.suspended);
+      const secondRunId = jsonResult(RunResultSchema, secondRun.stdout).runId;
+      const secondStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
+      let secondApprovalId: Id;
+      try {
+        const secondEvents = await readEvents(secondStore, secondRunId);
+        const approval = secondEvents.find((event) => event.type === "approval_requested");
+        if (approval?.type !== "approval_requested") {
+          throw new Error("The second MCP call did not request approval.");
+        }
+        secondApprovalId = approval.approvalId;
+      } finally {
+        await secondStore.close();
+      }
+      const deniedEdit = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "approvals",
+        "approve",
+        secondApprovalId,
+        "--yes",
+        "--edit",
+        deniedEditPath,
+        "--resume",
+      ]);
+      expect(deniedEdit.code).toBe(ExitCode.ok);
+      expect(serverCalls).toEqual([{ value: "edited" }]);
+      const deniedEventsStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
+      try {
+        expect(
+          (await readEvents(deniedEventsStore, secondRunId)).find(
+            (event) => event.type === "tool_result",
+          ),
+        ).toMatchObject({ outcome: "denied", errorCode: "edited_denied" });
+      } finally {
+        await deniedEventsStore.close();
+      }
+
+      const errorRun = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
+        "--json",
+        "run",
+        "--input",
+        inputPath,
+      ]);
+      expect(errorRun.code).toBe(ExitCode.ok);
+      const errorRunId = jsonResult(RunResultSchema, errorRun.stdout).runId;
+      const errorEventsStore = new SqliteEventStore(join(dataDirectory, "harness.db"));
+      try {
+        const errorEvents = await readEvents(errorEventsStore, errorRunId);
+        expect(errorEvents.find((event) => event.type === "tool_result")).toMatchObject({
+          outcome: "error",
+          errorCode: "tool_reported_error",
+          result: { content: [{ text: MCP_ERROR_CANARY }] },
+        });
+        expect(JSON.stringify(errorEvents)).toContain(MCP_ERROR_CANARY);
+      } finally {
+        await errorEventsStore.close();
+      }
+      expect(serverCalls).toEqual([{ value: "edited" }, { value: "server_error" }]);
+      expect(JSON.stringify(current.spans)).not.toContain(MCP_ERROR_CANARY);
+      expect(JSON.stringify(current.logs)).not.toContain(MCP_ERROR_CANARY);
+      expect(JSON.stringify({ stdout: errorRun.stdout, stderr: errorRun.stderr })).not.toContain(
+        MCP_ERROR_CANARY,
+      );
+    } finally {
+      await Promise.all(serverPeers.map(async ({ server }) => server.close()));
+      await Promise.all(serverPeers.map(async ({ serverTransport }) => serverTransport.close()));
+    }
+  }, 15_000);
+});
+
 describe("approval", () => {
   it("lists and shows tokenized approval details and does not execute the ask tool", async () => {
     const current = fixture();
@@ -818,6 +1157,256 @@ describe("resume", () => {
   });
 });
 
+async function dockerAvailable(): Promise<boolean> {
+  try {
+    await runNetworkIsolationCompose(`harness-sandbox-probe-${String(process.pid)}`, [
+      "ps",
+      "--quiet",
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
+  // threat: T-18
+  it("executes through the runtime-selected runner and records only safe metadata", async () => {
+    const current = fixture();
+    const directory = await mkdtemp(join(tmpdir(), "harness-sandbox-e2e-"));
+    const token = "synthetic-e2e-runner-token-for-task-19.11";
+    const tokenRef = SecretRefSchema.parse("env:HARNESS_SANDBOX_E2E_TOKEN");
+    const project = `harness-sandbox-e2e-${String(process.pid)}`;
+    const previousRunnerToken = process.env.SANDBOX_RUNNER_TOKEN;
+    process.env.SANDBOX_RUNNER_TOKEN = token;
+    const invokeCompose = (args: string[]) =>
+      runNetworkIsolationCompose(project, ["--profile", "sandbox", ...args]);
+    const requestSchema = z.object({ runId: Id, spec: ExecSpecSchema }).strict();
+    const responseSchema = z.object({ status: z.number().int(), body: z.string() }).strict();
+    const composeSchema = z.object({
+      networks: z.record(z.string(), z.object({ internal: z.boolean().optional() })),
+      services: z.record(
+        z.string(),
+        z.object({
+          ports: z.array(z.unknown()).optional(),
+          networks: z.record(z.string(), z.unknown()).optional(),
+        }),
+      ),
+    });
+    const responses: z.infer<typeof responseSchema>[] = [];
+    const forwarded: { body: z.infer<typeof requestSchema>; authorization: string | undefined }[] =
+      [];
+
+    // The host cannot reach Compose's internal network. Forward real HTTP requests
+    // from the configured remote backend without publishing a runner port.
+    const bridge = createServer((request, response) => {
+      const forward = async () => {
+        expect(request.method).toBe("POST");
+        expect(request.url).toBe("/exec");
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        for await (const chunk of request) {
+          const buffer = z.instanceof(Buffer).parse(chunk);
+          bytes += buffer.byteLength;
+          if (bytes > 2 * 1024 * 1024) {
+            throw new Error("Sandbox request exceeds the boundary limit.");
+          }
+          chunks.push(buffer);
+        }
+        const body = Buffer.concat(chunks).toString("utf8");
+        forwarded.push({
+          body: parseJson(requestSchema, body, { maxBytes: 2 * 1024 * 1024 }),
+          authorization: request.headers.authorization,
+        });
+        const script = [
+          'const http = require("node:http");',
+          `const request = http.request({ hostname: "127.0.0.1", port: 8080, path: "/exec", method: "POST", headers: ${JSON.stringify({ host: "sandbox-runner:8080", authorization: request.headers.authorization, "content-type": "application/json" })} }, (response) => {`,
+          '  const chunks = []; let bytes = 0; response.on("data", (chunk) => { bytes += chunk.length; if (bytes > 2097152) { response.destroy(); process.exitCode = 1; } else { chunks.push(chunk); } });',
+          '  response.on("end", () => process.stdout.write(JSON.stringify({ status: response.statusCode, body: Buffer.concat(chunks).toString() })));',
+          "});",
+          "request.setTimeout(10000, () => request.destroy());",
+          'request.on("error", () => { process.exitCode = 1; });',
+          `request.end(${JSON.stringify(body)});`,
+        ].join("\n");
+        const stdout = await invokeCompose([
+          "exec",
+          "--no-TTY",
+          "sandbox-runner",
+          "node",
+          "-e",
+          script,
+        ]);
+        const remote = parseJson(responseSchema, stdout, { maxBytes: 2 * 1024 * 1024 });
+        responses.push(remote);
+        response.writeHead(remote.status, { "content-type": "application/json" });
+        response.end(remote.body);
+      };
+      void forward().catch(() => {
+        response.writeHead(502);
+        response.end();
+      });
+    });
+    let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    try {
+      const compose = parseJson(composeSchema, await invokeCompose(["config", "--format", "json"]));
+      expect(compose.networks.sandbox?.internal).toBe(true);
+      expect(compose.services["sandbox-runner"]?.ports ?? []).toEqual([]);
+      expect(Object.keys(compose.services["sandbox-runner"]?.networks ?? {})).toEqual(["sandbox"]);
+      await invokeCompose([
+        "up",
+        "--detach",
+        "--wait",
+        "--wait-timeout",
+        "60",
+        "--pull=missing",
+        "sandbox-runner",
+      ]);
+      await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+      const address = bridge.address();
+      if (address === null || typeof address === "string") {
+        throw new Error("The sandbox test bridge is not listening.");
+      }
+      const store = new InMemoryEventStore();
+      const executions: Awaited<ReturnType<SandboxExecTool["execute"]>>[] = [];
+      const createTool = vi.fn((backend: SandboxBackend): ToolPort => {
+        const tool = new SandboxExecTool({
+          backend,
+          limits: { memoryMb: 2048, pids: 2048, outputBytes: 2048, cpuSeconds: 5 },
+        });
+        return {
+          describe: (toolId) => tool.describe(toolId),
+          execute: async (call, context) => {
+            const output = await tool.execute(call, context);
+            executions.push(output);
+            const boundedOutput = z
+              .object({
+                exitCode: z.number().int().nullable(),
+                stdout: z.string(),
+              })
+              .parse(output.result);
+            return {
+              outcome: "ok",
+              result: {
+                exitCode: boundedOutput.exitCode,
+                bytes: Buffer.byteLength(boundedOutput.stdout, "utf8"),
+              },
+            };
+          },
+        };
+      });
+      runtime = await createRuntime(
+        {
+          run: RunConfigSchema.parse({}),
+          pii: PiiConfigSchema.parse({
+            detokenize: [{ toolId: "sandbox.exec", args: ["/argv/1"] }],
+          }),
+          sandbox: { runner: { url: `http://127.0.0.1:${String(address.port)}`, token: tokenRef } },
+        },
+        {
+          store,
+          dataDir: directory,
+          transientVault: true,
+          clock: new FakeClock(1_000),
+          ids: new SequentialIdGenerator(),
+          secretResolver: {
+            resolve: (ref) => {
+              expect(ref).toBe(tokenRef);
+              return Promise.resolve({ reveal: () => token });
+            },
+          },
+          policy: {
+            version: Code.parse("e2e.sandbox"),
+            decide: () => ({
+              decision: "allow",
+              ruleId: Code.parse("e2e_sandbox"),
+              reason: Code.parse("synthetic_allowed"),
+              editable: [],
+            }),
+          },
+          model: new FakeModelPort([
+            completion(
+              [
+                {
+                  callId: "00000000000000000000000010",
+                  toolId: "sandbox.exec",
+                  args: { argv: ["/bin/echo", current.canary], timeoutMs: 10_000 },
+                },
+              ],
+              "execute",
+            ),
+            completion([], "completed"),
+          ]),
+          createTool,
+        },
+      );
+      expect(runtime.sandboxBackend).toBeInstanceOf(RemoteSandboxBackend);
+      expect(createTool).toHaveBeenCalledExactlyOnceWith(runtime.sandboxBackend);
+      const result = await runtime.run("Execute the synthetic sandbox command.");
+      expect(result.status).toBe("completed");
+      expect(responses).toMatchObject([{ status: 200 }]);
+      expect(executions).toMatchObject([
+        {
+          outcome: "ok",
+          result: { exitCode: 0, stdout: `${current.canary}\n` },
+        },
+      ]);
+      expect(forwarded).toHaveLength(1);
+      expect(forwarded[0]).toMatchObject({
+        authorization: ["Bearer", token].join(" "),
+        body: { spec: { argv: ["/bin/echo", current.canary] } },
+      });
+      expect(result.events.find((event) => event.type === "tool_result")).toMatchObject({
+        outcome: "ok",
+        result: { exitCode: 0, bytes: Buffer.byteLength(`${current.canary}\n`, "utf8") },
+      });
+      const safeEvents = result.events
+        .map((event) => toSafeEvent(event, Code.parse("e2e.sandbox")))
+        .filter((event) => event !== null);
+      expect(safeEvents.some((event) => event.kind === "tool_call")).toBe(true);
+      expect(safeEvents.every((event) => !("args" in event) && !("result" in event))).toBe(true);
+      for (const content of [
+        JSON.stringify(result.events),
+        JSON.stringify(safeEvents),
+        JSON.stringify(current.spans),
+        JSON.stringify(current.logs),
+      ]) {
+        expect(content).not.toContain(current.canary);
+        expect(content).not.toContain(token);
+      }
+      expect(JSON.stringify(safeEvents)).not.toContain("/bin/echo");
+    } finally {
+      try {
+        try {
+          await runtime?.close();
+        } finally {
+          if (bridge.listening) {
+            await new Promise<void>((resolve, reject) =>
+              bridge.close((error) => {
+                if (error === undefined) {
+                  resolve();
+                } else {
+                  reject(error);
+                }
+              }),
+            );
+          }
+        }
+      } finally {
+        try {
+          await invokeCompose(["down", "--volumes", "--remove-orphans"]);
+        } finally {
+          if (previousRunnerToken === undefined) {
+            delete process.env.SANDBOX_RUNNER_TOKEN;
+          } else {
+            process.env.SANDBOX_RUNNER_TOKEN = previousRunnerToken;
+          }
+          await rm(directory, { recursive: true, force: true });
+        }
+      }
+    }
+  }, 240_000);
+});
+
 describe("control plane", () => {
   it("exposes app-only decisions and supervises a runtime cancellation through MCP", async () => {
     const store = new InMemoryEventStore();
@@ -946,6 +1535,7 @@ describe("retention", () => {
       ids: current.ids,
       roleConfigDirectory: current.directory,
       secretResolver: new CompositeSecretResolver(),
+      sandboxBackend: unusedSandboxBackend,
     });
     try {
       await expect(
@@ -964,6 +1554,7 @@ describe("SDK", () => {
     const harness = await createHarness({
       config: HarnessConfigSchema.parse({
         ...config,
+        sandbox: {},
         policy: { ...config.policy, file: join(current.directory, "policy.yaml") },
       }),
       overrides: {

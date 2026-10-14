@@ -23,6 +23,7 @@ const expectedSpanNames = [
   "harness.ui.interaction",
   "harness.ui.render",
   "harness.ui_session",
+  "mcp.client.call",
 ];
 const expectedLogNames = [
   "harness.safe.approval_wait",

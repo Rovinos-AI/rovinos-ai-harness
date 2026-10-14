@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
+import { OffloadingToolPort } from "@harness/context";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
 import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
 import {
@@ -42,6 +43,14 @@ class RunInputMissingError extends HarnessError {
 
   constructor() {
     super("The run input is unavailable.");
+  }
+}
+
+class ApprovalEditUnavailableError extends HarnessError {
+  readonly code = "approval_edit_unavailable";
+
+  constructor() {
+    super("approval_edit_unavailable");
   }
 }
 
@@ -253,53 +262,52 @@ function createRuntimeRunMethods(
   };
 }
 
+function createRuntimeToolPort(
+  options: RuntimeComposition & {
+    readonly roles: RoleRegistry;
+    readonly scopes: RunScopeRegistry;
+  },
+): ToolPort {
+  const subagentTool = createSubagentTool({
+    config: options.config,
+    clock: options.clock,
+    ids: options.ids,
+    store: options.store,
+    model: options.model,
+    parentTool: options.tool,
+    policy: options.policy,
+    policyVersion: options.policyVersion,
+    roles: options.roles,
+    scopes: options.scopes,
+  });
+  const piiTool =
+    options.pii === undefined
+      ? subagentTool
+      : new PiiToolPort(subagentTool, {
+          tokenizer: options.pii.tokenizer,
+          config: options.pii.config,
+          resolver: options.pii.resolver,
+        });
+  return options.overrides.workspace === undefined
+    ? piiTool
+    : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, options.ids);
+}
+
 function composeRuntime(
   options: RuntimeComposition & {
     readonly roles: RoleRegistry;
     readonly scopes: RunScopeRegistry;
   },
 ): Runtime {
-  const {
-    config,
-    clock,
-    ids,
-    store,
-    keys,
-    vault,
-    vaultResolver,
-    pii,
-    model,
-    policy,
-    policyVersion,
-    roles,
-    scopes,
-  } = options;
-  const subagentTool = createSubagentTool({
-    config,
-    clock,
-    ids,
-    store,
-    model,
-    parentTool: options.tool,
-    policy,
-    policyVersion,
-    roles,
-    scopes,
-  });
-  const tool =
-    pii === undefined
-      ? subagentTool
-      : new PiiToolPort(subagentTool, {
-          tokenizer: pii.tokenizer,
-          config: pii.config,
-          resolver: pii.resolver,
-        });
+  const { config, clock, ids, store, keys, vault, vaultResolver, scopes } = options;
+  const tool = createRuntimeToolPort(options);
   const runWithControl = createTerminalAwareRunControl(options);
   const resume = createRuntimeResume(options, tool, runWithControl);
   return {
     store,
     vault: vaultResolver,
     keys,
+    sandboxBackend: options.sandboxBackend,
     clock,
     ids,
     ...createRuntimeRunMethods(options, tool, runWithControl),
@@ -312,8 +320,15 @@ function composeRuntime(
       }
       return result;
     },
-    resolveApproval: (runId, approvalId, decision, resolveOptions) =>
-      resolveApprovalEvent(
+    resolveApproval: (runId, approvalId, decision, resolveOptions) => {
+      if (
+        decision === "edit" &&
+        options.overrides.tool === undefined &&
+        (config.servers?.length ?? 0) === 0
+      ) {
+        throw new ApprovalEditUnavailableError();
+      }
+      return resolveApprovalEvent(
         store,
         runId,
         approvalId,
@@ -322,12 +337,15 @@ function composeRuntime(
         clock,
         tool,
         resolveOptions?.metadata,
-      ),
+      );
+    },
     close: () =>
       closeRuntimeResources({
         store,
+        ...(options.closeToolPort === undefined ? {} : { closeToolPort: options.closeToolPort }),
         vault,
         keys,
+        sandboxBackend: options.sandboxBackend,
         flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,
       }),
   };

@@ -61,6 +61,21 @@ afterEach(async () => {
 
 class EditableToolPort extends FakeToolPort {
   prepare = (call: Parameters<NonNullable<ToolPort["prepare"]>>[0]) => Promise.resolve(call);
+
+  override describe(toolId: Parameters<ToolPort["describe"]>[0]) {
+    return toolId === "send_mail"
+      ? {
+          idempotent: false,
+          timeoutMs: 1_000,
+          inputSchema: {
+            type: "object",
+            properties: { to: { type: "string" }, cc: { type: "string" } },
+            required: ["to"],
+            additionalProperties: false,
+          },
+        }
+      : super.describe(toolId);
+  }
 }
 
 interface Fixture {

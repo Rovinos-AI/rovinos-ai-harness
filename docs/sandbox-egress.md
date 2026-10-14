@@ -23,6 +23,8 @@ SANDBOX_RUNNER_TOKEN="$(cat /secure/sandbox-runner-token)" \
 
 With an empty or absent allowlist, the wrapper uses only the base Compose file and `sandbox` profile. The runner starts with no proxy variables and the proxy service is not started. With a non-empty allowlist, the wrapper passes it to Compose and enables the `sandbox-egress` profile. The proxy validates its configuration at startup and exits if the list is invalid.
 
+For runtime execution, also configure `sandbox.runner.url` and its token reference as described in [Configuration](configuration.md#sandbox-egress). The URL must identify the runner started by this wrapper with the same allowlist configuration and egress overlay. `createRuntime` resolves the token and shares one remote backend with tool adapters; it does not deploy or verify Compose networks. A non-empty allowlist without a runner is rejected rather than executed locally.
+
 The runner injects both uppercase and lowercase HTTP/HTTPS proxy variables into each command and removes `NO_PROXY` and `no_proxy`, so commands cannot exempt destinations from proxy enforcement.
 
 The proxy supports HTTP forwarding and HTTP CONNECT. It matches normalized host names and ports exactly, resolves the requested destination once, rejects the entire DNS answer set if any address is loopback, link-local/metadata, private or shared (`100.64.0.0/10`), in `192.0.0.0/24` or `198.18.0.0/15`, IPv6 unique-local/site-local/discard-only, Teredo, or multicast, and connects to the first validated resolved IP. Embedded IPv4 addresses in mapped IPv6, NAT64, and 6to4 addresses receive the same checks. Public IP literals are accepted only when explicitly listed. Wildcard and private IP-literal entries fail startup validation.
