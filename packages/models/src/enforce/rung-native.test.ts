@@ -16,16 +16,18 @@ describe("native structured output", () => {
     expect(withNativeOutputSchema(request, output).output).toEqual(output);
   });
 
-  it("returns the parsed typed value from the single text part", () => {
-    expect(enforceNativeOutput([{ type: "text", text: '{"answer":"ok"}' }], outputSchema)).toEqual({
-      value: { answer: "ok" },
-      valid: true,
-      rungUsed: "native",
-    });
+  it("returns the parsed typed value from the single text part", async () => {
+    await expect(
+      enforceNativeOutput([{ type: "text", text: '{"answer":"ok"}' }], outputSchema),
+    ).resolves.toEqual({
+        value: { answer: "ok" },
+        valid: true,
+        rungUsed: "native",
+      });
   });
 
-  it.each(["not-json", '{"answer":2}'])("returns safe issues for invalid text: %s", (text) => {
-    const result = enforceNativeOutput([{ type: "text", text }], outputSchema);
+  it.each(["not-json", '{"answer":2}'])("returns safe issues for invalid text: %s", async (text) => {
+    const result = await enforceNativeOutput([{ type: "text", text }], outputSchema);
     expect(result).toMatchObject({ valid: false });
     expect(JSON.stringify(result)).not.toContain("not-json");
   });
@@ -39,16 +41,16 @@ describe("native structured output", () => {
         { type: "text" as const, text: '{"answer":"second"}' },
       ],
     },
-  ])("rejects $name native text parts", ({ parts }) => {
-    expect(enforceNativeOutput(parts, outputSchema)).toMatchObject({
+  ])("rejects $name native text parts", async ({ parts }) => {
+    await expect(enforceNativeOutput(parts, outputSchema)).resolves.toMatchObject({
       valid: false,
       rungUsed: "native",
       issues: [{ path: [], code: "invalid_type" }],
     });
   });
 
-  it("rejects tool calls returned despite native structured output", () => {
-    expect(
+  it("rejects tool calls returned despite native structured output", async () => {
+    await expect(
       enforceNativeOutput(
         [
           { type: "text", text: '{"answer":"ok"}' },
@@ -61,10 +63,23 @@ describe("native structured output", () => {
         ],
         outputSchema,
       ),
-    ).toEqual({
+    ).resolves.toEqual({
       valid: false,
       issues: [{ path: [], code: "unexpected_tool_call" }],
       rungUsed: "native",
     });
+
+  });
+
+  it("keeps transformed values tokenized in successful enforcement results", async () => {
+    const tokenized = { answer: "<EMAIL_1>" };
+
+    await expect(
+      enforceNativeOutput(
+        [{ type: "text", text: JSON.stringify(tokenized) }],
+        z.object({ answer: z.string().email() }),
+        async (_schema, value) => ({ ok: true, tokenized: value }),
+      ),
+    ).resolves.toEqual({ value: tokenized, valid: true, rungUsed: "native" });
   });
 });

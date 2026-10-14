@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { JsonValue, ModelRetryConfigSchema, parseJson, type ModelRequest } from "@harness/schemas";
+import {
+  JsonValue,
+  ModelRetryConfigSchema,
+  parseJson,
+  type JsonValue as JsonValueType,
+  type ModelRequest,
+} from "@harness/schemas";
 import { attr, defineSpan, withSpan } from "@harness/telemetry";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { context, trace } from "@opentelemetry/api";
@@ -12,6 +18,7 @@ import * as ModelExports from "./index.js";
 import { AdapterRegistry } from "./registry.js";
 import { FakeProvider } from "./testing/fake-provider.js";
 import type { ProviderAdapter, ProviderContext } from "./types.js";
+import type { ValueTransform } from "./index.js";
 import { abortableSleep } from "./resilience/retry.js";
 import { AnthropicAdapter } from "./providers/anthropic.js";
 import { OpenAIAdapter } from "./providers/openai.js";
@@ -637,6 +644,7 @@ describe("ModelGateway", () => {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
     });
+
     const outputSchema = z.object({ answer: z.string() }).strict();
     const completion = await gateway.complete(
       { ...request, model: { provider: "openai", model: "model-a" } },
@@ -652,6 +660,97 @@ describe("ModelGateway", () => {
       rungUsed: "native",
       enforcement: { valid: true, value: { answer: "ok" } },
     });
+  });
+
+  it("uses a value transform and keeps the tokenized result in the gateway response", async () => {
+    const tokenized: JsonValueType = { email: "<EMAIL_1>" };
+    const raw = { email: "alice@example.test" };
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: JSON.stringify(tokenized) }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    const outputSchema = z.object({ email: z.string().email() });
+    let transformedValue: JsonValueType | undefined;
+    const valueTransform: ValueTransform = async (schema, value) => {
+      transformedValue = value;
+      if (!schema.safeParse(raw).success) {
+        return { ok: false, issues: [{ path: ["email"], code: "invalid_format" }] };
+      }
+      return { ok: true, tokenized: value };
+    };
+
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema,
+        valueTransform,
+      },
+    );
+
+    expect(transformedValue).toEqual(tokenized);
+    expect(completion).toMatchObject({
+      parts: [{ type: "text", text: '{"email":"<EMAIL_1>"}' }],
+      schemaValid: true,
+      enforcement: { valid: true, value: tokenized },
+    });
+    expect(JSON.stringify(completion)).not.toContain("alice@example.test");
+  });
+
+  it("repairs unresolvable tokens from paths only", async () => {
+    const tokenized: JsonValueType = { email: "<EMAIL_9>" };
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: JSON.stringify(tokenized) }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      enforcement: { maxRepairs: 1 },
+    });
+    let validationAttempts = 0;
+    const valueTransform: ValueTransform = async (_schema, value) => {
+      validationAttempts += 1;
+      return validationAttempts === 1
+        ? { ok: false, issues: [{ path: ["email"], code: "pii_token_unresolvable" }] }
+        : { ok: true, tokenized: value };
+    };
+
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema: z.object({ email: z.string().email() }),
+        valueTransform,
+      },
+    );
+
+    const repair = complete.mock.calls[1]?.[0].messages.at(-1);
+    expect(repair).toMatchObject({
+      role: "user",
+      parts: [
+        {
+          type: "text",
+          text: "Correct the structured output to match the requested schema. Return only the corrected output.\n$.email: expected a value matching the requested schema",
+        },
+      ],
+    });
+    expect(JSON.stringify(repair)).not.toContain("<EMAIL_9>");
+    expect(completion.parts).toEqual([{ type: "text", text: '{"email":"<EMAIL_9>"}' }]);
   });
 
   it("uses built-in protocol behavior for a custom adapter id", async () => {

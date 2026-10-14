@@ -45,6 +45,7 @@ import {
   selectEnforcementRung,
   type EnforcementResult,
   type EnforcementRung,
+  type ValueTransform,
 } from "./enforce/index.js";
 import { enforceNativeOutput, withNativeOutputSchema } from "./enforce/rung-native.js";
 import { enforceToolOutput, withForcedOutputTool } from "./enforce/rung-tool.js";
@@ -73,6 +74,8 @@ export interface ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType>
   readonly signal: AbortSignal;
   readonly deadlineTs?: number;
   readonly outputSchema?: OutputSchema;
+  /** Optional asynchronous validator that preserves the tokenized model output. */
+  readonly valueTransform?: ValueTransform;
 }
 
 /** Gateway enforcement configuration. */
@@ -161,14 +164,15 @@ function prepareRequestForRung(
   return withPromptOutput(request, output);
 }
 
-function enforceProviderOutput<OutputSchema extends z.ZodType>(
+async function enforceProviderOutput<OutputSchema extends z.ZodType>(
   parts: ModelResponse["parts"],
   outputSchema: OutputSchema | undefined,
   rung: EnforcementRung | undefined,
-): {
+  valueTransform?: ValueTransform,
+): Promise<{
   readonly parts: ModelResponse["parts"];
   readonly result?: EnforcementResult<OutputSchema>;
-} {
+}> {
   if (outputSchema === undefined || rung === undefined) {
     return { parts };
   }
@@ -176,17 +180,17 @@ function enforceProviderOutput<OutputSchema extends z.ZodType>(
     const hasToolCall = parts.some((part) => part.type === "tool_call");
     return {
       parts: hasToolCall ? parts.filter((part) => part.type !== "tool_call") : parts,
-      result: enforceNativeOutput(parts, outputSchema),
+      result: await enforceNativeOutput(parts, outputSchema, valueTransform),
     };
   }
   if (rung === "tool") {
-    const enforced = enforceToolOutput(parts, outputSchema);
+    const enforced = await enforceToolOutput(parts, outputSchema, valueTransform);
     return { parts: enforced.parts, result: enforced.result };
   }
   const hasToolCall = parts.some((part) => part.type === "tool_call");
   return {
     parts: hasToolCall ? parts.filter((part) => part.type !== "tool_call") : parts,
-    result: enforcePromptOutput(parts, outputSchema),
+    result: await enforcePromptOutput(parts, outputSchema, valueTransform),
   };
 }
 
@@ -337,7 +341,12 @@ export class ModelGateway {
         aggregateUsage = aggregateModelUsage(aggregateUsage, result.usage);
         aggregateLatencyMs += result.latencyMs;
 
-        const enforced = enforceProviderOutput(result.parts, context.outputSchema, prepared.rung);
+        const enforced = await enforceProviderOutput(
+          result.parts,
+          context.outputSchema,
+          prepared.rung,
+          context.valueTransform,
+        );
         const enforcement = enforced.result;
         if (enforcement !== undefined && "issues" in enforcement) {
           if (repairAttempts >= this.maxRepairs) {

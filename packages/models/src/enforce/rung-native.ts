@@ -5,7 +5,9 @@ import {
   EnforcementIssueSchema,
   enforcementIssuesFromError,
   parseEnforcementResult,
+  parseTokenizedEnforcementResult,
   type EnforcementResult,
+  type ValueTransform,
 } from "./index.js";
 
 /** Prepares a provider request with the schema lowered for native output. */
@@ -17,10 +19,11 @@ export function withNativeOutputSchema(
 }
 
 /** Parses the single native text response and validates it against the caller's schema. */
-export function enforceNativeOutput<Schema extends z.ZodType>(
+export async function enforceNativeOutput<Schema extends z.ZodType>(
   parts: readonly Part[],
   outputSchema: Schema,
-): EnforcementResult<Schema> {
+  valueTransform?: ValueTransform,
+): Promise<EnforcementResult<Schema>> {
   if (parts.some((part) => part.type === "tool_call")) {
     return parseEnforcementResult(outputSchema, {
       valid: false,
@@ -52,6 +55,22 @@ export function enforceNativeOutput<Schema extends z.ZodType>(
       rungUsed: "native",
     });
   }
+  if (valueTransform !== undefined) {
+    const transformed = await valueTransform(outputSchema, json.data);
+    if (!transformed.ok) {
+      return parseEnforcementResult(outputSchema, {
+        valid: false,
+        issues: transformed.issues,
+        rungUsed: "native",
+      });
+    }
+    return parseTokenizedEnforcementResult<Schema>({
+      value: transformed.tokenized,
+      valid: true,
+      rungUsed: "native",
+    });
+  }
+
   const parsed = outputSchema.safeParse(json.data);
   if (!parsed.success) {
     return parseEnforcementResult(outputSchema, {

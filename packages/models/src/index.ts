@@ -92,4 +92,6 @@ export {
   type EnforcementIssue,
   type EnforcementResult,
   type EnforcementRung,
+  type ValueTransform,
+  type ValueTransformResult,
 } from "./enforce/index.js";

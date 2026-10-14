@@ -6,7 +6,9 @@ import {
   EnforcementIssueSchema,
   enforcementIssuesFromError,
   parseEnforcementResult,
+  parseTokenizedEnforcementResult,
   type EnforcementResult,
+  type ValueTransform,
 } from "./index.js";
 
 /** Adds a schema-specific JSON instruction to the request's system messages. */
@@ -29,10 +31,11 @@ export function withPromptOutput(
 }
 
 /** Extracts a JSON value from the single model text part and validates it against the caller schema. */
-export function enforcePromptOutput<Schema extends z.ZodType>(
+export async function enforcePromptOutput<Schema extends z.ZodType>(
   parts: readonly Part[],
   outputSchema: Schema,
-): EnforcementResult<Schema> {
+  valueTransform?: ValueTransform,
+): Promise<EnforcementResult<Schema>> {
   if (parts.some((part) => part.type === "tool_call")) {
     return parseEnforcementResult(outputSchema, {
       valid: false,
@@ -61,6 +64,22 @@ export function enforcePromptOutput<Schema extends z.ZodType>(
           code: Code.parse(extracted.code),
         }),
       ],
+      rungUsed: "prompt",
+    });
+  }
+
+  if (valueTransform !== undefined) {
+    const transformed = await valueTransform(outputSchema, extracted.value);
+    if (!transformed.ok) {
+      return parseEnforcementResult(outputSchema, {
+        valid: false,
+        issues: transformed.issues,
+        rungUsed: "prompt",
+      });
+    }
+    return parseTokenizedEnforcementResult<Schema>({
+      value: transformed.tokenized,
+      valid: true,
       rungUsed: "prompt",
     });
   }

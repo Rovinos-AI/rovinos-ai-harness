@@ -10,6 +10,12 @@ export * from "./detectors/index.js";
 export { Tokenizer, type PiiDetectorRegistry, type TokenizerDependencies } from "./tokenizer.js";
 export { PiiBlockedError, PiiTokenizerError } from "./errors.js";
 export { PiiStorageFailedError } from "./errors.js";
+export {
+  validateWithTokens,
+  type TokenValidationIssue,
+  type ValidateWithTokensOptions,
+  type ValidateWithTokensResult,
+} from "./validate-with-tokens.js";
 export { PiiToolPort } from "./pii-tool-port.js";
 export {
   PiiEventStore,

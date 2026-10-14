@@ -31,8 +31,8 @@ describe("forced-tool structured output", () => {
     });
   });
 
-  it("returns a validated value, canonical JSON text, and no synthetic tool call", () => {
-    const response = enforceToolOutput(
+  it("returns a validated value, canonical JSON text, and no synthetic tool call", async () => {
+    const response = await enforceToolOutput(
       [
         resultCall,
         {
@@ -54,8 +54,8 @@ describe("forced-tool structured output", () => {
     ]);
   });
 
-  it("removes the matching synthetic call from provider blobs without changing other content", () => {
-    const response = enforceToolOutput(
+  it("removes the matching synthetic call from provider blobs without changing other content", async () => {
+    const response = await enforceToolOutput(
       [
         resultCall,
         {
@@ -137,8 +137,8 @@ describe("forced-tool structured output", () => {
     ]);
   });
 
-  it("strips raw synthetic calls even when the adapter could not normalize their arguments", () => {
-    const response = enforceToolOutput(
+  it("strips raw synthetic calls even when the adapter could not normalize their arguments", async () => {
+    const response = await enforceToolOutput(
       [
         {
           type: "opaque",
@@ -188,12 +188,12 @@ describe("forced-tool structured output", () => {
     ]);
   });
 
-  it("canonicalizes nested JSON values", () => {
+  it("canonicalizes nested JSON values", async () => {
     const schema = z.object({
       nested: z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])),
       z: z.string(),
     });
-    const response = enforceToolOutput(
+    const response = await enforceToolOutput(
       [
         {
           ...resultCall,
@@ -207,14 +207,14 @@ describe("forced-tool structured output", () => {
     ]);
   });
 
-  it("returns structured issues and strips the synthetic call for invalid args", () => {
-    const response = enforceToolOutput([{ ...resultCall, args: { answer: 2 } }], outputSchema);
+  it("returns structured issues and strips the synthetic call for invalid args", async () => {
+    const response = await enforceToolOutput([{ ...resultCall, args: { answer: 2 } }], outputSchema);
     expect(response.result.valid).toBe(false);
     expect(response.parts).toEqual([]);
   });
 
-  it("rejects transformed values that cannot be represented as JSON", () => {
-    const response = enforceToolOutput(
+  it("rejects transformed values that cannot be represented as JSON", async () => {
+    const response = await enforceToolOutput(
       [{ ...resultCall, args: "date" }],
       z.string().transform(() => new Date(0)),
     );
@@ -229,12 +229,29 @@ describe("forced-tool structured output", () => {
   it.each([
     { name: "missing", parts: [] },
     { name: "duplicate", parts: [resultCall, resultCall] },
-  ])("rejects $name synthetic calls", ({ parts }) => {
-    expect(enforceToolOutput(parts, outputSchema)).toMatchObject({
+  ])("rejects $name synthetic calls", async ({ parts }) => {
+    await expect(enforceToolOutput(parts, outputSchema)).resolves.toMatchObject({
       result: {
         valid: false,
         issues: [{ path: [], code: "invalid_type" }],
       },
     });
+  });
+
+  it("preserves tokenized tool output in parts after asynchronous validation", async () => {
+    const tokenized = { answer: "<EMAIL_1>" };
+
+    const response = await enforceToolOutput(
+      [{ ...resultCall, args: tokenized }],
+      z.object({ answer: z.string().email() }),
+      async (_schema, value) => ({ ok: true, tokenized: value }),
+    );
+
+    expect(response.result).toEqual({
+      value: tokenized,
+      valid: true,
+      rungUsed: "tool",
+    });
+    expect(response.parts).toEqual([{ type: "text", text: '{"answer":"<EMAIL_1>"}' }]);
   });
 });

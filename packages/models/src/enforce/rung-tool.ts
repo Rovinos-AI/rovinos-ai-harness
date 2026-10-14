@@ -5,8 +5,10 @@ import {
   EnforcementIssueSchema,
   enforcementIssuesFromError,
   parseEnforcementResult,
+  parseTokenizedEnforcementResult,
   stripSyntheticToolCall,
   type EnforcementResult,
+  type ValueTransform,
 } from "./index.js";
 
 const SYNTHETIC_TOOL_ID = Code.parse("emit_result");
@@ -31,13 +33,14 @@ export function withForcedOutputTool(
 }
 
 /** Validates the synthetic tool arguments and removes the synthetic call from response parts. */
-export function enforceToolOutput<Schema extends z.ZodType>(
+export async function enforceToolOutput<Schema extends z.ZodType>(
   parts: readonly Part[],
   outputSchema: Schema,
-): {
+  valueTransform?: ValueTransform,
+): Promise<{
   readonly parts: Part[];
   readonly result: EnforcementResult<Schema>;
-} {
+}> {
   const calls = parts.filter(
     (part) => part.type === "tool_call" && part.toolId === SYNTHETIC_TOOL_ID,
   );
@@ -48,6 +51,40 @@ export function enforceToolOutput<Schema extends z.ZodType>(
       result: parseEnforcementResult(outputSchema, {
         valid: false,
         issues: [EnforcementIssueSchema.parse({ path: [], code: Code.parse("invalid_type") })],
+        rungUsed: "tool",
+      }),
+    };
+  }
+
+  if (valueTransform !== undefined) {
+    const transformed = await valueTransform(outputSchema, calls[0].args);
+    if (!transformed.ok) {
+      return {
+        parts: withoutSyntheticCall,
+        result: parseEnforcementResult(outputSchema, {
+          valid: false,
+          issues: transformed.issues,
+          rungUsed: "tool",
+        }),
+      };
+    }
+
+    const jsonValue = JsonValue.safeParse(transformed.tokenized);
+    if (!jsonValue.success) {
+      return {
+        parts: withoutSyntheticCall,
+        result: parseEnforcementResult(outputSchema, {
+          valid: false,
+          issues: enforcementIssuesFromError(jsonValue.error),
+          rungUsed: "tool",
+        }),
+      };
+    }
+    return {
+      parts: [...withoutSyntheticCall, { type: "text", text: canonicalJson(jsonValue.data) }],
+      result: parseTokenizedEnforcementResult<Schema>({
+        value: jsonValue.data,
+        valid: true,
         rungUsed: "tool",
       }),
     };
