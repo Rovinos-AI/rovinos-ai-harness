@@ -22,6 +22,7 @@ export {
   countDroppedTelemetry,
   countHostAppRejected,
   countHostAppSpansAccepted,
+  countMcpDiscoveryFailed,
   countPolicyDecision,
   METRIC_ALLOWLIST,
   type HostAppRejectedReason,
