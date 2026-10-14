@@ -3,7 +3,7 @@ services:
   sandbox-runner:
     environment:
       SANDBOX_EGRESS_ALLOW: ${SANDBOX_EGRESS_ALLOW:?Set a non-empty sandbox egress allowlist}
-      SANDBOX_EGRESS_PROXY_URL: http://172.31.254.2:3128
+      SANDBOX_EGRESS_PROXY_URL: http://172.31.254.3:3128
     networks:
       - sandbox
       - sandbox-egress
