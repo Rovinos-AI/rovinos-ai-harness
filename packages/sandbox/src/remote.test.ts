@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
+import { MAX_WEB_FETCH_BYTES } from "./web-fetch-contracts.js";
 import { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
 import type { ExecResult, ExecSpec } from "./types.js";
 
@@ -187,6 +188,17 @@ describe("RemoteSandboxBackend", () => {
         body: JSON.stringify({ runId, request: fetchRequest }),
       }),
     );
+  });
+
+  it("accepts a cap-sized fetch body with sixfold JSON escaping", async () => {
+    const escapedResult = { ...fetchResult, text: "\u0000".repeat(MAX_WEB_FETCH_BYTES) };
+    await expect(
+      backend(() => Promise.resolve(response(escapedResult))).fetch(
+        runId,
+        fetchRequest,
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ text: escapedResult.text });
   });
 
   it("maps fetch status, malformed output, abort, and transport failures safely", async () => {

@@ -224,7 +224,7 @@ export class RemoteSandboxBackend implements SandboxBackend {
       if (!response.ok) {
         throw new RemoteSandboxError("sandbox_unavailable");
       }
-      const maxResponseBytes = MAX_WEB_FETCH_BYTES * 5 + 1_048_576;
+      const maxResponseBytes = MAX_WEB_FETCH_BYTES * 6 + 1_048_576;
       return parseJson(
         WebFetchResultSchema,
         await readBoundedResponse(response, maxResponseBytes),

@@ -56,6 +56,39 @@ describe("WebFetchTool", () => {
     expect(backend.fetch).toHaveBeenCalledWith(runId, { url, accept: "text/plain" }, signal);
   });
 
+  it("adapts binary content to the preview-free offload contract with sanitized metadata", async () => {
+    const backend = {
+      fetch: vi.fn().mockResolvedValue({
+        url: "https://docs.example.test/image?synthetic=canary",
+        status: 200,
+        contentType: "image/png",
+        binary: true,
+        bytes: [0, 255],
+        truncated: false,
+        untrusted: true,
+      }),
+    } satisfies WebFetchBackend;
+    const tool = new WebFetchTool({ backend });
+
+    await expect(
+      tool.execute(makeCall("web.fetch", { url }), {
+        runId,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({
+      outcome: "ok",
+      binary: true,
+      result: [0, 255],
+      metadata: {
+        url: "https://docs.example.test/image",
+        status: 200,
+        contentType: "image/png",
+        truncated: false,
+        untrusted: true,
+      },
+    });
+  });
+
   it("rejects unsafe URLs, unknown tools, and malformed runner responses without leaking errors", async () => {
     const backend = {
       fetch: vi.fn().mockRejectedValue(new Error(url)),

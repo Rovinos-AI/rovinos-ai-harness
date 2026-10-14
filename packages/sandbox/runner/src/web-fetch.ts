@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  request as createHttpRequest,
-  type ClientRequest,
-  type IncomingHttpHeaders,
-  type IncomingMessage,
-} from "node:http";
+import { request as createHttpRequest, type IncomingHttpHeaders } from "node:http";
 import { request as createHttpsRequest, Agent as HttpsAgent } from "node:https";
 import { connect as connectTls } from "node:tls";
 import { HarnessError, Id, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
 import { z } from "zod";
 import { htmlToText } from "./html-text.js";
 import {
+  MAX_WEB_FETCH_BYTES,
   MAX_WEB_FETCH_REDIRECTS,
   WebFetchRequestSchema,
   WebFetchResultSchema,
@@ -18,6 +14,8 @@ import {
 import type { WebFetchRequest, WebFetchResult } from "../../src/web-fetch-contracts.js";
 import {
   requestThroughProxy,
+  type NativeClientRequest,
+  type NativeIncomingMessage,
   type ProxyRequest,
   type ProxyResponse,
   type WebFetchRequester,
@@ -47,7 +45,8 @@ const RunnerFetchRequestSchema = z.object({ runId: Id, request: WebFetchRequestS
 
 type EgressAllowlist = z.infer<typeof SandboxEgressAllowlistSchema>;
 
-function adaptResponse(response: IncomingMessage): ProxyResponse {
+/** Adapts a Node response stream to the bounded fetch response interface. */
+export function adaptResponse(response: NativeIncomingMessage): ProxyResponse {
   return {
     statusCode: response.statusCode,
     headers: response.headers,
@@ -69,7 +68,8 @@ function adaptResponse(response: IncomingMessage): ProxyResponse {
   };
 }
 
-function adaptRequest(request: ClientRequest): ProxyRequest {
+/** Adapts a Node client request to the proxy request interface. */
+export function adaptRequest(request: NativeClientRequest): ProxyRequest {
   return {
     onError: (listener) => {
       request.once("error", listener);
@@ -201,6 +201,63 @@ function resultUrl(url: URL, stripQuery: boolean): string {
   return visibleUrl.href;
 }
 
+function safeTextEnd(text: string, end: number): number {
+  return end > 0 &&
+    end < text.length &&
+    text.charCodeAt(end - 1) >= 0xd800 &&
+    text.charCodeAt(end - 1) <= 0xdbff &&
+    text.charCodeAt(end) >= 0xdc00 &&
+    text.charCodeAt(end) <= 0xdfff
+    ? end - 1
+    : end;
+}
+
+function serializedBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function boundedTextResult(
+  base: {
+    readonly url: string;
+    readonly status: number;
+    readonly contentType: string;
+    readonly truncated: boolean;
+    readonly untrusted: true;
+  },
+  text: string,
+  hiddenTextDropped: number,
+): WebFetchResult {
+  const result = { ...base, text, hiddenTextDropped };
+  if (serializedBytes(result) <= MAX_WEB_FETCH_BYTES) {
+    return WebFetchResultSchema.parse(result);
+  }
+
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    let end = safeTextEnd(text, Math.ceil((low + high) / 2));
+    if (end <= low) {
+      end = low + (text.charCodeAt(low) >= 0xd800 && text.charCodeAt(low) <= 0xdbff ? 2 : 1);
+      if (end > high) {
+        break;
+      }
+    }
+    const candidate = { ...base, text: text.slice(0, end), hiddenTextDropped, truncated: true };
+    if (serializedBytes(candidate) <= MAX_WEB_FETCH_BYTES) {
+      low = end;
+    } else {
+      high = end - 1;
+    }
+  }
+
+  return WebFetchResultSchema.parse({
+    ...base,
+    text: text.slice(0, safeTextEnd(text, low)),
+    hiddenTextDropped,
+    truncated: true,
+  });
+}
+
 interface RedirectResult {
   readonly response: ProxiedResponse;
   readonly destination: URL;
@@ -280,7 +337,7 @@ function textResult(
   const decoded = new TextDecoder().decode(response.bytes);
   const converted =
     mimeType === "text/html" ? htmlToText(decoded) : { text: decoded, hiddenTextDropped: 0 };
-  return WebFetchResultSchema.parse({ ...common, ...converted });
+  return boundedTextResult(common, converted.text, converted.hiddenTextDropped);
 }
 
 /**

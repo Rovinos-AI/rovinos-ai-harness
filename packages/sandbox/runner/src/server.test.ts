@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { Readable } from "node:stream";
+import { Duplex, Readable } from "node:stream";
 import { Id, parseJson } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -20,6 +20,8 @@ import {
 } from "./server.js";
 import type { RunnerServerOptions } from "./server.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
+import { fetchWebContent } from "./web-fetch.js";
+import type { ProxyRequest, ProxyResponse, WebFetchTransport } from "./web-fetch-transport.js";
 
 const token = "synthetic-runner-token-that-is-at-least-32-bytes";
 const runId = Id.parse("00000000000000000000000001");
@@ -75,6 +77,20 @@ class MemoryResponse extends EventEmitter {
 
   destroy(): void {
     this.destroyed = true;
+  }
+}
+
+class FakeSocket extends Duplex {
+  override _read(): void {
+    this.push(null);
+  }
+
+  override _write(
+    _chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    callback();
   }
 }
 
@@ -220,6 +236,83 @@ describe("runner HTTP request handler", () => {
       },
       expect.any(AbortSignal),
     );
+  });
+
+  it("cancels a stalled TLS handshake and admits the next exec request", async () => {
+    const tunnelSocket = new FakeSocket();
+    const tlsSocket = new FakeSocket();
+    let onConnect: ((response: ProxyResponse, socket: Duplex) => void) | undefined;
+    let signalTlsStarted: () => void = () => undefined;
+    const tlsStarted = new Promise<void>((resolve) => {
+      signalTlsStarted = resolve;
+    });
+    const connectResponse: ProxyResponse = {
+      statusCode: 200,
+      headers: {},
+      onData: () => undefined,
+      onEnd: () => undefined,
+      onError: () => undefined,
+      onAborted: () => undefined,
+      destroy: () => undefined,
+    };
+    const transport: WebFetchTransport = {
+      requestHttp: (_requestOptions) => {
+        const request: ProxyRequest = {
+          onError: () => undefined,
+          onConnect: (listener) => {
+            onConnect = listener;
+          },
+          end: () => onConnect?.(connectResponse, tunnelSocket),
+        };
+        return request;
+      },
+      connectTls: () => {
+        signalTlsStarted();
+        return {
+          socket: tlsSocket,
+          onError: () => undefined,
+          onSecureConnect: () => undefined,
+        };
+      },
+      requestHttps: () => {
+        throw new Error("TLS handshake should remain stalled");
+      },
+    };
+    const handler = createRunnerRequestHandler(
+      makeOptions({
+        proxyUrl: "http://sandbox-egress-proxy:3128",
+        egressAllowlist: [{ host: "docs.example.test", ports: [443] }],
+        fetch: (request, configuration, signal) =>
+          fetchWebContent(request, configuration, signal, { transport }),
+      }),
+    );
+    const fetchResponse = new MemoryResponse();
+    const pendingFetch = handler(
+      makeRequest({
+        url: "/fetch",
+        authorization: ["Bearer", token].join(" "),
+        body: fetchPayload,
+      }),
+      fetchResponse,
+    );
+
+    await tlsStarted;
+    fetchResponse.emit("close");
+    await pendingFetch;
+
+    expect(fetchResponse.status).toBe(502);
+    expect(tunnelSocket.destroyed).toBe(true);
+    expect(tlsSocket.destroyed).toBe(true);
+    const execResponse = await call(
+      handler,
+      makeRequest({
+        url: "/exec",
+        authorization: ["Bearer", token].join(" "),
+        body: makePayload(),
+      }),
+    );
+    expect(execResponse.status).toBe(200);
+    expect(responseBody(execResponse)).toMatchObject({ stdout: "ok\n" });
   });
 
   it("does not expose fetch URLs in runner errors or invoke the fetcher for malformed inputs", async () => {

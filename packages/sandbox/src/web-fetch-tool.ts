@@ -17,6 +17,15 @@ import {
 import type { WebFetchRequest, WebFetchResult } from "./web-fetch-contracts.js";
 
 const WEB_FETCH_TOOL_ID: Code = "web.fetch";
+const WebFetchBinaryMetadataSchema = z
+  .object({
+    url: z.url(),
+    status: z.number().int().min(100).max(599),
+    contentType: z.string().min(1).max(255),
+    truncated: z.boolean(),
+    untrusted: z.literal(true),
+  })
+  .strict();
 const WEB_FETCH_TOOL_SPEC: ToolSpec = ToolSpecSchema.parse({
   toolId: WEB_FETCH_TOOL_ID,
   description: "Fetch allowlisted web content through the sandbox egress proxy.",
@@ -46,6 +55,8 @@ interface WebFetchRunContext {
 }
 
 interface WebFetchToolExecution {
+  readonly binary?: boolean;
+  readonly metadata?: JsonValueType;
   readonly outcome: "ok" | "error";
   readonly result: JsonValueType;
   readonly errorCode?: Code;
@@ -85,10 +96,28 @@ export class WebFetchTool {
       return { outcome: "error", errorCode: "sandbox_fetch_invalid", result: null };
     }
     try {
-      const result = WebFetchResultSchema.parse(
+      const fetched = WebFetchResultSchema.parse(
         await this.#backend.fetch(context.runId, parsed.data, context.signal),
       );
-      return { outcome: "ok", result: JsonValue.parse(result) };
+      if ("binary" in fetched) {
+        const sanitizedUrl = new URL(fetched.url);
+        sanitizedUrl.search = "";
+        sanitizedUrl.hash = "";
+        const metadata = WebFetchBinaryMetadataSchema.parse({
+          url: sanitizedUrl.href,
+          status: fetched.status,
+          contentType: fetched.contentType,
+          truncated: fetched.truncated,
+          untrusted: fetched.untrusted,
+        });
+        return {
+          outcome: "ok",
+          binary: true,
+          result: JsonValue.parse(fetched.bytes),
+          metadata: JsonValue.parse(metadata),
+        };
+      }
+      return { outcome: "ok", result: JsonValue.parse(fetched) };
     } catch {
       return { outcome: "error", errorCode: "sandbox_fetch_failed", result: null };
     }

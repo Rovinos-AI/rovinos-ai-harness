@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Duplex } from "node:stream";
+import { EventEmitter } from "node:events";
+import { Duplex, PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_WEB_FETCH_BYTES } from "../../src/web-fetch-contracts.js";
-import { fetchWebContent, WebFetchError } from "./web-fetch.js";
+import { adaptRequest, adaptResponse, fetchWebContent, WebFetchError } from "./web-fetch.js";
 import type {
   ProxyRequest,
   ProxyResponse,
@@ -23,7 +24,7 @@ function response(
   status: number,
   contentType: string,
   body: string | Uint8Array,
-  headers: Record<string, string> = {},
+  headers: Record<string, string | string[]> = {},
 ) {
   return {
     status,
@@ -136,6 +137,7 @@ class FakeSecureSocket implements SecureProxySocket {
   constructor(
     readonly socket: Duplex,
     private readonly failure = false,
+    private readonly stalled = false,
   ) {}
 
   onError(listener: (error: Error) => void): void {
@@ -145,7 +147,7 @@ class FakeSecureSocket implements SecureProxySocket {
   }
 
   onSecureConnect(listener: () => void): void {
-    if (!this.failure) {
+    if (!this.failure && !this.stalled) {
       listener();
     }
   }
@@ -161,15 +163,20 @@ function makeTransport(
     readonly connectStatus?: number;
     readonly requestFailure?: boolean;
     readonly tlsFailure?: boolean;
+    readonly tlsStalled?: boolean;
     readonly secureRequestFailure?: boolean;
   } = {},
 ): {
   readonly transport: WebFetchTransport;
   readonly requests: string[];
   readonly closed: { value: boolean };
+  readonly sockets: { readonly tunnel: FakeSocket[]; readonly tls: FakeSocket[] };
 } {
   const requests: string[] = [];
   const closed = { value: false };
+  const tunnelSockets: FakeSocket[] = [];
+  const tlsSockets: FakeSocket[] = [];
+  const sockets = { tunnel: tunnelSockets, tls: tlsSockets };
   const body = overrides.body ?? new TextEncoder().encode("proxied");
   const headers = {
     "content-type": overrides.contentType ?? "text/plain",
@@ -187,6 +194,7 @@ function makeTransport(
         );
         if (requestOptions.method === "CONNECT") {
           const tunnel = new FakeSocket();
+          sockets.tunnel.push(tunnel);
           request.connect(reply, tunnel);
           return;
         }
@@ -194,9 +202,11 @@ function makeTransport(
         reply.complete();
       }, overrides.requestFailure === true);
     },
-    connectTls: (socket, servername) => {
+    connectTls: (_socket, servername) => {
       requests.push(`TLS ${servername ?? "ip"}`);
-      return new FakeSecureSocket(socket, overrides.tlsFailure);
+      const tlsSocket = new FakeSocket();
+      sockets.tls.push(tlsSocket);
+      return new FakeSecureSocket(tlsSocket, overrides.tlsFailure, overrides.tlsStalled);
     },
     requestHttps: (requestOptions, secureSocket, onResponse) => {
       requests.push(
@@ -219,7 +229,7 @@ function makeTransport(
       return { request: secureRequest, close: () => (closed.value = true) };
     },
   };
-  return { transport, requests, closed };
+  return { transport, requests, closed, sockets };
 }
 
 afterEach(() => {
@@ -227,12 +237,118 @@ afterEach(() => {
 });
 
 describe("fetchWebContent", () => {
+  it("adapts native response and request events", async () => {
+    const nativeResponse = Object.assign(new PassThrough(), {
+      statusCode: 201,
+      headers: { "content-type": "text/plain" },
+    });
+    const adaptedResponse = adaptResponse(nativeResponse);
+    const chunks: string[] = [];
+    const ended = new Promise<void>((resolve) => {
+      adaptedResponse.onEnd(resolve);
+    });
+    adaptedResponse.onData((chunk) => chunks.push(String(chunk)));
+    adaptedResponse.onError(() => {
+      throw new Error("unexpected response error");
+    });
+    adaptedResponse.onAborted(() => {
+      throw new Error("unexpected response abort");
+    });
+    nativeResponse.end("adapted");
+    await ended;
+    expect(adaptedResponse.statusCode).toBe(201);
+    expect(chunks.join("")).toBe("adapted");
+    adaptedResponse.destroy();
+    expect(nativeResponse.destroyed).toBe(true);
+
+    const nativeRequest = Object.assign(new EventEmitter(), { end: vi.fn() });
+    const request = adaptRequest(nativeRequest);
+    let requestError: Error | undefined;
+    let connectedResponse: ProxyResponse | undefined;
+    let connectedSocket: Duplex | undefined;
+    request.onError((error) => {
+      requestError = error;
+    });
+    request.onConnect((connected, socket) => {
+      connectedResponse = connected;
+      connectedSocket = socket;
+    });
+    request.end();
+    const connectMessage = Object.assign(new PassThrough(), {
+      statusCode: 200,
+      headers: {},
+    });
+    const socket = new PassThrough();
+    nativeRequest.emit("connect", connectMessage, socket);
+    nativeRequest.emit("error", new Error("synthetic native request error"));
+    expect(nativeRequest.end).toHaveBeenCalledOnce();
+    expect(connectedResponse?.statusCode).toBe(200);
+    expect(connectedSocket).toBe(socket);
+    expect(requestError).toMatchObject({ message: "synthetic native request error" });
+
+    const failedResponse = Object.assign(new PassThrough(), {
+      statusCode: undefined,
+      headers: {},
+    });
+    const failed = adaptResponse(failedResponse);
+    let failedResponseError: Error | undefined;
+    let responseWasAborted = false;
+    failed.onError((error) => {
+      failedResponseError = error;
+    });
+    failed.onAborted(() => {
+      responseWasAborted = true;
+    });
+    failedResponse.emit("error", new Error("synthetic native response error"));
+    failedResponse.emit("aborted");
+    expect(failedResponseError).toMatchObject({ message: "synthetic native response error" });
+    expect(responseWasAborted).toBe(true);
+  });
+
   it("sends HTTP requests through the proxy and collects bounded response bodies", async () => {
     const { transport, requests } = makeTransport();
     await expect(
       fetchWebContent({ url: "http://docs.example.test:80/path" }, options, signal, { transport }),
     ).resolves.toMatchObject({ text: "proxied", status: 200 });
     expect(requests).toEqual(["GET http://docs.example.test/path"]);
+  });
+
+  it("handles explicit ports and array-valued response headers", async () => {
+    const requester: WebFetchRequester = (_proxy, destination) =>
+      Promise.resolve(
+        destination.pathname === "/page"
+          ? response(302, "text/plain", "", { location: ["/final"] })
+          : response(200, "", "array header", {
+              "content-type": ["Text/Plain; charset=utf-8"],
+            }),
+      );
+    await expect(
+      fetchWebContent(
+        { url: "https://docs.example.test:8443/page" },
+        {
+          proxyUrl: options.proxyUrl,
+          allow: [{ host: "docs.example.test", ports: [8443] }],
+        },
+        signal,
+        { requester },
+      ),
+    ).resolves.toMatchObject({
+      url: "https://docs.example.test:8443/final",
+      contentType: "text/plain",
+      text: "array header",
+    });
+
+    await expect(
+      fetchWebContent({ url: requestUrl }, options, signal, {
+        requester: () =>
+          Promise.resolve({
+            status: 200,
+            headers: {},
+            bytes: new Uint8Array([1]),
+            truncated: false,
+          }),
+      }),
+    ).resolves.toMatchObject({ contentType: "application/octet-stream", binary: true });
   });
 
   it("truncates oversized responses and rejects aborted bodies and request errors", async () => {
@@ -288,6 +404,28 @@ describe("fetchWebContent", () => {
         transport: requestFailure.transport,
       }),
     ).rejects.toMatchObject({ code: "sandbox_fetch_failed" });
+  });
+
+  it("aborts stalled TLS handshakes and destroys both tunnel sockets", async () => {
+    const { transport, requests, sockets } = makeTransport({ tlsStalled: true });
+    const controller = new AbortController();
+    const pending = fetchWebContent({ url: requestUrl }, options, controller.signal, { transport });
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ code: "sandbox_fetch_failed" });
+    expect(requests).toEqual(["CONNECT docs.example.test:443", "TLS docs.example.test"]);
+    expect(sockets.tunnel[0]?.destroyed).toBe(true);
+    expect(sockets.tls[0]?.destroyed).toBe(true);
+
+    const alreadyAborted = new AbortController();
+    alreadyAborted.abort();
+    const idle = makeTransport({ tlsStalled: true });
+    await expect(
+      fetchWebContent({ url: requestUrl }, options, alreadyAborted.signal, {
+        transport: idle.transport,
+      }),
+    ).rejects.toMatchObject({ code: "sandbox_fetch_failed" });
+    expect(idle.requests).toEqual([]);
   });
 
   it("converts HTML, drops hidden text, strips query strings, and returns untrusted output", async () => {
@@ -436,5 +574,16 @@ describe("fetchWebContent", () => {
     });
     await vi.advanceTimersByTimeAsync(5);
     await expect(pending).rejects.toMatchObject({ code: "sandbox_fetch_failed" });
+  });
+
+  it("keeps serialized text results within the PII JSON-size limit", async () => {
+    const requester: WebFetchRequester = () =>
+      Promise.resolve(response(200, "text/plain", "\u0000".repeat(MAX_WEB_FETCH_BYTES)));
+    const result = await fetchWebContent({ url: requestUrl }, options, signal, { requester });
+    expect(result).toMatchObject({ truncated: true, untrusted: true });
+    expect("text" in result).toBe(true);
+    expect(new TextEncoder().encode(JSON.stringify(result)).byteLength).toBeLessThanOrEqual(
+      MAX_WEB_FETCH_BYTES,
+    );
   });
 });
