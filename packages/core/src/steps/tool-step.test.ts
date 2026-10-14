@@ -16,6 +16,7 @@ import {
   Code,
   FakeClock,
   SequentialIdGenerator,
+  UNREGISTERED_TOOL_ID,
   type Event,
   type JsonValue,
 } from "@harness/schemas";
@@ -477,6 +478,8 @@ describe("tool-step resume handling", () => {
     ]);
     expect(events[1]).toMatchObject({ outcome: "ok" });
     expect(events[3]).toMatchObject({ outcome: "denied", errorCode: "unknown_tool" });
+    expect(events[2]).toMatchObject({ toolId: UNREGISTERED_TOOL_ID });
+    expect(events[3]).toMatchObject({ toolId: UNREGISTERED_TOOL_ID });
     expect(events[5]).toMatchObject({ outcome: "error", errorCode: "tool_failed" });
     expect(tool.calls).toHaveLength(2);
     const stored: Event[] = [];

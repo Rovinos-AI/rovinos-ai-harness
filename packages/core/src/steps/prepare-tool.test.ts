@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it, vi } from "vitest";
-import { EventSchema, FakeClock, HarnessError, type Event } from "@harness/schemas";
+import {
+  EventSchema,
+  FakeClock,
+  HarnessError,
+  UNREGISTERED_TOOL_ID,
+  type Event,
+} from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import type { ModelCompletion, ToolPort } from "../ports.js";
 import { RunRecorder } from "../recorder.js";
@@ -30,7 +36,8 @@ class BlockedError extends HarnessError {
 
 function tool(): ToolPort {
   return {
-    describe: () => ({ idempotent: true, timeoutMs: 100 }),
+    describe: (toolId) =>
+      toolId === call.toolId ? { idempotent: true, timeoutMs: 100 } : undefined,
     execute: () => Promise.resolve({ outcome: "ok", result: null }),
   };
 }
@@ -80,6 +87,31 @@ describe("tool preparation", () => {
     expect(JSON.stringify(prepared)).not.toContain(call.args);
   });
 
+  it("replaces unknown tool ids with the unregistered sentinel before recording", async () => {
+    const port = tool();
+    const unknownCall = { ...call, toolId: "missing.tool" };
+    const prepare = vi.fn(() => Promise.resolve(unknownCall));
+    port.prepare = prepare;
+    const input = {
+      ...completion(),
+      parts: [{ type: "tool_call" as const, ...unknownCall }],
+    };
+
+    const prepared = await prepareCompletion(input, port, context);
+
+    expect(prepare).not.toHaveBeenCalled();
+    expect(prepared.completion.parts).toEqual([
+      { type: "tool_call", ...unknownCall, toolId: UNREGISTERED_TOOL_ID },
+    ]);
+    expect(prepared.preparedCalls).toEqual([
+      {
+        call: { ...unknownCall, toolId: UNREGISTERED_TOOL_ID },
+        errorCode: "unknown_tool",
+      },
+    ]);
+    expect(JSON.stringify(prepared)).not.toContain(unknownCall.toolId);
+  });
+
   it("uses a fixed fallback instead of arbitrary attacker exception codes", async () => {
     const port = tool();
     port.prepare = () => Promise.reject(Object.assign(new Error(call.args), { code: call.args }));
@@ -92,7 +124,16 @@ describe("tool preparation", () => {
   it("keeps ports without preparation backward compatible", async () => {
     await expect(prepareToolCall(tool(), call, context)).resolves.toEqual({ call });
     const prepared = await prepareCompletion(completion(), undefined, context);
-    expect(prepared.completion).toEqual(completion());
+    expect(prepared.completion.parts).toEqual([
+      { type: "tool_call", ...call, toolId: UNREGISTERED_TOOL_ID },
+      { type: "text", text: "done" },
+    ]);
+    expect(prepared.preparedCalls).toEqual([
+      {
+        call: { ...call, toolId: UNREGISTERED_TOOL_ID },
+        errorCode: "unknown_tool",
+      },
+    ]);
   });
 
   it("records metadata-only summaries through RunRecorder and retains persistence failures", async () => {

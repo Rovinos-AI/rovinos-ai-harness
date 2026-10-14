@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tool calls are sequential here; parallel execution can be added independently.
-import { HarnessError, type Code, type Event, type Id } from "@harness/schemas";
+import {
+  HarnessError,
+  UNREGISTERED_TOOL_ID,
+  type Code,
+  type Event,
+  type Id,
+} from "@harness/schemas";
 import type { Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@harness/pii";
 import { countPolicyDecision } from "@harness/telemetry";
@@ -404,15 +410,29 @@ function recordDeniedResult(
 export async function toolStep(options: ToolStepOptions): Promise<readonly Event[]> {
   const events: Event[] = [];
   for (const [index, call] of options.calls.entries()) {
-    const description =
-      call.toolId === "harness.telemetry.emit" ? undefined : options.tool.describe(call.toolId);
+    const isSpecialTool = call.toolId === "harness.telemetry.emit";
+    const description = isSpecialTool ? undefined : options.tool.describe(call.toolId);
+    const unregistered = isSpecialTool || description === undefined;
+    const registeredCall = unregistered ? { ...call, toolId: UNREGISTERED_TOOL_ID } : call;
     const prepared = options.preparedCalls?.[index];
+    const preparedForRun =
+      !unregistered || prepared === undefined
+        ? prepared
+        : {
+            ...prepared,
+            call: { ...prepared.call, toolId: UNREGISTERED_TOOL_ID },
+            errorCode: prepared.errorCode ?? "unknown_tool",
+          };
     events.push(
       ...(await runToolCall(
         options,
-        call,
+        registeredCall,
         description,
-        prepared === undefined ? {} : { prepared },
+        preparedForRun === undefined
+          ? unregistered
+            ? { prepared: { call: registeredCall, errorCode: "unknown_tool" } }
+            : {}
+          : { prepared: preparedForRun },
       )),
     );
   }

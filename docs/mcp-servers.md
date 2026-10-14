@@ -70,6 +70,13 @@ harness logs only the excluded count (`mcp_tools_excluded`), never tool names.
 `servers_reachable.<serverId>` result for each configured server; its `detail`
 contains the configured server id.
 
+Registered MCP tool ids are normalized to the harness `Code` format, filtered
+by `toolAllowlist`, and rejected when their schemas exceed the bounded JSON
+Schema compiler limits or contain unsupported references. Server descriptions
+are untrusted text: they may contain prompt injection, are sanitized before
+being exposed as a model-visible tool description, and must pass through the
+model-input PII boundary. They are descriptive only and never grant authority.
+
 ## Examples
 
 `examples/servers.yaml` contains a trusted internal stdio server with trace

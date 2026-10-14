@@ -7,6 +7,7 @@ import {
   type Event,
   type Part,
 } from "@harness/schemas";
+import { UNREGISTERED_TOOL_ID } from "@harness/schemas";
 import type { ModelCompletion, ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import type { RunRecorder } from "../recorder.js";
 import type { VaultAudit } from "@harness/vault";
@@ -120,8 +121,16 @@ export async function prepareCompletion(
       parts.push(part);
       continue;
     }
-    const call = { callId: part.callId, toolId: part.toolId, args: part.args };
-    const prepared = tool === undefined ? { call } : await prepareToolCall(tool, call, context);
+    const unregistered = tool === undefined || tool.describe(part.toolId) === undefined;
+    const call = {
+      callId: part.callId,
+      toolId: unregistered ? UNREGISTERED_TOOL_ID : part.toolId,
+      args: part.args,
+    };
+    const prepared =
+      tool === undefined || unregistered
+        ? { call, errorCode: "unknown_tool" }
+        : await prepareToolCall(tool, call, context);
     preparedCalls.push(prepared);
     parts.push({ type: "tool_call", ...prepared.call });
   }
