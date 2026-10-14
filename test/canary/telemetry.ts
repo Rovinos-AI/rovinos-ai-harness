@@ -119,11 +119,13 @@ export async function captureWithoutSentinel(canary: string): Promise<string> {
       shutdown: () => Promise.resolve(),
     },
     logExporter: {
-      export: (_finished, callback) => callback({ code: ExportResultCode.SUCCESS }),
+      export: (_finished, callback) => {
+        callback({ code: ExportResultCode.SUCCESS });
+      },
       forceFlush: () => Promise.resolve(),
       shutdown: () => Promise.resolve(),
     },
-    telemetry: { sentinel: { enabled: false } },
+    telemetry: { sentinel: { enabled: false, minValueLength: 6 } },
   });
   const definition = defineSpan(
     "harness.canary.negative_control",
@@ -135,9 +137,7 @@ export async function captureWithoutSentinel(canary: string): Promise<string> {
     .startSpan(definition.name, { attributes: { "harness.canary.value": canary } });
   span.end();
   await sdk.tracerProvider.forceFlush();
-  const payload = JSON.stringify(
-    spans.map(({ name, attributes }) => ({ name, attributes })),
-  );
+  const payload = JSON.stringify(spans.map(({ name, attributes }) => ({ name, attributes })));
   await Promise.all([sdk.tracerProvider.shutdown(), sdk.loggerProvider.shutdown()]);
   return payload;
 }

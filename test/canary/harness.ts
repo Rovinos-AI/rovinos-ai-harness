@@ -2,13 +2,10 @@
 import { loadConfig } from "@harness/config";
 import { InMemoryWorkspace, OffloadingToolPort, type WorkspacePort } from "@harness/context";
 import { createRuntime } from "@harness/core";
-import type { ModelCompletion, Runtime, RuntimeOverrides, ToolPort } from "@harness/core";
-import { FakeModelPort } from "@harness/core/testing";
+import type { Runtime, ToolPort } from "@harness/core";
 import { FileCassetteStore } from "@harness/models";
 import { Code, Id, Sha256Hex, SequentialIdGenerator } from "@harness/schemas";
-import type { Event, VaultValueEntry } from "@harness/schemas";
-import { findTokens, tokenType, Token } from "@harness/vault";
-import type { VaultRunReader } from "@harness/telemetry";
+import type { Event } from "@harness/schemas";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,17 +14,22 @@ import { createCanaries, type CanarySet } from "./canaries.js";
 import { captureCliOutput } from "./cli-output.js";
 import { readDatabaseSinks } from "./scanning.js";
 import {
+  ASK_TOOL,
+  createCanaryModel,
+  createCanarySecretResolver,
+  createCanaryToolPort,
+  ECHO_TOOL,
+  FAIL_TOOL,
+  RuntimeVaultReader,
+  TEST_KEY_REF,
+} from "./runtime-fixture.js";
+import {
   captureWithoutSentinel,
   createCanaryTelemetry,
   emitCanaryBadLog,
   emitCanaryUnsafeSpan,
   type CanaryTelemetry,
 } from "./telemetry.js";
-
-const ECHO_TOOL = Code.parse("canary.echo");
-const FAIL_TOOL = Code.parse("canary.fail");
-const ASK_TOOL = Code.parse("canary.ask");
-const TEST_KEY_REF = "env:CANARY_TEST_KEY";
 
 interface CapturedSinks {
   readonly spans: CanaryTelemetry["spans"];
@@ -45,123 +47,52 @@ interface CapturedSinks {
   readonly unprotectedExporter: string[];
 }
 
-class RuntimeVaultReader implements VaultRunReader {
-  private runtime: Runtime | undefined;
-  private readonly versions = new Map<Id, number>();
-
-  attach(runtime: Runtime): void {
-    this.runtime = runtime;
-  }
-
-  async version(runId: Id): Promise<number> {
-    const version = (this.versions.get(runId) ?? 0) + 1;
-    this.versions.set(runId, version);
-    return version;
-  }
-
-  async listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
-    const runtime = this.runtime;
-    if (runtime === undefined) {
-      return [];
-    }
-    const tokens = new Set<Token>();
-    for await (const event of runtime.store.read(runId)) {
-      for (const { token } of findTokens(JSON.stringify(event))) {
-        tokens.add(token);
-      }
-    }
-    const entries: VaultValueEntry[] = [];
-    for (const token of tokens) {
-      const rawValue = await runtime.vault.resolve(
-        runId,
-        token,
-        { boundary: "ui" },
-        () => undefined,
-      );
-      if (rawValue !== undefined) {
-        entries.push({ rawValue, entityType: Code.parse(tokenType(token).toLowerCase()) });
-      }
-    }
-    return entries;
-  }
-}
-
-function completion(parts: ModelCompletion["parts"]): ModelCompletion {
-  return {
-    provider: "synthetic",
-    model: "synthetic",
-    parts,
-    providerBlobs: null,
-    usage: { inputTokens: 1, outputTokens: 1 },
-    finishReason: parts.some((part) => part.type === "tool_call") ? "tool_calls" : "stop",
-    latencyMs: 0,
-    schemaValid: true,
-    repairAttempts: 0,
-    fallbackDepth: 0,
-  };
-}
-
-function secretResolver(): NonNullable<RuntimeOverrides["secretResolver"]> {
-  const value = Buffer.alloc(32, 37).toString("base64");
-  return { resolve: () => Promise.resolve({ reveal: () => value }) };
-}
-
-function testToolPort(
-  canaries: CanarySet,
-  captured: Pick<CapturedSinks, "toolBoundary" | "toolErrors">,
-  executed: string[],
-): ToolPort {
-  return {
-    describe: (toolId) =>
-      [ECHO_TOOL, FAIL_TOOL, ASK_TOOL].includes(toolId)
-        ? { idempotent: true, timeoutMs: 1_000 }
-        : undefined,
-    execute: (call) => {
-      executed.push(call.toolId);
-      captured.toolBoundary.push(JSON.stringify(call.args));
-      if (call.toolId === FAIL_TOOL) {
-        const error = new Error(
-          `${canaries.card.value}\n${new Error(canaries.card.value).stack ?? ""}`,
-        );
-        captured.toolErrors.push(error.message);
-        return Promise.reject(error);
-      }
-      if (call.toolId === ECHO_TOOL) {
-        return Promise.resolve({
-          outcome: "ok",
-          result: { value: canaries.phone.value, repeated: canaries.phone.value },
-        });
-      }
-      return Promise.resolve({ outcome: "ok", result: { accepted: true } });
-    },
-  };
-}
-
-function modelFor(canaries: CanarySet): FakeModelPort {
-  const callId = (value: number): Id => Id.parse(String(value).padStart(26, "1"));
-  return new FakeModelPort([
-    completion([
-      { type: "text", text: `Model echo: ${canaries.apiKey.value}` },
-      {
-        type: "tool_call",
-        callId: callId(1),
-        toolId: ECHO_TOOL,
-        args: { value: canaries.phone.value },
-      },
-      {
-        type: "tool_call",
-        callId: callId(2),
-        toolId: FAIL_TOOL,
-        args: { value: canaries.card.value },
-      },
-      {
-        type: "tool_call",
-        callId: callId(3),
-        toolId: ASK_TOOL,
-        args: { value: canaries.person.value },
-      },
-    ]),
-  ]);
+async function loadCanaryConfig(
+  directory: string,
+): Promise<Awaited<ReturnType<typeof loadConfig>>> {
+  const configPath = join(directory, "harness.yaml");
+  const policy = [
+    "version: 1",
+    "defaultDecision: deny",
+    "rules:",
+    "  - id: canary_tool_allow",
+    "    match:",
+    `      tools: [${ECHO_TOOL}, ${FAIL_TOOL}]`,
+    "    decision: allow",
+    "    reason: canary_allowed",
+    "  - id: canary_tool_ask",
+    "    match:",
+    `      tools: [${ASK_TOOL}]`,
+    "    decision: ask",
+    "    reason: canary_approval",
+    "",
+  ].join("\n");
+  const source = [
+    "run: {}",
+    "keys:",
+    "  currentKeyId: canary-test-key",
+    "  keys:",
+    "    - id: canary-test-key",
+    `      secret: ${TEST_KEY_REF}`,
+    "policy:",
+    "  file: policy.yaml",
+    "pii:",
+    "  defaultAction: tokenize",
+    "  detokenize:",
+    `    - toolId: ${ECHO_TOOL}`,
+    "      args: [/value]",
+    `    - toolId: ${FAIL_TOOL}`,
+    "      args: [/value]",
+    "  custom:",
+    "    - name: canary_api_key",
+    "      pattern: 'hsk_live_[a-f0-9]{24}'",
+    "    - name: canary_person",
+    "      pattern: '[A-Z][a-z]{2,9}-[a-f0-9]{8}'",
+    "",
+  ].join("\n");
+  await writeFile(join(directory, "policy.yaml"), policy, "utf8");
+  await writeFile(configPath, source, "utf8");
+  return loadConfig({ configPath });
 }
 
 /** Compose the shipped runtime around synthetic ports and capture its real durable sinks. */
@@ -235,54 +166,12 @@ export class CanaryHarness {
   static async create(seed = randomUUID()): Promise<CanaryHarness> {
     const canaries = createCanaries(seed);
     const directory = await mkdtemp(join(tmpdir(), "harness-canary-"));
-    const configPath = join(directory, "harness.yaml");
-    const policy = [
-      "version: 1",
-      "defaultDecision: deny",
-      "rules:",
-      "  - id: canary_tool_allow",
-      "    match:",
-      `      tools: [${ECHO_TOOL}, ${FAIL_TOOL}]`,
-      "    decision: allow",
-      "    reason: canary_allowed",
-      "  - id: canary_tool_ask",
-      "    match:",
-      `      tools: [${ASK_TOOL}]`,
-      "    decision: ask",
-      "    reason: canary_approval",
-      "",
-    ].join("\n");
-    const source = [
-      "run: {}",
-      "keys:",
-      "  currentKeyId: canary-test-key",
-      "  keys:",
-      "    - id: canary-test-key",
-      `      secret: ${TEST_KEY_REF}`,
-      "policy:",
-      "  file: policy.yaml",
-      "pii:",
-      "  defaultAction: tokenize",
-      "  detokenize:",
-      `    - toolId: ${ECHO_TOOL}`,
-      "      args: [/value]",
-      `    - toolId: ${FAIL_TOOL}`,
-      "      args: [/value]",
-      "  custom:",
-      "    - name: canary_api_key",
-      "      pattern: 'hsk_live_[a-f0-9]{24}'",
-      "    - name: canary_person",
-      "      pattern: '[A-Z][a-z]{2,9}-[a-f0-9]{8}'",
-      "",
-    ].join("\n");
-    await writeFile(join(directory, "policy.yaml"), policy, "utf8");
-    await writeFile(configPath, source, "utf8");
-    const runtimeConfig = await loadConfig({ configPath });
+    const runtimeConfig = await loadCanaryConfig(directory);
     const reader = new RuntimeVaultReader();
     const telemetry = createCanaryTelemetry(reader);
     const clock = { now: () => 100 };
     const ids = new SequentialIdGenerator();
-    const resolver = secretResolver();
+    const resolver = createCanarySecretResolver();
     const toolBoundary: string[] = [];
     const toolErrors: string[] = [];
     const executedTools: string[] = [];
@@ -292,8 +181,8 @@ export class CanaryHarness {
         roleConfigDirectory: directory,
         clock,
         ids,
-        model: modelFor(canaries),
-        tool: testToolPort(canaries, { toolBoundary, toolErrors }, executedTools),
+        model: createCanaryModel(canaries),
+        tool: createCanaryToolPort(canaries, { toolBoundary, toolErrors }, executedTools),
         secretResolver: resolver,
       });
       reader.attach(runtime);
@@ -312,7 +201,10 @@ export class CanaryHarness {
       });
     } catch (error) {
       telemetry.unsafeSpanCleanup();
-      await Promise.all([telemetry.sdk.tracerProvider.shutdown(), telemetry.sdk.loggerProvider.shutdown()]);
+      await Promise.all([
+        telemetry.sdk.tracerProvider.shutdown(),
+        telemetry.sdk.loggerProvider.shutdown(),
+      ]);
       await rm(directory, { recursive: true, force: true });
       throw error;
     }
@@ -492,10 +384,15 @@ export class CanaryHarness {
       describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
       execute: () => Promise.resolve({ outcome: "ok", result: text }),
     };
-    const offloading = new OffloadingToolPort(port, this.workspace, {
-      thresholdBytes: 1,
-      previewChars: 0,
-    }, this.ids);
+    const offloading = new OffloadingToolPort(
+      port,
+      this.workspace,
+      {
+        thresholdBytes: 1,
+        previewChars: 0,
+      },
+      this.ids,
+    );
     const call = {
       callId: Id.parse(this.ids.next()),
       toolId: ECHO_TOOL,
