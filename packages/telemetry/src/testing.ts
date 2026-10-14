@@ -78,3 +78,4 @@ export {
   assertRegisteredSchemasSafe,
   assertSchemaCatalogSafe,
 } from "./testing/registry-lint.js";
+export { __registerUnsafeSpanForTests } from "./registry.js";

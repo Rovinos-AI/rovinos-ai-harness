@@ -138,3 +138,20 @@ stages:
           - bash: docker compose --env-file infra/collector/VERSION -f infra/compose/docker-compose.test.yml down -v
             condition: always()
             displayName: Stop Compose services
+
+  - stage: gates
+    dependsOn: integration
+    jobs:
+      - job: gates
+        steps:
+          - template: pipelines/templates/node-setup.yml
+          - script: >
+              yarn test:canary --reporter=junit
+              --outputFile=reports/canary-junit.xml
+            displayName: Canary release gate
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: reports/canary-junit.xml
+              failTaskOnFailedTests: true

@@ -19,6 +19,7 @@
 - [ ] Public APIs are documented and user-visible documentation is updated.
 - [ ] No `console.*`, `any`, or dependency outside the allowlist was added.
 - [ ] Telemetry follows CONVENTIONS §5.
+- [ ] Canary scenarios cover any new sink, boundary, or log path.
 - [ ] No unrelated lint rules or tests were weakened or removed.
 
 ## How it was tested
