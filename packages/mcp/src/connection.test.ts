@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   InMemoryTransport,
+  type CallToolRequest,
   type CallToolResult,
   type Tool,
   type Transport,
 } from "@modelcontextprotocol/client";
+import { trace } from "@opentelemetry/api";
 import { McpServer } from "@modelcontextprotocol/server";
 import { ServerConfigSchema, type JsonValue } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
@@ -25,6 +27,7 @@ interface MemoryPeer {
 
 type MemoryCallHandler = (
   serverTransport: InMemoryTransport,
+  params: CallToolRequest["params"],
 ) => Promise<CallToolResult> | CallToolResult;
 
 async function createMemoryPeer(
@@ -57,9 +60,9 @@ async function createMemoryPeer(
     }
     return { tools: [tools[0] ?? { name: "fallback", inputSchema }], nextCursor: "second" };
   });
-  server.server.setRequestHandler("tools/call", () => {
+  server.server.setRequestHandler("tools/call", (request) => {
     if (options.onCall !== undefined) {
-      return options.onCall(serverTransport);
+      return options.onCall(serverTransport, request.params);
     }
     return { content: [{ type: "text", text: "called" }] };
   });
@@ -72,12 +75,16 @@ function config(
     readonly protocol?: "auto" | "2026-07-28" | "2025-11-25";
     readonly idempotentTools?: string[];
     readonly connectMs?: number;
+    readonly trust?: "internal" | "external";
+    readonly propagateTrace?: boolean;
   } = {},
 ) {
   return ServerConfigSchema.parse({
     id: "mcp_test",
     transport: { kind: "stdio", command: "not-spawned-by-memory-transport" },
     protocol: options.protocol ?? "auto",
+    trust: options.trust ?? "external",
+    propagateTrace: options.propagateTrace ?? false,
     idempotentTools: options.idempotentTools,
     timeouts: { connectMs: options.connectMs ?? 1_000, callMs: 1_000 },
   });
@@ -168,6 +175,7 @@ describe("McpConnection", () => {
       "ToolRegistry",
       "ToolRegistryError",
       "UNREGISTERED_TOOL_ID",
+      "buildRequestMeta",
       "createMcpTransport",
       "createServersReachableChecks",
       "normalizeToolId",
@@ -403,6 +411,94 @@ describe("McpConnection", () => {
     expect(connection.state).toBe("ready");
     await connection.close();
     await peer.serverTransport.close();
+  });
+
+  it("sends trace context and existing metadata only to opted-in internal servers", async () => {
+    const spanContext = {
+      traceId: "a".repeat(32),
+      spanId: "b".repeat(16),
+      traceFlags: 1,
+    };
+    const span = trace.getTracer("mcp-test").startSpan("mcp.call");
+    const activeSpan = new Proxy(span, {
+      get(target, property, receiver) {
+        return property === "spanContext"
+          ? () => spanContext
+          : Reflect.get(target, property, receiver);
+      },
+    });
+    const activeSpanSpy = vi.spyOn(trace, "getActiveSpan").mockReturnValue(activeSpan);
+    const receivedMeta: Array<Record<string, unknown> | undefined> = [];
+    const peer = await createMemoryPeer({
+      onCall: (_transport, params) => {
+        receivedMeta.push(params._meta);
+        return { content: [{ type: "text", text: "called" }] };
+      },
+    });
+    const trustedConnection = connectionFor(
+      config({ trust: "internal", propagateTrace: true }),
+      () => Promise.resolve(peer.client),
+    );
+
+    try {
+      await trustedConnection.connect();
+      await trustedConnection.callTool(
+        {
+          name: "tool-1",
+          arguments: { value: "ok" },
+          _meta: {
+            progressToken: "progress-1",
+            traceparent: "00-stale",
+            tracestate: "stale=value",
+            baggage: "private=value",
+          },
+        },
+        inputSchema,
+      );
+      expect(receivedMeta).toEqual([
+        {
+          progressToken: "progress-1",
+          traceparent: `00-${spanContext.traceId}-${spanContext.spanId}-01`,
+        },
+      ]);
+    } finally {
+      await trustedConnection.close();
+      await peer.serverTransport.close();
+      span.end();
+      activeSpanSpy.mockRestore();
+    }
+  });
+
+  it("does not send trace keys to an external server even if present in request metadata", async () => {
+    const receivedMeta: Array<Record<string, unknown> | undefined> = [];
+    const peer = await createMemoryPeer({
+      onCall: (_transport, params) => {
+        receivedMeta.push(params._meta);
+        return { content: [{ type: "text", text: "called" }] };
+      },
+    });
+    const connection = connectionFor(config(), () => Promise.resolve(peer.client));
+
+    try {
+      await connection.connect();
+      await connection.callTool(
+        {
+          name: "tool-1",
+          arguments: { value: "ok" },
+          _meta: {
+            progressToken: "progress-1",
+            traceparent: "00-stale",
+            tracestate: "stale=value",
+            baggage: "private=value",
+          },
+        },
+        inputSchema,
+      );
+      expect(receivedMeta).toEqual([{ progressToken: "progress-1" }]);
+    } finally {
+      await connection.close();
+      await peer.serverTransport.close();
+    }
   });
   it("rejects a malformed tools/list page with a closed code", async () => {
     const peer = await createMemoryPeer();

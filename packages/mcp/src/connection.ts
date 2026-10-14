@@ -6,8 +6,10 @@ import {
   type CallToolResult,
   type Transport,
 } from "@modelcontextprotocol/client";
+import { trace } from "@opentelemetry/api";
 import { compileJsonSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
 import { McpConnectionError, isConnectionLossError } from "./errors.js";
+import { buildRequestMeta } from "./trace-injection.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
 import { createMcpTransport, type McpLogger } from "./transports.js";
 
@@ -347,7 +349,11 @@ export class McpConnection {
    * @returns The remote tool result.
    */
   async callTool(
-    params: { readonly name: string; readonly arguments?: Record<string, unknown> },
+    params: {
+      readonly name: string;
+      readonly arguments?: Record<string, unknown>;
+      readonly _meta?: Record<string, unknown>;
+    },
     inputSchema: unknown,
     options?: CallToolRequestOptions,
   ): Promise<CallToolResult> {
@@ -383,17 +389,33 @@ export class McpConnection {
   }
 
   async #invoke(
-    params: { readonly name: string; readonly arguments?: Record<string, unknown> },
+    params: {
+      readonly name: string;
+      readonly arguments?: Record<string, unknown>;
+      readonly _meta?: Record<string, unknown>;
+    },
     options?: CallToolRequestOptions,
   ): Promise<CallToolResult> {
     const client = this.#client;
     if (client === undefined || this.#state !== "ready") {
       throw new McpConnectionError("mcp_connection_lost");
     }
-    return client.callTool(params, {
-      timeout: this.#config.timeouts.callMs,
-      ...options,
+    const requestMeta = buildRequestMeta({
+      server: this.#config,
+      spanContext: trace.getActiveSpan()?.spanContext(),
+      ...(params._meta === undefined ? {} : { existingMeta: params._meta }),
     });
+    return client.callTool(
+      {
+        name: params.name,
+        ...(params.arguments === undefined ? {} : { arguments: params.arguments }),
+        ...(requestMeta === undefined ? {} : { _meta: requestMeta }),
+      },
+      {
+        timeout: this.#config.timeouts.callMs,
+        ...options,
+      },
+    );
   }
 
   async #ensureReady(signal?: AbortSignal): Promise<void> {

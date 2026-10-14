@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { StreamableHTTPClientTransport, type CallToolResult } from "@modelcontextprotocol/client";
+import { trace } from "@opentelemetry/api";
 import { ServerConfigSchema } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
@@ -41,6 +42,82 @@ function stdioConfig(inheritEnv: boolean) {
 }
 
 describe("MCP transports", () => {
+  it("sends HTTP trace metadata in the request body, not as propagation headers", async () => {
+    interface CapturedRequest {
+      readonly headers: Headers;
+      readonly body: {
+        readonly id?: string | number;
+        readonly method?: string;
+        readonly params?: Record<string, unknown>;
+      };
+    }
+    const requests: CapturedRequest[] = [];
+    const fetch: typeof globalThis.fetch = async (_input, init) => {
+      const body: CapturedRequest["body"] = JSON.parse(String(init?.body));
+      requests.push({ headers: new Headers(init?.headers), body });
+      const result =
+        body.method === "initialize"
+          ? {
+              protocolVersion: "2025-11-25",
+              capabilities: { tools: {} },
+              serverInfo: { name: "http-test", version: "1.0.0" },
+            }
+          : body.method === "tools/call"
+            ? { content: [{ type: "text", text: "called" }] }
+            : undefined;
+      return result === undefined
+        ? new Response(null, { status: 202 })
+        : Response.json({ jsonrpc: "2.0", id: body.id ?? 0, result });
+    };
+    const spanContext = {
+      traceId: "a".repeat(32),
+      spanId: "b".repeat(16),
+      traceFlags: 1,
+    };
+    const span = trace.getTracer("mcp-test").startSpan("mcp.call");
+    const activeSpan = new Proxy(span, {
+      get(target, property, receiver) {
+        return property === "spanContext"
+          ? () => spanContext
+          : Reflect.get(target, property, receiver);
+      },
+    });
+    const activeSpanSpy = vi.spyOn(trace, "getActiveSpan").mockReturnValue(activeSpan);
+    vi.stubGlobal("fetch", fetch);
+    const config = ServerConfigSchema.parse({
+      id: "http_test",
+      trust: "internal",
+      propagateTrace: true,
+      transport: { kind: "http", url: "https://mcp.example.test/rpc" },
+      protocol: "2025-11-25",
+      timeouts: { connectMs: 1_000, callMs: 1_000 },
+    });
+    const connection = new McpConnection(config, {
+      resolveSecret: () => Promise.reject(new Error("unexpected secret reference")),
+    });
+
+    try {
+      await connection.connect();
+      await connection.callTool({ name: "tool-1", arguments: {} }, { type: "object" });
+
+      const callRequest = requests.find(({ body }) => body.method === "tools/call");
+      expect(callRequest?.body.params?._meta).toEqual({
+        traceparent: `00-${spanContext.traceId}-${spanContext.spanId}-01`,
+      });
+      expect(
+        requests.every(
+          ({ headers }) =>
+            !headers.has("traceparent") && !headers.has("tracestate") && !headers.has("baggage"),
+        ),
+      ).toBe(true);
+    } finally {
+      await connection.close();
+      span.end();
+      activeSpanSpy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each([
     { inheritEnv: false, expectedPath: null },
     { inheritEnv: true, expectedPath: "safe-parent-path" },
