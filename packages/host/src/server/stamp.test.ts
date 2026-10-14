@@ -103,7 +103,7 @@ describe("stampAppSpan", () => {
     const gate = new SentinelGate(
       new VaultRunView({
         version: () => Promise.resolve(0),
-        listRawValues: () => Promise.resolve([]),
+        listRawValueEntries: () => Promise.resolve([]),
       }),
       activeRuns,
     );
