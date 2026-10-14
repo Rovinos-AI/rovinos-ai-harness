@@ -102,6 +102,7 @@ function makeServer(
     readonly onTelemetryEmit?: ReferenceHostDependencies["onTelemetryEmit"];
     readonly onAppToolsList?: ReferenceHostDependencies["onAppToolsList"];
     readonly isIdOwnedByRun?: ReferenceHostDependencies["isIdOwnedByRun"];
+    readonly hasPendingApproval?: ReferenceHostDependencies["hasPendingApproval"];
     readonly onAppRejected?: ReferenceHostDependencies["onAppRejected"];
     readonly onCode?: ReferenceHostDependencies["onCode"];
     readonly readStatic?: ReferenceHostDependencies["readStatic"];
@@ -148,6 +149,9 @@ function makeServer(
     ...(options.onTelemetryEmit === undefined ? {} : { onTelemetryEmit: options.onTelemetryEmit }),
     ...(options.onAppToolsList === undefined ? {} : { onAppToolsList: options.onAppToolsList }),
     ...(options.isIdOwnedByRun === undefined ? {} : { isIdOwnedByRun: options.isIdOwnedByRun }),
+    ...(options.hasPendingApproval === undefined
+      ? {}
+      : { hasPendingApproval: options.hasPendingApproval }),
     ...(options.onAppRejected === undefined ? {} : { onAppRejected: options.onAppRejected }),
     ...(options.onCode === undefined ? {} : { onCode: options.onCode }),
     ...(options.readStatic === undefined ? {} : { readStatic: options.readStatic }),
@@ -160,9 +164,14 @@ function makeServer(
     ...(options.scheduleUiSessionExpiry === undefined
       ? {}
       : { scheduleUiSessionExpiry: options.scheduleUiSessionExpiry }),
-    ...(options.uiSessionContext === undefined
-      ? {}
-      : { uiSessionContext: options.uiSessionContext }),
+    uiSessionContext: options.uiSessionContext ?? {
+      runId: options.runId ?? sessionId,
+      toolCallSpanContext: {
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        traceFlags: 1,
+      },
+    },
     createHttpServer: (requestListener) => {
       listener = requestListener;
       return server;
@@ -455,6 +464,70 @@ describe("createReferenceHost", () => {
     await host.close();
   });
 
+  it("stamps default app telemetry from its session and refuses unapproved decisions", async () => {
+    let now = 1_000;
+    let approvalPending = false;
+    const initialCount = spanCollector.getFinishedSpans().length;
+    const parent = spanCollector.provider.getTracer("reference-host-test").startSpan("harness.tool_call");
+    const onAppRejected = vi.fn();
+    const fixture = makeServer({
+      idGenerator: () => sessionId,
+      now: () => now,
+      uiSessionContext: {
+        runId: foreignRunId,
+        toolCallSpanContext: parent.spanContext(),
+      },
+      hasPendingApproval: () => approvalPending,
+      onAppRejected,
+    });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+
+    now = 1_100;
+    const rejectedDecision = await fixture.request(
+      "POST",
+      "/api/call",
+      authorization(host),
+      telemetryCallBody(launchedSessionId, {
+        spans: [
+          { name: "ui.render", startOffsetMs: Number.MAX_SAFE_INTEGER, durationMs: 500 },
+          { name: "ui.decision", decision: "approve", startOffsetMs: 0, durationMs: 1 },
+        ],
+      }),
+    );
+    expectTelemetryAck(rejectedDecision, 1, 1);
+    expect(onAppRejected).toHaveBeenCalledWith("unknown_span");
+
+    approvalPending = true;
+    now = 1_200;
+    const acceptedDecision = await fixture.request(
+      "POST",
+      "/api/call",
+      authorization(host),
+      telemetryCallBody(launchedSessionId, {
+        spans: [{ name: "ui.decision", decision: "approve", startOffsetMs: 0, durationMs: 5 }],
+      }),
+    );
+    expectTelemetryAck(acceptedDecision, 1, 0);
+    await host.close();
+    parent.end();
+
+    const spans = spanCollector.getFinishedSpans().slice(initialCount);
+    const sessionSpan = spans.find((span) => span.name === "harness.ui_session");
+    const renderSpan = spans.find((span) => span.name === "harness.ui.render");
+    const decisionSpan = spans.find((span) => span.name === "harness.ui.decision");
+    expect(sessionSpan).toBeDefined();
+    expect(renderSpan?.parentSpanContext?.spanId).toBe(sessionSpan?.spanContext().spanId);
+    expect(decisionSpan?.parentSpanContext?.spanId).toBe(sessionSpan?.spanContext().spanId);
+    expect(renderSpan?.attributes).toMatchObject({
+      "harness.app.id": "approval",
+      "harness.run.id": foreignRunId,
+      "harness.ui.session_id": launchedSessionId,
+      "harness.ui.duration_ms": 100,
+    });
+    expect(renderSpan?.attributes["harness.ui.start_offset_ms"]).toBeUndefined();
+  });
+
   it("sends anti-framing headers on JSON error responses", async () => {
     const host = await createReferenceHost(appConfig, {
       readStatic: () => Promise.reject(new Error("asset missing")),
@@ -568,7 +641,18 @@ describe("createReferenceHost", () => {
 
   it("reports unavailable trace context and omits traceparent from the app payload", async () => {
     const onCode = vi.fn();
-    const fixture = makeServer({ onCode, idGenerator: () => sessionId });
+    const fixture = makeServer({
+      onCode,
+      idGenerator: () => sessionId,
+      uiSessionContext: {
+        runId: sessionId,
+        toolCallSpanContext: {
+          traceId: "0".repeat(32),
+          spanId: "0".repeat(16),
+          traceFlags: 1,
+        },
+      },
+    });
     const host = await fixture.hostPromise;
     const launchedSessionId = await newAppSession(fixture, host);
     const result = await fixture.request("GET", appPath(launchedSessionId), authorization(host));
@@ -690,7 +774,11 @@ describe("createReferenceHost", () => {
   it("validates app telemetry through the default host handler", async () => {
     const onAppRejected = vi.fn();
     const spanStart = spanCollector.getFinishedSpans().length;
-    const fixture = makeServer({ onAppRejected, idGenerator: () => sessionId });
+    const fixture = makeServer({
+      onAppRejected,
+      idGenerator: () => sessionId,
+      hasPendingApproval: () => true,
+    });
     const host = await fixture.hostPromise;
     const launchedSessionId = await newAppSession(fixture, host);
     const response = await fixture.request(
