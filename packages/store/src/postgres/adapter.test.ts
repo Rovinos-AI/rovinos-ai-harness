@@ -318,6 +318,75 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     fakePg.encryptionValue = text(values[1]);
     return { rows: [] };
   }
+  if (query.startsWith("SELECT global_seq, run_id, seq, content_blob, key_id FROM events")) {
+    const targetKeyId = text(values[0]);
+    const after = values[1] === null ? undefined : number(values[1]);
+    const limit = number(values[2]);
+    return {
+      rows: fakePg.events
+        .filter(
+          (event) =>
+            event.key_id !== null &&
+            event.key_id !== targetKeyId &&
+            (after === undefined || event.global_seq > after),
+        )
+        .sort((first, second) => first.global_seq - second.global_seq)
+        .slice(0, limit),
+    };
+  }
+  if (query.startsWith("SELECT snapshot_id, run_id, at_seq, content_blob, key_id FROM snapshots")) {
+    const targetKeyId = text(values[0]);
+    const after = typeof values[1] === "string" ? text(values[1]) : "";
+    const limit = number(values.at(-1));
+    return {
+      rows: fakePg.snapshots
+        .filter(
+          (snapshot) =>
+            snapshot.key_id !== null &&
+            snapshot.key_id !== targetKeyId &&
+            snapshot.snapshot_id > after,
+        )
+        .sort((first, second) => first.snapshot_id.localeCompare(second.snapshot_id))
+        .slice(0, limit),
+    };
+  }
+  if (query.startsWith("UPDATE events SET content_blob")) {
+    const event = fakePg.events.find(
+      (row) =>
+        row.global_seq === number(values[2]) &&
+        row.key_id === text(values[3]) &&
+        row.content_blob === text(values[4]),
+    );
+    if (event !== undefined) {
+      event.content_blob = text(values[0]);
+      event.key_id = text(values[1]);
+    }
+    return { rows: [], rowCount: event === undefined ? 0 : 1 };
+  }
+  if (query.startsWith("UPDATE snapshots SET content_blob")) {
+    const snapshot = fakePg.snapshots.find(
+      (row) =>
+        row.snapshot_id === text(values[2]) &&
+        row.key_id === text(values[3]) &&
+        row.content_blob === text(values[4]),
+    );
+    if (snapshot !== undefined) {
+      snapshot.content_blob = text(values[0]);
+      snapshot.key_id = text(values[1]);
+    }
+    return { rows: [], rowCount: snapshot === undefined ? 0 : 1 };
+  }
+  if (query.startsWith("SELECT key_id, COUNT(*)::int AS count FROM (")) {
+    const counts = new Map<string, number>();
+    for (const row of [...fakePg.events, ...fakePg.snapshots]) {
+      if (row.key_id !== null) {
+        counts.set(row.key_id, (counts.get(row.key_id) ?? 0) + 1);
+      }
+    }
+    return {
+      rows: [...counts].map(([key_id, count]) => ({ key_id, count })),
+    };
+  }
   if (query.startsWith("INSERT INTO runs")) {
     const runId = text(values[0]);
     const createdAt = number(values[1]);
@@ -693,6 +762,79 @@ runEventStoreConformance(
   },
   { supportsFileReopen: false },
 );
+
+it("resumes encrypted Postgres event and snapshot rotation", async () => {
+  let currentKeyId = "key-a";
+  const rotationKeys = new Map([
+    ["key-a", new Uint8Array(32).fill(71)],
+    ["key-b", new Uint8Array(32).fill(72)],
+  ]);
+  const rotationProvider: KeyProvider = {
+    currentKeyId: () => currentKeyId,
+    getKey: (keyId) => {
+      const key = rotationKeys.get(keyId);
+      return key === undefined
+        ? Promise.reject(Object.assign(new Error("Synthetic key not found"), { code: "key_not_found" }))
+        : Promise.resolve(Uint8Array.from(key));
+    },
+  };
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  const snapshotId = builders.nextRunId();
+  const snapshot = builders.snapshot(runId, snapshotId, 1);
+  const store = new PostgresEventStore(
+    "postgresql://harness@localhost/harness",
+    {},
+    new AesGcmContentCodec(rotationProvider),
+  );
+  try {
+    await store.appendWithSnapshot(
+      runId,
+      [
+        builders.runCreated(runId),
+        builders.modelRequest(runId, "synthetic rotated content"),
+        builders.checkpointWritten(runId, snapshotId, 1),
+      ],
+      0,
+      snapshot,
+    );
+    currentKeyId = "key-b";
+    const first = await store.reencryptBatch({ targetKeyId: currentKeyId, limit: 1 });
+    expect(first.processed).toBe(1);
+    expect(first.nextCursor).toBeDefined();
+    await expect(store.countRowsByKey()).resolves.toContainEqual({ keyId: "key-a", count: 3 });
+    const events = [];
+    for await (const event of store.read(runId)) {
+      events.push(event);
+    }
+    expect(events).toMatchObject([
+      { seq: 0 },
+      {
+        seq: 1,
+        messages: [{ role: "user", parts: [{ type: "text", text: "synthetic rotated content" }] }],
+      },
+      { seq: 2 },
+    ]);
+
+    let cursor = first.nextCursor;
+    while (cursor !== undefined) {
+      const batch = await store.reencryptBatch({
+        targetKeyId: currentKeyId,
+        limit: 1,
+        afterCursor: cursor,
+      });
+      cursor = batch.nextCursor;
+    }
+
+    await expect(store.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 4 }]);
+    await expect(store.latestSnapshot(runId)).resolves.toEqual(snapshot);
+    await expect(store.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+      processed: 0,
+    });
+  } finally {
+    await store.close();
+  }
+});
 
 it("rejects invalid connection and pool configuration", () => {
   expect(() => new PostgresEventStore("invalid")).toThrow(

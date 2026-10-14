@@ -3,8 +3,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeClock, Id, KeysConfigSchema, type KeyProvider } from "@harness/schemas";
-import { AesGcmContentCodec, SqliteEventStore } from "@harness/store";
+import {
+  FakeClock,
+  Id,
+  KeysConfigSchema,
+  SecretRefSchema,
+  type KeyProvider,
+} from "@harness/schemas";
+import { AesGcmContentCodec, SqliteEventStore, StoreUnavailableError } from "@harness/store";
 import { SqliteVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openConfiguredKeyRotation, openConfiguredVaultAdmin } from "./runtime-store.js";
@@ -92,6 +98,83 @@ describe("openConfiguredVaultAdmin", () => {
   });
 
   describe("openConfiguredKeyRotation", () => {
+    it("does not create absent vault or SQLite store databases", async () => {
+      const directory = await temporaryDirectory();
+      const rotation = await openConfiguredKeyRotation(
+        { keys },
+        { dataDir: directory, vault: true, store: true, secretResolver },
+      );
+      try {
+        await expect(rotation.vault?.countRowsByKey()).resolves.toEqual([]);
+        await expect(rotation.store?.countRowsByKey()).resolves.toEqual([]);
+        await expect(rotation.vault?.reencryptBatch({ targetKeyId: keys.currentKeyId })).resolves.toEqual(
+          { processed: 0 },
+        );
+        await expect(rotation.store?.reencryptBatch({ targetKeyId: keys.currentKeyId })).resolves.toEqual(
+          { processed: 0 },
+        );
+      } finally {
+        await rotation.close();
+      }
+      expect(existsSync(join(directory, "vault.db"))).toBe(false);
+      expect(existsSync(join(directory, "harness.db"))).toBe(false);
+    });
+
+    it("opens and closes the configured Postgres adapter", async () => {
+      const rotation = await openConfiguredKeyRotation(
+        {
+          keys,
+          store: {
+            dialect: "postgres",
+            connectionString: SecretRefSchema.parse("env:HARNESS_STORE_URL"),
+          },
+        },
+        {
+          vault: false,
+          store: true,
+          secretResolver: {
+            resolve: (ref) =>
+              Promise.resolve({
+                reveal: () =>
+                  ref === "env:HARNESS_STORE_URL"
+                    ? "postgresql://harness@127.0.0.1:5432/harness"
+                    : Buffer.alloc(32, 41).toString("base64"),
+              }),
+          },
+        },
+      );
+      expect(rotation.store).toBeDefined();
+      await rotation.close();
+    });
+
+    it("closes opened adapters and disposes keys when store configuration cannot resolve", async () => {
+      const directory = await temporaryDirectory();
+      new SqliteVault(join(directory, "vault.db"), keyProvider).close();
+
+      await expect(
+        openConfiguredKeyRotation(
+          {
+            keys,
+            store: {
+              dialect: "postgres",
+              connectionString: SecretRefSchema.parse("env:HARNESS_STORE_URL"),
+            },
+          },
+          {
+            dataDir: directory,
+            vault: true,
+            store: true,
+            secretResolver: {
+              resolve: (ref) =>
+                ref === "env:HARNESS_STORE_URL"
+                  ? Promise.reject(new StoreUnavailableError())
+                  : secretResolver.resolve(),
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ code: "store_unavailable" });
+    });
+
     it("opens configured adapters and rotates both stores with the current key", async () => {
       const directory = await temporaryDirectory();
       const oldProvider = provider("key-a");
