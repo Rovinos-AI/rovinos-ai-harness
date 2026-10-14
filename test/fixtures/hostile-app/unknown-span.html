@@ -1,0 +1,14 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit }) => {
+        await emit([{ name: "ui.custom", payload: "synthetic", startOffsetMs: 0, durationMs: 0 }]);
+        await emit([
+          { name: "ui.error", code: "unknown_span_blocked", startOffsetMs: 0, durationMs: 0 },
+        ]);
+      };
+    </script>
+  </body>
+</html>

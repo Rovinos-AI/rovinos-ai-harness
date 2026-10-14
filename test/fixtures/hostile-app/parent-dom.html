@@ -1,0 +1,20 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit }) => {
+        let parentDomBlocked = false;
+        try {
+          void window.parent.document.body.textContent;
+        } catch {
+          parentDomBlocked = true;
+        }
+        await emit([
+          { name: "ui.error", code: "parent_dom_blocked", startOffsetMs: 0, durationMs: 0 },
+        ]);
+        return { parentDomBlocked };
+      };
+    </script>
+  </body>
+</html>

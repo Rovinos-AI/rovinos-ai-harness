@@ -1,0 +1,17 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit, input }) => {
+        const canary = input.canary
+          .repeat(Math.ceil(10_240 / input.canary.length))
+          .slice(0, 10_240);
+        await emit([{ name: "ui.error", code: canary, startOffsetMs: 0, durationMs: 0 }]);
+        await emit([
+          { name: "ui.error", code: "canary_field_blocked", startOffsetMs: 0, durationMs: 0 },
+        ]);
+      };
+    </script>
+  </body>
+</html>

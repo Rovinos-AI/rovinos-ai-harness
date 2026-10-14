@@ -277,9 +277,13 @@ function createFakeRoot(
 
 function successfulRequest(payload: unknown = appPayload) {
   const responses = [hostReadyResponse(), new Response(JSON.stringify(payload))];
-  return vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
-    Promise.resolve(responses.shift() ?? new Response("", { status: 500 })),
-  );
+  return vi.fn(function (
+    this: unknown,
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ): Promise<Response> {
+    return Promise.resolve(responses.shift() ?? new Response("", { status: 500 }));
+  });
 }
 
 function hostReadyResponse(): Response {
@@ -632,6 +636,7 @@ describe("reference app page", () => {
     expect(await mountReferenceApp(root, launchHash, request)).toBe(true);
     const callResult = await bridgeMock.toolCall({ name: "approve", arguments: { ok: true } });
     expect(parseJson(resultSchema, JSON.stringify(callResult)).content).toHaveLength(1);
+    expect(request.mock.contexts[2]).toBe(globalThis);
     expect(request.mock.calls[2]?.[1]).toMatchObject({
       method: "POST",
       body: JSON.stringify({

