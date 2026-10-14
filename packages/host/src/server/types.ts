@@ -79,8 +79,6 @@ export interface ReferenceHostDependencies {
   readonly randomBytes?: (size: number) => Buffer;
   /** Provides epoch milliseconds for generated ULIDs. */
   readonly now?: () => number;
-  /** Maximum telemetry batches accepted per app session in a rolling minute (default 20). */
-  readonly maxAppTelemetryBatchesPerMinute?: number;
   /** Receives safe host diagnostic codes, never resource data or call payloads. */
   readonly onCode: (code: HostDiagnosticCode) => void;
   /** Routes allowlisted app calls through the host's policy-aware handler. */

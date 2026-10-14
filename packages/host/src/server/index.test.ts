@@ -8,6 +8,7 @@ import type { PolicyPort, ToolPort } from "@harness/core";
 import { z } from "zod";
 import {
   APP_TELEMETRY_TOOL_NAME,
+  AppRateLimiter,
   createReferenceHost,
   ReferenceHostError,
   REFERENCE_CSP,
@@ -108,7 +109,6 @@ function makeServer(
     readonly idGenerator?: () => string;
     readonly randomBytes?: (size: number) => Buffer;
     readonly now?: () => number;
-    readonly maxAppTelemetryBatchesPerMinute?: number;
     readonly runId?: ReferenceHostDependencies["runId"];
     readonly policy?: ReferenceHostDependencies["policy"];
     readonly tool?: ReferenceHostDependencies["tool"];
@@ -154,9 +154,6 @@ function makeServer(
     ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
     ...(options.randomBytes === undefined ? {} : { randomBytes: options.randomBytes }),
     ...(options.now === undefined ? {} : { now: options.now }),
-    ...(options.maxAppTelemetryBatchesPerMinute === undefined
-      ? {}
-      : { maxAppTelemetryBatchesPerMinute: options.maxAppTelemetryBatchesPerMinute }),
     runId: options.runId ?? sessionId,
     ...(options.policy === undefined ? {} : { policy: options.policy }),
     ...(options.tool === undefined ? {} : { tool: options.tool }),
@@ -1059,13 +1056,21 @@ describe("createReferenceHost", () => {
     expect(appSpan?.parentSpanContext?.spanId).toBe(sessionSpan?.spanContext().spanId);
   });
 
-  it("limits telemetry batches per session in a rolling minute", async () => {
+  it("drops span-cap overflow with bounded counting and isolates sessions", async () => {
     let now = 0;
     let nextId = 0;
     const onAppRejected = vi.fn();
     const fixture = makeServer({
+      config: {
+        ...appConfig,
+        limits: {
+          batchesPerSecond: 10,
+          batchBurst: 20,
+          spansPerMinute: 1,
+          spansPerSessionLifetime: 2,
+        },
+      },
       idGenerator: () => String(nextId++).padStart(26, "0"),
-      maxAppTelemetryBatchesPerMinute: 2,
       now: () => now,
       onAppRejected,
     });
@@ -1082,23 +1087,117 @@ describe("createReferenceHost", () => {
       );
 
     expectTelemetryAck(await emit(firstSession), 1, 0);
-    expectTelemetryAck(await emit(firstSession), 1, 0);
-    expectTelemetryAck(
-      await fixture.request(
-        "POST",
-        "/api/call",
-        authorization(host),
-        telemetryCallBody(firstSession, { spans: [batch.spans[0], batch.spans[0]] }),
-      ),
-      0,
-      2,
-    );
+    expectTelemetryAck(await emit(firstSession), 0, 1);
     expectTelemetryAck(await emit(secondSession), 1, 0);
     expect(onAppRejected).toHaveBeenCalledExactlyOnceWith("rate");
 
     now = 60_000;
     expectTelemetryAck(await emit(firstSession), 1, 0);
+    now = 120_000;
+    expectTelemetryAck(await emit(firstSession), 0, 1);
+    expect(onAppRejected).toHaveBeenLastCalledWith("session_cap");
     await host.close();
+  });
+
+  it("returns a rate_limited error at the batch burst boundary and counts unknown apps", async () => {
+    const onAppRejected = vi.fn();
+    const fixture = makeServer({
+      config: {
+        ...appConfig,
+        limits: {
+          batchesPerSecond: 10,
+          batchBurst: 1,
+          spansPerMinute: 200,
+          spansPerSessionLifetime: 2_000,
+        },
+      },
+      idGenerator: () => sessionId,
+      now: () => 0,
+      onAppRejected,
+    });
+    const host = await fixture.hostPromise;
+    const activeSession = await newAppSession(fixture, host);
+    const batch = { spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 1 }] };
+    const headers = authorization(host);
+
+    expectTelemetryAck(
+      await fixture.request("POST", "/api/call", headers, telemetryCallBody(activeSession, batch)),
+      1,
+      0,
+    );
+    const limited = await fixture.request(
+      "POST",
+      "/api/call",
+      headers,
+      telemetryCallBody(activeSession, batch),
+    );
+    expect(limited.status).toBe(429);
+    expect(limited.body).toBe('{"error":"rate_limited"}');
+    const unknown = await fixture.request(
+      "POST",
+      "/api/call",
+      headers,
+      telemetryCallBody("00000000000000000000000002", batch),
+    );
+    expect(unknown.status).toBe(404);
+    expect(unknown.body).toBe('{"error":"app_unknown"}');
+    expect(onAppRejected.mock.calls).toEqual([["rate"], ["unknown_app"]]);
+    await host.close();
+  });
+
+  it("releases limiter state when an app session ends", async () => {
+    let now = 0;
+    const onAppRejected = vi.fn();
+    const endLimiterSession = vi.spyOn(AppRateLimiter.prototype, "endSession");
+    const endedSessionCounts = (): number[] =>
+      endLimiterSession.mock.contexts.map((context: unknown) =>
+        context instanceof AppRateLimiter ? context.activeSessionCount : -1,
+      );
+    const fixture = makeServer({
+      config: {
+        ...appConfig,
+        limits: {
+          batchesPerSecond: 10,
+          batchBurst: 1,
+          spansPerMinute: 200,
+          spansPerSessionLifetime: 1,
+        },
+      },
+      idGenerator: () => sessionId,
+      now: () => now,
+      onAppRejected,
+    });
+    const host = await fixture.hostPromise;
+    const firstSession = await newAppSession(fixture, host);
+    const headers = authorization(host);
+    const batch = { spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 1 }] };
+    const emit = () =>
+      fixture.request("POST", "/api/call", headers, telemetryCallBody(firstSession, batch));
+
+    expectTelemetryAck(await emit(), 1, 0);
+    now = 100;
+    expectTelemetryAck(await emit(), 0, 1);
+    expect(
+      (
+        await fixture.request(
+          "POST",
+          `/api/session/end?sessionId=${encodeURIComponent(firstSession)}`,
+          headers,
+        )
+      ).status,
+    ).toBe(200);
+    expect(endedSessionCounts()).toEqual([0]);
+
+    const nextSession = await newAppSession(fixture, host);
+    expect(nextSession).toBe(firstSession);
+    expectTelemetryAck(
+      await fixture.request("POST", "/api/call", headers, telemetryCallBody(nextSession, batch)),
+      1,
+      0,
+    );
+    expect(onAppRejected).toHaveBeenCalledExactlyOnceWith("session_cap");
+    await host.close();
+    expect(endedSessionCounts()).toEqual([0, 0]);
   });
 
   it("returns a bounded error result if app calls are not handled or fail", async () => {

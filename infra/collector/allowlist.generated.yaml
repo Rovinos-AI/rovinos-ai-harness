@@ -53,13 +53,14 @@ processors:
     error_mode: "ignore"
     metrics:
       metric:
-        - "not (name == \"harness.host.app_rejected\" or name == \"harness.sentinel.scope_reduced\" or name == \"harness.sentinel.short_values_skipped\" or name == \"harness.telemetry.dropped\")"
+        - "not (name == \"harness.host.app_rejected\" or name == \"harness.host.app_spans_accepted\" or name == \"harness.sentinel.scope_reduced\" or name == \"harness.sentinel.short_values_skipped\" or name == \"harness.telemetry.dropped\")"
   transform/metric_attributes:
     error_mode: "ignore"
     metric_statements:
       - "keep_keys(scope.attributes, [])"
       - "keep_keys(exemplar.filtered_attributes, [])"
       - "keep_keys(datapoint.attributes, [\"harness.host.app_rejected.reason\"]) where metric.name == \"harness.host.app_rejected\""
+      - "keep_keys(datapoint.attributes, []) where metric.name == \"harness.host.app_spans_accepted\""
       - "keep_keys(datapoint.attributes, []) where metric.name == \"harness.sentinel.scope_reduced\""
       - "keep_keys(datapoint.attributes, []) where metric.name == \"harness.sentinel.short_values_skipped\""
       - "keep_keys(datapoint.attributes, [\"harness.telemetry.dropped.reason\"]) where metric.name == \"harness.telemetry.dropped\""

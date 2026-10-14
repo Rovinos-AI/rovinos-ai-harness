@@ -20,6 +20,7 @@ export {
 export {
   countDroppedTelemetry,
   countHostAppRejected,
+  countHostAppSpansAccepted,
   METRIC_ALLOWLIST,
   type HostAppRejectedReason,
   type TelemetryDropReason,
