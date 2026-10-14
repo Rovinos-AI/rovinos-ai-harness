@@ -3,6 +3,16 @@
   "language": "en",
   "files": ["**/*.md", "packages/*/src/**/*"],
   "ignorePaths": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "**/*.generated.*"],
+  "words": [
+    "labelledby",
+    "noopener",
+    "noreferrer",
+    "onopenlink",
+    "onrequestdisplaymode",
+    "onupdatemodelcontext",
+    "sizechange",
+    "tldts"
+  ],
   "dictionaryDefinitions": [
     {
       "name": "project-words",

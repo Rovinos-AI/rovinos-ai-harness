@@ -28,6 +28,10 @@ export const HOST_APP_REJECTED_REASONS = [
   "unknown_tool",
   "unknown_span",
   "session_cap",
+  "request_disabled",
+  "request_invalid",
+  "request_unavailable",
+  "user_denied",
 ] as const;
 
 /** Policy outcomes used by the decision counter. */

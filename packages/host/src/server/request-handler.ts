@@ -21,6 +21,7 @@ import {
 import { UiSession } from "./ui-session.js";
 import { AppCallRouterError } from "./app-calls.js";
 import type { AppCallRouter } from "./app-calls.js";
+import { AppRequestSchema, type AppRequestRouter } from "./app-requests.js";
 import type { AppRateLimiter } from "./app-limits.js";
 
 const MAX_CALL_BYTES = 32_768;
@@ -29,6 +30,7 @@ interface RequestHandlerOptions {
   readonly config: HostConfig;
   readonly dependencies: ReferenceHostDependencies;
   readonly appCallRouter: AppCallRouter;
+  readonly appRequestRouter: AppRequestRouter;
   readonly rateLimiter: AppRateLimiter;
   readonly apps: ReadonlyMap<string, HostConfig["apps"][number]>;
   readonly appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>;
@@ -43,6 +45,12 @@ interface RequestHandlerOptions {
 
 const HOST_PAGE_CSP =
   "default-src 'none'; script-src 'self' 'unsafe-inline' http: https:; style-src 'unsafe-inline' http: https:; img-src data: http: https:; font-src data: http: https:; connect-src 'self' http: https:; media-src data: http: https:; frame-src 'self'; child-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+function isAuthorizedApiRequest(request: HostRequest, options: RequestHandlerOptions): boolean {
+  return (
+    isSameOrigin(request, options.expectedOrigin()) && authorizationMatches(request, options.token)
+  );
+}
 
 async function handleStaticRequest(
   request: HostRequest,
@@ -166,6 +174,7 @@ async function sendAppResource(
       appId: instance.id,
       sessionId: instance.sessionId,
       resourceUri,
+      allow: app.allow,
       html: resource.html,
       csp: resource.csp,
       permissions: resource.permissions,
@@ -257,6 +266,39 @@ async function routeAppToolsList(
   }
 }
 
+async function routeAppRequest(
+  request: HostRequest,
+  response: HostResponse,
+  options: RequestHandlerOptions,
+): Promise<void> {
+  const body = await readBody(request, MAX_CALL_BYTES);
+  if (body === undefined) {
+    options.appRequestRouter.reject("request_invalid");
+    writeError(response, 413, "app_request_too_large");
+    return;
+  }
+  let appRequest: ReturnType<typeof AppRequestSchema.parse>;
+  try {
+    appRequest = parseJson(AppRequestSchema, body, { maxBytes: MAX_CALL_BYTES });
+  } catch {
+    options.appRequestRouter.reject("request_invalid");
+    writeJson(response, 200, { allowed: false });
+    return;
+  }
+  const session = options.sessions.get(appRequest.sessionId);
+  if (session === undefined) {
+    options.appRequestRouter.reject("unknown_app");
+    writeJson(response, 200, { allowed: false });
+    return;
+  }
+  if (!options.rateLimiter.tryAcquireBatch(session.sessionId)) {
+    options.appRequestRouter.reject("rate");
+    writeError(response, 429, "rate_limited");
+    return;
+  }
+  writeJson(response, 200, await options.appRequestRouter.handle(session, appRequest));
+}
+
 /** Creates the authenticated static/API request handler for a single host process. */
 export function createRequestHandler(
   options: RequestHandlerOptions,
@@ -276,10 +318,7 @@ export function createRequestHandler(
         writeError(response, 404, "not_found");
         return;
       }
-      if (
-        !isSameOrigin(request, options.expectedOrigin()) ||
-        !authorizationMatches(request, options.token)
-      ) {
+      if (!isAuthorizedApiRequest(request, options)) {
         writeError(response, 403, "app_unauthorized");
         return;
       }
@@ -292,6 +331,9 @@ export function createRequestHandler(
           return;
         case "POST /api/call":
           await routeAppCall(request, response, options);
+          return;
+        case "POST /api/request":
+          await routeAppRequest(request, response, options);
           return;
         case "GET /api/tools":
           await routeAppToolsList(url, response, options);

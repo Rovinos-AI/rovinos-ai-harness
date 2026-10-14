@@ -10,6 +10,7 @@ import {
   createPolicyCheckedAppCallHandler,
 } from "./app-calls.js";
 import { AppRateLimiter } from "./app-limits.js";
+import { AppRequestRouter } from "./app-requests.js";
 import { ingestBatch, rejectBatch } from "./app-telemetry.js";
 import { createRequestHandler } from "./request-handler.js";
 import { readStaticAsset, writeRequestFailure } from "./http-utils.js";
@@ -23,6 +24,21 @@ import type {
 } from "./types.js";
 
 export { REFERENCE_CSP, AppRateLimiter };
+export {
+  AppContentEnvelopeSchema,
+  AppRequestResultSchema,
+  AppRequestRouter,
+  AppRequestSchema,
+  type AppContentEnvelope,
+  type AppContentTokenizer,
+  type AppRequest,
+  type AppRequestResult,
+} from "./app-requests.js";
+export {
+  HostContextOptionsSchema,
+  createHostContext,
+  type HostContextOptions,
+} from "./host-context.js";
 export {
   APP_TELEMETRY_TOOL,
   APP_TELEMETRY_TOOL_NAME,
@@ -268,6 +284,20 @@ function createAppCallRouter(
   });
 }
 
+function createAppRequestRouter(
+  appConfigs: ReadonlyMap<string, HostConfig["apps"][number]>,
+  dependencies: ReferenceHostDependencies,
+): AppRequestRouter {
+  return new AppRequestRouter({
+    apps: appConfigs,
+    ...(dependencies.tokenizeAppContent === undefined
+      ? {}
+      : { tokenizeAppContent: dependencies.tokenizeAppContent }),
+    ...(dependencies.onAppContent === undefined ? {} : { onAppContent: dependencies.onAppContent }),
+    ...(dependencies.onAppRejected === undefined ? {} : { onRejected: dependencies.onAppRejected }),
+  });
+}
+
 /**
  * Starts a loopback-only host for configured MCP Apps resources.
  *
@@ -292,6 +322,7 @@ export async function createReferenceHost(
   const sessionRunId = dependencies.uiSessionContext?.runId ?? dependencies.runId;
   const rateLimiter = new AppRateLimiter(config.limits, { now });
   const appCallRouter = createAppCallRouter(registry.appConfigs, dependencies, nextId, rateLimiter);
+  const appRequestRouter = createAppRequestRouter(registry.appConfigs, dependencies);
   const host = config.listen.host === "localhost" ? "127.0.0.1" : config.listen.host;
   let origin = "";
   let port = 0;
@@ -301,6 +332,7 @@ export async function createReferenceHost(
       config,
       dependencies: { ...dependencies, readStatic: dependencies.readStatic ?? readStaticAsset },
       appCallRouter,
+      appRequestRouter,
       rateLimiter,
       ...registry,
       nextSessionId: nextId,
