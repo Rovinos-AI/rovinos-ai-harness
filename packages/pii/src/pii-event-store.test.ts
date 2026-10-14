@@ -134,10 +134,14 @@ function createInnerStore(): EventStoreLike {
       return Promise.resolve(events.length);
     },
     watch() {
-      return (async function* () {})();
+      return (async function* () {
+        await Promise.resolve();
+      })();
     },
     watchRuns() {
-      return (async function* () {})();
+      return (async function* () {
+        await Promise.resolve();
+      })();
     },
     deleteRun() {
       const count = events.length;

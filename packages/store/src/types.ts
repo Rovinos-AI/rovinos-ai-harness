@@ -60,7 +60,7 @@ export interface WatchOptions {
   fromSeq: number;
   /** Stops the subscription when aborted. */
   signal: AbortSignal;
-  /** Maximum notification backlog before the iterator re-reads from storage. */
+  /** Maximum stored events per read batch before the iterator re-reads from storage. */
   maxBuffered?: number;
 }
 

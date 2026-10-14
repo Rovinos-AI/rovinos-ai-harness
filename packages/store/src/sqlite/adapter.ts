@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
 import {
-  Event,
   Id,
   RunStatus,
   parseJson,
-  splitEvent,
   type TraceId,
   type Event as StoredEvent,
   type NewEvent,
@@ -31,9 +29,13 @@ import {
   type ListRunsOptions,
   type RunSummary,
   type SqliteStoreOptions,
-  type WatchOptions,
-  type WatchRunsOptions,
 } from "../types.js";
+import {
+  ChangeEmitter,
+  watchEvents,
+  watchRunSummaries,
+  type ChangeSubscription,
+} from "../subscriptions.js";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
 import { migrate } from "../migrate.js";
 import {
@@ -52,8 +54,7 @@ import { openReadOnlyDatabase } from "./read-only.js";
 import { deleteRunTransaction } from "./retention.js";
 import { SqliteApprovalNotifications } from "./approval-notifications.js";
 import { findRunsByTrace } from "./traces.js";
-
-const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
+import { encodeEvents, type EncodedEvent } from "./event-encoding.js";
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
 const READ_PAGE_SIZE = 256;
 
@@ -68,58 +69,6 @@ type ListRunsQueryParams = [
   Id | null,
   number,
 ];
-
-interface EncodedEvent {
-  event: StoredEvent;
-  metaJson: string;
-  blob: string;
-  keyId: string | null;
-}
-
-async function encodeEvents(
-  codec: ContentCodec,
-  runId: Id,
-  events: readonly NewEvent[],
-  expectedSeq: number,
-): Promise<EncodedEvent[]> {
-  if (events.length === 0) {
-    throw new InvalidEventError([[]]);
-  }
-
-  const validated: StoredEvent[] = [];
-  for (const [index, event] of events.entries()) {
-    if (event.runId !== runId) {
-      throw new InvalidEventError([["runId"]]);
-    }
-
-    const result = Event.safeParse({ ...event, seq: expectedSeq + index });
-    if (!result.success) {
-      const paths = result.error.issues.map(({ path }) =>
-        path.flatMap((part) =>
-          typeof part === "string" || typeof part === "number" ? [part] : [],
-        ),
-      );
-      throw new InvalidEventError(paths);
-    }
-    validated.push(result.data);
-  }
-
-  return Promise.all(
-    validated.map(async (event) => {
-      const parts = splitEvent(event);
-      const content = await codec.encode({ runId, seq: event.seq }, parts.content);
-      const meta = Object.fromEntries(
-        Object.entries(parts.meta).filter(([key]) => !envelopeKeys.has(key)),
-      );
-      return {
-        event,
-        metaJson: JSON.stringify(meta),
-        blob: content.blob,
-        keyId: content.keyId ?? null,
-      };
-    }),
-  );
-}
 
 function decodeCursor(cursor: string): { createdAt: number; runId: Id } {
   try {
@@ -177,8 +126,7 @@ export class SqliteEventStore implements EventStore {
   private readonly latestSnapshotQuery: Database.Statement<[Id], SnapshotRow>;
   private readonly snapshotKeep: number;
   private readonly pollIntervalMs: number;
-  private readonly runWatchers = new Map<Id, Set<() => void>>();
-  private readonly runListWatchers = new Set<() => void>();
+  private readonly changeEmitter = new ChangeEmitter();
   private readonly outbox: SqliteOutboxReader;
   private readonly approvalNotifications: SqliteApprovalNotifications;
 
@@ -344,7 +292,7 @@ export class SqliteEventStore implements EventStore {
         }
       });
       appendTransaction.immediate();
-      this.notifyRunChange(runId);
+      this.changeEmitter.notify(runId);
       return { nextSeq: expectedSeq + validated.length };
     } catch (error) {
       throw storeError(error);
@@ -372,197 +320,43 @@ export class SqliteEventStore implements EventStore {
     }
   }
 
-  private notifyRunChange(runId: Id): void {
-    for (const notify of this.runWatchers.get(runId) ?? []) {
-      notify();
-    }
-    for (const notify of this.runListWatchers) {
-      notify();
-    }
-  }
-
-  private waitForChange(
-    runId: Id | undefined,
-    signal: AbortSignal,
-  ): { changed: Promise<void>; cancel: () => void } {
+  private waitForChange(runId: Id | undefined, signal: AbortSignal): ChangeSubscription {
+    const localSubscription = this.changeEmitter.subscribe(runId, signal);
     let resolveChanged: () => void = () => undefined;
-    let settled = false;
     const changed = new Promise<void>((resolve) => {
       resolveChanged = resolve;
     });
-    const watchers =
-      runId === undefined
-        ? this.runListWatchers
-        : (this.runWatchers.get(runId) ?? new Set<() => void>());
-    const onChange = (): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      signal.removeEventListener("abort", onChange);
-      watchers.delete(onChange);
-      if (runId !== undefined && watchers.size === 0) {
-        this.runWatchers.delete(runId);
-      }
-      resolveChanged();
+    const timer = setTimeout(resolveChanged, this.pollIntervalMs);
+    void localSubscription.changed.then(resolveChanged);
+    return {
+      changed,
+      async cancel() {
+        clearTimeout(timer);
+        await localSubscription.cancel();
+      },
     };
-    const timer = setTimeout(onChange, this.pollIntervalMs);
-    watchers.add(onChange);
-    if (runId !== undefined) {
-      this.runWatchers.set(runId, watchers);
-    }
-    signal.addEventListener("abort", onChange, { once: true });
-    if (signal.aborted) {
-      onChange();
-    }
-    return { changed, cancel: onChange };
   }
 
   /** {@inheritDoc EventStore.watch} */
-  async *watch(runId: Id, options: WatchOptions): AsyncIterable<StoredEvent> {
-    if (!Number.isSafeInteger(options.fromSeq) || options.fromSeq < 0) {
-      throw new InvalidEventError([["fromSeq"]]);
-    }
-    if (
-      options.maxBuffered !== undefined &&
-      (!Number.isSafeInteger(options.maxBuffered) || options.maxBuffered < 1)
-    ) {
-      throw new InvalidEventError([["maxBuffered"]]);
-    }
-    const maxBuffered = options.maxBuffered ?? 1_000;
-    let nextSeq = options.fromSeq;
-    while (!options.signal.aborted) {
-      const subscription = this.waitForChange(runId, options.signal);
-      try {
-        const head = await this.head(runId);
-        const toSeq = Math.min(head - 1, nextSeq + maxBuffered - 1);
-        for await (const event of this.read(runId, { fromSeq: nextSeq, toSeq })) {
-          if (options.signal.aborted) {
-            return;
-          }
-          nextSeq = event.seq + 1;
-          yield event;
-          if (
-            event.type === "run_status_changed" &&
-            ["completed", "failed", "cancelled"].includes(event.to)
-          ) {
-            return;
-          }
-        }
-        if (nextSeq < head) {
-          continue;
-        }
-        const current = this.getRun.get(runId);
-        if (
+  watch(runId: Id, options: Parameters<EventStore["watch"]>[1]): AsyncIterable<StoredEvent> {
+    return watchEvents(this, runId, options, {
+      subscribe: (watchedRunId, signal) => this.waitForChange(watchedRunId, signal),
+      isTerminal: (watchedRunId, observedNextSeq) => {
+        const current = this.getRun.get(watchedRunId);
+        return Promise.resolve(
           current !== undefined &&
-          ["completed", "failed", "cancelled"].includes(current.status) &&
-          current.next_seq <= nextSeq
-        ) {
-          return;
-        }
-        await subscription.changed;
-      } finally {
-        subscription.cancel();
-      }
-    }
-  }
-
-  private async allRunSummaries(): Promise<RunSummary[]> {
-    const summaries = new Map<Id, RunSummary>();
-    let cursor: string | undefined;
-    do {
-      const page = await this.listRuns({
-        limit: 100,
-        ...(cursor === undefined ? {} : { cursor }),
-      });
-      for (const summary of page.runs) {
-        summaries.set(summary.runId, summary);
-      }
-      cursor = page.nextCursor;
-    } while (cursor !== undefined);
-    return [...summaries.values()];
+            current.next_seq <= observedNextSeq &&
+            (current.status === "completed" ||
+              current.status === "failed" ||
+              current.status === "cancelled"),
+        );
+      },
+    });
   }
 
   /** {@inheritDoc EventStore.watchRuns} */
-  async *watchRuns(options: WatchRunsOptions): AsyncIterable<RunSummary> {
-    if (options.statuses?.some((status) => !RunStatus.safeParse(status).success)) {
-      throw new InvalidEventError([["statuses"]]);
-    }
-    let seen = new Map<Id, RunSummary>();
-    let initialized = false;
-    while (!options.signal.aborted) {
-      const subscription = this.waitForChange(undefined, options.signal);
-      try {
-        const summaries = await this.allRunSummaries();
-        if (!initialized) {
-          for (const summary of summaries) {
-            if (options.signal.aborted) {
-              return;
-            }
-            if (options.statuses === undefined || options.statuses.includes(summary.status)) {
-              yield summary;
-            }
-          }
-          seen = new Map(summaries.map((summary) => [summary.runId, summary]));
-          initialized = true;
-        } else {
-          for (const summary of summaries) {
-            const previous = seen.get(summary.runId);
-            if (previous === undefined) {
-              for await (const event of this.read(summary.runId, {
-                fromSeq: 0,
-                toSeq: summary.lastSeq,
-              })) {
-                if (options.signal.aborted) {
-                  return;
-                }
-                const status =
-                  event.type === "run_created"
-                    ? "pending"
-                    : event.type === "run_status_changed"
-                      ? event.to
-                      : undefined;
-                if (
-                  status !== undefined &&
-                  (options.statuses === undefined || options.statuses.includes(status))
-                ) {
-                  yield {
-                    ...summary,
-                    status,
-                    lastSeq: event.seq,
-                    lastTs: event.ts,
-                  };
-                }
-              }
-            } else if (summary.lastSeq > previous.lastSeq) {
-              for await (const event of this.read(summary.runId, {
-                fromSeq: previous.lastSeq + 1,
-                toSeq: summary.lastSeq,
-              })) {
-                if (options.signal.aborted) {
-                  return;
-                }
-                if (event.type === "run_status_changed") {
-                  if (options.statuses === undefined || options.statuses.includes(event.to)) {
-                    yield {
-                      ...summary,
-                      status: event.to,
-                      lastSeq: event.seq,
-                      lastTs: event.ts,
-                    };
-                  }
-                }
-              }
-            }
-            seen.set(summary.runId, summary);
-          }
-        }
-        await subscription.changed;
-      } finally {
-        subscription.cancel();
-      }
-    }
+  watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
+    return watchRunSummaries(this, options, (runId, signal) => this.waitForChange(runId, signal));
   }
 
   /** {@inheritDoc EventStore.head} */

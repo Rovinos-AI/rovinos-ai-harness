@@ -2,14 +2,13 @@
 import {
   Code,
   Id,
-  RunStatus,
   TraceId,
   type Code as SinkId,
   type Event,
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
-import { Pool, type Notification, type PoolClient, type QueryResultRow } from "pg";
+import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { z } from "zod";
 import {
   JsonContentCodec,
@@ -28,16 +27,14 @@ import {
   type EventStore,
   type ListRunsOptions,
   type RunSummary,
-  type WatchOptions,
-  type WatchRunsOptions,
 } from "../types.js";
+import { watchEvents, watchRunSummaries, type ChangeSubscription } from "../subscriptions.js";
 import {
   appendTransaction,
   decodeCursor,
   encodeEvents,
   eventFromRow,
   integer,
-  READ_PAGE_SIZE,
   runListPage,
   storeError,
   type EventRow,
@@ -47,6 +44,8 @@ import {
 import { deleteRunTransaction } from "./retention.js";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";
 import { initializePostgresStore } from "./initialize.js";
+import { readEvents } from "./reader.js";
+import { isRunTerminal, listenForChanges } from "./subscriptions.js";
 
 const connectionStringSchema = z
   .url()
@@ -187,252 +186,64 @@ export class PostgresEventStore implements EventStore {
   }
 
   /** {@inheritDoc EventStore.read} */
-  async *read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event> {
-    const toSeq = range?.toSeq ?? null;
-    let nextSeq = range?.fromSeq ?? 0;
-    try {
-      await this.ensureInitialized();
-      let rows = (
-        await this.pool.query<EventRow>(
-          "SELECT run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id FROM events WHERE run_id = $1 AND seq >= $2 AND ($3::bigint IS NULL OR seq <= $3) ORDER BY seq LIMIT $4",
-          [runId, nextSeq, toSeq, READ_PAGE_SIZE],
-        )
-      ).rows;
-      while (rows.length !== 0) {
-        for (const row of rows) {
-          yield await eventFromRow(this.codec, runId, row);
-          nextSeq = integer(row.seq) + 1;
-        }
-        rows = (
-          await this.pool.query<EventRow>(
-            "SELECT run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id FROM events WHERE run_id = $1 AND seq >= $2 AND ($3::bigint IS NULL OR seq <= $3) ORDER BY seq LIMIT $4",
-            [runId, nextSeq, toSeq, READ_PAGE_SIZE],
-          )
-        ).rows;
-      }
-    } catch (error) {
-      throw storeError(error);
-    }
+  read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event> {
+    return readEvents(
+      { pool: this.pool, codec: this.codec, ensureInitialized: () => this.ensureInitialized() },
+      runId,
+      range,
+    );
   }
 
-  private async listen(onNotification: (message: Notification) => void): Promise<{
-    client: PoolClient;
-    close: () => Promise<void>;
-  }> {
-    await this.ensureInitialized();
-    let client: PoolClient;
-    try {
-      client = await this.pool.connect();
-    } catch (error) {
-      throw storeError(error);
-    }
-    client.on("notification", onNotification);
-    try {
-      await client.query("LISTEN harness_events");
-    } catch (error) {
-      client.removeListener("notification", onNotification);
-      client.release();
-      throw storeError(error);
-    }
-    return {
-      client,
-      async close() {
-        client.removeListener("notification", onNotification);
-        await client.query("UNLISTEN harness_events").catch(() => undefined);
-        client.release();
-      },
+  private async waitForChange(
+    runId: Id | undefined,
+    signal: AbortSignal,
+  ): Promise<ChangeSubscription> {
+    let resolveChanged: () => void = () => undefined;
+    const changed = new Promise<void>((resolve) => {
+      resolveChanged = resolve;
+    });
+    const onAbort = (): void => {
+      resolveChanged();
     };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+    }
+    try {
+      const listener = await listenForChanges(
+        this.pool,
+        () => this.ensureInitialized(),
+        (message) => {
+          if (runId === undefined || message.payload?.startsWith(`${runId}:`) === true) {
+            resolveChanged();
+          }
+        },
+      );
+      return {
+        changed,
+        async cancel() {
+          signal.removeEventListener("abort", onAbort);
+          await listener.close();
+        },
+      };
+    } catch (error) {
+      signal.removeEventListener("abort", onAbort);
+      throw error;
+    }
   }
 
   /** {@inheritDoc EventStore.watch} */
-  async *watch(runId: Id, options: WatchOptions): AsyncIterable<Event> {
-    if (!Number.isSafeInteger(options.fromSeq) || options.fromSeq < 0) {
-      throw new InvalidEventError([["fromSeq"]]);
-    }
-    if (
-      options.maxBuffered !== undefined &&
-      (!Number.isSafeInteger(options.maxBuffered) || options.maxBuffered < 1)
-    ) {
-      throw new InvalidEventError([["maxBuffered"]]);
-    }
-    const maxBuffered = options.maxBuffered ?? 1_000;
-    if (options.signal.aborted) {
-      return;
-    }
-    let wake = (): void => undefined;
-    let notificationPending = false;
-    const listener = await this.listen((message) => {
-      if (message.payload?.startsWith(`${runId}:`) === true) {
-        notificationPending = true;
-        wake();
-      }
+  watch(runId: Id, options: Parameters<EventStore["watch"]>[1]): AsyncIterable<Event> {
+    return watchEvents(this, runId, options, {
+      subscribe: (watchedRunId, signal) => this.waitForChange(watchedRunId, signal),
+      isTerminal: (watchedRunId, observedNextSeq) =>
+        isRunTerminal(this.pool, () => this.ensureInitialized(), watchedRunId, observedNextSeq),
     });
-    const onAbort = (): void => wake();
-    options.signal.addEventListener("abort", onAbort, { once: true });
-    let nextSeq = options.fromSeq;
-    try {
-      while (!options.signal.aborted) {
-        notificationPending = false;
-        let resolveWake: () => void = () => undefined;
-        const changed = new Promise<void>((resolve) => {
-          resolveWake = resolve;
-        });
-        wake = resolveWake;
-        const head = await this.head(runId);
-        const toSeq = Math.min(head - 1, nextSeq + maxBuffered - 1);
-        for await (const event of this.read(runId, { fromSeq: nextSeq, toSeq })) {
-          if (options.signal.aborted) {
-            return;
-          }
-          nextSeq = event.seq + 1;
-          yield event;
-          if (
-            event.type === "run_status_changed" &&
-            ["completed", "failed", "cancelled"].includes(event.to)
-          ) {
-            return;
-          }
-        }
-        if (nextSeq < head) {
-          continue;
-        }
-        if (await this.isRunTerminal(runId, nextSeq)) {
-          return;
-        }
-        if (!notificationPending) {
-          await changed;
-        }
-      }
-    } finally {
-      options.signal.removeEventListener("abort", onAbort);
-      await listener.close();
-    }
-  }
-
-  private async isRunTerminal(runId: Id, observedNextSeq: number): Promise<boolean> {
-    try {
-      const result = await this.pool.query<{ next_seq: number | string; status: string }>(
-        "SELECT next_seq, status FROM runs WHERE run_id = $1",
-        [runId],
-      );
-      const row = result.rows[0];
-      return (
-        row !== undefined &&
-        integer(row.next_seq) <= observedNextSeq &&
-        (row.status === "completed" || row.status === "failed" || row.status === "cancelled")
-      );
-    } catch (error) {
-      throw storeError(error);
-    }
-  }
-
-  private async allRunSummaries(): Promise<RunSummary[]> {
-    const summaries = new Map<Id, RunSummary>();
-    let cursor: string | undefined;
-    do {
-      const page = await this.listRuns({
-        limit: 100,
-        ...(cursor === undefined ? {} : { cursor }),
-      });
-      for (const summary of page.runs) {
-        summaries.set(summary.runId, summary);
-      }
-      cursor = page.nextCursor;
-    } while (cursor !== undefined);
-    return [...summaries.values()];
   }
 
   /** {@inheritDoc EventStore.watchRuns} */
-  async *watchRuns(options: WatchRunsOptions): AsyncIterable<RunSummary> {
-    if (options.statuses?.some((status) => !RunStatus.safeParse(status).success)) {
-      throw new InvalidEventError([["statuses"]]);
-    }
-    if (options.signal.aborted) {
-      return;
-    }
-    let wake = (): void => undefined;
-    const listener = await this.listen(() => wake());
-    const onAbort = (): void => wake();
-    options.signal.addEventListener("abort", onAbort, { once: true });
-    let seen = new Map<Id, RunSummary>();
-    let initialized = false;
-    try {
-      while (!options.signal.aborted) {
-        let resolveWake: () => void = () => undefined;
-        const changed = new Promise<void>((resolve) => {
-          resolveWake = resolve;
-        });
-        wake = resolveWake;
-        const summaries = await this.allRunSummaries();
-        if (!initialized) {
-          for (const summary of summaries) {
-            if (options.signal.aborted) {
-              return;
-            }
-            if (options.statuses === undefined || options.statuses.includes(summary.status)) {
-              yield summary;
-            }
-          }
-          seen = new Map(summaries.map((summary) => [summary.runId, summary]));
-          initialized = true;
-        } else {
-          for (const summary of summaries) {
-            const previous = seen.get(summary.runId);
-            if (previous === undefined) {
-              for await (const event of this.read(summary.runId, {
-                fromSeq: 0,
-                toSeq: summary.lastSeq,
-              })) {
-                if (options.signal.aborted) {
-                  return;
-                }
-                const status =
-                  event.type === "run_created"
-                    ? "pending"
-                    : event.type === "run_status_changed"
-                      ? event.to
-                      : undefined;
-                if (
-                  status !== undefined &&
-                  (options.statuses === undefined || options.statuses.includes(status))
-                ) {
-                  yield {
-                    ...summary,
-                    status,
-                    lastSeq: event.seq,
-                    lastTs: event.ts,
-                  };
-                }
-              }
-            } else if (summary.lastSeq > previous.lastSeq) {
-              for await (const event of this.read(summary.runId, {
-                fromSeq: previous.lastSeq + 1,
-                toSeq: summary.lastSeq,
-              })) {
-                if (options.signal.aborted) {
-                  return;
-                }
-                if (event.type === "run_status_changed") {
-                  if (options.statuses === undefined || options.statuses.includes(event.to)) {
-                    yield {
-                      ...summary,
-                      status: event.to,
-                      lastSeq: event.seq,
-                      lastTs: event.ts,
-                    };
-                  }
-                }
-              }
-            }
-            seen.set(summary.runId, summary);
-          }
-        }
-        await changed;
-      }
-    } finally {
-      options.signal.removeEventListener("abort", onAbort);
-      await listener.close();
-    }
+  watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
+    return watchRunSummaries(this, options, (runId, signal) => this.waitForChange(runId, signal));
   }
 
   /** {@inheritDoc EventStore.head} */
