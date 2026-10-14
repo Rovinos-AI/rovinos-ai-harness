@@ -437,7 +437,7 @@ describe("confirmation-gated control-plane tools", () => {
       ...capturedContext,
       mcpReq: {
         ...capturedContext.mcpReq,
-        requestState: () => decodedState,
+        requestState: <T>() => decodedState as T,
         inputResponses: { confirm: { action: "accept", content: { confirm: true } } },
       },
     };

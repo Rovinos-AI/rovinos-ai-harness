@@ -139,6 +139,9 @@ function createInnerStore(): EventStoreLike {
       savedSnapshot = undefined;
       return Promise.resolve(count);
     },
+    consumeConfirmationState() {
+      return Promise.resolve(false);
+    },
     listRuns() {
       return Promise.resolve({ runs: [] });
     },
