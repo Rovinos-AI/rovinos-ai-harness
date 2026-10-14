@@ -70,22 +70,38 @@ export const ModelRequestSchema = z
     model: ModelRefSchema,
     role: Code.optional(),
     messages: z.array(MessageSchema),
+    /** Number of leading messages that belong to the stable prefix for provider caching. */
+    stablePrefixMessages: z.number().int().nonnegative().optional(),
     tools: z.array(ToolSpecSchema).optional(),
     output: z.object({ name: Code, schema: JsonValue, schemaHash: Sha256Hex }).strict().optional(),
     toolChoice: z.union([z.enum(["auto", "none"]), z.object({ forced: Code }).strict()]).optional(),
     maxOutputTokens: z.number().int().nonnegative().optional(),
     temperature: z.number().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((request, context) => {
+    if (
+      request.stablePrefixMessages !== undefined &&
+      request.stablePrefixMessages > request.messages.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["stablePrefixMessages"],
+        message: "Stable prefix must not exceed the request message count.",
+      });
+    }
+  });
 
 /** Inferred provider-neutral model request. */
 export type ModelRequest = z.infer<typeof ModelRequestSchema>;
 
-/** Token and optional cost usage reported by a provider. */
+/** Token usage and optional cost, including provider-reported cached input tokens. */
 export const ModelUsageSchema = z
   .object({
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
+    cacheReadTokens: z.number().int().nonnegative().optional(),
+    cacheWriteTokens: z.number().int().nonnegative().optional(),
     costMicros: z.number().int().nonnegative().optional(),
   })
   .strict();

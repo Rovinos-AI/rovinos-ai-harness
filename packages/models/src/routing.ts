@@ -92,16 +92,42 @@ function aggregateUsage(previous: ModelUsage | undefined, next: ModelUsage | und
   } else if (previous.costMicros !== undefined && next.costMicros !== undefined) {
     costMicros = previous.costMicros + next.costMicros;
   }
+  const cacheReadTokens = aggregateOptionalUsageCount(
+    previous?.cacheReadTokens,
+    next.cacheReadTokens,
+  );
+  const cacheWriteTokens = aggregateOptionalUsageCount(
+    previous?.cacheWriteTokens,
+    next.cacheWriteTokens,
+  );
   return {
     inputTokens: (previous?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + next.outputTokens,
+    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
+    ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
     ...(costMicros === undefined ? {} : { costMicros }),
   };
+}
+
+function aggregateOptionalUsageCount(
+  previous: number | undefined,
+  next: number | undefined,
+): number | undefined {
+  if (previous === undefined && next === undefined) {
+    return undefined;
+  }
+  return (previous ?? 0) + (next ?? 0);
 }
 
 function reportSpanUsage(usage: ModelUsage): void {
   setActiveSpanAttribute("harness.model.input_tokens", usage.inputTokens);
   setActiveSpanAttribute("harness.model.output_tokens", usage.outputTokens);
+  if (usage.cacheReadTokens !== undefined) {
+    setActiveSpanAttribute("harness.model.cache_read_tokens", usage.cacheReadTokens);
+  }
+  if (usage.cacheWriteTokens !== undefined) {
+    setActiveSpanAttribute("harness.model.cache_write_tokens", usage.cacheWriteTokens);
+  }
   if (usage.costMicros !== undefined) {
     setActiveSpanAttribute("harness.model.cost_micros", usage.costMicros);
   }

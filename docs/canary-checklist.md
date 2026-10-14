@@ -15,3 +15,8 @@ The hostile MCP App integration tests send run-seeded canaries through rejected 
 and scan the host's exported spans, logs, metrics, diagnostics, and captured stdout.
 The canary pipeline exercises the sample MCP fixture's error-result shape with a run-seeded raw
 value and verifies it is removed from persisted and exported sinks.
+
+The approval-screen unit tests inject synthetic canaries in invalid payloads and bridge
+errors, checking that the DOM error state and telemetry contain only fixed status text/codes.
+Hostile markup remains text, token display does not call approval/reveal tools, and no
+payload is written to browser storage.

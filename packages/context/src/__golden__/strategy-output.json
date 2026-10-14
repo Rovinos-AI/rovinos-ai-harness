@@ -1,6 +1,6 @@
 {
   "naive": {
-    "version": "v4",
+    "version": "v5",
     "output": {
       "messages": [
         {
@@ -79,6 +79,7 @@
           ]
         }
       ],
+      "stablePrefixMessages": 6,
       "stats": {
         "messageCount": 7,
         "estimatedTokens": 7,
@@ -120,6 +121,110 @@
     }
   },
   "sliding_window": {
+    "version": "v4",
+    "output": {
+      "messages": [
+        {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "synthetic goal"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "Summary of earlier work: summary of compacted work"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "[2 earlier steps omitted]"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "tool step"
+            },
+            {
+              "type": "tool_call",
+              "callId": "33333333333333333333333333",
+              "toolId": "lookup",
+              "args": {
+                "query": "synthetic"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "parts": [
+            {
+              "type": "tool_result",
+              "callId": "33333333333333333333333333",
+              "result": {
+                "value": "synthetic result"
+              },
+              "isError": false
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "latest"
+            }
+          ]
+        }
+      ],
+      "stablePrefixMessages": 5,
+      "stats": {
+        "messageCount": 6,
+        "estimatedTokens": 6,
+        "droppedGroups": 2,
+        "compactedRanges": 1,
+        "offloadedResults": 0
+      },
+      "pinnedSeqs": [0, 1],
+      "retainedSeqs": [
+        {
+          "runId": "00000000000000000000000000",
+          "seq": 0
+        },
+        {
+          "runId": "00000000000000000000000000",
+          "seq": 1
+        },
+        {
+          "runId": "00000000000000000000000000",
+          "seq": 4
+        },
+        {
+          "runId": "00000000000000000000000000",
+          "seq": 5
+        },
+        {
+          "runId": "00000000000000000000000000",
+          "seq": 6
+        }
+      ]
+    }
+  },
+  "summarizing": {
     "version": "v3",
     "output": {
       "messages": [
@@ -190,109 +295,7 @@
           ]
         }
       ],
-      "stats": {
-        "messageCount": 6,
-        "estimatedTokens": 6,
-        "droppedGroups": 2,
-        "compactedRanges": 1,
-        "offloadedResults": 0
-      },
-      "pinnedSeqs": [0, 1],
-      "retainedSeqs": [
-        {
-          "runId": "00000000000000000000000000",
-          "seq": 0
-        },
-        {
-          "runId": "00000000000000000000000000",
-          "seq": 1
-        },
-        {
-          "runId": "00000000000000000000000000",
-          "seq": 4
-        },
-        {
-          "runId": "00000000000000000000000000",
-          "seq": 5
-        },
-        {
-          "runId": "00000000000000000000000000",
-          "seq": 6
-        }
-      ]
-    }
-  },
-  "summarizing": {
-    "version": "v2",
-    "output": {
-      "messages": [
-        {
-          "role": "user",
-          "parts": [
-            {
-              "type": "text",
-              "text": "synthetic goal"
-            }
-          ]
-        },
-        {
-          "role": "user",
-          "parts": [
-            {
-              "type": "text",
-              "text": "Summary of earlier work: summary of compacted work"
-            }
-          ]
-        },
-        {
-          "role": "user",
-          "parts": [
-            {
-              "type": "text",
-              "text": "[2 earlier steps omitted]"
-            }
-          ]
-        },
-        {
-          "role": "assistant",
-          "parts": [
-            {
-              "type": "text",
-              "text": "tool step"
-            },
-            {
-              "type": "tool_call",
-              "callId": "33333333333333333333333333",
-              "toolId": "lookup",
-              "args": {
-                "query": "synthetic"
-              }
-            }
-          ]
-        },
-        {
-          "role": "tool",
-          "parts": [
-            {
-              "type": "tool_result",
-              "callId": "33333333333333333333333333",
-              "result": {
-                "value": "synthetic result"
-              },
-              "isError": false
-            }
-          ]
-        },
-        {
-          "role": "assistant",
-          "parts": [
-            {
-              "type": "text",
-              "text": "latest"
-            }
-          ]
-        }
-      ],
+      "stablePrefixMessages": 5,
       "stats": {
         "messageCount": 6,
         "estimatedTokens": 6,

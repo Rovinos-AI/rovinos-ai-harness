@@ -358,6 +358,7 @@ const configuration = [
       "packages/host/src/web/**/*.{js,mjs,ts,tsx}",
       "packages/control-plane/app/**/*.{js,mjs,ts,tsx}",
     ],
+    ignores: ["packages/approval-app/build.mjs"],
     rules: {
       "no-restricted-globals": ["error", "process", "require", "Buffer"],
       "no-restricted-imports": browserRestrictedImports(restrictedImports()[1].patterns),

@@ -67,6 +67,7 @@ export class StrategyContextPort implements ContextPort {
         strategyVersion: this.strategy.version,
         estimatedTokens: result.stats.estimatedTokens,
         messageCount: result.messages.length,
+        stablePrefixMessages: result.stablePrefixMessages,
       },
     };
   }

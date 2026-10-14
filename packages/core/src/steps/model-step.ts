@@ -5,6 +5,7 @@ import {
   type Event,
   type Id,
   type Message,
+  type ModelRequest,
   type ToolSpec,
 } from "@harness/schemas";
 import { requestHash } from "@harness/models";
@@ -34,6 +35,7 @@ export interface ModelStepOptions {
     readonly strategyVersion: Code;
     readonly estimatedTokens: number;
     readonly messageCount: number;
+    readonly stablePrefixMessages: number;
   };
 }
 
@@ -80,14 +82,10 @@ function modelRunContext(options: ModelStepOptions): RunContext {
   };
 }
 
-/**
- * Records a model request, performs the provider call, and records its outcome.
- *
- * @param options - Model port, recorder, request content, and injected IDs.
- * @returns The provider completion or a stable failure code with appended events.
- */
-export async function modelStep(options: ModelStepOptions): Promise<ModelStepResult> {
-  const requestId = options.ids.next();
+function requestParts(
+  options: ModelStepOptions,
+  requestId: Id,
+): { readonly modelRequest: ModelRequest; readonly requestPartial: EventPartial } {
   const role = options.role;
   const modelRequest = ModelRequestSchema.parse({
     requestId,
@@ -96,19 +94,34 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       model: options.modelName ?? "unknown",
     },
     messages: options.messages,
+    stablePrefixMessages: options.contextMetadata.stablePrefixMessages,
     ...(options.tools === undefined ? {} : { tools: [...options.tools] }),
     ...(role === undefined ? {} : { role }),
   });
-  const requestPartial: EventPartial = {
-    type: "model_request",
-    v: 1,
-    requestId,
-    provider: options.provider ?? "unknown",
-    model: options.modelName ?? "unknown",
-    messages: options.messages,
-    requestHash: requestHash(modelRequest),
-    ...(role === undefined ? {} : { role }),
+  return {
+    modelRequest,
+    requestPartial: {
+      type: "model_request",
+      v: 1,
+      requestId,
+      provider: options.provider ?? "unknown",
+      model: options.modelName ?? "unknown",
+      messages: options.messages,
+      requestHash: requestHash(modelRequest),
+      ...(role === undefined ? {} : { role }),
+    },
   };
+}
+
+/**
+ * Records a model request, performs the provider call, and records its outcome.
+ *
+ * @param options - Model port, recorder, request content, and injected IDs.
+ * @returns The provider completion or a stable failure code with appended events.
+ */
+export async function modelStep(options: ModelStepOptions): Promise<ModelStepResult> {
+  const requestId = options.ids.next();
+  const { modelRequest, requestPartial } = requestParts(options, requestId);
   const recorded: Event[] = [];
   let result: ModelStepResult | undefined;
 
@@ -180,6 +193,12 @@ function responsePayload(requestId: Id, completion: ModelCompletion): EventParti
     model: completion.model,
     inputTokens: completion.usage.inputTokens,
     outputTokens: completion.usage.outputTokens,
+    ...(completion.usage.cacheReadTokens === undefined
+      ? {}
+      : { cacheReadTokens: completion.usage.cacheReadTokens }),
+    ...(completion.usage.cacheWriteTokens === undefined
+      ? {}
+      : { cacheWriteTokens: completion.usage.cacheWriteTokens }),
     ...(completion.usage.costMicros === undefined
       ? {}
       : { costMicros: completion.usage.costMicros }),

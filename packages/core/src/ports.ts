@@ -176,6 +176,7 @@ export interface ContextBuildMetadata {
   readonly strategyVersion: Code;
   readonly estimatedTokens: number;
   readonly messageCount: number;
+  readonly stablePrefixMessages: number;
 }
 
 /** Provider messages and metadata produced atomically by one context build. */

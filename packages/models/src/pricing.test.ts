@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HarnessError } from "@harness/schemas";
 import { ModelUsageError } from "./errors.js";
-import { calculateCostMicros, resolveModelPricing } from "./pricing.js";
+import { calculateCostMicros, createPricingAccountant, resolveModelPricing } from "./pricing.js";
 
 describe("model pricing", () => {
   it.each([
@@ -87,6 +87,54 @@ describe("model pricing", () => {
 
   it("omits costs without a configured price", () => {
     expect(calculateCostMicros({ inputTokens: 100, outputTokens: 50 }, undefined)).toBeUndefined();
+  });
+
+  it("prices cached reads and writes independently from uncached input", () => {
+    expect(
+      calculateCostMicros(
+        {
+          inputTokens: 1_000,
+          outputTokens: 500,
+          cacheReadTokens: 300,
+          cacheWriteTokens: 200,
+        },
+        {
+          inputMicrosPerMTok: 250_000,
+          outputMicrosPerMTok: 1_000_000,
+          cacheReadMicrosPerMTok: 100_000,
+          cacheWriteMicrosPerMTok: 500_000,
+        },
+      ),
+    ).toBe(755);
+  });
+
+  it("falls back to input pricing and reports missing cache pricing once per model", () => {
+    const onMissingCachePrice = vi.fn();
+    const account = createPricingAccountant(
+      {
+        "sample/model-a": { inputMicrosPerMTok: 100, outputMicrosPerMTok: 0 },
+      },
+      vi.fn(),
+      onMissingCachePrice,
+    );
+    const usage = { inputTokens: 10_000, outputTokens: 1, cacheReadTokens: 2_000 };
+
+    expect(account({ provider: "sample", model: "model-a" }, usage)).toEqual({
+      ...usage,
+      costMicros: 1,
+    });
+    account({ provider: "sample", model: "model-a" }, usage);
+
+    expect(onMissingCachePrice).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects cached-token totals greater than total input tokens", () => {
+    expect(() =>
+      calculateCostMicros(
+        { inputTokens: 2, outputTokens: 0, cacheReadTokens: 2, cacheWriteTokens: 1 },
+        { inputMicrosPerMTok: 1, outputMicrosPerMTok: 0 },
+      ),
+    ).toThrow(ModelUsageError);
   });
 
   it("resolves prices only by the configured provider/model key", () => {

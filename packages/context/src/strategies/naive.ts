@@ -10,7 +10,7 @@ import { eventsToTranscript } from "../transcript.js";
  */
 export class NaiveStrategy implements ContextStrategy {
   readonly id: Code = "naive";
-  readonly version: Code = "v4";
+  readonly version: Code = "v5";
 
   /** {@inheritDoc ContextStrategy.build} */
   async build(input: Parameters<ContextStrategy["build"]>[0]): Promise<ContextResult> {
@@ -24,6 +24,10 @@ export class NaiveStrategy implements ContextStrategy {
       ...groups.flatMap((group) => group.messages),
       ...(plan === undefined ? [] : [renderPlanMessage(plan)]),
     ];
+    const latestGroupIndex = groups.findLastIndex((group) => !group.pinned);
+    const stablePrefixMessages = groups
+      .slice(0, latestGroupIndex < 0 ? groups.length : latestGroupIndex)
+      .reduce((count, group) => count + group.messages.length, 0);
     const offloadedResults = messages.reduce(
       (count, message) =>
         count +
@@ -34,6 +38,7 @@ export class NaiveStrategy implements ContextStrategy {
     );
     return ContextResultSchema.parseAsync({
       messages,
+      stablePrefixMessages,
       stats: {
         messageCount: messages.length,
         estimatedTokens: input.counter.count(messages, input.model),

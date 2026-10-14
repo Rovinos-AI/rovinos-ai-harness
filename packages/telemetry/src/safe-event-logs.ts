@@ -27,6 +27,10 @@ const pricingMissingDefinition = defineLogRecord("harness.model.pricing_missing"
   "harness.model.provider": attr.code(),
   "harness.model.name": attr.code(),
 });
+const pricingCacheMissingDefinition = defineLogRecord("harness.model.pricing_cache_missing", {
+  "harness.model.provider": attr.code(),
+  "harness.model.name": attr.code(),
+});
 
 /** SafeEvent fields mapped to bounded OpenTelemetry attribute names. */
 export const safeEventLogAttributeMap = {
@@ -395,6 +399,29 @@ export function emitPricingMissing(
     logger.emit({
       body: Code.parse("pricing_missing"),
       eventName: pricingMissingDefinition.name,
+      severityNumber: SeverityNumber.WARN,
+      attributes,
+      context: otelContext.active(),
+    });
+  } catch {
+    return;
+  }
+}
+
+/** Emits a bounded diagnostic when a cached-token price falls back to input pricing. */
+export function emitPricingCacheMissing(
+  provider: Code,
+  model: Code,
+  logger: Logger = safeEventLogger,
+): void {
+  const attributes = pricingCacheMissingDefinition.schema.parse({
+    "harness.model.provider": provider,
+    "harness.model.name": model,
+  });
+  try {
+    logger.emit({
+      body: Code.parse("pricing_cache_missing"),
+      eventName: pricingCacheMissingDefinition.name,
       severityNumber: SeverityNumber.WARN,
       attributes,
       context: otelContext.active(),
