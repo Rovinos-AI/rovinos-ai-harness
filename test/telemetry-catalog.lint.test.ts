@@ -36,6 +36,7 @@ const expectedLogNames = [
   "harness.safe.subagent_completed",
   "harness.safe.subagent_spawned",
   "harness.safe.tool_call",
+  "harness.sentinel.trip",
   "harness.vault.mark_terminal_failed",
 ];
 

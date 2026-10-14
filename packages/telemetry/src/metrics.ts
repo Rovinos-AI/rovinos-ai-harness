@@ -13,6 +13,10 @@ export const TELEMETRY_DROP_REASONS = [
   "event_stripped",
   "leak_sentinel",
   "processor_error",
+  "trip_queue_overflow",
+  "trip_append_failed",
+  "trip_flush_failed",
+  "trip_discarded",
 ] as const;
 
 /** Closed rejection reasons used by the host app-call counter. */

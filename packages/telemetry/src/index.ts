@@ -19,6 +19,7 @@ export {
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
 export {
+  countDroppedTelemetry,
   countHostAppRejected,
   countHostAppSpansAccepted,
   countPolicyDecision,
@@ -26,6 +27,7 @@ export {
   type HostAppRejectedReason,
   type PolicyDecision,
   POLICY_DECISIONS,
+  type TelemetryDropReason,
 } from "./metrics.js";
 export {
   __resetRegistryForTests,
@@ -61,11 +63,21 @@ export {
   SentinelGateInputSchema,
   SentinelGateResultSchema,
   SentinelRequiredError,
-  SentinelTripSchema,
   type SentinelGateInput,
   type SentinelGateOptions,
   type SentinelGateResult,
   type SentinelMatcherLike,
-  type SentinelTrip,
 } from "./sentinel/gate.js";
-export { createTelemetrySdk, type TelemetrySdk, type TelemetrySdkOptions } from "./sdk.js";
+export {
+  SentinelTripSchema,
+  TripQueue,
+  sentinelTripQueue,
+  type SentinelTrip,
+} from "./sentinel/trips.js";
+export { emitSentinelTrip } from "./safe-event-logs.js";
+export {
+  createTelemetrySdk,
+  forceFlushTelemetry,
+  type TelemetrySdk,
+  type TelemetrySdkOptions,
+} from "./sdk.js";

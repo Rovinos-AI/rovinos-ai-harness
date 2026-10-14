@@ -213,6 +213,7 @@ const logDefinitions = {
       "tool_output",
       "storage",
       "ui",
+      "telemetry_export",
     ]),
     "harness.pii.action": attr.enum(["tokenized", "redacted", "blocked", "allowed", "detokenized"]),
     "harness.pii.entity_count": attr.nonnegativeInt(),
@@ -240,6 +241,10 @@ const logDefinitions = {
   }),
 } satisfies Record<SafeEventType["kind"], LogRecordDefinition>;
 
+const sentinelTripDefinition = defineLogRecord("harness.sentinel.trip", {
+  "harness.run.id": attr.optional(attr.id()),
+  "harness.sentinel.trip.count": attr.nonnegativeInt(),
+});
 const safeEventLogger = logs.getLogger("@harness/core");
 
 function scalarValue(value: unknown): string | number | boolean | undefined {
@@ -301,6 +306,28 @@ export function emitSafeEvent(logger: Logger, safeEvent: SafeEventType): void {
       spanId: event.spanId,
       traceFlags: 0,
     }),
+  });
+}
+
+/**
+ * Emit the bounded log record for a sentinel trip.
+ *
+ * @param logger - OpenTelemetry logger from the logs API.
+ * @param trip - Optional run ID and integer count, with no matched content.
+ */
+export function emitSentinelTrip(
+  logger: Logger,
+  trip: { readonly runId?: Id; readonly count: number },
+): void {
+  const attributes = sentinelTripDefinition.schema.parse({
+    ...(trip.runId === undefined ? {} : { "harness.run.id": trip.runId }),
+    "harness.sentinel.trip.count": trip.count,
+  });
+  logger.emit({
+    body: Code.parse("leak_sentinel_trip"),
+    eventName: sentinelTripDefinition.name,
+    severityNumber: SeverityNumber.INFO,
+    attributes,
   });
 }
 

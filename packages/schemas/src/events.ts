@@ -186,7 +186,14 @@ const piiActionEvent = z
   .object({
     ...eventEnvelopeShape,
     type: z.literal("pii_action"),
-    boundary: z.enum(["model_input", "tool_input", "tool_output", "storage", "ui"]),
+    boundary: z.enum([
+      "model_input",
+      "tool_input",
+      "tool_output",
+      "storage",
+      "ui",
+      "telemetry_export",
+    ]),
     action: z.enum(["tokenized", "redacted", "blocked", "allowed", "detokenized"]),
     toolId: Code.optional(),
     entities: z.array(z.object({ type: Code, count: z.number().int().nonnegative() }).strict()),

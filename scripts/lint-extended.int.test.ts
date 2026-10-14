@@ -76,9 +76,13 @@ it("wires every extended linter into the static lint command", () => {
   const pipeline = readFileSync(resolve(rootDirectory, "azure-pipelines.yml"), "utf8");
   const lintCommand = /"lint": "([^"]+)"/u.exec(manifest)?.[1];
 
-  for (const name of ["md", "yaml", "sh", "docker", "editorconfig", "spell"]) {
+  for (const name of ["md", "yaml", "sh", "docker", "editorconfig", "spell", "ts"]) {
     expect(lintCommand).toContain(`yarn lint:${name}`);
   }
+  // Type-aware ESLint over the whole repo needs more than Node's default ~4 GB heap (peak ~4.4 GB on 2026-10-13).
+  expect(/"lint:ts": "([^"]+)"/u.exec(manifest)?.[1]).toMatch(
+    /^NODE_OPTIONS=--max-old-space-size=\d+ eslint \. --max-warnings 0$/u,
+  );
   expect(pipeline).toContain("- script: yarn lint");
   expect(pipeline).toContain('LINT_PULL_IMAGES: "1"');
   expect(pipeline).not.toContain("LINT_SKIP_CONTAINERS");

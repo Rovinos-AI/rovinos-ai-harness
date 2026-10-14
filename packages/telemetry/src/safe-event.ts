@@ -82,7 +82,14 @@ const piiAction = z
   .object({
     ...commonFields,
     kind: attr.enum(["pii_action"]),
-    boundary: attr.enum(["model_input", "tool_input", "tool_output", "storage", "ui"]),
+    boundary: attr.enum([
+      "model_input",
+      "tool_input",
+      "tool_output",
+      "storage",
+      "ui",
+      "telemetry_export",
+    ]),
     action: attr.enum(["tokenized", "redacted", "blocked", "allowed", "detokenized"]),
     toolId: attr.optional(attr.code()),
     entities: z.array(z.object({ type: attr.code(), count: attr.nonnegativeInt() }).strict()),

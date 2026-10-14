@@ -110,7 +110,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 - **SafeEvent**: closed, `.strict()` projection of an event containing only `meta`-classified fields from an explicit allowlist. Built by `toSafeEvent()` in `@harness/telemetry`.
 - **Code**: string matching `^[a-z0-9_.-]{1,64}$`. **Id**: 26-char ULID.
 - **Token**: placeholder for a raw sensitive value, format `<TYPE_N>` (for example `<EMAIL_1>`), run-scoped. The **vault** maps tokens to raw values.
-- **Boundary**: where data crosses a trust line: `model_input`, `tool_input`, `tool_output`, `storage`, `ui`.
+- **Boundary**: where data crosses a trust line: `model_input`, `tool_input`, `tool_output`, `storage`, `ui`, `telemetry_export`.
 - **Checkpoint**: event-log offset plus snapshot (compacted context, plan, workspace reference, `traceparent`).
 - **Trusted server**: MCP server configured `trust: internal`; only these receive trace context.
 - **Policy decision**: `allow | ask | deny`. `ask` suspends the run.
