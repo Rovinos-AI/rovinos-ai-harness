@@ -59,6 +59,7 @@ export {
   WorkspaceRef,
 } from "./primitives.js";
 export { isRegexSafePattern } from "./regex-safety.js";
+export { AppSpanSchema, type AppSpan } from "./app-span.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
 export { KeyVersionConfigSchema, KeysConfigSchema, type KeysConfig } from "./config/keys.js";
 export { isSecretKeyName } from "./secret-key-name.js";
@@ -95,11 +96,13 @@ export {
 export { VaultConfigSchema, type VaultConfig } from "./config/vault.js";
 export {
   ModelEnforcementConfigSchema,
+  ModelPricingRateSchema,
   ModelRetryConfigSchema,
   ModelProviderConfigSchema,
   ModelRoutingConfigSchema,
   ModelsConfigSchema,
   type ModelEnforcementConfig,
+  type ModelPricingRate,
   type ModelProviderConfig,
   type ModelRoutingConfig,
   type ModelRetryConfig,
@@ -205,7 +208,14 @@ export {
   type DoctorCheckStatus,
   type DoctorStatus,
 } from "./cli/doctor.js";
-export { KeyGenerateResultSchema, type KeyGenerateResult } from "./cli/keys.js";
+export {
+  KeyGenerateResultSchema,
+  KeyRetireResultSchema,
+  KeyRotationResultSchema,
+  type KeyGenerateResult,
+  type KeyRetireResult,
+  type KeyRotationResult,
+} from "./cli/keys.js";
 export {
   ServersCheckResultSchema,
   ServersCheckServerResultSchema,

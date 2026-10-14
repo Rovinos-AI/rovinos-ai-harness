@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Models retry configuration is owned by task 14.12.
 // Models provider and routing configuration is owned by task 14.13.
+// Models pricing configuration is owned by task 14.14.
 import { z } from "zod";
 import { CapabilitiesSchema } from "../capabilities.js";
 import { ModelRefSchema } from "../messages.js";
@@ -72,6 +73,16 @@ export const ModelRetryConfigSchema = z
   .strict()
   .prefault({});
 
+/** Configured input and output prices in integer micros per million tokens. */
+export const ModelPricingRateSchema = z
+  .object({
+    inputMicrosPerMTok: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    outputMicrosPerMTok: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+
+const modelPricingKey = z.string().regex(/^[a-z0-9_.-]{1,64}\/[a-z0-9_.-]{1,64}$/u);
+
 /** Structured-output repair policy, owned by model task 14.10. */
 export const ModelEnforcementConfigSchema = z
   .object({
@@ -86,6 +97,7 @@ export const ModelsConfigSchema = z
     retry: ModelRetryConfigSchema,
     enforcement: ModelEnforcementConfigSchema,
     maxConcurrent: z.coerce.number().int().positive().default(4),
+    pricing: z.record(modelPricingKey, ModelPricingRateSchema).default({}),
     providers: z
       .array(ModelProviderConfigSchema)
       .default([])
@@ -110,6 +122,8 @@ export const ModelsConfigSchema = z
 
 /** Inferred retry policy after applying defaults. */
 export type ModelRetryConfig = z.infer<typeof ModelRetryConfigSchema>;
+/** Inferred configured model prices. */
+export type ModelPricingRate = z.infer<typeof ModelPricingRateSchema>;
 /** Inferred structured-output enforcement policy after applying defaults. */
 export type ModelEnforcementConfig = z.infer<typeof ModelEnforcementConfigSchema>;
 /** Inferred model gateway configuration after applying defaults. */

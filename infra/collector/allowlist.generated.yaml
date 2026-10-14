@@ -20,7 +20,7 @@ processors:
       - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.run.id\"]) where span.name == \"harness.approval_wait\""
       - "keep_keys(span.attributes, [\"harness.checkpoint.reason\", \"harness.error.code\", \"harness.event.seq\", \"harness.run.id\"]) where span.name == \"harness.checkpoint\""
       - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.run.id\"]) where span.name == \"harness.compaction\""
-      - "keep_keys(span.attributes, [\"harness.context.estimated_tokens\", \"harness.context.message_count\", \"harness.context.strategy\", \"harness.context.strategy_version\", \"harness.error.code\", \"harness.event.seq\", \"harness.model.attempts\", \"harness.model.repair_attempts\", \"harness.run.id\"]) where span.name == \"harness.model_call\""
+      - "keep_keys(span.attributes, [\"harness.context.estimated_tokens\", \"harness.context.message_count\", \"harness.context.strategy\", \"harness.context.strategy_version\", \"harness.error.code\", \"harness.event.seq\", \"harness.model.attempts\", \"harness.model.cost_micros\", \"harness.model.input_tokens\", \"harness.model.output_tokens\", \"harness.model.repair_attempts\", \"harness.run.id\"]) where span.name == \"harness.model_call\""
       - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.run.continuation_of\", \"harness.run.depth\", \"harness.run.id\", \"harness.run.parent_id\", \"harness.segment.id\"]) where span.name == \"harness.run\""
       - "keep_keys(span.attributes, [\"harness.error.code\", \"harness.event.seq\", \"harness.policy.decision\", \"harness.policy.rule_id\", \"harness.run.id\"]) where span.name == \"harness.tool_call\""
       - "keep_keys(span.attributes, [\"harness.app.id\", \"harness.error.code\", \"harness.run.id\", \"harness.ui.decision\", \"harness.ui.duration_ms\", \"harness.ui.session_id\"]) where span.name == \"harness.ui.decision\""
@@ -34,11 +34,13 @@ processors:
     error_mode: "ignore"
     logs:
       log_record:
-        - "not (body == \"harness.safe.approval_wait\" or body == \"harness.safe.budget_exceeded\" or body == \"harness.safe.checkpoint\" or body == \"harness.safe.model_call\" or body == \"harness.safe.pii_action\" or body == \"harness.safe.policy_decision\" or body == \"harness.safe.run_created\" or body == \"harness.safe.run_status\" or body == \"harness.safe.subagent_completed\" or body == \"harness.safe.subagent_spawned\" or body == \"harness.safe.tool_call\" or body == \"harness.sentinel.trip\" or body == \"harness.vault.mark_terminal_failed\")"
+        - "not (body == \"harness.keys.rotated\" or body == \"harness.model.pricing_missing\" or body == \"harness.safe.approval_wait\" or body == \"harness.safe.budget_exceeded\" or body == \"harness.safe.checkpoint\" or body == \"harness.safe.model_call\" or body == \"harness.safe.pii_action\" or body == \"harness.safe.policy_decision\" or body == \"harness.safe.run_created\" or body == \"harness.safe.run_status\" or body == \"harness.safe.subagent_completed\" or body == \"harness.safe.subagent_spawned\" or body == \"harness.safe.tool_call\" or body == \"harness.sentinel.trip\" or body == \"harness.vault.mark_terminal_failed\")"
   transform/log_attributes:
     error_mode: "ignore"
     log_statements:
       - "keep_keys(scope.attributes, [])"
+      - "keep_keys(log.attributes, [\"harness.keys.store.rows_rotated\", \"harness.keys.vault.rows_rotated\"]) where log.body == \"harness.keys.rotated\""
+      - "keep_keys(log.attributes, [\"harness.model.name\", \"harness.model.provider\"]) where log.body == \"harness.model.pricing_missing\""
       - "keep_keys(log.attributes, [\"harness.approval.decided_by\", \"harness.approval.decision\", \"harness.approval.reason\", \"harness.approval.wait_ms\", \"harness.event.seq\", \"harness.event.timestamp_ms\", \"harness.policy.version\", \"harness.run.id\", \"harness.span.id\", \"harness.trace.id\"]) where log.body == \"harness.safe.approval_wait\""
       - "keep_keys(log.attributes, [\"harness.budget.kind\", \"harness.budget.limit\", \"harness.budget.observed\", \"harness.event.seq\", \"harness.event.timestamp_ms\", \"harness.policy.version\", \"harness.run.id\", \"harness.span.id\", \"harness.trace.id\"]) where log.body == \"harness.safe.budget_exceeded\""
       - "keep_keys(log.attributes, [\"harness.checkpoint.has_workspace_ref\", \"harness.checkpoint.seq\", \"harness.event.seq\", \"harness.event.timestamp_ms\", \"harness.policy.version\", \"harness.run.id\", \"harness.span.id\", \"harness.trace.id\"]) where log.body == \"harness.safe.checkpoint\""
@@ -56,7 +58,7 @@ processors:
     error_mode: "ignore"
     metrics:
       metric:
-        - "not (name == \"harness.host.app_rejected\" or name == \"harness.host.app_spans_accepted\" or name == \"harness.mcp.discovery_failed\" or name == \"harness.policy.decisions\" or name == \"harness.sentinel.scope_reduced\" or name == \"harness.sentinel.short_values_skipped\" or name == \"harness.telemetry.dropped\")"
+        - "not (name == \"harness.host.app_rejected\" or name == \"harness.host.app_spans_accepted\" or name == \"harness.mcp.discovery_failed\" or name == \"harness.model.cost_micros\" or name == \"harness.model.tokens\" or name == \"harness.policy.decisions\" or name == \"harness.sentinel.scope_reduced\" or name == \"harness.sentinel.short_values_skipped\" or name == \"harness.telemetry.dropped\")"
   transform/metric_attributes:
     error_mode: "ignore"
     metric_statements:
@@ -65,6 +67,8 @@ processors:
       - "keep_keys(datapoint.attributes, [\"harness.host.app_rejected.reason\"]) where metric.name == \"harness.host.app_rejected\""
       - "keep_keys(datapoint.attributes, []) where metric.name == \"harness.host.app_spans_accepted\""
       - "keep_keys(datapoint.attributes, []) where metric.name == \"harness.mcp.discovery_failed\""
+      - "keep_keys(datapoint.attributes, [\"harness.model.name\", \"harness.model.provider\"]) where metric.name == \"harness.model.cost_micros\""
+      - "keep_keys(datapoint.attributes, [\"harness.model.name\", \"harness.model.provider\"]) where metric.name == \"harness.model.tokens\""
       - "keep_keys(datapoint.attributes, [\"harness.policy.decision\"]) where metric.name == \"harness.policy.decisions\""
       - "keep_keys(datapoint.attributes, []) where metric.name == \"harness.sentinel.scope_reduced\""
       - "keep_keys(datapoint.attributes, []) where metric.name == \"harness.sentinel.short_values_skipped\""

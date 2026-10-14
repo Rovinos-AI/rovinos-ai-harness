@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { KeyGenerateResultSchema, parseJson } from "@harness/schemas";
+import { KeyGenerateResultSchema, KeyRetireResultSchema, parseJson } from "@harness/schemas";
+import { HarnessConfigSchema } from "@harness/config";
 import { describe, expect, it } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
@@ -7,16 +8,17 @@ import { createOutput } from "../output.js";
 import { main } from "../main.js";
 import { keysCommand } from "./keys.js";
 
-function createContext() {
+function createContext(overrides: Partial<CliContext> = {}) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const context: CliContext = {
-    loadConfig: () => Promise.reject(new Error("Configuration is not needed.")),
+    loadConfig: () => Promise.resolve(HarnessConfigSchema.parse({})),
     out: createOutput({
       stdout: (text) => stdout.push(text),
       stderr: (text) => stderr.push(text),
     }),
     clock: { now: () => 0 },
+    ...overrides,
   };
   return { context, stdout, stderr };
 }
@@ -54,5 +56,174 @@ describe("harness keys generate", () => {
 
     expect(exitCode).toBe(ExitCode.ok);
     expect(stdout.join("")).toContain("environment variable or secret store");
+  });
+
+  it("rotates the selected stores in resumable batches and logs only counts", async () => {
+    const calls: string[] = [];
+    const logged: { vault: number; store: number }[] = [];
+    const makeAdapter = (name: string) => ({
+      reencryptBatch(input: {
+        readonly targetKeyId: string;
+        readonly limit?: number | undefined;
+        readonly afterCursor?: string | undefined;
+      }): Promise<{ processed: number; nextCursor?: string | undefined }> {
+        calls.push(`${name}:${input.afterCursor ?? "start"}`);
+        return Promise.resolve(
+          input.afterCursor === undefined
+            ? { processed: 2, nextCursor: `${name}-cursor` }
+            : { processed: 1 },
+        );
+      },
+      countRowsByKey: () => Promise.resolve([]),
+    });
+    const { context, stdout, stderr } = createContext({
+      openKeyRotation: (_config, selection) =>
+        Promise.resolve({
+          currentKeyId: "key-b",
+          ...(selection.vault
+            ? { vault: { ...makeAdapter("vault"), close: () => undefined } }
+            : {}),
+          ...(selection.store
+            ? { store: { ...makeAdapter("store"), close: () => Promise.resolve() } }
+            : {}),
+          close: () => Promise.resolve(),
+        }),
+      keyRotationLogger: (counts) => logged.push(counts),
+    });
+
+    const exitCode = await main(["keys", "rotate", "--to", "key-b"], context, [keysCommand]);
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(calls).toEqual([
+      "vault:start",
+      "vault:vault-cursor",
+      "store:start",
+      "store:store-cursor",
+    ]);
+    expect(logged).toEqual([{ vault: 3, store: 3 }]);
+    expect(stdout.join("")).toContain("vault=3 store=3");
+    expect(stderr).toEqual([]);
+  });
+
+  it("restarts a pass when a concurrent update left rows under an old key", async () => {
+    const calls: string[] = [];
+    const createRacingAdapter = (name: string) => {
+      let pass = 0;
+      let counts = 0;
+      return {
+        reencryptBatch: () => {
+          calls.push(`${name}:${String(pass + 1)}`);
+          pass += 1;
+          return Promise.resolve({ processed: 1 });
+        },
+        countRowsByKey: () => {
+          counts += 1;
+          return Promise.resolve(
+            counts === 1 ? [{ keyId: "key-a", count: 1 }] : [{ keyId: "key-b", count: 2 }],
+          );
+        },
+      };
+    };
+    const { context, stdout } = createContext({
+      openKeyRotation: () =>
+        Promise.resolve({
+          currentKeyId: "key-b",
+          vault: { ...createRacingAdapter("vault"), close: () => undefined },
+          store: { ...createRacingAdapter("store"), close: () => Promise.resolve() },
+          close: () => Promise.resolve(),
+        }),
+    });
+
+    const exitCode = await main(["keys", "rotate", "--to", "key-b"], context, [keysCommand]);
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(calls).toEqual(["vault:1", "vault:2", "store:1", "store:2"]);
+    expect(stdout.join("")).toContain("vault=2 store=2");
+  });
+
+  it("fails after three passes and reports only remaining per-store counts", async () => {
+    let passes = 0;
+    const adapter = {
+      reencryptBatch: () => {
+        passes += 1;
+        return Promise.resolve({ processed: 0 });
+      },
+      countRowsByKey: () => Promise.resolve([{ keyId: "key-a", count: 2 }]),
+    };
+    const { context, stdout, stderr } = createContext({
+      openKeyRotation: () =>
+        Promise.resolve({
+          currentKeyId: "key-b",
+          vault: { ...adapter, close: () => undefined },
+          store: {
+            reencryptBatch: () => Promise.resolve({ processed: 0 }),
+            countRowsByKey: () => Promise.resolve([]),
+            close: () => Promise.resolve(),
+          },
+          close: () => Promise.resolve(),
+        }),
+    });
+
+    const exitCode = await main(["keys", "rotate", "--to", "key-b"], context, [keysCommand]);
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(passes).toBe(3);
+    expect(stdout).toEqual([]);
+    expect(stderr).toEqual(["key_rotation_incomplete remaining_vault_2_store_0\n"]);
+  });
+
+  it("refuses retirement while either store still references the key", async () => {
+    const { context, stdout, stderr } = createContext({
+      openKeyRotation: () =>
+        Promise.resolve({
+          currentKeyId: "key-b",
+          vault: {
+            reencryptBatch: () => Promise.resolve({ processed: 0 }),
+            countRowsByKey: () => Promise.resolve([{ keyId: "key-a", count: 1 }]),
+            close: () => undefined,
+          },
+          store: {
+            reencryptBatch: () => Promise.resolve({ processed: 0 }),
+            countRowsByKey: () => Promise.resolve([]),
+            close: () => Promise.resolve(),
+          },
+          close: () => Promise.resolve(),
+        }),
+    });
+
+    const exitCode = await main(["keys", "retire", "key-a"], context, [keysCommand]);
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(stdout).toEqual([]);
+    expect(stderr).toEqual(["key_in_use\n"]);
+  });
+
+  it("allows retirement only after both stores report zero references", async () => {
+    const { context, stdout, stderr } = createContext({
+      openKeyRotation: () =>
+        Promise.resolve({
+          currentKeyId: "key-b",
+          vault: {
+            reencryptBatch: () => Promise.resolve({ processed: 0 }),
+            countRowsByKey: () => Promise.resolve([]),
+            close: () => undefined,
+          },
+          store: {
+            reencryptBatch: () => Promise.resolve({ processed: 0 }),
+            countRowsByKey: () => Promise.resolve([]),
+            close: () => Promise.resolve(),
+          },
+          close: () => Promise.resolve(),
+        }),
+    });
+
+    const exitCode = await main(["--json", "keys", "retire", "key-a"], context, [keysCommand]);
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(parseJson(KeyRetireResultSchema, stdout[0] ?? "")).toEqual({
+      keyId: "key-a",
+      status: "safe_to_remove",
+    });
+    expect(stderr).toEqual([]);
   });
 });
