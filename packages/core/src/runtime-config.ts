@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   ModelsConfigSchema,
+  type Code,
+  type Event,
   type PolicyConfig,
   type PiiConfig,
   type RolesConfig,
@@ -33,8 +35,8 @@ import type { Clock } from "./recorder.js";
 import type { ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
 import type { CancelRunResult } from "./cancel.js";
-import type { ApprovalDecision } from "./approvals.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
+import type { ApprovalDecision, ApprovalResolutionMetadata } from "./approvals.js";
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
 export interface RuntimeOverrides {
@@ -99,26 +101,30 @@ export interface Runtime {
   readonly keys: KeyProvider;
   readonly clock: Clock;
   readonly ids: IdGenerator;
-  run(goal: JsonValue): Promise<RunLoopResult>;
+  run(goal: JsonValue, options?: { readonly role?: Code }): Promise<RunLoopResult>;
+  /** Starts a run and exposes when its initial events are durable and when execution settles. */
+  start(
+    goal: JsonValue,
+    options?: { readonly role?: Code },
+  ): {
+    readonly runId: Id;
+    readonly started: Promise<void>;
+    readonly completion: Promise<RunLoopResult>;
+  };
   /** Starts a follow-up run from an eligible terminal run. */
   continueRun(runId: Id, input: RunInput): Promise<RunLoopResult>;
   resume(runId: Id, options?: RuntimeResumeOptions): Promise<RunLoopResult>;
   /** Requests durable cancellation and reports if the run was already terminal. */
   cancel(runId: Id): Promise<CancelRunResult>;
-  /**
-   * Resolves a pending approval using the runtime's PII-aware tool port.
-   *
-   * @param runId - Run containing the approval.
-   * @param approvalId - Pending approval identifier.
-   * @param decision - Human approval decision.
-   * @param edits - Replacement arguments for an edit decision.
-   * @returns The durable approval resolution event.
-   */
+  /** Resolves a pending approval using the runtime's PII-aware tool port. */
   resolveApproval(
     runId: Id,
     approvalId: Id,
     decision: ApprovalDecision,
-    edits?: JsonValue,
+    options?: {
+      readonly edits?: JsonValue;
+      readonly metadata?: ApprovalResolutionMetadata;
+    },
   ): Promise<Extract<Event, { type: "approval_resolved" }>>;
   close(): Promise<void>;
 }

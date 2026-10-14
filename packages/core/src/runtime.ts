@@ -10,6 +10,7 @@ import {
 } from "./runtime-cancellation.js";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
+import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
 import type { ToolPort } from "./ports.js";
 import { LeaseLostError, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
@@ -21,7 +22,6 @@ import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool } from "./subagent/runtime.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import { setupRuntime } from "./runtime-setup.js";
-import { resolveApproval as resolveApprovalInRun } from "./approvals.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
   Runtime,
@@ -229,6 +229,38 @@ function createTerminalAwareRunControl({
   };
 }
 
+function createRuntimeRunMethods(
+  options: RuntimeComposition,
+  tool: ToolPort,
+  runWithControl: RunControl,
+): Pick<Runtime, "run" | "start"> {
+  return {
+    run: (goal, runOptions) => startRun(options, tool, goal, { runWithControl, ...runOptions }),
+    start: (goal, runOptions) => {
+      const runId = options.ids.next();
+      let resolveStarted: () => void = () => undefined;
+      let rejectStarted: (reason?: unknown) => void = () => undefined;
+      const started = new Promise<void>((resolve, reject) => {
+        resolveStarted = resolve;
+        rejectStarted = reject;
+      });
+      void started.catch(() => undefined);
+      const completion = startRun(options, tool, goal, {
+        runWithControl,
+        ...runOptions,
+        runId,
+        onStarted: resolveStarted,
+      });
+      void completion.catch(rejectStarted);
+      return {
+        runId,
+        started,
+        completion,
+      };
+    },
+  };
+}
+
 function composeRuntime(
   options: RuntimeComposition & {
     readonly roles: RoleRegistry;
@@ -237,7 +269,6 @@ function composeRuntime(
 ): Runtime {
   const {
     config,
-    overrides,
     clock,
     ids,
     store,
@@ -251,7 +282,6 @@ function composeRuntime(
     roles,
     scopes,
   } = options;
-  const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   const subagentTool = createSubagentTool({
     config,
     clock,
@@ -280,7 +310,7 @@ function composeRuntime(
     keys,
     clock,
     ids,
-    run: (goal) => startRun(options, tool, goal, runWithControl),
+    ...createRuntimeRunMethods(options, tool, runWithControl),
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume,
     cancel: async (runId) => {
@@ -290,15 +320,7 @@ function composeRuntime(
       }
       return result;
     },
-    close: () =>
-      closeRuntimeResources({
-        store,
-        ...(options.closeToolPort === undefined ? {} : { closeToolPort: options.closeToolPort }),
-        vault,
-        keys,
-        flushTelemetry,
-      }),
-    resolveApproval: (runId, approvalId, decision, edits) => {
+    resolveApproval: (runId, approvalId, decision, resolveOptions) => {
       if (
         decision === "edit" &&
         overrides.tool === undefined &&
@@ -306,8 +328,25 @@ function composeRuntime(
       ) {
         throw new ApprovalEditUnavailableError();
       }
-      return resolveApprovalInRun(store, runId, approvalId, decision, edits, clock, tool);
+      return resolveApprovalEvent(
+        store,
+        runId,
+        approvalId,
+        decision,
+        resolveOptions?.edits,
+        clock,
+        tool,
+        resolveOptions?.metadata,
+      );
     },
+    close: () =>
+      closeRuntimeResources({
+        store,
+        ...(options.closeToolPort === undefined ? {} : { closeToolPort: options.closeToolPort }),
+        vault,
+        keys,
+        flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,
+      }),
   };
 }
 
