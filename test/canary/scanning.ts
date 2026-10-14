@@ -2,28 +2,6 @@
 import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import type { Detection } from "@harness/schemas";
-import type { CanarySet } from "./canaries.js";
-
-/** Return exact synthetic detections, including repeated occurrences in one payload. */
-export function canaryDetections(canaries: CanarySet, text: string): Detection[] {
-  return canaries.all.flatMap(({ value, entityType }) => {
-    const detections: Detection[] = [];
-    let start = text.indexOf(value);
-    while (start >= 0) {
-      detections.push({
-        entityType,
-        start,
-        end: start + value.length,
-        confidence: 1,
-        detectorId: "canary.synthetic",
-      });
-      start = text.indexOf(value, start + value.length);
-    }
-    return detections;
-  });
-}
-
 /** Read the event and vault databases, including any active SQLite sidecar files. */
 export async function readDatabaseSinks(
   databases: readonly { readonly name: string; readonly path: string }[],

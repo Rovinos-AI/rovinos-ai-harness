@@ -1,34 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
+import { loadConfig } from "@harness/config";
 import { InMemoryWorkspace, OffloadingToolPort, type WorkspacePort } from "@harness/context";
+import { createRuntime } from "@harness/core";
+import type { ModelCompletion, Runtime, RuntimeOverrides, ToolPort } from "@harness/core";
+import { FakeModelPort } from "@harness/core/testing";
 import { FileCassetteStore } from "@harness/models";
-import { buildApprovalPayload } from "@harness/policy";
-import { AesGcmContentCodec, SqliteEventStore } from "@harness/store";
-import {
-  Code,
-  Id,
-  KeysConfigSchema,
-  PiiConfigSchema,
-  SequentialIdGenerator,
-  Sha256Hex,
-} from "@harness/schemas";
-import { PiiEventStore, PiiToolPort, Tokenizer, type PiiToolPortLike } from "@harness/pii";
-import { AuditingVaultResolver, LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { Code, Id, Sha256Hex, SequentialIdGenerator } from "@harness/schemas";
+import type { Event, VaultValueEntry } from "@harness/schemas";
+import { findTokens, tokenType, Token } from "@harness/vault";
+import type { VaultRunReader } from "@harness/telemetry";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { createCanaries, type CanarySet, type CanaryValue } from "./canaries.js";
-import { recordCanaryRunContent } from "./event-content.js";
-import { canaryDetections, readDatabaseSinks } from "./scanning.js";
+import { createCanaries, type CanarySet } from "./canaries.js";
+import { captureCliOutput } from "./cli-output.js";
+import { readDatabaseSinks } from "./scanning.js";
 import {
-  captureWithoutCanaryGuards,
+  captureWithoutSentinel,
   createCanaryTelemetry,
   emitCanaryBadLog,
   emitCanaryUnsafeSpan,
   type CanaryTelemetry,
 } from "./telemetry.js";
 
-const CANARY_TOOL = Code.parse("canary.echo");
+const ECHO_TOOL = Code.parse("canary.echo");
+const FAIL_TOOL = Code.parse("canary.fail");
+const ASK_TOOL = Code.parse("canary.ask");
+const TEST_KEY_REF = "env:CANARY_TEST_KEY";
 
 interface CapturedSinks {
   readonly spans: CanaryTelemetry["spans"];
@@ -37,68 +36,177 @@ interface CapturedSinks {
   readonly stderr: string[];
   readonly inspect: string[];
   readonly context: string[];
+  readonly approvals: string[];
   readonly snapshot: string[];
   readonly workspace: Map<string, Uint8Array>;
   readonly cassette: string[];
   readonly toolBoundary: string[];
-  readonly approvals: string[];
+  readonly toolErrors: string[];
   readonly unprotectedExporter: string[];
 }
 
-function testKeyProvider(): LocalKeyProvider {
-  const key = Buffer.alloc(32, 37).toString("base64");
-  return new LocalKeyProvider({
-    config: KeysConfigSchema.parse({
-      currentKeyId: "canary-test-key",
-      keys: [{ id: "canary-test-key", secret: "env:CANARY_TEST_KEY" }],
-    }),
-    secretResolver: { resolve: () => Promise.resolve({ reveal: () => key }) },
-    env: { NODE_ENV: "test" },
-    onWarning: () => undefined,
-  });
+class RuntimeVaultReader implements VaultRunReader {
+  private runtime: Runtime | undefined;
+  private readonly versions = new Map<Id, number>();
+
+  attach(runtime: Runtime): void {
+    this.runtime = runtime;
+  }
+
+  async version(runId: Id): Promise<number> {
+    const version = (this.versions.get(runId) ?? 0) + 1;
+    this.versions.set(runId, version);
+    return version;
+  }
+
+  async listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
+    const runtime = this.runtime;
+    if (runtime === undefined) {
+      return [];
+    }
+    const tokens = new Set<Token>();
+    for await (const event of runtime.store.read(runId)) {
+      for (const { token } of findTokens(JSON.stringify(event))) {
+        tokens.add(token);
+      }
+    }
+    const entries: VaultValueEntry[] = [];
+    for (const token of tokens) {
+      const rawValue = await runtime.vault.resolve(
+        runId,
+        token,
+        { boundary: "ui" },
+        () => undefined,
+      );
+      if (rawValue !== undefined) {
+        entries.push({ rawValue, entityType: Code.parse(tokenType(token).toLowerCase()) });
+      }
+    }
+    return entries;
+  }
 }
 
-/**
- * Composes the production storage, tokenizer, tool, telemetry, and offload boundaries with
- * isolated SQLite files and capture sinks for the release-gate scenario matrix.
- */
+function completion(parts: ModelCompletion["parts"]): ModelCompletion {
+  return {
+    provider: "synthetic",
+    model: "synthetic",
+    parts,
+    providerBlobs: null,
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: parts.some((part) => part.type === "tool_call") ? "tool_calls" : "stop",
+    latencyMs: 0,
+    schemaValid: true,
+    repairAttempts: 0,
+    fallbackDepth: 0,
+  };
+}
+
+function secretResolver(): NonNullable<RuntimeOverrides["secretResolver"]> {
+  const value = Buffer.alloc(32, 37).toString("base64");
+  return { resolve: () => Promise.resolve({ reveal: () => value }) };
+}
+
+function testToolPort(
+  canaries: CanarySet,
+  captured: Pick<CapturedSinks, "toolBoundary" | "toolErrors">,
+  executed: string[],
+): ToolPort {
+  return {
+    describe: (toolId) =>
+      [ECHO_TOOL, FAIL_TOOL, ASK_TOOL].includes(toolId)
+        ? { idempotent: true, timeoutMs: 1_000 }
+        : undefined,
+    execute: (call) => {
+      executed.push(call.toolId);
+      captured.toolBoundary.push(JSON.stringify(call.args));
+      if (call.toolId === FAIL_TOOL) {
+        const error = new Error(
+          `${canaries.card.value}\n${new Error(canaries.card.value).stack ?? ""}`,
+        );
+        captured.toolErrors.push(error.message);
+        return Promise.reject(error);
+      }
+      if (call.toolId === ECHO_TOOL) {
+        return Promise.resolve({
+          outcome: "ok",
+          result: { value: canaries.phone.value, repeated: canaries.phone.value },
+        });
+      }
+      return Promise.resolve({ outcome: "ok", result: { accepted: true } });
+    },
+  };
+}
+
+function modelFor(canaries: CanarySet): FakeModelPort {
+  const callId = (value: number): Id => Id.parse(String(value).padStart(26, "1"));
+  return new FakeModelPort([
+    completion([
+      { type: "text", text: `Model echo: ${canaries.apiKey.value}` },
+      {
+        type: "tool_call",
+        callId: callId(1),
+        toolId: ECHO_TOOL,
+        args: { value: canaries.phone.value },
+      },
+      {
+        type: "tool_call",
+        callId: callId(2),
+        toolId: FAIL_TOOL,
+        args: { value: canaries.card.value },
+      },
+      {
+        type: "tool_call",
+        callId: callId(3),
+        toolId: ASK_TOOL,
+        args: { value: canaries.person.value },
+      },
+    ]),
+  ]);
+}
+
+/** Compose the shipped runtime around synthetic ports and capture its real durable sinks. */
 export class CanaryHarness {
   readonly canaries: CanarySet;
-  readonly runId: Id;
   readonly captured: CapturedSinks;
   readonly eventDatabasePath: string;
   readonly vaultDatabasePath: string;
+  readonly executedTools: string[];
   readonly workspace: WorkspacePort;
 
-  private readonly keyProvider: LocalKeyProvider;
-  private readonly vault: SqliteVault;
-  private readonly store: PiiEventStore;
-  private readonly tokenizer: Tokenizer;
-  private readonly telemetry: CanaryTelemetry;
-  private readonly ids = new SequentialIdGenerator();
   private readonly directory: string;
+  private readonly runtimeConfig: Awaited<ReturnType<typeof loadConfig>>;
+  private readonly runtime: Runtime;
+  private readonly telemetry: CanaryTelemetry;
+  private readonly reader: RuntimeVaultReader;
+  private readonly ids: SequentialIdGenerator;
+  private readonly clock: { now(): number };
   private readonly memoryWorkspace = new InMemoryWorkspace();
+  runId: Id | undefined;
 
   private constructor(input: {
     readonly canaries: CanarySet;
     readonly directory: string;
-    readonly eventDatabasePath: string;
-    readonly vaultDatabasePath: string;
-    readonly keyProvider: LocalKeyProvider;
-    readonly vault: SqliteVault;
-    readonly store: PiiEventStore;
-    readonly tokenizer: Tokenizer;
+    readonly runtimeConfig: Awaited<ReturnType<typeof loadConfig>>;
+    readonly runtime: Runtime;
     readonly telemetry: CanaryTelemetry;
+    readonly reader: RuntimeVaultReader;
+    readonly ids: SequentialIdGenerator;
+    readonly clock: { now(): number };
+    readonly executedTools: string[];
+    readonly toolBoundary: string[];
+    readonly toolErrors: string[];
   }) {
     this.canaries = input.canaries;
     this.directory = input.directory;
-    this.eventDatabasePath = input.eventDatabasePath;
-    this.vaultDatabasePath = input.vaultDatabasePath;
-    this.keyProvider = input.keyProvider;
-    this.vault = input.vault;
-    this.store = input.store;
-    this.tokenizer = input.tokenizer;
+    this.runtimeConfig = input.runtimeConfig;
+    this.runtime = input.runtime;
     this.telemetry = input.telemetry;
+    this.reader = input.reader;
+    this.ids = input.ids;
+    this.clock = input.clock;
+    this.executedTools = input.executedTools;
+    this.eventDatabasePath = join(input.directory, "harness.db");
+    this.vaultDatabasePath = join(input.directory, "vault.db");
     this.captured = {
       spans: input.telemetry.spans,
       logs: input.telemetry.logs,
@@ -106,14 +214,14 @@ export class CanaryHarness {
       stderr: [],
       inspect: [],
       context: [],
+      approvals: [],
       snapshot: [],
       workspace: new Map(),
       cassette: [],
-      toolBoundary: [],
-      approvals: [],
+      toolBoundary: input.toolBoundary,
+      toolErrors: input.toolErrors,
       unprotectedExporter: [],
     };
-    this.runId = Id.parse(this.ids.next());
     this.workspace = {
       write: async (path, data) => {
         await this.memoryWorkspace.write(path, data);
@@ -123,165 +231,178 @@ export class CanaryHarness {
     };
   }
 
-  /** Create isolated encrypted databases, seed exact canaries, and install capture exporters. */
+  /** Create a unique data directory and compose the configured runtime with fake ports. */
   static async create(seed = randomUUID()): Promise<CanaryHarness> {
     const canaries = createCanaries(seed);
     const directory = await mkdtemp(join(tmpdir(), "harness-canary-"));
-    const eventDatabasePath = join(directory, "events.sqlite");
-    const vaultDatabasePath = join(directory, "vault.sqlite");
-    const keyProvider = testKeyProvider();
-    const vault = new SqliteVault(vaultDatabasePath, keyProvider);
-    const eventStore = new SqliteEventStore(eventDatabasePath, new AesGcmContentCodec(keyProvider));
-    const config = PiiConfigSchema.parse({
-      detokenize: [{ toolId: CANARY_TOOL, args: ["/value"] }],
-    });
-    const tokenizer = new Tokenizer({
-      policy: config,
-      vault,
-      detectors: {
-        detect: (text) => canaryDetections(canaries, text),
-      },
-    });
-    const store = new PiiEventStore(eventStore, tokenizer);
-    const telemetry = createCanaryTelemetry(vault);
-    const harness = new CanaryHarness({
-      canaries,
-      directory,
-      eventDatabasePath,
-      vaultDatabasePath,
-      keyProvider,
-      vault,
-      store,
-      tokenizer,
-      telemetry,
-    });
-    for (const value of canaries.all) {
-      await vault.put(harness.runId, value.entityType, value.value);
+    const configPath = join(directory, "harness.yaml");
+    const policy = [
+      "version: 1",
+      "defaultDecision: deny",
+      "rules:",
+      "  - id: canary_tool_allow",
+      "    match:",
+      `      tools: [${ECHO_TOOL}, ${FAIL_TOOL}]`,
+      "    decision: allow",
+      "    reason: canary_allowed",
+      "  - id: canary_tool_ask",
+      "    match:",
+      `      tools: [${ASK_TOOL}]`,
+      "    decision: ask",
+      "    reason: canary_approval",
+      "",
+    ].join("\n");
+    const source = [
+      "run: {}",
+      "keys:",
+      "  currentKeyId: canary-test-key",
+      "  keys:",
+      "    - id: canary-test-key",
+      `      secret: ${TEST_KEY_REF}`,
+      "policy:",
+      "  file: policy.yaml",
+      "pii:",
+      "  defaultAction: tokenize",
+      "  detokenize:",
+      `    - toolId: ${ECHO_TOOL}`,
+      "      args: [/value]",
+      `    - toolId: ${FAIL_TOOL}`,
+      "      args: [/value]",
+      "  custom:",
+      "    - name: canary_api_key",
+      "      pattern: 'hsk_live_[a-f0-9]{24}'",
+      "    - name: canary_person",
+      "      pattern: '[A-Z][a-z]{2,9}-[a-f0-9]{8}'",
+      "",
+    ].join("\n");
+    await writeFile(join(directory, "policy.yaml"), policy, "utf8");
+    await writeFile(configPath, source, "utf8");
+    const runtimeConfig = await loadConfig({ configPath });
+    const reader = new RuntimeVaultReader();
+    const telemetry = createCanaryTelemetry(reader);
+    const clock = { now: () => 100 };
+    const ids = new SequentialIdGenerator();
+    const resolver = secretResolver();
+    const toolBoundary: string[] = [];
+    const toolErrors: string[] = [];
+    const executedTools: string[] = [];
+    try {
+      const runtime = await createRuntime(runtimeConfig, {
+        dataDir: directory,
+        roleConfigDirectory: directory,
+        clock,
+        ids,
+        model: modelFor(canaries),
+        tool: testToolPort(canaries, { toolBoundary, toolErrors }, executedTools),
+        secretResolver: resolver,
+      });
+      reader.attach(runtime);
+      return new CanaryHarness({
+        canaries,
+        directory,
+        runtimeConfig,
+        runtime,
+        telemetry,
+        reader,
+        ids,
+        clock,
+        toolBoundary,
+        toolErrors,
+        executedTools,
+      });
+    } catch (error) {
+      telemetry.unsafeSpanCleanup();
+      await Promise.all([telemetry.sdk.tracerProvider.shutdown(), telemetry.sdk.loggerProvider.shutdown()]);
+      await rm(directory, { recursive: true, force: true });
+      throw error;
     }
-    return harness;
   }
 
-  /** Tokenize a raw value at a selected boundary and capture the resulting sink payload. */
-  async captureTokenized(
-    sink: "stdout" | "stderr" | "inspect" | "context",
-    value: CanaryValue,
-    boundary: "model_input" | "tool_output" | "storage" | "ui" = "storage",
-  ): Promise<string> {
-    const result = await this.tokenizer.tokenizeText(this.runId, value.value, {
-      boundary,
-      destination: "local",
-    });
-    this.captured[sink].push(result.text);
-    return result.text;
-  }
+  /** Exercise goal, model, tool, exception, and approval inputs through the runtime run loop. */
+  async runRuntimeScenario(): Promise<void> {
+    const result = await this.runtime.run({ goal: this.canaries.email.value });
+    const runId = result.events[0]?.runId;
+    if (runId === undefined) {
+      throw new Error("The canary runtime did not record its run.");
+    }
+    this.runId = runId;
+    if (result.status !== "suspended") {
+      throw new Error("The canary runtime did not suspend for the ask policy.");
+    }
+    const events: Event[] = [];
+    for await (const event of this.runtime.store.read(runId)) {
+      events.push(event);
+    }
+    const snapshot = await this.runtime.store.latestSnapshot(runId);
+    this.captured.snapshot.push(JSON.stringify(snapshot ?? null));
 
-  /** Write goal, model response, and snapshot content through the PII-aware event store. */
-  async recordRunContent(value: CanaryValue): Promise<void> {
-    await recordCanaryRunContent({
-      runId: this.runId,
-      value: value.value,
-      ids: this.ids,
-      store: this.store,
-      tokenizer: this.tokenizer,
-      captureSnapshot: (snapshot) => this.captured.snapshot.push(JSON.stringify(snapshot ?? null)),
-      captureInspect: (text) => this.captured.inspect.push(text),
-      captureContext: (text) => this.captured.context.push(text),
-      captureStderr: (text) => this.captured.stderr.push(text),
-    });
-  }
-
-  /** Exercise the real tool-input/output decorator, retaining raw args only in tool memory. */
-  async runTool(value: CanaryValue, options: { readonly failure?: boolean } = {}): Promise<string> {
-    const port = this.createToolPort(value, options.failure === true);
-    const call = {
-      callId: Id.parse(this.ids.next()),
-      toolId: CANARY_TOOL,
-      args: { value: value.value },
-    };
-    const context = { runId: this.runId, signal: new AbortController().signal };
-    const prepared = await port.prepare(call, context);
-    const result = await port.execute(prepared, context);
-    return JSON.stringify(result);
-  }
-
-  /** Build an approval payload from tokenized tool arguments and capture its serialized form. */
-  async recordApprovalPayload(value: CanaryValue): Promise<void> {
-    const tokenized = await this.tokenizer.tokenizeJson(
-      this.runId,
-      { value: value.value },
-      { boundary: "tool_input", destination: { tool: CANARY_TOOL } },
+    const response = events.find(
+      (event): event is Extract<Event, { type: "model_response" }> =>
+        event.type === "model_response",
     );
-    const payload = buildApprovalPayload({
-      call: {
-        callId: Id.parse(this.ids.next()),
-        toolId: CANARY_TOOL,
-        args: tokenized.value,
-      },
-      rule: { id: Code.parse("canary.ask"), reason: Code.parse("test_approval") },
-    });
-    this.captured.approvals.push(JSON.stringify(payload));
-  }
-
-  /** Exercise PII tokenization before an actual workspace offload write. */
-  async offloadToolResult(value: CanaryValue): Promise<void> {
-    const inner = this.createToolPort(value, false, `${value.value} ${value.value}`);
-    const offloading = new OffloadingToolPort(
-      inner,
-      this.workspace,
-      {
-        thresholdBytes: 1,
-        previewChars: 0,
-      },
-      this.ids,
+    const modelText = response?.content.find((part) => part.type === "text");
+    if (modelText?.type !== "text") {
+      throw new Error("The fake model response was not persisted.");
+    }
+    await this.recordCassette(modelText.text);
+    const toolResult = events.find(
+      (event): event is Extract<Event, { type: "tool_result" }> => event.type === "tool_result",
     );
-    const call = {
-      callId: Id.parse(this.ids.next()),
-      toolId: CANARY_TOOL,
-      args: { value: value.value },
-    };
-    const context = { runId: this.runId, signal: new AbortController().signal };
-    const prepared = await offloading.prepare(call, context);
-    await offloading.execute(prepared, context);
-  }
+    await this.recordOffload(JSON.stringify(toolResult?.result ?? null));
 
-  /** Send a malformed log field through the real allowlist and sentinel pipeline. */
-  async emitBadLog(value: CanaryValue): Promise<void> {
-    await emitCanaryBadLog(this.telemetry, this.runId, value.value);
-  }
-
-  /** Send an unsafe test-hook span through the processor and fail-closed sentinel. */
-  async emitUnsafeSpan(value: CanaryValue): Promise<void> {
-    await emitCanaryUnsafeSpan(this.telemetry, this.runId, value.value);
-  }
-
-  /** Export a raw span without either the allowlist processor or sentinel gate. */
-  async captureWithoutSentinelOrProcessor(value: CanaryValue): Promise<void> {
-    this.captured.unprotectedExporter.push(await captureWithoutCanaryGuards(value.value));
-  }
-
-  /** Persist tokenized model content using the real file-backed cassette store. */
-  async recordCassette(value: CanaryValue): Promise<void> {
-    const { text } = await this.tokenizer.tokenizeText(this.runId, value.value, {
-      boundary: "storage",
-      destination: "local",
-    });
-    const path = join(this.directory, "canary.cassette.json");
-    const cassette = new FileCassetteStore(path);
-    await cassette.set({
-      hash: Sha256Hex.parse("b".repeat(64)),
-      response: {
-        parts: [{ type: "text", text }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-        finishReason: Code.parse("stop"),
-        latencyMs: 0,
+    await captureCliOutput({
+      args: ["--json", "inspect", runId],
+      config: this.runtimeConfig,
+      runtime: this.runtime,
+      clock: this.clock,
+      stdout: (text) => {
+        this.captured.stdout.push(text);
+        this.captured.inspect.push(text);
       },
+      stderr: (text) => this.captured.stderr.push(text),
     });
-    this.captured.cassette.push(await readFile(path, "utf8"));
+    await captureCliOutput({
+      args: ["--json", "context", runId],
+      config: this.runtimeConfig,
+      runtime: this.runtime,
+      clock: this.clock,
+      stdout: (text) => {
+        this.captured.stdout.push(text);
+        this.captured.context.push(text);
+      },
+      stderr: (text) => this.captured.stderr.push(text),
+    });
+    const approval = events.find(
+      (event): event is Extract<Event, { type: "approval_requested" }> =>
+        event.type === "approval_requested",
+    );
+    if (approval === undefined) {
+      throw new Error("The canary run did not create an approval request.");
+    }
+    await captureCliOutput({
+      args: ["--json", "approvals", "show", approval.approvalId, "--show-args"],
+      config: this.runtimeConfig,
+      runtime: this.runtime,
+      clock: this.clock,
+      stdout: (text) => {
+        this.captured.stdout.push(text);
+        this.captured.approvals.push(text);
+      },
+      stderr: (text) => this.captured.stderr.push(text),
+    });
   }
 
-  /** Return sink names that contain any plaintext or encoded canary value. */
+  /** Exercise real logging, span, and vault-resolution paths using this runtime's vault. */
+  async exerciseTelemetry(): Promise<void> {
+    const runId = this.requireRunId();
+    await emitCanaryBadLog(this.telemetry, runId, this.canaries.email.value);
+    await emitCanaryUnsafeSpan(this.telemetry, runId, this.canaries.phone.value);
+    await this.telemetry.sdk.forceFlush();
+  }
+
+  /** Return sink names containing plaintext or encoded canary values. */
   async findLeaks(): Promise<string[]> {
-    await this.flushTelemetry();
+    await this.telemetry.sdk.forceFlush();
     const sinks: [string, string][] = [
       ["spans", JSON.stringify(this.captured.spans)],
       ["logs", JSON.stringify(this.captured.logs)],
@@ -289,9 +410,9 @@ export class CanaryHarness {
       ["stderr", this.captured.stderr.join("\n")],
       ["cli.inspect", this.captured.inspect.join("\n")],
       ["cli.context", this.captured.context.join("\n")],
+      ["cli.approvals", this.captured.approvals.join("\n")],
       ["snapshot", this.captured.snapshot.join("\n")],
       ["cassette", this.captured.cassette.join("\n")],
-      ["approval", this.captured.approvals.join("\n")],
       ["unprotected-exporter", this.captured.unprotectedExporter.join("\n")],
       ...[...this.captured.workspace].map(([path, data]): [string, string] => [
         `workspace:${path}`,
@@ -311,57 +432,76 @@ export class CanaryHarness {
     ];
   }
 
-  /** Check the encrypted vault contains every value while its file bytes contain none. */
+  /** Confirm every seeded value resolves from the runtime's read-only audited vault. */
   async assertVaultRoundTrips(): Promise<void> {
-    for (const value of this.canaries.all) {
-      const token = Token.parse(await this.vault.put(this.runId, value.entityType, value.value));
-      const resolved = await this.vault.resolve(this.runId, token, {
-        boundary: "tool_input",
-        toolId: CANARY_TOOL,
-      });
-      if (resolved !== value.value) {
-        throw new Error("A canary did not resolve from the encrypted vault.");
+    const entries = await this.reader.listRawValueEntries(this.requireRunId());
+    const values = new Set(entries.map(({ rawValue }) => rawValue));
+    for (const { value } of this.canaries.all) {
+      if (!values.has(value)) {
+        throw new Error("A canary did not resolve from the runtime's encrypted vault.");
       }
     }
   }
 
-  /** Shut down exporters and remove the isolated databases and temporary files. */
+  /** Prove the release detector catches a leak when the shipped sentinel is disabled. */
+  async captureWithoutSentinel(): Promise<void> {
+    this.captured.unprotectedExporter.push(
+      await captureWithoutSentinel(this.canaries.person.value),
+    );
+  }
+
+  /** Flush and close the runtime and telemetry resources, then remove the isolated data. */
   async close(): Promise<void> {
-    await this.flushTelemetry();
-    this.telemetry.unsafeSpanCleanup();
-    await this.telemetry.sdk.tracerProvider.shutdown();
-    await this.telemetry.sdk.loggerProvider.shutdown();
-    await this.store.close();
-    this.vault.close();
-    this.keyProvider.dispose();
-    await rm(this.directory, { recursive: true, force: true });
+    try {
+      await this.runtime.close();
+      await this.telemetry.sdk.forceFlush();
+      this.telemetry.unsafeSpanCleanup();
+      await Promise.all([
+        this.telemetry.sdk.tracerProvider.shutdown(),
+        this.telemetry.sdk.loggerProvider.shutdown(),
+      ]);
+    } finally {
+      await rm(this.directory, { recursive: true, force: true });
+    }
   }
 
-  private createToolPort(
-    value: CanaryValue,
-    failure: boolean,
-    result: string = value.value,
-  ): PiiToolPort {
-    const inner: PiiToolPortLike = {
-      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
-      execute: (call) => {
-        this.captured.toolBoundary.push(JSON.stringify(call.args));
-        if (failure) {
-          return Promise.reject(new Error(`${value.value}\n${new Error(value.value).stack ?? ""}`));
-        }
-        return Promise.resolve({ outcome: "ok", result: { value: result } });
+  private requireRunId(): Id {
+    if (this.runId === undefined) {
+      throw new Error("The canary runtime has not been run.");
+    }
+    return this.runId;
+  }
+
+  private async recordCassette(text: string): Promise<void> {
+    const path = join(this.directory, "canary.cassette.json");
+    const cassette = new FileCassetteStore(path);
+    await cassette.set({
+      hash: Sha256Hex.parse("b".repeat(64)),
+      response: {
+        parts: [{ type: "text", text }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: Code.parse("stop"),
+        latencyMs: 0,
       },
-    };
-    return new PiiToolPort(inner, {
-      tokenizer: this.tokenizer,
-      config: PiiConfigSchema.parse({
-        detokenize: [{ toolId: CANARY_TOOL, args: ["/value"] }],
-      }),
-      resolver: new AuditingVaultResolver(this.vault, () => undefined),
     });
+    this.captured.cassette.push(await readFile(path, "utf8"));
   }
 
-  private async flushTelemetry(): Promise<void> {
-    await this.telemetry.sdk.forceFlush();
+  private async recordOffload(text: string): Promise<void> {
+    const port: ToolPort = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () => Promise.resolve({ outcome: "ok", result: text }),
+    };
+    const offloading = new OffloadingToolPort(port, this.workspace, {
+      thresholdBytes: 1,
+      previewChars: 0,
+    }, this.ids);
+    const call = {
+      callId: Id.parse(this.ids.next()),
+      toolId: ECHO_TOOL,
+      args: { value: text },
+    };
+    const context = { runId: this.requireRunId(), signal: new AbortController().signal };
+    await offloading.execute(await offloading.prepare(call, context), context);
   }
 }

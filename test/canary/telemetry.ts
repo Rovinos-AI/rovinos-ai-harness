@@ -6,13 +6,14 @@ import { Id } from "@harness/schemas";
 import {
   attr,
   createTelemetrySdk,
+  defineSpan,
   defineLogRecord,
   SentinelGate,
+  type VaultRunReader,
   VaultRunView,
   type TelemetrySdkOptions,
 } from "@harness/telemetry";
-import { __registerUnsafeSpanForTests, createTestSpanCollector } from "@harness/telemetry/testing";
-import type { SqliteVault } from "@harness/vault";
+import { __registerUnsafeSpanForTests } from "@harness/telemetry/testing";
 import { z } from "zod";
 
 const UNSAFE_SPAN_NAME = "harness.canary.unsafe";
@@ -33,7 +34,7 @@ export interface CanaryTelemetry {
 }
 
 /** Install guarded telemetry exporters backed by the encrypted vault values. */
-export function createCanaryTelemetry(vault: SqliteVault): CanaryTelemetry {
+export function createCanaryTelemetry(vault: VaultRunReader): CanaryTelemetry {
   const spans: ExportedSpan[] = [];
   const records: ExportedLog[] = [];
   const sdk = createTelemetrySdk({
@@ -106,17 +107,37 @@ export async function emitCanaryUnsafeSpan(
   await telemetry.sdk.forceFlush();
 }
 
-/** Capture the raw value on an exporter with no allowlist processor or sentinel gate. */
-export async function captureWithoutCanaryGuards(canary: string): Promise<string> {
-  const unprotected = createTestSpanCollector();
-  const span = unprotected.provider
-    .getTracer("@harness/canary-negative-control")
-    .startSpan(UNSAFE_SPAN_NAME, { attributes: { "harness.canary.value": canary } });
-  span.end();
-  await unprotected.provider.forceFlush();
-  const payload = JSON.stringify(
-    unprotected.getFinishedSpans().map(({ name, attributes }) => ({ name, attributes })),
+/** Capture the raw value using the shipped allowlist processor with its sentinel disabled. */
+export async function captureWithoutSentinel(canary: string): Promise<string> {
+  const spans: ExportedSpan[] = [];
+  const sdk = createTelemetrySdk({
+    spanExporter: {
+      export: (finished, callback) => {
+        spans.push(...finished);
+        callback({ code: ExportResultCode.SUCCESS });
+      },
+      shutdown: () => Promise.resolve(),
+    },
+    logExporter: {
+      export: (_finished, callback) => callback({ code: ExportResultCode.SUCCESS }),
+      forceFlush: () => Promise.resolve(),
+      shutdown: () => Promise.resolve(),
+    },
+    telemetry: { sentinel: { enabled: false } },
+  });
+  const definition = defineSpan(
+    "harness.canary.negative_control",
+    { "harness.canary.value": attr.enum([canary]) },
+    { taskId: "8.5", packageName: "@harness/telemetry" },
   );
-  await unprotected.provider.shutdown();
+  const span = sdk.tracerProvider
+    .getTracer("@harness/canary-negative-control")
+    .startSpan(definition.name, { attributes: { "harness.canary.value": canary } });
+  span.end();
+  await sdk.tracerProvider.forceFlush();
+  const payload = JSON.stringify(
+    spans.map(({ name, attributes }) => ({ name, attributes })),
+  );
+  await Promise.all([sdk.tracerProvider.shutdown(), sdk.loggerProvider.shutdown()]);
   return payload;
 }

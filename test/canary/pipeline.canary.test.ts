@@ -23,14 +23,23 @@ function luhnValid(value: string): boolean {
 }
 
 describe("canary release gate", () => {
-  let harness: CanaryHarness;
+  let harness: CanaryHarness | undefined;
+
+  function currentHarness(): CanaryHarness {
+    if (harness === undefined) {
+      throw new Error("The canary harness has not been initialized.");
+    }
+    return harness;
+  }
 
   beforeAll(async () => {
     harness = await CanaryHarness.create();
   });
 
   afterAll(async () => {
-    await harness.close();
+    if (harness !== undefined) {
+      await harness.close();
+    }
   });
 
   it("generates unique synthetic values and encoded variants from the seed", () => {
@@ -59,25 +68,22 @@ describe("canary release gate", () => {
   });
 
   it("keeps canaries out of every captured sink across the scenario matrix", async () => {
-    await harness.recordRunContent(harness.canaries.email);
+    const current = currentHarness();
+    await current.runRuntimeScenario();
+    await current.exerciseTelemetry();
 
-    harness.captured.stdout.push(await harness.runTool(harness.canaries.phone));
-    harness.captured.stderr.push(await harness.runTool(harness.canaries.person, { failure: true }));
-    await harness.recordApprovalPayload(harness.canaries.apiKey);
-    await harness.captureTokenized("stderr", harness.canaries.card, "model_input");
-    await harness.emitBadLog(harness.canaries.email);
-    await harness.emitUnsafeSpan(harness.canaries.phone);
-    await harness.offloadToolResult(harness.canaries.card);
-    await harness.recordCassette(harness.canaries.apiKey);
-
-    expect(harness.captured.toolBoundary.join("\n")).toContain(harness.canaries.phone.value);
-    expect(await harness.findLeaks()).toEqual([]);
-    await expect(harness.assertVaultRoundTrips()).resolves.toBeUndefined();
+    expect(current.captured.toolBoundary.join("\n")).toContain(current.canaries.phone.value);
+    expect(current.captured.toolBoundary.join("\n")).toContain(current.canaries.card.value);
+    expect(current.captured.toolErrors.join("\n")).toContain(current.canaries.card.value);
+    expect(current.executedTools).toEqual(["canary.echo", "canary.fail"]);
+    expect(await current.findLeaks()).toEqual([]);
+    await expect(current.assertVaultRoundTrips()).resolves.toBeUndefined();
   });
 
-  it("detects leaks when the sentinel and processor path is bypassed", async () => {
-    await harness.captureWithoutSentinelOrProcessor(harness.canaries.person);
-    expect(await harness.findLeaks()).toContain("unprotected-exporter");
+  it("detects leaks when the shipped allowlist processor runs without the sentinel", async () => {
+    const current = currentHarness();
+    await current.captureWithoutSentinel();
+    expect(await current.findLeaks()).toContain("unprotected-exporter");
   });
 
   it("rejects canary-like values in committed cassettes and fixture directories", async () => {
