@@ -8,8 +8,10 @@ import { z } from "zod";
 import {
   createRunnerServer,
   createRunnerRequestHandler,
+  formatRunnerConfigurationError,
   RunnerConfigurationError,
   startRunnerServer,
+  withProxyEnvironment,
 } from "./server.js";
 import type { RunnerServerOptions } from "./server.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
@@ -253,7 +255,7 @@ describe("runner HTTP request handler", () => {
     expect(execute).toHaveBeenCalledWith(runId, spec, expect.any(AbortSignal));
   });
 
-  it("injects the configured proxy into child environments without inheriting it by default", async () => {
+  it("injects both proxy spellings and removes proxy bypass variables", async () => {
     const execute = vi.fn((_runId: typeof runId, _spec: ExecSpec) => Promise.resolve(result));
     const handler = createRunnerRequestHandler(
       makeOptions({ execute, proxyUrl: "http://sandbox-egress-proxy:3128" }),
@@ -267,10 +269,38 @@ describe("runner HTTP request handler", () => {
     expect(executedSpec?.env).toEqual({
       HTTP_PROXY: "http://sandbox-egress-proxy:3128",
       HTTPS_PROXY: "http://sandbox-egress-proxy:3128",
+      http_proxy: "http://sandbox-egress-proxy:3128",
+      https_proxy: "http://sandbox-egress-proxy:3128",
     });
+    expect(executedSpec?.env).not.toHaveProperty("NO_PROXY");
+    expect(executedSpec?.env).not.toHaveProperty("no_proxy");
     expect(() => createRunnerRequestHandler(makeOptions({ proxyUrl: "file:///tmp/proxy" }))).toThrow(
       RunnerConfigurationError,
     );
+  });
+
+  it("removes both proxy bypass spellings from a child environment", () => {
+    const execution = withProxyEnvironment(
+      {
+        ...spec,
+        env: {
+          NO_PROXY: "*",
+          no_proxy: "*",
+          HTTP_PROXY: "http://untrusted.example.test",
+          http_proxy: "http://untrusted.example.test",
+          CUSTOM_VALUE: "preserved",
+        },
+      },
+      "http://sandbox-egress-proxy:3128",
+    );
+
+    expect(execution.env).toEqual({
+      CUSTOM_VALUE: "preserved",
+      HTTP_PROXY: "http://sandbox-egress-proxy:3128",
+      HTTPS_PROXY: "http://sandbox-egress-proxy:3128",
+      http_proxy: "http://sandbox-egress-proxy:3128",
+      https_proxy: "http://sandbox-egress-proxy:3128",
+    });
   });
 
   it("rejects overlapping executions with a busy response", async () => {
@@ -396,5 +426,25 @@ describe("runner HTTP request handler", () => {
     vi.stubEnv("SANDBOX_RUNNER_PORT", "8080");
     delete process.env.SANDBOX_RUNNER_TOKEN;
     expect(() => startRunnerServer()).toThrow(RunnerConfigurationError);
+  });
+
+  it("refuses a proxy URL when the egress allowlist is empty", () => {
+    vi.stubEnv("SANDBOX_RUNNER_TOKEN", token);
+    vi.stubEnv("SANDBOX_RUNNER_PORT", "8080");
+    vi.stubEnv("SANDBOX_EGRESS_ALLOW", "[]");
+    vi.stubEnv("SANDBOX_EGRESS_PROXY_URL", "http://sandbox-egress-proxy:3128");
+
+    let caught: unknown;
+    try {
+      startRunnerServer();
+    } catch (error) {
+      caught = error;
+    }
+    if (!(caught instanceof RunnerConfigurationError)) {
+      throw new Error("Expected the proxy-without-allowlist configuration error.");
+    }
+    expect(caught.code).toBe("proxy_url_without_allowlist");
+    expect(caught.message).toBe("proxy_url_without_allowlist");
+    expect(formatRunnerConfigurationError(caught)).toBe("proxy_url_without_allowlist\n");
   });
 });

@@ -14,20 +14,17 @@ sandbox:
         ports: [443]
 ```
 
-Compose deployment passes the same `allow` entries as JSON in `SANDBOX_EGRESS_ALLOW`. Enable both the egress overlay and profile:
+Run the sandbox Compose wrapper from the repository root. It loads the harness config, serializes `sandbox.egress.allow` into `SANDBOX_EGRESS_ALLOW`, and selects the egress overlay only when the list is non-empty:
 
 ```sh
 SANDBOX_RUNNER_TOKEN="$(cat /secure/sandbox-runner-token)" \
-SANDBOX_EGRESS_ALLOW='[{"host":"api.example.com","ports":[443]}]' \
-  docker compose --env-file infra/collector/VERSION \
-  --file infra/compose/docker-compose.yml \
-  --file infra/compose/docker-compose.egress.yml \
-  --profile sandbox --profile sandbox-egress \
-  up --detach --build sandbox-runner sandbox-egress-proxy
+  yarn compose:sandbox up --detach --build sandbox-runner sandbox-egress-proxy
 ```
 
-Do not enable the egress profile with an empty allowlist. The proxy validates its configuration at startup and exits if the list is invalid or empty. The runner starts with no proxy variables in the default profile; in the egress overlay, the runner injects the proxy URL into `HTTP_PROXY` and `HTTPS_PROXY` for each command. Commands cannot set their own proxy or bypass variables.
+With an empty or absent allowlist, the wrapper uses only the base Compose file and `sandbox` profile. The runner starts with no proxy variables and the proxy service is not started. With a non-empty allowlist, the wrapper passes it to Compose and enables the `sandbox-egress` profile. The proxy validates its configuration at startup and exits if the list is invalid.
 
-The proxy supports HTTP forwarding and HTTP CONNECT. It matches normalized host names and ports exactly, resolves the requested destination once, rejects the entire DNS answer set if any address is loopback, link-local (including `169.254.169.254`), private, IPv6 unique-local, or multicast, and connects to the first validated resolved IP. Public IP literals are accepted only when explicitly listed. Wildcard and private IP-literal entries fail startup validation.
+The runner injects both uppercase and lowercase HTTP/HTTPS proxy variables into each command and removes `NO_PROXY` and `no_proxy`, so commands cannot exempt destinations from proxy enforcement.
+
+The proxy supports HTTP forwarding and HTTP CONNECT. It matches normalized host names and ports exactly, resolves the requested destination once, rejects the entire DNS answer set if any address is loopback, link-local/metadata, private or shared (`100.64.0.0/10`), in `192.0.0.0/24` or `198.18.0.0/15`, IPv6 unique-local/site-local/discard-only, Teredo, or multicast, and connects to the first validated resolved IP. Embedded IPv4 addresses in mapped IPv6, NAT64, and 6to4 addresses receive the same checks. Public IP literals are accepted only when explicitly listed. Wildcard and private IP-literal entries fail startup validation.
 
 Proxy output contains only `egress_allowed` / `egress_denied` counters and bounded reason codes. It does not emit hostnames, request paths, or URLs. The allowlist and proxy route are the egress boundary: a child that ignores proxy variables still has no direct external route.

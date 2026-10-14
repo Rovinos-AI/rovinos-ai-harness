@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lookup } from "node:dns/promises";
-import { resolve } from "node:path";
+import { resolve as resolvePath } from "node:path";
 import {
   Agent as HttpAgent,
   request as createHttpRequest,
@@ -13,33 +12,36 @@ import { isIP, createConnection, type Socket } from "node:net";
 import process from "node:process";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { parseJson, SandboxEgressAllowEntrySchema, SandboxEgressAllowlistSchema } from "@harness/schemas";
-import { z } from "zod";
+import { ContractError, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
+import {
+  EgressProxyConfigurationError,
+  formatEgressProxyConfigurationError,
+  type EgressAllowEntry,
+  type EgressConnector,
+  type EgressCounterEvent,
+  type EgressProxyConfigurationErrorCode,
+  type EgressReason,
+  type EgressResolver,
+} from "./contracts.js";
+import {
+  parseConnectDestination,
+  parseHttpDestination,
+  resolveEgressHostname,
+  resolveEgressDestination,
+  validateEgressAllowlist,
+} from "./policy.js";
+
+export { EgressProxyConfigurationError, formatEgressProxyConfigurationError } from "./contracts.js";
+export type {
+  EgressAllowEntry,
+  EgressCounterEvent,
+  EgressProxyConfigurationErrorCode,
+  EgressReason,
+} from "./contracts.js";
+export { isBlockedEgressAddress, validateEgressAllowlist } from "./policy.js";
 
 const DEFAULT_PROXY_PORT = 3128;
-const MAX_AUTHORITY_LENGTH = 512;
 const CONNECT_TIMEOUT_MS = 10_000;
-
-/** Bounded outcomes emitted by the egress counter sink. */
-export type EgressCounterEvent = "egress_allowed" | "egress_denied";
-
-/** Bounded reasons emitted with egress counters. */
-export type EgressReason =
-  | "allowed"
-  | "invalid_request"
-  | "not_allowlisted"
-  | "private_address"
-  | "resolution_failed"
-  | "connect_failed";
-
-/** One validated egress destination. */
-export type EgressAllowEntry = z.infer<typeof SandboxEgressAllowEntrySchema>;
-
-/** IP resolver used to pin a validated outbound connection to one DNS result. */
-export type EgressResolver = (hostname: string) => Promise<readonly string[]>;
-
-/** Socket factory receives only the already-resolved, validated address. */
-export type EgressConnector = (address: string, port: number) => Duplex;
 
 /** Egress proxy construction options. */
 export interface EgressProxyOptions {
@@ -55,218 +57,18 @@ export interface EgressProxyOptions {
   readonly resolve?: EgressResolver;
   /** Destination connector; injectable for deterministic tests. */
   readonly connect?: EgressConnector;
+  /** Outbound CONNECT establishment timeout in milliseconds. */
+  readonly connectTimeoutMs?: number;
   /** Receives only bounded counters and reason codes. */
   readonly counter?: (event: EgressCounterEvent, reason: EgressReason) => void;
 }
 
-interface Destination {
-  readonly hostname: string;
-  readonly port: number;
-}
-
-interface ResolvedDestination extends Destination {
-  readonly address: string;
-}
-
-function ipv4Bytes(address: string): readonly number[] {
-  const parts = address.split(".");
-  if (parts.length !== 4) {
-    return [];
-  }
-  const bytes = parts.map(Number);
-  return bytes.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255) ? bytes : [];
-}
-
-function ipv6Bytes(address: string): readonly number[] {
-  const lower = address.toLowerCase();
-  const dotted = /(\d{1,3}(?:\.\d{1,3}){3})$/u.exec(lower)?.[1];
-  const expanded = dotted === undefined
-    ? lower
-    : lower.replace(dotted, ipv4Bytes(dotted).map((byte) => byte.toString(16).padStart(2, "0")).join("").match(/.{4}/gu)?.join(":") ?? "");
-  const halves = expanded.split("::");
-  if (halves.length > 2) {
-    return [];
-  }
-  const left = halves[0] === "" ? [] : halves[0]?.split(":") ?? [];
-  const right = halves.length === 1 || halves[1] === "" ? [] : halves[1]?.split(":") ?? [];
-  const omitted = 8 - left.length - right.length;
-  if ((halves.length === 1 && omitted !== 0) || (halves.length === 2 && omitted < 1)) {
-    return [];
-  }
-  const groups = [...left, ...Array.from({ length: omitted }, () => "0"), ...right].map((group) =>
-    Number.parseInt(group, 16),
-  );
-  if (groups.length !== 8 || groups.some((group) => !Number.isInteger(group) || group < 0 || group > 0xffff)) {
-    return [];
-  }
-  return groups.flatMap((group) => [group >>> 8, group & 0xff]);
-}
-
-function ipv4Blocked(bytes: readonly number[]): boolean {
-  const [first, second] = bytes;
-  if (first === undefined || second === undefined) {
-    return true;
-  }
-  return (
-    first === 0 ||
-    first === 10 ||
-    first === 127 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168) ||
-    first >= 224
-  );
-}
-
-/** Returns true for loopback, link-local, private, unique-local, or multicast addresses. */
-export function isBlockedEgressAddress(address: string): boolean {
-  const family = isIP(address);
-  if (family === 4) {
-    return ipv4Blocked(ipv4Bytes(address));
-  }
-  if (family !== 6) {
-    return true;
-  }
-  const bytes = ipv6Bytes(address);
-  if (bytes.length !== 16) {
-    return true;
-  }
-  const mappedIpv4 =
-    bytes.slice(0, 10).every((byte) => byte === 0) &&
-    bytes[10] === 0xff &&
-    bytes[11] === 0xff;
-  const compatibleIpv4 = bytes.slice(0, 12).every((byte) => byte === 0);
-  if (mappedIpv4 || compatibleIpv4) {
-    return ipv4Blocked(bytes.slice(12));
-  }
-  const unspecified = bytes.every((byte) => byte === 0);
-  const loopback = bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1;
-  return (
-    unspecified ||
-    loopback ||
-    (bytes[0] === 0xfc || bytes[0] === 0xfd) ||
-    (bytes[0] === 0xfe && ((bytes[1] ?? 0) & 0xc0) === 0x80) ||
-    bytes[0] === 0xff
-  );
-}
-
-function normalizeHost(host: string): string {
-  if (host.trim() !== host || host.includes("*") || /[/\\@?#]/u.test(host) || host.length === 0) {
-    throw new Error("invalid");
-  }
-  const input = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
-  const parsed = new URL(`http://${input}/`);
-  if (parsed.username !== "" || parsed.password !== "" || parsed.port !== "" || parsed.pathname !== "/") {
-    throw new Error("invalid");
-  }
-  const normalized = parsed.hostname.toLowerCase();
-  return normalized.startsWith("[") && normalized.endsWith("]")
-    ? normalized.slice(1, -1)
-    : normalized.replace(/\.$/u, "");
-}
-
-/** Validates configured hosts and rejects wildcard and private IP-literal entries. */
-export function validateEgressAllowlist(entries: readonly EgressAllowEntry[]): readonly EgressAllowEntry[] {
-  const normalized = entries.map((entry) => {
-    const host = normalizeHost(entry.host);
-    if (isIP(host) !== 0 && isBlockedEgressAddress(host)) {
-      throw new Error("invalid");
-    }
-    if (entry.ports.length === 0 || entry.ports.some((port) => !Number.isInteger(port) || port < 1 || port > 65_535)) {
-      throw new Error("invalid");
-    }
-    return { host, ports: [...new Set(entry.ports)] };
-  });
-  return normalized;
-}
-
-function parseDestinationAuthority(authority: string): Destination | undefined {
-  if (authority.length === 0 || authority.length > MAX_AUTHORITY_LENGTH) {
-    return undefined;
-  }
-  try {
-    const parsed = new URL(`http://${authority}`);
-    const hostname = normalizeHost(parsed.hostname);
-    if (
-      parsed.username !== "" ||
-      parsed.password !== "" ||
-      parsed.pathname !== "/" ||
-      parsed.search !== "" ||
-      parsed.hash !== "" ||
-      parsed.port === ""
-    ) {
-      return undefined;
-    }
-    const port = Number(parsed.port);
-    return Number.isInteger(port) && port >= 1 && port <= 65_535 ? { hostname, port } : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function parseHttpDestination(request: IncomingMessage): Destination | undefined {
-  if (request.url === undefined || request.url.length > 8_192) {
-    return undefined;
-  }
-  try {
-    const parsed = new URL(request.url);
-    const hostname = normalizeHost(parsed.hostname);
-    const port = parsed.port === "" ? 80 : Number(parsed.port);
-    if (
-      parsed.protocol !== "http:" ||
-      parsed.username !== "" ||
-      parsed.password !== "" ||
-      parsed.hash !== "" ||
-      !Number.isInteger(port) ||
-      port < 1 ||
-      port > 65_535
-    ) {
-      return undefined;
-    }
-    return { hostname, port };
-  } catch {
-    return undefined;
-  }
-}
-
-function isAllowlisted(destination: Destination, entries: readonly EgressAllowEntry[]): boolean {
-  return entries.some(
-    (entry) => entry.host === destination.hostname && entry.ports.includes(destination.port),
-  );
-}
-
-async function systemResolve(hostname: string): Promise<readonly string[]> {
-  if (isIP(hostname) !== 0) {
-    return [hostname];
-  }
-  const addresses = await lookup(hostname, { all: true, verbatim: true });
-  return addresses.map(({ address }) => address);
-}
-
-async function resolveDestination(
-  destination: Destination,
-  entries: readonly EgressAllowEntry[],
-  resolver: EgressResolver,
-): Promise<ResolvedDestination | EgressReason> {
-  if (!isAllowlisted(destination, entries)) {
-    return "not_allowlisted";
-  }
-  try {
-    const addresses = await resolver(destination.hostname);
-    if (addresses.length === 0) {
-      return "resolution_failed";
-    }
-    if (addresses.some(isBlockedEgressAddress)) {
-      return "private_address";
-    }
-    const address = addresses[0];
-    if (address === undefined || isIP(address) === 0) {
-      return "resolution_failed";
-    }
-    return { ...destination, address };
-  } catch {
-    return "resolution_failed";
-  }
+interface ProxyRequestContext {
+  readonly allow: readonly EgressAllowEntry[];
+  readonly resolver: EgressResolver;
+  readonly connector: EgressConnector;
+  readonly counter: (event: EgressCounterEvent, reason: EgressReason) => void;
+  readonly connectTimeoutMs: number;
 }
 
 function defaultCounter(event: EgressCounterEvent, reason: EgressReason): void {
@@ -278,29 +80,83 @@ function denied(response: ServerResponse, reason: EgressReason, status: number):
   response.end(reason);
 }
 
+function hopByHopHeaders(connectionHeader: string | undefined): Set<string> {
+  return new Set([
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "proxy-connection",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+    ...(connectionHeader ?? "").split(",").map((name) => name.trim().toLowerCase()),
+  ]);
+}
+
+function forwardedResponseHeaders(
+  headers: IncomingMessage["headers"],
+  connectionHeader: string | undefined,
+): Record<string, string | string[] | undefined> {
+  const hopByHop = hopByHopHeaders(connectionHeader);
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => !hopByHop.has(name.toLowerCase())),
+  );
+}
+
+function pipeUpstreamResponse(
+  upstreamResponse: IncomingMessage,
+  response: ServerResponse,
+): void {
+  response.writeHead(
+    upstreamResponse.statusCode ?? 502,
+    forwardedResponseHeaders(upstreamResponse.headers, upstreamResponse.headers.connection),
+  );
+  const endResponseOnError = (): void => {
+    response.destroy();
+  };
+  upstreamResponse.once("aborted", endResponseOnError);
+  upstreamResponse.once("error", endResponseOnError);
+  upstreamResponse.pipe(response);
+}
+
+function handleUpstreamRequestError(
+  response: ServerResponse,
+  countedAllowed: boolean,
+  counter: ProxyRequestContext["counter"],
+): void {
+  if (!countedAllowed) {
+    counter("egress_denied", "connect_failed");
+  }
+  if (!response.headersSent) {
+    denied(response, "connect_failed", 502);
+  } else {
+    response.destroy();
+  }
+}
+
 function connectSocket(address: string, port: number): Socket {
   const socket = createConnection({ host: address, port, family: isIP(address) });
   socket.setTimeout(CONNECT_TIMEOUT_MS);
   socket.once("connect", () => socket.setTimeout(0));
-  socket.once("timeout", () => socket.destroy());
+  socket.once("timeout", () => socket.destroy(new Error("outbound connection timed out")));
   return socket;
 }
 
 async function handleHttpRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  allow: readonly EgressAllowEntry[],
-  resolver: EgressResolver,
-  connector: EgressConnector,
-  counter: (event: EgressCounterEvent, reason: EgressReason) => void,
+  context: ProxyRequestContext,
 ): Promise<void> {
+  const { allow, resolver, connector, counter } = context;
   const destination = parseHttpDestination(request);
   if (destination === undefined) {
     counter("egress_denied", "invalid_request");
     denied(response, "invalid_request", 400);
     return;
   }
-  const resolved = await resolveDestination(destination, allow, resolver);
+  const resolved = await resolveEgressDestination(destination, allow, resolver);
   if (typeof resolved === "string") {
     counter("egress_denied", resolved);
     denied(response, resolved, resolved === "not_allowlisted" ? 403 : 502);
@@ -321,21 +177,11 @@ async function handleHttpRequest(
   });
   const path = new URL(request.url ?? "");
   const host = isIP(destination.hostname) === 6 ? `[${destination.hostname}]` : destination.hostname;
-  const headers = { ...request.headers };
-  const hopByHop = new Set([
-    "connection",
-    "host",
-    "keep-alive",
-    "proxy-authorization",
-    "proxy-connection",
-    "te",
-    "trailer",
-    "upgrade",
-    ...(request.headers.connection ?? "").split(",").map((name) => name.trim().toLowerCase()),
-  ]);
-  for (const header of hopByHop) {
-    delete headers[header];
-  }
+  const hopByHop = hopByHopHeaders(request.headers.connection);
+  hopByHop.add("host");
+  const headers = Object.fromEntries(
+    Object.entries(request.headers).filter(([name]) => !hopByHop.has(name.toLowerCase())),
+  );
   const agent = new HttpAgent({ keepAlive: false });
   agent.createConnection = () => socket;
   const upstream = createHttpRequest(
@@ -348,39 +194,32 @@ async function handleHttpRequest(
       agent,
     },
     (upstreamResponse) => {
-      upstreamResponse.pipe(response);
+      pipeUpstreamResponse(upstreamResponse, response);
     },
   );
   upstream.once("error", () => {
-    if (!countedAllowed) {
-      counter("egress_denied", "connect_failed");
-    }
-    if (!response.headersSent) {
-      denied(response, "connect_failed", 502);
-    } else {
-      response.destroy();
-    }
+    handleUpstreamRequestError(response, countedAllowed, counter);
   });
   request.pipe(upstream);
-  response.once("close", () => socket.destroy());
+  response.once("close", () => {
+    socket.destroy();
+  });
 }
 
 async function handleConnectRequest(
   request: IncomingMessage,
   client: Duplex,
   head: Buffer,
-  allow: readonly EgressAllowEntry[],
-  resolver: EgressResolver,
-  connector: EgressConnector,
-  counter: (event: EgressCounterEvent, reason: EgressReason) => void,
+  context: ProxyRequestContext,
 ): Promise<void> {
-  const destination = parseDestinationAuthority(request.url ?? "");
+  const { allow, resolver, connector, counter, connectTimeoutMs } = context;
+  const destination = parseConnectDestination(request.url ?? "");
   if (destination === undefined) {
     counter("egress_denied", "invalid_request");
     client.end("HTTP/1.1 400 invalid_request\r\nConnection: close\r\n\r\n");
     return;
   }
-  const resolved = await resolveDestination(destination, allow, resolver);
+  const resolved = await resolveEgressDestination(destination, allow, resolver);
   if (typeof resolved === "string") {
     counter("egress_denied", resolved);
     const status = resolved === "not_allowlisted" ? 403 : 502;
@@ -397,8 +236,20 @@ async function handleConnectRequest(
   }
   try {
     await new Promise<void>((resolve, reject) => {
-      upstream.once("connect", resolve);
-      upstream.once("error", reject);
+      const timeout = setTimeout(
+        () => upstream.destroy(new Error("outbound connection timed out")),
+        connectTimeoutMs,
+      );
+      const settle = (callback: () => void): void => {
+        clearTimeout(timeout);
+        callback();
+      };
+      upstream.once("connect", () => {
+        settle(resolve);
+      });
+      upstream.once("error", () => {
+        settle(reject);
+      });
     });
   } catch {
     counter("egress_denied", "connect_failed");
@@ -421,14 +272,22 @@ async function handleConnectRequest(
 /** Creates an HTTP proxy that forwards only pinned, allowlisted public destinations. */
 export function createEgressProxy(options: EgressProxyOptions): Server {
   const allow = validateEgressAllowlist(options.allow);
-  const resolver = options.resolve ?? systemResolve;
+  const resolver = options.resolve ?? resolveEgressHostname;
   const connector = options.connect ?? connectSocket;
+  const connectTimeoutMs = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
   const counter = options.counter ?? defaultCounter;
+  const context: ProxyRequestContext = {
+    allow,
+    resolver,
+    connector,
+    counter,
+    connectTimeoutMs,
+  };
   const server = createServer((request, response) => {
-    void handleHttpRequest(request, response, allow, resolver, connector, counter);
+    void handleHttpRequest(request, response, context);
   });
   server.on("connect", (request, client, head) => {
-    void handleConnectRequest(request, client, head, allow, resolver, connector, counter);
+    void handleConnectRequest(request, client, head, context);
   });
   server.requestTimeout = CONNECT_TIMEOUT_MS;
   server.headersTimeout = CONNECT_TIMEOUT_MS;
@@ -448,16 +307,31 @@ export function createEgressProxy(options: EgressProxyOptions): Server {
 export function startEgressProxy(options: { readonly socketPath?: string } = {}): Server {
   const text = process.env.SANDBOX_EGRESS_ALLOW;
   if (text === undefined) {
-    throw new Error("invalid");
+    throw new EgressProxyConfigurationError("allowlist_missing");
   }
-  const allow = parseJson(SandboxEgressAllowlistSchema, text);
+  let allow: readonly EgressAllowEntry[];
+  try {
+    allow = parseJson(SandboxEgressAllowlistSchema, text);
+  } catch (error) {
+    if (error instanceof ContractError) {
+      const issuePaths = error.issues.flatMap(({ path }) => path.map(String));
+      let code: EgressProxyConfigurationErrorCode = "allowlist_invalid";
+      if (issuePaths.includes("host")) {
+        code = "allowlist_host_invalid";
+      } else if (issuePaths.includes("ports")) {
+        code = "allowlist_port_invalid";
+      }
+      throw new EgressProxyConfigurationError(code);
+    }
+    throw error;
+  }
   if (allow.length === 0) {
-    throw new Error("invalid");
+    throw new EgressProxyConfigurationError("allowlist_empty");
   }
   validateEgressAllowlist(allow);
   const port = Number(process.env.SANDBOX_EGRESS_PROXY_PORT ?? DEFAULT_PROXY_PORT);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error("invalid");
+    throw new EgressProxyConfigurationError("proxy_port_invalid");
   }
   return createEgressProxy({
     allow,
@@ -468,7 +342,15 @@ export function startEgressProxy(options: { readonly socketPath?: string } = {})
 
 if (
   process.argv[1] !== undefined &&
-  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+  fileURLToPath(import.meta.url) === resolvePath(process.argv[1])
 ) {
-  startEgressProxy();
+  try {
+    startEgressProxy();
+  } catch (error) {
+    if (!(error instanceof EgressProxyConfigurationError)) {
+      throw error;
+    }
+    process.stderr.write(formatEgressProxyConfigurationError(error));
+    process.exitCode = 1;
+  }
 }

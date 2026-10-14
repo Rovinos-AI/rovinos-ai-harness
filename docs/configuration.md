@@ -75,7 +75,7 @@ SANDBOX_RUNNER_TOKEN="$(cat /secure/sandbox-runner-token)" \
 
 ### Sandbox egress
 
-Runner egress is denied unless an exact destination allowlist is configured. Each entry pairs one host with one or more ports; wildcards, private IP literals, and destinations resolving to loopback, link-local, private, unique-local, or multicast addresses are rejected by the proxy.
+Runner egress is denied unless an exact destination allowlist is configured. Each entry pairs one host with one or more ports; wildcards, private IP literals, and destinations resolving to loopback, link-local/metadata, private/shared, special-use, unique-local/site-local/discard-only, Teredo, or multicast ranges are rejected by the proxy, including private IPv4 addresses embedded in NAT64 and 6to4 IPv6 addresses.
 
 ```yaml
 sandbox:
@@ -85,7 +85,7 @@ sandbox:
         ports: [443]
 ```
 
-The sandbox Compose profile remains offline by default. To enable the proxy, provide the same allowlist as JSON in `SANDBOX_EGRESS_ALLOW` and include `infra/compose/docker-compose.egress.yml` with the base Compose file, activating both `sandbox` and `sandbox-egress` profiles. The overlay connects the runner to the internal proxy-only network and injects `HTTP_PROXY` and `HTTPS_PROXY` into exec children. The runner has no external network attachment; direct connections do not use the proxy's egress route. See [Sandbox egress](sandbox-egress.md) for the complete setup and security behavior.
+The sandbox Compose profile remains offline by default. `yarn compose:sandbox` reads `sandbox.egress.allow`, serializes it as `SANDBOX_EGRESS_ALLOW`, and adds the egress overlay and profile only when the list is non-empty. The overlay connects the runner to the internal proxy-only network; exec children receive the proxy variables without `NO_PROXY` bypasses. The runner has no external network attachment, so direct connections do not use the proxy's egress route. See [Sandbox egress](sandbox-egress.md) for the complete setup and security behavior.
 
 Key versions are configured under `keys`. Each key must be a base64-encoded 32-byte secret reference. Keep old versions configured while stored content still uses them; new content uses `currentKeyId`.
 

@@ -217,6 +217,8 @@ it("enforces package source line coverage per file", () => {
   const config = readFileSync(resolve(root, "vitest.config.ts"), "utf8");
 
   expect(config).toContain('provider: "v8"');
+  expect(config).toContain('"packages/*/src/**/*.ts"');
+  expect(config).toContain('"packages/sandbox/runner/src/**/*.ts"');
   expect(config).toContain(
     '"packages/sandbox/egress-proxy/src/**/*.ts"',
   );

@@ -56,13 +56,30 @@ export interface RunnerServerOptions {
   ) => Promise<ExecResult>;
 }
 
-/** Error raised when the runner server is configured without required authentication. */
-export class RunnerConfigurationError extends HarnessError {
-  readonly code = "sandbox_runner_config_invalid";
+/** Closed runner startup error codes. */
+export type RunnerConfigurationErrorCode =
+  | "sandbox_runner_config_invalid"
+  | "proxy_url_without_allowlist"
+  | "allowlist_without_proxy_url";
 
-  constructor() {
-    super("The sandbox runner configuration is invalid.");
+/** Error raised when the runner server configuration is invalid. */
+export class RunnerConfigurationError extends HarnessError {
+  readonly code: RunnerConfigurationErrorCode;
+
+  constructor(code: RunnerConfigurationErrorCode = "sandbox_runner_config_invalid") {
+    super(code);
+    this.code = code;
   }
+}
+
+/**
+ * Formats runner startup errors as only their bounded error code.
+ *
+ * @param error - Typed runner startup error.
+ * @returns The closed error code followed by a newline.
+ */
+export function formatRunnerConfigurationError(error: RunnerConfigurationError): string {
+  return `${error.code}\n`;
 }
 
 function sendJson(response: RunnerResponse, status: number, body: unknown): void {
@@ -189,18 +206,77 @@ function validProxyUrl(value: string): boolean {
   }
 }
 
-function withProxyEnvironment(spec: ExecSpec, proxyUrl: string | undefined): ExecSpec {
+type RunnerEgressAllowlist = z.infer<typeof SandboxEgressAllowlistSchema>;
+
+interface RunnerEgressConfiguration {
+  readonly allow: RunnerEgressAllowlist;
+  readonly proxyUrl?: string;
+}
+
+function readRunnerEgressConfiguration(): RunnerEgressConfiguration {
+  const allowText = process.env.SANDBOX_EGRESS_ALLOW;
+  const allow = allowText === undefined ? [] : parseJson(SandboxEgressAllowlistSchema, allowText);
+  const proxyUrl = process.env.SANDBOX_EGRESS_PROXY_URL;
+  if (allow.length === 0 && proxyUrl !== undefined) {
+    throw new RunnerConfigurationError("proxy_url_without_allowlist");
+  }
+  if (allow.length > 0 && proxyUrl === undefined) {
+    throw new RunnerConfigurationError("allowlist_without_proxy_url");
+  }
+  return { allow, ...(proxyUrl === undefined ? {} : { proxyUrl }) };
+}
+
+/**
+ * Adds trusted proxy variables and removes caller-controlled bypasses.
+ *
+ * @param spec - Validated execution request.
+ * @param proxyUrl - Trusted proxy URL, if egress is enabled.
+ * @returns The execution request with enforced proxy variables.
+ */
+export function withProxyEnvironment(spec: ExecSpec, proxyUrl: string | undefined): ExecSpec {
   if (proxyUrl === undefined) {
     return spec;
   }
+  const env = { ...(spec.env ?? {}) };
+  delete env.NO_PROXY;
+  delete env.no_proxy;
   return {
     ...spec,
     env: {
-      ...(spec.env ?? {}),
+      ...env,
       HTTP_PROXY: proxyUrl,
       HTTPS_PROXY: proxyUrl,
+      http_proxy: proxyUrl,
+      https_proxy: proxyUrl,
     },
   };
+}
+
+/**
+ * Executes a request with the proxy settings owned by the runner.
+ *
+ * @param options - Runner configuration and optional execution test port.
+ * @param runId - Run owning the execution.
+ * @param spec - Validated execution request.
+ * @param signal - Cancellation signal for the execution.
+ * @returns The bounded execution result.
+ */
+function executeRunnerSpec(
+  options: RunnerServerOptions,
+  runId: z.infer<typeof Id>,
+  spec: ExecSpec,
+  signal: AbortSignal,
+): Promise<ExecResult> {
+  const executionSpec = withProxyEnvironment(spec, options.proxyUrl);
+  return options.execute === undefined
+    ? executeSpec({
+        spec: executionSpec,
+        signal,
+        workspaceRoot: options.workspaceRoot,
+        ...(options.executionUid === undefined ? {} : { executionUid: options.executionUid }),
+        ...(options.executionGid === undefined ? {} : { executionGid: options.executionGid }),
+      })
+    : options.execute(runId, executionSpec, signal);
 }
 
 /**
@@ -214,18 +290,6 @@ export function createRunnerRequestHandler(
 ): (request: RunnerRequest, response: RunnerResponse) => Promise<void> {
   const allowedHosts = validateRunnerOptions(options);
   const tokenHash = hashToken(options.token);
-  const runExec = (_runId: z.infer<typeof Id>, spec: ExecSpec, signal: AbortSignal) => {
-    const executionSpec = withProxyEnvironment(spec, options.proxyUrl);
-    return options.execute === undefined
-      ? executeSpec({
-          spec: executionSpec,
-          signal,
-          workspaceRoot: options.workspaceRoot,
-          ...(options.executionUid === undefined ? {} : { executionUid: options.executionUid }),
-          ...(options.executionGid === undefined ? {} : { executionGid: options.executionGid }),
-        })
-      : options.execute(_runId, executionSpec, signal);
-  };
   let activeExec = false;
 
   return async (request, response) => {
@@ -275,7 +339,7 @@ export function createRunnerRequestHandler(
       });
       try {
         const result = ExecResultSchema.parse(
-          await runExec(parsed.runId, parsed.spec, controller.signal),
+          await executeRunnerSpec(options, parsed.runId, parsed.spec, controller.signal),
         );
         sendJson(response, 200, result);
       } catch {
@@ -316,27 +380,27 @@ export function startRunnerServer(): Server {
   }
   const hostsText = process.env.SANDBOX_ALLOWED_HOSTS ?? `sandbox-runner:${String(port)}`;
   const workspaceRoot = process.env.SANDBOX_WORKSPACE_ROOT ?? "/workspaces";
-  const egressAllowText = process.env.SANDBOX_EGRESS_ALLOW;
-  const egressAllow =
-    egressAllowText === undefined
-      ? []
-      : parseJson(SandboxEgressAllowlistSchema, egressAllowText);
-  const proxyUrl = process.env.SANDBOX_EGRESS_PROXY_URL;
-  if ((egressAllow.length > 0) !== (proxyUrl !== undefined)) {
-    throw new RunnerConfigurationError();
-  }
+  const egress = readRunnerEgressConfiguration();
   delete process.env.SANDBOX_EGRESS_ALLOW;
   delete process.env.SANDBOX_EGRESS_PROXY_URL;
   const server = createRunnerServer({
     token,
     allowedHosts: hostsText.split(",").map((host) => host.trim()),
     workspaceRoot: resolve(workspaceRoot),
-    ...(egressAllow.length === 0 || proxyUrl === undefined ? {} : { proxyUrl }),
+    ...(egress.proxyUrl === undefined ? {} : { proxyUrl: egress.proxyUrl }),
   });
   server.listen(port, "0.0.0.0");
   return server;
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  startRunnerServer();
+  try {
+    startRunnerServer();
+  } catch (error) {
+    if (!(error instanceof RunnerConfigurationError)) {
+      throw error;
+    }
+    process.stderr.write(formatRunnerConfigurationError(error));
+    process.exitCode = 1;
+  }
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdtemp, rm } from "node:fs/promises";
-import { request } from "node:http";
+import { request, type IncomingMessage } from "node:http";
 import { createConnection, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,8 @@ import { once } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createEgressProxy,
+  EgressProxyConfigurationError,
+  formatEgressProxyConfigurationError,
   isBlockedEgressAddress,
   startEgressProxy,
   validateEgressAllowlist,
@@ -24,7 +26,9 @@ class EchoDestination extends Socket {
     queueMicrotask(() => this.emit("connect"));
   }
 
-  override _read(): void {}
+  override _read(): void {
+    return undefined;
+  }
 
   override _write(
     _chunk: Buffer,
@@ -43,7 +47,9 @@ class FailingDestination extends Socket {
     queueMicrotask(() => this.destroy(new Error("synthetic destination failure")));
   }
 
-  override _read(): void {}
+  override _read(): void {
+    return undefined;
+  }
 
   override _write(
     _chunk: Buffer,
@@ -51,6 +57,27 @@ class FailingDestination extends Socket {
     callback: (error?: Error | null) => void,
   ): void {
     callback();
+  }
+}
+
+class ErroringResponseDestination extends Socket {
+  constructor() {
+    super();
+    queueMicrotask(() => this.emit("connect"));
+  }
+
+  override _read(): void {
+    return undefined;
+  }
+
+  override _write(
+    _chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.push(Buffer.from("HTTP/1.1 200 OK\r\ncontent-length: 100\r\n\r\npartial"));
+    callback();
+    setImmediate(() => this.destroy(new Error("synthetic upstream stream failure")));
   }
 }
 
@@ -71,13 +98,37 @@ async function makeRequest(
   socketPath: string,
   path: string,
   method = "GET",
-): Promise<{ readonly status: number | undefined; readonly body: string }> {
+): Promise<{
+  readonly status: number | undefined;
+  readonly body: string;
+  readonly headers: IncomingMessage["headers"];
+  readonly aborted: boolean;
+}> {
   return new Promise((resolve, reject) => {
     const client = request({ socketPath, path, method }, (response) => {
       const chunks: Buffer[] = [];
+      let finished = false;
+      const finish = (aborted: boolean): void => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        resolve({
+          status: response.statusCode,
+          body: Buffer.concat(chunks).toString("utf8"),
+          headers: response.headers,
+          aborted,
+        });
+      };
       response.on("data", (chunk: Buffer) => chunks.push(chunk));
       response.once("end", () => {
-        resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString("utf8") });
+        finish(false);
+      });
+      response.once("aborted", () => {
+        finish(true);
+      });
+      response.once("error", () => {
+        finish(true);
       });
     });
     client.once("error", reject);
@@ -137,7 +188,13 @@ afterEach(async () => {
     proxyServers.splice(0).map(
       (server) =>
         new Promise<void>((resolve, reject) => {
-          server.close((error) => (error === undefined ? resolve() : reject(error)));
+          server.close((error) => {
+            if (error === undefined) {
+              resolve();
+            } else {
+              reject(error);
+            }
+          });
         }),
     ),
   );
@@ -151,6 +208,11 @@ describe("egress destination classifier", () => {
     ["169.254.169.254", true],
     ["172.31.255.255", true],
     ["192.168.1.1", true],
+    ["100.64.0.1", true],
+    ["100.100.100.200", true],
+    ["192.0.0.192", true],
+    ["198.18.0.1", true],
+    ["198.19.255.254", true],
     ["224.0.0.1", true],
     ["8.8.8.8", false],
     ["::", true],
@@ -158,9 +220,21 @@ describe("egress destination classifier", () => {
     ["fc00::1", true],
     ["fdff::1", true],
     ["fe80::1", true],
+    ["fec0::1", true],
+    ["100::1", true],
+    ["2001:0::1", true],
     ["ff02::1", true],
     ["::ffff:169.254.169.254", true],
     ["::ffff:8.8.8.8", false],
+    ["64:ff9b::a9fe:a9fe", true],
+    ["64:ff9b::a00:1", true],
+    ["64:ff9b::808:808", false],
+    ["64:ff9b:1:a9fe:a9:fe00::", true],
+    ["64:ff9b:1:a00:0:100::", true],
+    ["64:ff9b:1:808:8:800::", false],
+    ["2002:a9fe:a9fe::", true],
+    ["2002:a00:1::", true],
+    ["2002:808:808::", false],
     ["2001:4860:4860::8888", false],
   ])("classifies %s", (address, blocked) => {
     expect(isBlockedEgressAddress(address)).toBe(blocked);
@@ -187,12 +261,12 @@ describe("egress destination classifier", () => {
 describe("allowlisted HTTP proxy", () => {
   // threat: T-05
   it("forwards an allowlisted request to the pinned resolver address", async () => {
-    const counters: Array<readonly [EgressCounterEvent, EgressReason]> = [];
+    const counters: (readonly [EgressCounterEvent, EgressReason])[] = [];
     const socketPath = await makeProxy({
       allow: [{ host: "allowed.example.test", ports: [80] }],
-      resolve: async (hostname) => {
+      resolve: (hostname) => {
         expect(hostname).toBe("allowed.example.test");
-        return ["203.0.113.8"];
+        return Promise.resolve(["203.0.113.8"]);
       },
       connect: (address, port) => {
         expect(address).toBe("203.0.113.8");
@@ -205,22 +279,54 @@ describe("allowlisted HTTP proxy", () => {
       socketPath,
       "http://allowed.example.test/path?query-canary=do-not-log",
     );
-    expect(result).toEqual({ status: 200, body: "ok" });
+    expect(result).toMatchObject({ status: 200, body: "ok", aborted: false });
     expect(counters).toEqual([["egress_allowed", "allowed"]]);
     expect(JSON.stringify(counters)).not.toContain("allowed.example.test");
     expect(JSON.stringify(counters)).not.toContain("query-canary");
+  });
+
+  it("forwards upstream status and end-to-end headers while removing hop-by-hop headers", async () => {
+    const socketPath = await makeProxy({
+      allow: [{ host: "allowed.example.test", ports: [80] }],
+      resolve: () => Promise.resolve(["203.0.113.8"]),
+      connect: () =>
+        new EchoDestination(
+          "HTTP/1.1 418 I'm a teapot\r\ncontent-length: 4\r\nx-upstream: retained\r\nconnection: close, x-hop\r\nx-hop: removed\r\n\r\nnope",
+        ),
+    });
+
+    const response = await makeRequest(socketPath, "http://allowed.example.test/");
+
+    expect(response.status).toBe(418);
+    expect(response.body).toBe("nope");
+    expect(response.headers["x-upstream"]).toBe("retained");
+    expect(response.headers["x-hop"]).toBeUndefined();
+    expect(response.headers.connection).not.toBe("close");
+  });
+
+  it("terminates a client response when the upstream response stream errors mid-body", async () => {
+    const socketPath = await makeProxy({
+      allow: [{ host: "allowed.example.test", ports: [80] }],
+      resolve: () => Promise.resolve(["203.0.113.8"]),
+      connect: () => new ErroringResponseDestination(),
+    });
+
+    const response = await makeRequest(socketPath, "http://allowed.example.test/");
+
+    expect(response.status).toBe(200);
+    expect(response.aborted).toBe(true);
   });
 
   // threat: T-05
   it("rejects an unallowlisted host without resolving or connecting it", async () => {
     let resolverCalled = false;
     let connectorCalled = false;
-    const counters: Array<readonly [EgressCounterEvent, EgressReason]> = [];
+    const counters: (readonly [EgressCounterEvent, EgressReason])[] = [];
     const socketPath = await makeProxy({
       allow: [{ host: "allowed.example.test", ports: [80] }],
-      resolve: async () => {
+      resolve: () => {
         resolverCalled = true;
-        return ["203.0.113.8"];
+        return Promise.resolve(["203.0.113.8"]);
       },
       connect: () => {
         connectorCalled = true;
@@ -239,10 +345,10 @@ describe("allowlisted HTTP proxy", () => {
   // threat: T-06
   it("rejects a DNS answer in a private or metadata range before connecting", async () => {
     let connectorCalled = false;
-    const counters: Array<readonly [EgressCounterEvent, EgressReason]> = [];
+    const counters: (readonly [EgressCounterEvent, EgressReason])[] = [];
     const socketPath = await makeProxy({
       allow: [{ host: "allowed.example.test", ports: [80] }],
-      resolve: async () => ["169.254.169.254"],
+      resolve: () => Promise.resolve(["169.254.169.254"]),
       connect: () => {
         connectorCalled = true;
         return new EchoDestination("");
@@ -263,11 +369,11 @@ describe("allowlisted HTTP proxy", () => {
         { host: "allowed.example.test", ports: [80] },
         { host: "dns-failure.example.test", ports: [80] },
       ],
-      resolve: async (hostname) => {
+      resolve: (hostname) => {
         if (hostname === "dns-failure.example.test") {
           throw new Error("sensitive resolver message");
         }
-        return ["203.0.113.8"];
+        return Promise.resolve(["203.0.113.8"]);
       },
       connect: () => {
         throw new Error("sensitive connection message");
@@ -285,16 +391,16 @@ describe("allowlisted HTTP proxy", () => {
   });
 
   // threat: T-06
-  it("rejects a private IP literal even when it is present in the allowlist", async () => {
+  it("rejects a private IP literal even when it is present in the allowlist", () => {
     expect(() => createEgressProxy({ allow: [{ host: "127.0.0.1", ports: [80] }] })).toThrow();
   });
 
   // threat: T-05
   it("establishes CONNECT tunnels only to allowlisted hosts and ports", async () => {
-    const counters: Array<readonly [EgressCounterEvent, EgressReason]> = [];
+    const counters: (readonly [EgressCounterEvent, EgressReason])[] = [];
     const socketPath = await makeProxy({
       allow: [{ host: "allowed.example.test", ports: [443] }],
-      resolve: async () => ["203.0.113.8"],
+      resolve: () => Promise.resolve(["203.0.113.8"]),
       connect: () => new EchoDestination("synthetic-tunnel-response"),
       counter: (event, reason) => counters.push([event, reason]),
     });
@@ -309,6 +415,19 @@ describe("allowlisted HTTP proxy", () => {
     ]);
   });
 
+  it("returns a bounded failure when CONNECT upstream establishment times out", async () => {
+    const socketPath = await makeProxy({
+      allow: [{ host: "allowed.example.test", ports: [443] }],
+      resolve: () => Promise.resolve(["203.0.113.8"]),
+      connect: () => new Socket(),
+      connectTimeoutMs: 10,
+    });
+
+    const result = await makeConnectRequest(socketPath, "allowed.example.test:443");
+
+    expect(result).toEqual({ status: 502, body: "" });
+  });
+
   // threat: T-06
   it("refuses malformed, metadata, and unconnectable CONNECT destinations", async () => {
     const counters: EgressReason[] = [];
@@ -317,8 +436,10 @@ describe("allowlisted HTTP proxy", () => {
         { host: "metadata.example.test", ports: [443] },
         { host: "allowed.example.test", ports: [443] },
       ],
-      resolve: async (hostname) =>
-        hostname === "metadata.example.test" ? ["::ffff:169.254.169.254"] : ["203.0.113.8"],
+      resolve: (hostname) =>
+        Promise.resolve(
+          hostname === "metadata.example.test" ? ["::ffff:169.254.169.254"] : ["203.0.113.8"],
+        ),
       connect: (address) => {
         if (address === "203.0.113.8") {
           return new FailingDestination();
@@ -340,7 +461,7 @@ describe("allowlisted HTTP proxy", () => {
     const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const socketPath = await makeProxy({
       allow: [{ host: "allowed.example.test", ports: [80] }],
-      resolve: async () => ["203.0.113.8"],
+      resolve: () => Promise.resolve(["203.0.113.8"]),
       connect: () => new EchoDestination(""),
     });
     await makeRequest(socketPath, "http://denied.example.test/private");
@@ -349,16 +470,30 @@ describe("allowlisted HTTP proxy", () => {
     );
   });
 
-  it("refuses missing, empty, malformed, or invalid-port startup configuration", () => {
-    vi.stubEnv("SANDBOX_EGRESS_ALLOW", undefined);
-    expect(() => startEgressProxy()).toThrow();
-    vi.stubEnv("SANDBOX_EGRESS_ALLOW", "[]");
-    expect(() => startEgressProxy()).toThrow();
-    vi.stubEnv("SANDBOX_EGRESS_ALLOW", "not-json");
-    expect(() => startEgressProxy()).toThrow();
-    vi.stubEnv("SANDBOX_EGRESS_ALLOW", '[{"host":"allowed.example.test","ports":[443]}]');
-    vi.stubEnv("SANDBOX_EGRESS_PROXY_PORT", "65536");
-    expect(() => startEgressProxy()).toThrow();
+  it.each([
+    ["allowlist_missing", undefined, undefined],
+    ["allowlist_empty", "[]", undefined],
+    ["allowlist_invalid", "not-json", undefined],
+    ["allowlist_host_invalid", '[{"host":"*.example.test","ports":[443]}]', undefined],
+    ["allowlist_port_invalid", '[{"host":"allowed.example.test","ports":[0]}]', undefined],
+    ["proxy_port_invalid", '[{"host":"allowed.example.test","ports":[443]}]', "65536"],
+  ] as const)("reports bounded startup code %s", (code, allow, port) => {
+    vi.stubEnv("SANDBOX_EGRESS_ALLOW", allow);
+    if (port !== undefined) {
+      vi.stubEnv("SANDBOX_EGRESS_PROXY_PORT", port);
+    }
+    let caught: unknown;
+    try {
+      startEgressProxy();
+    } catch (error) {
+      caught = error;
+    }
+    if (!(caught instanceof EgressProxyConfigurationError)) {
+      throw new Error(`Expected configuration error ${code}.`);
+    }
+    expect(caught).toMatchObject({ code, message: code });
+    expect(formatEgressProxyConfigurationError(caught)).toBe(`${code}\n`);
+    expect(String(caught)).not.toContain("allowed.example.test");
   });
 
   it("starts with a validated non-empty allowlist on a local socket", async () => {
