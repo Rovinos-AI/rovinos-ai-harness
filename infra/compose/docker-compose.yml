@@ -110,8 +110,9 @@ services:
       start_period: 5s
       retries: 10
     networks:
-      - sandbox-egress
-      - egress
+      sandbox-egress:
+        ipv4_address: 172.31.254.2
+      egress: null
   otel-collector:
     image: ${OTEL_COLLECTOR_IMAGE:?Set OTEL_COLLECTOR_IMAGE in infra/collector/VERSION}
     command:
@@ -143,6 +144,9 @@ networks:
     internal: true
   sandbox-egress:
     internal: true
+    ipam:
+      config:
+        - subnet: 172.31.254.0/24
   egress: {}
 volumes:
   harness-workspaces: {}
