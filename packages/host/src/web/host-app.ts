@@ -154,7 +154,7 @@ function createAppBridgeHandlers(
           : { structuredContent: params.structuredContent }),
       }),
     onRequestDisplayMode: (mode) => root.setDisplayMode(mode),
-    getCurrentDisplayMode: () => getHostContext().displayMode,
+    getCurrentDisplayMode: () => getHostContext().displayMode ?? "inline",
     onSizeChange: ({ width, height }) => {
       const dimensions = getHostContext().containerDimensions;
       const maxWidth =

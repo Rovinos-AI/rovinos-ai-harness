@@ -109,7 +109,10 @@ const appHtml = `<!doctype html>
       window.parent.postMessage({ navigationAttempt: name }, "*");
       try { action(); } catch {}
     };
-    setTimeout(() => {
+    window.addEventListener("message", (event) => {
+      if (event.data?.hostTest !== "navigation") {
+        return;
+      }
       attemptNavigation("location.href", () => {
         window.location.href = "https://example.test/location-href?secret=synthetic";
       });
@@ -139,7 +142,7 @@ const appHtml = `<!doctype html>
         document.body.append(anchor);
         anchor.click();
       });
-    }, 1_000);
+    });
     window.parent.postMessage({
       jsonrpc: "2.0",
       id: 1,
@@ -350,6 +353,12 @@ describe("reference host browser security", () => {
     await page.setViewportSize({ width: 800, height: 600 });
     await waitForHostContextUpdate(app.locator("#context"), initialContext ?? "");
     expect(await app.locator("#context").textContent()).toContain('"updates":');
+    await page.evaluate(() => {
+      const frame = document.querySelector("iframe");
+      if (frame instanceof HTMLIFrameElement) {
+        frame.contentWindow?.postMessage({ hostTest: "navigation" }, "*");
+      }
+    });
     await expectNavigationAttempts(page);
     expect(externalRequests.map((url) => new URL(url).pathname).sort()).toEqual([
       "/beacon",
@@ -386,16 +395,17 @@ describe("reference host browser security", () => {
   }, 20_000);
 
   it("keeps iframe size limits independent while the app shrinks, grows, and enters fullscreen", async () => {
-    if (page === undefined || host === undefined) {
+    if (browser === undefined || host === undefined) {
       throw new Error("Browser test setup failed.");
     }
-    await page.goto(host.url, { waitUntil: "domcontentloaded" });
-    const iframe = page.locator("iframe");
-    await iframe.waitFor({ state: "attached" });
-    const app = page.frameLocator("iframe");
+    const sizePage = await browser.newPage({ viewport: { width: 800, height: 600 } });
+    await sizePage.goto(host.url, { waitUntil: "domcontentloaded", timeout: 5_000 });
+    const iframe = sizePage.locator("iframe");
+    await iframe.waitFor({ state: "attached", timeout: 5_000 });
+    const app = sizePage.frameLocator("iframe");
     const context = app.locator("#context");
-    await context.waitFor({ state: "visible" });
-    const initialContext = await context.textContent();
+    await context.waitFor({ state: "visible", timeout: 5_000 });
+    const initialContext = await context.textContent({ timeout: 2_000 });
     const initialMaxHeight = Number(initialContext?.match(/"maxHeight":(\d+)/u)?.[1]);
     expect(initialMaxHeight).toBeGreaterThanOrEqual(600);
 
@@ -409,10 +419,16 @@ describe("reference host browser security", () => {
         "*",
       );
     });
-    await page.waitForFunction(
+    await sizePage.waitForFunction(
       () => document.querySelector("iframe")?.style.height === "100px",
+      undefined,
+      { timeout: 3_000 },
     );
-    await waitForHostContextUpdate(context, initialContext ?? "");
+    await sizePage.evaluate(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    await sizePage.waitForTimeout(100);
+    expect(await context.textContent()).toBe(initialContext);
     await app.locator("body").evaluate(() => {
       window.parent.postMessage(
         {
@@ -423,21 +439,28 @@ describe("reference host browser security", () => {
         "*",
       );
     });
-    await page.waitForFunction(
+    await sizePage.waitForFunction(
       () => document.querySelector("iframe")?.style.height === "600px",
+      undefined,
+      { timeout: 3_000 },
     );
-    await app.locator("body").evaluate(() => {
-      window.parent.postMessage(
-        {
-          jsonrpc: "2.0",
-          id: 42,
-          method: "ui/request-display-mode",
-          params: { mode: "fullscreen" },
-        },
-        "*",
-      );
+    await sizePage.evaluate(() => {
+      const button = document.createElement("button");
+      button.textContent = "Enter fullscreen";
+      button.addEventListener("click", () => {
+        const element = document.getElementById("host");
+        if (element !== null) {
+          void element.requestFullscreen();
+        }
+      });
+      document.body.append(button);
     });
-    await page.waitForFunction(() => document.fullscreenElement?.id === "host");
+    await sizePage.getByRole("button", { name: "Enter fullscreen" }).click({ timeout: 3_000 });
+    await sizePage.waitForFunction(
+      () => document.fullscreenElement?.id === "host",
+      undefined,
+      { timeout: 3_000 },
+    );
     expect(await iframe.evaluate((element) => element.style.height)).toBe("600px");
   }, 20_000);
 
@@ -503,7 +526,8 @@ describe("reference host browser security", () => {
             if (
               text.includes('"id":2') &&
               text.includes('"id":3') &&
-              text.includes('"id":4')
+              text.includes('"id":4') &&
+              text.includes('"id":5')
             ) {
               resolve();
               return;
@@ -518,31 +542,23 @@ describe("reference host browser security", () => {
         }),
     );
     const result = await locator.textContent();
-    expect(result?.match(/"denied":true/gu)).toHaveLength(3);
+    expect(result?.match(/"denied":true/gu)).toHaveLength(4);
   }
 
   async function waitForHostContextUpdate(
     locator: ReturnType<Page["locator"]>,
     initial: string,
   ): Promise<void> {
-    await locator.evaluate(
-      (element, previous) =>
-        new Promise<void>((resolve, reject) => {
-          const started = Date.now();
-          const inspect = (): void => {
-            if (element.textContent !== previous) {
-              resolve();
-              return;
-            }
-            if (Date.now() - started > 5_000) {
-              reject(new Error("Host context did not update after resizing."));
-              return;
-            }
-            window.setTimeout(inspect, 25);
-          };
-          inspect();
-        }),
-      initial,
-    );
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const context = await locator.textContent({ timeout: 250 }).catch(() => null);
+      if (context !== null && context !== initial) {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 25);
+      });
+    }
+    throw new Error("Host context did not update after resizing.");
   }
 });

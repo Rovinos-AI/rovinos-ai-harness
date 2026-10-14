@@ -640,8 +640,7 @@ describe("createReferenceHost", () => {
     expect(refilled.status).toBe(200);
     expect(refilled.body).toBe('{"allowed":true}');
     expect(tokenizeAppContent).toHaveBeenCalledTimes(2);
-    expect(onRejected).toHaveBeenCalledOnce();
-    expect(onRejected).toHaveBeenCalledWith("rate");
+    expect(onRejected.mock.calls).toEqual([["rate"]]);
     await host.close();
   });
 

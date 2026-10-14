@@ -167,7 +167,9 @@ export function createAppBridge(
   );
   const transport = new AppPostMessageTransport(target);
   const initialized = new Promise<void>((resolve) => {
-    bridge.addEventListener("initialized", () => resolve());
+    bridge.addEventListener("initialized", () => {
+      resolve();
+    });
   });
   return {
     connect: () => bridge.connect(transport),

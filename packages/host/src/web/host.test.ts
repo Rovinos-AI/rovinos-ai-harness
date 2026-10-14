@@ -149,7 +149,9 @@ class FakeDomNode extends EventTarget {
     if (typeof listener === "function") {
       listeners.push(listener);
     } else {
-      listeners.push((event) => listener.handleEvent(event));
+      listeners.push((event) => {
+        listener.handleEvent(event);
+      });
     }
     this.#listeners.set(type, listeners);
   }
@@ -823,7 +825,7 @@ describe("reference app page", () => {
     expect(dialog.textContent).toContain("internationalized punycode domain");
     const destination = dialog.children[1];
     if (!(destination instanceof FakeDomNode)) {
-      throw new Error("The host consent dialog does not show its destination.");
+      throw new TypeError("The host consent dialog does not show its destination.");
     }
     const domain = destination.children.find(
       (node): node is FakeDomNode => node instanceof FakeDomNode,
@@ -857,8 +859,7 @@ describe("reference app page", () => {
     }
     activeDialog.dispatch("click", cancelButton);
     await expect(declining).resolves.toBe(false);
-    expect(open).toHaveBeenCalledOnce();
-    expect(open).toHaveBeenCalledWith(link, "_blank", "noopener,noreferrer");
+    expect(open.mock.calls).toEqual([[link, "_blank", "noopener,noreferrer"]]);
     expect(request.mock.calls.at(-1)?.[1]?.body).toContain('"consented":false');
 
     windowListeners.get("pagehide")?.();

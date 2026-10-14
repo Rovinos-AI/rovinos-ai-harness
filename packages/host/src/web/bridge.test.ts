@@ -143,14 +143,6 @@ describe("createAppBridge", () => {
       removeEventListener: vi.fn(),
       postMessage: vi.fn(),
     });
-    const currentContext: McpUiHostContext = {
-      theme: "light",
-      displayMode: "fullscreen",
-      availableDisplayModes: ["inline", "fullscreen"],
-      locale: "en-US",
-      timeZone: "UTC",
-      containerDimensions: { maxWidth: 800, maxHeight: 600 },
-    };
     const onRequestDisplayMode = vi.fn(
       (mode: "inline" | "fullscreen" | "pip") => Promise.resolve(mode),
     );
@@ -159,12 +151,16 @@ describe("createAppBridge", () => {
       () => Promise.resolve({ content: [] }),
       () => Promise.resolve({ tools: [] }),
       {
-        hostContext: currentContext,
+        hostContext: {
+          theme: "light",
+          displayMode: "fullscreen",
+          availableDisplayModes: ["inline", "fullscreen"],
+        },
         onOpenLink: () => Promise.resolve(false),
         onMessage: () => Promise.resolve(false),
         onUpdateModelContext: () => Promise.resolve(false),
         onRequestDisplayMode,
-        getCurrentDisplayMode: () => currentContext.displayMode,
+        getCurrentDisplayMode: () => "fullscreen",
         onSizeChange: () => undefined,
       },
     );
