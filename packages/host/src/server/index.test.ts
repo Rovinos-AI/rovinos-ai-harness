@@ -4,6 +4,7 @@ import { trace } from "@opentelemetry/api";
 import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/core";
 import { Code, parseJson, Traceparent } from "@harness/schemas";
 import { createTestSpanCollector } from "@harness/telemetry/testing";
+import type { HostAppRejectedReason } from "@harness/telemetry";
 import type { PolicyPort, ToolPort } from "@harness/core";
 import { z } from "zod";
 import {
@@ -115,6 +116,8 @@ function makeServer(
     readonly tool?: ReferenceHostDependencies["tool"];
     readonly scheduleUiSessionExpiry?: ReferenceHostDependencies["scheduleUiSessionExpiry"];
     readonly uiSessionContext?: ReferenceHostDependencies["uiSessionContext"];
+    readonly tokenizeAppContent?: ReferenceHostDependencies["tokenizeAppContent"];
+    readonly onAppContent?: ReferenceHostDependencies["onAppContent"];
   } = {},
 ) {
   let listener: RequestListener | undefined;
@@ -153,6 +156,10 @@ function makeServer(
       ? {}
       : { hasPendingApproval: options.hasPendingApproval }),
     ...(options.onAppRejected === undefined ? {} : { onAppRejected: options.onAppRejected }),
+    ...(options.tokenizeAppContent === undefined
+      ? {}
+      : { tokenizeAppContent: options.tokenizeAppContent }),
+    ...(options.onAppContent === undefined ? {} : { onAppContent: options.onAppContent }),
     ...(options.onCode === undefined ? {} : { onCode: options.onCode }),
     ...(options.readStatic === undefined ? {} : { readStatic: options.readStatic }),
     ...(options.idGenerator === undefined ? {} : { idGenerator: options.idGenerator }),
@@ -461,6 +468,120 @@ describe("createReferenceHost", () => {
     expect(disallowed.status).toBe(403);
     expect(disallowed.body).toBe('{"error":"app_tool_not_allowed"}');
     expect(onAppRejected).toHaveBeenCalledWith("unknown_tool");
+    await host.close();
+  });
+
+  it("denies gated requests by default and records only tokenized app content after opt-in", async () => {
+    const onRejected = vi.fn<(reason: HostAppRejectedReason) => void>();
+    const tokenizeAppContent: NonNullable<ReferenceHostDependencies["tokenizeAppContent"]> = vi.fn(
+      (_runId, content, context) => {
+        expect(context).toEqual({ boundary: "model_input" });
+        expect(content).toEqual({
+          content: [{ type: "text", text: "alice@example.test" }],
+        });
+        return Promise.resolve({ content: [{ type: "text", text: "<EMAIL_1>" }] });
+      },
+    );
+    const onAppContent = vi.fn(() => Promise.resolve());
+    const app = appConfig.apps[0];
+    if (app === undefined) {
+      throw new Error("Test app configuration is missing.");
+    }
+    const fixture = makeServer({
+      config: {
+        ...appConfig,
+        apps: [
+          {
+            ...app,
+            allow: { openLink: true, message: true, modelContext: true },
+          },
+        ],
+      },
+      onAppRejected: onRejected,
+      tokenizeAppContent,
+      onAppContent,
+      idGenerator: () => sessionId,
+    });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+    const auth = authorization(host);
+    const accepted = await fixture.request(
+      "POST",
+      "/api/request",
+      auth,
+      JSON.stringify({
+        sessionId: launchedSessionId,
+        kind: "message",
+        content: [{ type: "text", text: "alice@example.test" }],
+      }),
+    );
+    expect(accepted.status).toBe(200);
+    expect(accepted.body).toBe('{"allowed":true}');
+    expect(tokenizeAppContent).toHaveBeenCalledWith(
+      sessionId,
+      { content: [{ type: "text", text: "alice@example.test" }] },
+      { boundary: "model_input" },
+    );
+    expect(onAppContent).toHaveBeenCalledWith({
+      kind: "message",
+      source: "app",
+      label: "App-provided",
+      appId: "approval",
+      runId: sessionId,
+      content: { content: [{ type: "text", text: "<EMAIL_1>" }] },
+    });
+    expect(JSON.stringify(onAppContent.mock.calls)).not.toContain("alice@example.test");
+
+    const link = await fixture.request(
+      "POST",
+      "/api/request",
+      auth,
+      JSON.stringify({
+        sessionId: launchedSessionId,
+        kind: "open_link",
+        url: "https://example.test/path",
+      }),
+    );
+    expect(parseJson(z.object({ allowed: z.boolean() }).strict(), link.body)).toEqual({
+      allowed: true,
+    });
+    const cancelled = await fixture.request(
+      "POST",
+      "/api/request",
+      auth,
+      JSON.stringify({ sessionId: launchedSessionId, kind: "open_link", consented: false }),
+    );
+    expect(cancelled.body).toBe('{"allowed":false}');
+    expect(onRejected).toHaveBeenCalledWith("user_denied");
+    await host.close();
+  });
+
+  it("denies requests by default and counts malformed payloads without retaining content", async () => {
+    const onRejected = vi.fn<(reason: HostAppRejectedReason) => void>();
+    const onAppContent = vi.fn(() => Promise.resolve());
+    const fixture = makeServer({ onAppRejected: onRejected, onAppContent });
+    const host = await fixture.hostPromise;
+    const launchedSessionId = await newAppSession(fixture, host);
+    const auth = authorization(host);
+    const denied = await fixture.request(
+      "POST",
+      "/api/request",
+      auth,
+      JSON.stringify({
+        sessionId: launchedSessionId,
+        kind: "message",
+        content: [{ type: "text", text: "private synthetic canary" }],
+      }),
+    );
+    expect(denied.body).toBe('{"allowed":false}');
+    expect(onAppContent).not.toHaveBeenCalled();
+    const malformed = await fixture.request("POST", "/api/request", auth, '{"kind":"message"}');
+    expect(malformed.body).toBe('{"allowed":false}');
+    expect(onRejected.mock.calls.map(([reason]) => reason)).toEqual([
+      "request_disabled",
+      "request_invalid",
+    ]);
+    expect(JSON.stringify(onRejected.mock.calls)).not.toContain("private synthetic canary");
     await host.close();
   });
 

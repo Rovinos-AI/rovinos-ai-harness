@@ -8,6 +8,7 @@ const bridgeMocks = vi.hoisted(() => ({
   connect: vi.fn<(transport: Transport) => Promise<void>>(),
   sendInput: vi.fn<(input: Readonly<Record<string, unknown>>) => Promise<void>>(),
   sendResult: vi.fn<(result: unknown) => Promise<void>>(),
+  addEventListener: vi.fn<(event: string, callback: (params: unknown) => void) => void>(),
   handleCall:
     vi.fn<(call: { name: string; arguments?: Record<string, unknown> }) => Promise<unknown>>(),
   handleListTools: vi.fn<(params: { readonly cursor?: string } | undefined) => Promise<unknown>>(),
@@ -30,6 +31,7 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
     connect = bridgeMocks.connect;
     sendToolInput = bridgeMocks.sendInput;
     sendToolResult = bridgeMocks.sendResult;
+    addEventListener = bridgeMocks.addEventListener;
   },
 }));
 
@@ -59,6 +61,7 @@ describe("createAppBridge", () => {
     bridgeMocks.connect.mockResolvedValue();
     bridgeMocks.sendInput.mockResolvedValue();
     bridgeMocks.sendResult.mockResolvedValue();
+    bridgeMocks.addEventListener.mockReset();
     const result: CallToolResult = { content: [{ type: "text", text: "accepted" }] };
     const onToolCall = vi.fn(() => Promise.resolve(result));
     const listedTools = { tools: [] };
@@ -70,6 +73,10 @@ describe("createAppBridge", () => {
     expect(bridgeMocks.connect).toHaveBeenCalledOnce();
     expect(bridgeMocks.sendInput).toHaveBeenCalledWith({ arguments: { city: "Seattle" } });
     expect(bridgeMocks.sendResult).toHaveBeenCalledWith(result);
+    expect(bridgeMocks.addEventListener).toHaveBeenCalledWith(
+      "sizechange",
+      expect.any(Function),
+    );
     await expect(
       bridgeMocks.handleCall({ name: "approve", arguments: { ok: true } }),
     ).resolves.toBe(result);

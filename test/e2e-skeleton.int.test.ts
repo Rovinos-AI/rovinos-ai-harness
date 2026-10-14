@@ -8,6 +8,7 @@
 // Not wired yet: runtime vault from config (13.12 -> #389)
 // Not wired yet: storage-boundary tokenization (13.8 -> #81)
 // Not wired yet: sentinel trip gate wired to the runtime vault (8.4 -> #74)
+// Not wired yet: reference-host app content callbacks in the core runtime/CLI (3.8 -> #189)
 import { Command } from "commander";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";

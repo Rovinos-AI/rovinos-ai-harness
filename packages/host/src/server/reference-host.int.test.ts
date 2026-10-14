@@ -12,10 +12,17 @@ const appHtml = `<!doctype html>
   <pre id="network">pending</pre>
   <pre id="input"></pre>
   <pre id="result"></pre>
+  <pre id="context"></pre>
+  <pre id="requests"></pre>
   <script>
     const state = { fetch: "pending", xhr: "pending", websocket: "pending", image: "pending" };
+    const contextState = { initial: undefined, updates: 0 };
+    const requests = [];
     const update = () => {
       document.getElementById("network").textContent = JSON.stringify(state);
+    };
+    const updateContext = () => {
+      document.getElementById("context").textContent = JSON.stringify(contextState);
     };
     window.addEventListener("message", (event) => {
       const message = event.data;
@@ -25,11 +32,47 @@ const appHtml = `<!doctype html>
       if (message?.method === "ui/notifications/tool-result") {
         document.getElementById("result").textContent = JSON.stringify(message.params);
       }
+      if (message?.method === "ui/notifications/host-context-changed") {
+        contextState.updates += 1;
+        updateContext();
+      }
+      if ([2, 3, 4].includes(message?.id)) {
+        requests.push({
+          id: message.id,
+          denied: message.error !== undefined || message.result?.isError === true,
+        });
+        document.getElementById("requests").textContent = JSON.stringify(requests);
+      }
       if (message?.id === 1 && message.result !== undefined) {
+        contextState.initial = message.result.hostContext;
+        updateContext();
         window.parent.postMessage({
           jsonrpc: "2.0",
           method: "ui/notifications/initialized",
           params: {}
+        }, "*");
+        window.parent.postMessage({
+          jsonrpc: "2.0",
+          method: "ui/notifications/size-changed",
+          params: { width: 5000, height: 5000 }
+        }, "*");
+        window.parent.postMessage({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "ui/open-link",
+          params: { url: "https://example.test/path?synthetic=secret" }
+        }, "*");
+        window.parent.postMessage({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "ui/message",
+          params: { role: "user", content: [{ type: "text", text: "private-canary@example.test" }] }
+        }, "*");
+        window.parent.postMessage({
+          jsonrpc: "2.0",
+          id: 4,
+          method: "ui/update-model-context",
+          params: { content: [{ type: "text", text: "private-canary@example.test" }] }
         }, "*");
       }
     });
@@ -113,6 +156,7 @@ const externalFailures: string[] = [];
 const externalResponses: string[] = [];
 const allRequests: string[] = [];
 const routedExternalRequests: string[] = [];
+const appRequestRejections: string[] = [];
 const spanCollector = createTestSpanCollector();
 const diagnosticCodes: string[] = [];
 let toolCallSpan: Span | undefined;
@@ -158,6 +202,7 @@ beforeAll(async () => {
     },
     {
       onCode: (code) => diagnosticCodes.push(code),
+      onAppRejected: (reason) => appRequestRejections.push(reason),
       readResource: () =>
         Promise.resolve({
           contents: [
@@ -268,12 +313,36 @@ describe("reference host browser security", () => {
     expect(networkResult).toContain('"websocket":"blocked"');
     expect(networkResult).toContain('"image":"blocked"');
     expect(networkResult).toContain('"csp":');
+    await app.locator("#context").waitFor({ state: "visible", timeout: 2_000 }).catch(() => {
+      throw new Error("App did not receive host context.");
+    });
     expect(await app.locator("#input").textContent()).toBe('{"decision":"approve"}');
     const resultNotification = await app.locator("#result").textContent();
     expect(resultNotification).toContain("complete");
     expect(resultNotification).toContain('"_meta":{"traceparent":"00-');
     expect(resultNotification).not.toContain("tracestate");
     expect(resultNotification).not.toContain("baggage");
+    const initialContext = await app.locator("#context").textContent();
+    expect(initialContext).toContain('"theme":');
+    expect(initialContext).toContain('"locale":');
+    expect(initialContext).toContain('"timeZone":');
+    expect(initialContext).toContain('"availableDisplayModes":["inline"');
+    expect(initialContext).toContain('"containerDimensions":{"maxWidth":');
+    expect(initialContext).toContain('"--color-background-primary"');
+    await app.locator("#requests").waitFor({ state: "visible" });
+    await expectDeniedAppRequests(app.locator("#requests"));
+    expect(appRequestRejections).toEqual([
+      "request_disabled",
+      "request_disabled",
+      "request_disabled",
+    ]);
+    expect(JSON.stringify(appRequestRejections)).not.toContain("private-canary@example.test");
+    const iframeSize = await iframe.boundingBox();
+    expect(iframeSize?.width).toBeLessThanOrEqual(1024);
+    expect(iframeSize?.height).toBeLessThanOrEqual(768);
+    await page.setViewportSize({ width: 800, height: 600 });
+    await waitForHostContextUpdate(app.locator("#context"), initialContext ?? "");
+    expect(await app.locator("#context").textContent()).toContain('"updates":');
     await expectNavigationAttempts(page);
     expect(externalRequests.map((url) => new URL(url).pathname).sort()).toEqual([
       "/beacon",
@@ -359,5 +428,58 @@ describe("reference host browser security", () => {
     ]) {
       expect(value).toContain(navigation);
     }
+  }
+
+  async function expectDeniedAppRequests(locator: ReturnType<Page["locator"]>): Promise<void> {
+    await locator.evaluate(
+      (element) =>
+        new Promise<void>((resolve, reject) => {
+          const started = Date.now();
+          const inspect = (): void => {
+            const text = element.textContent;
+            if (
+              text.includes('"id":2') &&
+              text.includes('"id":3') &&
+              text.includes('"id":4')
+            ) {
+              resolve();
+              return;
+            }
+            if (Date.now() - started > 5_000) {
+              reject(new Error("App request responses did not arrive."));
+              return;
+            }
+            window.setTimeout(inspect, 25);
+          };
+          inspect();
+        }),
+    );
+    const result = await locator.textContent();
+    expect(result?.match(/"denied":true/gu)).toHaveLength(3);
+  }
+
+  async function waitForHostContextUpdate(
+    locator: ReturnType<Page["locator"]>,
+    initial: string,
+  ): Promise<void> {
+    await locator.evaluate(
+      (element, previous) =>
+        new Promise<void>((resolve, reject) => {
+          const started = Date.now();
+          const inspect = (): void => {
+            if (element.textContent !== previous) {
+              resolve();
+              return;
+            }
+            if (Date.now() - started > 5_000) {
+              reject(new Error("Host context did not update after resizing."));
+              return;
+            }
+            window.setTimeout(inspect, 25);
+          };
+          inspect();
+        }),
+      initial,
+    );
   }
 });

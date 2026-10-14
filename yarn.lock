@@ -1130,6 +1130,7 @@ __metadata:
     "@types/node": "npm:22.20.5"
     esbuild: "npm:0.28.2"
     playwright: "npm:1.64.0"
+    tldts: "npm:7.4.18"
     typescript: "npm:5.9.3"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
@@ -5754,6 +5755,24 @@ __metadata:
   version: 4.0.6
   resolution: "tinyspy@npm:4.0.6"
   checksum: 10c0/1066760cea2a18ca69b9d934b73212ff5a45414387a67270b6944591a8afe59031e3d82b48cf7ca2d16b6c640d654e3a4a5726a63f2509aec3ef2d98f62ae5b8
+  languageName: node
+  linkType: hard
+
+"tldts-core@npm:^7.4.18":
+  version: 7.4.18
+  resolution: "tldts-core@npm:7.4.18"
+  checksum: 10c0/474fa18404d313b16b8fa339406607b3d295561d20d48d734b0faaf45abf77aede26ed680f62a7c777bb2a35ae25da4b2ca0cefce676b4c09ea8408a23ac7e3c
+  languageName: node
+  linkType: hard
+
+"tldts@npm:7.4.18":
+  version: 7.4.18
+  resolution: "tldts@npm:7.4.18"
+  dependencies:
+    tldts-core: "npm:^7.4.18"
+  bin:
+    tldts: bin/cli.js
+  checksum: 10c0/3e51339815c8679293ae8e84289ed5f96241075187573e84f37b2450315a7860bbcaf8125fba684f298b969bc6a8ae93c0e125be7feab7d1449d326e7cf815ec
   languageName: node
   linkType: hard
 

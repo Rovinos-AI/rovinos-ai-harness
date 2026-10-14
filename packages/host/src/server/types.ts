@@ -5,6 +5,7 @@ import type { HostDiagnosticCode } from "./resource.js";
 import type { UiSession, UiSessionContext } from "./ui-session.js";
 import { z } from "zod";
 import type { AppCallExecutionContext, AppCallRejectedReason } from "./app-calls.js";
+import type { AppContentEnvelope, AppContentTokenizer } from "./app-requests.js";
 import type { PolicyPort, ToolPort } from "@harness/core";
 
 /** Validated app-originated call payload accepted at the host boundary. */
@@ -105,6 +106,10 @@ export interface ReferenceHostDependencies {
   readonly hasPendingApproval?: (runId: Id) => boolean;
   /** Counts a rejected app tool call using a bounded reason. */
   readonly onAppRejected?: (reason: AppCallRejectedReason) => void;
+  /** Tokenizes app message and model-context JSON at the `model_input` boundary. */
+  readonly tokenizeAppContent?: AppContentTokenizer;
+  /** Records only tokenized app content, preserving the `App-provided` label and app ID. */
+  readonly onAppContent?: (content: AppContentEnvelope) => Promise<void>;
   /** Injectable static asset reader for tests. */
   readonly readStatic?: (asset: "index" | "bundle") => Promise<Buffer>;
   /** Injectable HTTP server factory for tests that must not use a network socket. */
