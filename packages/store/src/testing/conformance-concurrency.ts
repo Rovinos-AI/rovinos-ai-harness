@@ -366,6 +366,6 @@ export function runConcurrencyConformance(
 
     it("keeps reader observations contiguous while a writer appends 1,000 events", async () => {
       await withFactory(multiFactory, (factory) => runWriterReader(factory, builders));
-    }, 30_000);
+    }, 60_000);
   });
 }

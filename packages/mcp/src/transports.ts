@@ -96,6 +96,9 @@ async function createHttpTransport(
 ): Promise<StreamableHTTPClientTransport> {
   const headers: Record<string, string> = {};
   for (const [key, ref] of Object.entries(config.headers ?? {})) {
+    if (["traceparent", "tracestate", "baggage"].includes(key.toLowerCase())) {
+      continue;
+    }
     headers[key] = await dependencies.resolveSecret(ref, signal);
   }
   return new StreamableHTTPClientTransport(new URL(config.url), {
