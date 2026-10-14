@@ -125,7 +125,12 @@ export {
   type ServerConfig,
   type ServersConfig,
 } from "./config/servers.js";
-export { PolicyConfigSchema, type PolicyConfig } from "./config/policy.js";
+export {
+  ApprovalConfigSchema,
+  ApprovalNotifierConfigSchema,
+  PolicyConfigSchema,
+  type PolicyConfig,
+} from "./config/policy.js";
 export {
   JsonPointerSchema,
   PiiConfigSchema,
@@ -216,6 +221,12 @@ export {
   type KeyRetireResult,
   type KeyRotationResult,
 } from "./cli/keys.js";
+export {
+  ServersCheckResultSchema,
+  ServersCheckServerResultSchema,
+  type ServersCheckResult,
+  type ServersCheckServerResult,
+} from "./cli/servers.js";
 export { eventSamples, FakeClock, SequentialIdGenerator } from "./testing.js";
 
 /** The current harness version. */

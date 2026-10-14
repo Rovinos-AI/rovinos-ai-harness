@@ -80,13 +80,13 @@ at its boundary and is recorded as a denied `approval_resolved` event with
 `decidedBy: expiry` and `reason: expired`. Sweeping is a one-shot CLI operation,
 not a background service.
 
-The CLI emits escalation notifications as metadata-only log lines. The policy
-package also provides `WebhookNotifier` for integrations that resolve its URL
-from a `SecretRef`; its strict payload contains run, approval, tool, and rule
-IDs plus approval age, never tool arguments. Webhook delivery is at least once:
-each delivery uses the approval ID as its `Idempotency-Key` header and
-`idempotencyKey` body field. Receivers must ignore duplicate notifications with
-the same key, since a delivery can be repeated if the sweeper cannot persist its
-sent marker. Selecting the webhook from CLI configuration is a follow-up;
-`harness approvals sweep` currently uses the log notifier.
+The CLI emits escalation notifications as metadata-only log lines by default.
+Configure `policy.approvals.notifier` to `kind: webhook` to post notifications
+to an HTTPS endpoint, with a bearer token resolved from its `secretRef`; see
+[Configuration](configuration.md). The strict payload contains run, approval,
+tool, and rule IDs plus approval age, never tool arguments. Webhook delivery is
+at least once: each delivery uses the approval ID as its `Idempotency-Key`
+header and `idempotencyKey` body field. Receivers must ignore duplicate
+notifications with the same key, since a delivery can be repeated if the
+sweeper cannot persist its sent marker.
 Control-plane integrations can invoke the sweep periodically.

@@ -27,11 +27,11 @@ export declare const HarnessOverridesSchema: z.ZodObject<{
     model: z.ZodOptional<z.ZodCustom<import("@harness/core").ModelPort, import("@harness/core").ModelPort>>;
     providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@harness/models").ProviderAdapter, import("@harness/models").ProviderAdapter>>>;
     secretResolver: z.ZodOptional<z.ZodCustom<{
-        resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+        resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
             reveal(): string;
         }>;
     }, {
-        resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+        resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
             reveal(): string;
         }>;
     }>>;
@@ -255,6 +255,17 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         }>>>>;
         policy: z.ZodPrefault<z.ZodObject<{
             file: z.ZodOptional<z.ZodString>;
+            approvals: z.ZodOptional<z.ZodObject<{
+                notifier: z.ZodDefault<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                    kind: z.ZodLiteral<"log">;
+                }, z.core.$strict>, z.ZodObject<{
+                    kind: z.ZodLiteral<"webhook">;
+                    url: z.ZodPipe<z.ZodURL, z.ZodString>;
+                    secretRef: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+                    timeoutMs: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+                }, z.core.$strict>], "kind">>;
+                allowInsecureLocalhost: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         pii: z.ZodPrefault<z.ZodObject<{
             defaultAction: z.ZodDefault<z.ZodEnum<{
@@ -350,11 +361,11 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         model: z.ZodOptional<z.ZodCustom<import("@harness/core").ModelPort, import("@harness/core").ModelPort>>;
         providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@harness/models").ProviderAdapter, import("@harness/models").ProviderAdapter>>>;
         secretResolver: z.ZodOptional<z.ZodCustom<{
-            resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+            resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
                 reveal(): string;
             }>;
         }, {
-            resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+            resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
                 reveal(): string;
             }>;
         }>>;
@@ -379,11 +390,11 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         model: z.ZodOptional<z.ZodCustom<import("@harness/core").ModelPort, import("@harness/core").ModelPort>>;
         providerAdapters: z.ZodOptional<z.ZodArray<z.ZodCustom<import("@harness/models").ProviderAdapter, import("@harness/models").ProviderAdapter>>>;
         secretResolver: z.ZodOptional<z.ZodCustom<{
-            resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+            resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
                 reveal(): string;
             }>;
         }, {
-            resolve(ref: import("@harness/schemas").SecretRef): Promise<{
+            resolve(ref: import("@harness/schemas").SecretRef, signal?: AbortSignal): Promise<{
                 reveal(): string;
             }>;
         }>>;

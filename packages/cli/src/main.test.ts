@@ -238,6 +238,7 @@ describe("CLI main", () => {
       "doctor",
       "keys",
       "policy",
+      "servers",
       "store",
       "healthcheck",
     ]);
