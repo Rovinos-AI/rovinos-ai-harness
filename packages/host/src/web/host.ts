@@ -1,31 +1,60 @@
 // SPDX-License-Identifier: Apache-2.0
-import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/core";
-import { INVALID_REQUEST, ProtocolError } from "@modelcontextprotocol/client";
-import { Code, Id, Traceparent, parseJson } from "@harness/schemas";
+import { getDomain } from "tldts";
 import { z } from "zod";
-import { createAppBridge, type AppIframe, type AppToolCall } from "./bridge.js";
+import type {
+  McpUiHostContext,
+  McpUiRequestDisplayModeRequest,
+} from "@modelcontextprotocol/ext-apps/app-bridge";
+import type { AppIframe } from "./bridge.js";
 
-const AppPayloadSchema = z
-  .object({
-    appId: Code,
-    sessionId: Id,
-    resourceUri: z.string().startsWith("ui://"),
-    html: z.string(),
-    csp: z.string(),
-    permissions: z.array(Code),
-    toolInput: z.record(z.string(), z.unknown()),
-    toolResult: CallToolResultSchema.nullable(),
-    telemetry: z.boolean(),
-    traceparent: Traceparent.optional(),
-  })
-  .strict();
-const CallResponseSchema = CallToolResultSchema;
-const AppCallErrorSchema = z
-  .object({
-    error: z.enum(["app_tool_not_allowed", "app_run_mismatch", "app_run_unavailable"]),
-  })
-  .strict();
-const HostReadySchema = z.object({ appId: Code, sessionId: Id }).strict();
+export const MAX_FRAME_WIDTH = 1024;
+export const MAX_FRAME_HEIGHT = 768;
+
+/** Destination data shown to a user before an app link can be opened. */
+export interface OpenLinkDetails {
+  readonly url: string;
+  readonly registrableDomain: string;
+  readonly punycodeWarning: boolean;
+}
+
+/** Formats a safe external URL for the host's explicit consent UI. */
+export function describeOpenLink(value: string): OpenLinkDetails | undefined {
+  try {
+    const url = new URL(value);
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      url.hostname.length === 0 ||
+      url.username.length > 0 ||
+      url.password.length > 0
+    ) {
+      return undefined;
+    }
+    return {
+      url: url.href,
+      registrableDomain: getDomain(url.hostname) ?? url.hostname,
+      punycodeWarning: /(?:^|\.)xn--/iu.test(url.hostname),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Clamps an app-requested iframe size to finite host limits. */
+export function clampAppSize(
+  width: number | undefined,
+  height: number | undefined,
+  maxWidth: number,
+  maxHeight: number,
+): { readonly width?: number; readonly height?: number } {
+  return {
+    ...(width === undefined ? {} : { width: clampDimension(width, maxWidth) }),
+    ...(height === undefined ? {} : { height: clampDimension(height, maxHeight) }),
+  };
+}
+
+function clampDimension(value: number, maximum: number): number {
+  return Math.floor(Math.max(1, Math.min(value, maximum)));
+}
 
 /** Default restrictions placed on every reference-host app iframe. */
 export const APP_CSP =
@@ -52,9 +81,14 @@ export interface HostPagePort {
   onFrameRemoved(callback: () => void): void;
   onPageHide(callback: () => void): void;
   attachFrame(): void;
+  getHostContext(): McpUiHostContext;
+  onHostContextChange(callback: (context: McpUiHostContext) => void): () => void;
+  confirmOpenLink(details: OpenLinkDetails, open: (url: string) => boolean): Promise<boolean>;
+  resizeFrame(width: number | undefined, height: number | undefined): void;
+  setDisplayMode(
+    mode: McpUiRequestDisplayModeRequest["params"]["mode"],
+  ): Promise<McpUiRequestDisplayModeRequest["params"]["mode"]>;
 }
-
-type AppPayload = z.infer<typeof AppPayloadSchema>;
 
 /** Reads and validates the non-secret resource selection and bearer token from the URL fragment. */
 export function parseLaunchDetails(hash: string): LaunchDetails | undefined {
@@ -74,11 +108,13 @@ export function createSandboxDocument(html: string, csp = APP_CSP): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"></head><body>${html}</body></html>`;
 }
 
-function authorizedHeaders(token: string): Record<string, string> {
+/** Builds the authenticated request headers for the host's local channel. */
+export function authorizedHeaders(token: string): Record<string, string> {
   return { authorization: ["Bearer", token].join(" ") };
 }
 
-function endUiSession(
+/** Ends a host UI session without retaining or exposing request details. */
+export function endUiSession(
   request: typeof fetch,
   sessionId: string,
   headers: Record<string, string>,
@@ -89,260 +125,4 @@ function endUiSession(
     headers,
     ...(keepalive ? { keepalive: true } : {}),
   }).catch(() => undefined);
-}
-
-function toolResultForApp(
-  result: NonNullable<z.infer<typeof CallToolResultSchema>>,
-  app: Pick<AppPayload, "telemetry" | "traceparent">,
-): z.infer<typeof CallToolResultSchema> {
-  const { _meta, ...resultWithoutMetadata } = result;
-  const metadata = { ..._meta };
-  delete metadata.traceparent;
-  delete metadata.tracestate;
-  delete metadata.baggage;
-  if (app.telemetry && app.traceparent !== undefined) {
-    metadata.traceparent = app.traceparent;
-  }
-  return {
-    ...resultWithoutMetadata,
-    ...(Object.keys(metadata).length === 0 ? {} : { _meta: metadata }),
-  };
-}
-
-function waitForFrameLoad(frame: ReturnType<AppIframeFactory>): Promise<void> {
-  return new Promise((resolve, reject) => {
-    frame.addEventListener("load", resolve, { once: true });
-    frame.addEventListener(
-      "error",
-      () => {
-        reject(new Error("App iframe failed to load."));
-      },
-      { once: true },
-    );
-  });
-}
-
-async function connectAppFrame(options: {
-  readonly root: HostPagePort;
-  readonly app: AppPayload;
-  readonly launch: LaunchDetails;
-  readonly request: typeof fetch;
-  readonly endSession: () => void;
-}): Promise<void> {
-  const { root, app, launch, request, endSession } = options;
-  const frame = root.createFrame();
-  frame.setAttribute("sandbox", "allow-scripts");
-  frame.setAttribute("referrerpolicy", "no-referrer");
-  frame.setAttribute("title", `MCP App ${app.appId}`);
-  if (app.permissions.length > 0) {
-    frame.setAttribute("allow", app.permissions.join("; "));
-  }
-  frame.srcdoc = createSandboxDocument(app.html, app.csp);
-  const loaded = waitForFrameLoad(frame);
-  root.onFrameRemoved(endSession);
-  root.attachFrame();
-  await loaded;
-  const bridge = createAppBridge(
-    frame,
-    (call) =>
-      routeToolCall(call, {
-        appId: app.appId,
-        sessionId: app.sessionId,
-        token: launch.token,
-        request,
-      }),
-    (cursor) =>
-      routeToolList(cursor, {
-        sessionId: app.sessionId,
-        token: launch.token,
-        request,
-      }),
-  );
-  await bridge.connect();
-  await bridge.sendToolInput(app.toolInput);
-  if (app.toolResult !== null) {
-    await bridge.sendToolResult(toolResultForApp(app.toolResult, app));
-  }
-}
-
-interface ToolCallContext {
-  readonly appId: string;
-  readonly sessionId: string;
-  readonly token: string;
-  readonly request: typeof fetch;
-}
-
-interface ToolListContext {
-  readonly sessionId: string;
-  readonly token: string;
-  readonly request: typeof fetch;
-}
-
-async function routeToolList(
-  cursor: string | undefined,
-  context: ToolListContext,
-): Promise<z.infer<typeof ListToolsResultSchema>> {
-  const query = new URLSearchParams({ sessionId: context.sessionId });
-  if (cursor !== undefined) {
-    query.set("cursor", cursor);
-  }
-  try {
-    const response = await context.request(`/api/tools?${query.toString()}`, {
-      headers: authorizedHeaders(context.token),
-    });
-    if (!response.ok) {
-      return { tools: [] };
-    }
-    return parseJson(ListToolsResultSchema, await response.text());
-  } catch {
-    return { tools: [] };
-  }
-}
-
-async function routeToolCall(
-  call: AppToolCall,
-  context: ToolCallContext,
-): Promise<z.infer<typeof CallResponseSchema>> {
-  try {
-    const response = await context.request("/api/call", {
-      method: "POST",
-      headers: { ...authorizedHeaders(context.token), "content-type": "application/json" },
-      body: JSON.stringify({
-        appId: context.appId,
-        sessionId: context.sessionId,
-        toolName: call.name,
-        arguments: call.arguments ?? {},
-      }),
-    });
-    if (!response.ok) {
-      const error = parseJson(AppCallErrorSchema, await response.text());
-      throw new ProtocolError(INVALID_REQUEST, error.error);
-    }
-    return parseJson(CallResponseSchema, await response.text());
-  } catch (error) {
-    if (error instanceof ProtocolError) {
-      throw error;
-    }
-    return { content: [], isError: true };
-  }
-}
-
-/**
- * Loads a registered MCP resource and mounts it in an isolated iframe.
- *
- * @param root - Trusted host-page container.
- * @param hash - The launch fragment containing the bearer token and resource URI.
- * @param request - Injectable fetch function for host-channel tests.
- * @returns True if the iframe was mounted; false if launch or server validation failed.
- */
-export async function mountReferenceApp(
-  root: HostPagePort,
-  hash: string,
-  request: typeof fetch = fetch,
-): Promise<boolean> {
-  const launch = parseLaunchDetails(hash);
-  if (launch === undefined) {
-    root.setStatus("app_unknown");
-    return false;
-  }
-  const headers = authorizedHeaders(launch.token);
-  const channel = await request(
-    `/api/events?resourceUri=${encodeURIComponent(launch.resourceUri)}`,
-    { headers },
-  );
-  if (!channel.ok) {
-    root.setStatus(channel.status === 404 ? "app_unknown" : "app_unauthorized");
-    return false;
-  }
-  let hostReady: z.infer<typeof HostReadySchema>;
-  try {
-    const event = (await channel.text()).split("\n").find((line) => line.startsWith("data: "));
-    if (event === undefined) {
-      throw new Error("Host launch event is missing.");
-    }
-    hostReady = parseJson(HostReadySchema, event.slice("data: ".length));
-  } catch {
-    root.setStatus("app_unknown");
-    return false;
-  }
-  let ended = false;
-  const endSession = (keepalive = false): void => {
-    if (!ended) {
-      ended = true;
-      endUiSession(request, hostReady.sessionId, headers, keepalive);
-    }
-  };
-  root.onPageHide(() => {
-    endSession(true);
-  });
-  let launched = false;
-  try {
-    const response = await request(
-      `/api/app?resourceUri=${encodeURIComponent(launch.resourceUri)}&sessionId=${encodeURIComponent(hostReady.sessionId)}`,
-      { headers },
-    );
-    if (!response.ok) {
-      root.setStatus(response.status === 404 ? "app_unknown" : "app_resource_invalid");
-      return false;
-    }
-    let app: z.infer<typeof AppPayloadSchema>;
-    try {
-      app = parseJson(AppPayloadSchema, await response.text());
-    } catch {
-      root.setStatus("app_resource_invalid");
-      return false;
-    }
-    await connectAppFrame({ root, app, launch, request, endSession });
-    launched = true;
-    return true;
-  } finally {
-    if (!launched) {
-      endSession();
-    }
-  }
-}
-
-/** Starts the browser entry point when the trusted static host page has loaded. */
-export function startReferenceHostPage(): void {
-  const element = document.getElementById("host");
-  if (element === null) {
-    return;
-  }
-  let frame: HTMLIFrameElement | undefined;
-  const root: HostPagePort = {
-    setStatus: (code) => {
-      element.textContent = code;
-    },
-    createFrame: () => {
-      frame = document.createElement("iframe");
-      return frame;
-    },
-    attachFrame: () => {
-      if (frame !== undefined) {
-        element.replaceChildren(frame);
-      }
-    },
-    onFrameRemoved: (callback) => {
-      if (typeof MutationObserver === "undefined") {
-        return;
-      }
-      const observer = new MutationObserver(() => {
-        if (frame !== undefined && !frame.isConnected) {
-          observer.disconnect();
-          callback();
-        }
-      });
-      observer.observe(document.documentElement, { childList: true, subtree: true });
-    },
-    onPageHide: (callback) => {
-      window.addEventListener("pagehide", callback, { once: true });
-    },
-  };
-  void mountReferenceApp(root, window.location.hash).catch(() => {
-    root.setStatus("host_unavailable");
-  });
-}
-
-if (typeof document !== "undefined") {
-  startReferenceHostPage();
 }

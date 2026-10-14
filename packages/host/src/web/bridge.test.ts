@@ -8,9 +8,12 @@ const bridgeMocks = vi.hoisted(() => ({
   connect: vi.fn<(transport: Transport) => Promise<void>>(),
   sendInput: vi.fn<(input: Readonly<Record<string, unknown>>) => Promise<void>>(),
   sendResult: vi.fn<(result: unknown) => Promise<void>>(),
+  addEventListener: vi.fn<(event: string, callback: (params: unknown) => void) => void>(),
+  getAppCapabilities: vi.fn<() => { readonly availableDisplayModes?: string[] } | undefined>(),
   handleCall:
     vi.fn<(call: { name: string; arguments?: Record<string, unknown> }) => Promise<unknown>>(),
   handleListTools: vi.fn<(params: { readonly cursor?: string } | undefined) => Promise<unknown>>(),
+  handleDisplayMode: vi.fn<(params: { readonly mode: string }) => Promise<unknown>>(),
 }));
 
 vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
@@ -30,6 +33,11 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
     connect = bridgeMocks.connect;
     sendToolInput = bridgeMocks.sendInput;
     sendToolResult = bridgeMocks.sendResult;
+    addEventListener = bridgeMocks.addEventListener;
+    getAppCapabilities = bridgeMocks.getAppCapabilities;
+    set onrequestdisplaymode(handler: (params: { readonly mode: string }) => Promise<unknown>) {
+      bridgeMocks.handleDisplayMode.mockImplementation(handler);
+    }
   },
 }));
 
@@ -59,6 +67,7 @@ describe("createAppBridge", () => {
     bridgeMocks.connect.mockResolvedValue();
     bridgeMocks.sendInput.mockResolvedValue();
     bridgeMocks.sendResult.mockResolvedValue();
+    bridgeMocks.addEventListener.mockReset();
     const result: CallToolResult = { content: [{ type: "text", text: "accepted" }] };
     const onToolCall = vi.fn(() => Promise.resolve(result));
     const listedTools = { tools: [] };
@@ -70,6 +79,7 @@ describe("createAppBridge", () => {
     expect(bridgeMocks.connect).toHaveBeenCalledOnce();
     expect(bridgeMocks.sendInput).toHaveBeenCalledWith({ arguments: { city: "Seattle" } });
     expect(bridgeMocks.sendResult).toHaveBeenCalledWith(result);
+    expect(bridgeMocks.addEventListener).toHaveBeenCalledWith("sizechange", expect.any(Function));
     await expect(
       bridgeMocks.handleCall({ name: "approve", arguments: { ok: true } }),
     ).resolves.toBe(result);
@@ -111,5 +121,59 @@ describe("createAppBridge", () => {
     expect(() =>
       createAppBridge({ contentWindow: null }, () => Promise.resolve({ content: [] })),
     ).toThrow("The app iframe has no content window.");
+  });
+
+  it("exposes initialized and ignores display modes not negotiated by the view", async () => {
+    let initializedListener: ((params: unknown) => void) | undefined;
+    bridgeMocks.addEventListener.mockReset().mockImplementation((event, callback) => {
+      if (event === "initialized") {
+        initializedListener = callback;
+      }
+    });
+    bridgeMocks.getAppCapabilities.mockReturnValue({ availableDisplayModes: ["inline"] });
+    bridgeMocks.handleDisplayMode.mockReset();
+    bridgeMocks.connect.mockResolvedValue();
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      postMessage: vi.fn(),
+    });
+    const onRequestDisplayMode = vi.fn((mode: "inline" | "fullscreen" | "pip") =>
+      Promise.resolve(mode),
+    );
+    const bridge = createAppBridge(
+      { contentWindow: window },
+      () => Promise.resolve({ content: [] }),
+      () => Promise.resolve({ tools: [] }),
+      {
+        hostContext: {
+          theme: "light",
+          displayMode: "fullscreen",
+          availableDisplayModes: ["inline", "fullscreen"],
+        },
+        onOpenLink: () => Promise.resolve(false),
+        onMessage: () => Promise.resolve(false),
+        onUpdateModelContext: () => Promise.resolve(false),
+        onRequestDisplayMode,
+        getCurrentDisplayMode: () => "fullscreen",
+        onSizeChange: () => undefined,
+      },
+    );
+    let initialized = false;
+    void bridge.initialized.then(() => {
+      initialized = true;
+    });
+    await bridge.connect();
+    expect(initialized).toBe(false);
+    if (initializedListener === undefined) {
+      throw new Error("The initialized event listener was not registered.");
+    }
+    initializedListener({});
+    await bridge.initialized;
+    expect(initialized).toBe(true);
+    await expect(bridgeMocks.handleDisplayMode({ mode: "fullscreen" })).resolves.toEqual({
+      mode: "fullscreen",
+    });
+    expect(onRequestDisplayMode).not.toHaveBeenCalled();
   });
 });

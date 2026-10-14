@@ -34,3 +34,28 @@ Requested permissions are denied unless named in `host.permissionAllowlist`. CSP
 `host.apps[].telemetry` defaults to `false`. When enabled, the host sends the app a W3C `traceparent` in the tool-result notification metadata, correlated with the originating tool-call span. The trace ID is visible to app code and is a correlation identifier, not a secret; only apps explicitly configured with `telemetry: true` receive it. No `tracestate` or `baggage` is sent. Supply the owning run ID and tool-call span context with `uiSessionContext`; call `ReferenceHost.endUiSessions()` when that run resumes. A missing or invalid span context omits the metadata and reports only `ui_trace_unavailable`.
 
 This setup assumes a trusted local host page and a browser that enforces iframe sandboxing and CSP. The CSP and sandbox are containment controls, not proof against browser vulnerabilities. App-call policy and host-stamped telemetry are completed by later tasks in epic 3.
+
+## UX
+
+The reference host sends MCP Apps host context during `ui/initialize` and pushes host-context updates when the viewport, fullscreen state, locale, or preferred color scheme changes. Context includes the light or dark theme, the SDK's documented CSS variables, locale, time zone, current and available display modes, and maximum container dimensions. App size-change requests are clamped to those dimensions (at most 1024 by 768 CSS pixels, and no larger than the viewport). The host supports inline mode and fullscreen when the browser enables it. It does not advertise picture-in-picture because this reference host does not implement PiP iframe handling.
+
+## App requests
+
+`host.apps[].allow` opts an individual app into requests that open external links or add model messages/context. All three flags default to `false`:
+
+```yaml
+apps:
+  - id: reference-app
+    resourceUri: ui://reference/app
+    allowedTools: []
+    allow:
+      openLink: true
+      message: false
+      modelContext: false
+```
+
+An opted-in `ui/open-link` request still requires explicit consent in the host page. The consent dialog shows the full URL, highlights its registrable domain, and warns when the hostname uses punycode; consent opens it in a new browser tab, not inside the harness. Only HTTP(S) URLs without embedded credentials are eligible.
+
+`ui/message` and `ui/update-model-context` remain separate opt-ins. The embedding runtime must provide both `tokenizeAppContent` and `onAppContent`; otherwise the requests fail closed with `request_unavailable`. The tokenizer receives the JSON content at the `model_input` boundary, and the recorder callback receives only the tokenized content with the app ID and the `App-provided` label. Embeddings should record this as untrusted content in the transcript; app requests do not resolve approvals or supply tool input. The reference host does not wire these callbacks into the CLI/runtime yet (-> #207).
+
+Rejected or unavailable requests are counted with bounded reason codes. Request payloads and tokenizer/recorder error messages are not included in those counters or host diagnostics. App tool calls continue to use the separate `allowedTools` and policy path described above.

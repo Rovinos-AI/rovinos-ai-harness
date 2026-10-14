@@ -4,6 +4,14 @@ import { z } from "zod";
 import { Code } from "../primitives.js";
 
 const AppPermissionSchema = z.enum(["camera", "microphone", "geolocation", "clipboardWrite"]);
+const AppRequestAllowSchema = z
+  .object({
+    openLink: z.boolean().default(false),
+    message: z.boolean().default(false),
+    modelContext: z.boolean().default(false),
+  })
+  .strict()
+  .default({ openLink: false, message: false, modelContext: false });
 const CspOriginSchema = z.url().superRefine((value, context) => {
   const url = new URL(value);
   const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
@@ -30,6 +38,7 @@ const AppConfigSchema = z
     resourceUri: z.string().startsWith("ui://"),
     telemetry: z.boolean().default(false),
     allowedTools: z.array(Code),
+    allow: AppRequestAllowSchema,
   })
   .strict()
   .superRefine((app, context) => {

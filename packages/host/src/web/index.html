@@ -10,9 +10,27 @@
         margin: 2rem;
       }
       iframe {
+        box-sizing: border-box;
         border: 1px solid #888;
         height: 32rem;
         width: min(100%, 64rem);
+        max-height: 48rem;
+        max-width: min(100%, 64rem);
+      }
+      dialog {
+        border: 1px solid #6b7280;
+        border-radius: 0.5rem;
+        color: CanvasText;
+        max-width: min(42rem, calc(100vw - 2rem));
+      }
+      dialog p {
+        overflow-wrap: anywhere;
+      }
+      .registrable-domain {
+        background: #fef3c7;
+        border-radius: 0.25rem;
+        color: #78350f;
+        padding: 0.125rem 0.25rem;
       }
     </style>
   </head>
