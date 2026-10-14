@@ -19,6 +19,12 @@ export interface Interactive {
   confirm(question: string): Promise<boolean>;
 }
 
+/** Vault resolver lease that may own resources which must be closed after use. */
+export interface CliVaultResolver extends VaultResolver {
+  /** Releases resources owned by the resolver, when applicable. */
+  close?(): void;
+}
+
 /** Dependencies shared by every registered CLI command. */
 export interface CliContext {
   /** Loads the validated harness configuration. */
@@ -36,7 +42,7 @@ export interface CliContext {
   /** Supplies the vault used by `harness approvals show --reveal`. */
   createVaultResolver?(
     config: HarnessConfig,
-  ): Promise<VaultResolver | undefined> | VaultResolver | undefined;
+  ): Promise<CliVaultResolver | undefined> | CliVaultResolver | undefined;
   /** Supplies the PII-aware tool port used to validate approval edits. */
   createToolPort?(config: HarnessConfig): Promise<ToolPort | undefined> | ToolPort | undefined;
 }

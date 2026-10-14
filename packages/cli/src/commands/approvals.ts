@@ -277,44 +277,48 @@ function registerShow(approvals: Command, context: CliContext): void {
         if (options.reveal === true && resolver === undefined) {
           throw new ApprovalsCodeError("reveal_unavailable");
         }
-        await withRuntime(
-          context,
-          undefined,
-          async (runtime) => {
-            const pending = await findPending(runtime.store, approvalId);
-            const summary = await summarize(pending, context.clock.now());
-            const { ApprovalPayloadSchema } = await import("@harness/policy");
-            const payload = ApprovalPayloadSchema.safeParse(pending.request.payload);
-            const showArgs = options.showArgs === true || options.reveal === true;
-            const args = payload.success ? payload.data.args : null;
-            let revealed: JsonValue | undefined;
-            if (options.reveal === true) {
-              if (resolver === undefined) {
-                throw new ApprovalsCodeError("reveal_unavailable");
+        try {
+          await withRuntime(
+            context,
+            undefined,
+            async (runtime) => {
+              const pending = await findPending(runtime.store, approvalId);
+              const summary = await summarize(pending, context.clock.now());
+              const { ApprovalPayloadSchema } = await import("@harness/policy");
+              const payload = ApprovalPayloadSchema.safeParse(pending.request.payload);
+              const showArgs = options.showArgs === true || options.reveal === true;
+              const args = payload.success ? payload.data.args : null;
+              let revealed: JsonValue | undefined;
+              if (options.reveal === true) {
+                if (resolver === undefined) {
+                  throw new ApprovalsCodeError("reveal_unavailable");
+                }
+                revealed = await revealArgs(
+                  { context, resolver, store: runtime.store },
+                  pending,
+                  args,
+                  summary.toolId,
+                );
               }
-              revealed = await revealArgs(
-                { context, resolver, store: runtime.store },
-                pending,
-                args,
-                summary.toolId,
-              );
-            }
-            if (revealed !== undefined) {
-              context.out.error("reveal_exposes_sensitive_values");
-            }
-            const result = {
-              ...summary,
-              callId: pending.request.callId,
-              reason: payload.success ? payload.data.reason : "unknown",
-              editableFields: payload.success ? payload.data.editableFields : [],
-              ...(showArgs ? { args } : {}),
-              ...(revealed === undefined ? {} : { revealed }),
-            };
-            context.out.json(ApprovalShowResultSchema, result);
-            context.out.print(`${JSON.stringify(result, null, 2)}\n`);
-          },
-          config,
-        );
+              if (revealed !== undefined) {
+                context.out.error("reveal_exposes_sensitive_values");
+              }
+              const result = {
+                ...summary,
+                callId: pending.request.callId,
+                reason: payload.success ? payload.data.reason : "unknown",
+                editableFields: payload.success ? payload.data.editableFields : [],
+                ...(showArgs ? { args } : {}),
+                ...(revealed === undefined ? {} : { revealed }),
+              };
+              context.out.json(ApprovalShowResultSchema, result);
+              context.out.print(`${JSON.stringify(result, null, 2)}\n`);
+            },
+            config,
+          );
+        } finally {
+          resolver?.close?.();
+        }
       },
     );
 }
