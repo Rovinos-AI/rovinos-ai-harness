@@ -8,7 +8,6 @@ COPY test/fixtures/sample-mcp-server/yarn.lock ./yarn.lock
 COPY .yarnrc.yml ./.yarnrc.yml
 RUN corepack yarn install --immutable
 COPY test/fixtures/sample-mcp-server/server.ts ./test/fixtures/sample-mcp-server/server.ts
-COPY test/fixtures/sample-mcp-failure.js ./test/fixtures/sample-mcp-failure.js
 USER node
 EXPOSE 3333
 CMD ["node", "--experimental-strip-types", "test/fixtures/sample-mcp-server/server.ts"]

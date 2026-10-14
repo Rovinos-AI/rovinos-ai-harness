@@ -5,7 +5,6 @@ import { Code, Id } from "@harness/schemas";
 import type { VaultValueEntry } from "@harness/schemas";
 import { findTokens, tokenType } from "@harness/vault";
 import type { Token } from "@harness/vault";
-import { sampleFailureText } from "../fixtures/sample-mcp-failure.js";
 import type { CanarySet } from "./canaries.js";
 
 export const ECHO_TOOL = Code.parse("canary.echo");
@@ -109,7 +108,7 @@ export function createCanaryToolPort(
         return Promise.reject(error);
       }
       if (call.toolId === SAMPLE_MCP_FAIL_TOOL) {
-        const text = sampleFailureText(canaries.email.value);
+        const text = `sample failure: ${canaries.email.value}`;
         captured.toolOutputs.push(text);
         return Promise.resolve({
           outcome: "error",

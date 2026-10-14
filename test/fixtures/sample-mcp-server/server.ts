@@ -12,7 +12,6 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/server";
-import { sampleFailureText } from "../sample-mcp-failure.js";
 
 const counterPath = process.env.SAMPLE_COUNTER_FILE ?? "/data/messages.count";
 const tracer = trace.getTracer("sample-mcp-server");
@@ -138,7 +137,7 @@ const toolHandlers: Record<string, SampleToolHandler> = {
   },
   slow: (args, signal) => slowTool(args, signal),
   fail: (args) => ({
-    content: [{ type: "text", text: sampleFailureText(String(args.value)) }],
+    content: [{ type: "text", text: `sample failure: ${String(args.value)}` }],
     isError: true,
   }),
   big: () => ({ content: [{ type: "text", text: "x".repeat(2 * 1024 * 1024) }] }),

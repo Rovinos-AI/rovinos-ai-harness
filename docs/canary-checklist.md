@@ -13,5 +13,5 @@ scanned for canary-like patterns.
 
 The hostile MCP App integration tests send run-seeded canaries through rejected telemetry fields
 and scan the host's exported spans, logs, metrics, diagnostics, and captured stdout.
-The sample MCP server's failure tool also supplies a run-seeded raw value as an error result to the
-canary pipeline, which verifies it is removed from persisted and exported sinks.
+The canary pipeline exercises the sample MCP fixture's error-result shape with a run-seeded raw
+value and verifies it is removed from persisted and exported sinks.
