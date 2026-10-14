@@ -44,6 +44,8 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly ids: IdGenerator;
   readonly goal: JsonValue;
   readonly signal: AbortSignal;
+  /** Called after the initial event batch has been durably appended. */
+  readonly onStarted?: () => void;
   /** Per-run limits sourced from the validated run configuration. */
   readonly budgets: RunConfig["budgets"];
   /** Optional inherited budget failure to record before executing this run. */
@@ -123,6 +125,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
         throw new Error("Expected run creation events.");
       }
       events.push(...recorded);
+      options.onStarted?.();
       const runId = last.runId;
       await drainSentinelTrips(options.recorder, events);
       const ended = await continueRunLoop(options, events, runId, budgetTracker);

@@ -1223,6 +1223,22 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@harness/sdk@workspace:^, @harness/sdk@workspace:packages/sdk":
+  version: 0.0.0-use.local
+  resolution: "@harness/sdk@workspace:packages/sdk"
+  dependencies:
+    "@harness/config": "workspace:^"
+    "@harness/core": "workspace:^"
+    "@harness/models": "workspace:^"
+    "@harness/schemas": "workspace:^"
+    "@harness/store": "workspace:^"
+    "@harness/telemetry": "workspace:^"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.5"
+  languageName: unknown
+  linkType: soft
+
 "@harness/store@workspace:^, @harness/store@workspace:packages/store":
   version: 0.0.0-use.local
   resolution: "@harness/store@workspace:packages/store"
@@ -5432,6 +5448,7 @@ __metadata:
     "@harness/pii": "workspace:^"
     "@harness/policy": "workspace:^"
     "@harness/schemas": "workspace:^"
+    "@harness/sdk": "workspace:^"
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"

@@ -10,6 +10,7 @@ import {
 } from "./runtime-cancellation.js";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
+import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
 import type { ToolPort } from "./ports.js";
 import { LeaseLostError, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
@@ -220,6 +221,38 @@ function createTerminalAwareRunControl({
   };
 }
 
+function createRuntimeRunMethods(
+  options: RuntimeComposition,
+  tool: ToolPort,
+  runWithControl: RunControl,
+): Pick<Runtime, "run" | "start"> {
+  return {
+    run: (goal, runOptions) => startRun(options, tool, goal, { runWithControl, ...runOptions }),
+    start: (goal, runOptions) => {
+      const runId = options.ids.next();
+      let resolveStarted: () => void = () => undefined;
+      let rejectStarted: (reason?: unknown) => void = () => undefined;
+      const started = new Promise<void>((resolve, reject) => {
+        resolveStarted = resolve;
+        rejectStarted = reject;
+      });
+      void started.catch(() => undefined);
+      const completion = startRun(options, tool, goal, {
+        runWithControl,
+        ...runOptions,
+        runId,
+        onStarted: resolveStarted,
+      });
+      void completion.catch(rejectStarted);
+      return {
+        runId,
+        started,
+        completion,
+      };
+    },
+  };
+}
+
 function composeRuntime(
   options: RuntimeComposition & {
     readonly roles: RoleRegistry;
@@ -228,7 +261,6 @@ function composeRuntime(
 ): Runtime {
   const {
     config,
-    overrides,
     clock,
     ids,
     store,
@@ -243,7 +275,6 @@ function composeRuntime(
     roles,
     scopes,
   } = options;
-  const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   const subagentTool = createSubagentTool({
     config,
     clock,
@@ -273,7 +304,7 @@ function composeRuntime(
     sandboxBackend,
     clock,
     ids,
-    run: (goal) => startRun(options, tool, goal, runWithControl),
+    ...createRuntimeRunMethods(options, tool, runWithControl),
     continueRun: createRuntimeContinuation(options, tool, scopes, runWithControl),
     resume,
     cancel: async (runId) => {
@@ -283,13 +314,24 @@ function composeRuntime(
       }
       return result;
     },
+    resolveApproval: (runId, approvalId, decision, resolveOptions) =>
+      resolveApprovalEvent(
+        store,
+        runId,
+        approvalId,
+        decision,
+        resolveOptions?.edits,
+        clock,
+        tool,
+        resolveOptions?.metadata,
+      ),
     close: () =>
       closeRuntimeResources({
         store,
         vault,
         keys,
         sandboxBackend,
-        flushTelemetry,
+        flushTelemetry: options.overrides.flushTelemetry ?? forceFlushTelemetry,
       }),
   };
 }
