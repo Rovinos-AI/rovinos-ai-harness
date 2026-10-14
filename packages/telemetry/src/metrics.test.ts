@@ -127,6 +127,10 @@ describe("countDroppedTelemetry", () => {
       "unknown_tool",
       "unknown_span",
       "session_cap",
+      "request_disabled",
+      "request_invalid",
+      "request_unavailable",
+      "user_denied",
     ]);
     expect(TELEMETRY_METRIC_STRING_ATTRIBUTES).toEqual({
       "harness.telemetry.dropped.reason": dropReasons,

@@ -4,7 +4,15 @@ import {
   ListToolsRequestSchema,
   ListToolsResultSchema,
 } from "@modelcontextprotocol/core";
-import { AppBridge, type McpUiHostCapabilities } from "@modelcontextprotocol/ext-apps/app-bridge";
+import {
+  AppBridge,
+  type McpUiHostCapabilities,
+  type McpUiHostContext,
+  type McpUiMessageRequest,
+  type McpUiOpenLinkRequest,
+  type McpUiRequestDisplayModeRequest,
+  type McpUiUpdateModelContextRequest,
+} from "@modelcontextprotocol/ext-apps/app-bridge";
 import type {
   CallToolRequest,
   CallToolResult,
@@ -19,8 +27,25 @@ export type AppToolCall = CallToolRequest["params"];
 /** Connected SDK bridge for one sandboxed app iframe. */
 export interface ReferenceAppBridge {
   connect(): Promise<void>;
+  readonly initialized: Promise<void>;
   sendToolInput(input: Readonly<Record<string, unknown>>): Promise<void>;
   sendToolResult(result: CallToolResult): Promise<void>;
+  setHostContext(context: McpUiHostContext): void;
+}
+
+/** Trusted host-page handlers for requests and notifications received from an app. */
+export interface AppBridgeHandlers {
+  readonly hostContext: McpUiHostContext;
+  readonly onOpenLink: (url: string) => Promise<boolean>;
+  readonly onMessage: (params: McpUiMessageRequest["params"]) => Promise<boolean>;
+  readonly onUpdateModelContext: (
+    params: McpUiUpdateModelContextRequest["params"],
+  ) => Promise<boolean>;
+  readonly onRequestDisplayMode: (
+    mode: McpUiRequestDisplayModeRequest["params"]["mode"],
+  ) => Promise<McpUiRequestDisplayModeRequest["params"]["mode"]>;
+  readonly getCurrentDisplayMode: () => McpUiRequestDisplayModeRequest["params"]["mode"];
+  readonly onSizeChange: (params: { readonly width?: number; readonly height?: number }) => void;
 }
 
 /** Minimal iframe surface needed to establish the SDK's host-side transport. */
@@ -88,18 +113,49 @@ export function createAppBridge(
   onToolCall: (call: AppToolCall) => Promise<CallToolResult>,
   onListTools: (cursor: string | undefined) => Promise<ListToolsResult> = () =>
     Promise.resolve({ tools: [] }),
+  handlers?: AppBridgeHandlers,
 ): ReferenceAppBridge {
   const target = frame.contentWindow;
   if (target === null) {
     throw new Error("The app iframe has no content window.");
   }
-  const capabilities: McpUiHostCapabilities = { serverTools: {} };
+  const capabilities: McpUiHostCapabilities = {
+    serverTools: {},
+    openLinks: {},
+    message: { text: {} },
+    updateModelContext: { text: {}, structuredContent: {} },
+  };
   const bridge = new AppBridge(
     null,
     { name: "Rovinos AI Harness", version: "0.0.0" },
     capabilities,
+    handlers === undefined ? undefined : { hostContext: handlers.hostContext },
   );
   bridge.oncalltool = (params) => onToolCall(params);
+  bridge.onopenlink = async (params: McpUiOpenLinkRequest["params"]) => {
+    const allowed = await handlers?.onOpenLink(params.url);
+    return { isError: allowed !== true };
+  };
+  bridge.onmessage = async (params) => {
+    const allowed = await handlers?.onMessage(params);
+    return { isError: allowed !== true };
+  };
+  bridge.onupdatemodelcontext = async (params) => {
+    if ((await handlers?.onUpdateModelContext(params)) !== true) {
+      throw new Error("app_request_rejected");
+    }
+    return {};
+  };
+  bridge.onrequestdisplaymode = async (params) => ({
+    mode:
+      bridge.getAppCapabilities()?.availableDisplayModes?.includes(params.mode) === true &&
+      handlers !== undefined
+        ? await handlers.onRequestDisplayMode(params.mode)
+        : (handlers?.getCurrentDisplayMode() ?? "inline"),
+  });
+  bridge.addEventListener("sizechange", (params) => {
+    handlers?.onSizeChange(params);
+  });
   bridge.setRequestHandler(
     "tools/list",
     {
@@ -109,9 +165,18 @@ export function createAppBridge(
     (params) => onListTools(params?.cursor),
   );
   const transport = new AppPostMessageTransport(target);
+  const initialized = new Promise<void>((resolve) => {
+    bridge.addEventListener("initialized", () => {
+      resolve();
+    });
+  });
   return {
     connect: () => bridge.connect(transport),
+    initialized,
     sendToolInput: (input) => bridge.sendToolInput({ arguments: { ...input } }),
     sendToolResult: (result) => bridge.sendToolResult(result),
+    setHostContext: (hostContext) => {
+      bridge.setHostContext(hostContext);
+    },
   };
 }

@@ -46,6 +46,38 @@ describe("HostConfigSchema", () => {
     ).toBe(false);
   });
 
+  it("defaults app-to-host requests to denied and accepts explicit per-app opt-ins", () => {
+    expect(
+      HostConfigSchema.parse({
+        apps: [{ id: "approval", resourceUri: "ui://approval/index.html", allowedTools: [] }],
+      }).apps[0]?.allow,
+    ).toEqual({ openLink: false, message: false, modelContext: false });
+    expect(
+      HostConfigSchema.parse({
+        apps: [
+          {
+            id: "approval",
+            resourceUri: "ui://approval/index.html",
+            allowedTools: [],
+            allow: { openLink: true, message: true, modelContext: false },
+          },
+        ],
+      }).apps[0]?.allow,
+    ).toEqual({ openLink: true, message: true, modelContext: false });
+    expect(
+      HostConfigSchema.safeParse({
+        apps: [
+          {
+            id: "approval",
+            resourceUri: "ui://approval/index.html",
+            allowedTools: [],
+            allow: { openLink: true, unexpected: true },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts UI-session lifetime and active-session limits", () => {
     expect(HostConfigSchema.parse({ maxUiSessions: 8, uiSessionMaxMs: 60_000 })).toMatchObject({
       maxUiSessions: 8,

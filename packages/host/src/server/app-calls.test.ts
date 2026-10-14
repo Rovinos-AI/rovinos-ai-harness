@@ -20,6 +20,7 @@ const app = {
   resourceUri: "ui://approval/index.html",
   telemetry: true,
   allowedTools: [Code.parse("approval.resolve"), Code.parse("notes.write")],
+  allow: { openLink: false, message: false, modelContext: false },
 };
 const session: AppInstance = {
   id: app.id,
