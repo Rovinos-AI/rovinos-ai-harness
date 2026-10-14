@@ -6,12 +6,25 @@ import {
   type Tool,
   type Transport,
 } from "@modelcontextprotocol/client";
-import { trace } from "@opentelemetry/api";
+import { context as otelContext, trace } from "@opentelemetry/api";
 import { McpServer } from "@modelcontextprotocol/server";
 import { ServerConfigSchema, type JsonValue } from "@harness/schemas";
-import { describe, expect, it, vi } from "vitest";
+import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection, McpConnectionError, excludeHeaderDeclaringTools } from "./connection.js";
 import * as mcpPackage from "./index.js";
+
+const tracerProvider = createTestTracerProvider();
+
+beforeAll(() => {
+  otelContext.setGlobalContextManager(createTestContextManager());
+  trace.setGlobalTracerProvider(tracerProvider);
+});
+
+afterAll(() => {
+  otelContext.disable();
+  trace.disable();
+});
 
 const inputSchema = {
   type: "object",
@@ -414,14 +427,6 @@ describe("McpConnection", () => {
   });
 
   it("sends trace context and existing metadata only to opted-in internal servers", async () => {
-    const spanContext = {
-      traceId: "a".repeat(32),
-      spanId: "b".repeat(16),
-      traceFlags: 1,
-    };
-    const span = trace.getTracer("mcp-test").startSpan("mcp.call");
-    const spanContextSpy = vi.spyOn(span, "spanContext").mockReturnValue(spanContext);
-    const activeSpanSpy = vi.spyOn(trace, "getActiveSpan").mockReturnValue(span);
     const receivedMeta: (Record<string, unknown> | undefined)[] = [];
     const peer = await createMemoryPeer({
       onCall: (_transport, params) => {
@@ -435,32 +440,30 @@ describe("McpConnection", () => {
     );
 
     try {
-      await trustedConnection.connect();
-      await trustedConnection.callTool(
-        {
-          name: "tool-1",
-          arguments: { value: "ok" },
-          _meta: {
-            progressToken: "progress-1",
-            traceparent: "00-stale",
-            tracestate: "stale=value",
-            baggage: "private=value",
+      await trace.getTracer("mcp-test").startActiveSpan("harness.mcp_call", async (span) => {
+        await trustedConnection.callTool(
+          {
+            name: "tool-1",
+            arguments: { value: "ok" },
+            _meta: {
+              progressToken: "progress-1",
+              traceparent: "00-stale",
+              tracestate: "stale=value",
+              baggage: "private=value",
+            },
           },
-        },
-        inputSchema,
-      );
-      expect(receivedMeta).toEqual([
-        {
-          progressToken: "progress-1",
-          traceparent: `00-${spanContext.traceId}-${spanContext.spanId}-01`,
-        },
-      ]);
+          inputSchema,
+        );
+        expect(receivedMeta).toEqual([
+          {
+            progressToken: "progress-1",
+            traceparent: `00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`,
+          },
+        ]);
+      });
     } finally {
       await trustedConnection.close();
       await peer.serverTransport.close();
-      span.end();
-      activeSpanSpy.mockRestore();
-      spanContextSpy.mockRestore();
     }
   });
 

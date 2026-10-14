@@ -36,7 +36,7 @@ export function buildRequestMeta(input: {
   const traceparent = `00-${traceId}-${spanId}-${(traceFlags & 0xff).toString(16).padStart(2, "0")}`;
   const serializedState = traceState?.serialize();
   if (serializedState !== undefined && serializedState.length > MAX_TRACE_STATE_LENGTH) {
-    diag.debug("MCP tracestate exceeded 512 characters; omitted.");
+    diag.debug("mcp_tracestate_dropped");
   } else if (serializedState !== undefined && serializedState.length > 0) {
     meta.tracestate = serializedState;
   }
@@ -45,7 +45,12 @@ export function buildRequestMeta(input: {
   return meta;
 }
 
-/** Builds request metadata from the currently active call span. */
+/**
+ * Builds request metadata from the currently active MCP call span.
+ *
+ * Callers must invoke `callTool` with the MCP call span active; until the production
+ * call span is wired around `callTool`, this uses whichever span the caller has active.
+ */
 export function buildActiveRequestMeta(
   server: ServerConfig,
   existingMeta?: Record<string, unknown>,

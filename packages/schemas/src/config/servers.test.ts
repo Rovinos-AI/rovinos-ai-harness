@@ -149,6 +149,30 @@ describe("ServerConfigSchema", () => {
     ).toBe(true);
   });
 
+  it.each(["traceparent", "TrAcEsTaTe", "BAGGAGE"])(
+    "rejects reserved HTTP header %s with a stable error code",
+    (header) => {
+      const result = ServerConfigSchema.safeParse({
+        id: "http",
+        transport: {
+          kind: "http",
+          url: "https://mcp.example",
+          headers: { [header]: "env:MCP_HEADER_VALUE" },
+        },
+      });
+
+      expect(result.success).toBe(false);
+      expect(
+        !result.success &&
+          result.error.issues.some(
+            (issue) =>
+              issue.code === "custom" &&
+              issue.params?.errorCode === "server_http_header_reserved",
+          ),
+      ).toBe(true);
+    },
+  );
+
   it.each([
     ["https://mcp.example", true],
     ["https://user@mcp.example", false],

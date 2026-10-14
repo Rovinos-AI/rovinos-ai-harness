@@ -101,6 +101,24 @@ describe("buildRequestMeta", () => {
 
     expect(result?.tracestate).toBe(expected);
     expect(debug).toHaveBeenCalledTimes(expected === undefined ? 1 : 0);
+    if (expected === undefined) {
+      expect(debug).toHaveBeenCalledWith("mcp_tracestate_dropped");
+    }
     debug.mockRestore();
+  });
+
+  it("strips caller trace metadata from external servers but preserves progress tokens", () => {
+    expect(
+      buildRequestMeta({
+        server: serverConfig("external", false),
+        spanContext: spanContext("vendor=value"),
+        existingMeta: {
+          traceparent: "00-stale",
+          tracestate: "stale=value",
+          baggage: "private=value",
+          progressToken: "progress-1",
+        },
+      }),
+    ).toEqual({ progressToken: "progress-1" });
   });
 });

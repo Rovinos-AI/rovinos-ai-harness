@@ -3,11 +3,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { StreamableHTTPClientTransport, type CallToolResult } from "@modelcontextprotocol/client";
-import { trace } from "@opentelemetry/api";
+import { context as otelContext, trace } from "@opentelemetry/api";
 import { ServerConfigSchema } from "@harness/schemas";
-import { describe, expect, it, vi } from "vitest";
+import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
 import { createMcpTransport, type McpLogEvent } from "./transports.js";
+
+const tracerProvider = createTestTracerProvider();
+
+beforeAll(() => {
+  otelContext.setGlobalContextManager(createTestContextManager());
+  trace.setGlobalTracerProvider(tracerProvider);
+});
+
+afterAll(() => {
+  otelContext.disable();
+  trace.disable();
+});
 
 const stdioServerScript = [
   "import { createInterface } from 'node:readline';",
@@ -42,7 +55,7 @@ function stdioConfig(inheritEnv: boolean) {
 }
 
 describe("MCP transports", () => {
-  it("sends HTTP trace metadata in the request body, not as propagation headers", async () => {
+  it("sends HTTP trace metadata only in _meta and strips configured reserved headers", async () => {
     interface CapturedRequest {
       readonly headers: Headers;
       readonly body: {
@@ -91,35 +104,88 @@ describe("MCP transports", () => {
       }
       return Promise.resolve(new Response(null, { status: 202 }));
     };
-    const spanContext = {
-      traceId: "a".repeat(32),
-      spanId: "b".repeat(16),
-      traceFlags: 1,
-    };
-    const span = trace.getTracer("mcp-test").startSpan("mcp.call");
-    const spanContextSpy = vi.spyOn(span, "spanContext").mockReturnValue(spanContext);
-    const activeSpanSpy = vi.spyOn(trace, "getActiveSpan").mockReturnValue(span);
     vi.stubGlobal("fetch", fetch);
-    const config = ServerConfigSchema.parse({
-      id: "http_test",
+    const trustedConfig = ServerConfigSchema.parse({
+      id: "http_trusted",
       trust: "internal",
       propagateTrace: true,
       transport: { kind: "http", url: "https://mcp.example.test/rpc" },
       protocol: "2025-11-25",
       timeouts: { connectMs: 1_000, callMs: 1_000 },
     });
-    const connection = new McpConnection(config, {
-      resolveSecret: () => Promise.reject(new Error("unexpected secret reference")),
+    const externalConfig = ServerConfigSchema.parse({
+      id: "http_external",
+      trust: "external",
+      transport: { kind: "http", url: "https://mcp.example.test/rpc" },
+      protocol: "2025-11-25",
+      timeouts: { connectMs: 1_000, callMs: 1_000 },
+    });
+    for (const config of [trustedConfig, externalConfig]) {
+      if (config.transport.kind !== "http") {
+        throw new Error("Expected HTTP transport");
+      }
+      Object.assign(
+        (config.transport.headers ??= {}),
+        config.trust === "internal"
+          ? {
+              TrAcEpArEnT: "env:TRACEPARENT",
+              TRACESTATE: "env:TRACESTATE",
+              bAgGaGe: "env:BAGGAGE",
+            }
+          : {
+              TRACEPARENT: "env:TRACEPARENT",
+              TraceState: "env:TRACESTATE",
+              Baggage: "env:BAGGAGE",
+            },
+      );
+    }
+    const resolveSecret = vi.fn(() => Promise.reject(new Error("reserved header was resolved")));
+    const trustedConnection = new McpConnection(trustedConfig, {
+      resolveSecret,
+    });
+    const externalConnection = new McpConnection(externalConfig, {
+      resolveSecret,
     });
 
     try {
-      await connection.connect();
-      await connection.callTool({ name: "tool-1", arguments: {} }, { type: "object" });
+      await trace.getTracer("mcp-test").startActiveSpan("harness.mcp_call", async (span) => {
+        await trustedConnection.callTool(
+          {
+            name: "tool-1",
+            arguments: {},
+            _meta: {
+              progressToken: "trusted-progress",
+              traceparent: "00-stale",
+              tracestate: "stale=value",
+              baggage: "private=value",
+            },
+          },
+          { type: "object" },
+        );
+        await externalConnection.callTool(
+          {
+            name: "tool-1",
+            arguments: {},
+            _meta: {
+              progressToken: "external-progress",
+              traceparent: "00-stale",
+              tracestate: "stale=value",
+              baggage: "private=value",
+            },
+          },
+          { type: "object" },
+        );
 
-      const callRequest = requests.find(({ body }) => body.method === "tools/call");
-      expect(callRequest?.body.params?._meta).toEqual({
-        traceparent: `00-${spanContext.traceId}-${spanContext.spanId}-01`,
+        const callRequests = requests.filter(({ body }) => body.method === "tools/call");
+        expect(callRequests.map(({ body }) => body.params?._meta)).toEqual([
+          {
+            progressToken: "trusted-progress",
+            traceparent: `00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`,
+          },
+          { progressToken: "external-progress" },
+        ]);
       });
+      expect(resolveSecret).not.toHaveBeenCalled();
       expect(
         requests.every(
           ({ headers }) =>
@@ -127,10 +193,8 @@ describe("MCP transports", () => {
         ),
       ).toBe(true);
     } finally {
-      await connection.close();
-      span.end();
-      activeSpanSpy.mockRestore();
-      spanContextSpy.mockRestore();
+      await trustedConnection.close();
+      await externalConnection.close();
       vi.unstubAllGlobals();
     }
   });
