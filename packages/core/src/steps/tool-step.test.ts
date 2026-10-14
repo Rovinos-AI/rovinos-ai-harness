@@ -551,8 +551,18 @@ describe("tool-step resume handling", () => {
     });
 
     expect(events).toMatchObject([
-      { type: "tool_intent", policyDecision: "deny", policyReason: "unknown_tool" },
-      { type: "tool_result", outcome: "denied", errorCode: "unknown_tool" },
+      {
+        type: "tool_intent",
+        toolId: UNREGISTERED_TOOL_ID,
+        policyDecision: "deny",
+        policyReason: "unknown_tool",
+      },
+      {
+        type: "tool_result",
+        toolId: UNREGISTERED_TOOL_ID,
+        outcome: "denied",
+        errorCode: "unknown_tool",
+      },
     ]);
     expect(execute).not.toHaveBeenCalled();
   });

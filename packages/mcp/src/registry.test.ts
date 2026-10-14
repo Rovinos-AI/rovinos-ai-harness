@@ -80,6 +80,18 @@ describe("normalizeToolId", () => {
     expect(second).toHaveLength(64);
     expect(first).not.toBe(second);
   });
+
+  it.each([[`${"a".repeat(70)}\u00f6`, `${"a".repeat(70)}\u00fc`]])(
+    "keeps long names distinct when replaced Unicode characters differ",
+    (firstName, secondName) => {
+      const first = normalizeToolId("server", firstName);
+      const second = normalizeToolId("server", secondName);
+
+      expect(first).toHaveLength(64);
+      expect(second).toHaveLength(64);
+      expect(first).not.toBe(second);
+    },
+  );
 });
 
 describe("ToolRegistry", () => {
@@ -111,6 +123,22 @@ describe("ToolRegistry", () => {
     expect(error).toMatchObject({
       code: "tool_id_collision",
       serverIds: ["first", "second"],
+      normalizedToolId: "shared.a_b",
+    });
+  });
+
+  it("fails startup when tools on the same server normalize to the same id", () => {
+    const error = thrownBy(
+      () =>
+        new ToolRegistry([
+          { config: config("server"), tools: [tool("Get Data"), tool("get_data")] },
+        ]),
+    );
+
+    expect(error).toMatchObject({
+      code: "tool_id_collision",
+      serverIds: ["server", "server"],
+      normalizedToolId: "server.get_data",
     });
   });
 

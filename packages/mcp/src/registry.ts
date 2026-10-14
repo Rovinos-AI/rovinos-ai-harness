@@ -41,21 +41,27 @@ export interface ResolvedTool {
   readonly outputSchema?: JsonValueType;
 }
 
-/** Startup failure raised when two server tools normalize to the same id. */
+/**
+ * Startup failure raised when two discovered tools normalize to the same id, including tools from
+ * the same server.
+ */
 export class ToolRegistryError extends HarnessError {
   readonly code = "tool_id_collision";
   readonly serverIds: readonly [Code, Code];
+  readonly normalizedToolId: Code;
 
   /**
-   * Creates a collision error that identifies both configured servers.
+   * Creates a collision error that identifies the normalized id and both configured servers.
    *
    * @param firstServerId - Server that first registered the normalized id.
    * @param secondServerId - Server whose tool collided with the first.
+   * @param normalizedToolId - Normalized `Code` shared by the colliding tools.
    */
-  constructor(firstServerId: Code, secondServerId: Code) {
+  constructor(firstServerId: Code, secondServerId: Code, normalizedToolId: Code) {
     super("tool_id_collision");
     this.name = "ToolRegistryError";
     this.serverIds = [firstServerId, secondServerId];
+    this.normalizedToolId = normalizedToolId;
   }
 }
 
@@ -69,8 +75,8 @@ function sanitizeComponent(value: string): string {
 /**
  * Normalizes a native MCP tool name into the bounded harness `Code` namespace.
  *
- * Long ids retain a six-hex SHA-256 suffix so distinct server names with the same prefix do not
- * silently collapse after truncation.
+ * Long ids retain a six-hex SHA-256 suffix based on the raw prefix and native name so distinct names
+ * do not silently collapse after sanitization or truncation.
  *
  * @param prefix - Configured server tool prefix.
  * @param nativeName - Untrusted native name returned by the MCP server.
@@ -83,7 +89,7 @@ export function normalizeToolId(prefix: string, nativeName: string): string {
     return normalized;
   }
   const suffix = createHash("sha256")
-    .update(normalized)
+    .update(`${prefix}\0${nativeName}`)
     .digest("hex")
     .slice(0, TOOL_ID_HASH_LENGTH);
   return `${normalized.slice(0, MAX_TOOL_ID_LENGTH - TOOL_ID_HASH_LENGTH - 1)}-${suffix}`;
@@ -133,6 +139,8 @@ interface RegisteredTool {
  * Descriptions are untrusted text and may contain prompt injection. They are sanitized as display
  * text, exposed only through the `ToolSpec.description` field, and must still pass through the
  * model-input PII boundary before being sent to a provider.
+ * Normalized ids must be unique across all discovered tools; collisions fail startup even when both
+ * tools came from the same server.
  *
  * @param servers - Configured servers and their discovered tools, in deterministic order.
  */
@@ -173,7 +181,7 @@ export class ToolRegistry {
     }
     const previous = this.#byId.get(parsedId.data);
     if (previous !== undefined) {
-      throw new ToolRegistryError(previous.server.id, config.id);
+      throw new ToolRegistryError(previous.server.id, config.id, parsedId.data);
     }
     return parsedId.data;
   }

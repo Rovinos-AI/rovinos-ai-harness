@@ -12,7 +12,12 @@ import {
   type Tracer,
   type TracerProvider,
 } from "@opentelemetry/api";
-import { FakeClock, SequentialIdGenerator, type Event } from "@harness/schemas";
+import {
+  FakeClock,
+  SequentialIdGenerator,
+  UNREGISTERED_TOOL_ID,
+  type Event,
+} from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { foldRunState, type ToolIntentEvent } from "./run-state.js";
@@ -246,6 +251,41 @@ async function createMultipleDanglingIntents(recorder: RunRecorder): Promise<Eve
 }
 
 describe("dangling tool intent resume", () => {
+  it("records a missing tool with the unregistered sentinel", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+    const { events } = await createDanglingIntent(recorder, true);
+    const tool = new FakeToolPort();
+    const [action] = planDanglingIntents(foldRunState(events), tool);
+    if (action === undefined) {
+      throw new Error("Expected a resume action.");
+    }
+
+    const recorded = await applyDanglingIntents(
+      {
+        recorder,
+        tool,
+        clock,
+        runId,
+        signal: new AbortController().signal,
+        ids: new SequentialIdGenerator(),
+      },
+      foldRunState(events),
+      [action],
+    );
+
+    expect(recorded).toMatchObject([
+      {
+        type: "tool_result",
+        toolId: UNREGISTERED_TOOL_ID,
+        outcome: "error",
+        errorCode: "unknown_tool",
+      },
+    ]);
+    expect(tool.calls).toHaveLength(0);
+  });
+
   it("re-runs idempotent calls once with the original callId and no new intent", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
