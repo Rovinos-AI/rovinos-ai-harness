@@ -20,10 +20,7 @@ import {
   validateSnapshotAppend,
 } from "../codec.js";
 import {
-  ContentDecryptFailedError,
-  ContentEncryptFailedError,
   InvalidEventError,
-  KeyNotFoundError,
   StoreReadOnlyError,
   StoreUnavailableError,
 } from "../errors.js";
@@ -55,14 +52,12 @@ import { initializePostgresStore } from "./initialize.js";
 import { readEvents } from "./reader.js";
 import { isRunTerminal, PostgresSubscriptions } from "./subscriptions.js";
 import {
-  decodeStoreRotationCursor,
-  encodeStoreRotationCursor,
-  ReencryptBatchInputSchema,
-  StoreKeyRowCountSchema,
-  StoreReencryptBatchResultSchema,
-  type ReencryptBatchInput,
+  countPostgresRowsByKey,
+  reencryptPostgresBatch,
+} from "./rotation.js";
+import type {
+  ReencryptBatchInput,
   type StoreKeyRotation,
-  type StoreRotationCursor,
 } from "../rotate.js";
 
 const connectionStringSchema = z
@@ -81,38 +76,6 @@ const optionsSchema = snapshotStoreOptionsSchema
     skipMigrations: z.boolean().default(false),
   })
   .strict();
-
-interface PostgresRotationEventRow extends QueryResultRow {
-  global_seq: number | string;
-  run_id: string;
-  seq: number | string;
-  content_blob: string;
-  key_id: string;
-}
-
-interface PostgresRotationSnapshotRow extends QueryResultRow {
-  snapshot_id: string;
-  run_id: string;
-  at_seq: number | string;
-  content_blob: string;
-  key_id: string;
-}
-
-type PostgresRotationUpdate =
-  | {
-      readonly table: "events";
-      readonly globalSeq: number;
-      readonly blob: string;
-      readonly oldBlob: string;
-      readonly oldKeyId: string;
-    }
-  | {
-      readonly table: "snapshots";
-      readonly snapshotId: string;
-      readonly blob: string;
-      readonly oldBlob: string;
-      readonly oldKeyId: string;
-    };
 
 /** Options for a Postgres event-store connection. */
 export type PostgresEventStoreOptions = z.input<typeof optionsSchema>;
@@ -191,177 +154,21 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
   }
 
   /** {@inheritDoc StoreKeyRotation.reencryptBatch} */
-  async reencryptBatch(input: ReencryptBatchInput) {
+  reencryptBatch(
+    input: ReencryptBatchInput,
+  ): ReturnType<StoreKeyRotation["reencryptBatch"]> {
     this.assertWritable();
-    const { targetKeyId, limit, afterCursor } = ReencryptBatchInputSchema.parse(input);
-    if (!this.codec.encrypted) {
-      return StoreReencryptBatchResultSchema.parse({ processed: 0 });
-    }
-    await this.ensureInitialized();
-    const cursor = afterCursor === undefined ? undefined : decodeStoreRotationCursor(afterCursor);
-    const selected: PostgresRotationUpdate[] = [];
-    let nextCursor: StoreRotationCursor | undefined;
-
-    try {
-      if (cursor?.table !== "snapshots") {
-        const events = await this.pool.query<PostgresRotationEventRow>(
-          `SELECT global_seq, run_id, seq, content_blob, key_id
-           FROM events
-           WHERE key_id IS NOT NULL AND key_id <> $1
-             AND ($2::bigint IS NULL OR global_seq > $2::bigint)
-           ORDER BY global_seq LIMIT $3`,
-          [targetKeyId, cursor?.after ?? null, limit + 1],
-        );
-        const eventBatch = events.rows.slice(0, limit);
-        for (const row of eventBatch) {
-          const runId = Id.parse(row.run_id);
-          const seq = integer(row.seq);
-          const context = { runId, seq };
-          const content = await this.codec.decode(context, row.content_blob, row.key_id);
-          const encoded = await this.codec.encode(context, content, targetKeyId);
-          if (encoded.keyId !== targetKeyId) {
-            throw new ContentEncryptFailedError();
-          }
-          selected.push({
-            table: "events",
-            globalSeq: integer(row.global_seq),
-            blob: encoded.blob,
-            oldBlob: row.content_blob,
-            oldKeyId: row.key_id,
-          });
-        }
-        if (events.rows.length > limit) {
-          const last = eventBatch.at(-1);
-          if (last !== undefined) {
-            nextCursor = { table: "events", after: integer(last.global_seq) };
-          }
-        } else {
-          const remaining = limit - eventBatch.length;
-          const snapshots = await this.pool.query<PostgresRotationSnapshotRow>(
-            `SELECT snapshot_id, run_id, at_seq, content_blob, key_id
-             FROM snapshots
-             WHERE key_id IS NOT NULL AND key_id <> $1
-             ORDER BY snapshot_id LIMIT $2`,
-            [targetKeyId, Math.max(1, remaining + 1)],
-          );
-          const snapshotBatch = snapshots.rows.slice(0, remaining);
-          for (const row of snapshotBatch) {
-            const runId = Id.parse(row.run_id);
-            const context = { runId, seq: integer(row.at_seq), purpose: "snapshot" as const };
-            const content = await this.codec.decode(context, row.content_blob, row.key_id);
-            const encoded = await this.codec.encode(context, content, targetKeyId);
-            if (encoded.keyId !== targetKeyId) {
-              throw new ContentEncryptFailedError();
-            }
-            selected.push({
-              table: "snapshots",
-              snapshotId: row.snapshot_id,
-              blob: encoded.blob,
-              oldBlob: row.content_blob,
-              oldKeyId: row.key_id,
-            });
-          }
-          if (snapshots.rows.length > remaining) {
-            const last = snapshotBatch.at(-1);
-            nextCursor =
-              last === undefined
-                ? { table: "snapshots" }
-                : { table: "snapshots", after: last.snapshot_id };
-          }
-        }
-      } else {
-        const snapshots = await this.pool.query<PostgresRotationSnapshotRow>(
-          `SELECT snapshot_id, run_id, at_seq, content_blob, key_id
-           FROM snapshots
-           WHERE key_id IS NOT NULL AND key_id <> $1 AND ($2::text IS NULL OR snapshot_id > $2)
-           ORDER BY snapshot_id LIMIT $3`,
-          [targetKeyId, cursor.after ?? null, limit + 1],
-        );
-        const snapshotBatch = snapshots.rows.slice(0, limit);
-        for (const row of snapshotBatch) {
-          const runId = Id.parse(row.run_id);
-          const context = { runId, seq: integer(row.at_seq), purpose: "snapshot" as const };
-          const content = await this.codec.decode(context, row.content_blob, row.key_id);
-          const encoded = await this.codec.encode(context, content, targetKeyId);
-          if (encoded.keyId !== targetKeyId) {
-            throw new ContentEncryptFailedError();
-          }
-          selected.push({
-            table: "snapshots",
-            snapshotId: row.snapshot_id,
-            blob: encoded.blob,
-            oldBlob: row.content_blob,
-            oldKeyId: row.key_id,
-          });
-        }
-        if (snapshots.rows.length > limit) {
-          const last = snapshotBatch.at(-1);
-          if (last !== undefined) {
-            nextCursor = { table: "snapshots", after: last.snapshot_id };
-          }
-        }
-      }
-
-      const client = await this.pool.connect();
-      let processed = 0;
-      try {
-        await client.query("BEGIN");
-        for (const row of selected) {
-          const result =
-            row.table === "events"
-              ? await client.query(
-                  "UPDATE events SET content_blob = $1, key_id = $2 WHERE global_seq = $3 AND key_id = $4 AND content_blob = $5",
-                  [row.blob, targetKeyId, row.globalSeq, row.oldKeyId, row.oldBlob],
-                )
-              : await client.query(
-                  "UPDATE snapshots SET content_blob = $1, key_id = $2 WHERE snapshot_id = $3 AND key_id = $4 AND content_blob = $5",
-                  [row.blob, targetKeyId, row.snapshotId, row.oldKeyId, row.oldBlob],
-                );
-          processed += result.rowCount ?? 0;
-        }
-        await client.query("COMMIT");
-      } catch {
-        await client.query("ROLLBACK").catch(() => undefined);
-        throw new StoreUnavailableError();
-      } finally {
-        client.release();
-      }
-      return StoreReencryptBatchResultSchema.parse({
-        processed,
-        ...(nextCursor === undefined
-          ? {}
-          : { nextCursor: encodeStoreRotationCursor(nextCursor) }),
-      });
-    } catch (error) {
-      if (
-        error instanceof ContentDecryptFailedError ||
-        error instanceof ContentEncryptFailedError ||
-        error instanceof KeyNotFoundError ||
-        error instanceof StoreUnavailableError
-      ) {
-        throw error;
-      }
-      throw new StoreUnavailableError();
-    }
+    return reencryptPostgresBatch(
+      this.pool,
+      this.codec,
+      () => this.ensureInitialized(),
+      input,
+    );
   }
 
   /** Count encrypted event and snapshot rows grouped by key identifier. */
-  async countRowsByKey(): Promise<readonly { keyId: string; count: number }[]> {
-    await this.ensureInitialized();
-    try {
-      const result = await this.pool.query<{ key_id: string; count: number | string }>(
-        `SELECT key_id, COUNT(*)::int AS count FROM (
-           SELECT key_id FROM events WHERE key_id IS NOT NULL
-           UNION ALL
-           SELECT key_id FROM snapshots WHERE key_id IS NOT NULL
-         ) AS encrypted_rows GROUP BY key_id ORDER BY key_id`,
-      );
-      return result.rows.map(({ key_id, count }) =>
-        StoreKeyRowCountSchema.parse({ keyId: key_id, count: integer(count) }),
-      );
-    } catch {
-      throw new StoreUnavailableError();
-    }
+  countRowsByKey(): ReturnType<StoreKeyRotation["countRowsByKey"]> {
+    return countPostgresRowsByKey(this.pool, () => this.ensureInitialized());
   }
 
   /** {@inheritDoc EventStore.append} */

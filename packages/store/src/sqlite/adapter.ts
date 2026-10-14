@@ -21,10 +21,7 @@ import {
   type SnapshotRow,
 } from "../codec.js";
 import {
-  ContentDecryptFailedError,
-  ContentEncryptFailedError,
   InvalidEventError,
-  KeyNotFoundError,
   SeqConflictError,
   StoreMigrationError,
   StoreUnavailableError,
@@ -67,54 +64,10 @@ import { SqliteApprovalNotifications } from "./approval-notifications.js";
 import { SqliteConfirmationStates } from "./confirmation-states.js";
 import { findRunsByTrace } from "./traces.js";
 import { encodeEvents, type EncodedEvent } from "./event-encoding.js";
-import {
-  decodeStoreRotationCursor,
-  encodeStoreRotationCursor,
-  ReencryptBatchInputSchema,
-  StoreKeyRowCountSchema,
-  StoreReencryptBatchResultSchema,
-  type ReencryptBatchInput,
-  type StoreKeyRotation,
-  type StoreRotationCursor,
-} from "../rotate.js";
+import type { ReencryptBatchInput, StoreKeyRotation } from "../rotate.js";
+import { countSqliteRowsByKey, reencryptSqliteBatch } from "./rotation.js";
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
 const READ_PAGE_SIZE = 256;
-
-interface StoreRotationEventRow {
-  global_seq: number;
-  run_id: string;
-  seq: number;
-  content_blob: string;
-  key_id: string;
-}
-
-interface StoreRotationSnapshotRow {
-  snapshot_id: string;
-  run_id: string;
-  at_seq: number;
-  content_blob: string;
-  key_id: string;
-}
-
-type StoreRotationUpdate =
-  | {
-      readonly table: "events";
-      readonly globalSeq: number;
-      readonly runId: Id;
-      readonly seq: number;
-      readonly blob: string;
-      readonly oldBlob: string;
-      readonly oldKeyId: string;
-    }
-  | {
-      readonly table: "snapshots";
-      readonly snapshotId: string;
-      readonly runId: Id;
-      readonly seq: number;
-      readonly blob: string;
-      readonly oldBlob: string;
-      readonly oldKeyId: string;
-    };
 
 type ListRunsQueryParams = [
   Id | null,
@@ -270,183 +223,15 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   }
 
   /** {@inheritDoc StoreKeyRotation.reencryptBatch} */
-  async reencryptBatch(input: ReencryptBatchInput) {
-    const { targetKeyId, limit, afterCursor } = ReencryptBatchInputSchema.parse(input);
-    if (!this.codec.encrypted) {
-      return StoreReencryptBatchResultSchema.parse({ processed: 0 });
-    }
-    const cursor = afterCursor === undefined ? undefined : decodeStoreRotationCursor(afterCursor);
-    const selected: StoreRotationUpdate[] = [];
-    let nextCursor: StoreRotationCursor | undefined;
-
-    try {
-      if (cursor?.table !== "snapshots") {
-        const events = this.db
-          .prepare<
-            [string, number | null, number | null, number],
-            StoreRotationEventRow
-          >(
-            `SELECT global_seq, run_id, seq, content_blob, key_id
-             FROM events
-             WHERE key_id IS NOT NULL AND key_id != ? AND (? IS NULL OR global_seq > ?)
-             ORDER BY global_seq LIMIT ?`,
-          )
-          .all(targetKeyId, cursor?.after ?? null, cursor?.after ?? 0, limit + 1);
-        const eventBatch = events.slice(0, limit);
-        for (const row of eventBatch) {
-          const runId = Id.parse(row.run_id);
-          const context = { runId, seq: row.seq };
-          const content = await this.codec.decode(context, row.content_blob, row.key_id);
-          const encoded = await this.codec.encode(context, content, targetKeyId);
-          if (encoded.keyId !== targetKeyId) {
-            throw new ContentEncryptFailedError();
-          }
-          selected.push({
-            table: "events",
-            globalSeq: row.global_seq,
-            runId,
-            seq: row.seq,
-            blob: encoded.blob,
-            oldBlob: row.content_blob,
-            oldKeyId: row.key_id,
-          });
-        }
-        if (events.length > limit) {
-          const last = eventBatch.at(-1);
-          if (last !== undefined) {
-            nextCursor = { table: "events", after: last.global_seq };
-          }
-        } else {
-          const remaining = limit - eventBatch.length;
-          const snapshots = this.db
-            .prepare<[string, number], StoreRotationSnapshotRow>(
-              `SELECT snapshot_id, run_id, at_seq, content_blob, key_id
-               FROM snapshots
-               WHERE key_id IS NOT NULL AND key_id != ?
-               ORDER BY snapshot_id LIMIT ?`,
-            )
-            .all(targetKeyId, Math.max(1, remaining + 1));
-          const snapshotBatch = snapshots.slice(0, remaining);
-          for (const row of snapshotBatch) {
-            const runId = Id.parse(row.run_id);
-            const context = { runId, seq: row.at_seq, purpose: "snapshot" as const };
-            const content = await this.codec.decode(context, row.content_blob, row.key_id);
-            const encoded = await this.codec.encode(context, content, targetKeyId);
-            if (encoded.keyId !== targetKeyId) {
-              throw new ContentEncryptFailedError();
-            }
-            selected.push({
-              table: "snapshots",
-              snapshotId: row.snapshot_id,
-              runId,
-              seq: row.at_seq,
-              blob: encoded.blob,
-              oldBlob: row.content_blob,
-              oldKeyId: row.key_id,
-            });
-          }
-          if (snapshots.length > remaining) {
-            const last = snapshotBatch.at(-1);
-            if (last !== undefined) {
-              nextCursor = { table: "snapshots", after: last.snapshot_id };
-            } else {
-              nextCursor = { table: "snapshots" };
-            }
-          }
-        }
-      } else {
-        const snapshots = this.db
-          .prepare<
-            [string, string, number],
-            StoreRotationSnapshotRow
-          >(
-            `SELECT snapshot_id, run_id, at_seq, content_blob, key_id
-             FROM snapshots
-             WHERE key_id IS NOT NULL AND key_id != ? AND snapshot_id > ?
-             ORDER BY snapshot_id LIMIT ?`,
-          )
-          .all(targetKeyId, cursor.after ?? "", limit + 1);
-        const snapshotBatch = snapshots.slice(0, limit);
-        for (const row of snapshotBatch) {
-          const runId = Id.parse(row.run_id);
-          const context = { runId, seq: row.at_seq, purpose: "snapshot" as const };
-          const content = await this.codec.decode(context, row.content_blob, row.key_id);
-          const encoded = await this.codec.encode(context, content, targetKeyId);
-          if (encoded.keyId !== targetKeyId) {
-            throw new ContentEncryptFailedError();
-          }
-          selected.push({
-            table: "snapshots",
-            snapshotId: row.snapshot_id,
-            runId,
-            seq: row.at_seq,
-            blob: encoded.blob,
-            oldBlob: row.content_blob,
-            oldKeyId: row.key_id,
-          });
-        }
-        if (snapshots.length > limit) {
-          const last = snapshotBatch.at(-1);
-          if (last !== undefined) {
-            nextCursor = { table: "snapshots", after: last.snapshot_id };
-          }
-        }
-      }
-
-      const rotate = this.db.transaction(() =>
-        selected.reduce((processed, row) => {
-          const result =
-            row.table === "events"
-              ? this.db
-                  .prepare(
-                    "UPDATE events SET content_blob = ?, key_id = ? WHERE global_seq = ? AND key_id = ? AND content_blob = ?",
-                  )
-                  .run(row.blob, targetKeyId, row.globalSeq, row.oldKeyId, row.oldBlob)
-              : this.db
-                  .prepare(
-                    "UPDATE snapshots SET content_blob = ?, key_id = ? WHERE snapshot_id = ? AND key_id = ? AND content_blob = ?",
-                  )
-                  .run(row.blob, targetKeyId, row.snapshotId, row.oldKeyId, row.oldBlob);
-          return processed + result.changes;
-        }, 0),
-      );
-      const processed = rotate.immediate();
-      return StoreReencryptBatchResultSchema.parse({
-        processed,
-        ...(nextCursor === undefined
-          ? {}
-          : { nextCursor: encodeStoreRotationCursor(nextCursor) }),
-      });
-    } catch (error) {
-      if (
-        error instanceof ContentDecryptFailedError ||
-        error instanceof ContentEncryptFailedError ||
-        error instanceof KeyNotFoundError
-      ) {
-        throw error;
-      }
-      throw new StoreUnavailableError();
-    }
+  reencryptBatch(
+    input: ReencryptBatchInput,
+  ): ReturnType<StoreKeyRotation["reencryptBatch"]> {
+    return reencryptSqliteBatch(this.db, this.codec, input);
   }
 
   /** Count event and snapshot rows that still use each key. */
-  countRowsByKey(): Promise<readonly { keyId: string; count: number }[]> {
-    try {
-      const rows = this.db
-        .prepare<[], { key_id: string; count: number }>(
-          `SELECT key_id, COUNT(*) AS count FROM (
-             SELECT key_id FROM events WHERE key_id IS NOT NULL
-             UNION ALL
-             SELECT key_id FROM snapshots WHERE key_id IS NOT NULL
-           ) GROUP BY key_id ORDER BY key_id`,
-        )
-        .all();
-      return Promise.resolve(
-        rows.map(({ key_id, count }) => StoreKeyRowCountSchema.parse({ keyId: key_id, count })),
-      );
-    } catch {
-      return Promise.reject(new StoreUnavailableError());
-    }
+  countRowsByKey(): ReturnType<StoreKeyRotation["countRowsByKey"]> {
+    return countSqliteRowsByKey(this.db);
   }
 
   /** {@inheritDoc EventStore.append} */
