@@ -201,6 +201,13 @@ function schemaObjectShape(schema: z.core.$ZodType): z.core.$ZodShape | undefine
   return unwrapped instanceof z.core.$ZodObject ? unwrapped._zod.def.shape : undefined;
 }
 
+function schemaDiscriminatedUnion(
+  schema: z.core.$ZodType,
+): { readonly discriminator: string; readonly options: readonly z.core.$ZodType[] } | undefined {
+  const unwrapped = unwrapSchema(schema);
+  return unwrapped instanceof z.core.$ZodDiscriminatedUnion ? unwrapped._zod.def : undefined;
+}
+
 function normalizedSegment(segment: string): string {
   return segment.toLowerCase().replaceAll(/[_-]/g, "");
 }
@@ -211,11 +218,86 @@ function invalidEnvironmentPath(key: string): never {
   ]);
 }
 
-function resolveEnvironmentPath(key: string, segments: readonly string[]): string[] {
+function valueAtPath(value: unknown, path: readonly string[]): unknown {
+  let current = value;
+  for (const segment of path) {
+    if (!isRecord(current) || !Object.hasOwn(current, segment)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return current;
+}
+
+function environmentValueAtPath(
+  key: string,
+  env: Readonly<Record<string, string | undefined>>,
+  path: readonly string[],
+): string | undefined {
+  const expected = path.map(normalizedSegment);
+  const matches = Object.entries(env).filter(([envKey, value]) => {
+    if (!envKey.startsWith("HARNESS__") || value === undefined) {
+      return false;
+    }
+    const segments = envKey.slice("HARNESS__".length).split("__");
+    return (
+      segments.length === expected.length &&
+      segments.every((segment, index) => normalizedSegment(segment) === expected[index])
+    );
+  });
+  if (matches.length > 1) {
+    invalidEnvironmentPath(key);
+  }
+  return matches[0]?.[1];
+}
+
+function resolveEnvironmentPath(
+  key: string,
+  segments: readonly string[],
+  config: unknown,
+  env: Readonly<Record<string, string | undefined>>,
+): string[] {
   const resolved: string[] = [];
   let currentSchema: z.core.$ZodType = HarnessConfigSchema;
 
   for (const segment of segments) {
+    const union = schemaDiscriminatedUnion(currentSchema);
+    if (union !== undefined) {
+      if (normalizedSegment(segment) === normalizedSegment(union.discriminator)) {
+        const firstOption = union.options[0];
+        const discriminatorSchema =
+          firstOption === undefined
+            ? undefined
+            : schemaObjectShape(firstOption)?.[union.discriminator];
+        if (discriminatorSchema === undefined) {
+          invalidEnvironmentPath(key);
+        }
+        resolved.push(union.discriminator);
+        currentSchema = discriminatorSchema;
+        continue;
+      }
+
+      const discriminatorPath = [...resolved, union.discriminator];
+      const discriminatorValue =
+        environmentValueAtPath(key, env, discriminatorPath) ??
+        valueAtPath(config, discriminatorPath);
+      const matchingOptions = union.options.filter((option) => {
+        const discriminatorSchema = schemaObjectShape(option)?.[union.discriminator];
+        return (
+          discriminatorSchema !== undefined &&
+          z.safeParse(discriminatorSchema, discriminatorValue).success
+        );
+      });
+      if (matchingOptions.length !== 1) {
+        invalidEnvironmentPath(key);
+      }
+      const selectedOption = matchingOptions[0];
+      if (selectedOption === undefined) {
+        invalidEnvironmentPath(key);
+      }
+      currentSchema = selectedOption;
+    }
+
     const shape = schemaObjectShape(currentSchema);
     if (shape === undefined) {
       invalidEnvironmentPath(key);
@@ -248,6 +330,7 @@ function resolveEnvironmentPath(key: string, segments: readonly string[]): strin
 
 function environmentOverrides(
   env: Readonly<Record<string, string | undefined>>,
+  config: unknown,
 ): Record<string, unknown> {
   const root: Record<string, unknown> = {};
   const entries = Object.entries(env)
@@ -264,7 +347,7 @@ function environmentOverrides(
     ) {
       invalidEnvironmentPath(key);
     }
-    const path = resolveEnvironmentPath(key, segments);
+    const path = resolveEnvironmentPath(key, segments, config, env);
 
     let current = root;
     for (const segment of path.slice(0, -1)) {
@@ -360,7 +443,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Harne
     }
   }
 
-  const merged = deepMerge(parsedFile, environmentOverrides(env));
+  const merged = deepMerge(parsedFile, environmentOverrides(env, parsedFile));
   assertNoInlineSecrets(merged);
   const result = HarnessConfigSchema.safeParse(merged);
   if (!result.success) {
