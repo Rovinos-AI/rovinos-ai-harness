@@ -59,6 +59,7 @@ export {
   WorkspaceRef,
 } from "./primitives.js";
 export { isRegexSafePattern } from "./regex-safety.js";
+export { AppSpanSchema, type AppSpan } from "./app-span.js";
 export { SecretRefSchema, type SecretRef } from "./secret-ref.js";
 export { KeyVersionConfigSchema, KeysConfigSchema, type KeysConfig } from "./config/keys.js";
 export { isSecretKeyName } from "./secret-key-name.js";
