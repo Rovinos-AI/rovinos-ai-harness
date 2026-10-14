@@ -1163,6 +1163,8 @@ __metadata:
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
+    "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/server": "npm:2.3.1"
     "@opentelemetry/api": "npm:1.9.1"
     commander: "npm:15.0.0"
     pg: "npm:8.23.1"

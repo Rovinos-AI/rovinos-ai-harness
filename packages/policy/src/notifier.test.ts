@@ -65,6 +65,52 @@ describe("approval notifiers", () => {
     expect(bodies[0]).not.toContain("args");
   });
 
+  it("allows localhost HTTP for a URL SecretRef only when explicitly enabled", async () => {
+    let calls = 0;
+    const notifier = new WebhookNotifier({
+      url: SecretRefSchema.parse("env:APPROVAL_WEBHOOK"),
+      allowInsecureLocalhost: true,
+      secrets: { resolve: () => Promise.resolve("http://localhost:8080/approval") },
+      fetch: () => {
+        calls += 1;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      },
+    });
+
+    await notifier.notify(notification);
+
+    expect(calls).toBe(1);
+  });
+
+  it("rejects localhost HTTP for both URL forms without explicit opt-in", async () => {
+    let calls = 0;
+    const secretUrlNotifier = new WebhookNotifier({
+      url: SecretRefSchema.parse("env:APPROVAL_WEBHOOK"),
+      secrets: { resolve: () => Promise.resolve("http://localhost:8080/approval") },
+      fetch: () => {
+        calls += 1;
+        return Promise.resolve(new Response(null, { status: 204 }));
+      },
+    });
+
+    await expect(secretUrlNotifier.notify(notification)).rejects.toMatchObject({
+      code: "approval_webhook_failed",
+    });
+    expect(
+      () =>
+        new WebhookNotifier({
+          url: "http://localhost:8080/approval",
+          secretRef: SecretRefSchema.parse("env:APPROVAL_WEBHOOK_TOKEN"),
+          secrets: { resolve: () => Promise.resolve("token") },
+          fetch: () => {
+            calls += 1;
+            return Promise.resolve(new Response(null, { status: 204 }));
+          },
+        }),
+    ).toThrow(WebhookNotificationError);
+    expect(calls).toBe(0);
+  });
+
   it("retries one failed request and rejects after two failures", async () => {
     let calls = 0;
     const notifier = new WebhookNotifier({

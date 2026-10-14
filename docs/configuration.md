@@ -18,6 +18,22 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 `run.shutdownGraceMs` defaults to `20000` and must be a positive integer. On SIGTERM or SIGINT, the run aborts in-flight work, suspends at a safe point, and writes a checkpoint before exiting with code 143 or 130. If the grace period expires first, the process attempts a best-effort checkpoint and exits with code 1. Set the container's `stop_grace_period` longer than this value so the container runtime does not terminate the process before graceful shutdown can finish.
 
+Approval escalation notifications default to metadata-only log output. Configure
+`policy.approvals.notifier` as `kind: log` or a webhook; webhook URLs must use
+HTTPS, and their `secretRef` resolves to a bearer token through the configured
+secret resolver. HTTP is accepted only for `localhost` when
+`policy.approvals.allowInsecureLocalhost` is `true`. For example:
+
+```yaml
+policy:
+  approvals:
+    notifier:
+      kind: webhook
+      url: https://hooks.example.test/approval
+      secretRef: env:APPROVAL_WEBHOOK_TOKEN
+      timeoutMs: 5000
+```
+
 ## Cassette recording
 
 Set `HARNESS_CASSETTE_AUTO=0` to disable cassette auto mode. Record and auto modes require caller-provided storage-boundary sanitization and a final PII detector check before a response can be written.

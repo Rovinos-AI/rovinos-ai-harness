@@ -49,13 +49,17 @@ async function createMemoryPeer(
   options: {
     readonly count?: number;
     readonly modern?: boolean;
+    readonly supportsApps?: boolean;
     readonly onCall?: MemoryCallHandler;
     readonly tools?: Tool[];
   } = {},
 ): Promise<MemoryPeer> {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = new McpServer({ name: "memory-server", version: "1.0.0" });
-  server.server.registerCapabilities({ tools: { listChanged: true } });
+  server.server.registerCapabilities({
+    tools: { listChanged: true },
+    ...(options.supportsApps === true ? { extensions: { "io.modelcontextprotocol/ui": {} } } : {}),
+  });
   if (options.modern === true) {
     server.server.setRequestHandler("server/discover", () => ({
       supportedVersions: ["2026-07-28"],
@@ -224,6 +228,19 @@ describe("McpConnection", () => {
       { name: "tool-1", inputSchema },
       { name: "tool-2", inputSchema },
     ]);
+    await connection.close();
+    await peer.serverTransport.close();
+  });
+
+  it("exposes negotiated protocol metadata and MCP Apps support", async () => {
+    const peer = await createMemoryPeer({ supportsApps: true });
+    const connection = connectionFor(undefined, () => Promise.resolve(peer.client));
+
+    expect(connection.serverMetadata.protocolVersion).toBeUndefined();
+    expect(connection.serverMetadata.supportsApps).toBe(false);
+    await connection.connect();
+    expect(connection.serverMetadata.protocolVersion).toBe("2025-11-25");
+    expect(connection.serverMetadata.supportsApps).toBe(true);
     await connection.close();
     await peer.serverTransport.close();
   });
