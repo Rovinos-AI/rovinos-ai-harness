@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
 // Not wired yet: approval escalation WebhookNotifier (17.13 -> #414)
-// Not wired yet: RemoteSandboxBackend / sandbox.runner (19.11 -> #415)
 // Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: MCP registry and model-visible descriptions through model-input PII (-> #199, model-input PII 13.6 -> #150)
 // Not wired yet: production tool port (MCP 6.5 -> #199)
@@ -16,6 +15,7 @@ import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { ExportResultCode } from "@opentelemetry/core";
 import Database from "better-sqlite3";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -44,6 +44,12 @@ import {
   type ToolPort,
 } from "@harness/core";
 import { FakeModelPort } from "@harness/core/testing";
+import {
+  ExecSpecSchema,
+  RemoteSandboxBackend,
+  SandboxExecTool,
+  type SandboxBackend,
+} from "@harness/sandbox";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { buildApprovalPayload } from "@harness/policy";
 import {
@@ -53,8 +59,11 @@ import {
   FakeClock,
   Id,
   JsonValue,
+  PiiConfigSchema,
+  RunConfigSchema,
   RunResultSchema,
   SequentialIdGenerator,
+  SecretRefSchema,
   StoreMigrateResultSchema,
   StorePurgeResultSchema,
   parseJson,
@@ -68,13 +77,15 @@ import {
   listLogDefinitions,
   listSpanDefinitions,
   SentinelGate,
+  toSafeEvent,
   type TelemetrySdkOptions,
   VaultRunView,
   withSpan,
 } from "@harness/telemetry";
 import type { Event } from "@harness/schemas";
-import type { z } from "zod";
+import { z } from "zod";
 import { createSandboxComposeInvocation } from "../scripts/compose/sandbox.js";
+import { runNetworkIsolationCompose } from "../scripts/ci/network-isolation.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const DAY_MS = 86_400_000;
@@ -812,6 +823,227 @@ describe("resume", () => {
       await store.close();
     }
   });
+});
+
+async function dockerAvailable(): Promise<boolean> {
+  try {
+    await runNetworkIsolationCompose(`harness-sandbox-probe-${String(process.pid)}`, [
+      "ps",
+      "--quiet",
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
+  // threat: T-18
+  it("executes through the runtime-selected runner and records only safe metadata", async () => {
+    const current = fixture();
+    const directory = await mkdtemp(join(process.cwd(), ".sandbox-e2e-"));
+    const token = "synthetic-e2e-runner-token-for-task-19.11";
+    const tokenRef = SecretRefSchema.parse("env:HARNESS_SANDBOX_E2E_TOKEN");
+    const project = `harness-sandbox-e2e-${String(process.pid)}`;
+    const previousRunnerToken = process.env.SANDBOX_RUNNER_TOKEN;
+    process.env.SANDBOX_RUNNER_TOKEN = token;
+    const invokeCompose = (args: string[]) =>
+      runNetworkIsolationCompose(project, ["--profile", "sandbox", ...args]);
+    const requestSchema = z.object({ runId: Id, spec: ExecSpecSchema }).strict();
+    const responseSchema = z.object({ status: z.number().int(), body: z.string() }).strict();
+    const responses: z.infer<typeof responseSchema>[] = [];
+    const forwarded: { body: z.infer<typeof requestSchema>; authorization: string | undefined }[] =
+      [];
+
+    // The host cannot reach Compose's internal network. Forward real HTTP requests
+    // from the configured remote backend without publishing a runner port.
+    const bridge = createServer((request, response) => {
+      const forward = async () => {
+        expect(request.method).toBe("POST");
+        expect(request.url).toBe("/exec");
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        for await (const chunk of request) {
+          const buffer = z.instanceof(Buffer).parse(chunk);
+          bytes += buffer.byteLength;
+          if (bytes > 2 * 1024 * 1024) {
+            throw new Error("Sandbox request exceeds the boundary limit.");
+          }
+          chunks.push(buffer);
+        }
+        const body = Buffer.concat(chunks).toString("utf8");
+        forwarded.push({
+          body: parseJson(requestSchema, body, { maxBytes: 2 * 1024 * 1024 }),
+          authorization: request.headers.authorization,
+        });
+        const script = [
+          'const http = require("node:http");',
+          `const request = http.request({ hostname: "sandbox-runner", port: 8080, path: "/exec", method: "POST", headers: ${JSON.stringify({ authorization: request.headers.authorization, "content-type": "application/json" })} }, (response) => {`,
+          '  const chunks = []; let bytes = 0; response.on("data", (chunk) => { bytes += chunk.length; if (bytes > 2097152) { response.destroy(); process.exitCode = 1; } else { chunks.push(chunk); } });',
+          '  response.on("end", () => process.stdout.write(JSON.stringify({ status: response.statusCode, body: Buffer.concat(chunks).toString() })));',
+          "});",
+          "request.setTimeout(10000, () => request.destroy());",
+          'request.on("error", () => { process.exitCode = 1; });',
+          `request.end(${JSON.stringify(body)});`,
+        ].join("\n");
+        const stdout = await invokeCompose([
+          "exec",
+          "--no-TTY",
+          "sandbox-runner",
+          "node",
+          "-e",
+          script,
+        ]);
+        const remote = parseJson(responseSchema, stdout, { maxBytes: 2 * 1024 * 1024 });
+        responses.push(remote);
+        response.writeHead(remote.status, { "content-type": "application/json" });
+        response.end(remote.body);
+      };
+      void forward().catch(() => {
+        response.writeHead(502);
+        response.end();
+      });
+    });
+    let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    try {
+      await invokeCompose([
+        "up",
+        "--detach",
+        "--wait",
+        "--pull=missing",
+        "--build",
+        "sandbox-runner",
+      ]);
+      await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+      const address = bridge.address();
+      if (address === null || typeof address === "string") {
+        throw new Error("The sandbox test bridge is not listening.");
+      }
+      const store = new InMemoryEventStore();
+      const executions: Awaited<ReturnType<SandboxExecTool["execute"]>>[] = [];
+      const createTool = vi.fn((backend: SandboxBackend): ToolPort => {
+        const tool = new SandboxExecTool({
+          backend,
+          limits: { memoryMb: 2048, pids: 2048, outputBytes: 2048, cpuSeconds: 5 },
+        });
+        return {
+          describe: (toolId) => tool.describe(toolId),
+          execute: async (call, context) => {
+            const output = await tool.execute(call, context);
+            executions.push(output);
+            const metadata = z
+              .object({
+                exitCode: z.number().int().nullable(),
+                truncated: z.boolean(),
+                timedOut: z.boolean(),
+              })
+              .parse(output.result);
+            return { outcome: "ok", result: metadata };
+          },
+        };
+      });
+      runtime = await createRuntime(
+        {
+          run: RunConfigSchema.parse({}),
+          pii: PiiConfigSchema.parse({
+            detokenize: [{ toolId: "sandbox.exec", args: ["/argv/1"] }],
+          }),
+          sandbox: { runner: { url: `http://127.0.0.1:${String(address.port)}`, token: tokenRef } },
+        },
+        {
+          store,
+          dataDir: directory,
+          transientVault: true,
+          clock: new FakeClock(1_000),
+          ids: new SequentialIdGenerator(),
+          secretResolver: {
+            resolve: (ref) => {
+              expect(ref).toBe(tokenRef);
+              return Promise.resolve({ reveal: () => token });
+            },
+          },
+          policy: {
+            version: Code.parse("e2e.sandbox"),
+            decide: () => ({
+              decision: "allow",
+              ruleId: Code.parse("e2e_sandbox"),
+              reason: Code.parse("synthetic_allowed"),
+              editable: [],
+            }),
+          },
+          model: new FakeModelPort([
+            completion(
+              [
+                {
+                  callId: "00000000000000000000000010",
+                  toolId: "sandbox.exec",
+                  args: { argv: ["/bin/echo", current.canary], timeoutMs: 10_000 },
+                },
+              ],
+              "execute",
+            ),
+            completion([], "completed"),
+          ]),
+          createTool,
+        },
+      );
+      expect(runtime.sandboxBackend).toBeInstanceOf(RemoteSandboxBackend);
+      expect(createTool).toHaveBeenCalledExactlyOnceWith(runtime.sandboxBackend);
+      const result = await runtime.run("Execute the synthetic sandbox command.");
+      expect(result.status).toBe("completed");
+      expect(responses).toMatchObject([{ status: 200 }]);
+      expect(executions).toMatchObject([
+        {
+          outcome: "ok",
+          result: { exitCode: 0, stdout: `${current.canary}\n` },
+        },
+      ]);
+      expect(forwarded).toHaveLength(1);
+      expect(forwarded[0]).toMatchObject({
+        authorization: ["Bearer", token].join(" "),
+        body: { spec: { argv: ["/bin/echo", current.canary] } },
+      });
+      expect(result.events.find((event) => event.type === "tool_result")).toMatchObject({
+        outcome: "ok",
+        result: { exitCode: 0, truncated: false, timedOut: false },
+      });
+      const safeEvents = result.events
+        .map((event) => toSafeEvent(event, Code.parse("e2e.sandbox")))
+        .filter((event) => event !== null);
+      expect(safeEvents.some((event) => event.kind === "tool_call")).toBe(true);
+      expect(safeEvents.every((event) => !("args" in event) && !("result" in event))).toBe(true);
+      for (const content of [
+        JSON.stringify(result.events),
+        JSON.stringify(safeEvents),
+        JSON.stringify(current.spans),
+        JSON.stringify(current.logs),
+      ]) {
+        expect(content).not.toContain(current.canary);
+        expect(content).not.toContain(token);
+      }
+      expect(JSON.stringify(safeEvents)).not.toContain("/bin/echo");
+    } finally {
+      await runtime?.close();
+      if (bridge.listening) {
+        await new Promise<void>((resolve, reject) =>
+          bridge.close((error) => {
+            if (error === undefined) {
+              resolve();
+            } else {
+              reject(error);
+            }
+          }),
+        );
+      }
+      await invokeCompose(["down", "--volumes", "--remove-orphans"]);
+      await rm(directory, { recursive: true, force: true });
+      if (previousRunnerToken === undefined) {
+        delete process.env.SANDBOX_RUNNER_TOKEN;
+      } else {
+        process.env.SANDBOX_RUNNER_TOKEN = previousRunnerToken;
+      }
+    }
+  }, 240_000);
 });
 
 describe("control plane", () => {

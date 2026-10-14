@@ -233,6 +233,7 @@ function composeRuntime(
     ids,
     store,
     keys,
+    sandboxBackend,
     vault,
     vaultResolver,
     pii,
@@ -269,6 +270,7 @@ function composeRuntime(
     store,
     vault: vaultResolver,
     keys,
+    sandboxBackend,
     clock,
     ids,
     run: (goal) => startRun(options, tool, goal, runWithControl),
@@ -286,6 +288,7 @@ function composeRuntime(
         store,
         vault,
         keys,
+        sandboxBackend,
         flushTelemetry,
       }),
   };

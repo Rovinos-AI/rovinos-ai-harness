@@ -9,6 +9,7 @@ import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import { SqliteVault, VaultOperationError } from "@harness/vault";
 import type { TokenType, VaultTerminalRunsQuery } from "@harness/vault";
 import type { EventStore } from "@harness/store";
+import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
@@ -190,6 +191,56 @@ function persistedScopeResolver(store: EventStore, scopes: RunScopeRegistry) {
   };
 }
 
+async function createRuntimeSandbox(config: RuntimeConfig, overrides: RuntimeOverrides) {
+  return (
+    overrides.sandboxBackend ??
+    (await createSandboxBackend(config.sandbox, {
+      workspaceRoot: process.cwd(),
+      logger: {
+        log: (code) => {
+          roleConfigLogger.warn(code);
+        },
+      },
+      ...(overrides.secretResolver === undefined
+        ? {}
+        : { secretResolver: overrides.secretResolver }),
+    }))
+  );
+}
+
+function createRuntimeTool(
+  config: RuntimeConfig,
+  backend: SandboxBackend,
+  overrides: RuntimeOverrides,
+) {
+  const tool = overrides.tool ?? overrides.createTool?.(backend) ?? unavailableTool;
+  if (config.pii?.enabled !== false && tool instanceof PiiToolPort) {
+    throw new PiiToolPortAlreadyWrappedError();
+  }
+  return tool;
+}
+
+async function closeFailedSetup(
+  backend: SandboxBackend | undefined,
+  store: EventStore | undefined,
+  vault: RuntimeVault | undefined,
+  keys: RuntimeComposition["keys"] | undefined,
+) {
+  try {
+    try {
+      await backend?.close?.();
+    } finally {
+      await store?.close();
+    }
+  } finally {
+    try {
+      vault?.close();
+    } finally {
+      keys?.dispose();
+    }
+  }
+}
+
 /** Builds validated ports and owned storage dependencies for `createRuntime`. */
 /**
  * Resolve validated runtime configuration and create owned storage dependencies.
@@ -201,15 +252,17 @@ export async function setupRuntime(
   config: RuntimeConfig,
   overrides: RuntimeOverrides,
 ): Promise<RuntimeSetup> {
-  const piiConfig = validatePiiConfig(config, overrides);
-  const runtimeConfig = { ...config, pii: piiConfig };
-  ensureTracing();
-  const clock = overrides.clock ?? systemClock;
-  const ids = overrides.ids ?? new SystemIdGenerator(clock);
-  const keys = await createRuntimeKeys(runtimeConfig.keys, overrides);
   let vault: RuntimeVault | undefined;
   let eventStore: EventStore | undefined;
+  let keys: RuntimeComposition["keys"] | undefined;
+  let sandboxBackend = overrides.sandboxBackend;
   try {
+    const piiConfig = validatePiiConfig(config, overrides);
+    const runtimeConfig = { ...config, pii: piiConfig };
+    ensureTracing();
+    const clock = overrides.clock ?? systemClock;
+    const ids = overrides.ids ?? new SystemIdGenerator(clock);
+    keys = await createRuntimeKeys(runtimeConfig.keys, overrides);
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
     const runtimeVault = await createRuntimeVault(dataDir, overrides, keys, clock);
@@ -217,7 +270,8 @@ export async function setupRuntime(
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
     const context = overrides.context ?? new NaiveContext();
-    const tool = overrides.tool ?? unavailableTool;
+    sandboxBackend = await createRuntimeSandbox(runtimeConfig, overrides);
+    const tool = createRuntimeTool(runtimeConfig, sandboxBackend, overrides);
     const roles = await resolveRuntimeRoles(
       runtimeConfig,
       overrides.roleConfigDirectory ?? process.cwd(),
@@ -244,6 +298,7 @@ export async function setupRuntime(
       ids,
       store,
       keys,
+      sandboxBackend,
       vault: runtimeVault,
       vaultResolver: piiRuntime.resolver,
       pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,
@@ -256,15 +311,7 @@ export async function setupRuntime(
       scopes,
     };
   } catch (error) {
-    try {
-      await eventStore?.close();
-    } finally {
-      try {
-        vault?.close();
-      } finally {
-        keys.dispose();
-      }
-    }
+    await closeFailedSetup(sandboxBackend, eventStore, vault, keys);
     throw error;
   }
 }

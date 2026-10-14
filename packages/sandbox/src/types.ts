@@ -149,4 +149,6 @@ export interface SandboxBackend {
    * @returns Exit status, bounded output, and timing metadata.
    */
   exec(runId: Id, spec: ExecSpec, signal: AbortSignal): Promise<ExecResult>;
+  /** Releases backend-owned resources when its runtime closes. */
+  close?(): Promise<void>;
 }
