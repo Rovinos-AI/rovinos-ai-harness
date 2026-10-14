@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Command } from "commander";
 import type { HarnessConfig } from "@harness/config";
-import type {
-  ConfiguredKeyRotation,
-  Runtime,
-  RuntimeOverrides,
-  ToolPort,
-} from "@harness/core";
+import type { ConfiguredKeyRotation, Runtime, RuntimeOverrides, ToolPort } from "@harness/core";
 import type { AuditingVaultResolver } from "@harness/vault";
 import type { Output } from "./output.js";
 
@@ -55,10 +50,8 @@ export interface CliContext {
     config: HarnessConfig,
     selection: { readonly vault: boolean; readonly store: boolean },
   ): Promise<ConfiguredKeyRotation>;
-  /** Receives metadata-only key-rotation completion counts. */
-  keyRotationLogger?: {
-    info(event: "keys_rotated", fields: { readonly vault: number; readonly store: number }): void;
-  };
+  /** Emits the registered metadata-only key-rotation completion record. */
+  keyRotationLogger?: (counts: { readonly vault: number; readonly store: number }) => void;
 }
 
 /** A lazily supplied command registration unit for the harness CLI. */

@@ -1,28 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import { CryptoError, aesGcmEncrypt, hkdfSha256, hmacSha256 } from "@harness/crypto";
-import {
-  Id,
-  KEY_PROVIDER_KEY_BYTES,
-  VaultValueEntrySchema,
-  Code,
-  type KeyProvider,
-  type VaultValueEntry,
-} from "@harness/schemas";
+import { CryptoError, aesGcmEncrypt, hmacSha256 } from "@harness/crypto";
+import { Id, VaultValueEntrySchema } from "@harness/schemas";
+import type { Code, KeyProvider, VaultValueEntry } from "@harness/schemas";
 import { normalize } from "./normalize.js";
 import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
 import { VaultOperationError } from "./errors.js";
-import { decryptSqliteEntry, ENCRYPTION_INFO } from "./sqlite-decrypt.js";
+import { decryptSqliteEntry } from "./sqlite-decrypt.js";
 import { migrateVault, validateReadOnlyVaultMigrations } from "./sqlite-migrations.js";
+import type { ReencryptBatchResult, VaultKeyRotation, VaultReencryptBatchInput } from "./rotate.js";
 import {
-  decodeVaultRotationCursor,
-  encodeVaultRotationCursor,
-  ReencryptBatchResultSchema,
-  VaultKeyRowCountSchema,
-  VaultReencryptBatchInputSchema,
-  type VaultKeyRotation,
-  type VaultReencryptBatchInput,
-} from "./rotate.js";
+  currentKeyId,
+  deriveVaultKeys,
+  loadMasterKey,
+  lookupMessage,
+  type VaultKeys,
+} from "./sqlite-crypto.js";
+import { countVaultRowsByKey, reencryptVaultBatch } from "./sqlite-rotation.js";
 import {
   VaultValueError,
   type VaultAdmin,
@@ -36,33 +30,11 @@ import {
 
 const MAX_VALUE_BYTES = 8 * 1024;
 const MAX_TOKEN_NUMBER = 999_999;
-const LOOKUP_INFO = "harness/vault/lookup";
 interface VaultEntryRow {
   token: string;
   entity_type?: string;
   value_enc: string;
   key_id: string;
-}
-
-interface VaultRotationRow extends VaultEntryRow {
-  run_id: string;
-  entity_type: string;
-  lookup_key_id: string;
-}
-
-interface VaultRotationUpdate {
-  runId: Id;
-  token: string;
-  oldKeyId: string;
-  oldLookupKeyId: string;
-  oldValueEnc: string;
-  valueEnc: string;
-  lookup: Buffer;
-}
-
-interface VaultKeys {
-  encryption: Uint8Array;
-  lookup: Uint8Array;
 }
 
 interface PutTransactionInput {
@@ -82,61 +54,6 @@ interface InsertEntryInput {
   lookup: Buffer;
   encrypted: Uint8Array;
   keyId: string;
-}
-
-function lookupMessage(runId: Id, entityType: Code, normalizedValue: string): Buffer {
-  return Buffer.concat([
-    Buffer.from(runId, "utf8"),
-    Buffer.from([0]),
-    Buffer.from(entityType, "utf8"),
-    Buffer.from([0]),
-    Buffer.from(normalizedValue, "utf8"),
-  ]);
-}
-
-async function loadMasterKey(
-  keyProvider: KeyProvider,
-  keyId: string,
-  failureCode: "vault_encrypt_failed" | "vault_decrypt_failed",
-): Promise<Uint8Array> {
-  try {
-    const key = await keyProvider.getKey(keyId);
-    if (!(key instanceof Uint8Array) || key.byteLength !== KEY_PROVIDER_KEY_BYTES) {
-      throw new VaultOperationError(failureCode);
-    }
-    return Uint8Array.from(key);
-  } catch {
-    throw new VaultOperationError(failureCode);
-  }
-}
-
-async function deriveVaultKeys(
-  keyProvider: KeyProvider,
-  keyId: string,
-  failureCode: "vault_encrypt_failed" | "vault_decrypt_failed",
-): Promise<VaultKeys> {
-  const masterKey = await loadMasterKey(keyProvider, keyId, failureCode);
-  let encryption: Uint8Array | undefined;
-  let lookup: Uint8Array | undefined;
-  try {
-    encryption = hkdfSha256(masterKey, ENCRYPTION_INFO);
-    lookup = hkdfSha256(masterKey, LOOKUP_INFO);
-    return { encryption, lookup };
-  } catch {
-    encryption?.fill(0);
-    lookup?.fill(0);
-    throw new VaultOperationError(failureCode);
-  } finally {
-    masterKey.fill(0);
-  }
-}
-
-function currentKeyId(keyProvider: KeyProvider): string {
-  try {
-    return keyProvider.currentKeyId();
-  } catch {
-    throw new VaultOperationError("vault_encrypt_failed");
-  }
 }
 
 /** SQLite-backed encrypted vault isolated in its own database file. */
@@ -385,154 +302,15 @@ export class SqliteVault
   }
 
   /** {@inheritDoc VaultKeyRotation.reencryptBatch} */
-  async reencryptBatch(input: VaultReencryptBatchInput) {
-    const { targetKeyId, limit, afterCursor } = VaultReencryptBatchInputSchema.parse(input);
-    const cursor =
-      afterCursor === undefined ? undefined : decodeVaultRotationCursor(afterCursor);
-    const rows = this.db
-      .prepare<
-        [string, string, string | null, string | null, string | null, string, number],
-        VaultRotationRow
-      >(
-        `SELECT run_id, token, entity_type, value_enc, key_id, lookup_key_id
-         FROM vault_entries
-         WHERE (key_id != ? OR lookup_key_id != ?)
-           AND (? IS NULL OR run_id > ? OR (run_id = ? AND token > ?))
-         ORDER BY run_id, token
-         LIMIT ?`,
-      )
-      .all(
-        targetKeyId,
-        targetKeyId,
-        cursor?.runId ?? null,
-        cursor?.runId ?? null,
-        cursor?.runId ?? null,
-        cursor?.token ?? "",
-        limit + 1,
-      );
-    const selected = rows.slice(0, limit);
-    const targetKeys = await deriveVaultKeys(
-      this.keyProvider,
-      targetKeyId,
-      "vault_encrypt_failed",
+  reencryptBatch(input: VaultReencryptBatchInput): Promise<ReencryptBatchResult> {
+    return reencryptVaultBatch(this.db, this.keyProvider, input, (runId, row) =>
+      this.decryptEntry(runId, row),
     );
-    const updates: VaultRotationUpdate[] = [];
-    try {
-      for (const row of selected) {
-        const runId = Id.parse(row.run_id);
-        const entityType = Code.parse(row.entity_type);
-        const rawValue = await this.decryptEntry(runId, {
-          token: row.token,
-          value_enc: row.value_enc,
-          key_id: row.key_id,
-        });
-        const normalizedValue = normalize(entityType, rawValue);
-        const plaintext = Buffer.from(rawValue, "utf8");
-        let encrypted: Uint8Array | undefined;
-        const message = lookupMessage(runId, entityType, normalizedValue);
-        let lookup: Buffer | undefined;
-        try {
-          encrypted = aesGcmEncrypt(
-            targetKeys.encryption,
-            plaintext,
-            Buffer.from(`${runId}:${row.token}`, "utf8"),
-          );
-          lookup = Buffer.from(hmacSha256(targetKeys.lookup, message));
-          updates.push({
-            runId,
-            token: row.token,
-            oldKeyId: row.key_id,
-            oldLookupKeyId: row.lookup_key_id,
-            oldValueEnc: row.value_enc,
-            valueEnc: Buffer.from(encrypted).toString("base64"),
-            lookup,
-          });
-          lookup = undefined;
-        } finally {
-          plaintext.fill(0);
-          encrypted?.fill(0);
-          message.fill(0);
-          lookup?.fill(0);
-        }
-      }
-    } catch (error) {
-      for (const update of updates) {
-        update.lookup.fill(0);
-      }
-      if (error instanceof VaultOperationError) {
-        throw error;
-      }
-      throw new VaultOperationError("vault_encrypt_failed");
-    } finally {
-      targetKeys.encryption.fill(0);
-      targetKeys.lookup.fill(0);
-    }
-
-    try {
-      const rotate = this.db.transaction(() => {
-        const update = this.db.prepare(
-          `UPDATE vault_entries
-           SET value_enc = ?, key_id = ?, lookup = ?, lookup_key_id = ?
-           WHERE run_id = ? AND token = ? AND key_id = ? AND lookup_key_id = ? AND value_enc = ?`,
-        );
-        return updates.reduce(
-          (processed, row) =>
-            processed +
-            update.run(
-              row.valueEnc,
-              targetKeyId,
-              row.lookup,
-              targetKeyId,
-              row.runId,
-              row.token,
-              row.oldKeyId,
-              row.oldLookupKeyId,
-              row.oldValueEnc,
-            ).changes,
-          0,
-        );
-      });
-      const processed = rotate.immediate();
-      const last = selected.at(-1);
-      const nextCursor =
-        rows.length > limit && last !== undefined
-          ? encodeVaultRotationCursor({ runId: last.run_id, token: last.token })
-          : undefined;
-      return ReencryptBatchResultSchema.parse({
-        processed,
-        ...(nextCursor === undefined ? {} : { nextCursor }),
-      });
-    } catch {
-      throw new VaultOperationError("vault_unavailable");
-    } finally {
-      for (const update of updates) {
-        update.lookup.fill(0);
-      }
-    }
   }
 
   /** Count rows that still need each encryption or lookup key. */
   countRowsByKey(): Promise<readonly { keyId: string; count: number }[]> {
-    try {
-      const rows = this.db
-        .prepare<[], { key_id: string; count: number }>(
-          `SELECT key_id, COUNT(*) AS count
-           FROM (
-             SELECT key_id, run_id, token FROM vault_entries
-             UNION
-             SELECT lookup_key_id AS key_id, run_id, token FROM vault_entries
-           )
-           GROUP BY key_id ORDER BY key_id`,
-        )
-        .all();
-      return Promise.resolve(
-        rows.map(({ key_id, count }) =>
-          VaultKeyRowCountSchema.parse({ keyId: key_id, count }),
-        ),
-      );
-    } catch {
-      return Promise.reject(new VaultOperationError("vault_unavailable"));
-    }
+    return countVaultRowsByKey(this.db);
   }
 
   /** Close the dedicated SQLite connection. */
@@ -551,8 +329,8 @@ export class SqliteVault
   }: PutTransactionInput): TokenValue {
     const put = this.db.transaction(() => {
       const findExisting = this.db.prepare<[Id, Code, Buffer], { token: string }>(
-          "SELECT token FROM vault_entries WHERE run_id = ? AND entity_type = ? AND lookup = ?",
-        );
+        "SELECT token FROM vault_entries WHERE run_id = ? AND entity_type = ? AND lookup = ?",
+      );
       let existing: { token: string } | undefined;
       for (const lookup of lookups) {
         existing = findExisting.get(runId, entityType, lookup);

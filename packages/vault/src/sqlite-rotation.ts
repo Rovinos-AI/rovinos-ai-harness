@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { aesGcmEncrypt, hmacSha256 } from "@harness/crypto";
 import { Code, Id, type KeyProvider } from "@harness/schemas";
 import { normalize } from "./normalize.js";
@@ -34,6 +34,7 @@ interface EncryptedEntry {
 interface RotationUpdate {
   readonly runId: Id;
   readonly token: string;
+  readonly entityType: Code;
   readonly oldKeyId: string;
   readonly oldLookupKeyId: string;
   readonly oldValueEnc: string;
@@ -55,10 +56,10 @@ function selectRows(
       RotationRow
     >(
       `SELECT run_id, token, entity_type, value_enc, key_id, lookup_key_id
-       FROM vault_entries
-       WHERE (key_id != ? OR lookup_key_id != ?)
-         AND (? IS NULL OR run_id > ? OR (run_id = ? AND token > ?))
-       ORDER BY run_id, token LIMIT ?`,
+        FROM vault_entries
+        WHERE (key_id != ? OR lookup_key_id != ?)
+          AND (? IS NULL OR run_id > ? OR (run_id = ? AND token > ?))
+        ORDER BY run_id, token LIMIT ?`,
     )
     .all(
       targetKeyId,
@@ -73,7 +74,6 @@ function selectRows(
 
 async function encryptRows(
   rows: readonly RotationRow[],
-  db: Database.Database,
   keyProvider: KeyProvider,
   targetKeyId: string,
   decryptEntry: DecryptEntry,
@@ -82,7 +82,7 @@ async function encryptRows(
   const updates: RotationUpdate[] = [];
   try {
     for (const row of rows) {
-      updates.push(await encryptRow(row, db, targetKeys, targetKeyId, decryptEntry));
+      updates.push(await encryptRow(row, targetKeys, targetKeyId, decryptEntry));
     }
     return updates;
   } catch (error) {
@@ -99,7 +99,6 @@ async function encryptRows(
 
 async function encryptRow(
   row: RotationRow,
-  db: Database.Database,
   targetKeys: VaultKeys,
   targetKeyId: string,
   decryptEntry: DecryptEntry,
@@ -122,6 +121,7 @@ async function encryptRow(
     const update = {
       runId,
       token: row.token,
+      entityType,
       oldKeyId: row.key_id,
       oldLookupKeyId: row.lookup_key_id,
       oldValueEnc: row.value_enc,
@@ -143,10 +143,13 @@ function updateRows(
   updates: readonly RotationUpdate[],
   targetKeyId: string,
 ): number {
+  const findLookupOwner = db.prepare<[Id, Code, Buffer, string], { token: string }>(
+    "SELECT token FROM vault_entries WHERE run_id = ? AND entity_type = ? AND lookup = ? AND token != ?",
+  );
   const update = db.prepare(
     `UPDATE vault_entries
-     SET value_enc = ?, key_id = ?, lookup = ?, lookup_key_id = ?
-     WHERE run_id = ? AND token = ? AND key_id = ? AND lookup_key_id = ? AND value_enc = ?`,
+      SET value_enc = ?, key_id = ?, lookup = ?, lookup_key_id = ?
+      WHERE run_id = ? AND token = ? AND key_id = ? AND lookup_key_id = ? AND value_enc = ?`,
   );
   const rotate = db.transaction(() =>
     updates.reduce(
@@ -155,7 +158,9 @@ function updateRows(
         update.run(
           row.valueEnc,
           targetKeyId,
-          row.lookup,
+          findLookupOwner.get(row.runId, row.entityType, row.lookup, row.token) === undefined
+            ? row.lookup
+            : null,
           targetKeyId,
           row.runId,
           row.token,
@@ -177,11 +182,10 @@ export async function reencryptVaultBatch(
   decryptEntry: DecryptEntry,
 ): Promise<ReencryptBatchResult> {
   const { targetKeyId, limit, afterCursor } = VaultReencryptBatchInputSchema.parse(input);
-  const cursor =
-    afterCursor === undefined ? undefined : decodeVaultRotationCursor(afterCursor);
+  const cursor = afterCursor === undefined ? undefined : decodeVaultRotationCursor(afterCursor);
   const rows = selectRows(db, targetKeyId, cursor, limit + 1);
   const selected = rows.slice(0, limit);
-  const updates = await encryptRows(selected, db, keyProvider, targetKeyId, decryptEntry);
+  const updates = await encryptRows(selected, keyProvider, targetKeyId, decryptEntry);
   try {
     const processed = updateRows(db, updates, targetKeyId);
     const last = selected.at(-1);
@@ -206,12 +210,12 @@ export function countVaultRowsByKey(db: Database.Database): Promise<readonly Vau
     const rows = db
       .prepare<[], { key_id: string; count: number }>(
         `SELECT key_id, COUNT(*) AS count
-         FROM (
-           SELECT key_id, run_id, token FROM vault_entries
-           UNION
-           SELECT lookup_key_id AS key_id, run_id, token FROM vault_entries
-         )
-         GROUP BY key_id ORDER BY key_id`,
+          FROM (
+            SELECT key_id, run_id, token FROM vault_entries
+            UNION
+            SELECT lookup_key_id AS key_id, run_id, token FROM vault_entries
+          )
+          GROUP BY key_id ORDER BY key_id`,
       )
       .all();
     return Promise.resolve(

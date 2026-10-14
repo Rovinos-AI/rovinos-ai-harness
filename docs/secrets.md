@@ -23,7 +23,9 @@ On POSIX systems, a world-readable secret file triggers the `secret_file_permiss
 
 Configure key versions in the top-level `keys` section using `env:`, `file:`, or `akv:` references. A key secret must resolve to canonical base64 for exactly 32 bytes. Keep prior key versions configured for as long as stored data uses them. Run `harness keys generate` to create a fresh key; copy it directly to an environment variable or secret store and never commit it.
 
-For rotation, configure the new key as `currentKeyId` first, then run `harness keys rotate --to <keyId>`. Vault rows record both `key_id` (ciphertext encryption) and `lookup_key_id` (the HMAC lookup key); rotation updates ciphertext, lookup HMAC, and both identifiers in one batch transaction. `put` checks lookup HMACs for every key id still referenced by vault rows, preserving idempotency during interrupted rotations. Retain old keys until `harness keys retire <keyId>` confirms that neither the vault nor event store has rows that reference them.
+For rotation, configure the new key as `currentKeyId` first, then run `harness keys rotate --to <keyId>`. Vault rows record both `key_id` (ciphertext encryption) and `lookup_key_id` (the HMAC lookup key); rotation updates ciphertext, lookup HMAC, and both identifiers in one batch transaction. `put` checks lookup HMACs for every key id still referenced by vault rows, preserving idempotency during interrupted rotations.
+
+(verify) Legacy vaults may contain separate tokens for the same normalized value with different HMACs. Rotation keeps both encrypted rows and their event references; when the target HMAC is already owned by another row, the duplicate is re-encrypted with a `NULL` lookup while the existing row remains canonical. New `put` calls resolve to that canonical row. Retain old keys until `harness keys retire <keyId>` confirms that neither the vault nor event store has rows that reference them.
 
 ## Vault detokenization audits
 

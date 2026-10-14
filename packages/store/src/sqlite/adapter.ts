@@ -20,12 +20,7 @@ import {
   type EncodedSnapshot,
   type SnapshotRow,
 } from "../codec.js";
-import {
-  InvalidEventError,
-  SeqConflictError,
-  StoreMigrationError,
-  StoreUnavailableError,
-} from "../errors.js";
+import { InvalidEventError, SeqConflictError, StoreMigrationError } from "../errors.js";
 import {
   systemClock,
   sqliteStoreOptionsSchema,
@@ -64,7 +59,7 @@ import { SqliteApprovalNotifications } from "./approval-notifications.js";
 import { SqliteConfirmationStates } from "./confirmation-states.js";
 import { findRunsByTrace } from "./traces.js";
 import { encodeEvents, type EncodedEvent } from "./event-encoding.js";
-import type { ReencryptBatchInput, StoreKeyRotation } from "../rotate.js";
+import type { StoreKeyRotation } from "../rotate.js";
 import { countSqliteRowsByKey, reencryptSqliteBatch } from "./rotation.js";
 const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
 const READ_PAGE_SIZE = 256;
@@ -223,16 +218,11 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   }
 
   /** {@inheritDoc StoreKeyRotation.reencryptBatch} */
-  reencryptBatch(
-    input: ReencryptBatchInput,
-  ): ReturnType<StoreKeyRotation["reencryptBatch"]> {
-    return reencryptSqliteBatch(this.db, this.codec, input);
-  }
+  reencryptBatch: StoreKeyRotation["reencryptBatch"] = (input) =>
+    reencryptSqliteBatch(this.db, this.codec, input);
 
   /** Count event and snapshot rows that still use each key. */
-  countRowsByKey(): ReturnType<StoreKeyRotation["countRowsByKey"]> {
-    return countSqliteRowsByKey(this.db);
-  }
+  countRowsByKey: StoreKeyRotation["countRowsByKey"] = () => countSqliteRowsByKey(this.db);
 
   /** {@inheritDoc EventStore.append} */
   async append(

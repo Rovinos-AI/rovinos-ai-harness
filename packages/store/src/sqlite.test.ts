@@ -742,6 +742,63 @@ describe("SqliteEventStore", () => {
     }
   });
 
+  it("retries a row skipped after a concurrent event-store update", async () => {
+    const path = await temporaryDatabase();
+    let currentKeyId = "key-a";
+    let injectConcurrentUpdate = false;
+    const rotationKeys = new Map([
+      ["key-a", new Uint8Array(32).fill(41)],
+      ["key-b", new Uint8Array(32).fill(42)],
+    ]);
+    const rotationProvider: KeyProvider = {
+      currentKeyId: () => currentKeyId,
+      getKey: (keyId) => {
+        const key = rotationKeys.get(keyId);
+        return key === undefined
+          ? Promise.reject(new KeyNotFoundError())
+          : Promise.resolve(Uint8Array.from(key));
+      },
+    };
+    const baseCodec = new AesGcmContentCodec(rotationProvider);
+    const codec: ContentCodec = {
+      encrypted: true,
+      async encode(context, content, targetKeyId) {
+        if (injectConcurrentUpdate && targetKeyId === "key-b") {
+          injectConcurrentUpdate = false;
+          const concurrent = await baseCodec.encode(context, content, "key-a");
+          const database = new Database(path);
+          try {
+            database
+              .prepare("UPDATE events SET content_blob = ? WHERE run_id = ? AND seq = ?")
+              .run(concurrent.blob, context.runId, context.seq);
+          } finally {
+            database.close();
+          }
+        }
+        return baseCodec.encode(context, content, targetKeyId);
+      },
+      decode: (context, blob, keyId) => baseCodec.decode(context, blob, keyId),
+    };
+    const store = new SqliteEventStore(path, codec);
+    try {
+      await store.append(runId, [runCreated(runId, 10)], 0);
+      currentKeyId = "key-b";
+      injectConcurrentUpdate = true;
+
+      await expect(store.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+        processed: 0,
+      });
+      await expect(store.countRowsByKey()).resolves.toEqual([{ keyId: "key-a", count: 1 }]);
+      await expect(store.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+        processed: 1,
+      });
+      await expect(store.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 1 }]);
+      await expect(collect(store.read(runId))).resolves.toMatchObject([{ seq: 0 }]);
+    } finally {
+      await store.close();
+    }
+  });
+
   it("resumes event and snapshot key rotation while reads and new appends continue", async () => {
     const path = await temporaryDatabase();
     let currentKeyId = "key-a";
@@ -801,7 +858,9 @@ describe("SqliteEventStore", () => {
         { seq: 0 },
         {
           seq: 1,
-          messages: [{ role: "user", parts: [{ type: "text", text: "synthetic rotation content" }] }],
+          messages: [
+            { role: "user", parts: [{ type: "text", text: "synthetic rotation content" }] },
+          ],
         },
         { seq: 2 },
       ]);
@@ -852,7 +911,9 @@ describe("SqliteEventStore", () => {
         { seq: 2 },
         {
           seq: 3,
-          messages: [{ role: "user", parts: [{ type: "text", text: "synthetic concurrent content" }] }],
+          messages: [
+            { role: "user", parts: [{ type: "text", text: "synthetic concurrent content" }] },
+          ],
         },
       ]);
     } finally {

@@ -19,11 +19,7 @@ import {
   type SnapshotRow,
   validateSnapshotAppend,
 } from "../codec.js";
-import {
-  InvalidEventError,
-  StoreReadOnlyError,
-  StoreUnavailableError,
-} from "../errors.js";
+import { InvalidEventError, StoreReadOnlyError, StoreUnavailableError } from "../errors.js";
 import {
   snapshotStoreOptionsSchema,
   systemClock,
@@ -32,7 +28,7 @@ import {
   type ListRunsOptions,
   type RunSummary,
 } from "../types.js";
-import { watchEvents, watchRunSummaries } from "../subscriptions.js";
+import { watchEvents } from "../subscriptions.js";
 import {
   appendTransaction,
   decodeCursor,
@@ -51,14 +47,9 @@ import { PostgresConfirmationStates } from "./confirmation-states.js";
 import { initializePostgresStore } from "./initialize.js";
 import { readEvents } from "./reader.js";
 import { isRunTerminal, PostgresSubscriptions } from "./subscriptions.js";
-import {
-  countPostgresRowsByKey,
-  reencryptPostgresBatch,
-} from "./rotation.js";
-import type {
-  ReencryptBatchInput,
-  type StoreKeyRotation,
-} from "../rotate.js";
+import { watchPostgresRuns } from "./watch-runs.js";
+import { countPostgresRowsByKey, reencryptPostgresBatch } from "./rotation.js";
+import type { ReencryptBatchInput, StoreKeyRotation } from "../rotate.js";
 
 const connectionStringSchema = z
   .url()
@@ -154,16 +145,9 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
   }
 
   /** {@inheritDoc StoreKeyRotation.reencryptBatch} */
-  reencryptBatch(
-    input: ReencryptBatchInput,
-  ): ReturnType<StoreKeyRotation["reencryptBatch"]> {
+  reencryptBatch(input: ReencryptBatchInput): ReturnType<StoreKeyRotation["reencryptBatch"]> {
     this.assertWritable();
-    return reencryptPostgresBatch(
-      this.pool,
-      this.codec,
-      () => this.ensureInitialized(),
-      input,
-    );
+    return reencryptPostgresBatch(this.pool, this.codec, () => this.ensureInitialized(), input);
   }
 
   /** Count encrypted event and snapshot rows grouped by key identifier. */
@@ -246,24 +230,13 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
 
   /** {@inheritDoc EventStore.watchRuns} */
   watchRuns(options: Parameters<EventStore["watchRuns"]>[0]): AsyncIterable<RunSummary> {
-    return watchRunSummaries(
-      this,
+    return watchPostgresRuns({
+      store: this,
       options,
-      (runId, signal) => this.subscriptions.subscribe(runId, signal),
-      async (runId) => {
-        try {
-          await this.ensureInitialized();
-          const result = await this.pool.query<RunSummaryRow>(
-            "SELECT run_id, created_at, status, next_seq - 1 AS last_seq, last_ts FROM runs WHERE run_id = $1",
-            [runId],
-          );
-          const row = result.rows[0];
-          return row === undefined ? undefined : runListPage([row], 1).runs[0];
-        } catch (error) {
-          throw storeError(error);
-        }
-      },
-    );
+      pool: this.pool,
+      subscriptions: this.subscriptions,
+      ensureInitialized: () => this.ensureInitialized(),
+    });
   }
 
   /** {@inheritDoc EventStore.head} */
@@ -461,19 +434,4 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
       throw storeError(error);
     }
   }
-}
-
-/** Open a Postgres event store from the JSON arguments supplied to a worker thread. */
-export function openPostgresEventStore(args: {
-  connectionString: string;
-  poolSize?: number;
-  snapshotKeep?: number;
-  schema?: string;
-}): PostgresEventStore {
-  const options: PostgresEventStoreOptions = {
-    ...(args.poolSize === undefined ? {} : { poolSize: args.poolSize }),
-    ...(args.snapshotKeep === undefined ? {} : { snapshotKeep: args.snapshotKeep }),
-    ...(args.schema === undefined ? {} : { schema: args.schema }),
-  };
-  return new PostgresEventStore(args.connectionString, options);
 }

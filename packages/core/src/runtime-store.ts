@@ -12,6 +12,7 @@ import {
   StoreUnavailableError,
   type Clock,
   type EventStore,
+  type StoreKeyRotation,
 } from "@harness/store";
 import {
   InMemoryVault,
@@ -21,7 +22,6 @@ import {
   type VaultTerminalRunsQuery,
   type VaultKeyRotation,
 } from "@harness/vault";
-import type { StoreKeyRotation } from "@harness/store";
 import type { Id, KeysConfig, SecretRef, StoreConfig } from "@harness/schemas";
 import type { RuntimeOverrides } from "./runtime-config.js";
 import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
@@ -35,6 +35,39 @@ export interface ConfiguredStoreOptions {
   readonly clock?: Clock;
   readonly secretResolver?: {
     resolve(ref: SecretRef): Promise<{ reveal(): string }>;
+  };
+}
+
+async function openConfiguredRotationStore(
+  config: { readonly store?: StoreConfig },
+  options: ConfiguredKeyRotationOptions,
+  keys: Awaited<ReturnType<typeof createRuntimeKeys>>,
+  openedStores: (SqliteEventStore | PostgresEventStore)[],
+): Promise<ConfiguredKeyRotation["store"]> {
+  const storeConfig = config.store ?? {};
+  const codec = new AesGcmContentCodec(keys);
+  if (storeConfig.dialect === "postgres") {
+    const connectionString = await postgresConnectionString(storeConfig, options.secretResolver);
+    const opened = new PostgresEventStore(
+      connectionString,
+      {},
+      codec,
+      options.clock ?? { now: () => Date.now() },
+    );
+    openedStores.push(opened);
+    return opened;
+  }
+
+  const databasePath = join(resolveDataDir(process.env, options.dataDir), "harness.db");
+  if (existsSync(databasePath)) {
+    const opened = new SqliteEventStore(databasePath, codec);
+    openedStores.push(opened);
+    return opened;
+  }
+  return {
+    reencryptBatch: () => Promise.resolve({ processed: 0 }),
+    countRowsByKey: () => Promise.resolve([]),
+    close: () => Promise.resolve(),
   };
 }
 
@@ -101,45 +134,16 @@ export async function openConfiguredKeyRotation(
         vault = opened;
       } else {
         vault = {
-          reencryptBatch: async () => ({ processed: 0 }),
-          countRowsByKey: async () => [],
+          reencryptBatch: () => Promise.resolve({ processed: 0 }),
+          countRowsByKey: () => Promise.resolve([]),
           close: () => undefined,
         };
       }
     }
 
-    let store: ConfiguredKeyRotation["store"];
-    if (options.store) {
-      const storeConfig = config.store ?? {};
-      const codec = new AesGcmContentCodec(keys);
-      if (storeConfig.dialect === "postgres") {
-        const connectionString = await postgresConnectionString(
-          storeConfig,
-          options.secretResolver,
-        );
-        const opened = new PostgresEventStore(
-          connectionString,
-          {},
-          codec,
-          options.clock ?? { now: () => Date.now() },
-        );
-        openedStores.push(opened);
-        store = opened;
-      } else {
-        const databasePath = join(resolveDataDir(process.env, options.dataDir), "harness.db");
-        if (existsSync(databasePath)) {
-          const opened = new SqliteEventStore(databasePath, codec);
-          openedStores.push(opened);
-          store = opened;
-        } else {
-          store = {
-            reencryptBatch: async () => ({ processed: 0 }),
-            countRowsByKey: async () => [],
-            close: async () => undefined,
-          };
-        }
-      }
-    }
+    const store = options.store
+      ? await openConfiguredRotationStore(config, options, keys, openedStores)
+      : undefined;
 
     return {
       currentKeyId: keys.currentKeyId(),

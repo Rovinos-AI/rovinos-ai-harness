@@ -31,8 +31,12 @@ describe("event-store key rotation contracts", () => {
   });
 
   it("rejects invalid cursors", () => {
-    expect(() => decodeStoreRotationCursor("invalid")).toThrow(
-      expect.objectContaining({ code: "store_unavailable" }),
-    );
+    let error: unknown;
+    try {
+      decodeStoreRotationCursor("invalid");
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: "store_unavailable" });
   });
 });

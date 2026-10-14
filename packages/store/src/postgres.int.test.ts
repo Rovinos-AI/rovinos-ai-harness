@@ -7,7 +7,8 @@ import { afterAll, expect, it } from "vitest";
 import { AesGcmContentCodec } from "./aes-gcm-codec.js";
 import { JsonContentCodec, type ContentCodec } from "./codec.js";
 import { migrate } from "./migrate.js";
-import { PostgresEventStore, openPostgresEventStore } from "./postgres/adapter.js";
+import { PostgresEventStore } from "./postgres/adapter.js";
+import { openPostgresEventStore } from "./postgres/open.js";
 import { encodeEvents } from "./postgres/helpers.js";
 import {
   createEventBuilders,
@@ -118,7 +119,7 @@ const postgresMultiFactory: MultiEventStoreFactoryCreator = async () => {
   const args = { connectionString, poolSize: 4, schema };
   return {
     worker: {
-      module: new URL("./postgres/adapter.ts", import.meta.url).href,
+      module: new URL("./postgres/open.ts", import.meta.url).href,
       exportName: "openPostgresEventStore",
       args,
       loader: new URL("./testing/worker-loader.mjs", import.meta.url).href,
@@ -166,7 +167,9 @@ it("resumes Postgres event and snapshot rotation without interrupting reads", as
     getKey: (keyId) => {
       const key = rotationKeys.get(keyId);
       return key === undefined
-        ? Promise.reject(Object.assign(new Error("Synthetic key not found"), { code: "key_not_found" }))
+        ? Promise.reject(
+            Object.assign(new Error("Synthetic key not found"), { code: "key_not_found" }),
+          )
         : Promise.resolve(Uint8Array.from(key));
     },
   };
@@ -192,6 +195,7 @@ it("resumes Postgres event and snapshot rotation without interrupting reads", as
     );
     currentKeyId = "key-b";
     const first = await store.reencryptBatch({ targetKeyId: currentKeyId, limit: 1 });
+
     expect(first.processed).toBe(1);
     expect(first.nextCursor).toBeDefined();
     await expect(store.countRowsByKey()).resolves.toContainEqual({
@@ -201,7 +205,9 @@ it("resumes Postgres event and snapshot rotation without interrupting reads", as
     const events: string[] = [];
     for await (const event of store.read(runId)) {
       if (event.type === "model_request") {
-        events.push(event.messages[0]?.parts[0]?.type === "text" ? event.messages[0].parts[0].text : "");
+        events.push(
+          event.messages[0]?.parts[0]?.type === "text" ? event.messages[0].parts[0].text : "",
+        );
       }
     }
     expect(events).toEqual(["synthetic rotation content"]);
@@ -220,6 +226,74 @@ it("resumes Postgres event and snapshot rotation without interrupting reads", as
     await expect(store.latestSnapshot(runId)).resolves.toEqual(snapshot);
   } finally {
     await closeStore(store);
+    await dropSchema(admin, schema);
+  }
+});
+
+it("retries a Postgres row skipped after a concurrent content update", async () => {
+  const { admin, schema } = await createSchema();
+  let currentKeyId = "key-a";
+  let injectConcurrentUpdate = false;
+  const rotationKeys = new Map([
+    ["key-a", new Uint8Array(32).fill(63)],
+    ["key-b", new Uint8Array(32).fill(64)],
+  ]);
+  const rotationProvider: KeyProvider = {
+    currentKeyId: () => currentKeyId,
+    getKey: (keyId) => {
+      const key = rotationKeys.get(keyId);
+      return key === undefined
+        ? Promise.reject(
+            Object.assign(new Error("Synthetic key not found"), { code: "key_not_found" }),
+          )
+        : Promise.resolve(Uint8Array.from(key));
+    },
+  };
+  const baseCodec = new AesGcmContentCodec(rotationProvider);
+  const concurrentWriter = new Pool({
+    connectionString,
+    max: 1,
+    options: `-c search_path="${schema}"`,
+  });
+  const codec: ContentCodec = {
+    encrypted: true,
+    async encode(context, content, targetKeyId) {
+      if (injectConcurrentUpdate && targetKeyId === "key-b") {
+        injectConcurrentUpdate = false;
+        const concurrent = await baseCodec.encode(context, content, "key-a");
+        await concurrentWriter.query(
+          "UPDATE events SET content_blob = $1 WHERE run_id = $2 AND seq = $3",
+          [concurrent.blob, context.runId, context.seq],
+        );
+      }
+      return baseCodec.encode(context, content, targetKeyId);
+    },
+    decode: (context, blob, keyId) => baseCodec.decode(context, blob, keyId),
+  };
+  const store = new PostgresEventStore(connectionString, { schema }, codec);
+  stores.add(store);
+  const runId = schemaIds.nextRunId();
+  try {
+    await store.append(runId, [schemaIds.runCreated(runId)], 0);
+    currentKeyId = "key-b";
+    injectConcurrentUpdate = true;
+
+    await expect(store.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+      processed: 0,
+    });
+    await expect(store.countRowsByKey()).resolves.toEqual([{ keyId: "key-a", count: 1 }]);
+    await expect(store.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+      processed: 1,
+    });
+    await expect(store.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 1 }]);
+    const events = [];
+    for await (const event of store.read(runId)) {
+      events.push(event);
+    }
+    expect(events).toMatchObject([{ seq: 0 }]);
+  } finally {
+    await closeStore(store);
+    await concurrentWriter.end();
     await dropSchema(admin, schema);
   }
 });

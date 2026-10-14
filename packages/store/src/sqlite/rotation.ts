@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { Id } from "@harness/schemas";
 import {
   ContentDecryptFailedError,
@@ -57,6 +57,14 @@ interface SelectedBatch {
   readonly nextCursor?: StoreRotationCursor;
 }
 
+interface SelectBatchInput {
+  readonly db: Database.Database;
+  readonly codec: ContentCodec;
+  readonly targetKeyId: string;
+  readonly limit: number;
+  readonly cursor: StoreRotationCursor | undefined;
+}
+
 function selectEvents(
   db: Database.Database,
   targetKeyId: string,
@@ -66,9 +74,9 @@ function selectEvents(
   return db
     .prepare<[string, number | null, number | null, number], RotationEventRow>(
       `SELECT global_seq, run_id, seq, content_blob, key_id
-       FROM events
-       WHERE key_id IS NOT NULL AND key_id != ? AND (? IS NULL OR global_seq > ?)
-       ORDER BY global_seq LIMIT ?`,
+        FROM events
+        WHERE key_id IS NOT NULL AND key_id != ? AND (? IS NULL OR global_seq > ?)
+        ORDER BY global_seq LIMIT ?`,
     )
     .all(targetKeyId, after ?? null, after ?? 0, limit);
 }
@@ -82,9 +90,9 @@ function selectSnapshots(
   return db
     .prepare<[string, string | null, string | null, number], RotationSnapshotRow>(
       `SELECT snapshot_id, run_id, at_seq, content_blob, key_id
-       FROM snapshots
-       WHERE key_id IS NOT NULL AND key_id != ? AND (? IS NULL OR snapshot_id > ?)
-       ORDER BY snapshot_id LIMIT ?`,
+        FROM snapshots
+        WHERE key_id IS NOT NULL AND key_id != ? AND (? IS NULL OR snapshot_id > ?)
+        ORDER BY snapshot_id LIMIT ?`,
     )
     .all(targetKeyId, after ?? null, after ?? null, limit);
 }
@@ -155,13 +163,13 @@ async function encryptSnapshots(
   return updates;
 }
 
-async function selectBatch(
-  db: Database.Database,
-  codec: ContentCodec,
-  targetKeyId: string,
-  limit: number,
-  cursor: StoreRotationCursor | undefined,
-): Promise<SelectedBatch> {
+async function selectBatch({
+  db,
+  codec,
+  targetKeyId,
+  limit,
+  cursor,
+}: SelectBatchInput): Promise<SelectedBatch> {
   if (cursor?.table === "snapshots") {
     const rows = selectSnapshots(db, targetKeyId, cursor.after, limit + 1);
     const batch = rows.slice(0, limit);
@@ -186,12 +194,7 @@ async function selectBatch(
   }
 
   const remaining = limit - eventBatch.length;
-  const snapshotRows = selectSnapshots(
-    db,
-    targetKeyId,
-    undefined,
-    Math.max(1, remaining + 1),
-  );
+  const snapshotRows = selectSnapshots(db, targetKeyId, undefined, Math.max(1, remaining + 1));
   const snapshotBatch = snapshotRows.slice(0, remaining);
   const snapshotUpdates = await encryptSnapshots(codec, snapshotBatch, targetKeyId);
   let nextCursor: StoreRotationCursor | undefined;
@@ -224,13 +227,7 @@ function updateBatch(
       const result =
         row.table === "events"
           ? updateEvent.run(row.blob, targetKeyId, row.globalSeq, row.oldKeyId, row.oldBlob)
-          : updateSnapshot.run(
-              row.blob,
-              targetKeyId,
-              row.snapshotId,
-              row.oldKeyId,
-              row.oldBlob,
-            );
+          : updateSnapshot.run(row.blob, targetKeyId, row.snapshotId, row.oldKeyId, row.oldBlob);
       return processed + result.changes;
     }, 0),
   );
@@ -249,7 +246,7 @@ export async function reencryptSqliteBatch(
   }
   try {
     const cursor = afterCursor === undefined ? undefined : decodeStoreRotationCursor(afterCursor);
-    const selected = await selectBatch(db, codec, targetKeyId, limit, cursor);
+    const selected = await selectBatch({ db, codec, targetKeyId, limit, cursor });
     const processed = updateBatch(db, selected.updates, targetKeyId);
     return StoreReencryptBatchResultSchema.parse({
       processed,
@@ -270,17 +267,15 @@ export async function reencryptSqliteBatch(
 }
 
 /** Count encrypted event and snapshot rows grouped by key identifier. */
-export function countSqliteRowsByKey(
-  db: Database.Database,
-): Promise<readonly StoreKeyRowCount[]> {
+export function countSqliteRowsByKey(db: Database.Database): Promise<readonly StoreKeyRowCount[]> {
   try {
     const rows = db
       .prepare<[], { key_id: string; count: number }>(
         `SELECT key_id, COUNT(*) AS count FROM (
-           SELECT key_id FROM events WHERE key_id IS NOT NULL
-           UNION ALL
-           SELECT key_id FROM snapshots WHERE key_id IS NOT NULL
-         ) GROUP BY key_id ORDER BY key_id`,
+            SELECT key_id FROM events WHERE key_id IS NOT NULL
+            UNION ALL
+            SELECT key_id FROM snapshots WHERE key_id IS NOT NULL
+          ) GROUP BY key_id ORDER BY key_id`,
       )
       .all();
     return Promise.resolve(

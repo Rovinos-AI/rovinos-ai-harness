@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CompositeSecretResolver, loadConfig, type HarnessConfig } from "@harness/config";
 import { HARNESS_VERSION } from "@harness/schemas";
+import { emitKeysRotated } from "@harness/telemetry";
 import { Command, CommanderError } from "commander";
 import { dirname, resolve } from "node:path";
 import type { CliContext, Clock, CommandModule } from "./command.js";
@@ -79,6 +80,7 @@ export function createDefaultContext(program: Command, out: Output): CliContext 
         secretResolver,
       });
     },
+    keyRotationLogger: emitKeysRotated,
   };
 }
 
@@ -147,7 +149,14 @@ export async function main(
       return handleCommanderError(error, program, output);
     }
     const code = errorCodeOf(error);
-    output.error(code);
+    const hint =
+      typeof error === "object" &&
+      error !== null &&
+      "hint" in error &&
+      typeof error.hint === "string"
+        ? error.hint
+        : undefined;
+    output.error(code, hint);
     return exitCodeForError(code);
   }
 }

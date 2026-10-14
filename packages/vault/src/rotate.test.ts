@@ -13,9 +13,9 @@ describe("vault key rotation contracts", () => {
       targetKeyId: "key-b",
       limit: 500,
     });
-    expect(VaultReencryptBatchInputSchema.safeParse({ targetKeyId: "key-b", limit: 0 }).success).toBe(
-      false,
-    );
+    expect(
+      VaultReencryptBatchInputSchema.safeParse({ targetKeyId: "key-b", limit: 0 }).success,
+    ).toBe(false);
     expect(VaultKeyRowCountSchema.parse({ keyId: "key-b", count: 2 })).toEqual({
       keyId: "key-b",
       count: 2,
@@ -25,8 +25,12 @@ describe("vault key rotation contracts", () => {
   it("round-trips stable cursors and rejects invalid cursor data", () => {
     const cursor = { runId: "A".repeat(26), token: "<EMAIL_2>" };
     expect(decodeVaultRotationCursor(encodeVaultRotationCursor(cursor))).toEqual(cursor);
-    expect(() => decodeVaultRotationCursor("invalid")).toThrow(
-      expect.objectContaining({ code: "vault_unavailable" }),
-    );
+    let error: unknown;
+    try {
+      decodeVaultRotationCursor("invalid");
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({ code: "vault_unavailable" });
   });
 });

@@ -47,7 +47,12 @@ function provider(currentKeyId: string): KeyProvider {
   return {
     currentKeyId: () => currentKeyId,
     getKey: (keyId) => {
-      const key = keyId === "key-a" ? keyA : keyId === "key-b" ? keyB : undefined;
+      let key: Uint8Array | undefined;
+      if (keyId === "key-a") {
+        key = keyA;
+      } else if (keyId === "key-b") {
+        key = keyB;
+      }
       return key === undefined
         ? Promise.reject(new Error("synthetic unavailable key"))
         : Promise.resolve(Uint8Array.from(key));
@@ -107,12 +112,12 @@ describe("openConfiguredVaultAdmin", () => {
       try {
         await expect(rotation.vault?.countRowsByKey()).resolves.toEqual([]);
         await expect(rotation.store?.countRowsByKey()).resolves.toEqual([]);
-        await expect(rotation.vault?.reencryptBatch({ targetKeyId: keys.currentKeyId })).resolves.toEqual(
-          { processed: 0 },
-        );
-        await expect(rotation.store?.reencryptBatch({ targetKeyId: keys.currentKeyId })).resolves.toEqual(
-          { processed: 0 },
-        );
+        await expect(
+          rotation.vault?.reencryptBatch({ targetKeyId: keys.currentKeyId }),
+        ).resolves.toEqual({ processed: 0 });
+        await expect(
+          rotation.store?.reencryptBatch({ targetKeyId: keys.currentKeyId }),
+        ).resolves.toEqual({ processed: 0 });
       } finally {
         await rotation.close();
       }

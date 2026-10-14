@@ -6,11 +6,15 @@ import { ENCRYPTION_INFO } from "./sqlite-decrypt.js";
 
 const LOOKUP_INFO = "harness/vault/lookup";
 
+/** Derived keys for a single configured vault key version. */
 export interface VaultKeys {
+  /** Derived encryption key, cleared after use. */
   encryption: Uint8Array;
+  /** Derived lookup HMAC key, cleared after use. */
   lookup: Uint8Array;
 }
 
+/** Build the run- and entity-scoped message used for keyed lookup HMACs. */
 export function lookupMessage(runId: Id, entityType: Code, normalizedValue: string): Buffer {
   return Buffer.concat([
     Buffer.from(runId, "utf8"),
@@ -21,6 +25,7 @@ export function lookupMessage(runId: Id, entityType: Code, normalizedValue: stri
   ]);
 }
 
+/** Load and detach validated master key material, mapping provider errors to a closed code. */
 export async function loadMasterKey(
   keyProvider: KeyProvider,
   keyId: string,
@@ -37,6 +42,7 @@ export async function loadMasterKey(
   }
 }
 
+/** Derive and return the vault encryption and lookup keys for one configured key id. */
 export async function deriveVaultKeys(
   keyProvider: KeyProvider,
   keyId: string,
@@ -58,6 +64,7 @@ export async function deriveVaultKeys(
   }
 }
 
+/** Read the configured current key id and map provider failures to a vault error. */
 export function currentKeyId(keyProvider: KeyProvider): string {
   try {
     return keyProvider.currentKeyId();

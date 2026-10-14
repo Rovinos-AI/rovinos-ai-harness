@@ -71,12 +71,21 @@ describe("canary release gate", () => {
     const current = currentHarness();
     await current.runRuntimeScenario();
     await current.exerciseTelemetry();
+    await current.exerciseKeysRotatedLog();
 
     expect(current.captured.toolBoundary.join("\n")).toContain(current.canaries.phone.value);
     expect(current.captured.toolBoundary.join("\n")).toContain(current.canaries.card.value);
     expect(current.captured.toolErrors.join("\n")).toContain(current.canaries.card.value);
     expect(current.executedTools).toEqual(["canary.echo", "canary.fail"]);
     expect(await current.findLeaks()).toEqual([]);
+    expect(
+      current.captured.logs.some(
+        ({ eventName, attributes }) =>
+          eventName === "harness.keys.rotated" &&
+          attributes["harness.keys.vault.rows_rotated"] === 3 &&
+          attributes["harness.keys.store.rows_rotated"] === 5,
+      ),
+    ).toBe(true);
     await expect(current.assertVaultRoundTrips()).resolves.toBeUndefined();
   });
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id } from "@harness/schemas";
-import { Pool, type QueryResultRow } from "pg";
+import type { Pool, QueryResultRow } from "pg";
 import {
   ContentDecryptFailedError,
   ContentEncryptFailedError,
@@ -58,6 +58,14 @@ interface SelectedBatch {
   readonly nextCursor?: StoreRotationCursor;
 }
 
+interface SelectBatchInput {
+  readonly pool: Pool;
+  readonly codec: ContentCodec;
+  readonly targetKeyId: string;
+  readonly limit: number;
+  readonly cursor: StoreRotationCursor | undefined;
+}
+
 async function selectEvents(
   pool: Pool,
   targetKeyId: string,
@@ -66,10 +74,10 @@ async function selectEvents(
 ): Promise<RotationEventRow[]> {
   const result = await pool.query<RotationEventRow>(
     `SELECT global_seq, run_id, seq, content_blob, key_id
-     FROM events
-     WHERE key_id IS NOT NULL AND key_id <> $1
-       AND ($2::bigint IS NULL OR global_seq > $2::bigint)
-     ORDER BY global_seq LIMIT $3`,
+      FROM events
+      WHERE key_id IS NOT NULL AND key_id <> $1
+        AND ($2::bigint IS NULL OR global_seq > $2::bigint)
+      ORDER BY global_seq LIMIT $3`,
     [targetKeyId, after ?? null, limit],
   );
   return result.rows;
@@ -83,10 +91,10 @@ async function selectSnapshots(
 ): Promise<RotationSnapshotRow[]> {
   const result = await pool.query<RotationSnapshotRow>(
     `SELECT snapshot_id, run_id, at_seq, content_blob, key_id
-     FROM snapshots
-     WHERE key_id IS NOT NULL AND key_id <> $1
-       AND ($2::text IS NULL OR snapshot_id > $2)
-     ORDER BY snapshot_id LIMIT $3`,
+      FROM snapshots
+      WHERE key_id IS NOT NULL AND key_id <> $1
+        AND ($2::text IS NULL OR snapshot_id > $2)
+      ORDER BY snapshot_id LIMIT $3`,
     [targetKeyId, after ?? null, limit],
   );
   return result.rows;
@@ -158,13 +166,13 @@ async function encryptSnapshots(
   return updates;
 }
 
-async function selectBatch(
-  pool: Pool,
-  codec: ContentCodec,
-  targetKeyId: string,
-  limit: number,
-  cursor: StoreRotationCursor | undefined,
-): Promise<SelectedBatch> {
+async function selectBatch({
+  pool,
+  codec,
+  targetKeyId,
+  limit,
+  cursor,
+}: SelectBatchInput): Promise<SelectedBatch> {
   if (cursor?.table === "snapshots") {
     const rows = await selectSnapshots(pool, targetKeyId, cursor.after, limit + 1);
     const batch = rows.slice(0, limit);
@@ -198,12 +206,13 @@ async function selectBatch(
   const snapshotBatch = snapshotRows.slice(0, remaining);
   const snapshotUpdates = await encryptSnapshots(codec, snapshotBatch, targetKeyId);
   const lastSnapshot = snapshotBatch.at(-1);
-  const nextCursor =
-    snapshotRows.length > remaining
-      ? lastSnapshot === undefined
-        ? { table: "snapshots" as const }
-        : { table: "snapshots" as const, after: lastSnapshot.snapshot_id }
-      : undefined;
+  let nextCursor: StoreRotationCursor | undefined;
+  if (snapshotRows.length > remaining) {
+    nextCursor =
+      lastSnapshot === undefined
+        ? { table: "snapshots" }
+        : { table: "snapshots", after: lastSnapshot.snapshot_id };
+  }
   return {
     updates: [...eventUpdates, ...snapshotUpdates],
     ...(nextCursor === undefined ? {} : { nextCursor }),
@@ -256,7 +265,7 @@ export async function reencryptPostgresBatch(
   await ensureInitialized();
   try {
     const cursor = afterCursor === undefined ? undefined : decodeStoreRotationCursor(afterCursor);
-    const selected = await selectBatch(pool, codec, targetKeyId, limit, cursor);
+    const selected = await selectBatch({ pool, codec, targetKeyId, limit, cursor });
     const processed = await updateBatch(pool, selected.updates, targetKeyId);
     return StoreReencryptBatchResultSchema.parse({
       processed,
@@ -286,10 +295,10 @@ export async function countPostgresRowsByKey(
   try {
     const result = await pool.query<{ key_id: string; count: number | string }>(
       `SELECT key_id, COUNT(*)::int AS count FROM (
-         SELECT key_id FROM events WHERE key_id IS NOT NULL
-         UNION ALL
-         SELECT key_id FROM snapshots WHERE key_id IS NOT NULL
-       ) AS encrypted_rows GROUP BY key_id ORDER BY key_id`,
+          SELECT key_id FROM events WHERE key_id IS NOT NULL
+          UNION ALL
+          SELECT key_id FROM snapshots WHERE key_id IS NOT NULL
+        ) AS encrypted_rows GROUP BY key_id ORDER BY key_id`,
     );
     return result.rows.map(({ key_id, count }) =>
       StoreKeyRowCountSchema.parse({ keyId: key_id, count: integer(count) }),

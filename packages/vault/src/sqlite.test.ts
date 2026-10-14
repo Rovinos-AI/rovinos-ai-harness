@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import { aesGcmEncrypt, hkdfSha256, hmacSha256 } from "@harness/crypto";
 import { Code, FakeClock, type KeyProvider } from "@harness/schemas";
 import type { VaultRunReader } from "@harness/telemetry";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +12,10 @@ import { runVaultConformance } from "./conformance.test-helpers.js";
 import { VaultOperationError } from "./errors.js";
 import { SqliteVault } from "./sqlite.js";
 import { purgeExpired } from "./purger.js";
+import { deriveVaultKeys, lookupMessage } from "./sqlite-crypto.js";
+import { normalize } from "./normalize.js";
+import { ENCRYPTION_INFO } from "./sqlite-decrypt.js";
+import type { Token as TokenValue } from "./token.js";
 
 const runId = "A".repeat(26);
 const anotherRunId = "B".repeat(26);
@@ -54,6 +59,172 @@ runVaultConformance("SqliteVault conformance", () => {
 });
 
 describe("SqliteVault", () => {
+  it("retries a row skipped after a concurrent vault update", async () => {
+    let currentKeyId = "key-a";
+    let token: TokenValue | undefined;
+    let injectConcurrentUpdate = true;
+    const rotationKeys = new Map([
+      ["key-a", new Uint8Array(32).fill(41)],
+      ["key-b", new Uint8Array(32).fill(42)],
+    ]);
+    const { path } = await temporaryPath();
+    const rotatingProvider: KeyProvider = {
+      currentKeyId: () => currentKeyId,
+      getKey: (requestedKeyId) => {
+        const key = rotationKeys.get(requestedKeyId);
+        if (key === undefined) {
+          return Promise.reject(new Error("synthetic unavailable key"));
+        }
+        if (requestedKeyId === "key-b" && injectConcurrentUpdate && token !== undefined) {
+          injectConcurrentUpdate = false;
+          const oldKey = rotationKeys.get("key-a");
+          if (oldKey === undefined) {
+            throw new Error("synthetic old key is missing");
+          }
+          const encryptionKey = hkdfSha256(oldKey, ENCRYPTION_INFO);
+          const plaintext = Buffer.from("alice@example.test", "utf8");
+          let encrypted: Uint8Array | undefined;
+          try {
+            encrypted = aesGcmEncrypt(
+              encryptionKey,
+              plaintext,
+              Buffer.from(`${runId}:${token}`, "utf8"),
+            );
+            const database = new Database(path);
+            try {
+              database
+                .prepare("UPDATE vault_entries SET value_enc = ? WHERE run_id = ? AND token = ?")
+                .run(Buffer.from(encrypted).toString("base64"), runId, token);
+            } finally {
+              database.close();
+            }
+          } finally {
+            encryptionKey.fill(0);
+            plaintext.fill(0);
+            encrypted?.fill(0);
+          }
+        }
+        return Promise.resolve(Uint8Array.from(key));
+      },
+    };
+    const vault = new SqliteVault(path, rotatingProvider);
+    try {
+      token = await vault.put(runId, "email", "alice@example.test");
+      currentKeyId = "key-b";
+      await expect(vault.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+        processed: 0,
+      });
+      await expect(vault.countRowsByKey()).resolves.toContainEqual({
+        keyId: "key-a",
+        count: 1,
+      });
+
+      await expect(vault.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+        processed: 1,
+      });
+      await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBe(
+        "alice@example.test",
+      );
+      await expect(vault.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 1 }]);
+    } finally {
+      vault.close();
+    }
+  });
+
+  it("rotates duplicate historical lookups as lookup-less rows and retires their old key", async () => {
+    let currentKeyId = "key-a";
+    const rotationKeys = new Map([
+      ["key-a", new Uint8Array(32).fill(31)],
+      ["key-b", new Uint8Array(32).fill(32)],
+    ]);
+    const rotatingProvider: KeyProvider = {
+      currentKeyId: () => currentKeyId,
+      getKey: (id) => {
+        const key = rotationKeys.get(id);
+        return key === undefined
+          ? Promise.reject(new Error("synthetic unavailable key"))
+          : Promise.resolve(Uint8Array.from(key));
+      },
+    };
+    const { path } = await temporaryPath();
+    const vault = new SqliteVault(path, rotatingProvider);
+    try {
+      const olderToken = await vault.put(runId, "email", "alice@example.test");
+      currentKeyId = "key-b";
+      const keys = await deriveVaultKeys(rotatingProvider, "key-b", "vault_encrypt_failed");
+      const plaintext = Buffer.from("alice@example.test", "utf8");
+      const lookupMessageBytes = lookupMessage(
+        runId,
+        Code.parse("email"),
+        normalize(Code.parse("email"), "alice@example.test"),
+      );
+      const lookup = Buffer.from(hmacSha256(keys.lookup, lookupMessageBytes));
+      let encrypted: Uint8Array | undefined;
+      try {
+        const token = "<EMAIL_2>";
+        encrypted = aesGcmEncrypt(
+          keys.encryption,
+          plaintext,
+          Buffer.from(`${runId}:${token}`, "utf8"),
+        );
+        const database = new Database(path);
+        database
+          .prepare(
+            `INSERT INTO vault_entries
+              (run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            runId,
+            token,
+            "email",
+            lookup,
+            Buffer.from(encrypted).toString("base64"),
+            "key-b",
+            "key-b",
+            0,
+          );
+        database
+          .prepare("UPDATE vault_counters SET next_n = 3 WHERE run_id = ? AND entity_type = ?")
+          .run(runId, "EMAIL");
+        database.close();
+      } finally {
+        plaintext.fill(0);
+        keys.encryption.fill(0);
+        keys.lookup.fill(0);
+        lookupMessageBytes.fill(0);
+        lookup.fill(0);
+        encrypted?.fill(0);
+      }
+
+      const canonicalToken = "<EMAIL_2>";
+      await expect(vault.reencryptBatch({ targetKeyId: "key-b" })).resolves.toEqual({
+        processed: 1,
+      });
+      await expect(vault.resolve(runId, olderToken, { boundary: "ui" })).resolves.toBe(
+        "alice@example.test",
+      );
+      await expect(vault.resolve(runId, canonicalToken, { boundary: "ui" })).resolves.toBe(
+        "alice@example.test",
+      );
+      await expect(vault.put(runId, "email", "alice@example.test")).resolves.toBe(canonicalToken);
+      await expect(vault.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 2 }]);
+      const database = new Database(path);
+      try {
+        const alias = database
+          .prepare<[string, string], { lookup: Buffer | null }>(
+            "SELECT lookup FROM vault_entries WHERE run_id = ? AND token = ?",
+          )
+          .get(runId, olderToken);
+        expect(alias?.lookup).toBeNull();
+      } finally {
+        database.close();
+      }
+    } finally {
+      vault.close();
+    }
+  });
+
   it("resumes batched key rotation, keeps reads available, and preserves lookup idempotency", async () => {
     let currentKeyId = "key-a";
     const rotationKeys = new Map([
