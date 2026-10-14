@@ -18,6 +18,7 @@ export async function recordBudgetFailureAndCheckpoint(
   violation: BudgetViolation,
   checkpointer: Checkpointer,
 ): Promise<Event> {
+  events.push(...(await recorder.drainTrips()));
   const recorded = await recorder.recordBatch([
     {
       type: "budget_exceeded",
@@ -35,6 +36,7 @@ export async function recordBudgetFailureAndCheckpoint(
     },
   ]);
   events.push(...recorded);
+  events.push(...(await recorder.drainTrips()));
   const failed = recorded.at(-1);
   if (failed === undefined) {
     throw new Error("Expected budget failure events.");

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { inspect } from "node:util";
-import type { Id } from "@harness/schemas";
+import {
+  VaultValueEntrySchema,
+  type Code,
+  type Id,
+  type VaultValueEntry,
+} from "@harness/schemas";
 import { z } from "zod";
 import { countSkippedShortValues } from "../metrics.js";
 
@@ -11,8 +16,8 @@ const MAX_CACHED_RUNS = 64;
  * The read-only structural vault surface keeps telemetry within its schemas-only package boundary.
  */
 export interface VaultRunReader {
-  /** List raw values owned by a run. */
-  listRawValues(runId: Id): Promise<readonly string[]>;
+  /** List raw values with vault entity types for metadata-only trip alerts. */
+  listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]>;
   /** Return a monotonic version that changes when run values are added or purged. */
   version(runId: Id): Promise<number>;
 }
@@ -31,14 +36,24 @@ export type VaultRunViewOptions = z.infer<typeof VaultRunViewOptionsSchema>;
  */
 export class RunValueSet {
   readonly values: readonly string[];
+  private readonly entityTypesByValue: readonly (readonly Code[])[];
 
   constructor(
     readonly version: number,
     values: readonly string[],
+    entityTypesByValue: readonly (readonly Code[])[],
     readonly skippedShort: number,
   ) {
     this.values = Object.freeze([...values]);
+    this.entityTypesByValue = Object.freeze(
+      entityTypesByValue.map((entityTypes) => Object.freeze([...entityTypes])),
+    );
     Object.freeze(this);
+  }
+
+  /** Return entity types for one matched value index without exposing the value. */
+  entityTypesForValue(patternIndex: number): readonly Code[] {
+    return this.entityTypesByValue[patternIndex] ?? [];
   }
 
   /** Return metadata only, never the raw values. */
@@ -103,19 +118,30 @@ export class VaultRunView {
       return cached.valueSet;
     }
 
-    const values = await this.reader.listRawValues(scopeId);
-    const uniqueValues = new Set<string>();
+    const entries = VaultValueEntrySchema.array().parse(
+      await this.reader.listRawValueEntries(scopeId),
+    );
+    const values: string[] = [];
+    const entityTypesByValue: Code[][] = [];
+    const valueIndexes = new Map<string, number>();
     let skippedShort = 0;
-    for (const rawValue of values) {
+    for (const { rawValue, entityType } of entries) {
       const value = rawValue.trim();
       if (value.length < this.minValueLength) {
         skippedShort += 1;
-      } else {
-        uniqueValues.add(value);
+        continue;
+      }
+      const existingIndex = valueIndexes.get(value);
+      if (existingIndex === undefined) {
+        valueIndexes.set(value, values.length);
+        values.push(value);
+        entityTypesByValue.push([entityType]);
+      } else if (!entityTypesByValue[existingIndex]?.includes(entityType)) {
+        entityTypesByValue[existingIndex]?.push(entityType);
       }
     }
 
-    const valueSet = new RunValueSet(version, [...uniqueValues], skippedShort);
+    const valueSet = new RunValueSet(version, values, entityTypesByValue, skippedShort);
     const newlySkippedShort = Math.max(0, skippedShort - (cached?.valueSet.skippedShort ?? 0));
     if (newlySkippedShort > 0) {
       countSkippedShortValues(newlySkippedShort);

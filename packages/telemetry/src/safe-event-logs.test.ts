@@ -63,11 +63,18 @@ const events = [
     ...common,
     kind: "pii_action",
     boundary: "tool_input",
-    action: "tokenized",
+    action: "detokenized",
     entities: [
       { type: "email", count: 2 },
       { type: "phone", count: 3 },
     ],
+  }),
+  SafeEvent.parse({
+    ...common,
+    kind: "pii_action",
+    boundary: "telemetry_export",
+    action: "blocked",
+    entities: [{ type: "email", count: 1 }],
   }),
   SafeEvent.parse({
     ...common,
@@ -113,7 +120,11 @@ describe("SafeEvent log projection", () => {
     expect(spanContext).toMatchObject({ traceId: event.traceId, spanId: event.spanId });
     const entityCount =
       event.kind === "pii_action" ? record?.attributes?.["harness.pii.entity_count"] : undefined;
-    expect(entityCount).toBe(event.kind === "pii_action" ? 5 : undefined);
+    const expectedEntityCount =
+      event.kind === "pii_action"
+        ? event.entities.reduce((total, entity) => total + entity.count, 0)
+        : undefined;
+    expect(entityCount).toBe(expectedEntityCount);
   });
 
   it("omits absent optional fields and aggregates PII entity counts", () => {
@@ -186,8 +197,10 @@ describe("SafeEvent log projection", () => {
     expect(
       listLogDefinitions()
         .map(({ name }) => name)
+        .filter((name) => name.startsWith("harness.safe."))
         .sort(),
-    ).toEqual(events.map(({ kind }) => `harness.safe.${kind}`).sort());
+    ).toEqual([...new Set(events.map(({ kind }) => `harness.safe.${kind}`))].sort());
+    expect(listLogDefinitions().map(({ name }) => name)).toContain("harness.sentinel.trip");
     const logger = {
       emit: vi.fn<(record: LogRecord) => void>(),
       enabled: () => true,

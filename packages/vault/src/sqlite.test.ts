@@ -129,6 +129,9 @@ describe("SqliteVault", () => {
     const token = await vault.put(runId, "email", " alice@example.test ");
 
     await expect(vault.listRawValues(runId)).resolves.toEqual(["alice@example.test"]);
+    await expect(vault.listRawValueEntries(runId)).resolves.toEqual([
+      { entityType: "email", rawValue: "alice@example.test" },
+    ]);
     await expect(vault.listRawValues(anotherRunId)).resolves.toEqual([]);
     await expect(vault.put(runId, "email", "  ")).rejects.toMatchObject({
       code: "vault_value_empty",

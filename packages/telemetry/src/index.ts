@@ -48,11 +48,16 @@ export {
   SentinelGateInputSchema,
   SentinelGateResultSchema,
   SentinelRequiredError,
-  SentinelTripSchema,
   type SentinelGateInput,
   type SentinelGateOptions,
   type SentinelGateResult,
   type SentinelMatcherLike,
-  type SentinelTrip,
 } from "./sentinel/gate.js";
+export {
+  SentinelTripSchema,
+  TripQueue,
+  sentinelTripQueue,
+  type SentinelTrip,
+} from "./sentinel/trips.js";
+export { emitSentinelTrip } from "./safe-event-logs.js";
 export { createTelemetrySdk, type TelemetrySdk, type TelemetrySdkOptions } from "./sdk.js";

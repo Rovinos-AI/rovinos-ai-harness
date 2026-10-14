@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id } from "@harness/schemas";
+import { Code, Id } from "@harness/schemas";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { countSentinelScopeReduced } from "../metrics.js";
 import { ActiveRuns } from "./active-runs.js";
 import { assertSentinelGate, SentinelGate, SentinelRequiredError } from "./gate.js";
+import { TripQueue } from "./trips.js";
 import { VaultRunView, type VaultRunReader } from "./run-values.js";
 
 vi.mock("../metrics.js", () => ({
@@ -16,7 +17,26 @@ const secondRun = Id.parse("B".repeat(26));
 function createReader(valuesByRun: Map<string, string[]>): VaultRunReader {
   return {
     version: (runId) => Promise.resolve(valuesByRun.get(runId)?.length ?? 0),
-    listRawValues: (runId) => Promise.resolve(valuesByRun.get(runId) ?? []),
+    listRawValueEntries: (runId) =>
+      Promise.resolve(
+        (valuesByRun.get(runId) ?? []).map((rawValue) => ({
+          entityType: Code.parse("email"),
+          rawValue,
+        })),
+      ),
+  };
+}
+
+function makeTripQueue(): TripQueue {
+  return new TripQueue({ emit: vi.fn(), enabled: () => true });
+}
+
+function matcherFor(values: readonly string[]) {
+  return {
+    findAll: (text: string) =>
+      values.flatMap((value, patternIndex) =>
+        text.includes(value) ? [{ patternIndex }] : [],
+      ),
   };
 }
 
@@ -26,14 +46,12 @@ describe("SentinelGate", () => {
   });
 
   it("uses a run-scoped matcher and enqueues metadata-only trips on a hit", async () => {
-    const enqueueTrip = vi.fn();
-    const matcherForValues = vi.fn((values: readonly string[]) => ({
-      hasMatch: (text: string) => values.some((value) => text.includes(value)),
-    }));
+    const tripQueue = makeTripQueue();
+    const matcherForValues = vi.fn(matcherFor);
     const gate = new SentinelGate(
       new VaultRunView(createReader(new Map([[firstRun, ["known-raw-value"]]]))),
       new ActiveRuns(),
-      { matcherForValues, onTrip: enqueueTrip },
+      { matcherForValues, tripQueue },
     );
 
     await expect(gate.check({ runId: firstRun, text: "payload known-raw-value" })).resolves.toEqual(
@@ -43,10 +61,10 @@ describe("SentinelGate", () => {
       },
     );
     expect(matcherForValues).toHaveBeenCalledWith(["known-raw-value"]);
-    expect(enqueueTrip).toHaveBeenCalledWith({ runId: firstRun, reason: "hit" });
-    expect(JSON.stringify(enqueueTrip.mock.calls)).not.toContain("known-raw-value");
-    expect(gate.drainTrips()).toEqual([{ runId: firstRun, reason: "hit" }]);
-    expect(gate.drainTrips()).toEqual([]);
+    expect(tripQueue.drainForRun(firstRun)).toEqual([
+      { runId: firstRun, entities: [{ type: "email", count: 1 }] },
+    ]);
+    expect(tripQueue.drainForRun(firstRun)).toEqual([]);
   });
 
   it("catches a child canary using the shared root vault scope", async () => {
@@ -54,7 +72,7 @@ describe("SentinelGate", () => {
     const rootCanary = "root-scope-private-value";
     const reader = createReader(new Map([[firstRun, [rootCanary]]]));
     const view = new VaultRunView(reader, {}, () => firstRun);
-    const gate = new SentinelGate(view, new ActiveRuns());
+    const gate = new SentinelGate(view, new ActiveRuns(), { tripQueue: makeTripQueue() });
 
     await expect(
       gate.check({ runId: childRun, text: `child span ${rootCanary}` }),
@@ -66,9 +84,8 @@ describe("SentinelGate", () => {
     runs.register(firstRun);
     runs.register(secondRun);
     runs.terminate(firstRun);
-    const matcherForValues = vi.fn((values: readonly string[]) => ({
-      hasMatch: (text: string) => values.some((value) => text.includes(value)),
-    }));
+    const matcherForValues = vi.fn(matcherFor);
+    const tripQueue = makeTripQueue();
     const gate = new SentinelGate(
       new VaultRunView(
         createReader(
@@ -79,7 +96,7 @@ describe("SentinelGate", () => {
         ),
       ),
       runs,
-      { matcherForValues },
+      { matcherForValues, tripQueue },
     );
 
     await expect(gate.check({ text: "second-run-value" })).resolves.toEqual({
@@ -97,9 +114,8 @@ describe("SentinelGate", () => {
     const runs = new ActiveRuns();
     runs.register(firstRun);
     runs.register(secondRun);
-    const matcherForValues = vi.fn((values: readonly string[]) => ({
-      hasMatch: (text: string) => values.some((value) => text.includes(value)),
-    }));
+    const matcherForValues = vi.fn(matcherFor);
+    const tripQueue = makeTripQueue();
     const gate = new SentinelGate(
       new VaultRunView(
         createReader(
@@ -110,7 +126,7 @@ describe("SentinelGate", () => {
         ),
       ),
       runs,
-      { maxCombinedValues: 1, matcherForValues },
+      { maxCombinedValues: 1, matcherForValues, tripQueue },
     );
 
     await expect(gate.check({ text: "second-value" })).resolves.toEqual({
@@ -127,9 +143,14 @@ describe("SentinelGate", () => {
     let version = 1;
     const reader: VaultRunReader = {
       version: () => Promise.resolve(version),
-      listRawValues: () => Promise.resolve(values),
+      listRawValueEntries: () =>
+        Promise.resolve(
+          values.map((rawValue) => ({ entityType: Code.parse("email"), rawValue })),
+        ),
     };
-    const gate = new SentinelGate(new VaultRunView(reader));
+    const gate = new SentinelGate(new VaultRunView(reader), new ActiveRuns(), {
+      tripQueue: makeTripQueue(),
+    });
 
     await expect(gate.check({ runId: firstRun, text: "new-value" })).resolves.toEqual({ ok: true });
     values = ["first-value", "new-value"];
@@ -143,8 +164,9 @@ describe("SentinelGate", () => {
   it("fails closed on matcher errors and scan timeouts", async () => {
     const values = new VaultRunView(createReader(new Map([[firstRun, ["known-value"]]])));
     const failingGate = new SentinelGate(values, new ActiveRuns(), {
+      tripQueue: makeTripQueue(),
       matcherForValues: () => ({
-        hasMatch: () => {
+        findAll: () => {
           throw new Error("matcher failure");
         },
       }),
@@ -158,6 +180,7 @@ describe("SentinelGate", () => {
     const clockValues = [0, 0, 10, 16];
     let clockCalls = 0;
     const slowClockGate = new SentinelGate(values, new ActiveRuns(), {
+      tripQueue: makeTripQueue(),
       now: () => clockValues[clockCalls++] ?? 16,
     });
     await expect(slowClockGate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({
@@ -174,9 +197,7 @@ describe("SentinelGate", () => {
         now: () => {
           throw new Error("clock failed");
         },
-        onTrip: () => {
-          throw new Error("trip hook failed");
-        },
+        tripQueue: makeTripQueue(),
       },
     );
 
@@ -184,16 +205,16 @@ describe("SentinelGate", () => {
       ok: false,
       reason: "error",
     });
-    expect(gate.drainTrips()).toEqual([{ runId: firstRun, reason: "error" }]);
   });
 
   it("fails closed when vault reads exceed the timeout", async () => {
     const slowReader: VaultRunReader = {
       version: async () => new Promise<number>(() => undefined),
-      listRawValues: () => Promise.resolve([]),
+      listRawValueEntries: () => Promise.resolve([]),
     };
     const gate = new SentinelGate(new VaultRunView(slowReader), new ActiveRuns(), {
       maxPrepareMs: 1,
+      tripQueue: makeTripQueue(),
     });
 
     await expect(gate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({
@@ -208,12 +229,14 @@ describe("SentinelGate", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return 1;
       },
-      listRawValues: () => Promise.resolve(["known-value"]),
+      listRawValueEntries: () =>
+        Promise.resolve([{ entityType: Code.parse("email"), rawValue: "known-value" }]),
     };
     const gate = new SentinelGate(new VaultRunView(slowReader), new ActiveRuns(), {
       maxPrepareMs: 100,
       maxScanMs: 5,
-      matcherForValues: () => ({ hasMatch: () => false }),
+      matcherForValues: () => ({ findAll: () => [] }),
+      tripQueue: makeTripQueue(),
     });
 
     await expect(gate.check({ runId: firstRun, text: "payload" })).resolves.toEqual({ ok: true });
@@ -226,6 +249,7 @@ describe("SentinelGate", () => {
       new ActiveRuns(),
       {
         maxPrepareMs: 5,
+        tripQueue: makeTripQueue(),
         now: () => now,
         matcherForValues: () => {
           now = 6;
@@ -246,11 +270,12 @@ describe("SentinelGate", () => {
       new VaultRunView(createReader(new Map([[firstRun, ["known-value"]]]))),
       new ActiveRuns(),
       {
+        tripQueue: makeTripQueue(),
         now: () => now,
         matcherForValues: () => ({
-          hasMatch: () => {
+          findAll: () => {
             now = 6;
-            return false;
+            return [];
           },
         }),
       },
@@ -265,9 +290,10 @@ describe("SentinelGate", () => {
       new VaultRunView(createReader(new Map([[firstRun, ["known-value"]]]))),
       new ActiveRuns(),
       {
+        tripQueue: makeTripQueue(),
         now: () => now,
         matcherForValues: () => ({
-          hasMatch: () => {
+          findAll: () => {
             now = 6;
             throw new Error("slow matcher failure");
           },

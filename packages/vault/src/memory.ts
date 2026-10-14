@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, Id } from "@harness/schemas";
+import type { Code, Id, VaultValueEntry } from "@harness/schemas";
 import { normalize } from "./normalize.js";
 import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
 import {
@@ -81,6 +81,16 @@ export class InMemoryVault implements VaultWriter, VaultResolver, VaultReader, V
   listRawValues(runId: Id): Promise<readonly string[]> {
     return Promise.resolve(
       [...(this.entries.get(runId)?.values() ?? [])].map((entry) => entry.rawValue),
+    );
+  }
+
+  /** Return detached values and entity types for metadata-only sentinel alerts. */
+  listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
+    return Promise.resolve(
+      [...(this.entries.get(runId)?.values() ?? [])].map(({ entityType, rawValue }) => ({
+        entityType,
+        rawValue,
+      })),
     );
   }
 

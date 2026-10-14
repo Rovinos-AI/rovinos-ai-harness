@@ -123,6 +123,7 @@ export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
       }
       events.push(...recorded);
       const runId = last.runId;
+      await drainSentinelTrips(options.recorder, events);
       const ended = await continueRunLoop(options, events, runId, budgetTracker);
       const state = foldRunState(events);
       result = {
@@ -205,6 +206,7 @@ async function runLoopSteps(
     return recovered;
   }
   for (;;) {
+    await drainSentinelTrips(options.recorder, events);
     const aborted = await suspendIfShutdown(options, events, execution);
     if (aborted !== undefined) {
       return aborted;
@@ -256,6 +258,7 @@ async function runLoopSteps(
       options.context,
     );
     events.push(...modelResult.events);
+    await drainSentinelTrips(options.recorder, events);
     const stoppedAfterModel = await suspendAfterModel(options, events, execution, modelResult);
     if (stoppedAfterModel !== undefined) {
       return stoppedAfterModel;
@@ -295,6 +298,7 @@ async function recordFinalAnswer(
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<Event> {
+  await drainSentinelTrips(options.recorder, events);
   const finished = await options.recorder.record({
     type: "run_status_changed",
     v: 1,
@@ -303,6 +307,7 @@ async function recordFinalAnswer(
     reason: "final_answer",
   });
   events.push(finished);
+  await drainSentinelTrips(options.recorder, events);
   await checkpointAfterStep(execution.checkpointer, events);
   return finished;
 }
@@ -370,6 +375,7 @@ async function runToolCalls(
         depth: options.depth ?? 0,
       })),
     );
+    await drainSentinelTrips(options.recorder, events);
     const stopped = await suspendIfShutdown(options, events, execution);
     if (stopped !== undefined) {
       return stopped;
@@ -416,6 +422,7 @@ async function suspendForShutdown(
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<Event> {
+  await drainSentinelTrips(options.recorder, events);
   const suspended = await options.recorder.record({
     type: "run_status_changed",
     v: 1,
@@ -424,8 +431,13 @@ async function suspendForShutdown(
     reason: "shutdown",
   });
   events.push(suspended);
+  await drainSentinelTrips(options.recorder, events);
   await checkpointAfterStep(execution.checkpointer, events);
   return suspended;
+}
+
+async function drainSentinelTrips(recorder: RunRecorder, events: Event[]): Promise<void> {
+  events.push(...(await recorder.drainTrips()));
 }
 
 async function checkpointAfterStep(checkpointer: Checkpointer, events: Event[]): Promise<RunState> {

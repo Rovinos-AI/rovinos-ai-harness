@@ -2,7 +2,7 @@
 import { ROOT_CONTEXT, type Context, type SpanContext } from "@opentelemetry/api";
 import { SeverityNumber } from "@opentelemetry/api-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
-import { Id, type TelemetryConfig } from "@harness/schemas";
+import { Code, Id, type TelemetryConfig } from "@harness/schemas";
 import type { LogRecordProcessor, ReadWriteLogRecord } from "@opentelemetry/sdk-logs";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { attr } from "../attr.js";
@@ -11,6 +11,7 @@ import { AllowlistLogRecordProcessor } from "./allowlist-log-processor.js";
 import { ActiveRuns } from "../sentinel/active-runs.js";
 import { SentinelGate, SentinelRequiredError } from "../sentinel/gate.js";
 import { VaultRunView } from "../sentinel/run-values.js";
+import { TripQueue } from "../sentinel/trips.js";
 
 const metricMocks = vi.hoisted(() => ({
   record: vi.fn<(reason: string) => void>(),
@@ -29,6 +30,10 @@ const disabledTelemetry: TelemetryConfig = {
   sentinel: { minValueLength: 6, enabled: false },
 };
 const runId = Id.parse("A".repeat(26));
+
+function makeTripQueue(): TripQueue {
+  return new TripQueue({ emit: vi.fn(), enabled: () => true });
+}
 
 function defineTestLogRecord() {
   return defineLogRecord("harness.test.log_record", {
@@ -209,9 +214,11 @@ describe("AllowlistLogRecordProcessor", () => {
     const gate = new SentinelGate(
       new VaultRunView({
         version: () => Promise.resolve(1),
-        listRawValues: () => Promise.resolve([canary]),
+        listRawValueEntries: () =>
+          Promise.resolve([{ entityType: Code.parse("email"), rawValue: canary }]),
       }),
       activeRuns,
+      { tripQueue: makeTripQueue() },
     );
     const processor = new AllowlistLogRecordProcessor(next, { gate });
 
@@ -241,9 +248,10 @@ describe("AllowlistLogRecordProcessor", () => {
     const gate = new SentinelGate(
       new VaultRunView({
         version: () => Promise.resolve(0),
-        listRawValues: () => Promise.resolve([]),
+        listRawValueEntries: () => Promise.resolve([]),
       }),
       new ActiveRuns(),
+      { tripQueue: makeTripQueue() },
     );
     const check = vi.spyOn(gate, "check");
     const processor = new AllowlistLogRecordProcessor(next, { gate });

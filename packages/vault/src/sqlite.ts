@@ -4,7 +4,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { CryptoError, aesGcmDecrypt, aesGcmEncrypt, hkdfSha256, hmacSha256 } from "@harness/crypto";
-import { KEY_PROVIDER_KEY_BYTES, type Code, type Id, type KeyProvider } from "@harness/schemas";
+import {
+  KEY_PROVIDER_KEY_BYTES,
+  VaultValueEntrySchema,
+  type Code,
+  type Id,
+  type KeyProvider,
+  type VaultValueEntry,
+} from "@harness/schemas";
 import { normalize } from "./normalize.js";
 import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
 import { VaultOperationError } from "./errors.js";
@@ -39,6 +46,7 @@ interface MigrationRow {
 
 interface VaultEntryRow {
   token: string;
+  entity_type: string;
   value_enc: string;
   key_id: string;
 }
@@ -270,6 +278,28 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
       throw new VaultOperationError("vault_unavailable");
     }
     return Promise.all(rows.map((row) => this.decryptEntry(runId, row)));
+  }
+
+  /** Return detached values and entity types for metadata-only sentinel alerts. */
+  async listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
+    let rows: VaultEntryRow[];
+    try {
+      rows = this.db
+        .prepare<[Id], VaultEntryRow>(
+          "SELECT token, entity_type, value_enc, key_id FROM vault_entries WHERE run_id = ? ORDER BY token",
+        )
+        .all(runId);
+    } catch {
+      throw new VaultOperationError("vault_unavailable");
+    }
+    return Promise.all(
+      rows.map(async (row) =>
+        VaultValueEntrySchema.parse({
+          entityType: row.entity_type,
+          rawValue: await this.decryptEntry(runId, row),
+        }),
+      ),
+    );
   }
 
   /** Return a monotonic version for entries ever added to or purged from a run. */

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, Id } from "@harness/schemas";
+import { Code, HarnessError, Id, type VaultValueEntry } from "@harness/schemas";
 import type { Token } from "./token.js";
 import { z } from "zod";
 
@@ -101,6 +101,13 @@ export interface VaultReader {
    * @returns A detached readonly list of original trimmed values.
    */
   listRawValues(runId: Id): Promise<readonly string[]>;
+
+  /**
+   * List raw values with their vault entity types for metadata-only sentinel alerts.
+   * @param runId Run to inspect.
+   * @returns Detached in-memory values with entity type codes.
+   */
+  listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]>;
 
   /**
    * Return a monotonic version that increases when an entry is added or removed by purge.

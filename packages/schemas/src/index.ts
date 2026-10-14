@@ -74,6 +74,7 @@ export {
 } from "./pii-action-summary.js";
 export { SnapshotSchema, type Snapshot } from "./snapshot.js";
 export { KEY_PROVIDER_KEY_BYTES, type KeyProvider } from "./key-provider.js";
+export { VaultValueEntrySchema, type VaultValueEntry } from "./vault-value-entry.js";
 export { RunConfigSchema, RunContinuationsSchema, type RunConfig } from "./config/run.js";
 export { RunResumePolicySchema } from "./config/run.js";
 export {
