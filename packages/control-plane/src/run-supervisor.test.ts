@@ -12,8 +12,8 @@ describe("RunSupervisor", () => {
     const thirdRunId = builders.nextRunId();
     const signals = new Map<string, AbortSignal>();
     const finish = new Map<string, () => void>();
-    const register = vi.fn();
-    const terminate = vi.fn();
+    const register = vi.fn((_runId: Id) => undefined);
+    const terminate = vi.fn((_runId: Id) => undefined);
     const supervisor = new RunSupervisor({
       maxConcurrentRuns: 2,
       activeRuns: { register, terminate },
@@ -25,25 +25,32 @@ describe("RunSupervisor", () => {
     });
 
     expect(supervisor.start(firstRunId)).toEqual({ started: true });
-    await vi.waitFor(() => expect(signals.has(firstRunId)).toBe(true));
+    await vi.waitFor(() => {
+      expect(signals.has(firstRunId)).toBe(true);
+    });
     expect(supervisor.start(firstRunId)).toEqual({
       started: false,
       code: "resume_conflict",
     });
     expect(supervisor.start(secondRunId)).toEqual({ started: true });
-    await vi.waitFor(() => expect(signals.has(secondRunId)).toBe(true));
+    await vi.waitFor(() => {
+      expect(signals.has(secondRunId)).toBe(true);
+    });
     expect(supervisor.start(thirdRunId)).toEqual({
       started: false,
       code: "capacity_exceeded",
     });
-    expect(register.mock.calls.map(([runId]) => runId)).toEqual([firstRunId, secondRunId]);
+    expect(register).toHaveBeenNthCalledWith(1, firstRunId);
+    expect(register).toHaveBeenNthCalledWith(2, secondRunId);
     expect(supervisor.isActive(firstRunId)).toBe(true);
     expect(supervisor.abort(firstRunId)).toBe(true);
     expect(signals.get(firstRunId)?.aborted).toBe(true);
     expect(supervisor.abort(thirdRunId)).toBe(false);
 
     finish.get(firstRunId)?.();
-    await vi.waitFor(() => expect(supervisor.isActive(firstRunId)).toBe(false));
+    await vi.waitFor(() => {
+      expect(supervisor.isActive(firstRunId)).toBe(false);
+    });
     expect(terminate).toHaveBeenCalledWith(firstRunId);
     expect(supervisor.start(thirdRunId)).toEqual({ started: true });
     finish.get(secondRunId)?.();
@@ -62,7 +69,9 @@ describe("RunSupervisor", () => {
       resumeRun: () => Promise.reject(new Error("synthetic failure")),
     });
     expect(failed.start(runId)).toEqual({ started: true });
-    await vi.waitFor(() => expect(failed.isActive(runId)).toBe(false));
+    await vi.waitFor(() => {
+      expect(failed.isActive(runId)).toBe(false);
+    });
   });
 
   it("rejects invalid concurrency limits", () => {

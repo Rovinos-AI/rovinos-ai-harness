@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code } from "@harness/schemas";
-import type { ClientCapabilities, McpServer } from "@modelcontextprotocol/server";
-import { ConfirmationGate } from "../confirmation-gate.js";
+import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
+import type { ConfirmationClientCapabilities, ConfirmationGate } from "../confirmation-gate.js";
 import { resumeRunOutputSchema, runLifecycleInputSchema } from "../schemas.js";
-import { RunSupervisor } from "../run-supervisor.js";
+import type { RunSupervisor } from "../run-supervisor.js";
 
 /** Dependencies for the `resume_run` tool. */
 export interface ResumeRunToolOptions {
   readonly confirmationGate: ConfirmationGate;
   readonly supervisor: RunSupervisor;
-  readonly clientCapabilities: () => ClientCapabilities | undefined;
+  readonly clientCapabilities: (
+    context: ServerContext,
+  ) => ConfirmationClientCapabilities | undefined;
 }
 
 /** Registers the confirmation-gated `resume_run` tool. */
@@ -29,7 +31,7 @@ export function registerResumeRunTool(server: McpServer, options: ResumeRunToolO
         targetId: parsed.runId,
         arguments: parsed,
         summary: `Resume run ${parsed.runId}?`,
-        clientCapabilities: options.clientCapabilities(),
+        clientCapabilities: options.clientCapabilities(context),
       });
       if (gate.status === "input_required") {
         return gate.result;

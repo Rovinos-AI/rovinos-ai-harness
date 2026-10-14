@@ -7,12 +7,21 @@ import {
   localhostOriginValidation,
   toNodeHandler,
 } from "@modelcontextprotocol/node";
-import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import type { ClientCapabilities, ServerContext, Tool } from "@modelcontextprotocol/server";
+import {
+  CLIENT_CAPABILITIES_META_KEY,
+  createMcpHandler,
+  McpServer,
+} from "@modelcontextprotocol/server";
+import type { ServerContext, Tool } from "@modelcontextprotocol/server";
 import { serveStdio, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { createServer, type Server } from "node:http";
 import { z } from "zod";
-import { ConfirmationGate, type ConfirmationGateOptions } from "./confirmation-gate.js";
+import {
+  confirmationClientCapabilitiesSchema,
+  ConfirmationGate,
+  type ConfirmationClientCapabilities,
+  type ConfirmationGateOptions,
+} from "./confirmation-gate.js";
 import { RunSupervisor } from "./run-supervisor.js";
 import {
   approveInputSchema,
@@ -100,8 +109,8 @@ export function createControlPlaneServer(
       ? {}
       : { resumeRun: options.operations.resumeRun }),
   });
-  const clientCapabilities = (): ClientCapabilities | undefined =>
-    server.server.getClientCapabilities();
+  const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
+    requestClientCapabilities(context, server);
   registerApproveTool(server, {
     store,
     confirmationGate,
@@ -128,13 +137,12 @@ export function createControlPlaneServer(
     clientCapabilities,
   });
   const definitions = toolDefinitions();
-  server.server.setRequestHandler("tools/list", () => ({
-    tools: definitions.filter(
-      (tool) =>
-        tool._meta?.ui === undefined ||
-        supportsMcpApps(server.server.getClientCapabilities()),
-    ),
-  }));
+  server.server.setRequestHandler("tools/list", (_request, context) => {
+    const supportsApps = supportsMcpApps(requestClientCapabilities(context, server));
+    return {
+      tools: definitions.filter((tool) => tool._meta?.ui === undefined || supportsApps),
+    };
+  });
   return server;
 }
 
@@ -233,12 +241,29 @@ function withSharedConfirmationGate(options: ControlPlaneServerOptions): Control
   };
 }
 
-function supportsMcpApps(capabilities: ClientCapabilities | undefined): boolean {
+function supportsMcpApps(capabilities: ConfirmationClientCapabilities | undefined): boolean {
   const extension = z
     .object({ mimeTypes: z.array(z.string()) })
-    .passthrough()
+    .loose()
     .safeParse(capabilities?.extensions?.[MCP_APP_EXTENSION]);
   return extension.success && extension.data.mimeTypes.includes(MCP_APP_MIME);
+}
+
+function requestClientCapabilities(
+  context: ServerContext,
+  server: McpServer,
+): ConfirmationClientCapabilities | undefined {
+  const envelope = z.record(z.string(), z.unknown()).safeParse(context.mcpReq.envelope);
+  if (envelope.success) {
+    const capabilities = confirmationClientCapabilitiesSchema.safeParse(
+      envelope.data[CLIENT_CAPABILITIES_META_KEY],
+    );
+    return capabilities.success ? capabilities.data : undefined;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- Legacy 2025-era requests carry capabilities only in initialize state.
+  const legacyCapabilities = server.server.getClientCapabilities();
+  const parsedCapabilities = confirmationClientCapabilitiesSchema.safeParse(legacyCapabilities);
+  return parsedCapabilities.success ? parsedCapabilities.data : undefined;
 }
 
 function toolDefinitions(): Tool[] {
@@ -297,6 +322,6 @@ function objectInputSchema(schema: z.ZodType): Tool["inputSchema"] {
       properties: z.record(z.string(), JsonValue).optional(),
       required: z.array(z.string()).optional(),
     })
-    .passthrough()
+    .loose()
     .parse(z.toJSONSchema(schema));
 }

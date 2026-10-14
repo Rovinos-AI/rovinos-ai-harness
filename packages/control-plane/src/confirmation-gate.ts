@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id } from "@harness/schemas";
+import { Code, Id, JsonValue } from "@harness/schemas";
 import {
   acceptedContent,
   createRequestStateCodec,
   inputRequired,
-  type ClientCapabilities,
   type InputRequiredResult,
   type ServerContext,
 } from "@modelcontextprotocol/server";
@@ -14,6 +13,15 @@ import { z } from "zod";
 const CONFIRMATION_TTL_SECONDS = 300;
 const DEFAULT_REQUEST_STATE_KEY = randomBytes(32);
 const confirmSchema = z.object({ confirm: z.boolean() }).strict();
+export const confirmationClientCapabilitiesSchema = z
+  .object({
+    elicitation: z
+      .object({ form: z.record(z.string(), JsonValue).optional() })
+      .loose()
+      .optional(),
+    extensions: z.record(z.string(), JsonValue).optional(),
+  })
+  .loose();
 
 const confirmationStateSchema = z
   .object({
@@ -28,6 +36,9 @@ const confirmationStateSchema = z
 
 type ConfirmationState = z.infer<typeof confirmationStateSchema>;
 
+/** Request capability fields used by the confirmation and app-visibility gates. */
+export type ConfirmationClientCapabilities = z.infer<typeof confirmationClientCapabilitiesSchema>;
+
 /** Parameters that bind a human confirmation to one concrete tool call. */
 export interface ConfirmationRequest {
   readonly toolName: string;
@@ -35,7 +46,7 @@ export interface ConfirmationRequest {
   readonly arguments: Readonly<Record<string, unknown>>;
   /** A summary containing only metadata and already-tokenized content. */
   readonly summary: string;
-  readonly clientCapabilities: ClientCapabilities | undefined;
+  readonly clientCapabilities: ConfirmationClientCapabilities | undefined;
 }
 
 /** Options for the fail-closed confirmation gate. */
@@ -65,7 +76,7 @@ export type ConfirmationGateResult =
  * requires an explicit trusted-host assertion; absent that, supported clients must confirm.
  */
 export class ConfirmationGate {
-  private readonly codec: ReturnType<typeof createRequestStateCodec<ConfirmationState>>;
+  private readonly codec: ReturnType<typeof createRequestStateCodec>;
   private readonly now: () => number;
   private readonly tokenId: (context: ServerContext) => string;
   private readonly isAppContext: (context: ServerContext, toolName: string) => boolean;
@@ -80,7 +91,7 @@ export class ConfirmationGate {
       ((context) => context.http?.authInfo?.clientId ?? context.sessionId ?? "local");
     this.isAppContext = options.isAppContext ?? (() => false);
     this.nextStateId = options.nextStateId ?? randomUUID;
-    this.codec = createRequestStateCodec<ConfirmationState>({
+    this.codec = createRequestStateCodec({
       key: options.key ?? DEFAULT_REQUEST_STATE_KEY,
       ttlSeconds: CONFIRMATION_TTL_SECONDS,
       bind: (context) => this.tokenId(context),
@@ -100,7 +111,7 @@ export class ConfirmationGate {
       return { status: "allowed" };
     }
 
-    const stateValue = context.mcpReq.requestState<unknown>();
+    const stateValue = context.mcpReq.requestState();
     if (stateValue !== undefined) {
       return this.acceptRetry(context, request, stateValue);
     }
@@ -110,7 +121,7 @@ export class ConfirmationGate {
     }
 
     const now = this.now();
-    const state = confirmationStateSchema.parse({
+    const state: ConfirmationState = confirmationStateSchema.parse({
       stateId: this.nextStateId(),
       tokenId: this.tokenId(context),
       toolName: request.toolName,
@@ -179,7 +190,9 @@ export class ConfirmationGate {
   }
 }
 
-function supportsFormElicitation(capabilities: ClientCapabilities | undefined): boolean {
+function supportsFormElicitation(
+  capabilities: ConfirmationClientCapabilities | undefined,
+): boolean {
   return capabilities?.elicitation?.form !== undefined;
 }
 

@@ -38,7 +38,7 @@ import {
   type ToolPort,
 } from "@harness/core";
 import { FakeModelPort } from "@harness/core/testing";
-import { InMemoryEventStore } from "@harness/store";
+import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { buildApprovalPayload } from "@harness/policy";
 import {
   ApprovalListResultSchema,
@@ -53,7 +53,6 @@ import {
   StorePurgeResultSchema,
   parseJson,
 } from "@harness/schemas";
-import { SqliteEventStore } from "@harness/store";
 import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
 import {
   attr,
@@ -804,10 +803,16 @@ describe("control plane", () => {
         resumeSignal = signal;
         markResumeStarted();
         return new Promise<void>((resolve) => {
-          signal.addEventListener("abort", () => resolve(), { once: true });
+          signal.addEventListener(
+            "abort",
+            () => {
+              resolve();
+            },
+            { once: true },
+          );
         });
       }),
-      cancelRun: vi.fn(async () => "cancelled"),
+      cancelRun: vi.fn(() => Promise.resolve("cancelled")),
     };
     const server = createControlPlaneServer(store, {
       isAppContext: () => true,

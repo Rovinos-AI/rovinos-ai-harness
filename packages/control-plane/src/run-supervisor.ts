@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, Id } from "@harness/schemas";
-import { ActiveRuns, activeRuns } from "@harness/telemetry";
+import { activeRuns } from "@harness/telemetry";
+import type { ActiveRuns } from "@harness/telemetry";
 import { z } from "zod";
 import type { ResumeRunOutput } from "./schemas.js";
 

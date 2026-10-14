@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { foldRunState, type RunState } from "@harness/core";
+import { foldRunState, type ApprovalRequestedEvent, type RunState } from "@harness/core";
 import type { Event, Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
-import type { ApprovalRequestedEvent } from "@harness/core";
 
 /** Reads and folds one run's events, returning undefined when the run is unknown. */
 export async function readRunState(
@@ -44,16 +43,19 @@ export async function findApprovalRequest(
   | undefined
 > {
   let cursor: string | undefined;
-  do {
+  for (;;) {
     const page = await store.listRuns({ limit: 50, ...(cursor === undefined ? {} : { cursor }) });
     for (const summary of page.runs) {
       const run = await readRunState(store, summary.runId);
-      const request = run?.state.approvalRequests.get(approvalId);
+      if (run === undefined) {
+        continue;
+      }
+      const request = run.state.approvalRequests.get(approvalId);
       if (request !== undefined) {
         return {
           runId: summary.runId,
           request,
-          resolved: run?.state.resolvedApprovals.has(approvalId) ?? false,
+          resolved: run.state.resolvedApprovals.has(approvalId),
         };
       }
     }
@@ -61,5 +63,5 @@ export async function findApprovalRequest(
       return undefined;
     }
     cursor = page.nextCursor;
-  } while (true);
+  }
 }

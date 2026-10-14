@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  HarnessError,
-  ServeResultSchema,
-  type Code,
-  type Id,
-  type JsonValue,
-} from "@harness/schemas";
+import { HarnessError, ServeResultSchema } from "@harness/schemas";
+import type { ControlPlaneOperations } from "@harness/control-plane";
+import type { Runtime, ToolPort } from "@harness/core";
 import { z } from "zod";
 import type { CommandModule } from "./command.js";
 import { createCommandRuntime } from "./command.js";
@@ -69,32 +65,7 @@ export const serveCommand: CommandModule = {
           try {
             const { startControlPlaneHttp, startControlPlaneStdio } =
               await import("@harness/control-plane");
-            const operations = {
-              resumeRun: (runId: Parameters<typeof runtime.resume>[0]) => runtime.resume(runId),
-              cancelRun: (runId: Parameters<typeof runtime.cancel>[0]) => runtime.cancel(runId),
-              resolveApproval: async (
-                runId: Parameters<typeof runtime.resume>[0],
-                approvalId: Id,
-                decision: "approve" | "deny" | "edit",
-                edits?: JsonValue,
-                reason?: Code,
-              ) => {
-                const { resolveApproval } = await import("@harness/core");
-                await resolveApproval(
-                  runtime.store,
-                  runId,
-                  approvalId,
-                  decision,
-                  edits,
-                  runtime.clock,
-                  tool,
-                  {
-                    decidedBy: "human",
-                    ...(reason === undefined ? {} : { reason }),
-                  },
-                );
-              },
-            };
+            const operations = createControlPlaneOperations(runtime, tool);
             if (http) {
               const handle = await startControlPlaneHttp(runtime.store, port, { operations });
               closeServer = () => handle.close();
@@ -117,6 +88,29 @@ export const serveCommand: CommandModule = {
       );
   },
 };
+
+function createControlPlaneOperations(
+  runtime: Runtime,
+  tool: ToolPort | undefined,
+): ControlPlaneOperations {
+  return {
+    resumeRun: (runId) => runtime.resume(runId),
+    cancelRun: (runId) => runtime.cancel(runId),
+    resolveApproval: async ({ runId, approvalId, decision, edits, reason }) => {
+      const { resolveApproval } = await import("@harness/core");
+      await resolveApproval(
+        runtime.store,
+        runId,
+        approvalId,
+        decision,
+        edits,
+        runtime.clock,
+        tool,
+        { decidedBy: "human", ...(reason === undefined ? {} : { reason }) },
+      );
+    },
+  };
+}
 
 function waitForShutdown(stdio: boolean): Promise<void> {
   return new Promise((resolve) => {

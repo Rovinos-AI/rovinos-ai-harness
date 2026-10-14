@@ -3,11 +3,12 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import type { EventStore } from "@harness/store";
 import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
-import { Code, Id, JsonValue, type NewEvent } from "@harness/schemas";
+import { Code, JsonValue, type Id, type NewEvent } from "@harness/schemas";
 import { ApprovalEditError } from "@harness/policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createControlPlaneServer } from "./server.js";
 import type { ResolveApprovalOperation } from "./tools/approve.js";
+import { findApprovalRequest } from "./tools/run-state.js";
 
 interface TestConnection {
   readonly client: Client;
@@ -35,7 +36,7 @@ async function connect(
     },
   );
   if (response !== undefined) {
-    client.setRequestHandler("elicitation/create", async () => ({
+    client.setRequestHandler("elicitation/create", () => ({
       action: response,
       ...(response === "accept" ? { content: { confirm: true } } : {}),
     }));
@@ -106,7 +107,7 @@ async function addPendingApproval(
 }
 
 function resolutionOperation(store: EventStore): ResolveApprovalOperation {
-  return async (runId, approvalId, decision, edits, reason) => {
+  return async ({ runId, approvalId, decision, edits, reason }) => {
     if (decision === "edit") {
       throw new ApprovalEditError("edit_invalid");
     }
@@ -150,6 +151,29 @@ afterEach(async () => {
 });
 
 describe("confirmation-gated control-plane tools", () => {
+  it("skips stale run summaries and stops when a pagination cursor repeats", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    const firstPage = await store.listRuns({ limit: 50 });
+    const listRuns = vi
+      .spyOn(store, "listRuns")
+      .mockResolvedValueOnce({ ...firstPage, nextCursor: "stale-cursor" })
+      .mockResolvedValueOnce({ ...firstPage, nextCursor: "stale-cursor" });
+    const emptyEvents: AsyncIterable<never> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.resolve({ done: true, value: undefined }),
+      }),
+    };
+    vi.spyOn(store, "read").mockReturnValue(emptyEvents);
+
+    await expect(findApprovalRequest(store, builders.nextRunId())).resolves.toBeUndefined();
+
+    expect(listRuns).toHaveBeenCalledTimes(2);
+    await store.close();
+  });
+
   it("requires supported elicitation when no trusted app context is supplied", async () => {
     const store = new InMemoryEventStore();
     const { runId, approvalId } = await addPendingApproval(store, createEventBuilders());
@@ -173,7 +197,7 @@ describe("confirmation-gated control-plane tools", () => {
     const approved = await addPendingApproval(store, builders);
     const denied = await addPendingApproval(store, builders);
     const resolveApproval = vi.fn(resolutionOperation(store));
-    const resumeRun = vi.fn(async () => undefined);
+    const resumeRun = vi.fn(() => Promise.resolve(undefined));
     const { client } = await connect(
       store,
       { operations: { resolveApproval, resumeRun } },
@@ -196,21 +220,17 @@ describe("confirmation-gated control-plane tools", () => {
       content: [{ type: "text", text: "Decision recorded." }],
     });
     expect(resolveApproval).toHaveBeenCalledTimes(2);
-    expect(resolveApproval).toHaveBeenNthCalledWith(
-      1,
-      approved.runId,
-      approved.approvalId,
-      "approve",
-      undefined,
-    );
-    expect(resolveApproval).toHaveBeenNthCalledWith(
-      2,
-      denied.runId,
-      denied.approvalId,
-      "deny",
-      undefined,
-      Code.parse("reviewed"),
-    );
+    expect(resolveApproval).toHaveBeenNthCalledWith(1, {
+      runId: approved.runId,
+      approvalId: approved.approvalId,
+      decision: "approve",
+    });
+    expect(resolveApproval).toHaveBeenNthCalledWith(2, {
+      runId: denied.runId,
+      approvalId: denied.approvalId,
+      decision: "deny",
+      reason: Code.parse("reviewed"),
+    });
     const repeatedDeny = await client.callTool({
       name: "deny",
       arguments: { approvalId: denied.approvalId },
@@ -348,10 +368,16 @@ describe("confirmation-gated control-plane tools", () => {
         resumeSignal = signal;
         markStarted();
         return new Promise<void>((resolve) => {
-          signal.addEventListener("abort", () => resolve(), { once: true });
+          signal.addEventListener(
+            "abort",
+            () => {
+              resolve();
+            },
+            { once: true },
+          );
         });
       }),
-      cancelRun: vi.fn(async () => "cancelled"),
+      cancelRun: vi.fn(() => Promise.resolve("cancelled")),
     };
     const { client } = await connect(store, { isAppContext: () => true, operations });
 

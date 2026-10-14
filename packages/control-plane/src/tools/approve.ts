@@ -1,27 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, type Id, type JsonValue } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
-import type { ClientCapabilities, McpServer } from "@modelcontextprotocol/server";
-import { ConfirmationGate } from "../confirmation-gate.js";
+import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
+import type { ConfirmationClientCapabilities, ConfirmationGate } from "../confirmation-gate.js";
 import { approveInputSchema, decisionOutputSchema } from "../schemas.js";
 import type { ApprovalDecision } from "@harness/core";
 import { findApprovalRequest } from "./run-state.js";
 
+/** One validated approval resolution request. */
+export interface ResolveApprovalRequest {
+  readonly runId: Id;
+  readonly approvalId: Id;
+  readonly decision: ApprovalDecision;
+  readonly edits?: JsonValue;
+  readonly reason?: Code;
+}
+
 /** Executes one validated approval resolution. */
-export type ResolveApprovalOperation = (
-  runId: Id,
-  approvalId: Id,
-  decision: ApprovalDecision,
-  edits?: JsonValue,
-  reason?: Code,
-) => Promise<unknown>;
+export type ResolveApprovalOperation = (request: ResolveApprovalRequest) => Promise<unknown>;
 
 /** Dependencies for the `approve` tool. */
 export interface ApproveToolOptions {
   readonly store: EventStore;
   readonly confirmationGate: ConfirmationGate;
   readonly resolveApproval?: ResolveApprovalOperation;
-  readonly clientCapabilities: () => ClientCapabilities | undefined;
+  readonly clientCapabilities: (
+    context: ServerContext,
+  ) => ConfirmationClientCapabilities | undefined;
 }
 
 /** Registers the app-only `approve` tool. */
@@ -42,7 +47,7 @@ export function registerApproveTool(server: McpServer, options: ApproveToolOptio
         targetId: parsed.approvalId,
         arguments: parsed,
         summary: `Approve request ${parsed.approvalId}?`,
-        clientCapabilities: options.clientCapabilities(),
+        clientCapabilities: options.clientCapabilities(context),
       });
       if (gate.status === "input_required") {
         return gate.result;
@@ -63,12 +68,12 @@ export function registerApproveTool(server: McpServer, options: ApproveToolOptio
       }
 
       try {
-        await options.resolveApproval(
-          approval.runId,
-          parsed.approvalId,
-          parsed.edits === undefined ? "approve" : "edit",
-          parsed.edits,
-        );
+        await options.resolveApproval({
+          runId: approval.runId,
+          approvalId: parsed.approvalId,
+          decision: parsed.edits === undefined ? "approve" : "edit",
+          ...(parsed.edits === undefined ? {} : { edits: parsed.edits }),
+        });
         return decisionResult(true);
       } catch (error) {
         return decisionResult(false, safeErrorCode(error));

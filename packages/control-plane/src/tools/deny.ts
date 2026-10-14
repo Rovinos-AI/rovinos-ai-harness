@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
-import type { ClientCapabilities, McpServer } from "@modelcontextprotocol/server";
-import { ConfirmationGate } from "../confirmation-gate.js";
+import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
+import type { ConfirmationClientCapabilities, ConfirmationGate } from "../confirmation-gate.js";
 import { denyInputSchema, decisionOutputSchema } from "../schemas.js";
 import type { ResolveApprovalOperation } from "./approve.js";
 import { findApprovalRequest } from "./run-state.js";
@@ -12,7 +12,9 @@ export interface DenyToolOptions {
   readonly store: EventStore;
   readonly confirmationGate: ConfirmationGate;
   readonly resolveApproval?: ResolveApprovalOperation;
-  readonly clientCapabilities: () => ClientCapabilities | undefined;
+  readonly clientCapabilities: (
+    context: ServerContext,
+  ) => ConfirmationClientCapabilities | undefined;
 }
 
 /** Registers the app-only `deny` tool. */
@@ -33,7 +35,7 @@ export function registerDenyTool(server: McpServer, options: DenyToolOptions): v
         targetId: parsed.approvalId,
         arguments: parsed,
         summary: `Deny request ${parsed.approvalId}?`,
-        clientCapabilities: options.clientCapabilities(),
+        clientCapabilities: options.clientCapabilities(context),
       });
       if (gate.status === "input_required") {
         return gate.result;
@@ -54,13 +56,12 @@ export function registerDenyTool(server: McpServer, options: DenyToolOptions): v
       }
 
       try {
-        await options.resolveApproval(
-          approval.runId,
-          parsed.approvalId,
-          "deny",
-          undefined,
-          parsed.reason,
-        );
+        await options.resolveApproval({
+          runId: approval.runId,
+          approvalId: parsed.approvalId,
+          decision: "deny",
+          ...(parsed.reason === undefined ? {} : { reason: parsed.reason }),
+        });
         return decisionResult(true);
       } catch (error) {
         return decisionResult(false, safeErrorCode(error));
