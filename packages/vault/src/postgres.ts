@@ -57,7 +57,7 @@ const postgresUrlSchema = z
 const schemaNameSchema = z.string().regex(/^[a-z_]\w{0,62}$/i);
 const optionsSchema = z
   .object({
-    storeConnectionString: postgresUrlSchema,
+    storeConnectionString: postgresUrlSchema.optional(),
     schema: schemaNameSchema.default("public"),
     storeSchema: schemaNameSchema.default("public"),
     poolSize: z.number().int().min(1).max(100).default(10),
@@ -66,7 +66,7 @@ const optionsSchema = z
 
 /** Options for a Postgres vault, including the event-store location for separation checks. */
 export interface PostgresVaultOptions {
-  readonly storeConnectionString: string;
+  readonly storeConnectionString?: string;
   readonly schema?: string;
   readonly storeSchema?: string;
   readonly poolSize?: number;
@@ -92,6 +92,13 @@ interface ScopeDataKey {
   readonly dataKey: Uint8Array;
   readonly keyId: string;
   readonly wrappedDek: Buffer;
+}
+
+interface DatabaseIdentity extends QueryResultRow {
+  system_identifier: string;
+  database_name: string;
+  schema_name: string;
+  role_name: string;
 }
 
 function databaseIdentity(connectionString: string): string {
@@ -133,6 +140,7 @@ export class PostgresVault
   implements VaultWriter, VaultResolver, VaultReader, VaultAdmin, VaultKeyRotation
 {
   private readonly pool: Pool;
+  private readonly storePool: Pool | undefined;
   private readonly schema: string;
   private readonly now: () => number;
   private initialized: Promise<void> | undefined;
@@ -152,14 +160,15 @@ export class PostgresVault
     if (!parsedUrl.success || !parsedOptions.success) {
       throw new VaultOperationError("vault_unavailable");
     }
-    const sameDatabase =
-      databaseIdentity(parsedUrl.data) ===
-      databaseIdentity(parsedOptions.data.storeConnectionString);
-    const sameSchema = parsedOptions.data.schema === parsedOptions.data.storeSchema;
-    const sameRole =
-      databaseRole(parsedUrl.data) === databaseRole(parsedOptions.data.storeConnectionString);
-    if (sameDatabase && (sameSchema || sameRole)) {
-      throw new VaultOperationError("vault_shares_store_database");
+    const storeUrl = parsedOptions.data.storeConnectionString;
+    if (storeUrl !== undefined) {
+      const sameDatabase =
+        databaseIdentity(parsedUrl.data) === databaseIdentity(storeUrl);
+      const sameSchema = parsedOptions.data.schema === parsedOptions.data.storeSchema;
+      const sameRole = databaseRole(parsedUrl.data) === databaseRole(storeUrl);
+      if (sameDatabase && (sameSchema || sameRole)) {
+        throw new VaultOperationError("vault_shares_store_database");
+      }
     }
     this.schema = parsedOptions.data.schema;
     this.now = now;
@@ -168,23 +177,32 @@ export class PostgresVault
       max: parsedOptions.data.poolSize,
       options: `-c search_path="${this.schema}"`,
     });
+    this.storePool =
+      storeUrl === undefined ? undefined : new Pool({ connectionString: storeUrl, max: 1 });
     this.pool.on("error", () => undefined);
+    this.storePool?.on("error", () => undefined);
   }
 
   private ensureInitialized(): Promise<void> {
-    this.initialized ??= this.initialize().catch((error: unknown) => {
+    this.initialized ??= this.initializePool().catch((error: unknown) => {
       this.initialized = undefined;
       mapVaultError(error);
     });
     return this.initialized;
   }
 
-  private async initialize(): Promise<void> {
+  /** Verify database separation and apply migrations before the adapter is used. */
+  initialize(): Promise<void> {
+    return this.ensureInitialized();
+  }
+
+  private async initializePool(): Promise<void> {
     const client = await this.pool.connect().catch(() => {
       throw new VaultOperationError("vault_unavailable");
     });
     let transactionStarted = false;
     try {
+      await this.assertSeparateDatabase();
       await client.query("BEGIN");
       transactionStarted = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext(current_schema())::bigint)");
@@ -213,6 +231,31 @@ export class PostgresVault
       mapVaultError(error);
     } finally {
       client.release();
+    }
+  }
+
+  private async assertSeparateDatabase(): Promise<void> {
+    if (this.storePool === undefined) {
+      return;
+    }
+    const identityQuery =
+      "SELECT (SELECT system_identifier::text FROM pg_control_system()) AS system_identifier, current_database() AS database_name, current_schema() AS schema_name, current_user AS role_name";
+    const [vaultIdentityResult, storeIdentityResult] = await Promise.all([
+      this.pool.query<DatabaseIdentity>(identityQuery),
+      this.storePool.query<DatabaseIdentity>(identityQuery),
+    ]);
+    const vaultIdentity = vaultIdentityResult.rows[0];
+    const storeIdentity = storeIdentityResult.rows[0];
+    if (vaultIdentity === undefined || storeIdentity === undefined) {
+      throw new VaultOperationError("vault_unavailable");
+    }
+    if (
+      vaultIdentity.system_identifier === storeIdentity.system_identifier &&
+      vaultIdentity.database_name === storeIdentity.database_name &&
+      (vaultIdentity.schema_name === storeIdentity.schema_name ||
+        vaultIdentity.role_name === storeIdentity.role_name)
+    ) {
+      throw new VaultOperationError("vault_shares_store_database");
     }
   }
 
@@ -346,6 +389,7 @@ export class PostgresVault
     const keys = await deriveVaultKeys(this.keyProvider, keyId, "vault_encrypt_failed");
     try {
       return await this.transaction(async (client) => {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [runId]);
         const scopeKey = await this.scopeKey(client, runId, keyId);
         let lookups: Buffer[] = [];
         try {
@@ -465,15 +509,36 @@ export class PostgresVault
     }
   }
 
+  private async decryptRows(runId: Id, rows: readonly EntryRow[]): Promise<Uint8Array | undefined> {
+    if (rows.length === 0) {
+      return undefined;
+    }
+    const scopeKey = await this.pool.query<ScopeKeyRow>(
+      "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = $1",
+      [runId],
+    );
+    const wrapped = scopeKey.rows[0];
+    if (wrapped === undefined) {
+      throw new VaultOperationError("vault_decrypt_failed");
+    }
+    return unwrapScopeKey(this.keyProvider, wrapped.key_id, runId, wrapped.wrapped_dek);
+  }
+
   /** Return detached values for leak detection. */
   async listRawValues(runId: Id): Promise<readonly string[]> {
     try {
       const rows = await this.readRows(runId);
-      const values: string[] = [];
-      for (const row of rows) {
-        values.push(await this.decryptEntry(runId, row));
+      const dataKey = await this.decryptRows(runId, rows);
+      if (dataKey === undefined) {
+        return [];
       }
-      return values;
+      try {
+        return rows.map((row) =>
+          decryptScopeValue(dataKey, row.value_enc, `${runId}:${row.token}`),
+        );
+      } finally {
+        dataKey?.fill(0);
+      }
     } catch (error) {
       mapVaultError(error);
     }
@@ -483,16 +548,20 @@ export class PostgresVault
   async listRawValueEntries(runId: Id): Promise<readonly VaultValueEntry[]> {
     try {
       const rows = await this.readRows(runId);
-      const values: VaultValueEntry[] = [];
-      for (const row of rows) {
-        values.push(
+      const dataKey = await this.decryptRows(runId, rows);
+      if (dataKey === undefined) {
+        return [];
+      }
+      try {
+        return rows.map((row) =>
           VaultValueEntrySchema.parse({
             entityType: row.entity_type,
-            rawValue: await this.decryptEntry(runId, row),
+            rawValue: decryptScopeValue(dataKey, row.value_enc, `${runId}:${row.token}`),
           }),
         );
+      } finally {
+        dataKey?.fill(0);
       }
-      return values;
     } catch (error) {
       mapVaultError(error);
     }
@@ -561,6 +630,7 @@ export class PostgresVault
   /** Delete the wrapped scope key before deleting its encrypted entries. */
   async purge(runId: Id): Promise<number> {
     return this.transaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [runId]);
       await client.query("DELETE FROM vault_scope_keys WHERE scope_id = $1", [runId]);
       const result = await client.query("DELETE FROM vault_entries WHERE run_id = $1", [runId]);
       await client.query("DELETE FROM run_meta WHERE run_id = $1", [runId]);
@@ -733,7 +803,7 @@ export class PostgresVault
   /** Close the shared Postgres pool. */
   async close(): Promise<void> {
     try {
-      await this.pool.end();
+      await Promise.all([this.pool.end(), this.storePool?.end()]);
     } catch (error) {
       mapVaultError(error);
     }

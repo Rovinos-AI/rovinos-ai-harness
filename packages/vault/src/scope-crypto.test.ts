@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
+import { aesGcmDecrypt } from "@harness/crypto";
 import { Id, type KeyProvider } from "@harness/schemas";
+import { deriveVaultKeys } from "./sqlite-crypto.js";
 import {
   createWrappedScopeKey,
   decryptScopeValue,
@@ -68,6 +70,33 @@ describe("scope key encryption", () => {
       unwrapScopeKey(provider(), "key-a", Id.parse("B".repeat(26)), wrapped.wrappedDek),
     ).rejects.toMatchObject({ code: "vault_decrypt_failed" });
     wrapped.dataKey.fill(0);
+  });
+
+  it("uses a distinct derived key for wrapped data keys", async () => {
+    const wrapped = await createWrappedScopeKey(
+      provider(),
+      "key-a",
+      scopeId,
+      () => new Uint8Array(32).fill(41),
+    );
+    const valueKeys = await deriveVaultKeys(provider(), "key-a", "vault_encrypt_failed");
+    try {
+      expect(() =>
+        aesGcmDecrypt(
+          valueKeys.encryption,
+          wrapped.wrappedDek,
+          Buffer.from(`harness/vault/scope/${scopeId}`, "utf8"),
+        ),
+      ).toThrow();
+      expect(await unwrapScopeKey(provider(), "key-a", scopeId, wrapped.wrappedDek)).toEqual(
+        wrapped.dataKey,
+      );
+    } finally {
+      wrapped.dataKey.fill(0);
+      wrapped.wrappedDek.fill(0);
+      valueKeys.encryption.fill(0);
+      valueKeys.lookup.fill(0);
+    }
   });
 
   it("masks invalid random sources and missing master keys", async () => {

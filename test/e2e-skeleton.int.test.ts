@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
 // Not wired yet: approval escalation WebhookNotifier (17.13 -> #414)
-// Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: model-visible MCP descriptions through model-input PII (13.6 -> #150)
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
@@ -70,6 +69,8 @@ import {
   SecretRefSchema,
   StoreMigrateResultSchema,
   StorePurgeResultSchema,
+  StoreConfigSchema,
+  VaultConfigSchema,
   parseJson,
 } from "@harness/schemas";
 import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
@@ -648,6 +649,64 @@ describe("run", () => {
       expect(checkpoint).toBeDefined();
     } finally {
       await store.close();
+    }
+  });
+});
+
+describe("Postgres vault", () => {
+  it.skipIf(
+    process.env.TEST_POSTGRES_URL === undefined ||
+      process.env.TEST_VAULT_POSTGRES_URL === undefined,
+  )("shares token values between two configured runtime instances", async () => {
+    const current = fixture();
+    const config = await current.context.loadConfig();
+    const postgresConfig = {
+      ...config,
+      store: StoreConfigSchema.parse({
+        dialect: "postgres",
+        connectionString: "env:TEST_POSTGRES_URL",
+      }),
+      vault: VaultConfigSchema.parse({
+        backend: "postgres",
+        postgres: { url: "env:TEST_VAULT_POSTGRES_URL" },
+      }),
+    };
+    const secretResolver = {
+      resolve: (ref: string) =>
+        Promise.resolve({
+          reveal: () => {
+            if (ref === KEY_REF) {
+              return process.env.HARNESS_E2E_KEY ?? "";
+            }
+            if (ref === "env:TEST_POSTGRES_URL") {
+              return process.env.TEST_POSTGRES_URL ?? "";
+            }
+            if (ref === "env:TEST_VAULT_POSTGRES_URL") {
+              return process.env.TEST_VAULT_POSTGRES_URL ?? "";
+            }
+            return "";
+          },
+        }),
+    };
+    const overrides = {
+      dataDir: current.dataDirectory,
+      model: new FakeModelPort([completion([], "Postgres vault run")]),
+      tool: syntheticTools([], [], []),
+      sandboxBackend: unusedSandboxBackend,
+      secretResolver,
+    };
+    const first = await createRuntime(postgresConfig, overrides);
+    const second = await createRuntime(postgresConfig, {
+      ...overrides,
+      model: new FakeModelPort([completion([], "Second Postgres vault run")]),
+    });
+    try {
+      const result = await first.run(current.canary);
+      await expect(
+        second.vault.resolve(result.runId, "<EMAIL_1>", { boundary: "ui" }),
+      ).resolves.toBe(current.canary);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
     }
   });
 });

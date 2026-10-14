@@ -143,7 +143,7 @@ export interface Runtime {
 
 /** Owned writer/resolver handle closed with its runtime. */
 export interface RuntimeVault extends VaultWriter, VaultResolver, VaultAdmin {
-  close(): void;
+  close(): void | Promise<void>;
 }
 
 /** Resolved dependencies needed to assemble a running runtime. */

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
-import { aesGcmDecrypt } from "@harness/crypto";
 import { Id, type KeyProvider } from "@harness/schemas";
 import { afterAll, expect, it } from "vitest";
 import { runVaultConformance } from "./conformance.test-helpers.js";
 import { PostgresVault } from "./postgres.js";
+import { decryptScopeValue, unwrapScopeKey } from "./scope-crypto.js";
 
 const vaultUrl =
   process.env.TEST_VAULT_POSTGRES_URL ?? "postgresql://harness@127.0.0.1:5432/harness_vault";
@@ -138,6 +138,68 @@ it("deduplicates concurrent puts from independent connection pools", async () =>
   }
 });
 
+it("serializes a first put and purge across independent pools", async () => {
+  const { admin, schema } = await createSchema();
+  const first = createVault(schema);
+  const second = createVault(schema);
+  const observer = new Pool({ connectionString: vaultUrl, max: 1 });
+  const gatePool = new Pool({ connectionString: vaultUrl, max: 1 });
+  const gate = await gatePool.connect();
+  try {
+    await first.stats(runId);
+    await admin.query(
+      `CREATE FUNCTION "${schema}".pause_vault_insert() RETURNS trigger
+       LANGUAGE plpgsql AS $$ BEGIN
+         PERFORM pg_advisory_xact_lock(180120, 1);
+         RETURN NEW;
+       END $$`,
+    );
+    await admin.query(
+      `CREATE TRIGGER pause_vault_insert BEFORE INSERT ON "${schema}".vault_entries
+       FOR EACH ROW EXECUTE FUNCTION "${schema}".pause_vault_insert()`,
+    );
+    await gate.query("SELECT pg_advisory_lock(180120, 1)");
+    const put = first.put(runId, "email", "alice@example.test");
+    let insertIsBlocked = false;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const waiting = await observer.query(
+        `SELECT 1 FROM pg_stat_activity
+         WHERE wait_event_type = 'Lock' AND query ILIKE '%INSERT INTO vault_entries%' LIMIT 1`,
+      );
+      if (waiting.rows.length > 0) {
+        insertIsBlocked = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(insertIsBlocked).toBe(true);
+
+    const purge = second.purge(runId);
+    await gate.query("SELECT pg_advisory_unlock(180120, 1)");
+    const [token] = await Promise.all([put, purge]);
+    expect(token).toBe("<EMAIL_1>");
+    const [entries, keys] = await Promise.all([
+      observer.query("SELECT token FROM vault_entries WHERE run_id = $1", [runId]),
+      observer.query("SELECT scope_id FROM vault_scope_keys WHERE scope_id = $1", [runId]),
+    ]);
+    expect(entries.rows).toHaveLength(0);
+    expect(keys.rows).toHaveLength(0);
+  } finally {
+    await gate.query("SELECT pg_advisory_unlock(180120, 1)").catch(() => undefined);
+    gate.release();
+    await observer.end();
+    await gatePool.end();
+    await first.close();
+    vaults.delete(first);
+    await second.close();
+    vaults.delete(second);
+    await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    schemas.delete(schema);
+    adminPools.delete(admin);
+    await admin.end();
+  }
+});
+
 it("refuses the event store database and schema", () => {
   expect(
     () =>
@@ -149,7 +211,26 @@ it("refuses the event store database and schema", () => {
   ).toThrowError(expect.objectContaining({ code: "vault_shares_store_database" }));
 });
 
-it("crypto-shreds copied ciphertext and re-wraps scope keys during rotation", async () => {
+it("rejects an aliased event-store host during startup", async () => {
+  const sameDatabaseVaultUrl = new URL(storeUrl);
+  sameDatabaseVaultUrl.hostname = "127.0.0.1";
+  const aliasedStoreUrl = new URL(storeUrl);
+  aliasedStoreUrl.hostname = "localhost";
+  const vault = new PostgresVault(sameDatabaseVaultUrl.toString(), provider(), {
+    storeConnectionString: aliasedStoreUrl.toString(),
+    schema: "public",
+    storeSchema: "public",
+  });
+  try {
+    await expect(vault.initialize()).rejects.toMatchObject({
+      code: "vault_shares_store_database",
+    });
+  } finally {
+    await vault.close();
+  }
+});
+
+it("re-wraps scope keys during rotation without re-encrypting entries", async () => {
   const { admin, schema } = await createSchema();
   const keyProvider = provider();
   const vault = createVault(schema, keyProvider);
@@ -189,21 +270,76 @@ it("crypto-shreds copied ciphertext and re-wraps scope keys during rotation", as
     );
     await expect(vault.put(runId, "email", "alice@example.test")).resolves.toBe(token);
 
-    const copiedCiphertext = Buffer.from(original.value_enc, "base64");
-    await expect(vault.purge(runId)).resolves.toBe(1);
-    const remainingKeys = await database.query(
-      "SELECT scope_id FROM vault_scope_keys WHERE scope_id = $1",
+  } finally {
+    await database.end();
+    await cleanup(vault, admin, schema);
+  }
+});
+
+it("cannot decrypt copied entries with the post-purge key table", async () => {
+  const { admin, schema } = await createSchema();
+  const vault = createVault(schema);
+  const database = new Pool({
+    connectionString: vaultUrl,
+    options: `-c search_path="${schema}"`,
+  });
+  try {
+    const token = await vault.put(runId, "email", "alice@example.test");
+    const copied = await database.query<{ token: string; value_enc: string }>(
+      "SELECT token, value_enc FROM vault_entries WHERE run_id = $1",
       [runId],
     );
-    expect(remainingKeys.rows).toHaveLength(0);
-    const masterKey = await keyProvider.getKey("key-b");
+    expect(copied.rows).toHaveLength(1);
+
+    await expect(vault.purge(runId)).resolves.toBe(1);
+    const postPurgeKeys = await database.query(
+      "SELECT wrapped_dek, key_id FROM vault_scope_keys WHERE scope_id = $1",
+      [runId],
+    );
+    expect(postPurgeKeys.rows).toHaveLength(0);
+    await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBeUndefined();
+    expect(copied.rows[0]?.value_enc).not.toContain("alice@example.test");
+  } finally {
+    await database.end();
+    await cleanup(vault, admin, schema);
+  }
+});
+
+it("documents that a pre-purge backup with the scope-key row remains decryptable", async () => {
+  const { admin, schema } = await createSchema();
+  const keyProvider = provider();
+  const vault = createVault(schema, keyProvider);
+  const database = new Pool({
+    connectionString: vaultUrl,
+    options: `-c search_path="${schema}"`,
+  });
+  try {
+    const token = await vault.put(runId, "email", "alice@example.test");
+    const backup = await database.query<{
+      value_enc: string;
+      wrapped_dek: Buffer;
+      key_id: string;
+    }>(
+      `SELECT entries.value_enc, scope_keys.wrapped_dek, scope_keys.key_id
+       FROM vault_entries AS entries
+       JOIN vault_scope_keys AS scope_keys ON scope_keys.scope_id = entries.run_id
+       WHERE entries.run_id = $1 AND entries.token = $2`,
+      [runId, token],
+    );
+    const row = backup.rows[0];
+    if (row === undefined) {
+      throw new Error("synthetic backup data is missing");
+    }
+    await expect(vault.purge(runId)).resolves.toBe(1);
+
+    const dataKey = await unwrapScopeKey(keyProvider, row.key_id, runId, row.wrapped_dek);
     try {
-      expect(() =>
-        aesGcmDecrypt(masterKey, copiedCiphertext, Buffer.from(`${runId}:${token}`, "utf8")),
-      ).toThrow();
+      expect(decryptScopeValue(dataKey, row.value_enc, `${runId}:${token}`)).toBe(
+        "alice@example.test",
+      );
     } finally {
-      masterKey.fill(0);
-      copiedCiphertext.fill(0);
+      dataKey.fill(0);
+      row.wrapped_dek.fill(0);
     }
   } finally {
     await database.end();

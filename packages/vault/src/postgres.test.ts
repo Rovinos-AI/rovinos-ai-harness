@@ -25,6 +25,8 @@ const fakePg = vi.hoisted(() => {
   };
   const databases = new Map<string, State>();
   const unavailableSchemas = new Set<string>();
+  let identityQueries = 0;
+  let scopeKeyReads = 0;
   const bufferValue = (value: unknown): Buffer => {
     if (!Buffer.isBuffer(value)) {
       throw new Error("Synthetic SQL value is not a buffer");
@@ -48,11 +50,35 @@ const fakePg = vi.hoisted(() => {
   };
   const equalBytes = (left: Buffer | null, right: unknown): boolean =>
     left !== null && Buffer.isBuffer(right) && left.equals(right);
-  const handle = (schema: string, statement: string, values: unknown[]) => {
+  const handle = (
+    schema: string,
+    statement: string,
+    values: unknown[],
+    connectionString: string,
+  ) => {
     const sql = statement.replaceAll(/\s+/g, " ").trim();
     const state = stateFor(schema);
     const rows: Record<string, unknown>[] = [];
     let rowCount = 0;
+    if (sql.startsWith("SELECT (SELECT system_identifier::text FROM pg_control_system())")) {
+      identityQueries += 1;
+      const url = new URL(connectionString);
+      const host =
+        url.hostname === "localhost" || url.hostname === "127.0.0.1"
+          ? "loopback"
+          : url.hostname;
+      return {
+        rows: [
+          {
+            system_identifier: host,
+            database_name: url.pathname.slice(1),
+            schema_name: schema,
+            role_name: url.username,
+          },
+        ],
+        rowCount: 1,
+      };
+    }
     if (
       sql === "BEGIN" ||
       sql === "COMMIT" ||
@@ -71,6 +97,9 @@ const fakePg = vi.hoisted(() => {
       return { rows, rowCount: 1 };
     }
     if (sql.startsWith("SELECT wrapped_dek, key_id FROM vault_scope_keys")) {
+      if (!sql.includes("FOR UPDATE")) {
+        scopeKeyReads += 1;
+      }
       const key = state.scopeKeys.get(String(values[0]));
       return {
         rows: key === undefined ? [] : [{ wrapped_dek: Buffer.from(key.wrapped_dek), key_id: key.key_id }],
@@ -283,14 +312,30 @@ const fakePg = vi.hoisted(() => {
     }
     throw new Error("Unhandled synthetic SQL");
   };
-  return { databases, unavailableSchemas, handle };
+  return {
+    databases,
+    unavailableSchemas,
+    get identityQueries() {
+      return identityQueries;
+    },
+    get scopeKeyReads() {
+      return scopeKeyReads;
+    },
+    resetReadCounts() {
+      identityQueries = 0;
+      scopeKeyReads = 0;
+    },
+    handle,
+  };
 });
 
 vi.mock("pg", () => ({
   Pool: class {
     readonly schema: string;
+    readonly connectionString: string;
 
-    constructor(options: { readonly options?: string }) {
+    constructor(options: { readonly connectionString: string; readonly options?: string }) {
+      this.connectionString = options.connectionString;
       this.schema = options.options?.match(/search_path="([^"]+)"/)?.[1] ?? "public";
     }
 
@@ -299,7 +344,9 @@ vi.mock("pg", () => ({
     }
 
     query(statement: string, values: unknown[] = []) {
-      return Promise.resolve(fakePg.handle(this.schema, statement, values));
+      return Promise.resolve(
+        fakePg.handle(this.schema, statement, values, this.connectionString),
+      );
     }
 
     connect() {
@@ -308,7 +355,9 @@ vi.mock("pg", () => ({
       }
       return Promise.resolve({
         query: (statement: string, values: unknown[] = []) =>
-          Promise.resolve(fakePg.handle(this.schema, statement, values)),
+          Promise.resolve(
+            fakePg.handle(this.schema, statement, values, this.connectionString),
+          ),
         release: () => undefined,
       });
     }
@@ -363,6 +412,7 @@ function vaultFor(
 
 beforeEach(() => {
   fakePg.unavailableSchemas.clear();
+  fakePg.resetReadCounts();
 });
 
 runVaultConformance("PostgresVault with a connection-pool double", async () => {
@@ -435,6 +485,40 @@ it("allows a dedicated role and schema in the same database", async () => {
     "postgresql://store@db/harness",
     "event_schema",
   );
+  await expect(vault.stats(runId)).resolves.toEqual({ entries: 0 });
+  await vault.close();
+});
+
+it("checks physical server identity and refuses aliased event-store connections", async () => {
+  const vault = vaultFor(
+    "public",
+    keyProvider(),
+    "postgresql://vault@127.0.0.1/harness",
+    "postgresql://store@localhost/harness",
+  );
+  await expect(vault.stats(runId)).rejects.toMatchObject({
+    code: "vault_shares_store_database",
+  });
+  expect(fakePg.identityQueries).toBe(2);
+  await vault.close();
+});
+
+it("fetches one scope key per value-list operation", async () => {
+  const vault = vaultFor(nextSchema());
+  await vault.put(runId, "email", "alice@example.test");
+  await vault.put(runId, "email", "bob@example.test");
+  fakePg.resetReadCounts();
+
+  await expect(vault.listRawValues(runId)).resolves.toEqual([
+    "alice@example.test",
+    "bob@example.test",
+  ]);
+  expect(fakePg.scopeKeyReads).toBe(1);
+  await expect(vault.listRawValueEntries(runId)).resolves.toEqual([
+    { entityType: "email", rawValue: "alice@example.test" },
+    { entityType: "email", rawValue: "bob@example.test" },
+  ]);
+  expect(fakePg.scopeKeyReads).toBe(2);
   await vault.close();
 });
 

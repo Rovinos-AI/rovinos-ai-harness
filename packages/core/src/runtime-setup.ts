@@ -3,10 +3,10 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
-import { HarnessError, PiiConfigSchema } from "@harness/schemas";
-import type { Id, PiiConfig } from "@harness/schemas";
+import { HarnessError, PiiConfigSchema, VaultConfigSchema } from "@harness/schemas";
+import type { Id, PiiConfig, StoreConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
-import { SqliteVault, VaultOperationError } from "@harness/vault";
+import { PostgresVault, SqliteVault, VaultOperationError } from "@harness/vault";
 import type { TokenType, VaultTerminalRunsQuery } from "@harness/vault";
 import type { EventStore } from "@harness/store";
 import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
@@ -90,7 +90,7 @@ async function closeSetupResources(options: {
       await options.eventStore?.close();
     } finally {
       try {
-        options.vault?.close();
+        await options.vault?.close();
       } finally {
         options.disposeKeys();
       }
@@ -276,10 +276,41 @@ async function createRuntimeModel(
 
 async function createRuntimeVault(
   dataDir: string,
+  config: RuntimeConfig,
   overrides: RuntimeOverrides,
   keys: RuntimeComposition["keys"],
   clock: Clock,
 ): Promise<RuntimeVault> {
+  const vaultConfig = VaultConfigSchema.parse(config.vault ?? {});
+  if (vaultConfig.backend === "postgres") {
+    const resolver = overrides.secretResolver;
+    const vaultUrl = vaultConfig.postgres?.url;
+    const vaultConnectionString =
+      resolver === undefined || vaultUrl === undefined
+        ? undefined
+        : (await resolver.resolve(vaultUrl)).reveal();
+    let storeConnectionString: string | undefined;
+    if (config.store?.dialect === "postgres") {
+      if (resolver === undefined || config.store.connectionString === undefined) {
+        throw new VaultOperationError("vault_unavailable");
+      }
+      storeConnectionString = (await resolver.resolve(config.store.connectionString)).reveal();
+    }
+    if (vaultConnectionString === undefined) {
+      throw new VaultOperationError("vault_unavailable");
+    }
+    const vault = new PostgresVault(vaultConnectionString, keys, {
+      ...(storeConnectionString === undefined ? {} : { storeConnectionString }),
+      now: () => clock.now(),
+    });
+    try {
+      await vault.initialize();
+      return vault;
+    } catch (error) {
+      await vault.close();
+      throw error;
+    }
+  }
   const vaultDir = resolveVaultDataDir(process.env, dataDir);
   const vaultPath = join(vaultDir, "vault.db");
   const transient = overrides.transientVault === true && overrides.readOnlyStore !== true;
@@ -359,7 +390,7 @@ export async function setupRuntime(
   try {
     const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    const runtimeVault = await createRuntimeVault(dataDir, overrides, keys, clock);
+    const runtimeVault = await createRuntimeVault(dataDir, runtimeConfig, overrides, keys, clock);
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);

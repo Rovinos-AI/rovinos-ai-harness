@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomBytes } from "node:crypto";
-import { aesGcmDecrypt, aesGcmEncrypt } from "@harness/crypto";
+import { aesGcmDecrypt, aesGcmEncrypt, hkdfSha256 } from "@harness/crypto";
 import type { Id, KeyProvider } from "@harness/schemas";
 import { VaultOperationError } from "./errors.js";
-import { deriveVaultKeys } from "./sqlite-crypto.js";
+import { loadMasterKey } from "./sqlite-crypto.js";
 
 const SCOPE_KEY_AAD_PREFIX = "harness/vault/scope/";
+const SCOPE_WRAP_INFO = "harness/vault/scope-wrap/v1";
 
 /** A fresh data key and its master-key-wrapped representation. */
 export interface WrappedScopeKey {
@@ -20,12 +21,14 @@ export async function wrapScopeKey(
   scopeId: Id,
   dataKey: Uint8Array,
 ): Promise<Buffer> {
-  let keys: Awaited<ReturnType<typeof deriveVaultKeys>> | undefined;
+  let masterKey: Uint8Array | undefined;
+  let wrappingKey: Uint8Array | undefined;
   let wrapped: Uint8Array | undefined;
   try {
-    keys = await deriveVaultKeys(keyProvider, keyId, "vault_encrypt_failed");
+    masterKey = await loadMasterKey(keyProvider, keyId, "vault_encrypt_failed");
+    wrappingKey = hkdfSha256(masterKey, SCOPE_WRAP_INFO);
     const encrypted = aesGcmEncrypt(
-      keys.encryption,
+      wrappingKey,
       dataKey,
       Buffer.from(`${SCOPE_KEY_AAD_PREFIX}${scopeId}`, "utf8"),
     );
@@ -34,8 +37,8 @@ export async function wrapScopeKey(
   } catch {
     throw new VaultOperationError("vault_encrypt_failed");
   } finally {
-    keys?.encryption.fill(0);
-    keys?.lookup.fill(0);
+    masterKey?.fill(0);
+    wrappingKey?.fill(0);
     wrapped?.fill(0);
   }
 }
@@ -74,12 +77,14 @@ export async function unwrapScopeKey(
   scopeId: Id,
   wrappedDek: Uint8Array,
 ): Promise<Uint8Array> {
-  let keys: Awaited<ReturnType<typeof deriveVaultKeys>> | undefined;
+  let masterKey: Uint8Array | undefined;
+  let wrappingKey: Uint8Array | undefined;
   let dataKey: Uint8Array | undefined;
   try {
-    keys = await deriveVaultKeys(keyProvider, keyId, "vault_decrypt_failed");
+    masterKey = await loadMasterKey(keyProvider, keyId, "vault_decrypt_failed");
+    wrappingKey = hkdfSha256(masterKey, SCOPE_WRAP_INFO);
     const unwrapped = aesGcmDecrypt(
-      keys.encryption,
+      wrappingKey,
       wrappedDek,
       Buffer.from(`${SCOPE_KEY_AAD_PREFIX}${scopeId}`, "utf8"),
     );
@@ -93,8 +98,8 @@ export async function unwrapScopeKey(
     dataKey?.fill(0);
     throw new VaultOperationError("vault_decrypt_failed");
   } finally {
-    keys?.encryption.fill(0);
-    keys?.lookup.fill(0);
+    masterKey?.fill(0);
+    wrappingKey?.fill(0);
   }
 }
 
