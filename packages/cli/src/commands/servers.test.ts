@@ -23,7 +23,10 @@ let toolCalls = 0;
 
 function createContext(
   loadConfigForTest: CliContext["loadConfig"],
-  options: { readonly secretResolver?: CliContext["secretResolver"]; readonly now?: () => number } = {},
+  options: {
+    readonly secretResolver?: CliContext["secretResolver"];
+    readonly now?: () => number;
+  } = {},
 ) {
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -226,15 +229,17 @@ describe("harness servers check", () => {
       },
     );
 
-    const exitCode = await main(["--json", "servers", "check"], context, [
-      createServersCommand(),
-    ]);
+    const exitCode = await main(["--json", "servers", "check"], context, [createServersCommand()]);
     const result = parseJson(ServersCheckResultSchema, stdout[0] ?? "");
 
     expect(exitCode).toBe(ExitCode.failure);
     expect(secretRefs).toEqual(["env:STALL", "env:NEXT"]);
     expect(result.servers).toEqual([
-      expect.objectContaining({ id: "stalled", reachable: false, errorCode: "mcp_connect_timeout" }),
+      expect.objectContaining({
+        id: "stalled",
+        reachable: false,
+        errorCode: "mcp_connect_timeout",
+      }),
       expect.objectContaining({ id: "next", reachable: false, errorCode: "mcp_connect_failed" }),
     ]);
   });
