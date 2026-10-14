@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
+  AesGcmContentCodec,
   InMemoryEventStore,
   migratePostgresConnection,
   migrateSqliteFile,
@@ -18,7 +19,9 @@ import {
   VaultOperationError,
   type VaultAdmin,
   type VaultTerminalRunsQuery,
+  type VaultKeyRotation,
 } from "@harness/vault";
+import type { StoreKeyRotation } from "@harness/store";
 import type { Id, KeysConfig, SecretRef, StoreConfig } from "@harness/schemas";
 import type { RuntimeOverrides } from "./runtime-config.js";
 import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
@@ -48,6 +51,119 @@ export interface ConfiguredVaultOptions {
 export interface ConfiguredVaultAdmin extends VaultAdmin {
   /** Close the vault database and dispose its cached keys. */
   close(): void;
+}
+
+/** Opened rotation adapters and the key provider they share. */
+export interface ConfiguredKeyRotation {
+  /** The configured current key id used for new writes. */
+  readonly currentKeyId: string;
+  /** Selected dedicated vault adapter, when requested. */
+  readonly vault?: VaultKeyRotation & { close(): void };
+  /** Selected event-store adapter, when requested. */
+  readonly store?: StoreKeyRotation & { close(): Promise<void> };
+  /** Close opened databases and zero cached key material. */
+  close(): Promise<void>;
+}
+
+/** Selects which configured stores to open for key rotation maintenance. */
+export interface ConfiguredKeyRotationOptions extends ConfiguredStoreOptions {
+  readonly vault: boolean;
+  readonly store: boolean;
+}
+
+/**
+ * Opens selected configured stores with their old-key read paths for rotation.
+ *
+ * @param config Validated key and event-store configuration.
+ * @param options Store selection, data directory, and secret resolver.
+ * @returns Rotation adapters and a resource cleanup function.
+ */
+export async function openConfiguredKeyRotation(
+  config: { readonly keys?: KeysConfig | undefined; readonly store?: StoreConfig },
+  options: ConfiguredKeyRotationOptions,
+): Promise<ConfiguredKeyRotation> {
+  const keyOptions: RuntimeOverrides =
+    options.secretResolver === undefined ? {} : { secretResolver: options.secretResolver };
+  const keys = await createRuntimeKeys(config.keys, keyOptions);
+  const openedVaults: SqliteVault[] = [];
+  const openedStores: (SqliteEventStore | PostgresEventStore)[] = [];
+  try {
+    let vault: ConfiguredKeyRotation["vault"];
+    if (options.vault) {
+      const dataDir = resolveVaultDataDir(
+        process.env,
+        resolveDataDir(process.env, options.dataDir),
+      );
+      const vaultPath = join(dataDir, "vault.db");
+      if (existsSync(vaultPath)) {
+        const opened = new SqliteVault(vaultPath, keys);
+        openedVaults.push(opened);
+        vault = opened;
+      } else {
+        vault = {
+          reencryptBatch: async () => ({ processed: 0 }),
+          countRowsByKey: async () => [],
+          close: () => undefined,
+        };
+      }
+    }
+
+    let store: ConfiguredKeyRotation["store"];
+    if (options.store) {
+      const storeConfig = config.store ?? {};
+      const codec = new AesGcmContentCodec(keys);
+      if (storeConfig.dialect === "postgres") {
+        const connectionString = await postgresConnectionString(
+          storeConfig,
+          options.secretResolver,
+        );
+        const opened = new PostgresEventStore(
+          connectionString,
+          {},
+          codec,
+          options.clock ?? { now: () => Date.now() },
+        );
+        openedStores.push(opened);
+        store = opened;
+      } else {
+        const databasePath = join(resolveDataDir(process.env, options.dataDir), "harness.db");
+        if (existsSync(databasePath)) {
+          const opened = new SqliteEventStore(databasePath, codec);
+          openedStores.push(opened);
+          store = opened;
+        } else {
+          store = {
+            reencryptBatch: async () => ({ processed: 0 }),
+            countRowsByKey: async () => [],
+            close: async () => undefined,
+          };
+        }
+      }
+    }
+
+    return {
+      currentKeyId: keys.currentKeyId(),
+      ...(vault === undefined ? {} : { vault }),
+      ...(store === undefined ? {} : { store }),
+      close: async () => {
+        try {
+          await Promise.all(openedStores.map((opened) => opened.close()));
+        } finally {
+          for (const opened of openedVaults) {
+            opened.close();
+          }
+          keys.dispose();
+        }
+      },
+    };
+  } catch (error) {
+    await Promise.all(openedStores.map((opened) => opened.close().catch(() => undefined)));
+    for (const opened of openedVaults) {
+      opened.close();
+    }
+    keys.dispose();
+    throw error;
+  }
 }
 
 /** Opens the configured SQLite vault for retention maintenance. */

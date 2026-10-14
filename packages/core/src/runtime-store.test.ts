@@ -3,10 +3,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FakeClock, Id, KeysConfigSchema } from "@harness/schemas";
+import { FakeClock, Id, KeysConfigSchema, type KeyProvider } from "@harness/schemas";
+import { AesGcmContentCodec, SqliteEventStore } from "@harness/store";
 import { SqliteVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openConfiguredVaultAdmin } from "./runtime-store.js";
+import { openConfiguredKeyRotation, openConfiguredVaultAdmin } from "./runtime-store.js";
 
 const runId = Id.parse("A".repeat(26));
 const keys = KeysConfigSchema.parse({
@@ -20,6 +21,33 @@ const keyProvider = {
   currentKeyId: () => "maintenance-test",
   getKey: () => Promise.resolve(new Uint8Array(32).fill(41)),
 };
+const keyA = new Uint8Array(32).fill(51);
+const keyB = new Uint8Array(32).fill(52);
+const rotationKeys = KeysConfigSchema.parse({
+  currentKeyId: "key-b",
+  keys: [
+    { id: "key-a", secret: "env:ROTATION_KEY_A" },
+    { id: "key-b", secret: "env:ROTATION_KEY_B" },
+  ],
+});
+const rotationSecretResolver = {
+  resolve: (ref: string) =>
+    Promise.resolve({
+      reveal: () => Buffer.from(ref.endsWith("_A") ? keyA : keyB).toString("base64"),
+    }),
+};
+
+function provider(currentKeyId: string): KeyProvider {
+  return {
+    currentKeyId: () => currentKeyId,
+    getKey: (keyId) => {
+      const key = keyId === "key-a" ? keyA : keyId === "key-b" ? keyB : undefined;
+      return key === undefined
+        ? Promise.reject(new Error("synthetic unavailable key"))
+        : Promise.resolve(Uint8Array.from(key));
+    },
+  };
+}
 
 let directories: string[] = [];
 
@@ -61,6 +89,108 @@ describe("openConfiguredVaultAdmin", () => {
       [],
     );
     admin.close();
+  });
+
+  describe("openConfiguredKeyRotation", () => {
+    it("opens configured adapters and rotates both stores with the current key", async () => {
+      const directory = await temporaryDirectory();
+      const oldProvider = provider("key-a");
+      const seedVault = new SqliteVault(join(directory, "vault.db"), oldProvider);
+      const token = await seedVault.put(runId, "email", "alice@example.test");
+      seedVault.close();
+      const seedStore = new SqliteEventStore(
+        join(directory, "harness.db"),
+        new AesGcmContentCodec(oldProvider),
+      );
+      const traceId = "a".repeat(32);
+      const spanId = "b".repeat(16);
+      await seedStore.append(
+        runId,
+        [
+          {
+            runId,
+            ts: 1,
+            v: 1,
+            traceId,
+            spanId,
+            segmentId: runId,
+            type: "run_created",
+            configHash: "c".repeat(64),
+            policyVersion: "policy.v1",
+            depth: 0,
+          },
+          {
+            runId,
+            ts: 2,
+            v: 1,
+            traceId,
+            spanId,
+            segmentId: runId,
+            type: "model_request",
+            requestId: runId,
+            provider: "test",
+            model: "test",
+            messages: [{ role: "user", parts: [{ type: "text", text: "synthetic content" }] }],
+          },
+        ],
+        0,
+      );
+      await seedStore.close();
+
+      const rotation = await openConfiguredKeyRotation(
+        { keys: rotationKeys },
+        { dataDir: directory, vault: true, store: true, secretResolver: rotationSecretResolver },
+      );
+      try {
+        expect(rotation.currentKeyId).toBe("key-b");
+        for (const adapter of [rotation.vault, rotation.store]) {
+          if (adapter === undefined) {
+            throw new Error("Expected both configured rotation adapters");
+          }
+          let cursor: string | undefined;
+          do {
+            const batch = await adapter.reencryptBatch({
+              targetKeyId: rotation.currentKeyId,
+              ...(cursor === undefined ? {} : { afterCursor: cursor }),
+            });
+            cursor = batch.nextCursor;
+          } while (cursor !== undefined);
+        }
+        await expect(rotation.vault?.countRowsByKey()).resolves.toEqual([
+          { keyId: "key-b", count: 1 },
+        ]);
+        await expect(rotation.store?.countRowsByKey()).resolves.toEqual([
+          { keyId: "key-b", count: 2 },
+        ]);
+      } finally {
+        await rotation.close();
+      }
+
+      const currentProvider = provider("key-b");
+      const verifyVault = new SqliteVault(join(directory, "vault.db"), currentProvider);
+      const verifyStore = new SqliteEventStore(
+        join(directory, "harness.db"),
+        new AesGcmContentCodec(currentProvider),
+      );
+      try {
+        await expect(verifyVault.resolve(runId, token, { boundary: "ui" })).resolves.toBe(
+          "alice@example.test",
+        );
+        const events: string[] = [];
+        for await (const event of verifyStore.read(runId)) {
+          if (event.type === "model_request") {
+            const text = event.messages[0]?.parts[0];
+            if (text?.type === "text") {
+              events.push(text.text);
+            }
+          }
+        }
+        expect(events).toEqual(["synthetic content"]);
+      } finally {
+        verifyVault.close();
+        await verifyStore.close();
+      }
+    });
   });
 
   it("does not create a database or key when no vault exists", async () => {

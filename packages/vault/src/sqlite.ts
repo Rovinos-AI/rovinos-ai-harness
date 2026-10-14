@@ -5,7 +5,7 @@ import {
   Id,
   KEY_PROVIDER_KEY_BYTES,
   VaultValueEntrySchema,
-  type Code,
+  Code,
   type KeyProvider,
   type VaultValueEntry,
 } from "@harness/schemas";
@@ -14,6 +14,15 @@ import { Token, tokenTypeName, type Token as TokenValue } from "./token.js";
 import { VaultOperationError } from "./errors.js";
 import { decryptSqliteEntry, ENCRYPTION_INFO } from "./sqlite-decrypt.js";
 import { migrateVault, validateReadOnlyVaultMigrations } from "./sqlite-migrations.js";
+import {
+  decodeVaultRotationCursor,
+  encodeVaultRotationCursor,
+  ReencryptBatchResultSchema,
+  VaultKeyRowCountSchema,
+  VaultReencryptBatchInputSchema,
+  type VaultKeyRotation,
+  type VaultReencryptBatchInput,
+} from "./rotate.js";
 import {
   VaultValueError,
   type VaultAdmin,
@@ -35,6 +44,22 @@ interface VaultEntryRow {
   key_id: string;
 }
 
+interface VaultRotationRow extends VaultEntryRow {
+  run_id: string;
+  entity_type: string;
+  lookup_key_id: string;
+}
+
+interface VaultRotationUpdate {
+  runId: Id;
+  token: string;
+  oldKeyId: string;
+  oldLookupKeyId: string;
+  oldValueEnc: string;
+  valueEnc: string;
+  lookup: Buffer;
+}
+
 interface VaultKeys {
   encryption: Uint8Array;
   lookup: Uint8Array;
@@ -45,7 +70,7 @@ interface PutTransactionInput {
   entityType: Code;
   typeName: string;
   rawValue: string;
-  lookup: Buffer;
+  lookups: readonly Buffer[];
   keyId: string;
   keys: VaultKeys;
 }
@@ -115,7 +140,9 @@ function currentKeyId(keyProvider: KeyProvider): string {
 }
 
 /** SQLite-backed encrypted vault isolated in its own database file. */
-export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, VaultAdmin {
+export class SqliteVault
+  implements VaultWriter, VaultResolver, VaultReader, VaultAdmin, VaultKeyRotation
+{
   private readonly db: Database.Database;
 
   /**
@@ -153,9 +180,8 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
   }
 
   /**
-   * Store a trimmed value or reuse its existing run-scoped token.
-   * Lookup uses the current key id, so rotation can issue a second token for the same value.
-   * Task 12.5 must query every active key id or keep the lookup key stable across rotations.
+   * Store a trimmed value or reuse its existing run-scoped token. `lookup_key_id`
+   * records the HMAC key independently so idempotency works across key rotation.
    */
   async put(runId: Id, entityType: Code, raw: string): Promise<TokenValue> {
     const rawValue = raw.trim();
@@ -171,16 +197,39 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     const keyId = currentKeyId(this.keyProvider);
     const keys = await deriveVaultKeys(this.keyProvider, keyId, "vault_encrypt_failed");
     const message = lookupMessage(runId, entityType, normalizedValue);
-    let lookup = Buffer.alloc(0);
+    const lookups: Buffer[] = [];
 
     try {
-      lookup = Buffer.from(hmacSha256(keys.lookup, message));
+      const referencedKeyIds = this.db
+        .prepare<[], { lookup_key_id: string }>(
+          "SELECT DISTINCT lookup_key_id FROM vault_entries ORDER BY lookup_key_id",
+        )
+        .all()
+        .map(({ lookup_key_id }) => lookup_key_id);
+      const keyIds = Array.from(new Set([keyId, ...referencedKeyIds]));
+      for (const lookupKeyId of keyIds) {
+        if (lookupKeyId === keyId) {
+          lookups.push(Buffer.from(hmacSha256(keys.lookup, message)));
+          continue;
+        }
+        const historicalKeys = await deriveVaultKeys(
+          this.keyProvider,
+          lookupKeyId,
+          "vault_encrypt_failed",
+        );
+        try {
+          lookups.push(Buffer.from(hmacSha256(historicalKeys.lookup, message)));
+        } finally {
+          historicalKeys.encryption.fill(0);
+          historicalKeys.lookup.fill(0);
+        }
+      }
       return this.putTransaction({
         runId,
         entityType,
         typeName,
         rawValue,
-        lookup,
+        lookups,
         keyId,
         keys,
       });
@@ -196,7 +245,9 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
       keys.encryption.fill(0);
       keys.lookup.fill(0);
       message.fill(0);
-      lookup.fill(0);
+      for (const lookup of lookups) {
+        lookup.fill(0);
+      }
     }
   }
 
@@ -333,6 +384,157 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     }
   }
 
+  /** {@inheritDoc VaultKeyRotation.reencryptBatch} */
+  async reencryptBatch(input: VaultReencryptBatchInput) {
+    const { targetKeyId, limit, afterCursor } = VaultReencryptBatchInputSchema.parse(input);
+    const cursor =
+      afterCursor === undefined ? undefined : decodeVaultRotationCursor(afterCursor);
+    const rows = this.db
+      .prepare<
+        [string, string, string | null, string | null, string | null, string, number],
+        VaultRotationRow
+      >(
+        `SELECT run_id, token, entity_type, value_enc, key_id, lookup_key_id
+         FROM vault_entries
+         WHERE (key_id != ? OR lookup_key_id != ?)
+           AND (? IS NULL OR run_id > ? OR (run_id = ? AND token > ?))
+         ORDER BY run_id, token
+         LIMIT ?`,
+      )
+      .all(
+        targetKeyId,
+        targetKeyId,
+        cursor?.runId ?? null,
+        cursor?.runId ?? null,
+        cursor?.runId ?? null,
+        cursor?.token ?? "",
+        limit + 1,
+      );
+    const selected = rows.slice(0, limit);
+    const targetKeys = await deriveVaultKeys(
+      this.keyProvider,
+      targetKeyId,
+      "vault_encrypt_failed",
+    );
+    const updates: VaultRotationUpdate[] = [];
+    try {
+      for (const row of selected) {
+        const runId = Id.parse(row.run_id);
+        const entityType = Code.parse(row.entity_type);
+        const rawValue = await this.decryptEntry(runId, {
+          token: row.token,
+          value_enc: row.value_enc,
+          key_id: row.key_id,
+        });
+        const normalizedValue = normalize(entityType, rawValue);
+        const plaintext = Buffer.from(rawValue, "utf8");
+        let encrypted: Uint8Array | undefined;
+        const message = lookupMessage(runId, entityType, normalizedValue);
+        let lookup: Buffer | undefined;
+        try {
+          encrypted = aesGcmEncrypt(
+            targetKeys.encryption,
+            plaintext,
+            Buffer.from(`${runId}:${row.token}`, "utf8"),
+          );
+          lookup = Buffer.from(hmacSha256(targetKeys.lookup, message));
+          updates.push({
+            runId,
+            token: row.token,
+            oldKeyId: row.key_id,
+            oldLookupKeyId: row.lookup_key_id,
+            oldValueEnc: row.value_enc,
+            valueEnc: Buffer.from(encrypted).toString("base64"),
+            lookup,
+          });
+          lookup = undefined;
+        } finally {
+          plaintext.fill(0);
+          encrypted?.fill(0);
+          message.fill(0);
+          lookup?.fill(0);
+        }
+      }
+    } catch (error) {
+      for (const update of updates) {
+        update.lookup.fill(0);
+      }
+      if (error instanceof VaultOperationError) {
+        throw error;
+      }
+      throw new VaultOperationError("vault_encrypt_failed");
+    } finally {
+      targetKeys.encryption.fill(0);
+      targetKeys.lookup.fill(0);
+    }
+
+    try {
+      const rotate = this.db.transaction(() => {
+        const update = this.db.prepare(
+          `UPDATE vault_entries
+           SET value_enc = ?, key_id = ?, lookup = ?, lookup_key_id = ?
+           WHERE run_id = ? AND token = ? AND key_id = ? AND lookup_key_id = ? AND value_enc = ?`,
+        );
+        return updates.reduce(
+          (processed, row) =>
+            processed +
+            update.run(
+              row.valueEnc,
+              targetKeyId,
+              row.lookup,
+              targetKeyId,
+              row.runId,
+              row.token,
+              row.oldKeyId,
+              row.oldLookupKeyId,
+              row.oldValueEnc,
+            ).changes,
+          0,
+        );
+      });
+      const processed = rotate.immediate();
+      const last = selected.at(-1);
+      const nextCursor =
+        rows.length > limit && last !== undefined
+          ? encodeVaultRotationCursor({ runId: last.run_id, token: last.token })
+          : undefined;
+      return ReencryptBatchResultSchema.parse({
+        processed,
+        ...(nextCursor === undefined ? {} : { nextCursor }),
+      });
+    } catch {
+      throw new VaultOperationError("vault_unavailable");
+    } finally {
+      for (const update of updates) {
+        update.lookup.fill(0);
+      }
+    }
+  }
+
+  /** Count rows that still need each encryption or lookup key. */
+  countRowsByKey(): Promise<readonly { keyId: string; count: number }[]> {
+    try {
+      const rows = this.db
+        .prepare<[], { key_id: string; count: number }>(
+          `SELECT key_id, COUNT(*) AS count
+           FROM (
+             SELECT key_id, run_id, token FROM vault_entries
+             UNION
+             SELECT lookup_key_id AS key_id, run_id, token FROM vault_entries
+           )
+           GROUP BY key_id ORDER BY key_id`,
+        )
+        .all();
+      return Promise.resolve(
+        rows.map(({ key_id, count }) =>
+          VaultKeyRowCountSchema.parse({ keyId: key_id, count }),
+        ),
+      );
+    } catch {
+      return Promise.reject(new VaultOperationError("vault_unavailable"));
+    }
+  }
+
   /** Close the dedicated SQLite connection. */
   close(): void {
     this.db.close();
@@ -343,16 +545,21 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
     entityType,
     typeName,
     rawValue,
-    lookup,
+    lookups,
     keyId,
     keys,
   }: PutTransactionInput): TokenValue {
     const put = this.db.transaction(() => {
-      const existing = this.db
-        .prepare<[Id, Code, Buffer], { token: string }>(
+      const findExisting = this.db.prepare<[Id, Code, Buffer], { token: string }>(
           "SELECT token FROM vault_entries WHERE run_id = ? AND entity_type = ? AND lookup = ?",
-        )
-        .get(runId, entityType, lookup);
+        );
+      let existing: { token: string } | undefined;
+      for (const lookup of lookups) {
+        existing = findExisting.get(runId, entityType, lookup);
+        if (existing !== undefined) {
+          break;
+        }
+      }
       if (existing !== undefined) {
         const token = Token.safeParse(existing.token);
         if (!token.success) {
@@ -387,7 +594,7 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
           runId,
           entityType,
           token: token.data,
-          lookup,
+          lookup: lookups[0] ?? Buffer.alloc(0),
           encrypted,
           keyId,
         });
@@ -411,7 +618,7 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
   }: InsertEntryInput): void {
     this.db
       .prepare(
-        "INSERT INTO vault_entries (run_id, token, entity_type, lookup, value_enc, key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO vault_entries (run_id, token, entity_type, lookup, value_enc, key_id, lookup_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         runId,
@@ -419,6 +626,7 @@ export class SqliteVault implements VaultWriter, VaultResolver, VaultReader, Vau
         entityType,
         lookup,
         Buffer.from(encrypted).toString("base64"),
+        keyId,
         keyId,
         this.now(),
       );

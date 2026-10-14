@@ -24,6 +24,20 @@ environment variable or secret store; the command never writes files. `--help` i
 storage guidance. In `--json` mode the key and storage instructions are returned as one
 `KeyGenerateResultSchema` document. Treat either output format as secret material.
 
+## `harness keys rotate` and `harness keys retire`
+
+Set `keys.currentKeyId` to the new key before rotating so new writes use the target key. Keep the
+old key configured and readable until the rotation and retirement check finish.
+`harness keys rotate --to <keyId>` re-encrypts the vault and event store in resumable batches of up to
+500 rows; `--vault` or `--store` selects only that adapter, and omitting both selects both. Running
+the command again is safe: rows already using the target key are skipped. The command reports only
+processed row counts. Its JSON result is validated by `KeyRotationResultSchema`.
+
+`harness keys retire <keyId>` checks both stores and fails with `key_in_use` while any encrypted
+content or vault lookup still references that key. On success, remove the key reference from
+configuration; the command does not edit configuration or delete external secret material. The
+current key cannot be retired.
+
 ## `harness healthcheck`
 
 `harness healthcheck` checks that the configured local data and vault directories exist, are

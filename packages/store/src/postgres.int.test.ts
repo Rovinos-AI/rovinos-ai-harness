@@ -154,6 +154,76 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
 
+it("resumes Postgres event and snapshot rotation without interrupting reads", async () => {
+  const { admin, schema } = await createSchema();
+  let currentKeyId = "key-a";
+  const rotationKeys = new Map([
+    ["key-a", new Uint8Array(32).fill(61)],
+    ["key-b", new Uint8Array(32).fill(62)],
+  ]);
+  const rotationProvider: KeyProvider = {
+    currentKeyId: () => currentKeyId,
+    getKey: (keyId) => {
+      const key = rotationKeys.get(keyId);
+      return key === undefined
+        ? Promise.reject(Object.assign(new Error("Synthetic key not found"), { code: "key_not_found" }))
+        : Promise.resolve(Uint8Array.from(key));
+    },
+  };
+  const store = new PostgresEventStore(
+    connectionString,
+    { schema },
+    new AesGcmContentCodec(rotationProvider),
+  );
+  stores.add(store);
+  const runId = schemaIds.nextRunId();
+  const snapshotId = schemaIds.nextRunId();
+  const snapshot = schemaIds.snapshot(runId, snapshotId, 1);
+  try {
+    await store.appendWithSnapshot(
+      runId,
+      [
+        schemaIds.runCreated(runId),
+        schemaIds.modelRequest(runId, "synthetic rotation content"),
+        schemaIds.checkpointWritten(runId, snapshotId, 1),
+      ],
+      0,
+      snapshot,
+    );
+    currentKeyId = "key-b";
+    const first = await store.reencryptBatch({ targetKeyId: currentKeyId, limit: 1 });
+    expect(first.processed).toBe(1);
+    expect(first.nextCursor).toBeDefined();
+    await expect(store.countRowsByKey()).resolves.toContainEqual({
+      keyId: "key-a",
+      count: 3,
+    });
+    const events: string[] = [];
+    for await (const event of store.read(runId)) {
+      if (event.type === "model_request") {
+        events.push(event.messages[0]?.parts[0]?.type === "text" ? event.messages[0].parts[0].text : "");
+      }
+    }
+    expect(events).toEqual(["synthetic rotation content"]);
+
+    let cursor = first.nextCursor;
+    while (cursor !== undefined) {
+      const batch = await store.reencryptBatch({
+        targetKeyId: currentKeyId,
+        limit: 1,
+        afterCursor: cursor,
+      });
+      cursor = batch.nextCursor;
+    }
+
+    await expect(store.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 4 }]);
+    await expect(store.latestSnapshot(runId)).resolves.toEqual(snapshot);
+  } finally {
+    await closeStore(store);
+    await dropSchema(admin, schema);
+  }
+});
+
 it("reads persisted v1 approval resolutions that predate decidedBy", async () => {
   const { admin, schema } = await createSchema();
   const raw = new Pool({

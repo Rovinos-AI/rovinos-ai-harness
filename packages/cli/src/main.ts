@@ -72,6 +72,13 @@ export function createDefaultContext(program: Command, out: Output): CliContext 
         secretResolver: overrides?.secretResolver ?? secretResolver,
       });
     },
+    openKeyRotation: async (config, selection) => {
+      const { openConfiguredKeyRotation } = await import("@harness/core");
+      return openConfiguredKeyRotation(config, {
+        ...selection,
+        secretResolver,
+      });
+    },
   };
 }
 

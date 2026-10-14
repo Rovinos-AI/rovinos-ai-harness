@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Command } from "commander";
 import type { HarnessConfig } from "@harness/config";
-import type { Runtime, RuntimeOverrides, ToolPort } from "@harness/core";
+import type {
+  ConfiguredKeyRotation,
+  Runtime,
+  RuntimeOverrides,
+  ToolPort,
+} from "@harness/core";
 import type { AuditingVaultResolver } from "@harness/vault";
 import type { Output } from "./output.js";
 
@@ -45,6 +50,15 @@ export interface CliContext {
   ): Promise<CliVaultResolver | undefined> | CliVaultResolver | undefined;
   /** Supplies the PII-aware tool port used to validate approval edits. */
   createToolPort?(config: HarnessConfig): Promise<ToolPort | undefined> | ToolPort | undefined;
+  /** Opens configured maintenance adapters for key rotation and retirement. */
+  openKeyRotation?(
+    config: HarnessConfig,
+    selection: { readonly vault: boolean; readonly store: boolean },
+  ): Promise<ConfiguredKeyRotation>;
+  /** Receives metadata-only key-rotation completion counts. */
+  keyRotationLogger?: {
+    info(event: "keys_rotated", fields: { readonly vault: number; readonly store: number }): void;
+  };
 }
 
 /** A lazily supplied command registration unit for the harness CLI. */

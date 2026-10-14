@@ -54,6 +54,59 @@ runVaultConformance("SqliteVault conformance", () => {
 });
 
 describe("SqliteVault", () => {
+  it("resumes batched key rotation, keeps reads available, and preserves lookup idempotency", async () => {
+    let currentKeyId = "key-a";
+    const rotationKeys = new Map([
+      ["key-a", new Uint8Array(32).fill(31)],
+      ["key-b", new Uint8Array(32).fill(32)],
+    ]);
+    const rotatingProvider: KeyProvider = {
+      currentKeyId: () => currentKeyId,
+      getKey: (id) => {
+        const key = rotationKeys.get(id);
+        return key === undefined
+          ? Promise.reject(new Error("synthetic unavailable key"))
+          : Promise.resolve(Uint8Array.from(key));
+      },
+    };
+    const vault = new SqliteVault(":memory:", rotatingProvider);
+    const first = await vault.put(runId, "email", "alice@example.test");
+    const second = await vault.put(runId, "email", "bob@example.test");
+    const third = await vault.put(runId, "email", "carol@example.test");
+    currentKeyId = "key-b";
+
+    const interrupted = await vault.reencryptBatch({ targetKeyId: currentKeyId, limit: 1 });
+    expect(interrupted).toMatchObject({ processed: 1 });
+    expect(interrupted.nextCursor).toBeDefined();
+    await expect(vault.resolve(runId, first, { boundary: "ui" })).resolves.toBe(
+      "alice@example.test",
+    );
+    await expect(vault.put(runId, "email", "alice@example.test")).resolves.toBe(first);
+    await expect(vault.put(runId, "email", "dana@example.test")).resolves.toBe("<EMAIL_4>");
+
+    let cursor = interrupted.nextCursor;
+    while (cursor !== undefined) {
+      const batch = await vault.reencryptBatch({
+        targetKeyId: currentKeyId,
+        limit: 1,
+        afterCursor: cursor,
+      });
+      cursor = batch.nextCursor;
+    }
+
+    await expect(vault.resolve(runId, second, { boundary: "ui" })).resolves.toBe(
+      "bob@example.test",
+    );
+    await expect(vault.resolve(runId, third, { boundary: "ui" })).resolves.toBe(
+      "carol@example.test",
+    );
+    await expect(vault.countRowsByKey()).resolves.toEqual([{ keyId: "key-b", count: 4 }]);
+    await expect(vault.reencryptBatch({ targetKeyId: currentKeyId })).resolves.toEqual({
+      processed: 0,
+    });
+    vault.close();
+  });
+
   it("satisfies the telemetry read-only reader interface", () => {
     const memoryReader: VaultRunReader = new InMemoryVault();
     const sqliteVault = new SqliteVault(":memory:", keyProvider);
