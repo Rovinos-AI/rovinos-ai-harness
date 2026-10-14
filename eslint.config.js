@@ -364,11 +364,9 @@ const configuration = [
       "no-restricted-properties": ["error", ...restrictedProperties, ...domProperties],
     },
   },
-  browserTypeOnlyImportConfiguration(
-    restrictedImports()[1].patterns,
-    "@harness/schemas",
-    ["packages/app-telemetry/src/**"],
-  ),
+  browserTypeOnlyImportConfiguration(restrictedImports()[1].patterns, "@harness/schemas", [
+    "packages/app-telemetry/src/**",
+  ]),
   {
     files: testFiles,
     plugins: { vitest },
