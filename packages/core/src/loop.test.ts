@@ -28,6 +28,7 @@ import {
   SequentialIdGenerator,
   HarnessError,
   Traceparent,
+  UNREGISTERED_TOOL_ID,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
 import {
@@ -2253,7 +2254,7 @@ describe("runLoop", () => {
     expect(result.events).toContainEqual(
       expect.objectContaining({
         type: "tool_intent",
-        toolId: "unknown_tool",
+        toolId: UNREGISTERED_TOOL_ID,
         idempotent: false,
         policyDecision: "deny",
       }),
@@ -2261,9 +2262,17 @@ describe("runLoop", () => {
     expect(result.events).toContainEqual(
       expect.objectContaining({
         type: "tool_result",
-        toolId: "unknown_tool",
+        toolId: UNREGISTERED_TOOL_ID,
         outcome: "denied",
         errorCode: "unknown_tool",
+      }),
+    );
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        type: "model_response",
+        content: expect.arrayContaining([
+          expect.objectContaining({ type: "tool_call", toolId: UNREGISTERED_TOOL_ID }),
+        ]),
       }),
     );
   });
