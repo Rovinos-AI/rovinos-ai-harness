@@ -2,14 +2,14 @@
 import {
   Client,
   specTypeSchemas,
+  type CallToolRequest,
   type CallToolRequestOptions,
   type CallToolResult,
   type Transport,
 } from "@modelcontextprotocol/client";
-import { trace } from "@opentelemetry/api";
 import { compileJsonSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
 import { McpConnectionError, isConnectionLossError } from "./errors.js";
-import { buildRequestMeta } from "./trace-injection.js";
+import { buildActiveRequestMeta } from "./trace-injection.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
 import { createMcpTransport, type McpLogger } from "./transports.js";
 
@@ -342,18 +342,13 @@ export class McpConnection {
 
   /**
    * Validates tool arguments before network I/O and calls the remote tool.
-   *
-   * @param params - Native tool name and arguments.
+   * @param params - Native tool name, arguments, and optional request metadata.
    * @param inputSchema - Untrusted JSON Schema supplied by the tool registry.
    * @param options - SDK request options such as the cancellation signal.
    * @returns The remote tool result.
    */
   async callTool(
-    params: {
-      readonly name: string;
-      readonly arguments?: Record<string, unknown>;
-      readonly _meta?: Record<string, unknown>;
-    },
+    params: CallToolRequest["params"],
     inputSchema: unknown,
     options?: CallToolRequestOptions,
   ): Promise<CallToolResult> {
@@ -389,26 +384,18 @@ export class McpConnection {
   }
 
   async #invoke(
-    params: {
-      readonly name: string;
-      readonly arguments?: Record<string, unknown>;
-      readonly _meta?: Record<string, unknown>;
-    },
+    params: CallToolRequest["params"],
     options?: CallToolRequestOptions,
   ): Promise<CallToolResult> {
     const client = this.#client;
     if (client === undefined || this.#state !== "ready") {
       throw new McpConnectionError("mcp_connection_lost");
     }
-    const requestMeta = buildRequestMeta({
-      server: this.#config,
-      spanContext: trace.getActiveSpan()?.spanContext(),
-      ...(params._meta === undefined ? {} : { existingMeta: params._meta }),
-    });
+    const { _meta: existingMeta, ...callParams } = params;
+    const requestMeta = buildActiveRequestMeta(this.#config, existingMeta);
     return client.callTool(
       {
-        name: params.name,
-        ...(params.arguments === undefined ? {} : { arguments: params.arguments }),
+        ...callParams,
         ...(requestMeta === undefined ? {} : { _meta: requestMeta }),
       },
       {

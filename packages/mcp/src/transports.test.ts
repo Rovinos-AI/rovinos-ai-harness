@@ -51,23 +51,45 @@ describe("MCP transports", () => {
         readonly params?: Record<string, unknown>;
       };
     }
+    function isRecord(value: unknown): value is Record<string, unknown> {
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    }
     const requests: CapturedRequest[] = [];
-    const fetch: typeof globalThis.fetch = async (_input, init) => {
-      const body: CapturedRequest["body"] = JSON.parse(String(init?.body));
+    const fetch: typeof globalThis.fetch = (_input, init) => {
+      const requestText = typeof init?.body === "string" ? init.body : "";
+      const parsedBody: unknown = JSON.parse(requestText);
+      const request = isRecord(parsedBody) ? parsedBody : {};
+      const body: CapturedRequest["body"] = {
+        ...(typeof request.id === "string" || typeof request.id === "number"
+          ? { id: request.id }
+          : {}),
+        ...(typeof request.method === "string" ? { method: request.method } : {}),
+        ...(isRecord(request.params) ? { params: request.params } : {}),
+      };
       requests.push({ headers: new Headers(init?.headers), body });
-      const result =
-        body.method === "initialize"
-          ? {
+      if (body.method === "initialize") {
+        return Promise.resolve(
+          Response.json({
+            jsonrpc: "2.0",
+            id: body.id ?? 0,
+            result: {
               protocolVersion: "2025-11-25",
               capabilities: { tools: {} },
               serverInfo: { name: "http-test", version: "1.0.0" },
-            }
-          : body.method === "tools/call"
-            ? { content: [{ type: "text", text: "called" }] }
-            : undefined;
-      return result === undefined
-        ? new Response(null, { status: 202 })
-        : Response.json({ jsonrpc: "2.0", id: body.id ?? 0, result });
+            },
+          }),
+        );
+      }
+      if (body.method === "tools/call") {
+        return Promise.resolve(
+          Response.json({
+            jsonrpc: "2.0",
+            id: body.id ?? 0,
+            result: { content: [{ type: "text", text: "called" }] },
+          }),
+        );
+      }
+      return Promise.resolve(new Response(null, { status: 202 }));
     };
     const spanContext = {
       traceId: "a".repeat(32),
@@ -75,14 +97,8 @@ describe("MCP transports", () => {
       traceFlags: 1,
     };
     const span = trace.getTracer("mcp-test").startSpan("mcp.call");
-    const activeSpan = new Proxy(span, {
-      get(target, property, receiver) {
-        return property === "spanContext"
-          ? () => spanContext
-          : Reflect.get(target, property, receiver);
-      },
-    });
-    const activeSpanSpy = vi.spyOn(trace, "getActiveSpan").mockReturnValue(activeSpan);
+    const spanContextSpy = vi.spyOn(span, "spanContext").mockReturnValue(spanContext);
+    const activeSpanSpy = vi.spyOn(trace, "getActiveSpan").mockReturnValue(span);
     vi.stubGlobal("fetch", fetch);
     const config = ServerConfigSchema.parse({
       id: "http_test",
@@ -114,6 +130,7 @@ describe("MCP transports", () => {
       await connection.close();
       span.end();
       activeSpanSpy.mockRestore();
+      spanContextSpy.mockRestore();
       vi.unstubAllGlobals();
     }
   });

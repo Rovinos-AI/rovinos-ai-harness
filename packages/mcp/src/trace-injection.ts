@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { diag, isSpanContextValid, type SpanContext } from "@opentelemetry/api";
+import { diag, isSpanContextValid, trace, type SpanContext } from "@opentelemetry/api";
 import type { ServerConfig } from "@harness/schemas";
 
 const MAX_TRACE_STATE_LENGTH = 512;
@@ -43,4 +43,16 @@ export function buildRequestMeta(input: {
 
   meta.traceparent = traceparent;
   return meta;
+}
+
+/** Builds request metadata from the currently active call span. */
+export function buildActiveRequestMeta(
+  server: ServerConfig,
+  existingMeta?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  return buildRequestMeta({
+    server,
+    spanContext: trace.getActiveSpan()?.spanContext(),
+    ...(existingMeta === undefined ? {} : { existingMeta }),
+  });
 }

@@ -420,15 +420,9 @@ describe("McpConnection", () => {
       traceFlags: 1,
     };
     const span = trace.getTracer("mcp-test").startSpan("mcp.call");
-    const activeSpan = new Proxy(span, {
-      get(target, property, receiver) {
-        return property === "spanContext"
-          ? () => spanContext
-          : Reflect.get(target, property, receiver);
-      },
-    });
-    const activeSpanSpy = vi.spyOn(trace, "getActiveSpan").mockReturnValue(activeSpan);
-    const receivedMeta: Array<Record<string, unknown> | undefined> = [];
+    const spanContextSpy = vi.spyOn(span, "spanContext").mockReturnValue(spanContext);
+    const activeSpanSpy = vi.spyOn(trace, "getActiveSpan").mockReturnValue(span);
+    const receivedMeta: (Record<string, unknown> | undefined)[] = [];
     const peer = await createMemoryPeer({
       onCall: (_transport, params) => {
         receivedMeta.push(params._meta);
@@ -466,11 +460,12 @@ describe("McpConnection", () => {
       await peer.serverTransport.close();
       span.end();
       activeSpanSpy.mockRestore();
+      spanContextSpy.mockRestore();
     }
   });
 
   it("does not send trace keys to an external server even if present in request metadata", async () => {
-    const receivedMeta: Array<Record<string, unknown> | undefined> = [];
+    const receivedMeta: (Record<string, unknown> | undefined)[] = [];
     const peer = await createMemoryPeer({
       onCall: (_transport, params) => {
         receivedMeta.push(params._meta);
