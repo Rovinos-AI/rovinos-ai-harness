@@ -77,6 +77,41 @@ services:
       retries: 10
     networks:
       - sandbox
+  sandbox-egress-proxy:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.sandbox
+    image: ${HARNESS_SANDBOX_IMAGE:-harness-sandbox:local}
+    profiles:
+      - sandbox-egress
+    entrypoint: ["node", "packages/sandbox/dist/egress-proxy/src/proxy.js"]
+    environment:
+      SANDBOX_EGRESS_ALLOW: ${SANDBOX_EGRESS_ALLOW:-[]}
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 1.0
+    user: "10002:10002"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const socket=require('node:net').connect({host:'127.0.0.1',port:3128}); socket.once('connect',()=>{socket.end();process.exit(0)}).once('error',()=>process.exit(1))"
+      interval: 2s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+    networks:
+      - sandbox-egress
+      - egress
   otel-collector:
     image: ${OTEL_COLLECTOR_IMAGE:?Set OTEL_COLLECTOR_IMAGE in infra/collector/VERSION}
     command:
@@ -105,6 +140,8 @@ networks:
   internal:
     internal: true
   sandbox:
+    internal: true
+  sandbox-egress:
     internal: true
   egress: {}
 volumes:

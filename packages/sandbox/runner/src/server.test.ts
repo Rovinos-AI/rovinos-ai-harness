@@ -253,6 +253,26 @@ describe("runner HTTP request handler", () => {
     expect(execute).toHaveBeenCalledWith(runId, spec, expect.any(AbortSignal));
   });
 
+  it("injects the configured proxy into child environments without inheriting it by default", async () => {
+    const execute = vi.fn((_runId: typeof runId, _spec: ExecSpec) => Promise.resolve(result));
+    const handler = createRunnerRequestHandler(
+      makeOptions({ execute, proxyUrl: "http://sandbox-egress-proxy:3128" }),
+    );
+    const response = await call(
+      handler,
+      makeRequest({ authorization: "Bearer " + token, body: makePayload() }),
+    );
+    const executedSpec = execute.mock.calls[0]?.[1];
+    expect(response.status).toBe(200);
+    expect(executedSpec?.env).toEqual({
+      HTTP_PROXY: "http://sandbox-egress-proxy:3128",
+      HTTPS_PROXY: "http://sandbox-egress-proxy:3128",
+    });
+    expect(() => createRunnerRequestHandler(makeOptions({ proxyUrl: "file:///tmp/proxy" }))).toThrow(
+      RunnerConfigurationError,
+    );
+  });
+
   it("rejects overlapping executions with a busy response", async () => {
     let releaseExecution: (value: ExecResult) => void = () => undefined;
     let markStarted: () => void = () => undefined;

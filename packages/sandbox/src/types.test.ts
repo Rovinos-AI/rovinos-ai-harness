@@ -67,6 +67,10 @@ describe("sandbox execution contracts", () => {
   it("rejects loader and interpreter startup environment variables with a closed code", () => {
     for (const key of [
       "PATH",
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "ALL_PROXY",
+      "NO_PROXY",
       "LD_PRELOAD",
       "LD_LIBRARY_PATH",
       "DYLD_INSERT_LIBRARIES",

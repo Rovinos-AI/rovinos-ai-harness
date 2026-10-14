@@ -73,6 +73,20 @@ SANDBOX_RUNNER_TOKEN="$(cat /secure/sandbox-runner-token)" \
 
 `limits.outputBytes` also limits the maximum size of any file written by a command through its file-size resource limit; this coupling remains until task 19.5 adds per-run workspace quotas. The runner's per-run workspace isolation is also deferred to task 19.5. The `sandbox.runner` setting is not yet wired into `core.createRuntime`; task #385 (2.15) tracks that integration.
 
+### Sandbox egress
+
+Runner egress is denied unless an exact destination allowlist is configured. Each entry pairs one host with one or more ports; wildcards, private IP literals, and destinations resolving to loopback, link-local, private, unique-local, or multicast addresses are rejected by the proxy.
+
+```yaml
+sandbox:
+  egress:
+    allow:
+      - host: api.example.com
+        ports: [443]
+```
+
+The sandbox Compose profile remains offline by default. To enable the proxy, provide the same allowlist as JSON in `SANDBOX_EGRESS_ALLOW` and include `infra/compose/docker-compose.egress.yml` with the base Compose file, activating both `sandbox` and `sandbox-egress` profiles. The overlay connects the runner to the internal proxy-only network and injects `HTTP_PROXY` and `HTTPS_PROXY` into exec children. The runner has no external network attachment; direct connections do not use the proxy's egress route. See [Sandbox egress](sandbox-egress.md) for the complete setup and security behavior.
+
 Key versions are configured under `keys`. Each key must be a base64-encoded 32-byte secret reference. Keep old versions configured while stored content still uses them; new content uses `currentKeyId`.
 
 ```yaml

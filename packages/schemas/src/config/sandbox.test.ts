@@ -23,6 +23,26 @@ describe("SandboxConfigSchema", () => {
     });
   });
 
+  it("accepts a strict egress allowlist and rejects wildcard hosts or invalid ports", () => {
+    expect(
+      SandboxConfigSchema.parse({
+        egress: { allow: [{ host: "api.example.test", ports: [443, 8443] }] },
+      }),
+    ).toEqual({
+      egress: { allow: [{ host: "api.example.test", ports: [443, 8443] }] },
+    });
+    expect(
+      SandboxConfigSchema.safeParse({
+        egress: { allow: [{ host: "*.example.test", ports: [443] }] },
+      }).success,
+    ).toBe(false);
+    expect(
+      SandboxConfigSchema.safeParse({
+        egress: { allow: [{ host: "api.example.test", ports: [0] }] },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects inline runner tokens and unknown runner settings", () => {
     expect(
       SandboxConfigSchema.safeParse({

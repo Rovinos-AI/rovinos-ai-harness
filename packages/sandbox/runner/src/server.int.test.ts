@@ -230,6 +230,8 @@ describe("sandbox runner Compose service", () => {
     ).toBe(false);
     expect(config.networks.sandbox?.internal).toBe(true);
     expect(Object.keys(runner?.networks ?? {})).toEqual(["sandbox"]);
+    expect(runner?.environment?.SANDBOX_EGRESS_ALLOW).toBeUndefined();
+    expect(runner?.environment?.SANDBOX_EGRESS_PROXY_URL).toBeUndefined();
     expect(runner?.read_only).toBe(true);
     expect(runner?.user).toBe("0:0");
     expect(runner?.entrypoint).toContain(`--reuid=${String(integrationUid)}`);
@@ -245,6 +247,23 @@ describe("sandbox runner Compose service", () => {
     const result = await runExec(makeSpec(["/bin/echo", "runner-ready"]));
 
     expect(result).toMatchObject({ exitCode: 0, stdout: "runner-ready\n" });
+  });
+
+  // threat: T-05
+  // threat: T-06
+  it("cannot connect directly to external or metadata destinations without an egress profile", async () => {
+    const script = [
+      'const net = require("node:net");',
+      'const probe = (host, port) => new Promise((resolve) => {',
+      '  const socket = net.connect({ host, port }); let done = false;',
+      '  const finish = (connected) => { if (!done) { done = true; socket.destroy(); resolve(connected); } };',
+      '  socket.setTimeout(750, () => finish(false)); socket.once("connect", () => finish(true)); socket.once("error", () => finish(false));',
+      '});',
+      'Promise.all([probe("1.1.1.1", 443), probe("169.254.169.254", 80)]).then((results) => process.stdout.write(JSON.stringify(results)));',
+    ].join("\n");
+    const result = await runExec(makeSpec(["node", "-e", script]));
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("[false,false]");
   });
 
   // threat: T-02
