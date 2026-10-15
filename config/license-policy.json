@@ -51,6 +51,24 @@
       "package": "@cspell/dict-en-common-misspellings",
       "reason": "CSpell's bundled English dictionary dependency; required by its default dictionaries.",
       "expires": "2027-10-08"
+    },
+    {
+      "package": "@modelcontextprotocol/inspector",
+      "version": "2.10.1",
+      "reason": "Pinned dev-only MCP conformance CLI has mixed upstream license metadata and an accompanying mixed-license notice.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 transitive dependency of the pinned dev-only MCP Inspector package.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss-linux-x64-gnu",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
+      "expires": "2027-10-14"
     }
   ]
 }
