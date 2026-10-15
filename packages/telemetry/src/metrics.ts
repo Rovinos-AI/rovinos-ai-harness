@@ -73,6 +73,7 @@ export const METRIC_ALLOWLIST = {
   "harness.model.tokens": ["harness.model.provider", "harness.model.name"],
   "harness.model.cost_micros": ["harness.model.provider", "harness.model.name"],
   "harness.policy.decisions": ["harness.policy.decision"],
+  "harness.pii.blob_hit": [],
   "harness.sentinel.scope_reduced": [],
   "harness.sentinel.short_values_skipped": [],
   "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
@@ -82,6 +83,7 @@ export const METRIC_ALLOWLIST = {
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
 let hostAppRejectedCounter: Counter<HostAppRejectedAttributes> | undefined;
 let policyDecisionsCounter: Counter<PolicyDecisionAttributes> | undefined;
+let piiBlobHitCounter: Counter<NoMetricAttributes> | undefined;
 let hostAppSpansAcceptedCounter: Counter<NoMetricAttributes> | undefined;
 let skippedShortValuesCounter: Counter<NoMetricAttributes> | undefined;
 let scopeReducedCounter: Counter<NoMetricAttributes> | undefined;
@@ -120,6 +122,13 @@ function getPolicyDecisionsCounter(): Counter<PolicyDecisionAttributes> {
     (meter, name) => meter.createCounter<PolicyDecisionAttributes>(name),
   );
   return policyDecisionsCounter;
+}
+
+function getPiiBlobHitCounter(): Counter<NoMetricAttributes> {
+  piiBlobHitCounter ??= createCounter<NoMetricAttributes>("harness.pii.blob_hit", (meter, name) =>
+    meter.createCounter<NoMetricAttributes>(name),
+  );
+  return piiBlobHitCounter;
 }
 
 function getHostAppSpansAcceptedCounter(): Counter<NoMetricAttributes> {
@@ -208,6 +217,15 @@ export function countHostAppRejected(reason: HostAppRejectedReason): void {
 export function countPolicyDecision(decision: PolicyDecision): void {
   try {
     getPolicyDecisionsCounter().add(1, { "harness.policy.decision": decision });
+  } catch {
+    return;
+  }
+}
+
+/** Counts one opaque provider blob that contains detected sensitive content. */
+export function countPiiBlobHit(): void {
+  try {
+    getPiiBlobHitCounter().add(1);
   } catch {
     return;
   }

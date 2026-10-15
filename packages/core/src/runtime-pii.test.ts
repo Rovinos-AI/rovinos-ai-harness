@@ -7,15 +7,19 @@ import {
   Code,
   Id,
   KeysConfigSchema,
+  ModelsConfigSchema,
   PiiConfigSchema,
   RunConfigSchema,
+  type ModelRequest,
   type JsonValue,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
+import { ProviderError, type ProviderAdapter } from "@harness/models";
 import { AuditingVaultResolver, InMemoryVault, Token } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PiiToolPort, Tokenizer } from "@harness/pii";
+import { emailDetector, PiiMessageSanitizer, PiiToolPort, Tokenizer } from "@harness/pii";
 import * as telemetry from "@harness/telemetry";
+import { AdapterRegistry, ModelGateway } from "@harness/models";
 import type { ModelCompletion, ModelToolCall, ToolPort } from "./ports.js";
 import { createRuntime } from "./runtime.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
@@ -23,6 +27,7 @@ import { createRuntimeVault } from "./runtime-vault.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { FakeModelPort } from "./testing/fake-model.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
+import { z } from "zod";
 
 const email = "runtime-canary@example.test";
 const toolId = Code.parse("test.echo");
@@ -93,6 +98,256 @@ afterEach(async () => {
 });
 
 describe("createRuntime PII composition", () => {
+  it("re-sanitizes local-allow messages before hosted fallback and records summaries", async () => {
+    const localRequests: ModelRequest[] = [];
+    const hostedRequests: ModelRequest[] = [];
+    const adapters: ProviderAdapter[] = [
+      {
+        provider: "local",
+        kind: "openai",
+        complete: (request) => {
+          localRequests.push(request);
+          return Promise.reject(new ProviderError("provider_unavailable"));
+        },
+      },
+      {
+        provider: "hosted",
+        kind: "openai",
+        complete: (request) => {
+          hostedRequests.push(request);
+          return Promise.resolve({
+            parts: [{ type: "text", text: "completed" }],
+            usage: { inputTokens: 1, outputTokens: 1 },
+            finishReason: "stop",
+            latencyMs: 0,
+          });
+        },
+      },
+    ];
+    const models = ModelsConfigSchema.parse({
+      retry: { maxAttempts: 1 },
+      providers: [
+        {
+          id: "local",
+          kind: "openai_compatible",
+          baseUrl: "http://127.0.0.1:1234",
+          trust: "local",
+        },
+        { id: "hosted", kind: "openai", trust: "hosted" },
+      ],
+      routing: {
+        default: [
+          { provider: "local", model: "local-model" },
+          { provider: "hosted", model: "hosted-model" },
+        ],
+      },
+    });
+    const pii = PiiConfigSchema.parse({
+      rules: [
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["local"],
+          action: "allow",
+        },
+      ],
+    });
+    const runtime = await createRuntime(
+      { run: runConfig, keys, pii, models },
+      {
+        dataDir: await dataDirectory(),
+        store: new InMemoryEventStore(),
+        transientVault: true,
+        providerAdapters: adapters,
+        policy: allowAllPolicy,
+        secretResolver,
+      },
+    );
+
+    try {
+      const result = await runtime.run(email);
+
+      expect(result.status).toBe("completed");
+      expect(JSON.stringify(localRequests[0]?.messages)).toContain(email);
+      expect(JSON.stringify(hostedRequests[0]?.messages)).not.toContain(email);
+      expect(JSON.stringify(hostedRequests[0]?.messages)).toContain("<EMAIL_1>");
+      const runId = result.events[0]?.runId;
+      expect(runId).toBeDefined();
+      if (runId === undefined) {
+        throw new Error("Expected the run to have an ID.");
+      }
+      const persistedEvents: unknown[] = [];
+      for await (const event of runtime.store.read(runId)) {
+        persistedEvents.push(event);
+      }
+      expect(JSON.stringify(persistedEvents)).not.toContain(email);
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: "pii_action",
+          boundary: "model_input",
+          action: "allowed",
+          entities: [{ type: "email", count: 1 }],
+        }),
+      );
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: "pii_action",
+          boundary: "model_input",
+          action: "tokenized",
+          entities: [{ type: "email", count: 1 }],
+        }),
+      );
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("sanitizes tool-call arguments appended to a structured-output repair request", async () => {
+    const requests: ModelRequest[] = [];
+    let attempt = 0;
+    const vault = new InMemoryVault();
+    const resolver = new AuditingVaultResolver(vault, () => undefined);
+    const detectors = { detect: (text: string) => emailDetector.detect(text) };
+    const policy = PiiConfigSchema.parse({});
+    const tokenizer = new Tokenizer({ detectors, policy, vault });
+    const sanitizer = new PiiMessageSanitizer({ tokenizer, detectors, policy, resolver });
+    const adapter: ProviderAdapter = {
+      provider: Code.parse("hosted"),
+      kind: "openai",
+      capabilities: { structuredOutput: "none", forcedToolChoice: true },
+      complete: (request) => {
+        requests.push(request);
+        attempt += 1;
+        return Promise.resolve({
+          parts: [
+            {
+              type: "tool_call",
+              callId: Id.parse(String(attempt).padStart(26, "0")),
+              toolId: Code.parse("emit_result"),
+              args: { answer: attempt === 1 ? email : 1 },
+            },
+          ],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "tool_calls",
+          latencyMs: 0,
+        });
+      },
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => Id.parse("11111111111111111111111111") },
+      clock: { now: () => 0 },
+      requestSanitizer: (request, target, context) =>
+        sanitizer.sanitizeRequest(request, target, context.runId, { signal: context.signal }),
+    });
+
+    await gateway.complete(
+      {
+        requestId: Id.parse("22222222222222222222222222"),
+        model: { provider: Code.parse("hosted"), model: Code.parse("test-model") },
+        messages: [{ role: "user", parts: [{ type: "text", text: "Return an answer." }] }],
+      },
+      {
+        runId: Id.parse("33333333333333333333333333"),
+        signal: new AbortController().signal,
+        outputSchema: z.object({ answer: z.number() }),
+      },
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1])).not.toContain(email);
+    expect(JSON.stringify(requests[1]?.messages)).toContain("<EMAIL_1>");
+    expect(
+      requests[1]?.messages.some((message) =>
+        message.parts.some((part) => part.type === "tool_call"),
+      ),
+    ).toBe(true);
+  });
+
+  it("fails the run with pii_blocked before a provider can receive a blocked token", async () => {
+    const complete = vi.fn<ProviderAdapter["complete"]>(() =>
+      Promise.resolve({
+        parts: [{ type: "text", text: "completed" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 0,
+      }),
+    );
+    const models = ModelsConfigSchema.parse({
+      retry: { maxAttempts: 1 },
+      providers: [
+        { id: "hosted", kind: "openai", trust: "hosted" },
+        { id: "secondary", kind: "openai", trust: "hosted" },
+      ],
+      routing: {
+        default: [
+          { provider: "hosted", model: "hosted-model" },
+          { provider: "secondary", model: "secondary-model" },
+        ],
+        fallbackOn: ["pii_blocked"],
+      },
+    });
+    const secondaryComplete = vi.fn<ProviderAdapter["complete"]>();
+    const pii = PiiConfigSchema.parse({
+      rules: [
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["hosted"],
+          action: "block",
+        },
+      ],
+    });
+    const runtime = await createRuntime(
+      { run: runConfig, keys, pii, models },
+      {
+        dataDir: await dataDirectory(),
+        store: new InMemoryEventStore(),
+        transientVault: true,
+        providerAdapters: [
+          { provider: "hosted", kind: "openai", complete },
+          { provider: "secondary", kind: "openai", complete: secondaryComplete },
+        ],
+        policy: allowAllPolicy,
+        secretResolver,
+      },
+    );
+
+    try {
+      const result = await runtime.run(email);
+
+      expect(result.status).toBe("failed");
+      expect(complete).not.toHaveBeenCalled();
+      expect(secondaryComplete).not.toHaveBeenCalled();
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: "run_status_changed",
+          to: "failed",
+          reason: "pii_blocked",
+        }),
+      );
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: "pii_action",
+          boundary: "model_input",
+          action: "blocked",
+          entities: [{ type: "email", count: 1 }],
+        }),
+      );
+      const runId = result.events[0]?.runId;
+      expect(runId).toBeDefined();
+      if (runId === undefined) {
+        throw new Error("Expected the run to have an ID.");
+      }
+      const persistedEvents: unknown[] = [];
+      for await (const event of runtime.store.read(runId)) {
+        persistedEvents.push(event);
+      }
+      expect(JSON.stringify(persistedEvents)).not.toContain(email);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("detokenizes only allowlisted arguments and tokenizes tool output before recording", async () => {
     const received: JsonValue[] = [];
     const store = new InMemoryEventStore();

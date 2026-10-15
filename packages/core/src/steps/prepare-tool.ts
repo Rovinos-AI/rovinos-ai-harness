@@ -53,12 +53,12 @@ export class SummaryRecordingError extends HarnessError {
   }
 }
 
-/** Builds a summary sink whose failures must not be mistaken for PII failures. */
-export function toolRunContext(
+/** Adds only the model-input summary sink to a model provider's run context. */
+export function piiActionRunContext(
   context: RunContext,
   recorder: RunRecorder,
   events: Event[],
-): RunContext {
+): RunContext & Required<Pick<RunContext, "recordPiiAction">> {
   return {
     ...context,
     recordPiiAction: async (summary) => {
@@ -74,6 +74,18 @@ export function toolRunContext(
         throw new SummaryRecordingError(error);
       }
     },
+  };
+}
+
+/** Builds a summary sink whose failures must not be mistaken for PII failures. */
+export function toolRunContext(
+  context: RunContext,
+  recorder: RunRecorder,
+  events: Event[],
+): RunContext {
+  return {
+    ...context,
+    recordPiiAction: piiActionRunContext(context, recorder, events).recordPiiAction,
     recordVaultAudit: async (audit: VaultAudit) => {
       events.push(
         await recorder.record({

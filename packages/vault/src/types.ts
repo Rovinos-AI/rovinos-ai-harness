@@ -6,7 +6,7 @@ import { z } from "zod";
 /** Context identifying the trust boundary for a detokenization. */
 export const VaultResolveContextSchema = z
   .object({
-    boundary: z.enum(["tool_input", "ui"]),
+    boundary: z.enum(["model_input", "tool_input", "ui"]),
     toolId: Code.optional(),
   })
   .strict();
@@ -18,7 +18,7 @@ export type VaultResolveContext = z.infer<typeof VaultResolveContextSchema>;
 export const VaultAuditSchema = z
   .object({
     runId: Id,
-    boundary: z.enum(["tool_input", "ui"]),
+    boundary: z.enum(["model_input", "tool_input", "ui"]),
     action: z.enum(["detokenized", "blocked"]),
     toolId: Code.optional(),
     /**

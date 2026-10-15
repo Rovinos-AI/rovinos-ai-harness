@@ -1650,25 +1650,25 @@ describe("runLoop", () => {
     ]);
     expect(build).toHaveBeenCalledWith(result.events.slice(0, 3));
     expect(append.mock.calls.map(([, , expectedSeq]) => expectedSeq)).toEqual([0, 3, 4, 5]);
-    expect(model.requests).toEqual([
-      {
-        request: {
-          requestId: "00000000000000000000000000",
-          model: { provider: "test_provider", model: "test_model" },
-          messages: [{ role: "user", parts: [{ type: "text", text: "test goal" }] }],
-          stablePrefixMessages: 1,
-          tools: [
-            {
-              toolId: "read_offloaded",
-              description: "Read a page of a large tool result stored in the run workspace.",
-              inputSchema: { type: "object" },
-            },
-          ],
-          role: "assistant",
+    const capturedRequest = model.requests[0];
+    expect(capturedRequest?.request).toEqual({
+      requestId: "00000000000000000000000000",
+      model: { provider: "test_provider", model: "test_model" },
+      messages: [{ role: "user", parts: [{ type: "text", text: "test goal" }] }],
+      stablePrefixMessages: 1,
+      tools: [
+        {
+          toolId: "read_offloaded",
+          description: "Read a page of a large tool result stored in the run workspace.",
+          inputSchema: { type: "object" },
         },
-        context: { runId, signal, deadlineTs: 3_600_100 },
-      },
-    ]);
+      ],
+      role: "assistant",
+    });
+    expect(capturedRequest?.context).toMatchObject({ runId, signal, deadlineTs: 3_600_100 });
+    expect(typeof capturedRequest?.context.recordPiiAction).toBe("function");
+    expect(capturedRequest?.context.recordVaultAudit).toBeUndefined();
+    expect(capturedRequest?.context.recordSubagentSpawned).toBeUndefined();
     expect(await store.head(runId)).toBe(6);
     const spans = tracerProvider.spans.slice(startingSpanIndex);
     const runSpans = spans.filter(({ name }) => name === "harness.run");

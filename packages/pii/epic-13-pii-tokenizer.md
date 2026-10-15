@@ -141,14 +141,14 @@ Shared design for this epic:
 
 **Parent:** #13 PII tokenizer
 **Task Description:** Apply policy to messages before they reach a provider, per the provider's trust level, including the fallback case.
-**Expected Inputs:** Messages, routed provider (`trust`), detector registry, policy.
-**Expected Output:** `packages/pii/src/model-sanitizer.ts` (`PiiMessageSanitizer`), a `MessageSanitizer` hook in the gateway (`packages/models/src/gateway.ts`) invoked once per provider attempt, wiring in `createRuntime`.
+**Expected Inputs:** A provider request (messages, tool descriptions and schemas, output schema), routed provider (`trust`), detector registry, policy.
+**Expected Output:** `packages/pii/src/model-sanitizer.ts` (`PiiMessageSanitizer`), a request-sanitizer hook in the gateway (`packages/models/src/gateway.ts`) invoked once per provider attempt, wiring in `createRuntime`.
 **Dependencies:** none.
 **Items it depends on:** 13.4, 13.5, 14.13.
 **Implementation guidance:**
 
-1. Gateway hook: `type MessageSanitizer = (messages: Message[], target: ModelRef & { trust: "hosted" | "local" }, runId: Id) => Promise<Message[]>`. The gateway calls it for **each** provider attempt (including fallbacks) after `prepareMessagesForProvider` (14.11).
-2. `PiiMessageSanitizer`: for `text` parts and `tool_result` JSON, apply `tokenize*` with `boundary: "model_input"` and the target's destination. For `local` destinations whose policy action is `allow`, detokenize tokens in the messages first (audited, boundary `model_input`), then pass raw values; for `hosted`, tokens stay tokens.
+1. Gateway hook: sanitize the full request for **each** provider attempt (including fallbacks) after `prepareMessagesForProvider` (14.11), using the selected provider's trust.
+2. `PiiMessageSanitizer`: apply `tokenize*` with `boundary: "model_input"` to message text, tool-call arguments/results, tool descriptions and JSON schemas. For `local` destinations whose policy action is `allow`, detokenize allowed tokens (audited, boundary `model_input`), re-check expanded values, then pass raw values; for `hosted`, tokens stay tokens.
 3. `opaque` parts are provider blobs produced by the model; they are passed through unchanged but scanned in tests for canaries (a model should never contain raw PII it was never given; if scanning finds some, count `harness.pii.blob_hit` and fail closed with `pii_blob_contains_pii`).
 4. `PiiBlockedError` aborts the model call and surfaces as a failed step with code `pii_blocked`.
 5. Emit `pii_action` summaries through a callback that the run loop records.

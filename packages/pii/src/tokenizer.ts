@@ -66,6 +66,13 @@ export interface TokenizerDependencies {
   readonly scopeOf?: (runId: Id) => Id;
 }
 
+interface TokenizationContext {
+  readonly boundary: PiiBoundary;
+  readonly destination: Destination;
+  /** Prevent `allow` from exposing raw values to a hosted model. */
+  readonly allowRaw?: boolean;
+}
+
 /** Detects sensitive entities, applies policy, and tokenizes/redacts approved output. */
 export class Tokenizer {
   constructor(private readonly dependencies: TokenizerDependencies) {}
@@ -81,7 +88,7 @@ export class Tokenizer {
   async tokenizeText(
     runId: Id,
     text: string,
-    context: { readonly boundary: PiiBoundary; readonly destination: Destination },
+    context: TokenizationContext,
   ): Promise<{ text: string; actions: PiiActionSummary[] }> {
     if (!DetectorTextSchema.safeParse(text).success) {
       throw new PiiTokenizerError("pii_input_invalid");
@@ -106,7 +113,7 @@ export class Tokenizer {
   async tokenizeJson(
     runId: Id,
     value: JsonValue,
-    context: { readonly boundary: PiiBoundary; readonly destination: Destination },
+    context: TokenizationContext,
   ): Promise<{ value: JsonValue; actions: PiiActionSummary[] }> {
     const validated = this.copyJson(value);
     assertJsonSize(validated);
@@ -169,7 +176,7 @@ export class Tokenizer {
 
   private async collectPlans(
     value: JsonValue,
-    context: { readonly boundary: PiiBoundary; readonly destination: Destination },
+    context: TokenizationContext,
     counts: ActionCounts,
     plans: TextPlan[],
   ): Promise<void> {
@@ -193,7 +200,7 @@ export class Tokenizer {
 
   private async planText(
     text: string,
-    context: { readonly boundary: PiiBoundary; readonly destination: Destination },
+    context: TokenizationContext,
     counts: ActionCounts,
     isKey = false,
   ): Promise<TextPlan> {
@@ -222,7 +229,7 @@ export class Tokenizer {
 
   private evaluateDetection(
     detection: Detection,
-    context: { readonly boundary: PiiBoundary; readonly destination: Destination },
+    context: TokenizationContext,
     counts: ActionCounts,
     isKey: boolean,
   ): EvaluatedDetection {
@@ -230,11 +237,13 @@ export class Tokenizer {
     if (!entity.success) {
       throw new PiiTokenizerError("pii_detector_invalid_output");
     }
-    const action = evaluatePiiPolicy(this.dependencies.policy, {
+    const policyAction = evaluatePiiPolicy(this.dependencies.policy, {
       entity: entity.data,
       boundary: context.boundary,
       destination: context.destination,
     });
+    const action =
+      context.allowRaw === false && policyAction === "allow" ? "tokenize" : policyAction;
     if (isKey && action !== "allow") {
       counts.keys.set(entity.data, (counts.keys.get(entity.data) ?? 0) + 1);
     }

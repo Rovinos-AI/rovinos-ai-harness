@@ -32,7 +32,7 @@ import type {
   VaultAdmin,
   VaultWriter,
 } from "@harness/vault";
-import type { Tokenizer } from "@harness/pii";
+import type { PiiMessageSanitizer, Tokenizer } from "@harness/pii";
 import type { WorkspacePort } from "@harness/context";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import type { Clock } from "./recorder.js";
@@ -171,6 +171,7 @@ export interface RuntimeComposition {
         readonly config: PiiConfig;
         readonly tokenizer: Tokenizer;
         readonly resolver: AuditingVaultResolver;
+        readonly messageSanitizer: PiiMessageSanitizer;
       }
     | undefined;
   readonly model: ModelPort;
