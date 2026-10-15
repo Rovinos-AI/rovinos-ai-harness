@@ -23,7 +23,7 @@ import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool } from "./subagent/runtime.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import { setupRuntime } from "./runtime-setup.js";
-import { createRuntimeAppCallbacks } from "./runtime-apps.js";
+import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
   Runtime,
@@ -310,15 +310,7 @@ function composeRuntime(
     clock,
     ...(pii === undefined
       ? {}
-      : {
-          tokenize: async (runId, content, context) =>
-            (
-              await pii.tokenizer.tokenizeJson(runId, content, {
-                ...context,
-                destination: "hosted",
-              })
-            ).value,
-        }),
+      : { tokenize: hostedAppContentTokenizer(pii.tokenizer) }),
   });
   return {
     store,

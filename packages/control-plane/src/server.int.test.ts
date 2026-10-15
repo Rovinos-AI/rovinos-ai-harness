@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { Id } from "@harness/schemas";
+import { Code, Id, type NewEvent } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
+import { createEventBuilders } from "@harness/store/testing";
+import { AuditingVaultResolver, Token } from "@harness/vault";
 import { request } from "node:http";
 import { describe, expect, it } from "vitest";
 import { startControlPlaneHttp } from "./server.js";
@@ -129,6 +131,108 @@ describe("control-plane HTTP transport", () => {
     } finally {
       await firstClient.close();
       await secondClient.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
+  it("shares the reveal rate limit across stateless HTTP tool requests", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const runId = builders.nextRunId();
+    const callId = builders.nextRunId();
+    const approvalId = builders.nextRunId();
+    const args = { email: Token.parse("<EMAIL_1>") };
+    const events: NewEvent[] = [
+      builders.runCreated(runId),
+      builders.runStatusChanged(runId, "pending", "running"),
+      {
+        runId,
+        ts: 2,
+        v: 1,
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        segmentId: runId,
+        type: "tool_intent",
+        callId,
+        toolId: "tool.synthetic",
+        idempotent: false,
+        policyDecision: "ask",
+        argsHash: "c".repeat(64),
+        args,
+      },
+      {
+        runId,
+        ts: 3,
+        v: 1,
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        segmentId: runId,
+        type: "approval_requested",
+        approvalId,
+        callId,
+        payload: {
+          payloadVersion: 1,
+          kind: "tool_call",
+          callId,
+          toolId: "tool.synthetic",
+          args,
+          ruleId: "approval.synthetic",
+          reason: "policy.ask",
+          summary: "Review this request.",
+          ui: {
+            resourceUri: "ui://harness/approval/v1",
+            fallbackText: "Review the tokenized approval.",
+          },
+          editableFields: [],
+        },
+      },
+      builders.runStatusChanged(runId, "running", "suspended"),
+    ];
+    await store.append(runId, events, 0);
+    const resolver = new AuditingVaultResolver(
+      { resolve: () => Promise.resolve("synthetic@example.test") },
+      () => undefined,
+    );
+    const server = await startControlPlaneHttp(store, 0, {
+      approvalHtml: "<html>test</html>",
+      isAppContext: () => true,
+      approvalApp: {
+        allowReveal: true,
+        authorize: (_context, scope) => ({
+          allowed: scope === "reveal",
+          tokenId: Code.parse("token.http"),
+        }),
+        vaultResolver: resolver,
+      },
+    });
+    const client = new Client({ name: "approval-rate-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(server.endpoint));
+    try {
+      await client.connect(transport);
+      for (let index = 0; index < 5; index += 1) {
+        await expect(
+          client.callTool({
+            name: "harness.approvals.reveal",
+            arguments: { approvalId, pointers: ["/email"] },
+          }),
+        ).resolves.toMatchObject({
+          structuredContent: {
+            values: [{ pointer: "/email", value: "synthetic@example.test" }],
+          },
+        });
+      }
+      await expect(
+        client.callTool({
+          name: "harness.approvals.reveal",
+          arguments: { approvalId, pointers: ["/email"] },
+        }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: "rate_limited" }],
+      });
+    } finally {
+      await client.close();
       await server.close();
       await store.close();
     }

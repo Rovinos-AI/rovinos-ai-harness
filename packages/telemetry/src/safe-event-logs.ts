@@ -257,7 +257,8 @@ const sentinelTripDefinition = defineLogRecord("harness.sentinel.trip", {
   "harness.run.id": attr.optional(attr.id()),
   "harness.sentinel.trip.count": attr.nonnegativeInt(),
 });
-const safeEventLogger = logs.getLogger("@harness/core");
+/** Logger for registered metadata-only event records. */
+export const safeEventLogger = logs.getLogger("@harness/core");
 
 function scalarValue(value: unknown): string | number | boolean | undefined {
   if (

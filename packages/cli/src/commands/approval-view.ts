@@ -5,17 +5,17 @@ import {
   Code,
   HarnessError,
   HostConfigSchema,
-  Id,
-  JsonValue,
   ResolveRequest,
   ResolveResponse,
   RevealRequest,
   RevealResponse,
+  type Id,
+  JsonValue,
   type Event,
 } from "@harness/schemas";
 import type { HarnessConfig } from "@harness/config";
 import { applyApprovalEdits, approvalEditsAreAllowed } from "@harness/policy";
-import { Token } from "@harness/vault";
+import { findTokens } from "@harness/vault";
 import { ListToolsResultSchema } from "@modelcontextprotocol/core";
 import { z } from "zod";
 import type { CliContext } from "../command.js";
@@ -25,6 +25,21 @@ const RESOLVE_TOOL = "harness.approvals.resolve";
 const REVEAL_TOOL = "harness.approvals.reveal";
 const REVEAL_WINDOW_MS = 60_000;
 const REVEAL_LIMIT = 5;
+const MAX_REVEAL_TOKENS = 20;
+
+type ApprovalViewRuntime = Omit<
+  Pick<
+    Runtime,
+    "store" | "vault" | "resolveApproval" | "hasPendingApproval" | "tokenizeAppContent" | "onAppContent"
+  >,
+  "resolveApproval"
+> & {
+  readonly resolveApproval: (
+    ...args: Parameters<Runtime["resolveApproval"]>
+  ) => Promise<unknown>;
+};
+
+type ApprovalViewContext = Pick<CliContext, "clock" | "out" | "interactive">;
 
 class ApprovalViewError extends HarnessError {
   override readonly code: string;
@@ -37,17 +52,21 @@ class ApprovalViewError extends HarnessError {
 
 /** Starts the local MCP Apps approval view for one currently pending approval. */
 export async function createApprovalViewHost(
-  runtime: Runtime,
-  context: CliContext,
-  config: HarnessConfig,
-  runId: Id,
-  approvalId: Id,
+  input: {
+    readonly runtime: ApprovalViewRuntime;
+    readonly context: ApprovalViewContext;
+    readonly config: HarnessConfig;
+    readonly runId: Id;
+    readonly approvalId: Id;
+  },
 ): Promise<{ readonly url: string; close(): Promise<void> }> {
-  const pending = await findPendingApproval(runtime, runId, approvalId);
-  const payload = ApprovalPayloadSchema.parse(pending.payload);
+  const { runtime, context, config, runId, approvalId } = input;
   const { createReferenceHost } = await import("@harness/host");
   const { APPROVAL_RESOURCE_URI, MCP_APP_HTML_MIME_TYPE, loadApprovalHtml } =
     await import("@harness/control-plane");
+  const approvalHtml = loadApprovalHtml();
+  const pending = await findPendingApproval(runtime, runId, approvalId);
+  const payload = ApprovalPayloadSchema.parse(pending.payload);
   const appConfig = HostConfigSchema.parse({
     apps: [
       {
@@ -59,7 +78,56 @@ export async function createApprovalViewHost(
       },
     ],
   });
-  const tools = ListToolsResultSchema.parse({
+  const tools = approvalTools();
+  const revealRequests = new Map<string, number[]>();
+  const host = await createReferenceHost(appConfig, {
+    readResource: (resourceUri) => ({
+      contents: [
+        {
+          uri: resourceUri,
+          mimeType: MCP_APP_HTML_MIME_TYPE,
+          text: approvalHtml,
+        },
+      ],
+    }),
+    onCode: (code) => {
+      context.out.error(code);
+    },
+    runId,
+    uiSessionContext: {
+      runId,
+      toolCallSpanContext: {
+        traceId: pending.traceId,
+        spanId: pending.spanId,
+        traceFlags: 1,
+      },
+    },
+    toolInput: { approvalId, payload },
+    hasPendingApproval: (id) => runtime.hasPendingApproval(id),
+    tokenizeAppContent: (id, content, boundary) =>
+      runtime.tokenizeAppContent(id, content, boundary),
+    onAppContent: (content) => runtime.onAppContent(content),
+    isIdOwnedByRun: (id, candidate) => id === runId && candidate === approvalId,
+    onAppToolsList: () => Promise.resolve(tools),
+    onAppCall: (call, callContext) =>
+      handleApprovalCall({
+        runtime,
+        context,
+        config,
+        runId,
+        approvalId,
+        revealRequests,
+        sessionId: call.sessionId,
+        toolName: call.toolName,
+        arguments: call.arguments,
+        callRunId: callContext.runId,
+      }),
+  });
+  return { url: host.url, close: () => host.close() };
+}
+
+function approvalTools() {
+  return ListToolsResultSchema.parse({
     tools: [
       {
         name: RESOLVE_TOOL,
@@ -75,41 +143,6 @@ export async function createApprovalViewHost(
       },
     ],
   });
-  const revealRequests = new Map<string, number[]>();
-  const host = await createReferenceHost(appConfig, {
-    readResource: async (resourceUri) => ({
-      contents: [
-        {
-          uri: resourceUri,
-          mimeType: MCP_APP_HTML_MIME_TYPE,
-          text: loadApprovalHtml(),
-        },
-      ],
-    }),
-    onCode: (code) => context.out.error(code),
-    runId,
-    toolInput: { approvalId, payload },
-    hasPendingApproval: (id) => runtime.hasPendingApproval(id),
-    tokenizeAppContent: (id, content, boundary) =>
-      runtime.tokenizeAppContent(id, content, boundary),
-    onAppContent: (content) => runtime.onAppContent(content),
-    isIdOwnedByRun: (id, candidate) => id === runId && candidate === approvalId,
-    onAppToolsList: async () => tools,
-    onAppCall: (call, callContext) =>
-      handleApprovalCall({
-        runtime,
-        context,
-        config,
-        runId,
-        approvalId,
-        revealRequests,
-        sessionId: call.sessionId,
-        toolName: call.toolName,
-        arguments: call.arguments,
-        callRunId: callContext.runId,
-      }),
-  });
-  return { url: host.url, close: host.close };
 }
 
 function zodJsonSchema(schema: typeof ResolveRequest | typeof RevealRequest) {
@@ -235,47 +268,95 @@ async function revealApprovalCall(options: {
   recent.push(now);
   options.revealRequests.set(options.sessionId, recent);
   if (
-    options.config.controlPlane?.reveal.requireElicitation !== false &&
-    (options.context.interactive?.isTTY !== true ||
-      !(await options.context.interactive.confirm(
-        `Reveal ${String(request.data.pointers.length)} values from this approval?`,
-      )))
+    options.context.interactive?.isTTY !== true ||
+    !(await options.context.interactive.confirm(
+      `Reveal ${String(request.data.pointers.length)} values from this approval?`,
+    ))
   ) {
     return revealError("human_confirmation_unavailable");
   }
   try {
     const approval = await findPendingApproval(options.runtime, options.runId, options.approvalId);
     const payload = ApprovalPayloadSchema.parse(approval.payload);
-    const selected = request.data.pointers.map((pointer) => ({
-    pointer,
-    value: valueAtPointer(payload.args, pointer),
-    }));
-    const tokens = [];
-    for (const { value } of selected) {
-    const token = Token.safeParse(value);
-    if (!token.success) {
-      return revealError("pointer_invalid");
-    }
-    tokens.push(token.data);
-    }
-    const values = await options.runtime.vault.resolveMany(options.runId, tokens, {
-    boundary: "ui",
-    });
-    if (values.some((value) => value === undefined)) {
-      return revealError("reveal_value_unavailable");
+    const revealed = await resolveApprovalValues(
+      options.runtime,
+      options.runId,
+      payload,
+      request.data.pointers,
+    );
+    if (!revealed.success) {
+      return revealError(revealed.code);
     }
     return {
       structuredContent: RevealResponse.parse({
-        values: selected.flatMap(({ pointer }, index) => {
-          const value = values[index];
-          return value === undefined ? [] : [{ pointer, value }];
-        }),
+        values: revealed.values,
       }),
-      content: [{ type: "text" as const, text: `Revealed ${String(values.length)} values.` }],
+      content: [{ type: "text" as const, text: `Revealed ${String(revealed.values.length)} values.` }],
     };
   } catch (error) {
     return revealError(errorCode(error));
   }
+}
+
+async function resolveApprovalValues(
+  runtime: Runtime,
+  runId: Id,
+  payload: ReturnType<typeof ApprovalPayloadSchema.parse>,
+  pointers: readonly string[],
+): Promise<
+  | { readonly success: true; readonly values: RevealResponse["values"] }
+  | { readonly success: false; readonly code: string }
+> {
+  const selected = pointers.map((pointer) => ({
+    pointer,
+    value: valueAtPointer(payload.args, pointer),
+  }));
+  const matches = selected.map(({ value }) =>
+    typeof value === "string" ? findTokens(value) : [],
+  );
+  if (selected.some(({ value }, index) => typeof value !== "string" || matches[index]?.length === 0)) {
+    return { success: false, code: "pointer_invalid" };
+  }
+  const occurrences = matches.flat();
+  if (occurrences.length > MAX_REVEAL_TOKENS) {
+    return { success: false, code: "pointer_invalid" };
+  }
+  const tokens = [...new Set(occurrences.map(({ token }) => token))];
+  const values = await runtime.vault.resolveMany(runId, tokens, {
+    boundary: "ui",
+    toolId: payload.toolId,
+  });
+  if (values.some((value) => value === undefined)) {
+    return { success: false, code: "reveal_value_unavailable" };
+  }
+  const resolved = new Map(
+    tokens.flatMap((token, index) => {
+      const value = values[index];
+      return value === undefined ? [] : [[token, value] as const];
+    }),
+  );
+  return {
+    success: true,
+    values: selected.flatMap(({ pointer, value }, index) =>
+      typeof value === "string"
+        ? [{ pointer, value: replaceTokens(value, matches[index] ?? [], resolved) }]
+        : [],
+    ),
+  };
+}
+
+function replaceTokens(
+  value: string,
+  matches: ReturnType<typeof findTokens>,
+  resolved: ReadonlyMap<string, string>,
+): string {
+  let offset = 0;
+  let result = "";
+  for (const match of matches) {
+    result += value.slice(offset, match.index) + (resolved.get(match.token) ?? match.token);
+    offset = match.index + match.token.length;
+  }
+  return result + value.slice(offset);
 }
 
 function valueAtPointer(value: JsonValue, pointer: string): JsonValue | undefined {

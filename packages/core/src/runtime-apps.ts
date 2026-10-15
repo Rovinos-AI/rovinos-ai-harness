@@ -7,6 +7,7 @@ import {
   JsonValue,
   type Event,
 } from "@harness/schemas";
+import type { Tokenizer } from "@harness/pii";
 import type { EventStore } from "@harness/store";
 import type { Clock } from "./recorder.js";
 import { RunRecorder } from "./recorder.js";
@@ -32,6 +33,17 @@ export interface RuntimeAppCallbacks {
   readonly hasPendingApproval: (runId: Id) => Promise<boolean>;
   readonly tokenizeAppContent: AppContentTokenize;
   readonly onAppContent: (content: RuntimeAppContent) => Promise<void>;
+}
+
+/** Adapts the PII tokenizer for the hosted model-input boundary. */
+export function hostedAppContentTokenizer(tokenizer: Tokenizer): AppContentTokenize {
+  return async (runId, content, context) =>
+    (
+      await tokenizer.tokenizeJson(runId, content, {
+        ...context,
+        destination: "hosted",
+      })
+    ).value;
 }
 
 class AppContentUnavailableError extends HarnessError {

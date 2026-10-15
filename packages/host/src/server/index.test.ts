@@ -672,9 +672,9 @@ describe("createReferenceHost", () => {
     await host.close();
   });
 
-  it("stamps default app telemetry from its session and refuses unapproved decisions", async () => {
+  it("accepts pending decisions and rejects them after approval resolution", async () => {
     let now = 1_000;
-    let approvalPending = false;
+    let approvalPending = true;
     const initialCount = spanCollector.getFinishedSpans().length;
     const parent = spanCollector.provider
       .getTracer("reference-host-test")
@@ -687,14 +687,15 @@ describe("createReferenceHost", () => {
         runId: foreignRunId,
         toolCallSpanContext: parent.spanContext(),
       },
-      hasPendingApproval: async () => approvalPending,
+      hasPendingApproval: (candidateRunId) =>
+        Promise.resolve(candidateRunId === foreignRunId && approvalPending),
       onAppRejected,
     });
     const host = await fixture.hostPromise;
     const launchedSessionId = await newAppSession(fixture, host);
 
     now = 1_100;
-    const rejectedDecision = await fixture.request(
+    const acceptedDecision = await fixture.request(
       "POST",
       "/api/call",
       authorization(host),
@@ -705,12 +706,12 @@ describe("createReferenceHost", () => {
         ],
       }),
     );
-    expectTelemetryAck(rejectedDecision, 1, 1);
-    expect(onAppRejected).toHaveBeenCalledWith("unknown_span");
+    expectTelemetryAck(acceptedDecision, 2, 0);
+    expect(onAppRejected).not.toHaveBeenCalled();
 
-    approvalPending = true;
+    approvalPending = false;
     now = 1_200;
-    const acceptedDecision = await fixture.request(
+    const rejectedDecision = await fixture.request(
       "POST",
       "/api/call",
       authorization(host),
@@ -718,7 +719,8 @@ describe("createReferenceHost", () => {
         spans: [{ name: "ui.decision", decision: "approve", startOffsetMs: 0, durationMs: 5 }],
       }),
     );
-    expectTelemetryAck(acceptedDecision, 1, 0);
+    expectTelemetryAck(rejectedDecision, 0, 1);
+    expect(onAppRejected).toHaveBeenCalledWith("unknown_span");
     await host.close();
     parent.end();
 

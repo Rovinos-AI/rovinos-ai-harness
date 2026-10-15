@@ -11,10 +11,16 @@ import { createEventBuilders } from "@harness/store/testing";
 import { AuditingVaultResolver, Token } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmationGate } from "../confirmation-gate.js";
-import { registerApprovalAppTools } from "./approvals-app.js";
+import {
+  ApprovalAppRevealRateLimiter,
+  registerApprovalAppTools,
+} from "./approvals-app.js";
 
 const PRIVATE_CANARY = "private-canary@example.test";
+const PHONE_CANARY = "private-phone-canary@example.test";
+const ARGUMENT_CANARY = "private-argument-canary";
 const TOKEN = Token.parse("<EMAIL_1>");
+const PHONE_TOKEN = Token.parse("<PHONE_2>");
 interface Connection {
   readonly client: McpClient;
   readonly server: McpServer;
@@ -25,13 +31,28 @@ const connections: Connection[] = [];
 
 async function createApproval(
   store: InMemoryEventStore,
-  options: { readonly resolved?: boolean; readonly editable?: boolean } = {},
+  options: {
+    readonly resolved?: boolean;
+    readonly editable?: boolean;
+    readonly revealCases?: boolean;
+  } = {},
 ): Promise<{ readonly runId: Id; readonly approvalId: Id }> {
   const builders = createEventBuilders();
   const runId = builders.nextRunId();
   const callId = builders.nextRunId();
   const approvalId = builders.nextRunId();
-  const args = { name: "original", email: TOKEN };
+  const args = {
+    name: "original",
+    email: TOKEN,
+    ...(options.revealCases === true
+      ? {
+          contact: "Contact <EMAIL_1>",
+          multiple: "<EMAIL_1> / <PHONE_2>",
+          tooMany: Array.from({ length: 21 }, () => "<EMAIL_1>").join(" "),
+          argumentCanary: ARGUMENT_CANARY,
+        }
+      : {}),
+  };
   const events: NewEvent[] = [
     builders.runCreated(runId),
     builders.runStatusChanged(runId, "pending", "running"),
@@ -107,7 +128,6 @@ async function createApproval(
 async function connect(
   options: {
     readonly allowReveal?: boolean;
-    readonly requireRevealElicitation?: boolean;
     readonly authorize?: Parameters<typeof registerApprovalAppTools>[1]["authorize"];
     readonly resolver?: AuditingVaultResolver;
     readonly onAudit?: Parameters<typeof registerApprovalAppTools>[1]["onAudit"];
@@ -132,13 +152,12 @@ async function connect(
   registerApprovalAppTools(server, {
     store,
     confirmationGate,
+    revealRateLimiter: new ApprovalAppRevealRateLimiter(),
     clientCapabilities: () =>
       options.hasElicitation === true ? { elicitation: { form: {} } } : undefined,
+    onAudit: options.onAudit ?? (() => undefined),
     authorize: options.authorize ?? (() => ({ allowed: true, tokenId: Code.parse("token.test") })),
     ...(options.allowReveal === undefined ? {} : { allowReveal: options.allowReveal }),
-    ...(options.requireRevealElicitation === undefined
-      ? {}
-      : { requireRevealElicitation: options.requireRevealElicitation }),
     ...(options.resolver === undefined ? {} : { vaultResolver: options.resolver }),
     ...(options.onAudit === undefined ? {} : { onAudit: options.onAudit }),
     ...(options.now === undefined ? {} : { now: options.now }),
@@ -178,9 +197,11 @@ afterEach(async () => {
 describe("app-only approval tools", () => {
   it("resolves an allowed edit through the runtime operation", async () => {
     const resolveApproval = vi.fn(() => Promise.resolve(undefined));
+    const audits: unknown[] = [];
     const { store, client } = await connect({
       isAppContext: true,
       resolveApproval,
+      onAudit: (audit) => audits.push(audit),
     });
     const approval = await createApproval(store, { editable: true });
 
@@ -189,7 +210,7 @@ describe("app-only approval tools", () => {
       arguments: {
         approvalId: approval.approvalId,
         decision: "edit",
-        edits: [{ pointer: "/name", value: "changed" }],
+        edits: [{ pointer: "/name", value: ARGUMENT_CANARY }],
       },
     });
 
@@ -198,8 +219,18 @@ describe("app-only approval tools", () => {
       runId: approval.runId,
       approvalId: approval.approvalId,
       decision: "edit",
-      edits: { name: "changed", email: TOKEN },
+      edits: { name: ARGUMENT_CANARY, email: TOKEN },
     });
+    expect(audits).toEqual([
+      {
+        tokenId: "token.test",
+        tool: "harness.approvals.resolve",
+        outcome: "ok",
+        count: 0,
+      },
+    ]);
+    expect(JSON.stringify(audits)).not.toContain("/name");
+    expect(JSON.stringify(audits)).not.toContain(ARGUMENT_CANARY);
   });
 
   it("returns metadata-only failure codes for unknown, resolved, and inaccessible approvals", async () => {
@@ -294,40 +325,54 @@ describe("app-only approval tools", () => {
 
   it("validates pointers against stored tokenized args and audits only metadata", async () => {
     const audits: unknown[] = [];
-    const resolve = vi.fn((_runId, _token, context) => {
+    const resolve = vi.fn((_runId, token, context) => {
       expect(context).toEqual({ boundary: "ui" });
-      return Promise.resolve(PRIVATE_CANARY);
+      return Promise.resolve(token === PHONE_TOKEN ? PHONE_CANARY : PRIVATE_CANARY);
     });
     const resolver = new AuditingVaultResolver({ resolve }, () => undefined);
     const { store, client } = await connect({
       allowReveal: true,
       isAppContext: true,
-      requireRevealElicitation: false,
       resolver,
       onAudit: (audit) => audits.push(audit),
     });
-    const approval = await createApproval(store);
+    const approval = await createApproval(store, { revealCases: true });
 
     const invalid = await client.callTool({
       name: "harness.approvals.reveal",
       arguments: { approvalId: approval.approvalId, pointers: ["/outside"] },
     });
+    const tooMany = await client.callTool({
+      name: "harness.approvals.reveal",
+      arguments: { approvalId: approval.approvalId, pointers: ["/tooMany"] },
+    });
     const result = await client.callTool({
       name: "harness.approvals.reveal",
-      arguments: { approvalId: approval.approvalId, pointers: ["/email"] },
+      arguments: { approvalId: approval.approvalId, pointers: ["/contact", "/multiple"] },
     });
 
     expect(invalid.content).toEqual([{ type: "text", text: "pointer_invalid" }]);
-    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(tooMany.content).toEqual([{ type: "text", text: "pointer_invalid" }]);
+    expect(resolve).toHaveBeenCalledTimes(2);
     expect(result.structuredContent).toEqual({
-      values: [{ pointer: "/email", value: PRIVATE_CANARY }],
+      values: [
+        { pointer: "/contact", value: `Contact ${PRIVATE_CANARY}` },
+        { pointer: "/multiple", value: `${PRIVATE_CANARY} / ${PHONE_CANARY}` },
+      ],
     });
     expect(JSON.stringify(audits)).not.toContain(PRIVATE_CANARY);
+    expect(JSON.stringify(audits)).not.toContain(PHONE_CANARY);
+    expect(JSON.stringify(audits)).not.toContain("<EMAIL_1>");
+    expect(JSON.stringify(audits)).not.toContain("<PHONE_2>");
+    expect(JSON.stringify(audits)).not.toContain(ARGUMENT_CANARY);
+    expect(JSON.stringify(audits)).not.toContain("/contact");
+    expect(JSON.stringify(audits)).not.toContain("/multiple");
+    expect(JSON.stringify(audits)).not.toContain("tooMany");
     expect(audits).toContainEqual({
       tokenId: "token.test",
       tool: "harness.approvals.reveal",
       outcome: "ok",
-      count: 1,
+      count: 2,
     });
   });
 
@@ -353,7 +398,6 @@ describe("app-only approval tools", () => {
     const rateLimited = await connect({
       allowReveal: true,
       isAppContext: true,
-      requireRevealElicitation: false,
       resolver,
       now: () => 10_000,
     });
@@ -373,12 +417,16 @@ describe("app-only approval tools", () => {
     expect(resolve).toHaveBeenCalledTimes(6);
   });
 
-  it("rejects a reveal without elicitation support when confirmation is required", async () => {
+  it("rejects an authorized non-app reveal without human confirmation", async () => {
     const resolve = vi.fn(() => Promise.resolve(PRIVATE_CANARY));
     const resolver = new AuditingVaultResolver({ resolve }, () => undefined);
     const { store, client } = await connect({
       allowReveal: true,
       isAppContext: false,
+      authorize: (_context, scope) => ({
+        allowed: scope === "reveal",
+        tokenId: Code.parse("token.test"),
+      }),
       resolver,
     });
     const approval = await createApproval(store);

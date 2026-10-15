@@ -2,7 +2,6 @@
 import { TextContentSchema } from "@modelcontextprotocol/core";
 import {
   AppContentEnvelopeSchema,
-  Code,
   Id,
   JsonValue,
   type AppContentEnvelope,

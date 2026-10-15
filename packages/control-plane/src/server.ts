@@ -52,9 +52,11 @@ import { registerListRunsTool } from "./tools/list-runs.js";
 import { registerResumeRunTool } from "./tools/resume-run.js";
 import {
   registerApprovalAppTools,
+  ApprovalAppRevealRateLimiter,
   type ApprovalAppAuthorization,
   type ApprovalAppScope,
 } from "./tools/approvals-app.js";
+import { emitApprovalAppAudit } from "@harness/telemetry";
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 
 const HTTP_HOST = "127.0.0.1";
@@ -86,7 +88,7 @@ export interface ControlPlaneServerOptions {
     ) => Promise<ApprovalAppAuthorization> | ApprovalAppAuthorization;
     readonly vaultResolver?: AuditingVaultResolver;
     readonly allowReveal?: boolean;
-    readonly requireRevealElicitation?: boolean;
+    readonly revealRateLimiter?: ApprovalAppRevealRateLimiter;
     readonly now?: () => number;
     readonly onAudit?: (audit: {
       readonly tokenId: Code;
@@ -138,14 +140,12 @@ export function createControlPlaneServer(
   registerListRunsTool(server, store);
   registerGetRunTool(server, store);
   registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
-  registerApprovalAppTools(server, {
+  registerConfiguredApprovalTools({
+    server,
     store,
+    options,
     confirmationGate,
     clientCapabilities,
-    ...(options.operations?.resolveApproval === undefined
-      ? {}
-      : { resolveApproval: options.operations.resolveApproval }),
-    ...options.approvalApp,
   });
   const supervisor = options.runSupervisor ?? createRunSupervisor(options);
   registerApproveTool(server, {
@@ -181,6 +181,29 @@ export function createControlPlaneServer(
     };
   });
   return server;
+}
+
+function registerConfiguredApprovalTools(input: {
+  readonly server: McpServer;
+  readonly store: EventStore;
+  readonly options: ControlPlaneServerOptions;
+  readonly confirmationGate: ConfirmationGate;
+  readonly clientCapabilities: (
+    context: ServerContext,
+  ) => ConfirmationClientCapabilities | undefined;
+}): void {
+  registerApprovalAppTools(input.server, {
+    ...input.options.approvalApp,
+    store: input.store,
+    confirmationGate: input.confirmationGate,
+    clientCapabilities: input.clientCapabilities,
+    revealRateLimiter:
+      input.options.approvalApp?.revealRateLimiter ?? new ApprovalAppRevealRateLimiter(),
+    onAudit: input.options.approvalApp?.onAudit ?? emitApprovalAppAudit,
+    ...(input.options.operations?.resolveApproval === undefined
+      ? {}
+      : { resolveApproval: input.options.operations.resolveApproval }),
+  });
 }
 
 /** Starts the same MCP server over stdio. */
@@ -283,6 +306,12 @@ function withSharedControlPlaneState(
 ): ControlPlaneServerOptions {
   return {
     ...options,
+    approvalHtml: options.approvalHtml ?? loadApprovalHtml(),
+    approvalApp: {
+      ...options.approvalApp,
+      revealRateLimiter:
+        options.approvalApp?.revealRateLimiter ?? new ApprovalAppRevealRateLimiter(),
+    },
     confirmationGate:
       options.confirmationGate ??
       new ConfirmationGate({

@@ -35,10 +35,9 @@ policy:
 ```
 
 Approval argument reveal is disabled by default. To enable the app-only reveal
-tool, set `controlPlane.allowReveal: true`; `controlPlane.reveal.requireElicitation`
-defaults to `true` and requires confirmation from clients that are not acting
-through a trusted app host. Reveal requests are limited to pointers in the stored
-approval arguments and are audited at the `ui` boundary.
+tool, set `controlPlane.allowReveal: true`. Every reveal requires a trusted app
+host or human confirmation through elicitation. Reveal requests are limited to
+pointers in the stored approval arguments and are audited at the `ui` boundary.
 
 ## Cassette recording
 

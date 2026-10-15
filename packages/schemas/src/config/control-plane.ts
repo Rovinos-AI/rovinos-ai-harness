@@ -6,15 +6,9 @@ import { z } from "zod";
 export const ControlPlaneConfigSchema = z
   .object({
     allowReveal: z.boolean().default(false),
-    reveal: z
-      .object({
-        requireElicitation: z.boolean().default(true),
-      })
-      .strict()
-      .default({ requireElicitation: true }),
   })
   .strict()
-  .default({ allowReveal: false, reveal: { requireElicitation: true } });
+  .default({ allowReveal: false });
 
 /** Inferred control-plane configuration. */
 export type ControlPlaneConfig = z.infer<typeof ControlPlaneConfigSchema>;

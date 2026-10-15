@@ -44,8 +44,12 @@ describe("approval app resource", () => {
   });
 
   it("fails closed when the built artifact is missing", () => {
-    expect(() => loadApprovalHtml("/missing/approval.html")).toThrow(
-      expect.objectContaining({ code: "approval_resource_unavailable" }),
-    );
+    let thrown: unknown;
+    try {
+      loadApprovalHtml("/missing/approval.html");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: "approval_resource_unavailable" });
   });
 });

@@ -1678,7 +1678,7 @@ describe("runLoop", () => {
     expect(modelSpans[0]?.parentSpanId).toBe(runSpans[0]?.spanContextValue.spanId);
     expect(modelSpans[0]?.attributes).toMatchObject({
       "harness.context.strategy": "naive",
-      "harness.context.strategy_version": "v5",
+      "harness.context.strategy_version": "v6",
       "harness.context.estimated_tokens": 0,
       "harness.context.message_count": 1,
     });
@@ -1732,7 +1732,7 @@ describe("runLoop", () => {
       traceparent,
       context: {
         strategyId: "naive",
-        strategyVersion: "v5",
+        strategyVersion: "v6",
         calibration: null,
       },
       plan: null,

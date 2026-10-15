@@ -36,7 +36,7 @@ export function registerApprovalResource(server: McpServer, html = loadApprovalH
       mimeType: MCP_APP_HTML_MIME_TYPE,
       _meta: { ui: { csp: {}, permissions: {} } },
     },
-    async (uri) => ({
+    (uri) => ({
       contents: [{ uri: uri.href, mimeType: MCP_APP_HTML_MIME_TYPE, text: html }],
     }),
   );

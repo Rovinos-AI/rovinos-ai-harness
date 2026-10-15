@@ -112,6 +112,7 @@ function createControlPlaneOperations(
   };
 }
 
+/** Waits for a shutdown signal and observes stdin closure when using stdio. */
 export function waitForShutdown(stdio: boolean): Promise<void> {
   return new Promise((resolve) => {
     const keepAlive = setInterval(() => undefined, 60_000);

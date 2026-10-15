@@ -20,6 +20,7 @@ export { registerResumeRunTool, type ResumeRunToolOptions } from "./tools/resume
 export { registerCancelRunTool, type CancelRunToolOptions } from "./tools/cancel-run.js";
 export {
   registerApprovalAppTools,
+  ApprovalAppRevealRateLimiter,
   type ApprovalAppAudit,
   type ApprovalAppAuthorization,
   type ApprovalAppScope,

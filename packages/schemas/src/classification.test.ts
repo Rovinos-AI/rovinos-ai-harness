@@ -127,7 +127,7 @@ describe("EVENT_FIELD_CLASS", () => {
 
   it("maps all declared event types", () => {
     const eventTypes = Object.keys(EVENT_FIELD_CLASS);
-    expect(eventTypes).toHaveLength(15);
+    expect(eventTypes).toHaveLength(16);
     expect(eventTypes).toEqual(expect.arrayContaining(eventSamples.map(({ type }) => type)));
   });
 });

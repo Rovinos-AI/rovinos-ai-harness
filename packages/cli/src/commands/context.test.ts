@@ -9,8 +9,8 @@ import {
   ContextInspectionSchema,
   Event as EventSchema,
   Id,
-  JsonValue,
   parseJson,
+  type JsonValue,
 } from "@harness/schemas";
 import { StrategyComparisonReportSchema } from "@harness/context";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
@@ -397,7 +397,7 @@ describe("harness context", () => {
         ].join("\t"),
         [
           "naive",
-          "v5",
+          "v6",
           "101",
           "5",
           "0",
