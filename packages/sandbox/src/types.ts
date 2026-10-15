@@ -149,6 +149,10 @@ export interface SandboxBackend {
    * @returns Exit status, bounded output, and timing metadata.
    */
   exec(runId: Id, spec: ExecSpec, signal: AbortSignal): Promise<ExecResult>;
+  /** Acquires a runner-wide lease before a run starts, when the backend supports leases. */
+  acquireLease?(runId: Id, ttlMs?: number): Promise<void>;
+  /** Releases a runner-wide lease after a run suspends or reaches a terminal state. */
+  releaseLease?(runId: Id): Promise<void>;
   /** Releases backend-owned resources when its runtime closes. */
   close?(): Promise<void>;
 }

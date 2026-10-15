@@ -6,11 +6,11 @@ import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { HarnessError, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
-import type { Id } from "@harness/schemas";
+import type { Id as IdValue } from "@harness/schemas";
 import { z } from "zod";
 import { executeSpec, SANDBOX_EXEC_GID, SANDBOX_EXEC_UID } from "./exec.js";
 import { MAX_EXEC_TIMEOUT_MS } from "../../src/types.js";
-import type { ExecResult, ExecSpec } from "../../src/types.js";
+import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 import type { WebFetchRequest, WebFetchResult } from "../../src/web-fetch-contracts.js";
 import {
   executeRunnerPayload,
@@ -18,11 +18,12 @@ import {
   type RunnerRequest,
   type RunnerResponse,
 } from "./request-handler.js";
+import { RunnerLeaseManager } from "./lease.js";
+import { authorityFrom, validHost, validOrigin } from "./server-origin.js";
 
 const REQUEST_TIMEOUT_MS = MAX_EXEC_TIMEOUT_MS + 10_000;
 const TOKEN_HASH_BYTES = 32;
 const MIN_RUNNER_TOKEN_BYTES = 32;
-
 const RunnerHealthSchema = z.object({ status: z.literal("ok") }).strict();
 
 /** Options for the authenticated runner HTTP server. */
@@ -33,6 +34,10 @@ export interface RunnerServerOptions {
   readonly allowedHosts: readonly string[];
   /** Workspace root mounted into the runner container. */
   readonly workspaceRoot: string;
+  /** Scratch root cleared between leases; defaults to no-op in isolated handler tests. */
+  readonly temporaryRoot?: string;
+  /** Clock used for lease expiry tests and operation timing. */
+  readonly clock?: Clock;
   /** Trusted HTTP proxy URL injected into every child command when egress is enabled. */
   readonly proxyUrl?: string;
   /** Exact destinations permitted for runner-side web fetches. */
@@ -42,11 +47,7 @@ export interface RunnerServerOptions {
   /** GID used for sandbox commands. */
   readonly executionGid?: number;
   /** Executes validated requests; injectable for isolated server tests. */
-  readonly execute?: (
-    runId: z.infer<typeof Id>,
-    spec: ExecSpec,
-    signal: AbortSignal,
-  ) => Promise<ExecResult>;
+  readonly execute?: (runId: IdValue, spec: ExecSpec, signal: AbortSignal) => Promise<ExecResult>;
   /** Fetches validated content; injectable for isolated server tests. */
   readonly fetch?: (
     request: WebFetchRequest,
@@ -100,66 +101,19 @@ function authorized(request: RunnerRequest, tokenHash: Buffer): boolean {
   return candidateHash.byteLength === TOKEN_HASH_BYTES && timingSafeEqual(tokenHash, candidateHash);
 }
 
-function authorityFrom(value: string | undefined): string | undefined {
-  if (
-    value === undefined ||
-    value.length === 0 ||
-    value.trim() !== value ||
-    /[/@?#]/u.test(value)
-  ) {
-    return undefined;
-  }
-  try {
-    const url = new URL(`http://${value}`);
-    if (url.username !== "" || url.password !== "" || url.pathname !== "/" || url.search !== "") {
-      return undefined;
-    }
-    return url.host.toLowerCase();
-  } catch {
-    return undefined;
-  }
-}
-
-function validOrigin(origin: string | undefined, allowedHosts: ReadonlySet<string>): boolean {
-  if (origin === undefined) {
-    return true;
-  }
-  try {
-    const url = new URL(origin);
-    return (
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      url.username === "" &&
-      url.password === "" &&
-      url.pathname === "/" &&
-      url.search === "" &&
-      url.hash === "" &&
-      allowedHosts.has(url.host.toLowerCase())
-    );
-  } catch {
-    return false;
-  }
-}
-
-function validHost(request: RunnerRequest, allowedHosts: ReadonlySet<string>): boolean {
-  const authority = authorityFrom(request.headers.host);
-  return authority !== undefined && allowedHosts.has(authority);
-}
-
 function writeError(response: RunnerResponse, status: number, code: string): void {
   sendJson(response, status, { code });
 }
 
 function validateRunnerOptions(options: RunnerServerOptions): ReadonlySet<string> {
   const executionUid = options.executionUid ?? SANDBOX_EXEC_UID;
-  const executionGid = options.executionGid ?? SANDBOX_EXEC_GID;
   if (
     Buffer.byteLength(options.token, "utf8") < MIN_RUNNER_TOKEN_BYTES ||
     options.allowedHosts.length === 0 ||
     options.allowedHosts.some((host) => authorityFrom(host) !== host.toLowerCase()) ||
     (options.proxyUrl !== undefined && !validProxyUrl(options.proxyUrl)) ||
     !validEgressOptions(options) ||
-    executionUid === process.getuid?.() ||
-    executionGid === process.getgid?.()
+    executionUid === process.getuid?.()
   ) {
     throw new RunnerConfigurationError();
   }
@@ -244,13 +198,14 @@ export function withProxyEnvironment(spec: ExecSpec, proxyUrl: string | undefine
  */
 function executeRunnerSpec(
   options: RunnerServerOptions,
-  runId: z.infer<typeof Id>,
+  runId: IdValue,
   spec: ExecSpec,
   signal: AbortSignal,
 ): Promise<ExecResult> {
   const executionSpec = withProxyEnvironment(spec, options.proxyUrl);
   return options.execute === undefined
     ? executeSpec({
+        runId,
         spec: executionSpec,
         signal,
         workspaceRoot: options.workspaceRoot,
@@ -266,6 +221,7 @@ interface RunnerRequestContext {
   readonly tokenHash: Buffer;
   readonly isBusy: () => boolean;
   readonly setBusy: (busy: boolean) => void;
+  readonly leases: RunnerLeaseManager;
 }
 
 async function handleRunnerRequest(
@@ -292,6 +248,26 @@ async function handleRunnerRequest(
     if (payload === undefined) {
       return;
     }
+    if (payload.kind === "lease") {
+      if (await context.leases.acquire(payload.runId, payload.ttlMs)) {
+        sendJson(response, 200, { status: "ok" });
+      } else {
+        writeError(response, 409, "sandbox_busy");
+      }
+      return;
+    }
+    if (payload.kind === "release") {
+      if (context.isBusy() || !(await context.leases.release(payload.runId))) {
+        writeError(response, 409, "sandbox_busy");
+      } else {
+        sendJson(response, 200, { status: "ok" });
+      }
+      return;
+    }
+    if (!(await context.leases.renew(payload.runId))) {
+      writeError(response, 409, "sandbox_busy");
+      return;
+    }
     if (context.isBusy()) {
       writeError(response, 409, "sandbox_busy");
       return;
@@ -315,6 +291,8 @@ async function handleRunnerRequest(
       });
     } finally {
       context.setBusy(false);
+      await context.leases.finishExecution(payload.runId);
+      await context.leases.expireDue();
     }
   } catch {
     if (!response.headersSent) {
@@ -337,6 +315,16 @@ export function createRunnerRequestHandler(
   const allowedHosts = validateRunnerOptions(options);
   const tokenHash = hashToken(options.token);
   let activeExec = false;
+  const executionUid =
+    options.executionUid ?? (options.execute === undefined ? SANDBOX_EXEC_UID : process.getuid?.());
+  const executionGid =
+    options.executionGid ?? (options.execute === undefined ? SANDBOX_EXEC_GID : process.getgid?.());
+  const leases = new RunnerLeaseManager({
+    ...options,
+    ...(executionUid === undefined ? {} : { executionUid }),
+    ...(executionGid === undefined ? {} : { executionGid }),
+    isBusy: () => activeExec,
+  });
   const context: RunnerRequestContext = {
     options,
     allowedHosts,
@@ -345,6 +333,7 @@ export function createRunnerRequestHandler(
     setBusy: (busy) => {
       activeExec = busy;
     },
+    leases,
   };
   return (request, response) => handleRunnerRequest(context, request, response);
 }
@@ -380,6 +369,7 @@ export function startRunnerServer(): Server {
     token,
     allowedHosts: hostsText.split(",").map((host) => host.trim()),
     workspaceRoot: resolve(workspaceRoot),
+    temporaryRoot: "/tmp",
     ...(egress.proxyUrl === undefined ? {} : { proxyUrl: egress.proxyUrl }),
     egressAllowlist: egress.allow,
   });

@@ -12,7 +12,7 @@
   "context": ["schemas", "telemetry"],
   "policy": ["schemas", "telemetry"],
   "mcp": ["schemas", "telemetry", "crypto"],
-  "sandbox": ["schemas", "telemetry", "crypto"],
+  "sandbox": ["schemas", "telemetry", "crypto", "context"],
   "approval-app": ["schemas", "app-telemetry"],
   "core": [
     "schemas",

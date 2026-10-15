@@ -19,6 +19,7 @@ import { InProcessBackend, RemoteSandboxBackend, type SandboxBackend } from "@ha
 import { SqliteVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
+import { withSandboxLease } from "./runtime-lifecycle.js";
 import type { ModelCompletion, ToolPort } from "./ports.js";
 import { FakeModelPort } from "./testing/fake-model.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
@@ -51,6 +52,13 @@ function completion(parts: ModelCompletion["parts"]): ModelCompletion {
     fallbackDepth: 0,
     providerBlobs: null,
   };
+}
+
+function requestUrl(input: RequestInfo | URL): URL {
+  if (input instanceof URL) {
+    return input;
+  }
+  return typeof input === "string" ? new URL(input) : new URL(input.url);
 }
 
 function model(): FakeModelPort {
@@ -125,6 +133,27 @@ afterEach(() => {
 });
 
 describe("createRuntime sandbox composition", () => {
+  it("preserves the operation outcome when lease cleanup fails", async () => {
+    const backend: SandboxBackend = {
+      exec: vi.fn(),
+      acquireLease: () => Promise.resolve(),
+      releaseLease: () => Promise.reject(new Error("synthetic cleanup failure")),
+    };
+    const value = { status: "completed" };
+    await expect(
+      withSandboxLease(backend, Id.parse("00000000000000000000000042"), () =>
+        Promise.resolve(value),
+      ),
+    ).resolves.toBe(value);
+
+    const operationError = new Error("synthetic operation failure");
+    await expect(
+      withSandboxLease(backend, Id.parse("00000000000000000000000042"), () =>
+        Promise.reject(operationError),
+      ),
+    ).rejects.toBe(operationError);
+  });
+
   // threat: T-12
   it("creates a private workspace under the data directory and rejects outside paths", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-workspace-"));
@@ -141,7 +170,9 @@ describe("createRuntime sandbox composition", () => {
       );
       const workspaceRoot = join(dataDir, "workspaces");
       // macOS resolves /var to /private/var; compare canonical paths.
-      expect(execution.stdout).toBe(await realpath(workspaceRoot));
+      expect(execution.stdout).toBe(
+        await realpath(join(workspaceRoot, Id.parse("00000000000000000000000041"), "project")),
+      );
       expect((await stat(workspaceRoot)).mode & 0o777).toBe(0o700);
       await expect(
         runtime.sandboxBackend.exec(
@@ -203,7 +234,11 @@ describe("createRuntime sandbox composition", () => {
     "passes one configured backend to the tool port and records only result metadata (remote=%s)",
     async (remote) => {
       vi.stubEnv("HARNESS_SANDBOX_CANARY", canary);
-      const fetcher = vi.fn(() => Promise.resolve(Response.json(result)));
+      const fetcher = vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(
+          Response.json(requestUrl(input).pathname === "/exec" ? result : { status: "ok" }),
+        ),
+      );
       vi.stubGlobal("fetch", fetcher);
       const createTool = vi.fn((backend: SandboxBackend) => metadataTool(backend, remote));
       const resolve = vi.fn(() =>

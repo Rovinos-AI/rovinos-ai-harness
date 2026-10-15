@@ -9,5 +9,8 @@
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../schemas/tsconfig.build.json" }]
+  "references": [
+    { "path": "../context/tsconfig.build.json" },
+    { "path": "../schemas/tsconfig.build.json" }
+  ]
 }

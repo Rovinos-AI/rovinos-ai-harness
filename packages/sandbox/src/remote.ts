@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, SandboxRunnerUrlSchema, type Id, parseJson } from "@harness/schemas";
+import { HarnessError, Id, SandboxRunnerUrlSchema, parseJson } from "@harness/schemas";
+import type { Id as IdValue } from "@harness/schemas";
 import { z } from "zod";
 import { ExecResultSchema, MAX_EXEC_TIMEOUT_MS } from "./types.js";
 import type { ExecResult, ExecSpec, SandboxBackend } from "./types.js";
@@ -18,6 +19,14 @@ const RemoteOptionsSchema = z
     timeoutGraceMs: z.number().int().nonnegative().max(10_000).optional(),
   })
   .strict();
+const RunnerLeaseResponseSchema = z.object({ status: z.literal("ok") }).strict();
+const RunnerLeaseRequestSchema = z
+  .object({
+    runId: Id,
+    ttlMs: z.number().int().positive().max(600_000).optional(),
+  })
+  .strict();
+const RunnerReleaseRequestSchema = z.object({ runId: Id }).strict();
 
 /** Error reported when a remote runner request fails. */
 export class RemoteSandboxError extends HarnessError {
@@ -117,6 +126,59 @@ export class RemoteSandboxBackend implements SandboxBackend {
     this.#token = parsed.data.token;
     this.#timeoutGraceMs = parsed.data.timeoutGraceMs ?? 1000;
     this.#fetcher = options.fetcher ?? fetch;
+  }
+
+  /** Acquires or renews the runner lease for a run. */
+  async acquireLease(runId: IdValue, ttlMs = 10 * 60 * 1000): Promise<void> {
+    const lease = RunnerLeaseRequestSchema.safeParse({ runId, ttlMs });
+    if (!lease.success) {
+      throw new RemoteSandboxError("sandbox_runner_config_invalid");
+    }
+    await this.#requestLease("/lease", lease.data);
+  }
+
+  /** Releases the runner lease for a run. */
+  async releaseLease(runId: IdValue): Promise<void> {
+    const release = RunnerReleaseRequestSchema.safeParse({ runId });
+    if (!release.success) {
+      throw new RemoteSandboxError("sandbox_runner_config_invalid");
+    }
+    await this.#requestLease("/release", release.data);
+  }
+
+  async #requestLease(path: "/lease" | "/release", body: unknown): Promise<void> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, 10_000);
+    try {
+      const response = await this.#fetcher(new URL(path, this.#url), {
+        method: "POST",
+        redirect: "error",
+        headers: {
+          authorization: ["Bearer", this.#token].join(" "),
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (response.status === 409) {
+        throw new RemoteSandboxError("sandbox_busy");
+      }
+      if (!response.ok) {
+        throw new RemoteSandboxError("sandbox_unavailable");
+      }
+      const text = await readBoundedResponse(response, 1024);
+      parseJson(RunnerLeaseResponseSchema, text, { maxBytes: 1024 });
+    } catch (error) {
+      if (error instanceof RemoteSandboxError) {
+        throw error;
+      }
+      throw new RemoteSandboxError("sandbox_unavailable");
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** {@inheritDoc SandboxBackend.exec} */

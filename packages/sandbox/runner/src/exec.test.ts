@@ -3,11 +3,14 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { executeSpec, RunnerExecError } from "./exec.js";
+import process from "node:process";
+import { Id } from "@harness/schemas";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { executeSpec, killProcessGroup, processGroupExists, RunnerExecError } from "./exec.js";
 import type { ExecSpec } from "../../src/types.js";
 
 const limits = { memoryMb: 2048, pids: 2048, outputBytes: 1024, cpuSeconds: 5 };
+const runId = Id.parse("00000000000000000000000001");
 const executionUid = process.getuid?.() ?? 10003;
 const executionGid = process.getgid?.() ?? 10003;
 let workspaceRoot: string;
@@ -38,6 +41,7 @@ function makeSpec(
 
 function execute(spec: ExecSpec, signal = new AbortController().signal) {
   return executeSpec({
+    runId,
     spec,
     signal,
     workspaceRoot,
@@ -117,6 +121,7 @@ describe("executeSpec", () => {
     // On Linux setpriv rejects the credentials (non-zero exit); where setpriv is absent (macOS CI agent)
     // the spawn itself fails. Either way the command must not run successfully.
     const outcome = await executeSpec({
+      runId,
       spec: makeSpec([process.execPath, "-e", "process.exit(0)"]),
       signal: new AbortController().signal,
       workspaceRoot,
@@ -128,6 +133,78 @@ describe("executeSpec", () => {
     );
 
     expect(outcome === "rejected" || (typeof outcome === "number" && outcome !== 0)).toBe(true);
+  });
+
+  it("rejects synchronous spawn errors and child-process errors", async () => {
+    await expect(
+      executeSpec({
+        runId,
+        spec: makeSpec(["/bin/true"]),
+        signal: new AbortController().signal,
+        workspaceRoot,
+        spawnProcess: () => {
+          throw new Error("synthetic spawn failure");
+        },
+      }),
+    ).rejects.toBeInstanceOf(RunnerExecError);
+    await expect(execute(makeSpec(["/synthetic-missing-command"]))).rejects.toBeInstanceOf(
+      RunnerExecError,
+    );
+  });
+
+  it("handles cancellation that arrives while the child is being spawned", async () => {
+    const controller = new AbortController();
+    const spawnThenAbort: typeof spawnWithoutPrivilegeChanges = (file, args, options) => {
+      const child = spawnWithoutPrivilegeChanges(file, args, options);
+      controller.abort();
+      return child;
+    };
+    const result = await executeSpec({
+      runId,
+      spec: makeSpec([process.execPath, "-e", "setInterval(() => {}, 1000)"]),
+      signal: controller.signal,
+      workspaceRoot,
+      executionUid,
+      executionGid,
+      spawnProcess: spawnThenAbort,
+    });
+
+    expect(result.signal).toBe("SIGKILL");
+  });
+
+  it.skipIf(process.platform === "win32")("detects live process-group members", async () => {
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    if (child.pid === undefined) {
+      throw new Error("Expected the child process to have a pid.");
+    }
+    try {
+      expect(processGroupExists(child.pid)).toBe(true);
+    } finally {
+      process.kill(-child.pid, "SIGKILL");
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (!processGroupExists(child.pid)) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    expect(processGroupExists(child.pid)).toBe(false);
+  });
+
+  it("ignores process-group cleanup races after a process exits", () => {
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw new Error("synthetic process-group race");
+    });
+    try {
+      expect(() => {
+        killProcessGroup(100_000, executionUid);
+      }).not.toThrow();
+    } finally {
+      kill.mockRestore();
+    }
   });
 
   it("decodes stdout and stderr independently", async () => {

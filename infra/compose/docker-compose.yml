@@ -42,7 +42,7 @@ services:
     entrypoint:
       - setpriv
       - --reuid=${SANDBOX_RUNNER_UID:-10002}
-      - --regid=${SANDBOX_RUNNER_GID:-10002}
+      - --regid=${SANDBOX_RUNNER_GID:-10003}
       - --clear-groups
       - --inh-caps=+setuid,+setgid,+setpcap
       - --ambient-caps=+setuid,+setgid,+setpcap
@@ -51,7 +51,7 @@ services:
       - packages/sandbox/dist/runner/src/server.js
     read_only: true
     tmpfs:
-      - /tmp:size=64m,noexec,nosuid,nodev
+      - /tmp:size=64m,noexec,nosuid,nodev,mode=0770,uid=10002,gid=10003
     cap_drop:
       - ALL
     cap_add:

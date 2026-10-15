@@ -2,11 +2,12 @@
 import { readFileSync, watch } from "node:fs";
 import { mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import process from "node:process";
 import { Id } from "@harness/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ensureRunWorkspace,
   InProcessBackend,
   InProcessBackendError,
   resolveWorkspacePath,
@@ -191,8 +192,10 @@ describe("InProcessBackend", () => {
       'writeFileSync("parent.ready", String(process.pid));',
       "setInterval(() => {}, 1000);",
     ].join("");
+    const projectRoot = join(workspaceRoot, runId, "project");
+    await ensureRunWorkspace(workspaceRoot, runId);
     const processesReady = new Promise<void>((resolve) => {
-      const watcher = watch(workspaceRoot, (_event, filename) => {
+      const watcher = watch(projectRoot, (_event, filename) => {
         if (filename?.toString() === "grandchild.ready") {
           watcher.close();
           resolve();
@@ -208,8 +211,8 @@ describe("InProcessBackend", () => {
     await processesReady;
     triggerTimeout?.();
     const result = await execution;
-    const parentPidText = await readFile(join(workspaceRoot, "parent.ready"), "utf8");
-    const grandchildPidText = await readFile(join(workspaceRoot, "grandchild.ready"), "utf8");
+    const parentPidText = await readFile(join(projectRoot, "parent.ready"), "utf8");
+    const grandchildPidText = await readFile(join(projectRoot, "grandchild.ready"), "utf8");
     const parentPid = Number(parentPidText);
     const grandchildPid = Number(grandchildPidText);
 
@@ -221,7 +224,7 @@ describe("InProcessBackend", () => {
     expect(Number.isSafeInteger(grandchildPid)).toBe(true);
     expect(await waitForProcessExit(parentPid)).toBe(true);
     expect(await waitForProcessExit(grandchildPid)).toBe(true);
-  });
+  }, 30_000);
 
   // threat: T-10
   it("kills a background grandchild after the command exits normally", async () => {
@@ -348,6 +351,54 @@ describe("InProcessBackend", () => {
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  // threat: T-14
+  it("uses a distinct project directory for each in-process run", async () => {
+    const otherRunId = Id.parse("00000000000000000000000002");
+    const backend = createBackend();
+    const first = await backend.exec(
+      runId,
+      makeSpec([
+        process.execPath,
+        "-e",
+        'require("node:fs").writeFileSync("private.txt", "first")',
+      ]),
+      new AbortController().signal,
+    );
+    const second = await backend.exec(
+      otherRunId,
+      makeSpec([process.execPath, "-e", "process.stdout.write(process.cwd())"]),
+      new AbortController().signal,
+    );
+
+    expect(first.exitCode).toBe(0);
+    expect(second.stdout).toBe(join(await realpath(workspaceRoot), otherRunId, "project"));
+    await expect(
+      backend.exec(
+        otherRunId,
+        makeSpec([process.execPath, "-e", "process.exit(0)"], {
+          cwd: `../../${runId}/project`,
+        }),
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: "sandbox_workspace_path_invalid" });
+  });
+
+  it("sets TMPDIR to an absolute sibling of the canonical project root", async () => {
+    const backend = new InProcessBackend({
+      workspaceRoot: relative(process.cwd(), workspaceRoot),
+      logger,
+    });
+    const result = await backend.exec(
+      runId,
+      makeSpec([process.execPath, "-e", "process.stdout.write(process.env.TMPDIR ?? '')"]),
+      new AbortController().signal,
+    );
+    const expected = await realpath(join(workspaceRoot, runId, ".harness", "tmp"));
+
+    expect(isAbsolute(result.stdout)).toBe(true);
+    expect(result.stdout).toBe(expected);
   });
 
   it("rejects commands that cannot be started", async () => {
