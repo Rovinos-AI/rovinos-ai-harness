@@ -328,7 +328,14 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             }, z.core.$strict>>>;
         }, z.core.$strict>>;
         vault: z.ZodPrefault<z.ZodObject<{
+            backend: z.ZodDefault<z.ZodEnum<{
+                sqlite: "sqlite";
+                postgres: "postgres";
+            }>>;
             purgeAfterDays: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            postgres: z.ZodOptional<z.ZodObject<{
+                url: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         telemetry: z.ZodPrefault<z.ZodObject<{
             sentinel: z.ZodPrefault<z.ZodObject<{
@@ -558,8 +565,8 @@ export declare const RunViewSchema: z.ZodObject<{
         toolId: z.ZodString;
         policyDecision: z.ZodEnum<{
             allow: "allow";
-            ask: "ask";
             deny: "deny";
+            ask: "ask";
         }>;
         ruleId: z.ZodOptional<z.ZodString>;
         runId: z.ZodString;
@@ -573,8 +580,8 @@ export declare const RunViewSchema: z.ZodObject<{
             approval_wait: "approval_wait";
         }>;
         decision: z.ZodEnum<{
-            deny: "deny";
             approve: "approve";
+            deny: "deny";
             edit: "edit";
         }>;
         decidedBy: z.ZodEnum<{
@@ -768,8 +775,8 @@ export declare const RunContentSchema: z.ZodArray<z.ZodObject<{
 export type RunContent = z.infer<typeof RunContentSchema>;
 /** A decision that can be applied to a pending approval. */
 export declare const ApprovalDecisionSchema: z.ZodEnum<{
-    deny: "deny";
     approve: "approve";
+    deny: "deny";
     edit: "edit";
 }>;
 /** Inferred human approval decision. */
@@ -786,8 +793,8 @@ export declare const ApprovalResolutionResultSchema: z.ZodObject<{
     runId: z.ZodString;
     approvalId: z.ZodString;
     decision: z.ZodEnum<{
-        deny: "deny";
         approve: "approve";
+        deny: "deny";
         edit: "edit";
     }>;
 }, z.core.$strict>;

@@ -453,7 +453,7 @@ describe("AnthropicAdapter", () => {
         },
       ],
     }).adapter.complete(baseRequest, context());
-    const enforced = enforceToolOutput(
+    const enforced = await enforceToolOutput(
       providerResult.parts,
       z.object({ answer: z.string() }).strict(),
     );

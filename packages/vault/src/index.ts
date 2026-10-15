@@ -7,6 +7,7 @@ export {
   type VaultScopeResolver,
 } from "./auditing-resolver.js";
 export { InMemoryVault } from "./memory.js";
+export { PostgresVault, type PostgresVaultOptions } from "./postgres.js";
 export { SqliteVault } from "./sqlite.js";
 export {
   purgeExpired,

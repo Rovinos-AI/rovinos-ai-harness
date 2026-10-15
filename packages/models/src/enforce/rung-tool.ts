@@ -2,11 +2,15 @@
 import { Code, JsonValue, type ModelRequest, type Part } from "@harness/schemas";
 import type { z } from "zod";
 import {
+  applyValueTransform,
   EnforcementIssueSchema,
   enforcementIssuesFromError,
   parseEnforcementResult,
+  parseTokenizedEnforcementResult,
   stripSyntheticToolCall,
   type EnforcementResult,
+  type TokenizedEnforcementResult,
+  type ValueTransform,
 } from "./index.js";
 
 const SYNTHETIC_TOOL_ID = Code.parse("emit_result");
@@ -34,10 +38,28 @@ export function withForcedOutputTool(
 export function enforceToolOutput<Schema extends z.ZodType>(
   parts: readonly Part[],
   outputSchema: Schema,
-): {
+): Promise<{ readonly parts: Part[]; readonly result: EnforcementResult<Schema> }>;
+export function enforceToolOutput(
+  parts: readonly Part[],
+  outputSchema: z.ZodType,
+  valueTransform: ValueTransform,
+): Promise<{ readonly parts: Part[]; readonly result: TokenizedEnforcementResult }>;
+export function enforceToolOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+  valueTransform?: ValueTransform,
+): Promise<{
   readonly parts: Part[];
-  readonly result: EnforcementResult<Schema>;
-} {
+  readonly result: EnforcementResult<Schema> | TokenizedEnforcementResult;
+}>;
+export async function enforceToolOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+  valueTransform?: ValueTransform,
+): Promise<{
+  readonly parts: Part[];
+  readonly result: EnforcementResult<Schema> | TokenizedEnforcementResult;
+}> {
   const calls = parts.filter(
     (part) => part.type === "tool_call" && part.toolId === SYNTHETIC_TOOL_ID,
   );
@@ -51,6 +73,15 @@ export function enforceToolOutput<Schema extends z.ZodType>(
         rungUsed: "tool",
       }),
     };
+  }
+
+  if (valueTransform !== undefined) {
+    return enforceTransformedToolOutput(
+      calls[0].args,
+      withoutSyntheticCall,
+      outputSchema,
+      valueTransform,
+    );
   }
 
   const parsed = outputSchema.safeParse(calls[0].args);
@@ -81,6 +112,47 @@ export function enforceToolOutput<Schema extends z.ZodType>(
     parts: [...withoutSyntheticCall, { type: "text", text: canonicalJson(jsonValue.data) }],
     result: parseEnforcementResult(outputSchema, {
       value: parsed.data,
+      valid: true,
+      rungUsed: "tool",
+    }),
+  };
+}
+
+async function enforceTransformedToolOutput<Schema extends z.ZodType>(
+  args: JsonValue,
+  parts: Part[],
+  outputSchema: Schema,
+  valueTransform: ValueTransform,
+): Promise<{
+  readonly parts: Part[];
+  readonly result: EnforcementResult<Schema> | TokenizedEnforcementResult;
+}> {
+  const transformed = await applyValueTransform(valueTransform, outputSchema, args);
+  if (!transformed.ok) {
+    return {
+      parts,
+      result: parseEnforcementResult(outputSchema, {
+        valid: false,
+        issues: transformed.issues,
+        rungUsed: "tool",
+      }),
+    };
+  }
+  const jsonValue = JsonValue.safeParse(transformed.tokenized);
+  if (!jsonValue.success) {
+    return {
+      parts,
+      result: parseEnforcementResult(outputSchema, {
+        valid: false,
+        issues: enforcementIssuesFromError(jsonValue.error),
+        rungUsed: "tool",
+      }),
+    };
+  }
+  return {
+    parts: [...parts, { type: "text", text: canonicalJson(jsonValue.data) }],
+    result: parseTokenizedEnforcementResult({
+      value: jsonValue.data,
       valid: true,
       rungUsed: "tool",
     }),

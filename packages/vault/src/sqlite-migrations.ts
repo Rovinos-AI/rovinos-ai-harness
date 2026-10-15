@@ -26,6 +26,10 @@ const MIGRATIONS = [
     version: "0005_nullable_lookup",
     path: fileURLToPath(new URL("../migrations/sqlite/0005_nullable_lookup.sql", import.meta.url)),
   },
+  {
+    version: "0006_scope_keys",
+    path: fileURLToPath(new URL("../migrations/sqlite/0006_scope_keys.sql", import.meta.url)),
+  },
 ] as const;
 
 interface MigrationRow {

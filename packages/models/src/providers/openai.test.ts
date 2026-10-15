@@ -326,7 +326,7 @@ describe("OpenAI Chat Completions mapper", () => {
       ids: { next: () => ids.shift() ?? id },
       clock: { now: () => 0 },
     });
-    const enforced = enforceToolOutput(
+    const enforced = await enforceToolOutput(
       providerResult.parts,
       z.object({ answer: z.string() }).strict(),
     );

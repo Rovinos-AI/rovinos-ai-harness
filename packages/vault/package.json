@@ -22,11 +22,13 @@
     "@harness/crypto": "workspace:^",
     "@harness/schemas": "workspace:^",
     "better-sqlite3": "13.0.3",
+    "pg": "8.23.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
     "@harness/telemetry": "workspace:^",
     "@types/better-sqlite3": "9.6.0",
+    "@types/pg": "8.23.1",
     "vitest": "3.2.6"
   }
 }

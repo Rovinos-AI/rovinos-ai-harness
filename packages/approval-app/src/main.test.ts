@@ -6,7 +6,7 @@ import type * as Apps from "@modelcontextprotocol/ext-apps";
 const bridge = vi.hoisted(() => ({
   apps: new Map<string, Apps.EventDispatcher<Apps.AppEventMap>>(),
   connect: vi.fn<() => Promise<void>>(),
-  call: vi.fn(),
+  call: vi.fn<Apps.App["callServerTool"]>(),
 }));
 
 vi.mock("@modelcontextprotocol/ext-apps", async (importOriginal) => {
@@ -91,6 +91,37 @@ describe("approval app SDK bootstrap", () => {
     expect(window.sessionStorage.length).toBe(0);
     window.dispatchEvent(new Event("pagehide"));
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("resolves a wrapped approval with its approval id and emits only the decision metadata", async () => {
+    const app = await start();
+    bridge.call.mockImplementation((request) =>
+      Promise.resolve(
+        request.name === "harness.approvals.resolve"
+          ? { content: [], structuredContent: { ok: true } }
+          : { content: [] },
+      ),
+    );
+    app.dispatch("toolinput", {
+      arguments: {
+        approvalId: "00000000000000000000000003",
+        payload,
+      },
+    });
+    document.querySelector<HTMLButtonElement>("button")?.click();
+    await vi.waitFor(() => {
+      const statuses = document.querySelectorAll('[role="status"]');
+      expect(statuses[statuses.length - 1]?.textContent).toBe("Approval granted.");
+    });
+    expect(
+      bridge.call.mock.calls.some(([request]) => request.name === "harness.approvals.resolve"),
+    ).toBe(true);
+    const calls = JSON.stringify(bridge.call.mock.calls);
+    expect(calls).toContain('"approvalId":"00000000000000000000000003"');
+    expect(calls).toContain('"decision":"approve"');
+    expect(calls).not.toContain("SYNTHETIC");
+    expect(window.localStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBe(0);
   });
 
   it("handles a failed connection without exposing the exception", async () => {
