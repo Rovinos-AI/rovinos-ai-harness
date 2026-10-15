@@ -185,6 +185,15 @@ it("runs integration tests with Compose and always tears down", () => {
   ).toBe(true);
   expect(
     integrationSteps.some(
+      (step) =>
+        typeof step.script === "string" &&
+        step.script.includes(
+          "yarn workspaces foreach --recursive --topological --from @harness/cli run build",
+        ),
+    ),
+  ).toBe(true);
+  expect(
+    integrationSteps.some(
       (step) => step.task === "PublishTestResults@2" && step.condition === "succeededOrFailed()",
     ),
   ).toBe(true);

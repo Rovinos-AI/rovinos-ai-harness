@@ -235,7 +235,6 @@ async function checkTransport(
   for (const era of ["modern", "legacy"] as const) {
     assertProtocol(await invoke({ ...request, protocolEra: era, method: "initialize" }), era);
   }
-  await invoke({ ...request, protocolEra: "modern", method: "tools/list", flags: ["--strict"] });
   const withoutApps = await invoke({
     ...request,
     protocolEra: "modern",
@@ -247,7 +246,7 @@ async function checkTransport(
     ...request,
     protocolEra: "modern",
     method: "tools/list",
-    flags: ["--app-info", "--advertise-apps"],
+    flags: ["--strict", "--app-info", "--advertise-apps"],
   });
   assertAppVisibility(toolRows(withApps), true);
   const resource = jsonObject(

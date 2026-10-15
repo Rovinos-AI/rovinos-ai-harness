@@ -110,6 +110,8 @@ stages:
             displayName: Build reference host browser bundle
           - script: yarn workspace @harness/approval-app build
             displayName: Build approval app for the control-plane resource
+          - script: yarn workspaces foreach --recursive --topological --from @harness/cli run build
+            displayName: Build CLI and runtime dependencies for Inspector conformance
           - script: yarn workspace @harness/host exec playwright install --with-deps chromium
             displayName: Install Chromium and Linux dependencies
             condition: eq(variables['Agent.OS'], 'Linux')

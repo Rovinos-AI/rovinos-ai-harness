@@ -55,7 +55,7 @@
     {
       "package": "@modelcontextprotocol/inspector",
       "version": "2.10.1",
-      "reason": "Pinned dev-only MCP conformance CLI has mixed upstream license metadata and an accompanying mixed-license notice.",
+      "reason": "Apache-2.0 with MIT-licensed contributions during MCP relicensing; docs are CC-BY-4.0; dev-only conformance CLI.",
       "expires": "2027-10-14"
     },
     {
@@ -66,6 +66,24 @@
     },
     {
       "package": "lightningcss-linux-x64-gnu",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss-linux-arm64-gnu",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss-darwin-arm64",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss-darwin-x64",
       "version": "1.33.0",
       "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
       "expires": "2027-10-14"
