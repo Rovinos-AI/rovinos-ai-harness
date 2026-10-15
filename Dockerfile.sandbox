@@ -31,13 +31,15 @@ RUN groupadd --gid 10003 sandbox-shared \
     && useradd --uid 10002 --gid sandbox-shared --no-create-home --shell /usr/sbin/nologin sandbox \
     && useradd --uid 10003 --gid sandbox-shared --no-create-home --shell /usr/sbin/nologin sandbox-exec \
     && mkdir -p /workspaces \
-    && chown 10002:10002 /workspaces \
-    && chmod 1777 /workspaces \
+    && chown 10002:10003 /workspaces \
+    && chmod 0750 /workspaces \
     && command -v prlimit \
     && command -v setpriv
 COPY --from=build /app/node_modules/ ./node_modules/
 COPY --from=build /app/packages/sandbox/package.json ./packages/sandbox/package.json
 COPY --from=build /app/packages/sandbox/dist/ ./packages/sandbox/dist/
+COPY --from=build /app/packages/context/package.json ./packages/context/package.json
+COPY --from=build /app/packages/context/dist/ ./packages/context/dist/
 COPY --from=build /app/packages/schemas/package.json ./packages/schemas/package.json
 COPY --from=build /app/packages/schemas/dist/ ./packages/schemas/dist/
 USER 10002:10002

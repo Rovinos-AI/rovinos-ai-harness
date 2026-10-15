@@ -1,9 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
+// cspell:ignore mkfifo
 import { EventEmitter } from "node:events";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { Readable } from "node:stream";
+import fc from "fast-check";
 import { Id } from "@harness/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRunnerRequestHandler } from "../runner/src/server.js";
@@ -133,6 +146,14 @@ describe("per-run filesystem workspace", () => {
     expect((await stat(project)).mode & 0o770).toBe(0o770);
   });
 
+  it("keeps the volume root and trusted harness ancestor non-writable by the execution group", async () => {
+    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-trusted-"));
+    await activateRunWorkspace(root, runA);
+
+    expect((await stat(root)).mode & 0o022).toBe(0);
+    expect((await stat(join(root, runA, ".harness"))).mode & 0o022).toBe(0);
+  });
+
   // threat: T-12
   it("rejects traversal, absolute, NUL, long names, symlinks, and fuzzed escape paths", async () => {
     root = await mkdtemp(join(tmpdir(), "sandbox-workspace-paths-"));
@@ -158,12 +179,55 @@ describe("per-run filesystem workspace", () => {
       );
     }
 
-    for (let index = 0; index < 128; index += 1) {
-      const candidate = `${"safe/".repeat(index % 7)}${"../".repeat((index % 5) + 1)}escape`;
-      await expect(resolveWorkspacePath(project, candidate)).rejects.toBeInstanceOf(
-        SandboxWorkspacePathError,
+    const fuzzSeed = 0x190512;
+    const segment = fc.constantFrom(
+      "",
+      ".",
+      "..",
+      "inside-link",
+      "outside-link",
+      "%2e%2e",
+      "․․",
+      "．．",
+      "\0",
+      "\u0001",
+      "a".repeat(256),
+      "slash/name",
+    );
+    const candidate = fc
+      .tuple(
+        fc.array(fc.tuple(segment, fc.constantFrom("/", "\\", "//", "\\/")), {
+          minLength: 0,
+          maxLength: 8,
+        }),
+        segment,
+      )
+      .map(
+        ([prefix, last]) =>
+          `${prefix.map(([part, separator]) => part + separator).join("")}${last}`,
       );
-    }
+    await fc.assert(
+      fc.asyncProperty(candidate, async (path) => {
+        let resolved: string;
+        try {
+          resolved = await resolveWorkspacePath(project, path, { allowMissing: true });
+        } catch (error) {
+          if (!(error instanceof SandboxWorkspacePathError)) {
+            throw error;
+          }
+          return;
+        }
+        const resolvedParent = await realpath(resolved).catch(() => realpath(dirname(resolved)));
+        const relativePath = relative(project, resolvedParent);
+        expect(
+          resolvedParent === project ||
+            (relativePath !== ".." &&
+              !relativePath.startsWith(`..${sep}`) &&
+              !isAbsolute(relativePath)),
+        ).toBe(true);
+      }),
+      { seed: fuzzSeed, numRuns: 2_000 },
+    );
     await expect(resolveWorkspacePath(project, "inside/file")).resolves.toBe(
       join(project, "inside", "file"),
     );
@@ -173,6 +237,7 @@ describe("per-run filesystem workspace", () => {
   // threat: T-09
   it("enforces the file and aggregate quota, recounts external changes, and serves ranges", async () => {
     root = await mkdtemp(join(tmpdir(), "sandbox-workspace-quota-"));
+    await ensureRunWorkspace(root, runA);
     const workspace = new FsWorkspace({
       workspaceRoot: root,
       runId: runA,
@@ -204,6 +269,27 @@ describe("per-run filesystem workspace", () => {
     ).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
   });
 
+  it("does not grant quota credit for an externally enlarged file before recount", async () => {
+    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-quota-stale-"));
+    const clock = new FakeClock();
+    const workspace = new FsWorkspace({
+      workspaceRoot: root,
+      runId: runA,
+      maxFileBytes: 100,
+      quotaBytes: 8,
+      recountIntervalMs: 10_000,
+      clock,
+    });
+    await ensureRunWorkspace(root, runA);
+    await workspace.write(".harness/offload/file", new TextEncoder().encode("12345"));
+    await writeFile(join(root, runA, ".harness", "offload", "file"), "x".repeat(100));
+    await workspace.write(".harness/offload/file", new TextEncoder().encode("1"));
+
+    await expect(
+      workspace.write(".harness/offload/second", new TextEncoder().encode("12345678")),
+    ).rejects.toBeInstanceOf(WorkspaceQuotaExceededError);
+  });
+
   it("refuses symbolic links while opening workspace files", async () => {
     root = await mkdtemp(join(tmpdir(), "sandbox-workspace-symlink-"));
     const outside = join(root, "outside");
@@ -219,6 +305,28 @@ describe("per-run filesystem workspace", () => {
       workspace.write(".harness/offload/linked", new TextEncoder().encode("overwrite")),
     ).rejects.toMatchObject({ code: "workspace_path_invalid" });
     expect(await readFile(outside, "utf8")).toBe("synthetic-private-content");
+  });
+
+  it.skipIf(process.platform === "win32")("rejects FIFOs without blocking", async () => {
+    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-fifo-"));
+    await ensureRunWorkspace(root, runA);
+    const fifoPath = join(root, runA, ".harness", "offload", "pipe");
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("mkfifo", [fifoPath], { shell: false, stdio: "ignore" });
+      child.once("error", reject);
+      child.once("close", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error("mkfifo failed"));
+        }
+      });
+    });
+    const workspace = new FsWorkspace({ workspaceRoot: root, runId: runA });
+
+    await expect(workspace.read(".harness/offload/pipe")).rejects.toMatchObject({
+      code: "workspace_path_invalid",
+    });
   });
 
   // threat: T-13

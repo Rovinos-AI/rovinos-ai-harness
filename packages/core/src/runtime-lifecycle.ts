@@ -16,7 +16,11 @@ export async function withSandboxLease<T>(
   try {
     return await operation();
   } finally {
-    await backend.releaseLease?.(runId);
+    try {
+      await backend.releaseLease?.(runId);
+    } catch {
+      // Lease cleanup must not replace a durable run outcome.
+    }
   }
 }
 

@@ -3,11 +3,7 @@ import { HarnessError, type Event, type Id } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
 import { OffloadingToolPort } from "@harness/context";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
-import {
-  closeRuntimeResources,
-  markTerminalBestEffort,
-  withSandboxLease,
-} from "./runtime-lifecycle.js";
+import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
 import {
   composeAbortSignals,
   inspectCancellationTail,
@@ -200,22 +196,19 @@ function createTerminalAwareRunControl({
   clock,
   store,
   vault,
-  sandboxBackend,
 }: RuntimeComposition): RunControl {
   const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   return async (runId, operation, firstNewSeq = 0) => {
-    const result = await withSandboxLease(sandboxBackend, runId, () =>
-      withRunControl({
-        store,
-        runId,
-        firstNewSeq,
-        clock,
-        flushTelemetry,
-        processLike: overrides.processLike ?? defaultProcessLike,
-        graceMs: config.run.shutdownGraceMs,
-        operation,
-      }),
-    );
+    const result = await withRunControl({
+      store,
+      runId,
+      firstNewSeq,
+      clock,
+      flushTelemetry,
+      processLike: overrides.processLike ?? defaultProcessLike,
+      graceMs: config.run.shutdownGraceMs,
+      operation,
+    });
     if (
       result.status === "completed" ||
       result.status === "failed" ||

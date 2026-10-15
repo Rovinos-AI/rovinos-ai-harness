@@ -14,7 +14,7 @@ const root = resolve(fileURLToPath(new URL("../../../../", import.meta.url)));
 const projectName = `harness-sandbox-runner-${String(process.pid)}`;
 const integrationToken = "synthetic-runner-token-for-integration";
 const composeFile = "infra/compose/docker-compose.yml";
-const integrationUid = process.getuid?.() ?? 10002;
+const integrationUid = 10002;
 const integrationGid = 10003;
 const composeEnvironment = {
   ...process.env,
@@ -125,7 +125,7 @@ function renderComposeConfigWithoutRunnerToken(file: string): void {
   );
 }
 
-async function executeInRunner(script: string): Promise<string> {
+async function executeInRunner(script: string, user?: string): Promise<string> {
   const { stdout } = await execFileAsync(
     "docker",
     [
@@ -140,6 +140,7 @@ async function executeInRunner(script: string): Promise<string> {
       composeFile,
       "exec",
       "--no-TTY",
+      ...(user === undefined ? [] : ["--user", user]),
       "sandbox-runner",
       "node",
       "-e",
@@ -321,14 +322,19 @@ describe("sandbox runner Compose service", () => {
       'const path = require("node:path");',
       `const target = "/workspaces/${runB}/project/private.txt";`,
       `const relative = "../../${runB}/project/private.txt";`,
+      'const volumeArtifact = "/workspaces/exec-root-artifact";',
       'const link = path.join(process.cwd(), "outside-link");',
+      'fs.writeFileSync("local.txt", "synthetic");',
       "try { fs.symlinkSync(target, link); } catch {}",
       "const denied = (action) => { try { action(); return false; } catch { return true; } };",
-      'const results = [denied(() => fs.readFileSync(relative)), denied(() => fs.readFileSync(target)), denied(() => fs.readdirSync(path.dirname(target))), denied(() => fs.writeFileSync(target, "changed")), denied(() => fs.readFileSync(link))];',
+      'const results = [denied(() => fs.readFileSync(relative)), denied(() => fs.readFileSync(target)), denied(() => fs.readdirSync(path.dirname(target))), denied(() => fs.writeFileSync(target, "changed")), denied(() => fs.readFileSync(link)), denied(() => fs.writeFileSync(volumeArtifact, "leak")), denied(() => fs.linkSync("local.txt", volumeArtifact)), denied(() => fs.renameSync("../.harness", "../.harness-renamed"))];',
       "process.stdout.write(JSON.stringify(results));",
     ].join("\n");
     const isolated = await runExec(makeSpec(["node", "-e", probe]), runA);
-    expect(isolated).toMatchObject({ exitCode: 0, stdout: "[true,true,true,true,true]" });
+    expect(isolated).toMatchObject({
+      exitCode: 0,
+      stdout: "[true,true,true,true,true,true,true,true]",
+    });
     expect(
       (
         await requestRunner(
@@ -340,6 +346,99 @@ describe("sandbox runner Compose service", () => {
         )
       ).status,
     ).toBe(200);
+  }, 30_000);
+
+  // threat: T-14
+  it("keeps runner-owned directory modes usable by the harness and execution identities", async () => {
+    const harnessFirstRun = Id.parse("00000000000000000000000034");
+    const runnerFirstRun = Id.parse("00000000000000000000000035");
+    const tryHarnessFirst = [
+      "(async () => {",
+      'const fs = require("node:fs");',
+      'const { FsWorkspace } = await import("@harness/sandbox");',
+      'const { Id } = await import("@harness/schemas");',
+      `const runId = Id.parse("${harnessFirstRun}");`,
+      'try { await new FsWorkspace({ workspaceRoot: "/workspaces", runId }).write(".harness/offload/value", new TextEncoder().encode("x")); } catch {}',
+      "process.stdout.write(String(fs.existsSync(`/workspaces/${runId}`))); })().catch(() => process.exit(1));",
+    ].join("\n");
+    expect(await executeInRunner(tryHarnessFirst, "10001:10003")).toBe("false");
+    expect(
+      (
+        await requestRunner(
+          { runId: harnessFirstRun, ttlMs: 30_000 },
+          { token: integrationToken, path: "/lease" },
+        )
+      ).status,
+    ).toBe(200);
+    const writeFromHarness = [
+      "(async () => {",
+      'const { FsWorkspace } = await import("@harness/sandbox");',
+      'const { Id } = await import("@harness/schemas");',
+      `const runId = Id.parse("${harnessFirstRun}");`,
+      'await new FsWorkspace({ workspaceRoot: "/workspaces", runId }).write(".harness/offload/value", new TextEncoder().encode("x"));',
+      'process.stdout.write("ok"); })().catch(() => process.exit(1));',
+    ].join("\n");
+    expect(await executeInRunner(writeFromHarness, "10001:10003")).toBe("ok");
+    expect(
+      (
+        await requestRunner(
+          { runId: harnessFirstRun },
+          { token: integrationToken, path: "/release" },
+        )
+      ).status,
+    ).toBe(200);
+
+    expect(
+      (
+        await requestRunner(
+          { runId: runnerFirstRun, ttlMs: 30_000 },
+          { token: integrationToken, path: "/lease" },
+        )
+      ).status,
+    ).toBe(200);
+    const writeAfterRunner = [
+      "(async () => {",
+      'const { FsWorkspace } = await import("@harness/sandbox");',
+      'const { Id } = await import("@harness/schemas");',
+      `const runId = Id.parse("${runnerFirstRun}");`,
+      'await new FsWorkspace({ workspaceRoot: "/workspaces", runId }).write(".harness/offload/value", new TextEncoder().encode("x"));',
+      'process.stdout.write("ok"); })().catch(() => process.exit(1));',
+    ].join("\n");
+    expect(await executeInRunner(writeAfterRunner, "10001:10003")).toBe("ok");
+  }, 30_000);
+
+  // threat: T-14
+  it("cleans command-owned private scratch trees between leases", async () => {
+    const runId = Id.parse("00000000000000000000000033");
+    expect(
+      (await requestRunner({ runId, ttlMs: 30_000 }, { token: integrationToken, path: "/lease" }))
+        .status,
+    ).toBe(200);
+    const createScratch = [
+      'const fs = require("node:fs");',
+      'fs.mkdirSync(".harness/tmp/private", { mode: 0o700 });',
+      'fs.writeFileSync(".harness/tmp/private/file", "synthetic");',
+      'fs.mkdirSync("/tmp/runner-private-tree", { mode: 0o700 });',
+      'fs.writeFileSync("/tmp/runner-private-tree/file", "synthetic");',
+    ].join("\n");
+    const created = await runExec(makeSpec(["node", "-e", createScratch]), runId);
+    expect(created.exitCode).toBe(0);
+    expect(
+      (await requestRunner({ runId }, { token: integrationToken, path: "/release" })).status,
+    ).toBe(200);
+    expect(
+      (await requestRunner({ runId, ttlMs: 30_000 }, { token: integrationToken, path: "/lease" }))
+        .status,
+    ).toBe(200);
+    const verifyCleanup = [
+      'const fs = require("node:fs");',
+      "const absent = (path) => { try { fs.statSync(path); return false; } catch { return true; } };",
+      'process.stdout.write(JSON.stringify([absent(".harness/tmp/private"), absent("/tmp/runner-private-tree")]));',
+    ].join("\n");
+    await expect(runExec(makeSpec(["node", "-e", verifyCleanup]), runId)).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "[true,true]",
+    });
   }, 30_000);
 
   // threat: T-05

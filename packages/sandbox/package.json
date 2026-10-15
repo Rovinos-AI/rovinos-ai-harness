@@ -28,6 +28,7 @@
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/core": "2.12.0",
     "@types/node": "22.20.5",
+    "fast-check": "4.10.2",
     "vitest": "3.2.6"
   }
 }

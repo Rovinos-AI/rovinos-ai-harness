@@ -2,7 +2,7 @@
 import { readFileSync, watch } from "node:fs";
 import { mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import process from "node:process";
 import { Id } from "@harness/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -383,6 +383,22 @@ describe("InProcessBackend", () => {
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({ code: "sandbox_workspace_path_invalid" });
+  });
+
+  it("sets TMPDIR to an absolute sibling of the canonical project root", async () => {
+    const backend = new InProcessBackend({
+      workspaceRoot: relative(process.cwd(), workspaceRoot),
+      logger,
+    });
+    const result = await backend.exec(
+      runId,
+      makeSpec([process.execPath, "-e", "process.stdout.write(process.env.TMPDIR ?? '')"]),
+      new AbortController().signal,
+    );
+    const expected = await realpath(join(workspaceRoot, runId, ".harness", "tmp"));
+
+    expect(isAbsolute(result.stdout)).toBe(true);
+    expect(result.stdout).toBe(expected);
   });
 
   it("rejects commands that cannot be started", async () => {

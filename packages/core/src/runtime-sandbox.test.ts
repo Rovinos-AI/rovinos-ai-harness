@@ -17,6 +17,7 @@ import { InProcessBackend, RemoteSandboxBackend, type SandboxBackend } from "@ha
 import { SqliteVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
+import { withSandboxLease } from "./runtime-lifecycle.js";
 import type { ModelCompletion, ToolPort } from "./ports.js";
 import { FakeModelPort } from "./testing/fake-model.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
@@ -104,6 +105,27 @@ afterEach(() => {
 });
 
 describe("createRuntime sandbox composition", () => {
+  it("preserves the operation outcome when lease cleanup fails", async () => {
+    const backend: SandboxBackend = {
+      exec: vi.fn(),
+      acquireLease: () => Promise.resolve(),
+      releaseLease: () => Promise.reject(new Error("synthetic cleanup failure")),
+    };
+    const value = { status: "completed" };
+    await expect(
+      withSandboxLease(backend, Id.parse("00000000000000000000000042"), () =>
+        Promise.resolve(value),
+      ),
+    ).resolves.toBe(value);
+
+    const operationError = new Error("synthetic operation failure");
+    await expect(
+      withSandboxLease(backend, Id.parse("00000000000000000000000042"), () =>
+        Promise.reject(operationError),
+      ),
+    ).rejects.toBe(operationError);
+  });
+
   // threat: T-12
   it("creates a private workspace under the data directory and rejects outside paths", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-workspace-"));
@@ -230,7 +252,7 @@ describe("createRuntime sandbox composition", () => {
         }
         expect(JSON.stringify(events)).not.toContain(canary);
         expect(JSON.stringify(events)).not.toContain("synthetic-runtime-sandbox-token-0001");
-        expect(fetcher).toHaveBeenCalledTimes(remote ? 3 : 0);
+        expect(fetcher).toHaveBeenCalledTimes(remote ? 1 : 0);
         expect(resolve).toHaveBeenCalledTimes(remote ? 1 : 0);
       } finally {
         await runtime.close();

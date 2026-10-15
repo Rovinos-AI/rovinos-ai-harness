@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { HarnessError, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
 import type { Id as IdValue } from "@harness/schemas";
 import { z } from "zod";
-import { executeSpec, SANDBOX_EXEC_UID } from "./exec.js";
+import { executeSpec, SANDBOX_EXEC_GID, SANDBOX_EXEC_UID } from "./exec.js";
 import { MAX_EXEC_TIMEOUT_MS } from "../../src/types.js";
 import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 import type { WebFetchRequest, WebFetchResult } from "../../src/web-fetch-contracts.js";
@@ -291,6 +291,8 @@ async function handleRunnerRequest(
       });
     } finally {
       context.setBusy(false);
+      await context.leases.finishExecution(payload.runId);
+      await context.leases.expireDue();
     }
   } catch {
     if (!response.headersSent) {
@@ -313,6 +315,16 @@ export function createRunnerRequestHandler(
   const allowedHosts = validateRunnerOptions(options);
   const tokenHash = hashToken(options.token);
   let activeExec = false;
+  const executionUid =
+    options.executionUid ?? (options.execute === undefined ? SANDBOX_EXEC_UID : process.getuid?.());
+  const executionGid =
+    options.executionGid ?? (options.execute === undefined ? SANDBOX_EXEC_GID : process.getgid?.());
+  const leases = new RunnerLeaseManager({
+    ...options,
+    ...(executionUid === undefined ? {} : { executionUid }),
+    ...(executionGid === undefined ? {} : { executionGid }),
+    isBusy: () => activeExec,
+  });
   const context: RunnerRequestContext = {
     options,
     allowedHosts,
@@ -321,7 +333,7 @@ export function createRunnerRequestHandler(
     setBusy: (busy) => {
       activeExec = busy;
     },
-    leases: new RunnerLeaseManager(options),
+    leases,
   };
   return (request, response) => handleRunnerRequest(context, request, response);
 }

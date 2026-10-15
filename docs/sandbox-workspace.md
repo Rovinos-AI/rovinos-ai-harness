@@ -11,31 +11,40 @@ runner. Each run has a separate directory:
     └── tmp/             run-scoped temporary files
 ```
 
-The runner creates these directories with mode `02770`: owner and shared-group
-access, plus the setgid bit so newly created entries retain the shared group.
-The deployment must configure the harness service (uid `10001`) and runner
-(uid `10002`) with a common group; the sandbox image uses gid `10003`. Commands
-run as uid/gid `10003`. The runner locks a run's top-level directory to mode
-`0700` when its lease is released or expires, so a later command running under
-the shared execution identity cannot traverse the previous run's directory.
+The volume root is runner-owned (uid `10002`, gid `10003`) and mode `0750`, so
+commands cannot create shared artifacts or hard links outside their run
+directory. A run's top-level directory is mode `02750`; `project/`, `offload/`,
+and `tmp/` use `02770`, while `.harness/` is mode `0750` so commands cannot
+replace its trusted children. The setgid bit keeps newly created entries in
+the shared group. The deployment must configure the harness service (uid
+`10001`) and runner (uid `10002`) with the common gid `10003`. Commands run as
+uid/gid `10003`. Only the runner creates, activates, and locks run directories;
+the harness accesses offloads through the shared group and does not change
+directory modes. The runner locks a run's top-level directory to mode `0700`
+when its lease is released or expires.
 
-The harness acquires `POST /lease` with `{ "runId": "<runId>", "ttlMs": 600000
-}` before starting or resuming a run. A lease is exclusive to one run ID;
-another run receives HTTP `409` with code `sandbox_busy`. Runner exec requests
-renew the lease. The harness calls `POST /release` with `{ "runId": "<runId>" }`
-when the run suspends or reaches a terminal state. Leases expire after ten
-minutes by default if the harness stops responding.
+The authenticated `POST /lease` endpoint explicitly reserves one run ID;
+another run receives HTTP `409` with code `sandbox_busy`. Normal `/exec`
+requests acquire an execution-scoped lease and release it after the process
+group exits, allowing subagents with distinct run IDs to execute between
+parent commands. An explicit lease remains pinned until `POST /release` or
+expiry. Expiry cannot unlock a workspace while its process group is still
+running. Leases expire after ten minutes by default. On runner startup, all
+persisted run directories are sealed before the first lease is admitted.
 
 Workspace paths are relative to the run's `project/` directory. The resolver
 rejects absolute paths, NUL bytes, traversal segments, overlong paths, and
-symlinks. Offloaded files are limited to 10 MiB each and 500 MiB across the
-run by default. Quota accounting includes the whole run directory and is
-recounted periodically.
+symlinks. Offloads are direct files in `.harness/offload/`; nested paths are
+rejected so commands cannot replace an ancestor during file operations.
+Offloaded files are limited to 10 MiB each and 500 MiB across the run by
+default. Quota accounting includes the whole run directory and is recounted
+periodically.
 
-Each lease clears `/tmp` in the runner and recreates the run's `.harness/tmp`;
-commands receive that run-specific directory as `TMPDIR`. The runner container
-also mounts `/tmp` as an ephemeral tmpfs. The harness does not execute files
-from the workspace.
+When a run is activated, the runner clears its `.harness/tmp` and `/tmp`
+entries as the command execution uid, which can remove private command-owned
+trees. Commands receive an absolute, run-specific `.harness/tmp` as `TMPDIR`.
+The runner container also mounts `/tmp` as an ephemeral tmpfs. The harness does
+not execute files from the workspace.
 
 ## Assumptions and known gaps
 

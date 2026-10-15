@@ -10,7 +10,9 @@ import {
   SequentialIdGenerator,
   type Detection,
   type Event,
+  type Id as IdValue,
 } from "@harness/schemas";
+import type { SandboxBackend } from "@harness/sandbox";
 import type { ModelPort, ModelRequest, ModelCompletion, ToolPort } from "./ports.js";
 import { InMemoryEventStore, type EventStore } from "@harness/store";
 import { InMemoryVault, AuditingVaultResolver, Token } from "@harness/vault";
@@ -71,6 +73,7 @@ function piiTool(
   scopes: RunScopeRegistry,
   vault: InMemoryVault,
   resolvedValues: string[],
+  sandboxBackend?: SandboxBackend,
 ): ToolPort {
   const config = PiiConfigSchema.parse({
     defaultAction: "tokenize",
@@ -93,23 +96,32 @@ function piiTool(
         inputSchema: { type: "object" },
       },
     ],
-    execute: (call) => {
+    execute: async (call, context) => {
+      await sandboxBackend?.exec(
+        context.runId,
+        {
+          argv: ["/bin/true"],
+          timeoutMs: 1000,
+          limits: { memoryMb: 32, pids: 2, outputBytes: 0, cpuSeconds: 1 },
+        },
+        context.signal,
+      );
       if (call.toolId === "test.make") {
-        return Promise.resolve({ outcome: "ok", result: { value: email } });
+        return { outcome: "ok", result: { value: email } };
       }
       const token =
         call.args !== null && typeof call.args === "object" && !Array.isArray(call.args)
           ? call.args.token
           : undefined;
       if (typeof token !== "string") {
-        return Promise.resolve({
+        return {
           outcome: "error",
           errorCode: "test_token_missing",
           result: null,
-        });
+        };
       }
       resolvedValues.push(token);
-      return Promise.resolve({ outcome: "ok", result: { value: token } });
+      return { outcome: "ok", result: { value: token } };
     },
   };
   return new PiiToolPort(tools, {
@@ -122,6 +134,46 @@ function piiTool(
     config,
     resolver: new AuditingVaultResolver(vault, () => undefined, scopes.scopeOf),
   });
+}
+
+function leaseAwareSandbox(runIds: IdValue[]): SandboxBackend {
+  let owner: IdValue | undefined;
+  return {
+    acquireLease: (runId) => {
+      if (owner !== undefined && owner !== runId) {
+        return Promise.reject(new Error("synthetic lease conflict"));
+      }
+      owner = runId;
+      return Promise.resolve();
+    },
+    releaseLease: (runId) => {
+      if (owner === runId) {
+        owner = undefined;
+      }
+      return Promise.resolve();
+    },
+    exec: (runId) => {
+      if (owner !== undefined && owner !== runId) {
+        return Promise.reject(new Error("synthetic lease conflict"));
+      }
+      const temporary = owner === undefined;
+      owner = runId;
+      runIds.push(runId);
+      if (temporary) {
+        owner = undefined;
+      }
+      return Promise.resolve({
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        stdoutBytes: 0,
+        stderrBytes: 0,
+        truncated: false,
+        timedOut: false,
+        durationMs: 0,
+      });
+    },
+  };
 }
 
 function runtimePiiTool(resolvedValues: string[]): ToolPort {
@@ -240,6 +292,8 @@ describe("runtime subagent spawning", () => {
     const vault = new InMemoryVault();
     const resolvedValues: string[] = [];
     const model = new SpawnModel();
+    const sandboxRunIds: IdValue[] = [];
+    const sandboxBackend = leaseAwareSandbox(sandboxRunIds);
     const runtime = await createRuntime(
       {
         run: RunConfigSchema.parse({}),
@@ -268,7 +322,8 @@ describe("runtime subagent spawning", () => {
         clock: new FakeClock(4),
         ids: new SequentialIdGenerator(),
         model,
-        tool: piiTool(scopes, vault, resolvedValues),
+        tool: piiTool(scopes, vault, resolvedValues, sandboxBackend),
+        sandboxBackend,
         scopeRegistry: scopes,
         policy: allowAllPolicy,
       },
@@ -306,6 +361,8 @@ describe("runtime subagent spawning", () => {
       expect(spawnAppendIndex).toBeGreaterThanOrEqual(0);
       expect(childAppendIndex).toBeGreaterThan(spawnAppendIndex);
       expect(resolvedValues).toEqual([email]);
+      expect(sandboxRunIds).toHaveLength(2);
+      expect(new Set(sandboxRunIds).size).toBe(2);
       expect(childRequest?.messages[0]).toEqual({
         role: "system",
         parts: [{ type: "text", text: "Work carefully." }],

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
 import { HarnessError, Id, type Id as IdValue } from "@harness/schemas";
 import { WorkspaceFileNotFoundError, WorkspacePathError } from "@harness/context";
@@ -20,6 +20,7 @@ const DEFAULT_CLOCK: Clock = {
   },
 };
 const NOFOLLOW = constants.O_NOFOLLOW;
+const NON_BLOCKING = constants.O_NONBLOCK;
 
 function codeOf(error: unknown): string | undefined {
   return error instanceof Error && "code" in error && typeof error.code === "string"
@@ -150,53 +151,54 @@ export async function resolveWorkspacePath(
 /** Ensures the documented project and private harness directories exist for a run. */
 export async function ensureRunWorkspace(workspacesRoot: string, runId: IdValue): Promise<string> {
   const validatedRunId = Id.parse(runId);
-  await mkdir(workspacesRoot, { recursive: true, mode: 0o2770 });
+  await mkdir(workspacesRoot, { recursive: true, mode: 0o750 });
   const realWorkspacesRoot = await realpath(workspacesRoot).catch(() => {
     throw new SandboxWorkspacePathError();
   });
   const runRoot = join(realWorkspacesRoot, validatedRunId);
-  await mkdir(runRoot, { recursive: true, mode: 0o2770 });
+  await mkdir(runRoot, { recursive: true, mode: 0o2750 });
   await assertDirectory(runRoot);
-  await chmod(runRoot, 0o2770);
-  for (const directory of [
-    join(runRoot, "project"),
-    join(runRoot, ".harness"),
-    join(runRoot, ".harness", "offload"),
-    join(runRoot, ".harness", "tmp"),
-  ]) {
-    await mkdir(directory, { recursive: true, mode: 0o2770 });
+  for (const [directory, mode] of [
+    [join(runRoot, "project"), 0o2770],
+    [join(runRoot, ".harness"), 0o750],
+    [join(runRoot, ".harness", "offload"), 0o2770],
+    [join(runRoot, ".harness", "tmp"), 0o2770],
+  ] as const) {
+    await mkdir(directory, { recursive: true, mode });
     await assertDirectory(directory);
-    await chmod(directory, 0o2770);
   }
   return join(runRoot, "project");
 }
 
 /** Removes only the run-specific scratch directory, leaving project and offload data intact. */
-export async function clearRunScratch(workspacesRoot: string, runId: IdValue): Promise<void> {
+export async function clearRunScratch(
+  workspacesRoot: string,
+  runId: IdValue,
+  removeTree: (path: string) => Promise<void> = (path) =>
+    rm(path, { force: true, recursive: true }),
+): Promise<void> {
   const validatedRunId = Id.parse(runId);
   const runRoot = join(await realpath(workspacesRoot), validatedRunId);
   await assertDirectory(runRoot);
   const harnessDirectory = join(runRoot, ".harness");
   await assertDirectory(harnessDirectory);
-  await rm(join(harnessDirectory, "tmp"), {
-    force: true,
-    recursive: true,
-  });
-  await mkdir(join(harnessDirectory, "tmp"), {
-    mode: 0o2770,
-    recursive: true,
-  });
+  const temporaryDirectory = join(harnessDirectory, "tmp");
+  await assertDirectory(temporaryDirectory);
+  for (const entry of await readdir(temporaryDirectory)) {
+    await removeTree(join(temporaryDirectory, entry));
+  }
 }
 
 /** Filesystem-backed offload workspace bound to one run and enforcing byte quotas. */
 export class FsWorkspace implements WorkspacePort {
-  readonly #runRoot: string;
+  #runRoot: string;
   readonly #workspaceRoot: string;
   readonly #runId: IdValue;
   readonly #maxFileBytes: number;
   readonly #quotaBytes: number;
   readonly #recountIntervalMs: number;
   readonly #clock: Clock;
+  readonly #accountedFileSizes = new Map<string, number>();
   #usedBytes = 0;
   #lastRecount = Number.NEGATIVE_INFINITY;
   #ready: Promise<void> | undefined;
@@ -217,7 +219,7 @@ export class FsWorkspace implements WorkspacePort {
   }) {
     this.#runId = Id.parse(options.runId);
     this.#workspaceRoot = options.workspaceRoot;
-    this.#runRoot = join(options.workspaceRoot, this.#runId);
+    this.#runRoot = resolve(options.workspaceRoot, this.#runId);
     this.#maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
     this.#quotaBytes = options.quotaBytes ?? DEFAULT_RUN_QUOTA_BYTES;
     this.#recountIntervalMs = options.recountIntervalMs ?? DEFAULT_RECOUNT_INTERVAL_MS;
@@ -247,8 +249,8 @@ export class FsWorkspace implements WorkspacePort {
     }
     await this.#ensureReady();
     const filePath = await this.#resolveOffloadPath(path, true);
-    const currentBytes = await this.#fileSize(filePath);
-    const nextBytes = this.#usedBytes - currentBytes + data.byteLength;
+    const accountedBytes = this.#accountedFileSizes.get(filePath) ?? 0;
+    const nextBytes = this.#usedBytes - accountedBytes + data.byteLength;
     if (nextBytes > this.#quotaBytes) {
       throw new WorkspaceQuotaExceededError();
     }
@@ -265,6 +267,7 @@ export class FsWorkspace implements WorkspacePort {
       await handle.close();
     }
     this.#usedBytes = nextBytes;
+    this.#accountedFileSizes.set(filePath, data.byteLength);
   }
 
   /** {@inheritDoc WorkspacePort.read} */
@@ -281,28 +284,47 @@ export class FsWorkspace implements WorkspacePort {
       }
     }
     const filePath = await this.#resolveOffloadPath(path, true);
-    const handle = await open(filePath, constants.O_RDONLY | NOFOLLOW).catch((error: unknown) => {
-      if (codeOf(error) === "ENOENT") {
-        throw new WorkspaceFileNotFoundError();
-      }
-      throw new WorkspacePathError();
-    });
+    const handle = await open(filePath, constants.O_RDONLY | NOFOLLOW | NON_BLOCKING).catch(
+      (error: unknown) => {
+        if (codeOf(error) === "ENOENT") {
+          throw new WorkspaceFileNotFoundError();
+        }
+        throw new WorkspacePathError();
+      },
+    );
     try {
       const info = await handle.stat();
-      if (!info.isFile() || info.size > this.#maxFileBytes) {
+      if (!info.isFile()) {
+        throw new WorkspacePathError();
+      }
+      if (info.size > this.#maxFileBytes) {
         throw new WorkspaceQuotaExceededError();
       }
-      const bytes = await handle.readFile();
-      return range === undefined
-        ? bytes
-        : bytes.subarray(range.offset, range.offset + range.length);
+      if (range === undefined) {
+        return await handle.readFile();
+      }
+      const bytes = Buffer.alloc(Math.min(range.length, Math.max(0, info.size - range.offset)));
+      let bytesRead = 0;
+      while (bytesRead < bytes.byteLength) {
+        const result = await handle.read(
+          bytes,
+          bytesRead,
+          bytes.byteLength - bytesRead,
+          range.offset + bytesRead,
+        );
+        if (result.bytesRead === 0) {
+          break;
+        }
+        bytesRead += result.bytesRead;
+      }
+      return bytes.subarray(0, bytesRead);
     } finally {
       await handle.close();
     }
   }
 
   async #ensureReady(): Promise<void> {
-    this.#ready ??= ensureRunWorkspace(this.#workspaceRoot, this.#runId).then(async () => {
+    this.#ready ??= this.#assertReady().then(async () => {
       this.#usedBytes = await this.#recount();
       this.#lastRecount = this.#clock.now();
     });
@@ -313,8 +335,19 @@ export class FsWorkspace implements WorkspacePort {
     }
   }
 
+  async #assertReady(): Promise<void> {
+    this.#runRoot = await realpath(join(await realpath(this.#workspaceRoot), this.#runId));
+    await assertDirectory(this.#runRoot);
+    await assertDirectory(join(this.#runRoot, ".harness"));
+    await assertDirectory(join(this.#runRoot, ".harness", "offload"));
+  }
+
   async #resolveOffloadPath(path: string, allowMissing = false): Promise<string> {
     if (!path.startsWith(".harness/offload/")) {
+      throw new WorkspacePathError();
+    }
+    const filename = path.slice(".harness/offload/".length);
+    if (filename.length === 0 || /[\\/]/u.test(filename)) {
       throw new WorkspacePathError();
     }
     const resolved = await resolveWorkspacePath(this.#runRoot, path, { allowMissing });
@@ -325,22 +358,8 @@ export class FsWorkspace implements WorkspacePort {
     return resolved;
   }
 
-  async #fileSize(filePath: string): Promise<number> {
-    try {
-      const info = await lstat(filePath);
-      if (!info.isFile() || info.isSymbolicLink()) {
-        throw new WorkspacePathError();
-      }
-      return info.size;
-    } catch (error) {
-      if (codeOf(error) === "ENOENT") {
-        return 0;
-      }
-      throw error;
-    }
-  }
-
   async #recount(): Promise<number> {
+    this.#accountedFileSizes.clear();
     const walk = async (directory: string): Promise<number> => {
       let total = 0;
       for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -353,6 +372,7 @@ export class FsWorkspace implements WorkspacePort {
           total += await walk(path);
         } else if (info.isFile()) {
           total += info.size;
+          this.#accountedFileSizes.set(path, info.size);
         }
         if (total > this.#quotaBytes) {
           throw new WorkspaceQuotaExceededError();
@@ -370,7 +390,9 @@ export async function activateRunWorkspace(
   runId: IdValue,
 ): Promise<string> {
   const project = await ensureRunWorkspace(workspacesRoot, runId);
-  await chmod(join(workspacesRoot, Id.parse(runId)), 0o2770);
+  const runRoot = join(await realpath(workspacesRoot), Id.parse(runId));
+  await chmod(runRoot, 0o2750);
+  await chmod(join(runRoot, ".harness"), 0o750);
   return project;
 }
 
@@ -379,4 +401,23 @@ export async function lockRunWorkspace(workspacesRoot: string, runId: IdValue): 
   const runRoot = join(await realpath(workspacesRoot), Id.parse(runId));
   await assertDirectory(runRoot);
   await chmod(runRoot, 0o700);
+}
+
+/** Locks every persisted run workspace after a runner restart. */
+export async function sealPersistedRunWorkspaces(workspacesRoot: string): Promise<void> {
+  const realRoot = await realpath(workspacesRoot).catch(() => {
+    throw new SandboxWorkspacePathError();
+  });
+  if (((await stat(realRoot)).mode & 0o022) !== 0) {
+    throw new SandboxWorkspacePathError();
+  }
+  for (const entry of await readdir(realRoot, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) {
+      throw new SandboxWorkspacePathError();
+    }
+    if (!entry.isDirectory() || !Id.safeParse(entry.name).success) {
+      continue;
+    }
+    await lockRunWorkspace(realRoot, Id.parse(entry.name));
+  }
 }

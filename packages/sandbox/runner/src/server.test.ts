@@ -2,12 +2,13 @@
 import { EventEmitter } from "node:events";
 import { createServer as createNetServer } from "node:net";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { Duplex, Readable } from "node:stream";
 import { Id, parseJson } from "@harness/schemas";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { WebFetchResultSchema } from "../../src/web-fetch-contracts.js";
 import {
@@ -25,6 +26,7 @@ import type { ProxyRequest, ProxyResponse, WebFetchTransport } from "./web-fetch
 
 const token = "synthetic-runner-token-that-is-at-least-32-bytes";
 const runId = Id.parse("00000000000000000000000001");
+const workspaceRoot = mkdtempSync(join(tmpdir(), "sandbox-runner-server-"));
 const spec: ExecSpec = {
   argv: ["/bin/echo", "ok"],
   timeoutMs: 100,
@@ -124,7 +126,7 @@ function makeOptions(overrides: Partial<RunnerServerOptions> = {}): RunnerServer
   return {
     token,
     allowedHosts: ["runner.test"],
-    workspaceRoot: "/tmp",
+    workspaceRoot,
     execute: () => Promise.resolve(result),
     ...overrides,
   };
@@ -163,6 +165,10 @@ function responseBody(response: MemoryResponse): z.infer<typeof ResponseBodySche
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+afterAll(async () => {
+  await rm(workspaceRoot, { recursive: true, force: true });
 });
 
 describe("runner HTTP request handler", () => {

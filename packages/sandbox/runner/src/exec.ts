@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn, type ChildProcess } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
 import process from "node:process";
 import { HarnessError } from "@harness/schemas";
 import { activateRunWorkspace, resolveWorkspacePath } from "../../src/workspace.js";
@@ -84,27 +85,57 @@ class CapturedOutput {
   }
 }
 
-function killProcessGroup(pid: number, executionUid: number): void {
-  if (process.geteuid === undefined || process.seteuid === undefined) {
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch {
-      // The process group may have exited before the timeout or abort was observed.
-    }
-    return;
-  }
-  const serverUid = process.geteuid();
+/** Sends SIGKILL to a process group using its execution credentials. */
+export function killProcessGroup(pid: number, executionUid: number): void {
+  const serverUid = process.geteuid?.();
   try {
-    if (serverUid !== executionUid) {
-      process.seteuid(executionUid);
+    if (serverUid !== undefined && serverUid !== executionUid) {
+      process.seteuid?.(executionUid);
     }
     process.kill(-pid, "SIGKILL");
   } catch {
     // The process group may have exited before the timeout or abort was observed.
   } finally {
-    if (serverUid !== executionUid) {
-      process.seteuid(serverUid);
+    if (serverUid !== undefined && serverUid !== executionUid) {
+      process.seteuid?.(serverUid);
     }
+  }
+}
+
+function linuxProcessGroupHasLiveMembers(pid: number): boolean {
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/u.test(entry)) {
+      continue;
+    }
+    try {
+      const status = readFileSync(`/proc/${entry}/stat`, "utf8");
+      const fields = status.slice(status.lastIndexOf(")") + 2).split(" ");
+      if (Number(fields[2]) === pid && fields[0] !== "Z" && fields[0] !== "X") {
+        return true;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
+/** Reports whether a process group still has live members. */
+export function processGroupExists(pid: number): boolean {
+  if (process.platform === "linux") {
+    return linuxProcessGroupHasLiveMembers(pid);
+  }
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code !== "ESRCH";
+  }
+}
+
+async function waitForProcessGroupExit(pid: number): Promise<void> {
+  while (processGroupExists(pid)) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
 
@@ -157,6 +188,46 @@ interface ProcessOptions {
   executionUid: number;
   executionGid: number;
   spawnProcess: SpawnProcess;
+}
+
+interface ProcessCompletionOptions {
+  readonly childPid: number | undefined;
+  readonly executionUid: number;
+  readonly signal: AbortSignal;
+  readonly abort: () => void;
+  readonly cancelTimeout: () => void;
+  readonly spawnFailed: boolean;
+  readonly exitCode: number | null;
+  readonly childSignal: NodeJS.Signals | null;
+  readonly output: CapturedOutput;
+  readonly timedOut: boolean;
+  readonly clock: Clock;
+  readonly startedAt: number;
+  readonly resolve: (result: ExecResult) => void;
+  readonly reject: (error: unknown) => void;
+}
+
+function completeProcess(options: ProcessCompletionOptions): void {
+  options.cancelTimeout();
+  if (options.childPid !== undefined) {
+    killProcessGroup(options.childPid, options.executionUid);
+  }
+  const exited =
+    options.childPid === undefined ? Promise.resolve() : waitForProcessGroupExit(options.childPid);
+  void exited.then(() => {
+    options.signal.removeEventListener("abort", options.abort);
+    if (options.spawnFailed) {
+      options.reject(new RunnerExecError());
+      return;
+    }
+    options.resolve({
+      exitCode: options.exitCode,
+      ...(options.childSignal === null ? {} : { signal: options.childSignal }),
+      ...options.output.result(),
+      timedOut: options.timedOut,
+      durationMs: Math.max(0, Math.round(options.clock.now() - options.startedAt)),
+    });
+  }, options.reject);
 }
 
 function executeProcess({
@@ -215,21 +286,21 @@ function executeProcess({
       spawnFailed = true;
     });
     child.once("close", (exitCode, childSignal) => {
-      cancelTimeout();
-      if (child.pid !== undefined) {
-        killProcessGroup(child.pid, executionUid);
-      }
-      signal.removeEventListener("abort", abort);
-      if (spawnFailed) {
-        reject(new RunnerExecError());
-        return;
-      }
-      resolve({
+      completeProcess({
+        childPid: child.pid,
+        executionUid,
+        signal,
+        abort,
+        cancelTimeout,
+        spawnFailed,
         exitCode,
-        ...(childSignal === null ? {} : { signal: childSignal }),
-        ...output.result(),
+        childSignal,
+        output,
         timedOut,
-        durationMs: Math.max(0, Math.round(clock.now() - startedAt)),
+        clock,
+        startedAt,
+        resolve,
+        reject,
       });
     });
     signal.addEventListener("abort", abort, { once: true });
