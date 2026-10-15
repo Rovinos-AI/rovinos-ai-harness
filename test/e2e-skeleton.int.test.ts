@@ -840,6 +840,13 @@ describe("MCP runtime", () => {
       });
       try {
         expect(await appRuntime.hasPendingApproval(firstRunId)).toBe(true);
+        // Every run records its initial run_input; app content must not add another.
+        const baselineEvents = await readEvents(
+          new SqliteEventStore(join(dataDirectory, "harness.db")),
+          firstRunId,
+        );
+        const countRunInputs = (events: readonly { readonly type: string }[]): number =>
+          events.filter((event) => event.type === "run_input").length;
         const tokenized = await appRuntime.tokenizeAppContent(
           firstRunId,
           { message: current.canary },
@@ -864,7 +871,7 @@ describe("MCP runtime", () => {
         expect(JSON.stringify(appEvents.at(-1))).not.toContain(current.canary);
         expect(await appRuntime.hasPendingApproval(firstRunId)).toBe(true);
         expect(appEvents.some((event) => event.type === "approval_resolved")).toBe(false);
-        expect(appEvents.some((event) => event.type === "run_input")).toBe(false);
+        expect(countRunInputs(appEvents)).toBe(countRunInputs(baselineEvents));
       } finally {
         await appRuntime.close();
       }
