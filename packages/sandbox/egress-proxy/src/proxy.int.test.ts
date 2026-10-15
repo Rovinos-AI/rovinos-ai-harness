@@ -69,7 +69,7 @@ function readComposeConfig(): void {
 function makeSpec(argv: string[]): ExecSpec {
   return {
     argv,
-    timeoutMs: 10_000,
+    timeoutMs: 20_000,
     limits: { memoryMb: 2048, pids: 32, outputBytes: 4096, cpuSeconds: 5 },
   };
 }
@@ -143,7 +143,8 @@ describe("sandbox egress proxy Compose services", () => {
       '  socket.setTimeout(1000, () => finish(false)); socket.once("connect", () => finish(true)); socket.once("error", () => finish(false));',
       "});",
       'Promise.all([viaProxy("http://egress-probe:8080/"), viaProxy("http://denied.example.test/"), viaProxy("http://metadata.example.test/"), direct("198.51.100.3", 8080), direct("169.254.169.254", 80)]).then((values) => {',
-      "  process.stdout.write(JSON.stringify({ proxyEnvPresent, allowed: values[0], denied: values[1], metadata: values[2], directProbe: values[3], directMetadata: values[4] }));",
+      // Exit once the output is flushed: keep-alive sockets can otherwise hold the event loop open until the runner's exec timeout kills the process (exitCode null).
+      "  process.stdout.write(JSON.stringify({ proxyEnvPresent, allowed: values[0], denied: values[1], metadata: values[2], directProbe: values[3], directMetadata: values[4] }), () => process.exit(0));",
       "});",
     ].join("\n");
     const result = await executeInRunner(script);
