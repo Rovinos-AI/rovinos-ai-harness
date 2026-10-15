@@ -17,7 +17,7 @@ const context = {
 
 function toolPort(toolId: Code) {
   return {
-    describe: (candidate) =>
+    describe: (candidate: Code) =>
       candidate === toolId ? { idempotent: true, timeoutMs: 1_000 } : undefined,
     getToolSpecs: () => [{ toolId, description: toolId, inputSchema: {} }],
     execute: vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null })),
@@ -28,14 +28,7 @@ describe("composeToolPorts", () => {
   it("advertises unique specs and routes describe and execute to the matching port", async () => {
     const additional = toolPort(webFetchId);
     const existing = toolPort(existingId);
-    const collision = { ...toolPort(webFetchId), execute: vi.fn() };
-    const composed = composeToolPorts(additional, {
-      ...existing,
-      getToolSpecs: () => [
-        ...(existing.getToolSpecs?.() ?? []),
-        ...(collision.getToolSpecs?.() ?? []),
-      ],
-    });
+    const composed = composeToolPorts(additional, existing);
 
     expect(composed.getToolSpecs?.().map(({ toolId }) => toolId)).toEqual([webFetchId, existingId]);
     expect(composed.describe(webFetchId)).toEqual(additional.describe(webFetchId));
@@ -45,6 +38,17 @@ describe("composeToolPorts", () => {
     expect(additional.execute.mock.calls).toHaveLength(1);
     expect(existing.execute.mock.calls).toHaveLength(1);
     expect(composed.describe(Code.parse("unknown.tool"))).toBeUndefined();
+  });
+
+  it("rejects a tool id advertised by both ports", () => {
+    let error: unknown;
+    try {
+      composeToolPorts(toolPort(webFetchId), toolPort(webFetchId));
+    } catch (caught: unknown) {
+      error = caught;
+    }
+
+    expect(error).toMatchObject({ code: "tool_id_collision", toolId: webFetchId });
   });
 
   it("forwards preparation and schema validation to the port owning each tool", async () => {

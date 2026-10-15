@@ -45,6 +45,32 @@ describe("WebFetchTool", () => {
     expect(tool.getToolSpecs()[0]?.inputSchema).toBeDefined();
   });
 
+  it("rejects binary content when no offloader is configured", async () => {
+    const backend = {
+      fetch: vi.fn().mockResolvedValue({
+        url: "https://docs.example.test/image",
+        status: 200,
+        contentType: "image/png",
+        binary: true,
+        bytes: [0, 255],
+        truncated: false,
+        untrusted: true,
+      }),
+    } satisfies WebFetchBackend;
+    const tool = new WebFetchTool({ backend });
+
+    await expect(
+      tool.execute(makeCall("web.fetch", { url }), {
+        runId,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({
+      outcome: "error",
+      errorCode: "binary_result_unavailable",
+      result: null,
+    });
+  });
+
   it("sends validated inputs to the runner and returns marked untrusted content", async () => {
     const backend = { fetch: vi.fn().mockResolvedValue(response) } satisfies WebFetchBackend;
     const tool = new WebFetchTool({ backend });
@@ -68,7 +94,7 @@ describe("WebFetchTool", () => {
         untrusted: true,
       }),
     } satisfies WebFetchBackend;
-    const tool = new WebFetchTool({ backend });
+    const tool = new WebFetchTool({ backend, offloadBinaryResults: true });
 
     await expect(
       tool.execute(makeCall("web.fetch", { url }), {

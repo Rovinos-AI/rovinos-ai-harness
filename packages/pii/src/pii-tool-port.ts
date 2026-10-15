@@ -64,6 +64,7 @@ export interface PiiToolPortDependencies {
 
 const safeToolErrorCodes = new Set([
   "args_invalid",
+  "binary_result_unavailable",
   "mcp_capability_missing",
   "mcp_connection_lost",
   "mcp_error",

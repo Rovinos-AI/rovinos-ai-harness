@@ -24,6 +24,7 @@ import { FakeModelPort } from "./testing/fake-model.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
 
 const toolId = Code.parse("sandbox.probe");
+const webFetchId = Code.parse("web.fetch");
 const run = RunConfigSchema.parse({});
 const canary = "synthetic-sandbox-output-canary";
 const result = {
@@ -327,6 +328,28 @@ describe("createRuntime sandbox composition", () => {
     }
   });
 
+  it("rejects a web.fetch collision during runtime setup", async () => {
+    const runtimeTool: ToolPort = {
+      describe: (id) => (id === webFetchId ? { idempotent: true, timeoutMs: 1_000 } : undefined),
+      getToolSpecs: () => [{ toolId: webFetchId, description: "Synthetic fetch", inputSchema: {} }],
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+    };
+
+    await expect(
+      createRuntime(
+        { run, sandbox: remoteSandbox([{ host: "docs.example.test", ports: [443] }]) },
+        {
+          ...overrides(),
+          createTool: () => runtimeTool,
+          secretResolver: {
+            resolve: () =>
+              Promise.resolve({ reveal: () => "synthetic-runtime-sandbox-token-0001" }),
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "tool_id_collision", toolId: webFetchId });
+  });
+
   // threat: T-05
   it("applies policy to tokenized web.fetch calls and tokenizes untrusted results", async () => {
     const outputCanary = "fetch.output@example.test";
@@ -431,6 +454,50 @@ describe("createRuntime sandbox composition", () => {
       });
       expect(fetcher).not.toHaveBeenCalled();
       expect(policy.decide).toHaveBeenCalledOnce();
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("rejects binary fetch results when no workspace offloader is configured", async () => {
+    const fetcher = vi.fn(() =>
+      Promise.resolve(
+        Response.json({
+          url: "https://docs.example.test/image",
+          status: 200,
+          contentType: "image/png",
+          binary: true,
+          bytes: [0, 255],
+          truncated: false,
+          untrusted: true,
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const runtime = await createRuntime(
+      {
+        run,
+        sandbox: remoteSandbox([{ host: "docs.example.test", ports: [443] }]),
+      },
+      {
+        ...overrides(),
+        model: webFetchModel("https://docs.example.test/image"),
+        policy: allowAllPolicy,
+        secretResolver: {
+          resolve: () => Promise.resolve({ reveal: () => "synthetic-runtime-sandbox-token-0001" }),
+        },
+      },
+    );
+    try {
+      const runResult = await runtime.run("fetch the image");
+      expect(runResult.events.find((event) => event.type === "tool_result")).toMatchObject({
+        toolId: webFetchId,
+        outcome: "error",
+        errorCode: "binary_result_unavailable",
+        result: null,
+      });
+      expect(JSON.stringify(runResult.events)).not.toContain("[0,255]");
+      expect(fetcher).toHaveBeenCalledOnce();
     } finally {
       await runtime.close();
     }

@@ -27,8 +27,7 @@ import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
 import { composeToolPorts } from "./runtime-tool-port.js";
-import { McpConnectionError, McpToolPort } from "@harness/mcp";
-import type { McpLogger } from "@harness/mcp";
+import { McpConnectionError, McpToolPort, type McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
 import type { ToolPort } from "./ports.js";
 import type {
@@ -139,7 +138,7 @@ function createRuntimeTool(
   // Keep runner fetches behind the same runtime decorators and tool-policy boundary.
   const webFetchTool =
     backend instanceof RemoteSandboxBackend
-      ? createWebFetchTool(config.sandbox?.egress?.allow, backend)
+      ? createWebFetchTool(config.sandbox?.egress?.allow, backend, !!overrides.workspace)
       : undefined;
   return webFetchTool === undefined ? baseTool : composeToolPorts(webFetchTool, baseTool);
 }

@@ -1,10 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Code, ToolSpec } from "@harness/schemas";
+import { HarnessError, type Code, type ToolSpec } from "@harness/schemas";
 import type { ToolPort } from "./ports.js";
+
+/** Startup failure raised when two composed tool ports expose the same tool id. */
+export class ToolPortCollisionError extends HarnessError {
+  readonly code = "tool_id_collision";
+
+  constructor(readonly toolId: Code) {
+    super("tool_id_collision");
+  }
+}
 
 /** Routes a built-in tool alongside an existing runtime tool port. */
 export function composeToolPorts(additional: ToolPort, existing: ToolPort): ToolPort {
   const ports = [additional, existing];
+  const advertised = ports.map(
+    (port) => new Set((port.getToolSpecs?.() ?? []).map(({ toolId }) => toolId)),
+  );
+  const toolIds = new Set(advertised.flatMap((toolIdsForPort) => [...toolIdsForPort]));
+  for (const toolId of toolIds) {
+    const owners = ports.filter(
+      (port, index) =>
+        advertised[index]?.has(toolId) === true || port.describe(toolId) !== undefined,
+    );
+    if (owners.length > 1) {
+      throw new ToolPortCollisionError(toolId);
+    }
+  }
   const portFor = (toolId: Code): ToolPort =>
     ports.find((port) => port.describe(toolId) !== undefined) ?? existing;
   const getToolSpecs = () => {
