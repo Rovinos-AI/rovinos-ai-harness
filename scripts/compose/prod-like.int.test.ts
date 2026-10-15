@@ -24,11 +24,18 @@ const composeArgs = [
   "--profile",
   "prod-like",
 ];
+const composeEnvironment: NodeJS.ProcessEnv = {
+  ...process.env,
+  SANDBOX_EGRESS_SUBNET: "172.31.251.0/24",
+  SANDBOX_EGRESS_PROXY_IP: "172.31.251.3",
+  EGRESS_TEST_SUBNET: "198.51.103.0/24",
+  EGRESS_PROBE_IP: "198.51.103.3",
+};
 const dockerAvailable =
   spawnSync("docker", ["info"], { stdio: "ignore", timeout: 5_000 }).status === 0;
 
 function compose(args: readonly string[]): string {
-  const environment = { ...process.env };
+  const environment = { ...composeEnvironment };
   delete environment.SANDBOX_RUNNER_TOKEN;
   environment.SANDBOX_RUNNER_TOKEN_SECRET_FILE = runnerTokenFile;
   return execFileSync("docker", [...composeArgs, ...args], {

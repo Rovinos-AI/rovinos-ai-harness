@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ModelPort, PolicyPort, ToolPort } from "@harness/core";
+import { CrashingEventStore } from "@harness/core/testing";
 import { HarnessConfigSchema } from "@harness/config";
-import { InMemoryEventStore } from "@harness/store";
+import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { Code, FakeClock, Id, SequentialIdGenerator, type Event } from "@harness/schemas";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createHarness } from "./index.js";
 import { GetRunContentOptionsSchema, ListRunsFilterSchema } from "./types.js";
 import type { Harness } from "./types.js";
+import type { EventStore } from "@harness/store";
 
 function fakeModel(responses?: readonly string[]): ModelPort {
   let index = 0;
@@ -92,12 +94,20 @@ const fakeTool: ToolPort = {
 
 const harnesses: Harness[] = [];
 
+function idsStartingAt(start: bigint) {
+  let nextId = start;
+  return {
+    next: () => Id.parse((nextId++).toString().padStart(26, "0")),
+  };
+}
+
 async function createTestHarness(
   options: {
     readonly model?: ModelPort;
     readonly approval?: boolean;
     readonly piiEnabled?: boolean;
     readonly store?: InMemoryEventStore;
+    readonly idStart?: bigint;
   } = {},
 ): Promise<{ readonly harness: Harness; readonly store: InMemoryEventStore }> {
   const store = options.store ?? new InMemoryEventStore();
@@ -108,7 +118,10 @@ async function createTestHarness(
     overrides: {
       store,
       clock: new FakeClock(10_000),
-      ids: new SequentialIdGenerator(),
+      ids:
+        options.idStart === undefined
+          ? new SequentialIdGenerator()
+          : idsStartingAt(options.idStart),
       transientVault: true,
       model: options.model ?? (options.approval === true ? approvalModel() : fakeModel()),
       ...(options.approval === true ? { policy: askPolicy, tool: fakeTool } : {}),
@@ -146,6 +159,20 @@ class DelayedAppendStore extends InMemoryEventStore {
     this.signalAppendStarted();
     await this.appendGate;
     return super.append(...args);
+  }
+}
+
+class OrphaningCrashStore extends CrashingEventStore {
+  override claimIdempotencyKey(
+    keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
+    runId: Id,
+    createdAt: number,
+  ): Promise<Id> {
+    return super.claimIdempotencyKey(keyHash, runId, createdAt - 30_001);
+  }
+
+  override releaseIdempotencyKey(): Promise<void> {
+    return Promise.resolve();
   }
 }
 
@@ -213,6 +240,178 @@ describe("@harness/sdk", () => {
     ]);
 
     expect(first.runId).toBe(second.runId);
+  });
+
+  it("waits for a concurrent instance's initial append before returning", async () => {
+    const store = new DelayedAppendStore();
+    const { harness: firstHarness } = await createTestHarness({ store });
+    const { harness: secondHarness } = await createTestHarness({ store, idStart: 10_000n });
+    let resolved = false;
+    const firstStart = firstHarness.startRun({
+      goal: "Synthetic blocked append",
+      idempotencyKey: "blocked-append-key",
+    });
+
+    await store.appendStarted;
+    const duplicateStart = secondHarness
+      .startRun({ goal: "Synthetic duplicate", idempotencyKey: "blocked-append-key" })
+      .then((result) => {
+        resolved = true;
+        return result;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(resolved).toBe(false);
+
+    store.release();
+    const [first, duplicate] = await Promise.all([firstStart, duplicateStart]);
+    expect(duplicate.runId).toBe(first.runId);
+  });
+
+  it("takes over a stale orphan claim once after a pre-append process crash", async () => {
+    const store = new InMemoryEventStore();
+    const crashingStore = new OrphaningCrashStore(store, {
+      crashAt: 1,
+      mode: "before_commit",
+    });
+    const crashedHarness = await createHarness({
+      config: HarnessConfigSchema.parse({}),
+      overrides: {
+        store: crashingStore,
+        clock: new FakeClock(100_000),
+        ids: idsStartingAt(9_000n),
+        transientVault: true,
+        model: fakeModel(),
+      },
+    });
+    harnesses.push(crashedHarness);
+    const request = { goal: "Synthetic orphaned request", idempotencyKey: "orphan-crash-key" };
+    await expect(crashedHarness.startRun(request)).rejects.toMatchObject({
+      code: "simulated_crash",
+    });
+    await crashedHarness.close();
+
+    const createRestartHarness = async (idStart: bigint): Promise<Harness> => {
+      const harness = await createHarness({
+        config: HarnessConfigSchema.parse({}),
+        overrides: {
+          store,
+          clock: new FakeClock(100_000),
+          ids: idsStartingAt(idStart),
+          transientVault: true,
+          model: fakeModel(),
+        },
+      });
+      harnesses.push(harness);
+      return harness;
+    };
+    const firstRestart = await createRestartHarness(10_000n);
+    const secondRestart = await createRestartHarness(20_000n);
+    const [first, second] = await Promise.all([
+      firstRestart.startRun(request),
+      secondRestart.startRun(request),
+    ]);
+    expect(second.runId).toBe(first.runId);
+    expect((await store.listRuns({ limit: 10 })).runs).toHaveLength(1);
+  });
+
+  it("retains a claim when the initial append commits before failing", async () => {
+    const store = new InMemoryEventStore();
+    const crashingStore = new CrashingEventStore(store, {
+      crashAt: 1,
+      mode: "after_commit",
+    });
+    const harness = await createHarness({
+      config: HarnessConfigSchema.parse({}),
+      overrides: {
+        store: crashingStore,
+        clock: new FakeClock(10_000),
+        ids: idsStartingAt(30_000n),
+        transientVault: true,
+        model: fakeModel(),
+      },
+    });
+    harnesses.push(harness);
+    const request = { goal: "Synthetic committed request", idempotencyKey: "after-commit-key" };
+    await expect(harness.startRun(request)).rejects.toMatchObject({ code: "simulated_crash" });
+
+    const retry = await harness.startRun(request);
+    expect(retry.runId).toBe(Id.parse("00000000000000000000030000"));
+    expect((await store.listRuns({ limit: 10 })).runs).toHaveLength(1);
+  });
+
+  it("consults the store after a successful start leaves the in-flight cache", async () => {
+    const { harness, store } = await createTestHarness();
+    const request = { goal: "Synthetic retained request", idempotencyKey: "retention-key" };
+    const first = await harness.startRun(request);
+    await waitForRun(harness, first.runId, "completed");
+    await store.deleteRun(Id.parse(first.runId));
+
+    const second = await harness.startRun(request);
+    expect(second.runId).not.toBe(first.runId);
+  });
+
+  it("deduplicates the same key across Harness instances sharing a store", async () => {
+    const store = new InMemoryEventStore();
+    const { harness: firstHarness } = await createTestHarness({ store });
+    const { harness: secondHarness } = await createTestHarness({ store, idStart: 10_000n });
+
+    const first = await firstHarness.startRun({
+      goal: "Synthetic first request",
+      idempotencyKey: "shared-instance-key",
+    });
+    const second = await secondHarness.startRun({
+      goal: "Synthetic duplicate request",
+      idempotencyKey: "shared-instance-key",
+    });
+
+    expect(second.runId).toBe(first.runId);
+    expect((await store.listRuns({ limit: 10 })).runs).toHaveLength(1);
+  });
+
+  it("deduplicates the same key after reopening a persistent store", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harness-sdk-idempotency-reopen-"));
+    const path = join(directory, "events.sqlite");
+    try {
+      const firstHarness = await createHarness({
+        config: HarnessConfigSchema.parse({}),
+        overrides: {
+          store: new SqliteEventStore(path),
+          clock: new FakeClock(10_000),
+          ids: new SequentialIdGenerator(),
+          transientVault: true,
+          model: fakeModel(),
+        },
+      });
+      harnesses.push(firstHarness);
+      const first = await firstHarness.startRun({
+        goal: "Synthetic persistent request",
+        idempotencyKey: "persistent-store-key",
+      });
+      await firstHarness.close();
+
+      const secondHarness = await createHarness({
+        config: HarnessConfigSchema.parse({}),
+        overrides: {
+          store: new SqliteEventStore(path),
+          clock: new FakeClock(10_000),
+          ids: {
+            next: () => Id.parse("00000000000000000000010000"),
+          },
+          transientVault: true,
+          model: fakeModel(),
+        },
+      });
+      harnesses.push(secondHarness);
+      const second = await secondHarness.startRun({
+        goal: "Synthetic duplicate after reopen",
+        idempotencyKey: "persistent-store-key",
+      });
+
+      expect(second.runId).toBe(first.runId);
+      expect((await secondHarness.listRuns({ limit: 10 })).runs).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("waits for the initial append before returning a run id", async () => {

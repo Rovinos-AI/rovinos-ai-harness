@@ -6,7 +6,12 @@ import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { Code, Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
-import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
+import {
+  createSandboxBackend,
+  createWebFetchTool,
+  RemoteSandboxBackend,
+  type SandboxBackend,
+} from "@harness/sandbox";
 import type { RequestSanitizer } from "@harness/models";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
@@ -21,8 +26,8 @@ import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
-import { McpConnectionError, McpToolPort } from "@harness/mcp";
-import type { McpLogger } from "@harness/mcp";
+import { composeToolPorts } from "./runtime-tool-port.js";
+import { McpConnectionError, McpToolPort, type McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
 import type { ToolPort } from "./ports.js";
 import type {
@@ -125,11 +130,17 @@ function createRuntimeTool(
   overrides: RuntimeOverrides,
   mcpToolPort: McpToolPort | undefined,
 ) {
-  const tool = overrides.tool ?? mcpToolPort ?? overrides.createTool?.(backend) ?? unavailableTool;
-  if (config.pii?.enabled !== false && tool instanceof PiiToolPort) {
+  const baseTool =
+    overrides.tool ?? mcpToolPort ?? overrides.createTool?.(backend) ?? unavailableTool;
+  if (config.pii?.enabled !== false && baseTool instanceof PiiToolPort) {
     throw new PiiToolPortAlreadyWrappedError();
   }
-  return tool;
+  // Keep runner fetches behind the same runtime decorators and tool-policy boundary.
+  const webFetchTool =
+    backend instanceof RemoteSandboxBackend
+      ? createWebFetchTool(config.sandbox?.egress?.allow, backend, !!overrides.workspace)
+      : undefined;
+  return webFetchTool === undefined ? baseTool : composeToolPorts(webFetchTool, baseTool);
 }
 
 /** Creates runtime keys, closing a caller-supplied sandbox backend if key resolution fails. */
@@ -369,7 +380,6 @@ export async function setupRuntime(
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
-    const context = overrides.context ?? new NaiveContext();
     tools = await createRuntimeTools(runtimeConfig, overrides);
     const { tool, sandboxBackend } = tools;
     const roles = await createRuntimeRoles(runtimeConfig, overrides, tool);
@@ -405,7 +415,7 @@ export async function setupRuntime(
         : { closeToolPort: () => managedMcpToolPort.close() }),
       policy,
       policyVersion: policy.version,
-      context,
+      context: overrides.context ?? new NaiveContext(),
       roles,
       scopes,
     };

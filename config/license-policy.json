@@ -51,6 +51,42 @@
       "package": "@cspell/dict-en-common-misspellings",
       "reason": "CSpell's bundled English dictionary dependency; required by its default dictionaries.",
       "expires": "2027-10-08"
+    },
+    {
+      "package": "@modelcontextprotocol/inspector",
+      "version": "2.10.1",
+      "reason": "Apache-2.0 with MIT-licensed contributions during MCP relicensing; docs are CC-BY-4.0; dev-only conformance CLI.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 transitive dependency of the pinned dev-only MCP Inspector package.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss-linux-x64-gnu",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss-linux-arm64-gnu",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss-darwin-arm64",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
+      "expires": "2027-10-14"
+    },
+    {
+      "package": "lightningcss-darwin-x64",
+      "version": "1.33.0",
+      "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
+      "expires": "2027-10-14"
     }
   ]
 }

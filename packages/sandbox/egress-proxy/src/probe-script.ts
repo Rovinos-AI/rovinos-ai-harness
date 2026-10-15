@@ -69,14 +69,25 @@ const runProbes = (probes, proxyEnvPresent, watchdogMs = 10000) => {
 };
 `;
 
-export const egressProbeScript = `${probeHelpers}
+/**
+ * Builds the egress probe scenario for a suite's isolated fixture endpoint.
+ *
+ * @param probeIp - Address used for the direct-route check.
+ * @param probeHost - DNS alias used for the allowlisted HTTP request.
+ */
+export function egressProbeScript(
+  probeIp = "198.51.100.3",
+  probeHost = "egress-probe.test",
+): string {
+  return `${probeHelpers}
 const proxyEnvPresent = typeof process.env.HTTP_PROXY === "string" && process.env.HTTP_PROXY.length > 0;
 const proxy = new URL(process.env.HTTP_PROXY ?? "http://invalid");
 runProbes({
-  allowed: () => viaProxy("http://egress-probe.test:8080/", proxy),
+  allowed: () => viaProxy(${JSON.stringify(`http://${probeHost}:8080/`)}, proxy),
   denied: () => viaProxy("http://denied.example.test/", proxy),
   metadata: () => viaProxy("http://metadata.example.test/", proxy),
-  directProbe: () => direct("198.51.100.3", 8080),
+  directProbe: () => direct(${JSON.stringify(probeIp)}, 8080),
   directMetadata: () => direct("169.254.169.254", 80),
 }, proxyEnvPresent);
 `;
+}

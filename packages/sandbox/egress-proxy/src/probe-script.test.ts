@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { egressProbeScript, probeHelpers } from "./probe-script.js";
 
+const testProbeIp = "198.51.104.3";
+
 function makeHarness() {
   const request = Object.assign(new EventEmitter(), { destroy: vi.fn() });
   const response = Object.assign(new EventEmitter(), {
@@ -109,7 +111,7 @@ describe("egress probe script", () => {
     "settles a direct socket %s without masking a successful connection",
     async (event, expected) => {
       const harness = makeHarness();
-      const result = harness.run(`${probeHelpers}\ndirect("198.51.100.3", 8080);`);
+      const result = harness.run(`${probeHelpers}\ndirect(${JSON.stringify(testProbeIp)}, 8080);`);
       harness.socket.emit(event);
       expect(await result).toBe(expected);
       expect(harness.socket.destroy).toHaveBeenCalledExactlyOnceWith();
@@ -119,7 +121,7 @@ describe("egress probe script", () => {
 
   it("bounds a connecting socket even if its inactivity timeout never fires", async () => {
     const harness = makeHarness();
-    const result = harness.run(`${probeHelpers}\ndirect("198.51.100.3", 8080);`);
+    const result = harness.run(`${probeHelpers}\ndirect(${JSON.stringify(testProbeIp)}, 8080);`);
     await vi.advanceTimersByTimeAsync(2000);
     expect(await result).toEqual({ status: -1, body: "probe_timeout" });
     expect(harness.socket.destroy).toHaveBeenCalledExactlyOnceWith();
@@ -192,7 +194,7 @@ describe("egress probe script", () => {
       });
       return harness.request;
     });
-    harness.run(egressProbeScript);
+    harness.run(egressProbeScript(testProbeIp));
     await vi.advanceTimersByTimeAsync(0);
     harness.socket.emit("timeout");
     await vi.advanceTimersByTimeAsync(0);

@@ -335,7 +335,8 @@ export interface Harness {
   /**
    * Start a detached run and return after its initial events are durable.
    *
-   * Idempotency keys are deduplicated only within this Harness instance.
+   * Idempotency keys are opaque identifiers and must not contain sensitive data. Their unsalted
+   * SHA-256 hashes are stored, so low-entropy keys may be guessed from the store.
    * `requestedBy` is validated but not recorded by the current event contract.
    */
   startRun(options: StartRunOptions): Promise<RunStartResult>;

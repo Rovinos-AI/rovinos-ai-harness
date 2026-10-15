@@ -15,8 +15,10 @@ const { runId } = await harness.startRun({
 
 Without a configured run queue, `startRun` launches execution in-process and returns its id with
 `pending` status after the initial run events are durable, while execution continues detached.
-An idempotency key is deduplicated only within this `Harness` instance; it is not persisted across
-instances or restarts. Run the worker-backed queue mode only after task 24.2 is available.
+Idempotency keys are deduplicated across `Harness` instances sharing the same store and persist
+across restarts. Use opaque identifiers only; do not include sensitive data. The store retains only
+the domain-separated, unsalted SHA-256 hash, never the raw key, so low-entropy keys may be guessed
+from the table. Run the worker-backed queue mode only after task 24.2 is available.
 
 An optional `role` is passed to model routing. `requestedBy` is validated but not recorded because
 the current `run_created` event contract has no audit field for it. It is not an authorization
@@ -50,8 +52,9 @@ included in that error.
 
 ## Decisions and scope
 
-- Idempotency is in-memory and instance-scoped until durable keys land in task 24.12 (#418);
-  calls made by another `Harness` instance or after restart are not deduplicated.
+- (verify) Durable SDK idempotency uses an `idempotency_keys` store table, rather than event
+  metadata, so the raw key and its hash stay out of the event contract. The store atomically
+  inserts or retrieves the run id and removes the record when that run is deleted.
 - `requestedBy` is validated but not persisted until the event contract provides an audit field.
 - The SDK does not add principal data to an existing event schema. A future schema task must define
   that audit field before the SDK can persist the `resolveApproval` principal.

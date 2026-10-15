@@ -120,7 +120,7 @@ export interface Runtime {
   /** Starts a run and exposes when its initial events are durable and when execution settles. */
   start(
     goal: JsonValue,
-    options?: { readonly role?: Code },
+    options?: { readonly role?: Code; readonly runId?: Id },
   ): {
     readonly runId: Id;
     readonly started: Promise<void>;

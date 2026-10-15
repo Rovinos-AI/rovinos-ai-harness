@@ -106,6 +106,27 @@ export class CrashingEventStore implements EventStore {
     return this.inner.consumeConfirmationState(stateId, expiresAt, now);
   }
 
+  claimIdempotencyKey(
+    keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
+    runId: Id,
+    createdAt: number,
+  ): Promise<Id> {
+    return this.inner.claimIdempotencyKey(keyHash, runId, createdAt);
+  }
+
+  takeoverIdempotencyKey(
+    ...args: Parameters<EventStore["takeoverIdempotencyKey"]>
+  ): ReturnType<EventStore["takeoverIdempotencyKey"]> {
+    return this.inner.takeoverIdempotencyKey(...args);
+  }
+
+  releaseIdempotencyKey(
+    keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0],
+    runId: Id,
+  ): Promise<void> {
+    return this.inner.releaseIdempotencyKey(keyHash, runId);
+  }
+
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
     return this.inner.listRuns(opts);
   }

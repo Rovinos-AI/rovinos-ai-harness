@@ -36,9 +36,11 @@ export { SqliteEventStore } from "./sqlite/adapter.js";
 export type { ContentCodec, ContentCodecContext, EncodedContent } from "./codec.js";
 export type { PostgresEventStoreOptions } from "./postgres/adapter.js";
 export {
+  IdempotencyKeyHashSchema,
   snapshotStoreOptionsSchema,
   type Clock,
   type EventStore,
+  type IdempotencyKeyHash,
   type ListRunsOptions,
   type RunSummary,
   sqliteStoreOptionsSchema,
