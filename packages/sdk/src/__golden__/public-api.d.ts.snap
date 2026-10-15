@@ -58,8 +58,8 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             }, z.core.$strict>>;
             resume: z.ZodPrefault<z.ZodObject<{
                 onNonIdempotent: z.ZodDefault<z.ZodEnum<{
-                    fail: "fail";
                     escalate: "escalate";
+                    fail: "fail";
                 }>>;
             }, z.core.$strict>>;
             budgets: z.ZodPrefault<z.ZodObject<{
@@ -91,8 +91,8 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         }, z.core.$strict>>>;
         store: z.ZodPrefault<z.ZodObject<{
             dialect: z.ZodOptional<z.ZodEnum<{
-                sqlite: "sqlite";
                 postgres: "postgres";
+                sqlite: "sqlite";
             }>>;
             connectionString: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>;
             retention: z.ZodOptional<z.ZodObject<{
@@ -137,10 +137,10 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 requestsPerMinute: z.ZodOptional<z.ZodNumber>;
                 capabilities: z.ZodOptional<z.ZodObject<{
                     structuredOutput: z.ZodOptional<z.ZodEnum<{
+                        json_mode: "json_mode";
                         native: "native";
                         none: "none";
                         tool: "tool";
-                        json_mode: "json_mode";
                     }>>;
                     forcedToolChoice: z.ZodOptional<z.ZodBoolean>;
                     parallelToolCalls: z.ZodOptional<z.ZodBoolean>;
@@ -148,8 +148,8 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                     opaqueRoundTrip: z.ZodOptional<z.ZodBoolean>;
                 }, z.core.$strict>>;
                 trust: z.ZodDefault<z.ZodEnum<{
-                    local: "local";
                     hosted: "hosted";
+                    local: "local";
                 }>>;
             }, z.core.$strict>>>;
             routing: z.ZodPrefault<z.ZodObject<{
@@ -179,14 +179,14 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>>;
             }, z.core.$strict>], "kind">;
             protocol: z.ZodDefault<z.ZodEnum<{
-                auto: "auto";
-                "2026-07-28": "2026-07-28";
                 "2025-11-25": "2025-11-25";
+                "2026-07-28": "2026-07-28";
+                auto: "auto";
             }>>;
             apps: z.ZodDefault<z.ZodBoolean>;
             trust: z.ZodDefault<z.ZodEnum<{
-                internal: "internal";
                 external: "external";
+                internal: "internal";
             }>>;
             propagateTrace: z.ZodDefault<z.ZodBoolean>;
             toolAllowlist: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -213,9 +213,9 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 url: string;
                 headers?: Record<string, string & z.core.$brand<"SecretRef">> | undefined;
             };
-            protocol: "auto" | "2026-07-28" | "2025-11-25";
+            protocol: "2025-11-25" | "2026-07-28" | "auto";
             apps: boolean;
-            trust: "internal" | "external";
+            trust: "external" | "internal";
             propagateTrace: boolean;
             useAnnotations: boolean;
             timeouts: {
@@ -239,9 +239,9 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 url: string;
                 headers?: Record<string, string & z.core.$brand<"SecretRef">> | undefined;
             };
-            protocol: "auto" | "2026-07-28" | "2025-11-25";
+            protocol: "2025-11-25" | "2026-07-28" | "auto";
             apps: boolean;
-            trust: "internal" | "external";
+            trust: "external" | "internal";
             propagateTrace: boolean;
             useAnnotations: boolean;
             timeouts: {
@@ -269,43 +269,43 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         }, z.core.$strict>>;
         pii: z.ZodPrefault<z.ZodObject<{
             defaultAction: z.ZodDefault<z.ZodEnum<{
-                block: "block";
-                tokenize: "tokenize";
-                redact: "redact";
                 allow: "allow";
+                block: "block";
+                redact: "redact";
+                tokenize: "tokenize";
             }>>;
             rules: z.ZodDefault<z.ZodArray<z.ZodObject<{
                 entities: z.ZodUnion<readonly [z.ZodArray<z.ZodUnion<readonly [z.ZodEnum<{
-                    location: "location";
-                    email: "email";
-                    credit_card: "credit_card";
-                    iban: "iban";
-                    phone: "phone";
-                    national_id: "national_id";
-                    ip_address: "ip_address";
-                    person_name: "person_name";
                     api_key: "api_key";
+                    credit_card: "credit_card";
+                    email: "email";
+                    iban: "iban";
+                    ip_address: "ip_address";
+                    location: "location";
+                    national_id: "national_id";
+                    person_name: "person_name";
+                    phone: "phone";
                     url_credentials: "url_credentials";
                 }>, z.ZodString]>>, z.ZodLiteral<"*">]>;
                 boundaries: z.ZodUnion<readonly [z.ZodArray<z.ZodEnum<{
-                    storage: "storage";
                     model_input: "model_input";
+                    storage: "storage";
                     tool_input: "tool_input";
                     tool_output: "tool_output";
                     ui: "ui";
                 }>>, z.ZodLiteral<"*">]>;
                 destinations: z.ZodUnion<readonly [z.ZodArray<z.ZodUnion<readonly [z.ZodEnum<{
                     any: "any";
-                    local: "local";
                     hosted: "hosted";
+                    local: "local";
                 }>, z.ZodObject<{
                     tool: z.ZodString;
                 }, z.core.$strict>]>>, z.ZodLiteral<"*">]>;
                 action: z.ZodEnum<{
-                    block: "block";
-                    tokenize: "tokenize";
-                    redact: "redact";
                     allow: "allow";
+                    block: "block";
+                    redact: "redact";
+                    tokenize: "tokenize";
                 }>;
             }, z.core.$strict>>>;
             enabled: z.ZodDefault<z.ZodBoolean>;
@@ -329,8 +329,8 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         }, z.core.$strict>>;
         vault: z.ZodPrefault<z.ZodObject<{
             backend: z.ZodDefault<z.ZodEnum<{
-                sqlite: "sqlite";
                 postgres: "postgres";
+                sqlite: "sqlite";
             }>>;
             purgeAfterDays: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
             postgres: z.ZodOptional<z.ZodObject<{
@@ -453,12 +453,12 @@ export declare const ApprovalIdInputSchema: z.ZodObject<{
 /** Filtering and pagination options for listing run metadata. */
 export declare const ListRunsFilterSchema: z.ZodObject<{
     status: z.ZodOptional<z.ZodEnum<{
-        failed: "failed";
+        cancelled: "cancelled";
         completed: "completed";
+        failed: "failed";
+        pending: "pending";
         running: "running";
         suspended: "suspended";
-        pending: "pending";
-        cancelled: "cancelled";
     }>>;
     continuationOf: z.ZodOptional<z.ZodString>;
     limit: z.ZodDefault<z.ZodNumber>;
@@ -471,12 +471,12 @@ export declare const RunSummarySchema: z.ZodObject<{
     runId: z.ZodString;
     createdAt: z.ZodNumber;
     status: z.ZodEnum<{
-        failed: "failed";
+        cancelled: "cancelled";
         completed: "completed";
+        failed: "failed";
+        pending: "pending";
         running: "running";
         suspended: "suspended";
-        pending: "pending";
-        cancelled: "cancelled";
     }>;
     lastSeq: z.ZodNumber;
     lastTs: z.ZodNumber;
@@ -489,12 +489,12 @@ export declare const RunPageSchema: z.ZodObject<{
         runId: z.ZodString;
         createdAt: z.ZodNumber;
         status: z.ZodEnum<{
-            failed: "failed";
+            cancelled: "cancelled";
             completed: "completed";
+            failed: "failed";
+            pending: "pending";
             running: "running";
             suspended: "suspended";
-            pending: "pending";
-            cancelled: "cancelled";
         }>;
         lastSeq: z.ZodNumber;
         lastTs: z.ZodNumber;
@@ -508,12 +508,12 @@ export declare const RunViewSchema: z.ZodObject<{
     runId: z.ZodString;
     createdAt: z.ZodNumber;
     status: z.ZodEnum<{
-        failed: "failed";
+        cancelled: "cancelled";
         completed: "completed";
+        failed: "failed";
+        pending: "pending";
         running: "running";
         suspended: "suspended";
-        pending: "pending";
-        cancelled: "cancelled";
     }>;
     lastSeq: z.ZodNumber;
     lastTs: z.ZodNumber;
@@ -548,10 +548,10 @@ export declare const RunViewSchema: z.ZodObject<{
         }>;
         toolId: z.ZodString;
         outcome: z.ZodEnum<{
-            error: "error";
             denied: "denied";
-            timeout: "timeout";
+            error: "error";
             ok: "ok";
+            timeout: "timeout";
         }>;
         errorCode: z.ZodOptional<z.ZodString>;
         latencyMs: z.ZodNumber;
@@ -568,8 +568,8 @@ export declare const RunViewSchema: z.ZodObject<{
         toolId: z.ZodString;
         policyDecision: z.ZodEnum<{
             allow: "allow";
-            deny: "deny";
             ask: "ask";
+            deny: "deny";
         }>;
         ruleId: z.ZodOptional<z.ZodString>;
         runId: z.ZodString;
@@ -588,9 +588,9 @@ export declare const RunViewSchema: z.ZodObject<{
             edit: "edit";
         }>;
         decidedBy: z.ZodEnum<{
+            expiry: "expiry";
             human: "human";
             policy: "policy";
-            expiry: "expiry";
         }>;
         reason: z.ZodOptional<z.ZodString>;
         waitMs: z.ZodNumber;
@@ -617,20 +617,20 @@ export declare const RunViewSchema: z.ZodObject<{
             run_status: "run_status";
         }>;
         from: z.ZodEnum<{
-            failed: "failed";
+            cancelled: "cancelled";
             completed: "completed";
+            failed: "failed";
+            pending: "pending";
             running: "running";
             suspended: "suspended";
-            pending: "pending";
-            cancelled: "cancelled";
         }>;
         to: z.ZodEnum<{
-            failed: "failed";
+            cancelled: "cancelled";
             completed: "completed";
+            failed: "failed";
+            pending: "pending";
             running: "running";
             suspended: "suspended";
-            pending: "pending";
-            cancelled: "cancelled";
         }>;
         reason: z.ZodString;
         runId: z.ZodString;
@@ -644,19 +644,19 @@ export declare const RunViewSchema: z.ZodObject<{
             pii_action: "pii_action";
         }>;
         boundary: z.ZodEnum<{
-            storage: "storage";
             model_input: "model_input";
+            storage: "storage";
+            telemetry_export: "telemetry_export";
             tool_input: "tool_input";
             tool_output: "tool_output";
             ui: "ui";
-            telemetry_export: "telemetry_export";
         }>;
         action: z.ZodEnum<{
-            blocked: "blocked";
-            tokenized: "tokenized";
-            redacted: "redacted";
             allowed: "allowed";
+            blocked: "blocked";
             detokenized: "detokenized";
+            redacted: "redacted";
+            tokenized: "tokenized";
         }>;
         toolId: z.ZodOptional<z.ZodString>;
         entities: z.ZodArray<z.ZodObject<{
@@ -674,8 +674,8 @@ export declare const RunViewSchema: z.ZodObject<{
             budget_exceeded: "budget_exceeded";
         }>;
         budget: z.ZodEnum<{
-            steps: "steps";
             cost: "cost";
+            steps: "steps";
             wall_clock: "wall_clock";
         }>;
         limit: z.ZodNumber;
@@ -705,9 +705,9 @@ export declare const RunViewSchema: z.ZodObject<{
         }>;
         childRunId: z.ZodString;
         outcome: z.ZodEnum<{
-            failed: "failed";
-            completed: "completed";
             cancelled: "cancelled";
+            completed: "completed";
+            failed: "failed";
         }>;
         runId: z.ZodString;
         seq: z.ZodNumber;
@@ -748,14 +748,14 @@ export type GetRunContentOptions = z.infer<typeof GetRunContentOptionsSchema>;
 export declare const RunContentEntrySchema: z.ZodObject<{
     seq: z.ZodNumber;
     type: z.ZodEnum<{
-        tool_result: "tool_result";
-        run_input: "run_input";
-        model_request: "model_request";
-        model_response: "model_response";
-        tool_intent: "tool_intent";
         approval_requested: "approval_requested";
         approval_resolved: "approval_resolved";
         context_compacted: "context_compacted";
+        model_request: "model_request";
+        model_response: "model_response";
+        run_input: "run_input";
+        tool_intent: "tool_intent";
+        tool_result: "tool_result";
     }>;
     content: z.ZodJSONSchema;
 }, z.core.$strict>;
@@ -763,14 +763,14 @@ export declare const RunContentEntrySchema: z.ZodObject<{
 export declare const RunContentSchema: z.ZodArray<z.ZodObject<{
     seq: z.ZodNumber;
     type: z.ZodEnum<{
-        tool_result: "tool_result";
-        run_input: "run_input";
-        model_request: "model_request";
-        model_response: "model_response";
-        tool_intent: "tool_intent";
         approval_requested: "approval_requested";
         approval_resolved: "approval_resolved";
         context_compacted: "context_compacted";
+        model_request: "model_request";
+        model_response: "model_response";
+        run_input: "run_input";
+        tool_intent: "tool_intent";
+        tool_result: "tool_result";
     }>;
     content: z.ZodJSONSchema;
 }, z.core.$strict>>;
@@ -815,20 +815,20 @@ export type AnswerInputOptions = z.infer<typeof AnswerInputOptionsSchema>;
 export declare const RunStartResultSchema: z.ZodObject<{
     runId: z.ZodString;
     status: z.ZodEnum<{
-        failed: "failed";
+        cancelled: "cancelled";
         completed: "completed";
+        failed: "failed";
+        pending: "pending";
         running: "running";
         suspended: "suspended";
-        pending: "pending";
-        cancelled: "cancelled";
     }>;
 }, z.core.$strict>;
 /** Inferred metadata-only run start result. */
 export type RunStartResult = z.infer<typeof RunStartResultSchema>;
 /** Result of a cooperative run cancellation. */
 export declare const CancelRunResultSchema: z.ZodEnum<{
-    cancelled: "cancelled";
     already_terminal: "already_terminal";
+    cancelled: "cancelled";
 }>;
 /** Inferred cancellation result returned by {@link Harness.cancelRun}. */
 export type CancelRunResult = z.infer<typeof CancelRunResultSchema>;
@@ -867,7 +867,7 @@ export interface Harness {
 }
 /** Coded SDK failure that does not include untrusted input values. */
 export declare class SdkError extends HarnessError {
-    readonly code: "sdk_run_not_found" | "sdk_closed" | "sdk_content_unavailable" | "sdk_input_unavailable";
+    readonly code: "sdk_closed" | "sdk_content_unavailable" | "sdk_input_unavailable" | "sdk_run_not_found";
     /** Creates a stable SDK error with a closed code. */
     constructor(code: SdkError["code"]);
 }
