@@ -1,39 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { HarnessError, Id, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
+import { HarnessError, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
+import type { Id } from "@harness/schemas";
 import { z } from "zod";
 import { executeSpec, SANDBOX_EXEC_GID, SANDBOX_EXEC_UID } from "./exec.js";
-import { ExecResultSchema, ExecSpecSchema, MAX_EXEC_TIMEOUT_MS } from "../../src/types.js";
+import { MAX_EXEC_TIMEOUT_MS } from "../../src/types.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
+import type { WebFetchRequest, WebFetchResult } from "../../src/web-fetch-contracts.js";
+import {
+  executeRunnerPayload,
+  readRunnerPayload,
+  type RunnerRequest,
+  type RunnerResponse,
+} from "./request-handler.js";
 
-const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = MAX_EXEC_TIMEOUT_MS + 10_000;
 const TOKEN_HASH_BYTES = 32;
 const MIN_RUNNER_TOKEN_BYTES = 32;
 
-const RunnerRequestSchema = z.object({ runId: Id, spec: ExecSpecSchema }).strict();
 const RunnerHealthSchema = z.object({ status: z.literal("ok") }).strict();
-
-interface RunnerRequest extends AsyncIterable<Buffer | string> {
-  readonly headers: Pick<IncomingMessage["headers"], "authorization" | "host" | "origin">;
-  readonly method?: string | undefined;
-  readonly url?: string | undefined;
-  resume(): this;
-}
-
-interface RunnerResponse {
-  readonly headersSent: boolean;
-  readonly writableEnded: boolean;
-  writeHead(status: number, headers: Record<string, string>): this;
-  end(body?: string): void;
-  once(event: "close", listener: () => void): this;
-  destroy(): void;
-}
 
 /** Options for the authenticated runner HTTP server. */
 export interface RunnerServerOptions {
@@ -45,6 +35,8 @@ export interface RunnerServerOptions {
   readonly workspaceRoot: string;
   /** Trusted HTTP proxy URL injected into every child command when egress is enabled. */
   readonly proxyUrl?: string;
+  /** Exact destinations permitted for runner-side web fetches. */
+  readonly egressAllowlist?: RunnerEgressAllowlist;
   /** UID used for sandbox commands. */
   readonly executionUid?: number;
   /** GID used for sandbox commands. */
@@ -55,6 +47,12 @@ export interface RunnerServerOptions {
     spec: ExecSpec,
     signal: AbortSignal,
   ) => Promise<ExecResult>;
+  /** Fetches validated content; injectable for isolated server tests. */
+  readonly fetch?: (
+    request: WebFetchRequest,
+    options: { readonly proxyUrl: string; readonly allow: RunnerEgressAllowlist },
+    signal: AbortSignal,
+  ) => Promise<WebFetchResult>;
 }
 
 /** Closed runner startup error codes. */
@@ -147,27 +145,6 @@ function validHost(request: RunnerRequest, allowedHosts: ReadonlySet<string>): b
   return authority !== undefined && allowedHosts.has(authority);
 }
 
-async function readRequestBody(
-  request: RunnerRequest,
-): Promise<{ body: string } | { status: 400 | 413 }> {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of request) {
-    const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += data.byteLength;
-    if (bytes > MAX_REQUEST_BYTES) {
-      request.resume();
-      return { status: 413 };
-    }
-    chunks.push(data);
-  }
-  try {
-    return { body: new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)) };
-  } catch {
-    return { status: 400 };
-  }
-}
-
 function writeError(response: RunnerResponse, status: number, code: string): void {
   sendJson(response, status, { code });
 }
@@ -180,6 +157,7 @@ function validateRunnerOptions(options: RunnerServerOptions): ReadonlySet<string
     options.allowedHosts.length === 0 ||
     options.allowedHosts.some((host) => authorityFrom(host) !== host.toLowerCase()) ||
     (options.proxyUrl !== undefined && !validProxyUrl(options.proxyUrl)) ||
+    !validEgressOptions(options) ||
     executionUid === process.getuid?.() ||
     executionGid === process.getgid?.()
   ) {
@@ -188,12 +166,16 @@ function validateRunnerOptions(options: RunnerServerOptions): ReadonlySet<string
   return new Set(options.allowedHosts.map((host) => host.toLowerCase()));
 }
 
+function validEgressOptions(options: RunnerServerOptions): boolean {
+  const allowlist = SandboxEgressAllowlistSchema.safeParse(options.egressAllowlist ?? []);
+  return allowlist.success && (allowlist.data.length === 0 || options.proxyUrl !== undefined);
+}
+
 function validProxyUrl(value: string): boolean {
   try {
     const url = new URL(value);
     return (
       (url.protocol === "http:" || url.protocol === "https:") &&
-      url.hostname !== "" &&
       url.username === "" &&
       url.password === "" &&
       url.pathname === "/" &&
@@ -278,6 +260,71 @@ function executeRunnerSpec(
     : options.execute(runId, executionSpec, signal);
 }
 
+interface RunnerRequestContext {
+  readonly options: RunnerServerOptions;
+  readonly allowedHosts: ReadonlySet<string>;
+  readonly tokenHash: Buffer;
+  readonly isBusy: () => boolean;
+  readonly setBusy: (busy: boolean) => void;
+}
+
+async function handleRunnerRequest(
+  context: RunnerRequestContext,
+  request: RunnerRequest,
+  response: RunnerResponse,
+): Promise<void> {
+  const { options, allowedHosts, tokenHash } = context;
+  try {
+    if (!validHost(request, allowedHosts) || !validOrigin(request.headers.origin, allowedHosts)) {
+      writeError(response, 400, "sandbox_host_rejected");
+      return;
+    }
+    if (request.method === "GET" && request.url === "/healthz") {
+      sendJson(response, 200, RunnerHealthSchema.parse({ status: "ok" }));
+      return;
+    }
+    const payload = await readRunnerPayload(
+      request,
+      response,
+      (candidate) => authorized(candidate, tokenHash),
+      writeError,
+    );
+    if (payload === undefined) {
+      return;
+    }
+    if (context.isBusy()) {
+      writeError(response, 409, "sandbox_busy");
+      return;
+    }
+    context.setBusy(true);
+    const controller = new AbortController();
+    response.once("close", () => {
+      if (!response.writableEnded) {
+        controller.abort();
+      }
+    });
+    try {
+      await executeRunnerPayload({
+        options,
+        payload,
+        response,
+        signal: controller.signal,
+        executeSpec: (runId, spec, signal) => executeRunnerSpec(options, runId, spec, signal),
+        sendJson,
+        sendError: writeError,
+      });
+    } finally {
+      context.setBusy(false);
+    }
+  } catch {
+    if (!response.headersSent) {
+      writeError(response, 500, "sandbox_internal_error");
+    } else {
+      response.destroy();
+    }
+  }
+}
+
 /**
  * Creates the HTTP request handler separately so its policy can be tested without opening sockets.
  *
@@ -290,70 +337,16 @@ export function createRunnerRequestHandler(
   const allowedHosts = validateRunnerOptions(options);
   const tokenHash = hashToken(options.token);
   let activeExec = false;
-
-  return async (request, response) => {
-    try {
-      if (!validHost(request, allowedHosts) || !validOrigin(request.headers.origin, allowedHosts)) {
-        writeError(response, 400, "sandbox_host_rejected");
-        return;
-      }
-      if (request.method === "GET" && request.url === "/healthz") {
-        sendJson(response, 200, RunnerHealthSchema.parse({ status: "ok" }));
-        return;
-      }
-      if (request.method !== "POST" || request.url !== "/exec") {
-        writeError(response, 404, "sandbox_route_not_found");
-        return;
-      }
-      if (!authorized(request, tokenHash)) {
-        writeError(response, 401, "sandbox_unauthorized");
-        return;
-      }
-      const body = await readRequestBody(request);
-      if ("status" in body) {
-        writeError(
-          response,
-          body.status,
-          body.status === 413 ? "sandbox_request_too_large" : "sandbox_request_invalid",
-        );
-        return;
-      }
-      let parsed: z.infer<typeof RunnerRequestSchema>;
-      try {
-        parsed = parseJson(RunnerRequestSchema, body.body, { maxBytes: MAX_REQUEST_BYTES });
-      } catch {
-        writeError(response, 400, "sandbox_request_invalid");
-        return;
-      }
-      if (activeExec) {
-        writeError(response, 409, "sandbox_busy");
-        return;
-      }
-      activeExec = true;
-      const controller = new AbortController();
-      response.once("close", () => {
-        if (!response.writableEnded) {
-          controller.abort();
-        }
-      });
-      try {
-        const result = ExecResultSchema.parse(
-          await executeRunnerSpec(options, parsed.runId, parsed.spec, controller.signal),
-        );
-        sendJson(response, 200, result);
-      } catch {
-        writeError(response, 500, "sandbox_exec_failed");
-      } finally {
-        activeExec = false;
-      }
-    } catch {
-      if (!response.headersSent) {
-        writeError(response, 500, "sandbox_internal_error");
-      } else {
-        response.destroy();
-      }
-    }
+  const context: RunnerRequestContext = {
+    options,
+    allowedHosts,
+    tokenHash,
+    isBusy: () => activeExec,
+    setBusy: (busy) => {
+      activeExec = busy;
+    },
   };
+  return (request, response) => handleRunnerRequest(context, request, response);
 }
 
 /** Creates the internal-only runner HTTP server. */
@@ -388,6 +381,7 @@ export function startRunnerServer(): Server {
     allowedHosts: hostsText.split(",").map((host) => host.trim()),
     workspaceRoot: resolve(workspaceRoot),
     ...(egress.proxyUrl === undefined ? {} : { proxyUrl: egress.proxyUrl }),
+    egressAllowlist: egress.allow,
   });
   server.listen(port, "0.0.0.0");
   return server;
