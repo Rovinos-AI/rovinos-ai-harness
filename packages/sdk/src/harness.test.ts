@@ -98,9 +98,11 @@ async function createTestHarness(
     readonly approval?: boolean;
     readonly piiEnabled?: boolean;
     readonly store?: InMemoryEventStore;
+    readonly idStart?: bigint;
   } = {},
 ): Promise<{ readonly harness: Harness; readonly store: InMemoryEventStore }> {
   const store = options.store ?? new InMemoryEventStore();
+  let nextId = options.idStart;
   const harness = await createHarness({
     config: HarnessConfigSchema.parse({
       ...(options.piiEnabled === false ? { pii: { enabled: false } } : {}),
@@ -108,7 +110,12 @@ async function createTestHarness(
     overrides: {
       store,
       clock: new FakeClock(10_000),
-      ids: new SequentialIdGenerator(),
+      ids:
+        nextId === undefined
+          ? new SequentialIdGenerator()
+          : {
+              next: () => Id.parse((nextId++).toString().padStart(26, "0")),
+            },
       transientVault: true,
       model: options.model ?? (options.approval === true ? approvalModel() : fakeModel()),
       ...(options.approval === true ? { policy: askPolicy, tool: fakeTool } : {}),
@@ -213,6 +220,24 @@ describe("@harness/sdk", () => {
     ]);
 
     expect(first.runId).toBe(second.runId);
+  });
+
+  it("deduplicates the same key across Harness instances sharing a store", async () => {
+    const store = new InMemoryEventStore();
+    const { harness: firstHarness } = await createTestHarness({ store });
+    const { harness: secondHarness } = await createTestHarness({ store, idStart: 10_000n });
+
+    const first = await firstHarness.startRun({
+      goal: "Synthetic first request",
+      idempotencyKey: "shared-instance-key",
+    });
+    const second = await secondHarness.startRun({
+      goal: "Synthetic duplicate request",
+      idempotencyKey: "shared-instance-key",
+    });
+
+    expect(second.runId).toBe(first.runId);
+    expect((await store.listRuns({ limit: 10 })).runs).toHaveLength(1);
   });
 
   it("waits for the initial append before returning a run id", async () => {

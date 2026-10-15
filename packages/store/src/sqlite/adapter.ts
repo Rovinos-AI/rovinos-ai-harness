@@ -23,9 +23,11 @@ import {
 import { InvalidEventError, SeqConflictError, StoreMigrationError } from "../errors.js";
 import {
   systemClock,
+  IdempotencyKeyHashSchema,
   sqliteStoreOptionsSchema,
   type Clock,
   type EventStore,
+  type IdempotencyKeyHash,
   type ListRunsOptions,
   type RunSummary,
   type SqliteStoreOptions,
@@ -373,6 +375,53 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     try {
       const row = this.getHead.get(runId);
       return Promise.resolve(row?.next_seq ?? 0);
+    } catch (error) {
+      return Promise.reject(storeError(error));
+    }
+  }
+
+  /** {@inheritDoc EventStore.claimIdempotencyKey} */
+  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<Id> {
+    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
+    const parsedRunId = Id.safeParse(runId);
+    if (!parsedHash.success || !parsedRunId.success) {
+      return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
+    }
+    try {
+      const claim = this.db.transaction(() => {
+        this.db
+          .prepare<[string, Id]>(
+            "INSERT INTO idempotency_keys (key_hash, run_id) VALUES (?, ?) ON CONFLICT (key_hash) DO NOTHING",
+          )
+          .run(parsedHash.data, parsedRunId.data);
+        const row = this.db
+          .prepare<[string], { run_id: string }>(
+            "SELECT run_id FROM idempotency_keys WHERE key_hash = ?",
+          )
+          .get(parsedHash.data);
+        if (row === undefined) {
+          throw new InvalidEventError([["idempotencyKey"]]);
+        }
+        return Id.parse(row.run_id);
+      });
+      return Promise.resolve(claim.immediate());
+    } catch (error) {
+      return Promise.reject(storeError(error));
+    }
+  }
+
+  /** {@inheritDoc EventStore.releaseIdempotencyKey} */
+  releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
+    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
+    const parsedRunId = Id.safeParse(runId);
+    if (!parsedHash.success || !parsedRunId.success) {
+      return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
+    }
+    try {
+      this.db
+        .prepare<[string, Id]>("DELETE FROM idempotency_keys WHERE key_hash = ? AND run_id = ?")
+        .run(parsedHash.data, parsedRunId.data);
+      return Promise.resolve();
     } catch (error) {
       return Promise.reject(storeError(error));
     }

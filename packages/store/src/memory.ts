@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
+  Id,
   TraceId,
   type Event as StoredEvent,
-  type Id,
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
@@ -19,7 +19,9 @@ import {
 import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "./errors.js";
 import {
   type EventStore,
+  IdempotencyKeyHashSchema,
   type ListRunsOptions,
+  type IdempotencyKeyHash,
   type RunSummary,
   type SnapshotStoreOptions,
 } from "./types.js";
@@ -49,6 +51,7 @@ export class InMemoryEventStore implements EventStore {
     { readonly runId: Id; readonly claimedAt: number; readonly sentAt?: number }
   >();
   private readonly confirmationStates = new Map<string, number>();
+  private readonly idempotencyKeys = new Map<string, Id>();
   private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -220,6 +223,11 @@ export class InMemoryEventStore implements EventStore {
 
     this.runs.delete(runId);
     this.snapshots.delete(runId);
+    for (const [keyHash, claimedRunId] of this.idempotencyKeys) {
+      if (claimedRunId === runId) {
+        this.idempotencyKeys.delete(keyHash);
+      }
+    }
     for (const [approvalId, notification] of this.approvalNotifications) {
       if (notification.runId === runId) {
         this.approvalNotifications.delete(approvalId);
@@ -405,6 +413,34 @@ export class InMemoryEventStore implements EventStore {
     }
     this.confirmationStates.set(stateId, expiresAt);
     return Promise.resolve(true);
+  }
+
+  /** {@inheritDoc EventStore.claimIdempotencyKey} */
+  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<Id> {
+    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
+    const parsedRunId = Id.safeParse(runId);
+    if (!parsedHash.success || !parsedRunId.success) {
+      return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
+    }
+    const existingRunId = this.idempotencyKeys.get(parsedHash.data);
+    if (existingRunId !== undefined) {
+      return Promise.resolve(existingRunId);
+    }
+    this.idempotencyKeys.set(parsedHash.data, parsedRunId.data);
+    return Promise.resolve(parsedRunId.data);
+  }
+
+  /** {@inheritDoc EventStore.releaseIdempotencyKey} */
+  releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
+    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
+    const parsedRunId = Id.safeParse(runId);
+    if (!parsedHash.success || !parsedRunId.success) {
+      return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
+    }
+    if (this.idempotencyKeys.get(parsedHash.data) === parsedRunId.data) {
+      this.idempotencyKeys.delete(parsedHash.data);
+    }
+    return Promise.resolve();
   }
 
   /** {@inheritDoc EventStore.close} */

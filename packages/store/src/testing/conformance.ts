@@ -317,6 +317,72 @@ function registerDeleteRun(factory: EventStoreFactory, builders: EventStoreTestB
   });
 }
 
+function registerIdempotencyKeyConformance(
+  factory: EventStoreFactory,
+  builders: EventStoreTestBuilders,
+  supportsFileReopen: boolean,
+): void {
+  it("atomically claims a hashed key and releases only its own claim", async () => {
+    await withStore(factory, async (store) => {
+      const keyHash = "a".repeat(64);
+      const firstRunId = builders.nextRunId();
+      const otherRunId = builders.nextRunId();
+
+      await expect(store.claimIdempotencyKey(keyHash, firstRunId)).resolves.toBe(firstRunId);
+      await expect(store.claimIdempotencyKey(keyHash, otherRunId)).resolves.toBe(firstRunId);
+      await store.releaseIdempotencyKey(keyHash, otherRunId);
+      await expect(store.claimIdempotencyKey(keyHash, otherRunId)).resolves.toBe(firstRunId);
+      await store.releaseIdempotencyKey(keyHash, firstRunId);
+      await expect(store.claimIdempotencyKey(keyHash, otherRunId)).resolves.toBe(otherRunId);
+
+      const raceHash = "d".repeat(64);
+      const contenders = Array.from({ length: 4 }, () => builders.nextRunId());
+      const winners = await Promise.all(
+        contenders.map((candidate) => store.claimIdempotencyKey(raceHash, candidate)),
+      );
+      expect(new Set(winners).size).toBe(1);
+    });
+  });
+
+  it("removes idempotency keys when deleting their terminal run", async () => {
+    await withStore(factory, async (store) => {
+      const runId = builders.nextRunId();
+      const keyHash = "b".repeat(64);
+      await store.append(
+        runId,
+        [builders.runCreated(runId), builders.runStatusChanged(runId, "pending", "completed")],
+        0,
+      );
+      await store.claimIdempotencyKey(keyHash, runId);
+
+      await expect(store.deleteRun(runId)).resolves.toBe(2);
+      const replacementRunId = builders.nextRunId();
+      await expect(store.claimIdempotencyKey(keyHash, replacementRunId)).resolves.toBe(
+        replacementRunId,
+      );
+    });
+  });
+
+  if (supportsFileReopen) {
+    it("persists idempotency key claims after reopening a file-backed store", async () => {
+      const first = await factory();
+      const keyHash = "c".repeat(64);
+      const firstRunId = builders.nextRunId();
+      try {
+        await first.store.claimIdempotencyKey(keyHash, firstRunId);
+      } finally {
+        await first.cleanup();
+      }
+
+      await withStore(factory, async (store) => {
+        await expect(store.claimIdempotencyKey(keyHash, builders.nextRunId())).resolves.toBe(
+          firstRunId,
+        );
+      });
+    });
+  }
+}
+
 /** Registers the shared behavioral tests required of every EventStore adapter. */
 export function runEventStoreConformance(
   name: string,
@@ -326,6 +392,7 @@ export function runEventStoreConformance(
   const builders = createEventBuilders();
   describe(`${name} EventStore conformance`, () => {
     registerAppendOrdering(factory, builders);
+    registerIdempotencyKeyConformance(factory, builders, caps.supportsFileReopen);
     registerRangeReads(factory, builders);
     registerUnknownHead(factory, builders);
     registerStaleConflict(factory, builders);

@@ -23,8 +23,10 @@ import { InvalidEventError, StoreReadOnlyError, StoreUnavailableError } from "..
 import {
   snapshotStoreOptionsSchema,
   systemClock,
+  IdempotencyKeyHashSchema,
   type Clock,
   type EventStore,
+  type IdempotencyKeyHash,
   type ListRunsOptions,
   type RunSummary,
 } from "../types.js";
@@ -265,6 +267,52 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
       } finally {
         client.release();
       }
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
+  /** {@inheritDoc EventStore.claimIdempotencyKey} */
+  async claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<Id> {
+    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
+    const parsedRunId = Id.safeParse(runId);
+    if (!parsedHash.success || !parsedRunId.success) {
+      throw new InvalidEventError([["idempotencyKey"]]);
+    }
+    this.assertWritable();
+    try {
+      await this.ensureInitialized();
+      const result = await this.pool.query<{ run_id: string }>(
+        `INSERT INTO idempotency_keys (key_hash, run_id)
+        VALUES ($1, $2)
+        ON CONFLICT (key_hash) DO UPDATE SET run_id = idempotency_keys.run_id
+        RETURNING run_id`,
+        [parsedHash.data, parsedRunId.data],
+      );
+      const storedRunId = result.rows[0]?.run_id;
+      if (storedRunId === undefined) {
+        throw new StoreUnavailableError();
+      }
+      return Id.parse(storedRunId);
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
+  /** {@inheritDoc EventStore.releaseIdempotencyKey} */
+  async releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
+    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
+    const parsedRunId = Id.safeParse(runId);
+    if (!parsedHash.success || !parsedRunId.success) {
+      throw new InvalidEventError([["idempotencyKey"]]);
+    }
+    this.assertWritable();
+    try {
+      await this.ensureInitialized();
+      await this.pool.query("DELETE FROM idempotency_keys WHERE key_hash = $1 AND run_id = $2", [
+        parsedHash.data,
+        parsedRunId.data,
+      ]);
     } catch (error) {
       throw storeError(error);
     }

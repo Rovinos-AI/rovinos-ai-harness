@@ -152,6 +152,12 @@ function createInnerStore(): EventStoreLike {
     consumeConfirmationState() {
       return Promise.resolve(false);
     },
+    claimIdempotencyKey(_keyHash, candidateRunId) {
+      return Promise.resolve(candidateRunId);
+    },
+    releaseIdempotencyKey() {
+      return Promise.resolve();
+    },
     listRuns() {
       return Promise.resolve({ runs: [] });
     },
@@ -180,6 +186,15 @@ function createInnerStore(): EventStoreLike {
 }
 
 describe("PiiEventStore", () => {
+  it("forwards hashed idempotency claims without treating them as event content", async () => {
+    const inner = createInnerStore();
+    const store = new PiiEventStore(inner, createTokenizer());
+    const keyHash = "d".repeat(64);
+
+    await expect(store.claimIdempotencyKey(keyHash, runId)).resolves.toBe(runId);
+    await expect(store.releaseIdempotencyKey(keyHash, runId)).resolves.toBeUndefined();
+  });
+
   it("tokenizes unmarked event content and reports a metadata-only summary", async () => {
     const inner = createInnerStore();
     const summaries: unknown[] = [];

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createHash } from "node:crypto";
 import { createRuntime, foldRunState, type Runtime, type RuntimeOverrides } from "@harness/core";
 import { loadConfig, type HarnessConfig } from "@harness/config";
 import {
@@ -158,10 +159,11 @@ class HarnessClient implements Harness {
   async startRun(options: StartRunOptions): Promise<RunStartResult> {
     this.assertOpen();
     const input = StartRunOptionsSchema.parse(options);
-    const existingStart =
+    const keyHash =
       input.idempotencyKey === undefined
         ? undefined
-        : this.idempotencyKeys.get(input.idempotencyKey);
+        : createHash("sha256").update(input.idempotencyKey).digest("hex");
+    const existingStart = keyHash === undefined ? undefined : this.idempotencyKeys.get(keyHash);
     if (existingStart !== undefined) {
       return this.existingRunResult(await existingStart);
     }
@@ -172,21 +174,36 @@ class HarnessClient implements Harness {
         ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       }),
     );
+    const candidateRunId = keyHash === undefined ? undefined : this.runtime.ids.next();
+    const claimedRunId =
+      keyHash === undefined || candidateRunId === undefined
+        ? undefined
+        : await this.runtime.store.claimIdempotencyKey(keyHash, candidateRunId);
+    if (candidateRunId !== undefined && claimedRunId !== candidateRunId) {
+      return this.existingRunResult(claimedRunId);
+    }
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
+      ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
     });
     this.trackRun(runId, completion);
     const start = started.then(() => runId);
-    const idempotencyKey = input.idempotencyKey;
-    if (idempotencyKey !== undefined) {
-      this.idempotencyKeys.set(idempotencyKey, start);
+    if (keyHash !== undefined) {
+      this.idempotencyKeys.set(keyHash, start);
       void start.catch(() => {
-        if (this.idempotencyKeys.get(idempotencyKey) === start) {
-          this.idempotencyKeys.delete(idempotencyKey);
+        if (this.idempotencyKeys.get(keyHash) === start) {
+          this.idempotencyKeys.delete(keyHash);
         }
       });
     }
-    await start;
+    try {
+      await start;
+    } catch (error) {
+      if (keyHash !== undefined) {
+        await this.runtime.store.releaseIdempotencyKey(keyHash, runId);
+      }
+      throw error;
+    }
     return RunStartResultSchema.parse({ runId, status: "pending" });
   }
 
