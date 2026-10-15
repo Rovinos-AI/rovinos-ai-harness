@@ -10,6 +10,7 @@ const vaultOperationErrorCodeSchema = z.enum([
   "vault_migration_newer_than_code",
   "schema_migration_pending",
   "vault_purge_stalled",
+  "vault_shares_store_database",
 ]);
 
 type VaultOperationErrorCode = z.infer<typeof vaultOperationErrorCodeSchema>;
@@ -22,6 +23,7 @@ const ERROR_MESSAGES: Record<VaultOperationErrorCode, string> = {
   vault_migration_newer_than_code: "Vault schema is newer than this version",
   schema_migration_pending: "Vault schema migrations are pending",
   vault_purge_stalled: "Vault purge made no progress",
+  vault_shares_store_database: "Vault and event store must use separate database schemas",
 };
 
 /** A detail-free failure raised by the encrypted vault adapter. */

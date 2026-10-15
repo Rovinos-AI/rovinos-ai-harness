@@ -13,6 +13,7 @@ coverage
 **/*.int.test.*
 **/*.canary.test.*
 **/*.replay.test.*
+!test/mcp-servers.int-client.test.mjs
 .env
 .env.*
 **/.env

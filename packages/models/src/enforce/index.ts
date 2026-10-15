@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, type Capabilities, type JsonValue, type Part } from "@harness/schemas";
+import {
+  Code,
+  HarnessError,
+  JsonValue,
+  type Capabilities,
+  type JsonValue as JsonValueType,
+  type Part,
+} from "@harness/schemas";
 import { z } from "zod";
 
 /** Structured-output enforcement rung supported by this gateway. */
@@ -63,12 +70,58 @@ export type EnforcementResult<Schema extends z.ZodType = z.ZodType> = z.infer<
   ReturnType<typeof createEnforcementResultSchema<Schema>>
 >;
 
+/** Inferred result for output validated while preserving its tokenized JSON value. */
+export type TokenizedEnforcementResult = z.infer<
+  ReturnType<typeof createEnforcementResultSchema<typeof JsonValue>>
+>;
+
+/** Value-preserving result returned by an asynchronous structured-output validator. */
+export const ValueTransformResultSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), tokenized: JsonValue }).strict(),
+  z.object({ ok: z.literal(false), issues: z.array(EnforcementIssueSchema) }).strict(),
+]);
+
+/** Inferred value-preserving result returned by an asynchronous structured-output validator. */
+export type ValueTransformResult = z.infer<typeof ValueTransformResultSchema>;
+
+/** Optional asynchronous validator that can validate without exposing a transformed raw value. */
+export type ValueTransform = (
+  outputSchema: z.ZodType,
+  tokenizedValue: JsonValueType,
+) => Promise<ValueTransformResult>;
+
+/** Executes and validates an optional asynchronous value transform without exposing errors. */
+export async function applyValueTransform(
+  valueTransform: ValueTransform,
+  outputSchema: z.ZodType,
+  tokenizedValue: JsonValueType,
+): Promise<ValueTransformResult> {
+  try {
+    const result = ValueTransformResultSchema.safeParse(
+      await valueTransform(outputSchema, tokenizedValue),
+    );
+    return result.success
+      ? result.data
+      : { ok: false, issues: [{ path: [], code: Code.parse("custom") }] };
+  } catch {
+    return { ok: false, issues: [{ path: [], code: Code.parse("custom") }] };
+  }
+}
+
 /** Parses an enforcement result against its caller-provided output schema. */
 export function parseEnforcementResult<Schema extends z.ZodType>(
   outputSchema: Schema,
   result: unknown,
 ): EnforcementResult<Schema> {
   return createEnforcementResultSchema(outputSchema).parse(result);
+}
+
+/**
+ * Parses a valid result whose tokenized value was validated by a caller-provided transform.
+ * The transform has already checked the caller schema against its temporary in-memory value.
+ */
+export function parseTokenizedEnforcementResult(result: unknown): TokenizedEnforcementResult {
+  return createEnforcementResultSchema(JsonValue).parse(result);
 }
 
 /** Reduces Zod issues to value-free paths, codes, and expected type descriptors. */

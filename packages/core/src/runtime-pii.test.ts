@@ -18,6 +18,8 @@ import { PiiToolPort, Tokenizer } from "@harness/pii";
 import * as telemetry from "@harness/telemetry";
 import type { ModelCompletion, ModelToolCall, ToolPort } from "./ports.js";
 import { createRuntime } from "./runtime.js";
+import { createRuntimeKeys } from "./runtime-keys.js";
+import { createRuntimeVault } from "./runtime-vault.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { FakeModelPort } from "./testing/fake-model.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
@@ -317,5 +319,56 @@ describe("createRuntime PII composition", () => {
 
     expect(await readFile(vaultPath)).toEqual(vaultBefore);
     expect(await readFile(storePath)).toEqual(storeBefore);
+  });
+
+  it("uses an empty read-only vault without creating a database", async () => {
+    const directory = await dataDirectory();
+    const runId = Id.parse("B".repeat(26));
+    const token = Token.parse("<EMAIL_1>");
+    const runtimeKeys = await createRuntimeKeys(undefined, { secretResolver });
+    const vault = await createRuntimeVault({
+      dataDir: directory,
+      config: config(),
+      overrides: { readOnlyStore: true, secretResolver },
+      keys: runtimeKeys,
+      clock: { now: () => 0 },
+    });
+    try {
+      await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBeUndefined();
+      await expect(vault.put(runId, "email", email)).rejects.toMatchObject({
+        code: "vault_unavailable",
+      });
+      await expect(vault.markTerminal(runId, 1)).rejects.toMatchObject({
+        code: "vault_unavailable",
+      });
+      await expect(vault.listTerminalRunsBefore({ terminalBefore: 2, limit: 1 })).resolves.toEqual(
+        [],
+      );
+      await expect(vault.purge(runId)).rejects.toMatchObject({
+        code: "vault_unavailable",
+      });
+      await expect(vault.stats(runId)).rejects.toMatchObject({
+        code: "vault_unavailable",
+      });
+    } finally {
+      await vault.close();
+      runtimeKeys.dispose();
+    }
+    await expect(vault.resolve(runId, token, { boundary: "ui" })).rejects.toMatchObject({
+      code: "vault_unavailable",
+    });
+    expect(existsSync(join(directory, "vault.db"))).toBe(false);
+  });
+
+  it("rejects transient vaults in production", async () => {
+    const directory = await dataDirectory();
+    vi.stubEnv("NODE_ENV", "production");
+    await expect(
+      createRuntime(config(), {
+        dataDir: directory,
+        transientVault: true,
+        secretResolver,
+      }),
+    ).rejects.toMatchObject({ code: "transient_vault_in_production" });
   });
 });

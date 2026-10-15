@@ -1325,6 +1325,7 @@ __metadata:
     "@harness/schemas": "workspace:^"
     "@harness/vault": "workspace:^"
     vitest: "npm:3.2.6"
+    zod: "npm:4.6.5"
   languageName: unknown
   linkType: soft
 
@@ -1427,7 +1428,9 @@ __metadata:
     "@harness/schemas": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@types/better-sqlite3": "npm:9.6.0"
+    "@types/pg": "npm:8.23.1"
     better-sqlite3: "npm:13.0.3"
+    pg: "npm:8.23.1"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   languageName: unknown
@@ -5718,6 +5721,7 @@ __metadata:
     "@harness/core": "workspace:^"
     "@harness/eslint-plugin-harness": "workspace:^"
     "@harness/host": "workspace:^"
+    "@harness/mcp": "workspace:^"
     "@harness/models": "workspace:^"
     "@harness/pii": "workspace:^"
     "@harness/policy": "workspace:^"
@@ -5728,6 +5732,7 @@ __metadata:
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/node": "npm:2.1.1"
     "@modelcontextprotocol/server": "npm:2.3.1"
     "@opentelemetry/api": "npm:1.9.1"
     "@opentelemetry/api-logs": "npm:0.223.0"

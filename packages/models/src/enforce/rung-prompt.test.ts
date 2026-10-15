@@ -44,26 +44,26 @@ describe("prompt-and-validate structured output", () => {
     });
   });
 
-  it("extracts and validates a JSON value from a text response", () => {
-    expect(
+  it("extracts and validates a JSON value from a text response", async () => {
+    await expect(
       enforcePromptOutput(
         [{ type: "text", text: 'Result: ```json\n{"answer":"ok"}\n```' }],
         outputSchema,
       ),
-    ).toEqual({
+    ).resolves.toEqual({
       value: { answer: "ok" },
       valid: true,
       rungUsed: "prompt",
     });
   });
 
-  it("returns value-free typed failures for missing, invalid, and schema-invalid output", () => {
+  it("returns value-free typed failures for missing, invalid, and schema-invalid output", async () => {
     for (const [text, code, path] of [
       ["No answer.", "no_json", []],
       ['{"answer":"truncated"', "invalid_json", []],
       ['{"answer":2}', "invalid_type", ["answer"]],
     ] as const) {
-      const result = enforcePromptOutput([{ type: "text", text }], outputSchema);
+      const result = await enforcePromptOutput([{ type: "text", text }], outputSchema);
       expect(result).toMatchObject({
         valid: false,
         rungUsed: "prompt",
@@ -73,13 +73,13 @@ describe("prompt-and-validate structured output", () => {
     }
   });
 
-  it("rejects non-text output and unexpected tool calls", () => {
-    expect(enforcePromptOutput([], outputSchema)).toMatchObject({
+  it("rejects non-text output and unexpected tool calls", async () => {
+    await expect(enforcePromptOutput([], outputSchema)).resolves.toMatchObject({
       valid: false,
       rungUsed: "prompt",
       issues: [{ code: "invalid_type" }],
     });
-    expect(
+    await expect(
       enforcePromptOutput(
         [
           {
@@ -91,10 +91,22 @@ describe("prompt-and-validate structured output", () => {
         ],
         outputSchema,
       ),
-    ).toMatchObject({
+    ).resolves.toMatchObject({
       valid: false,
       rungUsed: "prompt",
       issues: [{ code: "unexpected_tool_call" }],
     });
+  });
+
+  it("keeps values returned by a transform tokenized", async () => {
+    const tokenized = { answer: "<EMAIL_1>" };
+
+    await expect(
+      enforcePromptOutput(
+        [{ type: "text", text: JSON.stringify(tokenized) }],
+        z.object({ answer: z.email() }),
+        (_schema, value) => Promise.resolve({ ok: true, tokenized: value }),
+      ),
+    ).resolves.toEqual({ value: tokenized, valid: true, rungUsed: "prompt" });
   });
 });

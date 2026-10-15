@@ -45,6 +45,7 @@ interface CapturedSinks {
   readonly cassette: string[];
   readonly toolBoundary: string[];
   readonly toolErrors: string[];
+  readonly toolOutputs: string[];
   readonly unprotectedExporter: string[];
 }
 
@@ -58,7 +59,7 @@ async function loadCanaryConfig(
     "rules:",
     "  - id: canary_tool_allow",
     "    match:",
-    `      tools: [${ECHO_TOOL}, ${FAIL_TOOL}]`,
+    `      tools: [${ECHO_TOOL}, ${FAIL_TOOL}, sample_mcp.fail]`,
     "    decision: allow",
     "    reason: canary_allowed",
     "  - id: canary_tool_ask",
@@ -127,6 +128,7 @@ export class CanaryHarness {
     readonly executedTools: string[];
     readonly toolBoundary: string[];
     readonly toolErrors: string[];
+    readonly toolOutputs: string[];
   }) {
     this.canaries = input.canaries;
     this.directory = input.directory;
@@ -152,6 +154,7 @@ export class CanaryHarness {
       cassette: [],
       toolBoundary: input.toolBoundary,
       toolErrors: input.toolErrors,
+      toolOutputs: input.toolOutputs,
       unprotectedExporter: [],
     };
     this.workspace = {
@@ -175,6 +178,7 @@ export class CanaryHarness {
     const resolver = createCanarySecretResolver();
     const toolBoundary: string[] = [];
     const toolErrors: string[] = [];
+    const toolOutputs: string[] = [];
     const executedTools: string[] = [];
     try {
       const runtime = await createRuntime(runtimeConfig, {
@@ -183,7 +187,11 @@ export class CanaryHarness {
         clock,
         ids,
         model: createCanaryModel(canaries),
-        tool: createCanaryToolPort(canaries, { toolBoundary, toolErrors }, executedTools),
+        tool: createCanaryToolPort(
+          canaries,
+          { toolBoundary, toolErrors, toolOutputs },
+          executedTools,
+        ),
         secretResolver: resolver,
       });
       reader.attach(runtime);
@@ -198,6 +206,7 @@ export class CanaryHarness {
         clock,
         toolBoundary,
         toolErrors,
+        toolOutputs,
         executedTools,
       });
     } catch (error) {
