@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
+  type Id,
   TraceId,
   type Event as StoredEvent,
-  type Id,
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
@@ -20,9 +20,17 @@ import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "./er
 import {
   type EventStore,
   type ListRunsOptions,
+  type IdempotencyKeyHash,
   type RunSummary,
   type SnapshotStoreOptions,
 } from "./types.js";
+import {
+  claimMemoryIdempotencyKey,
+  deleteMemoryIdempotencyKeyClaims,
+  releaseMemoryIdempotencyKey,
+  takeoverMemoryIdempotencyKey,
+  type MemoryIdempotencyClaim,
+} from "./idempotency.js";
 import {
   ChangeEmitter,
   summaryFromEvents,
@@ -49,6 +57,7 @@ export class InMemoryEventStore implements EventStore {
     { readonly runId: Id; readonly claimedAt: number; readonly sentAt?: number }
   >();
   private readonly confirmationStates = new Map<string, number>();
+  private readonly idempotencyKeys = new Map<string, MemoryIdempotencyClaim>();
   private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -220,6 +229,7 @@ export class InMemoryEventStore implements EventStore {
 
     this.runs.delete(runId);
     this.snapshots.delete(runId);
+    deleteMemoryIdempotencyKeyClaims(this.idempotencyKeys, runId);
     for (const [approvalId, notification] of this.approvalNotifications) {
       if (notification.runId === runId) {
         this.approvalNotifications.delete(approvalId);
@@ -405,6 +415,26 @@ export class InMemoryEventStore implements EventStore {
     }
     this.confirmationStates.set(stateId, expiresAt);
     return Promise.resolve(true);
+  }
+
+  /** {@inheritDoc EventStore.claimIdempotencyKey} */
+  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id> {
+    return claimMemoryIdempotencyKey(this.idempotencyKeys, keyHash, runId, createdAt);
+  }
+
+  /** {@inheritDoc EventStore.takeoverIdempotencyKey} */
+  takeoverIdempotencyKey(
+    keyHash: IdempotencyKeyHash,
+    options: Parameters<EventStore["takeoverIdempotencyKey"]>[1],
+  ): Promise<boolean> {
+    return Promise.resolve().then(() =>
+      takeoverMemoryIdempotencyKey(this.idempotencyKeys, this.runs, keyHash, options),
+    );
+  }
+
+  /** {@inheritDoc EventStore.releaseIdempotencyKey} */
+  releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
+    return releaseMemoryIdempotencyKey(this.idempotencyKeys, keyHash, runId);
   }
 
   /** {@inheritDoc EventStore.close} */

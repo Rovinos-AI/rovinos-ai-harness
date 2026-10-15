@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { beforeEach, expect, it, vi } from "vitest";
-import { Code, parseJson, type KeyProvider } from "@harness/schemas";
+import { Code, Id, parseJson, type KeyProvider } from "@harness/schemas";
 import { AesGcmContentCodec } from "../aes-gcm-codec.js";
 import type { ContentCodec } from "../codec.js";
-import { StoreUnavailableError } from "../errors.js";
+import { InvalidEventError, StoreUnavailableError } from "../errors.js";
 import { PostgresEventStore } from "./adapter.js";
 import { createEventBuilders, runEventStoreConformance } from "../testing/index.js";
 import { z } from "zod";
@@ -46,6 +46,11 @@ interface FakeApprovalNotification {
   readonly sent_at?: number;
 }
 
+interface FakeIdempotencyClaim {
+  readonly run_id: string;
+  readonly created_at: number;
+}
+
 interface FakeQueryResult {
   rows: unknown[];
   rowCount?: number | null;
@@ -75,6 +80,7 @@ let transactionBackup:
       snapshots: FakeSnapshot[];
       approvalNotifications: Map<string, FakeApprovalNotification>;
       confirmationStates: Map<string, number>;
+      idempotencyKeys: Map<string, FakeIdempotencyClaim>;
     }
   | undefined;
 
@@ -85,6 +91,7 @@ const fakePg = vi.hoisted(() => ({
   snapshots: new Array<FakeSnapshot>(),
   approvalNotifications: new Map<string, FakeApprovalNotification>(),
   confirmationStates: new Map<string, number>(),
+  idempotencyKeys: new Map<string, FakeIdempotencyClaim>(),
   schemaInitialized: false,
   migrationHistory: new Map<string, string>(),
   encryptionValue: "",
@@ -194,6 +201,15 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     fakePg.schemaInitialized = true;
     return { rows: [] };
   }
+  if (query === "DELETE FROM idempotency_keys WHERE run_id = $1") {
+    const runId = text(values[0]);
+    for (const [keyHash, claim] of fakePg.idempotencyKeys) {
+      if (claim.run_id === runId) {
+        fakePg.idempotencyKeys.delete(keyHash);
+      }
+    }
+    return { rows: [] };
+  }
   if (query.startsWith("CREATE TABLE") || query.startsWith("CREATE INDEX")) {
     fakePg.schemaInitialized = true;
     return { rows: [] };
@@ -258,6 +274,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       snapshots: structuredClone(fakePg.snapshots),
       approvalNotifications: structuredClone(fakePg.approvalNotifications),
       confirmationStates: structuredClone(fakePg.confirmationStates),
+      idempotencyKeys: structuredClone(fakePg.idempotencyKeys),
     };
     return { rows: [] };
   }
@@ -272,6 +289,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       snapshots: structuredClone(fakePg.snapshots),
       approvalNotifications: structuredClone(fakePg.approvalNotifications),
       confirmationStates: structuredClone(fakePg.confirmationStates),
+      idempotencyKeys: structuredClone(fakePg.idempotencyKeys),
     };
     return { rows: [] };
   }
@@ -298,6 +316,10 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       fakePg.confirmationStates.clear();
       for (const [stateId, expiresAt] of transactionBackup.confirmationStates) {
         fakePg.confirmationStates.set(stateId, expiresAt);
+      }
+      fakePg.idempotencyKeys.clear();
+      for (const [keyHash, claim] of transactionBackup.idempotencyKeys) {
+        fakePg.idempotencyKeys.set(keyHash, claim);
       }
       transactionBackup = undefined;
     }
@@ -511,6 +533,38 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     fakePg.confirmationStates.set(stateId, number(values[1]));
     return { rows: [{ state_id: stateId }] };
   }
+  if (query.startsWith("INSERT INTO idempotency_keys")) {
+    const keyHash = text(values[0]);
+    const claim = fakePg.idempotencyKeys.get(keyHash) ?? {
+      run_id: text(values[1]),
+      created_at: number(values[2]),
+    };
+    fakePg.idempotencyKeys.set(keyHash, claim);
+    return { rows: [{ run_id: claim.run_id }] };
+  }
+  if (query.startsWith("UPDATE idempotency_keys")) {
+    const keyHash = text(values[0]);
+    const claim = fakePg.idempotencyKeys.get(keyHash);
+    if (
+      claim?.run_id === text(values[1]) &&
+      claim.created_at <= number(values[4]) &&
+      !fakePg.events.some((event) => event.run_id === claim.run_id)
+    ) {
+      fakePg.idempotencyKeys.set(keyHash, {
+        run_id: text(values[2]),
+        created_at: number(values[3]),
+      });
+      return { rows: [], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  }
+  if (query === "DELETE FROM idempotency_keys WHERE key_hash = $1 AND run_id = $2") {
+    const keyHash = text(values[0]);
+    if (fakePg.idempotencyKeys.get(keyHash)?.run_id === text(values[1])) {
+      fakePg.idempotencyKeys.delete(keyHash);
+    }
+    return { rows: [] };
+  }
   if (
     query ===
     "DELETE FROM approval_notifications WHERE approval_id = $1 AND run_id = $2 AND claimed_at = $3 AND sent_at IS NULL"
@@ -722,6 +776,7 @@ beforeEach(() => {
   fakePg.snapshots.length = 0;
   fakePg.approvalNotifications.clear();
   fakePg.confirmationStates.clear();
+  fakePg.idempotencyKeys.clear();
   transactionBackup = undefined;
   fakePg.schemaInitialized = false;
   fakePg.migrationHistory.clear();
@@ -762,6 +817,21 @@ runEventStoreConformance(
   },
   { supportsFileReopen: false },
 );
+
+it("validates Postgres idempotency claims before querying", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  const validRunId = Id.parse("00000000000000000000000001");
+  try {
+    await expect(store.claimIdempotencyKey("invalid", validRunId, 10)).rejects.toBeInstanceOf(
+      InvalidEventError,
+    );
+    await expect(store.claimIdempotencyKey("a".repeat(64), validRunId, -1)).rejects.toBeInstanceOf(
+      InvalidEventError,
+    );
+  } finally {
+    await store.close();
+  }
+});
 
 it("resumes encrypted Postgres event and snapshot rotation", async () => {
   let currentKeyId = "key-a";

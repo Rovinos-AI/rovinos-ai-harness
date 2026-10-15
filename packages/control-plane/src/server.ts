@@ -57,7 +57,11 @@ import {
   type ApprovalAppScope,
 } from "./tools/approvals-app.js";
 import { emitApprovalAppAudit } from "@harness/telemetry";
-import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
+import {
+  APPROVAL_RESOURCE_URI,
+  loadApprovalHtml,
+  registerApprovalResource,
+} from "./resources/approval.js";
 
 const HTTP_HOST = "127.0.0.1";
 const HTTP_PATH = "/mcp";
@@ -378,7 +382,7 @@ function toolDefinitions(): Tool[] {
       inputSchema: objectInputSchema(ResolveRequest),
       outputSchema: z.toJSONSchema(ResolveResponse),
       annotations: { openWorldHint: false },
-      _meta: { ui: { visibility: ["app"] } },
+      _meta: { ui: { visibility: ["app"], resourceUri: APPROVAL_RESOURCE_URI } },
     },
     {
       name: "harness.approvals.reveal",
@@ -386,7 +390,7 @@ function toolDefinitions(): Tool[] {
       inputSchema: objectInputSchema(RevealRequest),
       outputSchema: z.toJSONSchema(RevealResponse),
       annotations: { openWorldHint: false },
-      _meta: { ui: { visibility: ["app"] } },
+      _meta: { ui: { visibility: ["app"], resourceUri: APPROVAL_RESOURCE_URI } },
     },
     {
       name: "deny",

@@ -1105,4 +1105,18 @@ describe("SqliteEventStore", () => {
       await store.close();
     }
   });
+
+  it("validates SQLite idempotency claims before writing", async () => {
+    const store = new SqliteEventStore(":memory:");
+    try {
+      await expect(store.claimIdempotencyKey("invalid", runId, 10)).rejects.toBeInstanceOf(
+        InvalidEventError,
+      );
+      await expect(store.claimIdempotencyKey("a".repeat(64), runId, -1)).rejects.toBeInstanceOf(
+        InvalidEventError,
+      );
+    } finally {
+      await store.close();
+    }
+  });
 });

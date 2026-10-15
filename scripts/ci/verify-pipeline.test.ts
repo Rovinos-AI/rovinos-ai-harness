@@ -183,6 +183,7 @@ it("runs integration tests with Compose and always tears down", () => {
       (step) => typeof step.script === "string" && step.script.includes("yarn build:schemas"),
     ),
   ).toBe(true);
+  expect(integrationSteps.some((step) => step.script === "yarn build")).toBe(true);
   expect(
     integrationSteps.some(
       (step) => step.task === "PublishTestResults@2" && step.condition === "succeededOrFailed()",

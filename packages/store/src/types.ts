@@ -19,6 +19,23 @@ export const sqliteStoreOptionsSchema = snapshotStoreOptionsSchema.extend({
 /** SQLite adapter options for snapshot retention and cross-process watch polling. */
 export type SqliteStoreOptions = z.input<typeof sqliteStoreOptionsSchema>;
 
+/** SHA-256 digest used to persist an SDK idempotency key without storing the key itself. */
+export const IdempotencyKeyHashSchema = z.string().regex(/^[a-f0-9]{64}$/);
+/** Inferred SHA-256 digest type for idempotency key storage. */
+export type IdempotencyKeyHash = z.infer<typeof IdempotencyKeyHashSchema>;
+
+/** Fields needed to atomically take over a stale idempotency-key claim. */
+export interface IdempotencyKeyTakeoverOptions {
+  /** Run id currently associated with the key. */
+  readonly expectedRunId: Id;
+  /** Candidate replacement run id. */
+  readonly runId: Id;
+  /** New claim time in epoch milliseconds. */
+  readonly createdAt: number;
+  /** Claims created at or before this timestamp may be replaced. */
+  readonly staleBefore: number;
+}
+
 /** Source of epoch-millisecond timestamps used for store metadata. */
 export interface Clock {
   /** Return the current epoch time in milliseconds. */
@@ -222,6 +239,33 @@ export interface EventStore {
    * @returns True only when this call consumed an unused state.
    */
   consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean>;
+
+  /**
+   * Persist an idempotency hash or return the run id already associated with it.
+   * @param keyHash SHA-256 digest of the caller's idempotency key.
+   * @param runId Candidate run identifier for a new idempotency hash.
+   * @param createdAt Claim time in epoch milliseconds.
+   * @returns The candidate run id when inserted, otherwise the existing run id.
+   */
+  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id>;
+
+  /**
+   * Atomically replace an old claim when its run has no events.
+   * @param keyHash SHA-256 digest of the caller's idempotency key.
+   * @param options Expected owner, replacement id, and staleness cutoff.
+   * @returns True only when this call replaced the expected claim.
+   */
+  takeoverIdempotencyKey(
+    keyHash: IdempotencyKeyHash,
+    options: IdempotencyKeyTakeoverOptions,
+  ): Promise<boolean>;
+
+  /**
+   * Release a newly claimed key when its run failed before becoming durable.
+   * @param keyHash SHA-256 digest of the caller's idempotency key.
+   * @param runId Candidate run identifier that owns the claim.
+   */
+  releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void>;
 
   /** Release resources held by the store. */
   close(): Promise<void>;
