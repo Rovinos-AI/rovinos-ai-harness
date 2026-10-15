@@ -405,6 +405,14 @@ describe("sandbox runner Compose service", () => {
       'process.stdout.write("ok"); })().catch(() => process.exit(1));',
     ].join("\n");
     expect(await executeInRunner(writeAfterRunner, "10001:10003")).toBe("ok");
+    expect(
+      (
+        await requestRunner(
+          { runId: runnerFirstRun },
+          { token: integrationToken, path: "/release" },
+        )
+      ).status,
+    ).toBe(200);
   }, 30_000);
 
   // threat: T-14
@@ -416,8 +424,9 @@ describe("sandbox runner Compose service", () => {
     ).toBe(200);
     const createScratch = [
       'const fs = require("node:fs");',
-      'fs.mkdirSync(".harness/tmp/private", { mode: 0o700 });',
-      'fs.writeFileSync(".harness/tmp/private/file", "synthetic");',
+      "const scratch = `${String(process.env.TMPDIR)}/private`;",
+      "fs.mkdirSync(scratch, { mode: 0o700 });",
+      'fs.writeFileSync(`${scratch}/file`, "synthetic");',
       'fs.mkdirSync("/tmp/runner-private-tree", { mode: 0o700 });',
       'fs.writeFileSync("/tmp/runner-private-tree/file", "synthetic");',
     ].join("\n");
@@ -433,12 +442,15 @@ describe("sandbox runner Compose service", () => {
     const verifyCleanup = [
       'const fs = require("node:fs");',
       "const absent = (path) => { try { fs.statSync(path); return false; } catch { return true; } };",
-      'process.stdout.write(JSON.stringify([absent(".harness/tmp/private"), absent("/tmp/runner-private-tree")]));',
+      'process.stdout.write(JSON.stringify([absent(`${String(process.env.TMPDIR)}/private`), absent("/tmp/runner-private-tree")]));',
     ].join("\n");
     await expect(runExec(makeSpec(["node", "-e", verifyCleanup]), runId)).resolves.toMatchObject({
       exitCode: 0,
       stdout: "[true,true]",
     });
+    expect(
+      (await requestRunner({ runId }, { token: integrationToken, path: "/release" })).status,
+    ).toBe(200);
   }, 30_000);
 
   // threat: T-05

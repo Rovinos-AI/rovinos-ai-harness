@@ -24,8 +24,9 @@ const allowlist = [
 const composeEnvironment: NodeJS.ProcessEnv = {
   ...process.env,
   SANDBOX_RUNNER_TOKEN: integrationToken,
-  SANDBOX_RUNNER_UID: String(process.getuid?.() ?? 10002),
-  SANDBOX_RUNNER_GID: String(process.getgid?.() ?? 10002),
+  // The image's runner identity owns /workspaces; other ids cannot create run directories.
+  SANDBOX_RUNNER_UID: "10002",
+  SANDBOX_RUNNER_GID: "10003",
   SANDBOX_EGRESS_ALLOW: JSON.stringify(allowlist),
   SANDBOX_EGRESS_SUBNET: "172.31.253.0/24",
   SANDBOX_EGRESS_PROXY_IP: "172.31.253.3",

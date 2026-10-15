@@ -1641,15 +1641,16 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       expect(createTool).toHaveBeenCalledExactlyOnceWith(runtime.sandboxBackend);
       const result = await runtime.run("Execute the synthetic sandbox command.");
       expect(result.status).toBe("completed");
-      expect(responses.map(({ status }) => status)).toEqual([200, 200, 200]);
+      expect(responses.map(({ status }) => status)).toEqual([200]);
       expect(executions).toMatchObject([
         {
           outcome: "ok",
           result: { exitCode: 0, stdout: `${current.canary}\n` },
         },
       ]);
-      expect(forwarded.map(({ path }) => path)).toEqual(["/lease", "/exec", "/release"]);
-      expect(forwarded[1]).toMatchObject({
+      // The runner leases each exec; the runtime no longer holds a run-wide lease (subagents share it).
+      expect(forwarded.map(({ path }) => path)).toEqual(["/exec"]);
+      expect(forwarded[0]).toMatchObject({
         authorization: ["Bearer", token].join(" "),
         body: { spec: { argv: ["/bin/echo", current.canary] } },
       });
