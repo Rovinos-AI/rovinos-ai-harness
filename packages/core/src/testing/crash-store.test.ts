@@ -141,6 +141,16 @@ describe("CrashingEventStore", () => {
     await store.close();
   });
 
+  it("delegates durable idempotency key claims and release", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new CrashingEventStore(inner, { crashAt: 1, mode: "before_commit" });
+    const keyHash = "d".repeat(64);
+
+    await expect(store.claimIdempotencyKey(keyHash, runId, 100)).resolves.toBe(runId);
+    await expect(store.releaseIdempotencyKey(keyHash, runId)).resolves.toBeUndefined();
+    await store.close();
+  });
+
   it("rejects invalid crash points", () => {
     expect(
       () => new CrashingEventStore(new InMemoryEventStore(), { crashAt: 0, mode: "before_commit" }),

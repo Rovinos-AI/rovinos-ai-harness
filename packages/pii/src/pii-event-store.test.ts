@@ -191,7 +191,7 @@ describe("PiiEventStore", () => {
     const store = new PiiEventStore(inner, createTokenizer());
     const keyHash = "d".repeat(64);
 
-    await expect(store.claimIdempotencyKey(keyHash, runId)).resolves.toBe(runId);
+    await expect(store.claimIdempotencyKey(keyHash, runId, 10)).resolves.toBe(runId);
     await expect(store.releaseIdempotencyKey(keyHash, runId)).resolves.toBeUndefined();
   });
 

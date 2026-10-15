@@ -416,11 +416,14 @@ export class InMemoryEventStore implements EventStore {
   }
 
   /** {@inheritDoc EventStore.claimIdempotencyKey} */
-  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<Id> {
+  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id> {
     const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
     const parsedRunId = Id.safeParse(runId);
     if (!parsedHash.success || !parsedRunId.success) {
       return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
+    }
+    if (!Number.isSafeInteger(createdAt) || createdAt < 0) {
+      return Promise.reject(new InvalidEventError([["createdAt"]]));
     }
     const existingRunId = this.idempotencyKeys.get(parsedHash.data);
     if (existingRunId !== undefined) {

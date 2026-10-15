@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ModelPort, PolicyPort, ToolPort } from "@harness/core";
 import { HarnessConfigSchema } from "@harness/config";
-import { InMemoryEventStore } from "@harness/store";
+import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { Code, FakeClock, Id, SequentialIdGenerator, type Event } from "@harness/schemas";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -92,6 +92,13 @@ const fakeTool: ToolPort = {
 
 const harnesses: Harness[] = [];
 
+function idsStartingAt(start: bigint) {
+  let nextId = start;
+  return {
+    next: () => Id.parse((nextId++).toString().padStart(26, "0")),
+  };
+}
+
 async function createTestHarness(
   options: {
     readonly model?: ModelPort;
@@ -102,7 +109,6 @@ async function createTestHarness(
   } = {},
 ): Promise<{ readonly harness: Harness; readonly store: InMemoryEventStore }> {
   const store = options.store ?? new InMemoryEventStore();
-  let nextId = options.idStart;
   const harness = await createHarness({
     config: HarnessConfigSchema.parse({
       ...(options.piiEnabled === false ? { pii: { enabled: false } } : {}),
@@ -111,11 +117,9 @@ async function createTestHarness(
       store,
       clock: new FakeClock(10_000),
       ids:
-        nextId === undefined
+        options.idStart === undefined
           ? new SequentialIdGenerator()
-          : {
-              next: () => Id.parse((nextId++).toString().padStart(26, "0")),
-            },
+          : idsStartingAt(options.idStart),
       transientVault: true,
       model: options.model ?? (options.approval === true ? approvalModel() : fakeModel()),
       ...(options.approval === true ? { policy: askPolicy, tool: fakeTool } : {}),
@@ -238,6 +242,52 @@ describe("@harness/sdk", () => {
 
     expect(second.runId).toBe(first.runId);
     expect((await store.listRuns({ limit: 10 })).runs).toHaveLength(1);
+  });
+
+  it("deduplicates the same key after reopening a persistent store", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harness-sdk-idempotency-reopen-"));
+    const path = join(directory, "events.sqlite");
+    try {
+      const firstHarness = await createHarness({
+        config: HarnessConfigSchema.parse({}),
+        overrides: {
+          store: new SqliteEventStore(path),
+          clock: new FakeClock(10_000),
+          ids: new SequentialIdGenerator(),
+          transientVault: true,
+          model: fakeModel(),
+        },
+      });
+      harnesses.push(firstHarness);
+      const first = await firstHarness.startRun({
+        goal: "Synthetic persistent request",
+        idempotencyKey: "persistent-store-key",
+      });
+      await firstHarness.close();
+
+      const secondHarness = await createHarness({
+        config: HarnessConfigSchema.parse({}),
+        overrides: {
+          store: new SqliteEventStore(path),
+          clock: new FakeClock(10_000),
+          ids: {
+            next: () => Id.parse("00000000000000000000010000"),
+          },
+          transientVault: true,
+          model: fakeModel(),
+        },
+      });
+      harnesses.push(secondHarness);
+      const second = await secondHarness.startRun({
+        goal: "Synthetic duplicate after reopen",
+        idempotencyKey: "persistent-store-key",
+      });
+
+      expect(second.runId).toBe(first.runId);
+      expect((await secondHarness.listRuns({ limit: 10 })).runs).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("waits for the initial append before returning a run id", async () => {

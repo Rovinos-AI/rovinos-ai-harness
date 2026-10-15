@@ -59,7 +59,7 @@ export interface EventStoreLike {
   head(runId: Id): Promise<number>;
   deleteRun(runId: Id): Promise<number>;
   consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean>;
-  claimIdempotencyKey(keyHash: string, runId: Id): Promise<Id>;
+  claimIdempotencyKey(keyHash: string, runId: Id, createdAt: number): Promise<Id>;
   releaseIdempotencyKey(keyHash: string, runId: Id): Promise<void>;
   listRuns(opts: ListRunsOptionsLike): Promise<{ runs: RunSummaryLike[]; nextCursor?: string }>;
   findRunsByTrace(traceId: TraceId): Promise<Id[]>;
@@ -194,8 +194,8 @@ export class PiiEventStore implements EventStoreLike {
     return this.inner.consumeConfirmationState(stateId, expiresAt, now);
   }
 
-  claimIdempotencyKey(keyHash: string, runId: Id): Promise<Id> {
-    return this.inner.claimIdempotencyKey(keyHash, runId);
+  claimIdempotencyKey(keyHash: string, runId: Id, createdAt: number): Promise<Id> {
+    return this.inner.claimIdempotencyKey(keyHash, runId, createdAt);
   }
 
   releaseIdempotencyKey(keyHash: string, runId: Id): Promise<void> {

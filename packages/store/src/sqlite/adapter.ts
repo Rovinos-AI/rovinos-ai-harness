@@ -381,19 +381,22 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   }
 
   /** {@inheritDoc EventStore.claimIdempotencyKey} */
-  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<Id> {
+  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id> {
     const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
     const parsedRunId = Id.safeParse(runId);
     if (!parsedHash.success || !parsedRunId.success) {
       return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
     }
+    if (!Number.isSafeInteger(createdAt) || createdAt < 0) {
+      return Promise.reject(new InvalidEventError([["createdAt"]]));
+    }
     try {
       const claim = this.db.transaction(() => {
         this.db
-          .prepare<[string, Id]>(
-            "INSERT INTO idempotency_keys (key_hash, run_id) VALUES (?, ?) ON CONFLICT (key_hash) DO NOTHING",
+          .prepare<[string, Id, number]>(
+            "INSERT INTO idempotency_keys (key_hash, run_id, created_at) VALUES (?, ?, ?) ON CONFLICT (key_hash) DO NOTHING",
           )
-          .run(parsedHash.data, parsedRunId.data);
+          .run(parsedHash.data, parsedRunId.data, createdAt);
         const row = this.db
           .prepare<[string], { run_id: string }>(
             "SELECT run_id FROM idempotency_keys WHERE key_hash = ?",

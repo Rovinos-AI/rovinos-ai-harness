@@ -303,6 +303,18 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.consumeConfirmationState(stateId, expiresAt, now);
   }
 
+  claimIdempotencyKey(
+    keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
+    runId: Id,
+    createdAt: number,
+  ) {
+    return this.inner.claimIdempotencyKey(keyHash, runId, createdAt);
+  }
+
+  releaseIdempotencyKey(keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0], runId: Id) {
+    return this.inner.releaseIdempotencyKey(keyHash, runId);
+  }
+
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {
     return this.inner.listRuns(options);
   }
@@ -509,6 +521,18 @@ class PreIntentExecutionStore implements EventStore {
 
   consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean> {
     return this.inner.consumeConfirmationState(stateId, expiresAt, now);
+  }
+
+  claimIdempotencyKey(
+    keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
+    runId: Id,
+    createdAt: number,
+  ) {
+    return this.inner.claimIdempotencyKey(keyHash, runId, createdAt);
+  }
+
+  releaseIdempotencyKey(keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0], runId: Id) {
+    return this.inner.releaseIdempotencyKey(keyHash, runId);
   }
 
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {

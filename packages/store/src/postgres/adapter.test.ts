@@ -75,6 +75,7 @@ let transactionBackup:
       snapshots: FakeSnapshot[];
       approvalNotifications: Map<string, FakeApprovalNotification>;
       confirmationStates: Map<string, number>;
+      idempotencyKeys: Map<string, string>;
     }
   | undefined;
 
@@ -85,6 +86,7 @@ const fakePg = vi.hoisted(() => ({
   snapshots: new Array<FakeSnapshot>(),
   approvalNotifications: new Map<string, FakeApprovalNotification>(),
   confirmationStates: new Map<string, number>(),
+  idempotencyKeys: new Map<string, string>(),
   schemaInitialized: false,
   migrationHistory: new Map<string, string>(),
   encryptionValue: "",
@@ -194,6 +196,15 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     fakePg.schemaInitialized = true;
     return { rows: [] };
   }
+  if (query === "DELETE FROM idempotency_keys WHERE run_id = $1") {
+    const runId = text(values[0]);
+    for (const [keyHash, claimedRunId] of fakePg.idempotencyKeys) {
+      if (claimedRunId === runId) {
+        fakePg.idempotencyKeys.delete(keyHash);
+      }
+    }
+    return { rows: [] };
+  }
   if (query.startsWith("CREATE TABLE") || query.startsWith("CREATE INDEX")) {
     fakePg.schemaInitialized = true;
     return { rows: [] };
@@ -258,6 +269,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       snapshots: structuredClone(fakePg.snapshots),
       approvalNotifications: structuredClone(fakePg.approvalNotifications),
       confirmationStates: structuredClone(fakePg.confirmationStates),
+      idempotencyKeys: structuredClone(fakePg.idempotencyKeys),
     };
     return { rows: [] };
   }
@@ -272,6 +284,7 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       snapshots: structuredClone(fakePg.snapshots),
       approvalNotifications: structuredClone(fakePg.approvalNotifications),
       confirmationStates: structuredClone(fakePg.confirmationStates),
+      idempotencyKeys: structuredClone(fakePg.idempotencyKeys),
     };
     return { rows: [] };
   }
@@ -298,6 +311,10 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
       fakePg.confirmationStates.clear();
       for (const [stateId, expiresAt] of transactionBackup.confirmationStates) {
         fakePg.confirmationStates.set(stateId, expiresAt);
+      }
+      fakePg.idempotencyKeys.clear();
+      for (const [keyHash, runId] of transactionBackup.idempotencyKeys) {
+        fakePg.idempotencyKeys.set(keyHash, runId);
       }
       transactionBackup = undefined;
     }
@@ -511,6 +528,19 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
     fakePg.confirmationStates.set(stateId, number(values[1]));
     return { rows: [{ state_id: stateId }] };
   }
+  if (query.startsWith("INSERT INTO idempotency_keys")) {
+    const keyHash = text(values[0]);
+    const runId = fakePg.idempotencyKeys.get(keyHash) ?? text(values[1]);
+    fakePg.idempotencyKeys.set(keyHash, runId);
+    return { rows: [{ run_id: runId }] };
+  }
+  if (query === "DELETE FROM idempotency_keys WHERE key_hash = $1 AND run_id = $2") {
+    const keyHash = text(values[0]);
+    if (fakePg.idempotencyKeys.get(keyHash) === text(values[1])) {
+      fakePg.idempotencyKeys.delete(keyHash);
+    }
+    return { rows: [] };
+  }
   if (
     query ===
     "DELETE FROM approval_notifications WHERE approval_id = $1 AND run_id = $2 AND claimed_at = $3 AND sent_at IS NULL"
@@ -722,6 +752,7 @@ beforeEach(() => {
   fakePg.snapshots.length = 0;
   fakePg.approvalNotifications.clear();
   fakePg.confirmationStates.clear();
+  fakePg.idempotencyKeys.clear();
   transactionBackup = undefined;
   fakePg.schemaInitialized = false;
   fakePg.migrationHistory.clear();

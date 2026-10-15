@@ -231,9 +231,10 @@ export interface EventStore {
    * Persist an idempotency hash or return the run id already associated with it.
    * @param keyHash SHA-256 digest of the caller's idempotency key.
    * @param runId Candidate run identifier for a new idempotency hash.
+   * @param createdAt Claim time in epoch milliseconds.
    * @returns The candidate run id when inserted, otherwise the existing run id.
    */
-  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<Id>;
+  claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id>;
 
   /**
    * Release a newly claimed key when its run failed before becoming durable.

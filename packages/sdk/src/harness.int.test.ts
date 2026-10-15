@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { HarnessConfigSchema } from "@harness/config";
 import type { ModelPort } from "@harness/core";
-import { createHarness } from "@harness/sdk";
+import { createHarness } from "./index.js";
 import { Code, FakeClock, Id } from "@harness/schemas";
 import { PostgresEventStore } from "@harness/store";
 import { expect, it } from "vitest";

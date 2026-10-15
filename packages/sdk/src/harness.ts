@@ -178,8 +178,12 @@ class HarnessClient implements Harness {
     const claimedRunId =
       keyHash === undefined || candidateRunId === undefined
         ? undefined
-        : await this.runtime.store.claimIdempotencyKey(keyHash, candidateRunId);
-    if (candidateRunId !== undefined && claimedRunId !== candidateRunId) {
+        : await this.runtime.store.claimIdempotencyKey(
+            keyHash,
+            candidateRunId,
+            this.runtime.clock.now(),
+          );
+    if (claimedRunId !== undefined && claimedRunId !== candidateRunId) {
       return this.existingRunResult(claimedRunId);
     }
     const { runId, started, completion } = this.runtime.start(runInput, {

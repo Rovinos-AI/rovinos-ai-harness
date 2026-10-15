@@ -29,6 +29,9 @@ function brokenFactory(): EventStoreFactory {
       deleteRun: (runId) => reference.deleteRun(runId),
       consumeConfirmationState: (stateId, expiresAt, now) =>
         reference.consumeConfirmationState(stateId, expiresAt, now),
+      claimIdempotencyKey: (keyHash, runId, createdAt) =>
+        reference.claimIdempotencyKey(keyHash, runId, createdAt),
+      releaseIdempotencyKey: (keyHash, runId) => reference.releaseIdempotencyKey(keyHash, runId),
       listRuns: (options) => reference.listRuns(options),
       findRunsByTrace: (traceId) => reference.findRunsByTrace(traceId),
       fetchOutbox: (sinkId, limit) => reference.fetchOutbox(sinkId, limit),
