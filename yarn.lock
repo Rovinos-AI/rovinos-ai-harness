@@ -1383,6 +1383,8 @@ __metadata:
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
+    "@types/pg": "npm:8.23.1"
+    pg: "npm:8.23.1"
     typescript: "npm:5.9.3"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"

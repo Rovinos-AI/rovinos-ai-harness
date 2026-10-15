@@ -303,6 +303,27 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.consumeConfirmationState(stateId, expiresAt, now);
   }
 
+  claimIdempotencyKey(
+    keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
+    candidateRunId: Id,
+    createdAt: number,
+  ) {
+    return this.inner.claimIdempotencyKey(keyHash, candidateRunId, createdAt);
+  }
+
+  takeoverIdempotencyKey(
+    ...args: Parameters<EventStore["takeoverIdempotencyKey"]>
+  ): ReturnType<EventStore["takeoverIdempotencyKey"]> {
+    return this.inner.takeoverIdempotencyKey(...args);
+  }
+
+  releaseIdempotencyKey(
+    keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0],
+    claimedRunId: Id,
+  ) {
+    return this.inner.releaseIdempotencyKey(keyHash, claimedRunId);
+  }
+
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {
     return this.inner.listRuns(options);
   }
@@ -509,6 +530,27 @@ class PreIntentExecutionStore implements EventStore {
 
   consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean> {
     return this.inner.consumeConfirmationState(stateId, expiresAt, now);
+  }
+
+  claimIdempotencyKey(
+    keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
+    candidateRunId: Id,
+    createdAt: number,
+  ) {
+    return this.inner.claimIdempotencyKey(keyHash, candidateRunId, createdAt);
+  }
+
+  takeoverIdempotencyKey(
+    ...args: Parameters<EventStore["takeoverIdempotencyKey"]>
+  ): ReturnType<EventStore["takeoverIdempotencyKey"]> {
+    return this.inner.takeoverIdempotencyKey(...args);
+  }
+
+  releaseIdempotencyKey(
+    keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0],
+    claimedRunId: Id,
+  ) {
+    return this.inner.releaseIdempotencyKey(keyHash, claimedRunId);
   }
 
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {
