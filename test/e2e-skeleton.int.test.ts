@@ -12,12 +12,9 @@ import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { ExportResultCode } from "@opentelemetry/core";
 import Database from "better-sqlite3";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import {
   createDefaultContext,
   createOutput,
@@ -100,8 +97,6 @@ import { createSandboxComposeInvocation } from "../scripts/compose/sandbox.js";
 import { runNetworkIsolationCompose } from "../scripts/ci/network-isolation.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-const execFileAsync = promisify(execFile);
-const repositoryRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const DAY_MS = 86_400_000;
 const KEY_REF = "env:HARNESS_E2E_KEY";
 const KEY_ID = "e2e-test";
@@ -1709,40 +1704,11 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
     const previousEgressAllow = process.env.SANDBOX_EGRESS_ALLOW;
     process.env.SANDBOX_RUNNER_TOKEN = token;
     process.env.SANDBOX_EGRESS_ALLOW = JSON.stringify(allow);
-    const invokeCompose = async (args: string[]) => {
-      const { stdout } = await execFileAsync(
-        "docker",
-        [
-          "compose",
-          "--env-file",
-          "infra/collector/VERSION",
-          "--project-name",
-          project,
-          "--profile",
-          "sandbox",
-          "--profile",
-          "sandbox-egress",
-          "--file",
-          "infra/compose/docker-compose.yml",
-          "--file",
-          "infra/compose/docker-compose.egress.yml",
-          "--file",
-          "infra/compose/docker-compose.egress.test.yml",
-          ...args,
-        ],
-        {
-          cwd: repositoryRoot,
-          env: process.env,
-          encoding: "utf8",
-          maxBuffer: 10 * 1024 * 1024,
-          timeout: 180_000,
-        },
-      );
-      if (typeof stdout !== "string") {
-        throw new TypeError("Docker Compose did not return text output.");
-      }
-      return stdout;
-    };
+    const invokeCompose = (args: string[]) =>
+      runNetworkIsolationCompose(project, args, [
+        "infra/compose/docker-compose.egress.yml",
+        "infra/compose/docker-compose.egress.test.yml",
+      ]);
     const requestSchema = z.object({ runId: Id, request: WebFetchRequestSchema }).strict();
     const responseSchema = z.object({ status: z.number().int(), body: z.string() }).strict();
     const forwarded: z.infer<typeof requestSchema>[] = [];

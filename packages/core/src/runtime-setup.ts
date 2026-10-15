@@ -3,7 +3,7 @@ import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
-import type { Code, Id, PiiConfig, ToolSpec } from "@harness/schemas";
+import type { Code, Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
 import {
@@ -26,6 +26,7 @@ import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
+import { composeToolPorts } from "./runtime-tool-port.js";
 import { McpConnectionError, McpToolPort } from "@harness/mcp";
 import type { McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
@@ -140,47 +141,7 @@ function createRuntimeTool(
     backend instanceof RemoteSandboxBackend
       ? createWebFetchTool(config.sandbox?.egress?.allow, backend)
       : undefined;
-  return webFetchTool === undefined ? baseTool : composeToolPorts([webFetchTool, baseTool]);
-}
-
-function composeToolPorts(ports: readonly ToolPort[]): ToolPort {
-  const portFor = (toolId: Code): ToolPort | undefined =>
-    ports.find((port) => port.describe(toolId) !== undefined);
-  const fallback = ports.at(-1) ?? unavailableTool;
-  const getToolSpecs = () => {
-    const specs = new Map<Code, ToolSpec>();
-    for (const port of ports) {
-      for (const spec of port.getToolSpecs?.() ?? []) {
-        if (!specs.has(spec.toolId)) {
-          specs.set(spec.toolId, spec);
-        }
-      }
-    }
-    return [...specs.values()];
-  };
-  const prepare = ports.some((port) => port.prepare !== undefined)
-    ? (
-        call: Parameters<NonNullable<ToolPort["prepare"]>>[0],
-        context: Parameters<NonNullable<ToolPort["prepare"]>>[1],
-      ) => portFor(call.toolId)?.prepare?.(call, context) ?? Promise.resolve(call)
-    : undefined;
-  const validateInputSchema = ports.some((port) => port.validateInputSchema !== undefined)
-    ? (
-        toolId: Code,
-        args: Parameters<NonNullable<ToolPort["validateInputSchema"]>>[1],
-        schema: Parameters<NonNullable<ToolPort["validateInputSchema"]>>[2],
-        context: Parameters<NonNullable<ToolPort["validateInputSchema"]>>[3],
-      ) =>
-        portFor(toolId)?.validateInputSchema?.(toolId, args, schema, context) ??
-        Promise.resolve(true)
-    : undefined;
-  return {
-    ...(prepare === undefined ? {} : { prepare }),
-    ...(validateInputSchema === undefined ? {} : { validateInputSchema }),
-    describe: (toolId) => portFor(toolId)?.describe(toolId) ?? fallback.describe(toolId),
-    getToolSpecs,
-    execute: (call, context) => (portFor(call.toolId) ?? fallback).execute(call, context),
-  };
+  return webFetchTool === undefined ? baseTool : composeToolPorts(webFetchTool, baseTool);
 }
 
 /** Creates runtime keys, closing a caller-supplied sandbox backend if key resolution fails. */
@@ -420,7 +381,6 @@ export async function setupRuntime(
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
-    const context = overrides.context ?? new NaiveContext();
     tools = await createRuntimeTools(runtimeConfig, overrides);
     const { tool, sandboxBackend } = tools;
     const roles = await createRuntimeRoles(runtimeConfig, overrides, tool);
@@ -456,7 +416,7 @@ export async function setupRuntime(
         : { closeToolPort: () => managedMcpToolPort.close() }),
       policy,
       policyVersion: policy.version,
-      context,
+      context: overrides.context ?? new NaiveContext(),
       roles,
       scopes,
     };

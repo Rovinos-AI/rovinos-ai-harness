@@ -280,11 +280,11 @@ describe("createRuntime sandbox composition", () => {
       await emptyAllowlistRuntime.run("inspect tools");
       await localRuntime.run("inspect tools");
       expect(
-        emptyAllowlistModel.requests[0]?.request.tools?.map(({ toolId }) => toolId),
+        emptyAllowlistModel.requests[0]?.request.tools?.map(({ toolId: specId }) => specId),
       ).not.toContain("web.fetch");
-      expect(localModel.requests[0]?.request.tools?.map(({ toolId }) => toolId)).not.toContain(
-        "web.fetch",
-      );
+      expect(
+        localModel.requests[0]?.request.tools?.map(({ toolId: specId }) => specId),
+      ).not.toContain("web.fetch");
     } finally {
       await emptyAllowlistRuntime.close();
       await localRuntime.close();
@@ -316,10 +316,12 @@ describe("createRuntime sandbox composition", () => {
     try {
       await runtime.run("inspect tools");
       expect(createTool).toHaveBeenCalledExactlyOnceWith(runtime.sandboxBackend);
-      expect(modelPort.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toContain(
+      expect(modelPort.requests[0]?.request.tools?.map(({ toolId: specId }) => specId)).toContain(
         "web.fetch",
       );
-      expect(modelPort.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toContain(toolId);
+      expect(modelPort.requests[0]?.request.tools?.map(({ toolId: specId }) => specId)).toContain(
+        toolId,
+      );
     } finally {
       await runtime.close();
     }
@@ -375,18 +377,18 @@ describe("createRuntime sandbox composition", () => {
       },
     );
     try {
-      const result = await runtime.run("fetch the page");
-      expect(result.status).toBe("completed");
+      const runResult = await runtime.run("fetch the page");
+      expect(runResult.status).toBe("completed");
       expect(order).toEqual(["policy", "fetch"]);
-      expect(modelPort.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toContain(
+      expect(modelPort.requests[0]?.request.tools?.map(({ toolId: specId }) => specId)).toContain(
         "web.fetch",
       );
-      expect(result.events.find((event) => event.type === "tool_result")).toMatchObject({
+      expect(runResult.events.find((event) => event.type === "tool_result")).toMatchObject({
         toolId: "web.fetch",
         outcome: "ok",
         result: { text: "Contact <EMAIL_1>", untrusted: true },
       });
-      const recorded = JSON.stringify(result.events);
+      const recorded = JSON.stringify(runResult.events);
       expect(recorded).not.toContain(outputCanary);
     } finally {
       await runtime.close();
@@ -422,8 +424,8 @@ describe("createRuntime sandbox composition", () => {
       },
     );
     try {
-      const result = await runtime.run("fetch the page");
-      expect(result.events.find((event) => event.type === "tool_intent")).toMatchObject({
+      const runResult = await runtime.run("fetch the page");
+      expect(runResult.events.find((event) => event.type === "tool_intent")).toMatchObject({
         toolId: "web.fetch",
         policyDecision: "deny",
       });

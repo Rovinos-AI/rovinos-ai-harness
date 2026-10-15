@@ -67,6 +67,7 @@ export async function runTestComposeCommand(args: readonly string[]): Promise<st
 export async function runNetworkIsolationCompose(
   projectName: string,
   args: string[],
+  composeFiles: readonly string[] = ["infra/compose/docker-compose.isolation.test.yml"],
 ): Promise<string> {
   const { stdout } = await execFileAsync(
     "docker",
@@ -78,8 +79,7 @@ export async function runNetworkIsolationCompose(
       projectName,
       "--file",
       "infra/compose/docker-compose.yml",
-      "--file",
-      "infra/compose/docker-compose.isolation.test.yml",
+      ...composeFiles.flatMap((file) => ["--file", file]),
       ...args,
     ],
     { cwd: root, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
