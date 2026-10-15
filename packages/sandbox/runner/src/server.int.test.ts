@@ -191,10 +191,7 @@ async function runExec(
   spec: ExecSpec,
   runId = Id.parse("00000000000000000000000001"),
 ): Promise<z.infer<typeof ExecResultSchema>> {
-  const response = await requestRunner(
-    { runId, spec },
-    { token: integrationToken },
-  );
+  const response = await requestRunner({ runId, spec }, { token: integrationToken });
   expect(response.status).toBe(200);
   return parseJson(ExecResultSchema, response.body);
 }
@@ -267,29 +264,57 @@ describe("sandbox runner Compose service", () => {
       { runId: Id.parse("00000000000000000000000001") },
       { token: integrationToken, path: "/release" },
     );
-    const leaseB = await requestRunner({ runId: runB, ttlMs: 30_000 }, {
-      token: integrationToken,
-      path: "/lease",
-    });
+    const leaseB = await requestRunner(
+      { runId: runB, ttlMs: 30_000 },
+      {
+        token: integrationToken,
+        path: "/lease",
+      },
+    );
     expect(leaseB.status).toBe(200);
     const created = await runExec(
-      makeSpec(["node", "-e", 'require("node:fs").writeFileSync("private.txt", "synthetic-run-b")']),
+      makeSpec([
+        "node",
+        "-e",
+        'require("node:fs").writeFileSync("private.txt", "synthetic-run-b")',
+      ]),
       runB,
     );
     expect(created.exitCode).toBe(0);
-    expect((await requestRunner({ runId: runB }, {
-      token: integrationToken,
-      path: "/release",
-    })).status).toBe(200);
+    expect(
+      (
+        await requestRunner(
+          { runId: runB },
+          {
+            token: integrationToken,
+            path: "/release",
+          },
+        )
+      ).status,
+    ).toBe(200);
 
-    expect((await requestRunner({ runId: runA, ttlMs: 30_000 }, {
-      token: integrationToken,
-      path: "/lease",
-    })).status).toBe(200);
-    expect((await requestRunner({ runId: runB, ttlMs: 30_000 }, {
-      token: integrationToken,
-      path: "/lease",
-    })).status).toBe(409);
+    expect(
+      (
+        await requestRunner(
+          { runId: runA, ttlMs: 30_000 },
+          {
+            token: integrationToken,
+            path: "/lease",
+          },
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await requestRunner(
+          { runId: runB, ttlMs: 30_000 },
+          {
+            token: integrationToken,
+            path: "/lease",
+          },
+        )
+      ).status,
+    ).toBe(409);
 
     const probe = [
       'const fs = require("node:fs");',
@@ -304,10 +329,17 @@ describe("sandbox runner Compose service", () => {
     ].join("\n");
     const isolated = await runExec(makeSpec(["node", "-e", probe]), runA);
     expect(isolated).toMatchObject({ exitCode: 0, stdout: "[true,true,true,true,true]" });
-    expect((await requestRunner({ runId: runA }, {
-      token: integrationToken,
-      path: "/release",
-    })).status).toBe(200);
+    expect(
+      (
+        await requestRunner(
+          { runId: runA },
+          {
+            token: integrationToken,
+            path: "/release",
+          },
+        )
+      ).status,
+    ).toBe(200);
   }, 30_000);
 
   // threat: T-05

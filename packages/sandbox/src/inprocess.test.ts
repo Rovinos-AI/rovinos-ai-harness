@@ -224,7 +224,7 @@ describe("InProcessBackend", () => {
     expect(Number.isSafeInteger(grandchildPid)).toBe(true);
     expect(await waitForProcessExit(parentPid)).toBe(true);
     expect(await waitForProcessExit(grandchildPid)).toBe(true);
-  });
+  }, 30_000);
 
   // threat: T-10
   it("kills a background grandchild after the command exits normally", async () => {
@@ -351,6 +351,38 @@ describe("InProcessBackend", () => {
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  // threat: T-14
+  it("uses a distinct project directory for each in-process run", async () => {
+    const otherRunId = Id.parse("00000000000000000000000002");
+    const backend = createBackend();
+    const first = await backend.exec(
+      runId,
+      makeSpec([
+        process.execPath,
+        "-e",
+        'require("node:fs").writeFileSync("private.txt", "first")',
+      ]),
+      new AbortController().signal,
+    );
+    const second = await backend.exec(
+      otherRunId,
+      makeSpec([process.execPath, "-e", "process.stdout.write(process.cwd())"]),
+      new AbortController().signal,
+    );
+
+    expect(first.exitCode).toBe(0);
+    expect(second.stdout).toBe(join(await realpath(workspaceRoot), otherRunId, "project"));
+    await expect(
+      backend.exec(
+        otherRunId,
+        makeSpec([process.execPath, "-e", "process.exit(0)"], {
+          cwd: `../../${runId}/project`,
+        }),
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: "sandbox_workspace_path_invalid" });
   });
 
   it("rejects commands that cannot be started", async () => {

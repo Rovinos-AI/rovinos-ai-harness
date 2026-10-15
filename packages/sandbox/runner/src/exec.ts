@@ -247,7 +247,6 @@ function executeProcess({
  * @returns Bounded command output and process metadata.
  */
 export async function executeSpec(options: {
-  runId: Id;
   spec: ExecSpec;
   signal: AbortSignal;
   workspaceRoot: string;
@@ -265,10 +264,7 @@ export async function executeSpec(options: {
   }
   const projectRoot = await activateRunWorkspace(workspaceRoot, runId);
   const cwd = await resolveWorkspacePath(projectRoot, spec.cwd);
-  const tempDirectory = resolveWorkspacePath(
-    workspaceRoot,
-    `${runId}/.harness/tmp`,
-  );
+  const tempDirectory = resolveWorkspacePath(workspaceRoot, `${runId}/.harness/tmp`);
   const tempPath = await tempDirectory;
   return executeProcess({
     spec: {

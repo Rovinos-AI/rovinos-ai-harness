@@ -113,11 +113,12 @@ describe("RemoteSandboxBackend", () => {
   });
 
   it("maps lease conflicts and rejects invalid lease durations", async () => {
-    await expect(backend(() => Promise.resolve(response({}, 409))).acquireLease(runId))
-      .rejects.toMatchObject({ code: "sandbox_busy" });
     await expect(
-      backend(vi.fn<typeof fetch>()).acquireLease(runId, 600_001),
-    ).rejects.toMatchObject({ code: "sandbox_runner_config_invalid" });
+      backend(() => Promise.resolve(response({}, 409))).acquireLease(runId),
+    ).rejects.toMatchObject({ code: "sandbox_busy" });
+    await expect(backend(vi.fn<typeof fetch>()).acquireLease(runId, 600_001)).rejects.toMatchObject(
+      { code: "sandbox_runner_config_invalid" },
+    );
   });
 
   it("maps other HTTP failures, invalid responses, and fetch failures to unavailable", async () => {

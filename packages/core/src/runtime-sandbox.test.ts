@@ -50,6 +50,13 @@ function completion(parts: ModelCompletion["parts"]): ModelCompletion {
   };
 }
 
+function requestUrl(input: RequestInfo | URL): URL {
+  if (input instanceof URL) {
+    return input;
+  }
+  return typeof input === "string" ? new URL(input) : new URL(input.url);
+}
+
 function model(): FakeModelPort {
   return new FakeModelPort([
     completion([
@@ -113,7 +120,9 @@ describe("createRuntime sandbox composition", () => {
       );
       const workspaceRoot = join(dataDir, "workspaces");
       // macOS resolves /var to /private/var; compare canonical paths.
-      expect(execution.stdout).toBe(await realpath(join(workspaceRoot, Id.parse("00000000000000000000000041"), "project")));
+      expect(execution.stdout).toBe(
+        await realpath(join(workspaceRoot, Id.parse("00000000000000000000000041"), "project")),
+      );
       expect((await stat(workspaceRoot)).mode & 0o777).toBe(0o700);
       await expect(
         runtime.sandboxBackend.exec(
@@ -177,7 +186,7 @@ describe("createRuntime sandbox composition", () => {
       vi.stubEnv("HARNESS_SANDBOX_CANARY", canary);
       const fetcher = vi.fn((input: RequestInfo | URL) =>
         Promise.resolve(
-          Response.json(new URL(input.toString()).pathname === "/exec" ? result : { status: "ok" }),
+          Response.json(requestUrl(input).pathname === "/exec" ? result : { status: "ok" }),
         ),
       );
       vi.stubGlobal("fetch", fetcher);

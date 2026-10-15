@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { HarnessError, type Event, type Id } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
 import { OffloadingToolPort } from "@harness/context";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
-import { closeRuntimeResources, markTerminalBestEffort } from "./runtime-lifecycle.js";
+import {
+  closeRuntimeResources,
+  markTerminalBestEffort,
+  withSandboxLease,
+} from "./runtime-lifecycle.js";
 import {
   composeAbortSignals,
   inspectCancellationTail,
@@ -21,7 +25,12 @@ import type { RoleRegistry } from "./roles.js";
 import { foldRunState } from "./run-state.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool } from "./subagent/runtime.js";
-import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
+import {
+  createRuntimeContinuation,
+  readStoredGoal,
+  startRun,
+  type RunControl,
+} from "./runtime-runs.js";
 import { setupRuntime } from "./runtime-setup.js";
 import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
@@ -185,22 +194,6 @@ async function withRunControl(options: RunControlOptions): Promise<RunLoopResult
   }
 }
 
-async function storedGoal(store: EventStore, runId: Id): Promise<JsonValue | undefined> {
-  for await (const event of store.read(runId)) {
-    if (event.type === "run_input") {
-      return event.input;
-    }
-    if (event.type === "model_request") {
-      const goalMessage = event.messages.find(({ role }) => role === "user");
-      const goalPart = goalMessage?.parts.find((part) => part.type === "text");
-      if (goalPart?.type === "text") {
-        return goalPart.text;
-      }
-    }
-  }
-  return undefined;
-}
-
 function createTerminalAwareRunControl({
   config,
   overrides,
@@ -211,10 +204,8 @@ function createTerminalAwareRunControl({
 }: RuntimeComposition): RunControl {
   const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   return async (runId, operation, firstNewSeq = 0) => {
-    await sandboxBackend.acquireLease?.(runId);
-    let result: RunLoopResult;
-    try {
-      result = await withRunControl({
+    const result = await withSandboxLease(sandboxBackend, runId, () =>
+      withRunControl({
         store,
         runId,
         firstNewSeq,
@@ -223,10 +214,8 @@ function createTerminalAwareRunControl({
         processLike: overrides.processLike ?? defaultProcessLike,
         graceMs: config.run.shutdownGraceMs,
         operation,
-      });
-    } finally {
-      await sandboxBackend.releaseLease?.(runId);
-    }
+      }),
+    );
     if (
       result.status === "completed" ||
       result.status === "failed" ||
@@ -377,7 +366,7 @@ function createRuntimeResume(
     return runWithControl(
       runId,
       async (signal) => {
-        const goal = await storedGoal(store, runId);
+        const goal = await readStoredGoal(store, runId);
         if (goal === undefined) {
           throw new RunInputMissingError();
         }

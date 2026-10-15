@@ -1,19 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { HarnessError, Id, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
+import { HarnessError, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
+import type { Id as IdValue } from "@harness/schemas";
 import { z } from "zod";
 import { executeSpec, SANDBOX_EXEC_UID } from "./exec.js";
-import {
-  activateRunWorkspace,
-  clearRunScratch,
-  lockRunWorkspace,
-} from "../../src/workspace.js";
 import { MAX_EXEC_TIMEOUT_MS } from "../../src/types.js";
 import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 import type { WebFetchRequest, WebFetchResult } from "../../src/web-fetch-contracts.js";
@@ -23,21 +18,12 @@ import {
   type RunnerRequest,
   type RunnerResponse,
 } from "./request-handler.js";
+import { RunnerLeaseManager } from "./lease.js";
+import { authorityFrom, validHost, validOrigin } from "./server-origin.js";
 
 const REQUEST_TIMEOUT_MS = MAX_EXEC_TIMEOUT_MS + 10_000;
 const TOKEN_HASH_BYTES = 32;
 const MIN_RUNNER_TOKEN_BYTES = 32;
-const DEFAULT_LEASE_TTL_MS = 10 * 60 * 1000;
-const systemClock: Clock = {
-  now: () => Date.now(),
-  schedule: (callback, delayMs) => {
-    const timer = setTimeout(callback, delayMs);
-    return () => {
-      clearTimeout(timer);
-    };
-  },
-};
-
 const RunnerHealthSchema = z.object({ status: z.literal("ok") }).strict();
 
 /** Options for the authenticated runner HTTP server. */
@@ -61,11 +47,7 @@ export interface RunnerServerOptions {
   /** GID used for sandbox commands. */
   readonly executionGid?: number;
   /** Executes validated requests; injectable for isolated server tests. */
-  readonly execute?: (
-    runId: z.infer<typeof Id>,
-    spec: ExecSpec,
-    signal: AbortSignal,
-  ) => Promise<ExecResult>;
+  readonly execute?: (runId: IdValue, spec: ExecSpec, signal: AbortSignal) => Promise<ExecResult>;
   /** Fetches validated content; injectable for isolated server tests. */
   readonly fetch?: (
     request: WebFetchRequest,
@@ -117,51 +99,6 @@ function authorized(request: RunnerRequest, tokenHash: Buffer): boolean {
   }
   const candidateHash = hashToken(header.slice("Bearer ".length));
   return candidateHash.byteLength === TOKEN_HASH_BYTES && timingSafeEqual(tokenHash, candidateHash);
-}
-
-function authorityFrom(value: string | undefined): string | undefined {
-  if (
-    value === undefined ||
-    value.length === 0 ||
-    value.trim() !== value ||
-    /[/@?#]/u.test(value)
-  ) {
-    return undefined;
-  }
-  try {
-    const url = new URL(`http://${value}`);
-    if (url.username !== "" || url.password !== "" || url.pathname !== "/" || url.search !== "") {
-      return undefined;
-    }
-    return url.host.toLowerCase();
-  } catch {
-    return undefined;
-  }
-}
-
-function validOrigin(origin: string | undefined, allowedHosts: ReadonlySet<string>): boolean {
-  if (origin === undefined) {
-    return true;
-  }
-  try {
-    const url = new URL(origin);
-    return (
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      url.username === "" &&
-      url.password === "" &&
-      url.pathname === "/" &&
-      url.search === "" &&
-      url.hash === "" &&
-      allowedHosts.has(url.host.toLowerCase())
-    );
-  } catch {
-    return false;
-  }
-}
-
-function validHost(request: RunnerRequest, allowedHosts: ReadonlySet<string>): boolean {
-  const authority = authorityFrom(request.headers.host);
-  return authority !== undefined && allowedHosts.has(authority);
 }
 
 function writeError(response: RunnerResponse, status: number, code: string): void {
@@ -261,15 +198,15 @@ export function withProxyEnvironment(spec: ExecSpec, proxyUrl: string | undefine
  */
 function executeRunnerSpec(
   options: RunnerServerOptions,
-  runId: z.infer<typeof Id>,
+  runId: IdValue,
   spec: ExecSpec,
   signal: AbortSignal,
 ): Promise<ExecResult> {
   const executionSpec = withProxyEnvironment(spec, options.proxyUrl);
   return options.execute === undefined
     ? executeSpec({
-      runId,
-      spec: executionSpec,
+        runId,
+        spec: executionSpec,
         signal,
         workspaceRoot: options.workspaceRoot,
         ...(options.executionUid === undefined ? {} : { executionUid: options.executionUid }),
@@ -285,108 +222,6 @@ interface RunnerRequestContext {
   readonly isBusy: () => boolean;
   readonly setBusy: (busy: boolean) => void;
   readonly leases: RunnerLeaseManager;
-}
-
-interface ActiveRunLease {
-  readonly runId: z.infer<typeof Id>;
-  readonly ttlMs: number;
-  readonly expiresAt: number;
-}
-
-class RunnerLeaseManager {
-  readonly #workspaceRoot: string;
-  readonly #temporaryRoot: string | undefined;
-  readonly #clock: Clock;
-  #active: ActiveRunLease | undefined;
-  #cancelExpiry: (() => void) | undefined;
-
-  constructor(options: RunnerServerOptions) {
-    this.#workspaceRoot = options.workspaceRoot;
-    this.#temporaryRoot = options.temporaryRoot;
-    this.#clock = options.clock ?? systemClock;
-  }
-
-  async acquire(runId: z.infer<typeof Id>, ttlMs = DEFAULT_LEASE_TTL_MS): Promise<boolean> {
-    await this.#expireIfDue();
-    if (this.#active !== undefined && this.#active.runId !== runId) {
-      return false;
-    }
-    const isRenewal = this.#active?.runId === runId;
-    this.#setActive(runId, ttlMs);
-    try {
-      if (!isRenewal) {
-        await activateRunWorkspace(this.#workspaceRoot, runId);
-        await clearRunScratch(this.#workspaceRoot, runId);
-        await this.#clearTemporaryRoot();
-      }
-      return true;
-    } catch (error) {
-      if (!isRenewal && this.#active?.runId === runId) {
-        this.#cancelExpiry?.();
-        this.#cancelExpiry = undefined;
-        this.#active = undefined;
-        await lockRunWorkspace(this.#workspaceRoot, runId);
-      }
-      throw error;
-    }
-  }
-
-  async release(runId: z.infer<typeof Id>): Promise<boolean> {
-    await this.#expireIfDue();
-    if (this.#active?.runId !== runId) {
-      return false;
-    }
-    await this.#dropActive();
-    return true;
-  }
-
-  async #dropActive(): Promise<void> {
-    const active = this.#active;
-    if (active === undefined) {
-      return;
-    }
-    this.#cancelExpiry?.();
-    this.#cancelExpiry = undefined;
-    this.#active = undefined;
-    await lockRunWorkspace(this.#workspaceRoot, active.runId);
-  }
-
-  async renew(runId: z.infer<typeof Id>): Promise<boolean> {
-    return this.acquire(runId, this.#active?.runId === runId ? this.#active.ttlMs : undefined);
-  }
-
-  async #expireIfDue(): Promise<void> {
-    if (this.#active !== undefined && this.#active.expiresAt <= this.#clock.now()) {
-      await this.#dropActive();
-    }
-  }
-
-  #setActive(runId: z.infer<typeof Id>, ttlMs: number): void {
-    this.#cancelExpiry?.();
-    const expiresAt = this.#clock.now() + ttlMs;
-    this.#active = { runId, ttlMs, expiresAt };
-    this.#cancelExpiry = this.#clock.schedule(() => {
-      if (this.#active?.runId === runId && this.#active.expiresAt <= this.#clock.now()) {
-        void this.release(runId);
-      }
-    }, ttlMs);
-  }
-
-  async #clearTemporaryRoot(): Promise<void> {
-    if (this.#temporaryRoot === undefined) {
-      return;
-    }
-    const temporaryRoot = this.#temporaryRoot;
-    const entries = await readdir(temporaryRoot);
-    await Promise.all(
-      entries.map((entry) =>
-        rm(join(temporaryRoot, entry), {
-          force: true,
-          recursive: true,
-        }),
-      ),
-    );
-  }
 }
 
 async function handleRunnerRequest(

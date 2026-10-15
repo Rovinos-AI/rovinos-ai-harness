@@ -2,8 +2,23 @@
 // Runtime lifecycle helpers extracted from runtime.ts (keeps it under the max-lines limit).
 import { Code, type Id } from "@harness/schemas";
 import { emitVaultMarkTerminalFailed } from "@harness/telemetry";
+import type { SandboxBackend } from "@harness/sandbox";
 import type { EventStore } from "@harness/store";
 import type { RuntimeComposition, RuntimeOverrides } from "./runtime-config.js";
+
+/** Runs an operation while holding the backend's optional run-scoped lease. */
+export async function withSandboxLease<T>(
+  backend: SandboxBackend,
+  runId: Id,
+  operation: () => Promise<T>,
+): Promise<T> {
+  await backend.acquireLease?.(runId);
+  try {
+    return await operation();
+  } finally {
+    await backend.releaseLease?.(runId);
+  }
+}
 
 function terminalMarkFailureCode(error: unknown): Code {
   try {

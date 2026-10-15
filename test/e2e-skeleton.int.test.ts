@@ -1466,7 +1466,11 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
     process.env.SANDBOX_RUNNER_TOKEN = token;
     const invokeCompose = (args: string[]) =>
       runNetworkIsolationCompose(project, ["--profile", "sandbox", ...args]);
-    const requestSchema = z.object({ runId: Id, spec: ExecSpecSchema }).strict();
+    const requestSchema = z.union([
+      z.object({ runId: Id, spec: ExecSpecSchema }).strict(),
+      z.object({ runId: Id, ttlMs: z.number().int().positive().max(600_000).optional() }).strict(),
+      z.object({ runId: Id }).strict(),
+    ]);
     const responseSchema = z.object({ status: z.number().int(), body: z.string() }).strict();
     const composeSchema = z.object({
       networks: z.record(z.string(), z.object({ internal: z.boolean().optional() })),
@@ -1479,15 +1483,21 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       ),
     });
     const responses: z.infer<typeof responseSchema>[] = [];
-    const forwarded: { body: z.infer<typeof requestSchema>; authorization: string | undefined }[] =
-      [];
+    const forwarded: {
+      path: string;
+      body: z.infer<typeof requestSchema>;
+      authorization: string | undefined;
+    }[] = [];
 
     // The host cannot reach Compose's internal network. Forward real HTTP requests
     // from the configured remote backend without publishing a runner port.
     const bridge = createServer((request, response) => {
       const forward = async () => {
         expect(request.method).toBe("POST");
-        expect(request.url).toBe("/exec");
+        const path = request.url;
+        if (path !== "/lease" && path !== "/exec" && path !== "/release") {
+          throw new Error("Unexpected sandbox endpoint.");
+        }
         const chunks: Buffer[] = [];
         let bytes = 0;
         for await (const chunk of request) {
@@ -1500,12 +1510,13 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
         }
         const body = Buffer.concat(chunks).toString("utf8");
         forwarded.push({
+          path,
           body: parseJson(requestSchema, body, { maxBytes: 2 * 1024 * 1024 }),
           authorization: request.headers.authorization,
         });
         const script = [
           'const http = require("node:http");',
-          `const request = http.request({ hostname: "127.0.0.1", port: 8080, path: "/exec", method: "POST", headers: ${JSON.stringify({ host: "sandbox-runner:8080", authorization: request.headers.authorization, "content-type": "application/json" })} }, (response) => {`,
+          `const request = http.request({ hostname: "127.0.0.1", port: 8080, path: ${JSON.stringify(path)}, method: "POST", headers: ${JSON.stringify({ host: "sandbox-runner:8080", authorization: request.headers.authorization, "content-type": "application/json" })} }, (response) => {`,
           '  const chunks = []; let bytes = 0; response.on("data", (chunk) => { bytes += chunk.length; if (bytes > 2097152) { response.destroy(); process.exitCode = 1; } else { chunks.push(chunk); } });',
           '  response.on("end", () => process.stdout.write(JSON.stringify({ status: response.statusCode, body: Buffer.concat(chunks).toString() })));',
           "});",
@@ -1628,15 +1639,15 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       expect(createTool).toHaveBeenCalledExactlyOnceWith(runtime.sandboxBackend);
       const result = await runtime.run("Execute the synthetic sandbox command.");
       expect(result.status).toBe("completed");
-      expect(responses).toMatchObject([{ status: 200 }]);
+      expect(responses.map(({ status }) => status)).toEqual([200, 200, 200]);
       expect(executions).toMatchObject([
         {
           outcome: "ok",
           result: { exitCode: 0, stdout: `${current.canary}\n` },
         },
       ]);
-      expect(forwarded).toHaveLength(1);
-      expect(forwarded[0]).toMatchObject({
+      expect(forwarded.map(({ path }) => path)).toEqual(["/lease", "/exec", "/release"]);
+      expect(forwarded[1]).toMatchObject({
         authorization: ["Bearer", token].join(" "),
         body: { spec: { argv: ["/bin/echo", current.canary] } },
       });

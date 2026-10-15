@@ -1,14 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { constants } from "node:fs";
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  realpath,
-  rm,
-} from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
 import { HarnessError, Id, type Id as IdValue } from "@harness/schemas";
 import { WorkspaceFileNotFoundError, WorkspacePathError } from "@harness/context";
@@ -27,12 +19,21 @@ const DEFAULT_CLOCK: Clock = {
     };
   },
 };
-const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
+const NOFOLLOW = constants.O_NOFOLLOW;
 
 function codeOf(error: unknown): string | undefined {
   return error instanceof Error && "code" in error && typeof error.code === "string"
     ? error.code
     : undefined;
+}
+
+async function assertDirectory(path: string): Promise<void> {
+  const info = await lstat(path).catch(() => {
+    throw new SandboxWorkspacePathError();
+  });
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new SandboxWorkspacePathError();
+  }
 }
 
 /** Raised when a workspace write exceeds its per-file or per-run byte limit. */
@@ -75,6 +76,46 @@ function validateRelativePath(value: string): void {
   }
 }
 
+async function assertNoSymlinkComponents(root: string, candidate: string): Promise<void> {
+  let current = root;
+  for (const segment of relative(root, candidate)
+    .split(sep)
+    .filter((part) => part !== "")) {
+    current = join(current, segment);
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new SandboxWorkspacePathError();
+      }
+    } catch (error) {
+      if (error instanceof SandboxWorkspacePathError) {
+        throw error;
+      }
+      if (codeOf(error) !== "ENOENT") {
+        throw new SandboxWorkspacePathError();
+      }
+    }
+  }
+}
+
+async function resolveFinalPath(
+  root: string,
+  candidate: string,
+  allowMissing: boolean,
+): Promise<string> {
+  try {
+    const resolved = await realpath(candidate);
+    if (!isWithin(root, resolved)) {
+      throw new SandboxWorkspacePathError();
+    }
+    return resolved;
+  } catch (error) {
+    if (allowMissing && codeOf(error) === "ENOENT") {
+      return candidate;
+    }
+    throw error instanceof SandboxWorkspacePathError ? error : new SandboxWorkspacePathError();
+  }
+}
+
 /**
  * Resolves a workspace-relative path after validating its parent and every existing component.
  *
@@ -88,68 +129,34 @@ export async function resolveWorkspacePath(
   options: { readonly allowMissing?: boolean } = {},
 ): Promise<string> {
   validateRelativePath(workspacePath);
-  let realRoot: string;
-  try {
-    realRoot = await realpath(root);
-  } catch {
+  const realRoot = await realpath(root).catch(() => {
     throw new SandboxWorkspacePathError();
-  }
-
+  });
   const candidate = resolve(realRoot, workspacePath);
   if (!isWithin(realRoot, candidate)) {
     throw new SandboxWorkspacePathError();
   }
-  const parent = await realpath(candidate === realRoot ? realRoot : dirname(candidate)).catch(() => {
+  const parentPath = candidate === realRoot ? realRoot : dirname(candidate);
+  const parent = await realpath(parentPath).catch(() => {
     throw new SandboxWorkspacePathError();
   });
   if (!isWithin(realRoot, parent)) {
     throw new SandboxWorkspacePathError();
   }
-
-  const fromRoot = relative(realRoot, candidate);
-  let current = realRoot;
-  for (const segment of fromRoot.split(sep).filter((part) => part !== "")) {
-    current = join(current, segment);
-    try {
-      const info = await lstat(current);
-      if (info.isSymbolicLink()) {
-        throw new SandboxWorkspacePathError();
-      }
-    } catch (error) {
-      if (error instanceof SandboxWorkspacePathError) {
-        throw error;
-      }
-      if (codeOf(error) !== "ENOENT") {
-        throw new SandboxWorkspacePathError();
-      }
-    }
-  }
-
-  try {
-    const realCandidate = await realpath(candidate);
-    if (!isWithin(realRoot, realCandidate)) {
-      throw new SandboxWorkspacePathError();
-    }
-    return realCandidate;
-  } catch (error) {
-    if (error instanceof SandboxWorkspacePathError) {
-      throw error;
-    }
-    if (codeOf(error) !== "ENOENT") {
-      throw new SandboxWorkspacePathError();
-    }
-    if (options.allowMissing !== true) {
-      throw new SandboxWorkspacePathError();
-    }
-    return candidate;
-  }
+  await assertNoSymlinkComponents(realRoot, candidate);
+  return resolveFinalPath(realRoot, candidate, options.allowMissing === true);
 }
 
 /** Ensures the documented project and private harness directories exist for a run. */
 export async function ensureRunWorkspace(workspacesRoot: string, runId: IdValue): Promise<string> {
   const validatedRunId = Id.parse(runId);
-  const runRoot = join(workspacesRoot, validatedRunId);
+  await mkdir(workspacesRoot, { recursive: true, mode: 0o2770 });
+  const realWorkspacesRoot = await realpath(workspacesRoot).catch(() => {
+    throw new SandboxWorkspacePathError();
+  });
+  const runRoot = join(realWorkspacesRoot, validatedRunId);
   await mkdir(runRoot, { recursive: true, mode: 0o2770 });
+  await assertDirectory(runRoot);
   await chmod(runRoot, 0o2770);
   for (const directory of [
     join(runRoot, "project"),
@@ -158,6 +165,7 @@ export async function ensureRunWorkspace(workspacesRoot: string, runId: IdValue)
     join(runRoot, ".harness", "tmp"),
   ]) {
     await mkdir(directory, { recursive: true, mode: 0o2770 });
+    await assertDirectory(directory);
     await chmod(directory, 0o2770);
   }
   return join(runRoot, "project");
@@ -166,11 +174,15 @@ export async function ensureRunWorkspace(workspacesRoot: string, runId: IdValue)
 /** Removes only the run-specific scratch directory, leaving project and offload data intact. */
 export async function clearRunScratch(workspacesRoot: string, runId: IdValue): Promise<void> {
   const validatedRunId = Id.parse(runId);
-  await rm(join(workspacesRoot, validatedRunId, ".harness", "tmp"), {
+  const runRoot = join(await realpath(workspacesRoot), validatedRunId);
+  await assertDirectory(runRoot);
+  const harnessDirectory = join(runRoot, ".harness");
+  await assertDirectory(harnessDirectory);
+  await rm(join(harnessDirectory, "tmp"), {
     force: true,
     recursive: true,
   });
-  await mkdir(join(workspacesRoot, validatedRunId, ".harness", "tmp"), {
+  await mkdir(join(harnessDirectory, "tmp"), {
     mode: 0o2770,
     recursive: true,
   });
@@ -244,10 +256,9 @@ export class FsWorkspace implements WorkspacePort {
       filePath,
       constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | NOFOLLOW,
       0o660,
-    )
-      .catch(() => {
-        throw new WorkspacePathError();
-      });
+    ).catch(() => {
+      throw new WorkspacePathError();
+    });
     try {
       await handle.writeFile(data);
     } finally {
@@ -365,5 +376,7 @@ export async function activateRunWorkspace(
 
 /** Locks a completed run's top-level directory away from the execution group. */
 export async function lockRunWorkspace(workspacesRoot: string, runId: IdValue): Promise<void> {
-  await chmod(join(workspacesRoot, Id.parse(runId)), 0o700).catch(() => undefined);
+  const runRoot = join(await realpath(workspacesRoot), Id.parse(runId));
+  await assertDirectory(runRoot);
+  await chmod(runRoot, 0o700);
 }

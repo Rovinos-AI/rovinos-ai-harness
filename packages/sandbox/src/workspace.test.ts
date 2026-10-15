@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { Id } from "@harness/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRunnerRequestHandler } from "../runner/src/server.js";
@@ -78,25 +79,17 @@ class TestResponse extends EventEmitter {
     this.emit("close");
   }
 
-  destroy(): void {}
+  destroy(): void {
+    this.body = "";
+  }
 }
 
 function request(path: string, body: unknown) {
-  const text = JSON.stringify(body);
-  const chunks = [Buffer.from(text)];
-  return Object.assign(
-    (async function* () {
-      yield* chunks;
-    })(),
-    {
-      method: "POST",
-      url: path,
-      headers: { host: "runner.test", authorization: ["Bearer", token].join(" ") },
-      resume() {
-        return this;
-      },
-    },
-  );
+  return Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), {
+    method: "POST",
+    url: path,
+    headers: { host: "runner.test", authorization: ["Bearer", token].join(" ") },
+  });
 }
 
 async function call(
@@ -192,8 +185,9 @@ describe("per-run filesystem workspace", () => {
     await expect(
       workspace.write(".harness/offload/too-large.json", new TextEncoder().encode("123456")),
     ).rejects.toBeInstanceOf(WorkspaceQuotaExceededError);
-    await expect(workspace.write(".harness/offload/second.json", new TextEncoder().encode("1234")))
-      .rejects.toMatchObject({ code: "workspace_quota_exceeded" });
+    await expect(
+      workspace.write(".harness/offload/second.json", new TextEncoder().encode("1234")),
+    ).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
     await expect(
       workspace.read(".harness/offload/first.json", { offset: 2, length: 2 }),
     ).resolves.toEqual(Buffer.from("34"));
@@ -201,8 +195,9 @@ describe("per-run filesystem workspace", () => {
       code: "workspace_file_not_found",
     });
     await expect(workspace.write(".harness/project/other", new Uint8Array())).rejects.toBeDefined();
-    await expect(workspace.write(".harness/offload/first.json", new TextEncoder().encode("123")))
-      .resolves.toBeUndefined();
+    await expect(
+      workspace.write(".harness/offload/first.json", new TextEncoder().encode("123")),
+    ).resolves.toBeUndefined();
     await writeFile(join(root, runA, "project", "external"), "external-file");
     await expect(
       workspace.write(".harness/offload/second.json", new TextEncoder().encode("1")),
@@ -230,16 +225,27 @@ describe("per-run filesystem workspace", () => {
   it("rejects a second run until the owner releases or expires the lease and renews on exec", async () => {
     root = await mkdtemp(join(tmpdir(), "sandbox-runner-lease-"));
     await mkdir(join(root, "tmp"));
+    await writeFile(join(root, "tmp", "leftover"), "previous-run");
     const clock = new FakeClock();
     const handler = createRunnerRequestHandler(runnerOptions(root, clock));
 
     expect((await call(handler, "/lease", { runId: runA, ttlMs: 100 })).status).toBe(200);
+    await expect(readdir(join(root, "tmp"))).resolves.toEqual([]);
     expect((await call(handler, "/lease", { runId: runB, ttlMs: 100 })).status).toBe(409);
-    expect((await call(handler, "/exec", { runId: runA, spec: {
-      argv: ["/bin/true"],
-      timeoutMs: 100,
-      limits: { memoryMb: 32, pids: 2, outputBytes: 0, cpuSeconds: 1 },
-    } })).status).toBe(200);
+    clock.advanceBy(60);
+    expect(
+      (
+        await call(handler, "/exec", {
+          runId: runA,
+          spec: {
+            argv: ["/bin/true"],
+            timeoutMs: 100,
+            limits: { memoryMb: 32, pids: 2, outputBytes: 0, cpuSeconds: 1 },
+          },
+        })
+      ).status,
+    ).toBe(200);
+    expect((await call(handler, "/lease", { runId: runB, ttlMs: 100 })).status).toBe(409);
     clock.advanceBy(60);
     expect((await call(handler, "/lease", { runId: runB, ttlMs: 100 })).status).toBe(409);
     expect((await call(handler, "/release", { runId: runA })).status).toBe(200);

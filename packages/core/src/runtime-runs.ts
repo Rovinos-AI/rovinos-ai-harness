@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { type Code, type Id, type JsonValue, type RunInput } from "@harness/schemas";
+import type { EventStore } from "@harness/store";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ToolPort } from "./ports.js";
 import { continueRun as startContinuation } from "./continue.js";
@@ -7,6 +8,23 @@ import { runLoop, type RunLoopResult } from "./loop.js";
 import { RunRecorder } from "./recorder.js";
 import type { Runtime, RuntimeComposition } from "./runtime-config.js";
 import { configHash } from "./runtime-ids.js";
+
+/** Reads the original goal from a run's persisted input or first model request. */
+export async function readStoredGoal(store: EventStore, runId: Id): Promise<JsonValue | undefined> {
+  for await (const event of store.read(runId)) {
+    if (event.type === "run_input") {
+      return event.input;
+    }
+    if (event.type === "model_request") {
+      const goalMessage = event.messages.find(({ role }) => role === "user");
+      const goalPart = goalMessage?.parts.find((part) => part.type === "text");
+      if (goalPart?.type === "text") {
+        return goalPart.text;
+      }
+    }
+  }
+  return undefined;
+}
 
 /** Executes a run while applying cancellation and shutdown control. */
 export type RunControl = (

@@ -148,7 +148,9 @@ export class RemoteSandboxBackend implements SandboxBackend {
 
   async #requestLease(path: "/lease" | "/release", body: unknown): Promise<void> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, 10_000);
     try {
       const response = await this.#fetcher(new URL(path, this.#url), {
         method: "POST",

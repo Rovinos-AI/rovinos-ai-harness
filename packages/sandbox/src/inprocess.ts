@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 import process from "node:process";
 import { HarnessError, type Code, type Id } from "@harness/schemas";
 import { ensureRunWorkspace, resolveWorkspacePath } from "./workspace.js";
@@ -181,6 +182,7 @@ export class InProcessBackend implements SandboxBackend {
     const child = spawnCommand(command, spec.argv.slice(1), cwd, {
       ...spec.env,
       PATH: TRUSTED_PATH,
+      TMPDIR: join(this.#workspaceRoot, runId, ".harness", "tmp"),
     });
 
     return new Promise((resolve, reject) => {

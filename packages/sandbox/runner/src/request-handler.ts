@@ -42,6 +42,7 @@ export type RunnerPayload =
   | { readonly kind: "lease"; readonly runId: z.infer<typeof Id>; readonly ttlMs?: number }
   | { readonly kind: "release"; readonly runId: z.infer<typeof Id> }
   | { readonly kind: "exec"; readonly runId: z.infer<typeof Id>; readonly spec: ExecSpec };
+/** Runner payload kinds handled by the execution and fetch dispatcher. */
 export type RunnerExecutionPayload = Extract<RunnerPayload, { readonly kind: "exec" | "fetch" }>;
 
 type SendError = (response: RunnerResponse, status: number, code: string) => void;
@@ -167,9 +168,8 @@ export async function executeRunnerPayload(input: ExecuteRunnerPayloadOptions): 
     const result = ExecResultSchema.parse(await executeSpec(payload.runId, payload.spec, signal));
     sendJson(response, 200, result);
   } catch (error: unknown) {
-    const failure = payload.kind === "fetch"
-      ? fetchFailure(error)
-      : { status: 500, code: "sandbox_exec_failed" };
+    const failure =
+      payload.kind === "fetch" ? fetchFailure(error) : { status: 500, code: "sandbox_exec_failed" };
     sendError(response, failure.status, failure.code);
   }
 }
