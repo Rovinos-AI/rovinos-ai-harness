@@ -3,10 +3,11 @@ import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
-import type { Id, PiiConfig } from "@harness/schemas";
+import type { Code, Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
 import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
+import type { MessageSanitizer } from "@harness/models";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
@@ -226,20 +227,26 @@ function validatePiiConfig(config: RuntimeConfig, overrides: RuntimeOverrides): 
 async function createRuntimeModel(
   config: RuntimeConfig,
   overrides: RuntimeOverrides,
-  ids: RuntimeComposition["ids"],
-  clock: Clock,
+  options: {
+    readonly ids: RuntimeComposition["ids"];
+    readonly clock: Clock;
+    readonly messageSanitizer?: MessageSanitizer;
+  },
 ): Promise<RuntimeComposition["model"]> {
   return (
     overrides.model ??
     (await createConfiguredModelPort(config.models, {
-      ids,
-      clock,
+      ids: options.ids,
+      clock: options.clock,
       ...(overrides.providerAdapters === undefined
         ? {}
         : { providerAdapters: overrides.providerAdapters }),
       ...(overrides.secretResolver === undefined
         ? {}
         : { secretResolver: overrides.secretResolver }),
+      ...(options.messageSanitizer === undefined
+        ? {}
+        : { messageSanitizer: options.messageSanitizer }),
     })) ??
     missingModelPort
   );
@@ -284,6 +291,47 @@ function persistedScopeResolver(store: EventStore, scopes: RunScopeRegistry) {
   };
 }
 
+async function createRuntimeModelAndStore(options: {
+  readonly config: RuntimeConfig;
+  readonly piiConfig: PiiConfig;
+  readonly overrides: RuntimeOverrides;
+  readonly ids: RuntimeComposition["ids"];
+  readonly clock: Clock;
+  readonly vault: RuntimeVault;
+  readonly scopes: RunScopeRegistry;
+  readonly store: EventStore;
+  readonly policyVersion: Code;
+}): Promise<{
+  readonly piiRuntime: ReturnType<typeof createRuntimePii>;
+  readonly model: RuntimeComposition["model"];
+  readonly store: EventStore;
+}> {
+  const piiRuntime = createRuntimePii({
+    config: options.piiConfig,
+    vault: options.vault,
+    scopes: options.scopes,
+    scopeOf: persistedScopeResolver(options.store, options.scopes),
+    policyVersion: options.policyVersion,
+    clock: options.clock,
+  });
+  const messageSanitizer: MessageSanitizer | undefined = options.piiConfig.enabled
+    ? (messages, target, runId, recordPiiAction) =>
+        piiRuntime.messageSanitizer.sanitize(messages, target, runId, recordPiiAction)
+    : undefined;
+  const model = await createRuntimeModel(options.config, options.overrides, {
+    ids: options.ids,
+    clock: options.clock,
+    ...(messageSanitizer === undefined ? {} : { messageSanitizer }),
+  });
+  return {
+    piiRuntime,
+    model,
+    store: options.piiConfig.enabled
+      ? new PiiEventStore(options.store, piiRuntime.tokenizer)
+      : options.store,
+  };
+}
+
 /** Builds validated ports and owned storage dependencies for `createRuntime`. */
 /**
  * Resolve validated runtime configuration and create owned storage dependencies.
@@ -305,7 +353,6 @@ export async function setupRuntime(
   let eventStore: EventStore | undefined;
   let tools: RuntimeTools | undefined;
   try {
-    const model = await createRuntimeModel(runtimeConfig, overrides, ids, clock);
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
     const runtimeVault = await createRuntimeVault({
       dataDir,
@@ -323,15 +370,17 @@ export async function setupRuntime(
     const roles = await createRuntimeRoles(runtimeConfig, overrides, tool);
     const rawStore = await createRuntimeStore(runtimeConfig, overrides, clock);
     eventStore = rawStore;
-    const piiRuntime = createRuntimePii({
-      config: piiConfig,
+    const { piiRuntime, model, store } = await createRuntimeModelAndStore({
+      config: runtimeConfig,
+      piiConfig,
+      overrides,
+      ids,
+      clock,
       vault: runtimeVault,
       scopes,
-      scopeOf: persistedScopeResolver(rawStore, scopes),
+      store: rawStore,
       policyVersion: policy.version,
-      clock,
     });
-    const store = piiConfig.enabled ? new PiiEventStore(rawStore, piiRuntime.tokenizer) : rawStore;
     const managedMcpToolPort = tools.mcpToolPort;
     return {
       config: runtimeConfig,

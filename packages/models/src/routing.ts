@@ -147,6 +147,7 @@ function shouldFallback(options: {
     !hasNext ||
     signal.aborted ||
     (error instanceof Error && error.name === "AbortError") ||
+    code === "pii_blocked" ||
     code === "deadline_exceeded" ||
     code === "cancelled" ||
     code === "run_cancelled"

@@ -13,7 +13,12 @@ import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
-import { prepareCompletion, toolRunContext, type PreparedToolCall } from "./prepare-tool.js";
+import {
+  piiActionRunContext,
+  prepareCompletion,
+  toolRunContext,
+  type PreparedToolCall,
+} from "./prepare-tool.js";
 
 /** Inputs needed to perform one recorded model call. */
 export interface ModelStepOptions {
@@ -137,9 +142,10 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
       const requestEvent = await options.recorder.record(requestPartial);
       recorded.push(requestEvent);
 
+      const runContext = piiActionRunContext(modelRunContext(options), options.recorder, recorded);
       let completion: ModelCompletion;
       try {
-        completion = await options.model.complete(modelRequest, modelRunContext(options));
+        completion = await options.model.complete(modelRequest, runContext);
       } catch (error) {
         if (options.signal.reason === "shutdown") {
           result = { outcome: "aborted", events: recorded };

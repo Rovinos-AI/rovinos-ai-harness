@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
-// Not wired yet: model-visible MCP descriptions through model-input PII (13.6 -> #150)
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: reference host in core runtime/CLI (-> #207)
@@ -55,6 +54,7 @@ import {
   type SandboxBackend,
 } from "@harness/sandbox";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
+import { ProviderError, type ProviderAdapter } from "@harness/models";
 import { ApprovalNotificationSchema, buildApprovalPayload } from "@harness/policy";
 import {
   ApprovalListResultSchema,
@@ -64,11 +64,15 @@ import {
   FakeClock,
   Id,
   JsonValue,
+  KeysConfigSchema,
+  ModelsConfigSchema,
   PiiConfigSchema,
   RunConfigSchema,
   RunResultSchema,
   SequentialIdGenerator,
   SecretRefSchema,
+  type Event,
+  type ModelRequest,
   StoreMigrateResultSchema,
   StorePurgeResultSchema,
   parseJson,
@@ -87,7 +91,6 @@ import {
   VaultRunView,
   withSpan,
 } from "@harness/telemetry";
-import type { Event } from "@harness/schemas";
 import { z } from "zod";
 import { createSandboxComposeInvocation } from "../scripts/compose/sandbox.js";
 import { runNetworkIsolationCompose } from "../scripts/ci/network-isolation.js";
@@ -1748,10 +1751,110 @@ describe("invariants", () => {
     expect(JSON.stringify(current.toolCallEvents)).not.toContain(current.canary);
   });
 
-  // Not wired yet: model-input boundary (13.6 -> #150)
-  it.fails("does not send the synthetic canary in model requests", () => {
-    const current = fixture();
-    expect(JSON.stringify(current.model.requests)).not.toContain(current.canary);
+  it("re-sanitizes a local-allow model input before hosted fallback", async () => {
+    const canary = "e2e-model-input-canary@example.test";
+    const localRequests: ModelRequest[] = [];
+    const hostedRequests: ModelRequest[] = [];
+    const models = ModelsConfigSchema.parse({
+      retry: { maxAttempts: 1 },
+      providers: [
+        {
+          id: "local",
+          kind: "openai_compatible",
+          baseUrl: "http://127.0.0.1:1234",
+          trust: "local",
+        },
+        { id: "hosted", kind: "openai", trust: "hosted" },
+      ],
+      routing: {
+        default: [
+          { provider: "local", model: "local-model" },
+          { provider: "hosted", model: "hosted-model" },
+        ],
+      },
+    });
+    const pii = PiiConfigSchema.parse({
+      rules: [
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["local"],
+          action: "allow",
+        },
+      ],
+    });
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        keys: KeysConfigSchema.parse({
+          currentKeyId: "model-input-test",
+          keys: [{ id: "model-input-test", secret: KEY_REF }],
+        }),
+        pii,
+        models,
+      },
+      {
+        store: new InMemoryEventStore(),
+        transientVault: true,
+        sandboxBackend: unusedSandboxBackend,
+        policy: {
+          version: Code.parse("test_policy"),
+          decide: () => ({
+            decision: "allow",
+            ruleId: Code.parse("test_allow"),
+            reason: Code.parse("test_allowed"),
+            editable: [],
+          }),
+        },
+        providerAdapters: [
+          {
+            provider: "local",
+            kind: "openai",
+            complete: (request) => {
+              localRequests.push(request);
+              return Promise.reject(new ProviderError("provider_unavailable"));
+            },
+          },
+          {
+            provider: "hosted",
+            kind: "openai",
+            complete: (request) => {
+              hostedRequests.push(request);
+              return Promise.resolve({
+                parts: [{ type: "text", text: "completed" }],
+                usage: { inputTokens: 1, outputTokens: 1 },
+                finishReason: "stop",
+                latencyMs: 0,
+              });
+            },
+          },
+        ] satisfies ProviderAdapter[],
+        secretResolver: {
+          resolve: () => Promise.resolve({ reveal: () => Buffer.alloc(32, 31).toString("base64") }),
+        },
+      },
+    );
+
+    try {
+      const result = await runtime.run(canary);
+
+      expect(result.status).toBe("completed");
+      expect(JSON.stringify(localRequests[0]?.messages)).toContain(canary);
+      expect(JSON.stringify(hostedRequests[0]?.messages)).not.toContain(canary);
+      expect(JSON.stringify(hostedRequests[0]?.messages)).toContain("<EMAIL_1>");
+      const runId = result.events[0]?.runId;
+      expect(runId).toBeDefined();
+      if (runId === undefined) {
+        throw new Error("Expected the run to have an ID.");
+      }
+      const persistedEvents: Event[] = [];
+      for await (const event of runtime.store.read(runId)) {
+        persistedEvents.push(event);
+      }
+      expect(JSON.stringify(persistedEvents)).not.toContain(canary);
+    } finally {
+      await runtime.close();
+    }
   });
 
   it("does not persist the synthetic canary in SQLite event-store content bytes", () => {

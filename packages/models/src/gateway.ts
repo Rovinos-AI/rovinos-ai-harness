@@ -6,6 +6,7 @@ import {
   ModelRetryConfigSchema,
   type Id,
   type JsonValue,
+  type Message,
   type ModelsConfig,
   type ModelRef,
   type ModelRequest,
@@ -13,6 +14,7 @@ import {
   type ModelUsage,
   type ModelEnforcementConfig,
   type ModelRetryConfig,
+  type PiiActionSummary,
 } from "@harness/schemas";
 import {
   emitPricingCacheMissing,
@@ -65,7 +67,19 @@ export interface ModelGatewayDependencies {
   readonly requestsPerMinute?: Readonly<Partial<Record<Code, number>>>;
   readonly maxConcurrent?: number;
   readonly pricing?: ModelsConfig["pricing"];
+  /** Per-provider trust resolved from validated runtime configuration. */
+  readonly providerTrust?: Readonly<Partial<Record<Code, "hosted" | "local">>>;
+  /** Boundary hook invoked after provider-specific message preparation on every attempt. */
+  readonly messageSanitizer?: MessageSanitizer;
 }
+
+/** Sanitizes provider-prepared messages for one routed provider attempt. */
+export type MessageSanitizer = (
+  messages: Message[],
+  target: ModelRef & { readonly trust: "hosted" | "local" },
+  runId: Id,
+  recordPiiAction?: (summary: PiiActionSummary) => Promise<void>,
+) => Promise<Message[]>;
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
 interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
@@ -73,6 +87,7 @@ interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
   readonly signal: AbortSignal;
   readonly deadlineTs?: number;
   readonly outputSchema?: OutputSchema;
+  readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
 }
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
@@ -234,10 +249,23 @@ export class ModelGateway {
       operation: async (signal) => {
         onAttempt();
         try {
+          const preparedMessages = prepareMessagesForProvider(request.messages, adapter.provider);
+          const messages =
+            this.dependencies.messageSanitizer === undefined
+              ? preparedMessages
+              : await this.dependencies.messageSanitizer(
+                  preparedMessages,
+                  {
+                    ...request.model,
+                    trust: this.dependencies.providerTrust?.[adapter.provider] ?? "hosted",
+                  },
+                  context.runId,
+                  context.recordPiiAction,
+                );
           return await adapter.complete(
             {
               ...request,
-              messages: prepareMessagesForProvider(request.messages, adapter.provider),
+              messages,
             },
             {
               signal,

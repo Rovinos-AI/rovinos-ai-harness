@@ -36,6 +36,7 @@ export {
   type ModelGatewayDependencies,
   type ModelGatewayOptions,
   type ModelGatewayResponse,
+  type MessageSanitizer,
   type TokenizedModelGatewayContext,
   type TokenizedModelGatewayResponse,
 } from "./gateway.js";

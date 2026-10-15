@@ -27,6 +27,7 @@ export {
   countHostAppSpansAccepted,
   countModelUsage,
   countMcpDiscoveryFailed,
+  countPiiBlobHit,
   countPolicyDecision,
   METRIC_ALLOWLIST,
   type HostAppRejectedReason,

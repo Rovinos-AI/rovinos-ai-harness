@@ -11,6 +11,7 @@ import {
   countHostAppSpansAccepted,
   countModelUsage,
   countMcpDiscoveryFailed,
+  countPiiBlobHit,
   countPolicyDecision,
   countDroppedTelemetry,
   countSentinelScopeReduced,
@@ -101,6 +102,14 @@ describe("countDroppedTelemetry", () => {
     );
     expect(TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.policy.decision"]).toEqual(POLICY_DECISIONS);
     expectAddCallsAreAllowlisted("harness.policy.decisions");
+  });
+
+  it("counts opaque PII blob hits without attributes", () => {
+    countPiiBlobHit();
+
+    expect(createCounter).toHaveBeenCalledWith("harness.pii.blob_hit");
+    expect(add).toHaveBeenCalledWith(1);
+    expectAddCallsAreAllowlisted("harness.pii.blob_hit");
   });
 
   it("counts accepted app spans without attributes", () => {

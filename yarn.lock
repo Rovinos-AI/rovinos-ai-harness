@@ -1323,6 +1323,7 @@ __metadata:
   resolution: "@harness/pii@workspace:packages/pii"
   dependencies:
     "@harness/schemas": "workspace:^"
+    "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
