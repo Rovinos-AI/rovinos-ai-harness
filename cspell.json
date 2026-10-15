@@ -4,16 +4,21 @@
   "files": ["**/*.md", "packages/*/src/**/*"],
   "ignorePaths": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "**/*.generated.*"],
   "words": [
+    "decryptable",
+    "hashtextextended",
+    "ILIKE",
     "labelledby",
     "noopener",
     "noreferrer",
     "onopenlink",
     "onrequestdisplaymode",
     "onupdatemodelcontext",
+    "plpgsql",
     "sizechange",
+    "tldts",
     "toolinput",
     "toolresult",
-    "tldts",
+    "transactionally",
     "unlisten"
   ],
   "dictionaryDefinitions": [

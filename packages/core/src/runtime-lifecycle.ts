@@ -59,7 +59,7 @@ export async function closeRuntimeResources(options: {
         await options.store.close();
       } finally {
         try {
-          options.vault.close();
+          await options.vault.close();
         } finally {
           options.keys.dispose();
         }

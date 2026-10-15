@@ -35,6 +35,34 @@ non-production copy.
 `HARNESS_DATA_DIR` selects the event-store directory; `HARNESS_VAULT_DATA_DIR` optionally selects
 the vault directory and otherwise defaults to `HARNESS_DATA_DIR`.
 
+## Postgres vault
+
+Set `vault.backend` to `postgres` and configure `vault.postgres.url` with a `SecretRef`. Resolve that
+reference to a Postgres URL separate from the event-store URL. The adapter rejects startup when both
+URLs reach the same Postgres server and database and share either the active schema or role. This
+identity check reads `pg_control_system()` on both connections; grant the harness role the required
+PostgreSQL monitoring permission. A separate database is recommended; if a database is shared, use a
+dedicated vault schema and role with no event-store or analytics permissions.
+
+Grant the harness vault role access only to its vault database or schema and tables. Analytics roles
+must not receive `USAGE` on the vault schema or `SELECT`/write grants on vault tables. Keep vault
+credentials and master keys in the configured secret provider, not in Compose files or environment
+files committed to source control.
+
+Each root run scope has an independent random data-encryption key. The vault stores only that key's
+AES-GCM-wrapped form; entry ciphertext is encrypted with the scope key. The wrapping key is derived
+independently from the master key with HKDF-SHA-256 and
+`info = "harness/vault/scope-wrap/v1"`; it is never reused as the value-encryption key.
+
+Back up `vault_scope_keys` separately from `vault_entries` and retain key-table backups no longer than
+the configured purge SLA. Purging deletes the live wrapped key before its entry rows. Crypto-shredding
+covers entry backups or copies that do not also retain that scope's wrapped key. A pre-purge backup or
+copy containing both `vault_entries` and `vault_scope_keys` still contains the wrapper and remains
+decryptable with its master key; purge does not erase such a backup. Database backups and write-ahead
+logs may retain historical pages, so include them in the same retention policy and keep master keys
+available for the backups that must remain restorable. Key rotation re-wraps scope keys and rotates
+lookup HMACs without re-encrypting every value.
+
 ## Keys and secrets
 
 Do not put tokens, passwords, or encryption keys in Compose YAML or commit them in an env file.

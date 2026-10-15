@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
-// Not wired yet: Postgres vault adapter (12.9 -> #140)
 // Not wired yet: model-visible MCP descriptions through model-input PII (13.6 -> #150)
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
@@ -617,7 +616,7 @@ describe("config", () => {
     expect(loaded.policy.file).toBe("policy.yaml");
     expect(loaded.keys?.currentKeyId).toBe(KEY_ID);
     expect(loaded.pii.defaultAction).toBe("tokenize");
-    expect(loaded.vault).toEqual({ purgeAfterDays: 7 });
+    expect(loaded.vault).toEqual({ backend: "sqlite", purgeAfterDays: 7 });
     expect(loaded.store.retention).toEqual({ completedRunsDays: 1, failedRunsDays: 1 });
     expect(await readFile(current.configPath, "utf8")).not.toContain(current.canary);
   });

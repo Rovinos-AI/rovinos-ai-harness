@@ -328,7 +328,14 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             }, z.core.$strict>>>;
         }, z.core.$strict>>;
         vault: z.ZodPrefault<z.ZodObject<{
+            backend: z.ZodDefault<z.ZodEnum<{
+                sqlite: "sqlite";
+                postgres: "postgres";
+            }>>;
             purgeAfterDays: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            postgres: z.ZodOptional<z.ZodObject<{
+                url: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         telemetry: z.ZodPrefault<z.ZodObject<{
             sentinel: z.ZodPrefault<z.ZodObject<{

@@ -56,6 +56,10 @@ describe("getConfigSecretRefs", () => {
         dialect: "postgres",
         connectionString: "env:DOCTOR_STORE_URL",
       },
+      vault: {
+        backend: "postgres",
+        postgres: { url: "env:DOCTOR_VAULT_URL" },
+      },
       sandbox: {
         runner: { url: "http://sandbox-runner:8080", token: "env:SANDBOX_RUNNER_TOKEN" },
       },
@@ -77,6 +81,7 @@ describe("getConfigSecretRefs", () => {
       "env:DOCTOR_PRIMARY_KEY",
       "file:/run/secrets/doctor-previous-key",
       "env:DOCTOR_STORE_URL",
+      "env:DOCTOR_VAULT_URL",
       "env:SANDBOX_RUNNER_TOKEN",
       "env:APPROVAL_WEBHOOK_TOKEN",
     ]);

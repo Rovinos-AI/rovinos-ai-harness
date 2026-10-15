@@ -16,13 +16,14 @@ import {
 } from "@harness/store";
 import {
   InMemoryVault,
+  PostgresVault,
   SqliteVault,
   VaultOperationError,
   type VaultAdmin,
   type VaultTerminalRunsQuery,
   type VaultKeyRotation,
 } from "@harness/vault";
-import type { Id, KeysConfig, SecretRef, StoreConfig } from "@harness/schemas";
+import type { Id, KeysConfig, SecretRef, StoreConfig, VaultConfig } from "@harness/schemas";
 import type { RuntimeOverrides } from "./runtime-config.js";
 import { resolveDataDir, resolveVaultDataDir } from "./runtime-data-dir.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
@@ -83,7 +84,7 @@ export interface ConfiguredVaultOptions {
 /** Vault administration handle with ownership of its SQLite and key resources. */
 export interface ConfiguredVaultAdmin extends VaultAdmin {
   /** Close the vault database and dispose its cached keys. */
-  close(): void;
+  close(): void | Promise<void>;
 }
 
 /** Opened rotation adapters and the key provider they share. */
@@ -91,7 +92,7 @@ export interface ConfiguredKeyRotation {
   /** The configured current key id used for new writes. */
   readonly currentKeyId: string;
   /** Selected dedicated vault adapter, when requested. */
-  readonly vault?: VaultKeyRotation & { close(): void };
+  readonly vault?: VaultKeyRotation & { close(): void | Promise<void> };
   /** Selected event-store adapter, when requested. */
   readonly store?: StoreKeyRotation & { close(): Promise<void> };
   /** Close opened databases and zero cached key material. */
@@ -112,32 +113,42 @@ export interface ConfiguredKeyRotationOptions extends ConfiguredStoreOptions {
  * @returns Rotation adapters and a resource cleanup function.
  */
 export async function openConfiguredKeyRotation(
-  config: { readonly keys?: KeysConfig | undefined; readonly store?: StoreConfig },
+  config: {
+    readonly keys?: KeysConfig | undefined;
+    readonly store?: StoreConfig;
+    readonly vault?: VaultConfig;
+  },
   options: ConfiguredKeyRotationOptions,
 ): Promise<ConfiguredKeyRotation> {
   const keyOptions: RuntimeOverrides =
     options.secretResolver === undefined ? {} : { secretResolver: options.secretResolver };
   const keys = await createRuntimeKeys(config.keys, keyOptions);
-  const openedVaults: SqliteVault[] = [];
+  const openedVaults: (SqliteVault | PostgresVault)[] = [];
   const openedStores: (SqliteEventStore | PostgresEventStore)[] = [];
   try {
     let vault: ConfiguredKeyRotation["vault"];
     if (options.vault) {
-      const dataDir = resolveVaultDataDir(
-        process.env,
-        resolveDataDir(process.env, options.dataDir),
-      );
-      const vaultPath = join(dataDir, "vault.db");
-      if (existsSync(vaultPath)) {
-        const opened = new SqliteVault(vaultPath, keys);
+      if (config.vault?.backend === "postgres") {
+        const opened = await openConfiguredPostgresVault(config, options, keys);
         openedVaults.push(opened);
         vault = opened;
       } else {
-        vault = {
-          reencryptBatch: () => Promise.resolve({ processed: 0 }),
-          countRowsByKey: () => Promise.resolve([]),
-          close: () => undefined,
-        };
+        const dataDir = resolveVaultDataDir(
+          process.env,
+          resolveDataDir(process.env, options.dataDir),
+        );
+        const vaultPath = join(dataDir, "vault.db");
+        if (existsSync(vaultPath)) {
+          const opened = new SqliteVault(vaultPath, keys);
+          openedVaults.push(opened);
+          vault = opened;
+        } else {
+          vault = {
+            reencryptBatch: () => Promise.resolve({ processed: 0 }),
+            countRowsByKey: () => Promise.resolve([]),
+            close: () => undefined,
+          };
+        }
       }
     }
 
@@ -154,7 +165,7 @@ export async function openConfiguredKeyRotation(
           await Promise.all(openedStores.map((opened) => opened.close()));
         } finally {
           for (const opened of openedVaults) {
-            opened.close();
+            await opened.close();
           }
           keys.dispose();
         }
@@ -162,26 +173,65 @@ export async function openConfiguredKeyRotation(
     };
   } catch (error) {
     await Promise.all(openedStores.map((opened) => opened.close().catch(() => undefined)));
-    for (const opened of openedVaults) {
-      opened.close();
+    try {
+      await Promise.all(
+        openedVaults.map((opened) => Promise.resolve(opened.close()).catch(() => undefined)),
+      );
+    } finally {
+      keys.dispose();
     }
-    keys.dispose();
     throw error;
   }
 }
 
 /** Opens the configured SQLite vault for retention maintenance. */
 export async function openConfiguredVaultAdmin(
-  config: { readonly keys?: KeysConfig | undefined },
+  config: {
+    readonly keys?: KeysConfig | undefined;
+    readonly vault?: VaultConfig;
+    readonly store?: StoreConfig;
+  },
   options: ConfiguredVaultOptions = {},
 ): Promise<ConfiguredVaultAdmin> {
+  const keyOptions: RuntimeOverrides =
+    options.secretResolver === undefined ? {} : { secretResolver: options.secretResolver };
+  if (config.vault?.backend === "postgres") {
+    const keys = await createRuntimeKeys(config.keys, keyOptions);
+    let vault: PostgresVault | undefined;
+    try {
+      vault = await openConfiguredPostgresVault(config, options, keys);
+      const openedVault = vault;
+      return {
+        markTerminal: (runId: Id, ts: number) => openedVault.markTerminal(runId, ts),
+        listTerminalRunsBefore: (query: VaultTerminalRunsQuery) =>
+          openedVault.listTerminalRunsBefore(query),
+        purge: (runId: Id) => openedVault.purge(runId),
+        stats: (runId: Id) => openedVault.stats(runId),
+        close: async () => {
+          try {
+            await openedVault.close();
+          } finally {
+            keys.dispose();
+          }
+        },
+      };
+    } catch (error) {
+      try {
+        await vault?.close();
+      } finally {
+        keys.dispose();
+      }
+      if (error instanceof VaultOperationError) {
+        throw error;
+      }
+      throw new VaultOperationError("vault_unavailable");
+    }
+  }
   const dataDir = resolveVaultDataDir(process.env, resolveDataDir(process.env, options.dataDir));
   const vaultPath = join(dataDir, "vault.db");
   if (!existsSync(vaultPath)) {
     return Object.assign(new InMemoryVault(), { close: () => undefined });
   }
-  const keyOptions: RuntimeOverrides =
-    options.secretResolver === undefined ? {} : { secretResolver: options.secretResolver };
   const keys = await createRuntimeKeys(config.keys, keyOptions);
   let vault: SqliteVault | undefined;
   try {
@@ -211,6 +261,37 @@ export async function openConfiguredVaultAdmin(
       throw error;
     }
     throw new VaultOperationError("vault_unavailable");
+  }
+}
+
+async function openConfiguredPostgresVault(
+  config: {
+    readonly vault?: VaultConfig;
+    readonly store?: StoreConfig;
+  },
+  options: ConfiguredVaultOptions,
+  keys: Awaited<ReturnType<typeof createRuntimeKeys>>,
+): Promise<PostgresVault> {
+  const vaultUrl = config.vault?.postgres?.url;
+  const resolver = options.secretResolver;
+  if (config.vault?.backend !== "postgres" || vaultUrl === undefined || resolver === undefined) {
+    throw new VaultOperationError("vault_unavailable");
+  }
+  const vaultConnectionString = (await resolver.resolve(vaultUrl)).reveal();
+  const storeConnectionString =
+    config.store?.dialect === "postgres"
+      ? await postgresConnectionString(config.store, resolver)
+      : undefined;
+  const vault = new PostgresVault(vaultConnectionString, keys, {
+    ...(storeConnectionString === undefined ? {} : { storeConnectionString }),
+    ...(options.clock === undefined ? {} : { now: () => options.clock?.now() ?? Date.now() }),
+  });
+  try {
+    await vault.initialize();
+    return vault;
+  } catch (error) {
+    await vault.close();
+    throw error;
   }
 }
 
