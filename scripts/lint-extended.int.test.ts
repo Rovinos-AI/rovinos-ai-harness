@@ -227,7 +227,8 @@ it("accepts project spelling and rejects an unknown word", () => {
 
 it("makes yarn lint fail when ShellCheck is unavailable", () => {
   const isolatedPath = mkdtempSync(join(tmpdir(), "harness-lint-path-"));
-  const executableNames = new Set(["corepack", "yarn", "node"]);
+  // mise's corepack is a shell wrapper that needs readlink and dirname.
+  const executableNames = new Set(["corepack", "yarn", "node", "readlink", "dirname"]);
   const locations = (process.env.PATH ?? "").split(delimiter);
 
   try {
