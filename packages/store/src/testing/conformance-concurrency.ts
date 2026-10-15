@@ -83,6 +83,10 @@ function errorCode(error: unknown): string {
   return "store_error";
 }
 
+export function normalizeWorkerError(error: unknown): Error {
+  return error instanceof Error ? error : new Error("Concurrency worker error", { cause: error });
+}
+
 function rejectWorkerChannels(channels: WorkerChannels, error: Error): void {
   channels.opened.reject(error);
   for (const channel of channels.ready.values()) {
@@ -137,10 +141,7 @@ function createWorkerSession(options: WorkerSessionOptions): WorkerSession {
     receiveWorkerMessage(message, channels, worker);
   });
   worker.on("error", (error) => {
-    rejectWorkerChannels(
-      channels,
-      error instanceof Error ? error : new Error("Concurrency worker error"),
-    );
+    rejectWorkerChannels(channels, normalizeWorkerError(error));
   });
   worker.on("exit", (code) => {
     if (code !== 0) {
