@@ -5,7 +5,13 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ContextInspectionSchema, Event as EventSchema, Id, parseJson } from "@harness/schemas";
+import {
+  ContextInspectionSchema,
+  Event as EventSchema,
+  Id,
+  JsonValue,
+  parseJson,
+} from "@harness/schemas";
 import { StrategyComparisonReportSchema } from "@harness/context";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
@@ -109,6 +115,9 @@ async function harness() {
     resume: modelCall,
     cancel: modelCall,
     resolveApproval: () => Promise.reject(new Error("Approval is not used by context tests.")),
+    hasPendingApproval: () => Promise.resolve(false),
+    tokenizeAppContent: (_runId: Id, content: JsonValue) => Promise.resolve(content),
+    onAppContent: () => Promise.resolve(),
   }));
   const context: CliContext = {
     loadConfig: () => Promise.resolve(config),

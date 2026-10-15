@@ -304,15 +304,16 @@ function composeRuntime(
   const tool = createRuntimeToolPort(options);
   const runWithControl = createTerminalAwareRunControl(options);
   const resume = createRuntimeResume(options, tool, runWithControl);
+  const pii = options.pii;
   const appCallbacks = createRuntimeAppCallbacks({
     store,
     clock,
-    ...(options.pii === undefined
+    ...(pii === undefined
       ? {}
       : {
           tokenize: async (runId, content, context) =>
             (
-              await options.pii.tokenizer.tokenizeJson(runId, content, {
+              await pii.tokenizer.tokenizeJson(runId, content, {
                 ...context,
                 destination: "hosted",
               })

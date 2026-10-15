@@ -91,9 +91,12 @@ export class ReferenceHostError extends HarnessError {
   }
 }
 
-function hasPendingApproval(dependencies: ReferenceHostDependencies, runId: Id): boolean {
+async function hasPendingApproval(
+  dependencies: ReferenceHostDependencies,
+  runId: Id,
+): Promise<boolean> {
   try {
-    return dependencies.hasPendingApproval?.(runId) === true;
+    return (await dependencies.hasPendingApproval?.(runId)) === true;
   } catch {
     return false;
   }
@@ -231,7 +234,7 @@ function createAppCallRouter(
   const onAppCall = dependencies.onAppCall ?? defaultOnAppCall;
   const telemetryHandler =
     dependencies.onTelemetryEmit ??
-    ((session, payload) => {
+    (async (session, payload) => {
       const parent = session.uiSession?.spanContext;
       const stamp =
         session.runId === undefined ||
@@ -245,7 +248,7 @@ function createAppCallRouter(
               sessionStartTime: session.sessionStartTime,
               parent,
               clock: { now },
-              hasPendingApproval: hasPendingApproval(dependencies, session.runId),
+              hasPendingApproval: await hasPendingApproval(dependencies, session.runId),
             };
       const acknowledgment = ingestBatch(payload, {
         acceptSpan: () => rateLimiter.tryAcceptSpan(session.sessionId),

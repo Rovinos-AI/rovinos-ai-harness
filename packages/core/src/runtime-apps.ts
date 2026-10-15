@@ -68,25 +68,13 @@ function foldedState(events: readonly Event[]): RunState | undefined {
 async function recordAppContent(
   store: EventStore,
   clock: Clock,
-  tokenize: AppContentTokenize | undefined,
   content: RuntimeAppContent,
 ): Promise<void> {
-  if (tokenize === undefined) {
-    throw new AppContentUnavailableError();
-  }
   const validated = AppContentEnvelopeSchema.parse({
     source: "app",
     label: "App-provided",
     ...content,
   });
-  let tokenized: JsonValue;
-  try {
-    tokenized = JsonValue.parse(
-      await tokenize(validated.runId, validated.content, { boundary: "model_input" }),
-    );
-  } catch {
-    throw new AppContentUnavailableError();
-  }
   const nextSeq = await store.head(validated.runId);
   if (nextSeq === 0) {
     throw new AppContentRunUnavailableError();
@@ -113,7 +101,7 @@ async function recordAppContent(
         appId: Code.parse(validated.appId),
         label: "App-provided; untrusted",
         kind: validated.kind,
-        content: tokenized,
+        content: validated.content,
       }),
   );
 }
@@ -152,7 +140,6 @@ export function createRuntimeAppCallbacks(options: {
         throw new AppContentUnavailableError();
       }
     },
-    onAppContent: (content) =>
-      recordAppContent(options.store, options.clock, options.tokenize, content),
+    onAppContent: (content) => recordAppContent(options.store, options.clock, content),
   };
 }

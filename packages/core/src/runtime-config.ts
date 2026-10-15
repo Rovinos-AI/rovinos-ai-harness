@@ -94,7 +94,7 @@ export interface RuntimeConfig {
   readonly keys?: KeysConfig | undefined;
   readonly sandbox?: z.infer<typeof SandboxConfigSchema>;
   readonly servers?: ServersConfig;
-  readonly controlPlane?: ControlPlaneConfig;
+  readonly controlPlane?: ControlPlaneConfig | undefined;
 }
 
 /** Optional cooperative cancellation and claim notification for a resumed run. */

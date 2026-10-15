@@ -3,12 +3,15 @@ import { Code, Id, type NewEvent } from "@harness/schemas";
 import { FakeClock } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
+import { context as otelContext, trace } from "@opentelemetry/api";
+import { createTestContextManager, createTestSpanCollector } from "@harness/telemetry/testing";
 import { describe, expect, it, vi } from "vitest";
 import { foldRunState } from "./run-state.js";
 import { createRuntimeAppCallbacks } from "./runtime-apps.js";
 
+const builders = createEventBuilders();
+
 async function addRun(store: InMemoryEventStore, pendingApproval: boolean) {
-  const builders = createEventBuilders();
   const runId = builders.nextRunId();
   const approvalId = builders.nextRunId();
   const events: NewEvent[] = [
@@ -36,6 +39,21 @@ async function addRun(store: InMemoryEventStore, pendingApproval: boolean) {
   return { runId, approvalId };
 }
 
+async function withTracing(action: () => Promise<void>): Promise<void> {
+  trace.disable();
+  otelContext.disable();
+  const collector = createTestSpanCollector();
+  trace.setGlobalTracerProvider(collector.provider);
+  otelContext.setGlobalContextManager(createTestContextManager());
+  try {
+    await action();
+  } finally {
+    await collector.provider.shutdown();
+    trace.disable();
+    otelContext.disable();
+  }
+}
+
 describe("runtime reference-host callbacks", () => {
   it("reports pending approval state from the run fold and returns false for missing runs", async () => {
     const store = new InMemoryEventStore();
@@ -46,12 +64,13 @@ describe("runtime reference-host callbacks", () => {
     await expect(callbacks.hasPendingApproval(pending.runId)).resolves.toBe(true);
     await expect(callbacks.hasPendingApproval(running.runId)).resolves.toBe(false);
     await expect(
-      callbacks.hasPendingApproval(Id.parse("00000000000000000000000000")),
+      callbacks.hasPendingApproval(Id.parse("99999999999999999999999999")),
     ).resolves.toBe(false);
     await store.close();
   });
 
-  it("tokenizes app content at model_input and records it as untrusted content", async () => {
+  it("tokenizes app content at model_input and records it as untrusted content", async () =>
+    withTracing(async () => {
     const store = new InMemoryEventStore();
     const { runId } = await addRun(store, true);
     const tokenize = vi.fn((_runId, _content, context) => {
@@ -73,7 +92,7 @@ describe("runtime reference-host callbacks", () => {
       runId,
       appId: Code.parse("approval.app"),
       kind: "message",
-      content: { message: "raw-app-content@example.test" },
+      content: tokenized,
     });
 
     const events = [];
@@ -92,8 +111,10 @@ describe("runtime reference-host callbacks", () => {
     });
     expect(JSON.stringify(appContent)).not.toContain("raw-app-content@example.test");
     expect(foldRunState(events).pendingApprovals.size).toBe(1);
-    expect(tokenize).toHaveBeenCalledTimes(2);
-  });
+    expect(tokenize).toHaveBeenCalledOnce();
+    expect(events.some((event) => event.type === "run_input")).toBe(false);
+    expect(events.some((event) => event.type === "approval_resolved")).toBe(false);
+    }));
 
   it("fails closed when tokenization is absent or fails, and when the run is missing", async () => {
     const store = new InMemoryEventStore();
@@ -108,20 +129,19 @@ describe("runtime reference-host callbacks", () => {
     await expect(
       unavailable.tokenizeAppContent(runId, content.content, { boundary: "model_input" }),
     ).rejects.toMatchObject({ code: "app_content_unavailable" });
-    await expect(unavailable.onAppContent(content)).rejects.toMatchObject({
-      code: "app_content_unavailable",
-    });
 
     const broken = createRuntimeAppCallbacks({
       store,
       clock: new FakeClock(1),
       tokenize: () => Promise.reject(new Error("private tokenizer failure")),
     });
-    await expect(broken.onAppContent(content)).rejects.toMatchObject({
+    await expect(
+      broken.tokenizeAppContent(runId, content.content, { boundary: "model_input" }),
+    ).rejects.toMatchObject({
       code: "app_content_unavailable",
     });
     await expect(
-      broken.onAppContent({ ...content, runId: Id.parse("00000000000000000000000000") }),
+      broken.onAppContent({ ...content, runId: Id.parse("99999999999999999999999999") }),
     ).rejects.toMatchObject({ code: "app_content_run_unavailable" });
     await store.close();
   });

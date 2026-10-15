@@ -687,7 +687,7 @@ describe("createReferenceHost", () => {
         runId: foreignRunId,
         toolCallSpanContext: parent.spanContext(),
       },
-      hasPendingApproval: () => approvalPending,
+      hasPendingApproval: async () => approvalPending,
       onAppRejected,
     });
     const host = await fixture.hostPromise;

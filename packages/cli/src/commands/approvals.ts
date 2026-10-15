@@ -16,6 +16,8 @@ import {
 } from "@harness/schemas";
 import type { CliContext, CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
+import { waitForShutdown } from "../serve.js";
+import { createApprovalViewHost } from "./approval-view.js";
 import { createApprovalResolverLease, revealApprovalArgs } from "./approval-reveal.js";
 import { runApprovalSweep } from "./approval-sweep.js";
 import { assertResumeStatus } from "./resume.js";
@@ -182,6 +184,7 @@ function registerShow(approvals: Command, context: CliContext): void {
     .description("Show a pending approval")
     .argument("<approvalId>", "approval identifier")
     .option("--show-args", "include the tokenized tool arguments")
+    .option("--view", "open the pending approval in the local reference host")
     .option(
       "--reveal",
       "resolve tokens to raw values through the audited vault (implies --show-args)",
@@ -189,10 +192,17 @@ function registerShow(approvals: Command, context: CliContext): void {
     .action(
       async (
         value: string,
-        options: { readonly showArgs?: boolean; readonly reveal?: boolean },
+        options: { readonly showArgs?: boolean; readonly reveal?: boolean; readonly view?: boolean },
       ) => {
         const approvalId = parseId(value);
-        const config = options.reveal === true ? await context.loadConfig() : undefined;
+        if (options.view === true && approvals.optsWithGlobals().json === true) {
+          throw new ApprovalsCodeError("approval_view_json_unsupported");
+        }
+        if (options.view === true && options.reveal === true) {
+          throw new ApprovalsCodeError("approval_view_reveal_conflict");
+        }
+        const config =
+          options.reveal === true || options.view === true ? await context.loadConfig() : undefined;
         if (
           options.reveal === true &&
           config?.keys === undefined &&
@@ -210,6 +220,22 @@ function registerShow(approvals: Command, context: CliContext): void {
                 : undefined;
             try {
               const pending = await findPending(runtime.store, approvalId);
+              if (options.view === true) {
+                const host = await createApprovalViewHost(
+                  runtime,
+                  context,
+                  runtimeConfig,
+                  pending.runId,
+                  approvalId,
+                );
+                try {
+                  context.out.print(`${host.url}\n`);
+                  await waitForShutdown(false);
+                } finally {
+                  await host.close();
+                }
+                return;
+              }
               const summary = await summarize(pending, context.clock.now());
               const { ApprovalPayloadSchema } = await import("@harness/policy");
               const payload = ApprovalPayloadSchema.safeParse(pending.request.payload);
