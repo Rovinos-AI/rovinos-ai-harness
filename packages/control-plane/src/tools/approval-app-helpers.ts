@@ -75,7 +75,7 @@ export function decisionResult(
   },
 ): {
   readonly structuredContent: ReturnType<typeof ResolveResponse.parse>;
-  readonly content: readonly [{ readonly type: "text"; readonly text: string }];
+  readonly content: [{ type: "text"; text: string }];
   readonly isError?: true;
 } {
   const output = ResolveResponse.parse({
@@ -111,7 +111,7 @@ export function revealResult(
   },
 ): {
   readonly structuredContent: ReturnType<typeof RevealResponse.parse>;
-  readonly content: readonly [{ readonly type: "text"; readonly text: string }];
+  readonly content: [{ type: "text"; text: string }];
   readonly isError?: true;
 } {
   const output = RevealResponse.parse({ values: result.ok ? result.values : [] });
