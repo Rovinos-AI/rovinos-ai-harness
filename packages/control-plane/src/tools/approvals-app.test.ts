@@ -326,7 +326,7 @@ describe("app-only approval tools", () => {
   it("validates pointers against stored tokenized args and audits only metadata", async () => {
     const audits: unknown[] = [];
     const resolve = vi.fn((_runId, token, context) => {
-      expect(context).toEqual({ boundary: "ui" });
+      expect(context).toEqual({ boundary: "ui", toolId: "tool.synthetic" });
       return Promise.resolve(token === PHONE_TOKEN ? PHONE_CANARY : PRIVATE_CANARY);
     });
     const resolver = new AuditingVaultResolver({ resolve }, () => undefined);

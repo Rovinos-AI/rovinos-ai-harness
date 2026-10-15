@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { ReferenceHostDependencies } from "@harness/host";
+import type { AppCallExecutionContext, ReferenceHostDependencies } from "@harness/host";
 import { HarnessConfigSchema } from "@harness/config";
 import { createEventBuilders } from "@harness/store/testing";
 import {
@@ -11,7 +11,9 @@ import {
   type NewEvent,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
+import { AuditingVaultResolver } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createOutput } from "../output.js";
 import { createApprovalViewHost } from "./approval-view.js";
 
 const hostMock = vi.hoisted(() => {
@@ -73,6 +75,10 @@ type ApprovalViewDependencies = ReferenceHostDependencies & {
   readonly onAppContent: NonNullable<ReferenceHostDependencies["onAppContent"]>;
 };
 
+function appCallContext(runId: Id): AppCallExecutionContext {
+  return { runId, policyContext: { subagent: false, app: Code.parse("harness.approval") } };
+}
+
 function getApprovalViewDependencies(): ApprovalViewDependencies {
   const dependencies = hostMock.dependencies();
   if (
@@ -125,16 +131,16 @@ async function createFixture(options: {
     (..._args: Parameters<ApprovalViewInput["runtime"]["resolveApproval"]>) =>
       Promise.resolve(undefined),
   );
-  const resolveMany = vi.fn(
-    (...args: Parameters<ApprovalViewInput["runtime"]["vault"]["resolveMany"]>) => {
-      expect(args[2]).toMatchObject({ boundary: "ui" });
-      return Promise.resolve(
-        args[1].map((token) =>
-          token === "<PHONE_2>" ? "555-0101" : "alice@example.test",
-        ),
-      );
+  const vault = new AuditingVaultResolver(
+    {
+      resolve: (_id, token, resolveContext) => {
+        expect(resolveContext).toMatchObject({ boundary: "ui" });
+        return Promise.resolve(token === "<PHONE_2>" ? "555-0101" : "alice@example.test");
+      },
     },
+    () => undefined,
   );
+  const resolveMany = vi.spyOn(vault, "resolveMany");
   const onAppContent = vi.fn();
   const runtime = {
     store,
@@ -145,16 +151,20 @@ async function createFixture(options: {
       onAppContent();
       return Promise.resolve();
     },
-    vault: { resolveMany },
+    vault,
   } satisfies ApprovalViewInput["runtime"];
   let now = 1_000;
   const context = {
     clock: { now: () => now },
-    out: { error: vi.fn() },
-    interactive:
-      options.isTTY === true
-        ? { isTTY: true, confirm: options.confirm ?? (() => Promise.resolve(true)) }
-        : undefined,
+    out: createOutput({ stdout: vi.fn(), stderr: vi.fn() }),
+    ...(options.isTTY === true
+      ? {
+          interactive: {
+            isTTY: true,
+            confirm: options.confirm ?? (() => Promise.resolve(true)),
+          },
+        }
+      : {}),
   } satisfies ApprovalViewInput["context"];
   const config = HarnessConfigSchema.parse({
     controlPlane: options.allowReveal === true ? { allowReveal: true } : undefined,
@@ -224,7 +234,7 @@ describe("approval reference host", () => {
       fixture.dependencies.tokenizeAppContent(
         fixture.runId,
         { text: "app" },
-        "model_input",
+        { boundary: "model_input" },
       ),
     ).resolves.toEqual({ text: "app" });
     await fixture.dependencies.onAppContent(
@@ -243,10 +253,11 @@ describe("approval reference host", () => {
 
   it("resolves only the selected pending approval and rejects foreign calls", async () => {
     const fixture = await createFixture();
-    const callContext = { runId: fixture.runId };
+    const callContext = appCallContext(fixture.runId);
     const denied = await fixture.dependencies.onAppCall(
       {
-        sessionId: "00000000000000000000000004",
+        appId: Code.parse("harness.approval"),
+        sessionId: Id.parse("00000000000000000000000004"),
         toolName: "harness.approvals.resolve",
         arguments: { approvalId: "99999999999999999999999999", decision: "approve" },
       },
@@ -255,7 +266,8 @@ describe("approval reference host", () => {
     expect(denied.isError).toBe(true);
     const succeeded = await fixture.dependencies.onAppCall(
       {
-        sessionId: "00000000000000000000000004",
+        appId: Code.parse("harness.approval"),
+        sessionId: Id.parse("00000000000000000000000004"),
         toolName: "harness.approvals.resolve",
         arguments: { approvalId: fixture.approvalId, decision: "approve" },
       },
@@ -270,11 +282,12 @@ describe("approval reference host", () => {
     );
     const foreign = await fixture.dependencies.onAppCall(
       {
-        sessionId: "00000000000000000000000004",
+        appId: Code.parse("harness.approval"),
+        sessionId: Id.parse("00000000000000000000000004"),
         toolName: "harness.approvals.resolve",
         arguments: { approvalId: fixture.approvalId, decision: "approve" },
       },
-      { runId: Id.parse("99999999999999999999999999") },
+      appCallContext(Id.parse("99999999999999999999999999")),
     );
     expect(foreign.isError).toBe(true);
     await fixture.store.close();
@@ -288,11 +301,12 @@ describe("approval reference host", () => {
     };
     const denied = await disabled.dependencies.onAppCall(
       {
-        sessionId: "session",
+        appId: Code.parse("harness.approval"),
+        sessionId: Id.parse("00000000000000000000000004"),
         toolName: "harness.approvals.reveal",
         arguments: request,
       },
-      { runId: disabled.runId },
+      appCallContext(disabled.runId),
     );
     expect(denied.isError).toBe(true);
     expect(disabled.resolveMany).not.toHaveBeenCalled();
@@ -302,14 +316,15 @@ describe("approval reference host", () => {
     const call = (pointer: string | readonly string[]) =>
       enabled.dependencies.onAppCall(
         {
-          sessionId: "session",
+          appId: Code.parse("harness.approval"),
+          sessionId: Id.parse("00000000000000000000000004"),
           toolName: "harness.approvals.reveal",
           arguments: {
             approvalId: enabled.approvalId,
             pointers: typeof pointer === "string" ? [pointer] : pointer,
           },
         },
-        { runId: enabled.runId },
+        appCallContext(enabled.runId),
       );
     expect((await call("/tooMany")).isError).toBe(true);
     expect((await call("/missing")).isError).toBe(true);
@@ -336,22 +351,21 @@ describe("approval reference host", () => {
   it("requires elicitation confirmation when configured and catches unexpected tools", async () => {
     const noTty = await createFixture({ allowReveal: true });
     const call = {
-      sessionId: "session",
+      appId: Code.parse("harness.approval"),
+      sessionId: Id.parse("00000000000000000000000004"),
       toolName: "harness.approvals.reveal",
       arguments: { approvalId: noTty.approvalId, pointers: ["/email"] },
     };
     expect(
       (
-        await noTty.dependencies.onAppCall(call, {
-          runId: noTty.runId,
-        })
+        await noTty.dependencies.onAppCall(call, appCallContext(noTty.runId))
       ).isError,
     ).toBe(true);
     expect(
       (
         await noTty.dependencies.onAppCall(
           { ...call, toolName: "unexpected.tool" },
-          { runId: noTty.runId },
+          appCallContext(noTty.runId),
         )
       ).isError,
     ).toBe(true);

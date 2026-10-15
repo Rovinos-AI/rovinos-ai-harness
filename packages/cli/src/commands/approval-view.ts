@@ -27,12 +27,9 @@ const REVEAL_WINDOW_MS = 60_000;
 const REVEAL_LIMIT = 5;
 const MAX_REVEAL_TOKENS = 20;
 
-type ApprovalViewRuntime = Omit<
-  Pick<
-    Runtime,
-    "store" | "vault" | "resolveApproval" | "hasPendingApproval" | "tokenizeAppContent" | "onAppContent"
-  >,
-  "resolveApproval"
+type ApprovalViewRuntime = Pick<
+  Runtime,
+  "store" | "vault" | "hasPendingApproval" | "tokenizeAppContent" | "onAppContent"
 > & {
   readonly resolveApproval: (
     ...args: Parameters<Runtime["resolveApproval"]>
@@ -81,7 +78,7 @@ export async function createApprovalViewHost(
   const tools = approvalTools();
   const revealRequests = new Map<string, number[]>();
   const host = await createReferenceHost(appConfig, {
-    readResource: (resourceUri) => ({
+    readResource: (resourceUri) => Promise.resolve({
       contents: [
         {
           uri: resourceUri,
@@ -150,7 +147,7 @@ function zodJsonSchema(schema: typeof ResolveRequest | typeof RevealRequest) {
 }
 
 async function findPendingApproval(
-  runtime: Runtime,
+  runtime: Pick<Runtime, "store">,
   runId: Id,
   approvalId: Id,
 ): Promise<Extract<Event, { type: "approval_requested" }>> {
@@ -170,7 +167,7 @@ async function findPendingApproval(
   return approval;
 }
 
-async function readApprovalEvents(runtime: Runtime, runId: Id) {
+async function readApprovalEvents(runtime: Pick<Runtime, "store">, runId: Id) {
   const events = [];
   for await (const event of runtime.store.read(runId)) {
     events.push(event);
@@ -179,8 +176,8 @@ async function readApprovalEvents(runtime: Runtime, runId: Id) {
 }
 
 async function handleApprovalCall(options: {
-  readonly runtime: Runtime;
-  readonly context: CliContext;
+  readonly runtime: ApprovalViewRuntime;
+  readonly context: ApprovalViewContext;
   readonly config: HarnessConfig;
   readonly runId: Id;
   readonly approvalId: Id;
@@ -203,7 +200,7 @@ async function handleApprovalCall(options: {
 }
 
 async function resolveApprovalCall(options: {
-  readonly runtime: Runtime;
+  readonly runtime: ApprovalViewRuntime;
   readonly runId: Id;
   readonly approvalId: Id;
   readonly arguments: Record<string, unknown>;
@@ -241,8 +238,8 @@ async function resolveApprovalCall(options: {
 }
 
 async function revealApprovalCall(options: {
-  readonly runtime: Runtime;
-  readonly context: CliContext;
+  readonly runtime: Pick<Runtime, "store" | "vault">;
+  readonly context: Pick<ApprovalViewContext, "clock" | "interactive">;
   readonly config: HarnessConfig;
   readonly runId: Id;
   readonly approvalId: Id;
@@ -299,7 +296,7 @@ async function revealApprovalCall(options: {
 }
 
 async function resolveApprovalValues(
-  runtime: Runtime,
+  runtime: Pick<Runtime, "vault">,
   runId: Id,
   payload: ReturnType<typeof ApprovalPayloadSchema.parse>,
   pointers: readonly string[],
