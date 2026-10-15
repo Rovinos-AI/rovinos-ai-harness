@@ -23,6 +23,8 @@ SANDBOX_RUNNER_TOKEN="$(cat /secure/sandbox-runner-token)" \
 
 With an empty or absent allowlist, the wrapper uses only the base Compose file and `sandbox` profile. The runner starts with no proxy variables and the proxy service is not started. With a non-empty allowlist, the wrapper passes it to Compose and enables the `sandbox-egress` profile. The proxy validates its configuration at startup and exits if the list is invalid.
 
+The Compose network ranges and fixed addresses default to `172.31.254.0/24` (`172.31.254.3` for the proxy) and `198.51.100.0/24` (`198.51.100.3` for the egress probe). Override `SANDBOX_EGRESS_SUBNET`, `SANDBOX_EGRESS_PROXY_IP`, `EGRESS_TEST_SUBNET`, and `EGRESS_PROBE_IP` when running multiple Compose projects concurrently; the proxy URL is built from `SANDBOX_EGRESS_PROXY_IP`. The test probe alias defaults to `egress-probe.test`; concurrent test projects can give it a unique `EGRESS_PROBE_HOST` to keep Docker DNS answers isolated. Integration suites assign distinct values for their own projects.
+
 For runtime execution, also configure `sandbox.runner.url` and its token reference as described in [Configuration](configuration.md#sandbox-egress). The URL must identify the runner started by this wrapper with the same allowlist configuration and egress overlay. `createRuntime` resolves the token and shares one remote backend with tool adapters; it does not deploy or verify Compose networks. A non-empty allowlist without a runner is rejected rather than executed locally.
 
 The runner injects both uppercase and lowercase HTTP/HTTPS proxy variables into each command and removes `NO_PROXY` and `no_proxy`, so commands cannot exempt destinations from proxy enforcement.

@@ -1699,11 +1699,24 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
     const token = "synthetic-e2e-runner-token-for-web-fetch";
     const tokenRef = SecretRefSchema.parse("env:HARNESS_SANDBOX_E2E_TOKEN");
     const project = `harness-web-fetch-e2e-${String(process.pid)}`;
-    const allow = [{ host: "egress-probe.test", ports: [8080] }];
+    const probeHost = "web-fetch-egress-probe.test";
+    const allow = [{ host: probeHost, ports: [8080] }];
     const previousRunnerToken = process.env.SANDBOX_RUNNER_TOKEN;
     const previousEgressAllow = process.env.SANDBOX_EGRESS_ALLOW;
+    const previousEgressEnvironment = {
+      SANDBOX_EGRESS_SUBNET: process.env.SANDBOX_EGRESS_SUBNET,
+      SANDBOX_EGRESS_PROXY_IP: process.env.SANDBOX_EGRESS_PROXY_IP,
+      EGRESS_TEST_SUBNET: process.env.EGRESS_TEST_SUBNET,
+      EGRESS_PROBE_IP: process.env.EGRESS_PROBE_IP,
+      EGRESS_PROBE_HOST: process.env.EGRESS_PROBE_HOST,
+    };
     process.env.SANDBOX_RUNNER_TOKEN = token;
     process.env.SANDBOX_EGRESS_ALLOW = JSON.stringify(allow);
+    process.env.SANDBOX_EGRESS_SUBNET = "172.31.252.0/24";
+    process.env.SANDBOX_EGRESS_PROXY_IP = "172.31.252.3";
+    process.env.EGRESS_TEST_SUBNET = "198.51.102.0/24";
+    process.env.EGRESS_PROBE_IP = "198.51.102.3";
+    process.env.EGRESS_PROBE_HOST = probeHost;
     const invokeCompose = (args: string[]) =>
       runNetworkIsolationCompose(project, args, [
         "infra/compose/docker-compose.egress.yml",
@@ -1782,7 +1795,7 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
             {
               callId: "00000000000000000000000020",
               toolId: "web.fetch",
-              args: { url: "http://egress-probe.test:8080/runtime" },
+              args: { url: `http://${probeHost}:8080/runtime` },
             },
           ],
           "fetch",
@@ -1832,9 +1845,7 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       expect(result.status).toBe("completed");
       expect(model.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toContain("web.fetch");
       expect(decide).toHaveBeenCalledOnce();
-      expect(forwarded).toMatchObject([
-        { request: { url: "http://egress-probe.test:8080/runtime" } },
-      ]);
+      expect(forwarded).toMatchObject([{ request: { url: `http://${probeHost}:8080/runtime` } }]);
       expect(responses).toMatchObject([{ status: 200 }]);
       expect(WebFetchResultSchema.parse(toolResult.result)).toMatchObject({
         text: "Contact <EMAIL_1>",
@@ -1861,7 +1872,15 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
           }
         } finally {
           try {
-            await invokeCompose(["down", "--volumes", "--remove-orphans"]);
+            await invokeCompose([
+              "--profile",
+              "sandbox",
+              "--profile",
+              "sandbox-egress",
+              "down",
+              "--volumes",
+              "--remove-orphans",
+            ]);
           } finally {
             if (previousRunnerToken === undefined) {
               delete process.env.SANDBOX_RUNNER_TOKEN;
@@ -1872,6 +1891,13 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
               delete process.env.SANDBOX_EGRESS_ALLOW;
             } else {
               process.env.SANDBOX_EGRESS_ALLOW = previousEgressAllow;
+            }
+            for (const [name, value] of Object.entries(previousEgressEnvironment)) {
+              if (value === undefined) {
+                Reflect.deleteProperty(process.env, name);
+              } else {
+                process.env[name] = value;
+              }
             }
             await rm(directory, { recursive: true, force: true });
           }
