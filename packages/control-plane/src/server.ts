@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, JsonValue } from "@harness/schemas";
-import type { Id } from "@harness/schemas";
+import {
+  HarnessError,
+  JsonValue,
+  ResolveRequest,
+  ResolveResponse,
+  RevealRequest,
+  RevealResponse,
+} from "@harness/schemas";
+import type { Code, Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
+import type { AuditingVaultResolver } from "@harness/vault";
 import {
   localhostHostValidation,
   localhostOriginValidation,
@@ -42,6 +50,12 @@ import { registerDenyTool } from "./tools/deny.js";
 import { registerGetRunTool } from "./tools/get-run.js";
 import { registerListRunsTool } from "./tools/list-runs.js";
 import { registerResumeRunTool } from "./tools/resume-run.js";
+import {
+  registerApprovalAppTools,
+  type ApprovalAppAuthorization,
+  type ApprovalAppScope,
+} from "./tools/approvals-app.js";
+import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 
 const HTTP_HOST = "127.0.0.1";
 const HTTP_PATH = "/mcp";
@@ -64,6 +78,24 @@ export interface ControlPlaneServerOptions {
   readonly confirmation?: ConfirmationGateOptions;
   /** Must reflect trusted host-side app provenance, not client-controlled request fields. */
   readonly isAppContext?: (context: ServerContext, toolName: string) => boolean;
+  readonly approvalApp?: {
+    readonly authorize?: (
+      context: ServerContext,
+      scope: ApprovalAppScope,
+      runId: Id,
+    ) => Promise<ApprovalAppAuthorization> | ApprovalAppAuthorization;
+    readonly vaultResolver?: AuditingVaultResolver;
+    readonly allowReveal?: boolean;
+    readonly requireRevealElicitation?: boolean;
+    readonly now?: () => number;
+    readonly onAudit?: (audit: {
+      readonly tokenId: Code;
+      readonly tool: Code;
+      readonly outcome: Code;
+      readonly count: number;
+    }) => void;
+  };
+  readonly approvalHtml?: string;
 }
 
 class ControlPlaneListenError extends HarnessError {
@@ -101,11 +133,21 @@ export function createControlPlaneServer(
     { requestState: { verify: confirmationGate.verifyRequestState } },
   );
   server.server.registerCapabilities({ tools: {} });
-  registerListRunsTool(server, store);
-  registerGetRunTool(server, store);
-  const supervisor = options.runSupervisor ?? createRunSupervisor(options);
   const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
     requestClientCapabilities(context, server);
+  registerListRunsTool(server, store);
+  registerGetRunTool(server, store);
+  registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
+  registerApprovalAppTools(server, {
+    store,
+    confirmationGate,
+    clientCapabilities,
+    ...(options.operations?.resolveApproval === undefined
+      ? {}
+      : { resolveApproval: options.operations.resolveApproval }),
+    ...options.approvalApp,
+  });
+  const supervisor = options.runSupervisor ?? createRunSupervisor(options);
   registerApproveTool(server, {
     store,
     confirmationGate,
@@ -299,6 +341,22 @@ function toolDefinitions(): Tool[] {
       inputSchema: objectInputSchema(approveInputSchema),
       outputSchema: z.toJSONSchema(decisionOutputSchema),
       annotations: { idempotentHint: false, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    {
+      name: "harness.approvals.resolve",
+      description: "Resolve a pending approval from its human review view.",
+      inputSchema: objectInputSchema(ResolveRequest),
+      outputSchema: z.toJSONSchema(ResolveResponse),
+      annotations: { openWorldHint: false },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    {
+      name: "harness.approvals.reveal",
+      description: "Reveal selected approval argument values after authorization.",
+      inputSchema: objectInputSchema(RevealRequest),
+      outputSchema: z.toJSONSchema(RevealResponse),
+      annotations: { openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } },
     },
     {

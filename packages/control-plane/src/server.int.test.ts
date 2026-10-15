@@ -34,7 +34,7 @@ function sendMcpRequest(endpoint: string, headers: Record<string, string>): Prom
 describe("control-plane HTTP transport", () => {
   it("serves the same tools over loopback and rejects invalid Host and Origin headers", async () => {
     const store = new InMemoryEventStore();
-    const server = await startControlPlaneHttp(store, 0);
+    const server = await startControlPlaneHttp(store, 0, { approvalHtml: "<html>test</html>" });
     const client = new Client({ name: "control-plane-http-test", version: "1.0.0" });
     const transport = new StreamableHTTPClientTransport(new URL(server.endpoint));
     try {
@@ -80,6 +80,7 @@ describe("control-plane HTTP transport", () => {
       markAborted = resolve;
     });
     const server = await startControlPlaneHttp(store, 0, {
+      approvalHtml: "<html>test</html>",
       maxConcurrentRuns: 1,
       isAppContext: () => true,
       operations: {

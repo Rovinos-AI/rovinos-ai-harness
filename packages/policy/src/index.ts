@@ -22,6 +22,7 @@ export {
   ApprovalEditError,
   ApprovalEditSchema,
   ApprovalEditsSchema,
+  applyApprovalEdits,
   approvalEditsAreAllowed,
   diffToEdits,
   validateEdits,

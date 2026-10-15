@@ -157,7 +157,9 @@ function response(): MockResponse {
 describe("control-plane transports", () => {
   it("starts and closes stdio using the shared server factory", async () => {
     mocks.reset();
-    const handle = startControlPlaneStdio(new InMemoryEventStore());
+    const handle = startControlPlaneStdio(new InMemoryEventStore(), {
+      approvalHtml: "<html>test</html>",
+    });
 
     await handle.close();
 
@@ -166,7 +168,9 @@ describe("control-plane transports", () => {
 
   it("routes only the MCP endpoint and rejects untrusted Host and Origin values", async () => {
     mocks.reset();
-    const handle = await startControlPlaneHttp(new InMemoryEventStore(), 0);
+    const handle = await startControlPlaneHttp(new InMemoryEventStore(), 0, {
+      approvalHtml: "<html>test</html>",
+    });
 
     const wrongPath = response();
     mocks.dispatch(request("/other"), wrongPath);
@@ -197,7 +201,7 @@ describe("control-plane transports", () => {
     mocks.httpRequestHandler.mockImplementationOnce(async () => {
       await store.read(runId)[Symbol.asyncIterator]().next();
     });
-    const handle = await startControlPlaneHttp(store, 0);
+    const handle = await startControlPlaneHttp(store, 0, { approvalHtml: "<html>test</html>" });
     const outgoing = response();
 
     mocks.dispatch(request("/mcp"), outgoing);
@@ -215,20 +219,26 @@ describe("control-plane transports", () => {
     expect(mocks.createServer).not.toHaveBeenCalled();
 
     mocks.setFailListen(true);
-    await expect(startControlPlaneHttp(new InMemoryEventStore(), 3000)).rejects.toMatchObject({
+    await expect(
+      startControlPlaneHttp(new InMemoryEventStore(), 3000, { approvalHtml: "<html>test</html>" }),
+    ).rejects.toMatchObject({
       code: "control_plane_listen_failed",
     });
 
     mocks.reset();
     mocks.setAddress(null);
-    await expect(startControlPlaneHttp(new InMemoryEventStore(), 3000)).rejects.toMatchObject({
+    await expect(
+      startControlPlaneHttp(new InMemoryEventStore(), 3000, { approvalHtml: "<html>test</html>" }),
+    ).rejects.toMatchObject({
       code: "control_plane_listen_failed",
     });
   });
 
   it("rejects listener close failures with the closed code", async () => {
     mocks.reset();
-    const handle = await startControlPlaneHttp(new InMemoryEventStore(), 3000);
+    const handle = await startControlPlaneHttp(new InMemoryEventStore(), 3000, {
+      approvalHtml: "<html>test</html>",
+    });
     mocks.setFailClose(true);
 
     await expect(handle.close()).rejects.toMatchObject({ code: "control_plane_listen_failed" });
