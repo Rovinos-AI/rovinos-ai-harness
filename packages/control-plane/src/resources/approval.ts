@@ -16,9 +16,9 @@ class ApprovalResourceError extends HarnessError {
 }
 
 /** Reads the built approval app; the server must not start without this artifact. */
-export function loadApprovalHtml(path = fileURLToPath(
-  new URL("../../../approval-app/dist/approval.html", import.meta.url),
-)): string {
+export function loadApprovalHtml(
+  path = fileURLToPath(new URL("../../../approval-app/dist/approval.html", import.meta.url)),
+): string {
   try {
     return readFileSync(path, "utf8");
   } catch {

@@ -10,10 +10,7 @@ import {
 } from "@harness/schemas";
 import type { AuditingVaultResolver } from "@harness/vault";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
-import type {
-  ConfirmationClientCapabilities,
-  ConfirmationGate,
-} from "../confirmation-gate.js";
+import type { ConfirmationClientCapabilities, ConfirmationGate } from "../confirmation-gate.js";
 import {
   auditInputRequired,
   decisionResult,
@@ -295,15 +292,13 @@ function revealFailure(options: ApprovalAppToolOptions, tokenId: Code, code: str
   return revealResult(options, { tokenId, ok: false, code, values: [] });
 }
 
-async function requireApprovalConfirmation(
-  input: {
-    readonly options: ApprovalAppToolOptions;
-    readonly context: ServerContext;
-    readonly tokenId: Code;
-    readonly tool: Code;
-    readonly request: Parameters<typeof requireHumanConfirmation>[2];
-  },
-): Promise<Awaited<ReturnType<ConfirmationGate["requireHuman"]>>> {
+async function requireApprovalConfirmation(input: {
+  readonly options: ApprovalAppToolOptions;
+  readonly context: ServerContext;
+  readonly tokenId: Code;
+  readonly tool: Code;
+  readonly request: Parameters<typeof requireHumanConfirmation>[2];
+}): Promise<Awaited<ReturnType<ConfirmationGate["requireHuman"]>>> {
   const result = await requireHumanConfirmation(input.options, input.context, input.request);
   if (result.status === "input_required") {
     auditInputRequired(input.options, input.tokenId, input.tool);

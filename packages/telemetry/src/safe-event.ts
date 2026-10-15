@@ -162,11 +162,7 @@ type UnexportedEvent = Extract<
   Event,
   {
     type:
-      | "run_input"
-      | "model_request"
-      | "approval_requested"
-      | "context_compacted"
-      | "app_content";
+      "run_input" | "model_request" | "approval_requested" | "context_compacted" | "app_content";
   }
 >;
 

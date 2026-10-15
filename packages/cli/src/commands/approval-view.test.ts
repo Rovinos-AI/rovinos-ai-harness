@@ -100,11 +100,13 @@ function getApprovalViewDependencies(): ApprovalViewDependencies {
   };
 }
 
-async function createFixture(options: {
-  readonly allowReveal?: boolean;
-  readonly isTTY?: boolean;
-  readonly confirm?: () => Promise<boolean>;
-} = {}) {
+async function createFixture(
+  options: {
+    readonly allowReveal?: boolean;
+    readonly isTTY?: boolean;
+    readonly confirm?: () => Promise<boolean>;
+  } = {},
+) {
   const builders = createEventBuilders();
   const runId = builders.nextRunId();
   const approvalId = builders.nextRunId();
@@ -221,10 +223,10 @@ describe("approval reference host", () => {
       spanId: "b".repeat(16),
       traceFlags: 1,
     });
-    const tools = await fixture.dependencies.onAppToolsList(
-      Code.parse("harness.approval"),
-      [Code.parse("harness.approvals.resolve"), Code.parse("harness.approvals.reveal")],
-    );
+    const tools = await fixture.dependencies.onAppToolsList(Code.parse("harness.approval"), [
+      Code.parse("harness.approvals.resolve"),
+      Code.parse("harness.approvals.reveal"),
+    ]);
     expect(tools.tools.map((tool) => tool.name)).toEqual([
       "harness.approvals.resolve",
       "harness.approvals.reveal",
@@ -331,9 +333,7 @@ describe("approval reference host", () => {
     enabled.now(61_001);
     let revealed: unknown;
     for (let index = 0; index < 5; index += 1) {
-      const result = await call(
-        index === 0 ? ["/email", "/multiple"] : "/email",
-      );
+      const result = await call(index === 0 ? ["/email", "/multiple"] : "/email");
       expect(result.isError).toBeUndefined();
       revealed ??= result.structuredContent;
       enabled.now(61_002 + index);
@@ -356,11 +356,9 @@ describe("approval reference host", () => {
       toolName: "harness.approvals.reveal",
       arguments: { approvalId: noTty.approvalId, pointers: ["/email"] },
     };
-    expect(
-      (
-        await noTty.dependencies.onAppCall(call, appCallContext(noTty.runId))
-      ).isError,
-    ).toBe(true);
+    expect((await noTty.dependencies.onAppCall(call, appCallContext(noTty.runId))).isError).toBe(
+      true,
+    );
     expect(
       (
         await noTty.dependencies.onAppCall(

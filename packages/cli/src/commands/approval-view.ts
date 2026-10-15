@@ -31,9 +31,7 @@ type ApprovalViewRuntime = Pick<
   Runtime,
   "store" | "vault" | "hasPendingApproval" | "tokenizeAppContent" | "onAppContent"
 > & {
-  readonly resolveApproval: (
-    ...args: Parameters<Runtime["resolveApproval"]>
-  ) => Promise<unknown>;
+  readonly resolveApproval: (...args: Parameters<Runtime["resolveApproval"]>) => Promise<unknown>;
 };
 
 type ApprovalViewContext = Pick<CliContext, "clock" | "out" | "interactive">;
@@ -48,15 +46,13 @@ class ApprovalViewError extends HarnessError {
 }
 
 /** Starts the local MCP Apps approval view for one currently pending approval. */
-export async function createApprovalViewHost(
-  input: {
-    readonly runtime: ApprovalViewRuntime;
-    readonly context: ApprovalViewContext;
-    readonly config: HarnessConfig;
-    readonly runId: Id;
-    readonly approvalId: Id;
-  },
-): Promise<{ readonly url: string; close(): Promise<void> }> {
+export async function createApprovalViewHost(input: {
+  readonly runtime: ApprovalViewRuntime;
+  readonly context: ApprovalViewContext;
+  readonly config: HarnessConfig;
+  readonly runId: Id;
+  readonly approvalId: Id;
+}): Promise<{ readonly url: string; close(): Promise<void> }> {
   const { runtime, context, config, runId, approvalId } = input;
   const { createReferenceHost } = await import("@harness/host");
   const { APPROVAL_RESOURCE_URI, MCP_APP_HTML_MIME_TYPE, loadApprovalHtml } =
@@ -78,15 +74,16 @@ export async function createApprovalViewHost(
   const tools = approvalTools();
   const revealRequests = new Map<string, number[]>();
   const host = await createReferenceHost(appConfig, {
-    readResource: (resourceUri) => Promise.resolve({
-      contents: [
-        {
-          uri: resourceUri,
-          mimeType: MCP_APP_HTML_MIME_TYPE,
-          text: approvalHtml,
-        },
-      ],
-    }),
+    readResource: (resourceUri) =>
+      Promise.resolve({
+        contents: [
+          {
+            uri: resourceUri,
+            mimeType: MCP_APP_HTML_MIME_TYPE,
+            text: approvalHtml,
+          },
+        ],
+      }),
     onCode: (code) => {
       context.out.error(code);
     },
@@ -215,8 +212,7 @@ async function resolveApprovalCall(options: {
     let edits: JsonValue | undefined;
     if (request.data.decision === "edit") {
       const applied =
-        request.data.edits !== undefined &&
-        approvalEditsAreAllowed(payload, request.data.edits)
+        request.data.edits !== undefined && approvalEditsAreAllowed(payload, request.data.edits)
           ? applyApprovalEdits(payload.args, request.data.edits)
           : { success: false as const };
       if (!applied.success) {
@@ -224,10 +220,15 @@ async function resolveApprovalCall(options: {
       }
       edits = applied.args;
     }
-    await options.runtime.resolveApproval(options.runId, options.approvalId, request.data.decision, {
-      ...(edits === undefined ? {} : { edits }),
-      metadata: { decidedBy: "human" },
-    });
+    await options.runtime.resolveApproval(
+      options.runId,
+      options.approvalId,
+      request.data.decision,
+      {
+        ...(edits === undefined ? {} : { edits }),
+        metadata: { decidedBy: "human" },
+      },
+    );
     return {
       structuredContent: ResolveResponse.parse({ ok: true }),
       content: [{ type: "text" as const, text: "Decision recorded." }],
@@ -288,7 +289,9 @@ async function revealApprovalCall(options: {
       structuredContent: RevealResponse.parse({
         values: revealed.values,
       }),
-      content: [{ type: "text" as const, text: `Revealed ${String(revealed.values.length)} values.` }],
+      content: [
+        { type: "text" as const, text: `Revealed ${String(revealed.values.length)} values.` },
+      ],
     };
   } catch (error) {
     return revealError(errorCode(error));
@@ -308,10 +311,10 @@ async function resolveApprovalValues(
     pointer,
     value: valueAtPointer(payload.args, pointer),
   }));
-  const matches = selected.map(({ value }) =>
-    typeof value === "string" ? findTokens(value) : [],
-  );
-  if (selected.some(({ value }, index) => typeof value !== "string" || matches[index]?.length === 0)) {
+  const matches = selected.map(({ value }) => (typeof value === "string" ? findTokens(value) : []));
+  if (
+    selected.some(({ value }, index) => typeof value !== "string" || matches[index]?.length === 0)
+  ) {
     return { success: false, code: "pointer_invalid" };
   }
   const occurrences = matches.flat();

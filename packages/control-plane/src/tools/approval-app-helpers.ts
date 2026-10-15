@@ -33,11 +33,7 @@ export function findValueAtPointer(value: JsonValue, pointer: string): JsonValue
       }
       const index = Number(segment);
       current = Number.isSafeInteger(index) && index >= 0 ? current[index] : undefined;
-    } else if (
-      typeof current === "object" &&
-      current !== null &&
-      Object.hasOwn(current, segment)
-    ) {
+    } else if (typeof current === "object" && current !== null && Object.hasOwn(current, segment)) {
       current = current[segment];
     } else {
       return undefined;
@@ -139,15 +135,13 @@ export function audit(options: ApprovalAppToolOptions, entry: ApprovalAppAudit):
 }
 
 /** Resolves valid PII tokens from selected stored approval strings. */
-export async function resolveSelectedValues(
-  input: {
-    readonly vaultResolver: AuditingVaultResolver;
-    readonly runId: Id;
-    readonly args: JsonValue;
-    readonly toolId: Code;
-    readonly pointers: readonly string[];
-  },
-): Promise<
+export async function resolveSelectedValues(input: {
+  readonly vaultResolver: AuditingVaultResolver;
+  readonly runId: Id;
+  readonly args: JsonValue;
+  readonly toolId: Code;
+  readonly pointers: readonly string[];
+}): Promise<
   | { readonly success: true; readonly values: RevealResponse["values"] }
   | { readonly success: false; readonly code: string }
 > {
@@ -155,9 +149,7 @@ export async function resolveSelectedValues(
     pointer,
     value: findValueAtPointer(input.args, pointer),
   }));
-  const matches = selected.map(({ value }) =>
-    typeof value === "string" ? findTokens(value) : [],
-  );
+  const matches = selected.map(({ value }) => (typeof value === "string" ? findTokens(value) : []));
   if (
     selected.some(({ value }, index) => typeof value !== "string" || matches[index]?.length === 0)
   ) {

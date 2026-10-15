@@ -71,49 +71,49 @@ describe("runtime reference-host callbacks", () => {
 
   it("tokenizes app content at model_input and records it as untrusted content", async () =>
     withTracing(async () => {
-    const store = new InMemoryEventStore();
-    const { runId } = await addRun(store, true);
-    const tokenize = vi.fn((_runId, _content, context) => {
-      expect(context).toEqual({ boundary: "model_input" });
-      return Promise.resolve({ message: "<EMAIL_1>" });
-    });
-    const callbacks = createRuntimeAppCallbacks({
-      store,
-      clock: new FakeClock(20),
-      tokenize,
-    });
+      const store = new InMemoryEventStore();
+      const { runId } = await addRun(store, true);
+      const tokenize = vi.fn((_runId, _content, context) => {
+        expect(context).toEqual({ boundary: "model_input" });
+        return Promise.resolve({ message: "<EMAIL_1>" });
+      });
+      const callbacks = createRuntimeAppCallbacks({
+        store,
+        clock: new FakeClock(20),
+        tokenize,
+      });
 
-    const tokenized = await callbacks.tokenizeAppContent(
-      runId,
-      { message: "raw-app-content@example.test" },
-      { boundary: "model_input" },
-    );
-    await callbacks.onAppContent({
-      runId,
-      appId: Code.parse("approval.app"),
-      kind: "message",
-      content: tokenized,
-    });
+      const tokenized = await callbacks.tokenizeAppContent(
+        runId,
+        { message: "raw-app-content@example.test" },
+        { boundary: "model_input" },
+      );
+      await callbacks.onAppContent({
+        runId,
+        appId: Code.parse("approval.app"),
+        kind: "message",
+        content: tokenized,
+      });
 
-    const events = [];
-    for await (const event of store.read(runId)) {
-      events.push(event);
-    }
-    const appContent = events.at(-1);
-    expect(tokenized).toEqual({ message: "<EMAIL_1>" });
-    expect(appContent).toMatchObject({
-      type: "app_content",
-      source: "app",
-      appId: "approval.app",
-      label: "App-provided; untrusted",
-      kind: "message",
-      content: { message: "<EMAIL_1>" },
-    });
-    expect(JSON.stringify(appContent)).not.toContain("raw-app-content@example.test");
-    expect(foldRunState(events).pendingApprovals.size).toBe(1);
-    expect(tokenize).toHaveBeenCalledOnce();
-    expect(events.some((event) => event.type === "run_input")).toBe(false);
-    expect(events.some((event) => event.type === "approval_resolved")).toBe(false);
+      const events = [];
+      for await (const event of store.read(runId)) {
+        events.push(event);
+      }
+      const appContent = events.at(-1);
+      expect(tokenized).toEqual({ message: "<EMAIL_1>" });
+      expect(appContent).toMatchObject({
+        type: "app_content",
+        source: "app",
+        appId: "approval.app",
+        label: "App-provided; untrusted",
+        kind: "message",
+        content: { message: "<EMAIL_1>" },
+      });
+      expect(JSON.stringify(appContent)).not.toContain("raw-app-content@example.test");
+      expect(foldRunState(events).pendingApprovals.size).toBe(1);
+      expect(tokenize).toHaveBeenCalledOnce();
+      expect(events.some((event) => event.type === "run_input")).toBe(false);
+      expect(events.some((event) => event.type === "approval_resolved")).toBe(false);
     }));
 
   it("fails closed when tokenization is absent or fails, and when the run is missing", async () => {

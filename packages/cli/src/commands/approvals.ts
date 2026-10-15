@@ -17,7 +17,6 @@ import {
 import type { CliContext, CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 import { waitForShutdown } from "../serve.js";
-import { createApprovalViewHost } from "./approval-view.js";
 import { createApprovalResolverLease, revealApprovalArgs } from "./approval-reveal.js";
 import { runApprovalSweep } from "./approval-sweep.js";
 import { assertResumeStatus } from "./resume.js";
@@ -268,6 +267,8 @@ async function showApprovalView(input: {
   readonly pending: PendingApproval;
   readonly approvalId: Id;
 }): Promise<void> {
+  // Loaded lazily: the view pulls in policy and vault, which plain approvals commands must not load.
+  const { createApprovalViewHost } = await import("./approval-view.js");
   const host = await createApprovalViewHost({
     runtime: input.runtime,
     context: input.context,

@@ -308,9 +308,7 @@ function composeRuntime(
   const appCallbacks = createRuntimeAppCallbacks({
     store,
     clock,
-    ...(pii === undefined
-      ? {}
-      : { tokenize: hostedAppContentTokenizer(pii.tokenizer) }),
+    ...(pii === undefined ? {} : { tokenize: hostedAppContentTokenizer(pii.tokenizer) }),
   });
   return {
     store,

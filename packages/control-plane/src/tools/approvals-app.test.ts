@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Client,
-  InMemoryTransport,
-  type Client as McpClient,
-} from "@modelcontextprotocol/client";
+import { Client, InMemoryTransport, type Client as McpClient } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { Code, type Id, type NewEvent } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
@@ -11,10 +7,7 @@ import { createEventBuilders } from "@harness/store/testing";
 import { AuditingVaultResolver, Token } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmationGate } from "../confirmation-gate.js";
-import {
-  ApprovalAppRevealRateLimiter,
-  registerApprovalAppTools,
-} from "./approvals-app.js";
+import { ApprovalAppRevealRateLimiter, registerApprovalAppTools } from "./approvals-app.js";
 
 const PRIVATE_CANARY = "private-canary@example.test";
 const PHONE_CANARY = "private-phone-canary@example.test";
@@ -134,9 +127,7 @@ async function connect(
     readonly isAppContext?: boolean;
     readonly hasElicitation?: boolean;
     readonly now?: () => number;
-    readonly resolveApproval?: Parameters<
-      typeof registerApprovalAppTools
-    >[1]["resolveApproval"];
+    readonly resolveApproval?: Parameters<typeof registerApprovalAppTools>[1]["resolveApproval"];
   } = {},
 ): Promise<Connection> {
   const store = new InMemoryEventStore();
@@ -161,9 +152,7 @@ async function connect(
     ...(options.resolver === undefined ? {} : { vaultResolver: options.resolver }),
     ...(options.onAudit === undefined ? {} : { onAudit: options.onAudit }),
     ...(options.now === undefined ? {} : { now: options.now }),
-    ...(options.resolveApproval === undefined
-      ? {}
-      : { resolveApproval: options.resolveApproval }),
+    ...(options.resolveApproval === undefined ? {} : { resolveApproval: options.resolveApproval }),
   });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client(

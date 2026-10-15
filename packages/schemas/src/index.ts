@@ -160,10 +160,7 @@ export {
 } from "./pii-detection.js";
 export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
 export { HostConfigSchema, type HostConfig } from "./config/host.js";
-export {
-  ControlPlaneConfigSchema,
-  type ControlPlaneConfig,
-} from "./config/control-plane.js";
+export { ControlPlaneConfigSchema, type ControlPlaneConfig } from "./config/control-plane.js";
 export {
   SandboxConfigSchema,
   SandboxEgressAllowEntrySchema,
