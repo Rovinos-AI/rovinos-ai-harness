@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createRuntime, foldRunState, type Runtime, type RuntimeOverrides } from "@harness/core";
+import { createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
+import { createRuntime, foldRunState, type Runtime } from "@harness/core";
 import { loadConfig, type HarnessConfig } from "@harness/config";
 import {
   JsonValue as JsonValueSchema,
@@ -7,10 +9,10 @@ import {
   type Event,
   type Id,
 } from "@harness/schemas";
-import type { SafeEvent } from "@harness/telemetry";
-import { toSafeEvent } from "@harness/telemetry";
+import { toSafeEvent, type SafeEvent } from "@harness/telemetry";
 import { SdkError } from "./types.js";
 import { contentEntries, readEvents, safeEvents } from "./event-views.js";
+import { runtimeOverridesFrom } from "./runtime-overrides.js";
 import {
   AnswerInputOptionsSchema,
   ApprovalIdInputSchema,
@@ -32,7 +34,6 @@ import {
   StartRunOptionsSchema,
   WatchOptionsSchema,
   type Harness,
-  type HarnessOverrides,
   type CreateHarnessOptions,
   type StartRunOptions,
   type ContinueRunOptions,
@@ -43,6 +44,10 @@ import {
   type AnswerInputOptions,
   type RunStartResult,
 } from "./types.js";
+
+const IDEMPOTENCY_ORPHAN_GRACE_MS = 30_000;
+const IDEMPOTENCY_START_WAIT_MS = 5_000;
+const IDEMPOTENCY_POLL_INTERVAL_MS = 10;
 
 /**
  * Finds the suspended run for an approval by streaming its log.
@@ -79,70 +84,6 @@ async function findPendingApprovalRun(
   return undefined;
 }
 
-function storageOverrides(
-  options: HarnessOverrides,
-): Pick<
-  RuntimeOverrides,
-  "store" | "dataDir" | "roleConfigDirectory" | "readOnlyStore" | "transientVault"
-> {
-  return {
-    ...(options.store === undefined ? {} : { store: options.store }),
-    ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
-    ...(options.roleConfigDirectory === undefined
-      ? {}
-      : { roleConfigDirectory: options.roleConfigDirectory }),
-    ...(options.readOnlyStore === undefined ? {} : { readOnlyStore: options.readOnlyStore }),
-    ...(options.transientVault === undefined ? {} : { transientVault: options.transientVault }),
-  };
-}
-
-function dependencyOverrides(
-  options: HarnessOverrides,
-): Pick<
-  RuntimeOverrides,
-  "clock" | "ids" | "model" | "providerAdapters" | "secretResolver" | "onKeysWarning"
-> {
-  return {
-    ...(options.clock === undefined ? {} : { clock: options.clock }),
-    ...(options.ids === undefined ? {} : { ids: options.ids }),
-    ...(options.model === undefined ? {} : { model: options.model }),
-    ...(options.providerAdapters === undefined
-      ? {}
-      : { providerAdapters: options.providerAdapters }),
-    ...(options.secretResolver === undefined ? {} : { secretResolver: options.secretResolver }),
-    ...(options.onKeysWarning === undefined ? {} : { onKeysWarning: options.onKeysWarning }),
-  };
-}
-
-function portOverrides(
-  options: HarnessOverrides,
-): Pick<RuntimeOverrides, "tool" | "policy" | "context" | "scopeRegistry"> {
-  return {
-    ...(options.tool === undefined ? {} : { tool: options.tool }),
-    ...(options.policy === undefined ? {} : { policy: options.policy }),
-    ...(options.context === undefined ? {} : { context: options.context }),
-    ...(options.scopeRegistry === undefined ? {} : { scopeRegistry: options.scopeRegistry }),
-  };
-}
-
-function lifecycleOverrides(
-  options: HarnessOverrides,
-): Pick<RuntimeOverrides, "processLike" | "flushTelemetry"> {
-  return {
-    ...(options.processLike === undefined ? {} : { processLike: options.processLike }),
-    ...(options.flushTelemetry === undefined ? {} : { flushTelemetry: options.flushTelemetry }),
-  };
-}
-
-function runtimeOverridesFrom(options: HarnessOverrides): RuntimeOverrides {
-  return {
-    ...storageOverrides(options),
-    ...dependencyOverrides(options),
-    ...portOverrides(options),
-    ...lifecycleOverrides(options),
-  };
-}
-
 class HarnessClient implements Harness {
   private readonly idempotencyKeys = new Map<string, Promise<Id>>();
   private readonly activeRuns = new Map<string, Promise<void>>();
@@ -158,10 +99,14 @@ class HarnessClient implements Harness {
   async startRun(options: StartRunOptions): Promise<RunStartResult> {
     this.assertOpen();
     const input = StartRunOptionsSchema.parse(options);
-    const existingStart =
+    const keyHash =
       input.idempotencyKey === undefined
         ? undefined
-        : this.idempotencyKeys.get(input.idempotencyKey);
+        : createHash("sha256")
+            .update("harness/sdk/idempotency/v1\0")
+            .update(input.idempotencyKey)
+            .digest("hex");
+    const existingStart = keyHash === undefined ? undefined : this.idempotencyKeys.get(keyHash);
     if (existingStart !== undefined) {
       return this.existingRunResult(await existingStart);
     }
@@ -172,21 +117,62 @@ class HarnessClient implements Harness {
         ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       }),
     );
+    const claim = keyHash === undefined ? undefined : await this.claimOrRecoverStart(keyHash);
+    if (claim !== undefined && "result" in claim) {
+      return claim.result;
+    }
+    return this.launchRun(input, runInput, keyHash, claim?.runId);
+  }
+
+  private async claimOrRecoverStart(
+    keyHash: string,
+  ): Promise<{ readonly runId: Id } | { readonly result: RunStartResult }> {
+    const candidateRunId = this.runtime.ids.next();
+    const claimedRunId = await this.runtime.store.claimIdempotencyKey(
+      keyHash,
+      candidateRunId,
+      this.runtime.clock.now(),
+    );
+    if (claimedRunId === candidateRunId) {
+      return { runId: candidateRunId };
+    }
+    const result = await this.waitForExistingStart(keyHash, claimedRunId, candidateRunId);
+    return result === undefined ? { runId: candidateRunId } : { result };
+  }
+
+  private async launchRun(
+    input: StartRunOptions,
+    runInput: ReturnType<typeof JsonValueSchema.parse>,
+    keyHash: string | undefined,
+    candidateRunId: Id | undefined,
+  ): Promise<RunStartResult> {
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
+      ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
     });
     this.trackRun(runId, completion);
     const start = started.then(() => runId);
-    const idempotencyKey = input.idempotencyKey;
-    if (idempotencyKey !== undefined) {
-      this.idempotencyKeys.set(idempotencyKey, start);
-      void start.catch(() => {
-        if (this.idempotencyKeys.get(idempotencyKey) === start) {
-          this.idempotencyKeys.delete(idempotencyKey);
-        }
-      });
+    if (keyHash !== undefined) {
+      this.idempotencyKeys.set(keyHash, start);
     }
-    await start;
+    try {
+      await start;
+    } catch (error) {
+      if (keyHash !== undefined) {
+        try {
+          if ((await this.runtime.store.head(runId)) === 0) {
+            await this.runtime.store.releaseIdempotencyKey(keyHash, runId);
+          }
+        } catch {
+          // Keep the claim when the append outcome cannot be established.
+        }
+      }
+      throw error;
+    } finally {
+      if (keyHash !== undefined && this.idempotencyKeys.get(keyHash) === start) {
+        this.idempotencyKeys.delete(keyHash);
+      }
+    }
     return RunStartResultSchema.parse({ runId, status: "pending" });
   }
 
@@ -335,6 +321,37 @@ class HarnessClient implements Harness {
       }
     }
     return RunStartResultSchema.parse({ runId, status });
+  }
+
+  private async waitForExistingStart(
+    keyHash: string,
+    initialRunId: Id,
+    candidateRunId: Id,
+  ): Promise<RunStartResult | undefined> {
+    let runId = initialRunId;
+    const deadline = performance.now() + IDEMPOTENCY_START_WAIT_MS;
+    while (performance.now() < deadline) {
+      if ((await this.runtime.store.head(runId)) > 0) {
+        return this.existingRunResult(runId);
+      }
+      const now = this.runtime.clock.now();
+      if (
+        await this.runtime.store.takeoverIdempotencyKey(keyHash, {
+          expectedRunId: runId,
+          runId: candidateRunId,
+          createdAt: now,
+          staleBefore: now - IDEMPOTENCY_ORPHAN_GRACE_MS,
+        })
+      ) {
+        return undefined;
+      }
+      runId = await this.runtime.store.claimIdempotencyKey(keyHash, candidateRunId, now);
+      if (runId === candidateRunId) {
+        return undefined;
+      }
+      await new Promise((resolve) => setTimeout(resolve, IDEMPOTENCY_POLL_INTERVAL_MS));
+    }
+    throw new SdkError("sdk_run_not_found");
   }
 
   private trackRun(runId: Id, completion: Promise<unknown>): void {
