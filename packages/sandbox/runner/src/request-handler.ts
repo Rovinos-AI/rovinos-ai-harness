@@ -13,6 +13,10 @@ export const MAX_RUNNER_REQUEST_BYTES = 2 * 1024 * 1024;
 
 const RunnerExecRequestSchema = z.object({ runId: Id, spec: ExecSpecSchema }).strict();
 const RunnerFetchRequestSchema = z.object({ runId: Id, request: WebFetchRequestSchema }).strict();
+const RunnerLeaseRequestSchema = z
+  .object({ runId: Id, ttlMs: z.number().int().positive().max(600_000).optional() })
+  .strict();
+const RunnerReleaseRequestSchema = z.object({ runId: Id }).strict();
 
 /** Minimal request shape used by the independently testable runner handler. */
 export interface RunnerRequest extends AsyncIterable<Buffer | string> {
@@ -34,8 +38,11 @@ export interface RunnerResponse {
 
 /** Parsed, authenticated runner payload. */
 export type RunnerPayload =
-  | { readonly kind: "fetch"; readonly body: string }
+  | { readonly kind: "fetch"; readonly runId: z.infer<typeof Id>; readonly body: string }
+  | { readonly kind: "lease"; readonly runId: z.infer<typeof Id>; readonly ttlMs?: number }
+  | { readonly kind: "release"; readonly runId: z.infer<typeof Id> }
   | { readonly kind: "exec"; readonly runId: z.infer<typeof Id>; readonly spec: ExecSpec };
+export type RunnerExecutionPayload = Extract<RunnerPayload, { readonly kind: "exec" | "fetch" }>;
 
 type SendError = (response: RunnerResponse, status: number, code: string) => void;
 type SendJson = (response: RunnerResponse, status: number, body: unknown) => void;
@@ -48,7 +55,7 @@ type ExecuteSpec = (
 
 interface ExecuteRunnerPayloadOptions {
   readonly options: RunnerServerOptions;
-  readonly payload: RunnerPayload;
+  readonly payload: RunnerExecutionPayload;
   readonly response: RunnerResponse;
   readonly signal: AbortSignal;
   readonly executeSpec: ExecuteSpec;
@@ -84,7 +91,13 @@ export async function readRunnerPayload(
   isAuthorized: IsAuthorized,
   sendError: SendError,
 ): Promise<RunnerPayload | undefined> {
-  if (request.method !== "POST" || (request.url !== "/exec" && request.url !== "/fetch")) {
+  if (
+    request.method !== "POST" ||
+    (request.url !== "/exec" &&
+      request.url !== "/fetch" &&
+      request.url !== "/lease" &&
+      request.url !== "/release")
+  ) {
     sendError(response, 404, "sandbox_route_not_found");
     return undefined;
   }
@@ -103,8 +116,26 @@ export async function readRunnerPayload(
   }
   try {
     if (request.url === "/fetch") {
-      parseJson(RunnerFetchRequestSchema, body.body, { maxBytes: MAX_RUNNER_REQUEST_BYTES });
-      return { kind: "fetch", body: body.body };
+      const parsed = parseJson(RunnerFetchRequestSchema, body.body, {
+        maxBytes: MAX_RUNNER_REQUEST_BYTES,
+      });
+      return { kind: "fetch", runId: parsed.runId, body: body.body };
+    }
+    if (request.url === "/lease") {
+      const parsed = parseJson(RunnerLeaseRequestSchema, body.body, {
+        maxBytes: MAX_RUNNER_REQUEST_BYTES,
+      });
+      return {
+        kind: "lease",
+        runId: parsed.runId,
+        ...(parsed.ttlMs === undefined ? {} : { ttlMs: parsed.ttlMs }),
+      };
+    }
+    if (request.url === "/release") {
+      const parsed = parseJson(RunnerReleaseRequestSchema, body.body, {
+        maxBytes: MAX_RUNNER_REQUEST_BYTES,
+      });
+      return { kind: "release", runId: parsed.runId };
     }
     const parsed = parseJson(RunnerExecRequestSchema, body.body, {
       maxBytes: MAX_RUNNER_REQUEST_BYTES,
@@ -136,8 +167,9 @@ export async function executeRunnerPayload(input: ExecuteRunnerPayloadOptions): 
     const result = ExecResultSchema.parse(await executeSpec(payload.runId, payload.spec, signal));
     sendJson(response, 200, result);
   } catch (error: unknown) {
-    const failure =
-      payload.kind === "fetch" ? fetchFailure(error) : { status: 500, code: "sandbox_exec_failed" };
+    const failure = payload.kind === "fetch"
+      ? fetchFailure(error)
+      : { status: 500, code: "sandbox_exec_failed" };
     sendError(response, failure.status, failure.code);
   }
 }

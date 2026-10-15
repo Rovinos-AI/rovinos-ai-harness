@@ -1350,6 +1350,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@harness/sandbox@workspace:packages/sandbox"
   dependencies:
+    "@harness/context": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@opentelemetry/api": "npm:1.9.1"

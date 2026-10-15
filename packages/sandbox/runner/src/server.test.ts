@@ -166,16 +166,14 @@ afterEach(() => {
 });
 
 describe("runner HTTP request handler", () => {
-  it("rejects execution credentials that match the runner identity", () => {
+  it("rejects matching execution uids while allowing the shared execution group", () => {
     const serverUid = process.getuid?.() ?? 0;
     const serverGid = process.getgid?.() ?? 0;
 
     expect(() => createRunnerServer(makeOptions({ executionUid: serverUid }))).toThrowError(
       RunnerConfigurationError,
     );
-    expect(() => createRunnerServer(makeOptions({ executionGid: serverGid }))).toThrowError(
-      RunnerConfigurationError,
-    );
+    expect(() => createRunnerServer(makeOptions({ executionGid: serverGid }))).not.toThrow();
   });
 
   it("serves health without auth and rejects unknown routes", async () => {

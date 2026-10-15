@@ -207,19 +207,26 @@ function createTerminalAwareRunControl({
   clock,
   store,
   vault,
+  sandboxBackend,
 }: RuntimeComposition): RunControl {
   const flushTelemetry = overrides.flushTelemetry ?? forceFlushTelemetry;
   return async (runId, operation, firstNewSeq = 0) => {
-    const result = await withRunControl({
-      store,
-      runId,
-      firstNewSeq,
-      clock,
-      flushTelemetry,
-      processLike: overrides.processLike ?? defaultProcessLike,
-      graceMs: config.run.shutdownGraceMs,
-      operation,
-    });
+    await sandboxBackend.acquireLease?.(runId);
+    let result: RunLoopResult;
+    try {
+      result = await withRunControl({
+        store,
+        runId,
+        firstNewSeq,
+        clock,
+        flushTelemetry,
+        processLike: overrides.processLike ?? defaultProcessLike,
+        graceMs: config.run.shutdownGraceMs,
+        operation,
+      });
+    } finally {
+      await sandboxBackend.releaseLease?.(runId);
+    }
     if (
       result.status === "completed" ||
       result.status === "failed" ||

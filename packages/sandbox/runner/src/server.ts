@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { HarnessError, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
-import type { Id } from "@harness/schemas";
+import { HarnessError, Id, parseJson, SandboxEgressAllowlistSchema } from "@harness/schemas";
 import { z } from "zod";
-import { executeSpec, SANDBOX_EXEC_GID, SANDBOX_EXEC_UID } from "./exec.js";
+import { executeSpec, SANDBOX_EXEC_UID } from "./exec.js";
+import {
+  activateRunWorkspace,
+  clearRunScratch,
+  lockRunWorkspace,
+} from "../../src/workspace.js";
 import { MAX_EXEC_TIMEOUT_MS } from "../../src/types.js";
-import type { ExecResult, ExecSpec } from "../../src/types.js";
+import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 import type { WebFetchRequest, WebFetchResult } from "../../src/web-fetch-contracts.js";
 import {
   executeRunnerPayload,
@@ -22,6 +27,16 @@ import {
 const REQUEST_TIMEOUT_MS = MAX_EXEC_TIMEOUT_MS + 10_000;
 const TOKEN_HASH_BYTES = 32;
 const MIN_RUNNER_TOKEN_BYTES = 32;
+const DEFAULT_LEASE_TTL_MS = 10 * 60 * 1000;
+const systemClock: Clock = {
+  now: () => Date.now(),
+  schedule: (callback, delayMs) => {
+    const timer = setTimeout(callback, delayMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  },
+};
 
 const RunnerHealthSchema = z.object({ status: z.literal("ok") }).strict();
 
@@ -33,6 +48,10 @@ export interface RunnerServerOptions {
   readonly allowedHosts: readonly string[];
   /** Workspace root mounted into the runner container. */
   readonly workspaceRoot: string;
+  /** Scratch root cleared between leases; defaults to no-op in isolated handler tests. */
+  readonly temporaryRoot?: string;
+  /** Clock used for lease expiry tests and operation timing. */
+  readonly clock?: Clock;
   /** Trusted HTTP proxy URL injected into every child command when egress is enabled. */
   readonly proxyUrl?: string;
   /** Exact destinations permitted for runner-side web fetches. */
@@ -151,15 +170,13 @@ function writeError(response: RunnerResponse, status: number, code: string): voi
 
 function validateRunnerOptions(options: RunnerServerOptions): ReadonlySet<string> {
   const executionUid = options.executionUid ?? SANDBOX_EXEC_UID;
-  const executionGid = options.executionGid ?? SANDBOX_EXEC_GID;
   if (
     Buffer.byteLength(options.token, "utf8") < MIN_RUNNER_TOKEN_BYTES ||
     options.allowedHosts.length === 0 ||
     options.allowedHosts.some((host) => authorityFrom(host) !== host.toLowerCase()) ||
     (options.proxyUrl !== undefined && !validProxyUrl(options.proxyUrl)) ||
     !validEgressOptions(options) ||
-    executionUid === process.getuid?.() ||
-    executionGid === process.getgid?.()
+    executionUid === process.getuid?.()
   ) {
     throw new RunnerConfigurationError();
   }
@@ -251,7 +268,8 @@ function executeRunnerSpec(
   const executionSpec = withProxyEnvironment(spec, options.proxyUrl);
   return options.execute === undefined
     ? executeSpec({
-        spec: executionSpec,
+      runId,
+      spec: executionSpec,
         signal,
         workspaceRoot: options.workspaceRoot,
         ...(options.executionUid === undefined ? {} : { executionUid: options.executionUid }),
@@ -266,6 +284,109 @@ interface RunnerRequestContext {
   readonly tokenHash: Buffer;
   readonly isBusy: () => boolean;
   readonly setBusy: (busy: boolean) => void;
+  readonly leases: RunnerLeaseManager;
+}
+
+interface ActiveRunLease {
+  readonly runId: z.infer<typeof Id>;
+  readonly ttlMs: number;
+  readonly expiresAt: number;
+}
+
+class RunnerLeaseManager {
+  readonly #workspaceRoot: string;
+  readonly #temporaryRoot: string | undefined;
+  readonly #clock: Clock;
+  #active: ActiveRunLease | undefined;
+  #cancelExpiry: (() => void) | undefined;
+
+  constructor(options: RunnerServerOptions) {
+    this.#workspaceRoot = options.workspaceRoot;
+    this.#temporaryRoot = options.temporaryRoot;
+    this.#clock = options.clock ?? systemClock;
+  }
+
+  async acquire(runId: z.infer<typeof Id>, ttlMs = DEFAULT_LEASE_TTL_MS): Promise<boolean> {
+    await this.#expireIfDue();
+    if (this.#active !== undefined && this.#active.runId !== runId) {
+      return false;
+    }
+    const isRenewal = this.#active?.runId === runId;
+    this.#setActive(runId, ttlMs);
+    try {
+      if (!isRenewal) {
+        await activateRunWorkspace(this.#workspaceRoot, runId);
+        await clearRunScratch(this.#workspaceRoot, runId);
+        await this.#clearTemporaryRoot();
+      }
+      return true;
+    } catch (error) {
+      if (!isRenewal && this.#active?.runId === runId) {
+        this.#cancelExpiry?.();
+        this.#cancelExpiry = undefined;
+        this.#active = undefined;
+        await lockRunWorkspace(this.#workspaceRoot, runId);
+      }
+      throw error;
+    }
+  }
+
+  async release(runId: z.infer<typeof Id>): Promise<boolean> {
+    await this.#expireIfDue();
+    if (this.#active?.runId !== runId) {
+      return false;
+    }
+    await this.#dropActive();
+    return true;
+  }
+
+  async #dropActive(): Promise<void> {
+    const active = this.#active;
+    if (active === undefined) {
+      return;
+    }
+    this.#cancelExpiry?.();
+    this.#cancelExpiry = undefined;
+    this.#active = undefined;
+    await lockRunWorkspace(this.#workspaceRoot, active.runId);
+  }
+
+  async renew(runId: z.infer<typeof Id>): Promise<boolean> {
+    return this.acquire(runId, this.#active?.runId === runId ? this.#active.ttlMs : undefined);
+  }
+
+  async #expireIfDue(): Promise<void> {
+    if (this.#active !== undefined && this.#active.expiresAt <= this.#clock.now()) {
+      await this.#dropActive();
+    }
+  }
+
+  #setActive(runId: z.infer<typeof Id>, ttlMs: number): void {
+    this.#cancelExpiry?.();
+    const expiresAt = this.#clock.now() + ttlMs;
+    this.#active = { runId, ttlMs, expiresAt };
+    this.#cancelExpiry = this.#clock.schedule(() => {
+      if (this.#active?.runId === runId && this.#active.expiresAt <= this.#clock.now()) {
+        void this.release(runId);
+      }
+    }, ttlMs);
+  }
+
+  async #clearTemporaryRoot(): Promise<void> {
+    if (this.#temporaryRoot === undefined) {
+      return;
+    }
+    const temporaryRoot = this.#temporaryRoot;
+    const entries = await readdir(temporaryRoot);
+    await Promise.all(
+      entries.map((entry) =>
+        rm(join(temporaryRoot, entry), {
+          force: true,
+          recursive: true,
+        }),
+      ),
+    );
+  }
 }
 
 async function handleRunnerRequest(
@@ -290,6 +411,26 @@ async function handleRunnerRequest(
       writeError,
     );
     if (payload === undefined) {
+      return;
+    }
+    if (payload.kind === "lease") {
+      if (await context.leases.acquire(payload.runId, payload.ttlMs)) {
+        sendJson(response, 200, { status: "ok" });
+      } else {
+        writeError(response, 409, "sandbox_busy");
+      }
+      return;
+    }
+    if (payload.kind === "release") {
+      if (context.isBusy() || !(await context.leases.release(payload.runId))) {
+        writeError(response, 409, "sandbox_busy");
+      } else {
+        sendJson(response, 200, { status: "ok" });
+      }
+      return;
+    }
+    if (!(await context.leases.renew(payload.runId))) {
+      writeError(response, 409, "sandbox_busy");
       return;
     }
     if (context.isBusy()) {
@@ -345,6 +486,7 @@ export function createRunnerRequestHandler(
     setBusy: (busy) => {
       activeExec = busy;
     },
+    leases: new RunnerLeaseManager(options),
   };
   return (request, response) => handleRunnerRequest(context, request, response);
 }
@@ -380,6 +522,7 @@ export function startRunnerServer(): Server {
     token,
     allowedHosts: hostsText.split(",").map((host) => host.trim()),
     workspaceRoot: resolve(workspaceRoot),
+    temporaryRoot: "/tmp",
     ...(egress.proxyUrl === undefined ? {} : { proxyUrl: egress.proxyUrl }),
     egressAllowlist: egress.allow,
   });

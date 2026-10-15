@@ -113,7 +113,7 @@ describe("createRuntime sandbox composition", () => {
       );
       const workspaceRoot = join(dataDir, "workspaces");
       // macOS resolves /var to /private/var; compare canonical paths.
-      expect(execution.stdout).toBe(await realpath(workspaceRoot));
+      expect(execution.stdout).toBe(await realpath(join(workspaceRoot, Id.parse("00000000000000000000000041"), "project")));
       expect((await stat(workspaceRoot)).mode & 0o777).toBe(0o700);
       await expect(
         runtime.sandboxBackend.exec(
@@ -175,7 +175,11 @@ describe("createRuntime sandbox composition", () => {
     "passes one configured backend to the tool port and records only result metadata (remote=%s)",
     async (remote) => {
       vi.stubEnv("HARNESS_SANDBOX_CANARY", canary);
-      const fetcher = vi.fn(() => Promise.resolve(Response.json(result)));
+      const fetcher = vi.fn((input: RequestInfo | URL) =>
+        Promise.resolve(
+          Response.json(new URL(input.toString()).pathname === "/exec" ? result : { status: "ok" }),
+        ),
+      );
       vi.stubGlobal("fetch", fetcher);
       const createTool = vi.fn((backend: SandboxBackend) => metadataTool(backend, remote));
       const resolve = vi.fn(() =>
@@ -217,7 +221,7 @@ describe("createRuntime sandbox composition", () => {
         }
         expect(JSON.stringify(events)).not.toContain(canary);
         expect(JSON.stringify(events)).not.toContain("synthetic-runtime-sandbox-token-0001");
-        expect(fetcher).toHaveBeenCalledTimes(remote ? 1 : 0);
+        expect(fetcher).toHaveBeenCalledTimes(remote ? 3 : 0);
         expect(resolve).toHaveBeenCalledTimes(remote ? 1 : 0);
       } finally {
         await runtime.close();

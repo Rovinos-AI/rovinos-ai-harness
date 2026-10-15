@@ -3,11 +3,13 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Id } from "@harness/schemas";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { executeSpec, RunnerExecError } from "./exec.js";
 import type { ExecSpec } from "../../src/types.js";
 
 const limits = { memoryMb: 2048, pids: 2048, outputBytes: 1024, cpuSeconds: 5 };
+const runId = Id.parse("00000000000000000000000001");
 const executionUid = process.getuid?.() ?? 10003;
 const executionGid = process.getgid?.() ?? 10003;
 let workspaceRoot: string;
@@ -38,6 +40,7 @@ function makeSpec(
 
 function execute(spec: ExecSpec, signal = new AbortController().signal) {
   return executeSpec({
+    runId,
     spec,
     signal,
     workspaceRoot,
@@ -117,6 +120,7 @@ describe("executeSpec", () => {
     // On Linux setpriv rejects the credentials (non-zero exit); where setpriv is absent (macOS CI agent)
     // the spawn itself fails. Either way the command must not run successfully.
     const outcome = await executeSpec({
+      runId,
       spec: makeSpec([process.execPath, "-e", "process.exit(0)"]),
       signal: new AbortController().signal,
       workspaceRoot,

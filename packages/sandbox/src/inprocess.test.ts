@@ -7,6 +7,7 @@ import process from "node:process";
 import { Id } from "@harness/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ensureRunWorkspace,
   InProcessBackend,
   InProcessBackendError,
   resolveWorkspacePath,
@@ -191,8 +192,10 @@ describe("InProcessBackend", () => {
       'writeFileSync("parent.ready", String(process.pid));',
       "setInterval(() => {}, 1000);",
     ].join("");
+    const projectRoot = join(workspaceRoot, runId, "project");
+    await ensureRunWorkspace(workspaceRoot, runId);
     const processesReady = new Promise<void>((resolve) => {
-      const watcher = watch(workspaceRoot, (_event, filename) => {
+      const watcher = watch(projectRoot, (_event, filename) => {
         if (filename?.toString() === "grandchild.ready") {
           watcher.close();
           resolve();
@@ -208,8 +211,8 @@ describe("InProcessBackend", () => {
     await processesReady;
     triggerTimeout?.();
     const result = await execution;
-    const parentPidText = await readFile(join(workspaceRoot, "parent.ready"), "utf8");
-    const grandchildPidText = await readFile(join(workspaceRoot, "grandchild.ready"), "utf8");
+    const parentPidText = await readFile(join(projectRoot, "parent.ready"), "utf8");
+    const grandchildPidText = await readFile(join(projectRoot, "grandchild.ready"), "utf8");
     const parentPid = Number(parentPidText);
     const grandchildPid = Number(grandchildPidText);
 

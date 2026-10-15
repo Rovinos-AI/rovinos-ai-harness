@@ -2,7 +2,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import process from "node:process";
 import { HarnessError } from "@harness/schemas";
-import { resolveWorkspacePath } from "../../src/inprocess.js";
+import { activateRunWorkspace, resolveWorkspacePath } from "../../src/workspace.js";
+import type { Id } from "@harness/schemas";
 import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 
 const PRLIMIT_PATH = "/usr/bin/prlimit";
@@ -246,24 +247,34 @@ function executeProcess({
  * @returns Bounded command output and process metadata.
  */
 export async function executeSpec(options: {
+  runId: Id;
   spec: ExecSpec;
   signal: AbortSignal;
   workspaceRoot: string;
+  runId: Id;
   clock?: Clock;
   executionUid?: number;
   executionGid?: number;
   spawnProcess?: SpawnProcess;
 }): Promise<ExecResult> {
-  const { spec, signal, workspaceRoot } = options;
+  const { runId, spec, signal, workspaceRoot } = options;
   const clock = options.clock ?? systemClock;
   const startedAt = clock.now();
   if (signal.aborted) {
     return abortedResult();
   }
-  // Per-run workspace isolation is enforced by task 19.5; this execution resolves only the shared root for now.
-  const cwd = await resolveWorkspacePath(workspaceRoot, spec.cwd);
+  const projectRoot = await activateRunWorkspace(workspaceRoot, runId);
+  const cwd = await resolveWorkspacePath(projectRoot, spec.cwd);
+  const tempDirectory = resolveWorkspacePath(
+    workspaceRoot,
+    `${runId}/.harness/tmp`,
+  );
+  const tempPath = await tempDirectory;
   return executeProcess({
-    spec,
+    spec: {
+      ...spec,
+      env: { ...spec.env, TMPDIR: tempPath },
+    },
     cwd,
     signal,
     clock,

@@ -87,6 +87,39 @@ describe("RemoteSandboxBackend", () => {
     ).rejects.toMatchObject({ code: "sandbox_timeout" });
   });
 
+  it("acquires and releases run leases using authenticated runner endpoints", async () => {
+    const fetcher: typeof fetch = vi.fn(() => Promise.resolve(response({ status: "ok" })));
+    const remote = backend(fetcher);
+
+    await remote.acquireLease(runId, 30_000);
+    await remote.releaseLease(runId);
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      new URL("http://sandbox-runner:8080/lease"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ runId, ttlMs: 30_000 }),
+      }),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      new URL("http://sandbox-runner:8080/release"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ runId }),
+      }),
+    );
+  });
+
+  it("maps lease conflicts and rejects invalid lease durations", async () => {
+    await expect(backend(() => Promise.resolve(response({}, 409))).acquireLease(runId))
+      .rejects.toMatchObject({ code: "sandbox_busy" });
+    await expect(
+      backend(vi.fn<typeof fetch>()).acquireLease(runId, 600_001),
+    ).rejects.toMatchObject({ code: "sandbox_runner_config_invalid" });
+  });
+
   it("maps other HTTP failures, invalid responses, and fetch failures to unavailable", async () => {
     const failingFetchers: (typeof fetch)[] = [
       () => Promise.resolve(response({}, 500)),

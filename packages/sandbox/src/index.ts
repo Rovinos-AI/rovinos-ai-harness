@@ -20,6 +20,14 @@ export {
   SandboxWorkspacePathError,
 } from "./inprocess.js";
 export type { InProcessBackendOptions, InProcessLogger } from "./inprocess.js";
+export {
+  activateRunWorkspace,
+  clearRunScratch,
+  ensureRunWorkspace,
+  FsWorkspace,
+  lockRunWorkspace,
+  WorkspaceQuotaExceededError,
+} from "./workspace.js";
 export { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
 export type { RemoteSandboxBackendOptions } from "./remote.js";
 export {

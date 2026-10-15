@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from "node:child_process";
-import { realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import process from "node:process";
 import { HarnessError, type Code, type Id } from "@harness/schemas";
+import { ensureRunWorkspace, resolveWorkspacePath } from "./workspace.js";
 import { ExecTimeoutMsSchema, MAX_EXEC_TIMEOUT_MS } from "./types.js";
 import type { Clock, ExecResult, ExecSpec, SandboxBackend } from "./types.js";
+
+export { resolveWorkspacePath, SandboxWorkspacePathError } from "./workspace.js";
 
 const UNSAFE_LOG_CODE: Code = "sandbox_inprocess_unsafe";
 const UNENFORCED_LIMITS_LOG_CODE: Code = "sandbox_inprocess_limits_unenforced";
@@ -49,16 +50,6 @@ export class InProcessBackendError extends HarnessError {
   }
 }
 
-/** Error raised when a working directory is not inside the workspace. */
-export class SandboxWorkspacePathError extends HarnessError {
-  readonly code = "sandbox_workspace_path_invalid";
-
-  /** Create a path error without including workspace paths in the message. */
-  constructor() {
-    super("The requested working directory is outside the workspace.");
-  }
-}
-
 class SandboxSpawnError extends HarnessError {
   readonly code = "sandbox_exec_spawn_failed";
 
@@ -85,50 +76,6 @@ function spawnCommand(
   } catch {
     throw new SandboxSpawnError();
   }
-}
-
-function isWithin(root: string, candidate: string): boolean {
-  const pathFromRoot = relative(root, candidate);
-  return (
-    pathFromRoot === "" ||
-    (pathFromRoot !== ".." && !pathFromRoot.startsWith(`..${sep}`) && !isAbsolute(pathFromRoot))
-  );
-}
-
-/**
- * Resolve an optional workspace-relative directory while rejecting traversal and symlink escapes.
- *
- * @param workspaceRoot - Trusted workspace directory.
- * @param workspacePath - Relative directory requested by the caller.
- * @returns A canonical path contained by the workspace.
- */
-export async function resolveWorkspacePath(
-  workspaceRoot: string,
-  workspacePath = ".",
-): Promise<string> {
-  let realRoot: string;
-  try {
-    realRoot = await realpath(workspaceRoot);
-  } catch {
-    throw new SandboxWorkspacePathError();
-  }
-  if (isAbsolute(workspacePath)) {
-    throw new SandboxWorkspacePathError();
-  }
-  const candidate = resolvePath(realRoot, workspacePath);
-  if (!isWithin(realRoot, candidate)) {
-    throw new SandboxWorkspacePathError();
-  }
-  let realCandidate: string;
-  try {
-    realCandidate = await realpath(candidate);
-  } catch {
-    throw new SandboxWorkspacePathError();
-  }
-  if (!isWithin(realRoot, realCandidate)) {
-    throw new SandboxWorkspacePathError();
-  }
-  return realCandidate;
 }
 
 class CapturedOutput {
@@ -209,7 +156,7 @@ export class InProcessBackend implements SandboxBackend {
   }
 
   /** {@inheritDoc SandboxBackend.exec} */
-  async exec(_runId: Id, spec: ExecSpec, signal: AbortSignal): Promise<ExecResult> {
+  async exec(runId: Id, spec: ExecSpec, signal: AbortSignal): Promise<ExecResult> {
     const startedAt = this.#clock.now();
     if (signal.aborted) {
       return {
@@ -228,7 +175,8 @@ export class InProcessBackend implements SandboxBackend {
     if (command === undefined || command.length === 0) {
       throw new SandboxSpawnError();
     }
-    const cwd = await resolveWorkspacePath(this.#workspaceRoot, spec.cwd);
+    const projectRoot = await ensureRunWorkspace(this.#workspaceRoot, runId);
+    const cwd = await resolveWorkspacePath(projectRoot, spec.cwd);
     const output = new CapturedOutput(spec.limits.outputBytes);
     const child = spawnCommand(command, spec.argv.slice(1), cwd, {
       ...spec.env,
