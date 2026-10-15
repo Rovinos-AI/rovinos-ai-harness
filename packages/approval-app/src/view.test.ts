@@ -139,6 +139,29 @@ describe("approval view", () => {
     expect([...document.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
   });
 
+  it("disables edit controls as well as actions when an approval expires", () => {
+    let now = 1000;
+    const view = createApprovalView(document.body, {
+      clock: { now: () => now },
+      onError: vi.fn(),
+      onPayload: ({ editHost }) => {
+        const input = document.createElement("input");
+        const submit = document.createElement("button");
+        submit.textContent = "Submit edits";
+        editHost.append(input, submit);
+        return undefined;
+      },
+    });
+    view.receive(payload);
+    const editControls = [
+      ...document.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button"),
+    ];
+    expect(editControls.every((control) => !control.disabled)).toBe(true);
+    now = 5000;
+    view.tick();
+    expect(editControls.every((control) => control.disabled)).toBe(true);
+  });
+
   it("updates the live region only when status changes, not on every countdown tick", () => {
     const { advance } = setup();
     const status = document.querySelector('[role="status"]');
@@ -150,6 +173,36 @@ describe("approval view", () => {
     const expiredText = status?.firstChild;
     advance(6000);
     expect(status?.firstChild).toBe(expiredText);
+  });
+
+  it.each([
+    ["approve", "Approval granted."],
+    ["deny", "Approval denied."],
+    ["edit", "Edits submitted."],
+  ] as const)("keeps the %s decision status terminal after expiry", (decision, message) => {
+    let now = 1000;
+    let markDecision: ((value: "approve" | "deny" | "edit") => void) | undefined;
+    const view = createApprovalView(document.body, {
+      clock: { now: () => now },
+      onError: vi.fn(),
+      onPayload: ({ onDecision }) => {
+        markDecision = onDecision;
+        return undefined;
+      },
+    });
+    view.receive(payload);
+    if (markDecision === undefined) {
+      throw new Error("Expected the decision callback");
+    }
+    markDecision(decision);
+    expect(document.querySelector('[role="status"]')?.textContent).toBe(message);
+    expect([...document.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
+
+    now = 6000;
+    view.tick();
+    expect(document.querySelector('[role="status"]')?.textContent).toBe(message);
+    expect(document.body.textContent).not.toContain("Approval expired");
+    expect(document.body.textContent).not.toContain("Pending approval");
   });
 
   it("preserves the live-region text node for repeated invalid payloads", () => {
@@ -200,6 +253,39 @@ describe("approval view", () => {
     view.tick();
     expect(document.activeElement).toBe(document.querySelector("h1"));
     expect(document.querySelector('[role="status"]')?.textContent).toBe("Waiting for host");
+  });
+
+  it("keeps the approval id separate and replaces token pills only for the reveal display", () => {
+    let approvalId: string | undefined;
+    let renderRevealed: ((values: ReadonlyMap<string, string>) => void) | undefined;
+    const cleanup = vi.fn();
+    const view = createApprovalView(document.body, {
+      clock: { now: () => 1000 },
+      onError: vi.fn(),
+      onPayload: ({ approvalId: id, renderRevealed: render }) => {
+        approvalId = id;
+        renderRevealed = render;
+        return () => {
+          cleanup();
+          render(new Map());
+        };
+      },
+    });
+    view.receive({
+      approvalId: "00000000000000000000000003",
+      payload,
+    });
+    expect(approvalId).toBe("00000000000000000000000003");
+    if (renderRevealed === undefined) {
+      throw new Error("Expected a reveal renderer");
+    }
+    renderRevealed(new Map([["/to", "<EMAIL_99>"]]));
+    expect(document.body.textContent).toContain("<EMAIL_99>");
+    expect(document.querySelector('[aria-label="<EMAIL_99>"]')).toBeNull();
+    expect(document.querySelector('[aria-label="<EMAIL_1>"]')).toBeNull();
+    view.dispose();
+    expect(document.body.textContent).not.toContain("<EMAIL_99>");
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it.each(["pending", "expired", "invalid", "waiting", "readonly"])(
