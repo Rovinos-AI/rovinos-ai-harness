@@ -5,6 +5,7 @@
 // Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
+// Not wired yet: web.fetch provider registration in the core runtime/CLI (19.12 -> #439)
 import { Command } from "commander";
 import { Client, InMemoryTransport, type Tool, type Transport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";

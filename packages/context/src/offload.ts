@@ -36,6 +36,7 @@ export const OffloadedStub = z
         preview: z.string(),
       })
       .strict(),
+    metadata: JsonValue.optional(),
   })
   .strict();
 
@@ -117,6 +118,7 @@ export interface OffloadRunContext {
 /** Result returned by a tool execution. */
 export interface OffloadToolExecutionResult {
   readonly binary?: boolean;
+  readonly metadata?: JsonValueType;
   readonly outcome: "ok" | "error";
   readonly result: JsonValueType;
   readonly errorCode?: Code;
@@ -498,16 +500,19 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     return {
       outcome: execution.outcome,
       ...(execution.errorCode === undefined ? {} : { errorCode: execution.errorCode }),
-      result: OffloadedStub.parse({
-        $offloaded: {
-          handle: validatedHandle,
-          bytes: data.byteLength,
-          preview:
-            execution.binary === true
-              ? ""
-              : Array.from(serialized).slice(0, this.options.previewChars).join(""),
-        },
-      }),
+      result: JsonValue.parse(
+        OffloadedStub.parse({
+          $offloaded: {
+            handle: validatedHandle,
+            bytes: data.byteLength,
+            preview:
+              execution.binary === true
+                ? ""
+                : Array.from(serialized).slice(0, this.options.previewChars).join(""),
+          },
+          ...(execution.metadata === undefined ? {} : { metadata: execution.metadata }),
+        }),
+      ),
     };
   }
 }

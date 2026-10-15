@@ -3,6 +3,16 @@ export { createSandboxBackend } from "./factory.js";
 export type { SandboxBackendDependencies } from "./factory.js";
 export { SandboxExecTool, ExecToolInputSchema } from "./exec-tool.js";
 export type { SandboxExecToolOptions } from "./exec-tool.js";
+export { createWebFetchTool, WebFetchTool } from "./web-fetch-tool.js";
+export type { WebFetchBackend, WebFetchToolOptions } from "./web-fetch-tool.js";
+export {
+  MAX_WEB_FETCH_BYTES,
+  MAX_WEB_FETCH_REDIRECTS,
+  MAX_WEB_FETCH_TIMEOUT_MS,
+  WebFetchRequestSchema,
+  WebFetchResultSchema,
+} from "./web-fetch-contracts.js";
+export type { WebFetchRequest, WebFetchResult } from "./web-fetch-contracts.js";
 export {
   InProcessBackend,
   InProcessBackendError,

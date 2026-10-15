@@ -34,6 +34,7 @@ export interface PiiToolContext {
 /** JSON execution contract with a validated numeric-byte binary representation. */
 export interface PiiToolResult {
   readonly binary?: boolean;
+  readonly metadata?: JsonValue;
   readonly outcome: "ok" | "error";
   readonly result: JsonValue;
   readonly errorCode?: Code;
@@ -187,23 +188,47 @@ export class PiiToolPort implements PiiToolPortLike {
       return { outcome: "error", errorCode: "tool_failed", result: null };
     }
     if (execution.binary === true) {
-      return binaryResult(execution);
+      return binaryResult(execution, call, context, this.deps.tokenizer);
     }
     return tokenizeToolOutput(execution, call, context, this.deps.tokenizer);
   }
 }
 
-function binaryResult(execution: PiiToolResult): PiiToolResult {
+async function binaryResult(
+  execution: PiiToolResult,
+  call: PiiToolCall,
+  context: PiiToolContext,
+  tokenizer: Tokenizer,
+): Promise<PiiToolResult> {
   const payload = ToolBinaryPayloadSchema.safeParse(execution.result);
   if (!payload.success) {
     return { outcome: "error", errorCode: "pii_input_invalid", result: null };
   }
-  return {
+  let metadata: JsonValue | undefined;
+  if (execution.metadata !== undefined) {
+    const sanitized = await tokenizeToolOutput(
+      {
+        outcome: execution.outcome,
+        result: execution.metadata,
+        ...(execution.errorCode === undefined ? {} : { errorCode: execution.errorCode }),
+      },
+      call,
+      context,
+      tokenizer,
+    );
+    if (sanitized.outcome === "error") {
+      return sanitized;
+    }
+    metadata = sanitized.result;
+  }
+  const result = {
     outcome: execution.outcome,
     result: payload.data,
     binary: true,
     ...(execution.outcome === "error" ? { errorCode: "tool_failed" } : {}),
+    ...(metadata === undefined ? {} : { metadata }),
   };
+  return metadata === undefined ? result : markSanitizedField(result, "metadata");
 }
 
 function markJsonSanitized(value: JsonValue): JsonValue {

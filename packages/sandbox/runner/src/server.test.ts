@@ -5,10 +5,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { Readable } from "node:stream";
+import { Duplex, Readable } from "node:stream";
 import { Id, parseJson } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { WebFetchResultSchema } from "../../src/web-fetch-contracts.js";
 import {
   createRunnerServer,
   createRunnerRequestHandler,
@@ -19,6 +20,8 @@ import {
 } from "./server.js";
 import type { RunnerServerOptions } from "./server.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
+import { fetchWebContent } from "./web-fetch.js";
+import type { ProxyRequest, ProxyResponse, WebFetchTransport } from "./web-fetch-transport.js";
 
 const token = "synthetic-runner-token-that-is-at-least-32-bytes";
 const runId = Id.parse("00000000000000000000000001");
@@ -77,6 +80,20 @@ class MemoryResponse extends EventEmitter {
   }
 }
 
+class FakeSocket extends Duplex {
+  override _read(): void {
+    this.push(null);
+  }
+
+  override _write(
+    _chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    callback();
+  }
+}
+
 function makeRequest(
   options: {
     method?: string;
@@ -116,6 +133,20 @@ function makeOptions(overrides: Partial<RunnerServerOptions> = {}): RunnerServer
 function makePayload(): string {
   return JSON.stringify({ runId, spec });
 }
+
+const fetchPayload = JSON.stringify({
+  runId,
+  request: { url: "https://docs.example.test/page?synthetic=canary", accept: "text/plain" },
+});
+const fetchResult = WebFetchResultSchema.parse({
+  url: "https://docs.example.test/page",
+  status: 200,
+  contentType: "text/plain",
+  text: "untrusted response",
+  truncated: false,
+  untrusted: true,
+  hiddenTextDropped: 0,
+});
 
 async function call(
   handler: ReturnType<typeof createRunnerRequestHandler>,
@@ -160,6 +191,154 @@ describe("runner HTTP request handler", () => {
     expect(responseBody(health)).toEqual({ status: "ok" });
     expect(missing.status).toBe(404);
     expect(responseBody(missing)).toMatchObject({ code: "sandbox_route_not_found" });
+  });
+
+  it("requires an allowlist and proxy before exposing the authenticated fetch endpoint", async () => {
+    const handler = createRunnerRequestHandler(makeOptions());
+    const response = await call(
+      handler,
+      makeRequest({
+        url: "/fetch",
+        authorization: ["Bearer", token].join(" "),
+        body: fetchPayload,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(responseBody(response)).toMatchObject({ code: "sandbox_fetch_egress_disabled" });
+  });
+
+  it("fetches only through the configured runner proxy and returns untrusted content", async () => {
+    const fetch = vi.fn(() => Promise.resolve(fetchResult));
+    const handler = createRunnerRequestHandler(
+      makeOptions({
+        proxyUrl: "http://sandbox-egress-proxy:3128",
+        egressAllowlist: [{ host: "docs.example.test", ports: [443] }],
+        fetch,
+      }),
+    );
+    const response = await call(
+      handler,
+      makeRequest({
+        url: "/fetch",
+        authorization: ["Bearer", token].join(" "),
+        body: fetchPayload,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(WebFetchResultSchema.parse(JSON.parse(response.body))).toEqual(fetchResult);
+    expect(fetch).toHaveBeenCalledWith(
+      { url: "https://docs.example.test/page?synthetic=canary", accept: "text/plain" },
+      {
+        proxyUrl: "http://sandbox-egress-proxy:3128",
+        allow: [{ host: "docs.example.test", ports: [443] }],
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("cancels a stalled TLS handshake and admits the next exec request", async () => {
+    const tunnelSocket = new FakeSocket();
+    const tlsSocket = new FakeSocket();
+    let onConnect: ((response: ProxyResponse, socket: Duplex) => void) | undefined;
+    let signalTlsStarted: () => void = () => undefined;
+    const tlsStarted = new Promise<void>((resolve) => {
+      signalTlsStarted = resolve;
+    });
+    const connectResponse: ProxyResponse = {
+      statusCode: 200,
+      headers: {},
+      onData: () => undefined,
+      onEnd: () => undefined,
+      onError: () => undefined,
+      onAborted: () => undefined,
+      destroy: () => undefined,
+    };
+    const transport: WebFetchTransport = {
+      requestHttp: (_requestOptions) => {
+        const request: ProxyRequest = {
+          onError: () => undefined,
+          onConnect: (listener) => {
+            onConnect = listener;
+          },
+          end: () => onConnect?.(connectResponse, tunnelSocket),
+        };
+        return request;
+      },
+      connectTls: () => {
+        signalTlsStarted();
+        return {
+          socket: tlsSocket,
+          onError: () => undefined,
+          onSecureConnect: () => undefined,
+        };
+      },
+      requestHttps: () => {
+        throw new Error("TLS handshake should remain stalled");
+      },
+    };
+    const handler = createRunnerRequestHandler(
+      makeOptions({
+        proxyUrl: "http://sandbox-egress-proxy:3128",
+        egressAllowlist: [{ host: "docs.example.test", ports: [443] }],
+        fetch: (request, configuration, signal) =>
+          fetchWebContent(request, configuration, signal, { transport }),
+      }),
+    );
+    const fetchResponse = new MemoryResponse();
+    const pendingFetch = handler(
+      makeRequest({
+        url: "/fetch",
+        authorization: ["Bearer", token].join(" "),
+        body: fetchPayload,
+      }),
+      fetchResponse,
+    );
+
+    await tlsStarted;
+    fetchResponse.emit("close");
+    await pendingFetch;
+
+    expect(fetchResponse.status).toBe(502);
+    expect(tunnelSocket.destroyed).toBe(true);
+    expect(tlsSocket.destroyed).toBe(true);
+    const execResponse = await call(
+      handler,
+      makeRequest({
+        url: "/exec",
+        authorization: ["Bearer", token].join(" "),
+        body: makePayload(),
+      }),
+    );
+    expect(execResponse.status).toBe(200);
+    expect(responseBody(execResponse)).toMatchObject({ stdout: "ok\n" });
+  });
+
+  it("does not expose fetch URLs in runner errors or invoke the fetcher for malformed inputs", async () => {
+    const fetch = vi.fn(() => Promise.resolve(fetchResult));
+    const handler = createRunnerRequestHandler(
+      makeOptions({
+        proxyUrl: "http://sandbox-egress-proxy:3128",
+        egressAllowlist: [{ host: "docs.example.test", ports: [443] }],
+        fetch,
+      }),
+    );
+    const response = await call(
+      handler,
+      makeRequest({
+        url: "/fetch",
+        authorization: ["Bearer", token].join(" "),
+        body: JSON.stringify({
+          runId,
+          request: { url: "******docs.example.test/page?synthetic-canary" },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body).not.toContain("synthetic-canary");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("rejects missing and incorrect bearer credentials", async () => {

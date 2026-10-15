@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id } from "@harness/schemas";
 import { describe, expect, it, vi } from "vitest";
+import { MAX_WEB_FETCH_BYTES } from "./web-fetch-contracts.js";
 import { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
 import type { ExecResult, ExecSpec } from "./types.js";
 
@@ -20,6 +21,23 @@ const result: ExecResult = {
   timedOut: false,
   durationMs: 2,
 };
+const fetchResult = {
+  url: "https://docs.example.test/page",
+  status: 200,
+  contentType: "text/plain",
+  text: "content",
+  truncated: false,
+  untrusted: true as const,
+  hiddenTextDropped: 0,
+};
+const fetchRequest = { url: "https://docs.example.test/page?synthetic=canary" };
+
+function requestUrl(value: RequestInfo | URL): URL {
+  if (value instanceof URL) {
+    return value;
+  }
+  return typeof value === "string" ? new URL(value) : new URL(value.url);
+}
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
@@ -148,6 +166,94 @@ describe("RemoteSandboxBackend", () => {
     await expect(
       backend(fetcher, { timeoutGraceMs: 0 }).exec(runId, shortSpec, new AbortController().signal),
     ).rejects.toMatchObject({ code: "sandbox_timeout" });
+  });
+
+  it("sends fetch calls to the authenticated runner endpoint and validates untrusted content", async () => {
+    const fetcher: typeof fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      expect(requestUrl(url).pathname).toBe("/fetch");
+      expect(new Headers(init?.headers).get("authorization")).toBe(
+        ["Bearer", "synthetic-runner-token-that-is-at-least-32-bytes"].join(" "),
+      );
+      return Promise.resolve(response(fetchResult));
+    });
+
+    await expect(
+      backend(fetcher).fetch(runId, fetchRequest, new AbortController().signal),
+    ).resolves.toEqual(fetchResult);
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("http://sandbox-runner:8080/fetch"),
+      expect.objectContaining({
+        method: "POST",
+        redirect: "error",
+        body: JSON.stringify({ runId, request: fetchRequest }),
+      }),
+    );
+  });
+
+  it("accepts a cap-sized fetch body with sixfold JSON escaping", async () => {
+    const escapedResult = { ...fetchResult, text: "\u0000".repeat(MAX_WEB_FETCH_BYTES) };
+    await expect(
+      backend(() => Promise.resolve(response(escapedResult))).fetch(
+        runId,
+        fetchRequest,
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ text: escapedResult.text });
+  });
+
+  it("maps fetch status, malformed output, abort, and transport failures safely", async () => {
+    const failingFetchers: { readonly fetcher: typeof fetch; readonly code: string }[] = [
+      { fetcher: () => Promise.resolve(response({}, 409)), code: "sandbox_busy" },
+      { fetcher: () => Promise.resolve(response({}, 504)), code: "sandbox_timeout" },
+      { fetcher: () => Promise.resolve(response({}, 500)), code: "sandbox_unavailable" },
+      {
+        fetcher: () => Promise.resolve(response({ url: "https://bad.example.test" })),
+        code: "sandbox_unavailable",
+      },
+      {
+        fetcher: () => Promise.reject(new Error("synthetic fetch URL")),
+        code: "sandbox_unavailable",
+      },
+    ];
+    for (const { fetcher, code } of failingFetchers) {
+      await expect(
+        backend(fetcher).fetch(runId, fetchRequest, new AbortController().signal),
+      ).rejects.toMatchObject({ code });
+    }
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await expect(
+      backend(vi.fn<typeof fetch>()).fetch(runId, fetchRequest, cancelled.signal),
+    ).rejects.toMatchObject({ code: "sandbox_timeout" });
+  });
+
+  it("maps the fetch request deadline to sandbox_timeout", async () => {
+    vi.useFakeTimers();
+    const fetcher: typeof fetch = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            reject(new Error("aborted"));
+          },
+          { once: true },
+        );
+      });
+    try {
+      const pending = backend(fetcher, { timeoutGraceMs: 0 }).fetch(
+        runId,
+        fetchRequest,
+        new AbortController().signal,
+      );
+      const outcome = pending.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expect(outcome).resolves.toMatchObject({ code: "sandbox_timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

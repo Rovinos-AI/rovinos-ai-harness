@@ -5,7 +5,7 @@ services:
     command:
       - node
       - -e
-      - "require('node:http').createServer((_request, response) => response.end('probe')).listen(8080, '0.0.0.0')"
+      - "require('node:http').createServer((request, response) => { const path = new URL(request.url, 'http://localhost').pathname; if (path === '/redirect-denied') { response.writeHead(302, { location: 'http://denied.example.test/' }); response.end(); return; } if (path === '/redirect-metadata') { response.writeHead(302, { location: 'http://metadata.example.test/latest' }); response.end(); return; } if (path === '/large') { response.writeHead(200, { 'content-type': 'text/plain' }); response.end(Buffer.alloc(2 * 1024 * 1024 + 1, 97)); return; } if (path === '/html') { response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end('<h1>visible</h1><div hidden>hidden-canary</div><script>script-canary</script>'); return; } if (path === '/binary') { response.writeHead(200, { 'content-type': 'image/png' }); response.end(Buffer.from([0, 1, 255])); return; } response.writeHead(200, { 'content-type': 'text/plain' }); response.end('probe'); }).listen(8080, '0.0.0.0')"
     read_only: true
     tmpfs:
       - /tmp
@@ -16,6 +16,8 @@ services:
     networks:
       egress:
         ipv4_address: 198.51.100.3
+        aliases:
+          - egress-probe.test
   sandbox-egress-proxy:
     extra_hosts:
       - metadata.example.test:169.254.169.254
