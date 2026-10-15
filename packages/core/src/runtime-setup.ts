@@ -3,10 +3,15 @@ import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
-import type { Code, Id, PiiConfig } from "@harness/schemas";
+import type { Code, Id, PiiConfig, ToolSpec } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
-import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
+import {
+  createSandboxBackend,
+  createWebFetchTool,
+  RemoteSandboxBackend,
+  type SandboxBackend,
+} from "@harness/sandbox";
 import type { RequestSanitizer } from "@harness/models";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
@@ -125,11 +130,57 @@ function createRuntimeTool(
   overrides: RuntimeOverrides,
   mcpToolPort: McpToolPort | undefined,
 ) {
-  const tool = overrides.tool ?? mcpToolPort ?? overrides.createTool?.(backend) ?? unavailableTool;
-  if (config.pii?.enabled !== false && tool instanceof PiiToolPort) {
+  const baseTool =
+    overrides.tool ?? mcpToolPort ?? overrides.createTool?.(backend) ?? unavailableTool;
+  if (config.pii?.enabled !== false && baseTool instanceof PiiToolPort) {
     throw new PiiToolPortAlreadyWrappedError();
   }
-  return tool;
+  // Keep runner fetches behind the same runtime decorators and tool-policy boundary.
+  const webFetchTool =
+    backend instanceof RemoteSandboxBackend
+      ? createWebFetchTool(config.sandbox?.egress?.allow, backend)
+      : undefined;
+  return webFetchTool === undefined ? baseTool : composeToolPorts([webFetchTool, baseTool]);
+}
+
+function composeToolPorts(ports: readonly ToolPort[]): ToolPort {
+  const portFor = (toolId: Code): ToolPort | undefined =>
+    ports.find((port) => port.describe(toolId) !== undefined);
+  const fallback = ports.at(-1) ?? unavailableTool;
+  const getToolSpecs = () => {
+    const specs = new Map<Code, ToolSpec>();
+    for (const port of ports) {
+      for (const spec of port.getToolSpecs?.() ?? []) {
+        if (!specs.has(spec.toolId)) {
+          specs.set(spec.toolId, spec);
+        }
+      }
+    }
+    return [...specs.values()];
+  };
+  const prepare = ports.some((port) => port.prepare !== undefined)
+    ? (
+        call: Parameters<NonNullable<ToolPort["prepare"]>>[0],
+        context: Parameters<NonNullable<ToolPort["prepare"]>>[1],
+      ) => portFor(call.toolId)?.prepare?.(call, context) ?? Promise.resolve(call)
+    : undefined;
+  const validateInputSchema = ports.some((port) => port.validateInputSchema !== undefined)
+    ? (
+        toolId: Code,
+        args: Parameters<NonNullable<ToolPort["validateInputSchema"]>>[1],
+        schema: Parameters<NonNullable<ToolPort["validateInputSchema"]>>[2],
+        context: Parameters<NonNullable<ToolPort["validateInputSchema"]>>[3],
+      ) =>
+        portFor(toolId)?.validateInputSchema?.(toolId, args, schema, context) ??
+        Promise.resolve(true)
+    : undefined;
+  return {
+    ...(prepare === undefined ? {} : { prepare }),
+    ...(validateInputSchema === undefined ? {} : { validateInputSchema }),
+    describe: (toolId) => portFor(toolId)?.describe(toolId) ?? fallback.describe(toolId),
+    getToolSpecs,
+    execute: (call, context) => (portFor(call.toolId) ?? fallback).execute(call, context),
+  };
 }
 
 /** Creates runtime keys, closing a caller-supplied sandbox backend if key resolution fails. */

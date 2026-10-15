@@ -7,6 +7,8 @@ import {
   Code,
   FakeClock,
   Id,
+  JsonValue,
+  PiiConfigSchema,
   RunConfigSchema,
   SandboxConfigSchema,
   SecretRefSchema,
@@ -57,6 +59,31 @@ function model(): FakeModelPort {
     ]),
     completion([{ type: "text", text: "completed" }]),
   ]);
+}
+
+function textModel(): FakeModelPort {
+  return new FakeModelPort([completion([{ type: "text", text: "completed" }])]);
+}
+
+function webFetchModel(url: string): FakeModelPort {
+  return new FakeModelPort([
+    completion([
+      {
+        type: "tool_call",
+        callId: Id.parse("11111111111111111111111112"),
+        toolId: Code.parse("web.fetch"),
+        args: JsonValue.parse({ url }),
+      },
+    ]),
+    completion([{ type: "text", text: "completed" }]),
+  ]);
+}
+
+function remoteSandbox(allow: readonly { readonly host: string; readonly ports: number[] }[]) {
+  return SandboxConfigSchema.parse({
+    runner: { url: "http://sandbox-runner:8080", token: "env:RUNNER" },
+    egress: { allow },
+  });
 }
 
 function metadataTool(backend: SandboxBackend, remote: boolean): ToolPort {
@@ -224,6 +251,188 @@ describe("createRuntime sandbox composition", () => {
       }
     },
   );
+
+  it("does not advertise web.fetch without a configured allowlist or a remote runner", async () => {
+    const emptyAllowlistModel = textModel();
+    const emptyAllowlistRuntime = await createRuntime(
+      { run, sandbox: remoteSandbox([]) },
+      {
+        ...overrides(),
+        model: emptyAllowlistModel,
+        secretResolver: {
+          resolve: () => Promise.resolve({ reveal: () => "synthetic-runtime-sandbox-token-0001" }),
+        },
+      },
+    );
+    const localModel = textModel();
+    const localRuntime = await createRuntime(
+      { run, sandbox: remoteSandbox([{ host: "docs.example.test", ports: [443] }]) },
+      {
+        ...overrides(),
+        model: localModel,
+        sandboxBackend: new InProcessBackend({
+          workspaceRoot: "/tmp/runtime-web-fetch",
+          logger: { log: () => undefined },
+        }),
+      },
+    );
+    try {
+      await emptyAllowlistRuntime.run("inspect tools");
+      await localRuntime.run("inspect tools");
+      expect(
+        emptyAllowlistModel.requests[0]?.request.tools?.map(({ toolId }) => toolId),
+      ).not.toContain("web.fetch");
+      expect(localModel.requests[0]?.request.tools?.map(({ toolId }) => toolId)).not.toContain(
+        "web.fetch",
+      );
+    } finally {
+      await emptyAllowlistRuntime.close();
+      await localRuntime.close();
+    }
+  });
+
+  it("advertises web.fetch with a remote runner and allowlist alongside createTool tools", async () => {
+    const modelPort = textModel();
+    const customTool = {
+      describe: (id: Code) => (id === toolId ? { idempotent: true, timeoutMs: 1_000 } : undefined),
+      getToolSpecs: () => [{ toolId, description: "A synthetic tool", inputSchema: {} }],
+      execute: () => Promise.resolve({ outcome: "ok" as const, result: null }),
+    };
+    const createTool = vi.fn(() => customTool);
+    const runtime = await createRuntime(
+      {
+        run,
+        sandbox: remoteSandbox([{ host: "docs.example.test", ports: [443] }]),
+      },
+      {
+        ...overrides(),
+        model: modelPort,
+        secretResolver: {
+          resolve: () => Promise.resolve({ reveal: () => "synthetic-runtime-sandbox-token-0001" }),
+        },
+        createTool,
+      },
+    );
+    try {
+      await runtime.run("inspect tools");
+      expect(createTool).toHaveBeenCalledExactlyOnceWith(runtime.sandboxBackend);
+      expect(modelPort.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toContain(
+        "web.fetch",
+      );
+      expect(modelPort.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toContain(toolId);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  // threat: T-05
+  it("applies policy to tokenized web.fetch calls and tokenizes untrusted results", async () => {
+    const outputCanary = "fetch.output@example.test";
+    const order: string[] = [];
+    const fetcher = vi.fn((_input: URL | RequestInfo): Promise<Response> => {
+      order.push("fetch");
+      return Promise.resolve(
+        Response.json({
+          url: "https://docs.example.test/page",
+          status: 200,
+          contentType: "text/plain",
+          text: `Contact ${outputCanary}`,
+          truncated: false,
+          untrusted: true,
+          hiddenTextDropped: 0,
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const modelPort = webFetchModel("https://docs.example.test/page");
+    const policy = {
+      version: Code.parse("web_fetch_test"),
+      decide: vi.fn((call: { readonly toolId: Code; readonly args: JsonValue }) => {
+        order.push("policy");
+        expect(call.toolId).toBe("web.fetch");
+        expect(JSON.stringify(call.args)).toContain("https://docs.example.test/page");
+        return {
+          decision: "allow" as const,
+          ruleId: Code.parse("test_allow"),
+          reason: Code.parse("test_allowed"),
+          editable: [],
+        };
+      }),
+    };
+    const runtime = await createRuntime(
+      {
+        run,
+        pii: PiiConfigSchema.parse({ defaultAction: "tokenize" }),
+        sandbox: remoteSandbox([{ host: "docs.example.test", ports: [443] }]),
+      },
+      {
+        ...overrides(),
+        model: modelPort,
+        policy,
+        secretResolver: {
+          resolve: () => Promise.resolve({ reveal: () => "synthetic-runtime-sandbox-token-0001" }),
+        },
+      },
+    );
+    try {
+      const result = await runtime.run("fetch the page");
+      expect(result.status).toBe("completed");
+      expect(order).toEqual(["policy", "fetch"]);
+      expect(modelPort.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toContain(
+        "web.fetch",
+      );
+      expect(result.events.find((event) => event.type === "tool_result")).toMatchObject({
+        toolId: "web.fetch",
+        outcome: "ok",
+        result: { text: "Contact <EMAIL_1>", untrusted: true },
+      });
+      const recorded = JSON.stringify(result.events);
+      expect(recorded).not.toContain(outputCanary);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  // threat: T-05
+  it("does not call the runner when policy denies web.fetch", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    const modelPort = webFetchModel("https://docs.example.test/page");
+    const policy = {
+      version: Code.parse("web_fetch_test"),
+      decide: vi.fn(() => ({
+        decision: "deny" as const,
+        ruleId: Code.parse("test_deny"),
+        reason: Code.parse("test_denied"),
+        editable: [],
+      })),
+    };
+    const runtime = await createRuntime(
+      {
+        run,
+        sandbox: remoteSandbox([{ host: "docs.example.test", ports: [443] }]),
+      },
+      {
+        ...overrides(),
+        model: modelPort,
+        policy,
+        secretResolver: {
+          resolve: () => Promise.resolve({ reveal: () => "synthetic-runtime-sandbox-token-0001" }),
+        },
+      },
+    );
+    try {
+      const result = await runtime.run("fetch the page");
+      expect(result.events.find((event) => event.type === "tool_intent")).toMatchObject({
+        toolId: "web.fetch",
+        policyDecision: "deny",
+      });
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(policy.decide).toHaveBeenCalledOnce();
+    } finally {
+      await runtime.close();
+    }
+  });
 
   // threat: T-08
   it.each(["deny", "ask"] as const)(

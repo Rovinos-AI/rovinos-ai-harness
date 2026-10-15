@@ -39,4 +39,18 @@ The tool accepts `url`, an optional `accept` value (`text/html`, `text/plain`, `
 
 The runner enforces a 20-second total deadline and reads at most 2 MiB of response bytes. HTML becomes visible text: scripts, styles, templates, and hidden elements are omitted; `hiddenTextDropped` reports the number of omitted hidden text characters. Plain text, Markdown, and JSON are returned as text. Other media types return `{ binary: true, contentType, bytes }`, where `bytes` is a bounded array of byte values. Results include the final URL, status, content type, truncation state, and `untrusted: true`; the query string is removed from the result URL by default. When composed through the standard tool boundary, content is tokenized before durable storage and large results use the workspace offload path. The provider does not create spans or log request URLs.
 
-The provider is available from `@harness/sandbox`; registration into the shipped runtime and CLI is not yet wired. Applications should only register it with a `RemoteSandboxBackend` configured against a runner started with the same non-empty allowlist and egress overlay.
+`createRuntime` advertises `web.fetch` only when it selects a `RemoteSandboxBackend` and the configured egress allowlist is non-empty. The CLI uses this runtime composition. The call is subject to the same policy engine as every other tool; enabling egress does not grant policy permission. Without a policy file, the runtime's default decision is `deny`. To allow the tool, add an explicit rule, for example:
+
+```yaml
+version: 1
+defaultDecision: deny
+rules:
+  - id: allow_web_fetch
+    match:
+      tools:
+        - web.fetch
+    decision: allow
+    reason: allowlisted_fetch
+```
+
+The runner must still be started with the same non-empty allowlist and egress overlay.
