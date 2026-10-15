@@ -83,6 +83,7 @@ function errorCode(error: unknown): string {
   return "store_error";
 }
 
+/** Converts a worker failure to an Error while retaining non-Error causes. */
 export function normalizeWorkerError(error: unknown): Error {
   return error instanceof Error ? error : new Error("Concurrency worker error", { cause: error });
 }
