@@ -27,8 +27,8 @@ const arrayRequest: ModelRequest = {
 describe("bounded repair requests", () => {
   it.each(["CANARY_ALPHA", "CANARY_BETA", "CANARY_GAMMA"])(
     "includes issue paths without echoing invalid values such as %s",
-    (canary) => {
-      const result = enforcePromptOutput(
+    async (canary) => {
+      const result = await enforcePromptOutput(
         [{ type: "text", text: `{"items":[{"count":"${canary}"}]}` }],
         z.object({ items: z.array(z.object({ count: z.number().int() })) }),
       );
@@ -58,9 +58,9 @@ describe("bounded repair requests", () => {
     },
   );
 
-  it("replaces model-provided record keys with a wildcard", () => {
+  it("replaces model-provided record keys with a wildcard", async () => {
     const canary = "alice@example.test";
-    const result = enforcePromptOutput(
+    const result = await enforcePromptOutput(
       [{ type: "text", text: `{"${canary}":"invalid"}` }],
       z.record(z.string(), z.number()),
     );

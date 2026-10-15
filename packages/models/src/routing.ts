@@ -20,6 +20,8 @@ import {
   type ModelGatewayDependencies,
   type ModelGatewayOptions,
   type ModelGatewayResponse,
+  type TokenizedModelGatewayContext,
+  type TokenizedModelGatewayResponse,
 } from "./gateway.js";
 import { AdapterRegistry } from "./registry.js";
 import type { ProviderAdapter } from "./types.js";
@@ -190,10 +192,24 @@ export class RoutingModelGateway {
    * @param context - Active run identifier, signal, deadline, and output schema.
    * @returns Completion from the successful provider with its fallback depth.
    */
+  complete<OutputSchema extends z.ZodType = z.ZodType>(
+    request: ModelRequest,
+    context: Omit<ModelGatewayContext<OutputSchema>, "valueTransform"> & {
+      readonly valueTransform?: undefined;
+    },
+  ): Promise<ModelGatewayResponse<OutputSchema>>;
+  complete<OutputSchema extends z.ZodType = z.ZodType>(
+    request: ModelRequest,
+    context: TokenizedModelGatewayContext<OutputSchema>,
+  ): Promise<TokenizedModelGatewayResponse>;
+  complete<OutputSchema extends z.ZodType = z.ZodType>(
+    request: ModelRequest,
+    context: ModelGatewayContext<OutputSchema>,
+  ): Promise<ModelGatewayResponse<OutputSchema> | TokenizedModelGatewayResponse>;
   async complete<OutputSchema extends z.ZodType = z.ZodType>(
     request: ModelRequest,
     context: ModelGatewayContext<OutputSchema>,
-  ): Promise<ModelGatewayResponse<OutputSchema>> {
+  ): Promise<ModelGatewayResponse<OutputSchema> | TokenizedModelGatewayResponse> {
     const candidates = requestCandidates(request, this.routing);
     let accumulatedUsage: ModelUsage | undefined;
     let accumulatedLatencyMs = 0;

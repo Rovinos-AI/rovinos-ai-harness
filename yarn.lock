@@ -1325,6 +1325,7 @@ __metadata:
     "@harness/schemas": "workspace:^"
     "@harness/vault": "workspace:^"
     vitest: "npm:3.2.6"
+    zod: "npm:4.6.5"
   languageName: unknown
   linkType: soft
 

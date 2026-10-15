@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { JsonValue, ModelRetryConfigSchema, parseJson, type ModelRequest } from "@harness/schemas";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import {
+  JsonValue,
+  ModelRetryConfigSchema,
+  parseJson,
+  type JsonValue as JsonValueType,
+  type ModelRequest,
+} from "@harness/schemas";
 import { attr, defineSpan, withSpan } from "@harness/telemetry";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { context, trace } from "@opentelemetry/api";
@@ -12,6 +18,7 @@ import * as ModelExports from "./index.js";
 import { AdapterRegistry } from "./registry.js";
 import { FakeProvider } from "./testing/fake-provider.js";
 import type { ProviderAdapter, ProviderContext } from "./types.js";
+import type { ValueTransform } from "./index.js";
 import { abortableSleep } from "./resilience/retry.js";
 import { AnthropicAdapter } from "./providers/anthropic.js";
 import { OpenAIAdapter } from "./providers/openai.js";
@@ -637,6 +644,7 @@ describe("ModelGateway", () => {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
     });
+
     const outputSchema = z.object({ answer: z.string() }).strict();
     const completion = await gateway.complete(
       { ...request, model: { provider: "openai", model: "model-a" } },
@@ -652,6 +660,198 @@ describe("ModelGateway", () => {
       rungUsed: "native",
       enforcement: { valid: true, value: { answer: "ok" } },
     });
+    if (completion.enforcement?.valid === true) {
+      expectTypeOf(completion.enforcement.value.answer).toEqualTypeOf<string>();
+    }
+  });
+
+  it("uses a value transform and keeps the tokenized result in the gateway response", async () => {
+    const tokenized: JsonValueType = { email: "<EMAIL_1>" };
+    const raw = { email: "alice@example.test" };
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: JSON.stringify(tokenized) }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    const outputSchema = z.object({ email: z.email() });
+    let transformedValue: JsonValueType | undefined;
+    const valueTransform: ValueTransform = (schema, value) => {
+      transformedValue = value;
+      if (!schema.safeParse(raw).success) {
+        return Promise.resolve({
+          ok: false,
+          issues: [{ path: ["email"], code: "invalid_format" }],
+        });
+      }
+      return Promise.resolve({ ok: true, tokenized: value });
+    };
+
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema,
+        valueTransform,
+      },
+    );
+
+    expect(transformedValue).toEqual(tokenized);
+    expect(completion).toMatchObject({
+      parts: [{ type: "text", text: '{"email":"<EMAIL_1>"}' }],
+      schemaValid: true,
+      enforcement: { valid: true, value: tokenized },
+    });
+    if (completion.enforcement?.valid === true) {
+      expectTypeOf(completion.enforcement.value).toEqualTypeOf<JsonValueType>();
+    }
+    expect(JSON.stringify(completion)).not.toContain("alice@example.test");
+  });
+
+  it("cancels a pending value transform with the run signal", async () => {
+    const tokenized: JsonValueType = { answer: "ok" };
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: JSON.stringify(tokenized) }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+    });
+    let finishValidation = (): void => undefined;
+    let validationStarted = false;
+    const valueTransform: ValueTransform = () =>
+      new Promise((resolve) => {
+        validationStarted = true;
+        finishValidation = () => {
+          resolve({ ok: true, tokenized });
+        };
+      });
+    const controller = new AbortController();
+    const completion = gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: controller.signal,
+        outputSchema: z.object({ answer: z.string() }),
+        valueTransform,
+      },
+    );
+    await vi.waitFor(() => {
+      expect(validationStarted).toBe(true);
+    });
+    const cancelled = new Error("run cancelled");
+    controller.abort(cancelled);
+
+    await expect(completion).rejects.toBe(cancelled);
+    finishValidation();
+  });
+
+  it("expires a pending value transform at the run deadline", async () => {
+    useFakeClock();
+    const tokenized: JsonValueType = { answer: "ok" };
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: JSON.stringify(tokenized) }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => Date.now() },
+    });
+    let finishValidation = (): void => undefined;
+    let startValidation = (): void => undefined;
+    const validationStarted = new Promise<void>((resolve) => {
+      startValidation = () => {
+        resolve();
+      };
+    });
+    const valueTransform: ValueTransform = () =>
+      new Promise((resolve) => {
+        startValidation();
+        finishValidation = () => {
+          resolve({ ok: true, tokenized });
+        };
+      });
+    const completion = gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        deadlineTs: 1_000,
+        outputSchema: z.object({ answer: z.string() }),
+        valueTransform,
+      },
+    );
+    await validationStarted;
+    const result = completion.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(await result).toMatchObject({ code: "deadline_exceeded" });
+    finishValidation();
+  });
+
+  it("repairs unresolvable tokens from paths only", async () => {
+    const tokenized: JsonValueType = { email: "<EMAIL_9>" };
+    const complete = vi.fn((_request: ModelRequest) =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: JSON.stringify(tokenized) }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 1,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("openai", complete)]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      enforcement: { maxRepairs: 1 },
+    });
+    let validationAttempts = 0;
+    const valueTransform: ValueTransform = (_schema, value) => {
+      validationAttempts += 1;
+      return Promise.resolve(
+        validationAttempts === 1
+          ? { ok: false, issues: [{ path: ["email"], code: "pii_token_unresolvable" }] }
+          : { ok: true, tokenized: value },
+      );
+    };
+
+    const completion = await gateway.complete(
+      { ...request, model: { provider: "openai", model: "model-a" } },
+      {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        outputSchema: z.object({ email: z.email() }),
+        valueTransform,
+      },
+    );
+
+    const repair = complete.mock.calls[1]?.[0].messages.at(-1);
+    expect(repair).toMatchObject({
+      role: "user",
+      parts: [
+        {
+          type: "text",
+          text: "Correct the structured output to match the requested schema. Return only the corrected output.\n$.email: expected a value matching the requested schema",
+        },
+      ],
+    });
+    expect(JSON.stringify(repair)).not.toContain("<EMAIL_9>");
+    expect(completion.parts).toEqual([{ type: "text", text: '{"email":"<EMAIL_9>"}' }]);
   });
 
   it("uses built-in protocol behavior for a custom adapter id", async () => {

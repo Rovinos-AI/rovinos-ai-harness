@@ -2,10 +2,14 @@
 import { Code, JsonValue, safeParseJson, type ModelRequest, type Part } from "@harness/schemas";
 import type { z } from "zod";
 import {
+  applyValueTransform,
   EnforcementIssueSchema,
   enforcementIssuesFromError,
   parseEnforcementResult,
+  parseTokenizedEnforcementResult,
   type EnforcementResult,
+  type TokenizedEnforcementResult,
+  type ValueTransform,
 } from "./index.js";
 
 /** Prepares a provider request with the schema lowered for native output. */
@@ -20,7 +24,22 @@ export function withNativeOutputSchema(
 export function enforceNativeOutput<Schema extends z.ZodType>(
   parts: readonly Part[],
   outputSchema: Schema,
-): EnforcementResult<Schema> {
+): Promise<EnforcementResult<Schema>>;
+export function enforceNativeOutput(
+  parts: readonly Part[],
+  outputSchema: z.ZodType,
+  valueTransform: ValueTransform,
+): Promise<TokenizedEnforcementResult>;
+export function enforceNativeOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+  valueTransform?: ValueTransform,
+): Promise<EnforcementResult<Schema> | TokenizedEnforcementResult>;
+export async function enforceNativeOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+  valueTransform?: ValueTransform,
+): Promise<EnforcementResult<Schema> | TokenizedEnforcementResult> {
   if (parts.some((part) => part.type === "tool_call")) {
     return parseEnforcementResult(outputSchema, {
       valid: false,
@@ -52,6 +71,22 @@ export function enforceNativeOutput<Schema extends z.ZodType>(
       rungUsed: "native",
     });
   }
+  if (valueTransform !== undefined) {
+    const transformed = await applyValueTransform(valueTransform, outputSchema, json.data);
+    if (!transformed.ok) {
+      return parseEnforcementResult(outputSchema, {
+        valid: false,
+        issues: transformed.issues,
+        rungUsed: "native",
+      });
+    }
+    return parseTokenizedEnforcementResult({
+      value: transformed.tokenized,
+      valid: true,
+      rungUsed: "native",
+    });
+  }
+
   const parsed = outputSchema.safeParse(json.data);
   if (!parsed.success) {
     return parseEnforcementResult(outputSchema, {
