@@ -108,6 +108,8 @@ stages:
             displayName: Build schemas for worker-thread tests
           - script: yarn build:host
             displayName: Build reference host browser bundle
+          - script: yarn workspace @harness/approval-app build
+            displayName: Build approval app for the control-plane resource
           - script: yarn workspace @harness/host exec playwright install --with-deps chromium
             displayName: Install Chromium and Linux dependencies
             condition: eq(variables['Agent.OS'], 'Linux')
