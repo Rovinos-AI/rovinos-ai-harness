@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@harness/schemas": "workspace:^",
-    "@harness/vault": "workspace:^"
+    "@harness/vault": "workspace:^",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "vitest": "3.2.6"

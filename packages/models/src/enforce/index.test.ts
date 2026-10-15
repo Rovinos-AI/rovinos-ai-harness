@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, expect, it } from "vitest";
-import { lookupCapabilities } from "@harness/schemas";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { lookupCapabilities, type JsonValue } from "@harness/schemas";
 import { z } from "zod";
 import {
   createEnforcementResultSchema,
@@ -8,7 +8,11 @@ import {
   parseEnforcementResult,
   selectEnforcementRung,
   stripSyntheticToolCall,
+  type EnforcementResult,
+  type TokenizedEnforcementResult,
+  type ValueTransform,
 } from "./index.js";
+import { enforceNativeOutput } from "./rung-native.js";
 
 describe("structured-output enforcement selection", () => {
   it.each([
@@ -68,5 +72,27 @@ describe("structured-output enforcement selection", () => {
     expect(
       resultSchema.safeParse({ value: { answer: 42 }, valid: true, rungUsed: "native" }).success,
     ).toBe(false);
+  });
+
+  it("keeps ordinary results schema-typed and transformed results tokenized", async () => {
+    const outputSchema = z.object({ answer: z.string() });
+    const parts = [{ type: "text" as const, text: '{"answer":"ok"}' }];
+    const ordinary = await enforceNativeOutput(parts, outputSchema);
+
+    expect(ordinary.valid).toBe(true);
+    expectTypeOf(ordinary).toEqualTypeOf<EnforcementResult<typeof outputSchema>>();
+    if (ordinary.valid) {
+      expectTypeOf(ordinary.value.answer).toEqualTypeOf<string>();
+    }
+
+    const valueTransform: ValueTransform = (_schema, tokenized) =>
+      Promise.resolve({ ok: true, tokenized });
+    const tokenized = await enforceNativeOutput(parts, outputSchema, valueTransform);
+
+    expect(tokenized.valid).toBe(true);
+    expectTypeOf(tokenized).toEqualTypeOf<TokenizedEnforcementResult>();
+    if (tokenized.valid) {
+      expectTypeOf(tokenized.value).toEqualTypeOf<JsonValue>();
+    }
   });
 });

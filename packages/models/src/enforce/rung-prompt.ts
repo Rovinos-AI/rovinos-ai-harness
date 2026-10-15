@@ -3,10 +3,14 @@ import { Code, type ModelRequest, type Part } from "@harness/schemas";
 import type { z } from "zod";
 import { extractJson } from "./extract-json.js";
 import {
+  applyValueTransform,
   EnforcementIssueSchema,
   enforcementIssuesFromError,
   parseEnforcementResult,
+  parseTokenizedEnforcementResult,
   type EnforcementResult,
+  type TokenizedEnforcementResult,
+  type ValueTransform,
 } from "./index.js";
 
 /** Adds a schema-specific JSON instruction to the request's system messages. */
@@ -32,7 +36,22 @@ export function withPromptOutput(
 export function enforcePromptOutput<Schema extends z.ZodType>(
   parts: readonly Part[],
   outputSchema: Schema,
-): EnforcementResult<Schema> {
+): Promise<EnforcementResult<Schema>>;
+export function enforcePromptOutput(
+  parts: readonly Part[],
+  outputSchema: z.ZodType,
+  valueTransform: ValueTransform,
+): Promise<TokenizedEnforcementResult>;
+export function enforcePromptOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+  valueTransform?: ValueTransform,
+): Promise<EnforcementResult<Schema> | TokenizedEnforcementResult>;
+export async function enforcePromptOutput<Schema extends z.ZodType>(
+  parts: readonly Part[],
+  outputSchema: Schema,
+  valueTransform?: ValueTransform,
+): Promise<EnforcementResult<Schema> | TokenizedEnforcementResult> {
   if (parts.some((part) => part.type === "tool_call")) {
     return parseEnforcementResult(outputSchema, {
       valid: false,
@@ -61,6 +80,22 @@ export function enforcePromptOutput<Schema extends z.ZodType>(
           code: Code.parse(extracted.code),
         }),
       ],
+      rungUsed: "prompt",
+    });
+  }
+
+  if (valueTransform !== undefined) {
+    const transformed = await applyValueTransform(valueTransform, outputSchema, extracted.value);
+    if (!transformed.ok) {
+      return parseEnforcementResult(outputSchema, {
+        valid: false,
+        issues: transformed.issues,
+        rungUsed: "prompt",
+      });
+    }
+    return parseTokenizedEnforcementResult({
+      value: transformed.tokenized,
+      valid: true,
       rungUsed: "prompt",
     });
   }
