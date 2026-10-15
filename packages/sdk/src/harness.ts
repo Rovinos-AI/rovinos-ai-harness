@@ -336,15 +336,12 @@ class HarnessClient implements Harness {
       }
       const now = this.runtime.clock.now();
       if (
-        await this.runtime.store.takeoverIdempotencyKey(
-          keyHash,
-          {
-            expectedRunId: runId,
-            runId: candidateRunId,
-            createdAt: now,
-            staleBefore: now - IDEMPOTENCY_ORPHAN_GRACE_MS,
-          },
-        )
+        await this.runtime.store.takeoverIdempotencyKey(keyHash, {
+          expectedRunId: runId,
+          runId: candidateRunId,
+          createdAt: now,
+          staleBefore: now - IDEMPOTENCY_ORPHAN_GRACE_MS,
+        })
       ) {
         return undefined;
       }

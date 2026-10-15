@@ -2,28 +2,19 @@
 import {
   Code,
   Id,
-  TraceId,
   type Code as SinkId,
   type Event,
   type NewEvent,
   type Snapshot,
+  type TraceId,
 } from "@harness/schemas";
-import { Pool, type PoolClient, type QueryResultRow } from "pg";
+import { Pool, type QueryResultRow } from "pg";
 import { z } from "zod";
-import {
-  JsonContentCodec,
-  decodeSnapshot,
-  encodeSnapshot,
-  type ContentCodec,
-  type EncodedSnapshot,
-  type SnapshotRow,
-  validateSnapshotAppend,
-} from "../codec.js";
+import { JsonContentCodec, decodeSnapshot, type ContentCodec, type SnapshotRow } from "../codec.js";
 import { InvalidEventError, StoreReadOnlyError, StoreUnavailableError } from "../errors.js";
 import {
   snapshotStoreOptionsSchema,
   systemClock,
-  IdempotencyKeyHashSchema,
   type Clock,
   type EventStore,
   type IdempotencyKeyHash,
@@ -32,27 +23,23 @@ import {
   type RunSummary,
 } from "../types.js";
 import { watchEvents } from "../subscriptions.js";
-import {
-  appendTransaction,
-  decodeCursor,
-  encodeEvents,
-  eventFromRow,
-  integer,
-  runListPage,
-  storeError,
-  type EventRow,
-  type EncodedEvent,
-  type RunSummaryRow,
-} from "./helpers.js";
+import { integer, eventFromRow, storeError, type EventRow } from "./helpers.js";
 import { deleteRunTransaction } from "./retention.js";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";
 import { PostgresConfirmationStates } from "./confirmation-states.js";
-import { takeoverPostgresIdempotencyKey } from "./idempotency.js";
+import {
+  claimPostgresIdempotencyKey,
+  releasePostgresIdempotencyKey,
+  takeoverPostgresIdempotencyKey,
+  type PostgresIdempotencyContext,
+} from "./idempotency.js";
+import { findPostgresRunsByTrace, listPostgresRuns } from "./run-listing.js";
 import { initializePostgresStore } from "./initialize.js";
 import { readEvents } from "./reader.js";
 import { isRunTerminal, PostgresSubscriptions } from "./subscriptions.js";
 import { watchPostgresRuns } from "./watch-runs.js";
 import { countPostgresRowsByKey, reencryptPostgresBatch } from "./rotation.js";
+import { PostgresEventWriter } from "./writer.js";
 import type { ReencryptBatchInput, StoreKeyRotation } from "../rotate.js";
 
 const connectionStringSchema = z
@@ -84,6 +71,8 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
   private readonly skipMigrations: boolean;
   private readonly approvalNotifications: PostgresApprovalNotifications;
   private readonly confirmationStates: PostgresConfirmationStates;
+  private readonly writer: PostgresEventWriter;
+  private readonly idempotencyContext: PostgresIdempotencyContext;
   private readonly subscriptions: PostgresSubscriptions;
   private initialized: Promise<void> | undefined;
 
@@ -116,6 +105,22 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     this.snapshotKeep = parsedOptions.data.snapshotKeep;
     this.clock = clock;
     this.skipMigrations = parsedOptions.data.skipMigrations;
+    this.writer = new PostgresEventWriter({
+      pool: this.pool,
+      codec: this.codec,
+      ensureInitialized: () => this.ensureInitialized(),
+      assertWritable: () => {
+        this.assertWritable();
+      },
+      snapshotKeep: this.snapshotKeep,
+    });
+    this.idempotencyContext = {
+      pool: this.pool,
+      initialize: () => this.ensureInitialized(),
+      assertWritable: () => {
+        this.assertWritable();
+      },
+    };
     this.approvalNotifications = new PostgresApprovalNotifications(this.pool, () =>
       this.ensureInitialized(),
     );
@@ -165,9 +170,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     events: readonly NewEvent[],
     expectedSeq: number,
   ): Promise<{ nextSeq: number }> {
-    this.assertWritable();
-    const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
-    return this.appendEncoded(runId, encoded, expectedSeq);
+    return this.writer.append(runId, events, expectedSeq);
   }
 
   /** {@inheritDoc EventStore.appendWithSnapshot} */
@@ -177,41 +180,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     expectedSeq: number,
     snapshot: Snapshot,
   ): Promise<{ nextSeq: number }> {
-    this.assertWritable();
-    const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
-    const [encoded, encodedSnapshot] = await Promise.all([
-      encodeEvents(this.codec, runId, events, expectedSeq),
-      encodeSnapshot(this.codec, validatedSnapshot),
-    ]);
-    return this.appendEncoded(runId, encoded, expectedSeq, encodedSnapshot);
-  }
-
-  private async appendEncoded(
-    runId: Id,
-    encoded: readonly EncodedEvent[],
-    expectedSeq: number,
-    encodedSnapshot?: EncodedSnapshot,
-  ): Promise<{ nextSeq: number }> {
-    await this.ensureInitialized();
-    let client: PoolClient;
-    try {
-      client = await this.pool.connect();
-    } catch (error) {
-      throw storeError(error, expectedSeq);
-    }
-    try {
-      return {
-        nextSeq: await appendTransaction(client, {
-          runId,
-          encoded,
-          expectedSeq,
-          ...(encodedSnapshot === undefined ? {} : { encodedSnapshot }),
-          snapshotKeep: this.snapshotKeep,
-        }),
-      };
-    } finally {
-      client.release();
-    }
+    return this.writer.appendWithSnapshot(runId, events, expectedSeq, snapshot);
   }
 
   /** {@inheritDoc EventStore.read} */
@@ -280,32 +249,7 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     runId: Id,
     createdAt: number,
   ): Promise<Id> {
-    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
-    const parsedRunId = Id.safeParse(runId);
-    if (!parsedHash.success || !parsedRunId.success) {
-      throw new InvalidEventError([["idempotencyKey"]]);
-    }
-    if (!Number.isSafeInteger(createdAt) || createdAt < 0) {
-      throw new InvalidEventError([["createdAt"]]);
-    }
-    this.assertWritable();
-    try {
-      await this.ensureInitialized();
-      const result = await this.pool.query<{ run_id: string }>(
-        `INSERT INTO idempotency_keys (key_hash, run_id, created_at)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (key_hash) DO UPDATE SET run_id = idempotency_keys.run_id
-        RETURNING run_id`,
-        [parsedHash.data, parsedRunId.data, createdAt],
-      );
-      const storedRunId = result.rows[0]?.run_id;
-      if (storedRunId === undefined) {
-        throw new StoreUnavailableError();
-      }
-      return Id.parse(storedRunId);
-    } catch (error) {
-      throw storeError(error);
-    }
+    return claimPostgresIdempotencyKey(this.idempotencyContext, keyHash, runId, createdAt);
   }
 
   /** {@inheritDoc EventStore.takeoverIdempotencyKey} */
@@ -314,31 +258,12 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     options: IdempotencyKeyTakeoverOptions,
   ): Promise<boolean> {
     this.assertWritable();
-    return takeoverPostgresIdempotencyKey(
-      this.pool,
-      () => this.ensureInitialized(),
-      keyHash,
-      options,
-    );
+    return takeoverPostgresIdempotencyKey(this.idempotencyContext, keyHash, options);
   }
 
   /** {@inheritDoc EventStore.releaseIdempotencyKey} */
-  async releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
-    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
-    const parsedRunId = Id.safeParse(runId);
-    if (!parsedHash.success || !parsedRunId.success) {
-      throw new InvalidEventError([["idempotencyKey"]]);
-    }
-    this.assertWritable();
-    try {
-      await this.ensureInitialized();
-      await this.pool.query("DELETE FROM idempotency_keys WHERE key_hash = $1 AND run_id = $2", [
-        parsedHash.data,
-        parsedRunId.data,
-      ]);
-    } catch (error) {
-      throw storeError(error);
-    }
+  releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
+    return releasePostgresIdempotencyKey(this.idempotencyContext, keyHash, runId);
   }
 
   /** {@inheritDoc EventStore.latestSnapshot} */
@@ -357,54 +282,13 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
   }
 
   /** {@inheritDoc EventStore.listRuns} */
-  async listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
-    if (!Number.isInteger(opts.limit) || opts.limit < 1) {
-      throw new InvalidEventError([["limit"]]);
-    }
-    try {
-      await this.ensureInitialized();
-      const cursor = opts.cursor === undefined ? undefined : decodeCursor(opts.cursor);
-      const result = await this.pool.query<RunSummaryRow>(
-        `SELECT runs.run_id, runs.created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
-        FROM runs
-        WHERE ($1::text IS NULL OR runs.run_id IN (
-          SELECT run_id FROM events
-          WHERE type = 'run_created' AND meta ->> 'continuationOf' = $1
-        ))
-        AND ($2::text IS NULL OR runs.status = $2)
-        AND ($3::bigint IS NULL OR runs.created_at < $3 OR (runs.created_at = $3 AND runs.run_id > $4))
-        ORDER BY runs.created_at DESC, runs.run_id ASC
-        LIMIT $5`,
-        [
-          opts.continuationOf ?? null,
-          opts.status ?? null,
-          cursor?.createdAt ?? null,
-          cursor?.runId ?? null,
-          opts.limit + 1,
-        ],
-      );
-      return runListPage(result.rows, opts.limit);
-    } catch (error) {
-      throw storeError(error);
-    }
+  listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
+    return listPostgresRuns(this.pool, () => this.ensureInitialized(), opts);
   }
 
   /** {@inheritDoc EventStore.findRunsByTrace} */
-  async findRunsByTrace(traceId: TraceId): Promise<Id[]> {
-    const parsedTraceId = TraceId.safeParse(traceId);
-    if (!parsedTraceId.success) {
-      throw new InvalidEventError([["traceId"]]);
-    }
-    try {
-      await this.ensureInitialized();
-      const result = await this.pool.query<{ run_id: string }>(
-        "SELECT run_id FROM events WHERE trace_id = $1 GROUP BY run_id ORDER BY MIN(global_seq)",
-        [parsedTraceId.data],
-      );
-      return result.rows.map(({ run_id }) => Id.parse(run_id));
-    } catch (error) {
-      throw storeError(error);
-    }
+  findRunsByTrace(traceId: TraceId): Promise<Id[]> {
+    return findPostgresRunsByTrace(this.pool, () => this.ensureInitialized(), traceId);
   }
 
   /** {@inheritDoc EventStore.fetchOutbox} */

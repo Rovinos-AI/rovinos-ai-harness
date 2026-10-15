@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
 import {
-  Id,
   RunStatus,
-  parseJson,
+  type Id,
   type TraceId,
   type Event as StoredEvent,
   type NewEvent,
   type Snapshot,
 } from "@harness/schemas";
-import { z } from "zod";
 import {
   JsonContentCodec,
   decodeSnapshot,
@@ -23,7 +21,6 @@ import {
 import { InvalidEventError, SeqConflictError, StoreMigrationError } from "../errors.js";
 import {
   systemClock,
-  IdempotencyKeyHashSchema,
   sqliteStoreOptionsSchema,
   type Clock,
   type EventStore,
@@ -41,7 +38,11 @@ import {
   type ChangeSubscription,
 } from "../subscriptions.js";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
-import { takeoverSqliteIdempotencyKey } from "./idempotency.js";
+import {
+  claimSqliteIdempotencyKey,
+  releaseSqliteIdempotencyKey,
+  takeoverSqliteIdempotencyKey,
+} from "./idempotency.js";
 import { migrate } from "../migrate.js";
 import {
   decodeStoredContent,
@@ -52,7 +53,6 @@ import {
   parseStoredMeta,
   prepareRunSummaryQuery,
   readRunSummary,
-  runListPage,
   type EventRow,
   type RunRow,
   type RunSummaryRow,
@@ -65,52 +65,9 @@ import { findRunsByTrace } from "./traces.js";
 import { encodeEvents, type EncodedEvent } from "./event-encoding.js";
 import type { StoreKeyRotation } from "../rotate.js";
 import { countSqliteRowsByKey, reencryptSqliteBatch } from "./rotation.js";
-const runCursorSchema = z.tuple([z.number().int().nonnegative(), Id]);
+import { listSqliteRuns, prepareListRunsQuery, type ListRunsQueryParams } from "./run-listing.js";
+
 const READ_PAGE_SIZE = 256;
-
-type ListRunsQueryParams = [
-  Id | null,
-  Id | null,
-  RunStatus | null,
-  RunStatus | null,
-  number | null,
-  number | null,
-  number | null,
-  Id | null,
-  number,
-];
-
-function decodeCursor(cursor: string): { createdAt: number; runId: Id } {
-  try {
-    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
-    const [createdAt, runId] = parseJson(runCursorSchema, decoded);
-    return { createdAt, runId };
-  } catch {
-    throw new InvalidEventError([["cursor"]]);
-  }
-}
-
-function prepareListRunsQuery(
-  db: Database.Database,
-): Database.Statement<ListRunsQueryParams, RunSummaryRow> {
-  return db.prepare<ListRunsQueryParams, RunSummaryRow>(`
-    SELECT runs.run_id, runs.created_at, runs.status, runs.next_seq - 1 AS last_seq, runs.last_ts
-    FROM runs
-    WHERE (? IS NULL OR runs.run_id IN (
-      SELECT run_id FROM events
-      WHERE type = 'run_created' AND json_extract(meta_json, '$.continuationOf') = ?
-    ))
-    AND (? IS NULL OR runs.status = ?)
-    AND (? IS NULL OR runs.created_at < ? OR (runs.created_at = ? AND runs.run_id > ?))
-    ORDER BY runs.created_at DESC, runs.run_id ASC
-    LIMIT ?
-  `);
-}
-
-function continuationRunParams(continuationOf: Id | undefined): [Id | null, Id | null] {
-  const runId = continuationOf ?? null;
-  return [runId, runId];
-}
 
 /** Durable SQLite implementation of the append-only event store. */
 export class SqliteEventStore implements EventStore, StoreKeyRotation {
@@ -384,35 +341,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
 
   /** {@inheritDoc EventStore.claimIdempotencyKey} */
   claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id> {
-    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
-    const parsedRunId = Id.safeParse(runId);
-    if (!parsedHash.success || !parsedRunId.success) {
-      return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
-    }
-    if (!Number.isSafeInteger(createdAt) || createdAt < 0) {
-      return Promise.reject(new InvalidEventError([["createdAt"]]));
-    }
-    try {
-      const claim = this.db.transaction(() => {
-        this.db
-          .prepare<[string, Id, number]>(
-            "INSERT INTO idempotency_keys (key_hash, run_id, created_at) VALUES (?, ?, ?) ON CONFLICT (key_hash) DO NOTHING",
-          )
-          .run(parsedHash.data, parsedRunId.data, createdAt);
-        const row = this.db
-          .prepare<[string], { run_id: string }>(
-            "SELECT run_id FROM idempotency_keys WHERE key_hash = ?",
-          )
-          .get(parsedHash.data);
-        if (row === undefined) {
-          throw new InvalidEventError([["idempotencyKey"]]);
-        }
-        return Id.parse(row.run_id);
-      });
-      return Promise.resolve(claim.immediate());
-    } catch (error) {
-      return Promise.reject(storeError(error));
-    }
+    return claimSqliteIdempotencyKey(this.db, keyHash, runId, createdAt);
   }
 
   /** {@inheritDoc EventStore.takeoverIdempotencyKey} */
@@ -425,19 +354,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
 
   /** {@inheritDoc EventStore.releaseIdempotencyKey} */
   releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
-    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
-    const parsedRunId = Id.safeParse(runId);
-    if (!parsedHash.success || !parsedRunId.success) {
-      return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
-    }
-    try {
-      this.db
-        .prepare<[string, Id]>("DELETE FROM idempotency_keys WHERE key_hash = ? AND run_id = ?")
-        .run(parsedHash.data, parsedRunId.data);
-      return Promise.resolve();
-    } catch (error) {
-      return Promise.reject(storeError(error));
-    }
+    return releaseSqliteIdempotencyKey(this.db, keyHash, runId);
   }
 
   /** {@inheritDoc EventStore.deleteRun} */
@@ -461,27 +378,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
 
   /** {@inheritDoc EventStore.listRuns} */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
-    if (!Number.isInteger(opts.limit) || opts.limit < 1) {
-      return Promise.reject(new InvalidEventError([["limit"]]));
-    }
-
-    try {
-      const cursor = opts.cursor === undefined ? undefined : decodeCursor(opts.cursor);
-      const continuationParams = continuationRunParams(opts.continuationOf);
-      const rows = this.listRunsQuery.all(
-        ...continuationParams,
-        opts.status ?? null,
-        opts.status ?? null,
-        cursor?.createdAt ?? null,
-        cursor?.createdAt ?? null,
-        cursor?.createdAt ?? null,
-        cursor?.runId ?? null,
-        opts.limit + 1,
-      );
-      return Promise.resolve(runListPage(rows, opts.limit));
-    } catch (error) {
-      return Promise.reject(storeError(error));
-    }
+    return listSqliteRuns(this.listRunsQuery, opts);
   }
 
   /** {@inheritDoc EventStore.findRunsByTrace} */

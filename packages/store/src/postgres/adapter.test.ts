@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { beforeEach, expect, it, vi } from "vitest";
-import { Code, parseJson, type KeyProvider } from "@harness/schemas";
+import { Code, Id, parseJson, type KeyProvider } from "@harness/schemas";
 import { AesGcmContentCodec } from "../aes-gcm-codec.js";
 import type { ContentCodec } from "../codec.js";
-import { StoreUnavailableError } from "../errors.js";
+import { InvalidEventError, StoreUnavailableError } from "../errors.js";
 import { PostgresEventStore } from "./adapter.js";
 import { createEventBuilders, runEventStoreConformance } from "../testing/index.js";
 import { z } from "zod";
@@ -817,6 +817,21 @@ runEventStoreConformance(
   },
   { supportsFileReopen: false },
 );
+
+it("validates Postgres idempotency claims before querying", async () => {
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+  const validRunId = Id.parse("00000000000000000000000001");
+  try {
+    await expect(store.claimIdempotencyKey("invalid", validRunId, 10)).rejects.toBeInstanceOf(
+      InvalidEventError,
+    );
+    await expect(store.claimIdempotencyKey("a".repeat(64), validRunId, -1)).rejects.toBeInstanceOf(
+      InvalidEventError,
+    );
+  } finally {
+    await store.close();
+  }
+});
 
 it("resumes encrypted Postgres event and snapshot rotation", async () => {
   let currentKeyId = "key-a";
