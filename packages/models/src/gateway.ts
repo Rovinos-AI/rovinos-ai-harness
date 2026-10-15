@@ -13,6 +13,7 @@ import {
   type ModelUsage,
   type ModelEnforcementConfig,
   type ModelRetryConfig,
+  type PiiActionSummary,
 } from "@harness/schemas";
 import {
   emitPricingCacheMissing,
@@ -65,7 +66,22 @@ export interface ModelGatewayDependencies {
   readonly requestsPerMinute?: Readonly<Partial<Record<Code, number>>>;
   readonly maxConcurrent?: number;
   readonly pricing?: ModelsConfig["pricing"];
+  /** Per-provider trust resolved from validated runtime configuration. */
+  readonly providerTrust?: Readonly<Partial<Record<Code, "hosted" | "local">>>;
+  /** Boundary hook invoked after provider-specific preparation on every attempt. */
+  readonly requestSanitizer?: RequestSanitizer;
 }
+
+/** Sanitizes a full provider request for one routed provider attempt. */
+export type RequestSanitizer = (
+  request: ModelRequest,
+  target: ModelRef & { readonly trust: "hosted" | "local" },
+  context: {
+    readonly runId: Id;
+    readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
+    readonly signal: AbortSignal;
+  },
+) => Promise<ModelRequest>;
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
 interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
@@ -73,6 +89,7 @@ interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
   readonly signal: AbortSignal;
   readonly deadlineTs?: number;
   readonly outputSchema?: OutputSchema;
+  readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
 }
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
@@ -234,18 +251,33 @@ export class ModelGateway {
       operation: async (signal) => {
         onAttempt();
         try {
-          return await adapter.complete(
-            {
-              ...request,
-              messages: prepareMessagesForProvider(request.messages, adapter.provider),
-            },
-            {
-              signal,
-              ids: this.dependencies.ids,
-              clock: this.dependencies.clock,
-              ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-            },
-          );
+          const preparedMessages = prepareMessagesForProvider(request.messages, adapter.provider);
+          const preparedRequest = { ...request, messages: preparedMessages };
+          const sanitizedRequest =
+            this.dependencies.requestSanitizer === undefined
+              ? preparedRequest
+              : await this.dependencies.requestSanitizer(
+                  preparedRequest,
+                  {
+                    ...request.model,
+                    provider: adapter.provider,
+                    trust: this.dependencies.providerTrust?.[adapter.provider] ?? "hosted",
+                  },
+                  {
+                    runId: context.runId,
+                    ...(context.recordPiiAction === undefined
+                      ? {}
+                      : { recordPiiAction: context.recordPiiAction }),
+                    signal,
+                  },
+                );
+          signal.throwIfAborted();
+          return await adapter.complete(sanitizedRequest, {
+            signal,
+            ids: this.dependencies.ids,
+            clock: this.dependencies.clock,
+            ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+          });
         } catch (error) {
           onFailedAttempt(error);
           throw error;

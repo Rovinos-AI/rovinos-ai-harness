@@ -11,6 +11,8 @@ import {
   secretsDetector,
   Tokenizer,
   urlCredentialsDetector,
+  PiiMessageSanitizer,
+  type PiiDetectorRegistry,
   type Detector,
 } from "@harness/pii";
 import {
@@ -54,15 +56,20 @@ export function createRuntimePii({
   scopeOf,
   policyVersion,
   clock,
-}: RuntimePiiOptions): { readonly tokenizer: Tokenizer; readonly resolver: AuditingVaultResolver } {
+}: RuntimePiiOptions): {
+  readonly tokenizer: Tokenizer;
+  readonly resolver: AuditingVaultResolver;
+  readonly messageSanitizer: PiiMessageSanitizer;
+} {
   const detectors = [
     ...builtInDetectors,
     ...(config.custom ?? []).map((detector) => createCustomDetector(detector)),
   ];
+  const detectorRegistry: PiiDetectorRegistry = {
+    detect: (text) => detectors.flatMap((detector) => detector.detect(text)),
+  };
   const tokenizer = new Tokenizer({
-    detectors: {
-      detect: (text) => detectors.flatMap((detector) => detector.detect(text)),
-    },
+    detectors: detectorRegistry,
     policy: config,
     vault,
     scopeOf: scopes.scopeOf,
@@ -89,5 +96,11 @@ export function createRuntimePii({
     },
     scopeOf,
   );
-  return { tokenizer, resolver };
+  const messageSanitizer = new PiiMessageSanitizer({
+    tokenizer,
+    detectors: detectorRegistry,
+    policy: config,
+    resolver,
+  });
+  return { tokenizer, resolver, messageSanitizer };
 }

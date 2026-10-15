@@ -535,6 +535,52 @@ describe("ModelGateway", () => {
     expect(active).toBe(0);
   });
 
+  it("does not call the adapter when a delayed request sanitizer finishes after cancellation", async () => {
+    let startSanitizing: () => void = () => undefined;
+    let finishSanitizing: (() => void) | undefined;
+    let markSanitizationSettled: () => void = () => undefined;
+    const sanitizationStarted = new Promise<void>((resolve) => {
+      startSanitizing = resolve;
+    });
+    const sanitizationSettled = new Promise<void>((resolve) => {
+      markSanitizationSettled = resolve;
+    });
+    const sanitizerWait = new Promise<void>((resolve) => {
+      finishSanitizing = resolve;
+    });
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        finishReason: "stop",
+        latencyMs: 0,
+      }),
+    );
+    const gateway = new ModelGateway(new AdapterRegistry([providerAdapter("sample", complete)]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 1 }),
+      requestSanitizer: async (providerRequest) => {
+        startSanitizing();
+        await sanitizerWait;
+        markSanitizationSettled();
+        return providerRequest;
+      },
+    });
+    const controller = new AbortController();
+    const cancelled = new Error("cancelled");
+    const result = gateway
+      .complete(request, { runId: request.requestId, signal: controller.signal })
+      .catch((error: unknown) => error);
+    await sanitizationStarted;
+    controller.abort(cancelled);
+    expect(await result).toBe(cancelled);
+    finishSanitizing?.();
+    await sanitizationSettled;
+
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it("stops semaphore waiting at the run deadline without a provider call", async () => {
     useFakeClock();
     const complete = vi.fn(async () => {

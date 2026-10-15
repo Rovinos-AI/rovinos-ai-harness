@@ -9,6 +9,7 @@ import {
   AnthropicAdapter,
   createRoutingModelGateway,
   OpenAIAdapter,
+  type RequestSanitizer,
   type ProviderAdapter,
 } from "@harness/models";
 import type { ModelPort, IdGenerator } from "./ports.js";
@@ -31,6 +32,7 @@ export interface RuntimeModelOverrides {
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly providerAdapters?: readonly ProviderAdapter[];
+  readonly requestSanitizer?: RequestSanitizer;
   readonly secretResolver?: {
     resolve(ref: SecretRef): Promise<{ reveal(): string }>;
   };
@@ -115,6 +117,12 @@ export async function createConfiguredModelPort(
       provider.requestsPerMinute === undefined ? [] : [[provider.id, provider.requestsPerMinute]],
     ),
   );
+  const providerTrust: Partial<
+    Record<ModelsConfig["providers"][number]["id"], "hosted" | "local">
+  > = {};
+  for (const provider of models.providers) {
+    providerTrust[provider.id] = provider.trust;
+  }
   return createRoutingModelGateway(
     adapters,
     {
@@ -125,6 +133,10 @@ export async function createConfiguredModelPort(
       maxConcurrent: models.maxConcurrent,
       requestsPerMinute,
       pricing: models.pricing,
+      providerTrust,
+      ...(overrides.requestSanitizer === undefined
+        ? {}
+        : { requestSanitizer: overrides.requestSanitizer }),
     },
     models.routing,
   );

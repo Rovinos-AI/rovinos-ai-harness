@@ -47,3 +47,12 @@ export class PiiBlockedError extends HarnessError {
     this.entities = entities.map(({ type, count }) => ({ type, count }));
   }
 }
+
+/** Raised when raw sensitive content is found inside an opaque provider blob. */
+export class PiiBlobContainsPiiError extends HarnessError {
+  readonly code = "pii_blob_contains_pii";
+
+  constructor() {
+    super("Opaque provider data contained sensitive content.");
+  }
+}

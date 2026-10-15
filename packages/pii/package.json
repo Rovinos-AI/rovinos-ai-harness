@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@harness/schemas": "workspace:^",
+    "@harness/telemetry": "workspace:^",
     "@harness/vault": "workspace:^",
     "zod": "4.6.5"
   },
