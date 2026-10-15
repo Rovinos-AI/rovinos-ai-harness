@@ -215,7 +215,8 @@ export class RunnerLeaseManager {
 
   #removeAsExecutionUser(path: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const child = spawn("/usr/bin/rm", ["-rf", "--", path], {
+      // /bin/rm exists on Debian (merged /usr) and macOS; /usr/bin/rm is missing on macOS.
+      const child = spawn("/bin/rm", ["-rf", "--", path], {
         shell: false,
         stdio: "ignore",
         ...(this.#executionUid === undefined ? {} : { uid: this.#executionUid }),

@@ -138,7 +138,7 @@ afterEach(async () => {
 
 describe("per-run filesystem workspace", () => {
   it("creates isolated project and harness directories with group access", async () => {
-    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-layout-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-layout-")));
     const project = await ensureRunWorkspace(root, runA);
 
     expect(project).toBe(join(root, runA, "project"));
@@ -147,7 +147,7 @@ describe("per-run filesystem workspace", () => {
   });
 
   it("keeps the volume root and trusted harness ancestor non-writable by the execution group", async () => {
-    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-trusted-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-trusted-")));
     await activateRunWorkspace(root, runA);
 
     expect((await stat(root)).mode & 0o022).toBe(0);
@@ -156,9 +156,9 @@ describe("per-run filesystem workspace", () => {
 
   // threat: T-12
   it("rejects traversal, absolute, NUL, long names, symlinks, and fuzzed escape paths", async () => {
-    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-paths-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-paths-")));
     const project = await ensureRunWorkspace(root, runA);
-    const outside = await mkdtemp(join(tmpdir(), "sandbox-workspace-outside-"));
+    const outside = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-outside-")));
     await mkdir(join(project, "inside"));
     await writeFile(join(project, "inside", "file"), "ok");
     await symlink(outside, join(project, "outside-link"));
@@ -236,7 +236,7 @@ describe("per-run filesystem workspace", () => {
 
   // threat: T-09
   it("enforces the file and aggregate quota, recounts external changes, and serves ranges", async () => {
-    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-quota-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-quota-")));
     await ensureRunWorkspace(root, runA);
     const workspace = new FsWorkspace({
       workspaceRoot: root,
@@ -270,7 +270,7 @@ describe("per-run filesystem workspace", () => {
   });
 
   it("does not grant quota credit for an externally enlarged file before recount", async () => {
-    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-quota-stale-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-quota-stale-")));
     const clock = new FakeClock();
     const workspace = new FsWorkspace({
       workspaceRoot: root,
@@ -291,7 +291,7 @@ describe("per-run filesystem workspace", () => {
   });
 
   it("refuses symbolic links while opening workspace files", async () => {
-    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-symlink-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-symlink-")));
     const outside = join(root, "outside");
     await writeFile(outside, "synthetic-private-content");
     const workspace = new FsWorkspace({ workspaceRoot: root, runId: runA });
@@ -308,7 +308,7 @@ describe("per-run filesystem workspace", () => {
   });
 
   it.skipIf(process.platform === "win32")("rejects FIFOs without blocking", async () => {
-    root = await mkdtemp(join(tmpdir(), "sandbox-workspace-fifo-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-workspace-fifo-")));
     await ensureRunWorkspace(root, runA);
     const fifoPath = join(root, runA, ".harness", "offload", "pipe");
     await new Promise<void>((resolve, reject) => {
@@ -331,7 +331,7 @@ describe("per-run filesystem workspace", () => {
 
   // threat: T-13
   it("rejects a second run until the owner releases or expires the lease and renews on exec", async () => {
-    root = await mkdtemp(join(tmpdir(), "sandbox-runner-lease-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-runner-lease-")));
     await mkdir(join(root, "tmp"));
     await writeFile(join(root, "tmp", "leftover"), "previous-run");
     const clock = new FakeClock();
@@ -365,7 +365,7 @@ describe("per-run filesystem workspace", () => {
 
   // threat: T-14
   it("locks old run directories and wipes run scratch before another run starts", async () => {
-    root = await mkdtemp(join(tmpdir(), "sandbox-run-isolation-"));
+    root = await realpath(await mkdtemp(join(tmpdir(), "sandbox-run-isolation-")));
     const firstProject = await activateRunWorkspace(root, runA);
     await writeFile(join(firstProject, "private.txt"), "first-run-only");
     await writeFile(join(root, runA, ".harness", "tmp", "scratch"), "scratch");
