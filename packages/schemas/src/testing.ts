@@ -70,6 +70,15 @@ export const eventSamples = [
   },
   {
     ...envelope,
+    type: "app_content",
+    source: "app",
+    appId: "test.app",
+    label: "App-provided; untrusted",
+    kind: "message",
+    content: { content: [{ type: "text", text: "app content" }] },
+  },
+  {
+    ...envelope,
     type: "checkpoint_written",
     checkpointId: id,
     atSeq: 1,

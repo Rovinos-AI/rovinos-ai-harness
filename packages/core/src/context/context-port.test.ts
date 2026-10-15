@@ -43,7 +43,7 @@ describe("StrategyContextPort", () => {
       messages: [{ role: "user", parts: [{ type: "text", text: "goal" }] }],
       metadata: {
         strategyId: "naive",
-        strategyVersion: "v5",
+        strategyVersion: "v6",
         estimatedTokens: 2,
         messageCount: 1,
         stablePrefixMessages: 1,
@@ -53,7 +53,7 @@ describe("StrategyContextPort", () => {
     const snapshot = await context.snapshot();
     expect(snapshot).toEqual({
       strategyId: "naive",
-      strategyVersion: "v5",
+      strategyVersion: "v6",
       calibration,
     });
 
@@ -63,7 +63,7 @@ describe("StrategyContextPort", () => {
       messages: [{ role: "user", parts: [{ type: "text", text: "goal" }] }],
       metadata: {
         strategyId: "naive",
-        strategyVersion: "v5",
+        strategyVersion: "v6",
         estimatedTokens: 2,
         messageCount: 1,
         stablePrefixMessages: 1,

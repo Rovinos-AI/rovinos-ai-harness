@@ -19,6 +19,7 @@ import {
   emitVaultMarkTerminalFailed,
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
+import { emitApprovalAppAudit } from "./approval-app-audit.js";
 
 const common = {
   runId: "00000000000000000000000000",
@@ -114,6 +115,33 @@ const events = [
 ];
 
 describe("SafeEvent log projection", () => {
+  it("emits approval operation audit metadata through its registered log record", () => {
+    const emit = vi.fn<(record: LogRecord) => void>();
+    const logger = { emit, enabled: () => true } satisfies Logger;
+
+    emitApprovalAppAudit(
+      {
+        tokenId: Code.parse("token.test"),
+        tool: Code.parse("harness.approvals.reveal"),
+        outcome: Code.parse("ok"),
+        count: 2,
+      },
+      logger,
+    );
+
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "harness.approval_app.operation",
+        attributes: {
+          "harness.auth.token.id": "token.test",
+          "harness.approval.tool": "harness.approvals.reveal",
+          "harness.approval.outcome": "ok",
+          "harness.approval.value_count": 2,
+        },
+      }),
+    );
+  });
+
   it("emits registered key-rotation counts only", () => {
     const emit = vi.fn<(record: LogRecord) => void>();
     const logger = { emit, enabled: () => true } satisfies Logger;

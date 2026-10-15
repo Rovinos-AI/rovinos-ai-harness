@@ -18,6 +18,20 @@ export { registerApproveTool, type ApproveToolOptions } from "./tools/approve.js
 export { registerDenyTool, type DenyToolOptions } from "./tools/deny.js";
 export { registerResumeRunTool, type ResumeRunToolOptions } from "./tools/resume-run.js";
 export { registerCancelRunTool, type CancelRunToolOptions } from "./tools/cancel-run.js";
+export {
+  registerApprovalAppTools,
+  ApprovalAppRevealRateLimiter,
+  type ApprovalAppAudit,
+  type ApprovalAppAuthorization,
+  type ApprovalAppScope,
+  type ApprovalAppToolOptions,
+} from "./tools/approvals-app.js";
+export {
+  APPROVAL_RESOURCE_URI,
+  MCP_APP_HTML_MIME_TYPE,
+  loadApprovalHtml,
+  registerApprovalResource,
+} from "./resources/approval.js";
 export { getRun, getRunText, registerGetRunTool } from "./tools/get-run.js";
 export { listRuns, registerListRunsTool } from "./tools/list-runs.js";
 export {

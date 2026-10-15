@@ -103,7 +103,7 @@ export interface ReferenceHostDependencies {
   /** Confirms that a call or approval identifier belongs to the active run. */
   readonly isIdOwnedByRun?: (runId: Id, id: Id) => boolean | Promise<boolean>;
   /** Confirms that this run currently has a pending approval requiring human action. */
-  readonly hasPendingApproval?: (runId: Id) => boolean;
+  readonly hasPendingApproval?: (runId: Id) => boolean | Promise<boolean>;
   /** Counts a rejected app tool call using a bounded reason. */
   readonly onAppRejected?: (reason: AppCallRejectedReason) => void;
   /** Tokenizes app message and model-context JSON at the `model_input` boundary. */

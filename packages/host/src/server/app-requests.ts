@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { TextContentSchema } from "@modelcontextprotocol/core";
-import { Code, Id, JsonValue, type HostConfig } from "@harness/schemas";
+import {
+  AppContentEnvelopeSchema,
+  Id,
+  JsonValue,
+  type AppContentEnvelope,
+  type HostConfig,
+} from "@harness/schemas";
 import { countHostAppRejected, type HostAppRejectedReason } from "@harness/telemetry";
 import { AppRequestResultSchema } from "../shared/app-request.js";
 import { z } from "zod";
@@ -52,21 +58,6 @@ export const AppRequestSchema = z.discriminatedUnion("kind", [
 /** Validated app request payload. */
 export type AppRequest = z.infer<typeof AppRequestSchema>;
 
-/** Sanitized app content recorded by the embedding run after PII tokenization. */
-export const AppContentEnvelopeSchema = z
-  .object({
-    kind: z.enum(["message", "model_context"]),
-    source: z.literal("app"),
-    label: z.literal("App-provided"),
-    appId: Code,
-    runId: Id,
-    content: JsonValue,
-  })
-  .strict();
-
-/** Inferred tokenized content envelope with host-bound app identity. */
-export type AppContentEnvelope = z.infer<typeof AppContentEnvelopeSchema>;
-
 /** Tokenizes JSON content for the model-input boundary. */
 export type AppContentTokenizer = (
   runId: Id,
@@ -86,6 +77,7 @@ export interface AppRequestRouterOptions {
 export { AppRequestResultSchema };
 /** Inferred minimal request result. */
 export type AppRequestResult = z.infer<typeof AppRequestResultSchema>;
+export { AppContentEnvelopeSchema, type AppContentEnvelope };
 
 function isSafeExternalUrl(value: string): boolean {
   try {

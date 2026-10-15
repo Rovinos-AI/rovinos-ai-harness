@@ -84,7 +84,8 @@
     "sandbox",
     "core",
     "config",
-    "control-plane"
+    "control-plane",
+    "host"
   ],
   "sdk": [
     "schemas",

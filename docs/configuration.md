@@ -34,6 +34,11 @@ policy:
       timeoutMs: 5000
 ```
 
+Approval argument reveal is disabled by default. To enable the app-only reveal
+tool, set `controlPlane.allowReveal: true`. Every reveal requires a trusted app
+host or human confirmation through elicitation. Reveal requests are limited to
+pointers in the stored approval arguments and are audited at the `ui` boundary.
+
 ## Cassette recording
 
 Set `HARNESS_CASSETTE_AUTO=0` to disable cassette auto mode. Record and auto modes require caller-provided storage-boundary sanitization and a final PII detector check before a response can be written.

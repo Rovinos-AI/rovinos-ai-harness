@@ -23,6 +23,7 @@ import type { RunScopeRegistry } from "./subagent/scope.js";
 import { createSubagentTool } from "./subagent/runtime.js";
 import { createRuntimeContinuation, startRun, type RunControl } from "./runtime-runs.js";
 import { setupRuntime } from "./runtime-setup.js";
+import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
 import type {
   Runtime,
@@ -303,6 +304,12 @@ function composeRuntime(
   const tool = createRuntimeToolPort(options);
   const runWithControl = createTerminalAwareRunControl(options);
   const resume = createRuntimeResume(options, tool, runWithControl);
+  const pii = options.pii;
+  const appCallbacks = createRuntimeAppCallbacks({
+    store,
+    clock,
+    ...(pii === undefined ? {} : { tokenize: hostedAppContentTokenizer(pii.tokenizer) }),
+  });
   return {
     store,
     vault: vaultResolver,
@@ -320,6 +327,7 @@ function composeRuntime(
       }
       return result;
     },
+    ...appCallbacks,
     resolveApproval: (runId, approvalId, decision, resolveOptions) => {
       if (
         decision === "edit" &&

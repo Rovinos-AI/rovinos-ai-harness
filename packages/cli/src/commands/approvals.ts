@@ -16,6 +16,7 @@ import {
 } from "@harness/schemas";
 import type { CliContext, CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
+import { waitForShutdown } from "../serve.js";
 import { createApprovalResolverLease, revealApprovalArgs } from "./approval-reveal.js";
 import { runApprovalSweep } from "./approval-sweep.js";
 import { assertResumeStatus } from "./resume.js";
@@ -182,77 +183,151 @@ function registerShow(approvals: Command, context: CliContext): void {
     .description("Show a pending approval")
     .argument("<approvalId>", "approval identifier")
     .option("--show-args", "include the tokenized tool arguments")
+    .option("--view", "open the pending approval in the local reference host")
     .option(
       "--reveal",
       "resolve tokens to raw values through the audited vault (implies --show-args)",
     )
-    .action(
-      async (
-        value: string,
-        options: { readonly showArgs?: boolean; readonly reveal?: boolean },
-      ) => {
-        const approvalId = parseId(value);
-        const config = options.reveal === true ? await context.loadConfig() : undefined;
-        if (
-          options.reveal === true &&
-          config?.keys === undefined &&
-          context.createVaultResolver === undefined
-        ) {
-          throw new ApprovalsCodeError("reveal_unavailable");
-        }
-        await withRuntime(
-          context,
-          undefined,
-          async (runtime, runtimeConfig) => {
-            const resolverLease =
-              options.reveal === true
-                ? await createApprovalResolverLease(context, runtime, runtimeConfig)
-                : undefined;
-            try {
-              const pending = await findPending(runtime.store, approvalId);
-              const summary = await summarize(pending, context.clock.now());
-              const { ApprovalPayloadSchema } = await import("@harness/policy");
-              const payload = ApprovalPayloadSchema.safeParse(pending.request.payload);
-              const showArgs = options.showArgs === true || options.reveal === true;
-              const args = payload.success ? payload.data.args : null;
-              let revealed: JsonValue | undefined;
-              if (options.reveal === true) {
-                const resolver = resolverLease?.resolver;
-                if (resolver === undefined) {
-                  throw new ApprovalsCodeError("reveal_unavailable");
-                }
-                revealed = await revealApprovalArgs({
-                  context,
-                  resolver,
-                  store: runtime.store,
-                  pending,
-                  args,
-                  toolId: summary.toolId,
-                });
-              }
-              if (revealed !== undefined) {
-                context.out.error("reveal_exposes_sensitive_values");
-              }
-              const result = {
-                ...summary,
-                callId: pending.request.callId,
-                reason: payload.success ? payload.data.reason : "unknown",
-                editableFields: payload.success ? payload.data.editableFields : [],
-                ...(showArgs ? { args } : {}),
-                ...(revealed === undefined ? {} : { revealed }),
-              };
-              context.out.json(ApprovalShowResultSchema, result);
-              if (approvals.optsWithGlobals().json !== true) {
-                context.out.print(`${JSON.stringify(result, null, 2)}\n`);
-              }
-            } finally {
-              resolverLease?.close();
-            }
-          },
-          config,
-        );
-      },
+    .action(async (value: string, options: ShowOptions) =>
+      showApproval({ approvals, context, approvalId: parseId(value), options }),
     );
+}
+
+interface ShowOptions {
+  readonly showArgs?: boolean;
+  readonly reveal?: boolean;
+  readonly view?: boolean;
+}
+
+async function showApproval(input: {
+  readonly approvals: Command;
+  readonly context: CliContext;
+  readonly approvalId: Id;
+  readonly options: ShowOptions;
+}): Promise<void> {
+  const { approvals, context, approvalId, options } = input;
+  if (options.view === true && approvals.optsWithGlobals().json === true) {
+    throw new ApprovalsCodeError("approval_view_json_unsupported");
+  }
+  if (options.view === true && options.reveal === true) {
+    throw new ApprovalsCodeError("approval_view_reveal_conflict");
+  }
+  const config =
+    options.reveal === true || options.view === true ? await context.loadConfig() : undefined;
+  if (
+    options.reveal === true &&
+    config?.keys === undefined &&
+    context.createVaultResolver === undefined
+  ) {
+    throw new ApprovalsCodeError("reveal_unavailable");
+  }
+  await withRuntime(
+    context,
+    undefined,
+    (runtime, runtimeConfig) =>
+      showApprovalInRuntime({ approvals, context, runtime, runtimeConfig, approvalId, options }),
+    config,
+  );
+}
+
+async function showApprovalInRuntime(input: {
+  readonly approvals: Command;
+  readonly context: CliContext;
+  readonly runtime: Runtime;
+  readonly runtimeConfig: HarnessConfig;
+  readonly approvalId: Id;
+  readonly options: ShowOptions;
+}): Promise<void> {
+  const resolverLease =
+    input.options.reveal === true
+      ? await createApprovalResolverLease(input.context, input.runtime, input.runtimeConfig)
+      : undefined;
+  try {
+    const pending = await findPending(input.runtime.store, input.approvalId);
+    if (input.options.view === true) {
+      await showApprovalView({
+        context: input.context,
+        runtime: input.runtime,
+        config: input.runtimeConfig,
+        pending,
+        approvalId: input.approvalId,
+      });
+      return;
+    }
+    await showApprovalDetails({ ...input, pending, resolverLease });
+  } finally {
+    resolverLease?.close();
+  }
+}
+
+async function showApprovalView(input: {
+  readonly context: CliContext;
+  readonly runtime: Runtime;
+  readonly config: HarnessConfig;
+  readonly pending: PendingApproval;
+  readonly approvalId: Id;
+}): Promise<void> {
+  // Loaded lazily: the view pulls in policy and vault, which plain approvals commands must not load.
+  const { createApprovalViewHost } = await import("./approval-view.js");
+  const host = await createApprovalViewHost({
+    runtime: input.runtime,
+    context: input.context,
+    config: input.config,
+    runId: input.pending.runId,
+    approvalId: input.approvalId,
+  });
+  try {
+    input.context.out.print(`${host.url}\n`);
+    await waitForShutdown(false);
+  } finally {
+    await host.close();
+  }
+}
+
+async function showApprovalDetails(input: {
+  readonly approvals: Command;
+  readonly context: CliContext;
+  readonly runtime: Runtime;
+  readonly approvalId: Id;
+  readonly options: ShowOptions;
+  readonly pending: PendingApproval;
+  readonly resolverLease: Awaited<ReturnType<typeof createApprovalResolverLease>> | undefined;
+}): Promise<void> {
+  const summary = await summarize(input.pending, input.context.clock.now());
+  const { ApprovalPayloadSchema } = await import("@harness/policy");
+  const payload = ApprovalPayloadSchema.safeParse(input.pending.request.payload);
+  const showArgs = input.options.showArgs === true || input.options.reveal === true;
+  const args = payload.success ? payload.data.args : null;
+  let revealed: JsonValue | undefined;
+  if (input.options.reveal === true) {
+    const resolver = input.resolverLease?.resolver;
+    if (resolver === undefined) {
+      throw new ApprovalsCodeError("reveal_unavailable");
+    }
+    revealed = await revealApprovalArgs({
+      context: input.context,
+      resolver,
+      store: input.runtime.store,
+      pending: input.pending,
+      args,
+      toolId: summary.toolId,
+    });
+  }
+  if (revealed !== undefined) {
+    input.context.out.error("reveal_exposes_sensitive_values");
+  }
+  const result = {
+    ...summary,
+    callId: input.pending.request.callId,
+    reason: payload.success ? payload.data.reason : "unknown",
+    editableFields: payload.success ? payload.data.editableFields : [],
+    ...(showArgs ? { args } : {}),
+    ...(revealed === undefined ? {} : { revealed }),
+  };
+  input.context.out.json(ApprovalShowResultSchema, result);
+  if (input.approvals.optsWithGlobals().json !== true) {
+    input.context.out.print(`${JSON.stringify(result, null, 2)}\n`);
+  }
 }
 
 async function decide(

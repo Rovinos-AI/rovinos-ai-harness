@@ -139,4 +139,8 @@ export async function validateEdits(
   }
 }
 
-export { approvalEditsAreAllowed, diffToEdits } from "./approval-edit-pointers.js";
+export {
+  applyApprovalEdits,
+  approvalEditsAreAllowed,
+  diffToEdits,
+} from "./approval-edit-pointers.js";

@@ -3,6 +3,7 @@ import {
   ModelsConfigSchema,
   type SandboxConfigSchema,
   type Code,
+  type ControlPlaneConfig,
   type Event,
   type PolicyConfig,
   type PiiConfig,
@@ -40,6 +41,7 @@ import type { RunLoopResult } from "./loop.js";
 import type { CancelRunResult } from "./cancel.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ApprovalDecision, ApprovalResolutionMetadata } from "./approvals.js";
+import type { AppContentTokenize, RuntimeAppContent } from "./runtime-apps.js";
 
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
 export interface RuntimeOverrides {
@@ -92,6 +94,7 @@ export interface RuntimeConfig {
   readonly keys?: KeysConfig | undefined;
   readonly sandbox?: z.infer<typeof SandboxConfigSchema>;
   readonly servers?: ServersConfig;
+  readonly controlPlane?: ControlPlaneConfig | undefined;
 }
 
 /** Optional cooperative cancellation and claim notification for a resumed run. */
@@ -138,6 +141,12 @@ export interface Runtime {
       readonly metadata?: ApprovalResolutionMetadata;
     },
   ): Promise<Extract<Event, { type: "approval_resolved" }>>;
+  /** Returns whether the folded state currently contains a pending approval. */
+  hasPendingApproval(runId: Id): Promise<boolean>;
+  /** Tokenizes app-originated JSON at the model-input boundary. */
+  tokenizeAppContent: AppContentTokenize;
+  /** Records tokenized app content with an explicit untrusted label. */
+  onAppContent(content: RuntimeAppContent): Promise<void>;
   close(): Promise<void>;
 }
 

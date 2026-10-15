@@ -46,6 +46,7 @@ export {
 } from "./approvals.js";
 export {
   APPROVAL_WAIT_SPAN,
+  APP_CONTENT_SPAN,
   CHECKPOINT_SPAN,
   COMPACTION_SPAN,
   MODEL_CALL_SPAN,

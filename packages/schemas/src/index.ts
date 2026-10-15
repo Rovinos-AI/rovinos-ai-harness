@@ -16,6 +16,7 @@ export {
 } from "./json-schema.js";
 export { JsonValue } from "./json.js";
 export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.js";
+export { AppContentEnvelopeSchema, type AppContentEnvelope } from "./app-content.js";
 export {
   ApprovalAppInputSchema,
   ResolveRequest,
@@ -159,6 +160,7 @@ export {
 } from "./pii-detection.js";
 export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
 export { HostConfigSchema, type HostConfig } from "./config/host.js";
+export { ControlPlaneConfigSchema, type ControlPlaneConfig } from "./config/control-plane.js";
 export {
   SandboxConfigSchema,
   SandboxEgressAllowEntrySchema,

@@ -12,6 +12,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 const productionModules = import.meta.glob("../packages/*/src/**/*.ts");
 const expectedSpanNames = [
+  "harness.app_content",
   "harness.approval_wait",
   "harness.checkpoint",
   "harness.compaction",
@@ -26,6 +27,7 @@ const expectedSpanNames = [
   "mcp.client.call",
 ];
 const expectedLogNames = [
+  "harness.approval_app.operation",
   "harness.keys.rotated",
   "harness.model.pricing_cache_missing",
   "harness.model.pricing_missing",

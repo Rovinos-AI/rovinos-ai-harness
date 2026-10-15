@@ -10,6 +10,17 @@ The SDK defaults `OTEL_SEMCONV_STABILITY_OPT_IN` to `http` only when it is unset
 
 ## Spans
 
+### `harness.app_content`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.app.id` | Code | Required | `@harness/core` |
+| `harness.error.code` | Code | Optional | `@harness/core` |
+| `harness.event.seq` | integer | Optional | `@harness/core` |
+| `harness.run.id` | Id | Required | `@harness/core` |
+
+Owner task: `3.8`.
+
 ### `harness.approval_wait`
 
 | Attribute | Type | Presence | Owning package |
@@ -163,6 +174,15 @@ Owner task: `3.2`.
 Owner task: `6.5`.
 
 ## Log records
+
+### `harness.approval_app.operation`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.approval.outcome` | Code | Required | `@harness/telemetry` |
+| `harness.approval.tool` | Code | Required | `@harness/telemetry` |
+| `harness.approval.value_count` | integer | Required | `@harness/telemetry` |
+| `harness.auth.token.id` | Code | Required | `@harness/telemetry` |
 
 ### `harness.keys.rotated`
 

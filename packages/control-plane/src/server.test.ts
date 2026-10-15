@@ -81,7 +81,7 @@ const connections: MemoryConnection[] = [];
 
 async function connect(store: InMemoryEventStore, mcpApps = false): Promise<MemoryConnection> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = createControlPlaneServer(store);
+  const server = createControlPlaneServer(store, { approvalHtml: "<html>test</html>" });
   const client = new Client(
     { name: "control-plane-test", version: "1.0.0" },
     mcpApps

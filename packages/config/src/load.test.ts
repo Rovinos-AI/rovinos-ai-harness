@@ -487,6 +487,7 @@ store: {}`,
     });
 
     expect(config).toEqual({
+      controlPlane: { allowReveal: false },
       run: {
         checkpointEveryEvents: 20,
         shutdownGraceMs: 20_000,

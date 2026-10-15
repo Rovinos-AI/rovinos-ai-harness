@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { InMemoryEventStore } from "@harness/store";
-import { Id } from "@harness/schemas";
+import { HarnessError, Id } from "@harness/schemas";
 import type * as McpServerModule from "@modelcontextprotocol/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -22,6 +22,14 @@ interface MockResponse {
 
 type RequestListener = (request: MockRequest, response: MockResponse) => void;
 
+class MissingApprovalHtmlError extends HarnessError {
+  override readonly code = "approval_resource_unavailable";
+
+  constructor() {
+    super("The approval app resource is unavailable.");
+  }
+}
+
 const mocks = vi.hoisted(() => {
   let requestListener: RequestListener | undefined;
   let listenError: ((error: Error) => void) | undefined;
@@ -29,6 +37,7 @@ const mocks = vi.hoisted(() => {
   let failListen = false;
   let failClose = false;
   const httpRequestHandler = vi.fn(() => Promise.resolve());
+  const loadApprovalHtml = vi.fn(() => "<html>test</html>");
   const server = {
     address: () => address,
     listen: (_port: number, _host: string, callback: () => void) => {
@@ -54,6 +63,7 @@ const mocks = vi.hoisted(() => {
     }),
     createMcpHandler: vi.fn(() => ({ fetch: () => Promise.resolve(new Response()) })),
     httpRequestHandler,
+    loadApprovalHtml,
     serveStdio: vi.fn(() => ({ close: () => Promise.resolve() })),
     setAddress: (value: { port: number } | string | null) => {
       address = value;
@@ -73,6 +83,8 @@ const mocks = vi.hoisted(() => {
       address = { port: 41234 };
       failListen = false;
       failClose = false;
+      loadApprovalHtml.mockReset();
+      loadApprovalHtml.mockImplementation(() => "<html>test</html>");
       httpRequestHandler.mockClear();
       server.closeAllConnections.mockClear();
       server.off.mockClear();
@@ -120,6 +132,10 @@ vi.mock("@modelcontextprotocol/server", async (importOriginal) => {
   };
 });
 vi.mock("@modelcontextprotocol/server/stdio", () => ({ serveStdio: mocks.serveStdio }));
+vi.mock("./resources/approval.js", () => ({
+  loadApprovalHtml: mocks.loadApprovalHtml,
+  registerApprovalResource: vi.fn(),
+}));
 
 import { startControlPlaneHttp, startControlPlaneStdio } from "./server.js";
 
@@ -157,7 +173,9 @@ function response(): MockResponse {
 describe("control-plane transports", () => {
   it("starts and closes stdio using the shared server factory", async () => {
     mocks.reset();
-    const handle = startControlPlaneStdio(new InMemoryEventStore());
+    const handle = startControlPlaneStdio(new InMemoryEventStore(), {
+      approvalHtml: "<html>test</html>",
+    });
 
     await handle.close();
 
@@ -166,7 +184,9 @@ describe("control-plane transports", () => {
 
   it("routes only the MCP endpoint and rejects untrusted Host and Origin values", async () => {
     mocks.reset();
-    const handle = await startControlPlaneHttp(new InMemoryEventStore(), 0);
+    const handle = await startControlPlaneHttp(new InMemoryEventStore(), 0, {
+      approvalHtml: "<html>test</html>",
+    });
 
     const wrongPath = response();
     mocks.dispatch(request("/other"), wrongPath);
@@ -197,7 +217,7 @@ describe("control-plane transports", () => {
     mocks.httpRequestHandler.mockImplementationOnce(async () => {
       await store.read(runId)[Symbol.asyncIterator]().next();
     });
-    const handle = await startControlPlaneHttp(store, 0);
+    const handle = await startControlPlaneHttp(store, 0, { approvalHtml: "<html>test</html>" });
     const outgoing = response();
 
     mocks.dispatch(request("/mcp"), outgoing);
@@ -215,23 +235,42 @@ describe("control-plane transports", () => {
     expect(mocks.createServer).not.toHaveBeenCalled();
 
     mocks.setFailListen(true);
-    await expect(startControlPlaneHttp(new InMemoryEventStore(), 3000)).rejects.toMatchObject({
+    await expect(
+      startControlPlaneHttp(new InMemoryEventStore(), 3000, { approvalHtml: "<html>test</html>" }),
+    ).rejects.toMatchObject({
       code: "control_plane_listen_failed",
     });
 
     mocks.reset();
     mocks.setAddress(null);
-    await expect(startControlPlaneHttp(new InMemoryEventStore(), 3000)).rejects.toMatchObject({
+    await expect(
+      startControlPlaneHttp(new InMemoryEventStore(), 3000, { approvalHtml: "<html>test</html>" }),
+    ).rejects.toMatchObject({
       code: "control_plane_listen_failed",
     });
   });
 
   it("rejects listener close failures with the closed code", async () => {
     mocks.reset();
-    const handle = await startControlPlaneHttp(new InMemoryEventStore(), 3000);
+    const handle = await startControlPlaneHttp(new InMemoryEventStore(), 3000, {
+      approvalHtml: "<html>test</html>",
+    });
     mocks.setFailClose(true);
 
     await expect(handle.close()).rejects.toMatchObject({ code: "control_plane_listen_failed" });
     expect(mocks.createServer).toHaveBeenCalledOnce();
+  });
+
+  it("fails HTTP startup before listening when the approval build is missing", async () => {
+    mocks.reset();
+    mocks.loadApprovalHtml.mockImplementationOnce(() => {
+      throw new MissingApprovalHtmlError();
+    });
+
+    await expect(startControlPlaneHttp(new InMemoryEventStore(), 0)).rejects.toMatchObject({
+      code: "approval_resource_unavailable",
+    });
+    expect(mocks.createMcpHandler).not.toHaveBeenCalled();
+    expect(mocks.createServer).not.toHaveBeenCalled();
   });
 });

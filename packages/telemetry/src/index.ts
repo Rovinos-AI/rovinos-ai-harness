@@ -21,6 +21,7 @@ export {
   emitPricingCacheMissing,
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
+export { emitApprovalAppAudit } from "./approval-app-audit.js";
 export {
   countDroppedTelemetry,
   countHostAppRejected,

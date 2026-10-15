@@ -158,6 +158,18 @@ const approvalResolvedEvent = z
   })
   .strict();
 
+const appContentEvent = z
+  .object({
+    ...eventEnvelopeShape,
+    type: z.literal("app_content"),
+    source: z.literal("app"),
+    appId: Code,
+    label: z.literal("App-provided; untrusted"),
+    kind: z.enum(["message", "model_context"]),
+    content: JsonValue,
+  })
+  .strict();
+
 const checkpointWrittenEvent = z
   .object({
     ...eventEnvelopeShape,
@@ -242,6 +254,7 @@ export const EventSchema = z.discriminatedUnion("type", [
   toolResultEvent,
   approvalRequestedEvent,
   approvalResolvedEvent,
+  appContentEvent,
   checkpointWrittenEvent,
   contextCompactedEvent,
   piiActionEvent,

@@ -78,6 +78,16 @@ export const APPROVAL_WAIT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpa
   { taskId: "4.1", packageName: "@harness/core" },
 );
 
+/** Span for recording content submitted by an untrusted app. */
+export const APP_CONTENT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
+  "harness.app_content",
+  {
+    ...commonAttributes,
+    "harness.app.id": attr.code(),
+  },
+  { taskId: "3.8", packageName: "@harness/core" },
+);
+
 /** Span for writing a checkpoint. */
 export const CHECKPOINT_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
   "harness.checkpoint",

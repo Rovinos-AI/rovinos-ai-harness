@@ -356,6 +356,9 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 token: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
+        controlPlane: z.ZodOptional<z.ZodDefault<z.ZodObject<{
+            allowReveal: z.ZodDefault<z.ZodBoolean>;
+        }, z.core.$strict>>>;
     }, z.core.$strict>;
     overrides: z.ZodOptional<z.ZodObject<{
         store: z.ZodOptional<z.ZodCustom<import("@harness/store").EventStore, import("@harness/store").EventStore>>;

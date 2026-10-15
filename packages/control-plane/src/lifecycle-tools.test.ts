@@ -27,6 +27,7 @@ async function connect(
 ): Promise<TestConnection> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createControlPlaneServer(store, {
+    approvalHtml: "<html>test</html>",
     confirmation: { key: Buffer.alloc(32, 19) },
     ...options,
   });

@@ -1129,7 +1129,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@harness/approval-app@workspace:packages/approval-app":
+"@harness/approval-app@workspace:^, @harness/approval-app@workspace:packages/approval-app":
   version: 0.0.0-use.local
   resolution: "@harness/approval-app@workspace:packages/approval-app"
   dependencies:
@@ -1156,6 +1156,7 @@ __metadata:
     "@harness/context": "workspace:^"
     "@harness/control-plane": "workspace:^"
     "@harness/core": "workspace:^"
+    "@harness/host": "workspace:^"
     "@harness/mcp": "workspace:^"
     "@harness/pii": "workspace:^"
     "@harness/policy": "workspace:^"
@@ -1164,6 +1165,7 @@ __metadata:
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
+    "@modelcontextprotocol/core": "npm:2.3.1"
     "@modelcontextprotocol/server": "npm:2.3.1"
     "@opentelemetry/api": "npm:1.9.1"
     commander: "npm:15.0.0"
@@ -1199,12 +1201,14 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@harness/control-plane@workspace:packages/control-plane"
   dependencies:
+    "@harness/approval-app": "workspace:^"
     "@harness/core": "workspace:^"
     "@harness/models": "workspace:^"
     "@harness/policy": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
+    "@harness/vault": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
     "@modelcontextprotocol/node": "npm:2.1.1"
     "@modelcontextprotocol/server": "npm:2.3.1"

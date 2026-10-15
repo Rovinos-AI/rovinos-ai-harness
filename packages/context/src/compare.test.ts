@@ -100,7 +100,7 @@ describe("context strategy comparison", () => {
     expect(comparisons).toMatchObject([
       {
         strategy: "naive",
-        strategyVersion: "v5",
+        strategyVersion: "v6",
         estimatedTokens: 4,
         messageCount: 4,
         droppedGroups: 0,

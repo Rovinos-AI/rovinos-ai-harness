@@ -2,12 +2,9 @@
 // Every task that wires a capability into the runtime or CLI extends this test.
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
-// Not wired yet: reference host in core runtime/CLI (-> #207)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
-// Not wired yet: reference-host app content callbacks in the core runtime/CLI (-> #207)
-// Not wired yet: serve the approval app resource and decision tools (18.4 -> #207)
-// Not wired yet: web.fetch provider registration in the core runtime/CLI (19.10 -> #98)
+// Not wired yet: web.fetch provider registration in the core runtime/CLI (19.12 -> #439)
 import { Command } from "commander";
 import { Client, InMemoryTransport, type Tool, type Transport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
@@ -830,6 +827,53 @@ describe("MCP runtime", () => {
         firstApprovalId = approval.approvalId;
       } finally {
         await store.close();
+      }
+
+      const appRuntime = await createRuntime(await loadConfig({ configPath }), {
+        dataDir: dataDirectory,
+        clock: current.clock,
+        ids: current.ids,
+        model: new FakeModelPort([]),
+        roleConfigDirectory: dirname(configPath),
+        secretResolver: new CompositeSecretResolver(),
+        mcpTransportFactory: createTransport,
+      });
+      try {
+        expect(await appRuntime.hasPendingApproval(firstRunId)).toBe(true);
+        // Every run records its initial run_input; app content must not add another.
+        const baselineEvents = await readEvents(
+          new SqliteEventStore(join(dataDirectory, "harness.db")),
+          firstRunId,
+        );
+        const countRunInputs = (events: readonly { readonly type: string }[]): number =>
+          events.filter((event) => event.type === "run_input").length;
+        const tokenized = await appRuntime.tokenizeAppContent(
+          firstRunId,
+          { message: current.canary },
+          { boundary: "model_input" },
+        );
+        await appRuntime.onAppContent({
+          runId: firstRunId,
+          appId: Code.parse("approval.app"),
+          kind: "message",
+          content: tokenized,
+        });
+        const appEvents = await readEvents(
+          new SqliteEventStore(join(dataDirectory, "harness.db")),
+          firstRunId,
+        );
+        expect(appEvents.at(-1)).toMatchObject({
+          type: "app_content",
+          source: "app",
+          label: "App-provided; untrusted",
+          appId: "approval.app",
+        });
+        expect(JSON.stringify(appEvents.at(-1))).not.toContain(current.canary);
+        expect(await appRuntime.hasPendingApproval(firstRunId)).toBe(true);
+        expect(appEvents.some((event) => event.type === "approval_resolved")).toBe(false);
+        expect(countRunInputs(appEvents)).toBe(countRunInputs(baselineEvents));
+      } finally {
+        await appRuntime.close();
       }
 
       const invalidEdit = await invokeMcpCli(configPath, dataDirectory, model, createTransport, [
