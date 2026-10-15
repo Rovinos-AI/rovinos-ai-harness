@@ -2,7 +2,7 @@
 
 The repository uses mise to activate the exact Node.js and Corepack versions in
 `mise.toml`. Install mise 2026.10.4, trust this repository with `mise trust`,
-then run `mise install` once. The project configuration selects Node.js 22.23.3
+then run `mise install` once. The project configuration selects Node.js 26.12.0
 and Corepack 0.36.0.
 
 Corepack selects Yarn 4.18.1 from the integrity-pinned `packageManager` field in

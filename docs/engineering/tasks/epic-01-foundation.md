@@ -10,8 +10,8 @@
 **Parent:** #1 Foundation
 **Task Description:** Create the empty monorepo skeleton so `yarn install && yarn test:unit` works, with the four Vitest projects (unit, integration, canary, replay) defined but only the unit project populated.
 **Expected Inputs:** Repo containing `LICENSE`, the specs and `AGENTS.md` files, `CLAUDE.md`, `.gitignore`, `docs/engineering/layers.json`, and the dependency-free agent index generator `scripts/gen-agents-index.mjs` with its `node:test` suite `scripts/gen-agents-index.test.mjs`. Package layout in CONVENTIONS §1.
-**Expected Output:** `package.json` (private, `engines.node >=22`, `packageManager`, and workspaces), `tsconfig.base.json`, `vitest.config.ts`, `packages/schemas` with one exported `HARNESS_VERSION` constant and a test, `.editorconfig`, edits to the existing `.gitignore` (add, never drop entries) and root `AGENTS.md`.
-**Dependencies:** yarn, Node 22, typescript, vitest, `@vitest/coverage-v8`.
+**Expected Output:** `package.json` (private, `engines.node >=26.12.0`, `packageManager`, and workspaces), `tsconfig.base.json`, `vitest.config.ts`, `packages/schemas` with one exported `HARNESS_VERSION` constant and a test, `.editorconfig`, edits to the existing `.gitignore` (add, never drop entries) and root `AGENTS.md`.
+**Dependencies:** yarn, Node 26, typescript, vitest, `@vitest/coverage-v8`.
 **Items it depends on:** none.
 **Implementation guidance:**
 
@@ -40,11 +40,11 @@
 **Task Description:** Standardize package management on Yarn 4 and pin Node.js, Corepack, Yarn, and mise so every machine, container, and CI agent uses the same toolchain.
 **Expected Inputs:** The Yarn workspace from 1.1 and 1.2, the Dockerfile and compose files from 1.3, and the existing toolchain references in specs, `AGENTS.md` files, conventions, and README.
 **Expected Output:** `mise.toml`, `.yarnrc.yml`, `yarn.lock`, `yarn.config.cjs` (Yarn constraints), root `package.json` workspaces and integrity-pinned `packageManager`, scripts including `build`, `start`, `clean`, and `deps:check`, removal of obsolete package-manager files, Yarn ignore entries, `scripts/ci/toolchain.test.ts`, `docs/engineering/toolchain.md`, updated tooling references throughout the repository, and regenerated agent indexes.
-**Dependencies:** Yarn 4.18.1 (latest stable verified for this task; not the Yarn 6 preview), mise 2026.10.4, Node.js 22.23.3, and Corepack 0.36.0.
+**Dependencies:** Yarn 4.18.1 (latest stable verified for this task; not the Yarn 6 preview), mise 2026.10.4, Node.js 26.12.0, and Corepack 0.36.0.
 **Items it depends on:** 1.1, 1.2.
 **Implementation guidance:**
 
-1. **mise (`mise.toml`).** Pin Node 22.23.3 and `"npm:corepack"` 0.36.0 under `[tools]`; enable `node.corepack` and set `experimental = false`. Do not set `NODE_OPTIONS` or duplicate package scripts as mise tasks. Developers run `mise trust` and `mise install`; document these commands in `docs/engineering/toolchain.md`.
+1. **mise (`mise.toml`).** Pin Node 26.12.0 and `"npm:corepack"` 0.36.0 under `[tools]`; enable `node.corepack` and set `experimental = false`. Do not set `NODE_OPTIONS` or duplicate package scripts as mise tasks. Developers run `mise trust` and `mise install`; document these commands in `docs/engineering/toolchain.md`.
 2. **Yarn version.** Pin Yarn 4.18.1 once in the root `packageManager` field using Corepack's integrity hash. Corepack enforces it; do not add another Yarn version pin or commit `.yarn/releases`.
 3. **`.yarnrc.yml`.** Use `nodeLinker: node-modules`, `enableTelemetry: false`, `enableGlobalCache: true`, `defaultSemverRangePrefix: ""`, `npmMinimalAgeGate: 3d`, an empty `npmPreapprovedPackages` list, and `enableScripts: false`. Keep the root `dependenciesMeta` build-script allowlist explicit; esbuild is the only package currently allowed to run its build script. Yarn 4.18.1 verifies the age-gate duration syntax and Corepack behavior.
 4. **Workspaces.** Root `package.json` declares `["packages/*", "tools/*"]`; all internal dependencies use `workspace:^`. The committed Yarn lockfile preserves the versions resolved by the previous lockfile unless a difference is recorded in the PR.
@@ -101,7 +101,7 @@
 **Task Description:** Provide a hardened base image build and a compose file that starts a placeholder `harness` service with a healthcheck.
 **Expected Inputs:** Workspace; a placeholder `packages/cli` with a `bin` printing the version.
 **Expected Output:** `Dockerfile` (multi-stage), `.dockerignore`, `infra/compose/docker-compose.yml`, minimal `packages/cli` (`src/bin.ts`, `package.json` with `bin.harness`).
-**Dependencies:** Docker, `node:22-slim` base image.
+**Dependencies:** Docker, `node:26-slim` base image.
 **Items it depends on:** 1.1, 1.1.1.
 **Implementation guidance:**
 

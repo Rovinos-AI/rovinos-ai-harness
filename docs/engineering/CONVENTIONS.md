@@ -81,7 +81,7 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 
 ## 2. Tooling
 
-- Node 22 LTS and Corepack are pinned through mise; Yarn 4 is selected by Corepack from the root `packageManager` field. Yarn uses the `node-modules` linker. Run `mise install` and `yarn install --immutable`. TypeScript 5.x strict (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `verbatimModuleSyntax`), ESM only (`"type": "module"`, `.js` extensions in relative imports).
+- Node 26 and Corepack are pinned through mise; Yarn 4 is selected by Corepack from the root `packageManager` field. Yarn uses the `node-modules` linker. Run `mise install` and `yarn install --immutable`. TypeScript 5.x strict (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `verbatimModuleSyntax`), ESM only (`"type": "module"`, `.js` extensions in relative imports).
 - Vitest (workspace with four projects, see §6). Linting: strict type-aware ESLint (`typescript-eslint` strict and stylistic type-checked presets plus the plugins in task 1.2), Prettier, markdownlint, ShellCheck, hadolint, and cspell (task 1.11). Every rule is an error or off; `yarn lint` runs all of them with zero warnings allowed.
 - Zod for every runtime boundary (config, events, tool args/results, model outputs, telemetry). **Zod 4, version 4.2 or later**: the MCP TypeScript SDK v2 requires it and accepts Standard Schema objects. One Zod major across the repo.
 - IDs: ULID (`ulid` package). Time: epoch milliseconds integers.

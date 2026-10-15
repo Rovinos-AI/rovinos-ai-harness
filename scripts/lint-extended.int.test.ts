@@ -155,14 +155,14 @@ it.skipIf(process.env.LINT_SKIP_CONTAINERS === "1")(
       const clean = writeFixture(
         temporaryRoot,
         "Dockerfile.clean",
-        `FROM node:22-slim@sha256:${imageDigest}\n`,
+        `FROM node:26-slim@sha256:${imageDigest}\n`,
       );
       const invalid = writeFixture(
         temporaryRoot,
         "Dockerfile.invalid",
-        `FROM node:22-slim@sha256:${imageDigest}\nRUN echo ready | cat\n`,
+        `FROM node:26-slim@sha256:${imageDigest}\nRUN echo ready | cat\n`,
       );
-      const unpinned = writeFixture(temporaryRoot, "Dockerfile.unpinned", "FROM node:22-slim\n");
+      const unpinned = writeFixture(temporaryRoot, "Dockerfile.unpinned", "FROM node:26-slim\n");
 
       expect(invokeLint("docker", [relative(rootDirectory, clean)])).toBe(true);
       expect(invokeLint("docker", [relative(rootDirectory, invalid)])).toBe(false);

@@ -97,7 +97,7 @@ Shared design for this epic:
 **Task Description:** Make network isolation structural and tested.
 **Expected Inputs:** Compose networks and service definitions.
 **Expected Output:** compose networks `internal` (`internal: true`) and `egress`, `harness` attached to `internal` only, collector attached to both, `infra/k8s/networkpolicy.example.yaml`, `test/network-isolation.int.test.ts`.
-**Dependencies:** Docker, a tiny probe container (for example `busybox` or `node:22-slim`).
+**Dependencies:** Docker, a tiny probe container (for example `busybox` or `node:26-slim`).
 **Items it depends on:** 10.1, 1.8.
 **Implementation guidance:**
 

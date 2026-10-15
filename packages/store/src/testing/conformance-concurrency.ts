@@ -119,12 +119,7 @@ function createWorkerSession(options: WorkerSessionOptions): WorkerSession {
   const execArgv =
     options.worker.loader === undefined
       ? undefined
-      : [
-          "--experimental-transform-types",
-          "--disable-warning=ExperimentalWarning",
-          "--experimental-loader",
-          options.worker.loader,
-        ];
+      : ["--disable-warning=ExperimentalWarning", "--experimental-loader", options.worker.loader];
   const worker = new Worker(concurrencyWorkerSource, {
     eval: true,
     ...(execArgv === undefined ? {} : { execArgv }),
@@ -142,7 +137,10 @@ function createWorkerSession(options: WorkerSessionOptions): WorkerSession {
     receiveWorkerMessage(message, channels, worker);
   });
   worker.on("error", (error) => {
-    rejectWorkerChannels(channels, error);
+    rejectWorkerChannels(
+      channels,
+      error instanceof Error ? error : new Error("Concurrency worker error"),
+    );
   });
   worker.on("exit", (code) => {
     if (code !== 0) {

@@ -9,6 +9,7 @@ import { z } from "zod";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const packageManifestSchema = z.looseObject({
+  devDependencies: z.looseObject({ "@types/node": z.string() }),
   engines: z.looseObject({ node: z.string() }),
   packageManager: z.string(),
 });
@@ -67,7 +68,7 @@ it("pins an exact supported Node and Corepack version through mise", () => {
   }
 
   expect(mise).not.toMatch(/^node\.corepack\s*=/m);
-  expect(nodeVersion).toMatch(/^22\.\d+\.\d+$/);
+  expect(nodeVersion).toMatch(/^26\.\d+\.\d+$/);
   expect(corepackVersion).toMatch(/^\d+\.\d+\.\d+$/);
   expect(shellcheckVersion).toMatch(/^\d+\.\d+\.\d+$/);
   expect(shellcheckVersion).toBe("0.11.0");
@@ -77,6 +78,17 @@ it("pins an exact supported Node and Corepack version through mise", () => {
   );
   expect(satisfiesNodeEngine(nodeVersion, getNodeEngine())).toBe(true);
   expect(existsSync(join(root, ".nvmrc"))).toBe(false);
+});
+
+it("keeps the Node major aligned across mise, engines, types, and the runtime image", () => {
+  const mise = readFileSync(join(root, "mise.toml"), "utf8");
+  const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8");
+  const miseMajor = /^node = "(\d+)\.\d+\.\d+"$/m.exec(mise)?.[1];
+  const engineMajor = /^>=(\d+)\.\d+\.\d+$/.exec(getNodeEngine())?.[1];
+  const typesMajor = /^(\d+)\.\d+\.\d+$/.exec(readManifest().devDependencies["@types/node"])?.[1];
+  const dockerMajor = /^FROM node:(\d+)-slim@sha256:/m.exec(dockerfile)?.[1];
+
+  expect([miseMajor, engineMajor, typesMajor, dockerMajor]).toEqual(["26", "26", "26", "26"]);
 });
 
 it("adds the mise-installed ShellCheck binary to the Azure Pipelines path", () => {

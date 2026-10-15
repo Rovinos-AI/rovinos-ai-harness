@@ -18,7 +18,7 @@ it("builds extended lint commands through the injected runner", () => {
   try {
     const dockerfile = resolve(temporaryRoot, "Dockerfile");
     const shellFile = resolve(temporaryRoot, "fixture.sh");
-    writeFileSync(dockerfile, `FROM node:22-slim@sha256:${"a".repeat(64)}\n`);
+    writeFileSync(dockerfile, `FROM node:26-slim@sha256:${"a".repeat(64)}\n`);
     writeFileSync(
       shellFile,
       "#!/usr/bin/env bash\n# SPDX-License-Identifier: Apache-2.0\nset -euo pipefail\n",

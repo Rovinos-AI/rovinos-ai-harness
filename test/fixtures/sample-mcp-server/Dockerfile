@@ -21,7 +21,7 @@ RUN mise exec -- yarn install --immutable
 COPY . .
 RUN mise exec -- yarn build
 
-FROM node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+FROM node:26-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4
 WORKDIR /app
 RUN groupadd --gid 10001 harness \
     && useradd --uid 10001 --gid harness --no-create-home --shell /usr/sbin/nologin harness \
