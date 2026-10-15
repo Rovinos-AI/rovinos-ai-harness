@@ -161,7 +161,12 @@ type SafeEventEnvelope = Pick<Event, "runId" | "seq" | "ts" | "traceId" | "spanI
 type UnexportedEvent = Extract<
   Event,
   {
-    type: "run_input" | "model_request" | "approval_requested" | "context_compacted";
+    type:
+      | "run_input"
+      | "model_request"
+      | "approval_requested"
+      | "context_compacted"
+      | "app_content";
   }
 >;
 
@@ -182,7 +187,8 @@ function isUnexportedEvent(event: Event): event is UnexportedEvent {
     event.type === "run_input" ||
     event.type === "model_request" ||
     event.type === "approval_requested" ||
-    event.type === "context_compacted"
+    event.type === "context_compacted" ||
+    event.type === "app_content"
   );
 }
 

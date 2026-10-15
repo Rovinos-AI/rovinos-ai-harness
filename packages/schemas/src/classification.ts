@@ -78,6 +78,13 @@ export const EVENT_FIELD_CLASS = {
     waitMs: "meta",
     edits: "content",
   },
+  app_content: {
+    source: "meta",
+    appId: "meta",
+    label: "meta",
+    kind: "meta",
+    content: "content",
+  },
   checkpoint_written: {
     checkpointId: "meta",
     atSeq: "meta",

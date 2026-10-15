@@ -240,6 +240,14 @@ const unexportedEvents = [
     strategyVersion: "summary.v1",
     summary: "CONTEXT_CANARY",
   }),
+  validEvent({
+    type: "app_content",
+    source: "app",
+    appId: "approval.app",
+    label: "App-provided; untrusted",
+    kind: "message",
+    content: { text: "APP_CONTENT_CANARY" },
+  }),
 ];
 
 function assertConstrainedStrings(schema: z.core.$ZodType): void {
