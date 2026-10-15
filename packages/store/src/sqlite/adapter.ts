@@ -28,6 +28,7 @@ import {
   type Clock,
   type EventStore,
   type IdempotencyKeyHash,
+  type IdempotencyKeyTakeoverOptions,
   type ListRunsOptions,
   type RunSummary,
   type SqliteStoreOptions,
@@ -40,6 +41,7 @@ import {
   type ChangeSubscription,
 } from "../subscriptions.js";
 import { SqliteOutboxReader, sqliteStoreError as storeError } from "./outbox.js";
+import { takeoverSqliteIdempotencyKey } from "./idempotency.js";
 import { migrate } from "../migrate.js";
 import {
   decodeStoredContent,
@@ -411,6 +413,14 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     } catch (error) {
       return Promise.reject(storeError(error));
     }
+  }
+
+  /** {@inheritDoc EventStore.takeoverIdempotencyKey} */
+  takeoverIdempotencyKey(
+    keyHash: IdempotencyKeyHash,
+    options: IdempotencyKeyTakeoverOptions,
+  ): Promise<boolean> {
+    return takeoverSqliteIdempotencyKey(this.db, keyHash, options);
   }
 
   /** {@inheritDoc EventStore.releaseIdempotencyKey} */

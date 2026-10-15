@@ -5,6 +5,7 @@ import type { ModelPort } from "@harness/core";
 import { createHarness } from "./index.js";
 import { Code, FakeClock, Id } from "@harness/schemas";
 import { PostgresEventStore } from "@harness/store";
+import { Pool } from "pg";
 import { expect, it } from "vitest";
 
 const connectionString =
@@ -34,12 +35,16 @@ const fakeModel: ModelPort = {
 };
 
 it("deduplicates concurrent starts across SDK instances using Postgres", async () => {
-  const firstStore = new PostgresEventStore(connectionString);
-  const secondStore = new PostgresEventStore(connectionString);
+  const admin = new Pool({ connectionString, max: 1 });
+  const schema = `sdk_${randomBytes(16).toString("hex")}`;
+  const firstStore = new PostgresEventStore(connectionString, { schema });
+  const secondStore = new PostgresEventStore(connectionString, { schema });
   const key = `sdk-idempotency-${randomBytes(16).toString("hex")}`;
   let firstHarness: Awaited<ReturnType<typeof createHarness>> | undefined;
   let secondHarness: Awaited<ReturnType<typeof createHarness>> | undefined;
   try {
+    await admin.query(`CREATE SCHEMA "${schema}"`);
+    await firstStore.head(Id.parse("00000000000000000000000000"));
     firstHarness = await createHarness({
       config: HarnessConfigSchema.parse({}),
       overrides: {
@@ -69,9 +74,17 @@ it("deduplicates concurrent starts across SDK instances using Postgres", async (
     const runs = await firstStore.listRuns({ limit: 100 });
     expect(runs.runs.filter(({ runId }) => runId === first.runId)).toHaveLength(1);
   } finally {
-    await Promise.all([
-      firstHarness?.close() ?? firstStore.close(),
-      secondHarness?.close() ?? secondStore.close(),
-    ]);
+    try {
+      await Promise.all([
+        firstHarness?.close() ?? firstStore.close(),
+        secondHarness?.close() ?? secondStore.close(),
+      ]);
+    } finally {
+      try {
+        await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      } finally {
+        await admin.end();
+      }
+    }
   }
 });

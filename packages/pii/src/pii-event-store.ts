@@ -60,6 +60,15 @@ export interface EventStoreLike {
   deleteRun(runId: Id): Promise<number>;
   consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean>;
   claimIdempotencyKey(keyHash: string, runId: Id, createdAt: number): Promise<Id>;
+  takeoverIdempotencyKey(
+    keyHash: string,
+    options: {
+      readonly expectedRunId: Id;
+      readonly runId: Id;
+      readonly createdAt: number;
+      readonly staleBefore: number;
+    },
+  ): Promise<boolean>;
   releaseIdempotencyKey(keyHash: string, runId: Id): Promise<void>;
   listRuns(opts: ListRunsOptionsLike): Promise<{ runs: RunSummaryLike[]; nextCursor?: string }>;
   findRunsByTrace(traceId: TraceId): Promise<Id[]>;
@@ -196,6 +205,18 @@ export class PiiEventStore implements EventStoreLike {
 
   claimIdempotencyKey(keyHash: string, runId: Id, createdAt: number): Promise<Id> {
     return this.inner.claimIdempotencyKey(keyHash, runId, createdAt);
+  }
+
+  takeoverIdempotencyKey(
+    keyHash: string,
+    options: {
+      readonly expectedRunId: Id;
+      readonly runId: Id;
+      readonly createdAt: number;
+      readonly staleBefore: number;
+    },
+  ): Promise<boolean> {
+    return this.inner.takeoverIdempotencyKey(keyHash, options);
   }
 
   releaseIdempotencyKey(keyHash: string, runId: Id): Promise<void> {

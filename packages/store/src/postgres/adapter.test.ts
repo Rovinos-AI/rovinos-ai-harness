@@ -46,6 +46,11 @@ interface FakeApprovalNotification {
   readonly sent_at?: number;
 }
 
+interface FakeIdempotencyClaim {
+  readonly run_id: string;
+  readonly created_at: number;
+}
+
 interface FakeQueryResult {
   rows: unknown[];
   rowCount?: number | null;
@@ -75,7 +80,7 @@ let transactionBackup:
       snapshots: FakeSnapshot[];
       approvalNotifications: Map<string, FakeApprovalNotification>;
       confirmationStates: Map<string, number>;
-      idempotencyKeys: Map<string, string>;
+      idempotencyKeys: Map<string, FakeIdempotencyClaim>;
     }
   | undefined;
 
@@ -86,7 +91,7 @@ const fakePg = vi.hoisted(() => ({
   snapshots: new Array<FakeSnapshot>(),
   approvalNotifications: new Map<string, FakeApprovalNotification>(),
   confirmationStates: new Map<string, number>(),
-  idempotencyKeys: new Map<string, string>(),
+  idempotencyKeys: new Map<string, FakeIdempotencyClaim>(),
   schemaInitialized: false,
   migrationHistory: new Map<string, string>(),
   encryptionValue: "",
@@ -198,8 +203,8 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   }
   if (query === "DELETE FROM idempotency_keys WHERE run_id = $1") {
     const runId = text(values[0]);
-    for (const [keyHash, claimedRunId] of fakePg.idempotencyKeys) {
-      if (claimedRunId === runId) {
+    for (const [keyHash, claim] of fakePg.idempotencyKeys) {
+      if (claim.run_id === runId) {
         fakePg.idempotencyKeys.delete(keyHash);
       }
     }
@@ -313,8 +318,8 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
         fakePg.confirmationStates.set(stateId, expiresAt);
       }
       fakePg.idempotencyKeys.clear();
-      for (const [keyHash, runId] of transactionBackup.idempotencyKeys) {
-        fakePg.idempotencyKeys.set(keyHash, runId);
+      for (const [keyHash, claim] of transactionBackup.idempotencyKeys) {
+        fakePg.idempotencyKeys.set(keyHash, claim);
       }
       transactionBackup = undefined;
     }
@@ -530,13 +535,32 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   }
   if (query.startsWith("INSERT INTO idempotency_keys")) {
     const keyHash = text(values[0]);
-    const runId = fakePg.idempotencyKeys.get(keyHash) ?? text(values[1]);
-    fakePg.idempotencyKeys.set(keyHash, runId);
-    return { rows: [{ run_id: runId }] };
+    const claim = fakePg.idempotencyKeys.get(keyHash) ?? {
+      run_id: text(values[1]),
+      created_at: number(values[2]),
+    };
+    fakePg.idempotencyKeys.set(keyHash, claim);
+    return { rows: [{ run_id: claim.run_id }] };
+  }
+  if (query.startsWith("UPDATE idempotency_keys")) {
+    const keyHash = text(values[0]);
+    const claim = fakePg.idempotencyKeys.get(keyHash);
+    if (
+      claim?.run_id === text(values[1]) &&
+      claim.created_at <= number(values[4]) &&
+      !fakePg.events.some((event) => event.run_id === claim.run_id)
+    ) {
+      fakePg.idempotencyKeys.set(keyHash, {
+        run_id: text(values[2]),
+        created_at: number(values[3]),
+      });
+      return { rows: [], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
   }
   if (query === "DELETE FROM idempotency_keys WHERE key_hash = $1 AND run_id = $2") {
     const keyHash = text(values[0]);
-    if (fakePg.idempotencyKeys.get(keyHash) === text(values[1])) {
+    if (fakePg.idempotencyKeys.get(keyHash)?.run_id === text(values[1])) {
       fakePg.idempotencyKeys.delete(keyHash);
     }
     return { rows: [] };

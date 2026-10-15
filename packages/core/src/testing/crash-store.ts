@@ -114,6 +114,12 @@ export class CrashingEventStore implements EventStore {
     return this.inner.claimIdempotencyKey(keyHash, runId, createdAt);
   }
 
+  takeoverIdempotencyKey(
+    ...args: Parameters<EventStore["takeoverIdempotencyKey"]>
+  ): ReturnType<EventStore["takeoverIdempotencyKey"]> {
+    return this.inner.takeoverIdempotencyKey(...args);
+  }
+
   releaseIdempotencyKey(
     keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0],
     runId: Id,

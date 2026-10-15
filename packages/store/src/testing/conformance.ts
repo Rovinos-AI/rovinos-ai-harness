@@ -13,6 +13,7 @@ import { registerTraceLookupConformance } from "./conformance-trace-lookup.js";
 import { registerOutboxConformance } from "./conformance-outbox.js";
 import { registerLazyRead } from "./conformance-read.js";
 import { registerWatchConformance } from "./conformance-watch.js";
+import { registerIdempotencyKeyTakeoverConformance } from "./conformance-idempotency-takeover.js";
 import { createEventBuilders, type EventStoreTestBuilders } from "./testing.js";
 
 /** Factory for a fresh store and its resource cleanup. */
@@ -393,6 +394,7 @@ export function runEventStoreConformance(
   describe(`${name} EventStore conformance`, () => {
     registerAppendOrdering(factory, builders);
     registerIdempotencyKeyConformance(factory, builders, caps.supportsFileReopen);
+    registerIdempotencyKeyTakeoverConformance(factory, builders);
     registerRangeReads(factory, builders);
     registerUnknownHead(factory, builders);
     registerStaleConflict(factory, builders);

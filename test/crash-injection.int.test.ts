@@ -305,14 +305,23 @@ class BoundaryRecordingStore implements EventStore {
 
   claimIdempotencyKey(
     keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
-    runId: Id,
+    candidateRunId: Id,
     createdAt: number,
   ) {
-    return this.inner.claimIdempotencyKey(keyHash, runId, createdAt);
+    return this.inner.claimIdempotencyKey(keyHash, candidateRunId, createdAt);
   }
 
-  releaseIdempotencyKey(keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0], runId: Id) {
-    return this.inner.releaseIdempotencyKey(keyHash, runId);
+  takeoverIdempotencyKey(
+    ...args: Parameters<EventStore["takeoverIdempotencyKey"]>
+  ): ReturnType<EventStore["takeoverIdempotencyKey"]> {
+    return this.inner.takeoverIdempotencyKey(...args);
+  }
+
+  releaseIdempotencyKey(
+    keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0],
+    claimedRunId: Id,
+  ) {
+    return this.inner.releaseIdempotencyKey(keyHash, claimedRunId);
   }
 
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {
@@ -525,14 +534,23 @@ class PreIntentExecutionStore implements EventStore {
 
   claimIdempotencyKey(
     keyHash: Parameters<EventStore["claimIdempotencyKey"]>[0],
-    runId: Id,
+    candidateRunId: Id,
     createdAt: number,
   ) {
-    return this.inner.claimIdempotencyKey(keyHash, runId, createdAt);
+    return this.inner.claimIdempotencyKey(keyHash, candidateRunId, createdAt);
   }
 
-  releaseIdempotencyKey(keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0], runId: Id) {
-    return this.inner.releaseIdempotencyKey(keyHash, runId);
+  takeoverIdempotencyKey(
+    ...args: Parameters<EventStore["takeoverIdempotencyKey"]>
+  ): ReturnType<EventStore["takeoverIdempotencyKey"]> {
+    return this.inner.takeoverIdempotencyKey(...args);
+  }
+
+  releaseIdempotencyKey(
+    keyHash: Parameters<EventStore["releaseIdempotencyKey"]>[0],
+    claimedRunId: Id,
+  ) {
+    return this.inner.releaseIdempotencyKey(keyHash, claimedRunId);
   }
 
   listRuns(options: Parameters<EventStore["listRuns"]>[0]) {

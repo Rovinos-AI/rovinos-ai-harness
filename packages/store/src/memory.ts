@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
-  Id,
+  type Id,
   TraceId,
   type Event as StoredEvent,
   type NewEvent,
@@ -19,12 +19,18 @@ import {
 import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "./errors.js";
 import {
   type EventStore,
-  IdempotencyKeyHashSchema,
   type ListRunsOptions,
   type IdempotencyKeyHash,
   type RunSummary,
   type SnapshotStoreOptions,
 } from "./types.js";
+import {
+  claimMemoryIdempotencyKey,
+  deleteMemoryIdempotencyKeyClaims,
+  releaseMemoryIdempotencyKey,
+  takeoverMemoryIdempotencyKey,
+  type MemoryIdempotencyClaim,
+} from "./idempotency.js";
 import {
   ChangeEmitter,
   summaryFromEvents,
@@ -51,7 +57,7 @@ export class InMemoryEventStore implements EventStore {
     { readonly runId: Id; readonly claimedAt: number; readonly sentAt?: number }
   >();
   private readonly confirmationStates = new Map<string, number>();
-  private readonly idempotencyKeys = new Map<string, Id>();
+  private readonly idempotencyKeys = new Map<string, MemoryIdempotencyClaim>();
   private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -223,11 +229,7 @@ export class InMemoryEventStore implements EventStore {
 
     this.runs.delete(runId);
     this.snapshots.delete(runId);
-    for (const [keyHash, claimedRunId] of this.idempotencyKeys) {
-      if (claimedRunId === runId) {
-        this.idempotencyKeys.delete(keyHash);
-      }
-    }
+    deleteMemoryIdempotencyKeyClaims(this.idempotencyKeys, runId);
     for (const [approvalId, notification] of this.approvalNotifications) {
       if (notification.runId === runId) {
         this.approvalNotifications.delete(approvalId);
@@ -417,33 +419,22 @@ export class InMemoryEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.claimIdempotencyKey} */
   claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id> {
-    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
-    const parsedRunId = Id.safeParse(runId);
-    if (!parsedHash.success || !parsedRunId.success) {
-      return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
-    }
-    if (!Number.isSafeInteger(createdAt) || createdAt < 0) {
-      return Promise.reject(new InvalidEventError([["createdAt"]]));
-    }
-    const existingRunId = this.idempotencyKeys.get(parsedHash.data);
-    if (existingRunId !== undefined) {
-      return Promise.resolve(existingRunId);
-    }
-    this.idempotencyKeys.set(parsedHash.data, parsedRunId.data);
-    return Promise.resolve(parsedRunId.data);
+    return claimMemoryIdempotencyKey(this.idempotencyKeys, keyHash, runId, createdAt);
+  }
+
+  /** {@inheritDoc EventStore.takeoverIdempotencyKey} */
+  takeoverIdempotencyKey(
+    keyHash: IdempotencyKeyHash,
+    options: Parameters<EventStore["takeoverIdempotencyKey"]>[1],
+  ): Promise<boolean> {
+    return Promise.resolve().then(() =>
+      takeoverMemoryIdempotencyKey(this.idempotencyKeys, this.runs, keyHash, options),
+    );
   }
 
   /** {@inheritDoc EventStore.releaseIdempotencyKey} */
   releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
-    const parsedHash = IdempotencyKeyHashSchema.safeParse(keyHash);
-    const parsedRunId = Id.safeParse(runId);
-    if (!parsedHash.success || !parsedRunId.success) {
-      return Promise.reject(new InvalidEventError([["idempotencyKey"]]));
-    }
-    if (this.idempotencyKeys.get(parsedHash.data) === parsedRunId.data) {
-      this.idempotencyKeys.delete(parsedHash.data);
-    }
-    return Promise.resolve();
+    return releaseMemoryIdempotencyKey(this.idempotencyKeys, keyHash, runId);
   }
 
   /** {@inheritDoc EventStore.close} */

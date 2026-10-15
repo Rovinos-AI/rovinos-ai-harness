@@ -27,6 +27,7 @@ import {
   type Clock,
   type EventStore,
   type IdempotencyKeyHash,
+  type IdempotencyKeyTakeoverOptions,
   type ListRunsOptions,
   type RunSummary,
 } from "../types.js";
@@ -46,6 +47,7 @@ import {
 import { deleteRunTransaction } from "./retention.js";
 import { PostgresApprovalNotifications } from "./approval-notifications.js";
 import { PostgresConfirmationStates } from "./confirmation-states.js";
+import { takeoverPostgresIdempotencyKey } from "./idempotency.js";
 import { initializePostgresStore } from "./initialize.js";
 import { readEvents } from "./reader.js";
 import { isRunTerminal, PostgresSubscriptions } from "./subscriptions.js";
@@ -304,6 +306,20 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     } catch (error) {
       throw storeError(error);
     }
+  }
+
+  /** {@inheritDoc EventStore.takeoverIdempotencyKey} */
+  takeoverIdempotencyKey(
+    keyHash: IdempotencyKeyHash,
+    options: IdempotencyKeyTakeoverOptions,
+  ): Promise<boolean> {
+    this.assertWritable();
+    return takeoverPostgresIdempotencyKey(
+      this.pool,
+      () => this.ensureInitialized(),
+      keyHash,
+      options,
+    );
   }
 
   /** {@inheritDoc EventStore.releaseIdempotencyKey} */

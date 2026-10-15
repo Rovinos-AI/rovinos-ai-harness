@@ -31,6 +31,7 @@ function brokenFactory(): EventStoreFactory {
         reference.consumeConfirmationState(stateId, expiresAt, now),
       claimIdempotencyKey: (keyHash, runId, createdAt) =>
         reference.claimIdempotencyKey(keyHash, runId, createdAt),
+      takeoverIdempotencyKey: (...args) => reference.takeoverIdempotencyKey(...args),
       releaseIdempotencyKey: (keyHash, runId) => reference.releaseIdempotencyKey(keyHash, runId),
       listRuns: (options) => reference.listRuns(options),
       findRunsByTrace: (traceId) => reference.findRunsByTrace(traceId),

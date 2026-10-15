@@ -155,6 +155,9 @@ function createInnerStore(): EventStoreLike {
     claimIdempotencyKey(_keyHash, candidateRunId) {
       return Promise.resolve(candidateRunId);
     },
+    takeoverIdempotencyKey() {
+      return Promise.resolve(false);
+    },
     releaseIdempotencyKey() {
       return Promise.resolve();
     },
@@ -192,6 +195,14 @@ describe("PiiEventStore", () => {
     const keyHash = "d".repeat(64);
 
     await expect(store.claimIdempotencyKey(keyHash, runId, 10)).resolves.toBe(runId);
+    await expect(
+      store.takeoverIdempotencyKey(keyHash, {
+        expectedRunId: runId,
+        runId,
+        createdAt: 20,
+        staleBefore: 10,
+      }),
+    ).resolves.toBe(false);
     await expect(store.releaseIdempotencyKey(keyHash, runId)).resolves.toBeUndefined();
   });
 

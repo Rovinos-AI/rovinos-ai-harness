@@ -16,8 +16,9 @@ const { runId } = await harness.startRun({
 Without a configured run queue, `startRun` launches execution in-process and returns its id with
 `pending` status after the initial run events are durable, while execution continues detached.
 Idempotency keys are deduplicated across `Harness` instances sharing the same store and persist
-across restarts. The store retains only the key's SHA-256 hash, never the raw key. Run the
-worker-backed queue mode only after task 24.2 is available.
+across restarts. Use opaque identifiers only; do not include sensitive data. The store retains only
+the domain-separated, unsalted SHA-256 hash, never the raw key, so low-entropy keys may be guessed
+from the table. Run the worker-backed queue mode only after task 24.2 is available.
 
 An optional `role` is passed to model routing. `requestedBy` is validated but not recorded because
 the current `run_created` event contract has no audit field for it. It is not an authorization
