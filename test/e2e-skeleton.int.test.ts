@@ -962,9 +962,9 @@ describe("MCP runtime", () => {
     const localAdapter: ProviderAdapter = {
       provider: Code.parse("local"),
       kind: "openai",
-      complete: async (request) => {
+      complete: (request) => {
         localRequests.push(request);
-        throw new ProviderError("provider_unavailable");
+        return Promise.reject(new ProviderError("provider_unavailable"));
       },
     };
     const hostedAdapter = new FakeProvider(Code.parse("hosted"), [

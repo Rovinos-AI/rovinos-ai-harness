@@ -76,9 +76,11 @@ export interface ModelGatewayDependencies {
 export type RequestSanitizer = (
   request: ModelRequest,
   target: ModelRef & { readonly trust: "hosted" | "local" },
-  runId: Id,
-  recordPiiAction?: (summary: PiiActionSummary) => Promise<void>,
-  signal?: AbortSignal,
+  context: {
+    readonly runId: Id;
+    readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
+    readonly signal: AbortSignal;
+  },
 ) => Promise<ModelRequest>;
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
@@ -261,9 +263,13 @@ export class ModelGateway {
                     provider: adapter.provider,
                     trust: this.dependencies.providerTrust?.[adapter.provider] ?? "hosted",
                   },
-                  context.runId,
-                  context.recordPiiAction,
-                  signal,
+                  {
+                    runId: context.runId,
+                    ...(context.recordPiiAction === undefined
+                      ? {}
+                      : { recordPiiAction: context.recordPiiAction }),
+                    signal,
+                  },
                 );
           signal.throwIfAborted();
           return await adapter.complete(sanitizedRequest, {

@@ -215,10 +215,10 @@ describe("createRuntime PII composition", () => {
       provider: Code.parse("hosted"),
       kind: "openai",
       capabilities: { structuredOutput: "none", forcedToolChoice: true },
-      complete: async (request) => {
+      complete: (request) => {
         requests.push(request);
         attempt += 1;
-        return {
+        return Promise.resolve({
           parts: [
             {
               type: "tool_call",
@@ -230,14 +230,14 @@ describe("createRuntime PII composition", () => {
           usage: { inputTokens: 1, outputTokens: 1 },
           finishReason: "tool_calls",
           latencyMs: 0,
-        };
+        });
       },
     };
     const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
       ids: { next: () => Id.parse("11111111111111111111111111") },
       clock: { now: () => 0 },
-      requestSanitizer: (request, target, runId, recordPiiAction, signal) =>
-        sanitizer.sanitizeRequest(request, target, runId, recordPiiAction, signal),
+      requestSanitizer: (request, target, context) =>
+        sanitizer.sanitizeRequest(request, target, context.runId, { signal: context.signal }),
     });
 
     await gateway.complete(
@@ -256,9 +256,11 @@ describe("createRuntime PII composition", () => {
     expect(requests).toHaveLength(2);
     expect(JSON.stringify(requests[1])).not.toContain(email);
     expect(JSON.stringify(requests[1]?.messages)).toContain("<EMAIL_1>");
-    expect(requests[1]?.messages.some((message) =>
-      message.parts.some((part) => part.type === "tool_call"),
-    )).toBe(true);
+    expect(
+      requests[1]?.messages.some((message) =>
+        message.parts.some((part) => part.type === "tool_call"),
+      ),
+    ).toBe(true);
   });
 
   it("fails the run with pii_blocked before a provider can receive a blocked token", async () => {

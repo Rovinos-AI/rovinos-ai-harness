@@ -315,8 +315,13 @@ async function createRuntimeModelAndStore(options: {
     clock: options.clock,
   });
   const requestSanitizer: RequestSanitizer | undefined = options.piiConfig.enabled
-    ? (request, target, runId, recordPiiAction, signal) =>
-        piiRuntime.messageSanitizer.sanitizeRequest(request, target, runId, recordPiiAction, signal)
+    ? (request, target, context) =>
+        piiRuntime.messageSanitizer.sanitizeRequest(request, target, context.runId, {
+          ...(context.recordPiiAction === undefined
+            ? {}
+            : { recordPiiAction: context.recordPiiAction }),
+          signal: context.signal,
+        })
     : undefined;
   const model = await createRuntimeModel(options.config, options.overrides, {
     ids: options.ids,

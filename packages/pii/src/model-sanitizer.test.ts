@@ -111,7 +111,7 @@ describe("PiiMessageSanitizer", () => {
       ],
       target("local"),
       runId,
-      recordPiiAction,
+      { recordPiiAction },
     );
 
     expect(JSON.stringify(result)).toContain(canary);
@@ -177,9 +177,7 @@ describe("PiiMessageSanitizer", () => {
   });
 
   it("applies model-input policy to tool-call arguments", async () => {
-    const { sanitizer, vault } = createSanitizer(
-      PiiConfigSchema.parse({ defaultAction: "block" }),
-    );
+    const { sanitizer, vault } = createSanitizer(PiiConfigSchema.parse({ defaultAction: "block" }));
     const token = await vault.put(runId, "email", canary);
 
     await expect(
@@ -227,9 +225,7 @@ describe("PiiMessageSanitizer", () => {
       summaries.push(summary);
       return Promise.resolve();
     };
-    const textMessage: Message[] = [
-      { role: "user", parts: [{ type: "text", text: token }] },
-    ];
+    const textMessage: Message[] = [{ role: "user", parts: [{ type: "text", text: token }] }];
     const jsonMessage: Message[] = [
       {
         role: "tool",
@@ -245,10 +241,10 @@ describe("PiiMessageSanitizer", () => {
     ];
 
     await expect(
-      sanitizer.sanitize(textMessage, target("local"), runId, recordPiiAction),
+      sanitizer.sanitize(textMessage, target("local"), runId, { recordPiiAction }),
     ).rejects.toMatchObject({ code: "pii_blocked" });
     await expect(
-      sanitizer.sanitize(jsonMessage, target("local"), runId, recordPiiAction),
+      sanitizer.sanitize(jsonMessage, target("local"), runId, { recordPiiAction }),
     ).rejects.toMatchObject({ code: "pii_blocked" });
 
     expect(audits).toHaveLength(2);
@@ -290,9 +286,11 @@ describe("PiiMessageSanitizer", () => {
         [{ role: "user", parts: [{ type: "text", text: canary }] }],
         target("hosted"),
         runId,
-        (summary) => {
-          summaries.push(summary);
-          return Promise.resolve();
+        {
+          recordPiiAction: (summary) => {
+            summaries.push(summary);
+            return Promise.resolve();
+          },
         },
       ),
     ).rejects.toMatchObject({ code: "pii_blocked" });
@@ -466,9 +464,11 @@ describe("PiiMessageSanitizer", () => {
         [{ role: "user", parts: [{ type: "text", text: token }] }],
         target("hosted"),
         runId,
-        (summary) => {
-          summaries.push(summary);
-          return Promise.resolve();
+        {
+          recordPiiAction: (summary) => {
+            summaries.push(summary);
+            return Promise.resolve();
+          },
         },
       ),
     ).rejects.toMatchObject({ code: "pii_blocked" });
@@ -485,7 +485,7 @@ describe("PiiMessageSanitizer", () => {
         [{ role: "user", parts: [{ type: "text", text: canary }] }],
         target("hosted"),
         runId,
-        () => Promise.reject(new Error(canary)),
+        { recordPiiAction: () => Promise.reject(new Error(canary)) },
       ),
     ).rejects.toThrow(canary);
   });
@@ -496,11 +496,15 @@ describe("PiiMessageSanitizer", () => {
     const detectionStarted = new Promise<void>((resolve) => {
       startDetection = resolve;
     });
-    const { sanitizer } = createSanitizer(PiiConfigSchema.parse({}), (text) =>
-      new Promise((resolve) => {
-        finishDetection = () => resolve(emailDetector.detect(text));
-        startDetection();
-      }),
+    const { sanitizer } = createSanitizer(
+      PiiConfigSchema.parse({}),
+      (text) =>
+        new Promise((resolve) => {
+          finishDetection = () => {
+            resolve(emailDetector.detect(text));
+          };
+          startDetection();
+        }),
     );
     const controller = new AbortController();
     const recordPiiAction = vi.fn(() => Promise.resolve());
@@ -508,8 +512,7 @@ describe("PiiMessageSanitizer", () => {
       [{ role: "user", parts: [{ type: "text", text: canary }] }],
       target("hosted"),
       runId,
-      recordPiiAction,
-      controller.signal,
+      { recordPiiAction, signal: controller.signal },
     );
     await detectionStarted;
     controller.abort(new Error("cancelled"));

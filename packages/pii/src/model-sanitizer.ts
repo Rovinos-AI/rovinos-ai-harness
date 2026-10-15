@@ -20,6 +20,13 @@ import { detectOutsideTokenSpans } from "./tokenizer-helpers.js";
 import { PiiBlobContainsPiiError, PiiBlockedError, PiiTokenizerError } from "./errors.js";
 import { PiiTokenUnresolvableError } from "./detokenize.js";
 import type { PiiDetectorRegistry, Tokenizer } from "./tokenizer.js";
+import {
+  addCount,
+  collectStrings,
+  collectTokens,
+  mapJsonStrings,
+  summarizeTokenActions,
+} from "./model-sanitizer-helpers.js";
 
 /** Receives metadata-only summaries for durable model-input PII events. */
 export type PiiActionRecorder = (summary: PiiActionSummary) => Promise<void>;
@@ -38,6 +45,11 @@ interface SanitizationContext {
   readonly allowRaw: boolean;
   readonly recordPiiAction: PiiActionRecorder | undefined;
   readonly signal: AbortSignal | undefined;
+}
+
+interface SanitizationOptions {
+  readonly recordPiiAction?: PiiActionRecorder;
+  readonly signal?: AbortSignal;
 }
 
 interface TokenAction {
@@ -67,15 +79,14 @@ export class PiiMessageSanitizer {
     messages: Message[],
     target: { readonly provider: Code; readonly model: Code; readonly trust: "hosted" | "local" },
     runId: Id,
-    recordPiiAction?: PiiActionRecorder,
-    signal?: AbortSignal,
+    options: SanitizationOptions = {},
   ): Promise<Message[]> {
     const context: SanitizationContext = {
       runId,
       destination: target.trust,
       allowRaw: target.trust === "local",
-      recordPiiAction,
-      signal,
+      recordPiiAction: options.recordPiiAction,
+      signal: options.signal,
     };
     const sanitized: Message[] = [];
     for (const message of messages) {
@@ -96,10 +107,8 @@ export class PiiMessageSanitizer {
         } else if (part.type === "opaque") {
           await this.scanOpaque(part.blob, context);
           parts.push(part);
-        } else if (part.type === "tool_call") {
-          parts.push({ ...part, args: await this.sanitizeJson(part.args, context) });
         } else {
-          parts.push(part);
+          parts.push({ ...part, args: await this.sanitizeJson(part.args, context) });
         }
       }
       sanitized.push({ role: message.role, parts });
@@ -108,30 +117,20 @@ export class PiiMessageSanitizer {
     return sanitized;
   }
 
-  /**
-   * Returns a detached request sanitized for one provider attempt.
-   *
-   * @param request - Provider-neutral request, including model-visible metadata.
-   * @param target - Provider/model and its configured trust level.
-   * @param runId - Run scope for created or resolved tokens.
-   * @param recordPiiAction - Optional durable recorder for metadata-only summaries.
-   * @param signal - Attempt cancellation signal.
-   * @returns Sanitized request.
-   */
+  /** Applies model-input policy to all provider-visible fields for one attempt. */
   async sanitizeRequest(
     request: ModelRequest,
     target: { readonly provider: Code; readonly model: Code; readonly trust: "hosted" | "local" },
     runId: Id,
-    recordPiiAction?: PiiActionRecorder,
-    signal?: AbortSignal,
+    options: SanitizationOptions = {},
   ): Promise<ModelRequest> {
-    const messages = await this.sanitize(request.messages, target, runId, recordPiiAction, signal);
+    const messages = await this.sanitize(request.messages, target, runId, options);
     const context: SanitizationContext = {
       runId,
       destination: target.trust,
       allowRaw: target.trust === "local",
-      recordPiiAction,
-      signal,
+      recordPiiAction: options.recordPiiAction,
+      signal: options.signal,
     };
     assertActive(context);
     return {
@@ -200,7 +199,7 @@ export class PiiMessageSanitizer {
       summarizeTokenActions(this.tokenActions(collectTokens(value), context.destination)),
       context,
     );
-    return this.mapJsonStrings(tokenized.value, async (text) =>
+    return mapJsonStrings(tokenized.value, async (text) =>
       this.applyTokenPolicy(text, [], context),
     );
   }
@@ -352,36 +351,6 @@ export class PiiMessageSanitizer {
     return counts;
   }
 
-  private async mapJsonStrings(
-    value: JsonValue,
-    transform: (text: string) => Promise<string>,
-  ): Promise<JsonValue> {
-    if (typeof value === "string") {
-      return transform(value);
-    }
-    if (Array.isArray(value)) {
-      const result: JsonValue[] = [];
-      for (const child of value) {
-        result.push(await this.mapJsonStrings(child, transform));
-      }
-      return result;
-    }
-    if (value !== null && typeof value === "object") {
-      const entries: [string, JsonValue][] = [];
-      const keys = new Set<string>();
-      for (const [key, child] of Object.entries(value)) {
-        const transformedKey = await transform(key);
-        if (keys.has(transformedKey)) {
-          throw new PiiTokenizerError("pii_input_invalid");
-        }
-        keys.add(transformedKey);
-        entries.push([transformedKey, await this.mapJsonStrings(child, transform)]);
-      }
-      return Object.fromEntries(entries);
-    }
-    return value;
-  }
-
   private async recordSummaries(
     summaries: readonly PiiActionSummary[],
     context: SanitizationContext,
@@ -421,55 +390,4 @@ export class PiiMessageSanitizer {
 
 function assertActive(context: SanitizationContext): void {
   context.signal?.throwIfAborted();
-}
-
-function addCount(
-  counts: Map<PiiAction, Map<Code, number>>,
-  action: PiiAction,
-  entity: Code,
-): void {
-  const entities = counts.get(action) ?? new Map<Code, number>();
-  entities.set(entity, (entities.get(entity) ?? 0) + 1);
-  counts.set(action, entities);
-}
-
-function summarizeTokenActions(
-  counts: ReadonlyMap<PiiAction, ReadonlyMap<Code, number>>,
-): PiiActionSummary[] {
-  return [...counts].map(([action, entities]) => ({
-    boundary: "model_input",
-    action,
-    entities: [...entities].map(([type, count]) => ({ type, count })),
-  }));
-}
-
-function collectStrings(value: JsonValue, output: string[]): void {
-  if (typeof value === "string") {
-    output.push(value);
-  } else if (Array.isArray(value)) {
-    for (const child of value) {
-      collectStrings(child, output);
-    }
-  } else if (value !== null && typeof value === "object") {
-    for (const [key, child] of Object.entries(value)) {
-      output.push(key);
-      collectStrings(child, output);
-    }
-  }
-}
-
-function collectTokens(value: JsonValue, output: Token[] = []): Token[] {
-  if (typeof value === "string") {
-    output.push(...findTokens(value).map(({ token }) => token));
-  } else if (Array.isArray(value)) {
-    for (const child of value) {
-      collectTokens(child, output);
-    }
-  } else if (value !== null && typeof value === "object") {
-    for (const [key, child] of Object.entries(value)) {
-      output.push(...findTokens(key).map(({ token }) => token));
-      collectTokens(child, output);
-    }
-  }
-  return output;
 }
