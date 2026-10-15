@@ -21,7 +21,8 @@
     }
   },
   "resolutions": {
-    "node-releases": "2.0.57"
+    "node-releases": "2.0.57",
+    "zod": "4.6.5"
   },
   "scripts": {
     "build": "yarn workspaces foreach --all --topological --parallel run build",
