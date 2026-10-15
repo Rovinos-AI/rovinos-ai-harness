@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ExecResultSchema } from "../../src/types.js";
 import type { ExecSpec } from "../../src/types.js";
+import { egressProbeScript } from "./probe-script.js";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("../../../../", import.meta.url)));
@@ -150,46 +151,24 @@ describe("sandbox egress proxy Compose services", () => {
   // threat: T-05
   // threat: T-06
   it("allows only proxied public destinations and rejects direct, denied, and metadata routes", async () => {
-    const script = [
-      'const http = require("node:http");',
-      'const net = require("node:net");',
-      'const proxyEnvPresent = typeof process.env.HTTP_PROXY === "string" && process.env.HTTP_PROXY.length > 0;',
-      'const proxy = new URL(process.env.HTTP_PROXY ?? "http://invalid");',
-      "const viaProxy = (url) => new Promise((resolve) => {",
-      '  if (!proxyEnvPresent) { resolve({ status: 0, body: "" }); return; }',
-      "  const request = http.get({ hostname: proxy.hostname, port: Number(proxy.port), path: url }, (response) => {",
-      '    const chunks = []; response.on("data", (chunk) => chunks.push(chunk));',
-      '    response.on("end", () => { clearTimeout(timeout); resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString() }); });',
-      "  });",
-      "  const timeout = setTimeout(() => request.destroy(), 2000);",
-      '  request.on("error", (error) => { clearTimeout(timeout); resolve({ status: 0, body: error.code || "request_failed" }); });',
-      "});",
-      "const direct = (host, port) => new Promise((resolve) => {",
-      "  const socket = net.connect({ host, port }); let done = false;",
-      "  const finish = (connected) => { if (!done) { done = true; socket.destroy(); resolve(connected); } };",
-      '  socket.setTimeout(1000, () => finish(false)); socket.once("connect", () => finish(true)); socket.once("error", () => finish(false));',
-      "});",
-      'Promise.all([viaProxy("http://egress-probe.test:8080/"), viaProxy("http://denied.example.test/"), viaProxy("http://metadata.example.test/"), direct("198.51.100.3", 8080), direct("169.254.169.254", 80)]).then((values) => {',
-      // Exit once the output is flushed: keep-alive sockets can otherwise hold the event loop open until the runner's exec timeout kills the process (exitCode null).
-      "  process.stdout.write(JSON.stringify({ proxyEnvPresent, allowed: values[0], denied: values[1], metadata: values[2], directProbe: values[3], directMetadata: values[4] }), () => process.exit(0));",
-      "});",
-    ].join("\n");
-    const result = await executeInRunner(script);
+    const result = await executeInRunner(egressProbeScript);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.startsWith("{")).toBe(true);
     const output = parseJson(
       z
         .object({
           proxyEnvPresent: z.boolean(),
-          allowed: ResponseSchema,
-          denied: ResponseSchema,
-          metadata: ResponseSchema,
-          directProbe: z.boolean(),
-          directMetadata: z.boolean(),
+          allowed: ResponseSchema.optional(),
+          denied: ResponseSchema.optional(),
+          metadata: ResponseSchema.optional(),
+          directProbe: z.union([z.boolean(), ResponseSchema]).optional(),
+          directMetadata: z.union([z.boolean(), ResponseSchema]).optional(),
+          pending: z.array(z.string()),
         })
         .strict(),
       result.stdout,
     );
+    expect(output.pending, `Pending egress probes: ${output.pending.join(", ")}`).toEqual([]);
     expect(output).toEqual({
       proxyEnvPresent: true,
       allowed: { status: 200, body: "probe" },
@@ -197,6 +176,7 @@ describe("sandbox egress proxy Compose services", () => {
       metadata: { status: 502, body: "private_address" },
       directProbe: false,
       directMetadata: false,
+      pending: [],
     });
   }, 30_000);
 
