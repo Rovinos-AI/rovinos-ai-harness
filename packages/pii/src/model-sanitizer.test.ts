@@ -126,6 +126,139 @@ describe("PiiMessageSanitizer", () => {
     });
   });
 
+  it("sanitizes model-visible tool and output schemas using the target policy", async () => {
+    const config = PiiConfigSchema.parse({
+      rules: [
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["local"],
+          action: "allow",
+        },
+      ],
+    });
+    const { sanitizer } = createSanitizer(config);
+    const request = {
+      requestId: runId,
+      model: { provider: "test", model: "test-model" },
+      messages: [{ role: "user" as const, parts: [{ type: "text" as const, text: canary }] }],
+      tools: [
+        {
+          toolId: Code.parse("test.tool"),
+          description: `Tool contact ${canary}`,
+          inputSchema: {
+            type: "object",
+            title: `Schema ${canary}`,
+            properties: {
+              contact: {
+                type: "string",
+                description: `Contact ${canary}`,
+                default: canary,
+                examples: [canary],
+                enum: [canary],
+              },
+            },
+          },
+        },
+      ],
+      output: {
+        name: Code.parse("test.output"),
+        schema: { title: `Output ${canary}`, examples: [canary] },
+        schemaHash: "a".repeat(64),
+      },
+    };
+    const hosted = await sanitizer.sanitizeRequest(request, target("hosted"), runId);
+    const local = await sanitizer.sanitizeRequest(request, target("local"), runId);
+
+    expect(JSON.stringify(hosted)).not.toContain(canary);
+    expect(JSON.stringify(hosted)).toContain("<EMAIL_1>");
+    expect(JSON.stringify(local)).toContain(canary);
+    expect(JSON.stringify(request)).toContain(canary);
+  });
+
+  it("applies model-input policy to tool-call arguments", async () => {
+    const { sanitizer, vault } = createSanitizer(
+      PiiConfigSchema.parse({ defaultAction: "block" }),
+    );
+    const token = await vault.put(runId, "email", canary);
+
+    await expect(
+      sanitizer.sanitize(
+        [
+          {
+            role: "assistant",
+            parts: [
+              {
+                type: "tool_call",
+                callId: Id.parse("22222222222222222222222222"),
+                toolId: Code.parse("emit_result"),
+                args: { contact: token },
+              },
+            ],
+          },
+        ],
+        target("hosted"),
+        runId,
+      ),
+    ).rejects.toMatchObject({ code: "pii_blocked" });
+  });
+
+  it("re-checks detokenized text and JSON for blocked overlapping entities", async () => {
+    const config = PiiConfigSchema.parse({
+      rules: [
+        {
+          entities: ["custom_contact"],
+          boundaries: ["model_input"],
+          destinations: ["local"],
+          action: "allow",
+        },
+        {
+          entities: ["email"],
+          boundaries: ["model_input"],
+          destinations: ["local"],
+          action: "block",
+        },
+      ],
+    });
+    const { audits, sanitizer, vault } = createSanitizer(config);
+    const token = await vault.put(runId, "custom_contact", canary);
+    const summaries: unknown[] = [];
+    const recordPiiAction = (summary: unknown) => {
+      summaries.push(summary);
+      return Promise.resolve();
+    };
+    const textMessage: Message[] = [
+      { role: "user", parts: [{ type: "text", text: token }] },
+    ];
+    const jsonMessage: Message[] = [
+      {
+        role: "tool",
+        parts: [
+          {
+            type: "tool_result",
+            callId: Id.parse("22222222222222222222222222"),
+            isError: false,
+            result: { contact: token },
+          },
+        ],
+      },
+    ];
+
+    await expect(
+      sanitizer.sanitize(textMessage, target("local"), runId, recordPiiAction),
+    ).rejects.toMatchObject({ code: "pii_blocked" });
+    await expect(
+      sanitizer.sanitize(jsonMessage, target("local"), runId, recordPiiAction),
+    ).rejects.toMatchObject({ code: "pii_blocked" });
+
+    expect(audits).toHaveLength(2);
+    expect(summaries).toContainEqual({
+      boundary: "model_input",
+      action: "block",
+      entities: [{ type: "email", count: 1 }],
+    });
+  });
+
   it("re-sanitizes the original messages when a local attempt falls back to hosted", async () => {
     const config = PiiConfigSchema.parse({
       rules: [
@@ -355,6 +488,35 @@ describe("PiiMessageSanitizer", () => {
         () => Promise.reject(new Error(canary)),
       ),
     ).rejects.toThrow(canary);
+  });
+
+  it("does not record summaries after cancellation during detection", async () => {
+    let startDetection: () => void = () => undefined;
+    let finishDetection: (() => void) | undefined;
+    const detectionStarted = new Promise<void>((resolve) => {
+      startDetection = resolve;
+    });
+    const { sanitizer } = createSanitizer(PiiConfigSchema.parse({}), (text) =>
+      new Promise((resolve) => {
+        finishDetection = () => resolve(emailDetector.detect(text));
+        startDetection();
+      }),
+    );
+    const controller = new AbortController();
+    const recordPiiAction = vi.fn(() => Promise.resolve());
+    const sanitization = sanitizer.sanitize(
+      [{ role: "user", parts: [{ type: "text", text: canary }] }],
+      target("hosted"),
+      runId,
+      recordPiiAction,
+      controller.signal,
+    );
+    await detectionStarted;
+    controller.abort(new Error("cancelled"));
+    finishDetection?.();
+
+    await expect(sanitization).rejects.toThrow("cancelled");
+    expect(recordPiiAction).not.toHaveBeenCalled();
   });
 
   it("maps detector failures in opaque data to a safe error", async () => {

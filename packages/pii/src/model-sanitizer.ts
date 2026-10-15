@@ -8,6 +8,7 @@ import {
   type Id,
   type JsonValue,
   type Message,
+  type ModelRequest,
   type PiiAction,
   type PiiActionSummary,
   type PiiPolicy,
@@ -36,6 +37,7 @@ interface SanitizationContext {
   readonly destination: Destination;
   readonly allowRaw: boolean;
   readonly recordPiiAction: PiiActionRecorder | undefined;
+  readonly signal: AbortSignal | undefined;
 }
 
 interface TokenAction {
@@ -66,17 +68,21 @@ export class PiiMessageSanitizer {
     target: { readonly provider: Code; readonly model: Code; readonly trust: "hosted" | "local" },
     runId: Id,
     recordPiiAction?: PiiActionRecorder,
+    signal?: AbortSignal,
   ): Promise<Message[]> {
     const context: SanitizationContext = {
       runId,
       destination: target.trust,
       allowRaw: target.trust === "local",
       recordPiiAction,
+      signal,
     };
     const sanitized: Message[] = [];
     for (const message of messages) {
+      assertActive(context);
       const parts: Message["parts"] = [];
       for (const part of message.parts) {
+        assertActive(context);
         if (part.type === "text") {
           parts.push({
             ...part,
@@ -88,18 +94,73 @@ export class PiiMessageSanitizer {
             result: await this.sanitizeJson(part.result, context),
           });
         } else if (part.type === "opaque") {
-          await this.scanOpaque(part.blob);
+          await this.scanOpaque(part.blob, context);
           parts.push(part);
+        } else if (part.type === "tool_call") {
+          parts.push({ ...part, args: await this.sanitizeJson(part.args, context) });
         } else {
           parts.push(part);
         }
       }
       sanitized.push({ role: message.role, parts });
     }
+    assertActive(context);
     return sanitized;
   }
 
+  /**
+   * Returns a detached request sanitized for one provider attempt.
+   *
+   * @param request - Provider-neutral request, including model-visible metadata.
+   * @param target - Provider/model and its configured trust level.
+   * @param runId - Run scope for created or resolved tokens.
+   * @param recordPiiAction - Optional durable recorder for metadata-only summaries.
+   * @param signal - Attempt cancellation signal.
+   * @returns Sanitized request.
+   */
+  async sanitizeRequest(
+    request: ModelRequest,
+    target: { readonly provider: Code; readonly model: Code; readonly trust: "hosted" | "local" },
+    runId: Id,
+    recordPiiAction?: PiiActionRecorder,
+    signal?: AbortSignal,
+  ): Promise<ModelRequest> {
+    const messages = await this.sanitize(request.messages, target, runId, recordPiiAction, signal);
+    const context: SanitizationContext = {
+      runId,
+      destination: target.trust,
+      allowRaw: target.trust === "local",
+      recordPiiAction,
+      signal,
+    };
+    assertActive(context);
+    return {
+      ...request,
+      messages,
+      ...(request.tools === undefined
+        ? {}
+        : {
+            tools: await Promise.all(
+              request.tools.map(async (tool) => ({
+                ...tool,
+                description: await this.sanitizeText(tool.description, context),
+                inputSchema: await this.sanitizeJson(tool.inputSchema, context),
+              })),
+            ),
+          }),
+      ...(request.output === undefined
+        ? {}
+        : {
+            output: {
+              ...request.output,
+              schema: await this.sanitizeJson(request.output.schema, context),
+            },
+          }),
+    };
+  }
+
   private async sanitizeText(text: string, context: SanitizationContext): Promise<string> {
+    assertActive(context);
     let tokenized;
     try {
       tokenized = await this.dependencies.tokenizer.tokenizeText(context.runId, text, {
@@ -111,6 +172,7 @@ export class PiiMessageSanitizer {
       await this.recordBlock(error, context);
       throw error;
     }
+    assertActive(context);
     await this.recordSummaries(tokenized.actions, context);
     return this.applyTokenPolicy(
       tokenized.text,
@@ -120,6 +182,7 @@ export class PiiMessageSanitizer {
   }
 
   private async sanitizeJson(value: JsonValue, context: SanitizationContext): Promise<JsonValue> {
+    assertActive(context);
     let tokenized;
     try {
       tokenized = await this.dependencies.tokenizer.tokenizeJson(context.runId, value, {
@@ -131,6 +194,7 @@ export class PiiMessageSanitizer {
       await this.recordBlock(error, context);
       throw error;
     }
+    assertActive(context);
     await this.recordSummaries(tokenized.actions, context);
     await this.recordSummaries(
       summarizeTokenActions(this.tokenActions(collectTokens(value), context.destination)),
@@ -146,6 +210,7 @@ export class PiiMessageSanitizer {
     originalTokens: readonly Token[],
     context: SanitizationContext,
   ): Promise<string> {
+    assertActive(context);
     const matches = findTokens(text);
     if (matches.length === 0) {
       return text;
@@ -162,7 +227,21 @@ export class PiiMessageSanitizer {
       throw new PiiBlockedError([...blocked].map(([type, count]) => ({ type, count })));
     }
     const resolved = await this.resolveAllowedTokens(matches, decisions, context);
-    return this.renderTokens(text, { matches, decisions, resolved }, context);
+    assertActive(context);
+    const rendered = this.renderTokens(text, { matches, decisions, resolved }, context);
+    let rechecked;
+    try {
+      rechecked = await this.dependencies.tokenizer.tokenizeText(context.runId, rendered, {
+        boundary: "model_input",
+        destination: context.destination,
+        allowRaw: context.allowRaw,
+      });
+    } catch (error) {
+      await this.recordBlock(error, context);
+      throw error;
+    }
+    await this.recordSummaries(rechecked.actions, context);
+    return rechecked.text;
   }
 
   private async recordOriginalTokenActions(
@@ -197,6 +276,7 @@ export class PiiMessageSanitizer {
         if (resolved.some((value) => value === undefined)) {
           throw new PiiTokenUnresolvableError();
         }
+        assertActive(context);
         return resolved;
       } catch (error) {
         if (error instanceof PiiTokenUnresolvableError) {
@@ -307,6 +387,7 @@ export class PiiMessageSanitizer {
     context: SanitizationContext,
   ): Promise<void> {
     for (const summary of summaries) {
+      assertActive(context);
       await context.recordPiiAction?.(PiiActionSummarySchema.parse(summary));
     }
   }
@@ -320,20 +401,26 @@ export class PiiMessageSanitizer {
     }
   }
 
-  private async scanOpaque(value: JsonValue): Promise<void> {
+  private async scanOpaque(value: JsonValue, context: SanitizationContext): Promise<void> {
     const strings: string[] = [];
     collectStrings(value, strings);
     for (const text of strings) {
+      assertActive(context);
       const detections = await detectOutsideTokenSpans(text, async (masked) => {
         const detected = await this.dependencies.detectors.detect(masked);
         return detected.map((detection) => DetectionSchema.parse(detection));
       });
+      assertActive(context);
       if (detections.length > 0) {
         countPiiBlobHit();
         throw new PiiBlobContainsPiiError();
       }
     }
   }
+}
+
+function assertActive(context: SanitizationContext): void {
+  context.signal?.throwIfAborted();
 }
 
 function addCount(

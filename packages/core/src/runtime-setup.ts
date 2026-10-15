@@ -7,7 +7,7 @@ import type { Code, Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
 import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
-import type { MessageSanitizer } from "@harness/models";
+import type { RequestSanitizer } from "@harness/models";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
@@ -230,7 +230,7 @@ async function createRuntimeModel(
   options: {
     readonly ids: RuntimeComposition["ids"];
     readonly clock: Clock;
-    readonly messageSanitizer?: MessageSanitizer;
+    readonly requestSanitizer?: RequestSanitizer;
   },
 ): Promise<RuntimeComposition["model"]> {
   return (
@@ -244,9 +244,9 @@ async function createRuntimeModel(
       ...(overrides.secretResolver === undefined
         ? {}
         : { secretResolver: overrides.secretResolver }),
-      ...(options.messageSanitizer === undefined
+      ...(options.requestSanitizer === undefined
         ? {}
-        : { messageSanitizer: options.messageSanitizer }),
+        : { requestSanitizer: options.requestSanitizer }),
     })) ??
     missingModelPort
   );
@@ -314,14 +314,14 @@ async function createRuntimeModelAndStore(options: {
     policyVersion: options.policyVersion,
     clock: options.clock,
   });
-  const messageSanitizer: MessageSanitizer | undefined = options.piiConfig.enabled
-    ? (messages, target, runId, recordPiiAction) =>
-        piiRuntime.messageSanitizer.sanitize(messages, target, runId, recordPiiAction)
+  const requestSanitizer: RequestSanitizer | undefined = options.piiConfig.enabled
+    ? (request, target, runId, recordPiiAction, signal) =>
+        piiRuntime.messageSanitizer.sanitizeRequest(request, target, runId, recordPiiAction, signal)
     : undefined;
   const model = await createRuntimeModel(options.config, options.overrides, {
     ids: options.ids,
     clock: options.clock,
-    ...(messageSanitizer === undefined ? {} : { messageSanitizer }),
+    ...(requestSanitizer === undefined ? {} : { requestSanitizer }),
   });
   return {
     piiRuntime,

@@ -17,8 +17,9 @@ import { InMemoryEventStore } from "@harness/store";
 import { ProviderError, type ProviderAdapter } from "@harness/models";
 import { AuditingVaultResolver, InMemoryVault, Token } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PiiToolPort, Tokenizer } from "@harness/pii";
+import { emailDetector, PiiMessageSanitizer, PiiToolPort, Tokenizer } from "@harness/pii";
 import * as telemetry from "@harness/telemetry";
+import { AdapterRegistry, ModelGateway } from "@harness/models";
 import type { ModelCompletion, ModelToolCall, ToolPort } from "./ports.js";
 import { createRuntime } from "./runtime.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
@@ -26,6 +27,7 @@ import { createRuntimeVault } from "./runtime-vault.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { FakeModelPort } from "./testing/fake-model.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
+import { z } from "zod";
 
 const email = "runtime-canary@example.test";
 const toolId = Code.parse("test.echo");
@@ -198,6 +200,65 @@ describe("createRuntime PII composition", () => {
     } finally {
       await runtime.close();
     }
+  });
+
+  it("sanitizes tool-call arguments appended to a structured-output repair request", async () => {
+    const requests: ModelRequest[] = [];
+    let attempt = 0;
+    const vault = new InMemoryVault();
+    const resolver = new AuditingVaultResolver(vault, () => undefined);
+    const detectors = { detect: (text: string) => emailDetector.detect(text) };
+    const policy = PiiConfigSchema.parse({});
+    const tokenizer = new Tokenizer({ detectors, policy, vault });
+    const sanitizer = new PiiMessageSanitizer({ tokenizer, detectors, policy, resolver });
+    const adapter: ProviderAdapter = {
+      provider: Code.parse("hosted"),
+      kind: "openai",
+      capabilities: { structuredOutput: "none", forcedToolChoice: true },
+      complete: async (request) => {
+        requests.push(request);
+        attempt += 1;
+        return {
+          parts: [
+            {
+              type: "tool_call",
+              callId: Id.parse(String(attempt).padStart(26, "0")),
+              toolId: Code.parse("emit_result"),
+              args: { answer: attempt === 1 ? email : 1 },
+            },
+          ],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "tool_calls",
+          latencyMs: 0,
+        };
+      },
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => Id.parse("11111111111111111111111111") },
+      clock: { now: () => 0 },
+      requestSanitizer: (request, target, runId, recordPiiAction, signal) =>
+        sanitizer.sanitizeRequest(request, target, runId, recordPiiAction, signal),
+    });
+
+    await gateway.complete(
+      {
+        requestId: Id.parse("22222222222222222222222222"),
+        model: { provider: Code.parse("hosted"), model: Code.parse("test-model") },
+        messages: [{ role: "user", parts: [{ type: "text", text: "Return an answer." }] }],
+      },
+      {
+        runId: Id.parse("33333333333333333333333333"),
+        signal: new AbortController().signal,
+        outputSchema: z.object({ answer: z.number() }),
+      },
+    );
+
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1])).not.toContain(email);
+    expect(JSON.stringify(requests[1]?.messages)).toContain("<EMAIL_1>");
+    expect(requests[1]?.messages.some((message) =>
+      message.parts.some((part) => part.type === "tool_call"),
+    )).toBe(true);
   });
 
   it("fails the run with pii_blocked before a provider can receive a blocked token", async () => {

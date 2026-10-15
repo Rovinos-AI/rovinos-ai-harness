@@ -55,6 +55,7 @@ import {
 } from "@harness/sandbox";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
 import { ProviderError, type ProviderAdapter } from "@harness/models";
+import { FakeProvider } from "@harness/models/testing";
 import { ApprovalNotificationSchema, buildApprovalPayload } from "@harness/policy";
 import {
   ApprovalListResultSchema,
@@ -69,6 +70,7 @@ import {
   PiiConfigSchema,
   RunConfigSchema,
   RunResultSchema,
+  ServersConfigSchema,
   SequentialIdGenerator,
   SecretRefSchema,
   type Event,
@@ -949,6 +951,126 @@ describe("MCP runtime", () => {
     } finally {
       await Promise.all(serverPeers.map(async ({ server }) => server.close()));
       await Promise.all(serverPeers.map(async ({ serverTransport }) => serverTransport.close()));
+    }
+  }, 15_000);
+
+  it("sanitizes MCP descriptions and schema metadata before hosted fallback", async () => {
+    const current = fixture();
+    const directory = await mkdtemp(join(tmpdir(), "harness-mcp-pii-"));
+    const canary = `mcp.${directory.split("/").at(-1) ?? "fixture"}@example.test`;
+    const localRequests: ModelRequest[] = [];
+    const localAdapter: ProviderAdapter = {
+      provider: Code.parse("local"),
+      kind: "openai",
+      complete: async (request) => {
+        localRequests.push(request);
+        throw new ProviderError("provider_unavailable");
+      },
+    };
+    const hostedAdapter = new FakeProvider(Code.parse("hosted"), [
+      {
+        parts: [{ type: "text", text: "completed" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        finishReason: "stop",
+        latencyMs: 0,
+      },
+    ]);
+    const server = new McpServer({ name: "pii-e2e-server", version: "1.0.0" });
+    const inputSchema = {
+      type: "object",
+      description: `Schema contact ${canary}`,
+      properties: {
+        contact: {
+          type: "string",
+          title: `Contact ${canary}`,
+          description: `Contact ${canary}`,
+          default: canary,
+          examples: [canary],
+          enum: [canary],
+        },
+      },
+    } satisfies Tool["inputSchema"];
+    server.server.registerCapabilities({ tools: { listChanged: true } });
+    server.server.setRequestHandler("tools/list", () => ({
+      tools: [{ name: "send", description: `Send to ${canary}`, inputSchema }],
+    }));
+    const createTransport = async () => {
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await server.connect(serverTransport);
+      return clientTransport;
+    };
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        pii: PiiConfigSchema.parse({
+          rules: [
+            {
+              entities: ["email"],
+              boundaries: ["model_input"],
+              destinations: ["local"],
+              action: "allow",
+            },
+          ],
+        }),
+        models: ModelsConfigSchema.parse({
+          retry: { maxAttempts: 1 },
+          providers: [
+            {
+              id: "local",
+              kind: "openai_compatible",
+              baseUrl: "http://127.0.0.1:1234",
+              trust: "local",
+            },
+            { id: "hosted", kind: "openai", trust: "hosted" },
+          ],
+          routing: {
+            default: [
+              { provider: "local", model: "local-model" },
+              { provider: "hosted", model: "hosted-model" },
+            ],
+          },
+        }),
+        servers: ServersConfigSchema.parse([
+          {
+            id: "e2e_mcp",
+            transport: { kind: "stdio", command: "in-memory" },
+            toolAllowlist: ["send"],
+          },
+        ]),
+      },
+      {
+        dataDir: directory,
+        store: new InMemoryEventStore(),
+        transientVault: true,
+        clock: current.clock,
+        ids: current.ids,
+        providerAdapters: [localAdapter, hostedAdapter],
+        mcpTransportFactory: createTransport,
+        policy: {
+          version: Code.parse("e2e.mcp_pii"),
+          decide: () => ({
+            decision: "allow",
+            ruleId: Code.parse("e2e_allow"),
+            reason: Code.parse("synthetic_allowed"),
+            editable: [],
+          }),
+        },
+      },
+    );
+
+    try {
+      const result = await runtime.run(canary);
+
+      expect(result.status).toBe("completed");
+      expect(localRequests).toHaveLength(1);
+      expect(JSON.stringify(localRequests[0])).toContain(canary);
+      expect(hostedAdapter.requests).toHaveLength(1);
+      expect(JSON.stringify(hostedAdapter.requests[0])).not.toContain(canary);
+      expect(JSON.stringify(hostedAdapter.requests[0])).toContain("<EMAIL_1>");
+    } finally {
+      await runtime.close();
+      await server.close();
+      await rm(directory, { recursive: true, force: true });
     }
   }, 15_000);
 });
