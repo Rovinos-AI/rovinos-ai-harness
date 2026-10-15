@@ -268,7 +268,7 @@ it("fails when a package source file falls below the coverage floor", () => {
 it("verifies pinned mise and Yarn toolchain paths", () => {
   const template = readFileSync(resolve(root, "pipelines/templates/node-setup.yml"), "utf8");
   const nodePathLine = template.indexOf("$(mise where node)/bin");
-  const corepackPathLine = template.indexOf("$(mise where npm:corepack)/bin");
+  const corepackPathLine = template.indexOf("$(mise where npm:corepack)/node_modules/.bin");
 
   expect(template).not.toContain("https://mise.run");
   expect(template).toContain("MISE_VERSION=v2026.10.4");
