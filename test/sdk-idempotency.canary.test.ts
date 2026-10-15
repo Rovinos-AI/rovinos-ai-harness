@@ -31,7 +31,11 @@ it("stores only a SHA-256 digest of the SDK idempotency key", async () => {
   const directory = await mkdtemp(join(tmpdir(), "harness-sdk-idempotency-canary-"));
   const path = join(directory, "events.sqlite");
   const rawKey = `synthetic-idempotency-canary-${randomBytes(16).toString("hex")}`;
-  const keyHash = createHash("sha256").update(rawKey).digest("hex");
+  // Mirrors the SDK: a domain-separated SHA-256 of the raw key.
+  const keyHash = createHash("sha256")
+    .update("harness/sdk/idempotency/v1\0")
+    .update(rawKey)
+    .digest("hex");
   const store = new SqliteEventStore(path);
   let harness: Awaited<ReturnType<typeof createHarness>> | undefined;
   try {
