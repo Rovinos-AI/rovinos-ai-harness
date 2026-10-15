@@ -15,8 +15,13 @@ import { serveCommand } from "./serve.js";
 const controlPlaneMocks = vi.hoisted(() => {
   const closeHttp = vi.fn(() => Promise.resolve());
   let httpOptions: ControlPlane.ControlPlaneServerOptions | undefined;
+  const closeStdio = vi.fn(() => Promise.resolve());
   return {
     closeHttp,
+    closeStdio,
+    // stdio is mocked like HTTP: these tests cover serve's signal handling, and the real server
+    // loads the approval-app build, which CI's unit stage does not produce.
+    startStdio: vi.fn(() => ({ close: closeStdio })),
     httpOptions: () => httpOptions,
     startHttp: vi.fn(
       (
@@ -34,6 +39,7 @@ const controlPlaneMocks = vi.hoisted(() => {
 vi.mock("@harness/control-plane", async (importOriginal) => ({
   ...(await importOriginal<typeof ControlPlane>()),
   startControlPlaneHttp: controlPlaneMocks.startHttp,
+  startControlPlaneStdio: controlPlaneMocks.startStdio,
 }));
 
 function waitForSignalListener(
