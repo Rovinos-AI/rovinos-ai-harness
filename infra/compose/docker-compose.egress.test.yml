@@ -5,7 +5,7 @@ services:
     command:
       - node
       - -e
-      - "require('node:http').createServer((request, response) => { const path = new URL(request.url, 'http://localhost').pathname; if (path === '/redirect-denied') { response.writeHead(302, { location: 'http://denied.example.test/' }); response.end(); return; } if (path === '/redirect-metadata') { response.writeHead(302, { location: 'http://metadata.example.test/latest' }); response.end(); return; } if (path === '/large') { response.writeHead(200, { 'content-type': 'text/plain' }); response.end(Buffer.alloc(2 * 1024 * 1024 + 1, 97)); return; } if (path === '/html') { response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end('<h1>visible</h1><div hidden>hidden-canary</div><script>script-canary</script>'); return; } if (path === '/binary') { response.writeHead(200, { 'content-type': 'image/png' }); response.end(Buffer.from([0, 1, 255])); return; } response.writeHead(200, { 'content-type': 'text/plain' }); response.end('probe'); }).listen(8080, '0.0.0.0')"
+      - "require('node:http').createServer((request, response) => { const path = new URL(request.url, 'http://localhost').pathname; if (path === '/redirect-denied') { response.writeHead(302, { location: 'http://denied.example.test/' }); response.end(); return; } if (path === '/redirect-metadata') { response.writeHead(302, { location: 'http://metadata.example.test/latest' }); response.end(); return; } if (path === '/large') { response.writeHead(200, { 'content-type': 'text/plain' }); response.end(Buffer.alloc(2 * 1024 * 1024 + 1, 97)); return; } if (path === '/html') { response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end('<h1>visible</h1><div hidden>hidden-canary</div><script>script-canary</script>'); return; } if (path === '/runtime') { response.writeHead(200, { 'content-type': 'text/plain' }); response.end('Contact runtime.fetch@example.test'); return; } if (path === '/binary') { response.writeHead(200, { 'content-type': 'image/png' }); response.end(Buffer.from([0, 1, 255])); return; } response.writeHead(200, { 'content-type': 'text/plain' }); response.end('probe'); }).listen(8080, '0.0.0.0')"
     read_only: true
     tmpfs:
       - /tmp
@@ -13,11 +13,21 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get({ host: '127.0.0.1', port: 8080, path: '/' }, (response) => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 1s
+      timeout: 3s
+      start_period: 1s
+      retries: 10
     networks:
       egress:
-        ipv4_address: 198.51.100.3
+        ipv4_address: ${EGRESS_PROBE_IP:-198.51.100.3}
         aliases:
-          - egress-probe.test
+          - ${EGRESS_PROBE_HOST:-egress-probe.test}
   sandbox-egress-proxy:
     extra_hosts:
       - metadata.example.test:169.254.169.254
@@ -25,4 +35,4 @@ networks:
   egress:
     ipam:
       config:
-        - subnet: 198.51.100.0/24
+        - subnet: ${EGRESS_TEST_SUBNET:-198.51.100.0/24}

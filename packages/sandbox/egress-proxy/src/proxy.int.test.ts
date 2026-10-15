@@ -14,9 +14,11 @@ import { egressProbeScript } from "./probe-script.js";
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("../../../../", import.meta.url)));
 const projectName = `harness-sandbox-egress-${String(process.pid)}`;
+const egressProbeIp = "198.51.101.3";
+const egressProbeHost = "egress-probe-egress.test";
 const integrationToken = "synthetic-sandbox-egress-token-for-integration";
 const allowlist = [
-  { host: "egress-probe.test", ports: [8080] },
+  { host: egressProbeHost, ports: [8080] },
   { host: "metadata.example.test", ports: [80] },
 ];
 const composeEnvironment: NodeJS.ProcessEnv = {
@@ -25,6 +27,11 @@ const composeEnvironment: NodeJS.ProcessEnv = {
   SANDBOX_RUNNER_UID: String(process.getuid?.() ?? 10002),
   SANDBOX_RUNNER_GID: String(process.getgid?.() ?? 10002),
   SANDBOX_EGRESS_ALLOW: JSON.stringify(allowlist),
+  SANDBOX_EGRESS_SUBNET: "172.31.253.0/24",
+  SANDBOX_EGRESS_PROXY_IP: "172.31.253.3",
+  EGRESS_TEST_SUBNET: "198.51.101.0/24",
+  EGRESS_PROBE_IP: egressProbeIp,
+  EGRESS_PROBE_HOST: egressProbeHost,
 };
 
 const ResponseSchema = z.object({ status: z.number().int(), body: z.string() }).strict();
@@ -151,7 +158,7 @@ describe("sandbox egress proxy Compose services", () => {
   // threat: T-05
   // threat: T-06
   it("allows only proxied public destinations and rejects direct, denied, and metadata routes", async () => {
-    const result = await executeInRunner(egressProbeScript);
+    const result = await executeInRunner(egressProbeScript(egressProbeIp, egressProbeHost));
     expect(result.exitCode).toBe(0);
     expect(result.stdout.startsWith("{")).toBe(true);
     const output = parseJson(
@@ -184,22 +191,22 @@ describe("sandbox egress proxy Compose services", () => {
   // threat: T-06
   it("fetches only allowlisted content, rejects redirect escapes, and keeps URL canaries out of logs", async () => {
     const html = await requestRunnerFetch(
-      "http://egress-probe.test:8080/html?synthetic-fetch-query-canary",
+      `http://${egressProbeHost}:8080/html?synthetic-fetch-query-canary`,
     );
     expect(html.status).toBe(200);
     expect(WebFetchResultSchema.parse(JSON.parse(html.body))).toMatchObject({
-      url: "http://egress-probe.test:8080/html",
+      url: `http://${egressProbeHost}:8080/html`,
       text: "visible",
       hiddenTextDropped: "hidden-canary".length,
       untrusted: true,
     });
 
-    const denied = await requestRunnerFetch("http://egress-probe.test:8080/redirect-denied");
+    const denied = await requestRunnerFetch(`http://${egressProbeHost}:8080/redirect-denied`);
     expect(denied.status).toBe(403);
     expect(denied.body).toContain("sandbox_fetch_denied");
     expect(denied.body).not.toContain("denied.example.test");
 
-    const metadata = await requestRunnerFetch("http://egress-probe.test:8080/redirect-metadata");
+    const metadata = await requestRunnerFetch(`http://${egressProbeHost}:8080/redirect-metadata`);
     expect(metadata.status).toBe(200);
     expect(WebFetchResultSchema.parse(JSON.parse(metadata.body))).toMatchObject({
       status: 502,
@@ -207,14 +214,14 @@ describe("sandbox egress proxy Compose services", () => {
       untrusted: true,
     });
 
-    const large = await requestRunnerFetch("http://egress-probe.test:8080/large");
+    const large = await requestRunnerFetch(`http://${egressProbeHost}:8080/large`);
     expect(large.status).toBe(200);
     expect(WebFetchResultSchema.parse(JSON.parse(large.body))).toMatchObject({
       truncated: true,
       untrusted: true,
     });
 
-    const binary = await requestRunnerFetch("http://egress-probe.test:8080/binary");
+    const binary = await requestRunnerFetch(`http://${egressProbeHost}:8080/binary`);
     expect(WebFetchResultSchema.parse(JSON.parse(binary.body))).toMatchObject({
       binary: true,
       contentType: "image/png",
@@ -224,6 +231,6 @@ describe("sandbox egress proxy Compose services", () => {
 
     const logs = await runCompose(["logs", "--no-color", "sandbox-runner", "sandbox-egress-proxy"]);
     expect(logs).not.toContain("synthetic-fetch-query-canary");
-    expect(logs).not.toContain("egress-probe.test");
+    expect(logs).not.toContain(egressProbeHost);
   }, 60_000);
 });

@@ -41,6 +41,7 @@ export interface WebFetchBackend {
 /** Options for the built-in `web.fetch` tool. */
 export interface WebFetchToolOptions {
   readonly backend: WebFetchBackend;
+  readonly offloadBinaryResults?: boolean;
 }
 
 interface WebFetchToolCall {
@@ -65,10 +66,12 @@ interface WebFetchToolExecution {
 /** Exposes runner-mediated, allowlisted web fetches as an idempotent built-in tool. */
 export class WebFetchTool {
   readonly #backend: WebFetchBackend;
+  readonly #offloadBinaryResults: boolean;
 
   /** Create the tool with a backend that implements the runner fetch endpoint. */
   constructor(options: WebFetchToolOptions) {
     this.#backend = options.backend;
+    this.#offloadBinaryResults = options.offloadBinaryResults === true;
   }
 
   /** Return retry metadata for this idempotent fetch tool. */
@@ -100,6 +103,9 @@ export class WebFetchTool {
         await this.#backend.fetch(context.runId, parsed.data, context.signal),
       );
       if ("binary" in fetched) {
+        if (!this.#offloadBinaryResults) {
+          return { outcome: "error", errorCode: "binary_result_unavailable", result: null };
+        }
         const sanitizedUrl = new URL(fetched.url);
         sanitizedUrl.search = "";
         sanitizedUrl.hash = "";
@@ -129,12 +135,16 @@ export class WebFetchTool {
  *
  * @param allowlist - Validated sandbox egress destinations.
  * @param backend - Remote runner fetch backend.
+ * @param offloadBinaryResults - Whether an outer workspace offloader is configured.
  * @returns The built-in tool, or `undefined` when egress is disabled.
  */
 export function createWebFetchTool(
   allowlist: unknown,
   backend: WebFetchBackend,
+  offloadBinaryResults = false,
 ): WebFetchTool | undefined {
   const parsed = SandboxEgressAllowlistSchema.safeParse(allowlist);
-  return parsed.success && parsed.data.length > 0 ? new WebFetchTool({ backend }) : undefined;
+  return parsed.success && parsed.data.length > 0
+    ? new WebFetchTool({ backend, offloadBinaryResults })
+    : undefined;
 }

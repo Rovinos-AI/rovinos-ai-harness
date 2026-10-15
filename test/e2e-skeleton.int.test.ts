@@ -4,7 +4,6 @@
 // Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
-// Not wired yet: web.fetch provider registration in the core runtime/CLI (19.12 -> #439)
 import { Command } from "commander";
 import { Client, InMemoryTransport, type Tool, type Transport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
@@ -47,6 +46,8 @@ import { FakeModelPort } from "@harness/core/testing";
 import {
   ExecSpecSchema,
   RemoteSandboxBackend,
+  WebFetchRequestSchema,
+  WebFetchResultSchema,
   SandboxExecTool,
   type SandboxBackend,
 } from "@harness/sandbox";
@@ -67,6 +68,7 @@ import {
   PiiConfigSchema,
   RunConfigSchema,
   RunResultSchema,
+  SandboxConfigSchema,
   ServersConfigSchema,
   SequentialIdGenerator,
   SecretRefSchema,
@@ -1685,6 +1687,220 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
             process.env.SANDBOX_RUNNER_TOKEN = previousRunnerToken;
           }
           await rm(directory, { recursive: true, force: true });
+        }
+      }
+    }
+  }, 240_000);
+
+  // threat: T-05
+  it("runs web.fetch through the runtime and tokenizes the untrusted egress fixture result", async () => {
+    const current = fixture();
+    const directory = await mkdtemp(join(tmpdir(), "harness-web-fetch-e2e-"));
+    const token = "synthetic-e2e-runner-token-for-web-fetch";
+    const tokenRef = SecretRefSchema.parse("env:HARNESS_SANDBOX_E2E_TOKEN");
+    const project = `harness-web-fetch-e2e-${String(process.pid)}`;
+    const probeHost = "web-fetch-egress-probe.test";
+    const allow = [{ host: probeHost, ports: [8080] }];
+    const previousRunnerToken = process.env.SANDBOX_RUNNER_TOKEN;
+    const previousEgressAllow = process.env.SANDBOX_EGRESS_ALLOW;
+    const previousEgressEnvironment = {
+      SANDBOX_EGRESS_SUBNET: process.env.SANDBOX_EGRESS_SUBNET,
+      SANDBOX_EGRESS_PROXY_IP: process.env.SANDBOX_EGRESS_PROXY_IP,
+      EGRESS_TEST_SUBNET: process.env.EGRESS_TEST_SUBNET,
+      EGRESS_PROBE_IP: process.env.EGRESS_PROBE_IP,
+      EGRESS_PROBE_HOST: process.env.EGRESS_PROBE_HOST,
+    };
+    process.env.SANDBOX_RUNNER_TOKEN = token;
+    process.env.SANDBOX_EGRESS_ALLOW = JSON.stringify(allow);
+    process.env.SANDBOX_EGRESS_SUBNET = "172.31.252.0/24";
+    process.env.SANDBOX_EGRESS_PROXY_IP = "172.31.252.3";
+    process.env.EGRESS_TEST_SUBNET = "198.51.102.0/24";
+    process.env.EGRESS_PROBE_IP = "198.51.102.3";
+    process.env.EGRESS_PROBE_HOST = probeHost;
+    const invokeCompose = (args: string[]) =>
+      runNetworkIsolationCompose(project, args, [
+        "infra/compose/docker-compose.egress.yml",
+        "infra/compose/docker-compose.egress.test.yml",
+      ]);
+    const requestSchema = z.object({ runId: Id, request: WebFetchRequestSchema }).strict();
+    const responseSchema = z.object({ status: z.number().int(), body: z.string() }).strict();
+    const forwarded: z.infer<typeof requestSchema>[] = [];
+    const responses: z.infer<typeof responseSchema>[] = [];
+    const bridge = createServer((request, response) => {
+      const forward = async () => {
+        expect(request.method).toBe("POST");
+        expect(request.url).toBe("/fetch");
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        for await (const chunk of request) {
+          const buffer = z.instanceof(Buffer).parse(chunk);
+          bytes += buffer.byteLength;
+          if (bytes > 2 * 1024 * 1024) {
+            throw new Error("Web fetch request exceeds the boundary limit.");
+          }
+          chunks.push(buffer);
+        }
+        const body = Buffer.concat(chunks).toString("utf8");
+        const parsed = parseJson(requestSchema, body, { maxBytes: 2 * 1024 * 1024 });
+        forwarded.push(parsed);
+        const script = [
+          'const http = require("node:http");',
+          `const request = http.request({ hostname: "127.0.0.1", port: 8080, path: "/fetch", method: "POST", headers: ${JSON.stringify({ host: "sandbox-runner:8080", authorization: request.headers.authorization, "content-type": "application/json" })} }, (response) => {`,
+          '  const chunks = []; let bytes = 0; response.on("data", (chunk) => { bytes += chunk.length; if (bytes > 2097152) { response.destroy(); process.exitCode = 1; } else { chunks.push(chunk); } });',
+          '  response.on("end", () => process.stdout.write(JSON.stringify({ status: response.statusCode, body: Buffer.concat(chunks).toString() })));',
+          "});",
+          "request.setTimeout(10000, () => request.destroy());",
+          'request.on("error", () => { process.exitCode = 1; });',
+          `request.end(${JSON.stringify(body)});`,
+        ].join("\n");
+        const stdout = await invokeCompose([
+          "exec",
+          "--no-TTY",
+          "sandbox-runner",
+          "node",
+          "-e",
+          script,
+        ]);
+        const remote = parseJson(responseSchema, stdout, { maxBytes: 2 * 1024 * 1024 });
+        responses.push(remote);
+        response.writeHead(remote.status, { "content-type": "application/json" });
+        response.end(remote.body);
+      };
+      void forward().catch(() => {
+        response.writeHead(502);
+        response.end();
+      });
+    });
+    let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+    try {
+      await invokeCompose([
+        "up",
+        "--detach",
+        "--wait",
+        "--wait-timeout",
+        "60",
+        "--pull=missing",
+        "sandbox-runner",
+        "sandbox-egress-proxy",
+        "egress-probe",
+      ]);
+      await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+      const address = bridge.address();
+      if (address === null || typeof address === "string") {
+        throw new Error("The web.fetch test bridge is not listening.");
+      }
+      const model = new FakeModelPort([
+        completion(
+          [
+            {
+              callId: "00000000000000000000000020",
+              toolId: "web.fetch",
+              args: { url: `http://${probeHost}:8080/runtime` },
+            },
+          ],
+          "fetch",
+        ),
+        completion([], "completed"),
+      ]);
+      const decide = vi.fn(() => ({
+        decision: "allow" as const,
+        ruleId: Code.parse("e2e_web_fetch"),
+        reason: Code.parse("synthetic_allowed"),
+        editable: [],
+      }));
+      runtime = await createRuntime(
+        {
+          run: RunConfigSchema.parse({}),
+          pii: PiiConfigSchema.parse({ defaultAction: "tokenize" }),
+          sandbox: SandboxConfigSchema.parse({
+            runner: { url: `http://127.0.0.1:${String(address.port)}`, token: tokenRef },
+            egress: { allow },
+          }),
+        },
+        {
+          store: new InMemoryEventStore(),
+          dataDir: directory,
+          transientVault: true,
+          clock: new FakeClock(1_000),
+          ids: new SequentialIdGenerator(),
+          secretResolver: {
+            resolve: (ref) => {
+              expect(ref).toBe(tokenRef);
+              return Promise.resolve({ reveal: () => token });
+            },
+          },
+          policy: { version: Code.parse("e2e.web_fetch"), decide },
+          model,
+        },
+      );
+      expect(runtime.sandboxBackend).toBeInstanceOf(RemoteSandboxBackend);
+      const result = await runtime.run("fetch the allowlisted page");
+      const toolResult = result.events.find(
+        (event) => event.type === "tool_result" && event.toolId === "web.fetch",
+      );
+      if (toolResult?.type !== "tool_result") {
+        throw new Error("The runtime did not record the web.fetch result.");
+      }
+
+      expect(result.status).toBe("completed");
+      expect(model.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toContain("web.fetch");
+      expect(decide).toHaveBeenCalledOnce();
+      expect(forwarded).toMatchObject([{ request: { url: `http://${probeHost}:8080/runtime` } }]);
+      expect(responses).toMatchObject([{ status: 200 }]);
+      expect(WebFetchResultSchema.parse(toolResult.result)).toMatchObject({
+        text: "Contact <EMAIL_1>",
+        untrusted: true,
+      });
+      expect(JSON.stringify(result.events)).not.toContain("runtime.fetch@example.test");
+      expect(JSON.stringify(current.spans)).not.toContain("runtime.fetch@example.test");
+      expect(JSON.stringify(current.logs)).not.toContain("runtime.fetch@example.test");
+    } finally {
+      try {
+        await runtime?.close();
+      } finally {
+        try {
+          if (bridge.listening) {
+            await new Promise<void>((resolve, reject) =>
+              bridge.close((error) => {
+                if (error === undefined) {
+                  resolve();
+                } else {
+                  reject(error);
+                }
+              }),
+            );
+          }
+        } finally {
+          try {
+            await invokeCompose([
+              "--profile",
+              "sandbox",
+              "--profile",
+              "sandbox-egress",
+              "down",
+              "--volumes",
+              "--remove-orphans",
+            ]);
+          } finally {
+            if (previousRunnerToken === undefined) {
+              delete process.env.SANDBOX_RUNNER_TOKEN;
+            } else {
+              process.env.SANDBOX_RUNNER_TOKEN = previousRunnerToken;
+            }
+            if (previousEgressAllow === undefined) {
+              delete process.env.SANDBOX_EGRESS_ALLOW;
+            } else {
+              process.env.SANDBOX_EGRESS_ALLOW = previousEgressAllow;
+            }
+            for (const [name, value] of Object.entries(previousEgressEnvironment)) {
+              if (value === undefined) {
+                Reflect.deleteProperty(process.env, name);
+              } else {
+                process.env[name] = value;
+              }
+            }
+            await rm(directory, { recursive: true, force: true });
+          }
         }
       }
     }

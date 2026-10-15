@@ -74,7 +74,10 @@ describe("web.fetch through PII and offloading", () => {
       truncated: false,
       untrusted: true,
     });
-    const tool = new WebFetchTool({ backend: { fetch: () => Promise.resolve(fetched) } });
+    const tool = new WebFetchTool({
+      backend: { fetch: () => Promise.resolve(fetched) },
+      offloadBinaryResults: true,
+    });
     const { port, workspace } = wrap(tool);
 
     const execution = await port.execute(call, context);
