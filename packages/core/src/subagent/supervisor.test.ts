@@ -2,6 +2,7 @@
 import { context as otelContext, trace } from "@opentelemetry/api";
 import { ensureTracingFallback } from "@harness/telemetry";
 import { FakeClock, Id, JsonValue } from "@harness/schemas";
+import type { Event } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "../recorder.js";
@@ -251,7 +252,7 @@ describe("SubagentSupervisor", () => {
     expect(scopes.scopeOf(childRunId)).toBe(parentRunId);
     expect(childRequest?.tools.describe("fs.read")).toBeDefined();
     expect(childRequest?.tools.describe("fs.write")).toBeUndefined();
-    const childEvents = [];
+    const childEvents: Event[] = [];
     for await (const event of store.read(childRunId)) {
       childEvents.push(event);
     }
@@ -622,12 +623,13 @@ describe("SubagentSupervisor", () => {
           parentSpanContext,
         }),
       );
-      await childRecorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
-        grandchildSupervisor.spawn({
+      const grandchildCallId = Id.parse("55555555555555555555555555");
+      await childRecorder.withStepSpan(TOOL_CALL_SPAN, {}, async () => {
+        const result = await grandchildSupervisor.spawn({
           role,
           goal: "grandchild goal",
           call: {
-            callId: Id.parse("55555555555555555555555555"),
+            callId: grandchildCallId,
             toolId: "agent.spawn",
             args: {},
           },
@@ -636,9 +638,18 @@ describe("SubagentSupervisor", () => {
             childRecorder,
             [],
           ),
-        }),
-      );
-      const childEvents = [];
+        });
+        return childRecorder.record({
+          type: "tool_result",
+          v: 1,
+          callId: grandchildCallId,
+          toolId: "agent.spawn",
+          outcome: "ok",
+          latencyMs: 0,
+          result: JsonValue.parse(result),
+        });
+      });
+      const childEvents: Event[] = [];
       for await (const event of store.read(request.runId)) {
         childEvents.push(event);
       }
@@ -653,15 +664,24 @@ describe("SubagentSupervisor", () => {
       supervisorOptions(childRunner, { store, scopes, parentSpanContext }),
     );
 
-    await rootRecorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
-      rootSupervisor.spawn({
+    await rootRecorder.withStepSpan(TOOL_CALL_SPAN, {}, async () => {
+      const result = await rootSupervisor.spawn({
         role,
         goal: "child goal",
         call: toolCall(),
         context: toolRunContext(context(), rootRecorder, []),
-      }),
-    );
-    const rootEvents = [];
+      });
+      return rootRecorder.record({
+        type: "tool_result",
+        v: 1,
+        callId: parentCallId,
+        toolId: "agent.spawn",
+        outcome: "ok",
+        latencyMs: 0,
+        result: JsonValue.parse(result),
+      });
+    });
+    const rootEvents: Event[] = [];
     for await (const event of store.read(parentRunId)) {
       rootEvents.push(event);
     }
