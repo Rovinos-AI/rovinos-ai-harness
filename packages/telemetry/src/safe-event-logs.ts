@@ -148,6 +148,8 @@ export const safeEventLogAttributeMap = {
     spanId: "harness.span.id",
     childRunId: "harness.subagent.run.id",
     outcome: "harness.subagent.outcome",
+    inputTokens: "harness.subagent.input_tokens",
+    outputTokens: "harness.subagent.output_tokens",
   },
   run_created: {
     runId: "harness.run.id",
@@ -246,6 +248,8 @@ const logDefinitions = {
     ...commonShape,
     "harness.subagent.run.id": attr.id(),
     "harness.subagent.outcome": attr.enum(["completed", "failed", "cancelled"]),
+    "harness.subagent.input_tokens": attr.nonnegativeInt(),
+    "harness.subagent.output_tokens": attr.nonnegativeInt(),
   }),
   run_created: defineLogRecord("harness.safe.run_created", {
     ...commonShape,

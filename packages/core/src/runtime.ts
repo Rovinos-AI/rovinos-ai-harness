@@ -269,6 +269,7 @@ function createRuntimeToolPort(
     policyVersion: options.policyVersion,
     roles: options.roles,
     scopes: options.scopes,
+    ...(options.pii === undefined ? {} : { resolver: options.pii.resolver }),
   });
   const piiTool =
     options.pii === undefined

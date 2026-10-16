@@ -652,6 +652,17 @@ describe("reference app page", () => {
 
     request.mockResolvedValueOnce(new Response("", { status: 403 }));
     expect(await bridgeMock.toolCall({ name: "approve" })).toEqual({ content: [], isError: true });
+    request.mockResolvedValueOnce(
+      new Response('{"error":"rate_limited"}', {
+        status: 429,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(await bridgeMock.toolCall({ name: "harness.telemetry.emit" })).toEqual({
+      content: [{ type: "text", text: "rate_limited" }],
+      isError: true,
+      structuredContent: { code: "rate_limited" },
+    });
     request.mockResolvedValueOnce(new Response("{"));
     expect(await bridgeMock.toolCall({ name: "approve" })).toEqual({ content: [], isError: true });
     request.mockRejectedValueOnce(new Error("private request detail"));
