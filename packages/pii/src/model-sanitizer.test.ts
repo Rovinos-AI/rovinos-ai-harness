@@ -11,6 +11,7 @@ import {
   type PresidioFetcher,
 } from "./detectors/presidio.js";
 import { DetectorRegistry } from "./detectors/registry.js";
+import { PiiDetectorError } from "./detectors/types.js";
 import { PiiBlobContainsPiiError } from "./errors.js";
 import { PiiMessageSanitizer } from "./model-sanitizer.js";
 import { Tokenizer, type PiiDetectorRegistry } from "./tokenizer.js";
@@ -359,14 +360,22 @@ describe("PiiMessageSanitizer", () => {
         PiiPresidioConfigSchema.parse({ baseUrl: "http://presidio:3000" }),
         { clock, fetcher },
       );
-      if (breakerState === "half-open") {
-        for (let attempt = 0; attempt < 5; attempt += 1) {
-          await expect(presidio.detect("synthetic")).rejects.toMatchObject({
-            code: "pii_detector_unavailable",
-          });
-        }
-        now += 30_000;
-      }
+      const warmupAttempts = breakerState === "half-open" ? 5 : 0;
+      const warmupResults = await Promise.all(
+        Array.from({ length: warmupAttempts }, () =>
+          presidio.detect("synthetic").then(
+            () => undefined,
+            (error: unknown) => error,
+          ),
+        ),
+      );
+      expect(warmupResults).toHaveLength(warmupAttempts);
+      expect(
+        warmupResults.every(
+          (error) => error instanceof PiiDetectorError && error.code === "pii_detector_unavailable",
+        ),
+      ).toBe(true);
+      now = warmupAttempts === 0 ? 0 : 30_000;
       const registry = new DetectorRegistry({
         asyncDetectors: [presidio],
         failMode: "closed",
@@ -425,8 +434,7 @@ describe("PiiMessageSanitizer", () => {
       ),
     ).rejects.toBeInstanceOf(PiiBlobContainsPiiError);
 
-    expect(count).toHaveBeenCalledOnce();
-    expect(count.mock.calls).toEqual([[]]);
+    expect(count).toHaveBeenCalledExactlyOnceWith();
   });
 
   it("passes safe opaque data and tool calls through without mutation", async () => {

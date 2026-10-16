@@ -108,8 +108,7 @@ describe("DetectorRegistry", () => {
     });
 
     await expect(registry.detect("text")).resolves.toEqual([synchronous]);
-    expect(countPiiDetectorDegraded).toHaveBeenCalledOnce();
-    expect(countPiiDetectorDegraded.mock.calls).toEqual([[]]);
+    expect(countPiiDetectorDegraded).toHaveBeenCalledExactlyOnceWith();
   });
 
   it("does not degrade synchronous detector failures", () => {

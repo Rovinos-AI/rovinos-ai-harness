@@ -43,9 +43,10 @@ interface PresidioRequestInit {
   readonly signal: AbortSignal;
 }
 
-interface TimeoutOptions {
+interface TimeoutOptions<Result> {
   readonly timeoutMs: number;
   readonly parentSignal?: AbortSignal;
+  readonly consumeResponse: (response: UndiciResponse, signal: AbortSignal) => Promise<Result>;
 }
 
 /** Injectable network edge for unit tests; production requests use Undici. */
@@ -105,16 +106,18 @@ export class PresidioDetector implements AsyncDetector {
           headers: { "content-type": "application/json" },
           body: requestBody,
         },
-        { timeoutMs: this.timeoutMs },
-        async (response, signal) => {
-          if (!response.ok) {
-            throw new Error("Presidio request failed.");
-          }
-          const responseBody = await readBoundedBody(response, signal);
-          const results = parseJson(PresidioResponseSchema, responseBody, {
-            maxBytes: MAX_RESPONSE_BYTES,
-          });
-          return mapResults(text, results);
+        {
+          timeoutMs: this.timeoutMs,
+          consumeResponse: async (response, signal) => {
+            if (!response.ok) {
+              throw new Error("Presidio request failed.");
+            }
+            const responseBody = await readBoundedBody(response, signal);
+            const results = parseJson(PresidioResponseSchema, responseBody, {
+              maxBytes: MAX_RESPONSE_BYTES,
+            });
+            return mapResults(text, results);
+          },
         },
       );
       this.resetCircuit();
@@ -185,15 +188,15 @@ export function createPresidioReachableCheck(
           {
             timeoutMs,
             ...(ctx.signal === undefined ? {} : { parentSignal: ctx.signal }),
-          },
-          async (response, signal) => {
-            if (!response.ok) {
-              return { status: "fail", code: "presidio_unreachable" };
-            }
-            const body = await readBoundedBody(response, signal);
-            return body.trim() === "Presidio Analyzer service is up"
-              ? { status: "ok", code: "presidio_reachable" }
-              : { status: "fail", code: "presidio_unreachable" };
+            consumeResponse: async (response, signal) => {
+              if (!response.ok) {
+                return { status: "fail", code: "presidio_unreachable" };
+              }
+              const body = await readBoundedBody(response, signal);
+              return body.trim() === "Presidio Analyzer service is up"
+                ? { status: "ok", code: "presidio_reachable" }
+                : { status: "fail", code: "presidio_unreachable" };
+            },
           },
         );
       } catch {
@@ -225,21 +228,22 @@ async function fetchWithTimeout<Result>(
   fetcher: PresidioFetcher,
   url: URL,
   init: Omit<PresidioRequestInit, "signal" | "redirect">,
-  options: TimeoutOptions,
-  consumeResponse: (response: UndiciResponse, signal: AbortSignal) => Promise<Result>,
+  options: TimeoutOptions<Result>,
 ): Promise<Result> {
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const abort = (): void => {
     controller.abort();
   };
-  const { timeoutMs, parentSignal } = options;
+  const { timeoutMs, parentSignal, consumeResponse } = options;
   parentSignal?.addEventListener("abort", abort, { once: true });
   if (parentSignal?.aborted === true) {
     abort();
   }
   const aborted = new Promise<never>((_resolve, reject) => {
-    const rejectAbort = (): void => reject(new Error("Presidio request aborted."));
+    const rejectAbort = (): void => {
+      reject(new Error("Presidio request aborted."));
+    };
     if (controller.signal.aborted) {
       rejectAbort();
     } else {

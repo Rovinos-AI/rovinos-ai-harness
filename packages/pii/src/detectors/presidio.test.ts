@@ -18,7 +18,10 @@ function response(
   status = 200,
   headers?: Readonly<Record<string, string>>,
 ): UndiciResponse {
-  return new UndiciResponse(JSON.stringify(body), { status, headers });
+  return new UndiciResponse(JSON.stringify(body), {
+    status,
+    ...(headers === undefined ? {} : { headers }),
+  });
 }
 
 function result(entity_type: string, start = 1, end = 4, score = 0.9) {
@@ -133,25 +136,22 @@ describe("PresidioDetector", () => {
 
   it("rejects a redirect without forwarding the analyze request to its target", async () => {
     const visitedHosts: string[] = [];
-    const fetcher: PresidioFetcher = (url, init) => {
+    const fetcher = vi.fn<PresidioFetcher>((url) => {
       visitedHosts.push(url.host);
-      if (init.redirect !== "error") {
-        visitedHosts.push("second.test:3000");
-        return Promise.resolve(response([]));
-      }
       return Promise.resolve(
         new UndiciResponse(null, {
           status: 307,
           headers: { location: "http://second.test:3000/analyze" },
         }),
       );
-    };
+    });
     const detector = new PresidioDetector(config, { fetcher });
 
     await expect(detector.detect("synthetic raw text")).rejects.toMatchObject({
       code: "pii_detector_unavailable",
     });
     expect(visitedHosts).toEqual(["presidio:3000"]);
+    expect(fetcher.mock.calls[0]?.[1].redirect).toBe("error");
   });
 
   it("times out a hung request and aborts its signal", async () => {
@@ -259,8 +259,7 @@ describe("PresidioDetector", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     await expect(pending).resolves.toEqual([]);
-    expect(degraded).toHaveBeenCalledOnce();
-    expect(degraded.mock.calls).toEqual([[]]);
+    expect(degraded).toHaveBeenCalledExactlyOnceWith();
   });
 
   it("rejects an oversized content-length before consuming the response body", async () => {
@@ -380,20 +379,17 @@ describe("PresidioDetector", () => {
 
   it("does not follow a health-check redirect to another host", async () => {
     const visitedHosts: string[] = [];
+    const fetcher = vi.fn<PresidioFetcher>((url) => {
+      visitedHosts.push(url.host);
+      return Promise.resolve(
+        new UndiciResponse(null, {
+          status: 307,
+          headers: { location: "http://second.test:3000/health" },
+        }),
+      );
+    });
     const check = createPresidioReachableCheck(config, {
-      fetcher: (url, init) => {
-        visitedHosts.push(url.host);
-        if (init.redirect !== "error") {
-          visitedHosts.push("second.test:3000");
-          return Promise.resolve(new UndiciResponse("Presidio Analyzer service is up"));
-        }
-        return Promise.resolve(
-          new UndiciResponse(null, {
-            status: 307,
-            headers: { location: "http://second.test:3000/health" },
-          }),
-        );
-      },
+      fetcher,
     });
 
     await expect(check.run({})).resolves.toEqual({
@@ -401,5 +397,6 @@ describe("PresidioDetector", () => {
       code: "presidio_unreachable",
     });
     expect(visitedHosts).toEqual(["presidio:3000"]);
+    expect(fetcher.mock.calls[0]?.[1].redirect).toBe("error");
   });
 });
