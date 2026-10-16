@@ -707,12 +707,21 @@ describe("SubagentSupervisor", () => {
       }),
     );
 
+    let resultStatus: string | undefined;
     await expect(
-      recorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
-        supervisor.spawn({ role, goal: "goal", call: toolCall(), context: runContext }),
-      ),
-    ).resolves.toMatchObject({ status: "cancelled" });
+      recorder.withStepSpan(TOOL_CALL_SPAN, {}, async () => {
+        resultStatus = (
+          await supervisor.spawn({ role, goal: "goal", call: toolCall(), context: runContext })
+        ).status;
+        const last = events.at(-1);
+        if (last === undefined) {
+          throw new Error("Expected the cancellation completion event.");
+        }
+        return last;
+      }),
+    ).resolves.toMatchObject({ type: "subagent_completed", outcome: "cancelled" });
 
+    expect(resultStatus).toBe("cancelled");
     expect(runChild).not.toHaveBeenCalled();
     expect(
       (await eventsOf(store, parentRunId)).filter(
@@ -901,14 +910,16 @@ describe("SubagentSupervisor", () => {
       ),
     );
 
-    await recorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
-      supervisor.spawn({
-        role,
-        goal: "goal",
-        call: toolCall(),
-        context: toolRunContext(context(), recorder, []),
-      }),
-    );
+    const events: Event[] = [];
+    const runContext = toolRunContext(context(), recorder, events);
+    await recorder.withStepSpan(TOOL_CALL_SPAN, {}, async () => {
+      await supervisor.spawn({ role, goal: "goal", call: toolCall(), context: runContext });
+      const last = events.at(-1);
+      if (last === undefined) {
+        throw new Error("Expected a durable spawn event.");
+      }
+      return last;
+    });
 
     expect(childBudgets).toMatchObject({ maxSteps: 10, maxCostUsd: 0.00001 });
   });

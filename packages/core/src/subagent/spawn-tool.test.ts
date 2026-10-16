@@ -238,28 +238,25 @@ describe("agent.spawn tool", () => {
   ])(
     "returns $expectedCode for the $name limit",
     async ({ runConfig, existingChild, depth, roleMaxChildren, expectedCode }) => {
-    const runChild = vi.fn();
-    const tool = await createSpawnTool(
-      innerTools(),
-      await roles(roleMaxChildren),
-      () => undefined,
-      runChild,
-      {
-        runConfig,
-        ...(existingChild === undefined ? {} : { existingChild }),
-      },
-    );
-
-    await expect(
-      tool.execute(
-        call("agent.spawn", { role: "worker", goal: "must not start" }),
+      const runChild = vi.fn();
+      const tool = await createSpawnTool(
+        innerTools(),
+        await roles(roleMaxChildren),
+        () => undefined,
+        runChild,
         {
+          runConfig,
+          ...(existingChild === undefined ? {} : { existingChild }),
+        },
+      );
+
+      await expect(
+        tool.execute(call("agent.spawn", { role: "worker", goal: "must not start" }), {
           ...runContext(innerTools()),
           ...(depth === undefined ? {} : { depth }),
-        },
-      ),
-    ).resolves.toEqual({ outcome: "error", errorCode: expectedCode, result: null });
-    expect(runChild).not.toHaveBeenCalled();
+        }),
+      ).resolves.toEqual({ outcome: "error", errorCode: expectedCode, result: null });
+      expect(runChild).not.toHaveBeenCalled();
     },
   );
 

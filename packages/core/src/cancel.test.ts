@@ -230,7 +230,7 @@ describe("cancelRun", () => {
         await store.append(runId, [competingEvent(head)], head);
         races += 1;
       }
-      return requestedRunId === runId && races > 0 ? await readHead(requestedRunId) : head;
+      return requestedRunId === runId && races > 0 ? readHead(requestedRunId) : head;
     });
 
     await expect(
@@ -385,13 +385,15 @@ describe("cancelRun", () => {
         steps: 0,
       }),
     );
-    expect(await (async () => {
-      const events: Event[] = [];
-      for await (const event of store.read(childRunId)) {
-        events.push(event);
-      }
-      return events;
-    })()).toEqual([]);
+    expect(
+      await (async () => {
+        const events: Event[] = [];
+        for await (const event of store.read(childRunId)) {
+          events.push(event);
+        }
+        return events;
+      })(),
+    ).toEqual([]);
   });
 
   it("sweeps a child announced between the tree scan and parent cancellation", async () => {
@@ -456,9 +458,7 @@ describe("cancelRun", () => {
     vi.spyOn(store, "append").mockImplementation((id, events, expectedSeq) => {
       if (
         id === grandchildRunId &&
-        events.some(
-          (event) => event.type === "run_status_changed" && event.to === "cancelled",
-        )
+        events.some((event) => event.type === "run_status_changed" && event.to === "cancelled")
       ) {
         return Promise.reject(new Error("injected child cancellation failure"));
       }
@@ -485,9 +485,10 @@ describe("cancelRun", () => {
         return events;
       })(),
     ]);
-    expect(
-      middleEvents.findLast((event) => event.type === "run_status_changed"),
-    ).toMatchObject({ type: "run_status_changed", to: "cancelled" });
+    expect(middleEvents.findLast((event) => event.type === "run_status_changed")).toMatchObject({
+      type: "run_status_changed",
+      to: "cancelled",
+    });
     expect(siblingEvents.at(-1)).toMatchObject({
       type: "run_status_changed",
       to: "cancelled",
@@ -506,11 +507,7 @@ describe("cancelRun", () => {
     const append = store.append.bind(store);
     let raced = false;
     vi.spyOn(store, "append").mockImplementation(async (id, events, expectedSeq) => {
-      if (
-        id === runId &&
-        !raced &&
-        events.some((event) => event.type === "subagent_completed")
-      ) {
+      if (id === runId && !raced && events.some((event) => event.type === "subagent_completed")) {
         raced = true;
         await append(id, [competingEvent(expectedSeq)], expectedSeq);
       }
