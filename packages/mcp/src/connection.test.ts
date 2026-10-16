@@ -75,6 +75,44 @@ describe("ClientCredentialsExtensionSupport", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("ignores probe failures but preserves cancellation of the connection signal", async () => {
+    const serverConfig = ServerConfigSchema.parse({
+      id: "machine",
+      transport: {
+        kind: "http",
+        url: "https://mcp.example.test/mcp",
+        auth: {
+          kind: "oauth",
+          grant: "client_credentials",
+          clientId: "machine-client",
+          clientSecret: "env:OAUTH_SECRET",
+          scopes: ["tools:read"],
+        },
+      },
+    });
+    const extension = new ClientCredentialsExtensionSupport();
+    const signal = new AbortController().signal;
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("transient network failure")));
+    try {
+      await expect(extension.probe(serverConfig, signal, false)).resolves.toBeUndefined();
+      await expect(extension.probe(serverConfig, signal, false)).resolves.toBeUndefined();
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const controller = new AbortController();
+    controller.abort();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError")));
+    try {
+      await expect(extension.probe(serverConfig, controller.signal, false)).rejects.toMatchObject({
+        name: "AbortError",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 interface MemoryPeer {

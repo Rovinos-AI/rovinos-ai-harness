@@ -36,7 +36,7 @@ describe("resourceAdvertisesClientCredentials", () => {
     expect(fetch).toHaveBeenNthCalledWith(
       2,
       new URL("https://auth.example.test/metadata"),
-      expect.objectContaining({ redirect: "error" }),
+      expect.objectContaining({ credentials: "omit", redirect: "follow" }),
     );
   });
 
@@ -52,7 +52,26 @@ describe("resourceAdvertisesClientCredentials", () => {
     expect(fetch).toHaveBeenNthCalledWith(
       2,
       new URL("https://mcp.example.test/.well-known/oauth-protected-resource/mcp"),
-      expect.objectContaining({ redirect: "error" }),
+      expect.objectContaining({ credentials: "omit", redirect: "follow" }),
+    );
+  });
+
+  it("does not forward credentials when following a cross-origin probe redirect", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(Response.json({ extensions: {} }));
+
+    await expect(resourceAdvertisesClientCredentials(resourceUrl)).resolves.toBe(false);
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      new URL(resourceUrl),
+      expect.objectContaining({ credentials: "omit", redirect: "follow" }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      expect.any(URL),
+      expect.objectContaining({ credentials: "omit", redirect: "follow" }),
     );
   });
 

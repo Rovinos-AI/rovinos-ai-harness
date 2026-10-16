@@ -105,7 +105,9 @@ export class ClientCredentialsExtensionSupport {
       if (this.#probe === probe) {
         this.#probe = undefined;
       }
-      throw error;
+      if (signal.aborted) {
+        throw error;
+      }
     }
   }
 }

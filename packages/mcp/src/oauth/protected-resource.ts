@@ -29,8 +29,9 @@ export async function resourceAdvertisesClientCredentials(
 ): Promise<boolean> {
   const resourceUrl = new URL(serverUrl);
   const challenge = await fetch(resourceUrl, {
+    credentials: "omit",
     headers: { accept: "application/json" },
-    redirect: "error",
+    redirect: "follow",
     ...(signal === undefined ? {} : { signal }),
   });
   const resourceMetadata =
@@ -48,8 +49,9 @@ export async function resourceAdvertisesClientCredentials(
     return false;
   }
   const response = await fetch(metadataUrl, {
+    credentials: "omit",
     headers: { accept: "application/json" },
-    redirect: "error",
+    redirect: "follow",
     ...(signal === undefined ? {} : { signal }),
   });
   if (response.status >= 500) {
