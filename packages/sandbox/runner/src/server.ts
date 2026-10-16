@@ -10,6 +10,7 @@ import type { Id as IdValue } from "@harness/schemas";
 import { z } from "zod";
 import { executeSpec, SANDBOX_EXEC_GID, SANDBOX_EXEC_UID } from "./exec.js";
 import { MAX_EXEC_TIMEOUT_MS } from "../../src/types.js";
+import { WorkspaceFileSystem } from "../../src/workspace-files.js";
 import type { Clock, ExecResult, ExecSpec } from "../../src/types.js";
 import type { WebFetchRequest, WebFetchResult } from "../../src/web-fetch-contracts.js";
 import {
@@ -219,6 +220,9 @@ interface RunnerRequestContext {
   readonly options: RunnerServerOptions;
   readonly allowedHosts: ReadonlySet<string>;
   readonly tokenHash: Buffer;
+  readonly workspaceFiles: WorkspaceFileSystem;
+  readonly executionUid: number | undefined;
+  readonly executionGid: number | undefined;
   readonly isBusy: () => boolean;
   readonly setBusy: (busy: boolean) => void;
   readonly leases: RunnerLeaseManager;
@@ -229,7 +233,14 @@ async function handleRunnerRequest(
   request: RunnerRequest,
   response: RunnerResponse,
 ): Promise<void> {
-  const { options, allowedHosts, tokenHash } = context;
+  const {
+    options,
+    allowedHosts,
+    tokenHash,
+    workspaceFiles,
+    executionUid,
+    executionGid,
+  } = context;
   try {
     if (!validHost(request, allowedHosts) || !validOrigin(request.headers.origin, allowedHosts)) {
       writeError(response, 400, "sandbox_host_rejected");
@@ -286,6 +297,9 @@ async function handleRunnerRequest(
         response,
         signal: controller.signal,
         executeSpec: (runId, spec, signal) => executeRunnerSpec(options, runId, spec, signal),
+        workspaceFiles,
+        executionUid,
+        executionGid,
         sendJson,
         sendError: writeError,
       });
@@ -319,6 +333,7 @@ export function createRunnerRequestHandler(
     options.executionUid ?? (options.execute === undefined ? SANDBOX_EXEC_UID : process.getuid?.());
   const executionGid =
     options.executionGid ?? (options.execute === undefined ? SANDBOX_EXEC_GID : process.getgid?.());
+  const workspaceFiles = new WorkspaceFileSystem(options.workspaceRoot);
   const leases = new RunnerLeaseManager({
     ...options,
     ...(executionUid === undefined ? {} : { executionUid }),
@@ -329,6 +344,9 @@ export function createRunnerRequestHandler(
     options,
     allowedHosts,
     tokenHash,
+    workspaceFiles,
+    executionUid,
+    executionGid,
     isBusy: () => activeExec,
     setBusy: (busy) => {
       activeExec = busy;

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstat } from "node:fs/promises";
-import { dirname } from "node:path";
 import type { Id } from "@harness/schemas";
 import { ensureRunWorkspace } from "./workspace.js";
 import {
@@ -32,7 +31,8 @@ import {
   fileAt,
   listEntries,
   projectPath,
-  readFileAt,
+  readFileSnapshotAt,
+  readTextRangeAt,
   searchDirectory,
   searchFile,
   sha256,
@@ -93,20 +93,20 @@ export class WorkspaceFileSystem {
   async #read(runId: Id, input: FsReadInput, signal: AbortSignal): Promise<FsToolResult> {
     const root = await this.#projectRoot(runId);
     const path = await projectPath(root, input.path, true);
-    const bytes = await readFileAt(path);
+    const range = await readTextRangeAt(
+      path,
+      input.offset ?? 0,
+      input.length ?? MAX_FS_READ_BYTES,
+    );
     assertActive(signal);
-    if (decodeText(bytes) === undefined) {
-      return { binary: true, bytes: bytes.byteLength };
+    if (range.binary) {
+      return { binary: true, bytes: range.fileBytes };
     }
-    const offset = input.offset ?? 0;
-    const length = input.length ?? MAX_FS_READ_BYTES;
-    const selected = bytes.subarray(offset, Math.min(bytes.byteLength, offset + length));
-    const content = new TextDecoder().decode(selected);
     return {
       binary: false,
-      bytes: selected.byteLength,
-      content,
-      offset,
+      bytes: range.bytes,
+      content: range.content,
+      offset: range.offset,
       path: input.path,
     };
   }
@@ -135,13 +135,18 @@ export class WorkspaceFileSystem {
         throw new WorkspaceFileError("precondition_failed");
       }
     }
-    const runRoot = dirname(root);
-    const usedBytes = await countWorkspaceBytes(runRoot, signal);
+    const usedBytes = await countWorkspaceBytes(root, signal);
     const replacedBytes = current.exists ? current.bytes.byteLength : 0;
     if (usedBytes - replacedBytes + bytes.byteLength > DEFAULT_RUN_QUOTA_BYTES) {
-      throw new WorkspaceFileError("fs_quota_exceeded");
+      throw new WorkspaceFileError("workspace_quota_exceeded");
     }
-    await writeFileAt(path, bytes, input.mode);
+    await writeFileAt(
+      path,
+      bytes,
+      input.mode,
+      signal,
+      current.exists ? current.identity : undefined,
+    );
     return {
       bytes: bytes.byteLength,
       path: input.path,
@@ -152,7 +157,8 @@ export class WorkspaceFileSystem {
   async #edit(runId: Id, input: FsEditInput, signal: AbortSignal): Promise<FsToolResult> {
     const root = await this.#projectRoot(runId);
     const path = await projectPath(root, input.path, true);
-    const original = await readFileAt(path);
+    const snapshot = await readFileSnapshotAt(path);
+    const original = snapshot.bytes;
     if (input.expectedSha256 !== undefined && sha256(original) !== input.expectedSha256) {
       throw new WorkspaceFileError("precondition_failed");
     }
@@ -172,19 +178,17 @@ export class WorkspaceFileSystem {
       content = `${content.slice(0, start)}${edit.newText}${content.slice(start + edit.oldText.length)}`;
     }
     const bytes = new TextEncoder().encode(content);
-    if (
-      bytes.byteLength > DEFAULT_MAX_FILE_BYTES ||
-      (input.expectedSha256 !== undefined && sha256(bytes) === input.expectedSha256)
-    ) {
-      throw new WorkspaceFileError(
-        input.expectedSha256 === undefined ? "fs_quota_exceeded" : "precondition_failed",
-      );
+    if (bytes.byteLength > DEFAULT_MAX_FILE_BYTES) {
+      throw new WorkspaceFileError("workspace_quota_exceeded");
     }
-    const usedBytes = await countWorkspaceBytes(dirname(root), signal);
+    if (input.expectedSha256 !== undefined && sha256(bytes) === input.expectedSha256) {
+      throw new WorkspaceFileError("precondition_failed");
+    }
+    const usedBytes = await countWorkspaceBytes(root, signal);
     if (usedBytes - original.byteLength + bytes.byteLength > DEFAULT_RUN_QUOTA_BYTES) {
-      throw new WorkspaceFileError("fs_quota_exceeded");
+      throw new WorkspaceFileError("workspace_quota_exceeded");
     }
-    await writeFileAt(path, bytes, "overwrite");
+    await writeFileAt(path, bytes, "overwrite", signal, snapshot.identity);
     return {
       bytes: bytes.byteLength,
       path: input.path,
@@ -233,6 +237,7 @@ export class WorkspaceFileSystem {
         limit: input.limit,
         matches,
         signal,
+        state: { filesVisited: 0, bytesScanned: 0 },
       });
     } else if (info.isFile()) {
       truncated = await searchFile(resolved, searchPath, {
@@ -242,6 +247,7 @@ export class WorkspaceFileSystem {
         limit: input.limit,
         matches,
         signal,
+        state: { filesVisited: 0, bytesScanned: 0 },
       });
     } else {
       throw new WorkspaceFileError("fs_not_file");

@@ -2,9 +2,11 @@
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
 import {
+  link as createHardLink,
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   symlink,
@@ -15,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { Code, Id, JsonValue } from "@harness/schemas";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FsEditInputSchema,
   FsListInputSchema,
@@ -30,6 +32,7 @@ import {
   ensureRunWorkspace,
 } from "./index.js";
 import type { FsOperation } from "./fs-tools.js";
+import { readFileSnapshotAt, writeFileAt } from "./workspace-file-helpers.js";
 import { createRunnerRequestHandler } from "../runner/src/server.js";
 import type { RunnerResponse, RunnerRequest } from "../runner/src/request-handler.js";
 
@@ -228,6 +231,34 @@ describe.each(["in-process", "remote"] as const)("workspace tools on the %s back
       await close();
     }
   });
+
+  it("transports escaped writes and aggregate multi-edit input within the shared contract", async () => {
+    const root = await workspaceRoot();
+    const { backend, close } = await makeBackend(kind, root);
+    const tools = new FsTools(backend);
+    const project = await ensureRunWorkspace(root, runId);
+    try {
+      await expect(
+        toolCall(tools, "fs.write", {
+          path: "escaped.txt",
+          content: "\n".repeat(1024 * 1024),
+          mode: "create",
+        }),
+      ).resolves.toMatchObject({ outcome: "ok" });
+      await writeFile(join(project, "multi-edit.txt"), "a".repeat(512 * 1024) + "b".repeat(512 * 1024));
+      await expect(
+        toolCall(tools, "fs.edit", {
+          path: "multi-edit.txt",
+          edits: [
+            { oldText: "a".repeat(512 * 1024), newText: "\n".repeat(512 * 1024) },
+            { oldText: "b".repeat(512 * 1024), newText: "\n".repeat(512 * 1024) },
+          ],
+        }),
+      ).resolves.toMatchObject({ outcome: "ok" });
+    } finally {
+      await close();
+    }
+  });
 });
 
 describe("workspace file operation contracts and safety", () => {
@@ -242,6 +273,20 @@ describe("workspace file operation contracts and safety", () => {
     expect(FsEditInputSchema.safeParse({
       path: "a",
       edits: Array.from({ length: 21 }, () => ({ oldText: "a", newText: "b" })),
+    }).success).toBe(false);
+    expect(FsEditInputSchema.safeParse({
+      path: "a",
+      edits: [
+        { oldText: "a".repeat(1024 * 1024), newText: "b".repeat(1024 * 1024) },
+        { oldText: "a".repeat(1024 * 1024), newText: "b".repeat(1024 * 1024) },
+      ],
+    }).success).toBe(true);
+    expect(FsEditInputSchema.safeParse({
+      path: "a",
+      edits: Array.from({ length: 3 }, () => ({
+        oldText: "a".repeat(1024 * 1024),
+        newText: "b".repeat(1024 * 1024),
+      })),
     }).success).toBe(false);
     expect(FsListInputSchema.safeParse({ path: ".", depth: 4, limit: 10 }).success).toBe(false);
     expect(FsSearchInputSchema.safeParse({
@@ -274,7 +319,34 @@ describe("workspace file operation contracts and safety", () => {
       offset: 3,
       bytes: 1,
     });
+    await writeFile(join(project, "unicode.txt"), "éx");
+    expect(await files.execute(runId, "read", { path: "unicode.txt", offset: 1, length: 1 }, signal)).toMatchObject({
+      binary: false,
+      content: "x",
+      offset: 2,
+      bytes: 1,
+    });
     expect(FsToolResultSchema.safeParse({ binary: true, bytes: 3, path: "secret" }).success).toBe(false);
+  });
+
+  it("reads only the requested range from a maximum-size file", async () => {
+    const root = await workspaceRoot();
+    const project = await ensureRunWorkspace(root, runId);
+    await writeFile(join(project, "large.txt"), `${"x".repeat(10 * 1024 * 1024 - 1)}z`);
+    const files = new WorkspaceFileSystem(root);
+    const allocationSpy = vi.spyOn(Buffer, "alloc");
+
+    try {
+      await expect(files.execute(
+        runId,
+        "read",
+        { path: "large.txt", offset: 10 * 1024 * 1024 - 1, length: 1 },
+        new AbortController().signal,
+      )).resolves.toMatchObject({ binary: false, content: "z", bytes: 1 });
+      expect(allocationSpy.mock.calls.every(([size]) => size < 1024 * 1024)).toBe(true);
+    } finally {
+      allocationSpy.mockRestore();
+    }
   });
 
   it("rejects missing and non-file targets while skipping symlinks in traversal", async () => {
@@ -346,6 +418,35 @@ describe("workspace file operation contracts and safety", () => {
       mode: "create",
     }, "fs_path_invalid");
     await expect(readFile(join(outside, "target.txt"), "utf8")).resolves.toBe("unchanged");
+  });
+
+  it("rejects protected offload hard links for all file tools", async () => {
+    const root = await workspaceRoot();
+    const project = await ensureRunWorkspace(root, runId);
+    const protectedPath = join(root, runId, ".harness", "offload", "protected.txt");
+    await writeFile(protectedPath, "protected content");
+    await createHardLink(protectedPath, join(project, "alias.txt"));
+
+    await expectFileError("read", root, { path: "alias.txt" }, "fs_path_invalid");
+    await expectFileError(
+      "search",
+      root,
+      { path: "alias.txt", query: "protected", regex: false, limit: 1 },
+      "fs_path_invalid",
+    );
+    await expectFileError(
+      "write",
+      root,
+      { path: "alias.txt", content: "changed", mode: "overwrite" },
+      "fs_path_invalid",
+    );
+    await expectFileError(
+      "edit",
+      root,
+      { path: "alias.txt", edits: [{ oldText: "protected", newText: "changed" }] },
+      "fs_path_invalid",
+    );
+    await expect(readFile(protectedPath, "utf8")).resolves.toBe("protected content");
   });
 
   it("enforces edit uniqueness and prevents a preconditioned retry from applying twice", async () => {
@@ -425,6 +526,58 @@ describe("workspace file operation contracts and safety", () => {
     });
   });
 
+  it("reports an oversized preconditioned edit as a quota error without changing the file", async () => {
+    const root = await workspaceRoot();
+    const project = await ensureRunWorkspace(root, runId);
+    const path = join(project, "oversized-edit.txt");
+    const markers = Array.from({ length: 5 }, (_, index) => `[edit-${String(index)}]`);
+    const markerText = markers.join("");
+    const original = `${markerText}${"x".repeat(10 * 1024 * 1024 - markerText.length)}`;
+    await writeFile(path, original);
+    const edits = markers.map((oldText) => ({ oldText, newText: "z".repeat(800_000) }));
+
+    await expect(new WorkspaceFileSystem(root).execute(
+      runId,
+      "edit",
+      {
+        path: "oversized-edit.txt",
+        edits,
+        expectedSha256: createHash("sha256").update(original).digest("hex"),
+      },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
+    const unchanged = await readFile(path);
+    expect(createHash("sha256").update(unchanged).digest("hex")).toBe(
+      createHash("sha256").update(original).digest("hex"),
+    );
+  });
+
+  it("keeps the prior bytes and hash when atomic replacement detects a stale target", async () => {
+    const root = await workspaceRoot();
+    const project = await ensureRunWorkspace(root, runId);
+    const path = join(project, "atomic.txt");
+    const original = "original";
+    await writeFile(path, original);
+    const snapshot = await readFileSnapshotAt(path);
+    const staleIdentity = { ...snapshot.identity, mtimeMs: snapshot.identity.mtimeMs + 1 };
+
+    await expect(
+      writeFileAt(
+        path,
+        Buffer.from("replacement"),
+        "overwrite",
+        new AbortController().signal,
+        staleIdentity,
+      ),
+    ).rejects.toMatchObject({ code: "precondition_failed" });
+    const unchanged = await readFile(path);
+    expect(unchanged.toString("utf8")).toBe(original);
+    expect(createHash("sha256").update(unchanged).digest("hex")).toBe(
+      createHash("sha256").update(original).digest("hex"),
+    );
+    expect((await readdir(project)).filter((name) => name.startsWith(".harness-fs-"))).toEqual([]);
+  });
+
   // threat: T-09
   it("enforces the existing per-file and per-run quotas", async () => {
     const root = await workspaceRoot();
@@ -444,7 +597,7 @@ describe("workspace file operation contracts and safety", () => {
       "write",
       { path: "over-quota.txt", content: "x", mode: "create" },
       new AbortController().signal,
-    )).rejects.toMatchObject({ code: "fs_quota_exceeded" });
+    )).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
 
     const tooLargePath = join(project, "too-large.bin");
     await writeFile(tooLargePath, "");
@@ -454,7 +607,27 @@ describe("workspace file operation contracts and safety", () => {
       "read",
       { path: "too-large.bin" },
       new AbortController().signal,
-    )).rejects.toMatchObject({ code: "fs_quota_exceeded" });
+    )).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
+  });
+
+  it("skips symlinks and counts oversized command-created files without blocking a small write", async () => {
+    const root = await workspaceRoot();
+    const project = await ensureRunWorkspace(root, runId);
+    const outside = await realpath(await mkdtemp(join(tmpdir(), "sandbox-fs-quota-")));
+    roots.push(outside);
+    const oversized = join(project, "exec-large.bin");
+    await writeFile(oversized, "");
+    await truncate(oversized, 11 * 1024 * 1024);
+    const external = join(outside, "secret.txt");
+    await writeFile(external, "outside");
+    await symlink(external, join(project, "external-link"));
+
+    await expect(new WorkspaceFileSystem(root).execute(
+      runId,
+      "write",
+      { path: "small.txt", content: "small", mode: "create" },
+      new AbortController().signal,
+    )).resolves.toMatchObject({ path: "small.txt" });
   });
 
   it("reports bounded list/search results, ignores binary search input, and rejects aborted work", async () => {
@@ -491,5 +664,38 @@ describe("workspace file operation contracts and safety", () => {
     await expect(files.execute(runId, "read", { path: "binary.dat" }, controller.signal)).rejects.toMatchObject({
       code: "fs_operation_failed",
     });
+  });
+
+  it("caps total search input and regex line lengths across many large files", async () => {
+    const root = await workspaceRoot();
+    const project = await ensureRunWorkspace(root, runId);
+    const maximum = 10 * 1024 * 1024;
+    await writeFile(join(project, "first.txt"), `needle\n${"x".repeat(maximum - 7)}`);
+    await Promise.all(
+      Array.from({ length: 8 }, async (_, index) => {
+        const path = join(project, `large-${String(index)}.txt`);
+        await writeFile(path, "");
+        await truncate(path, maximum);
+      }),
+    );
+    const files = new WorkspaceFileSystem(root);
+
+    await expect(files.execute(
+      runId,
+      "search",
+      { query: "needle", regex: false, limit: 1 },
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      matches: [{ path: "first.txt", lineNumber: 1 }],
+      truncated: true,
+    });
+
+    await writeFile(join(project, "long-line.txt"), `${"x".repeat(2048)}needle`);
+    await expect(files.execute(
+      runId,
+      "search",
+      { path: "long-line.txt", query: "needle", regex: false, limit: 1 },
+      new AbortController().signal,
+    )).resolves.toMatchObject({ matches: [], truncated: true });
   });
 });

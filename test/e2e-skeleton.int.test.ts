@@ -1749,18 +1749,19 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
         expect(request.method).toBe("POST");
         const endpoint = request.url ?? "";
         expect(endpoint === "/fetch" || endpoint.startsWith("/fs/")).toBe(true);
+        const requestLimit = endpoint.startsWith("/fs/") ? 32 * 1024 * 1024 : 2 * 1024 * 1024;
         const chunks: Buffer[] = [];
         let bytes = 0;
         for await (const chunk of request) {
           const buffer = z.instanceof(Buffer).parse(chunk);
           bytes += buffer.byteLength;
-          if (bytes > 2 * 1024 * 1024) {
+          if (bytes > requestLimit) {
             throw new Error("Web fetch request exceeds the boundary limit.");
           }
           chunks.push(buffer);
         }
         const body = Buffer.concat(chunks).toString("utf8");
-        const parsed = parseJson(requestSchema, body, { maxBytes: 2 * 1024 * 1024 });
+        const parsed = parseJson(requestSchema, body, { maxBytes: requestLimit });
         forwarded.push(parsed);
         const script = [
           'const http = require("node:http");',
@@ -1891,11 +1892,16 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
       expect(model.requests[0]?.request.tools?.map(({ toolId }) => toolId)).toEqual(
         expect.arrayContaining(["fs.read", "fs.write", "fs.edit", "fs.list", "fs.search"]),
       );
-      expect(decide).toHaveBeenCalledOnce();
-      expect(forwarded).toMatchObject([{ request: { url: `http://${probeHost}:8080/runtime` } }]);
-      expect(responses).toMatchObject([{ status: 200 }]);
+      expect(decide).toHaveBeenCalledTimes(3);
+      expect(forwarded).toMatchObject(expect.arrayContaining([
+        { request: { url: `http://${probeHost}:8080/runtime` } },
+        { request: { operation: "write" } },
+        { request: { operation: "read" } },
+      ]));
+      expect(responses).toHaveLength(3);
+      expect(responses.every(({ status }) => status === 200)).toBe(true);
       expect(WebFetchResultSchema.parse(toolResult.result)).toMatchObject({
-        text: "Contact <EMAIL_1>",
+        text: "Contact <EMAIL_2>",
         untrusted: true,
       });
       expect(FsToolResultSchema.parse(fileRead.result)).toMatchObject({

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import { createServer as createNetServer } from "node:net";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +24,7 @@ import type { RunnerServerOptions } from "./server.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
 import { fetchWebContent } from "./web-fetch.js";
 import type { ProxyRequest, ProxyResponse, WebFetchTransport } from "./web-fetch-transport.js";
+import { ensureRunWorkspace } from "../../src/workspace.js";
 
 const token = "synthetic-runner-token-that-is-at-least-32-bytes";
 const runId = Id.parse("00000000000000000000000001");
@@ -428,6 +430,61 @@ describe("runner HTTP request handler", () => {
     expect(oversized.status).toBe(413);
   });
 
+  it("rejects a mismatch between the /fs route and its body operation", async () => {
+    const handler = createRunnerRequestHandler(makeOptions());
+    const response = await call(
+      handler,
+      makeRequest({
+        url: "/fs/read",
+        authorization: "Bearer " + token,
+        body: JSON.stringify({
+          runId,
+          request: {
+            operation: "write",
+            input: { path: "mismatch.txt", content: "synthetic", mode: "create" },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(responseBody(response)).toMatchObject({ code: "sandbox_request_invalid" });
+  });
+
+  it("serializes concurrent preconditioned file edits through the runner handler", async () => {
+    const runIdForFile = Id.parse("00000000000000000000000022");
+    const project = await ensureRunWorkspace(workspaceRoot, runIdForFile);
+    const path = join(project, "concurrent.txt");
+    const original = "before";
+    await writeFile(path, original);
+    const expectedSha256 = createHash("sha256").update(original).digest("hex");
+    const handler = createRunnerRequestHandler(makeOptions());
+    const request = () =>
+      call(
+        handler,
+        makeRequest({
+          url: "/fs/edit",
+          authorization: "Bearer " + token,
+          body: JSON.stringify({
+            runId: runIdForFile,
+            request: {
+              operation: "edit",
+              input: {
+                path: "concurrent.txt",
+                edits: [{ oldText: original, newText: "after" }],
+                expectedSha256,
+              },
+            },
+          }),
+        }),
+      );
+
+    const responses = await Promise.all([request(), request()]);
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect(responses.filter((response) => response.status === 409)).toHaveLength(1);
+    expect(await readFile(path, "utf8")).toBe("after");
+  });
+
   it("executes an authenticated request and returns a schema-validated result", async () => {
     const execute = vi.fn(() => Promise.resolve(result));
     const handler = createRunnerRequestHandler(makeOptions({ execute }));
@@ -490,7 +547,7 @@ describe("runner HTTP request handler", () => {
     });
   });
 
-  it("rejects overlapping executions with a busy response", async () => {
+  it("rejects a file operation while an execution is busy", async () => {
     let releaseExecution: (value: ExecResult) => void = () => undefined;
     let markStarted: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
@@ -514,7 +571,14 @@ describe("runner HTTP request handler", () => {
     await started;
     const second = await call(
       handler,
-      makeRequest({ authorization: "Bearer " + token, body: makePayload() }),
+      makeRequest({
+        url: "/fs/read",
+        authorization: "Bearer " + token,
+        body: JSON.stringify({
+          runId,
+          request: { operation: "read", input: { path: "busy.txt" } },
+        }),
+      }),
     );
     releaseExecution(result);
     await first;

@@ -17,6 +17,7 @@ import {
 import { InMemoryEventStore } from "@harness/store";
 import { InProcessBackend, RemoteSandboxBackend, type SandboxBackend } from "@harness/sandbox";
 import { SqliteVault } from "@harness/vault";
+import { compilePolicy, PolicyDocumentSchema } from "@harness/policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
 import { withSandboxLease } from "./runtime-lifecycle.js";
@@ -88,6 +89,19 @@ function webFetchModel(url: string): FakeModelPort {
   ]);
 }
 
+function fileToolModel(toolId: string, args: JsonValue): FakeModelPort {
+  return new FakeModelPort([
+    completion([
+      {
+        type: "tool_call",
+        callId: Id.parse("11111111111111111111111113"),
+        toolId: Code.parse(toolId),
+        args,
+      },
+    ]),
+  ]);
+}
+
 function remoteSandbox(allow: readonly { readonly host: string; readonly ports: number[] }[]) {
   return SandboxConfigSchema.parse({
     runner: { url: "http://sandbox-runner:8080", token: "env:RUNNER" },
@@ -133,6 +147,71 @@ afterEach(() => {
 });
 
 describe("createRuntime sandbox composition", () => {
+  it("enforces a sensitive-path ask through the decorated runtime", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-policy-"));
+    const modelPort = fileToolModel(
+      "fs.write",
+      JsonValue.parse({ path: "secrets/.ENV", content: "synthetic", mode: "create" }),
+    );
+    const compiled = compilePolicy(PolicyDocumentSchema.parse({
+      version: 1,
+      defaultDecision: "deny",
+      rules: [{
+        id: "ask_sensitive_env",
+        match: {
+          tools: ["fs.write"],
+          args: [{ pointer: "/path", op: "matches", value: "[^/]{0,255}\\.[eE][nN][vV]$" }],
+        },
+        decision: "ask",
+        reason: "sensitive_file",
+      }],
+    }));
+    const runtime = await createRuntime(
+      { run, pii: PiiConfigSchema.parse({ defaultAction: "tokenize" }) },
+      {
+        ...overrides(),
+        dataDir,
+        model: modelPort,
+        policy: {
+          version: Code.parse("sensitive_path_test"),
+          decide: ({ toolId, args }) =>
+            compiled.evaluate({ toolId, args, context: { subagent: false } }),
+        },
+      },
+    );
+    try {
+      const result = await runtime.run("write the environment file");
+      expect(result.events.some((event) => event.type === "approval_requested")).toBe(true);
+      expect(result.events.some((event) => event.type === "tool_result")).toBe(false);
+    } finally {
+      await runtime.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a filesystem error code through the decorated runtime", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-fs-error-"));
+    const modelPort = fileToolModel(
+      "fs.read",
+      JsonValue.parse({ path: ".harness/offload/private.txt" }),
+    );
+    const runtime = await createRuntime(
+      { run, pii: PiiConfigSchema.parse({ defaultAction: "tokenize" }) },
+      { ...overrides(), dataDir, model: modelPort, policy: allowAllPolicy },
+    );
+    try {
+      const result = await runtime.run("read the private file");
+      expect(result.events.find((event) => event.type === "tool_result")).toMatchObject({
+        toolId: "fs.read",
+        outcome: "error",
+        errorCode: "fs_path_invalid",
+      });
+    } finally {
+      await runtime.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it("preserves the operation outcome when lease cleanup fails", async () => {
     const backend: SandboxBackend = {
       exec: vi.fn(),

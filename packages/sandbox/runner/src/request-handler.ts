@@ -2,8 +2,10 @@
 import type { IncomingMessage } from "node:http";
 import { Id, parseJson } from "@harness/schemas";
 import { z } from "zod";
+import process from "node:process";
 import { ExecResultSchema, ExecSpecSchema } from "../../src/types.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
+import { MAX_FS_REQUEST_TRANSPORT_BYTES } from "../../src/fs-tools.js";
 import {
   FsOperationRequestSchema,
   FsOperationSchema,
@@ -13,6 +15,7 @@ import { WorkspaceFileSystem } from "../../src/workspace-files.js";
 import { WorkspaceFileError } from "../../src/workspace-file-helpers.js";
 import { WebFetchRequestSchema } from "../../src/web-fetch-contracts.js";
 import { executeRunnerFetch, WebFetchError } from "./web-fetch.js";
+import { SANDBOX_EXEC_GID, SANDBOX_EXEC_UID } from "./exec.js";
 import type { RunnerServerOptions } from "./server.js";
 
 /** Maximum UTF-8 request body accepted by runner endpoints. */
@@ -78,19 +81,23 @@ interface ExecuteRunnerPayloadOptions {
   readonly response: RunnerResponse;
   readonly signal: AbortSignal;
   readonly executeSpec: ExecuteSpec;
+  readonly workspaceFiles: WorkspaceFileSystem;
+  readonly executionUid: number | undefined;
+  readonly executionGid: number | undefined;
   readonly sendJson: SendJson;
   readonly sendError: SendError;
 }
 
 async function readRequestBody(
   request: RunnerRequest,
+  maxBytes: number,
 ): Promise<{ readonly body: string } | { readonly status: 400 | 413 }> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of request) {
     const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += data.byteLength;
-    if (bytes > MAX_RUNNER_REQUEST_BYTES) {
+    if (bytes > maxBytes) {
       request.resume();
       return { status: 413 };
     }
@@ -125,7 +132,7 @@ function parseFilePayload(
 ): RunnerPayload | undefined {
   const operation = FsOperationSchema.parse(path.slice("/fs/".length));
   const parsed = parseJson(RunnerFsRequestSchema, body, {
-    maxBytes: MAX_RUNNER_REQUEST_BYTES,
+    maxBytes: MAX_FS_REQUEST_TRANSPORT_BYTES,
   });
   if (parsed.request.operation !== operation) {
     sendError(response, 400, "sandbox_request_invalid");
@@ -149,7 +156,12 @@ export async function readRunnerPayload(
     sendError(response, 401, "sandbox_unauthorized");
     return undefined;
   }
-  const body = await readRequestBody(request);
+  const body = await readRequestBody(
+    request,
+    request.url?.startsWith("/fs/") === true
+      ? MAX_FS_REQUEST_TRANSPORT_BYTES
+      : MAX_RUNNER_REQUEST_BYTES,
+  );
   if ("status" in body) {
     sendError(
       response,
@@ -213,7 +225,7 @@ function fileOperationFailure(error: unknown): { readonly status: number; readon
   if (error.code === "fs_file_exists" || error.code === "precondition_failed") {
     return { status: 409, code: error.code };
   }
-  if (error.code === "fs_quota_exceeded") {
+  if (error.code === "workspace_quota_exceeded") {
     return { status: 413, code: error.code };
   }
   if (error.code === "edit_no_match" || error.code === "edit_ambiguous") {
@@ -223,6 +235,34 @@ function fileOperationFailure(error: unknown): { readonly status: number; readon
     return { status: 400, code: error.code };
   }
   return { status: 500, code: "fs_operation_failed" };
+}
+
+async function withExecutionIdentity<T>(
+  uid: number | undefined,
+  gid: number | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const originalUid = process.geteuid?.();
+  const originalGid = process.getegid?.();
+  if (originalUid === undefined || originalGid === undefined) {
+    return operation();
+  }
+  try {
+    if (gid !== undefined && gid !== originalGid) {
+      process.setegid(gid);
+    }
+    if (uid !== undefined && uid !== originalUid) {
+      process.seteuid(uid);
+    }
+    return await operation();
+  } finally {
+    if (uid !== undefined && originalUid !== uid) {
+      process.seteuid(originalUid);
+    }
+    if (gid !== undefined && originalGid !== gid) {
+      process.setegid(originalGid);
+    }
+  }
 }
 
 function executionFailure(
@@ -247,11 +287,17 @@ export async function executeRunnerPayload(input: ExecuteRunnerPayloadOptions): 
       return;
     }
     if (payload.kind === "fs") {
-      const files = new WorkspaceFileSystem(options.workspaceRoot);
       sendJson(
         response,
         200,
-        await files.execute(payload.runId, payload.request.operation, payload.request.input, signal),
+        await withExecutionIdentity(input.executionUid, input.executionGid, () =>
+          input.workspaceFiles.execute(
+            payload.runId,
+            payload.request.operation,
+            payload.request.input,
+            signal,
+          ),
+        ),
       );
       return;
     }

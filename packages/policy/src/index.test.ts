@@ -239,6 +239,18 @@ describe("loadPolicy and policyVersion", () => {
       args: { path: "secrets/.env.local" },
       context: { subagent: false },
     }).decision).toBe("ask");
+    for (const path of ["secrets/.ENV", "certificates/id.PEM"]) {
+      expect(evaluate({
+        toolId: "fs.write",
+        args: { path },
+        context: { subagent: false },
+      }).decision).toBe("ask");
+    }
+    expect(evaluate({
+      toolId: "fs.write",
+      args: { path: "src/.environment" },
+      context: { subagent: false },
+    }).decision).toBe("allow");
   });
 
   it("loads YAML and JSON policy files from disk", async () => {

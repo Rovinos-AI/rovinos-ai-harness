@@ -7,6 +7,8 @@ import { z } from "zod";
 export const MAX_FS_READ_BYTES = 256 * 1024;
 /** Maximum text content accepted by `fs.write`. */
 export const MAX_FS_WRITE_BYTES = 1024 * 1024;
+export const MAX_FS_REQUEST_TEXT_BYTES = 4 * 1024 * 1024;
+export const MAX_FS_REQUEST_TRANSPORT_BYTES = 32 * 1024 * 1024;
 /** Maximum timeout advertised for one workspace file operation. */
 export const MAX_FS_TOOL_TIMEOUT_MS = 30_000;
 
@@ -50,7 +52,19 @@ export const FsEditInputSchema = z
       .max(20),
     expectedSha256: Sha256Hex.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    const textBytes = input.edits.reduce(
+      (total, edit) =>
+        total +
+        new TextEncoder().encode(edit.oldText).byteLength +
+        new TextEncoder().encode(edit.newText).byteLength,
+      0,
+    );
+    if (textBytes > MAX_FS_REQUEST_TEXT_BYTES) {
+      context.addIssue({ code: "custom", message: "fs_invalid_input" });
+    }
+  });
 
 /** Input contract for the `fs.list` tool. */
 export const FsListInputSchema = z
@@ -106,7 +120,7 @@ export const FsOperationErrorCodeSchema = z.enum([
   "fs_not_file",
   "fs_operation_failed",
   "fs_path_invalid",
-  "fs_quota_exceeded",
+  "workspace_quota_exceeded",
   "precondition_failed",
 ]);
 /** Inferred workspace file error code. */
@@ -256,7 +270,7 @@ const FS_ERROR_CODES = new Set([
   "fs_not_file",
   "fs_operation_failed",
   "fs_path_invalid",
-  "fs_quota_exceeded",
+  "workspace_quota_exceeded",
   "precondition_failed",
 ]);
 

@@ -51,7 +51,19 @@ rules:
       args:
         - pointer: /path
           op: matches
-          value: '\.env'
+          value: '[^/]{0,255}\.[eE][nN][vV]$'
+    decision: ask
+    reason: sensitive_workspace_file
+  - id: ask_sensitive_env_variants
+    description: Ask before changing environment file variants
+    match:
+      tools:
+        - fs.write
+        - fs.edit
+      args:
+        - pointer: /path
+          op: matches
+          value: '\.[eE][nN][vV]\.[^/]{1,255}$'
     decision: ask
     reason: sensitive_workspace_file
   - id: ask_sensitive_key_files
@@ -63,7 +75,7 @@ rules:
       args:
         - pointer: /path
           op: matches
-          value: '\.key$'
+          value: '[^/]{0,255}\.[kK][eE][yY]$'
     decision: ask
     reason: sensitive_workspace_file
   - id: ask_sensitive_pem_files
@@ -75,6 +87,6 @@ rules:
       args:
         - pointer: /path
           op: matches
-          value: '\.pem$'
+          value: '[^/]{0,255}\.[pP][eE][mM]$'
     decision: ask
     reason: sensitive_workspace_file
