@@ -156,6 +156,18 @@ export class InMemoryEventStore implements EventStore {
     return latest === undefined ? undefined : decodeSnapshot(this.codec, latest);
   }
 
+  /** {@inheritDoc EventStore.retainedSnapshots} */
+  async retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new TypeError("Snapshot limit must be a positive integer");
+    }
+    return Promise.all(
+      (this.snapshots.get(runId) ?? [])
+        .slice(0, limit)
+        .map((snapshot) => decodeSnapshot(this.codec, snapshot)),
+    );
+  }
+
   /** {@inheritDoc EventStore.read} */
   read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<StoredEvent> {
     const stored = this.runs.get(runId) ?? [];

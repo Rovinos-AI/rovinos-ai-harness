@@ -13,6 +13,13 @@ describe("SandboxConfigSchema", () => {
     });
   });
 
+  it("accepts explicit workspace snapshot settings", () => {
+    expect(SandboxConfigSchema.parse({ restoreOnResume: true, snapshotEncryption: true })).toEqual({
+      restoreOnResume: true,
+      snapshotEncryption: true,
+    });
+  });
+
   it("accepts a remote runner URL with a secret reference", () => {
     expect(
       SandboxConfigSchema.parse({

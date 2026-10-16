@@ -4,6 +4,10 @@
   "files": ["**/*.md", "packages/*/src/**/*"],
   "ignorePaths": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "**/*.generated.*"],
   "words": [
+    "WSENC",
+    "checkpointed",
+    "hardlink",
+    "ustar",
     "decryptable",
     "hashtextextended",
     "ILIKE",

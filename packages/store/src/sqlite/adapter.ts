@@ -92,6 +92,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   >;
   private readonly pruneSnapshots: Database.Statement<[Id, Id, number]>;
   private readonly latestSnapshotQuery: Database.Statement<[Id], SnapshotRow>;
+  private readonly retainedSnapshotsQuery: Database.Statement<[Id, number], SnapshotRow>;
   private readonly snapshotKeep: number;
   private readonly pollIntervalMs: number;
   private readonly changeEmitter = new ChangeEmitter();
@@ -175,6 +176,9 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     );
     this.latestSnapshotQuery = this.db.prepare<[Id], SnapshotRow>(
       "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT 1",
+    );
+    this.retainedSnapshotsQuery = this.db.prepare<[Id, number], SnapshotRow>(
+      "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT ?",
     );
   }
 
@@ -371,6 +375,20 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     try {
       const row = this.latestSnapshotQuery.get(runId);
       return row === undefined ? undefined : await decodeSnapshot(this.codec, row);
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
+  /** {@inheritDoc EventStore.retainedSnapshots} */
+  async retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new TypeError("Snapshot limit must be a positive integer");
+    }
+    try {
+      return await Promise.all(
+        this.retainedSnapshotsQuery.all(runId, limit).map((row) => decodeSnapshot(this.codec, row)),
+      );
     } catch (error) {
       throw storeError(error);
     }
