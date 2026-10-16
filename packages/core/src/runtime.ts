@@ -267,6 +267,7 @@ function createRuntimeToolPort(
     parentTool: options.tool,
     policy: options.policy,
     policyVersion: options.policyVersion,
+    workspaceSnapshotter: options.workspaceSnapshotter,
     roles: options.roles,
     scopes: options.scopes,
   });
@@ -383,6 +384,10 @@ function createRuntimeResume(
             budgets: config.run.budgets,
             checkpointEveryEvents: config.run.checkpointEveryEvents,
             resumePolicy: config.run.resume.onNonIdempotent,
+            ...(config.sandbox?.restoreOnResume === undefined
+              ? {}
+              : { restoreOnResume: config.sandbox.restoreOnResume }),
+            workspaceSnapshotter: options.workspaceSnapshotter,
             ...(resumeOptions.onClaimed === undefined
               ? {}
               : { onClaimed: resumeOptions.onClaimed }),

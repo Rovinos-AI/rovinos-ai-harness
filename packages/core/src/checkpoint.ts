@@ -12,6 +12,7 @@ import type { Clock, RunRecorder } from "./recorder.js";
 import type { ContextPort, IdGenerator } from "./ports.js";
 import type { RunState } from "./run-state.js";
 import { CHECKPOINT_SPAN } from "./spans.js";
+import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 
 /** Dependencies for writing durable checkpoints. */
 export interface CheckpointerOptions {
@@ -21,6 +22,7 @@ export interface CheckpointerOptions {
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly checkpointEveryEvents?: number;
+  readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
 }
 
 /** Error raised when a checkpoint is attempted without a valid active span. */
@@ -68,25 +70,43 @@ export class Checkpointer {
         }
 
         const traceparent = Traceparent.parse(`00-${spanContext.traceId}-${spanContext.spanId}-01`);
-        const contextSnapshot = await this.options.context.snapshot();
-        const snapshot: Omit<Snapshot, "atSeq"> = {
-          snapshotId,
-          runId: this.options.runId,
-          createdAt: this.options.clock.now(),
-          traceparent,
-          context: contextSnapshot,
-          plan: state.plan ?? null,
-        };
-        return this.options.recorder.recordWithSnapshot(
-          {
-            type: "checkpoint_written",
-            v: 1,
-            checkpointId: snapshotId,
-            atSeq: this.options.recorder.nextSeq,
+        const workspaceRef = await this.options.workspaceSnapshotter?.snapshot(this.options.runId);
+        try {
+          const contextSnapshot = await this.options.context.snapshot();
+          const snapshot: Omit<Snapshot, "atSeq"> = {
+            snapshotId,
+            runId: this.options.runId,
+            createdAt: this.options.clock.now(),
             traceparent,
-          },
-          snapshot,
-        );
+            context: contextSnapshot,
+            plan: state.plan ?? null,
+            ...(workspaceRef === undefined ? {} : { workspaceRef }),
+          };
+          const event = await this.options.recorder.recordWithSnapshot(
+            {
+              type: "checkpoint_written",
+              v: 1,
+              checkpointId: snapshotId,
+              atSeq: this.options.recorder.nextSeq,
+              traceparent,
+              ...(workspaceRef === undefined ? {} : { workspaceRef }),
+            },
+            snapshot,
+          );
+          if (workspaceRef !== undefined) {
+            await this.options.workspaceSnapshotter
+              ?.prune(this.options.runId)
+              .catch(() => undefined);
+          }
+          return event;
+        } catch (error) {
+          if (workspaceRef !== undefined) {
+            await this.options.workspaceSnapshotter
+              ?.deleteSnapshot(this.options.runId, workspaceRef)
+              .catch(() => undefined);
+          }
+          throw error;
+        }
       },
     );
   }

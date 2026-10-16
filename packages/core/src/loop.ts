@@ -31,6 +31,7 @@ import type {
   RunContinuationMetadata,
   ToolPort,
 } from "./ports.js";
+import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
 
 /** Dependencies and initial input for a new run. */
@@ -51,6 +52,7 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   /** Optional inherited budget failure to record before executing this run. */
   readonly initialBudgetViolation?: BudgetViolation;
   readonly checkpointEveryEvents?: RunConfig["checkpointEveryEvents"];
+  readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
@@ -174,6 +176,9 @@ export async function continueRunLoop(
     ...(options.checkpointEveryEvents === undefined
       ? {}
       : { checkpointEveryEvents: options.checkpointEveryEvents }),
+    ...(options.workspaceSnapshotter === undefined
+      ? {}
+      : { workspaceSnapshotter: options.workspaceSnapshotter }),
   });
   const execution = { runId, checkpointer, budgetTracker };
   const isTerminal = () => isTerminalRunState(foldRunState(events));

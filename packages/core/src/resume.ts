@@ -2,6 +2,7 @@
 import { HarnessError, type Event, type Id, type Snapshot } from "@harness/schemas";
 import type { Link } from "@opentelemetry/api";
 import type { EventStore } from "@harness/store";
+import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 import { activeRuns } from "@harness/telemetry";
 import { applyResolvedApprovals } from "./approvals.js";
 import { BudgetTracker } from "./budgets.js";
@@ -66,6 +67,9 @@ export interface ResumeRunOptions extends Omit<RunLoopExecutionOptions, "recorde
   readonly scopes?: RunScopeRegistry;
   /** Policy for dangling non-idempotent tool intents; defaults to escalation. */
   readonly resumePolicy?: ResumePolicy;
+  /** Restores the latest workspace archive even when the workspace still exists. */
+  readonly restoreOnResume?: boolean;
+  readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   /** Called immediately after this worker wins the durable resume claim. */
   readonly onClaimed?: () => void;
 }
@@ -266,6 +270,7 @@ function claimEvents(state: RunState): EventPartial[] {
 
 async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
   const { options, recorder, events, snapshot, eventsAfterSnapshot, checkpointer } = execution;
+  await restoreWorkspace(execution);
   await options.context.restore(snapshot?.context, eventsAfterSnapshot);
 
   const budgetTracker = new BudgetTracker(options.budgets);
@@ -346,6 +351,17 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
   return continueRunLoop({ ...options, recorder }, events, options.runId);
 }
 
+async function restoreWorkspace(execution: ResumeExecution): Promise<void> {
+  const { options, snapshot } = execution;
+  if (snapshot?.workspaceRef === undefined || options.workspaceSnapshotter === undefined) {
+    return;
+  }
+  const workspaceExists = await options.workspaceSnapshotter.hasWorkspace(options.runId);
+  if (options.restoreOnResume === true || !workspaceExists) {
+    await options.workspaceSnapshotter.restore(options.runId, snapshot.workspaceRef);
+  }
+}
+
 class ResumeBudgetExceededError extends Error {}
 
 async function claimAndContinue(execution: ResumeExecution): Promise<Event> {
@@ -383,6 +399,9 @@ export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResul
     ...(options.checkpointEveryEvents === undefined
       ? {}
       : { checkpointEveryEvents: options.checkpointEveryEvents }),
+    ...(options.workspaceSnapshotter === undefined
+      ? {}
+      : { workspaceSnapshotter: options.workspaceSnapshotter }),
   });
   const eventsAfterSnapshot =
     snapshot === undefined ? events.slice() : events.filter((event) => event.seq > snapshot.atSeq);

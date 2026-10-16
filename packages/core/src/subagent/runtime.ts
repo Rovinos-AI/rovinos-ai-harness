@@ -2,6 +2,7 @@
 import { createStrategyRegistry, HeuristicTokenCounter } from "@harness/context";
 import { Code, type Message } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
+import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 import { parseRuntimeModelsConfig, type RuntimeConfig } from "../runtime-config.js";
 import { RunRecorder, type Clock } from "../recorder.js";
 import { configHash } from "../runtime-ids.js";
@@ -94,6 +95,7 @@ export function createSubagentTool(options: {
   readonly parentTool: ToolPort;
   readonly policy: PolicyPort;
   readonly policyVersion: PolicyPort["version"];
+  readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   readonly roles: RoleRegistry;
   readonly scopes: RunScopeRegistry;
 }): ToolPort {
@@ -121,6 +123,9 @@ export function createSubagentTool(options: {
         signal: request.signal,
         budgets: options.config.run.budgets,
         checkpointEveryEvents: options.config.run.checkpointEveryEvents,
+        ...(options.workspaceSnapshotter === undefined
+          ? {}
+          : { workspaceSnapshotter: options.workspaceSnapshotter }),
         configHash: configHash(options.config),
         policyVersion: options.policyVersion,
         role: request.role.route ?? request.role.id,

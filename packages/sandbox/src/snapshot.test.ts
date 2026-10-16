@@ -9,16 +9,18 @@ import {
   readdir,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Id, type KeyProvider, type WorkspaceRef } from "@harness/schemas";
+import { Id, WorkspaceRef, type KeyProvider } from "@harness/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   SnapshotTooLargeError,
   WorkspaceSnapshotError,
   WorkspaceSnapshotter,
+  purgeWorkspaceSnapshots,
 } from "./snapshot.js";
 
 const runId = Id.parse("00000000000000000000000001");
@@ -114,6 +116,14 @@ async function writeArchive(
   return `ws:${snapshotId}:${digest}`;
 }
 
+function snapshotIdFrom(ref: WorkspaceRef): string {
+  const snapshot = ref.split(":")[1];
+  if (snapshot === undefined) {
+    throw new Error("The snapshot reference has no ID.");
+  }
+  return snapshot;
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -129,6 +139,10 @@ describe("WorkspaceSnapshotter", () => {
     await chmod(join(runRoot, "project", "file.txt"), 0o4750);
     const snapshotterInstance = snapshotter(paths);
     const ref = await snapshotterInstance.snapshot(runId);
+    expect((await stat(paths.snapshotRoot)).mode & 0o777).toBe(0o700);
+    expect((await stat(join(paths.snapshotRoot, runId, `${snapshotId}.tar.gz`))).mode & 0o777).toBe(
+      0o600,
+    );
     await writeFile(join(runRoot, "project", "file.txt"), "changed");
     await snapshotterInstance.restore(runId, ref);
 
@@ -154,6 +168,83 @@ describe("WorkspaceSnapshotter", () => {
     await expect(readFile(join(runRoot, "large"))).resolves.toEqual(Buffer.alloc(512, 1));
   });
 
+  it("rejects missing and oversized snapshot files before extraction", async () => {
+    const paths = await createRoots();
+    const ref = WorkspaceRef.parse(`ws:${snapshotId}:0000000000000000`);
+    await expect(snapshotter(paths).restore(runId, ref)).rejects.toBeInstanceOf(
+      WorkspaceSnapshotError,
+    );
+
+    const oversized = await writeArchive(paths, Buffer.alloc(64, 1));
+    await expect(
+      snapshotter(paths, { maxSnapshotBytes: 16 }).restore(runId, oversized),
+    ).rejects.toBeInstanceOf(SnapshotTooLargeError);
+  });
+
+  it("preserves a pre-existing restore temporary directory on an ID collision", async () => {
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot);
+    await writeFile(join(runRoot, "keep"), "original");
+    const instance = snapshotter(paths);
+    const ref = await instance.snapshot(runId);
+    const collisionRoot = join(paths.workspaceRoot, `.${runId}.restore-00000000000000000000000003`);
+    await mkdir(collisionRoot);
+    await writeFile(join(collisionRoot, "keep"), "do not remove");
+
+    await expect(instance.restore(runId, ref)).rejects.toBeInstanceOf(WorkspaceSnapshotError);
+    await expect(readFile(join(collisionRoot, "keep"), "utf8")).resolves.toBe("do not remove");
+    await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
+  });
+
+  it("recovers an interrupted directory swap before restoring", async () => {
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    const oldRoot = join(paths.workspaceRoot, `${runId}.old`);
+    await mkdir(runRoot);
+    await writeFile(join(runRoot, "keep"), "checkpointed");
+    const instance = snapshotter(paths);
+    const ref = await instance.snapshot(runId);
+    await rm(runRoot, { recursive: true });
+    await mkdir(oldRoot);
+    await writeFile(join(oldRoot, "interrupted"), "old workspace");
+
+    await instance.restore(runId, ref);
+
+    await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("checkpointed");
+    await expect(readFile(join(runRoot, "interrupted"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("refuses to restore over or report a symlink workspace", async () => {
+    const paths = await createRoots();
+    const outside = join(paths.workspaceRoot, "outside");
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(outside);
+    await symlink(outside, runRoot, "dir");
+    const ref = await writeArchive(paths, maliciousArchive("file", "0", Buffer.from("new")));
+
+    await expect(snapshotter(paths).restore(runId, ref)).rejects.toBeInstanceOf(
+      WorkspaceSnapshotError,
+    );
+    await expect(snapshotter(paths).hasWorkspace(runId)).rejects.toBeInstanceOf(
+      WorkspaceSnapshotError,
+    );
+    await expect(readdir(outside)).resolves.toEqual([]);
+  });
+
+  it("removes a temporary archive if the atomic snapshot rename fails", async () => {
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true });
+    await writeFile(join(runRoot, "file"), "value");
+    await mkdir(join(paths.snapshotRoot, runId, `${snapshotId}.tar.gz`), { recursive: true });
+
+    await expect(snapshotter(paths).snapshot(runId)).rejects.toBeInstanceOf(WorkspaceSnapshotError);
+    await expect(readdir(join(paths.snapshotRoot, runId))).resolves.toEqual([
+      `${snapshotId}.tar.gz`,
+    ]);
+  });
+
   it("rejects a tampered archive before changing the workspace", async () => {
     const paths = await createRoots();
     const runRoot = join(paths.workspaceRoot, runId);
@@ -162,34 +253,51 @@ describe("WorkspaceSnapshotter", () => {
     const ref = await writeArchive(paths, maliciousArchive("new", "0", Buffer.from("archive")));
     await writeFile(join(paths.snapshotRoot, runId, `${snapshotId}.tar.gz`), "tampered");
 
-    await expect(snapshotter(paths).restore(runId, ref)).rejects.toBeInstanceOf(WorkspaceSnapshotError);
+    await expect(snapshotter(paths).restore(runId, ref)).rejects.toBeInstanceOf(
+      WorkspaceSnapshotError,
+    );
     await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
+    const instance = snapshotter(paths);
+    await instance.deleteSnapshot(runId, ref);
+    await instance.deleteSnapshot(runId, ref);
+  });
+
+  it("rejects workspace references that do not contain a snapshot id and digest", async () => {
+    const paths = await createRoots();
+    const ref = WorkspaceRef.parse("ws:invalid:0000000000000000");
+
+    await expect(snapshotter(paths).restore(runId, ref)).rejects.toBeInstanceOf(
+      WorkspaceSnapshotError,
+    );
   });
 
   it.each([
     ["traversal", "../escaped", "0", Buffer.from("bad")],
-    ["absolute path", "/escaped", "0", Buffer.from("bad")],
+    ["absolute path", "__absolute__", "0", Buffer.from("bad")],
     ["symlink escape", "link", "2", Buffer.alloc(0), "../escaped"],
     ["hardlink escape", "link", "1", Buffer.alloc(0), "../escaped"],
     ["device node", "device", "3"],
     ["FIFO", "pipe", "6"],
-  ])("rejects %s archives without changing the existing workspace", async (_name, path, type, data, link) => {
-    // threat: T-17
-    const paths = await createRoots();
-    const runRoot = join(paths.workspaceRoot, runId);
-    await mkdir(runRoot, { recursive: true });
-    await writeFile(join(runRoot, "keep"), "original");
-    const ref = await writeArchive(
-      paths,
-      maliciousArchive(path, type, data, link),
-    );
+  ])(
+    "rejects %s archives without changing the existing workspace",
+    async (_name, path, type, data?: Buffer, link?: string) => {
+      // threat: T-17
+      const paths = await createRoots();
+      const runRoot = join(paths.workspaceRoot, runId);
+      await mkdir(runRoot, { recursive: true });
+      await writeFile(join(runRoot, "keep"), "original");
+      const outsideAbsolutePath = join(paths.workspaceRoot, "..", "absolute-escaped");
+      const archivePath = path === "__absolute__" ? outsideAbsolutePath : path;
+      const ref = await writeArchive(paths, maliciousArchive(archivePath, type, data, link));
 
-    await expect(snapshotter(paths).restore(runId, ref)).rejects.toBeInstanceOf(Error);
-    await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
-    await expect(readFile(join(paths.workspaceRoot, "escaped"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  });
+      await expect(snapshotter(paths).restore(runId, ref)).rejects.toBeInstanceOf(Error);
+      await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
+      await expect(readFile(join(paths.workspaceRoot, "escaped"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(readFile(outsideAbsolutePath)).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
 
   it("keeps the original workspace if extraction fails after accepting an earlier file", async () => {
     // threat: T-17
@@ -234,11 +342,35 @@ describe("WorkspaceSnapshotter", () => {
       false,
     );
     await rm(runRoot, { recursive: true });
+    await expect(snapshotterInstance.hasWorkspace(runId)).resolves.toBe(false);
     await snapshotterInstance.restore(runId, ref);
     await expect(readFile(join(runRoot, "secret.txt"), "utf8")).resolves.toBe(
       "synthetic workspace content",
     );
     expect(key).toEqual(Buffer.alloc(32, 7));
+  });
+
+  it("counts encryption overhead against the stored snapshot limit", async () => {
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot);
+    await writeFile(join(runRoot, "file"), "synthetic workspace content");
+    const plainRef = await snapshotter(paths).snapshot(runId);
+    const plainId = snapshotIdFrom(plainRef);
+    const plainSize = (await stat(join(paths.snapshotRoot, runId, `${plainId}.tar.gz`))).size;
+    const keyProvider: KeyProvider = {
+      currentKeyId: () => "test_key",
+      getKey: () => Promise.resolve(Buffer.alloc(32, 7)),
+    };
+    const encrypted = snapshotter(paths, {
+      ids: ids("00000000000000000000000004"),
+      maxSnapshotBytes: plainSize + 10,
+      snapshotEncryption: true,
+      keyProvider,
+    });
+
+    await expect(encrypted.snapshot(runId)).rejects.toBeInstanceOf(SnapshotTooLargeError);
+    await expect(readdir(join(paths.snapshotRoot, runId))).resolves.toEqual([`${plainId}.tar.gz`]);
   });
 
   it("prunes old archives and deletes all archives when a run is purged", async () => {
@@ -249,25 +381,32 @@ describe("WorkspaceSnapshotter", () => {
     const first = snapshotId;
     const second = Id.parse("00000000000000000000000003");
     const instance = snapshotter(paths, {
-      ids: ids(first, second),
+      ids: ids(first, second, "00000000000000000000000004"),
       snapshotKeep: 1,
     });
+    const orphaned = await instance.snapshot(runId);
     await instance.snapshot(runId);
-    await instance.snapshot(runId);
+    await instance.deleteSnapshot(runId, orphaned);
+    const retainedRef = await instance.snapshot(runId);
+    await writeFile(join(paths.snapshotRoot, runId, "temporary.archive"), "ignore");
     await instance.prune(runId);
 
     const directory = join(paths.snapshotRoot, runId);
-    await expect(readdir(directory)).resolves.toEqual([`${second}.tar.gz`]);
+    const retainedId = snapshotIdFrom(retainedRef);
+    await expect(readdir(directory)).resolves.toEqual(
+      expect.arrayContaining([`${retainedId}.tar.gz`, "temporary.archive"]),
+    );
     await instance.purgeRun(runId);
     await expect(readdir(directory)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(instance.hasWorkspace(runId)).resolves.toBe(true);
+    await expect(
+      purgeWorkspaceSnapshots(join(paths.snapshotRoot, "missing"), runId),
+    ).resolves.toBeUndefined();
   });
 
   it("rejects invalid configuration and missing encryption keys", async () => {
     const paths = await createRoots();
     expect(() => snapshotter(paths, { maxSnapshotBytes: 0 })).toThrow(RangeError);
-    expect(() => snapshotter(paths, { snapshotEncryption: true })).toThrow(
-      WorkspaceSnapshotError,
-    );
+    expect(() => snapshotter(paths, { snapshotEncryption: true })).toThrow(WorkspaceSnapshotError);
   });
 });

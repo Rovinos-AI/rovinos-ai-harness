@@ -11,47 +11,25 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { join, posix, win32 } from "node:path";
-import { Readable, Writable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import { aesGcmDecrypt, aesGcmEncrypt } from "@harness/crypto";
-import { Code, HarnessError, Id, WorkspaceRef } from "@harness/schemas";
+import { join } from "node:path";
+import { HarnessError, Id, WorkspaceRef } from "@harness/schemas";
 import type { KeyProvider } from "@harness/schemas";
-import * as tar from "tar";
 import { ensureRunWorkspace } from "./workspace.js";
+import {
+  createWorkspaceArchive,
+  decryptWorkspaceArchive,
+  encryptWorkspaceArchive,
+  SnapshotTooLargeError,
+  UnsafeWorkspaceSnapshotError,
+  WorkspaceSnapshotError,
+  restoreWorkspaceArchive,
+  workspaceSnapshotRefParts,
+} from "./snapshot-archive.js";
 
 const DEFAULT_MAX_SNAPSHOT_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_SNAPSHOT_KEEP = 5;
-const ENCRYPTION_HEADER = Buffer.from("WSENC01", "ascii");
-const WORKSPACE_REF_PATTERN = /^ws:([0-9A-HJKMNP-TV-Z]{26}):([a-f0-9]{16})$/u;
-
-/** Error raised when a workspace snapshot cannot be read or restored safely. */
-export class WorkspaceSnapshotError extends HarnessError {
-  readonly code = "workspace_snapshot_invalid";
-
-  constructor() {
-    super("The workspace snapshot is invalid.");
-  }
-}
-
-/** Error raised when a snapshot exceeds its configured size limit. */
-export class SnapshotTooLargeError extends HarnessError {
-  readonly code = "snapshot_too_large";
-
-  constructor() {
-    super("The workspace snapshot exceeds its size limit.");
-  }
-}
-
-/** Error raised when a snapshot archive contains an unsafe entry. */
-export class UnsafeWorkspaceSnapshotError extends HarnessError {
-  readonly code = "workspace_snapshot_unsafe";
-
-  constructor() {
-    super("The workspace snapshot contains an unsafe entry.");
-  }
-}
+export { SnapshotTooLargeError, UnsafeWorkspaceSnapshotError, WorkspaceSnapshotError };
 
 /** Inputs for the filesystem-backed workspace snapshotter. */
 export interface WorkspaceSnapshotterOptions {
@@ -73,33 +51,18 @@ export interface WorkspaceSnapshotterOptions {
   readonly keyProvider?: KeyProvider;
 }
 
-function isWithinPath(path: string): boolean {
-  const normalized = path.replaceAll("\\", "/");
-  return (
-    normalized.length <= 4096 &&
-    !normalized.includes("\0") &&
-    !normalized.startsWith("/") &&
-    !win32.isAbsolute(path) &&
-    !/^[A-Za-z]:/u.test(path) &&
-    !normalized.split("/").some((segment) => segment === ".." || segment.length > 255)
-  );
-}
-
-function archiveRelativePath(path: string): string {
-  if (!isWithinPath(path)) {
-    throw new UnsafeWorkspaceSnapshotError();
-  }
-  return posix.normalize(path.replaceAll("\\", "/")).replace(/^\.\//u, "");
-}
-
-function workspaceRefParts(ref: WorkspaceRef): { snapshotId: Id; digest: string } {
-  const match = WORKSPACE_REF_PATTERN.exec(ref);
-  const snapshotId = match?.[1];
-  const digest = match?.[2];
-  if (snapshotId === undefined || digest === undefined) {
-    throw new WorkspaceSnapshotError();
-  }
-  return { snapshotId: Id.parse(snapshotId), digest };
+/** Snapshot operations used by checkpointing and resume. */
+export interface WorkspaceSnapshotPort {
+  /** Persist the run workspace and return its content-addressed reference. */
+  snapshot(runId: string): Promise<WorkspaceRef>;
+  /** Replace the run workspace with a verified snapshot. */
+  restore(runId: string, ref: WorkspaceRef): Promise<void>;
+  /** Check whether the run workspace exists as a real directory. */
+  hasWorkspace(runId: string): Promise<boolean>;
+  /** Remove stale archives after the matching DB checkpoint has committed. */
+  prune(runId: string): Promise<void>;
+  /** Remove an unreferenced archive after a failed DB checkpoint append. */
+  deleteSnapshot(runId: string, ref: WorkspaceRef): Promise<void>;
 }
 
 function codeOf(error: unknown): string | undefined {
@@ -164,8 +127,13 @@ export class WorkspaceSnapshotter {
     const snapshotPath = join(snapshotDirectory, `${snapshotId}.tar.gz`);
     let archive: Buffer | undefined;
     try {
-      archive = await this.#createArchive(runRoot);
-      const storedBytes = await this.#encryptIfConfigured(validatedRunId, snapshotId, archive);
+      archive = await createWorkspaceArchive(runRoot, this.#maxSnapshotBytes);
+      const storedBytes = await encryptWorkspaceArchive(archive, {
+        runId: validatedRunId,
+        snapshotId,
+        enabled: this.#snapshotEncryption,
+        ...(this.options.keyProvider === undefined ? {} : { provider: this.options.keyProvider }),
+      });
       if (storedBytes.byteLength > this.#maxSnapshotBytes) {
         throw new SnapshotTooLargeError();
       }
@@ -192,77 +160,61 @@ export class WorkspaceSnapshotter {
    */
   async restore(runId: string, ref: WorkspaceRef): Promise<void> {
     const validatedRunId = Id.parse(runId);
-    const { snapshotId, digest } = workspaceRefParts(WorkspaceRef.parse(ref));
     const workspaceRoot = await this.#ensureRoot(this.options.workspaceRoot);
-    const snapshotDirectory = await this.#ensureRunSnapshotDirectory(validatedRunId);
+    const { storedBytes, archive } = await this.#readSnapshot(
+      validatedRunId,
+      WorkspaceRef.parse(ref),
+    );
+    try {
+      await restoreWorkspaceArchive({
+        archive,
+        workspaceRoot,
+        runId: validatedRunId,
+        temporaryId: Id.parse(this.options.ids.next()),
+        maxFileBytes: this.#maxFileBytes,
+        maxSnapshotBytes: this.#maxSnapshotBytes,
+      });
+    } finally {
+      archive.fill(0);
+      storedBytes.fill(0);
+    }
+  }
+
+  async #readSnapshot(
+    runId: Id,
+    ref: WorkspaceRef,
+  ): Promise<{ storedBytes: Buffer; archive: Buffer }> {
+    const { snapshotId, digest } = workspaceSnapshotRefParts(ref);
+    const snapshotDirectory = await this.#ensureRunSnapshotDirectory(runId);
     const snapshotPath = join(snapshotDirectory, `${snapshotId}.tar.gz`);
     const archiveStat = await lstat(snapshotPath).catch(() => {
       throw new WorkspaceSnapshotError();
     });
-    if (
-      !archiveStat.isFile() ||
-      archiveStat.isSymbolicLink() ||
-      archiveStat.size > this.#maxSnapshotBytes
-    ) {
-      throw archiveStat.size > this.#maxSnapshotBytes
-        ? new SnapshotTooLargeError()
-        : new WorkspaceSnapshotError();
-    }
-    let storedBytes: Buffer;
-    try {
-      storedBytes = await readFile(snapshotPath);
-    } catch {
+    if (!archiveStat.isFile() || archiveStat.isSymbolicLink()) {
       throw new WorkspaceSnapshotError();
     }
+    if (archiveStat.size > this.#maxSnapshotBytes) {
+      throw new SnapshotTooLargeError();
+    }
+    const storedBytes = await readFile(snapshotPath).catch(() => {
+      throw new WorkspaceSnapshotError();
+    });
     const actualDigest = createHash("sha256").update(storedBytes).digest("hex").slice(0, 16);
     if (actualDigest !== digest) {
+      storedBytes.fill(0);
       throw new WorkspaceSnapshotError();
     }
-    const archive = await this.#decryptIfEncrypted(validatedRunId, snapshotId, storedBytes);
-    const temporaryId = Id.parse(this.options.ids.next());
-    const temporaryRoot = join(workspaceRoot, `.${validatedRunId}.restore-${temporaryId}`);
-    const runRoot = join(workspaceRoot, validatedRunId);
-    const oldRoot = join(workspaceRoot, `${validatedRunId}.old`);
-    let movedOldWorkspace = false;
     try {
-      await this.#recoverInterruptedSwap(runRoot, oldRoot);
-      await mkdir(temporaryRoot, { recursive: false, mode: 0o700 });
-      await this.#extractArchive(archive, temporaryRoot);
-      const existing = await lstat(runRoot).catch((error: unknown) => {
-        if (codeOf(error) === "ENOENT") {
-          return undefined;
-        }
-        throw new WorkspaceSnapshotError();
-      });
-      if (existing !== undefined) {
-        if (!existing.isDirectory() || existing.isSymbolicLink()) {
-          throw new WorkspaceSnapshotError();
-        }
-        await rm(oldRoot, { recursive: true, force: true });
-        await rename(runRoot, oldRoot);
-        movedOldWorkspace = true;
-      }
-      try {
-        await rename(temporaryRoot, runRoot);
-      } catch {
-        if (movedOldWorkspace) {
-          await rename(oldRoot, runRoot);
-          movedOldWorkspace = false;
-        }
-        throw new WorkspaceSnapshotError();
-      }
-      if (movedOldWorkspace) {
-        await rm(oldRoot, { recursive: true, force: true });
-      }
+      const archive = await decryptWorkspaceArchive(
+        storedBytes,
+        runId,
+        snapshotId,
+        this.options.keyProvider,
+      );
+      return { storedBytes, archive };
     } catch (error) {
-      if (error instanceof HarnessError) {
-        throw error;
-      }
-      throw new WorkspaceSnapshotError();
-    } finally {
-      await rm(temporaryRoot, { recursive: true, force: true });
-      archive.fill(0);
       storedBytes.fill(0);
+      throw error;
     }
   }
 
@@ -306,209 +258,32 @@ export class WorkspaceSnapshotter {
     );
   }
 
-  /** Deletes every snapshot belonging to a purged run. */
-  async purgeRun(runId: string): Promise<void> {
+  /** Removes an archive that was written before a failed checkpoint append. */
+  async deleteSnapshot(runId: string, ref: WorkspaceRef): Promise<void> {
     const validatedRunId = Id.parse(runId);
-    const root = await this.#ensureRoot(this.options.snapshotRoot);
-    const path = join(root, validatedRunId);
+    const { snapshotId } = workspaceSnapshotRefParts(WorkspaceRef.parse(ref));
+    const directory = await this.#ensureRunSnapshotDirectory(validatedRunId);
+    const path = join(directory, `${snapshotId}.tar.gz`);
     const info = await lstat(path).catch((error: unknown) => {
       if (codeOf(error) === "ENOENT") {
         return undefined;
       }
       throw new WorkspaceSnapshotError();
     });
-    if (info !== undefined && (!info.isDirectory() || info.isSymbolicLink())) {
+    if (info !== undefined && (!info.isFile() || info.isSymbolicLink())) {
       throw new WorkspaceSnapshotError();
     }
-    await rm(path, { recursive: true, force: true });
+    await rm(path, { force: true });
   }
 
-  async #createArchive(runRoot: string): Promise<Buffer> {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const sink = new Writable({
-      write: (chunk: Buffer, _encoding, callback) => {
-        size += chunk.byteLength;
-        if (size > this.#maxSnapshotBytes) {
-          callback(new SnapshotTooLargeError());
-          return;
-        }
-        chunks.push(Buffer.from(chunk));
-        callback();
-      },
-    });
-    try {
-      const archive = tar.c(
-        {
-          cwd: runRoot,
-          gzip: true,
-          portable: true,
-          filter: (path) => {
-            const segments = path
-              .replaceAll("\\", "/")
-              .split("/")
-              .filter((segment) => segment !== "" && segment !== ".");
-            return !(segments[0] === ".harness" && segments[1] === "tmp");
-          },
-        },
-        ["."],
-      );
-      await pipeline(archive, sink);
-      return Buffer.concat(chunks, size);
-    } catch (error) {
-      for (const chunk of chunks) {
-        chunk.fill(0);
-      }
-      if (error instanceof SnapshotTooLargeError) {
-        throw error;
-      }
-      throw new WorkspaceSnapshotError();
-    }
-  }
-
-  async #encryptIfConfigured(runId: Id, snapshotId: Id, archive: Buffer): Promise<Buffer> {
-    if (!this.#snapshotEncryption) {
-      return archive;
-    }
-    const provider = this.options.keyProvider;
-    if (provider === undefined) {
-      throw new WorkspaceSnapshotError();
-    }
-    let key: Buffer | undefined;
-    try {
-      const keyId = Code.parse(provider.currentKeyId());
-      const keyBytes = await provider.getKey(keyId);
-      key = Buffer.from(keyBytes);
-      const encrypted = aesGcmEncrypt(key, archive, Buffer.from(`${runId}:${snapshotId}`));
-      const encodedKeyId = Buffer.from(keyId, "utf8");
-      return Buffer.concat([ENCRYPTION_HEADER, Buffer.from([encodedKeyId.byteLength]), encodedKeyId, encrypted]);
-    } catch {
-      throw new WorkspaceSnapshotError();
-    } finally {
-      key?.fill(0);
-    }
-  }
-
-  async #decryptIfEncrypted(runId: Id, snapshotId: Id, storedBytes: Buffer): Promise<Buffer> {
-    if (!storedBytes.subarray(0, ENCRYPTION_HEADER.byteLength).equals(ENCRYPTION_HEADER)) {
-      return Buffer.from(storedBytes);
-    }
-    const keyIdLength = storedBytes[ENCRYPTION_HEADER.byteLength];
-    if (keyIdLength === undefined || keyIdLength < 1) {
-      throw new WorkspaceSnapshotError();
-    }
-    const keyOffset = ENCRYPTION_HEADER.byteLength + 1;
-    const keyId = Code.safeParse(storedBytes.subarray(keyOffset, keyOffset + keyIdLength).toString("utf8"));
-    const provider = this.options.keyProvider;
-    if (!keyId.success || provider === undefined) {
-      throw new WorkspaceSnapshotError();
-    }
-    let key: Buffer | undefined;
-    try {
-      key = Buffer.from(await provider.getKey(keyId.data));
-      return Buffer.from(
-        aesGcmDecrypt(
-          key,
-          storedBytes.subarray(keyOffset + keyIdLength),
-          Buffer.from(`${runId}:${snapshotId}`),
-        ),
-      );
-    } catch {
-      throw new WorkspaceSnapshotError();
-    } finally {
-      key?.fill(0);
-    }
-  }
-
-  async #extractArchive(archive: Buffer, destination: string): Promise<void> {
-    let totalBytes = 0;
-    let rootMode: number | undefined;
-    let rejection: HarnessError | undefined;
-    try {
-      const extractor = tar.x({
-        cwd: destination,
-        strict: true,
-        preservePaths: true,
-        preserveOwner: false,
-        unlink: true,
-        chmod: true,
-        processUmask: 0,
-        maxDecompressionRatio: 1000,
-        filter: (_path, entry) => {
-          if (!("type" in entry)) {
-            rejection ??= new UnsafeWorkspaceSnapshotError();
-            return false;
-          }
-          let relativePath: string;
-          try {
-            relativePath = archiveRelativePath(entry.path);
-          } catch {
-            rejection ??= new UnsafeWorkspaceSnapshotError();
-            return false;
-          }
-          if (
-            entry.type !== "Directory" &&
-            entry.type !== "File" &&
-            entry.type !== "OldFile"
-          ) {
-            rejection ??= new UnsafeWorkspaceSnapshotError();
-            return false;
-          }
-          if (entry.type !== "Directory") {
-            totalBytes += entry.size;
-            if (entry.size > this.#maxFileBytes || totalBytes > this.#maxSnapshotBytes) {
-              rejection ??= new SnapshotTooLargeError();
-              return false;
-            }
-          }
-          entry.mode = (entry.mode ?? (entry.type === "Directory" ? 0o755 : 0o644)) & 0o777;
-          if (relativePath === ".") {
-            rootMode = entry.mode;
-          }
-          return true;
-        },
-      });
-      await pipeline(Readable.from([archive]), extractor);
-      if (rejection !== undefined) {
-        throw rejection;
-      }
-      await chmod(destination, rootMode ?? 0o700);
-    } catch (error) {
-      if (error instanceof HarnessError) {
-        throw error;
-      }
-      throw new WorkspaceSnapshotError();
-    }
-  }
-
-  async #recoverInterruptedSwap(runRoot: string, oldRoot: string): Promise<void> {
-    const oldInfo = await lstat(oldRoot).catch((error: unknown) => {
-      if (codeOf(error) === "ENOENT") {
-        return undefined;
-      }
-      throw new WorkspaceSnapshotError();
-    });
-    if (oldInfo === undefined) {
-      return;
-    }
-    if (!oldInfo.isDirectory() || oldInfo.isSymbolicLink()) {
-      throw new WorkspaceSnapshotError();
-    }
-    const currentInfo = await lstat(runRoot).catch((error: unknown) => {
-      if (codeOf(error) === "ENOENT") {
-        return undefined;
-      }
-      throw new WorkspaceSnapshotError();
-    });
-    if (currentInfo === undefined) {
-      await rename(oldRoot, runRoot);
-    } else {
-      await rm(oldRoot, { recursive: true, force: true });
-    }
+  /** Deletes every snapshot belonging to a purged run. */
+  async purgeRun(runId: string): Promise<void> {
+    return purgeWorkspaceSnapshots(this.options.snapshotRoot, runId);
   }
 
   async #ensureRunSnapshotDirectory(runId: Id): Promise<string> {
     const root = await this.#ensureRoot(this.options.snapshotRoot);
+    await chmod(root, 0o700);
     const directory = join(root, runId);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await assertPlainDirectory(directory);
@@ -530,4 +305,35 @@ export class WorkspaceSnapshotter {
       throw new WorkspaceSnapshotError();
     });
   }
+}
+
+/** Deletes all workspace archives associated with one retained run. */
+export async function purgeWorkspaceSnapshots(snapshotRoot: string, runId: string): Promise<void> {
+  const validatedRunId = Id.parse(runId);
+  const rootInfo = await lstat(snapshotRoot).catch((error: unknown) => {
+    if (codeOf(error) === "ENOENT") {
+      return undefined;
+    }
+    throw new WorkspaceSnapshotError();
+  });
+  if (rootInfo === undefined) {
+    return;
+  }
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {
+    throw new WorkspaceSnapshotError();
+  }
+  const root = await realpath(snapshotRoot).catch(() => {
+    throw new WorkspaceSnapshotError();
+  });
+  const path = join(root, validatedRunId);
+  const info = await lstat(path).catch((error: unknown) => {
+    if (codeOf(error) === "ENOENT") {
+      return undefined;
+    }
+    throw new WorkspaceSnapshotError();
+  });
+  if (info !== undefined && (!info.isDirectory() || info.isSymbolicLink())) {
+    throw new WorkspaceSnapshotError();
+  }
+  await rm(path, { recursive: true, force: true });
 }

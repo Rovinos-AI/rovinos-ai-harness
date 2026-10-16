@@ -355,6 +355,8 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 url: z.ZodURL;
                 token: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
             }, z.core.$strict>>;
+            restoreOnResume: z.ZodOptional<z.ZodBoolean>;
+            snapshotEncryption: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>>;
         controlPlane: z.ZodOptional<z.ZodDefault<z.ZodObject<{
             allowReveal: z.ZodDefault<z.ZodBoolean>;

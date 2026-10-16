@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, StoreMigrateResultSchema, StorePurgeResultSchema } from "@harness/schemas";
 import type { HarnessConfig } from "@harness/config";
+import { purgeWorkspaceSnapshots } from "@harness/sandbox";
 import type { EventStore } from "@harness/store";
 import { purgeExpired, type VaultAdmin } from "@harness/vault";
+import { join } from "node:path";
 import type { CliContext, CommandModule } from "../command.js";
 
 interface StoreCommandOperations {
@@ -113,6 +115,8 @@ async function writePurgeResult({
     throw new StoreCommandError("retention_not_configured");
   }
   const store = await operations.openStore(config, dryRun, context.secretResolver);
+  const core = await import("@harness/core");
+  const snapshotRoot = join(core.resolveDataDir(process.env), "snapshots");
   let vault: (VaultAdmin & { close(): void | Promise<void> }) | undefined;
   try {
     const vaultAdmin =
@@ -126,13 +130,10 @@ async function writePurgeResult({
       clock: context.clock,
       policy,
       dryRun,
-      ...(vaultAdmin === undefined
-        ? {}
-        : {
-            onRunPurged: async (runId) => {
-              await vaultAdmin.purge(runId);
-            },
-          }),
+      onRunPurged: async (runId) => {
+        await purgeWorkspaceSnapshots(snapshotRoot, runId);
+        await vaultAdmin?.purge(runId);
+      },
     });
     const vaultResult =
       vaultAdmin === undefined

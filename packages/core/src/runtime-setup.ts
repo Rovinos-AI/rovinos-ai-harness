@@ -26,6 +26,7 @@ import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
+import { createRuntimeWorkspaceSnapshotter } from "./runtime-workspace-snapshot.js";
 import { composeToolPorts } from "./runtime-tool-port.js";
 import { McpConnectionError, McpToolPort, type McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
@@ -348,7 +349,6 @@ async function createRuntimeModelAndStore(options: {
   };
 }
 
-/** Builds validated ports and owned storage dependencies for `createRuntime`. */
 /**
  * Resolve validated runtime configuration and create owned storage dependencies.
  * @param config - Validated run configuration.
@@ -370,6 +370,12 @@ export async function setupRuntime(
   let tools: RuntimeTools | undefined;
   try {
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
+    const workspaceSnapshotter = createRuntimeWorkspaceSnapshotter(
+      dataDir,
+      runtimeConfig,
+      ids,
+      keys,
+    );
     const runtimeVault = await createRuntimeVault({
       dataDir,
       config: runtimeConfig,
@@ -405,6 +411,7 @@ export async function setupRuntime(
       store,
       keys,
       sandboxBackend,
+      workspaceSnapshotter,
       vault: runtimeVault,
       vaultResolver: piiRuntime.resolver,
       pii: piiConfig.enabled ? { config: piiConfig, ...piiRuntime } : undefined,

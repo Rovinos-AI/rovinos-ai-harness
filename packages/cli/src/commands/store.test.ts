@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CompositeSecretResolver, HarnessConfigSchema } from "@harness/config";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -312,8 +312,13 @@ describe("harness store purge", () => {
   });
 
   it("purges vault mappings immediately when the retention hook deletes a run", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-store-snapshot-purge-"));
+    vi.stubEnv("HARNESS_DATA_DIR", temporaryDirectory);
     const store = new InMemoryEventStore();
     const runId = await seedRun(store, "completed", 1);
+    const snapshotDirectory = join(temporaryDirectory, "snapshots", runId);
+    await mkdir(snapshotDirectory, { recursive: true });
+    await writeFile(join(snapshotDirectory, "synthetic.tar.gz"), "archive");
     const vault = new InMemoryVault();
     const token = await vault.put(runId, "email", "alice@example.test");
     const closeVault = vi.fn();
@@ -333,6 +338,7 @@ describe("harness store purge", () => {
       hookFailures: 0,
     });
     await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBeUndefined();
+    expect(existsSync(snapshotDirectory)).toBe(false);
     expect(closeVault).toHaveBeenCalledOnce();
     expect(stderr).toEqual([]);
   });
