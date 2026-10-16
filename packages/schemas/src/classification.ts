@@ -44,6 +44,7 @@ export const EVENT_FIELD_CLASS = {
     repairAttempts: "meta",
     rungUsed: "meta",
     fallbackDepth: "meta",
+    structuredValue: "content",
     content: "content",
     providerBlobs: "content",
   },

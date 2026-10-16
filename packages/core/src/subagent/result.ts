@@ -24,20 +24,29 @@ export const SubagentResultSchema = z
 /** Inferred result returned by one child run to its parent. */
 export type SubagentResult = z.infer<typeof SubagentResultSchema>;
 
-function aggregateUsage(events: readonly Event[]) {
+/**
+ * Aggregates model and direct-child usage already present in one event history.
+ *
+ * @param events - Events from the run being finalized.
+ * @returns Combined token totals and cost when reported.
+ */
+export function aggregateSubagentUsage(events: readonly Event[]): {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly costMicros?: number;
+} {
   let inputTokens = 0;
   let outputTokens = 0;
   let costMicros = 0;
   let hasCost = false;
   for (const event of events) {
-    if (event.type !== "model_response") {
-      continue;
-    }
-    inputTokens += event.inputTokens;
-    outputTokens += event.outputTokens;
-    if (event.costMicros !== undefined) {
-      costMicros += event.costMicros;
-      hasCost = true;
+    if (event.type === "model_response" || event.type === "subagent_completed") {
+      inputTokens += event.inputTokens;
+      outputTokens += event.outputTokens;
+      if (event.costMicros !== undefined) {
+        costMicros += event.costMicros;
+        hasCost = true;
+      }
     }
   }
   return {
@@ -47,16 +56,17 @@ function aggregateUsage(events: readonly Event[]) {
   };
 }
 
-function failureCode(events: readonly Event[]): string | undefined {
+function failureCode(events: readonly Event[]): Code | undefined {
   const terminal = events.findLast(
     (event) => event.type === "run_status_changed" && event.to !== "running",
   );
   if (terminal?.type !== "run_status_changed" || terminal.to === "suspended") {
     return undefined;
   }
-  return terminal.reason === "result_invalid"
-    ? Code.parse("subagent_result_invalid")
-    : terminal.reason;
+  const code = Code.safeParse(
+    terminal.reason === "result_invalid" ? "subagent_result_invalid" : terminal.reason,
+  );
+  return code.success ? code.data : "subagent_failed";
 }
 
 function finalText(events: readonly Event[]): string {
@@ -66,7 +76,10 @@ function finalText(events: readonly Event[]): string {
     : "";
 }
 
-function invalidResult(childRunId: Id, usage: ReturnType<typeof aggregateUsage>): SubagentResult {
+function invalidResult(
+  childRunId: Id,
+  usage: ReturnType<typeof aggregateSubagentUsage>,
+): SubagentResult {
   return SubagentResultSchema.parse({
     childRunId,
     status: "failed",
@@ -79,7 +92,7 @@ function finalizeNonCompleted(options: {
   readonly childRunId: Id;
   readonly status: Exclude<SubagentResult["status"], "completed">;
   readonly events: readonly Event[];
-  readonly usage: ReturnType<typeof aggregateUsage>;
+  readonly usage: ReturnType<typeof aggregateSubagentUsage>;
 }): SubagentResult {
   const errorCode = failureCode(options.events);
   return SubagentResultSchema.parse({
@@ -94,7 +107,7 @@ function finalizeCompleted(options: {
   readonly childRunId: Id;
   readonly events: readonly Event[];
   readonly hasResultSchema: boolean;
-  readonly usage: ReturnType<typeof aggregateUsage>;
+  readonly usage: ReturnType<typeof aggregateSubagentUsage>;
 }): SubagentResult {
   if (!options.hasResultSchema) {
     return SubagentResultSchema.parse({
@@ -111,6 +124,14 @@ function finalizeCompleted(options: {
     response.rungUsed === undefined
   ) {
     return invalidResult(options.childRunId, options.usage);
+  }
+  if (response.structuredValue !== undefined) {
+    return SubagentResultSchema.parse({
+      childRunId: options.childRunId,
+      status: "completed",
+      value: response.structuredValue,
+      usage: options.usage,
+    });
   }
   const parsed = safeParseJson(JsonValue, finalText(options.events));
   if (!parsed.success) {
@@ -131,7 +152,7 @@ export function finalizeChild(options: {
   readonly events: readonly Event[];
   readonly hasResultSchema: boolean;
 }): SubagentResult {
-  const usage = aggregateUsage(options.events);
+  const usage = aggregateSubagentUsage(options.events);
   if (options.status !== "completed") {
     return finalizeNonCompleted({
       childRunId: options.childRunId,

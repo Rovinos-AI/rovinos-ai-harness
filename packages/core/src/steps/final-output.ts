@@ -65,6 +65,9 @@ export async function runStructuredFinalOutput(
   if (result.outcome === "aborted") {
     return suspendForShutdown(options.recorder, events, execution.checkpointer);
   }
+  if (options.signal.aborted && options.signal.reason === "shutdown") {
+    return suspendForShutdown(options.recorder, events, execution.checkpointer);
+  }
   if (result.outcome === "failed") {
     const failure = result.events.at(-1);
     if (failure === undefined) {

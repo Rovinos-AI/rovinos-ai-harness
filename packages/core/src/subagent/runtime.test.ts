@@ -46,6 +46,7 @@ function completion(
   parts: ModelCompletion["parts"] = [{ type: "text", text: "child answer" }],
   usage: ModelCompletion["usage"] = { inputTokens: 1, outputTokens: 1 },
   rungUsed?: ModelCompletion["rungUsed"],
+  enforcement?: ModelCompletion["enforcement"],
 ): ModelCompletion {
   return {
     parts,
@@ -59,6 +60,7 @@ function completion(
     fallbackDepth: 0,
     providerBlobs: null,
     ...(rungUsed === undefined ? {} : { rungUsed }),
+    ...(enforcement === undefined ? {} : { enforcement }),
   };
 }
 
@@ -217,7 +219,13 @@ describe("production subagent runtime", () => {
             parentCallId: callId,
           });
         },
-        recordSubagentCompleted: async ({ childRunId, outcome, inputTokens, outputTokens, costMicros }) => {
+        recordSubagentCompleted: async ({
+          childRunId,
+          outcome,
+          inputTokens,
+          outputTokens,
+          costMicros,
+        }) => {
           await parentRecorder.record({
             type: "subagent_completed",
             v: 1,
@@ -278,12 +286,13 @@ describe("production subagent runtime", () => {
       parts: [{ type: "text", text: "Follow the task." }],
     });
     expect(modelRequests[0]?.tools?.map(({ toolId }) => toolId)).toEqual(["test.read"]);
-    expect((await readEvents(store, parentRunId)).find((event) => event.type === "subagent_completed"))
-      .toMatchObject({
-        outcome: "completed",
-        inputTokens: 1,
-        outputTokens: 1,
-      });
+    expect(
+      (await readEvents(store, parentRunId)).find((event) => event.type === "subagent_completed"),
+    ).toMatchObject({
+      outcome: "completed",
+      inputTokens: 1,
+      outputTokens: 1,
+    });
   });
 
   it("validates tokenized structured output and records terminal usage without raw values", async () => {
@@ -309,26 +318,35 @@ describe("production subagent runtime", () => {
       complete: async (_request, context) => {
         modelRequests.push({ context });
         if (context.outputSchema === undefined) {
-          return completion(
-            [{ type: "text", text: "final answer candidate" }],
-            { inputTokens: 1, outputTokens: 2, costMicros: 3 },
-          );
+          return completion([{ type: "text", text: "final answer candidate" }], {
+            inputTokens: 1,
+            outputTokens: 2,
+            costMicros: 3,
+          });
         }
         structuredCalls += 1;
         if (structuredCalls === 2) {
-          throw Object.assign(new Error("invalid result"), { code: "model_output_invalid" });
+          throw Object.assign(new Error("invalid result"), {
+            code: "model_output_invalid",
+            usage: { inputTokens: 13, outputTokens: 17, costMicros: 19 },
+            latencyMs: 2,
+            repairAttempts: 1,
+          });
         }
         if (context.valueTransform === undefined) {
           throw new Error("Expected token-aware output validation.");
         }
-        await expect(context.valueTransform(context.outputSchema, { email: token })).resolves.toEqual({
+        await expect(
+          context.valueTransform(context.outputSchema, { email: token }),
+        ).resolves.toEqual({
           ok: true,
           tokenized: { email: token },
         });
         return completion(
-          [{ type: "text", text: `{"email":"${token}"}` }],
+          [{ type: "text", text: `Here is the result: {"email":"${token}"}` }],
           { inputTokens: 5, outputTokens: 7, costMicros: 11 },
-          "native",
+          "prompt",
+          { valid: true, value: { email: token }, rungUsed: "prompt" },
         );
       },
     };
@@ -492,15 +510,21 @@ describe("production subagent runtime", () => {
       });
     });
 
-    expect(invalidResult).toEqual({
-      outcome: "error",
-      errorCode: "subagent_result_invalid",
-      result: null,
-    });
+    expect(invalidResult?.outcome).toBe("error");
+    if (invalidResult?.outcome !== "error") {
+      throw new Error("Expected the invalid child result to be an error.");
+    }
+    expect(invalidResult.errorCode).toBe("subagent_result_invalid");
+    expect(invalidResult.result).toMatchObject({ status: "failed" });
+    expect(
+      typeof invalidResult.result === "object" &&
+        invalidResult.result !== null &&
+        "childRunId" in invalidResult.result &&
+        Id.safeParse(invalidResult.result.childRunId).success,
+    ).toBe(true);
     const finalParentEvents = await readEvents(store, parentRunId);
     const failedSpawn = finalParentEvents.find(
-      (event) =>
-        event.type === "subagent_spawned" && event.parentCallId === invalidCallId,
+      (event) => event.type === "subagent_spawned" && event.parentCallId === invalidCallId,
     );
     if (failedSpawn?.type !== "subagent_spawned") {
       throw new Error("Expected the failed child spawn event.");
@@ -510,8 +534,13 @@ describe("production subagent runtime", () => {
         (event) => event.type === "run_status_changed" && event.to === "failed",
       ),
     ).toMatchObject({ reason: "result_invalid" });
-    expect(finalParentEvents.findLast((event) => event.type === "subagent_completed")).toMatchObject({
+    expect(
+      finalParentEvents.findLast((event) => event.type === "subagent_completed"),
+    ).toMatchObject({
       outcome: "failed",
+      inputTokens: 14,
+      outputTokens: 19,
+      costMicros: 22,
     });
     expect(JSON.stringify(finalParentEvents)).not.toContain("alice@example.test");
   });

@@ -109,7 +109,13 @@ export function toolRunContext(
         }),
       );
     },
-    recordSubagentCompleted: async ({ childRunId, outcome, inputTokens, outputTokens, costMicros }) => {
+    recordSubagentCompleted: async ({
+      childRunId,
+      outcome,
+      inputTokens,
+      outputTokens,
+      costMicros,
+    }) => {
       events.push(
         await recorder.record({
           type: "subagent_completed",

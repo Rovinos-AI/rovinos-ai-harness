@@ -91,8 +91,13 @@ export class AgentSpawnTool implements ToolPort {
       call,
       context,
     });
-    if (result.status === "failed" && result.errorCode !== undefined) {
-      return { outcome: "error", errorCode: Code.parse(result.errorCode), result: null };
+    if (result.status === "failed" || result.status === "cancelled") {
+      const errorCode = Code.safeParse(result.errorCode);
+      return {
+        outcome: "error",
+        errorCode: errorCode.success ? errorCode.data : "subagent_failed",
+        result: { childRunId: result.childRunId, status: result.status },
+      };
     }
     const value: JsonValueType = JsonValue.parse(result);
     return { outcome: "ok", result: value };

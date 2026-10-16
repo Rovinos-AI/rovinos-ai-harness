@@ -185,4 +185,66 @@ describe("agent.spawn tool", () => {
       result: { ok: true },
     });
   });
+
+  it("returns a typed error for cancelled children with their identity and status", async () => {
+    const inner = innerTools();
+    const supervisor = new SubagentSupervisor({
+      store: new InMemoryEventStore(),
+      ids: { next: () => childRunId },
+      scopes: new RunScopeRegistry(),
+      parentTools: inner,
+      parentSpanContext: () => ({
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        traceFlags: 1,
+      }),
+      runChild: (request) =>
+        Promise.resolve({
+          childRunId: request.runId,
+          status: "cancelled",
+          errorCode: "run_cancelled",
+          usage: { inputTokens: 0, outputTokens: 0 },
+        }),
+    });
+    const tool = new AgentSpawnTool(inner, await roles(), supervisor);
+
+    await expect(
+      tool.execute(call("agent.spawn", { role: "worker", goal: "cancel" }), runContext(inner)),
+    ).resolves.toEqual({
+      outcome: "error",
+      errorCode: "run_cancelled",
+      result: { childRunId, status: "cancelled" },
+    });
+  });
+
+  it("falls back to a typed code for an unusual child failure reason", async () => {
+    const inner = innerTools();
+    const supervisor = new SubagentSupervisor({
+      store: new InMemoryEventStore(),
+      ids: { next: () => childRunId },
+      scopes: new RunScopeRegistry(),
+      parentTools: inner,
+      parentSpanContext: () => ({
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        traceFlags: 1,
+      }),
+      runChild: (request) =>
+        Promise.resolve({
+          childRunId: request.runId,
+          status: "failed",
+          errorCode: "failure reason with spaces",
+          usage: { inputTokens: 1, outputTokens: 2 },
+        }),
+    });
+    const tool = new AgentSpawnTool(inner, await roles(), supervisor);
+
+    await expect(
+      tool.execute(call("agent.spawn", { role: "worker", goal: "failed" }), runContext(inner)),
+    ).resolves.toEqual({
+      outcome: "error",
+      errorCode: "subagent_failed",
+      result: { childRunId, status: "failed" },
+    });
+  });
 });

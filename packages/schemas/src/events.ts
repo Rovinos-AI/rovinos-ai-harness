@@ -96,6 +96,7 @@ const modelResponseEvent = z
     repairAttempts: z.number().int().nonnegative(),
     rungUsed: Code.optional(),
     fallbackDepth: z.number().int().nonnegative().default(0),
+    structuredValue: JsonValue.optional(),
     content: z.array(PartSchema),
     providerBlobs: JsonValue,
   })

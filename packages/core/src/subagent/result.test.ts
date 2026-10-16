@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Event, Id } from "@harness/schemas";
+import { Event, Id, type JsonValue as JsonValueType } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { finalizeChild } from "./result.js";
 
@@ -17,8 +17,16 @@ const envelope = {
 function response(
   seq: number,
   text: string,
-  usage: { readonly inputTokens?: number; readonly outputTokens?: number; readonly costMicros?: number } = {},
-  enforcement: { readonly schemaValid?: boolean; readonly rungUsed?: string } = {},
+  usage: {
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+    readonly costMicros?: number;
+  } = {},
+  enforcement: {
+    readonly schemaValid?: boolean;
+    readonly rungUsed?: string;
+    readonly structuredValue?: JsonValueType;
+  } = {},
 ) {
   return Event.parse({
     ...envelope,
@@ -35,13 +43,20 @@ function response(
     schemaValid: enforcement.schemaValid ?? true,
     repairAttempts: 0,
     ...(enforcement.rungUsed === undefined ? {} : { rungUsed: enforcement.rungUsed }),
+    ...(enforcement.structuredValue === undefined
+      ? {}
+      : { structuredValue: enforcement.structuredValue }),
     fallbackDepth: 0,
     content: [{ type: "text", text }],
     providerBlobs: null,
   });
 }
 
-function status(seq: number, to: "completed" | "failed" | "cancelled" | "suspended", reason: string) {
+function status(
+  seq: number,
+  to: "completed" | "failed" | "cancelled" | "suspended",
+  reason: string,
+) {
   return Event.parse({
     ...envelope,
     seq,
@@ -115,6 +130,64 @@ describe("finalizeChild", () => {
     expect(invalidJson).toMatchObject({
       status: "failed",
       errorCode: "subagent_result_invalid",
+    });
+  });
+
+  it.each([
+    ["prefixed", 'Here is the result: {"ok":true}'],
+    ["fenced", '```json\n{"ok":true}\n```'],
+  ])("uses the durable validated value for %s prompt-rung output", (_description, text) => {
+    expect(
+      finalizeChild({
+        childRunId,
+        status: "completed",
+        hasResultSchema: true,
+        events: [
+          response(
+            1,
+            text,
+            {},
+            {
+              rungUsed: "prompt",
+              structuredValue: { ok: true },
+            },
+          ),
+        ],
+      }),
+    ).toMatchObject({
+      status: "completed",
+      value: { ok: true },
+    });
+  });
+
+  it("aggregates descendant and failed structured-call usage from the child log", () => {
+    const descendant = Event.parse({
+      ...envelope,
+      seq: 2,
+      type: "subagent_completed",
+      childRunId,
+      outcome: "completed",
+      inputTokens: 7,
+      outputTokens: 8,
+      costMicros: 9,
+    });
+    const invalid = response(
+      1,
+      "",
+      { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+      { schemaValid: false },
+    );
+
+    expect(
+      finalizeChild({
+        childRunId,
+        status: "failed",
+        hasResultSchema: true,
+        events: [invalid, descendant],
+      }),
+    ).toMatchObject({
+      status: "failed",
+      usage: { inputTokens: 9, outputTokens: 11, costMicros: 13 },
     });
   });
 

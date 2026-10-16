@@ -16,7 +16,11 @@ import type {
 } from "@harness/schemas";
 import type { TranscriptGroup } from "@harness/context";
 import type { VaultAuditHandler } from "@harness/vault";
-import type { ValueTransform } from "@harness/models";
+import type {
+  ModelGatewayResponse,
+  TokenizedModelGatewayResponse,
+  ValueTransform,
+} from "@harness/models";
 import { z } from "zod";
 
 /** Provider-neutral request contract shared with the model gateway. */
@@ -65,6 +69,8 @@ export type ModelUsage = SharedModelUsage;
 /** Provider-agnostic completion returned by a model port. */
 export interface ModelCompletion extends ModelResponse {
   readonly providerBlobs: JsonValue;
+  readonly enforcement?:
+    ModelGatewayResponse["enforcement"] | TokenizedModelGatewayResponse["enforcement"];
 }
 
 /** Provider interface used by the run loop. */

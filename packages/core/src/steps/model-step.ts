@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   Code,
+  JsonValue as JsonValueSchema,
   ModelRequestSchema,
+  ModelUsageSchema,
   type Event,
   type Id,
   type Message,
@@ -9,12 +11,12 @@ import {
   type ToolSpec,
 } from "@harness/schemas";
 import { requestHash } from "@harness/models";
-import { SpanStatusCode } from "@opentelemetry/api";
+import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
 import type { ValueTransform } from "@harness/models";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   piiActionRunContext,
   prepareCompletion,
@@ -159,23 +161,15 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
           result = { outcome: "aborted", events: recorded };
           return requestEvent;
         }
-        const code = errorCode(error);
-        const reason =
-          code === "model_output_invalid" && options.outputSchema !== undefined
-            ? "result_invalid"
-            : code;
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        span.setAttribute("harness.error.code", reason);
-        const failed = await options.recorder.record({
-          type: "run_status_changed",
-          v: 1,
-          from: "running",
-          to: "failed",
-          reason,
+        const failure = await recordModelFailure({
+          options,
+          requestId,
+          error,
+          span,
+          recorded,
         });
-        recorded.push(failed);
-        result = { outcome: "failed", code: reason, events: recorded };
-        return failed;
+        result = failure.result;
+        return failure.event;
       }
 
       const prepared = await prepareCompletion(
@@ -184,7 +178,13 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
         toolRunContext(modelRunContext(options), options.recorder, recorded),
       );
       completion = prepared.completion;
-      const response = await options.recorder.record(responsePayload(requestId, completion));
+      const structuredValue = tokenizedStructuredValue(
+        completion,
+        options.valueTransform !== undefined,
+      );
+      const response = await options.recorder.record(
+        responsePayload(requestId, completion, structuredValue),
+      );
       recorded.push(response);
       result = {
         outcome: "response",
@@ -202,7 +202,63 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
   return result;
 }
 
-function responsePayload(requestId: Id, completion: ModelCompletion): EventPartial {
+async function recordModelFailure({
+  options,
+  requestId,
+  error,
+  span,
+  recorded,
+}: {
+  readonly options: ModelStepOptions;
+  readonly requestId: Id;
+  readonly error: unknown;
+  readonly span: Span;
+  readonly recorded: Event[];
+}): Promise<{ readonly result: ModelStepResult; readonly event: Event }> {
+  const code = errorCode(error);
+  if (options.outputSchema !== undefined && code === "model_output_invalid") {
+    const usage = readFailureUsage(error);
+    if (usage !== undefined) {
+      const response = await options.recorder.record({
+        type: "model_response",
+        v: 1,
+        requestId,
+        provider: options.provider ?? "unknown",
+        model: options.modelName ?? "unknown",
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
+        finishReason: "invalid_output",
+        latencyMs: readFailureCount(error, "latencyMs"),
+        schemaValid: false,
+        repairAttempts: readFailureCount(error, "repairAttempts"),
+        fallbackDepth: 0,
+        content: [],
+        providerBlobs: null,
+      });
+      recorded.push(response);
+    }
+  }
+  const reason =
+    code === "model_output_invalid" && options.outputSchema !== undefined ? "result_invalid" : code;
+  span.setStatus({ code: SpanStatusCode.ERROR });
+  span.setAttribute("harness.error.code", reason);
+  const event = await options.recorder.record({
+    type: "run_status_changed",
+    v: 1,
+    from: "running",
+    to: "failed",
+    reason,
+  });
+  recorded.push(event);
+  return { result: { outcome: "failed", code: reason, events: recorded }, event };
+}
+
+function responsePayload(
+  requestId: Id,
+  completion: ModelCompletion,
+  structuredValue: ModelCompletion["providerBlobs"] | undefined,
+): EventPartial {
   return {
     type: "model_response",
     v: 1,
@@ -226,7 +282,48 @@ function responsePayload(requestId: Id, completion: ModelCompletion): EventParti
     repairAttempts: completion.repairAttempts,
     ...(completion.rungUsed === undefined ? {} : { rungUsed: completion.rungUsed }),
     fallbackDepth: completion.fallbackDepth,
+    ...(structuredValue === undefined ? {} : { structuredValue }),
     content: completion.parts,
     providerBlobs: completion.providerBlobs,
   };
+}
+
+function tokenizedStructuredValue(
+  completion: ModelCompletion,
+  tokenAware: boolean,
+): ModelCompletion["providerBlobs"] | undefined {
+  if (!tokenAware || completion.enforcement === undefined) {
+    return undefined;
+  }
+  const parsed = ModelGatewayEnforcementSchema.safeParse(completion.enforcement);
+  return parsed.success ? parsed.data.value : undefined;
+}
+
+const ModelGatewayEnforcementSchema = z
+  .object({
+    value: JsonValueSchema,
+    valid: z.literal(true),
+    rungUsed: z.enum(["native", "tool", "prompt"]),
+  })
+  .strict();
+
+function readFailureUsage(error: unknown): ModelCompletion["usage"] | undefined {
+  if (typeof error !== "object" || error === null || !("usage" in error)) {
+    return undefined;
+  }
+  const parsed = ModelUsageSchema.safeParse(error.usage);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function readFailureCount(error: unknown, key: "latencyMs" | "repairAttempts"): number {
+  if (typeof error !== "object" || error === null) {
+    return 0;
+  }
+  let value: unknown;
+  if (key === "latencyMs" && "latencyMs" in error) {
+    value = error.latencyMs;
+  } else if (key === "repairAttempts" && "repairAttempts" in error) {
+    value = error.repairAttempts;
+  }
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }

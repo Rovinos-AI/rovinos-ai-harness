@@ -8,12 +8,13 @@ import {
   type Link,
   type SpanContext,
 } from "@opentelemetry/api";
-import { HarnessError, type Code, type Id, type JsonValue } from "@harness/schemas";
+import { HarnessError, type Code, type Event, type Id, type JsonValue } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { IdGenerator, ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import type { ResolvedRole } from "../roles.js";
 import type { RunScopeRegistry } from "./scope.js";
 import type { SubagentResult } from "./result.js";
+import { aggregateSubagentUsage } from "./result.js";
 
 /** Stable errors raised before a child run can start. */
 export type SubagentErrorCode =
@@ -98,7 +99,8 @@ export class SubagentSupervisor {
       throw new SubagentError("subagent_children_limit");
     }
     const recordSpawned = context.recordSubagentSpawned;
-    if (recordSpawned === undefined) {
+    const recordCompleted = context.recordSubagentCompleted;
+    if (recordSpawned === undefined || recordCompleted === undefined) {
       throw new SubagentError("subagent_recorder_unavailable");
     }
     const parentSpanContext = this.parentSpanContext();
@@ -107,6 +109,7 @@ export class SubagentSupervisor {
     }
 
     const childRunId = this.options.ids.next();
+    const completionRecorded = await this.hasCompletion(context.runId, childRunId);
     await recordSpawned({
       childRunId,
       role: role.id,
@@ -123,25 +126,27 @@ export class SubagentSupervisor {
       goal,
       ...(inputs === undefined ? {} : { inputs }),
     };
-    const result = await this.options.runChild({
-      runId: childRunId,
-      parentRunId: context.runId,
-      parentCallId: call.callId,
-      depth,
-      scopeId,
-      role,
-      input: childInput,
-      tools: childTools,
-      signal: context.signal,
-      parentSpanContext,
-      rootSpanParent: trace.setSpanContext(ROOT_CONTEXT, parentSpanContext),
-      rootSpanLinks: [{ context: parentSpanContext }],
-    });
-    if (result.status !== "suspended") {
-      const recordCompleted = context.recordSubagentCompleted;
-      if (recordCompleted === undefined) {
-        throw new SubagentError("subagent_recorder_unavailable");
-      }
+    let result: SubagentResult;
+    try {
+      result = await this.options.runChild({
+        runId: childRunId,
+        parentRunId: context.runId,
+        parentCallId: call.callId,
+        depth,
+        scopeId,
+        role,
+        input: childInput,
+        tools: childTools,
+        signal: context.signal,
+        parentSpanContext,
+        rootSpanParent: trace.setSpanContext(ROOT_CONTEXT, parentSpanContext),
+        rootSpanLinks: [{ context: parentSpanContext }],
+      });
+    } catch (error) {
+      await this.recordFailedCompletion(childRunId, completionRecorded, recordCompleted);
+      throw error;
+    }
+    if (result.status !== "suspended" && !completionRecorded) {
       const { inputTokens, outputTokens, costMicros } = result.usage;
       await recordCompleted({
         childRunId,
@@ -162,6 +167,41 @@ export class SubagentSupervisor {
       }
     }
     return count;
+  }
+
+  private async recordFailedCompletion(
+    childRunId: Id,
+    completionRecorded: boolean,
+    recordCompleted: NonNullable<RunContext["recordSubagentCompleted"]>,
+  ): Promise<void> {
+    if (completionRecorded) {
+      return;
+    }
+    const usage = aggregateSubagentUsage(await this.childEvents(childRunId));
+    await recordCompleted({
+      childRunId,
+      outcome: "failed",
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
+    });
+  }
+
+  private async hasCompletion(runId: Id, childRunId: Id): Promise<boolean> {
+    for await (const event of this.options.store.read(runId)) {
+      if (event.type === "subagent_completed" && event.childRunId === childRunId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async childEvents(runId: Id): Promise<Event[]> {
+    const events: Event[] = [];
+    for await (const event of this.options.store.read(runId)) {
+      events.push(event);
+    }
+    return events;
   }
 }
 
