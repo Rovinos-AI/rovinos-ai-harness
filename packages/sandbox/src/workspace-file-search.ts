@@ -199,18 +199,20 @@ export async function searchDirectory(directory: string, context: SearchContext)
         return true;
       }
     } else if (info.isFile()) {
+      try {
+        fileIdentity(info);
+      } catch (error) {
+        if (error instanceof WorkspaceHardLinkError) {
+          continue;
+        }
+        throw error;
+      }
       if (state.filesVisited >= MAX_SEARCH_FILES) {
         return true;
       }
       state.filesVisited += 1;
-      try {
-        if (await searchFile(path, relativePath, context)) {
-          return true;
-        }
-      } catch (error) {
-        if (!(error instanceof WorkspaceHardLinkError)) {
-          throw error;
-        }
+      if (await searchFile(path, relativePath, context)) {
+        return true;
       }
     }
   }

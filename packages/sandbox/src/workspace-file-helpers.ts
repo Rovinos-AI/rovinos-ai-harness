@@ -25,12 +25,6 @@ export interface WorkspaceFileIdentity {
   readonly mode: number;
 }
 
-export class WorkspaceHardLinkError extends WorkspaceFileError {
-  constructor() {
-    super("fs_path_invalid");
-  }
-}
-
 /** File bytes paired with the identity observed while reading them. */
 export interface WorkspaceFileSnapshot {
   readonly bytes: Buffer;
@@ -69,6 +63,13 @@ export class WorkspaceFileError extends HarnessError {
   constructor(code: FsOperationErrorCode) {
     super("The workspace file operation failed.");
     this.code = code;
+  }
+}
+
+/** Marks a hard-link rejection so recursive search can skip only that case. */
+export class WorkspaceHardLinkError extends WorkspaceFileError {
+  constructor() {
+    super("fs_path_invalid");
   }
 }
 

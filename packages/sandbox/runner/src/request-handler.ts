@@ -2,7 +2,6 @@
 import type { IncomingMessage } from "node:http";
 import { Id, parseJson } from "@harness/schemas";
 import { z } from "zod";
-import process from "node:process";
 import { ExecResultSchema, ExecSpecSchema } from "../../src/types.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
 import {
@@ -238,31 +237,27 @@ function fileOperationFailure(error: unknown): { readonly status: number; readon
 
 function setExecutionIdentity(
   credentials: RunnerCredentialApi,
-  uid: number | undefined,
-  gid: number | undefined,
-  currentUid: number,
-  currentGid: number,
+  requested: { readonly uid: number | undefined; readonly gid: number | undefined },
+  original: { readonly uid: number; readonly gid: number },
 ): void {
-  if (gid !== undefined && gid !== currentGid) {
-    credentials.setegid?.(gid);
+  if (requested.gid !== undefined && requested.gid !== original.gid) {
+    credentials.setegid?.(requested.gid);
   }
-  if (uid !== undefined && uid !== currentUid) {
-    credentials.seteuid?.(uid);
+  if (requested.uid !== undefined && requested.uid !== original.uid) {
+    credentials.seteuid?.(requested.uid);
   }
 }
 
 function restoreExecutionIdentity(
   credentials: RunnerCredentialApi,
-  uid: number,
-  gid: number,
-  currentUid: number,
-  currentGid: number,
+  original: { readonly uid: number; readonly gid: number },
+  requested: { readonly uid: number; readonly gid: number },
 ): void {
-  if (uid !== currentUid) {
-    credentials.seteuid?.(uid);
+  if (original.uid !== requested.uid) {
+    credentials.seteuid?.(original.uid);
   }
-  if (gid !== currentGid) {
-    credentials.setegid?.(gid);
+  if (original.gid !== requested.gid) {
+    credentials.setegid?.(original.gid);
   }
 }
 
@@ -278,15 +273,15 @@ async function withExecutionIdentity<T>(
     return operation();
   }
   try {
-    setExecutionIdentity(credentials, uid, gid, originalUid, originalGid);
+    const original = { uid: originalUid, gid: originalGid };
+    const requested = { uid, gid };
+    setExecutionIdentity(credentials, requested, original);
     return await operation();
   } finally {
     restoreExecutionIdentity(
       credentials,
-      originalUid,
-      originalGid,
-      uid ?? originalUid,
-      gid ?? originalGid,
+      { uid: originalUid, gid: originalGid },
+      { uid: uid ?? originalUid, gid: gid ?? originalGid },
     );
   }
 }

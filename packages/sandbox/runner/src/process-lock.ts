@@ -4,6 +4,7 @@ import process from "node:process";
 
 let pendingOperations: Promise<void> = Promise.resolve();
 
+/** Process credential access used by the runner and injectable by tests. */
 export interface RunnerCredentialApi {
   readonly geteuid: () => number | undefined;
   readonly getegid: () => number | undefined;

@@ -279,6 +279,10 @@ async function handleRunnerPayload(
     writeLeaseResult(!context.isBusy() && (await context.leases.release(payload.runId)), response);
     return;
   }
+  if (context.isBusy()) {
+    writeError(response, 409, "sandbox_busy");
+    return;
+  }
   if (!(await context.leases.renew(payload.runId)) || context.isBusy()) {
     writeError(response, 409, "sandbox_busy");
     return;
@@ -291,19 +295,22 @@ async function handleRunnerPayload(
     }
   });
   try {
-    await withRunnerProcessLock(() => executeRunnerPayload({
-      options: context.options,
-      payload,
-      response,
-      signal: controller.signal,
-      executeSpec: (runId, spec, signal) => executeRunnerSpec(context.options, runId, spec, signal),
-      workspaceFiles: context.workspaceFiles,
-      executionUid: context.executionUid,
-      executionGid: context.executionGid,
-      credentials: context.credentials,
-      sendJson,
-      sendError: writeError,
-    }));
+    await withRunnerProcessLock(() =>
+      executeRunnerPayload({
+        options: context.options,
+        payload,
+        response,
+        signal: controller.signal,
+        executeSpec: (runId, spec, signal) =>
+          executeRunnerSpec(context.options, runId, spec, signal),
+        workspaceFiles: context.workspaceFiles,
+        executionUid: context.executionUid,
+        executionGid: context.executionGid,
+        credentials: context.credentials,
+        sendJson,
+        sendError: writeError,
+      }),
+    );
   } finally {
     context.setBusy(false);
     await context.leases.finishExecution(payload.runId);

@@ -739,7 +739,9 @@ describe("workspace file operation contracts and safety", () => {
         mode: "overwrite",
         signal: controller.signal,
         expectedIdentity: snapshot.identity,
-        onTemporaryFileCreated: () => controller.abort(),
+        onTemporaryFileCreated: () => {
+          controller.abort();
+        },
       }),
     ).rejects.toMatchObject({ code: "fs_operation_failed" });
     const unchanged = await readFile(path);
