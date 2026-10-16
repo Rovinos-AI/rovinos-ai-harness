@@ -121,6 +121,9 @@ describe("createAppTelemetry", () => {
 
     telemetry.record("ui.render", {});
     const firstFlush = telemetry.flush();
+    await vi.waitFor(() => {
+      expect(callTool).toHaveBeenCalledTimes(2);
+    });
     telemetry.record("ui.error", { code: "during_send" });
     const secondFlush = telemetry.flush();
     let firstResolved = false;
@@ -132,9 +135,6 @@ describe("createAppTelemetry", () => {
       secondResolved = true;
     });
 
-    await vi.waitFor(() => {
-      expect(callTool).toHaveBeenCalledTimes(2);
-    });
     expect(callTool).toHaveBeenNthCalledWith(2, "harness.telemetry.emit", {
       spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 0 }],
     });
@@ -190,6 +190,7 @@ describe("createAppTelemetry", () => {
   });
 
   it("swallows bridge errors and keeps the batch available for retry", async () => {
+    vi.useFakeTimers();
     let fail = true;
     const callTool = vi.fn((..._args: Parameters<AppTelemetryBridge["callTool"]>) => {
       if (_args[1].spans.length === 0) {
@@ -204,6 +205,7 @@ describe("createAppTelemetry", () => {
       bridge: { callTool },
       manifest: { spans: ["ui.render"] as const },
       now: () => 10,
+      random: () => 0.5,
     });
     await waitForActive(telemetry);
 
@@ -211,12 +213,18 @@ describe("createAppTelemetry", () => {
     await expect(telemetry.flush()).resolves.toBeUndefined();
     fail = false;
     await expect(telemetry.flush()).resolves.toBeUndefined();
+    expect(callTool).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.waitFor(() => {
+      expect(callTool).toHaveBeenCalledTimes(3);
+    });
 
     expect(callTool).toHaveBeenCalledTimes(3);
     expect(callTool).toHaveBeenLastCalledWith("harness.telemetry.emit", {
       spans: [{ name: "ui.render", startOffsetMs: 0, durationMs: 0 }],
     });
     await telemetry.dispose();
+    vi.useRealTimers();
   });
 
   it("never sends undeclared attribute values", async () => {
