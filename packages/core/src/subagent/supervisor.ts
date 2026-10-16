@@ -211,7 +211,9 @@ export class SubagentSupervisor {
         ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
       });
     } catch {
-      return;
+      trace
+        .getSpan(otelContext.active())
+        ?.setAttribute("harness.subagent.completion_record_failed", true);
     }
   }
 
