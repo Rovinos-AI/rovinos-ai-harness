@@ -1893,11 +1893,23 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
         expect.arrayContaining(["fs.read", "fs.write", "fs.edit", "fs.list", "fs.search"]),
       );
       expect(decide).toHaveBeenCalledTimes(3);
-      expect(forwarded).toMatchObject(
+      const forwardedFetch = forwarded.find(({ request }) => "url" in request)?.request;
+      expect(forwardedFetch).toMatchObject({ url: `http://${probeHost}:8080/runtime` });
+      const forwardedFileRequests = forwarded.flatMap(({ request }) =>
+        "operation" in request ? [request] : [],
+      );
+      expect(forwardedFileRequests).toEqual(
         expect.arrayContaining([
-          { request: { url: `http://${probeHost}:8080/runtime` } },
-          { request: { operation: "write" } },
-          { request: { operation: "read" } },
+          {
+            operation: "write",
+            input: {
+              content: "<EMAIL_1>",
+              expectedSha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              mode: "create",
+              path: "notes.txt",
+            },
+          },
+          { operation: "read", input: { path: "notes.txt" } },
         ]),
       );
       expect(responses).toHaveLength(3);

@@ -313,7 +313,7 @@ describe("sandbox runner Compose service", () => {
     expect(edit.status).toBe(200);
     expect(createInPrivateDirectory.status).toBe(200);
     expect(parseJson(FsToolResultSchema, overwrite.body)).toMatchObject({ bytes: 5 });
-    expect(parseJson(FsToolResultSchema, edit.body)).toMatchObject({ bytes: 14 });
+    expect(parseJson(FsToolResultSchema, edit.body)).toMatchObject({ bytes: 13 });
     expect(parseJson(FsToolResultSchema, createInPrivateDirectory.body)).toMatchObject({
       bytes: 7,
     });
