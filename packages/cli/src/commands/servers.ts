@@ -12,6 +12,7 @@ import {
   type McpConnectionDependencies,
   type McpTool,
 } from "@harness/mcp";
+import { openUrlInBrowser } from "@harness/sandbox";
 import {
   Code,
   HarnessError,
@@ -20,7 +21,6 @@ import {
   type ServerConfig,
 } from "@harness/schemas";
 import { LocalKeyProvider } from "@harness/vault";
-import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod";
 import type { CliContext, CommandModule } from "../command.js";
@@ -106,6 +106,7 @@ async function discoverServers(
   servers: readonly ServerConfig[],
   context: Parameters<CommandModule["register"]>[1],
   overrides: ServersCommandOverrides | undefined,
+  oauthTokenStore?: OAuthTokenStore,
 ): Promise<DiscoveryResult[]> {
   const defaultResolver = new CompositeSecretResolver();
   const dependencies: McpConnectionDependencies = {
@@ -114,6 +115,7 @@ async function discoverServers(
         ? (await defaultResolver.resolve(ref, signal)).reveal()
         : (await context.secretResolver.resolve(ref, signal)).reveal(),
     env: process.env,
+    ...(oauthTokenStore === undefined ? {} : { oauthTokenStore }),
     ...(overrides?.createTransport === undefined
       ? {}
       : { createTransport: overrides.createTransport }),
@@ -314,19 +316,6 @@ function createLoginKeys(config: HarnessConfig, context: CliContext): LocalKeyPr
   });
 }
 
-function launchBrowser(url: string): Promise<void> {
-  const executable =
-    process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, [url], { detached: true, stdio: "ignore" });
-    child.once("error", () => reject(new ServersCommandError("server_browser_open_failed")));
-    child.once("spawn", () => {
-      child.unref();
-      resolve();
-    });
-  });
-}
-
 function printAuthResult(
   output: Output,
   program: Parameters<CommandModule["register"]>[0],
@@ -383,7 +372,11 @@ async function runServersLogin(
         authorizationUrl: session.authorizationUrl,
       });
       if (options.open === true) {
-        await (overrides?.openBrowser ?? launchBrowser)(session.authorizationUrl);
+        try {
+          await (overrides?.openBrowser ?? openUrlInBrowser)(session.authorizationUrl);
+        } catch {
+          throw new ServersCommandError("server_browser_open_failed");
+        }
       }
     } else {
       printAuthResult(context.out, program, { status: "authorized" });
@@ -447,22 +440,40 @@ export function createServersCommand(overrides?: ServersCommandOverrides): Comma
               ? configured
               : configured.filter(({ id }) => id === options.server);
           const missingServer = options.server !== undefined && selected.length === 0;
-          const discovered = await discoverServers(selected, context, overrides);
-          const result = createResult(discovered);
-          const completed = {
-            ...result,
-            ...(missingServer ? { errorCode: Code.parse("mcp_server_not_found") } : {}),
-          };
-          if (program.optsWithGlobals().json === true) {
-            context.out.json(ServersCheckResultSchema, completed);
-          } else {
-            printHumanResult(context.out, completed);
-          }
-          if (
-            completed.errorCode !== undefined ||
-            completed.servers.some(({ reachable }) => !reachable)
-          ) {
-            throw new ServersCheckFailedError();
+          let keys: LocalKeyProvider | undefined;
+          let store: OAuthTokenStore | undefined;
+          const hasOAuthServers = selected.some(
+            (server) => server.transport.kind === "http" && server.transport.auth !== undefined,
+          );
+          try {
+            if (hasOAuthServers && config.keys !== undefined) {
+              const core = await import("@harness/core");
+              keys = createLoginKeys(config, context);
+              store = await OAuthTokenStore.open(
+                join(core.resolveDataDir(process.env), "mcp-oauth.db"),
+                keys,
+              );
+            }
+            const discovered = await discoverServers(selected, context, overrides, store);
+            const result = createResult(discovered);
+            const completed = {
+              ...result,
+              ...(missingServer ? { errorCode: Code.parse("mcp_server_not_found") } : {}),
+            };
+            if (program.optsWithGlobals().json === true) {
+              context.out.json(ServersCheckResultSchema, completed);
+            } else {
+              printHumanResult(context.out, completed);
+            }
+            if (
+              completed.errorCode !== undefined ||
+              completed.servers.some(({ reachable }) => !reachable)
+            ) {
+              throw new ServersCheckFailedError();
+            }
+          } finally {
+            store?.close();
+            keys?.dispose();
           }
         });
       servers

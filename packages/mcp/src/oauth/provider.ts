@@ -49,30 +49,38 @@ export interface McpOAuthProviderOptions {
 
 let warningSuppressionDepth = 0;
 let originalWarning: Console["warn"] | undefined;
+let originalError: Console["error"] | undefined;
 
 function suppressSdkWarnings(): () => void {
   const consoleObject = globalThis["console"];
   if (warningSuppressionDepth === 0) {
     originalWarning = consoleObject["warn"];
-    const warning = originalWarning;
-    const redactingWarning: typeof warning = (...args) => {
-      const firstArgument = args[0];
-      if (typeof firstArgument === "string" && firstArgument.startsWith("[mcp-sdk]")) {
-        return;
-      }
-      Reflect.apply(warning, consoleObject, args);
-    };
-    if (!Reflect.set(consoleObject, "warn", redactingWarning)) {
+    originalError = consoleObject["error"];
+    const discard: Console["warn"] = () => undefined;
+    if (!Reflect.set(consoleObject, "warn", discard)) {
       originalWarning = undefined;
+      originalError = undefined;
+      throw new McpAuthRequiredError();
+    }
+    if (!Reflect.set(consoleObject, "error", discard)) {
+      Reflect.set(consoleObject, "warn", originalWarning);
+      originalWarning = undefined;
+      originalError = undefined;
       throw new McpAuthRequiredError();
     }
   }
   warningSuppressionDepth += 1;
   return () => {
     warningSuppressionDepth -= 1;
-    if (warningSuppressionDepth === 0 && originalWarning !== undefined) {
-      Reflect.set(consoleObject, "warn", originalWarning);
+    if (warningSuppressionDepth === 0) {
+      if (originalWarning !== undefined) {
+        Reflect.set(consoleObject, "warn", originalWarning);
+      }
+      if (originalError !== undefined) {
+        Reflect.set(consoleObject, "error", originalError);
+      }
       originalWarning = undefined;
+      originalError = undefined;
     }
   };
 }
@@ -105,6 +113,8 @@ export class McpOAuthProvider implements OAuthClientProvider {
   readonly #clientSecret: string | undefined;
   #record: OAuthCredentialRecord;
   #discovery: OAuthDiscoveryState | undefined;
+  #discoveryIssuer: string | undefined;
+  #clientCredentialsExtensionEnabled = false;
   #authorizationUrl: URL | undefined;
 
   private constructor(options: McpOAuthProviderOptions, record: OAuthCredentialRecord, secret?: string) {
@@ -117,6 +127,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
     this.#store = options.tokenStore;
     this.#interactive = options.interactive === true;
     this.#record = record;
+    this.#discoveryIssuer = record.issuer;
     this.#clientSecret = secret;
     this.#redirectUrl =
       options.redirectUrl ??
@@ -198,12 +209,21 @@ export class McpOAuthProvider implements OAuthClientProvider {
   ): Promise<StoredOAuthClientInformation | undefined> {
     const issuer = context?.issuer;
     if (issuer === undefined) {
+      return this.#record.clientInformation?.issuer === this.#record.issuer
+        ? this.#record.clientInformation
+        : undefined;
+    }
+    if (
+      this.#record.issuer === issuer &&
+      this.#record.clientInformation?.issuer === issuer
+    ) {
       return this.#record.clientInformation;
     }
-    if (this.#record.issuer === issuer) {
-      return this.#record.clientInformation;
+    const knownIssuer = this.#discoveryIssuer ?? this.#record.issuer;
+    if (knownIssuer !== undefined && knownIssuer !== issuer) {
+      return undefined;
     }
-    if (this.#record.issuer !== undefined || this.#config.clientId === undefined) {
+    if (this.#config.clientId === undefined) {
       return undefined;
     }
     const information: StoredOAuthClientInformation = {
@@ -224,19 +244,26 @@ export class McpOAuthProvider implements OAuthClientProvider {
     if (issuer === undefined) {
       throw new McpAuthRequiredError();
     }
+    const current = this.#recordForIssuer(issuer);
     await this.#save({
-      ...this.#record,
+      ...current,
       issuer,
       clientInformation: { ...information, issuer },
     });
+    this.#discoveryIssuer = issuer;
   }
 
   /** Returns tokens only for the matching issuer, or the most recently stored tokens to transports. */
   tokens(context?: OAuthClientInformationContext): StoredOAuthTokens | undefined {
-    if (context?.issuer !== undefined && context.issuer !== this.#record.issuer) {
+    const tokens = this.#record.tokens;
+    if (
+      tokens === undefined ||
+      tokens.issuer !== this.#record.issuer ||
+      (context?.issuer !== undefined && context.issuer !== tokens.issuer)
+    ) {
       return undefined;
     }
-    return this.#record.tokens;
+    return tokens;
   }
 
   /** Stores SDK tokens with their validated issuer. */
@@ -245,7 +272,12 @@ export class McpOAuthProvider implements OAuthClientProvider {
     if (issuer === undefined) {
       throw new McpAuthRequiredError();
     }
-    await this.#save({ ...this.#record, issuer, tokens: { ...tokens, issuer } });
+    await this.#save({
+      ...this.#recordForIssuer(issuer),
+      issuer,
+      tokens: { ...tokens, issuer },
+    });
+    this.#discoveryIssuer = issuer;
   }
 
   /** Captures the SDK authorization URL or refuses to start an interactive run-time flow. */
@@ -274,6 +306,9 @@ export class McpOAuthProvider implements OAuthClientProvider {
     if (this.#config.grant !== "client_credentials") {
       return undefined;
     }
+    if (this.#clientCredentialsExtensionEnabled !== true) {
+      throw new McpAuthRequiredError();
+    }
     const parameters = new URLSearchParams({ grant_type: "client_credentials" });
     const requestedScope = scope ?? this.#config.scopes?.join(" ");
     if (requestedScope !== undefined && requestedScope.length > 0) {
@@ -282,11 +317,26 @@ export class McpOAuthProvider implements OAuthClientProvider {
     return parameters;
   }
 
+  /** Enables the client-credentials grant only after the MCP server advertises its extension. */
+  setClientCredentialsExtensionEnabled(enabled: boolean): void {
+    this.#clientCredentialsExtensionEnabled = enabled;
+  }
+
   /** Persists discovery state in memory for issuer validation across the login redirect. */
   async saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
     this.#discovery = state;
     const issuer = state.authorizationServerMetadata?.issuer ?? state.authorizationServerUrl;
-    await this.#save({ ...this.#record, issuer });
+    const previousIssuer = this.#discoveryIssuer ?? this.#record.issuer;
+    if (previousIssuer !== undefined && previousIssuer !== issuer) {
+      const next = { ...this.#record };
+      delete next.issuer;
+      delete next.clientInformation;
+      delete next.tokens;
+      delete next.codeVerifier;
+      delete next.state;
+      await this.#save(next);
+    }
+    this.#discoveryIssuer = issuer;
   }
 
   /** Returns discovery metadata retained for the current process. */
@@ -302,6 +352,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
       this.#store.delete(this.#serverId);
       this.#record = {};
       this.#discovery = undefined;
+      this.#discoveryIssuer = undefined;
       return;
     }
     const next = { ...this.#record };
@@ -314,8 +365,21 @@ export class McpOAuthProvider implements OAuthClientProvider {
       delete next.state;
     } else {
       this.#discovery = undefined;
+      this.#discoveryIssuer = undefined;
     }
     await this.#save(next);
+  }
+
+  #recordForIssuer(issuer: string): OAuthCredentialRecord {
+    if (this.#record.issuer === undefined || this.#record.issuer === issuer) {
+      return { ...this.#record };
+    }
+    const next = { ...this.#record };
+    delete next.clientInformation;
+    delete next.tokens;
+    delete next.codeVerifier;
+    delete next.state;
+    return next;
   }
 
   /** Runs OAuth discovery using the SDK without exposing its server-derived warning messages. */

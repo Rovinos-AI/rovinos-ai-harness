@@ -325,6 +325,72 @@ describe("McpOAuthProvider", () => {
     }
   });
 
+  it("clears issuer A credentials when discovery switches to issuer B", async () => {
+    const store = await OAuthTokenStore.open(":memory:", keyProvider);
+    const server = serverConfig("http://127.0.0.1:3000");
+    if (server.transport.kind !== "http" || server.transport.auth === undefined) {
+      throw new Error("invalid OAuth test configuration");
+    }
+    const provider = await McpOAuthProvider.create({
+      serverId: server.id,
+      auth: server.transport.auth,
+      tokenStore: store,
+      resolveSecret: () => Promise.resolve("configured-secret"),
+    });
+    try {
+      await provider.saveClientInformation(
+        { client_id: "issuer-a-client", issuer: issuerCanary },
+        { issuer: issuerCanary },
+      );
+      await provider.saveTokens(
+        { access_token: accessTokenCanary, token_type: "Bearer", issuer: issuerCanary },
+        { issuer: issuerCanary },
+      );
+      await provider.saveCodeVerifier("issuer-a-verifier");
+      await provider.state();
+
+      const issuerB = "https://different-issuer.invalid";
+      await provider.saveDiscoveryState({ authorizationServerUrl: issuerB });
+
+      expect(provider.tokens({ issuer: issuerB })).toBeUndefined();
+      expect(await provider.clientInformation({ issuer: issuerB })).toBeUndefined();
+      const stored = await store.load(server.id);
+      expect(stored?.issuer).toBeUndefined();
+      expect(stored?.clientInformation).toBeUndefined();
+      expect(stored?.tokens).toBeUndefined();
+      expect(stored?.codeVerifier).toBeUndefined();
+      expect(stored?.state).toBeUndefined();
+    } finally {
+      store.close();
+    }
+  });
+
+  it("reuses configured client information after cached registration invalidation", async () => {
+    const store = await OAuthTokenStore.open(":memory:", keyProvider);
+    const server = serverConfig("http://127.0.0.1:3000", {
+      grant: "authorization_code",
+      clientId: "configured-client",
+      clientSecret: "env:OAUTH_SECRET",
+    });
+    if (server.transport.kind !== "http" || server.transport.auth === undefined) {
+      throw new Error("invalid OAuth test configuration");
+    }
+    const provider = await McpOAuthProvider.create({
+      serverId: server.id,
+      auth: server.transport.auth,
+      tokenStore: store,
+      resolveSecret: () => Promise.resolve("configured-secret"),
+    });
+    try {
+      const initial = await provider.clientInformation({ issuer: issuerCanary });
+      await provider.invalidateCredentials("client");
+
+      expect(await provider.clientInformation({ issuer: issuerCanary })).toEqual(initial);
+    } finally {
+      store.close();
+    }
+  });
+
   it("prepares client-credentials grants and refuses interactive runtime redirects", async () => {
     const mock = await startMockOAuthServer();
     const store = await OAuthTokenStore.open(":memory:", keyProvider);
@@ -346,6 +412,9 @@ describe("McpOAuthProvider", () => {
     try {
       expect(provider.redirectUrl).toBeUndefined();
       expect(provider.clientMetadata.grant_types).toEqual(["client_credentials"]);
+      expect(() => provider.prepareTokenRequest()).toThrow(McpAuthRequiredError);
+      expect(mock.tokenRequest).toBeUndefined();
+      provider.setClientCredentialsExtensionEnabled(true);
       expect(decodeURIComponent(provider.prepareTokenRequest()?.toString() ?? "")).toBe(
         "grant_type=client_credentials&scope=tools:read",
       );
@@ -357,6 +426,30 @@ describe("McpOAuthProvider", () => {
       expect(mock.tokenRequest?.get("scope")).toBe("tools:read");
       expect((await store.load(server.id))?.tokens?.access_token).toBe(accessTokenCanary);
     } finally {
+      store.close();
+    }
+  });
+
+  it("does not request a client-credentials token before the server advertises the extension", async () => {
+    const mock = await startMockOAuthServer({ unauthorizedMcp: true });
+    const store = await OAuthTokenStore.open(":memory:", keyProvider);
+    const server = serverConfig(mock.baseUrl, {
+      grant: "client_credentials",
+      clientId: "service-client",
+      clientSecret: "env:OAUTH_SECRET",
+      scopes: ["tools:read"],
+    });
+    const connection = new McpConnection(server, {
+      resolveSecret: () => Promise.resolve("configured-secret"),
+      oauthTokenStore: store,
+    });
+    try {
+      await expect(connection.connect()).rejects.toMatchObject({
+        code: "mcp_auth_required",
+      });
+      expect(mock.tokenRequest).toBeUndefined();
+    } finally {
+      await connection.close();
       store.close();
     }
   });
@@ -440,24 +533,30 @@ describe("McpOAuthProvider", () => {
     }
   });
 
-  it("restores console warnings even when an operation rejects", async () => {
+  it("suppresses all auth-path warnings and errors, then restores the console", async () => {
     const warning = console.warn;
+    const errorOutput = console.error;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const spyWarning = console.warn;
+    const spyError = console.error;
     try {
       await expect(
         withOAuthWarningsRedacted(async () => {
-          Reflect.apply(console.warn, console, ["[mcp-sdk] OAuth error_description canary"]);
-          Reflect.apply(console.warn, console, ["unrelated warning"]);
+          Reflect.apply(console.warn, console, [{ message: errorCanary }]);
+          Reflect.apply(console.error, console, [`x ${errorCanary}`]);
           throw new McpAuthRequiredError();
         }),
       ).rejects.toBeInstanceOf(McpAuthRequiredError);
       expect(console.warn).toBe(spyWarning);
-      expect(warn.mock.calls.flat().join(" ")).toContain("unrelated warning");
-      expect(warn.mock.calls.flat().join(" ")).not.toContain("error_description");
+      expect(console.error).toBe(spyError);
+      expect(warn).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
+      error.mockRestore();
     }
     expect(console.warn).toBe(warning);
+    expect(console.error).toBe(errorOutput);
   });
 });

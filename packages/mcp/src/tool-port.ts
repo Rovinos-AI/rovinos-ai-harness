@@ -245,6 +245,8 @@ function errorCode(error: unknown, signal: AbortSignal): string {
   }
   if (error instanceof McpConnectionError) {
     switch (error.code) {
+      case "mcp_auth_required":
+        return "mcp_auth_required";
       case "mcp_tool_arguments_invalid":
         return "args_invalid";
       case "mcp_connect_timeout":

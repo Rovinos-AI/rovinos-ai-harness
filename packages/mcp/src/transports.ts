@@ -47,6 +47,10 @@ export interface McpTransportDependencies {
   readonly logger?: McpLogger;
   /** Encrypted store used only for configured OAuth HTTP transports. */
   readonly oauthTokenStore?: OAuthTokenStore;
+  /** Extension availability learned from a previous MCP handshake, if any. */
+  readonly clientCredentialsExtensionEnabled?: boolean;
+  /** Gives the connection access to the OAuth provider after transport creation. */
+  readonly onOAuthProvider?: (provider: McpOAuthProvider) => void;
 }
 
 async function resolveValue(
@@ -118,6 +122,10 @@ async function createHttpTransport(
       tokenStore: dependencies.oauthTokenStore,
       resolveSecret: (ref) => dependencies.resolveSecret(ref, signal),
     });
+    authProvider.setClientCredentialsExtensionEnabled(
+      dependencies.clientCredentialsExtensionEnabled === true,
+    );
+    dependencies.onOAuthProvider?.(authProvider);
     if (config.auth.grant === "authorization_code" && !authProvider.hasStoredTokens) {
       throw new McpAuthRequiredError();
     }

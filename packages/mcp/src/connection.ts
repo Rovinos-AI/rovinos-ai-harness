@@ -10,6 +10,7 @@ import {
 import { compileJsonSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
 import { McpConnectionError, McpProtocolError, isConnectionLossError } from "./errors.js";
 import { McpAuthRequiredError, withOAuthWarningsRedacted } from "./oauth/provider.js";
+import type { McpOAuthProvider } from "./oauth/provider.js";
 import type { OAuthTokenStore } from "./oauth/token-store.js";
 import { invokeMcpTool } from "./mcp-call.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
@@ -102,6 +103,8 @@ export class McpConnection {
   #state: McpConnectionState = "unavailable";
   #protocolEra: "legacy" | "modern" | undefined;
   #cachedTools: CachedToolList | undefined;
+  #supportsClientCredentialsExtension = false;
+  #oauthProvider: McpOAuthProvider | undefined;
   #closed = false;
   #connectGeneration = 0;
 
@@ -212,6 +215,12 @@ export class McpConnection {
           timeout: this.#config.timeouts.connectMs,
         }),
       );
+      this.#supportsClientCredentialsExtension =
+        activeClient.getServerCapabilities()?.extensions?.[OAUTH_CLIENT_CREDENTIALS_EXTENSION] !==
+        undefined;
+      this.#oauthProvider?.setClientCredentialsExtensionEnabled(
+        this.#supportsClientCredentialsExtension,
+      );
       if (this.#isStale(generation)) {
         this.#state = "unavailable";
         await activeClient.close().catch(() => undefined);
@@ -259,6 +268,10 @@ export class McpConnection {
         ...(env === undefined ? {} : { env }),
         ...(logger === undefined ? {} : { logger }),
         ...(oauthTokenStore === undefined ? {} : { oauthTokenStore }),
+        clientCredentialsExtensionEnabled: this.#supportsClientCredentialsExtension,
+        onOAuthProvider: (provider) => {
+          this.#oauthProvider = provider;
+        },
       },
       signal,
     );
@@ -267,7 +280,8 @@ export class McpConnection {
   #createClient(): Client {
     const oauthClientCredentials =
       this.#config.transport.kind === "http" &&
-      this.#config.transport.auth?.grant === "client_credentials";
+      this.#config.transport.auth?.grant === "client_credentials" &&
+      this.#supportsClientCredentialsExtension;
     return new Client(
       { name: "rovinos-ai-harness", version: "0.0.0" },
       {
@@ -360,6 +374,10 @@ export class McpConnection {
         }),
       );
     } catch (error) {
+      if (error instanceof McpAuthRequiredError) {
+        this.#markUnavailable();
+        throw new McpConnectionError("mcp_auth_required");
+      }
       throw error instanceof McpConnectionError
         ? error
         : new McpConnectionError("mcp_list_tools_failed");

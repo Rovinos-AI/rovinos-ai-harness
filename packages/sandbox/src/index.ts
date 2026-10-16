@@ -30,6 +30,7 @@ export {
 } from "./workspace.js";
 export { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
 export type { RemoteSandboxBackendOptions } from "./remote.js";
+export { openUrlInBrowser } from "./open-browser.js";
 export {
   ExecLimitsSchema,
   ExecResultSchema,

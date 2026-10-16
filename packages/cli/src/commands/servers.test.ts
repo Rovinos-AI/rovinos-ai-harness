@@ -8,17 +8,24 @@ import { InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextp
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { HarnessConfigSchema } from "@harness/config";
 import { OAuthTokenStore } from "@harness/mcp";
-import { parseJson, ServersCheckResultSchema, type KeyProvider } from "@harness/schemas";
+import {
+  DoctorResultsSchema,
+  parseJson,
+  ServersCheckResultSchema,
+  type KeyProvider,
+} from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
 import { createOutput } from "../output.js";
 import { main } from "../main.js";
+import { createDoctorCommand } from "./doctor.js";
 import { createServersCommand } from "./servers.js";
 
 const descriptionCanary = "servers-check-description-canary";
 const errorCanary = "servers-check-error-canary";
+const oauthErrorCanary = "oauth-cli-error-description-canary";
 const inputSchema = {
   type: "object",
   properties: {},
@@ -133,11 +140,59 @@ function sendJson(response: ServerResponse, value: unknown): void {
   response.end(JSON.stringify(value));
 }
 
-async function createOAuthServer() {
+async function createOAuthServer(options: {
+  readonly failTokenExchange?: boolean;
+  readonly unauthorizedMcp?: boolean;
+} = {}) {
+  const mcpHandler = createMcpHandler(() => {
+    const server = new McpServer({ name: "oauth-mcp-server", version: "1.0.0" });
+    server.server.registerCapabilities({ tools: {} });
+    server.server.setRequestHandler("tools/list", () => ({
+      tools: [{ name: "listed", inputSchema }],
+    }));
+    return server;
+  }, { legacy: "reject" });
+  let unauthorizedMcp = options.unauthorizedMcp === true;
   let issuer = "";
   const server = createServer((request, response) => {
     void (async () => {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+      if (request.method === "POST" && url.pathname === "/mcp") {
+        if (
+          unauthorizedMcp ||
+          request.headers.authorization !== ["Bearer", oauthAccessToken].join(" ")
+        ) {
+          response
+            .writeHead(401, {
+              "WWW-Authenticate": [
+                "Bearer",
+                `error="invalid_token", error_description="${oauthErrorCanary}", resource_metadata="http://${request.headers.host}/.well-known/oauth-protected-resource/mcp"`,
+              ].join(" "),
+            })
+            .end();
+          return;
+        }
+        const body = await readRequestBody(request);
+        const headers = new Headers();
+        for (const [key, value] of Object.entries(request.headers)) {
+          if (typeof value === "string") {
+            headers.set(key, value);
+          } else if (Array.isArray(value)) {
+            headers.set(key, value.join(", "));
+          }
+        }
+        const mcpResponse = await mcpHandler.fetch(
+          new Request(`${issuer}${url.pathname}${url.search}`, {
+            method: request.method,
+            headers,
+            body,
+          }),
+        );
+        response
+          .writeHead(mcpResponse.status, Object.fromEntries(mcpResponse.headers.entries()))
+          .end(Buffer.from(await mcpResponse.arrayBuffer()));
+        return;
+      }
       if (request.method === "GET" && url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
         sendJson(response, {
           resource: `http://${request.headers.host}/mcp`,
@@ -169,6 +224,14 @@ async function createOAuthServer() {
         return;
       }
       if (request.method === "POST" && url.pathname === "/token") {
+        if (options.failTokenExchange === true) {
+          sendJson(
+            response,
+            { error: "server_error", error_description: oauthErrorCanary },
+            400,
+          );
+          return;
+        }
         sendJson(response, {
           access_token: oauthAccessToken,
           refresh_token: "servers-login-refresh-token",
@@ -184,7 +247,12 @@ async function createOAuthServer() {
   httpServers.push(server);
   const address = server.address() as AddressInfo;
   issuer = `http://127.0.0.1:${String(address.port)}`;
-  return issuer;
+  return {
+    issuer,
+    setUnauthorized: (value: boolean) => {
+      unauthorizedMcp = value;
+    },
+  };
 }
 
 afterEach(async () => {
@@ -477,7 +545,8 @@ describe("harness servers check", () => {
   it("logs in through a fake browser callback and removes the stored tokens on logout", async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "mcp-oauth-cli-"));
     vi.stubEnv("HARNESS_DATA_DIR", dataDirectory);
-    const serverUrl = await createOAuthServer();
+    const oauthServer = await createOAuthServer();
+    const serverUrl = oauthServer.issuer;
     const configWithAuth = HarnessConfigSchema.parse({
       keys: {
         currentKeyId: "primary",
@@ -528,6 +597,38 @@ describe("harness servers check", () => {
       const databaseBytes = await readFile(databasePath);
       expect(databaseBytes.includes(Buffer.from(oauthAccessToken))).toBe(false);
 
+      const logoutAfterOpen = await main(["servers", "logout", "remote"], context, [
+        createServersCommand(),
+      ]);
+      expect(logoutAfterOpen).toBe(ExitCode.ok);
+      stdout.length = 0;
+      openBrowser.mockClear();
+      const noOpenLogin = main(["servers", "login", "remote"], context, [
+        createServersCommand({ openBrowser }),
+      ]);
+      await vi.waitFor(() => expect(stdout).toHaveLength(1));
+      const authorizationUrlText = stdout[0];
+      if (authorizationUrlText === undefined) {
+        throw new Error("expected authorization URL output");
+      }
+      const authorizationUrl = new URL(authorizationUrlText);
+      const callback = new URL(authorizationUrl.searchParams.get("redirect_uri") ?? "");
+      callback.searchParams.set("code", "cli-no-open-authorization-code");
+      callback.searchParams.set("state", authorizationUrl.searchParams.get("state") ?? "");
+      callback.searchParams.set("iss", serverUrl);
+      expect((await fetch(callback)).status).toBe(200);
+      expect(await noOpenLogin).toBe(ExitCode.ok);
+      expect(openBrowser).not.toHaveBeenCalled();
+
+      const checkExit = await main(["--json", "servers", "check"], context, [
+        createServersCommand(),
+      ]);
+      const check = parseJson(ServersCheckResultSchema, stdout.at(-1) ?? "");
+      expect(checkExit).toBe(ExitCode.ok);
+      expect(check.servers).toEqual([
+        expect.objectContaining({ id: "remote", reachable: true, toolCount: 1 }),
+      ]);
+
       const logoutExit = await main(["servers", "logout", "remote"], context, [
         createServersCommand(),
       ]);
@@ -537,6 +638,141 @@ describe("harness servers check", () => {
       expect(await store.load("remote")).toBeUndefined();
       store.close();
     } finally {
+      await rm(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps OAuth error canaries out of console and CLI output during login", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "mcp-oauth-login-failure-"));
+    vi.stubEnv("HARNESS_DATA_DIR", dataDirectory);
+    const oauthServer = await createOAuthServer({ failTokenExchange: true });
+    const configWithAuth = HarnessConfigSchema.parse({
+      keys: {
+        currentKeyId: "primary",
+        keys: [{ id: "primary", secret: "env:OAUTH_KEY" }],
+      },
+      servers: [
+        {
+          id: "remote",
+          transport: {
+            kind: "http",
+            url: `${oauthServer.issuer}/mcp`,
+            auth: { kind: "oauth", grant: "authorization_code" },
+          },
+        },
+      ],
+    });
+    const { context, stdout, stderr } = createContext(
+      () => Promise.resolve(configWithAuth),
+      {
+        secretResolver: {
+          resolve(ref) {
+            if (ref === "env:OAUTH_KEY") {
+              return Promise.resolve({ reveal: () => oauthKey.toString("base64") });
+            }
+            return Promise.reject(new Error("unexpected secret reference"));
+          },
+        },
+      },
+    );
+    const openBrowser = vi.fn(async (url: string) => {
+      const authorizationUrl = new URL(url);
+      const callback = new URL(authorizationUrl.searchParams.get("redirect_uri") ?? "");
+      callback.searchParams.set("code", "failed-authorization-code");
+      callback.searchParams.set("state", authorizationUrl.searchParams.get("state") ?? "");
+      callback.searchParams.set("iss", oauthServer.issuer);
+      expect((await fetch(callback)).status).toBe(400);
+    });
+    const consoleSpies = [
+      vi.spyOn(console, "warn").mockImplementation(() => undefined),
+      vi.spyOn(console, "error").mockImplementation(() => undefined),
+      vi.spyOn(console, "log").mockImplementation(() => undefined),
+      vi.spyOn(console, "info").mockImplementation(() => undefined),
+      vi.spyOn(console, "debug").mockImplementation(() => undefined),
+      vi.spyOn(console, "trace").mockImplementation(() => undefined),
+    ];
+    try {
+      const exitCode = await main(["--json", "servers", "login", "remote", "--open"], context, [
+        createServersCommand({ openBrowser }),
+      ]);
+      const output = stdout.join("") + stderr.join("");
+      const consoleOutput = consoleSpies.flatMap((spy) => spy.mock.calls.flat()).join(" ");
+
+      expect(exitCode).toBe(ExitCode.failure);
+      expect(openBrowser).toHaveBeenCalledOnce();
+      expect(stderr).toContain("mcp_auth_required\n");
+      expect(output).not.toContain(oauthErrorCanary);
+      expect(consoleOutput).not.toContain(oauthErrorCanary);
+    } finally {
+      for (const spy of consoleSpies) {
+        spy.mockRestore();
+      }
+      await rm(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps OAuth challenge canaries out of doctor output", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "mcp-oauth-doctor-"));
+    vi.stubEnv("HARNESS_DATA_DIR", dataDirectory);
+    vi.stubEnv("OAUTH_KEY", oauthKey.toString("base64"));
+    const oauthServer = await createOAuthServer({ unauthorizedMcp: true });
+    const configWithAuth = HarnessConfigSchema.parse({
+      keys: {
+        currentKeyId: "primary",
+        keys: [{ id: "primary", secret: "env:OAUTH_KEY" }],
+      },
+      servers: [
+        {
+          id: "remote",
+          transport: {
+            kind: "http",
+            url: `${oauthServer.issuer}/mcp`,
+            auth: { kind: "oauth", grant: "authorization_code" },
+          },
+        },
+      ],
+    });
+    const databasePath = join(dataDirectory, "mcp-oauth.db");
+    const store = await OAuthTokenStore.open(databasePath, keyProvider);
+    await store.save("remote", {
+      issuer: oauthServer.issuer,
+      clientInformation: { client_id: "registered-client", issuer: oauthServer.issuer },
+      tokens: {
+        access_token: "expired-access-token",
+        refresh_token: "refresh-token",
+        token_type: "Bearer",
+        issuer: oauthServer.issuer,
+      },
+    });
+    store.close();
+    const { context, stdout, stderr } = createContext(() => Promise.resolve(configWithAuth));
+    const consoleSpies = [
+      vi.spyOn(console, "warn").mockImplementation(() => undefined),
+      vi.spyOn(console, "error").mockImplementation(() => undefined),
+      vi.spyOn(console, "log").mockImplementation(() => undefined),
+      vi.spyOn(console, "info").mockImplementation(() => undefined),
+      vi.spyOn(console, "debug").mockImplementation(() => undefined),
+      vi.spyOn(console, "trace").mockImplementation(() => undefined),
+    ];
+    try {
+      const exitCode = await main(["--json", "doctor"], context, [createDoctorCommand()]);
+      const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
+      const consoleOutput = consoleSpies.flatMap((spy) => spy.mock.calls.flat()).join(" ");
+
+      expect(exitCode).toBe(ExitCode.failure);
+      expect(results).toContainEqual(
+        expect.objectContaining({
+          id: "servers_authorized",
+          status: "fail",
+          code: "mcp_connect_failed",
+        }),
+      );
+      expect(stdout.join("") + stderr.join("")).not.toContain(oauthErrorCanary);
+      expect(consoleOutput).not.toContain(oauthErrorCanary);
+    } finally {
+      for (const spy of consoleSpies) {
+        spy.mockRestore();
+      }
       await rm(dataDirectory, { recursive: true, force: true });
     }
   });
