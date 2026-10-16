@@ -1298,12 +1298,15 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@harness/mcp@workspace:packages/mcp"
   dependencies:
+    "@harness/crypto": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
     "@modelcontextprotocol/server": "npm:2.3.1"
     "@opentelemetry/api": "npm:1.9.1"
+    "@types/better-sqlite3": "npm:9.6.0"
     "@types/node": "npm:26.6.4"
+    better-sqlite3: "npm:13.0.3"
     vitest: "npm:3.2.6"
   languageName: unknown
   linkType: soft
