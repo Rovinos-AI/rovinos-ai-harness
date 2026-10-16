@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AppSpan } from "@harness/schemas";
 import { isManifestSpanName } from "./types.js";
+import { createAppTelemetryTransport } from "./transport.js";
 import type {
   AppSpanName,
   AppTelemetry,
@@ -13,21 +14,22 @@ export type {
   AppTelemetry,
   AppTelemetryBridge,
   AppTelemetryManifest,
+  AppTelemetryStats,
   CreateAppTelemetryOptions,
+  AppTraceContext,
   SpanAttrs,
 } from "./types.js";
 
 const maxDurationMs = 3_600_000;
-const maxPendingSpans = 50;
 
 type MutableAppSpan = AppSpan;
 
 interface RecorderContext {
-  readonly active: boolean;
+  readonly active: () => boolean;
   readonly createdAt: number | undefined;
   readonly declared: ReadonlySet<AppSpanName>;
   readonly now: () => number;
-  readonly pending: MutableAppSpan[];
+  readonly record: (span: MutableAppSpan) => void;
 }
 
 interface RecordAppSpanInput {
@@ -144,11 +146,7 @@ function readNow(now: () => number): number | undefined {
 }
 
 function recordAppSpan(context: RecorderContext, input: RecordAppSpanInput): void {
-  if (
-    !context.active ||
-    !isManifestSpanName(input.name, context.declared) ||
-    context.pending.length >= maxPendingSpans
-  ) {
+  if (!context.active() || !isManifestSpanName(input.name, context.declared)) {
     return;
   }
   try {
@@ -163,7 +161,7 @@ function recordAppSpan(context: RecorderContext, input: RecordAppSpanInput): voi
     }
     const span = makeSpan(input.name, input.attrs, startOffsetMs, duration);
     if (span !== undefined) {
-      context.pending.push(span);
+      context.record(span);
     }
   } catch {
     return;
@@ -175,7 +173,7 @@ function createStart<Name extends AppSpanName>(
   name: Name,
 ): { end(attrs?: SpanAttrs<Name>): void } {
   if (
-    !context.active ||
+    !context.active() ||
     !isManifestSpanName(name, context.declared) ||
     context.createdAt === undefined
   ) {
@@ -203,13 +201,12 @@ function createStart<Name extends AppSpanName>(
 /**
  * Creates a browser-safe shim that only queues manifest-declared spans for its host bridge.
  *
- * @param options - Host bridge, allowed span names, and optional monotonic clock.
+ * @param options - Host bridge, allowed span names, readiness signal, clock, and retry randomness.
  * @returns A no-throw telemetry interface scoped to the supplied manifest.
  */
 export function createAppTelemetry<const Names extends readonly AppSpanName[]>(
   options: CreateAppTelemetryOptions<Names>,
 ): AppTelemetry<Names> {
-  const pending: MutableAppSpan[] = [];
   const declared = new Set<AppSpanName>();
   try {
     for (const name of options.manifest.spans) {
@@ -220,57 +217,51 @@ export function createAppTelemetry<const Names extends readonly AppSpanName[]>(
   }
 
   let bridge: AppTelemetryBridge | undefined;
-  let active = false;
   try {
     bridge = options.bridge;
-    active = typeof bridge?.callTool === "function";
+    if (typeof bridge?.callTool !== "function") {
+      bridge = undefined;
+    }
   } catch {
     bridge = undefined;
   }
 
+  const transport = createAppTelemetryTransport(bridge, options.hostReady, options.random);
   const now = options.now ?? (() => performance.now());
   const context: RecorderContext = {
-    active,
+    active: () => transport.active,
     createdAt: readNow(now),
     declared,
     now,
-    pending,
+    record: (span) => {
+      transport.record(span);
+    },
   };
-  let activeFlush: Promise<void> | undefined;
 
   return {
-    active,
+    get active() {
+      return transport.active;
+    },
+    get traceContext() {
+      return transport.traceContext;
+    },
+    setHostMetadata(metadata: unknown) {
+      transport.setHostMetadata(metadata);
+    },
     start<Name extends Names[number]>(name: Name): { end(attrs?: SpanAttrs<Name>): void } {
       return createStart(context, name);
     },
     record(name: Names[number], attrs: unknown, durationMs = 0) {
       recordAppSpan(context, { name, attrs, durationMs });
     },
-    async flush() {
-      if (!active || bridge === undefined) {
-        return;
-      }
-      while (activeFlush !== undefined) {
-        await activeFlush;
-      }
-      if (pending.length === 0) {
-        return;
-      }
-      const batch = pending.slice();
-      const sending = Promise.resolve().then(async () => {
-        try {
-          await bridge.callTool("harness.telemetry.emit", { spans: batch });
-          pending.splice(0, batch.length);
-        } catch {
-          return;
-        }
-      });
-      activeFlush = sending;
-      try {
-        await sending;
-      } finally {
-        activeFlush = undefined;
-      }
+    flush() {
+      return transport.flush();
+    },
+    stats() {
+      return transport.stats();
+    },
+    dispose() {
+      return transport.dispose();
     },
   };
 }
