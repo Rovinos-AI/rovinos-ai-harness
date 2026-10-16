@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseYaml } from "@harness/schemas";
-import { ArgMatcherSchema, loadPolicy, PolicyDocumentSchema, policyVersion } from "./index.js";
+import {
+  ArgMatcherSchema,
+  compilePolicy,
+  loadPolicy,
+  PolicyDocumentSchema,
+  policyVersion,
+} from "./index.js";
 
 const validYaml = `
 version: 1
@@ -211,18 +217,27 @@ describe("PolicyDocumentSchema", () => {
 describe("loadPolicy and policyVersion", () => {
   it("loads the documented example policy", async () => {
     const examplePath = fileURLToPath(new URL("../../../examples/policy.yaml", import.meta.url));
-    await expect(loadPolicy(examplePath)).resolves.toMatchObject({
+    const policy = await loadPolicy(examplePath);
+    expect(policy).toMatchObject({
       version: 1,
       defaultDecision: "ask",
-      rules: [
-        { id: "ask_email_send" },
-        {
-          id: "ask_sandbox_exec",
-          decision: "ask",
-          match: { tools: ["sandbox.exec"] },
-        },
-      ],
     });
+    const evaluate = compilePolicy(policy).evaluate;
+    expect(evaluate({
+      toolId: "fs.read",
+      args: { path: "README.md" },
+      context: { subagent: false },
+    }).decision).toBe("allow");
+    expect(evaluate({
+      toolId: "fs.write",
+      args: { path: "src/notes.txt" },
+      context: { subagent: false },
+    }).decision).toBe("allow");
+    expect(evaluate({
+      toolId: "fs.write",
+      args: { path: "secrets/.env.local" },
+      context: { subagent: false },
+    }).decision).toBe("ask");
   });
 
   it("loads YAML and JSON policy files from disk", async () => {

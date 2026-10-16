@@ -46,6 +46,31 @@ trees. Commands receive an absolute, run-specific `.harness/tmp` as `TMPDIR`.
 The runner container also mounts `/tmp` as an ephemeral tmpfs. The harness does
 not execute files from the workspace.
 
+## File tools
+
+The built-in `fs.read`, `fs.write`, `fs.edit`, `fs.list`, and `fs.search` tools
+operate on paths relative to `project/`; they do not accept shell commands.
+Every requested path passes through the workspace resolver, which rejects
+absolute paths, traversal, and symlinks. The `.harness/` tree is not accessible
+through these tools; use `read_offloaded` for offloaded output.
+
+`fs.read` returns UTF-8 text in ranges of at most 256 KiB. Binary files return
+only `{ binary: true, bytes }`. Writes accept at most 1 MiB of UTF-8 text;
+`create` requires a missing path and `overwrite` requires an existing regular
+file. Edits apply 1–20 exact-text replacements, each of which must occur once.
+An optional `expectedSha256` checks the prior bytes (the SHA-256 of empty bytes
+represents a missing path for `create`). A retry after a successful preconditioned
+write or edit fails with `precondition_failed`; unchanged output is rejected so
+the original precondition cannot be reused.
+
+`fs.list` is limited to depth 3 and 1,000 entries. `fs.search` returns at most
+200 text-line matches; regex queries pass the shared conservative ReDoS screen.
+The existing 10 MiB per-file and 500 MiB per-run workspace limits apply to file
+reads and mutations. File results are returned through the runtime's usual PII
+and output-offloading decorators. Read, list, and search are idempotent;
+write and edit are advertised as idempotent only when they include
+`expectedSha256`.
+
 ## Assumptions and known gaps
 
 The shared group and volume permissions must be preserved by the deployment's

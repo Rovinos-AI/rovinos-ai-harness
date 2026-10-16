@@ -4,6 +4,12 @@ import { Id, parseJson } from "@harness/schemas";
 import { z } from "zod";
 import { ExecResultSchema, ExecSpecSchema } from "../../src/types.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
+import {
+  FsOperationRequestSchema,
+  FsOperationSchema,
+} from "../../src/fs-tools.js";
+import type { FsOperationRequest } from "../../src/fs-tools.js";
+import { WorkspaceFileError, WorkspaceFileSystem } from "../../src/workspace-files.js";
 import { WebFetchRequestSchema } from "../../src/web-fetch-contracts.js";
 import { executeRunnerFetch, WebFetchError } from "./web-fetch.js";
 import type { RunnerServerOptions } from "./server.js";
@@ -13,6 +19,9 @@ export const MAX_RUNNER_REQUEST_BYTES = 2 * 1024 * 1024;
 
 const RunnerExecRequestSchema = z.object({ runId: Id, spec: ExecSpecSchema }).strict();
 const RunnerFetchRequestSchema = z.object({ runId: Id, request: WebFetchRequestSchema }).strict();
+const RunnerFsRequestSchema = z
+  .object({ runId: Id, request: FsOperationRequestSchema })
+  .strict();
 const RunnerLeaseRequestSchema = z
   .object({ runId: Id, ttlMs: z.number().int().positive().max(600_000).optional() })
   .strict();
@@ -39,11 +48,19 @@ export interface RunnerResponse {
 /** Parsed, authenticated runner payload. */
 export type RunnerPayload =
   | { readonly kind: "fetch"; readonly runId: z.infer<typeof Id>; readonly body: string }
+  | {
+      readonly kind: "fs";
+      readonly runId: z.infer<typeof Id>;
+      readonly request: FsOperationRequest;
+    }
   | { readonly kind: "lease"; readonly runId: z.infer<typeof Id>; readonly ttlMs?: number }
   | { readonly kind: "release"; readonly runId: z.infer<typeof Id> }
   | { readonly kind: "exec"; readonly runId: z.infer<typeof Id>; readonly spec: ExecSpec };
 /** Runner payload kinds handled by the execution and fetch dispatcher. */
-export type RunnerExecutionPayload = Extract<RunnerPayload, { readonly kind: "exec" | "fetch" }>;
+export type RunnerExecutionPayload = Extract<
+  RunnerPayload,
+  { readonly kind: "exec" | "fetch" | "fs" }
+>;
 
 type SendError = (response: RunnerResponse, status: number, code: string) => void;
 type SendJson = (response: RunnerResponse, status: number, body: unknown) => void;
@@ -97,7 +114,9 @@ export async function readRunnerPayload(
     (request.url !== "/exec" &&
       request.url !== "/fetch" &&
       request.url !== "/lease" &&
-      request.url !== "/release")
+      request.url !== "/release" &&
+      !(request.url?.startsWith("/fs/") === true &&
+        FsOperationSchema.safeParse(request.url.slice("/fs/".length)).success))
   ) {
     sendError(response, 404, "sandbox_route_not_found");
     return undefined;
@@ -121,6 +140,17 @@ export async function readRunnerPayload(
         maxBytes: MAX_RUNNER_REQUEST_BYTES,
       });
       return { kind: "fetch", runId: parsed.runId, body: body.body };
+    }
+    if (request.url?.startsWith("/fs/") === true) {
+      const operation = FsOperationSchema.parse(request.url.slice("/fs/".length));
+      const parsed = parseJson(RunnerFsRequestSchema, body.body, {
+        maxBytes: MAX_RUNNER_REQUEST_BYTES,
+      });
+      if (parsed.request.operation !== operation) {
+        sendError(response, 400, "sandbox_request_invalid");
+        return undefined;
+      }
+      return { kind: "fs", runId: parsed.runId, request: parsed.request };
     }
     if (request.url === "/lease") {
       const parsed = parseJson(RunnerLeaseRequestSchema, body.body, {
@@ -157,6 +187,28 @@ function fetchFailure(error: unknown): { readonly status: number; readonly code:
   return { status: denied ? 403 : 502, code: error.code };
 }
 
+function fileOperationFailure(error: unknown): { readonly status: number; readonly code: string } {
+  if (!(error instanceof WorkspaceFileError)) {
+    return { status: 500, code: "fs_operation_failed" };
+  }
+  if (error.code === "fs_file_not_found") {
+    return { status: 404, code: error.code };
+  }
+  if (error.code === "fs_file_exists" || error.code === "precondition_failed") {
+    return { status: 409, code: error.code };
+  }
+  if (error.code === "fs_quota_exceeded") {
+    return { status: 413, code: error.code };
+  }
+  if (error.code === "edit_no_match" || error.code === "edit_ambiguous") {
+    return { status: 422, code: error.code };
+  }
+  if (error.code.startsWith("fs_")) {
+    return { status: 400, code: error.code };
+  }
+  return { status: 500, code: "fs_operation_failed" };
+}
+
 /** Executes a parsed runner request and maps failures to closed response codes. */
 export async function executeRunnerPayload(input: ExecuteRunnerPayloadOptions): Promise<void> {
   const { options, payload, response, signal, executeSpec, sendJson, sendError } = input;
@@ -165,11 +217,24 @@ export async function executeRunnerPayload(input: ExecuteRunnerPayloadOptions): 
       sendJson(response, 200, await executeRunnerFetch(payload.body, options, signal));
       return;
     }
+    if (payload.kind === "fs") {
+      const files = new WorkspaceFileSystem(options.workspaceRoot);
+      sendJson(
+        response,
+        200,
+        await files.execute(payload.runId, payload.request.operation, payload.request.input, signal),
+      );
+      return;
+    }
     const result = ExecResultSchema.parse(await executeSpec(payload.runId, payload.spec, signal));
     sendJson(response, 200, result);
   } catch (error: unknown) {
     const failure =
-      payload.kind === "fetch" ? fetchFailure(error) : { status: 500, code: "sandbox_exec_failed" };
+      payload.kind === "fetch"
+        ? fetchFailure(error)
+        : payload.kind === "fs"
+          ? fileOperationFailure(error)
+          : { status: 500, code: "sandbox_exec_failed" };
     sendError(response, failure.status, failure.code);
   }
 }

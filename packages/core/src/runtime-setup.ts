@@ -8,7 +8,9 @@ import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
 import {
   createSandboxBackend,
+  createFsTools,
   createWebFetchTool,
+  InProcessBackend,
   RemoteSandboxBackend,
   type SandboxBackend,
 } from "@harness/sandbox";
@@ -140,7 +142,14 @@ function createRuntimeTool(
     backend instanceof RemoteSandboxBackend
       ? createWebFetchTool(config.sandbox?.egress?.allow, backend, !!overrides.workspace)
       : undefined;
-  return webFetchTool === undefined ? baseTool : composeToolPorts(webFetchTool, baseTool);
+  const fsTool =
+    backend instanceof InProcessBackend || backend instanceof RemoteSandboxBackend
+      ? createFsTools(backend)
+      : undefined;
+  const composedTool = fsTool === undefined ? baseTool : composeToolPorts(fsTool, baseTool);
+  return webFetchTool === undefined
+    ? composedTool
+    : composeToolPorts(webFetchTool, composedTool);
 }
 
 /** Creates runtime keys, closing a caller-supplied sandbox backend if key resolution fails. */

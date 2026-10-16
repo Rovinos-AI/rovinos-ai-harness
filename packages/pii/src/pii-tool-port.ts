@@ -42,7 +42,7 @@ export interface PiiToolResult {
 
 /** Structural port avoids a dependency from PII back to core. */
 export interface PiiToolPortLike {
-  describe(toolId: Code):
+  describe(toolId: Code, args?: JsonValue):
     | {
         readonly idempotent: boolean;
         readonly timeoutMs: number;
@@ -87,8 +87,8 @@ export class PiiToolPort implements PiiToolPortLike {
   ) {}
 
   /** Forwards retry and timeout metadata. */
-  describe(toolId: Code): ReturnType<PiiToolPortLike["describe"]> {
-    return this.inner.describe(toolId);
+  describe(toolId: Code, args?: JsonValue): ReturnType<PiiToolPortLike["describe"]> {
+    return this.inner.describe(toolId, args);
   }
 
   /**
