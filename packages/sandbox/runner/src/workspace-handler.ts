@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { randomBytes } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { Writable, Readable, Transform } from "node:stream";
@@ -26,7 +26,7 @@ interface WorkspaceRequestContext {
 
 function nextTemporaryId(): Id {
   return Id.parse(
-    [...randomBytes(26)].map((byte) => ID_ALPHABET[byte % ID_ALPHABET.length] ?? "0").join(""),
+    Array.from({ length: 26 }, () => ID_ALPHABET[randomInt(ID_ALPHABET.length)] ?? "0").join(""),
   );
 }
 

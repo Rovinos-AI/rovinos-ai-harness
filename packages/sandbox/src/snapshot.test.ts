@@ -180,7 +180,12 @@ describe("WorkspaceSnapshotter", () => {
     await mkdir(runRoot, { recursive: true });
     await writeFile(join(runRoot, "large"), Buffer.alloc(11 * 1024 * 1024, 1));
 
-    await expect(snapshotter(paths).snapshot(runId)).rejects.toBeInstanceOf(SnapshotTooLargeError);
+    await expect(
+      snapshotter(paths, {
+        maxFileBytes: 10 * 1024 * 1024,
+        maxSnapshotBytes: 12 * 1024 * 1024,
+      }).snapshot(runId),
+    ).rejects.toBeInstanceOf(SnapshotTooLargeError);
     await expect(readdir(join(paths.snapshotRoot, runId))).resolves.toEqual([]);
   });
 
@@ -188,13 +193,13 @@ describe("WorkspaceSnapshotter", () => {
     const paths = await createRoots();
     const runRoot = join(paths.workspaceRoot, runId);
     await mkdir(runRoot, { recursive: true });
-    await writeFile(join(runRoot, "small"), Buffer.alloc(128, 1));
-    const instance = snapshotter(paths, { maxFileBytes: 128, maxSnapshotBytes: 4096 });
+    await writeFile(join(runRoot, "small"), Buffer.alloc(900, 1));
+    const instance = snapshotter(paths, { maxFileBytes: 1024, maxSnapshotBytes: 1024 });
     const ref = await instance.snapshot(runId);
     await rm(runRoot, { recursive: true });
 
     await expect(instance.restore(runId, ref)).resolves.toBeUndefined();
-    await expect(readFile(join(runRoot, "small"))).resolves.toEqual(Buffer.alloc(128, 1));
+    await expect(readFile(join(runRoot, "small"))).resolves.toEqual(Buffer.alloc(900, 1));
   });
 
   it("streams archive creation without concatenating its contents into a full buffer", async () => {
@@ -342,6 +347,54 @@ describe("WorkspaceSnapshotter", () => {
       await expect(readFile(outsideAbsolutePath)).rejects.toMatchObject({ code: "ENOENT" });
     },
   );
+
+  it.each([
+    [
+      "sub/link -> .. followed by x -> sub/link/..",
+      [
+        tarEntry("sub/link", "2", Buffer.alloc(0), ".."),
+        tarEntry("x", "2", Buffer.alloc(0), "sub/link/.."),
+        Buffer.alloc(1024),
+      ],
+    ],
+    [
+      "a -> . followed by b -> a/..",
+      [
+        tarEntry("a", "2", Buffer.alloc(0), "."),
+        tarEntry("b", "2", Buffer.alloc(0), "a/.."),
+        Buffer.alloc(1024),
+      ],
+    ],
+  ])("rejects chained symlink escape: %s", async (_description, entries) => {
+    // threat: T-17
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true });
+    await writeFile(join(runRoot, "keep"), "original");
+    const ref = await writeArchive(paths, gzipSync(Buffer.concat(entries)));
+
+    await expect(snapshotter(paths).restore(runId, ref)).rejects.toMatchObject({
+      code: "workspace_snapshot_unsafe",
+    });
+    await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
+  });
+
+  it("rejects a hardlink whose target has not already been accepted", async () => {
+    // threat: T-17
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true });
+    await writeFile(join(runRoot, "keep"), "original");
+    const ref = await writeArchive(
+      paths,
+      maliciousArchive("link", "1", Buffer.alloc(0), "later"),
+    );
+
+    await expect(snapshotter(paths).restore(runId, ref)).rejects.toMatchObject({
+      code: "workspace_snapshot_unsafe",
+    });
+    await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
+  });
 
   it("round-trips contained relative symbolic and hard links", async () => {
     // threat: T-17

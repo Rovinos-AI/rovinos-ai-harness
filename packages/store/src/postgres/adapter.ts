@@ -281,6 +281,23 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     }
   }
 
+  /** {@inheritDoc EventStore.retainedSnapshots} */
+  async retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new TypeError("Snapshot limit must be a positive integer");
+    }
+    try {
+      await this.ensureInitialized();
+      const result = await this.pool.query<SnapshotRow & QueryResultRow>(
+        "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = $1 ORDER BY at_seq DESC, snapshot_id DESC LIMIT $2",
+        [runId, limit],
+      );
+      return await Promise.all(result.rows.map((row) => decodeSnapshot(this.codec, row)));
+    } catch (error) {
+      throw storeError(error);
+    }
+  }
+
   /** {@inheritDoc EventStore.listRuns} */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
     return listPostgresRuns(this.pool, () => this.ensureInitialized(), opts);

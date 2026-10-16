@@ -53,6 +53,7 @@ export interface EventStoreLike {
     snapshot: Snapshot,
   ): Promise<{ nextSeq: number }>;
   latestSnapshot(runId: Id): Promise<Snapshot | undefined>;
+  retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]>;
   read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event>;
   watch(runId: Id, options: WatchOptionsLike): AsyncIterable<Event>;
   watchRuns(options: WatchRunsOptionsLike): AsyncIterable<RunSummaryLike>;
@@ -177,6 +178,10 @@ export class PiiEventStore implements EventStoreLike {
 
   latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
     return this.inner.latestSnapshot(runId);
+  }
+
+  retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]> {
+    return this.inner.retainedSnapshots(runId, limit);
   }
 
   read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event> {

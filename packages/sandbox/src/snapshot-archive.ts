@@ -71,7 +71,42 @@ function archiveRelativePath(path: string): string {
   return posix.normalize(path.replaceAll("\\", "/")).replace(/^\.\//u, "");
 }
 
-function resolveLinkTarget(path: string, target: string, hardLink: boolean): string {
+function resolveTargetWithinRoot(
+  base: string,
+  target: string,
+  symbolicLinks: ReadonlySet<string> = new Set(),
+): string {
+  let resolved = posix.normalize(base);
+  for (const segment of target.split("/")) {
+    if (segment.length === 0 || segment === ".") {
+      continue;
+    }
+    if (symbolicLinks.has(resolved)) {
+      throw new UnsafeWorkspaceSnapshotError();
+    }
+    if (segment === ".." && resolved === ".") {
+      throw new UnsafeWorkspaceSnapshotError();
+    }
+    resolved = segment === ".." ? posix.dirname(resolved) : posix.join(resolved, segment);
+    if (resolved === "") {
+      resolved = ".";
+    }
+    if (symbolicLinks.has(resolved)) {
+      throw new UnsafeWorkspaceSnapshotError();
+    }
+  }
+  if (resolved === ".." || resolved.startsWith("../") || resolved.startsWith("/")) {
+    throw new UnsafeWorkspaceSnapshotError();
+  }
+  return resolved;
+}
+
+function resolveLinkTarget(
+  path: string,
+  target: string,
+  hardLink: boolean,
+  symbolicLinks: ReadonlySet<string> = new Set(),
+): string {
   const normalized = target.replaceAll("\\", "/");
   if (
     normalized.length === 0 ||
@@ -83,11 +118,7 @@ function resolveLinkTarget(path: string, target: string, hardLink: boolean): str
     throw new UnsafeWorkspaceSnapshotError();
   }
   const base = hardLink ? "." : dirname(path);
-  const resolved = posix.normalize(posix.join(base, normalized));
-  if (resolved === ".." || resolved.startsWith("../") || resolved.startsWith("/")) {
-    throw new UnsafeWorkspaceSnapshotError();
-  }
-  return archiveRelativePath(resolved);
+  return archiveRelativePath(resolveTargetWithinRoot(base, normalized, symbolicLinks));
 }
 
 /** Rejects filesystem entries that could not be restored safely or within configured limits. */
@@ -97,6 +128,7 @@ export async function assertWorkspaceArchiveLimits(
   maxSnapshotBytes: number,
 ): Promise<void> {
   let totalBytes = 0;
+  const symlinkEntries: { readonly path: string; readonly target: string }[] = [];
   const walk = async (directory: string, relativeDirectory: string): Promise<void> => {
     for (const name of await readdir(directory)) {
       const relativePath = relativeDirectory === "." ? name : `${relativeDirectory}/${name}`;
@@ -106,7 +138,7 @@ export async function assertWorkspaceArchiveLimits(
       const path = join(directory, name);
       const info = await lstat(path);
       if (info.isSymbolicLink()) {
-        resolveLinkTarget(relativePath, await readlink(path), false);
+        symlinkEntries.push({ path: relativePath, target: await readlink(path) });
       } else if (info.isDirectory()) {
         await walk(path, relativePath);
       } else if (info.isFile()) {
@@ -120,6 +152,10 @@ export async function assertWorkspaceArchiveLimits(
     }
   };
   await walk(runRoot, ".");
+  const symbolicLinks = new Set(symlinkEntries.map(({ path }) => path));
+  for (const entry of symlinkEntries) {
+    resolveLinkTarget(entry.path, entry.target, false, symbolicLinks);
+  }
 }
 
 /** Compresses the workspace while excluding ephemeral per-run scratch files. */
@@ -236,7 +272,12 @@ function registerArchiveEntry(
       return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
     }
     try {
-      const target = resolveLinkTarget(relativePath, linkTarget, entry.type === "Link");
+      const target = resolveLinkTarget(
+        relativePath,
+        linkTarget,
+        entry.type === "Link",
+        state.symbolicLinks,
+      );
       if (entry.type === "Link" && !state.files.has(target)) {
         return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
       }

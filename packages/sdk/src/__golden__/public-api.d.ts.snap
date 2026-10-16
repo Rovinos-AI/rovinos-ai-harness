@@ -99,6 +99,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 completedRunsDays: z.ZodCoercedNumber<unknown>;
                 failedRunsDays: z.ZodCoercedNumber<unknown>;
             }, z.core.$strict>>;
+            snapshotKeep: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strict>>;
         keys: z.ZodOptional<z.ZodObject<{
             currentKeyId: z.ZodString;

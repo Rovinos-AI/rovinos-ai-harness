@@ -369,7 +369,7 @@ describe("harness store purge", () => {
     await writeFile(join(dataDir, "snapshots"), "not a directory");
     const store = new InMemoryEventStore();
     const runId = await seedRun(store, "completed", 1);
-    const purgeVault = vi.fn(() => Promise.resolve());
+    const purgeVault = vi.fn(() => Promise.resolve(0));
     const vaultAdmin = {
       markTerminal: () => Promise.resolve(),
       listTerminalRunsBefore: () => Promise.resolve([]),

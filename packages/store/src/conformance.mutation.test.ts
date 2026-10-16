@@ -22,6 +22,7 @@ function brokenFactory(): EventStoreFactory {
       appendWithSnapshot: (runId, events, expectedSeq, snapshot) =>
         reference.appendWithSnapshot(runId, events, expectedSeq, snapshot),
       latestSnapshot: (runId) => reference.latestSnapshot(runId),
+      retainedSnapshots: (runId, limit) => reference.retainedSnapshots(runId, limit),
       read: (runId, range) => reference.read(runId, range),
       watch: (runId, options) => reference.watch(runId, options),
       watchRuns: (options) => reference.watchRuns(options),

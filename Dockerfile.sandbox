@@ -42,5 +42,7 @@ COPY --from=build /app/packages/context/package.json ./packages/context/package.
 COPY --from=build /app/packages/context/dist/ ./packages/context/dist/
 COPY --from=build /app/packages/schemas/package.json ./packages/schemas/package.json
 COPY --from=build /app/packages/schemas/dist/ ./packages/schemas/dist/
+COPY --from=build /app/packages/crypto/package.json ./packages/crypto/package.json
+COPY --from=build /app/packages/crypto/dist/ ./packages/crypto/dist/
 USER 10002:10002
 ENTRYPOINT ["node", "packages/sandbox/dist/runner/src/server.js"]

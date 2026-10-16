@@ -125,6 +125,14 @@ export interface EventStore {
   latestSnapshot(runId: Id): Promise<Snapshot | undefined>;
 
   /**
+   * Retrieve the most recent retained snapshots, bounded by the requested limit.
+   * @param runId Run identifier to inspect.
+   * @param limit Maximum number of retained snapshots to return.
+   * @returns Snapshots ordered from newest to oldest.
+   */
+  retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]>;
+
+  /**
    * Read events in sequence order. Both range endpoints are inclusive.
    * @param runId Run identifier to read.
    * @param range Optional inclusive sequence bounds.

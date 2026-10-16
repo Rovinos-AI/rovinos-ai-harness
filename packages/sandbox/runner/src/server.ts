@@ -293,6 +293,10 @@ async function handleRunnerRequest(
     if (await handleControlPayload(context, payload, response)) {
       return;
     }
+    if (payload.kind !== "exec" && payload.kind !== "fetch") {
+      writeError(response, 400, "sandbox_request_invalid");
+      return;
+    }
     if (!(await context.leases.renew(payload.runId))) {
       writeError(response, 409, "sandbox_busy");
       return;

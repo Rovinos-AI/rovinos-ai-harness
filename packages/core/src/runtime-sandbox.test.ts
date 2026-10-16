@@ -13,6 +13,7 @@ import {
   SandboxConfigSchema,
   SecretRefSchema,
   SequentialIdGenerator,
+  type WorkspaceRef,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { InProcessBackend, RemoteSandboxBackend, type SandboxBackend } from "@harness/sandbox";
@@ -172,7 +173,10 @@ describe("createRuntime sandbox composition", () => {
           checkpoints.push(event.workspaceRef);
         }
       }
-      const retainedRefs = checkpoints.slice(-2);
+      const retainedRefs = (await store.retainedSnapshots(runId, 2))
+        .map((snapshot) => snapshot.workspaceRef)
+        .filter((ref): ref is WorkspaceRef => ref !== undefined)
+        .reverse();
       const archiveIds = retainedRefs.map((ref) => ref.slice(3, 29));
       const archiveNames = await readdir(join(dataDir, "snapshots", runId));
 

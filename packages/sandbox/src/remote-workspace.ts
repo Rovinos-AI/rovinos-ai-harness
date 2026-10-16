@@ -26,7 +26,7 @@ function toWebStream(source: Readable): ReadableStream<Uint8Array> {
     async pull(controller) {
       try {
         const chunk = await iterator.next();
-        if (chunk.done) {
+        if (chunk.done === true) {
           controller.close();
         } else {
           controller.enqueue(chunk.value);

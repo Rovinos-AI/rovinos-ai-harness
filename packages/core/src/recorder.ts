@@ -112,18 +112,9 @@ export class RunRecorder {
 
   /** Read the workspace references attached to the snapshots retained by the event store. */
   async retainedWorkspaceRefs(snapshotKeep: number): Promise<WorkspaceRef[]> {
-    const checkpoints: Extract<Event, { type: "checkpoint_written" }>[] = [];
-    for await (const event of this.store.read(this.runId)) {
-      if (event.type !== "checkpoint_written") {
-        continue;
-      }
-      checkpoints.push(event);
-      if (checkpoints.length > snapshotKeep) {
-        checkpoints.shift();
-      }
-    }
-    return checkpoints.flatMap((event) =>
-      event.workspaceRef === undefined ? [] : [event.workspaceRef],
+    const snapshots = await this.store.retainedSnapshots(this.runId, snapshotKeep);
+    return snapshots.flatMap((snapshot) =>
+      snapshot.workspaceRef === undefined ? [] : [snapshot.workspaceRef],
     );
   }
 

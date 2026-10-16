@@ -28,6 +28,7 @@ import type { ProxyRequest, ProxyResponse, WebFetchTransport } from "./web-fetch
 
 const token = "synthetic-runner-token-that-is-at-least-32-bytes";
 const runId = Id.parse("00000000000000000000000001");
+const otherRunId = Id.parse("00000000000000000000000002");
 const workspaceRoot = mkdtempSync(join(tmpdir(), "sandbox-runner-server-"));
 const spec: ExecSpec = {
   argv: ["/bin/echo", "ok"],
@@ -672,6 +673,10 @@ describe("runner HTTP request handler", () => {
     const runRoot = join(runnerWorkspaceRoot, runId);
     await mkdir(runRoot, { recursive: true, mode: 0o750 });
     await writeFile(join(runRoot, "project.txt"), "before", { encoding: "utf8" });
+    await mkdir(join(runnerWorkspaceRoot, otherRunId), { recursive: true, mode: 0o750 });
+    await writeFile(join(runnerWorkspaceRoot, otherRunId, "project.txt"), "other", {
+      encoding: "utf8",
+    });
     const port = await availablePort();
     const server = createRunnerServer(
       makeOptions({
@@ -725,6 +730,16 @@ describe("runner HTTP request handler", () => {
       await snapshotter.restore(runId, ref);
 
       expect(await readFile(join(runRoot, "project.txt"), "utf8")).toBe("before");
+
+      await backend.acquireLease(runId);
+      const pinnedRef = await snapshotter.snapshot(runId);
+      await snapshotter.restore(runId, pinnedRef);
+      await expect(snapshotter.snapshot(otherRunId)).rejects.toMatchObject({
+        code: "sandbox_busy",
+      });
+      await backend.releaseLease(runId);
+      await backend.acquireLease(otherRunId);
+      await backend.releaseLease(otherRunId);
     } finally {
       if (server.listening) {
         await new Promise<void>((resolve, reject) => {
