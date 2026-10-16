@@ -4,11 +4,14 @@ import { compileJsonSchema, type ServerConfig } from "@harness/schemas";
 import type { McpConnectionDependencies } from "./connection-types.js";
 import { withOAuthWarningsRedacted } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
+import {
+  OAUTH_CLIENT_CREDENTIALS_EXTENSION,
+  resourceAdvertisesClientCredentials,
+} from "./oauth/protected-resource.js";
 import type { McpTool } from "./tool-list.js";
 import { createMcpTransport } from "./transports.js";
 
-export const OAUTH_CLIENT_CREDENTIALS_EXTENSION =
-  "io.modelcontextprotocol/oauth-client-credentials";
+export { OAUTH_CLIENT_CREDENTIALS_EXTENSION } from "./oauth/protected-resource.js";
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
 export const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
 
@@ -63,6 +66,21 @@ export function runWithSafeAuthLogging<Result>(
   operation: () => Promise<Result>,
 ): Promise<Result> {
   return oauthConfigured ? withOAuthWarningsRedacted(operation) : operation();
+}
+
+/** Detects client-credentials extension support before initialize can trigger OAuth. */
+export async function clientCredentialsExtensionAvailable(
+  config: ServerConfig,
+  previouslyAdvertised: boolean,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (previouslyAdvertised) {
+    return true;
+  }
+  return config.transport.kind === "http" &&
+    config.transport.auth?.grant === "client_credentials"
+    ? resourceAdvertisesClientCredentials(config.transport.url, signal)
+    : false;
 }
 
 /** Creates the configured transport and reports the OAuth provider selected for HTTP auth. */

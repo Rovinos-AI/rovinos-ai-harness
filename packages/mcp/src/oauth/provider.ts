@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { auth } from "@modelcontextprotocol/client";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   OAuthClientInformationContext,
   OAuthClientMetadata,
@@ -45,48 +46,52 @@ export interface McpOAuthProviderOptions {
   readonly interactive?: boolean;
 }
 
-let warningSuppressionDepth = 0;
-let originalWarning: unknown;
-let originalError: unknown;
+const oauthAuthContext = new AsyncLocalStorage<boolean>();
+let activeAuthScopes = 0;
+let originalWarning: Console["warn"] | undefined;
+let originalError: Console["error"] | undefined;
+let wrappedWarning: Console["warn"] | undefined;
+let wrappedError: Console["error"] | undefined;
 
 function suppressSdkWarnings(): () => void {
-  const consoleObject: unknown = Reflect.get(globalThis, "console");
-  if (typeof consoleObject !== "object" || consoleObject === null) {
-    throw new McpAuthRequiredError();
+  const consoleObject = globalThis.console;
+  if (activeAuthScopes === 0) {
+    const savedWarning = consoleObject.warn;
+    const savedError = consoleObject.error;
+    originalWarning = savedWarning;
+    originalError = savedError;
+    wrappedWarning = (...args) => {
+      if (oauthAuthContext.getStore() !== true) {
+        Reflect.apply(savedWarning, consoleObject, args);
+      }
+    };
+    wrappedError = (...args) => {
+      if (oauthAuthContext.getStore() !== true) {
+        Reflect.apply(savedError, consoleObject, args);
+      }
+    };
+    consoleObject.warn = wrappedWarning;
+    consoleObject.error = wrappedError;
   }
-  if (warningSuppressionDepth === 0) {
-    originalWarning = Reflect.get(consoleObject, "warn");
-    originalError = Reflect.get(consoleObject, "error");
-    if (typeof originalWarning !== "function" || typeof originalError !== "function") {
-      originalWarning = undefined;
-      originalError = undefined;
-      throw new McpAuthRequiredError();
-    }
-    const discard: Console["warn"] = () => undefined;
-    if (!Reflect.set(consoleObject, "warn", discard)) {
-      originalWarning = undefined;
-      originalError = undefined;
-      throw new McpAuthRequiredError();
-    }
-    if (!Reflect.set(consoleObject, "error", discard)) {
-      Reflect.set(consoleObject, "warn", originalWarning);
-      originalWarning = undefined;
-      originalError = undefined;
-      throw new McpAuthRequiredError();
-    }
-  }
-  warningSuppressionDepth += 1;
+  activeAuthScopes += 1;
+  let restored = false;
   return () => {
-    warningSuppressionDepth -= 1;
-    if (warningSuppressionDepth === 0) {
-      if (originalWarning !== undefined) {
-        Reflect.set(consoleObject, "warn", originalWarning);
+    if (restored) {
+      return;
+    }
+    restored = true;
+    activeAuthScopes -= 1;
+    if (activeAuthScopes === 0) {
+      if (consoleObject.warn === wrappedWarning && originalWarning !== undefined) {
+        consoleObject.warn = originalWarning;
       }
-      if (originalError !== undefined) {
-        Reflect.set(consoleObject, "error", originalError);
+      if (consoleObject.error === wrappedError && originalError !== undefined) {
+        consoleObject.error = originalError;
       }
       originalWarning = undefined;
       originalError = undefined;
+      wrappedWarning = undefined;
+      wrappedError = undefined;
     }
   };
 }
@@ -102,7 +107,7 @@ export async function withOAuthWarningsRedacted<Result>(
 ): Promise<Result> {
   const restore = suppressSdkWarnings();
   try {
-    return await operation();
+    return await oauthAuthContext.run(true, operation);
   } finally {
     restore();
   }

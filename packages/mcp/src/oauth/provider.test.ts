@@ -18,6 +18,7 @@ const issuerCanary = "https://oauth-issuer.invalid";
 const accessTokenCanary = "oauth-access-token-canary";
 const refreshTokenCanary = "oauth-refresh-token-canary";
 const errorCanary = "oauth-error-description-canary";
+const headerCanary = "oauth-www-authenticate-canary";
 const capturedConsoleOutput: unknown[] = [];
 const keyProvider: KeyProvider = {
   currentKeyId: () => "oauth-test-key",
@@ -72,7 +73,7 @@ async function startMockOAuthServer(options: MockOAuthOptions = {}) {
       if (url.pathname === "/mcp" && options.unauthorizedMcp === true) {
         response
           .writeHead(401, {
-            "WWW-Authenticate": `bearer error="invalid_token", error_description="${errorCanary}", resource_metadata="http://${host}/.well-known/oauth-protected-resource/mcp"`,
+            "WWW-Authenticate": `bearer error="invalid_token", error_description="${errorCanary}", realm="${headerCanary}", resource_metadata="http://${host}/.well-known/oauth-protected-resource/mcp"`,
           })
           .end();
         return;
@@ -545,6 +546,7 @@ describe("McpOAuthProvider", () => {
       expect(connection.state).toBe("unavailable");
       const captured = consoleOutputText([...capturedConsoleOutput, ...output]);
       expect(captured).not.toContain(errorCanary);
+      expect(captured).not.toContain(headerCanary);
     } finally {
       await connection.close();
       for (const spy of spies) {
@@ -582,5 +584,30 @@ describe("McpOAuthProvider", () => {
     }
     expect(consoleObject.warn).toBe(warning);
     expect(consoleObject.error).toBe(errorOutput);
+  });
+
+  it("suppresses auth-context console output without dropping concurrent application warnings", async () => {
+    const output: unknown[] = [];
+    const warn = vi.spyOn(globalThis.console, "warn").mockImplementation((...args: unknown[]) => {
+      output.push(...args);
+    });
+    try {
+      const authOperation = withOAuthWarningsRedacted(
+        () =>
+          new Promise<void>((resolve) => {
+            setTimeout(() => {
+              globalThis.console.warn(errorCanary);
+              resolve();
+            }, 10);
+          }),
+      );
+      globalThis.console.warn("unrelated-application-warning");
+      await authOperation;
+
+      expect(output).toContain("unrelated-application-warning");
+      expect(output).not.toContain(errorCanary);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

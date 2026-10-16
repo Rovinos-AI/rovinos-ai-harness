@@ -24,6 +24,7 @@ import {
   ListToolsResultSchema,
   OAUTH_CLIENT_CREDENTIALS_EXTENSION,
   RECONNECT_BACKOFF_MS,
+  clientCredentialsExtensionAvailable,
   createConfiguredTransport,
   createMcpClient,
   defaultSleep,
@@ -139,6 +140,13 @@ export class McpConnection {
       if (this.#isStale(generation)) {
         this.#state = "unavailable";
         return;
+      }
+      if (this.#dependencies.createTransport === undefined) {
+        this.#supportsClientCredentialsExtension = await clientCredentialsExtensionAvailable(
+          this.#config,
+          this.#supportsClientCredentialsExtension,
+          combinedSignal,
+        );
       }
       const activeTransport = await createConfiguredTransport(
         this.#config,

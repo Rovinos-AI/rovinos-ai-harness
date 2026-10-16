@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { KeyProvider } from "@harness/schemas";
 import { OAuthTokenStore, OAuthTokenStoreError } from "./token-store.js";
 
@@ -62,6 +62,21 @@ describe("OAuthTokenStore", () => {
     }
   });
 
+  it("deletes credentials without requesting an encryption key", async () => {
+    const getKey = vi.fn(() => Promise.reject(new Error("unexpected key lookup")));
+    const keys: KeyProvider = {
+      currentKeyId: () => "unused",
+      getKey,
+    };
+    const store = await OAuthTokenStore.open(":memory:", keys);
+    try {
+      store.delete("server");
+      expect(getKey).not.toHaveBeenCalled();
+    } finally {
+      store.close();
+    }
+  });
+
   it("rejects invalid values and maps database failures to safe errors", async () => {
     const store = await OAuthTokenStore.open(":memory:", keyProvider);
     await expect(
@@ -71,6 +86,8 @@ describe("OAuthTokenStore", () => {
     store.close();
 
     await expect(store.load("server")).rejects.toBeInstanceOf(OAuthTokenStoreError);
-    expect(() => store.delete("server")).toThrow(OAuthTokenStoreError);
+    expect(() => {
+      store.delete("server");
+    }).toThrow(OAuthTokenStoreError);
   });
 });

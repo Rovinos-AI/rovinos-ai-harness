@@ -83,6 +83,21 @@ authorization-code session fails with `mcp_auth_required`, and `harness doctor`
 reports the `servers_authorized` check as failed. Client-credentials servers
 obtain tokens non-interactively at connection time.
 
+Client-credentials authorization is enabled only when the protected-resource
+metadata advertises the MCP extension under `extensions`, for example:
+
+```json
+{
+  "extensions": {
+    "io.modelcontextprotocol/oauth-client-credentials": {}
+  }
+}
+```
+
+This pre-initialize advertisement allows the first `initialize` request to
+authenticate without enabling client credentials for servers that do not
+support the extension.
+
 The SDK validates authorization-server metadata, issuer-bound credentials,
 resource indicators, PKCE, and callback `iss` values where supplied. The
 authorization server controls its own metadata and registration policy; check
