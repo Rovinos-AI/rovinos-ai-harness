@@ -105,11 +105,9 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
  *
  * @param options - Internal runner URL, resolved token, and optional fetch settings.
  */
-<<<<<<< HEAD
-export class RemoteSandboxBackend implements SandboxBackend, WorkspaceFileToolBackend {
-=======
-export class RemoteSandboxBackend implements SandboxBackend, RemoteWorkspaceSnapshotPort {
->>>>>>> origin/main
+export class RemoteSandboxBackend
+  implements SandboxBackend, WorkspaceFileToolBackend, RemoteWorkspaceSnapshotPort
+{
   readonly #url: string;
   readonly #token: string;
   readonly #timeoutGraceMs: number;

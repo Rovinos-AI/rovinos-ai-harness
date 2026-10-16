@@ -148,7 +148,6 @@ afterEach(() => {
 });
 
 describe("createRuntime sandbox composition", () => {
-<<<<<<< HEAD
   it("enforces a sensitive-path ask through the decorated runtime", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-policy-"));
     const modelPort = fileToolModel(
@@ -211,7 +210,13 @@ describe("createRuntime sandbox composition", () => {
         toolId: "fs.read",
         outcome: "error",
         errorCode: "fs_path_invalid",
-=======
+      });
+    } finally {
+      await runtime.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it("retains workspace archives matching the two event-store snapshot refs", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-snapshot-retention-"));
     const store = new InMemoryEventStore(undefined, { snapshotKeep: 2 });
@@ -262,7 +267,6 @@ describe("createRuntime sandbox composition", () => {
       expect(archiveNames).toEqual(archiveIds.map((id) => `${id}.tar.gz`));
       await expect(store.latestSnapshot(runId)).resolves.toMatchObject({
         workspaceRef: retainedRefs.at(-1),
->>>>>>> origin/main
       });
     } finally {
       await runtime.close();

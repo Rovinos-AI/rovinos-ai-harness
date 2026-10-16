@@ -19,7 +19,6 @@ import {
   type RunnerPayload,
   type RunnerRequest,
   type RunnerResponse,
-  type RunnerPayload,
 } from "./request-handler.js";
 import { RunnerLeaseManager } from "./lease.js";
 import { handleWorkspacePayload } from "./workspace-handler.js";
@@ -239,24 +238,6 @@ async function handleControlPayload(
   payload: RunnerPayload,
   response: RunnerResponse,
 ): Promise<boolean> {
-  if (payload.kind === "lease") {
-    const acquired = await context.leases.acquire(payload.runId, payload.ttlMs);
-    if (acquired) {
-      sendJson(response, 200, { status: "ok" });
-    } else {
-      writeError(response, 409, "sandbox_busy");
-    }
-    return true;
-  }
-  if (payload.kind === "release") {
-    const released = !context.isBusy() && (await context.leases.release(payload.runId));
-    if (released) {
-      sendJson(response, 200, { status: "ok" });
-    } else {
-      writeError(response, 409, "sandbox_busy");
-    }
-    return true;
-  }
   if (
     payload.kind === "workspace-snapshot" ||
     payload.kind === "workspace-exists" ||
@@ -298,47 +279,7 @@ async function handleRunnerRequest(
     if (payload === undefined) {
       return;
     }
-<<<<<<< HEAD
     await handleRunnerPayload(context, payload, response);
-=======
-    if (await handleControlPayload(context, payload, response)) {
-      return;
-    }
-    if (payload.kind !== "exec" && payload.kind !== "fetch") {
-      writeError(response, 400, "sandbox_request_invalid");
-      return;
-    }
-    if (!(await context.leases.renew(payload.runId))) {
-      writeError(response, 409, "sandbox_busy");
-      return;
-    }
-    if (context.isBusy()) {
-      writeError(response, 409, "sandbox_busy");
-      return;
-    }
-    context.setBusy(true);
-    const controller = new AbortController();
-    response.once("close", () => {
-      if (!response.writableEnded) {
-        controller.abort();
-      }
-    });
-    try {
-      await executeRunnerPayload({
-        options,
-        payload,
-        response,
-        signal: controller.signal,
-        executeSpec: (runId, spec, signal) => executeRunnerSpec(options, runId, spec, signal),
-        sendJson,
-        sendError: writeError,
-      });
-    } finally {
-      context.setBusy(false);
-      await context.leases.finishExecution(payload.runId);
-      await context.leases.expireDue();
-    }
->>>>>>> origin/main
   } catch {
     if (!response.headersSent) {
       writeError(response, 500, "sandbox_internal_error");
@@ -353,12 +294,19 @@ async function handleRunnerPayload(
   payload: RunnerPayload,
   response: RunnerResponse,
 ): Promise<void> {
+  if (await handleControlPayload(context, payload, response)) {
+    return;
+  }
   if (payload.kind === "lease") {
     writeLeaseResult(await context.leases.acquire(payload.runId, payload.ttlMs), response);
     return;
   }
   if (payload.kind === "release") {
     writeLeaseResult(!context.isBusy() && (await context.leases.release(payload.runId)), response);
+    return;
+  }
+  if (payload.kind !== "exec" && payload.kind !== "fetch" && payload.kind !== "fs") {
+    writeError(response, 400, "sandbox_request_invalid");
     return;
   }
   if (context.isBusy()) {

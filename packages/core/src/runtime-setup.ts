@@ -6,17 +6,7 @@ import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { PiiConfig } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
-<<<<<<< HEAD
-import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
-import type { RequestSanitizer } from "@harness/models";
-=======
-import {
-  createSandboxBackend,
-  createWebFetchTool,
-  RemoteSandboxBackend,
-  type SandboxBackend,
-} from "@harness/sandbox";
->>>>>>> origin/main
+import { createSandboxBackend, RemoteSandboxBackend, type SandboxBackend } from "@harness/sandbox";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
 import { createRuntimeModelAndStore } from "./runtime-setup-model.js";
@@ -29,12 +19,8 @@ import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
-<<<<<<< HEAD
-import { composeSandboxTools } from "./runtime-tool-port.js";
-=======
 import { createRuntimeWorkspaceSnapshotter } from "./runtime-workspace-snapshot.js";
-import { composeToolPorts } from "./runtime-tool-port.js";
->>>>>>> origin/main
+import { composeSandboxTools } from "./runtime-tool-port.js";
 import { McpConnectionError, McpToolPort, type McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
 import type { ToolPort } from "./ports.js";

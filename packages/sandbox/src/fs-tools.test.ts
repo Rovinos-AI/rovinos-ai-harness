@@ -54,6 +54,11 @@ class MemoryResponse extends EventEmitter implements RunnerResponse {
     return this;
   }
 
+  write(chunk: Buffer): boolean {
+    this.body += chunk.toString();
+    return true;
+  }
+
   end(body?: string): void {
     this.body = body ?? "";
     this.writableEnded = true;

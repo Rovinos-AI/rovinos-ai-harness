@@ -2,11 +2,7 @@
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
 import { createServer as createNetServer } from "node:net";
-<<<<<<< HEAD
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-=======
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
->>>>>>> origin/main
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
