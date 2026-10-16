@@ -22,6 +22,7 @@ export interface CheckpointerOptions {
   readonly ids: IdGenerator;
   readonly clock: Clock;
   readonly checkpointEveryEvents?: number;
+  readonly snapshotKeep?: number;
   readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
 }
 
@@ -93,10 +94,17 @@ export class Checkpointer {
             },
             snapshot,
           );
-          if (workspaceRef !== undefined) {
-            await this.options.workspaceSnapshotter
-              ?.prune(this.options.runId)
-              .catch(() => undefined);
+          if (workspaceRef !== undefined && this.options.workspaceSnapshotter !== undefined) {
+            try {
+              const retainedRefs = await this.options.recorder.retainedWorkspaceRefs(
+                this.options.snapshotKeep ?? 5,
+              );
+              await this.options.workspaceSnapshotter
+                .prune(this.options.runId, retainedRefs)
+                .catch(() => undefined);
+            } catch {
+              // Pruning is best-effort after the checkpoint has committed.
+            }
           }
           return event;
         } catch (error) {

@@ -383,6 +383,9 @@ function createRuntimeResume(
             scopes,
             budgets: config.run.budgets,
             checkpointEveryEvents: config.run.checkpointEveryEvents,
+            ...(config.store?.snapshotKeep === undefined
+              ? {}
+              : { snapshotKeep: config.store.snapshotKeep }),
             resumePolicy: config.run.resume.onNonIdempotent,
             ...(config.sandbox?.restoreOnResume === undefined
               ? {}

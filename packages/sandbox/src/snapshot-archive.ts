@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { aesGcmDecrypt, aesGcmEncrypt } from "@harness/crypto";
-import { Code, HarnessError, Id } from "@harness/schemas";
-import type { KeyProvider, WorkspaceRef } from "@harness/schemas";
-import { chmod, lstat, mkdir, readlink, readdir, rename, rm } from "node:fs/promises";
+// cspell:ignore linkpath
+import { HarnessError, Id } from "@harness/schemas";
+import type { WorkspaceRef } from "@harness/schemas";
+import { chmod, lstat, readlink, readdir } from "node:fs/promises";
 import { dirname, join, posix, win32 } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import * as tar from "tar";
+import type { ReadEntry } from "tar";
 
-const ENCRYPTION_HEADER = Buffer.from("WSENC01", "ascii");
 const WORKSPACE_REF_PATTERN = /^ws:([0-9A-HJKMNP-TV-Z]{26}):([a-f0-9]{16})$/u;
 
 /** Error raised when a workspace snapshot cannot be read or restored safely. */
@@ -123,11 +123,9 @@ export async function assertWorkspaceArchiveLimits(
 }
 
 /** Compresses the workspace while excluding ephemeral per-run scratch files. */
-export async function createWorkspaceArchive(
-  runRoot: string,
-): Promise<Readable> {
+export function createWorkspaceArchive(runRoot: string): Readable {
   try {
-    return tar.c(
+    return Readable.from(tar.c(
       {
         cwd: runRoot,
         gzip: true,
@@ -141,83 +139,9 @@ export async function createWorkspaceArchive(
         },
       },
       ["."],
-    );
-  } catch (error) {
-    throw new WorkspaceSnapshotError();
-  }
-}
-
-/** Optionally encrypts compressed workspace bytes with the configured key provider. */
-export async function encryptWorkspaceArchive(
-  archive: Buffer,
-  options: {
-    readonly runId: Id;
-    readonly snapshotId: Id;
-    readonly enabled: boolean;
-    readonly provider?: KeyProvider;
-  },
-): Promise<Buffer> {
-  const { runId, snapshotId, enabled, provider } = options;
-  if (!enabled) {
-    return archive;
-  }
-  if (provider === undefined) {
-    throw new WorkspaceSnapshotError();
-  }
-  let key: Buffer | undefined;
-  try {
-    const keyId = Code.parse(provider.currentKeyId());
-    key = Buffer.from(await provider.getKey(keyId));
-    const encrypted = aesGcmEncrypt(key, archive, Buffer.from(`${runId}:${snapshotId}`));
-    const encodedKeyId = Buffer.from(keyId, "utf8");
-    return Buffer.concat([
-      ENCRYPTION_HEADER,
-      Buffer.from([encodedKeyId.byteLength]),
-      encodedKeyId,
-      encrypted,
-    ]);
+    ));
   } catch {
     throw new WorkspaceSnapshotError();
-  } finally {
-    key?.fill(0);
-  }
-}
-
-/** Verifies and decrypts stored snapshot bytes when an encryption envelope is present. */
-export async function decryptWorkspaceArchive(
-  storedBytes: Buffer,
-  runId: Id,
-  snapshotId: Id,
-  provider?: KeyProvider,
-): Promise<Buffer> {
-  if (!storedBytes.subarray(0, ENCRYPTION_HEADER.byteLength).equals(ENCRYPTION_HEADER)) {
-    return Buffer.from(storedBytes);
-  }
-  const keyIdLength = storedBytes[ENCRYPTION_HEADER.byteLength];
-  if (keyIdLength === undefined || keyIdLength < 1) {
-    throw new WorkspaceSnapshotError();
-  }
-  const keyOffset = ENCRYPTION_HEADER.byteLength + 1;
-  const keyId = Code.safeParse(
-    storedBytes.subarray(keyOffset, keyOffset + keyIdLength).toString("utf8"),
-  );
-  if (!keyId.success || provider === undefined) {
-    throw new WorkspaceSnapshotError();
-  }
-  let key: Buffer | undefined;
-  try {
-    key = Buffer.from(await provider.getKey(keyId.data));
-    return Buffer.from(
-      aesGcmDecrypt(
-        key,
-        storedBytes.subarray(keyOffset + keyIdLength),
-        Buffer.from(`${runId}:${snapshotId}`),
-      ),
-    );
-  } catch {
-    throw new WorkspaceSnapshotError();
-  } finally {
-    key?.fill(0);
   }
 }
 
@@ -255,7 +179,7 @@ function resolveArchiveEntryPath(
 
 function entryHasAllowedType(
   entry: ArchiveFilterEntry,
-): entry is Extract<ArchiveFilterEntry, { type: string }> {
+): entry is ReadEntry {
   return (
     "type" in entry &&
     (entry.type === "Directory" ||
@@ -267,7 +191,7 @@ function entryHasAllowedType(
 }
 
 function entryFitsSnapshotLimits(
-  entry: ArchiveFilterEntry,
+  entry: ReadEntry,
   state: ArchiveExtractionState,
   maxFileBytes: number,
   maxSnapshotBytes: number,
@@ -288,38 +212,31 @@ function entryFitsSnapshotLimits(
   return true;
 }
 
-function filterArchiveEntry(
-  entry: ArchiveFilterEntry,
-  state: ArchiveExtractionState,
-  maxFileBytes: number,
-  maxSnapshotBytes: number,
-): boolean {
-  const relativePath = resolveArchiveEntryPath(entry, state);
-  if (relativePath === undefined) {
-    return false;
-  }
-  if (!entryHasAllowedType(entry)) {
-    return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
-  }
+function hasSymlinkAncestor(relativePath: string, state: ArchiveExtractionState): boolean {
   const ancestors = relativePath.split("/");
   ancestors.pop();
   let ancestorPath = "";
   for (const ancestor of ancestors) {
     ancestorPath = ancestorPath.length === 0 ? ancestor : `${ancestorPath}/${ancestor}`;
     if (state.symbolicLinks.has(ancestorPath)) {
-      return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
+      return true;
     }
   }
-  if (state.paths.has(relativePath)) {
-    return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
-  }
+  return false;
+}
+
+function registerArchiveEntry(
+  entry: ReadEntry,
+  relativePath: string,
+  state: ArchiveExtractionState,
+): boolean {
   if (entry.type === "SymbolicLink" || entry.type === "Link") {
-    const linkPath = "linkpath" in entry ? entry.linkpath : undefined;
-    if (linkPath === undefined) {
+    const linkTarget = "linkpath" in entry ? entry.linkpath : undefined;
+    if (linkTarget === undefined) {
       return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
     }
     try {
-      const target = resolveLinkTarget(relativePath, linkPath, entry.type === "Link");
+      const target = resolveLinkTarget(relativePath, linkTarget, entry.type === "Link");
       if (entry.type === "Link" && !state.files.has(target)) {
         return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
       }
@@ -333,6 +250,31 @@ function filterArchiveEntry(
     }
   } else if (entry.type === "File" || entry.type === "OldFile") {
     state.files.add(relativePath);
+  }
+  return true;
+}
+
+function filterArchiveEntry(
+  entry: ArchiveFilterEntry,
+  state: ArchiveExtractionState,
+  maxFileBytes: number,
+  maxSnapshotBytes: number,
+): boolean {
+  const relativePath = resolveArchiveEntryPath(entry, state);
+  if (relativePath === undefined) {
+    return false;
+  }
+  if (!entryHasAllowedType(entry)) {
+    return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
+  }
+  if (hasSymlinkAncestor(relativePath, state)) {
+    return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
+  }
+  if (state.paths.has(relativePath)) {
+    return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
+  }
+  if (!registerArchiveEntry(entry, relativePath, state)) {
+    return false;
   }
   if (!entryFitsSnapshotLimits(entry, state, maxFileBytes, maxSnapshotBytes)) {
     return false;
@@ -348,7 +290,7 @@ function filterArchiveEntry(
 
 /** Safely extracts archive entries into a private temporary workspace directory. */
 export async function extractWorkspaceArchive(
-  archive: Buffer,
+  archive: Buffer | Readable,
   destination: string,
   maxFileBytes: number,
   maxSnapshotBytes: number,
@@ -381,100 +323,5 @@ export async function extractWorkspaceArchive(
       throw error;
     }
     throw new WorkspaceSnapshotError();
-  }
-}
-
-function codeOf(error: unknown): string | undefined {
-  return error instanceof Error && "code" in error && typeof error.code === "string"
-    ? error.code
-    : undefined;
-}
-
-async function recoverInterruptedWorkspaceSwap(runRoot: string, oldRoot: string): Promise<void> {
-  const oldInfo = await lstat(oldRoot).catch((error: unknown) => {
-    if (codeOf(error) === "ENOENT") {
-      return undefined;
-    }
-    throw new WorkspaceSnapshotError();
-  });
-  if (oldInfo === undefined) {
-    return;
-  }
-  if (!oldInfo.isDirectory() || oldInfo.isSymbolicLink()) {
-    throw new WorkspaceSnapshotError();
-  }
-  const currentInfo = await lstat(runRoot).catch((error: unknown) => {
-    if (codeOf(error) === "ENOENT") {
-      return undefined;
-    }
-    throw new WorkspaceSnapshotError();
-  });
-  if (currentInfo === undefined) {
-    await rename(oldRoot, runRoot);
-  } else {
-    await rm(oldRoot, { recursive: true, force: true });
-  }
-}
-
-async function swapRestoredWorkspace(
-  temporaryRoot: string,
-  runRoot: string,
-  oldRoot: string,
-): Promise<void> {
-  const existing = await lstat(runRoot).catch((error: unknown) => {
-    if (codeOf(error) === "ENOENT") {
-      return undefined;
-    }
-    throw new WorkspaceSnapshotError();
-  });
-  if (existing !== undefined) {
-    if (!existing.isDirectory() || existing.isSymbolicLink()) {
-      throw new WorkspaceSnapshotError();
-    }
-    await rm(oldRoot, { recursive: true, force: true });
-    await rename(runRoot, oldRoot);
-  }
-  try {
-    await rename(temporaryRoot, runRoot);
-  } catch {
-    if (existing !== undefined) {
-      await rename(oldRoot, runRoot);
-    }
-    throw new WorkspaceSnapshotError();
-  }
-  if (existing !== undefined) {
-    await rm(oldRoot, { recursive: true, force: true });
-  }
-}
-
-/** Installs a validated snapshot archive with a recoverable atomic workspace swap. */
-export async function restoreWorkspaceArchive(options: {
-  readonly archive: Buffer | Readable;
-  readonly workspaceRoot: string;
-  readonly runId: Id;
-  readonly temporaryId: Id;
-  readonly maxFileBytes: number;
-  readonly maxSnapshotBytes: number;
-}): Promise<void> {
-  const { archive, workspaceRoot, runId, temporaryId, maxFileBytes, maxSnapshotBytes } = options;
-  const temporaryRoot = join(workspaceRoot, `.${runId}.restore-${temporaryId}`);
-  const runRoot = join(workspaceRoot, runId);
-  const oldRoot = join(workspaceRoot, `${runId}.old`);
-  let createdTemporaryRoot = false;
-  try {
-    await recoverInterruptedWorkspaceSwap(runRoot, oldRoot);
-    await mkdir(temporaryRoot, { recursive: false, mode: 0o700 });
-    createdTemporaryRoot = true;
-    await extractWorkspaceArchive(archive, temporaryRoot, maxFileBytes, maxSnapshotBytes);
-    await swapRestoredWorkspace(temporaryRoot, runRoot, oldRoot);
-  } catch (error) {
-    if (error instanceof HarnessError) {
-      throw error;
-    }
-    throw new WorkspaceSnapshotError();
-  } finally {
-    if (createdTemporaryRoot) {
-      await rm(temporaryRoot, { recursive: true, force: true });
-    }
   }
 }

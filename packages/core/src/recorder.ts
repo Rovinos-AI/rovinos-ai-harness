@@ -19,6 +19,7 @@ import {
   type Id,
   type NewEvent,
   type Snapshot,
+  type WorkspaceRef,
 } from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
 import {
@@ -107,6 +108,23 @@ export class RunRecorder {
   /** The next sequence this recorder expects to append. */
   get nextSeq(): number {
     return this.nextSequence;
+  }
+
+  /** Read the workspace references attached to the snapshots retained by the event store. */
+  async retainedWorkspaceRefs(snapshotKeep: number): Promise<WorkspaceRef[]> {
+    const checkpoints: Extract<Event, { type: "checkpoint_written" }>[] = [];
+    for await (const event of this.store.read(this.runId)) {
+      if (event.type !== "checkpoint_written") {
+        continue;
+      }
+      checkpoints.push(event);
+      if (checkpoints.length > snapshotKeep) {
+        checkpoints.shift();
+      }
+    }
+    return checkpoints.flatMap((event) =>
+      event.workspaceRef === undefined ? [] : [event.workspaceRef],
+    );
   }
 
   /**

@@ -18,11 +18,13 @@ interface StoreCommandOperations {
     config: HarnessConfig,
     dryRun: boolean,
     secretResolver: CliContext["secretResolver"],
+    dataDir?: string,
   ): Promise<EventStore>;
   openVaultAdmin?(
     config: HarnessConfig,
     clock: CliContext["clock"],
     secretResolver: CliContext["secretResolver"],
+    dataDir?: string,
   ): Promise<VaultAdmin & { close(): void | Promise<void> }>;
 }
 
@@ -52,17 +54,19 @@ const defaultOperations: StoreCommandOperations = {
       ...(secretResolver === undefined ? {} : { secretResolver }),
     });
   },
-  async openStore(config, dryRun, secretResolver) {
+  async openStore(config, dryRun, secretResolver, dataDir) {
     const core = await import("@harness/core");
     return core.openConfiguredStore(config, {
       readOnly: dryRun,
+      ...(dataDir === undefined ? {} : { dataDir }),
       ...(secretResolver === undefined ? {} : { secretResolver }),
     });
   },
-  async openVaultAdmin(config, clock, secretResolver) {
+  async openVaultAdmin(config, clock, secretResolver, dataDir) {
     const core = await import("@harness/core");
     return core.openConfiguredVaultAdmin(config, {
       clock,
+      ...(dataDir === undefined ? {} : { dataDir }),
       ...(secretResolver === undefined ? {} : { secretResolver }),
     });
   },
@@ -103,6 +107,27 @@ async function writeMigrateResult({
   }
 }
 
+async function purgeRunResources(
+  snapshotRoot: string,
+  vault: (VaultAdmin & { close(): void | Promise<void> }) | undefined,
+  runId: string,
+): Promise<void> {
+  let failure: unknown;
+  try {
+    await purgeWorkspaceSnapshots(snapshotRoot, runId);
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    await vault?.purge(runId);
+  } catch (error) {
+    failure ??= error;
+  }
+  if (failure !== undefined) {
+    throw new StoreCommandError("retention_hook_failed");
+  }
+}
+
 async function writePurgeResult({
   context,
   config,
@@ -114,15 +139,20 @@ async function writePurgeResult({
   if (policy === undefined) {
     throw new StoreCommandError("retention_not_configured");
   }
-  const store = await operations.openStore(config, dryRun, context.secretResolver);
+  const store = await operations.openStore(config, dryRun, context.secretResolver, context.dataDir);
   const core = await import("@harness/core");
-  const snapshotRoot = join(core.resolveDataDir(process.env), "snapshots");
+  const snapshotRoot = join(core.resolveDataDir(process.env, context.dataDir), "snapshots");
   let vault: (VaultAdmin & { close(): void | Promise<void> }) | undefined;
   try {
     const vaultAdmin =
       dryRun || operations.openVaultAdmin === undefined
         ? undefined
-        : await operations.openVaultAdmin(config, context.clock, context.secretResolver);
+        : await operations.openVaultAdmin(
+            config,
+            context.clock,
+            context.secretResolver,
+            context.dataDir,
+          );
     vault = vaultAdmin;
     const { purgeExpiredRuns } = await import("@harness/store");
     const result = await purgeExpiredRuns({
@@ -130,10 +160,7 @@ async function writePurgeResult({
       clock: context.clock,
       policy,
       dryRun,
-      onRunPurged: async (runId) => {
-        await purgeWorkspaceSnapshots(snapshotRoot, runId);
-        await vaultAdmin?.purge(runId);
-      },
+      onRunPurged: (runId) => purgeRunResources(snapshotRoot, vaultAdmin, runId),
     });
     const vaultResult =
       vaultAdmin === undefined

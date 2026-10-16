@@ -1,16 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import {
-  chmod,
-  open,
-  lstat,
-  mkdir,
-  readdir,
-  realpath,
-  rename,
-  rm,
-} from "node:fs/promises";
+import { chmod, open, lstat, mkdir, realpath, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -20,19 +11,21 @@ import { ensureRunWorkspace } from "./workspace.js";
 import {
   createWorkspaceArchive,
   assertWorkspaceArchiveLimits,
-  decryptWorkspaceArchive,
-  encryptWorkspaceArchive,
   SnapshotTooLargeError,
   UnsafeWorkspaceSnapshotError,
   WorkspaceSnapshotError,
-  restoreWorkspaceArchive,
   workspaceSnapshotRefParts,
 } from "./snapshot-archive.js";
+import { decryptWorkspaceArchive, encryptWorkspaceArchive } from "./snapshot-encryption.js";
+import { purgeWorkspaceSnapshots, WorkspaceSnapshotRetention } from "./snapshot-retention.js";
+import { readVerifiedPlainArchive } from "./snapshot-reader.js";
+import { restoreWorkspaceArchive } from "./snapshot-restore.js";
 
 const DEFAULT_MAX_SNAPSHOT_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_SNAPSHOT_KEEP = 5;
 export { SnapshotTooLargeError, UnsafeWorkspaceSnapshotError, WorkspaceSnapshotError };
+export { purgeWorkspaceSnapshots };
 
 /** Inputs for the filesystem-backed workspace snapshotter. */
 export interface WorkspaceSnapshotterOptions {
@@ -52,6 +45,20 @@ export interface WorkspaceSnapshotterOptions {
   readonly snapshotEncryption?: boolean;
   /** Key provider used when snapshot encryption is enabled. */
   readonly keyProvider?: KeyProvider;
+  /** Workspace access hosted by a remote sandbox runner. */
+  readonly remoteWorkspace?: RemoteWorkspaceSnapshotPort;
+}
+
+/** Streaming access to the workspace mounted inside a remote sandbox runner. */
+export interface RemoteWorkspaceSnapshotPort {
+  createArchive(runId: Id, maxFileBytes: number, maxSnapshotBytes: number): Promise<Readable>;
+  restoreArchive(
+    runId: Id,
+    archive: Readable,
+    maxFileBytes: number,
+    maxSnapshotBytes: number,
+  ): Promise<void>;
+  hasWorkspace(runId: Id): Promise<boolean>;
 }
 
 /** Snapshot operations used by checkpointing and resume. */
@@ -63,7 +70,7 @@ export interface WorkspaceSnapshotPort {
   /** Check whether the run workspace exists as a real directory. */
   hasWorkspace(runId: string): Promise<boolean>;
   /** Remove stale archives after the matching DB checkpoint has committed. */
-  prune(runId: string): Promise<void>;
+  prune(runId: string, retainedRefs: readonly WorkspaceRef[]): Promise<void>;
   /** Remove an unreferenced archive after a failed DB checkpoint append. */
   deleteSnapshot(runId: string, ref: WorkspaceRef): Promise<void>;
 }
@@ -87,27 +94,30 @@ async function assertPlainDirectory(path: string): Promise<void> {
 export class WorkspaceSnapshotter {
   readonly #maxSnapshotBytes: number;
   readonly #maxFileBytes: number;
-  readonly #snapshotKeep: number;
   readonly #snapshotEncryption: boolean;
+  readonly #retention: WorkspaceSnapshotRetention;
 
   constructor(private readonly options: WorkspaceSnapshotterOptions) {
     this.#maxSnapshotBytes = options.maxSnapshotBytes ?? DEFAULT_MAX_SNAPSHOT_BYTES;
     this.#maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
-    this.#snapshotKeep = options.snapshotKeep ?? DEFAULT_SNAPSHOT_KEEP;
+    const snapshotKeep = options.snapshotKeep ?? DEFAULT_SNAPSHOT_KEEP;
     this.#snapshotEncryption = options.snapshotEncryption ?? false;
     if (
       !Number.isSafeInteger(this.#maxSnapshotBytes) ||
       this.#maxSnapshotBytes < 1 ||
       !Number.isSafeInteger(this.#maxFileBytes) ||
       this.#maxFileBytes < 1 ||
-      !Number.isSafeInteger(this.#snapshotKeep) ||
-      this.#snapshotKeep < 1
+      !Number.isSafeInteger(snapshotKeep) ||
+      snapshotKeep < 1
     ) {
       throw new RangeError("Workspace snapshot limits must be positive safe integers.");
     }
     if (this.#snapshotEncryption && options.keyProvider === undefined) {
       throw new WorkspaceSnapshotError();
     }
+    this.#retention = new WorkspaceSnapshotRetention(options.snapshotRoot, snapshotKeep, (runId) =>
+      this.#ensureRunSnapshotDirectory(runId),
+    );
   }
 
   /**
@@ -121,16 +131,12 @@ export class WorkspaceSnapshotter {
   async snapshot(runId: string): Promise<WorkspaceRef> {
     const validatedRunId = Id.parse(runId);
     const snapshotId = Id.parse(this.options.ids.next());
-    const workspaceRoot = await this.#ensureRoot(this.options.workspaceRoot);
-    const runRoot = join(workspaceRoot, validatedRunId);
-    await ensureRunWorkspace(workspaceRoot, validatedRunId);
-    await assertPlainDirectory(runRoot);
     const snapshotDirectory = await this.#ensureRunSnapshotDirectory(validatedRunId);
     const temporaryPath = join(snapshotDirectory, `.${snapshotId}.tmp`);
     const rawTemporaryPath = join(snapshotDirectory, `.${snapshotId}.archive.tmp`);
     const snapshotPath = join(snapshotDirectory, `${snapshotId}.tar.gz`);
     try {
-      await assertWorkspaceArchiveLimits(runRoot, this.#maxFileBytes, this.#maxSnapshotBytes);
+      const archive = await this.#createArchiveSource(validatedRunId);
       const rawPath = this.#snapshotEncryption ? rawTemporaryPath : temporaryPath;
       const digest = createHash("sha256");
       let compressedBytes = 0;
@@ -148,18 +154,20 @@ export class WorkspaceSnapshotter {
         },
       });
       await pipeline(
-        await createWorkspaceArchive(runRoot),
+        archive,
         compressedLimit,
         createWriteStream(rawPath, { flags: "wx", mode: 0o600 }),
       );
       if (this.#snapshotEncryption) {
-        const archive = await this.#readArchiveBuffer(rawTemporaryPath);
+        const archiveBytes = await this.#readArchiveBuffer(rawTemporaryPath);
         try {
-          const storedBytes = await encryptWorkspaceArchive(archive, {
+          const storedBytes = await encryptWorkspaceArchive(archiveBytes, {
             runId: validatedRunId,
             snapshotId,
             enabled: true,
-            ...(this.options.keyProvider === undefined ? {} : { provider: this.options.keyProvider }),
+            ...(this.options.keyProvider === undefined
+              ? {}
+              : { provider: this.options.keyProvider }),
           });
           if (storedBytes.byteLength > this.#maxSnapshotBytes) {
             storedBytes.fill(0);
@@ -169,7 +177,7 @@ export class WorkspaceSnapshotter {
           await this.#writeTemporaryArchive(temporaryPath, storedBytes);
           storedBytes.fill(0);
         } finally {
-          archive.fill(0);
+          archiveBytes.fill(0);
         }
       }
       await rename(temporaryPath, snapshotPath);
@@ -192,26 +200,34 @@ export class WorkspaceSnapshotter {
    */
   async restore(runId: string, ref: WorkspaceRef): Promise<void> {
     const validatedRunId = Id.parse(runId);
-    const workspaceRoot = await this.#ensureRoot(this.options.workspaceRoot);
     const snapshot = await this.#readSnapshot(validatedRunId, WorkspaceRef.parse(ref));
     try {
-      await restoreWorkspaceArchive({
-        archive: snapshot.archive,
-        workspaceRoot,
-        runId: validatedRunId,
-        temporaryId: Id.parse(this.options.ids.next()),
-        maxFileBytes: this.#maxFileBytes,
-        maxSnapshotBytes: this.#maxSnapshotBytes,
-      });
+      if (this.options.remoteWorkspace !== undefined) {
+        await this.options.remoteWorkspace.restoreArchive(
+          validatedRunId,
+          snapshot.archive,
+          this.#maxFileBytes,
+          this.#maxSnapshotBytes,
+        );
+      } else {
+        await restoreWorkspaceArchive({
+          archive: snapshot.archive,
+          workspaceRoot: await this.#ensureRoot(this.options.workspaceRoot),
+          runId: validatedRunId,
+          temporaryId: Id.parse(this.options.ids.next()),
+          maxFileBytes: this.#maxFileBytes,
+          maxSnapshotBytes: this.#maxSnapshotBytes,
+        });
+      }
     } finally {
-      snapshot.cleanup();
+      await snapshot.cleanup();
     }
   }
 
   async #readSnapshot(
     runId: Id,
     ref: WorkspaceRef,
-  ): Promise<{ archive: Readable; cleanup(): void }> {
+  ): Promise<{ archive: Readable; cleanup(): void | Promise<void> }> {
     const { snapshotId, digest } = workspaceSnapshotRefParts(ref);
     const snapshotDirectory = await this.#ensureRunSnapshotDirectory(runId);
     const snapshotPath = join(snapshotDirectory, `${snapshotId}.tar.gz`);
@@ -234,8 +250,7 @@ export class WorkspaceSnapshotter {
     } finally {
       await file.close();
     }
-    const isEncrypted =
-      readBytes === 7 && header.equals(Buffer.from("WSENC01", "ascii"));
+    const isEncrypted = readBytes === 7 && header.equals(Buffer.from("WSENC01", "ascii"));
     if (isEncrypted) {
       const storedBytes = await this.#readArchiveBuffer(snapshotPath);
       const actualDigest = createHash("sha256").update(storedBytes).digest("hex").slice(0, 16);
@@ -262,47 +277,34 @@ export class WorkspaceSnapshotter {
         throw error;
       }
     }
-    const hash = createHash("sha256");
-    let size = 0;
-    const verify = new Transform({
-      transform: (chunk: Buffer, _encoding, callback) => {
-        size += chunk.byteLength;
-        hash.update(chunk);
-        callback(null, chunk);
-      },
-      flush: (callback) => {
-        if (size > this.#maxSnapshotBytes || hash.digest("hex").slice(0, 16) !== digest) {
-          callback(
-            size > this.#maxSnapshotBytes
-              ? new SnapshotTooLargeError()
-              : new WorkspaceSnapshotError(),
-          );
-          return;
-        }
-        callback();
-      },
+    return readVerifiedPlainArchive({
+      snapshotPath,
+      snapshotDirectory,
+      snapshotId,
+      digest,
+      maxSnapshotBytes: this.#maxSnapshotBytes,
     });
-    return { archive: createReadStream(snapshotPath).pipe(verify), cleanup: () => verify.destroy() };
   }
 
   async #readArchiveBuffer(path: string): Promise<Buffer> {
-    const chunks: Buffer[] = [];
-    for await (const chunk of createReadStream(path)) {
-      chunks.push(Buffer.from(chunk));
+    const chunks: Uint8Array[] = [];
+    const source: AsyncIterable<Buffer> = createReadStream(path);
+    for await (const chunk of source) {
+      chunks.push(chunk);
     }
     return Buffer.concat(chunks);
   }
 
   async #writeTemporaryArchive(path: string, bytes: Buffer): Promise<void> {
-    await pipeline(
-      Readable.from([bytes]),
-      createWriteStream(path, { flags: "wx", mode: 0o600 }),
-    );
+    await pipeline(Readable.from([bytes]), createWriteStream(path, { flags: "wx", mode: 0o600 }));
   }
 
   /** Returns whether a non-symlink run workspace currently exists. */
   async hasWorkspace(runId: string): Promise<boolean> {
     const validatedRunId = Id.parse(runId);
+    if (this.options.remoteWorkspace !== undefined) {
+      return this.options.remoteWorkspace.hasWorkspace(validatedRunId);
+    }
     const workspaceRoot = await this.#ensureRoot(this.options.workspaceRoot);
     const runRoot = join(workspaceRoot, validatedRunId);
     const info = await lstat(runRoot).catch((error: unknown) => {
@@ -320,47 +322,35 @@ export class WorkspaceSnapshotter {
     return true;
   }
 
-  /** Prunes old archives to the same default retention count used by event-store snapshots. */
-  async prune(runId: string): Promise<void> {
-    const directory = await this.#ensureRunSnapshotDirectory(Id.parse(runId));
-    const archives: { readonly path: string; readonly name: string }[] = [];
-    for (const name of await readdir(directory)) {
-      if (!/^[0-9A-HJKMNP-TV-Z]{26}\.tar\.gz$/u.test(name)) {
-        continue;
-      }
-      const path = join(directory, name);
-      const info = await lstat(path);
-      if (info.isFile() && !info.isSymbolicLink()) {
-        archives.push({ path, name });
-      }
+  async #createArchiveSource(runId: Id): Promise<Readable> {
+    if (this.options.remoteWorkspace !== undefined) {
+      return this.options.remoteWorkspace.createArchive(
+        runId,
+        this.#maxFileBytes,
+        this.#maxSnapshotBytes,
+      );
     }
-    archives.sort((left, right) => right.name.localeCompare(left.name));
-    await Promise.all(
-      archives.slice(this.#snapshotKeep).map(({ path }) => rm(path, { force: true })),
-    );
+    const workspaceRoot = await this.#ensureRoot(this.options.workspaceRoot);
+    const runRoot = join(workspaceRoot, runId);
+    await ensureRunWorkspace(workspaceRoot, runId);
+    await assertPlainDirectory(runRoot);
+    await assertWorkspaceArchiveLimits(runRoot, this.#maxFileBytes, this.#maxSnapshotBytes);
+    return createWorkspaceArchive(runRoot);
+  }
+
+  /** Removes archives whose refs are no longer retained by the event store. */
+  prune(runId: string, retainedRefs: readonly WorkspaceRef[]): Promise<void> {
+    return this.#retention.prune(runId, retainedRefs);
   }
 
   /** Removes an archive that was written before a failed checkpoint append. */
-  async deleteSnapshot(runId: string, ref: WorkspaceRef): Promise<void> {
-    const validatedRunId = Id.parse(runId);
-    const { snapshotId } = workspaceSnapshotRefParts(WorkspaceRef.parse(ref));
-    const directory = await this.#ensureRunSnapshotDirectory(validatedRunId);
-    const path = join(directory, `${snapshotId}.tar.gz`);
-    const info = await lstat(path).catch((error: unknown) => {
-      if (codeOf(error) === "ENOENT") {
-        return undefined;
-      }
-      throw new WorkspaceSnapshotError();
-    });
-    if (info !== undefined && (!info.isFile() || info.isSymbolicLink())) {
-      throw new WorkspaceSnapshotError();
-    }
-    await rm(path, { force: true });
+  deleteSnapshot(runId: string, ref: WorkspaceRef): Promise<void> {
+    return this.#retention.deleteSnapshot(runId, ref);
   }
 
   /** Deletes every snapshot belonging to a purged run. */
-  async purgeRun(runId: string): Promise<void> {
-    return purgeWorkspaceSnapshots(this.options.snapshotRoot, runId);
+  purgeRun(runId: string): Promise<void> {
+    return this.#retention.purgeRun(runId);
   }
 
   async #ensureRunSnapshotDirectory(runId: Id): Promise<string> {
@@ -387,35 +377,4 @@ export class WorkspaceSnapshotter {
       throw new WorkspaceSnapshotError();
     });
   }
-}
-
-/** Deletes all workspace archives associated with one retained run. */
-export async function purgeWorkspaceSnapshots(snapshotRoot: string, runId: string): Promise<void> {
-  const validatedRunId = Id.parse(runId);
-  const rootInfo = await lstat(snapshotRoot).catch((error: unknown) => {
-    if (codeOf(error) === "ENOENT") {
-      return undefined;
-    }
-    throw new WorkspaceSnapshotError();
-  });
-  if (rootInfo === undefined) {
-    return;
-  }
-  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {
-    throw new WorkspaceSnapshotError();
-  }
-  const root = await realpath(snapshotRoot).catch(() => {
-    throw new WorkspaceSnapshotError();
-  });
-  const path = join(root, validatedRunId);
-  const info = await lstat(path).catch((error: unknown) => {
-    if (codeOf(error) === "ENOENT") {
-      return undefined;
-    }
-    throw new WorkspaceSnapshotError();
-  });
-  if (info !== undefined && (!info.isDirectory() || info.isSymbolicLink())) {
-    throw new WorkspaceSnapshotError();
-  }
-  await rm(path, { recursive: true, force: true });
 }

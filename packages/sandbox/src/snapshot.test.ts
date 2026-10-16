@@ -324,7 +324,7 @@ describe("WorkspaceSnapshotter", () => {
     ["FIFO", "pipe", "6"],
   ])(
     "rejects %s archives without changing the existing workspace",
-    async (_name, path, type, data?: Buffer, link?: string) => {
+    async (_name, path, type, data?: Buffer, linkTarget?: string) => {
       // threat: T-17
       const paths = await createRoots();
       const runRoot = join(paths.workspaceRoot, runId);
@@ -332,7 +332,7 @@ describe("WorkspaceSnapshotter", () => {
       await writeFile(join(runRoot, "keep"), "original");
       const outsideAbsolutePath = join(paths.workspaceRoot, "..", "absolute-escaped");
       const archivePath = path === "__absolute__" ? outsideAbsolutePath : path;
-      const ref = await writeArchive(paths, maliciousArchive(archivePath, type, data, link));
+      const ref = await writeArchive(paths, maliciousArchive(archivePath, type, data, linkTarget));
 
       await expect(snapshotter(paths).restore(runId, ref)).rejects.toBeInstanceOf(Error);
       await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
@@ -377,19 +377,22 @@ describe("WorkspaceSnapshotter", () => {
   it.each([
     ["escaping relative symlink", "link", "2", Buffer.alloc(0), "../x"],
     ["absolute symlink", "link", "2", Buffer.alloc(0), "/etc/passwd"],
-  ] as const)("rejects %s without replacing the existing workspace", async (_name, path, type, data, target) => {
-    // threat: T-17
-    const paths = await createRoots();
-    const runRoot = join(paths.workspaceRoot, runId);
-    await mkdir(runRoot, { recursive: true });
-    await writeFile(join(runRoot, "keep"), "original");
-    const ref = await writeArchive(paths, maliciousArchive(path, type, data, target));
+  ] as const)(
+    "rejects %s without replacing the existing workspace",
+    async (_name, path, type, data, target) => {
+      // threat: T-17
+      const paths = await createRoots();
+      const runRoot = join(paths.workspaceRoot, runId);
+      await mkdir(runRoot, { recursive: true });
+      await writeFile(join(runRoot, "keep"), "original");
+      const ref = await writeArchive(paths, maliciousArchive(path, type, data, target));
 
-    await expect(snapshotter(paths).restore(runId, ref)).rejects.toMatchObject({
-      code: "workspace_snapshot_unsafe",
-    });
-    await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
-  });
+      await expect(snapshotter(paths).restore(runId, ref)).rejects.toMatchObject({
+        code: "workspace_snapshot_unsafe",
+      });
+      await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
+    },
+  );
 
   it("rejects writing through a previously accepted symbolic link", async () => {
     // threat: T-17
@@ -460,6 +463,16 @@ describe("WorkspaceSnapshotter", () => {
       "synthetic workspace content",
     );
     expect(key).toEqual(Buffer.alloc(32, 7));
+
+    await rm(runRoot, { recursive: true });
+    const encryptionDisabled = snapshotter(paths, {
+      snapshotEncryption: false,
+      keyProvider: provider,
+    });
+    await encryptionDisabled.restore(runId, ref);
+    await expect(readFile(join(runRoot, "secret.txt"), "utf8")).resolves.toBe(
+      "synthetic workspace content",
+    );
   });
 
   it("counts encryption overhead against the stored snapshot limit", async () => {
@@ -490,10 +503,10 @@ describe("WorkspaceSnapshotter", () => {
     const runRoot = join(paths.workspaceRoot, runId);
     await mkdir(runRoot, { recursive: true });
     await writeFile(join(runRoot, "file"), "value");
-    const first = snapshotId;
+    const first = Id.parse("00000000000000000000000004");
     const second = Id.parse("00000000000000000000000003");
     const instance = snapshotter(paths, {
-      ids: ids(first, second, "00000000000000000000000004"),
+      ids: ids(first, second, snapshotId),
       snapshotKeep: 1,
     });
     const orphaned = await instance.snapshot(runId);
@@ -501,7 +514,7 @@ describe("WorkspaceSnapshotter", () => {
     await instance.deleteSnapshot(runId, orphaned);
     const retainedRef = await instance.snapshot(runId);
     await writeFile(join(paths.snapshotRoot, runId, "temporary.archive"), "ignore");
-    await instance.prune(runId);
+    await instance.prune(runId, [retainedRef]);
 
     const directory = join(paths.snapshotRoot, runId);
     const retainedId = snapshotIdFrom(retainedRef);
@@ -514,6 +527,33 @@ describe("WorkspaceSnapshotter", () => {
     await expect(
       purgeWorkspaceSnapshots(join(paths.snapshotRoot, "missing"), runId),
     ).resolves.toBeUndefined();
+  });
+
+  it("prunes by retained checkpoint refs when snapshot IDs are out of order", async () => {
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true });
+    const instance = snapshotter(paths, {
+      snapshotKeep: 2,
+      ids: ids(
+        "00000000000000000000000008",
+        "00000000000000000000000006",
+        "00000000000000000000000007",
+        "00000000000000000000000002",
+      ),
+    });
+    const refs: WorkspaceRef[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      await writeFile(join(runRoot, "file"), String(index));
+      refs.push(await instance.snapshot(runId));
+    }
+
+    const retainedRefs = refs.slice(-2);
+    await instance.prune(runId, retainedRefs);
+
+    await expect(readdir(join(paths.snapshotRoot, runId))).resolves.toEqual(
+      retainedRefs.map((ref) => `${snapshotIdFrom(ref)}.tar.gz`).sort(),
+    );
   });
 
   it("rejects invalid configuration and missing encryption keys", async () => {

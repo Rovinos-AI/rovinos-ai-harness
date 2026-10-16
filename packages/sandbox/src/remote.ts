@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, Id, SandboxRunnerUrlSchema, parseJson } from "@harness/schemas";
+import { Id, SandboxRunnerUrlSchema, parseJson } from "@harness/schemas";
 import type { Id as IdValue } from "@harness/schemas";
+import type { Readable } from "node:stream";
 import { z } from "zod";
 import { ExecResultSchema, MAX_EXEC_TIMEOUT_MS } from "./types.js";
 import type { ExecResult, ExecSpec, SandboxBackend } from "./types.js";
+import type { RemoteWorkspaceSnapshotPort } from "./snapshot.js";
+import { RemoteSandboxError } from "./remote-errors.js";
+import { RemoteWorkspaceClient } from "./remote-workspace.js";
+export { RemoteSandboxError } from "./remote-errors.js";
 import {
   MAX_WEB_FETCH_BYTES,
   MAX_WEB_FETCH_TIMEOUT_MS,
@@ -27,21 +32,6 @@ const RunnerLeaseRequestSchema = z
   })
   .strict();
 const RunnerReleaseRequestSchema = z.object({ runId: Id }).strict();
-
-/** Error reported when a remote runner request fails. */
-export class RemoteSandboxError extends HarnessError {
-  readonly code:
-    "sandbox_unavailable" | "sandbox_busy" | "sandbox_timeout" | "sandbox_runner_config_invalid";
-
-  constructor(
-    code:
-      "sandbox_unavailable" | "sandbox_busy" | "sandbox_timeout" | "sandbox_runner_config_invalid",
-  ) {
-    super("The remote sandbox request failed.");
-    this.code = code;
-  }
-}
-
 /** Options for the authenticated HTTP sandbox backend. */
 export interface RemoteSandboxBackendOptions {
   /** Base URL of the internal runner service. */
@@ -107,11 +97,12 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
  *
  * @param options - Internal runner URL, resolved token, and optional fetch settings.
  */
-export class RemoteSandboxBackend implements SandboxBackend {
+export class RemoteSandboxBackend implements SandboxBackend, RemoteWorkspaceSnapshotPort {
   readonly #url: string;
   readonly #token: string;
   readonly #timeoutGraceMs: number;
   readonly #fetcher: typeof fetch;
+  readonly #workspace: RemoteWorkspaceClient;
 
   constructor(options: RemoteSandboxBackendOptions) {
     const parsed = RemoteOptionsSchema.safeParse({
@@ -126,6 +117,12 @@ export class RemoteSandboxBackend implements SandboxBackend {
     this.#token = parsed.data.token;
     this.#timeoutGraceMs = parsed.data.timeoutGraceMs ?? 1000;
     this.#fetcher = options.fetcher ?? fetch;
+    this.#workspace = new RemoteWorkspaceClient({
+      url: this.#url,
+      token: this.#token,
+      timeoutGraceMs: this.#timeoutGraceMs,
+      fetcher: this.#fetcher,
+    });
   }
 
   /** Acquires or renews the runner lease for a run. */
@@ -144,6 +141,30 @@ export class RemoteSandboxBackend implements SandboxBackend {
       throw new RemoteSandboxError("sandbox_runner_config_invalid");
     }
     await this.#requestLease("/release", release.data);
+  }
+
+  /** Streams a runner-owned workspace archive into the local snapshot store. */
+  async createArchive(
+    runId: IdValue,
+    maxFileBytes: number,
+    maxSnapshotBytes: number,
+  ): Promise<Readable> {
+    return this.#workspace.createArchive(runId, maxFileBytes, maxSnapshotBytes);
+  }
+
+  /** Safely streams a verified snapshot into the runner-owned workspace. */
+  async restoreArchive(
+    runId: IdValue,
+    archive: Readable,
+    maxFileBytes: number,
+    maxSnapshotBytes: number,
+  ): Promise<void> {
+    return this.#workspace.restoreArchive(runId, archive, maxFileBytes, maxSnapshotBytes);
+  }
+
+  /** Checks for a real workspace without activating or creating it. */
+  async hasWorkspace(runId: IdValue): Promise<boolean> {
+    return this.#workspace.hasWorkspace(runId);
   }
 
   async #requestLease(path: "/lease" | "/release", body: unknown): Promise<void> {

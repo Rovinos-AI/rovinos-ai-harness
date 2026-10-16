@@ -17,6 +17,11 @@ describe("StoreConfigSchema", () => {
     });
   });
 
+  it("parses snapshot retention independently from run retention", () => {
+    expect(StoreConfigSchema.parse({ snapshotKeep: 2 })).toEqual({ snapshotKeep: 2 });
+    expect(() => StoreConfigSchema.parse({ snapshotKeep: 0 })).toThrow();
+  });
+
   it("selects SQLite by default and requires a secret reference for Postgres", () => {
     expect(StoreConfigSchema.parse({ dialect: "sqlite" })).toEqual({ dialect: "sqlite" });
     expect(

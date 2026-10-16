@@ -11,6 +11,8 @@
     "../src/inprocess.ts",
     "../src/types.ts",
     "../src/workspace.ts",
+    "../src/snapshot-archive.ts",
+    "../src/snapshot-restore.ts",
     "../src/web-fetch-contracts.ts"
   ],
   "exclude": ["src/**/*.test.ts"],

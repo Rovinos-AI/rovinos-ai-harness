@@ -399,6 +399,7 @@ export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResul
     ...(options.checkpointEveryEvents === undefined
       ? {}
       : { checkpointEveryEvents: options.checkpointEveryEvents }),
+    ...(options.snapshotKeep === undefined ? {} : { snapshotKeep: options.snapshotKeep }),
     ...(options.workspaceSnapshotter === undefined
       ? {}
       : { workspaceSnapshotter: options.workspaceSnapshotter }),

@@ -3,8 +3,8 @@ import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
-import type { Code, Id, PiiConfig } from "@harness/schemas";
-import { PiiEventStore, PiiToolPort } from "@harness/pii";
+import type { PiiConfig } from "@harness/schemas";
+import { PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
 import {
   createSandboxBackend,
@@ -12,16 +12,14 @@ import {
   RemoteSandboxBackend,
   type SandboxBackend,
 } from "@harness/sandbox";
-import type { RequestSanitizer } from "@harness/models";
 import { createRuntimeStore } from "./runtime-store.js";
-import { createConfiguredModelPort } from "./runtime-model.js";
 import { createRuntimeKeys } from "./runtime-keys.js";
-import { createRuntimePii } from "./runtime-pii.js";
+import { createRuntimeModelAndStore } from "./runtime-setup-model.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 import { createRuntimeVault } from "./runtime-vault.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
-import { missingModelPort, unavailableTool } from "./runtime-default-ports.js";
+import { unavailableTool } from "./runtime-default-ports.js";
 import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
@@ -37,7 +35,6 @@ import type {
   RuntimeOverrides,
   RuntimeVault,
 } from "./runtime-config.js";
-import type { Clock } from "./recorder.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 const sandboxLogger = diag.createComponentLogger({ namespace: "harness.sandbox" });
@@ -101,6 +98,24 @@ async function closeSetupResources(options: {
       }
     }
   }
+}
+
+function cleanupRuntimeSetupFailure(options: {
+  readonly tools: RuntimeTools | undefined;
+  readonly eventStore: EventStore | undefined;
+  readonly vault: RuntimeVault | undefined;
+  readonly keys: RuntimeComposition["keys"];
+  readonly overrides: RuntimeOverrides;
+}): Promise<void> {
+  return closeSetupResources({
+    mcpToolPort: options.tools?.mcpToolPort,
+    sandboxBackend: options.tools?.sandboxBackend ?? options.overrides.sandboxBackend,
+    eventStore: options.eventStore,
+    vault: options.vault,
+    disposeKeys: () => {
+      options.keys.dispose();
+    },
+  });
 }
 
 async function createRuntimeSandbox(config: RuntimeConfig, overrides: RuntimeOverrides) {
@@ -236,119 +251,6 @@ function validatePiiConfig(config: RuntimeConfig, overrides: RuntimeOverrides): 
   return pii;
 }
 
-async function createRuntimeModel(
-  config: RuntimeConfig,
-  overrides: RuntimeOverrides,
-  options: {
-    readonly ids: RuntimeComposition["ids"];
-    readonly clock: Clock;
-    readonly requestSanitizer?: RequestSanitizer;
-  },
-): Promise<RuntimeComposition["model"]> {
-  return (
-    overrides.model ??
-    (await createConfiguredModelPort(config.models, {
-      ids: options.ids,
-      clock: options.clock,
-      ...(overrides.providerAdapters === undefined
-        ? {}
-        : { providerAdapters: overrides.providerAdapters }),
-      ...(overrides.secretResolver === undefined
-        ? {}
-        : { secretResolver: overrides.secretResolver }),
-      ...(options.requestSanitizer === undefined
-        ? {}
-        : { requestSanitizer: options.requestSanitizer }),
-    })) ??
-    missingModelPort
-  );
-}
-
-function persistedScopeResolver(store: EventStore, scopes: RunScopeRegistry) {
-  const pending = new Map<Id, Promise<Id>>();
-  const resolve = async (runId: Id, visited: Set<Id>): Promise<Id> => {
-    const registered = scopes.registeredScopeOf(runId);
-    if (registered !== undefined) {
-      return registered;
-    }
-    if (visited.has(runId)) {
-      return runId;
-    }
-    visited.add(runId);
-    let scopeId: Id | undefined;
-    let parentRunId: Id | undefined;
-    for await (const event of store.read(runId, { fromSeq: 0, toSeq: 0 })) {
-      if (event.type === "run_created") {
-        scopeId = event.scopeId;
-        parentRunId = event.parentRunId;
-        break;
-      }
-    }
-    scopeId ??= parentRunId === undefined ? runId : await resolve(parentRunId, visited);
-    scopes.register(runId, scopeId);
-    return scopeId;
-  };
-  return (runId: Id): Promise<Id> => {
-    const known = scopes.registeredScopeOf(runId);
-    if (known !== undefined) {
-      return Promise.resolve(known);
-    }
-    const existing = pending.get(runId);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const resolution = resolve(runId, new Set<Id>());
-    pending.set(runId, resolution);
-    return resolution;
-  };
-}
-
-async function createRuntimeModelAndStore(options: {
-  readonly config: RuntimeConfig;
-  readonly piiConfig: PiiConfig;
-  readonly overrides: RuntimeOverrides;
-  readonly ids: RuntimeComposition["ids"];
-  readonly clock: Clock;
-  readonly vault: RuntimeVault;
-  readonly scopes: RunScopeRegistry;
-  readonly store: EventStore;
-  readonly policyVersion: Code;
-}): Promise<{
-  readonly piiRuntime: ReturnType<typeof createRuntimePii>;
-  readonly model: RuntimeComposition["model"];
-  readonly store: EventStore;
-}> {
-  const piiRuntime = createRuntimePii({
-    config: options.piiConfig,
-    vault: options.vault,
-    scopes: options.scopes,
-    scopeOf: persistedScopeResolver(options.store, options.scopes),
-    policyVersion: options.policyVersion,
-    clock: options.clock,
-  });
-  const requestSanitizer: RequestSanitizer | undefined = options.piiConfig.enabled
-    ? (request, target, context) =>
-        piiRuntime.messageSanitizer.sanitizeRequest(request, target, context.runId, {
-          ...(context.recordPiiAction === undefined
-            ? {}
-            : { recordPiiAction: context.recordPiiAction }),
-          signal: context.signal,
-        })
-    : undefined;
-  const model = await createRuntimeModel(options.config, options.overrides, {
-    ids: options.ids,
-    clock: options.clock,
-    ...(requestSanitizer === undefined ? {} : { requestSanitizer }),
-  });
-  return {
-    piiRuntime,
-    model,
-    store: options.piiConfig.enabled
-      ? new PiiEventStore(options.store, piiRuntime.tokenizer)
-      : options.store,
-  };
-}
-
 /**
  * Resolve validated runtime configuration and create owned storage dependencies.
  * @param config - Validated run configuration.
@@ -370,12 +272,6 @@ export async function setupRuntime(
   let tools: RuntimeTools | undefined;
   try {
     const dataDir = resolveDataDir(process.env, overrides.dataDir);
-    const workspaceSnapshotter = createRuntimeWorkspaceSnapshotter(
-      dataDir,
-      runtimeConfig,
-      ids,
-      keys,
-    );
     const runtimeVault = await createRuntimeVault({
       dataDir,
       config: runtimeConfig,
@@ -388,6 +284,15 @@ export async function setupRuntime(
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
     tools = await createRuntimeTools(runtimeConfig, overrides);
     const { tool, sandboxBackend } = tools;
+    const workspaceSnapshotter = createRuntimeWorkspaceSnapshotter({
+      dataDir,
+      config: runtimeConfig,
+      ids,
+      keys,
+      ...(sandboxBackend instanceof RemoteSandboxBackend
+        ? { remoteWorkspace: sandboxBackend }
+        : {}),
+    });
     const roles = await createRuntimeRoles(runtimeConfig, overrides, tool);
     const rawStore = await createRuntimeStore(runtimeConfig, overrides, clock);
     eventStore = rawStore;
@@ -427,15 +332,7 @@ export async function setupRuntime(
       scopes,
     };
   } catch (error) {
-    await closeSetupResources({
-      mcpToolPort: tools?.mcpToolPort,
-      sandboxBackend: tools?.sandboxBackend ?? overrides.sandboxBackend,
-      eventStore,
-      vault,
-      disposeKeys: () => {
-        keys.dispose();
-      },
-    });
+    await cleanupRuntimeSetupFailure({ tools, eventStore, vault, keys, overrides });
     throw error;
   }
 }

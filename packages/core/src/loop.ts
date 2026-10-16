@@ -52,6 +52,7 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   /** Optional inherited budget failure to record before executing this run. */
   readonly initialBudgetViolation?: BudgetViolation;
   readonly checkpointEveryEvents?: RunConfig["checkpointEveryEvents"];
+  readonly snapshotKeep?: number;
   readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   readonly role?: Code;
   readonly provider?: Code;
@@ -176,6 +177,7 @@ export async function continueRunLoop(
     ...(options.checkpointEveryEvents === undefined
       ? {}
       : { checkpointEveryEvents: options.checkpointEveryEvents }),
+    ...(options.snapshotKeep === undefined ? {} : { snapshotKeep: options.snapshotKeep }),
     ...(options.workspaceSnapshotter === undefined
       ? {}
       : { workspaceSnapshotter: options.workspaceSnapshotter }),

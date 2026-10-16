@@ -51,7 +51,11 @@ async function openConfiguredRotationStore(
     const connectionString = await postgresConnectionString(storeConfig, options.secretResolver);
     const opened = new PostgresEventStore(
       connectionString,
-      {},
+      {
+        ...(storeConfig.snapshotKeep === undefined
+          ? {}
+          : { snapshotKeep: storeConfig.snapshotKeep }),
+      },
       codec,
       options.clock ?? { now: () => Date.now() },
     );
@@ -61,7 +65,11 @@ async function openConfiguredRotationStore(
 
   const databasePath = join(resolveDataDir(process.env, options.dataDir), "harness.db");
   if (existsSync(databasePath)) {
-    const opened = new SqliteEventStore(databasePath, codec);
+    const opened = new SqliteEventStore(
+      databasePath,
+      codec,
+      storeConfig.snapshotKeep === undefined ? {} : { snapshotKeep: storeConfig.snapshotKeep },
+    );
     openedStores.push(opened);
     return opened;
   }
@@ -332,10 +340,20 @@ export async function openConfiguredStore(
   if (storeConfig.dialect === "postgres") {
     const connectionString = await postgresConnectionString(storeConfig, options.secretResolver);
     return options.clock === undefined
-      ? new PostgresEventStore(connectionString, { skipMigrations: readOnly })
+      ? new PostgresEventStore(connectionString, {
+          skipMigrations: readOnly,
+          ...(storeConfig.snapshotKeep === undefined
+            ? {}
+            : { snapshotKeep: storeConfig.snapshotKeep }),
+        })
       : new PostgresEventStore(
           connectionString,
-          { skipMigrations: readOnly },
+          {
+            skipMigrations: readOnly,
+            ...(storeConfig.snapshotKeep === undefined
+              ? {}
+              : { snapshotKeep: storeConfig.snapshotKeep }),
+          },
           undefined,
           options.clock,
         );
@@ -348,7 +366,10 @@ export async function openConfiguredStore(
   if (!readOnly) {
     await mkdir(resolveDataDir(process.env, options.dataDir), { recursive: true });
   }
-  return new SqliteEventStore(databasePath, undefined, { readOnly });
+  return new SqliteEventStore(databasePath, undefined, {
+    readOnly,
+    ...(storeConfig.snapshotKeep === undefined ? {} : { snapshotKeep: storeConfig.snapshotKeep }),
+  });
 }
 
 /** Applies or lists migrations for the same configured store used at runtime. */

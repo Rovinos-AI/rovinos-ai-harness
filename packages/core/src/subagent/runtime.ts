@@ -123,6 +123,9 @@ export function createSubagentTool(options: {
         signal: request.signal,
         budgets: options.config.run.budgets,
         checkpointEveryEvents: options.config.run.checkpointEveryEvents,
+        ...(options.config.store?.snapshotKeep === undefined
+          ? {}
+          : { snapshotKeep: options.config.store.snapshotKeep }),
         ...(options.workspaceSnapshotter === undefined
           ? {}
           : { workspaceSnapshotter: options.workspaceSnapshotter }),
