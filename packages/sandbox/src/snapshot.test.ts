@@ -24,6 +24,7 @@ import {
   WorkspaceSnapshotter,
   purgeWorkspaceSnapshots,
 } from "./snapshot.js";
+import { decryptWorkspaceArchive, encryptWorkspaceArchive } from "./snapshot-encryption.js";
 
 const runId = Id.parse("00000000000000000000000001");
 const snapshotId = Id.parse("00000000000000000000000002");
@@ -552,6 +553,15 @@ describe("WorkspaceSnapshotter", () => {
     await expect(readFile(join(runRoot, "secret.txt"), "utf8")).resolves.toBe(
       "synthetic workspace content",
     );
+  });
+
+  it("passes plaintext archives through when snapshot encryption is disabled", async () => {
+    const archive = Buffer.from("synthetic archive");
+
+    await expect(
+      encryptWorkspaceArchive(archive, { runId, snapshotId, enabled: false }),
+    ).resolves.toBe(archive);
+    await expect(decryptWorkspaceArchive(archive, runId, snapshotId)).resolves.toEqual(archive);
   });
 
   it("counts encryption overhead against the stored snapshot limit", async () => {

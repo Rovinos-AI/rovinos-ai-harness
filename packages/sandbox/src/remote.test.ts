@@ -97,6 +97,23 @@ describe("RemoteSandboxBackend", () => {
     await expect(remote.hasWorkspace(runId)).resolves.toBe(true);
   });
 
+  it("returns an empty stream when the runner has no snapshot body", async () => {
+    const remote = backend(() => Promise.resolve(new Response(null)));
+    let bytes = 0;
+
+    await pipeline(
+      await remote.createArchive(runId, 1024, 2048),
+      new Writable({
+        write(chunk: Buffer, _encoding, callback) {
+          bytes += chunk.byteLength;
+          callback();
+        },
+      }),
+    );
+
+    expect(bytes).toBe(0);
+  });
+
   it("sends the run request with bearer authentication and validates the response", async () => {
     const fetcher: typeof fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(
