@@ -314,7 +314,9 @@ describe("sandbox runner Compose service", () => {
     expect(createInPrivateDirectory.status).toBe(200);
     expect(parseJson(FsToolResultSchema, overwrite.body)).toMatchObject({ bytes: 5 });
     expect(parseJson(FsToolResultSchema, edit.body)).toMatchObject({ bytes: 14 });
-    expect(parseJson(FsToolResultSchema, createInPrivateDirectory.body)).toMatchObject({ bytes: 7 });
+    expect(parseJson(FsToolResultSchema, createInPrivateDirectory.body)).toMatchObject({
+      bytes: 7,
+    });
   });
 
   // threat: T-13

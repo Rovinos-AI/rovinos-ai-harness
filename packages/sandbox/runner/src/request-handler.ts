@@ -5,17 +5,16 @@ import { z } from "zod";
 import process from "node:process";
 import { ExecResultSchema, ExecSpecSchema } from "../../src/types.js";
 import type { ExecResult, ExecSpec } from "../../src/types.js";
-import { MAX_FS_REQUEST_TRANSPORT_BYTES } from "../../src/fs-tools.js";
 import {
+  MAX_FS_REQUEST_TRANSPORT_BYTES,
   FsOperationRequestSchema,
   FsOperationSchema,
 } from "../../src/fs-tools.js";
 import type { FsOperationRequest } from "../../src/fs-tools.js";
-import { WorkspaceFileSystem } from "../../src/workspace-files.js";
+import type { WorkspaceFileSystem } from "../../src/workspace-files.js";
 import { WorkspaceFileError } from "../../src/workspace-file-helpers.js";
 import { WebFetchRequestSchema } from "../../src/web-fetch-contracts.js";
 import { executeRunnerFetch, WebFetchError } from "./web-fetch.js";
-import { SANDBOX_EXEC_GID, SANDBOX_EXEC_UID } from "./exec.js";
 import type { RunnerServerOptions } from "./server.js";
 
 /** Maximum UTF-8 request body accepted by runner endpoints. */
@@ -23,9 +22,7 @@ export const MAX_RUNNER_REQUEST_BYTES = 2 * 1024 * 1024;
 
 const RunnerExecRequestSchema = z.object({ runId: Id, spec: ExecSpecSchema }).strict();
 const RunnerFetchRequestSchema = z.object({ runId: Id, request: WebFetchRequestSchema }).strict();
-const RunnerFsRequestSchema = z
-  .object({ runId: Id, request: FsOperationRequestSchema })
-  .strict();
+const RunnerFsRequestSchema = z.object({ runId: Id, request: FsOperationRequestSchema }).strict();
 const RunnerLeaseRequestSchema = z
   .object({ runId: Id, ttlMs: z.number().int().positive().max(600_000).optional() })
   .strict();
@@ -248,20 +245,38 @@ async function withExecutionIdentity<T>(
     return operation();
   }
   try {
-    if (gid !== undefined && gid !== originalGid) {
-      process.setegid?.(gid);
-    }
-    if (uid !== undefined && uid !== originalUid) {
-      process.seteuid?.(uid);
-    }
+    setExecutionIdentity(uid, gid, originalUid, originalGid);
     return await operation();
   } finally {
-    if (uid !== undefined && originalUid !== uid) {
-      process.seteuid?.(originalUid);
-    }
-    if (gid !== undefined && originalGid !== gid) {
-      process.setegid?.(originalGid);
-    }
+    restoreExecutionIdentity(originalUid, originalGid, uid ?? originalUid, gid ?? originalGid);
+  }
+}
+
+function setExecutionIdentity(
+  uid: number | undefined,
+  gid: number | undefined,
+  currentUid: number,
+  currentGid: number,
+): void {
+  if (gid !== undefined && gid !== currentGid) {
+    process.setegid?.(gid);
+  }
+  if (uid !== undefined && uid !== currentUid) {
+    process.seteuid?.(uid);
+  }
+}
+
+function restoreExecutionIdentity(
+  uid: number,
+  gid: number,
+  currentUid: number,
+  currentGid: number,
+): void {
+  if (uid !== currentUid) {
+    process.seteuid?.(uid);
+  }
+  if (gid !== currentGid) {
+    process.setegid?.(gid);
   }
 }
 

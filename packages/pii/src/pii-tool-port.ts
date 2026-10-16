@@ -42,7 +42,10 @@ export interface PiiToolResult {
 
 /** Structural port avoids a dependency from PII back to core. */
 export interface PiiToolPortLike {
-  describe(toolId: Code, args?: JsonValue):
+  describe(
+    toolId: Code,
+    args?: JsonValue,
+  ):
     | {
         readonly idempotent: boolean;
         readonly timeoutMs: number;

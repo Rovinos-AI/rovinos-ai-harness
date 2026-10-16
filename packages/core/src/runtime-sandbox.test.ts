@@ -89,13 +89,13 @@ function webFetchModel(url: string): FakeModelPort {
   ]);
 }
 
-function fileToolModel(toolId: string, args: JsonValue): FakeModelPort {
+function fileToolModel(fileToolId: string, args: JsonValue): FakeModelPort {
   return new FakeModelPort([
     completion([
       {
         type: "tool_call",
         callId: Id.parse("11111111111111111111111113"),
-        toolId: Code.parse(toolId),
+        toolId: Code.parse(fileToolId),
         args,
       },
     ]),
@@ -153,19 +153,23 @@ describe("createRuntime sandbox composition", () => {
       "fs.write",
       JsonValue.parse({ path: "secrets/.ENV", content: "synthetic", mode: "create" }),
     );
-    const compiled = compilePolicy(PolicyDocumentSchema.parse({
-      version: 1,
-      defaultDecision: "deny",
-      rules: [{
-        id: "ask_sensitive_env",
-        match: {
-          tools: ["fs.write"],
-          args: [{ pointer: "/path", op: "matches", value: "[^/]{0,255}\\.[eE][nN][vV]$" }],
-        },
-        decision: "ask",
-        reason: "sensitive_file",
-      }],
-    }));
+    const compiled = compilePolicy(
+      PolicyDocumentSchema.parse({
+        version: 1,
+        defaultDecision: "deny",
+        rules: [
+          {
+            id: "ask_sensitive_env",
+            match: {
+              tools: ["fs.write"],
+              args: [{ pointer: "/path", op: "matches", value: "[^/]{0,255}\\.[eE][nN][vV]$" }],
+            },
+            decision: "ask",
+            reason: "sensitive_file",
+          },
+        ],
+      }),
+    );
     const runtime = await createRuntime(
       { run, pii: PiiConfigSchema.parse({ defaultAction: "tokenize" }) },
       {
@@ -174,15 +178,15 @@ describe("createRuntime sandbox composition", () => {
         model: modelPort,
         policy: {
           version: Code.parse("sensitive_path_test"),
-          decide: ({ toolId, args }) =>
-            compiled.evaluate({ toolId, args, context: { subagent: false } }),
+          decide: ({ toolId: policyToolId, args }) =>
+            compiled.evaluate({ toolId: policyToolId, args, context: { subagent: false } }),
         },
       },
     );
     try {
-      const result = await runtime.run("write the environment file");
-      expect(result.events.some((event) => event.type === "approval_requested")).toBe(true);
-      expect(result.events.some((event) => event.type === "tool_result")).toBe(false);
+      const runResult = await runtime.run("write the environment file");
+      expect(runResult.events.some((event) => event.type === "approval_requested")).toBe(true);
+      expect(runResult.events.some((event) => event.type === "tool_result")).toBe(false);
     } finally {
       await runtime.close();
       await rm(dataDir, { recursive: true, force: true });
@@ -200,8 +204,8 @@ describe("createRuntime sandbox composition", () => {
       { ...overrides(), dataDir, model: modelPort, policy: allowAllPolicy },
     );
     try {
-      const result = await runtime.run("read the private file");
-      expect(result.events.find((event) => event.type === "tool_result")).toMatchObject({
+      const runResult = await runtime.run("read the private file");
+      expect(runResult.events.find((event) => event.type === "tool_result")).toMatchObject({
         toolId: "fs.read",
         outcome: "error",
         errorCode: "fs_path_invalid",

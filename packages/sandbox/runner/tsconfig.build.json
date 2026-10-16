@@ -13,6 +13,8 @@
     "../src/types.ts",
     "../src/workspace.ts",
     "../src/workspace-file-helpers.ts",
+    "../src/workspace-file-quota.ts",
+    "../src/workspace-file-search.ts",
     "../src/workspace-files.ts",
     "../src/web-fetch-contracts.ts"
   ],

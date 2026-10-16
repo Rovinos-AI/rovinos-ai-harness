@@ -1893,11 +1893,13 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
         expect.arrayContaining(["fs.read", "fs.write", "fs.edit", "fs.list", "fs.search"]),
       );
       expect(decide).toHaveBeenCalledTimes(3);
-      expect(forwarded).toMatchObject(expect.arrayContaining([
-        { request: { url: `http://${probeHost}:8080/runtime` } },
-        { request: { operation: "write" } },
-        { request: { operation: "read" } },
-      ]));
+      expect(forwarded).toMatchObject(
+        expect.arrayContaining([
+          { request: { url: `http://${probeHost}:8080/runtime` } },
+          { request: { operation: "write" } },
+          { request: { operation: "read" } },
+        ]),
+      );
       expect(responses).toHaveLength(3);
       expect(responses.every(({ status }) => status === 200)).toBe(true);
       expect(WebFetchResultSchema.parse(toolResult.result)).toMatchObject({

@@ -16,6 +16,7 @@ import type { WebFetchRequest, WebFetchResult } from "../../src/web-fetch-contra
 import {
   executeRunnerPayload,
   readRunnerPayload,
+  type RunnerPayload,
   type RunnerRequest,
   type RunnerResponse,
 } from "./request-handler.js";
@@ -233,14 +234,7 @@ async function handleRunnerRequest(
   request: RunnerRequest,
   response: RunnerResponse,
 ): Promise<void> {
-  const {
-    options,
-    allowedHosts,
-    tokenHash,
-    workspaceFiles,
-    executionUid,
-    executionGid,
-  } = context;
+  const { allowedHosts, tokenHash } = context;
   try {
     if (!validHost(request, allowedHosts) || !validOrigin(request.headers.origin, allowedHosts)) {
       writeError(response, 400, "sandbox_host_rejected");
@@ -259,61 +253,65 @@ async function handleRunnerRequest(
     if (payload === undefined) {
       return;
     }
-    if (payload.kind === "lease") {
-      if (await context.leases.acquire(payload.runId, payload.ttlMs)) {
-        sendJson(response, 200, { status: "ok" });
-      } else {
-        writeError(response, 409, "sandbox_busy");
-      }
-      return;
-    }
-    if (payload.kind === "release") {
-      if (context.isBusy() || !(await context.leases.release(payload.runId))) {
-        writeError(response, 409, "sandbox_busy");
-      } else {
-        sendJson(response, 200, { status: "ok" });
-      }
-      return;
-    }
-    if (!(await context.leases.renew(payload.runId))) {
-      writeError(response, 409, "sandbox_busy");
-      return;
-    }
-    if (context.isBusy()) {
-      writeError(response, 409, "sandbox_busy");
-      return;
-    }
-    context.setBusy(true);
-    const controller = new AbortController();
-    response.once("close", () => {
-      if (!response.writableEnded) {
-        controller.abort();
-      }
-    });
-    try {
-      await executeRunnerPayload({
-        options,
-        payload,
-        response,
-        signal: controller.signal,
-        executeSpec: (runId, spec, signal) => executeRunnerSpec(options, runId, spec, signal),
-        workspaceFiles,
-        executionUid,
-        executionGid,
-        sendJson,
-        sendError: writeError,
-      });
-    } finally {
-      context.setBusy(false);
-      await context.leases.finishExecution(payload.runId);
-      await context.leases.expireDue();
-    }
+    await handleRunnerPayload(context, payload, response);
   } catch {
     if (!response.headersSent) {
       writeError(response, 500, "sandbox_internal_error");
     } else {
       response.destroy();
     }
+  }
+}
+
+async function handleRunnerPayload(
+  context: RunnerRequestContext,
+  payload: RunnerPayload,
+  response: RunnerResponse,
+): Promise<void> {
+  if (payload.kind === "lease") {
+    writeLeaseResult(await context.leases.acquire(payload.runId, payload.ttlMs), response);
+    return;
+  }
+  if (payload.kind === "release") {
+    writeLeaseResult(!context.isBusy() && (await context.leases.release(payload.runId)), response);
+    return;
+  }
+  if (!(await context.leases.renew(payload.runId)) || context.isBusy()) {
+    writeError(response, 409, "sandbox_busy");
+    return;
+  }
+  context.setBusy(true);
+  const controller = new AbortController();
+  response.once("close", () => {
+    if (!response.writableEnded) {
+      controller.abort();
+    }
+  });
+  try {
+    await executeRunnerPayload({
+      options: context.options,
+      payload,
+      response,
+      signal: controller.signal,
+      executeSpec: (runId, spec, signal) => executeRunnerSpec(context.options, runId, spec, signal),
+      workspaceFiles: context.workspaceFiles,
+      executionUid: context.executionUid,
+      executionGid: context.executionGid,
+      sendJson,
+      sendError: writeError,
+    });
+  } finally {
+    context.setBusy(false);
+    await context.leases.finishExecution(payload.runId);
+    await context.leases.expireDue();
+  }
+}
+
+function writeLeaseResult(acquired: boolean, response: RunnerResponse): void {
+  if (acquired) {
+    sendJson(response, 200, { status: "ok" });
+  } else {
+    writeError(response, 409, "sandbox_busy");
   }
 }
 

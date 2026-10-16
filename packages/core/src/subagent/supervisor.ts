@@ -159,8 +159,7 @@ export function restrictToolPort(parent: ToolPort, roleTools: readonly Code[]): 
           getToolSpecs: () =>
             (parent.getToolSpecs?.() ?? []).filter(({ toolId }) => allowed.has(toolId)),
         }),
-    describe: (toolId, args) =>
-      allowed.has(toolId) ? parent.describe(toolId, args) : undefined,
+    describe: (toolId, args) => (allowed.has(toolId) ? parent.describe(toolId, args) : undefined),
     prepare: (call, context) =>
       allowed.has(call.toolId)
         ? (parent.prepare?.(call, context) ?? Promise.resolve(call))

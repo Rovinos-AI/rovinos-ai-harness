@@ -224,33 +224,43 @@ describe("loadPolicy and policyVersion", () => {
     });
     const compiled = compilePolicy(policy);
     const evaluate = (input: Parameters<typeof compiled.evaluate>[0]) => compiled.evaluate(input);
-    expect(evaluate({
-      toolId: "fs.read",
-      args: { path: "README.md" },
-      context: { subagent: false },
-    }).decision).toBe("allow");
-    expect(evaluate({
-      toolId: "fs.write",
-      args: { path: "src/notes.txt" },
-      context: { subagent: false },
-    }).decision).toBe("allow");
-    expect(evaluate({
-      toolId: "fs.write",
-      args: { path: "secrets/.env.local" },
-      context: { subagent: false },
-    }).decision).toBe("ask");
-    for (const path of ["secrets/.ENV", "certificates/id.PEM"]) {
-      expect(evaluate({
-        toolId: "fs.write",
-        args: { path },
+    expect(
+      evaluate({
+        toolId: "fs.read",
+        args: { path: "README.md" },
         context: { subagent: false },
-      }).decision).toBe("ask");
+      }).decision,
+    ).toBe("allow");
+    expect(
+      evaluate({
+        toolId: "fs.write",
+        args: { path: "src/notes.txt" },
+        context: { subagent: false },
+      }).decision,
+    ).toBe("allow");
+    expect(
+      evaluate({
+        toolId: "fs.write",
+        args: { path: "secrets/.env.local" },
+        context: { subagent: false },
+      }).decision,
+    ).toBe("ask");
+    for (const path of ["secrets/.ENV", "certificates/id.PEM"]) {
+      expect(
+        evaluate({
+          toolId: "fs.write",
+          args: { path },
+          context: { subagent: false },
+        }).decision,
+      ).toBe("ask");
     }
-    expect(evaluate({
-      toolId: "fs.write",
-      args: { path: "src/.environment" },
-      context: { subagent: false },
-    }).decision).toBe("allow");
+    expect(
+      evaluate({
+        toolId: "fs.write",
+        args: { path: "src/.environment" },
+        context: { subagent: false },
+      }).decision,
+    ).toBe("allow");
   });
 
   it("loads YAML and JSON policy files from disk", async () => {

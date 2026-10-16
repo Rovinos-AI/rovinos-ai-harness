@@ -6,10 +6,7 @@ import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { Code, Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
-import {
-  createSandboxBackend,
-  type SandboxBackend,
-} from "@harness/sandbox";
+import { createSandboxBackend, type SandboxBackend } from "@harness/sandbox";
 import type { RequestSanitizer } from "@harness/models";
 import { createRuntimeStore } from "./runtime-store.js";
 import { createConfiguredModelPort } from "./runtime-model.js";

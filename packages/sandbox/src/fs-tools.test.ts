@@ -122,7 +122,10 @@ async function remoteBackend(root: string): Promise<{
 async function makeBackend(
   kind: "in-process" | "remote",
   root: string,
-): Promise<{ readonly backend: InProcessBackend | RemoteSandboxBackend; readonly close: () => Promise<void> }> {
+): Promise<{
+  readonly backend: InProcessBackend | RemoteSandboxBackend;
+  readonly close: () => Promise<void>;
+}> {
   if (kind === "remote") {
     return remoteBackend(root);
   }
@@ -135,11 +138,7 @@ async function makeBackend(
   };
 }
 
-function toolCall(
-  tool: FsTools,
-  toolId: string,
-  args: unknown,
-): ReturnType<FsTools["execute"]> {
+function toolCall(tool: FsTools, toolId: string, args: unknown): ReturnType<FsTools["execute"]> {
   return tool.execute(
     {
       callId: runId,
@@ -157,7 +156,9 @@ async function expectFileError(
   code: string,
 ): Promise<void> {
   const files = new WorkspaceFileSystem(root);
-  await expect(files.execute(runId, operation, input, new AbortController().signal)).rejects.toMatchObject({
+  await expect(
+    files.execute(runId, operation, input, new AbortController().signal),
+  ).rejects.toMatchObject({
     code,
   });
 }
@@ -179,48 +180,68 @@ describe.each(["in-process", "remote"] as const)("workspace tools on the %s back
         "fs.list",
         "fs.search",
       ]);
-      expect(await toolCall(tools, "fs.write", {
-        path: "notes.txt",
-        content: "alpha\nbeta",
-        mode: "create",
-      })).toMatchObject({ outcome: "ok" });
-      expect(await toolCall(tools, "fs.read", { path: "notes.txt", offset: 6, length: 4 })).toMatchObject({
+      expect(
+        await toolCall(tools, "fs.write", {
+          path: "notes.txt",
+          content: "alpha\nbeta",
+          mode: "create",
+        }),
+      ).toMatchObject({ outcome: "ok" });
+      expect(
+        await toolCall(tools, "fs.read", { path: "notes.txt", offset: 6, length: 4 }),
+      ).toMatchObject({
         outcome: "ok",
         result: { binary: false, content: "beta", offset: 6 },
       });
-      expect(await toolCall(tools, "fs.edit", {
-        path: "notes.txt",
-        edits: [{ oldText: "beta", newText: "gamma" }],
-      })).toMatchObject({ outcome: "ok" });
+      expect(
+        await toolCall(tools, "fs.edit", {
+          path: "notes.txt",
+          edits: [{ oldText: "beta", newText: "gamma" }],
+        }),
+      ).toMatchObject({ outcome: "ok" });
       expect(await toolCall(tools, "fs.list", { path: ".", depth: 0, limit: 10 })).toMatchObject({
         outcome: "ok",
         result: { entries: [{ path: "notes.txt", type: "file" }], truncated: false },
       });
-      expect(await toolCall(tools, "fs.search", { query: "gamma", regex: false, limit: 10 })).toMatchObject({
+      expect(
+        await toolCall(tools, "fs.search", { query: "gamma", regex: false, limit: 10 }),
+      ).toMatchObject({
         outcome: "ok",
         result: { matches: [{ path: "notes.txt", line: "gamma", lineNumber: 2 }] },
       });
-      expect(await toolCall(tools, "fs.search", {
-        query: "g.mma",
-        regex: true,
-        path: "notes.txt",
-        limit: 10,
-      })).toMatchObject({
+      expect(
+        await toolCall(tools, "fs.search", {
+          query: "g.mma",
+          regex: true,
+          path: "notes.txt",
+          limit: 10,
+        }),
+      ).toMatchObject({
         outcome: "ok",
         result: { matches: [{ path: "notes.txt", lineNumber: 2, line: "gamma" }] },
       });
       expect(tools.describe("fs.read")).toMatchObject({ idempotent: true });
-      expect(tools.describe("fs.write", JsonValue.parse({
-        path: "notes.txt",
-        content: "new",
-        mode: "overwrite",
-        expectedSha256: "0".repeat(64),
-      }))).toMatchObject({ idempotent: true });
-      expect(tools.describe("fs.write", JsonValue.parse({
-        path: "notes.txt",
-        content: "new",
-        mode: "overwrite",
-      }))).toMatchObject({ idempotent: false });
+      expect(
+        tools.describe(
+          "fs.write",
+          JsonValue.parse({
+            path: "notes.txt",
+            content: "new",
+            mode: "overwrite",
+            expectedSha256: "0".repeat(64),
+          }),
+        ),
+      ).toMatchObject({ idempotent: true });
+      expect(
+        tools.describe(
+          "fs.write",
+          JsonValue.parse({
+            path: "notes.txt",
+            content: "new",
+            mode: "overwrite",
+          }),
+        ),
+      ).toMatchObject({ idempotent: false });
       expect(tools.describe(Code.parse("fs.unknown"))).toBeUndefined();
       expect(await toolCall(tools, "fs.read", { path: "../outside" })).toMatchObject({
         outcome: "error",
@@ -245,7 +266,10 @@ describe.each(["in-process", "remote"] as const)("workspace tools on the %s back
           mode: "create",
         }),
       ).resolves.toMatchObject({ outcome: "ok" });
-      await writeFile(join(project, "multi-edit.txt"), "a".repeat(512 * 1024) + "b".repeat(512 * 1024));
+      await writeFile(
+        join(project, "multi-edit.txt"),
+        "a".repeat(512 * 1024) + "b".repeat(512 * 1024),
+      );
       await expect(
         toolCall(tools, "fs.edit", {
           path: "multi-edit.txt",
@@ -265,40 +289,52 @@ describe("workspace file operation contracts and safety", () => {
   it("enforces input sizes, counts, offsets, depths, limits, and safe regexes", () => {
     expect(FsReadInputSchema.safeParse({ path: "a", length: 256 * 1024 }).success).toBe(true);
     expect(FsReadInputSchema.safeParse({ path: "a", length: 256 * 1024 + 1 }).success).toBe(false);
-    expect(FsWriteInputSchema.safeParse({
-      path: "a",
-      content: "é".repeat(524_289),
-      mode: "create",
-    }).success).toBe(false);
-    expect(FsEditInputSchema.safeParse({
-      path: "a",
-      edits: Array.from({ length: 21 }, () => ({ oldText: "a", newText: "b" })),
-    }).success).toBe(false);
-    expect(FsEditInputSchema.safeParse({
-      path: "a",
-      edits: [
-        { oldText: "a".repeat(1024 * 1024), newText: "b".repeat(1024 * 1024) },
-        { oldText: "a".repeat(1024 * 1024), newText: "b".repeat(1024 * 1024) },
-      ],
-    }).success).toBe(true);
-    expect(FsEditInputSchema.safeParse({
-      path: "a",
-      edits: Array.from({ length: 3 }, () => ({
-        oldText: "a".repeat(1024 * 1024),
-        newText: "b".repeat(1024 * 1024),
-      })),
-    }).success).toBe(false);
+    expect(
+      FsWriteInputSchema.safeParse({
+        path: "a",
+        content: "é".repeat(524_289),
+        mode: "create",
+      }).success,
+    ).toBe(false);
+    expect(
+      FsEditInputSchema.safeParse({
+        path: "a",
+        edits: Array.from({ length: 21 }, () => ({ oldText: "a", newText: "b" })),
+      }).success,
+    ).toBe(false);
+    expect(
+      FsEditInputSchema.safeParse({
+        path: "a",
+        edits: [
+          { oldText: "a".repeat(1024 * 1024), newText: "b".repeat(1024 * 1024) },
+          { oldText: "a".repeat(1024 * 1024), newText: "b".repeat(1024 * 1024) },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      FsEditInputSchema.safeParse({
+        path: "a",
+        edits: Array.from({ length: 3 }, () => ({
+          oldText: "a".repeat(1024 * 1024),
+          newText: "b".repeat(1024 * 1024),
+        })),
+      }).success,
+    ).toBe(false);
     expect(FsListInputSchema.safeParse({ path: ".", depth: 4, limit: 10 }).success).toBe(false);
-    expect(FsSearchInputSchema.safeParse({
-      query: "(a+)+$",
-      regex: true,
-      limit: 10,
-    }).success).toBe(false);
-    expect(FsSearchInputSchema.safeParse({
-      query: "[",
-      regex: true,
-      limit: 10,
-    }).success).toBe(false);
+    expect(
+      FsSearchInputSchema.safeParse({
+        query: "(a+)+$",
+        regex: true,
+        limit: 10,
+      }).success,
+    ).toBe(false);
+    expect(
+      FsSearchInputSchema.safeParse({
+        query: "[",
+        regex: true,
+        limit: 10,
+      }).success,
+    ).toBe(false);
   });
 
   it("returns only binary metadata and supports byte offsets", async () => {
@@ -313,20 +349,26 @@ describe("workspace file operation contracts and safety", () => {
       binary: true,
       bytes: 3,
     });
-    expect(await files.execute(runId, "read", { path: "text.txt", offset: 3, length: 1 }, signal)).toMatchObject({
+    expect(
+      await files.execute(runId, "read", { path: "text.txt", offset: 3, length: 1 }, signal),
+    ).toMatchObject({
       binary: false,
       content: "l",
       offset: 3,
       bytes: 1,
     });
     await writeFile(join(project, "unicode.txt"), "éx");
-    expect(await files.execute(runId, "read", { path: "unicode.txt", offset: 1, length: 1 }, signal)).toMatchObject({
+    expect(
+      await files.execute(runId, "read", { path: "unicode.txt", offset: 1, length: 1 }, signal),
+    ).toMatchObject({
       binary: false,
       content: "x",
       offset: 2,
       bytes: 1,
     });
-    expect(FsToolResultSchema.safeParse({ binary: true, bytes: 3, path: "secret" }).success).toBe(false);
+    expect(FsToolResultSchema.safeParse({ binary: true, bytes: 3, path: "secret" }).success).toBe(
+      false,
+    );
   });
 
   it("reads only the requested range from a maximum-size file", async () => {
@@ -337,12 +379,14 @@ describe("workspace file operation contracts and safety", () => {
     const allocationSpy = vi.spyOn(Buffer, "alloc");
 
     try {
-      await expect(files.execute(
-        runId,
-        "read",
-        { path: "large.txt", offset: 10 * 1024 * 1024 - 1, length: 1 },
-        new AbortController().signal,
-      )).resolves.toMatchObject({ binary: false, content: "z", bytes: 1 });
+      await expect(
+        files.execute(
+          runId,
+          "read",
+          { path: "large.txt", offset: 10 * 1024 * 1024 - 1, length: 1 },
+          new AbortController().signal,
+        ),
+      ).resolves.toMatchObject({ binary: false, content: "z", bytes: 1 });
       expect(allocationSpy.mock.calls.every(([size]) => size < 1024 * 1024)).toBe(true);
     } finally {
       allocationSpy.mockRestore();
@@ -363,40 +407,76 @@ describe("workspace file operation contracts and safety", () => {
 
     await expectFileError("read", root, { path: "missing.txt" }, "fs_file_not_found");
     await expectFileError("read", root, { path: "directory" }, "fs_not_file");
-    await expectFileError("write", root, {
-      path: "file.txt",
-      content: "replacement",
-      mode: "create",
-    }, "fs_file_exists");
-    await expectFileError("write", root, {
-      path: "missing.txt",
-      content: "replacement",
-      mode: "overwrite",
-    }, "fs_file_not_found");
-    await expectFileError("write", root, {
-      path: "linked.txt",
-      content: "replacement",
-      mode: "overwrite",
-    }, "fs_path_invalid");
-    await expectFileError("list", root, { path: "file.txt", depth: 0, limit: 10 }, "fs_not_directory");
-    await expect(files.execute(runId, "list", { path: ".", depth: 0, limit: 10 }, signal)).resolves.toMatchObject({
+    await expectFileError(
+      "write",
+      root,
+      {
+        path: "file.txt",
+        content: "replacement",
+        mode: "create",
+      },
+      "fs_file_exists",
+    );
+    await expectFileError(
+      "write",
+      root,
+      {
+        path: "missing.txt",
+        content: "replacement",
+        mode: "overwrite",
+      },
+      "fs_file_not_found",
+    );
+    await expectFileError(
+      "write",
+      root,
+      {
+        path: "linked.txt",
+        content: "replacement",
+        mode: "overwrite",
+      },
+      "fs_path_invalid",
+    );
+    await expectFileError(
+      "list",
+      root,
+      { path: "file.txt", depth: 0, limit: 10 },
+      "fs_not_directory",
+    );
+    await expect(
+      files.execute(runId, "list", { path: ".", depth: 0, limit: 10 }, signal),
+    ).resolves.toMatchObject({
       entries: [
         { path: "directory", type: "directory" },
         { path: "file.txt", type: "file" },
       ],
     });
-    await expect(files.execute(runId, "search", {
-      query: "visible",
-      regex: false,
-      path: "directory",
-      limit: 10,
-    }, signal)).resolves.toMatchObject({ matches: [], truncated: false });
-    await expect(files.execute(runId, "search", {
-      query: "hidden",
-      regex: false,
-      path: ".",
-      limit: 10,
-    }, signal)).resolves.toMatchObject({ matches: [], truncated: false });
+    await expect(
+      files.execute(
+        runId,
+        "search",
+        {
+          query: "visible",
+          regex: false,
+          path: "directory",
+          limit: 10,
+        },
+        signal,
+      ),
+    ).resolves.toMatchObject({ matches: [], truncated: false });
+    await expect(
+      files.execute(
+        runId,
+        "search",
+        {
+          query: "hidden",
+          regex: false,
+          path: ".",
+          limit: 10,
+        },
+        signal,
+      ),
+    ).resolves.toMatchObject({ matches: [], truncated: false });
     await expect(readFile(join(outside, "secret.txt"), "utf8")).resolves.toBe("hidden");
   });
 
@@ -412,11 +492,16 @@ describe("workspace file operation contracts and safety", () => {
     for (const path of ["../outside", "/etc/passwd", "linked.txt", ".harness/offload/item"]) {
       await expectFileError("read", root, { path }, "fs_path_invalid");
     }
-    await expectFileError("write", root, {
-      path: ".harness/tmp/item",
-      content: "blocked",
-      mode: "create",
-    }, "fs_path_invalid");
+    await expectFileError(
+      "write",
+      root,
+      {
+        path: ".harness/tmp/item",
+        content: "blocked",
+        mode: "create",
+      },
+      "fs_path_invalid",
+    );
     await expect(readFile(join(outside, "target.txt"), "utf8")).resolves.toBe("unchanged");
   });
 
@@ -457,14 +542,24 @@ describe("workspace file operation contracts and safety", () => {
     const files = new WorkspaceFileSystem(root);
     const signal = new AbortController().signal;
 
-    await expectFileError("edit", root, {
-      path: "edit.txt",
-      edits: [{ oldText: "absent", newText: "value" }],
-    }, "edit_no_match");
-    await expectFileError("edit", root, {
-      path: "edit.txt",
-      edits: [{ oldText: "second", newText: "third" }],
-    }, "edit_ambiguous");
+    await expectFileError(
+      "edit",
+      root,
+      {
+        path: "edit.txt",
+        edits: [{ oldText: "absent", newText: "value" }],
+      },
+      "edit_no_match",
+    );
+    await expectFileError(
+      "edit",
+      root,
+      {
+        path: "edit.txt",
+        edits: [{ oldText: "second", newText: "third" }],
+      },
+      "edit_ambiguous",
+    );
 
     const originalSha256 = createHash("sha256").update("first second second").digest("hex");
     const input = {
@@ -536,16 +631,18 @@ describe("workspace file operation contracts and safety", () => {
     await writeFile(path, original);
     const edits = markers.map((oldText) => ({ oldText, newText: "z".repeat(800_000) }));
 
-    await expect(new WorkspaceFileSystem(root).execute(
-      runId,
-      "edit",
-      {
-        path: "oversized-edit.txt",
-        edits,
-        expectedSha256: createHash("sha256").update(original).digest("hex"),
-      },
-      new AbortController().signal,
-    )).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
+    await expect(
+      new WorkspaceFileSystem(root).execute(
+        runId,
+        "edit",
+        {
+          path: "oversized-edit.txt",
+          edits,
+          expectedSha256: createHash("sha256").update(original).digest("hex"),
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
     const unchanged = await readFile(path);
     expect(createHash("sha256").update(unchanged).digest("hex")).toBe(
       createHash("sha256").update(original).digest("hex"),
@@ -562,13 +659,11 @@ describe("workspace file operation contracts and safety", () => {
     const staleIdentity = { ...snapshot.identity, mtimeMs: snapshot.identity.mtimeMs + 1 };
 
     await expect(
-      writeFileAt(
-        path,
-        Buffer.from("replacement"),
-        "overwrite",
-        new AbortController().signal,
-        staleIdentity,
-      ),
+      writeFileAt(path, Buffer.from("replacement"), {
+        mode: "overwrite",
+        signal: new AbortController().signal,
+        expectedIdentity: staleIdentity,
+      }),
     ).rejects.toMatchObject({ code: "precondition_failed" });
     const unchanged = await readFile(path);
     expect(unchanged.toString("utf8")).toBe(original);
@@ -592,22 +687,21 @@ describe("workspace file operation contracts and safety", () => {
       ),
     );
     const files = new WorkspaceFileSystem(root);
-    await expect(files.execute(
-      runId,
-      "write",
-      { path: "over-quota.txt", content: "x", mode: "create" },
-      new AbortController().signal,
-    )).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
+    await expect(
+      files.execute(
+        runId,
+        "write",
+        { path: "over-quota.txt", content: "x", mode: "create" },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
 
     const tooLargePath = join(project, "too-large.bin");
     await writeFile(tooLargePath, "");
     await truncate(tooLargePath, 10 * 1024 * 1024 + 1);
-    await expect(files.execute(
-      runId,
-      "read",
-      { path: "too-large.bin" },
-      new AbortController().signal,
-    )).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
+    await expect(
+      files.execute(runId, "read", { path: "too-large.bin" }, new AbortController().signal),
+    ).rejects.toMatchObject({ code: "workspace_quota_exceeded" });
   });
 
   it("skips symlinks and counts oversized command-created files without blocking a small write", async () => {
@@ -622,12 +716,14 @@ describe("workspace file operation contracts and safety", () => {
     await writeFile(external, "outside");
     await symlink(external, join(project, "external-link"));
 
-    await expect(new WorkspaceFileSystem(root).execute(
-      runId,
-      "write",
-      { path: "small.txt", content: "small", mode: "create" },
-      new AbortController().signal,
-    )).resolves.toMatchObject({ path: "small.txt" });
+    await expect(
+      new WorkspaceFileSystem(root).execute(
+        runId,
+        "write",
+        { path: "small.txt", content: "small", mode: "create" },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ path: "small.txt" });
   });
 
   it("reports bounded list/search results, ignores binary search input, and rejects aborted work", async () => {
@@ -639,21 +735,32 @@ describe("workspace file operation contracts and safety", () => {
     const files = new WorkspaceFileSystem(root);
     const signal = new AbortController().signal;
 
-    await expect(files.execute(runId, "list", { path: ".", depth: 3, limit: 1 }, signal)).resolves.toMatchObject({
+    await expect(
+      files.execute(runId, "list", { path: ".", depth: 3, limit: 1 }, signal),
+    ).resolves.toMatchObject({
       truncated: true,
     });
-    await expect(files.execute(
-      runId,
-      "search",
-      { query: "needle", regex: false, path: "nested/deeper/match.txt", limit: 1 },
-      signal,
-    )).resolves.toMatchObject({ matches: [{ lineNumber: 1 }], truncated: true });
-    await expect(files.execute(runId, "search", {
-      query: "needle",
-      regex: false,
-      path: ".",
-      limit: 10,
-    }, signal)).resolves.toMatchObject({
+    await expect(
+      files.execute(
+        runId,
+        "search",
+        { query: "needle", regex: false, path: "nested/deeper/match.txt", limit: 1 },
+        signal,
+      ),
+    ).resolves.toMatchObject({ matches: [{ lineNumber: 1 }], truncated: true });
+    await expect(
+      files.execute(
+        runId,
+        "search",
+        {
+          query: "needle",
+          regex: false,
+          path: ".",
+          limit: 10,
+        },
+        signal,
+      ),
+    ).resolves.toMatchObject({
       matches: [
         { path: "nested/deeper/match.txt", lineNumber: 1 },
         { path: "nested/deeper/match.txt", lineNumber: 2 },
@@ -661,7 +768,9 @@ describe("workspace file operation contracts and safety", () => {
     });
     const controller = new AbortController();
     controller.abort();
-    await expect(files.execute(runId, "read", { path: "binary.dat" }, controller.signal)).rejects.toMatchObject({
+    await expect(
+      files.execute(runId, "read", { path: "binary.dat" }, controller.signal),
+    ).rejects.toMatchObject({
       code: "fs_operation_failed",
     });
   });
@@ -680,22 +789,26 @@ describe("workspace file operation contracts and safety", () => {
     );
     const files = new WorkspaceFileSystem(root);
 
-    await expect(files.execute(
-      runId,
-      "search",
-      { query: "needle", regex: false, limit: 1 },
-      new AbortController().signal,
-    )).resolves.toMatchObject({
+    await expect(
+      files.execute(
+        runId,
+        "search",
+        { query: "needle", regex: false, limit: 1 },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({
       matches: [{ path: "first.txt", lineNumber: 1 }],
       truncated: true,
     });
 
     await writeFile(join(project, "long-line.txt"), `${"x".repeat(2048)}needle`);
-    await expect(files.execute(
-      runId,
-      "search",
-      { path: "long-line.txt", query: "needle", regex: false, limit: 1 },
-      new AbortController().signal,
-    )).resolves.toMatchObject({ matches: [], truncated: true });
+    await expect(
+      files.execute(
+        runId,
+        "search",
+        { path: "long-line.txt", query: "needle", regex: false, limit: 1 },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ matches: [], truncated: true });
   });
 });

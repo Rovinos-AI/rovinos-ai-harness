@@ -23,24 +23,46 @@ import type {
 } from "./fs-tools.js";
 import {
   assertActive,
-  countWorkspaceBytes,
   decodeText,
   DEFAULT_MAX_FILE_BYTES,
   DEFAULT_RUN_QUOTA_BYTES,
   EMPTY_SHA256,
   fileAt,
-  listEntries,
   projectPath,
   readFileSnapshotAt,
   readTextRangeAt,
-  searchDirectory,
-  searchFile,
   sha256,
   WorkspaceFileError,
   writeFileAt,
 } from "./workspace-file-helpers.js";
-import type { SearchMatch } from "./workspace-file-helpers.js";
+import { countWorkspaceBytes } from "./workspace-file-quota.js";
+import { listEntries, searchDirectory, searchFile } from "./workspace-file-search.js";
+import type { SearchMatch } from "./workspace-file-search.js";
 export { WorkspaceFileError } from "./workspace-file-helpers.js";
+
+function validateWritePrecondition(
+  input: FsWriteInput,
+  current: Awaited<ReturnType<typeof fileAt>>,
+  bytes: Uint8Array,
+): void {
+  if (input.mode === "create" && current.exists && input.expectedSha256 === undefined) {
+    throw new WorkspaceFileError("fs_file_exists");
+  }
+  if (input.mode === "overwrite" && !current.exists) {
+    throw new WorkspaceFileError("fs_file_not_found");
+  }
+  if (input.expectedSha256 === undefined) {
+    return;
+  }
+  const currentHash = current.exists ? sha256(current.bytes) : EMPTY_SHA256;
+  if (
+    currentHash !== input.expectedSha256 ||
+    (input.mode === "create" && current.exists) ||
+    sha256(bytes) === input.expectedSha256
+  ) {
+    throw new WorkspaceFileError("precondition_failed");
+  }
+}
 
 /**
  * Provides quota-checked, symlink-safe workspace file operations for one backend.
@@ -93,11 +115,7 @@ export class WorkspaceFileSystem {
   async #read(runId: Id, input: FsReadInput, signal: AbortSignal): Promise<FsToolResult> {
     const root = await this.#projectRoot(runId);
     const path = await projectPath(root, input.path, true);
-    const range = await readTextRangeAt(
-      path,
-      input.offset ?? 0,
-      input.length ?? MAX_FS_READ_BYTES,
-    );
+    const range = await readTextRangeAt(path, input.offset ?? 0, input.length ?? MAX_FS_READ_BYTES);
     assertActive(signal);
     if (range.binary) {
       return { binary: true, bytes: range.fileBytes };
@@ -119,34 +137,17 @@ export class WorkspaceFileSystem {
     const root = await this.#projectRoot(runId);
     const path = await projectPath(root, input.path, true);
     const current = await fileAt(path);
-    if (input.mode === "create" && current.exists && input.expectedSha256 === undefined) {
-      throw new WorkspaceFileError("fs_file_exists");
-    }
-    if (input.mode === "overwrite" && !current.exists) {
-      throw new WorkspaceFileError("fs_file_not_found");
-    }
-    if (input.expectedSha256 !== undefined) {
-      const currentHash = current.exists ? sha256(current.bytes) : EMPTY_SHA256;
-      if (
-        currentHash !== input.expectedSha256 ||
-        (input.mode === "create" && current.exists) ||
-        sha256(bytes) === input.expectedSha256
-      ) {
-        throw new WorkspaceFileError("precondition_failed");
-      }
-    }
+    validateWritePrecondition(input, current, bytes);
     const usedBytes = await countWorkspaceBytes(root, signal);
     const replacedBytes = current.exists ? current.bytes.byteLength : 0;
     if (usedBytes - replacedBytes + bytes.byteLength > DEFAULT_RUN_QUOTA_BYTES) {
       throw new WorkspaceFileError("workspace_quota_exceeded");
     }
-    await writeFileAt(
-      path,
-      bytes,
-      input.mode,
+    await writeFileAt(path, bytes, {
+      mode: input.mode,
       signal,
-      current.exists ? current.identity : undefined,
-    );
+      ...(current.exists ? { expectedIdentity: current.identity } : {}),
+    });
     return {
       bytes: bytes.byteLength,
       path: input.path,
@@ -188,7 +189,11 @@ export class WorkspaceFileSystem {
     if (usedBytes - original.byteLength + bytes.byteLength > DEFAULT_RUN_QUOTA_BYTES) {
       throw new WorkspaceFileError("workspace_quota_exceeded");
     }
-    await writeFileAt(path, bytes, "overwrite", signal, snapshot.identity);
+    await writeFileAt(path, bytes, {
+      mode: "overwrite",
+      signal,
+      expectedIdentity: snapshot.identity,
+    });
     return {
       bytes: bytes.byteLength,
       path: input.path,
@@ -204,17 +209,14 @@ export class WorkspaceFileSystem {
       throw new WorkspaceFileError("fs_not_directory");
     }
     const entries: FsListEntry[] = [];
-    const truncated = await listEntries(
-      directory,
-      {
-        root,
-        prefix: input.path,
-        remainingDepth: input.depth,
-        limit: input.limit,
-        entries,
-        signal,
-      },
-    );
+    const truncated = await listEntries(directory, {
+      root,
+      prefix: input.path,
+      remainingDepth: input.depth,
+      limit: input.limit,
+      entries,
+      signal,
+    });
     return { entries: entries.slice(0, input.limit), truncated };
   }
 
@@ -225,9 +227,10 @@ export class WorkspaceFileSystem {
     const info = await lstat(resolved);
     const matches: SearchMatch[] = [];
     const expression = input.regex ? new RegExp(input.query, "u") : undefined;
-    const matcher = expression === undefined
-      ? (line: string) => line.includes(input.query)
-      : (line: string) => expression.test(line);
+    const matcher =
+      expression === undefined
+        ? (line: string) => line.includes(input.query)
+        : (line: string) => expression.test(line);
     let truncated: boolean;
     if (info.isDirectory()) {
       truncated = await searchDirectory(resolved, {
