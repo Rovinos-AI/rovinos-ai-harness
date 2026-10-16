@@ -377,7 +377,10 @@ export class RemoteSandboxBackend implements SandboxBackend, WorkspaceFileToolBa
       if (error instanceof WorkspaceFileError || error instanceof RemoteSandboxError) {
         throw error;
       }
-      if (controller.signal.reason === timeoutReason || signal.aborted) {
+      if (controller.signal.reason === timeoutReason) {
+        throw new RemoteSandboxError("sandbox_timeout");
+      }
+      if (wasAborted(signal)) {
         throw new RemoteSandboxError("sandbox_timeout");
       }
       throw new RemoteSandboxError("sandbox_unavailable");

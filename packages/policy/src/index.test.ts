@@ -222,7 +222,8 @@ describe("loadPolicy and policyVersion", () => {
       version: 1,
       defaultDecision: "ask",
     });
-    const evaluate = compilePolicy(policy).evaluate;
+    const compiled = compilePolicy(policy);
+    const evaluate = (input: Parameters<typeof compiled.evaluate>[0]) => compiled.evaluate(input);
     expect(evaluate({
       toolId: "fs.read",
       args: { path: "README.md" },

@@ -9,7 +9,8 @@ import {
   FsOperationSchema,
 } from "../../src/fs-tools.js";
 import type { FsOperationRequest } from "../../src/fs-tools.js";
-import { WorkspaceFileError, WorkspaceFileSystem } from "../../src/workspace-files.js";
+import { WorkspaceFileSystem } from "../../src/workspace-files.js";
+import { WorkspaceFileError } from "../../src/workspace-file-helpers.js";
 import { WebFetchRequestSchema } from "../../src/web-fetch-contracts.js";
 import { executeRunnerFetch, WebFetchError } from "./web-fetch.js";
 import type { RunnerServerOptions } from "./server.js";
@@ -102,6 +103,37 @@ async function readRequestBody(
   }
 }
 
+function isSupportedRoute(method: string | undefined, path: string | undefined): boolean {
+  if (method !== "POST") {
+    return false;
+  }
+  if (path === "/exec" || path === "/fetch" || path === "/lease" || path === "/release") {
+    return true;
+  }
+  return (
+    path !== undefined &&
+    path.startsWith("/fs/") &&
+    FsOperationSchema.safeParse(path.slice("/fs/".length)).success
+  );
+}
+
+function parseFilePayload(
+  path: string,
+  body: string,
+  response: RunnerResponse,
+  sendError: SendError,
+): RunnerPayload | undefined {
+  const operation = FsOperationSchema.parse(path.slice("/fs/".length));
+  const parsed = parseJson(RunnerFsRequestSchema, body, {
+    maxBytes: MAX_RUNNER_REQUEST_BYTES,
+  });
+  if (parsed.request.operation !== operation) {
+    sendError(response, 400, "sandbox_request_invalid");
+    return undefined;
+  }
+  return { kind: "fs", runId: parsed.runId, request: parsed.request };
+}
+
 /** Reads and validates the authenticated endpoint payload, writing bounded errors as needed. */
 export async function readRunnerPayload(
   request: RunnerRequest,
@@ -109,15 +141,7 @@ export async function readRunnerPayload(
   isAuthorized: IsAuthorized,
   sendError: SendError,
 ): Promise<RunnerPayload | undefined> {
-  if (
-    request.method !== "POST" ||
-    (request.url !== "/exec" &&
-      request.url !== "/fetch" &&
-      request.url !== "/lease" &&
-      request.url !== "/release" &&
-      !(request.url?.startsWith("/fs/") === true &&
-        FsOperationSchema.safeParse(request.url.slice("/fs/".length)).success))
-  ) {
+  if (!isSupportedRoute(request.method, request.url)) {
     sendError(response, 404, "sandbox_route_not_found");
     return undefined;
   }
@@ -142,15 +166,7 @@ export async function readRunnerPayload(
       return { kind: "fetch", runId: parsed.runId, body: body.body };
     }
     if (request.url?.startsWith("/fs/") === true) {
-      const operation = FsOperationSchema.parse(request.url.slice("/fs/".length));
-      const parsed = parseJson(RunnerFsRequestSchema, body.body, {
-        maxBytes: MAX_RUNNER_REQUEST_BYTES,
-      });
-      if (parsed.request.operation !== operation) {
-        sendError(response, 400, "sandbox_request_invalid");
-        return undefined;
-      }
-      return { kind: "fs", runId: parsed.runId, request: parsed.request };
+      return parseFilePayload(request.url, body.body, response, sendError);
     }
     if (request.url === "/lease") {
       const parsed = parseJson(RunnerLeaseRequestSchema, body.body, {
@@ -209,6 +225,19 @@ function fileOperationFailure(error: unknown): { readonly status: number; readon
   return { status: 500, code: "fs_operation_failed" };
 }
 
+function executionFailure(
+  payload: RunnerExecutionPayload,
+  error: unknown,
+): { readonly status: number; readonly code: string } {
+  if (payload.kind === "fetch") {
+    return fetchFailure(error);
+  }
+  if (payload.kind === "fs") {
+    return fileOperationFailure(error);
+  }
+  return { status: 500, code: "sandbox_exec_failed" };
+}
+
 /** Executes a parsed runner request and maps failures to closed response codes. */
 export async function executeRunnerPayload(input: ExecuteRunnerPayloadOptions): Promise<void> {
   const { options, payload, response, signal, executeSpec, sendJson, sendError } = input;
@@ -229,12 +258,7 @@ export async function executeRunnerPayload(input: ExecuteRunnerPayloadOptions): 
     const result = ExecResultSchema.parse(await executeSpec(payload.runId, payload.spec, signal));
     sendJson(response, 200, result);
   } catch (error: unknown) {
-    const failure =
-      payload.kind === "fetch"
-        ? fetchFailure(error)
-        : payload.kind === "fs"
-          ? fileOperationFailure(error)
-          : { status: 500, code: "sandbox_exec_failed" };
+    const failure = executionFailure(payload, error);
     sendError(response, failure.status, failure.code);
   }
 }

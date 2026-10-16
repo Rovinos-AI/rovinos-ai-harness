@@ -12,6 +12,7 @@
     "../src/fs-tools.ts",
     "../src/types.ts",
     "../src/workspace.ts",
+    "../src/workspace-file-helpers.ts",
     "../src/workspace-files.ts",
     "../src/web-fetch-contracts.ts"
   ],

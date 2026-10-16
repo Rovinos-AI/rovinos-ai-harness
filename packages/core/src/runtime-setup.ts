@@ -8,10 +8,6 @@ import { PiiEventStore, PiiToolPort } from "@harness/pii";
 import type { EventStore } from "@harness/store";
 import {
   createSandboxBackend,
-  createFsTools,
-  createWebFetchTool,
-  InProcessBackend,
-  RemoteSandboxBackend,
   type SandboxBackend,
 } from "@harness/sandbox";
 import type { RequestSanitizer } from "@harness/models";
@@ -28,7 +24,7 @@ import { NaiveContext } from "./context/naive-context.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
-import { composeToolPorts } from "./runtime-tool-port.js";
+import { composeSandboxTools } from "./runtime-tool-port.js";
 import { McpConnectionError, McpToolPort, type McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
 import type { ToolPort } from "./ports.js";
@@ -137,31 +133,7 @@ function createRuntimeTool(
   if (config.pii?.enabled !== false && baseTool instanceof PiiToolPort) {
     throw new PiiToolPortAlreadyWrappedError();
   }
-  // Keep runner fetches behind the same runtime decorators and tool-policy boundary.
-  const webFetchTool =
-    backend instanceof RemoteSandboxBackend
-      ? createWebFetchTool(config.sandbox?.egress?.allow, backend, !!overrides.workspace)
-      : undefined;
-  let fsTool: ReturnType<typeof createFsTools> | undefined;
-  if (backend instanceof InProcessBackend || backend instanceof RemoteSandboxBackend) {
-    const candidateFsTool = createFsTools(backend);
-    const baseToolSpecs = new Set((baseTool.getToolSpecs?.() ?? []).map(({ toolId }) => toolId));
-    const excludedFsToolIds = candidateFsTool
-      .getToolSpecs()
-      .filter(
-        ({ toolId }) =>
-          baseToolSpecs.has(toolId) || baseTool.describe(toolId) !== undefined,
-      )
-      .map(({ toolId }) => toolId);
-    fsTool = createFsTools(backend, excludedFsToolIds);
-  }
-  const composedTool =
-    fsTool === undefined || fsTool.getToolSpecs().length === 0
-      ? baseTool
-      : composeToolPorts(fsTool, baseTool);
-  return webFetchTool === undefined
-    ? composedTool
-    : composeToolPorts(webFetchTool, composedTool);
+  return composeSandboxTools(config, backend, baseTool, !!overrides.workspace);
 }
 
 /** Creates runtime keys, closing a caller-supplied sandbox backend if key resolution fails. */

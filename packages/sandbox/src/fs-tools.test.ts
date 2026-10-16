@@ -26,7 +26,6 @@ import {
   FsWriteInputSchema,
   InProcessBackend,
   RemoteSandboxBackend,
-  WorkspaceFileError,
   WorkspaceFileSystem,
   ensureRunWorkspace,
 } from "./index.js";
