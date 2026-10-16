@@ -178,10 +178,7 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
         toolRunContext(modelRunContext(options), options.recorder, recorded),
       );
       completion = prepared.completion;
-      const structuredValue = tokenizedStructuredValue(
-        completion,
-        options.valueTransform !== undefined,
-      );
+      const structuredValue = tokenizedStructuredValue(completion);
       const response = await options.recorder.record(
         responsePayload(requestId, completion, structuredValue),
       );
@@ -290,9 +287,8 @@ function responsePayload(
 
 function tokenizedStructuredValue(
   completion: ModelCompletion,
-  tokenAware: boolean,
 ): ModelCompletion["providerBlobs"] | undefined {
-  if (!tokenAware || completion.enforcement === undefined) {
+  if (completion.enforcement === undefined) {
     return undefined;
   }
   const parsed = ModelGatewayEnforcementSchema.safeParse(completion.enforcement);

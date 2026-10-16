@@ -789,9 +789,10 @@ describe("SQLite crash-injection matrix", () => {
       expect(resumed.status).toBe("completed");
       expect(structuredCalls).toBe(1);
       expect(events.filter((event) => event.type === "model_response")).toHaveLength(2);
-      expect(
-        events.filter((event) => event.type === "run_status_changed" && event.to === "completed"),
-      ).toHaveLength(1);
+      const completedRuns = events.filter(
+        (event) => event.type === "run_status_changed" && event.to === "completed",
+      );
+      expect(completedRuns).toHaveLength(1);
     } finally {
       await database.close();
       await rm(directory, { recursive: true, force: true });

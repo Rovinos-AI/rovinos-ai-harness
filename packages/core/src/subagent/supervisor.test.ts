@@ -67,13 +67,14 @@ function supervisorOptions(
   options: {
     readonly store?: InMemoryEventStore;
     readonly scopes?: RunScopeRegistry;
+    readonly ids?: IdGenerator;
     readonly parentSpanContext?: () => { traceId: string; spanId: string; traceFlags: number };
     readonly tools?: ToolPort;
   } = {},
 ): SubagentSupervisorOptions {
   return {
     store: options.store ?? new InMemoryEventStore(),
-    ids: idGenerator(),
+    ids: options.ids ?? idGenerator(),
     scopes: options.scopes ?? new RunScopeRegistry(),
     parentTools: options.tools ?? parentTools(),
     runChild,
@@ -288,7 +289,7 @@ describe("SubagentSupervisor", () => {
           segmentId,
           childRunId,
           role: "worker",
-          parentCallId,
+          parentCallId: Id.parse("55555555555555555555555555"),
         },
       ],
       1,
@@ -410,32 +411,84 @@ describe("SubagentSupervisor", () => {
     });
   });
 
-  it("does not append a duplicate completion after resume", async () => {
+  it("reuses the durable child id and does not duplicate parent events after a fresh resume", async () => {
     const store = new InMemoryEventStore();
     await seedParent(store);
-    await store.append(
-      parentRunId,
-      [
-        {
-          runId: parentRunId,
-          type: "subagent_completed",
-          v: 1,
-          ts: 2,
+    const clock = new FakeClock(1);
+    const firstRecorder = new RunRecorder(store, parentRunId, segmentId, 1, clock);
+    const runChild = vi.fn((request: SubagentRunRequest) =>
+      Promise.resolve({
+        childRunId: request.runId,
+        status: "completed" as const,
+        value: { text: "done" },
+        usage: { inputTokens: 3, outputTokens: 5, costMicros: 7 },
+      }),
+    );
+    const firstSupervisor = new SubagentSupervisor(
+      supervisorOptions(runChild, {
+        store,
+        parentSpanContext: () => ({
           traceId: "a".repeat(32),
           spanId: "b".repeat(16),
-          segmentId,
-          childRunId,
-          outcome: "failed",
-          inputTokens: 3,
-          outputTokens: 5,
-          costMicros: 7,
-        },
-      ],
-      1,
+          traceFlags: 1,
+        }),
+      }),
     );
-    const recordCompleted = vi.fn(() => Promise.resolve());
+
+    const invokeSpawn = async (recorder: RunRecorder, supervisor: SubagentSupervisor) =>
+      recorder.withStepSpan(TOOL_CALL_SPAN, {}, async () => {
+        const result = await supervisor.spawn({
+          role,
+          goal: "goal",
+          call: toolCall(),
+          context: toolRunContext(context(), recorder, []),
+        });
+        return recorder.record({
+          type: "tool_result",
+          v: 1,
+          callId: parentCallId,
+          toolId: "agent.spawn",
+          outcome: "ok",
+          latencyMs: 0,
+          result: JsonValue.parse(result),
+        });
+      });
+
+    ensureTracing();
+    await invokeSpawn(firstRecorder, firstSupervisor);
+    const resumedRecorder = new RunRecorder(store, parentRunId, segmentId, 4, clock);
+    const resumedSupervisor = new SubagentSupervisor(
+      supervisorOptions(runChild, {
+        store,
+        ids: { next: () => Id.parse("44444444444444444444444444") },
+        parentSpanContext: () => ({
+          traceId: "a".repeat(32),
+          spanId: "b".repeat(16),
+          traceFlags: 1,
+        }),
+      }),
+    );
+    await invokeSpawn(resumedRecorder, resumedSupervisor);
+
+    const events = [];
+    for await (const event of store.read(parentRunId)) {
+      events.push(event);
+    }
+    expect(events.filter((event) => event.type === "subagent_spawned")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "subagent_completed")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "subagent_spawned")[0]).toMatchObject({
+      childRunId,
+      parentCallId,
+    });
+    expect(runChild.mock.calls.map(([request]) => request.runId)).toEqual([childRunId, childRunId]);
+  });
+
+  it("preserves the original runner error if failed-completion recording also fails", async () => {
+    const store = new InMemoryEventStore();
+    await seedParent(store);
+    const runnerError = Object.assign(new Error("runner failed"), { code: "seq_conflict" });
     const supervisor = new SubagentSupervisor(
-      supervisorOptions(() => Promise.reject(new Error("resumed failure")), {
+      supervisorOptions(() => Promise.reject(runnerError), {
         store,
         parentSpanContext: () => ({
           traceId: "a".repeat(32),
@@ -450,17 +503,11 @@ describe("SubagentSupervisor", () => {
         role,
         goal: "goal",
         call: toolCall(),
-        context: context({ recordSubagentCompleted: recordCompleted }),
+        context: context({
+          recordSubagentCompleted: () => Promise.reject(new Error("recorder failed")),
+        }),
       }),
-    ).rejects.toThrow();
-    const completions = [];
-    for await (const event of store.read(parentRunId)) {
-      if (event.type === "subagent_completed") {
-        completions.push(event);
-      }
-    }
-    expect(completions).toHaveLength(1);
-    expect(recordCompleted).not.toHaveBeenCalled();
+    ).rejects.toBe(runnerError);
   });
 
   it("fails closed when durable recording or a parent span is unavailable", async () => {

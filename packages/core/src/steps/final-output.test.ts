@@ -92,6 +92,34 @@ describe("structured final output", () => {
     ).toBe(false);
   });
 
+  it("persists successful structured values without a value transform", async () => {
+    beginTracing();
+    const model: ModelPort = {
+      complete: (_request, context) =>
+        Promise.resolve(
+          context.outputSchema === undefined
+            ? completion("candidate")
+            : {
+                ...completion('{"answer":"done"}', "native"),
+                enforcement: {
+                  valid: true,
+                  value: { answer: "done" },
+                  rungUsed: "native",
+                },
+              },
+        ),
+    };
+
+    const result = await execute(model);
+
+    expect(result.status).toBe("completed");
+    expect(
+      result.events.findLast(
+        (event) => event.type === "model_response" && event.rungUsed !== undefined,
+      ),
+    ).toMatchObject({ structuredValue: { answer: "done" } });
+  });
+
   it("fails when the structured final call returns tool calls", async () => {
     beginTracing();
     const executeTool = vi.fn(() => Promise.resolve({ outcome: "ok" as const, result: null }));

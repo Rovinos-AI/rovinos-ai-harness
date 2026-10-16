@@ -191,6 +191,49 @@ describe("finalizeChild", () => {
     });
   });
 
+  it("carries grandchild usage through the child result into the root aggregate", () => {
+    const grandchildCompleted = Event.parse({
+      ...envelope,
+      seq: 2,
+      type: "subagent_completed",
+      childRunId: Id.parse("22222222222222222222222222"),
+      outcome: "completed",
+      inputTokens: 7,
+      outputTokens: 8,
+      costMicros: 9,
+    });
+    const childResult = finalizeChild({
+      childRunId,
+      status: "completed",
+      hasResultSchema: false,
+      events: [
+        response(1, "child answer", { inputTokens: 2, outputTokens: 3, costMicros: 4 }),
+        grandchildCompleted,
+      ],
+    });
+    const childCompleted = Event.parse({
+      ...envelope,
+      seq: 1,
+      type: "subagent_completed",
+      childRunId,
+      outcome: "completed",
+      ...childResult.usage,
+    });
+    const rootResult = finalizeChild({
+      childRunId: runId,
+      status: "completed",
+      hasResultSchema: false,
+      events: [childCompleted],
+    });
+
+    expect(childResult.usage).toEqual({
+      inputTokens: 9,
+      outputTokens: 11,
+      costMicros: 13,
+    });
+    expect(rootResult.usage).toEqual(childResult.usage);
+  });
+
   it("maps invalid structured output failures and preserves suspended status", () => {
     expect(
       finalizeChild({
