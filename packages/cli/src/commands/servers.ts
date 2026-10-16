@@ -3,40 +3,29 @@ import { CompositeSecretResolver, type HarnessConfig } from "@harness/config";
 import {
   McpConnection,
   McpConnectionError,
-  McpAuthRequiredError,
   OAuthTokenStore,
-  OAuthTokenStoreError,
-  startMcpOAuthLogin,
   ToolRegistry,
   ToolRegistryError,
   type McpConnectionDependencies,
   type McpTool,
 } from "@harness/mcp";
-import { openUrlInBrowser } from "@harness/sandbox";
 import {
   Code,
   HarnessError,
   ServersCheckResultSchema,
-  type KeyProvider,
   type ServerConfig,
 } from "@harness/schemas";
-import { LocalKeyProvider } from "@harness/vault";
+import type { LocalKeyProvider } from "@harness/vault";
 import { join } from "node:path";
 import { z } from "zod";
-import type { CliContext, CommandModule } from "../command.js";
+import type { CommandModule } from "../command.js";
+import { createLoginKeys, registerServersAuthCommands } from "./servers-auth.js";
 import type { Output } from "../output.js";
 
 const MCP_PROTOCOL_VERSION_SCHEMA = z.iso.date();
 const APPS_EXTENSION_WARNING = Code.parse("annotations_require_internal");
 const TRACE_DISABLED_WARNING = Code.parse("trace_propagation_disabled");
 const TOOL_HEADER_INVALID = Code.parse("tool_header_invalid");
-const ServerAuthCommandResultSchema = z
-  .object({
-    status: z.enum(["authorization_required", "authorized", "logged_out"]),
-    authorizationUrl: z.url().optional(),
-  })
-  .strict();
-
 type ServersCommandOverrides = Pick<McpConnectionDependencies, "createTransport" | "now"> & {
   readonly openBrowser?: (url: string) => Promise<void>;
 };
@@ -59,17 +48,6 @@ class ServersCheckFailedError extends HarnessError {
 
   constructor() {
     super("servers_check_failed");
-  }
-}
-
-class ServersCommandError extends HarnessError {
-  override readonly code: "mcp_server_not_found" | "mcp_auth_required" | "key_config_required" | "server_browser_open_failed";
-
-  constructor(
-    code: "mcp_server_not_found" | "mcp_auth_required" | "key_config_required" | "server_browser_open_failed",
-  ) {
-    super(code);
-    this.code = code;
   }
 }
 
@@ -303,123 +281,6 @@ function printHumanResult(
   output.table(rows);
 }
 
-function createLoginKeys(config: HarnessConfig, context: CliContext): LocalKeyProvider {
-  if (config.keys === undefined) {
-    throw new ServersCommandError("key_config_required");
-  }
-  const resolver = context.secretResolver ?? new CompositeSecretResolver();
-  return new LocalKeyProvider({
-    config: config.keys,
-    secretResolver: { resolve: (reference) => resolver.resolve(reference) },
-    env: process.env,
-    onWarning: () => undefined,
-  });
-}
-
-function printAuthResult(
-  output: Output,
-  program: Parameters<CommandModule["register"]>[0],
-  result: z.infer<typeof ServerAuthCommandResultSchema>,
-): void {
-  if (program.optsWithGlobals().json === true) {
-    output.json(ServerAuthCommandResultSchema, result);
-    return;
-  }
-  if (result.authorizationUrl !== undefined) {
-    output.print(`${result.authorizationUrl}\n`);
-  } else {
-    output.print(`${result.status}\n`);
-  }
-}
-
-async function runServersLogin(
-  serverId: string,
-  options: { readonly open?: boolean },
-  program: Parameters<CommandModule["register"]>[0],
-  context: CliContext,
-  overrides: ServersCommandOverrides | undefined,
-): Promise<void> {
-  const config = await context.loadConfig();
-  const server = config.servers.find(({ id }) => id === serverId);
-  if (server === undefined) {
-    throw new ServersCommandError("mcp_server_not_found");
-  }
-  if (
-    server.transport.kind !== "http" ||
-    server.transport.auth?.grant !== "authorization_code"
-  ) {
-    throw new McpAuthRequiredError();
-  }
-
-  const core = await import("@harness/core");
-  const keys = createLoginKeys(config, context);
-  let store: OAuthTokenStore | undefined;
-  let session: Awaited<ReturnType<typeof startMcpOAuthLogin>> | undefined;
-  try {
-    store = await OAuthTokenStore.open(
-      join(core.resolveDataDir(process.env), "mcp-oauth.db"),
-      keys,
-    );
-    session = await startMcpOAuthLogin({
-      server,
-      tokenStore: store,
-      resolveSecret: async (reference) =>
-        (await (context.secretResolver ?? new CompositeSecretResolver()).resolve(reference)).reveal(),
-    });
-    if (session.authorizationUrl.length > 0) {
-      printAuthResult(context.out, program, {
-        status: "authorization_required",
-        authorizationUrl: session.authorizationUrl,
-      });
-      if (options.open === true) {
-        try {
-          await (overrides?.openBrowser ?? openUrlInBrowser)(session.authorizationUrl);
-        } catch {
-          throw new ServersCommandError("server_browser_open_failed");
-        }
-      }
-    } else {
-      printAuthResult(context.out, program, { status: "authorized" });
-    }
-    await session.complete;
-  } catch (error) {
-    if (error instanceof ServersCommandError || error instanceof McpAuthRequiredError) {
-      throw error;
-    }
-    throw new McpAuthRequiredError();
-  } finally {
-    await session?.close();
-    store?.close();
-    keys.dispose();
-  }
-}
-
-async function runServersLogout(
-  serverId: string,
-  program: Parameters<CommandModule["register"]>[0],
-  context: CliContext,
-): Promise<void> {
-  const parsedId = Code.safeParse(serverId);
-  if (!parsedId.success) {
-    throw new ServersCommandError("mcp_server_not_found");
-  }
-  const core = await import("@harness/core");
-  const keys: KeyProvider = {
-    currentKeyId: () => "logout",
-    getKey: () => Promise.reject(new OAuthTokenStoreError()),
-  };
-  const store = await OAuthTokenStore.open(
-    join(core.resolveDataDir(process.env), "mcp-oauth.db"),
-    keys,
-  );
-  try {
-    store.delete(parsedId.data);
-    printAuthResult(context.out, program, { status: "logged_out" });
-  } finally {
-    store.close();
-  }
-}
-
 /** Creates the `harness servers check` command. */
 export function createServersCommand(overrides?: ServersCommandOverrides): CommandModule {
   return {
@@ -476,19 +337,7 @@ export function createServersCommand(overrides?: ServersCommandOverrides): Comma
             keys?.dispose();
           }
         });
-      servers
-        .command("login")
-        .description("Authorize a remote MCP server")
-        .argument("<id>", "configured server id")
-        .option("--open", "open the authorization URL in a browser")
-        .action((id: string, options: { readonly open?: boolean }) =>
-          runServersLogin(id, options, program, context, overrides),
-        );
-      servers
-        .command("logout")
-        .description("Remove stored OAuth credentials for a server")
-        .argument("<id>", "configured server id")
-        .action((id: string) => runServersLogout(id, program, context));
+      registerServersAuthCommands(servers, program, context, overrides?.openBrowser);
     },
   };
 }

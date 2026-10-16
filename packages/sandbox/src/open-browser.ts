@@ -3,12 +3,18 @@ import { spawn } from "node:child_process";
 
 /** Opens a URL in the system browser without passing it through a shell. */
 export function openUrlInBrowser(url: string): Promise<void> {
-  const executable =
-    process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer.exe" : "xdg-open";
+  let executable = "xdg-open";
+  if (process.platform === "darwin") {
+    executable = "open";
+  } else if (process.platform === "win32") {
+    executable = "explorer.exe";
+  }
   return new Promise((resolve, reject) => {
     try {
       const child = spawn(executable, [url], { detached: true, shell: false, stdio: "ignore" });
-      child.once("error", () => reject(new Error("browser_launch_failed")));
+      child.once("error", () => {
+        reject(new Error("browser_launch_failed"));
+      });
       child.once("spawn", () => {
         child.unref();
         resolve();

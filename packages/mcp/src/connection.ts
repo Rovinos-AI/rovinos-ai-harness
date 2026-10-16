@@ -1,93 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
+import type {
   Client,
-  specTypeSchemas,
-  type CallToolRequest,
-  type CallToolRequestOptions,
-  type CallToolResult,
-  type Transport,
+  CallToolRequest,
+  CallToolRequestOptions,
+  CallToolResult,
+  Transport,
 } from "@modelcontextprotocol/client";
-import { compileJsonSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
-import { McpConnectionError, McpProtocolError, isConnectionLossError } from "./errors.js";
-import { McpAuthRequiredError, withOAuthWarningsRedacted } from "./oauth/provider.js";
+import type { ServerConfig } from "@harness/schemas";
+import {
+  McpConnectionError,
+  McpProtocolError,
+  isConnectionLossError,
+  type McpConnectionErrorCode,
+} from "./errors.js";
+import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
-import type { OAuthTokenStore } from "./oauth/token-store.js";
 import { invokeMcpTool } from "./mcp-call.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
-import { createMcpTransport, type McpLogger } from "./transports.js";
+import type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
+import {
+  type CachedToolList,
+  ListToolsResultSchema,
+  OAUTH_CLIENT_CREDENTIALS_EXTENSION,
+  RECONNECT_BACKOFF_MS,
+  createConfiguredTransport,
+  createMcpClient,
+  defaultSleep,
+  getOrCreateValidator,
+  runWithSafeAuthLogging,
+} from "./connection-helpers.js";
 
+export type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
 export { McpConnectionError, type McpConnectionErrorCode } from "./errors.js";
 export { excludeHeaderDeclaringTools, type McpTool } from "./tool-list.js";
-
-const OAUTH_CLIENT_CREDENTIALS_EXTENSION = "io.modelcontextprotocol/oauth-client-credentials";
-
-/** Observable lifecycle state for one MCP server connection. */
-export type McpConnectionState = "connecting" | "ready" | "unavailable";
-
-/** Dependencies injected at the connection boundary. */
-export interface McpConnectionDependencies {
-  /** Resolves validated server secret references when a transport is created. */
-  readonly resolveSecret: (ref: SecretRef, signal?: AbortSignal) => Promise<string>;
-  /** Optional logger that accepts only safe codes and stderr byte counts. */
-  readonly logger?: McpLogger;
-  /** Encrypted per-server credentials used by configured OAuth HTTP transports. */
-  readonly oauthTokenStore?: OAuthTokenStore;
-  /** Injectable reconnect delay used by tests and host runtimes. */
-  readonly sleep?: (milliseconds: number) => Promise<void>;
-  /** Process environment source for the stdio PATH allowlist. */
-  readonly env?: Readonly<Record<string, string | undefined>>;
-  /** Optional transport factory for in-memory tests and embedded transports. */
-  readonly createTransport?: (
-    config: ServerConfig,
-    signal?: AbortSignal,
-  ) => Promise<Transport> | Transport;
-  /** Injectable clock returning current epoch milliseconds. */
-  readonly now?: () => number;
-}
-
-interface CachedToolList {
-  readonly tools: readonly McpTool[];
-  readonly expiresAt: number;
-}
-
-const RECONNECT_BACKOFF_MS = [250, 1_000, 4_000] as const;
-
-const ListToolsResultSchema = specTypeSchemas.ListToolsResult;
-
-const schemaValidatorCache = new WeakMap<Record<string, unknown>, (value: unknown) => void>();
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function getOrCreateValidator(inputSchema: unknown): (value: unknown) => void {
-  if (!isRecord(inputSchema)) {
-    return compileJsonSchema(inputSchema);
-  }
-  const cached = schemaValidatorCache.get(inputSchema);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const validator = compileJsonSchema(inputSchema);
-  schemaValidatorCache.set(inputSchema, validator);
-  return validator;
-}
-
-const defaultSleep = (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
-
-function protocolOptions(protocol: ServerConfig["protocol"]) {
-  if (protocol === "auto") {
-    return { mode: "auto" as const };
-  }
-  if (protocol === "2026-07-28") {
-    return { mode: { pin: protocol } };
-  }
-  return { mode: "legacy" as const };
-}
 
 /**
  * Manages one MCP SDK client, its transport, tool discovery, and reconnection.
@@ -181,12 +127,6 @@ export class McpConnection {
     return this.#closed || this.#connectGeneration !== generation;
   }
 
-  #runWithSafeAuthLogging<Result>(operation: () => Promise<Result>): Promise<Result> {
-    return this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined
-      ? withOAuthWarningsRedacted(operation)
-      : operation();
-  }
-
   async #performConnect(generation: number, signal: AbortSignal): Promise<void> {
     const combinedSignal = AbortSignal.any([
       AbortSignal.timeout(this.#config.timeouts.connectMs),
@@ -200,20 +140,38 @@ export class McpConnection {
         this.#state = "unavailable";
         return;
       }
-      const activeTransport = await this.#createTransport(combinedSignal);
+      const activeTransport = await createConfiguredTransport(
+        this.#config,
+        this.#dependencies,
+        {
+          clientCredentialsExtensionEnabled: this.#supportsClientCredentialsExtension,
+          onOAuthProvider: (provider) => {
+            this.#oauthProvider = provider;
+          },
+          signal: combinedSignal,
+        },
+      );
       transport = activeTransport;
       if (this.#isStale(generation)) {
         this.#state = "unavailable";
         await activeTransport.close().catch(() => undefined);
         return;
       }
-      const activeClient = this.#createClient();
+      const activeClient = createMcpClient(
+        this.#config,
+        this.#supportsClientCredentialsExtension,
+        (error) => {
+          this.#onToolsChanged(error);
+        },
+      );
       client = activeClient;
-      await this.#runWithSafeAuthLogging(() =>
-        activeClient.connect(activeTransport, {
-          signal: combinedSignal,
-          timeout: this.#config.timeouts.connectMs,
-        }),
+      await runWithSafeAuthLogging(
+        this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined,
+        () =>
+          activeClient.connect(activeTransport, {
+            signal: combinedSignal,
+            timeout: this.#config.timeouts.connectMs,
+          }),
       );
       this.#supportsClientCredentialsExtension =
         activeClient.getServerCapabilities()?.extensions?.[OAUTH_CLIENT_CREDENTIALS_EXTENSION] !==
@@ -233,13 +191,13 @@ export class McpConnection {
     } catch (error) {
       this.#markUnavailable();
       await (client ?? transport)?.close().catch(() => undefined);
-      throw new McpConnectionError(
-        error instanceof McpAuthRequiredError
-          ? "mcp_auth_required"
-          : combinedSignal.aborted
-            ? "mcp_connect_timeout"
-            : "mcp_connect_failed",
-      );
+      let code: McpConnectionErrorCode = "mcp_connect_failed";
+      if (error instanceof McpAuthRequiredError) {
+        code = "mcp_auth_required";
+      } else if (combinedSignal.aborted) {
+        code = "mcp_connect_timeout";
+      }
+      throw new McpConnectionError(code);
     }
   }
 
@@ -254,52 +212,6 @@ export class McpConnection {
     this.#state = "unavailable";
     this.#protocolEra = undefined;
     this.#cachedTools = undefined;
-  }
-
-  async #createTransport(signal: AbortSignal): Promise<Transport> {
-    const { createTransport, resolveSecret, env, logger, oauthTokenStore } = this.#dependencies;
-    if (createTransport !== undefined) {
-      return createTransport(this.#config, signal);
-    }
-    return createMcpTransport(
-      this.#config,
-      {
-        resolveSecret,
-        ...(env === undefined ? {} : { env }),
-        ...(logger === undefined ? {} : { logger }),
-        ...(oauthTokenStore === undefined ? {} : { oauthTokenStore }),
-        clientCredentialsExtensionEnabled: this.#supportsClientCredentialsExtension,
-        onOAuthProvider: (provider) => {
-          this.#oauthProvider = provider;
-        },
-      },
-      signal,
-    );
-  }
-
-  #createClient(): Client {
-    const oauthClientCredentials =
-      this.#config.transport.kind === "http" &&
-      this.#config.transport.auth?.grant === "client_credentials" &&
-      this.#supportsClientCredentialsExtension;
-    return new Client(
-      { name: "rovinos-ai-harness", version: "0.0.0" },
-      {
-        capabilities: oauthClientCredentials
-          ? { extensions: { [OAUTH_CLIENT_CREDENTIALS_EXTENSION]: {} } }
-          : {},
-        versionNegotiation: protocolOptions(this.#config.protocol),
-        inputRequired: { autoFulfill: false },
-        listChanged: {
-          tools: {
-            autoRefresh: false,
-            onChanged: (error) => {
-              this.#onToolsChanged(error);
-            },
-          },
-        },
-      },
-    );
   }
 
   #onToolsChanged(error: Error | null): void {
@@ -354,24 +266,26 @@ export class McpConnection {
     }
     let listed: Awaited<ReturnType<typeof listAllTools>>;
     try {
-      listed = await this.#runWithSafeAuthLogging(() =>
-        listAllTools({
-          requestPage: (cursor) =>
-            client.request(
-              { method: "tools/list", ...(cursor === undefined ? {} : { params: { cursor } }) },
-              ListToolsResultSchema,
-              { timeout: this.#config.timeouts.callMs },
-            ),
-          era: this.#protocolEra,
-          transport: this.#config.transport.kind,
-          onExcluded: (count) => {
-            this.#dependencies.logger?.log({
-              code: "mcp_tools_excluded",
-              serverId: this.#config.id,
-              count,
-            });
-          },
-        }),
+      listed = await runWithSafeAuthLogging(
+        this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined,
+        () =>
+          listAllTools({
+            requestPage: (cursor) =>
+              client.request(
+                { method: "tools/list", ...(cursor === undefined ? {} : { params: { cursor } }) },
+                ListToolsResultSchema,
+                { timeout: this.#config.timeouts.callMs },
+              ),
+            era: this.#protocolEra,
+            transport: this.#config.transport.kind,
+            onExcluded: (count) => {
+              this.#dependencies.logger?.log({
+                code: "mcp_tools_excluded",
+                serverId: this.#config.id,
+                count,
+              });
+            },
+          }),
       );
     } catch (error) {
       if (error instanceof McpAuthRequiredError) {
@@ -400,9 +314,8 @@ export class McpConnection {
     options?: CallToolRequestOptions,
     toolDefinition?: McpTool,
   ): Promise<CallToolResult> {
-    let validate: ReturnType<typeof compileJsonSchema>;
     try {
-      validate = getOrCreateValidator(inputSchema);
+      const validate = getOrCreateValidator(inputSchema);
       validate(params.arguments ?? {});
     } catch {
       throw new McpConnectionError("mcp_tool_arguments_invalid");
@@ -450,14 +363,16 @@ export class McpConnection {
     if (client === undefined || this.#state !== "ready") {
       throw new McpConnectionError("mcp_connection_lost");
     }
-    return this.#runWithSafeAuthLogging(() =>
-      invokeMcpTool({
-        client,
-        server: this.#config,
-        params,
-        ...(options === undefined ? {} : { requestOptions: options }),
-        ...(toolDefinition === undefined ? {} : { toolDefinition }),
-      }),
+    return runWithSafeAuthLogging(
+      this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined,
+      () =>
+        invokeMcpTool({
+          client,
+          server: this.#config,
+          params,
+          ...(options === undefined ? {} : { requestOptions: options }),
+          ...(toolDefinition === undefined ? {} : { toolDefinition }),
+        }),
     );
   }
 

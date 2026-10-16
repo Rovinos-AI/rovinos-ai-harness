@@ -27,12 +27,14 @@ export {
 export {
   McpAuthRequiredError,
   McpOAuthProvider,
-  startMcpOAuthLogin,
   withOAuthWarningsRedacted,
-  type McpOAuthLoginOptions,
-  type McpOAuthLoginSession,
   type McpOAuthProviderOptions,
 } from "./oauth/provider.js";
+export {
+  startMcpOAuthLogin,
+  type McpOAuthLoginOptions,
+  type McpOAuthLoginSession,
+} from "./oauth/login.js";
 export {
   OAuthTokenStore,
   OAuthTokenStoreError,

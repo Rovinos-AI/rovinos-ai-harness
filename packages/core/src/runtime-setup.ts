@@ -5,6 +5,8 @@ import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { Code, Id, PiiConfig } from "@harness/schemas";
 import { PiiEventStore, PiiToolPort } from "@harness/pii";
+import type { McpToolPort } from "@harness/mcp";
+import type { LocalKeyProvider } from "@harness/vault";
 import type { EventStore } from "@harness/store";
 import {
   createSandboxBackend,
@@ -20,6 +22,7 @@ import { createRuntimePii } from "./runtime-pii.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 import { createRuntimeVault } from "./runtime-vault.js";
+import { createConfiguredMcpToolPort } from "./runtime-mcp.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { missingModelPort, unavailableTool } from "./runtime-default-ports.js";
 import { NaiveContext } from "./context/naive-context.js";
@@ -27,13 +30,6 @@ import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
 import { composeToolPorts } from "./runtime-tool-port.js";
-import {
-  McpConnectionError,
-  McpToolPort,
-  OAuthTokenStore,
-  type McpLogger,
-} from "@harness/mcp";
-import type { LocalKeyProvider } from "@harness/vault";
 import type { RoleRegistry } from "./roles.js";
 import type { ToolPort } from "./ports.js";
 import type {
@@ -46,51 +42,6 @@ import type { Clock } from "./recorder.js";
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 const sandboxLogger = diag.createComponentLogger({ namespace: "harness.sandbox" });
-const mcpDiagnosticLogger = diag.createComponentLogger({ namespace: "harness.mcp" });
-const mcpLogger: McpLogger = {
-  log: (event) => {
-    mcpDiagnosticLogger.warn(
-      event.code,
-      event.code === "mcp_stderr"
-        ? { serverId: event.serverId, bytes: event.bytes }
-        : { serverId: event.serverId },
-    );
-  },
-};
-
-async function createConfiguredMcpToolPort(
-  config: RuntimeConfig,
-  overrides: RuntimeOverrides,
-  keys: LocalKeyProvider,
-  dataDir: string,
-): Promise<McpToolPort | undefined> {
-  const servers = config.servers ?? [];
-  if (overrides.tool !== undefined || servers.length === 0) {
-    return undefined;
-  }
-  const secretResolver = overrides.secretResolver ?? {
-    resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
-  };
-  const oauthTokenStore =
-    servers.some(
-      (server) => server.transport.kind === "http" && server.transport.auth !== undefined,
-    )
-      ? await OAuthTokenStore.open(join(dataDir, "mcp-oauth.db"), keys)
-      : undefined;
-  return McpToolPort.create(
-    servers,
-    {
-      resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
-      logger: mcpLogger,
-      ...(oauthTokenStore === undefined ? {} : { oauthTokenStore }),
-      ...(overrides.mcpTransportFactory === undefined
-        ? {}
-        : { createTransport: overrides.mcpTransportFactory }),
-    },
-    { offloadBinaryResults: overrides.workspace !== undefined },
-  );
-}
-
 async function closeSetupResources(options: {
   readonly mcpToolPort?: McpToolPort | undefined;
   readonly sandboxBackend?: SandboxBackend | undefined;

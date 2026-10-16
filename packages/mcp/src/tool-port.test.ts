@@ -100,7 +100,8 @@ async function fixture(
                 return target.send(message, sendOptions);
               };
             }
-            return Reflect.get(target, property, target);
+            const value: unknown = Reflect.get(target, property, target);
+            return value;
           },
         });
   let port: McpToolPort;

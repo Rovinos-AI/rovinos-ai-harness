@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,7 +32,7 @@ const inputSchema = {
 } as const;
 
 let serverTransports: InMemoryTransport[] = [];
-let httpServers: Server[] = [];
+const httpServers: Server[] = [];
 let toolCalls = 0;
 const oauthAccessToken = "servers-login-access-token-canary";
 const oauthKey = Buffer.alloc(32, 41);
@@ -54,8 +53,12 @@ function createContext(
   const context: CliContext = {
     loadConfig: loadConfigForTest,
     out: createOutput({
-      stdout: (text) => stdout.push(text),
-      stderr: (text) => stderr.push(text),
+      stdout: (text) => {
+        stdout.push(text);
+      },
+      stderr: (text) => {
+        stderr.push(text);
+      },
     }),
     ...(options.secretResolver === undefined ? {} : { secretResolver: options.secretResolver }),
     clock: { now: options.now ?? (() => 20) },
@@ -128,17 +131,35 @@ function config(servers?: unknown) {
 }
 
 async function readRequestBody(request: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
+  const chunks: Uint8Array[] = [];
   for await (const chunk of request) {
-    chunks.push(Buffer.from(chunk));
+    if (typeof chunk === "string") {
+      chunks.push(new TextEncoder().encode(chunk));
+    } else if (chunk instanceof Uint8Array) {
+      chunks.push(chunk);
+    } else {
+      throw new TypeError("invalid HTTP request body chunk");
+    }
   }
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function sendJson(response: ServerResponse, value: unknown): void {
-  response.writeHead(200, { "content-type": "application/json" });
+function sendJson(response: ServerResponse, value: unknown, status = 200): void {
+  response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(value));
 }
+
+function captureConsoleOutput(...args: unknown[]): void {
+  capturedConsoleOutput.push(...args);
+}
+
+function consoleOutputText(values: readonly unknown[]): string {
+  return values
+    .map((value) => (typeof value === "string" ? value : JSON.stringify(value)))
+    .join(" ");
+}
+
+const capturedConsoleOutput: unknown[] = [];
 
 async function createOAuthServer(options: {
   readonly failTokenExchange?: boolean;
@@ -156,7 +177,8 @@ async function createOAuthServer(options: {
   let issuer = "";
   const server = createServer((request, response) => {
     void (async () => {
-      const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+      const host = request.headers.host ?? "localhost";
+      const url = new URL(request.url ?? "/", `http://${host}`);
       if (request.method === "POST" && url.pathname === "/mcp") {
         if (
           unauthorizedMcp ||
@@ -166,7 +188,7 @@ async function createOAuthServer(options: {
             .writeHead(401, {
               "WWW-Authenticate": [
                 "Bearer",
-                `error="invalid_token", error_description="${oauthErrorCanary}", resource_metadata="http://${request.headers.host}/.well-known/oauth-protected-resource/mcp"`,
+                `error="invalid_token", error_description="${oauthErrorCanary}", resource_metadata="http://${host}/.well-known/oauth-protected-resource/mcp"`,
               ].join(" "),
             })
             .end();
@@ -195,7 +217,7 @@ async function createOAuthServer(options: {
       }
       if (request.method === "GET" && url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
         sendJson(response, {
-          resource: `http://${request.headers.host}/mcp`,
+          resource: `http://${host}/mcp`,
           authorization_servers: [issuer],
           scopes_supported: ["tools:read"],
         });
@@ -217,7 +239,7 @@ async function createOAuthServer(options: {
       }
       if (request.method === "POST" && url.pathname === "/register") {
         const registration = parseJson(
-          z.object({ redirect_uris: z.array(z.url()) }).passthrough(),
+          z.looseObject({ redirect_uris: z.array(z.url()) }),
           await readRequestBody(request),
         );
         sendJson(response, { ...registration, client_id: "cli-registered-client" });
@@ -245,7 +267,10 @@ async function createOAuthServer(options: {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   httpServers.push(server);
-  const address = server.address() as AddressInfo;
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("OAuth server did not bind a TCP port");
+  }
   issuer = `http://127.0.0.1:${String(address.port)}`;
   return {
     issuer,
@@ -266,7 +291,9 @@ afterEach(async () => {
           if (!server.listening) {
             resolve();
           } else {
-            server.close(() => resolve());
+            server.close(() => {
+              resolve();
+            });
           }
         }),
     ),
@@ -606,7 +633,9 @@ describe("harness servers check", () => {
       const noOpenLogin = main(["servers", "login", "remote"], context, [
         createServersCommand({ openBrowser }),
       ]);
-      await vi.waitFor(() => expect(stdout).toHaveLength(1));
+      await vi.waitFor(() => {
+        expect(stdout).toHaveLength(1);
+      });
       const authorizationUrlText = stdout[0];
       if (authorizationUrlText === undefined) {
         throw new Error("expected authorization URL output");
@@ -683,20 +712,21 @@ describe("harness servers check", () => {
       callback.searchParams.set("iss", oauthServer.issuer);
       expect((await fetch(callback)).status).toBe(400);
     });
+    capturedConsoleOutput.length = 0;
     const consoleSpies = [
-      vi.spyOn(console, "warn").mockImplementation(() => undefined),
-      vi.spyOn(console, "error").mockImplementation(() => undefined),
-      vi.spyOn(console, "log").mockImplementation(() => undefined),
-      vi.spyOn(console, "info").mockImplementation(() => undefined),
-      vi.spyOn(console, "debug").mockImplementation(() => undefined),
-      vi.spyOn(console, "trace").mockImplementation(() => undefined),
+      vi.spyOn(globalThis.console, "warn").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "error").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "log").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "info").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "debug").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "trace").mockImplementation(captureConsoleOutput),
     ];
     try {
       const exitCode = await main(["--json", "servers", "login", "remote", "--open"], context, [
         createServersCommand({ openBrowser }),
       ]);
       const output = stdout.join("") + stderr.join("");
-      const consoleOutput = consoleSpies.flatMap((spy) => spy.mock.calls.flat()).join(" ");
+      const consoleOutput = consoleOutputText(capturedConsoleOutput);
 
       expect(exitCode).toBe(ExitCode.failure);
       expect(openBrowser).toHaveBeenCalledOnce();
@@ -746,18 +776,19 @@ describe("harness servers check", () => {
     });
     store.close();
     const { context, stdout, stderr } = createContext(() => Promise.resolve(configWithAuth));
+    capturedConsoleOutput.length = 0;
     const consoleSpies = [
-      vi.spyOn(console, "warn").mockImplementation(() => undefined),
-      vi.spyOn(console, "error").mockImplementation(() => undefined),
-      vi.spyOn(console, "log").mockImplementation(() => undefined),
-      vi.spyOn(console, "info").mockImplementation(() => undefined),
-      vi.spyOn(console, "debug").mockImplementation(() => undefined),
-      vi.spyOn(console, "trace").mockImplementation(() => undefined),
+      vi.spyOn(globalThis.console, "warn").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "error").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "log").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "info").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "debug").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "trace").mockImplementation(captureConsoleOutput),
     ];
     try {
       const exitCode = await main(["--json", "doctor"], context, [createDoctorCommand()]);
       const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
-      const consoleOutput = consoleSpies.flatMap((spy) => spy.mock.calls.flat()).join(" ");
+      const consoleOutput = consoleOutputText(capturedConsoleOutput);
 
       expect(exitCode).toBe(ExitCode.failure);
       expect(results).toContainEqual(

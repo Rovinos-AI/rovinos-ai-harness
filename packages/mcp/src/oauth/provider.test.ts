@@ -1,30 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import { parseJson, ServerConfigSchema } from "@harness/schemas";
 import type { KeyProvider } from "@harness/schemas";
-import { ServerConfigSchema } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "../connection.js";
-import { parseJson } from "@harness/schemas";
 import { z } from "zod";
 import {
   McpAuthRequiredError,
   McpOAuthProvider,
-  startMcpOAuthLogin,
   withOAuthWarningsRedacted,
 } from "./provider.js";
+import { startMcpOAuthLogin } from "./login.js";
 import { OAuthTokenStore } from "./token-store.js";
 
 const issuerCanary = "https://oauth-issuer.invalid";
 const accessTokenCanary = "oauth-access-token-canary";
 const refreshTokenCanary = "oauth-refresh-token-canary";
 const errorCanary = "oauth-error-description-canary";
+const capturedConsoleOutput: unknown[] = [];
 const keyProvider: KeyProvider = {
   currentKeyId: () => "oauth-test-key",
   getKey: () => Promise.resolve(new Uint8Array(32).fill(29)),
 };
 const servers: Server[] = [];
+
+function captureConsoleOutput(...args: unknown[]): void {
+  capturedConsoleOutput.push(...args);
+}
+
+function consoleOutputText(values: readonly unknown[]): string {
+  return values
+    .map((value) => (typeof value === "string" ? value : JSON.stringify(value)))
+    .join(" ");
+}
 
 interface MockOAuthOptions {
   readonly failTokenExchange?: boolean;
@@ -35,9 +44,16 @@ interface MockOAuthOptions {
 async function readBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
-    chunks.push(Buffer.from(chunk));
+    chunks.push(bufferFromChunk(chunk));
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+function bufferFromChunk(chunk: unknown): Buffer {
+  if (typeof chunk === "string" || chunk instanceof Uint8Array) {
+    return Buffer.from(chunk);
+  }
+  throw new Error("invalid HTTP request body chunk");
 }
 
 function sendJson(response: ServerResponse, value: unknown, status = 200): void {
@@ -48,21 +64,22 @@ function sendJson(response: ServerResponse, value: unknown, status = 200): void 
 async function startMockOAuthServer(options: MockOAuthOptions = {}) {
   let authorizationRequest: URL | undefined;
   let tokenRequest: URLSearchParams | undefined;
-  let issuer = options.issuer;
+  let issuer = options.issuer ?? "";
   const server = createServer((request, response) => {
     void (async () => {
-      const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+      const host = request.headers.host ?? "127.0.0.1";
+      const url = new URL(request.url ?? "/", `http://${host}`);
       if (url.pathname === "/mcp" && options.unauthorizedMcp === true) {
         response
           .writeHead(401, {
-            "WWW-Authenticate": `bearer error="invalid_token", error_description="${errorCanary}", resource_metadata="http://${request.headers.host}/.well-known/oauth-protected-resource/mcp"`,
+            "WWW-Authenticate": `bearer error="invalid_token", error_description="${errorCanary}", resource_metadata="http://${host}/.well-known/oauth-protected-resource/mcp"`,
           })
           .end();
         return;
       }
       if (request.method === "GET" && url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
         sendJson(response, {
-          resource: `http://${request.headers.host}/mcp`,
+          resource: `http://${host}/mcp`,
           authorization_servers: [issuer],
           scopes_supported: ["tools:read"],
         });
@@ -83,7 +100,7 @@ async function startMockOAuthServer(options: MockOAuthOptions = {}) {
       }
       if (request.method === "POST" && url.pathname === "/register") {
         const registration = parseJson(
-          z.object({ redirect_uris: z.array(z.url()) }).passthrough(),
+          z.looseObject({ redirect_uris: z.array(z.url()) }),
           await readBody(request),
         );
         sendJson(response, {
@@ -119,13 +136,20 @@ async function startMockOAuthServer(options: MockOAuthOptions = {}) {
         return;
       }
       response.writeHead(404).end();
-    })().catch(() => response.writeHead(500).end());
+    })().catch(() => {
+      response.writeHead(500).end();
+    });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
   servers.push(server);
-  const address = server.address() as AddressInfo;
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("OAuth server did not bind a TCP port");
+  }
   const baseUrl = `http://127.0.0.1:${String(address.port)}`;
-  issuer ??= baseUrl;
+  issuer = issuer.length > 0 ? issuer : baseUrl;
   return {
     baseUrl,
     issuer,
@@ -170,7 +194,9 @@ afterEach(async () => {
           if (!server.listening) {
             resolve();
           } else {
-            server.close(() => resolve());
+            server.close(() => {
+              resolve();
+            });
           }
         }),
     ),
@@ -212,15 +238,10 @@ describe("McpOAuthProvider", () => {
 
       expect(mock.tokenRequest?.get("grant_type")).toBe("authorization_code");
       expect(mock.tokenRequest?.get("code_verifier")).toBe(verifier);
-      expect(await store.load("oauth-server")).toEqual(
-        expect.objectContaining({
-          issuer: mock.issuer,
-          tokens: expect.objectContaining({
-            access_token: accessTokenCanary,
-            refresh_token: refreshTokenCanary,
-          }),
-        }),
-      );
+      const stored = await store.load("oauth-server");
+      expect(stored?.issuer).toBe(mock.issuer);
+      expect(stored?.tokens?.access_token).toBe(accessTokenCanary);
+      expect(stored?.tokens?.refresh_token).toBe(refreshTokenCanary);
     } finally {
       await session.close();
       store.close();
@@ -418,9 +439,9 @@ describe("McpOAuthProvider", () => {
       expect(decodeURIComponent(provider.prepareTokenRequest()?.toString() ?? "")).toBe(
         "grant_type=client_credentials&scope=tools:read",
       );
-      expect(() => provider.redirectToAuthorization(new URL("https://auth.invalid"))).toThrow(
-        McpAuthRequiredError,
-      );
+      expect(() => {
+        provider.redirectToAuthorization(new URL("https://auth.invalid"));
+      }).toThrow(McpAuthRequiredError);
       expect(await provider.beginAuthorization(new URL(`${mock.baseUrl}/mcp`))).toBe("AUTHORIZED");
       expect(mock.tokenRequest?.get("grant_type")).toBe("client_credentials");
       expect(mock.tokenRequest?.get("scope")).toBe("tools:read");
@@ -499,30 +520,30 @@ describe("McpOAuthProvider", () => {
     const store = await OAuthTokenStore.open(":memory:", keyProvider);
     const server = serverConfig(mock.baseUrl);
     const output: unknown[] = [];
+    capturedConsoleOutput.length = 0;
     const spies = [
-      vi.spyOn(console, "warn"),
-      vi.spyOn(console, "error"),
-      vi.spyOn(console, "log"),
-      vi.spyOn(console, "info"),
-      vi.spyOn(console, "debug"),
-      vi.spyOn(console, "trace"),
+      vi.spyOn(globalThis.console, "warn").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "error").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "log").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "info").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "debug").mockImplementation(captureConsoleOutput),
+      vi.spyOn(globalThis.console, "trace").mockImplementation(captureConsoleOutput),
     ];
     const connection = new McpConnection(server, {
       resolveSecret: () => Promise.resolve("configured-secret"),
       oauthTokenStore: store,
-      logger: { log: (event) => output.push(event) },
+      logger: {
+        log: (event) => {
+          output.push(event);
+        },
+      },
     });
     try {
       await expect(connection.connect()).rejects.toMatchObject({
         code: "mcp_auth_required",
       });
       expect(connection.state).toBe("unavailable");
-      const captured = [
-        ...spies.flatMap((spy) => spy.mock.calls.flat()),
-        ...output,
-      ]
-        .map((value) => (typeof value === "string" ? value : JSON.stringify(value)))
-        .join(" ");
+      const captured = consoleOutputText([...capturedConsoleOutput, ...output]);
       expect(captured).not.toContain(errorCanary);
     } finally {
       await connection.close();
@@ -534,29 +555,32 @@ describe("McpOAuthProvider", () => {
   });
 
   it("suppresses all auth-path warnings and errors, then restores the console", async () => {
-    const warning = console.warn;
-    const errorOutput = console.error;
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const spyWarning = console.warn;
-    const spyError = console.error;
+    const consoleObject = globalThis.console;
+    const warning = consoleObject.warn;
+    const errorOutput = consoleObject.error;
+    const warn = vi.spyOn(consoleObject, "warn").mockImplementation(captureConsoleOutput);
+    const error = vi.spyOn(consoleObject, "error").mockImplementation(captureConsoleOutput);
+    const spyWarning = consoleObject.warn;
+    const spyError = consoleObject.error;
     try {
       await expect(
-        withOAuthWarningsRedacted(async () => {
-          Reflect.apply(console.warn, console, [{ message: errorCanary }]);
-          Reflect.apply(console.error, console, [`x ${errorCanary}`]);
-          throw new McpAuthRequiredError();
-        }),
+        withOAuthWarningsRedacted(() =>
+          Promise.resolve().then(() => {
+            consoleObject.warn({ message: errorCanary });
+            consoleObject.error(`x ${errorCanary}`);
+            throw new McpAuthRequiredError();
+          }),
+        ),
       ).rejects.toBeInstanceOf(McpAuthRequiredError);
-      expect(console.warn).toBe(spyWarning);
-      expect(console.error).toBe(spyError);
+      expect(consoleObject.warn).toBe(spyWarning);
+      expect(consoleObject.error).toBe(spyError);
       expect(warn).not.toHaveBeenCalled();
       expect(error).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
       error.mockRestore();
     }
-    expect(console.warn).toBe(warning);
-    expect(console.error).toBe(errorOutput);
+    expect(consoleObject.warn).toBe(warning);
+    expect(consoleObject.error).toBe(errorOutput);
   });
 });

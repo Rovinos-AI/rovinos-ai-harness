@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  auth,
-  StreamableHTTPClientTransport,
-  type OAuthClientInformationContext,
-  type OAuthClientMetadata,
-  type OAuthClientProvider,
-  type OAuthDiscoveryState,
-  type StoredOAuthClientInformation,
-  type StoredOAuthTokens,
+import { auth } from "@modelcontextprotocol/client";
+import type {
+  OAuthClientInformationContext,
+  OAuthClientMetadata,
+  OAuthClientProvider,
+  OAuthDiscoveryState,
+  StoredOAuthClientInformation,
+  StoredOAuthTokens,
 } from "@modelcontextprotocol/client";
 import { randomBytes, randomInt } from "node:crypto";
-import { createServer, type Server } from "node:http";
 import {
   HarnessError,
   SecretRefSchema,
   type SecretRef,
   type ServerConfig,
 } from "@harness/schemas";
-import { OAuthTokenStore, type OAuthCredentialRecord } from "./token-store.js";
+import type { OAuthCredentialRecord, OAuthTokenStore } from "./token-store.js";
 
 type HttpTransportConfig = Extract<ServerConfig["transport"], { kind: "http" }>;
 type OAuthConfig = NonNullable<HttpTransportConfig["auth"]>;
@@ -48,14 +46,22 @@ export interface McpOAuthProviderOptions {
 }
 
 let warningSuppressionDepth = 0;
-let originalWarning: Console["warn"] | undefined;
-let originalError: Console["error"] | undefined;
+let originalWarning: unknown;
+let originalError: unknown;
 
 function suppressSdkWarnings(): () => void {
-  const consoleObject = globalThis["console"];
+  const consoleObject: unknown = Reflect.get(globalThis, "console");
+  if (typeof consoleObject !== "object" || consoleObject === null) {
+    throw new McpAuthRequiredError();
+  }
   if (warningSuppressionDepth === 0) {
-    originalWarning = consoleObject["warn"];
-    originalError = consoleObject["error"];
+    originalWarning = Reflect.get(consoleObject, "warn");
+    originalError = Reflect.get(consoleObject, "error");
+    if (typeof originalWarning !== "function" || typeof originalError !== "function") {
+      originalWarning = undefined;
+      originalError = undefined;
+      throw new McpAuthRequiredError();
+    }
     const discard: Console["warn"] = () => undefined;
     if (!Reflect.set(consoleObject, "warn", discard)) {
       originalWarning = undefined;
@@ -306,7 +312,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
     if (this.#config.grant !== "client_credentials") {
       return undefined;
     }
-    if (this.#clientCredentialsExtensionEnabled !== true) {
+    if (!this.#clientCredentialsExtensionEnabled) {
       throw new McpAuthRequiredError();
     }
     const parameters = new URLSearchParams({ grant_type: "client_credentials" });
@@ -396,160 +402,5 @@ export class McpOAuthProvider implements OAuthClientProvider {
   async #save(record: OAuthCredentialRecord): Promise<void> {
     this.#record = record;
     await this.#store.save(this.#serverId, record);
-  }
-}
-
-/** Active explicit-login flow with a loopback callback and no implicit browser launch. */
-export interface McpOAuthLoginSession {
-  /** Authorization URL to display to the user. */
-  readonly authorizationUrl: string;
-  /** Loopback callback URL registered for this login. */
-  readonly redirectUrl: string;
-  /** Resolves after issuer-validated callback parameters are exchanged for tokens. */
-  readonly complete: Promise<void>;
-  /** Stops the loopback listener and closes the temporary SDK transport. */
-  close(): Promise<void>;
-}
-
-/** Inputs for the explicit HTTP-server authorization-code login flow. */
-export interface McpOAuthLoginOptions {
-  /** Validated server configuration. */
-  readonly server: ServerConfig;
-  /** Encrypted credential store. */
-  readonly tokenStore: OAuthTokenStore;
-  /** Resolves a configured client secret reference. */
-  readonly resolveSecret: (reference: SecretRef) => Promise<string>;
-}
-
-async function closeCallbackServer(server: Server): Promise<void> {
-  if (!server.listening) {
-    return;
-  }
-  await new Promise<void>((resolve) => {
-    server.close(() => resolve());
-  });
-}
-
-/**
- * Starts an OAuth 2.1 authorization-code flow on an IPv4 loopback callback.
- *
- * The caller decides whether to open the returned URL. The SDK receives the full callback
- * parameters so it can validate the RFC 9207 `iss` value before exchanging the code.
- *
- * @param options - Server configuration, encrypted token store, and client-secret resolver.
- * @returns Session containing the authorization URL and callback completion promise.
- */
-export async function startMcpOAuthLogin(
-  options: McpOAuthLoginOptions,
-): Promise<McpOAuthLoginSession> {
-  const transportConfig = options.server.transport;
-  if (
-    transportConfig.kind !== "http" ||
-    transportConfig.auth === undefined ||
-    transportConfig.auth.grant !== "authorization_code"
-  ) {
-    throw new McpAuthRequiredError();
-  }
-  const oauthConfig = transportConfig.auth;
-  const callbackServer = createServer();
-  await new Promise<void>((resolve, reject) => {
-    callbackServer.once("error", () => reject(new McpAuthRequiredError()));
-    callbackServer.listen(oauthConfig.redirectPort ?? 0, "127.0.0.1", resolve);
-  });
-  const address = callbackServer.address();
-  if (address === null || typeof address === "string") {
-    await closeCallbackServer(callbackServer);
-    throw new McpAuthRequiredError();
-  }
-  const redirectUrl = `http://127.0.0.1:${String(address.port)}/oauth/callback`;
-  let provider: McpOAuthProvider;
-  let transport: StreamableHTTPClientTransport;
-  try {
-    provider = await McpOAuthProvider.create({
-      serverId: options.server.id,
-      auth: oauthConfig,
-      tokenStore: options.tokenStore,
-      resolveSecret: options.resolveSecret,
-      redirectUrl,
-      interactive: true,
-    });
-    transport = new StreamableHTTPClientTransport(new URL(transportConfig.url), {
-      authProvider: provider,
-    });
-  } catch {
-    await closeCallbackServer(callbackServer);
-    throw new McpAuthRequiredError();
-  }
-
-  let resolveCompletion: () => void = () => undefined;
-  let rejectCompletion: () => void = () => undefined;
-  const complete = new Promise<void>((resolve, reject) => {
-    resolveCompletion = resolve;
-    rejectCompletion = () => reject(new McpAuthRequiredError());
-  });
-  void complete.catch(() => undefined);
-  let expectedState: string | undefined;
-  callbackServer.on("request", (request, response) => {
-    void (async () => {
-      let callback: URL;
-      try {
-        callback = new URL(request.url ?? "/", redirectUrl);
-      } catch {
-        response.writeHead(400).end("Invalid authorization response.");
-        return;
-      }
-      if (request.method !== "GET" || callback.pathname !== "/oauth/callback") {
-        response.writeHead(404).end("Not found.");
-        return;
-      }
-      if (
-        expectedState === undefined ||
-        callback.searchParams.get("state") !== expectedState
-      ) {
-        response.writeHead(400).end("Invalid authorization response.");
-        return;
-      }
-      try {
-        await withOAuthWarningsRedacted(() => transport.finishAuth(callback.searchParams));
-        response
-          .writeHead(200, { "content-type": "text/plain; charset=utf-8" })
-          .end("Authorization complete. Return to the harness CLI.");
-        resolveCompletion();
-      } catch {
-        response.writeHead(400).end("Authorization failed.");
-        rejectCompletion();
-      }
-    })();
-  });
-  try {
-    const result = await provider.beginAuthorization(new URL(transportConfig.url));
-    expectedState = await provider.state();
-    if (result === "AUTHORIZED") {
-      resolveCompletion();
-      await closeCallbackServer(callbackServer);
-      return {
-        authorizationUrl: "",
-        redirectUrl,
-        complete,
-        close: async () => transport.close(),
-      };
-    }
-    const authorizationUrl = provider.authorizationUrl;
-    if (authorizationUrl === undefined) {
-      throw new McpAuthRequiredError();
-    }
-    return {
-      authorizationUrl: authorizationUrl.toString(),
-      redirectUrl,
-      complete,
-      close: async () => {
-        await closeCallbackServer(callbackServer);
-        await transport.close();
-      },
-    };
-  } catch {
-    await closeCallbackServer(callbackServer);
-    await transport.close();
-    throw new McpAuthRequiredError();
   }
 }
