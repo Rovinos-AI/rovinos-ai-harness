@@ -286,10 +286,12 @@ function toolErrorCode(error: unknown): Code {
 /** Exposes read, write, edit, list, and search as policy-controlled tools. */
 export class FsTools {
   readonly #backend: WorkspaceFileToolBackend;
+  readonly #excludedToolIds: ReadonlySet<string>;
 
   /** Creates the five workspace file tools around a sandbox backend. */
-  constructor(backend: WorkspaceFileToolBackend) {
+  constructor(backend: WorkspaceFileToolBackend, excludedToolIds: readonly Code[] = []) {
     this.#backend = backend;
+    this.#excludedToolIds = new Set(excludedToolIds);
   }
 
   /** Return retry metadata, with writes and edits idempotent only when preconditioned. */
@@ -297,7 +299,7 @@ export class FsTools {
     toolId: Code,
     args?: JsonValueType,
   ): { readonly idempotent: boolean; readonly timeoutMs: number } | undefined {
-    if (!isFsToolId(toolId)) {
+    if (!isFsToolId(toolId) || this.#excludedToolIds.has(toolId)) {
       return undefined;
     }
     const tool = TOOL_SCHEMAS[toolId];
@@ -316,12 +318,12 @@ export class FsTools {
 
   /** Advertise strict, schema-derived input contracts to model providers. */
   getToolSpecs(): readonly ToolSpec[] {
-    return FS_TOOL_SPECS;
+    return FS_TOOL_SPECS.filter(({ toolId }) => !this.#excludedToolIds.has(toolId));
   }
 
   /** Validate and perform one file operation, leaving result decoration to the runtime. */
   async execute(call: FsToolCall, context: FsToolContext): Promise<FsToolExecution> {
-    if (!isFsToolId(call.toolId)) {
+    if (!isFsToolId(call.toolId) || this.#excludedToolIds.has(call.toolId)) {
       return { outcome: "error", errorCode: "fs_operation_failed", result: null };
     }
     const operation = parseToolInput(call.toolId, call.args);
@@ -344,7 +346,10 @@ export class FsTools {
   }
 }
 
-/** Creates the built-in workspace file tool provider. */
-export function createFsTools(backend: WorkspaceFileToolBackend): FsTools {
-  return new FsTools(backend);
+/** Creates the built-in workspace file tool provider, optionally excluding ids owned elsewhere. */
+export function createFsTools(
+  backend: WorkspaceFileToolBackend,
+  excludedToolIds: readonly Code[] = [],
+): FsTools {
+  return new FsTools(backend, excludedToolIds);
 }

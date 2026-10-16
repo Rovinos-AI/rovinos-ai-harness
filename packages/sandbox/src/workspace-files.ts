@@ -366,7 +366,7 @@ export class WorkspaceFileSystem {
 
   async #read(runId: Id, input: FsReadInput, signal: AbortSignal): Promise<FsToolResult> {
     const root = await this.#projectRoot(runId);
-    const path = await projectPath(root, input.path);
+    const path = await projectPath(root, input.path, true);
     const bytes = await readFileAt(path);
     assertActive(signal);
     if (decodeText(bytes) === undefined) {
@@ -425,7 +425,7 @@ export class WorkspaceFileSystem {
 
   async #edit(runId: Id, input: FsEditInput, signal: AbortSignal): Promise<FsToolResult> {
     const root = await this.#projectRoot(runId);
-    const path = await projectPath(root, input.path);
+    const path = await projectPath(root, input.path, true);
     const original = await readFileAt(path);
     if (input.expectedSha256 !== undefined && sha256(original) !== input.expectedSha256) {
       throw new WorkspaceFileError("precondition_failed");

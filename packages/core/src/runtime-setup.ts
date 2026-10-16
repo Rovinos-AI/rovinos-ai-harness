@@ -142,11 +142,23 @@ function createRuntimeTool(
     backend instanceof RemoteSandboxBackend
       ? createWebFetchTool(config.sandbox?.egress?.allow, backend, !!overrides.workspace)
       : undefined;
-  const fsTool =
-    backend instanceof InProcessBackend || backend instanceof RemoteSandboxBackend
-      ? createFsTools(backend)
-      : undefined;
-  const composedTool = fsTool === undefined ? baseTool : composeToolPorts(fsTool, baseTool);
+  let fsTool: ReturnType<typeof createFsTools> | undefined;
+  if (backend instanceof InProcessBackend || backend instanceof RemoteSandboxBackend) {
+    const candidateFsTool = createFsTools(backend);
+    const baseToolSpecs = new Set((baseTool.getToolSpecs?.() ?? []).map(({ toolId }) => toolId));
+    const excludedFsToolIds = candidateFsTool
+      .getToolSpecs()
+      .filter(
+        ({ toolId }) =>
+          baseToolSpecs.has(toolId) || baseTool.describe(toolId) !== undefined,
+      )
+      .map(({ toolId }) => toolId);
+    fsTool = createFsTools(backend, excludedFsToolIds);
+  }
+  const composedTool =
+    fsTool === undefined || fsTool.getToolSpecs().length === 0
+      ? baseTool
+      : composeToolPorts(fsTool, baseTool);
   return webFetchTool === undefined
     ? composedTool
     : composeToolPorts(webFetchTool, composedTool);

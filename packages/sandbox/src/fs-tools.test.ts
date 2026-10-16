@@ -278,6 +278,57 @@ describe("workspace file operation contracts and safety", () => {
     expect(FsToolResultSchema.safeParse({ binary: true, bytes: 3, path: "secret" }).success).toBe(false);
   });
 
+  it("rejects missing and non-file targets while skipping symlinks in traversal", async () => {
+    const root = await workspaceRoot();
+    const project = await ensureRunWorkspace(root, runId);
+    const outside = await realpath(await mkdtemp(join(tmpdir(), "sandbox-fs-outside-")));
+    roots.push(outside);
+    await mkdir(join(project, "directory"));
+    await writeFile(join(project, "file.txt"), "visible");
+    await writeFile(join(outside, "secret.txt"), "hidden");
+    await symlink(join(outside, "secret.txt"), join(project, "linked.txt"));
+    const files = new WorkspaceFileSystem(root);
+    const signal = new AbortController().signal;
+
+    await expectFileError("read", root, { path: "missing.txt" }, "fs_file_not_found");
+    await expectFileError("read", root, { path: "directory" }, "fs_not_file");
+    await expectFileError("write", root, {
+      path: "file.txt",
+      content: "replacement",
+      mode: "create",
+    }, "fs_file_exists");
+    await expectFileError("write", root, {
+      path: "missing.txt",
+      content: "replacement",
+      mode: "overwrite",
+    }, "fs_file_not_found");
+    await expectFileError("write", root, {
+      path: "linked.txt",
+      content: "replacement",
+      mode: "overwrite",
+    }, "fs_path_invalid");
+    await expectFileError("list", root, { path: "file.txt", depth: 0, limit: 10 }, "fs_not_directory");
+    await expect(files.execute(runId, "list", { path: ".", depth: 0, limit: 10 }, signal)).resolves.toMatchObject({
+      entries: [
+        { path: "directory", type: "directory" },
+        { path: "file.txt", type: "file" },
+      ],
+    });
+    await expect(files.execute(runId, "search", {
+      query: "visible",
+      regex: false,
+      path: "directory",
+      limit: 10,
+    }, signal)).resolves.toMatchObject({ matches: [], truncated: false });
+    await expect(files.execute(runId, "search", {
+      query: "hidden",
+      regex: false,
+      path: ".",
+      limit: 10,
+    }, signal)).resolves.toMatchObject({ matches: [], truncated: false });
+    await expect(readFile(join(outside, "secret.txt"), "utf8")).resolves.toBe("hidden");
+  });
+
   // threat: T-12
   it("rejects traversal, absolute paths, symlinks, and all .harness paths", async () => {
     const root = await workspaceRoot();
@@ -352,6 +403,25 @@ describe("workspace file operation contracts and safety", () => {
       content: "before",
     };
     await expect(files.execute(runId, "write", unchanged, signal)).rejects.toMatchObject({
+      code: "precondition_failed",
+    });
+  });
+
+  it("creates a preconditioned new file once", async () => {
+    const root = await workspaceRoot();
+    const files = new WorkspaceFileSystem(root);
+    const signal = new AbortController().signal;
+    const input = {
+      path: "created.txt",
+      content: "created",
+      mode: "create",
+      expectedSha256: createHash("sha256").update(new Uint8Array()).digest("hex"),
+    };
+
+    await expect(files.execute(runId, "write", input, signal)).resolves.toMatchObject({
+      path: "created.txt",
+    });
+    await expect(files.execute(runId, "write", input, signal)).rejects.toMatchObject({
       code: "precondition_failed",
     });
   });
