@@ -70,6 +70,10 @@ export function startRun(
       scopeId: runId,
       budgets: config.run.budgets,
       checkpointEveryEvents: config.run.checkpointEveryEvents,
+      ...(config.store?.snapshotKeep === undefined
+        ? {}
+        : { snapshotKeep: config.store.snapshotKeep }),
+      workspaceSnapshotter: composition.workspaceSnapshotter,
       configHash: configHash(config),
       policyVersion,
       ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
@@ -106,6 +110,10 @@ export function createRuntimeContinuation(
         signal,
         budgets: config.run.budgets,
         checkpointEveryEvents: config.run.checkpointEveryEvents,
+        ...(config.store?.snapshotKeep === undefined
+          ? {}
+          : { snapshotKeep: config.store.snapshotKeep }),
+        workspaceSnapshotter: composition.workspaceSnapshotter,
         configHash: configHash(config),
         policyVersion,
         continuations: config.run.continuations,

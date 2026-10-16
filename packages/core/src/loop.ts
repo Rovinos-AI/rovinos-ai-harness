@@ -10,7 +10,7 @@ import {
 import type { Context, Link } from "@opentelemetry/api";
 import { activeRuns } from "@harness/telemetry";
 import { BudgetTracker, type BudgetViolation } from "./budgets.js";
-import { Checkpointer } from "./checkpoint.js";
+import { createRunCheckpointer, type Checkpointer } from "./checkpoint.js";
 import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from "./run-state.js";
 import type { RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
@@ -31,6 +31,7 @@ import type {
   RunContinuationMetadata,
   ToolPort,
 } from "./ports.js";
+import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
 import { recordRunCompleted, runStructuredFinalOutput } from "./steps/final-output.js";
 import type { ValueTransform } from "@harness/models";
@@ -54,6 +55,8 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   /** Optional inherited budget failure to record before executing this run. */
   readonly initialBudgetViolation?: BudgetViolation;
   readonly checkpointEveryEvents?: RunConfig["checkpointEveryEvents"];
+  readonly snapshotKeep?: number;
+  readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
@@ -173,16 +176,7 @@ export async function continueRunLoop(
   runId: Id,
   budgetTracker = new BudgetTracker(options.budgets),
 ): Promise<Event> {
-  const checkpointer = new Checkpointer({
-    recorder: options.recorder,
-    runId,
-    context: options.context,
-    ids: options.ids,
-    clock: options.clock,
-    ...(options.checkpointEveryEvents === undefined
-      ? {}
-      : { checkpointEveryEvents: options.checkpointEveryEvents }),
-  });
+  const checkpointer = createRunCheckpointer(options, runId);
   const execution = { runId, checkpointer, budgetTracker };
   const isTerminal = () => isTerminalRunState(foldRunState(events));
   return activeRuns.track(runId, () => runLoopSteps(options, events, execution), isTerminal);

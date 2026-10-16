@@ -19,8 +19,10 @@
   },
   "dependencies": {
     "@harness/context": "workspace:^",
+    "@harness/crypto": "workspace:^",
     "@harness/schemas": "workspace:^",
     "parse5": "8.0.1",
+    "tar": "7.5.22",
     "zod": "4.6.5"
   },
   "devDependencies": {

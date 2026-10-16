@@ -646,13 +646,14 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   }
   if (query.startsWith("SELECT snapshot_id, run_id, at_seq")) {
     const runId = text(values[0]);
-    const row = fakePg.snapshots
+    const rows = fakePg.snapshots
       .filter((snapshot) => snapshot.run_id === runId)
       .sort((first, second) => {
         const atSeqOrder = second.at_seq - first.at_seq;
         return atSeqOrder === 0 ? second.snapshot_id.localeCompare(first.snapshot_id) : atSeqOrder;
-      })[0];
-    return { rows: row === undefined ? [] : [row] };
+      });
+    const limit = query.includes("LIMIT $2") ? number(values[1]) : 1;
+    return { rows: rows.slice(0, limit) };
   }
   if (query.startsWith("SELECT run_id, seq, ts, type")) {
     const runId = text(values[0]);

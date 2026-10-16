@@ -240,6 +240,17 @@ function registerSnapshotPruning(
 
       await appendSnapshots(store, runId, snapshotIds, builders);
       await expect(store.head(runId)).resolves.toBe(7);
+      const latestSnapshots = await store.retainedSnapshots(runId, 2);
+      expect(latestSnapshots.map(({ snapshotId, atSeq }) => ({ snapshotId, atSeq }))).toEqual(
+        snapshotIds
+          .slice(-2)
+          .reverse()
+          .map((snapshotId, index) => ({ snapshotId, atSeq: 6 - index })),
+      );
+      await expect(store.retainedSnapshots(runId, 20)).resolves.toHaveLength(5);
+      await expect(store.retainedSnapshots(runId, 0)).rejects.toThrow(
+        "Snapshot limit must be a positive integer",
+      );
       const expectedSeq = await store.head(runId);
       const fixture = { store, runId, snapshotIds, expectedSeq, builders };
       await assertRetainedSnapshotsCannotBeReused(fixture);

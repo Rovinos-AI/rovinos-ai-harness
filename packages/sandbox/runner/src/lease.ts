@@ -111,6 +111,43 @@ export class RunnerLeaseManager {
     });
   }
 
+  /** Runs one workspace transfer under an exclusive lease, preserving pinned ownership. */
+  async withWorkspaceLease(runId: IdValue, operation: () => Promise<void>): Promise<boolean> {
+    const acquisition = await this.#serialize(async () => {
+      await this.#expireIfDue();
+      if (this.#isBusy()) {
+        return { acquired: false, temporary: false };
+      }
+      if (!this.#reconciled) {
+        await this.#operations.sealPersisted(this.#workspaceRoot);
+        this.#reconciled = true;
+      }
+      const current = this.#active?.runId === runId ? this.#active : undefined;
+      const acquired = await this.#acquireLocked(
+        runId,
+        current?.ttlMs ?? DEFAULT_RUNNER_LEASE_TTL_MS,
+        true,
+      );
+      return {
+        acquired,
+        temporary: acquired && current?.pinned !== true,
+      };
+    });
+    if (!acquisition.acquired) {
+      return false;
+    }
+    try {
+      await operation();
+      return true;
+    } finally {
+      if (acquisition.temporary) {
+        await this.release(runId);
+      } else {
+        await this.expireDue();
+      }
+    }
+  }
+
   /** Renews the current lease for an execution request, claiming it if unowned. */
   renew(runId: IdValue): Promise<boolean> {
     return this.#serialize(async () => {

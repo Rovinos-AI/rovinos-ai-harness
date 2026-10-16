@@ -21,7 +21,7 @@ import {
   type VaultConfig,
 } from "@harness/schemas";
 import type { z } from "zod";
-import type { SandboxBackend } from "@harness/sandbox";
+import type { SandboxBackend, WorkspaceSnapshotPort } from "@harness/sandbox";
 import type { ProviderAdapter } from "@harness/models";
 import type { McpConnectionDependencies } from "@harness/mcp";
 import type { EventStore } from "@harness/store";
@@ -164,6 +164,7 @@ export interface RuntimeComposition {
   readonly store: EventStore;
   readonly keys: LocalKeyProvider;
   readonly sandboxBackend: SandboxBackend;
+  readonly workspaceSnapshotter: WorkspaceSnapshotPort;
   readonly vault: RuntimeVault;
   readonly vaultResolver: AuditingVaultResolver;
   readonly pii:

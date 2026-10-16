@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CompositeSecretResolver, HarnessConfigSchema } from "@harness/config";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,7 +50,11 @@ vi.mock("pg", () => ({
 
 function createContext(
   harnessConfig: ReturnType<typeof HarnessConfigSchema.parse>,
-  options: { readonly now?: number; readonly vault?: CliContext["createVaultResolver"] } = {},
+  options: {
+    readonly now?: number;
+    readonly dataDir?: string;
+    readonly vault?: CliContext["createVaultResolver"];
+  } = {},
 ) {
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -62,6 +66,7 @@ function createContext(
     }),
     clock: new FakeClock(options.now ?? 10 * DAY_MS),
     secretResolver: new CompositeSecretResolver(),
+    ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
     ...(options.vault === undefined ? {} : { createVaultResolver: options.vault }),
   };
   return { context, stdout, stderr };
@@ -312,13 +317,32 @@ describe("harness store purge", () => {
   });
 
   it("purges vault mappings immediately when the retention hook deletes a run", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-store-snapshot-purge-"));
+    const dataDir = join(temporaryDirectory, "custom-data");
     const store = new InMemoryEventStore();
     const runId = await seedRun(store, "completed", 1);
+    const snapshotDirectory = join(dataDir, "snapshots", runId);
+    await mkdir(snapshotDirectory, { recursive: true });
+    await writeFile(join(snapshotDirectory, "synthetic.tar.gz"), "archive");
     const vault = new InMemoryVault();
     const token = await vault.put(runId, "email", "alice@example.test");
     const closeVault = vi.fn();
     const vaultAdmin = Object.assign(vault, { close: closeVault });
-    const { context, stdout, stderr } = createContext(config(), { now: 3 * DAY_MS });
+    const { context: dryContext } = createContext(config(), { now: 3 * DAY_MS, dataDir });
+    await expect(
+      main(["--json", "store", "purge", "--dry-run"], dryContext, [
+        createStoreCommand({
+          migrate: vi.fn(),
+          openStore: (_config, _dryRun, _resolver, override) => {
+            expect(override).toBe(dataDir);
+            return Promise.resolve(store);
+          },
+        }),
+      ]),
+    ).resolves.toBe(ExitCode.ok);
+    expect(existsSync(snapshotDirectory)).toBe(true);
+
+    const { context, stdout, stderr } = createContext(config(), { now: 3 * DAY_MS, dataDir });
     const command = createStoreCommand({
       migrate: vi.fn(),
       openStore: () => Promise.resolve(store),
@@ -333,8 +357,46 @@ describe("harness store purge", () => {
       hookFailures: 0,
     });
     await expect(vault.resolve(runId, token, { boundary: "ui" })).resolves.toBeUndefined();
+    expect(existsSync(snapshotDirectory)).toBe(false);
     expect(closeVault).toHaveBeenCalledOnce();
     expect(stderr).toEqual([]);
+  });
+
+  it("attempts vault cleanup after snapshot deletion fails and reports the hook failure", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-store-purge-failure-"));
+    const dataDir = join(temporaryDirectory, "custom-data");
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(join(dataDir, "snapshots"), "not a directory");
+    const store = new InMemoryEventStore();
+    const runId = await seedRun(store, "completed", 1);
+    const purgeVault = vi.fn(() => Promise.resolve(0));
+    const vaultAdmin = {
+      markTerminal: () => Promise.resolve(),
+      listTerminalRunsBefore: () => Promise.resolve([]),
+      purge: purgeVault,
+      stats: () => Promise.resolve({ entries: 0 }),
+      close: vi.fn(),
+    };
+    const { context, stdout, stderr } = createContext(config(), {
+      now: 3 * DAY_MS,
+      dataDir,
+    });
+
+    const exitCode = await main(["--json", "store", "purge"], context, [
+      createStoreCommand({
+        migrate: vi.fn(),
+        openStore: () => Promise.resolve(store),
+        openVaultAdmin: () => Promise.resolve(vaultAdmin),
+      }),
+    ]);
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(purgeVault).toHaveBeenCalledExactlyOnceWith(runId);
+    expect(parseJson(StorePurgeResultSchema, stdout[0] ?? "")).toMatchObject({
+      purged: 1,
+      hookFailures: 1,
+    });
+    expect(stderr).toEqual(["retention_hook_failed\n"]);
   });
 
   it("waits for asynchronous vault cleanup before completing retention", async () => {

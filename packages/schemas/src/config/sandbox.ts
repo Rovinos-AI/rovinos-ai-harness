@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// 19.3: Remote runner configuration is owned by @harness/sandbox.
+// 19.3 and 19.6: Sandbox runner and snapshot settings are owned by @harness/sandbox.
 import { z } from "zod";
 import { SecretRefSchema } from "../secret-ref.js";
 
@@ -51,6 +51,8 @@ export const SandboxConfigSchema = z
     allowUnsafeInProcess: z.boolean().optional(),
     egress: SandboxEgressConfigSchema.optional(),
     runner: SandboxRunnerConfigSchema.optional(),
+    restoreOnResume: z.boolean().optional(),
+    snapshotEncryption: z.boolean().optional(),
   })
   .strict()
   .prefault({});

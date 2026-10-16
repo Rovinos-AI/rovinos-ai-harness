@@ -28,6 +28,18 @@ export {
   lockRunWorkspace,
   WorkspaceQuotaExceededError,
 } from "./workspace.js";
+export {
+  SnapshotTooLargeError,
+  UnsafeWorkspaceSnapshotError,
+  WorkspaceSnapshotError,
+  WorkspaceSnapshotter,
+  purgeWorkspaceSnapshots,
+} from "./snapshot.js";
+export type {
+  RemoteWorkspaceSnapshotPort,
+  WorkspaceSnapshotterOptions,
+  WorkspaceSnapshotPort,
+} from "./snapshot.js";
 export { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
 export type { RemoteSandboxBackendOptions } from "./remote.js";
 export { openUrlInBrowser } from "./open-browser.js";

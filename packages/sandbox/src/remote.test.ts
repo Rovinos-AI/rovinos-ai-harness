@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id } from "@harness/schemas";
+import { Readable, Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_WEB_FETCH_BYTES } from "./web-fetch-contracts.js";
 import { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
@@ -53,6 +55,65 @@ function backend(fetcher: typeof fetch, options: { timeoutGraceMs?: number } = {
 }
 
 describe("RemoteSandboxBackend", () => {
+  it("streams workspace snapshot downloads and restores", async () => {
+    let uploaded = "";
+    const fetcher: typeof fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/workspace/snapshot") {
+        return new Response(Buffer.from("archive"));
+      }
+      if (path === "/workspace/restore") {
+        const body = init?.body;
+        if (!(body instanceof ReadableStream)) {
+          throw new TypeError("Expected a streamed archive upload.");
+        }
+        const reader = body.getReader();
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) {
+            break;
+          }
+          uploaded += Buffer.from(chunk.value).toString("utf8");
+        }
+        return response({ status: "ok" });
+      }
+      return response({ exists: true });
+    });
+    const remote = backend(fetcher);
+    let downloaded = "";
+    await pipeline(
+      await remote.createArchive(runId, 1024, 2048),
+      new Writable({
+        write(chunk: Buffer, _encoding, callback) {
+          downloaded += chunk.toString("utf8");
+          callback();
+        },
+      }),
+    );
+    await remote.restoreArchive(runId, Readable.from([Buffer.from("archive")]), 1024, 2048);
+
+    expect(downloaded).toBe("archive");
+    expect(uploaded).toBe("archive");
+    await expect(remote.hasWorkspace(runId)).resolves.toBe(true);
+  });
+
+  it("returns an empty stream when the runner has no snapshot body", async () => {
+    const remote = backend(() => Promise.resolve(new Response(null)));
+    let bytes = 0;
+
+    await pipeline(
+      await remote.createArchive(runId, 1024, 2048),
+      new Writable({
+        write(chunk: Buffer, _encoding, callback) {
+          bytes += chunk.byteLength;
+          callback();
+        },
+      }),
+    );
+
+    expect(bytes).toBe(0);
+  });
+
   it("sends the run request with bearer authentication and validates the response", async () => {
     const fetcher: typeof fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(

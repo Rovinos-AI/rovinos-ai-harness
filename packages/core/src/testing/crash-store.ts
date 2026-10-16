@@ -82,6 +82,10 @@ export class CrashingEventStore implements EventStore {
     return this.inner.latestSnapshot(runId);
   }
 
+  retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]> {
+    return this.inner.retainedSnapshots(runId, limit);
+  }
+
   read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event> {
     return this.inner.read(runId, range);
   }
