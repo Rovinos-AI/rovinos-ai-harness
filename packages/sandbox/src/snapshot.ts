@@ -1,22 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
 import {
   chmod,
+  open,
   lstat,
   mkdir,
-  readFile,
   readdir,
   realpath,
   rename,
   rm,
-  writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { HarnessError, Id, WorkspaceRef } from "@harness/schemas";
 import type { KeyProvider } from "@harness/schemas";
 import { ensureRunWorkspace } from "./workspace.js";
 import {
   createWorkspaceArchive,
+  assertWorkspaceArchiveLimits,
   decryptWorkspaceArchive,
   encryptWorkspaceArchive,
   SnapshotTooLargeError,
@@ -124,31 +127,60 @@ export class WorkspaceSnapshotter {
     await assertPlainDirectory(runRoot);
     const snapshotDirectory = await this.#ensureRunSnapshotDirectory(validatedRunId);
     const temporaryPath = join(snapshotDirectory, `.${snapshotId}.tmp`);
+    const rawTemporaryPath = join(snapshotDirectory, `.${snapshotId}.archive.tmp`);
     const snapshotPath = join(snapshotDirectory, `${snapshotId}.tar.gz`);
-    let archive: Buffer | undefined;
     try {
-      archive = await createWorkspaceArchive(runRoot, this.#maxSnapshotBytes);
-      const storedBytes = await encryptWorkspaceArchive(archive, {
-        runId: validatedRunId,
-        snapshotId,
-        enabled: this.#snapshotEncryption,
-        ...(this.options.keyProvider === undefined ? {} : { provider: this.options.keyProvider }),
+      await assertWorkspaceArchiveLimits(runRoot, this.#maxFileBytes, this.#maxSnapshotBytes);
+      const rawPath = this.#snapshotEncryption ? rawTemporaryPath : temporaryPath;
+      const digest = createHash("sha256");
+      let compressedBytes = 0;
+      const compressedLimit = new Transform({
+        transform: (chunk: Buffer, _encoding, callback) => {
+          compressedBytes += chunk.byteLength;
+          if (compressedBytes > this.#maxSnapshotBytes) {
+            callback(new SnapshotTooLargeError());
+            return;
+          }
+          if (!this.#snapshotEncryption) {
+            digest.update(chunk);
+          }
+          callback(null, chunk);
+        },
       });
-      if (storedBytes.byteLength > this.#maxSnapshotBytes) {
-        throw new SnapshotTooLargeError();
+      await pipeline(
+        await createWorkspaceArchive(runRoot),
+        compressedLimit,
+        createWriteStream(rawPath, { flags: "wx", mode: 0o600 }),
+      );
+      if (this.#snapshotEncryption) {
+        const archive = await this.#readArchiveBuffer(rawTemporaryPath);
+        try {
+          const storedBytes = await encryptWorkspaceArchive(archive, {
+            runId: validatedRunId,
+            snapshotId,
+            enabled: true,
+            ...(this.options.keyProvider === undefined ? {} : { provider: this.options.keyProvider }),
+          });
+          if (storedBytes.byteLength > this.#maxSnapshotBytes) {
+            storedBytes.fill(0);
+            throw new SnapshotTooLargeError();
+          }
+          digest.update(storedBytes);
+          await this.#writeTemporaryArchive(temporaryPath, storedBytes);
+          storedBytes.fill(0);
+        } finally {
+          archive.fill(0);
+        }
       }
-      const digest = createHash("sha256").update(storedBytes).digest("hex");
-      await writeFile(temporaryPath, storedBytes, { flag: "wx", mode: 0o600 });
       await rename(temporaryPath, snapshotPath);
-      return WorkspaceRef.parse(`ws:${snapshotId}:${digest.slice(0, 16)}`);
+      return WorkspaceRef.parse(`ws:${snapshotId}:${digest.digest("hex").slice(0, 16)}`);
     } catch (error) {
       await rm(temporaryPath, { force: true });
+      await rm(rawTemporaryPath, { force: true });
       if (error instanceof HarnessError) {
         throw error;
       }
       throw new WorkspaceSnapshotError();
-    } finally {
-      archive?.fill(0);
     }
   }
 
@@ -161,13 +193,10 @@ export class WorkspaceSnapshotter {
   async restore(runId: string, ref: WorkspaceRef): Promise<void> {
     const validatedRunId = Id.parse(runId);
     const workspaceRoot = await this.#ensureRoot(this.options.workspaceRoot);
-    const { storedBytes, archive } = await this.#readSnapshot(
-      validatedRunId,
-      WorkspaceRef.parse(ref),
-    );
+    const snapshot = await this.#readSnapshot(validatedRunId, WorkspaceRef.parse(ref));
     try {
       await restoreWorkspaceArchive({
-        archive,
+        archive: snapshot.archive,
         workspaceRoot,
         runId: validatedRunId,
         temporaryId: Id.parse(this.options.ids.next()),
@@ -175,15 +204,14 @@ export class WorkspaceSnapshotter {
         maxSnapshotBytes: this.#maxSnapshotBytes,
       });
     } finally {
-      archive.fill(0);
-      storedBytes.fill(0);
+      snapshot.cleanup();
     }
   }
 
   async #readSnapshot(
     runId: Id,
     ref: WorkspaceRef,
-  ): Promise<{ storedBytes: Buffer; archive: Buffer }> {
+  ): Promise<{ archive: Readable; cleanup(): void }> {
     const { snapshotId, digest } = workspaceSnapshotRefParts(ref);
     const snapshotDirectory = await this.#ensureRunSnapshotDirectory(runId);
     const snapshotPath = join(snapshotDirectory, `${snapshotId}.tar.gz`);
@@ -196,26 +224,80 @@ export class WorkspaceSnapshotter {
     if (archiveStat.size > this.#maxSnapshotBytes) {
       throw new SnapshotTooLargeError();
     }
-    const storedBytes = await readFile(snapshotPath).catch(() => {
+    const header = Buffer.alloc(7);
+    const file = await open(snapshotPath, "r").catch(() => {
       throw new WorkspaceSnapshotError();
     });
-    const actualDigest = createHash("sha256").update(storedBytes).digest("hex").slice(0, 16);
-    if (actualDigest !== digest) {
-      storedBytes.fill(0);
-      throw new WorkspaceSnapshotError();
-    }
+    let readBytes: number;
     try {
-      const archive = await decryptWorkspaceArchive(
-        storedBytes,
-        runId,
-        snapshotId,
-        this.options.keyProvider,
-      );
-      return { storedBytes, archive };
-    } catch (error) {
-      storedBytes.fill(0);
-      throw error;
+      ({ bytesRead: readBytes } = await file.read(header, 0, header.byteLength, 0));
+    } finally {
+      await file.close();
     }
+    const isEncrypted =
+      readBytes === 7 && header.equals(Buffer.from("WSENC01", "ascii"));
+    if (isEncrypted) {
+      const storedBytes = await this.#readArchiveBuffer(snapshotPath);
+      const actualDigest = createHash("sha256").update(storedBytes).digest("hex").slice(0, 16);
+      if (actualDigest !== digest) {
+        storedBytes.fill(0);
+        throw new WorkspaceSnapshotError();
+      }
+      try {
+        const archive = await decryptWorkspaceArchive(
+          storedBytes,
+          runId,
+          snapshotId,
+          this.options.keyProvider,
+        );
+        return {
+          archive: Readable.from([archive]),
+          cleanup: () => {
+            archive.fill(0);
+            storedBytes.fill(0);
+          },
+        };
+      } catch (error) {
+        storedBytes.fill(0);
+        throw error;
+      }
+    }
+    const hash = createHash("sha256");
+    let size = 0;
+    const verify = new Transform({
+      transform: (chunk: Buffer, _encoding, callback) => {
+        size += chunk.byteLength;
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+      flush: (callback) => {
+        if (size > this.#maxSnapshotBytes || hash.digest("hex").slice(0, 16) !== digest) {
+          callback(
+            size > this.#maxSnapshotBytes
+              ? new SnapshotTooLargeError()
+              : new WorkspaceSnapshotError(),
+          );
+          return;
+        }
+        callback();
+      },
+    });
+    return { archive: createReadStream(snapshotPath).pipe(verify), cleanup: () => verify.destroy() };
+  }
+
+  async #readArchiveBuffer(path: string): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of createReadStream(path)) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  async #writeTemporaryArchive(path: string, bytes: Buffer): Promise<void> {
+    await pipeline(
+      Readable.from([bytes]),
+      createWriteStream(path, { flags: "wx", mode: 0o600 }),
+    );
   }
 
   /** Returns whether a non-symlink run workspace currently exists. */

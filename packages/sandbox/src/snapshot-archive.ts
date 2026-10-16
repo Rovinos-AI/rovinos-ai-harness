@@ -2,9 +2,9 @@
 import { aesGcmDecrypt, aesGcmEncrypt } from "@harness/crypto";
 import { Code, HarnessError, Id } from "@harness/schemas";
 import type { KeyProvider, WorkspaceRef } from "@harness/schemas";
-import { chmod, lstat, mkdir, rename, rm } from "node:fs/promises";
-import { join, posix, win32 } from "node:path";
-import { Readable, Writable } from "node:stream";
+import { chmod, lstat, mkdir, readlink, readdir, rename, rm } from "node:fs/promises";
+import { dirname, join, posix, win32 } from "node:path";
+import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import * as tar from "tar";
 
@@ -71,26 +71,63 @@ function archiveRelativePath(path: string): string {
   return posix.normalize(path.replaceAll("\\", "/")).replace(/^\.\//u, "");
 }
 
+function resolveLinkTarget(path: string, target: string, hardLink: boolean): string {
+  const normalized = target.replaceAll("\\", "/");
+  if (
+    normalized.length === 0 ||
+    normalized.includes("\0") ||
+    normalized.startsWith("/") ||
+    win32.isAbsolute(target) ||
+    /^[A-Za-z]:/u.test(target)
+  ) {
+    throw new UnsafeWorkspaceSnapshotError();
+  }
+  const base = hardLink ? "." : dirname(path);
+  const resolved = posix.normalize(posix.join(base, normalized));
+  if (resolved === ".." || resolved.startsWith("../") || resolved.startsWith("/")) {
+    throw new UnsafeWorkspaceSnapshotError();
+  }
+  return archiveRelativePath(resolved);
+}
+
+/** Rejects filesystem entries that could not be restored safely or within configured limits. */
+export async function assertWorkspaceArchiveLimits(
+  runRoot: string,
+  maxFileBytes: number,
+  maxSnapshotBytes: number,
+): Promise<void> {
+  let totalBytes = 0;
+  const walk = async (directory: string, relativeDirectory: string): Promise<void> => {
+    for (const name of await readdir(directory)) {
+      const relativePath = relativeDirectory === "." ? name : `${relativeDirectory}/${name}`;
+      if (relativePath === ".harness/tmp" || relativePath.startsWith(".harness/tmp/")) {
+        continue;
+      }
+      const path = join(directory, name);
+      const info = await lstat(path);
+      if (info.isSymbolicLink()) {
+        resolveLinkTarget(relativePath, await readlink(path), false);
+      } else if (info.isDirectory()) {
+        await walk(path, relativePath);
+      } else if (info.isFile()) {
+        totalBytes += info.size;
+        if (info.size > maxFileBytes || totalBytes > maxSnapshotBytes) {
+          throw new SnapshotTooLargeError();
+        }
+      } else {
+        throw new UnsafeWorkspaceSnapshotError();
+      }
+    }
+  };
+  await walk(runRoot, ".");
+}
+
 /** Compresses the workspace while excluding ephemeral per-run scratch files. */
 export async function createWorkspaceArchive(
   runRoot: string,
-  maxSnapshotBytes: number,
-): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  const sink = new Writable({
-    write: (chunk: Buffer, _encoding, callback) => {
-      size += chunk.byteLength;
-      if (size > maxSnapshotBytes) {
-        callback(new SnapshotTooLargeError());
-        return;
-      }
-      chunks.push(Buffer.from(chunk));
-      callback();
-    },
-  });
+): Promise<Readable> {
   try {
-    const archive = tar.c(
+    return tar.c(
       {
         cwd: runRoot,
         gzip: true,
@@ -105,15 +142,7 @@ export async function createWorkspaceArchive(
       },
       ["."],
     );
-    await pipeline(archive, sink);
-    return Buffer.concat(chunks, size);
   } catch (error) {
-    for (const chunk of chunks) {
-      chunk.fill(0);
-    }
-    if (error instanceof SnapshotTooLargeError) {
-      throw error;
-    }
     throw new WorkspaceSnapshotError();
   }
 }
@@ -196,6 +225,9 @@ interface ArchiveExtractionState {
   totalBytes: number;
   rootMode?: number;
   rejection?: HarnessError;
+  readonly symbolicLinks: Set<string>;
+  readonly files: Set<string>;
+  readonly paths: Set<string>;
 }
 
 type ArchiveFilterEntry = Parameters<NonNullable<tar.TarOptionsWithAliases["filter"]>>[1];
@@ -226,7 +258,11 @@ function entryHasAllowedType(
 ): entry is Extract<ArchiveFilterEntry, { type: string }> {
   return (
     "type" in entry &&
-    (entry.type === "Directory" || entry.type === "File" || entry.type === "OldFile")
+    (entry.type === "Directory" ||
+      entry.type === "File" ||
+      entry.type === "OldFile" ||
+      entry.type === "SymbolicLink" ||
+      entry.type === "Link")
   );
 }
 
@@ -236,7 +272,12 @@ function entryFitsSnapshotLimits(
   maxFileBytes: number,
   maxSnapshotBytes: number,
 ): boolean {
-  if (!("type" in entry) || entry.type === "Directory") {
+  if (
+    !("type" in entry) ||
+    entry.type === "Directory" ||
+    entry.type === "SymbolicLink" ||
+    entry.type === "Link"
+  ) {
     return true;
   }
   const totalBytes = state.totalBytes + entry.size;
@@ -260,6 +301,39 @@ function filterArchiveEntry(
   if (!entryHasAllowedType(entry)) {
     return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
   }
+  const ancestors = relativePath.split("/");
+  ancestors.pop();
+  let ancestorPath = "";
+  for (const ancestor of ancestors) {
+    ancestorPath = ancestorPath.length === 0 ? ancestor : `${ancestorPath}/${ancestor}`;
+    if (state.symbolicLinks.has(ancestorPath)) {
+      return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
+    }
+  }
+  if (state.paths.has(relativePath)) {
+    return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
+  }
+  if (entry.type === "SymbolicLink" || entry.type === "Link") {
+    const linkPath = "linkpath" in entry ? entry.linkpath : undefined;
+    if (linkPath === undefined) {
+      return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
+    }
+    try {
+      const target = resolveLinkTarget(relativePath, linkPath, entry.type === "Link");
+      if (entry.type === "Link" && !state.files.has(target)) {
+        return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
+      }
+      if (entry.type === "SymbolicLink") {
+        state.symbolicLinks.add(relativePath);
+      } else {
+        state.files.add(relativePath);
+      }
+    } catch {
+      return rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
+    }
+  } else if (entry.type === "File" || entry.type === "OldFile") {
+    state.files.add(relativePath);
+  }
   if (!entryFitsSnapshotLimits(entry, state, maxFileBytes, maxSnapshotBytes)) {
     return false;
   }
@@ -268,6 +342,7 @@ function filterArchiveEntry(
   if (relativePath === ".") {
     Object.assign(state, { rootMode: mode });
   }
+  state.paths.add(relativePath);
   return true;
 }
 
@@ -278,7 +353,12 @@ export async function extractWorkspaceArchive(
   maxFileBytes: number,
   maxSnapshotBytes: number,
 ): Promise<void> {
-  const state: ArchiveExtractionState = { totalBytes: 0 };
+  const state: ArchiveExtractionState = {
+    totalBytes: 0,
+    symbolicLinks: new Set(),
+    files: new Set(),
+    paths: new Set(),
+  };
   try {
     const extractor = tar.x({
       cwd: destination,
@@ -291,7 +371,7 @@ export async function extractWorkspaceArchive(
       maxDecompressionRatio: 1000,
       filter: (_path, entry) => filterArchiveEntry(entry, state, maxFileBytes, maxSnapshotBytes),
     });
-    await pipeline(Readable.from([archive]), extractor);
+    await pipeline(Buffer.isBuffer(archive) ? Readable.from([archive]) : archive, extractor);
     if (state.rejection !== undefined) {
       throw state.rejection;
     }
@@ -369,7 +449,7 @@ async function swapRestoredWorkspace(
 
 /** Installs a validated snapshot archive with a recoverable atomic workspace swap. */
 export async function restoreWorkspaceArchive(options: {
-  readonly archive: Buffer;
+  readonly archive: Buffer | Readable;
   readonly workspaceRoot: string;
   readonly runId: Id;
   readonly temporaryId: Id;

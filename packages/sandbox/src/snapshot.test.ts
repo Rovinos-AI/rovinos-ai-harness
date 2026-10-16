@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import {
   chmod,
+  link,
+  lstat,
   mkdtemp,
   mkdir,
   readFile,
@@ -15,7 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Id, WorkspaceRef, type KeyProvider } from "@harness/schemas";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SnapshotTooLargeError,
   WorkspaceSnapshotError,
@@ -105,6 +107,10 @@ function maliciousArchive(
   return gzipSync(Buffer.concat([tarEntry(name, type, data, linkname), Buffer.alloc(1024)]));
 }
 
+function archiveOf(...entries: Buffer[]): Buffer {
+  return gzipSync(Buffer.concat([...entries, Buffer.alloc(1024)]));
+}
+
 async function writeArchive(
   rootsToUse: { workspaceRoot: string; snapshotRoot: string },
   bytes: Buffer,
@@ -166,6 +172,44 @@ describe("WorkspaceSnapshotter", () => {
     const smallFileLimit = snapshotter(paths, { maxFileBytes: 10 });
     await expect(smallFileLimit.restore(runId, ref)).rejects.toBeInstanceOf(SnapshotTooLargeError);
     await expect(readFile(join(runRoot, "large"))).resolves.toEqual(Buffer.alloc(512, 1));
+  });
+
+  it("enforces file and uncompressed limits before publishing a snapshot", async () => {
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true });
+    await writeFile(join(runRoot, "large"), Buffer.alloc(11 * 1024 * 1024, 1));
+
+    await expect(snapshotter(paths).snapshot(runId)).rejects.toBeInstanceOf(SnapshotTooLargeError);
+    await expect(readdir(join(paths.snapshotRoot, runId))).resolves.toEqual([]);
+  });
+
+  it("restores every snapshot accepted by its configured file and total limits", async () => {
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true });
+    await writeFile(join(runRoot, "small"), Buffer.alloc(128, 1));
+    const instance = snapshotter(paths, { maxFileBytes: 128, maxSnapshotBytes: 4096 });
+    const ref = await instance.snapshot(runId);
+    await rm(runRoot, { recursive: true });
+
+    await expect(instance.restore(runId, ref)).resolves.toBeUndefined();
+    await expect(readFile(join(runRoot, "small"))).resolves.toEqual(Buffer.alloc(128, 1));
+  });
+
+  it("streams archive creation without concatenating its contents into a full buffer", async () => {
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true });
+    await writeFile(join(runRoot, "large"), Buffer.alloc(1024 * 1024, 1));
+    const concat = vi.spyOn(Buffer, "concat");
+
+    try {
+      await expect(snapshotter(paths).snapshot(runId)).resolves.toMatch(/^ws:/u);
+      expect(concat).not.toHaveBeenCalled();
+    } finally {
+      concat.mockRestore();
+    }
   });
 
   it("rejects missing and oversized snapshot files before extraction", async () => {
@@ -298,6 +342,74 @@ describe("WorkspaceSnapshotter", () => {
       await expect(readFile(outsideAbsolutePath)).rejects.toMatchObject({ code: "ENOENT" });
     },
   );
+
+  it("round-trips contained relative symbolic and hard links", async () => {
+    // threat: T-17
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(join(runRoot, "project"), { recursive: true });
+    await writeFile(join(runRoot, "project", "v2"), "symbolic target");
+    await symlink("v2", join(runRoot, "project", "current"));
+    await writeFile(join(runRoot, "project", "original"), "hardlink target");
+    await link(join(runRoot, "project", "original"), join(runRoot, "project", "copy"));
+    const instance = snapshotter(paths);
+    const ref = await instance.snapshot(runId);
+    await rm(runRoot, { recursive: true });
+
+    await instance.restore(runId, ref);
+
+    await expect(readFile(join(runRoot, "project", "current"), "utf8")).resolves.toBe(
+      "symbolic target",
+    );
+    await expect(
+      lstat(join(runRoot, "project", "current")).then((info) => info.isSymbolicLink()),
+    ).resolves.toBe(true);
+    await expect(readFile(join(runRoot, "project", "copy"), "utf8")).resolves.toBe(
+      "hardlink target",
+    );
+    await expect(
+      lstat(join(runRoot, "project", "original")).then((original) =>
+        lstat(join(runRoot, "project", "copy")).then((copy) => original.ino === copy.ino),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it.each([
+    ["escaping relative symlink", "link", "2", Buffer.alloc(0), "../x"],
+    ["absolute symlink", "link", "2", Buffer.alloc(0), "/etc/passwd"],
+  ] as const)("rejects %s without replacing the existing workspace", async (_name, path, type, data, target) => {
+    // threat: T-17
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true });
+    await writeFile(join(runRoot, "keep"), "original");
+    const ref = await writeArchive(paths, maliciousArchive(path, type, data, target));
+
+    await expect(snapshotter(paths).restore(runId, ref)).rejects.toMatchObject({
+      code: "workspace_snapshot_unsafe",
+    });
+    await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
+  });
+
+  it("rejects writing through a previously accepted symbolic link", async () => {
+    // threat: T-17
+    const paths = await createRoots();
+    const runRoot = join(paths.workspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true });
+    await writeFile(join(runRoot, "keep"), "original");
+    const ref = await writeArchive(
+      paths,
+      archiveOf(
+        tarEntry("link", "2", Buffer.alloc(0), "sub"),
+        tarEntry("link/created", "0", Buffer.from("unsafe")),
+      ),
+    );
+
+    await expect(snapshotter(paths).restore(runId, ref)).rejects.toMatchObject({
+      code: "workspace_snapshot_unsafe",
+    });
+    await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
+  });
 
   it("keeps the original workspace if extraction fails after accepting an earlier file", async () => {
     // threat: T-17
