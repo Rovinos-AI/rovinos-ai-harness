@@ -3,7 +3,12 @@ import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { ServerConfigSchema } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
-import { McpPool, createServersReachableChecks } from "./pool.js";
+import {
+  McpPool,
+  createServersAuthorizedCheck,
+  createServersReachableChecks,
+} from "./pool.js";
+import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpLogEvent } from "./transports.js";
 
 function config(id: string) {
@@ -117,6 +122,28 @@ describe("McpPool", () => {
     await expect(check.run({})).resolves.toEqual({
       status: "ok",
       code: "servers_reachable",
+    });
+  });
+
+  it("reports missing OAuth authorization through the dedicated doctor check", async () => {
+    const serverConfig = ServerConfigSchema.parse({
+      id: "protected",
+      transport: {
+        kind: "http",
+        url: "http://127.0.0.1:3000/mcp",
+        auth: { kind: "oauth", grant: "authorization_code" },
+      },
+    });
+    const check = createServersAuthorizedCheck([config("stdio"), serverConfig], {
+      resolveSecret: () => Promise.reject(new Error("not used")),
+      createTransport: () => Promise.reject(new McpAuthRequiredError()),
+    });
+
+    expect(check.id).toBe("servers_authorized");
+    await expect(check.run({})).resolves.toEqual({
+      status: "fail",
+      code: "mcp_auth_required",
+      detail: "protected",
     });
   });
 

@@ -200,19 +200,27 @@ describe("McpConnection", () => {
 
   it("exports the MCP connection, pool, and transport APIs from the package entry point", () => {
     expect(Object.keys(mcpPackage).sort()).toEqual([
+      "McpAuthRequiredError",
       "McpConnection",
       "McpConnectionError",
+      "McpOAuthProvider",
       "McpPool",
       "McpPoolError",
       "McpProtocolError",
       "McpToolPort",
+      "OAuthCredentialRecordSchema",
+      "OAuthTokenStore",
+      "OAuthTokenStoreError",
       "ToolRegistry",
       "ToolRegistryError",
       "UNREGISTERED_TOOL_ID",
       "buildRequestMeta",
       "createMcpTransport",
+      "createServersAuthorizedCheck",
       "createServersReachableChecks",
       "normalizeToolId",
+      "startMcpOAuthLogin",
+      "withOAuthWarningsRedacted",
     ]);
   });
 

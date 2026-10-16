@@ -19,6 +19,8 @@ import { createMcpTransport, type McpLogger } from "./transports.js";
 export { McpConnectionError, type McpConnectionErrorCode } from "./errors.js";
 export { excludeHeaderDeclaringTools, type McpTool } from "./tool-list.js";
 
+const OAUTH_CLIENT_CREDENTIALS_EXTENSION = "io.modelcontextprotocol/oauth-client-credentials";
+
 /** Observable lifecycle state for one MCP server connection. */
 export type McpConnectionState = "connecting" | "ready" | "unavailable";
 
@@ -263,9 +265,15 @@ export class McpConnection {
   }
 
   #createClient(): Client {
+    const oauthClientCredentials =
+      this.#config.transport.kind === "http" &&
+      this.#config.transport.auth?.grant === "client_credentials";
     return new Client(
       { name: "rovinos-ai-harness", version: "0.0.0" },
       {
+        capabilities: oauthClientCredentials
+          ? { extensions: { [OAUTH_CLIENT_CREDENTIALS_EXTENSION]: {} } }
+          : {},
         versionNegotiation: protocolOptions(this.#config.protocol),
         inputRequired: { autoFulfill: false },
         listChanged: {

@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { HarnessConfigSchema } from "@harness/config";
-import { parseJson, ServersCheckResultSchema } from "@harness/schemas";
-import { afterEach, describe, expect, it } from "vitest";
+import { OAuthTokenStore } from "@harness/mcp";
+import { parseJson, ServersCheckResultSchema, type KeyProvider } from "@harness/schemas";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
 import { createOutput } from "../output.js";
@@ -19,7 +26,14 @@ const inputSchema = {
 } as const;
 
 let serverTransports: InMemoryTransport[] = [];
+let httpServers: Server[] = [];
 let toolCalls = 0;
+const oauthAccessToken = "servers-login-access-token-canary";
+const oauthKey = Buffer.alloc(32, 41);
+const keyProvider: KeyProvider = {
+  currentKeyId: () => "test-key",
+  getKey: () => Promise.resolve(new Uint8Array(oauthKey)),
+};
 
 function createContext(
   loadConfigForTest: CliContext["loadConfig"],
@@ -106,10 +120,90 @@ function config(servers?: unknown) {
   return HarnessConfigSchema.parse({ ...(servers === undefined ? {} : { servers }) });
 }
 
+async function readRequestBody(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function sendJson(response: ServerResponse, value: unknown): void {
+  response.writeHead(200, { "content-type": "application/json" });
+  response.end(JSON.stringify(value));
+}
+
+async function createOAuthServer() {
+  let issuer = "";
+  const server = createServer((request, response) => {
+    void (async () => {
+      const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+      if (request.method === "GET" && url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
+        sendJson(response, {
+          resource: `http://${request.headers.host}/mcp`,
+          authorization_servers: [issuer],
+          scopes_supported: ["tools:read"],
+        });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/.well-known/oauth-authorization-server") {
+        sendJson(response, {
+          issuer,
+          authorization_endpoint: `${issuer}/authorize`,
+          token_endpoint: `${issuer}/token`,
+          registration_endpoint: `${issuer}/register`,
+          response_types_supported: ["code"],
+          grant_types_supported: ["authorization_code", "refresh_token"],
+          code_challenge_methods_supported: ["S256"],
+          authorization_response_iss_parameter_supported: true,
+          token_endpoint_auth_methods_supported: ["none"],
+        });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/register") {
+        const registration = parseJson(
+          z.object({ redirect_uris: z.array(z.url()) }).passthrough(),
+          await readRequestBody(request),
+        );
+        sendJson(response, { ...registration, client_id: "cli-registered-client" });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/token") {
+        sendJson(response, {
+          access_token: oauthAccessToken,
+          refresh_token: "servers-login-refresh-token",
+          token_type: "Bearer",
+          expires_in: 3600,
+        });
+        return;
+      }
+      response.writeHead(404).end();
+    })().catch(() => response.writeHead(500).end());
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  httpServers.push(server);
+  const address = server.address() as AddressInfo;
+  issuer = `http://127.0.0.1:${String(address.port)}`;
+  return issuer;
+}
+
 afterEach(async () => {
   toolCalls = 0;
   await Promise.all(serverTransports.map((transport) => transport.close()));
   serverTransports = [];
+  await Promise.all(
+    httpServers.splice(0).map(
+      (server) =>
+        new Promise<void>((resolve) => {
+          if (!server.listening) {
+            resolve();
+          } else {
+            server.close(() => resolve());
+          }
+        }),
+    ),
+  );
+  vi.unstubAllEnvs();
 });
 
 describe("harness servers check", () => {
@@ -378,6 +472,73 @@ describe("harness servers check", () => {
     expect(exitCode).toBe(ExitCode.failure);
     expect(result).toEqual({ servers: [], errorCode: "mcp_server_not_found" });
     expect(stderr).toEqual(["servers_check_failed\n"]);
+  });
+
+  it("logs in through a fake browser callback and removes the stored tokens on logout", async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), "mcp-oauth-cli-"));
+    vi.stubEnv("HARNESS_DATA_DIR", dataDirectory);
+    const serverUrl = await createOAuthServer();
+    const configWithAuth = HarnessConfigSchema.parse({
+      keys: {
+        currentKeyId: "primary",
+        keys: [{ id: "primary", secret: "env:OAUTH_KEY" }],
+      },
+      servers: [
+        {
+          id: "remote",
+          transport: {
+            kind: "http",
+            url: `${serverUrl}/mcp`,
+            auth: { kind: "oauth", grant: "authorization_code" },
+          },
+        },
+      ],
+    });
+    const { context, stdout, stderr } = createContext(
+      () => Promise.resolve(configWithAuth),
+      {
+        secretResolver: {
+          resolve(ref) {
+            if (ref === "env:OAUTH_KEY") {
+              return Promise.resolve({ reveal: () => oauthKey.toString("base64") });
+            }
+            return Promise.reject(new Error("unexpected secret reference"));
+          },
+        },
+      },
+    );
+    const openBrowser = vi.fn(async (url: string) => {
+      const authorizationUrl = new URL(url);
+      const callback = new URL(authorizationUrl.searchParams.get("redirect_uri") ?? "");
+      callback.searchParams.set("code", "cli-authorization-code");
+      callback.searchParams.set("state", authorizationUrl.searchParams.get("state") ?? "");
+      callback.searchParams.set("iss", serverUrl);
+      expect((await fetch(callback)).status).toBe(200);
+    });
+    try {
+      const loginExit = await main(["servers", "login", "remote", "--open"], context, [
+        createServersCommand({ openBrowser }),
+      ]);
+      expect(loginExit).toBe(ExitCode.ok);
+      expect(openBrowser).toHaveBeenCalledOnce();
+      expect(stdout[0]).toMatch(/^http:\/\/127\.0\.0\.1:/);
+      expect(stderr).toEqual([]);
+      expect(stdout.join("") + stderr.join("")).not.toContain(oauthAccessToken);
+      const databasePath = join(dataDirectory, "mcp-oauth.db");
+      const databaseBytes = await readFile(databasePath);
+      expect(databaseBytes.includes(Buffer.from(oauthAccessToken))).toBe(false);
+
+      const logoutExit = await main(["servers", "logout", "remote"], context, [
+        createServersCommand(),
+      ]);
+      expect(logoutExit).toBe(ExitCode.ok);
+      expect(stdout.join("")).toContain("logged_out");
+      const store = await OAuthTokenStore.open(databasePath, keyProvider);
+      expect(await store.load("remote")).toBeUndefined();
+      store.close();
+    } finally {
+      await rm(dataDirectory, { recursive: true, force: true });
+    }
   });
 
   it("reports registry collisions using a code without printing tool descriptions", async () => {

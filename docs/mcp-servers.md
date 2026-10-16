@@ -46,6 +46,48 @@ must also be allowlisted. Effective tool prefixes must be unique across servers.
 | `url` | URL string | required | HTTPS is required except for `localhost`, `127.0.0.1`, and `::1`; loopback accepts HTTP for local development. URLs must not contain usernames or passwords. |
 | `headers` | `SecretRef` values | omitted | Request headers resolved from secret references. |
 
+### Authorization
+
+Remote HTTP servers can use OAuth authorization-code or client-credentials
+authorization:
+
+```yaml
+servers:
+  - id: remote-tools
+    transport:
+      kind: http
+      url: https://mcp.example.test/mcp
+      auth:
+        kind: oauth
+        grant: authorization_code
+        clientId: harness-client
+        scopes: [tools:read]
+        redirectPort: 49152
+```
+
+`auth.clientSecret` is optional for authorization-code flows and is a secret
+reference when configured. Client-credentials flows require `clientSecret`;
+`clientId` may be configured or resolved by the authorization server's
+registration flow. `clientIdMetadataUrl` can identify a Client ID Metadata
+Document; the SDK uses it when supported and otherwise performs its supported
+registration flow. OAuth secrets and tokens are stored in the encrypted
+`<dataDir>/mcp-oauth.db` database using the configured key provider. Configure
+`keys` before logging in so credentials can be encrypted with a persistent key.
+
+Run `harness servers login <id>` to start an explicit authorization-code login.
+The command prints the authorization URL and waits for the loopback callback on
+`127.0.0.1`; it opens a browser only when `--open` is supplied. `harness servers
+logout <id>` removes that server's stored OAuth credentials. Runtime calls do
+not start an interactive authorization flow: an absent or unusable
+authorization-code session fails with `mcp_auth_required`, and `harness doctor`
+reports the `servers_authorized` check as failed. Client-credentials servers
+obtain tokens non-interactively at connection time.
+
+The SDK validates authorization-server metadata, issuer-bound credentials,
+resource indicators, PKCE, and callback `iss` values where supplied. The
+authorization server controls its own metadata and registration policy; check
+its advertised capabilities and scopes before enabling a server.
+
 Secret references use `env:NAME`, `file:/absolute/path`, or
 `akv:vault/secret`. Header values are always references. Stdio environment
 values may be literal strings unless the key looks secret-related, such as
@@ -69,6 +111,8 @@ harness logs only the excluded count (`mcp_tools_excluded`), never tool names.
 `harness doctor` reports a
 `servers_reachable.<serverId>` result for each configured server; its `detail`
 contains the configured server id.
+The `servers_authorized` check covers configured OAuth servers separately from
+reachability.
 
 Registered MCP tool ids are normalized to the harness `Code` format, filtered
 by `toolAllowlist`, and rejected when their schemas exceed the bounded JSON
