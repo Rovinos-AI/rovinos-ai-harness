@@ -56,6 +56,7 @@ function runContext(tools: ToolPort): RunContext {
     toolRegistry: tools,
     depth: 0,
     recordSubagentSpawned: vi.fn(() => Promise.resolve()),
+    recordSubagentCompleted: vi.fn(() => Promise.resolve()),
   };
 }
 
@@ -76,7 +77,12 @@ function createSpawnTool(
     }),
     runChild: (request) => {
       onChild(request);
-      return Promise.resolve({ runId: request.runId, input: request.input });
+      return Promise.resolve({
+        childRunId: request.runId,
+        status: "completed",
+        value: { input: request.input },
+        usage: { inputTokens: 0, outputTokens: 0 },
+      });
     },
   });
   return new AgentSpawnTool(inner, registry, supervisor);
@@ -159,8 +165,10 @@ describe("agent.spawn tool", () => {
     ).resolves.toEqual({
       outcome: "ok",
       result: {
-        runId: childRunId,
-        input: { goal: "tokenized goal", inputs: { ref: "<EMAIL_1>" } },
+        childRunId,
+        status: "completed",
+        value: { input: { goal: "tokenized goal", inputs: { ref: "<EMAIL_1>" } } },
+        usage: { inputTokens: 0, outputTokens: 0 },
       },
     });
     expect(seen).toHaveLength(1);
@@ -175,6 +183,68 @@ describe("agent.spawn tool", () => {
 
     await expect(tool.execute(call("fs.read", {}), runContext(inner))).resolves.toMatchObject({
       result: { ok: true },
+    });
+  });
+
+  it("returns a typed error for cancelled children with their identity and status", async () => {
+    const inner = innerTools();
+    const supervisor = new SubagentSupervisor({
+      store: new InMemoryEventStore(),
+      ids: { next: () => childRunId },
+      scopes: new RunScopeRegistry(),
+      parentTools: inner,
+      parentSpanContext: () => ({
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        traceFlags: 1,
+      }),
+      runChild: (request) =>
+        Promise.resolve({
+          childRunId: request.runId,
+          status: "cancelled",
+          errorCode: "run_cancelled",
+          usage: { inputTokens: 0, outputTokens: 0 },
+        }),
+    });
+    const tool = new AgentSpawnTool(inner, await roles(), supervisor);
+
+    await expect(
+      tool.execute(call("agent.spawn", { role: "worker", goal: "cancel" }), runContext(inner)),
+    ).resolves.toEqual({
+      outcome: "error",
+      errorCode: "run_cancelled",
+      result: { childRunId, status: "cancelled" },
+    });
+  });
+
+  it("falls back to a typed code for an unusual child failure reason", async () => {
+    const inner = innerTools();
+    const supervisor = new SubagentSupervisor({
+      store: new InMemoryEventStore(),
+      ids: { next: () => childRunId },
+      scopes: new RunScopeRegistry(),
+      parentTools: inner,
+      parentSpanContext: () => ({
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        traceFlags: 1,
+      }),
+      runChild: (request) =>
+        Promise.resolve({
+          childRunId: request.runId,
+          status: "failed",
+          errorCode: "failure reason with spaces",
+          usage: { inputTokens: 1, outputTokens: 2 },
+        }),
+    });
+    const tool = new AgentSpawnTool(inner, await roles(), supervisor);
+
+    await expect(
+      tool.execute(call("agent.spawn", { role: "worker", goal: "failed" }), runContext(inner)),
+    ).resolves.toEqual({
+      outcome: "error",
+      errorCode: "subagent_failed",
+      result: { childRunId, status: "failed" },
     });
   });
 });

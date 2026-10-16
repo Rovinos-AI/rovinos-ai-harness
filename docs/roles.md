@@ -56,6 +56,11 @@ An optional `resultSchema` is a module reference of the form
 fails if the module cannot be loaded or the named export is not a Zod schema.
 Schemas from another Zod module copy are accepted when they expose Zod's
 `safeParse` and `_zod` members.
+For `agent.spawn`, the child's final model call enforces this schema and the
+parent receives the validated JSON value in tokenized form. A role without a
+`resultSchema` returns its final text as `{ text }`. Terminal child usage is
+recorded as metadata in the parent's `subagent_completed` event; exhausted
+result validation returns `subagent_result_invalid`.
 An optional `contextStrategy` must name a strategy in the runtime registry.
 
 See the configuration schema for the exact accepted fields and validation.

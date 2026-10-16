@@ -44,6 +44,7 @@ export const EVENT_FIELD_CLASS = {
     repairAttempts: "meta",
     rungUsed: "meta",
     fallbackDepth: "meta",
+    structuredValue: "content",
     content: "content",
     providerBlobs: "content",
   },
@@ -104,7 +105,13 @@ export const EVENT_FIELD_CLASS = {
   pii_action: { boundary: "meta", action: "meta", toolId: "meta", entities: "meta" },
   budget_exceeded: { budget: "meta", limit: "meta", observed: "meta" },
   subagent_spawned: { childRunId: "meta", role: "meta", parentCallId: "meta" },
-  subagent_completed: { childRunId: "meta", outcome: "meta" },
+  subagent_completed: {
+    childRunId: "meta",
+    outcome: "meta",
+    inputTokens: "meta",
+    outputTokens: "meta",
+    costMicros: "meta",
+  },
 } satisfies { [T in EventType]: Record<PayloadKeys<T>, EventFieldClass> };
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "v", "traceId", "spanId", "segmentId"]);

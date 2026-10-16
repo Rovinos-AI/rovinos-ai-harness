@@ -21,10 +21,12 @@ import {
   resolveApproval,
   RunAlreadyTerminalError,
   RunRecorder,
+  RUN_SPAN,
   runLoop,
   type ContextPort,
   type IdGenerator,
   type ModelCompletion,
+  type ModelPort,
   type ModelRequest,
   type PolicyPort,
 } from "@harness/core";
@@ -40,6 +42,8 @@ import {
 } from "@harness/core/testing";
 import { SqliteEventStore, type EventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { ensureTracingFallback } from "@harness/telemetry";
 
 const config = {
   run: RunConfigSchema.parse({
@@ -691,6 +695,110 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
 }
 
 describe("SQLite crash-injection matrix", () => {
+  it("recovers between an unstructured final response and its structured call", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harness-structured-final-crash-"));
+    const structuredRunId = Id.parse("00000000000000000000000020");
+    const segmentId = Id.parse("11111111111111111111111120");
+    const clock = new FakeClock(100);
+    const database = new SqliteEventStore(join(directory, "events.sqlite"));
+    const store = new CrashingEventStore(database, { crashAt: 3, mode: "after_commit" });
+    const tracingRuntime = await createRuntime(config, { dataDir: join(directory, "tracing") });
+    await tracingRuntime.close();
+    ensureTracingFallback(
+      RUN_SPAN.start({
+        "harness.run.id": structuredRunId,
+        "harness.segment.id": segmentId,
+      }),
+    );
+    const schema = z.object({ answer: z.string() }).strict();
+    let structuredCalls = 0;
+    const model: ModelPort = {
+      complete: (_request, context) => {
+        if (context.outputSchema !== undefined) {
+          structuredCalls += 1;
+          return Promise.resolve({
+            parts: [{ type: "text", text: '{"answer":"recovered"}' }],
+            usage: { inputTokens: 2, outputTokens: 1 },
+            finishReason: "stop",
+            provider: "fake",
+            model: "structured",
+            latencyMs: 1,
+            schemaValid: true,
+            repairAttempts: 0,
+            rungUsed: "native",
+            fallbackDepth: 0,
+            providerBlobs: null,
+          });
+        }
+        return Promise.resolve({
+          parts: [{ type: "text", text: "unstructured final candidate" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          finishReason: "stop",
+          provider: "fake",
+          model: "plain",
+          latencyMs: 1,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+          providerBlobs: null,
+        });
+      },
+    };
+    const tool = new FakeToolPort();
+    const context = new NaiveContext();
+    const budgets = config.run.budgets;
+    const structuredGoal = "recover structured final";
+    try {
+      await expect(
+        runLoop({
+          recorder: new RunRecorder(store, structuredRunId, segmentId, 0, clock),
+          clock,
+          model,
+          tool,
+          context,
+          ids: idsAfter(0),
+          goal: structuredGoal,
+          configHash: "a".repeat(64),
+          budgets,
+          policyVersion: "test.policy",
+          signal: new AbortController().signal,
+          finalOutputSchema: schema,
+        }),
+      ).rejects.toBeInstanceOf(SimulatedCrash);
+      expect(
+        (await readEvents(store, structuredRunId)).filter(
+          (event) => event.type === "model_response",
+        ),
+      ).toHaveLength(1);
+
+      const resumed = await resumeRun({
+        store,
+        runId: structuredRunId,
+        clock,
+        model,
+        tool,
+        context,
+        ids: idsAfter(100),
+        goal: structuredGoal,
+        budgets,
+        signal: new AbortController().signal,
+        finalOutputSchema: schema,
+      });
+      const events = await readEvents(store, structuredRunId);
+
+      expect(resumed.status).toBe("completed");
+      expect(structuredCalls).toBe(1);
+      expect(events.filter((event) => event.type === "model_response")).toHaveLength(2);
+      const completedRuns = events.filter(
+        (event) => event.type === "run_status_changed" && event.to === "completed",
+      );
+      expect(completedRuns).toHaveLength(1);
+    } finally {
+      await database.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each(["ask", "deny"] as const)(
     "recovers an idempotent %s decision after its atomic intent append",
     async (decision) => {

@@ -96,6 +96,7 @@ Owner task: `4.1`.
 | `harness.policy.decision` | enum: `allow`, `ask`, `deny` | Optional | `@harness/core` |
 | `harness.policy.rule_id` | Code | Optional | `@harness/core` |
 | `harness.run.id` | Id | Required | `@harness/core` |
+| `harness.subagent.completion_record_failed` | boolean | Optional | `@harness/core` |
 
 Owner task: `4.1`.
 
@@ -329,7 +330,9 @@ Owner task: `6.5`.
 | `harness.policy.version` | Code | Required | `@harness/telemetry` |
 | `harness.run.id` | Id | Required | `@harness/telemetry` |
 | `harness.span.id` | Code | Required | `@harness/telemetry` |
+| `harness.subagent.input_tokens` | integer | Required | `@harness/telemetry` |
 | `harness.subagent.outcome` | enum: `completed`, `failed`, `cancelled` | Required | `@harness/telemetry` |
+| `harness.subagent.output_tokens` | integer | Required | `@harness/telemetry` |
 | `harness.subagent.run.id` | Id | Required | `@harness/telemetry` |
 | `harness.trace.id` | Code | Required | `@harness/telemetry` |
 

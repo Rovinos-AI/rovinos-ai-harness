@@ -122,6 +122,9 @@ const subagentCompleted = z
     kind: attr.enum(["subagent_completed"]),
     childRunId: attr.id(),
     outcome: attr.enum(["completed", "failed", "cancelled"]),
+    inputTokens: attr.nonnegativeInt(),
+    outputTokens: attr.nonnegativeInt(),
+    costMicros: attr.optional(attr.nonnegativeInt()),
   })
   .strict();
 
@@ -321,6 +324,9 @@ function projectSubagentCompleted(
     kind: "subagent_completed",
     childRunId: event.childRunId,
     outcome: event.outcome,
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+    ...(event.costMicros === undefined ? {} : { costMicros: event.costMicros }),
   });
 }
 
