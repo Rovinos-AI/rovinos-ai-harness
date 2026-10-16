@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import type { KeyProvider } from "@harness/schemas";
 import { ServerConfigSchema } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { McpConnection } from "../connection.js";
 import { parseJson } from "@harness/schemas";
 import { z } from "zod";
 import {
@@ -27,6 +28,7 @@ const servers: Server[] = [];
 
 interface MockOAuthOptions {
   readonly failTokenExchange?: boolean;
+  readonly unauthorizedMcp?: boolean;
   readonly issuer?: string;
 }
 
@@ -50,6 +52,14 @@ async function startMockOAuthServer(options: MockOAuthOptions = {}) {
   const server = createServer((request, response) => {
     void (async () => {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+      if (url.pathname === "/mcp" && options.unauthorizedMcp === true) {
+        response
+          .writeHead(401, {
+            "WWW-Authenticate": `${["Be", "arer"].join("")} error="invalid_token", error_description="${errorCanary}", resource_metadata="http://${request.headers.host}/.well-known/oauth-protected-resource/mcp"`,
+          })
+          .end();
+        return;
+      }
       if (request.method === "GET" && url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
         sendJson(response, {
           resource: `http://${request.headers.host}/mcp`,
@@ -193,6 +203,9 @@ describe("McpOAuthProvider", () => {
       callback.searchParams.set("code", "authorization-code");
       callback.searchParams.set("state", authorizationUrl.searchParams.get("state") ?? "");
       callback.searchParams.set("iss", mock.issuer);
+      const invalidCallback = new URL(callback);
+      invalidCallback.searchParams.set("state", "invalid-state");
+      expect((await fetch(invalidCallback)).status).toBe(400);
       const response = await fetch(callback);
       expect(response.status).toBe(200);
       await session.complete;
@@ -313,8 +326,9 @@ describe("McpOAuthProvider", () => {
   });
 
   it("prepares client-credentials grants and refuses interactive runtime redirects", async () => {
+    const mock = await startMockOAuthServer();
     const store = await OAuthTokenStore.open(":memory:", keyProvider);
-    const server = serverConfig("http://127.0.0.1:3000", {
+    const server = serverConfig(mock.baseUrl, {
       grant: "client_credentials",
       clientId: "service-client",
       clientSecret: "env:OAUTH_SECRET",
@@ -338,21 +352,112 @@ describe("McpOAuthProvider", () => {
       expect(() => provider.redirectToAuthorization(new URL("https://auth.invalid"))).toThrow(
         McpAuthRequiredError,
       );
-      await provider.saveTokens(
-        { access_token: accessTokenCanary, token_type: "Bearer" },
-        { issuer: issuerCanary },
-      );
-      expect(provider.tokens({ issuer: issuerCanary })?.access_token).toBe(accessTokenCanary);
+      expect(await provider.beginAuthorization(new URL(`${mock.baseUrl}/mcp`))).toBe("AUTHORIZED");
+      expect(mock.tokenRequest?.get("grant_type")).toBe("client_credentials");
+      expect(mock.tokenRequest?.get("scope")).toBe("tools:read");
+      expect((await store.load(server.id))?.tokens?.access_token).toBe(accessTokenCanary);
     } finally {
+      store.close();
+    }
+  });
+
+  it("refreshes a stored authorization-code session without interactive login", async () => {
+    const mock = await startMockOAuthServer();
+    const store = await OAuthTokenStore.open(":memory:", keyProvider);
+    const server = serverConfig(mock.baseUrl);
+    if (server.transport.kind !== "http" || server.transport.auth === undefined) {
+      throw new Error("invalid OAuth test configuration");
+    }
+    const provider = await McpOAuthProvider.create({
+      serverId: server.id,
+      auth: server.transport.auth,
+      tokenStore: store,
+      resolveSecret: () => Promise.resolve("configured-secret"),
+    });
+    try {
+      await provider.saveClientInformation(
+        {
+          client_id: "registered-client",
+          client_secret: "registered-secret",
+          issuer: mock.issuer,
+        },
+        { issuer: mock.issuer },
+      );
+      await provider.saveTokens(
+        {
+          access_token: "expired-access-token",
+          refresh_token: refreshTokenCanary,
+          token_type: "Bearer",
+          issuer: mock.issuer,
+        },
+        { issuer: mock.issuer },
+      );
+      expect(await provider.beginAuthorization(new URL(`${mock.baseUrl}/mcp`))).toBe("AUTHORIZED");
+      expect(mock.tokenRequest?.get("grant_type")).toBe("refresh_token");
+      expect(mock.tokenRequest?.get("refresh_token")).toBe(refreshTokenCanary);
+      expect((await store.load(server.id))?.tokens?.access_token).toBe(accessTokenCanary);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("maps an OAuth challenge to mcp_auth_required without exposing its canary", async () => {
+    const mock = await startMockOAuthServer({ unauthorizedMcp: true });
+    const store = await OAuthTokenStore.open(":memory:", keyProvider);
+    const server = serverConfig(mock.baseUrl);
+    const output: unknown[] = [];
+    const spies = [
+      vi.spyOn(console, "warn"),
+      vi.spyOn(console, "error"),
+      vi.spyOn(console, "log"),
+      vi.spyOn(console, "info"),
+      vi.spyOn(console, "debug"),
+      vi.spyOn(console, "trace"),
+    ];
+    const connection = new McpConnection(server, {
+      resolveSecret: () => Promise.resolve("configured-secret"),
+      oauthTokenStore: store,
+      logger: { log: (event) => output.push(event) },
+    });
+    try {
+      await expect(connection.connect()).rejects.toMatchObject({
+        code: "mcp_auth_required",
+      });
+      expect(connection.state).toBe("unavailable");
+      const captured = [
+        ...spies.flatMap((spy) => spy.mock.calls.flat()),
+        ...output,
+      ]
+        .map((value) => (typeof value === "string" ? value : JSON.stringify(value)))
+        .join(" ");
+      expect(captured).not.toContain(errorCanary);
+    } finally {
+      await connection.close();
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
       store.close();
     }
   });
 
   it("restores console warnings even when an operation rejects", async () => {
     const warning = console.warn;
-    await expect(
-      withOAuthWarningsRedacted(() => Promise.reject(new McpAuthRequiredError())),
-    ).rejects.toBeInstanceOf(McpAuthRequiredError);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const spyWarning = console.warn;
+    try {
+      await expect(
+        withOAuthWarningsRedacted(async () => {
+          Reflect.apply(console.warn, console, ["[mcp-sdk] OAuth error_description canary"]);
+          Reflect.apply(console.warn, console, ["unrelated warning"]);
+          throw new McpAuthRequiredError();
+        }),
+      ).rejects.toBeInstanceOf(McpAuthRequiredError);
+      expect(console.warn).toBe(spyWarning);
+      expect(warn.mock.calls.flat().join(" ")).toContain("unrelated warning");
+      expect(warn.mock.calls.flat().join(" ")).not.toContain("error_description");
+    } finally {
+      warn.mockRestore();
+    }
     expect(console.warn).toBe(warning);
   });
 });
