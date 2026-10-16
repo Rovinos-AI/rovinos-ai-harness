@@ -23,6 +23,15 @@ describe("JSON Pointer and PII detokenization config", () => {
         presidio: { baseUrl: "https://example.test?token=synthetic" },
       }).success,
     ).toBe(false);
+    expect(PiiConfigSchema.safeParse({ presidio: { baseUrl: "http://example.com" } }).success).toBe(
+      false,
+    );
+    expect(
+      PiiConfigSchema.safeParse({ presidio: { baseUrl: "http://127.0.0.1:3000" } }).success,
+    ).toBe(true);
+    expect(
+      PiiConfigSchema.safeParse({ presidio: { baseUrl: "https://example.com" } }).success,
+    ).toBe(true);
     expect(
       PiiConfigSchema.safeParse({
         presidio: { baseUrl: "******example.test" },

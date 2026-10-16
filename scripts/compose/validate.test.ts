@@ -69,6 +69,18 @@ describe("compose security evaluator", () => {
     ).toContain("harness: external_network");
   });
 
+  it.each(["dev", "test", "prod-like"] as const)(
+    "rejects a published Presidio port in the %s profile",
+    (profile) => {
+      expect(
+        evaluateComposeSecurity(
+          config({ "presidio-analyzer": service({ ports: ["3000:3000"] }) }),
+          profile,
+        ),
+      ).toContain("presidio-analyzer: published_ports");
+    },
+  );
+
   it("permits the collector and the test-only published database network", () => {
     expect(
       evaluateComposeSecurity(

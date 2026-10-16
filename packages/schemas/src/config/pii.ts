@@ -42,8 +42,11 @@ export const PiiPresidioConfigSchema = z
     baseUrl: z.url().refine((value) => {
       try {
         const url = new URL(value);
+        const hostname = url.hostname.toLowerCase();
         return (
-          (url.protocol === "http:" || url.protocol === "https:") &&
+          (url.protocol === "https:" ||
+            (url.protocol === "http:" && isLoopbackHostname(hostname)) ||
+            (url.protocol === "http:" && isSingleLabelHostname(hostname))) &&
           url.username === "" &&
           url.password === "" &&
           url.search === "" &&
@@ -57,6 +60,26 @@ export const PiiPresidioConfigSchema = z
     scoreThreshold: z.number().min(0).max(1).default(0.5),
   })
   .strict();
+
+function isLoopbackHostname(hostname: string): boolean {
+  if (hostname === "localhost" || hostname === "[::1]") {
+    return true;
+  }
+  const octets = hostname.split(".");
+  return (
+    octets.length === 4 &&
+    octets[0] === "127" &&
+    octets.every((octet) => /^\d{1,3}$/u.test(octet) && Number(octet) <= 255)
+  );
+}
+
+function isSingleLabelHostname(hostname: string): boolean {
+  return (
+    hostname.length <= 63 &&
+    !hostname.includes(".") &&
+    /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(hostname)
+  );
+}
 
 /** Validated optional Presidio sidecar configuration. */
 export type PiiPresidioConfig = z.infer<typeof PiiPresidioConfigSchema>;

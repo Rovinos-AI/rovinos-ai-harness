@@ -30,13 +30,13 @@ function asyncDetector(detect: AsyncDetector["detect"], id = "remote"): AsyncDet
 }
 
 describe("DetectorRegistry", () => {
-  it("preserves synchronous results and resolves overlaps without async plugins", () => {
+  it("preserves policy-relevant synchronous overlaps without async plugins", () => {
     const results = [detection(0, 5, "regex"), detection(2, 8, "regex")];
     const detect = vi.fn(() => results);
     const detector = syncDetector(results, detect);
     const registry = new DetectorRegistry({ syncDetectors: [detector] });
 
-    expect(registry.detect("text")).toEqual([detection(2, 8, "regex")]);
+    expect(registry.detect("text")).toEqual(results);
     expect(detect).toHaveBeenCalledWith("text");
   });
 
@@ -76,6 +76,7 @@ describe("DetectorRegistry", () => {
     expect(events).toEqual(["sync", "first", "second"]);
     release?.();
     await expect(result).resolves.toEqual([
+      detection(0, 5, "regex"),
       detection(2, 8, "first", "person_name"),
       detection(9, 12, "second", "person_name"),
     ]);
@@ -108,6 +109,7 @@ describe("DetectorRegistry", () => {
 
     await expect(registry.detect("text")).resolves.toEqual([synchronous]);
     expect(countPiiDetectorDegraded).toHaveBeenCalledOnce();
+    expect(countPiiDetectorDegraded.mock.calls).toEqual([[]]);
   });
 
   it("does not degrade synchronous detector failures", () => {

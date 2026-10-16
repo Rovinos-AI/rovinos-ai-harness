@@ -20,7 +20,7 @@ const PresidioResultSchema = z
     analysis_explanation: z.unknown().optional(),
     recognition_metadata: z.record(z.string(), z.unknown()).optional(),
   })
-  .strict();
+  .strip();
 
 const PresidioResponseSchema = z.array(PresidioResultSchema);
 
@@ -39,6 +39,7 @@ interface PresidioRequestInit {
   readonly method: "GET" | "POST";
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: string;
+  readonly redirect: "error";
   readonly signal: AbortSignal;
 }
 
@@ -96,7 +97,7 @@ export class PresidioDetector implements AsyncDetector {
         language: this.language,
         score_threshold: this.scoreThreshold,
       });
-      const response = await fetchWithTimeout(
+      const detections = await fetchWithTimeout(
         this.fetcher,
         this.analyzeUrl,
         {
@@ -105,15 +106,17 @@ export class PresidioDetector implements AsyncDetector {
           body: requestBody,
         },
         { timeoutMs: this.timeoutMs },
+        async (response, signal) => {
+          if (!response.ok) {
+            throw new Error("Presidio request failed.");
+          }
+          const responseBody = await readBoundedBody(response, signal);
+          const results = parseJson(PresidioResponseSchema, responseBody, {
+            maxBytes: MAX_RESPONSE_BYTES,
+          });
+          return mapResults(text, results);
+        },
       );
-      if (!response.ok) {
-        throw new Error("Presidio request failed.");
-      }
-      const responseBody = await readBoundedBody(response);
-      const results = parseJson(PresidioResponseSchema, responseBody, {
-        maxBytes: MAX_RESPONSE_BYTES,
-      });
-      const detections = mapResults(text, results);
       this.resetCircuit();
       return detections;
     } catch {
@@ -175,15 +178,21 @@ export function createPresidioReachableCheck(
     title: "Presidio analyzer",
     async run(ctx) {
       try {
-        const response = await fetchWithTimeout(
+        return await fetchWithTimeout(
           fetcher,
           healthUrl,
           { method: "GET" },
           { timeoutMs, parentSignal: ctx.signal },
+          async (response, signal) => {
+            if (!response.ok) {
+              return { status: "fail", code: "presidio_unreachable" };
+            }
+            const body = await readBoundedBody(response, signal);
+            return body.trim() === "Presidio Analyzer service is up"
+              ? { status: "ok", code: "presidio_reachable" }
+              : { status: "fail", code: "presidio_unreachable" };
+          },
         );
-        return response.ok
-          ? { status: "ok", code: "presidio_reachable" }
-          : { status: "fail", code: "presidio_unreachable" };
       } catch {
         return { status: "fail", code: "presidio_unreachable" };
       }
@@ -209,12 +218,13 @@ function endpointUrl(baseUrl: string, endpoint: string): URL {
   }
 }
 
-async function fetchWithTimeout(
+async function fetchWithTimeout<Result>(
   fetcher: PresidioFetcher,
   url: URL,
-  init: Omit<PresidioRequestInit, "signal">,
+  init: Omit<PresidioRequestInit, "signal" | "redirect">,
   options: TimeoutOptions,
-): Promise<UndiciResponse> {
+  consumeResponse: (response: UndiciResponse, signal: AbortSignal) => Promise<Result>,
+): Promise<Result> {
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const abort = (): void => {
@@ -226,13 +236,12 @@ async function fetchWithTimeout(
     abort();
   }
   const aborted = new Promise<never>((_resolve, reject) => {
-    controller.signal.addEventListener(
-      "abort",
-      () => {
-        reject(new Error("Presidio request aborted."));
-      },
-      { once: true },
-    );
+    const rejectAbort = (): void => reject(new Error("Presidio request aborted."));
+    if (controller.signal.aborted) {
+      rejectAbort();
+    } else {
+      controller.signal.addEventListener("abort", rejectAbort, { once: true });
+    }
   });
   const timedOut = new Promise<never>((_resolve, reject) => {
     timeout = setTimeout(() => {
@@ -241,9 +250,14 @@ async function fetchWithTimeout(
     }, timeoutMs);
   });
   try {
-    const request = Promise.resolve().then(() =>
-      fetcher(url, { ...init, signal: controller.signal }),
-    );
+    const request = Promise.resolve().then(async () => {
+      const response = await fetcher(url, {
+        ...init,
+        redirect: "error",
+        signal: controller.signal,
+      });
+      return consumeResponse(response, controller.signal);
+    });
     return await Promise.race([request, aborted, timedOut]);
   } finally {
     if (timeout !== undefined) {
@@ -253,10 +267,21 @@ async function fetchWithTimeout(
   }
 }
 
-async function readBoundedBody(response: UndiciResponse): Promise<string> {
+async function readBoundedBody(response: UndiciResponse, signal?: AbortSignal): Promise<string> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null && Number(contentLength) > MAX_RESPONSE_BYTES) {
+    throw new Error("Presidio response is too large.");
+  }
   const reader = response.body?.getReader();
   if (reader === undefined) {
     return "";
+  }
+  const cancelReader = (): void => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener("abort", cancelReader, { once: true });
+  if (signal?.aborted === true) {
+    cancelReader();
   }
   const chunks: Uint8Array[] = [];
   let bytes = 0;
@@ -276,6 +301,7 @@ async function readBoundedBody(response: UndiciResponse): Promise<string> {
       }
     }
   } finally {
+    signal?.removeEventListener("abort", cancelReader);
     reader.releaseLock();
   }
   const body = new Uint8Array(bytes);

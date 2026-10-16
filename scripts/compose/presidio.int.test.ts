@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from "node:child_process";
-import { isIP } from "node:net";
 import { DetectionSchema, parseJson } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -15,26 +14,10 @@ const composeArgs = [
 
 describe("Presidio analyzer Compose service", () => {
   it("detects a synthetic name through the internal Compose network", () => {
-    const serviceId = execFileSync("docker", [...composeArgs, "ps", "-q", "presidio-analyzer"], {
-      encoding: "utf8",
-    }).trim();
-    const serviceAddress = execFileSync(
-      "docker",
-      [
-        "inspect",
-        "--format",
-        "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
-        serviceId,
-      ],
-      { encoding: "utf8" },
-    ).trim();
-    if (isIP(serviceAddress) === 0) {
-      throw new Error("The Presidio service has no internal Compose network address.");
-    }
     const script = [
       'import { PresidioDetector } from "./packages/pii/dist/index.js";',
       'import { PiiPresidioConfigSchema } from "./packages/schemas/dist/index.js";',
-      `const config = PiiPresidioConfigSchema.parse({ baseUrl: "http://${serviceAddress}:3000" });`,
+      'const config = PiiPresidioConfigSchema.parse({ baseUrl: "http://presidio-analyzer:3000" });',
       "const detector = new PresidioDetector(config);",
       'const detections = await detector.detect("My name is Alice Smith.");',
       "process.stdout.write(JSON.stringify(detections));",

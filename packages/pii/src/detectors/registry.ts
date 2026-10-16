@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { DetectionSchema } from "@harness/schemas";
 import { countPiiDetectorDegraded } from "@harness/telemetry";
-import { resolveOverlaps } from "./overlaps.js";
 import { PiiDetectorError, validateText } from "./types.js";
 import type { AsyncDetector, Detection, Detector } from "./types.js";
 
@@ -11,7 +11,7 @@ export interface DetectorRegistryOptions {
   readonly syncDetectors?: readonly Detector[];
 }
 
-/** Runs synchronous detectors first and async detectors concurrently, then resolves overlaps. */
+/** Runs synchronous detectors first and async detectors concurrently, preserving all ranges for policy evaluation. */
 export class DetectorRegistry {
   private readonly asyncDetectors: readonly AsyncDetector[];
   private readonly failMode: "closed" | "regex_only";
@@ -27,7 +27,7 @@ export class DetectorRegistry {
   detect(text: string): Detection[] | Promise<Detection[]> {
     const synchronous = this.syncDetectors.flatMap((detector) => detector.detect(text));
     if (this.asyncDetectors.length === 0) {
-      return resolveOverlaps(synchronous);
+      return validateDetections(synchronous);
     }
     validateText(text);
     return this.detectWithAsync(text, synchronous);
@@ -45,10 +45,20 @@ export class DetectorRegistry {
     } catch {
       if (this.failMode === "regex_only") {
         countPiiDetectorDegraded();
-        return resolveOverlaps([...synchronous]);
+        return validateDetections(synchronous);
       }
       throw new PiiDetectorError("pii_detector_unavailable");
     }
-    return resolveOverlaps([...synchronous, ...asyncResults.flat()]);
+    return validateDetections([...synchronous, ...asyncResults.flat()]);
   }
+}
+
+function validateDetections(detections: readonly Detection[]): Detection[] {
+  return detections.map((detection) => {
+    const parsed = DetectionSchema.safeParse(detection);
+    if (!parsed.success) {
+      throw new PiiDetectorError("pii_detector_invalid_input");
+    }
+    return parsed.data;
+  });
 }

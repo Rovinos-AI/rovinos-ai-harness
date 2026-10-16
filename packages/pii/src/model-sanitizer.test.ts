@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, PiiConfigSchema, type Message } from "@harness/schemas";
+import { Code, Id, PiiConfigSchema, PiiPresidioConfigSchema, type Message } from "@harness/schemas";
 import * as telemetry from "@harness/telemetry";
 import { AuditingVaultResolver, InMemoryVault, Token, type VaultAudit } from "@harness/vault";
+import { Response as UndiciResponse } from "undici";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emailDetector } from "./detectors/email.js";
+import {
+  PresidioDetector,
+  type PresidioClock,
+  type PresidioFetcher,
+} from "./detectors/presidio.js";
+import { DetectorRegistry } from "./detectors/registry.js";
 import { PiiBlobContainsPiiError } from "./errors.js";
 import { PiiMessageSanitizer } from "./model-sanitizer.js";
 import { Tokenizer, type PiiDetectorRegistry } from "./tokenizer.js";
@@ -339,6 +346,87 @@ describe("PiiMessageSanitizer", () => {
       ),
     ).rejects.toBeInstanceOf(PiiBlobContainsPiiError);
     expect(count).toHaveBeenCalledOnce();
+  });
+
+  it.each(["closed", "half-open"] as const)(
+    "fails closed on an opaque blob when Presidio is unavailable (%s breaker)",
+    async (breakerState) => {
+      let now = 0;
+      const clock: PresidioClock = { now: () => now };
+      const fetcher: PresidioFetcher = () =>
+        Promise.resolve(new UndiciResponse(null, { status: 503 }));
+      const presidio = new PresidioDetector(
+        PiiPresidioConfigSchema.parse({ baseUrl: "http://presidio:3000" }),
+        { clock, fetcher },
+      );
+      if (breakerState === "half-open") {
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          await expect(presidio.detect("synthetic")).rejects.toMatchObject({
+            code: "pii_detector_unavailable",
+          });
+        }
+        now += 30_000;
+      }
+      const registry = new DetectorRegistry({
+        asyncDetectors: [presidio],
+        failMode: "closed",
+        syncDetectors: [emailDetector],
+      });
+      const { sanitizer } = createSanitizer(PiiConfigSchema.parse({}), (text) =>
+        registry.detect(text),
+      );
+      const error = await sanitizer
+        .sanitize(
+          [
+            {
+              role: "assistant",
+              parts: [{ type: "opaque", provider: Code.parse("hosted"), blob: { text: canary } }],
+            },
+          ],
+          target("hosted"),
+          runId,
+        )
+        .catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ code: "pii_detector_unavailable" });
+      expect(String(error)).not.toContain(canary);
+      expect(JSON.stringify(error)).not.toContain(canary);
+    },
+  );
+
+  it("counts regex-only degradation exactly once for one opaque scan with no metric attributes", async () => {
+    const count = vi.spyOn(telemetry, "countPiiDetectorDegraded");
+    const registry = new DetectorRegistry({
+      asyncDetectors: [
+        {
+          id: Code.parse("presidio"),
+          entityTypes: [Code.parse("person_name")],
+          detect: () => Promise.reject(new Error(canary)),
+        },
+      ],
+      failMode: "regex_only",
+      syncDetectors: [emailDetector],
+    });
+    const { sanitizer } = createSanitizer(
+      PiiConfigSchema.parse({ failMode: "regex_only" }),
+      (text) => registry.detect(text),
+    );
+
+    await expect(
+      sanitizer.sanitize(
+        [
+          {
+            role: "assistant",
+            parts: [{ type: "opaque", provider: Code.parse("hosted"), blob: canary }],
+          },
+        ],
+        target("hosted"),
+        runId,
+      ),
+    ).rejects.toBeInstanceOf(PiiBlobContainsPiiError);
+
+    expect(count).toHaveBeenCalledOnce();
+    expect(count.mock.calls).toEqual([[]]);
   });
 
   it("passes safe opaque data and tool calls through without mutation", async () => {

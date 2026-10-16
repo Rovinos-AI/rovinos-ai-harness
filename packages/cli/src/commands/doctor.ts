@@ -126,7 +126,7 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
             },
           };
           const presidioChecks =
-            config.pii.presidio === undefined
+            config?.pii.presidio === undefined
               ? []
               : [createPresidioReachableCheck(config.pii.presidio)];
           const defaultChecks = [
