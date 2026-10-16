@@ -2,7 +2,8 @@
 // cspell:ignore linkpath
 import { HarnessError, Id } from "@harness/schemas";
 import type { WorkspaceRef } from "@harness/schemas";
-import { chmod, lstat, readlink, readdir } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { chmod, lstat, readlink, readdir, rm } from "node:fs/promises";
 import { dirname, join, posix, win32 } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -208,7 +209,11 @@ function resolveArchiveEntryPath(
     return undefined;
   }
   try {
-    return archiveRelativePath(entry.path);
+    const path = archiveRelativePath(entry.path);
+    if (path === ".snapshot-preflight.tmp") {
+      throw new UnsafeWorkspaceSnapshotError();
+    }
+    return path;
   } catch {
     rejectArchiveEntry(state, new UnsafeWorkspaceSnapshotError());
     return undefined;
@@ -329,6 +334,33 @@ function filterArchiveEntry(
   return true;
 }
 
+async function validateArchiveLinkTargets(archivePath: string): Promise<void> {
+  const links: { readonly path: string; readonly target: string; readonly hardLink: boolean }[] =
+    [];
+  await tar.t({
+    file: archivePath,
+    strict: true,
+    onReadEntry: (entry) => {
+      if (entry.type === "SymbolicLink" || entry.type === "Link") {
+        if (entry.linkpath === undefined) {
+          throw new UnsafeWorkspaceSnapshotError();
+        }
+        links.push({
+          path: archiveRelativePath(entry.path),
+          target: entry.linkpath,
+          hardLink: entry.type === "Link",
+        });
+      }
+    },
+  });
+  const symbolicLinks = new Set(
+    links.filter((entry) => !entry.hardLink).map((entry) => entry.path),
+  );
+  for (const entry of links) {
+    resolveLinkTarget(entry.path, entry.target, entry.hardLink, symbolicLinks);
+  }
+}
+
 /** Safely extracts archive entries into a private temporary workspace directory. */
 export async function extractWorkspaceArchive(
   archive: Buffer | Readable,
@@ -342,7 +374,13 @@ export async function extractWorkspaceArchive(
     files: new Set(),
     paths: new Set(),
   };
+  const archivePath = join(destination, ".snapshot-preflight.tmp");
   try {
+    await pipeline(
+      Buffer.isBuffer(archive) ? Readable.from([archive]) : archive,
+      createWriteStream(archivePath, { flags: "wx", mode: 0o600 }),
+    );
+    await validateArchiveLinkTargets(archivePath);
     const extractor = tar.x({
       cwd: destination,
       strict: true,
@@ -354,7 +392,7 @@ export async function extractWorkspaceArchive(
       maxDecompressionRatio: 1000,
       filter: (_path, entry) => filterArchiveEntry(entry, state, maxFileBytes, maxSnapshotBytes),
     });
-    await pipeline(Buffer.isBuffer(archive) ? Readable.from([archive]) : archive, extractor);
+    await pipeline(createReadStream(archivePath), extractor);
     if (state.rejection !== undefined) {
       throw state.rejection;
     }
@@ -364,5 +402,7 @@ export async function extractWorkspaceArchive(
       throw error;
     }
     throw new WorkspaceSnapshotError();
+  } finally {
+    await rm(archivePath, { force: true });
   }
 }

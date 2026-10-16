@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import {
   chmod,
@@ -193,13 +193,25 @@ describe("WorkspaceSnapshotter", () => {
     const paths = await createRoots();
     const runRoot = join(paths.workspaceRoot, runId);
     await mkdir(runRoot, { recursive: true });
-    await writeFile(join(runRoot, "small"), Buffer.alloc(900, 1));
-    const instance = snapshotter(paths, { maxFileBytes: 1024, maxSnapshotBytes: 1024 });
-    const ref = await instance.snapshot(runId);
+    const content = randomBytes(8192);
+    await writeFile(join(runRoot, "small"), content);
+    const first = snapshotter(paths, { maxFileBytes: content.byteLength });
+    await first.snapshot(runId);
+    const archivePath = join(paths.snapshotRoot, runId, `${snapshotId}.tar.gz`);
+    const compressedBytes = (await stat(archivePath)).size;
+    const exactBound = snapshotter(paths, {
+      ids: ids("00000000000000000000000003", "00000000000000000000000004"),
+      maxFileBytes: content.byteLength,
+      maxSnapshotBytes: compressedBytes + 1,
+    });
+    const ref = await exactBound.snapshot(runId);
+    expect(
+      (await stat(join(paths.snapshotRoot, runId, "00000000000000000000000003.tar.gz"))).size,
+    ).toBe(compressedBytes);
     await rm(runRoot, { recursive: true });
 
-    await expect(instance.restore(runId, ref)).resolves.toBeUndefined();
-    await expect(readFile(join(runRoot, "small"))).resolves.toEqual(Buffer.alloc(900, 1));
+    await expect(exactBound.restore(runId, ref)).resolves.toBeUndefined();
+    await expect(readFile(join(runRoot, "small"))).resolves.toEqual(content);
   });
 
   it("streams archive creation without concatenating its contents into a full buffer", async () => {
@@ -362,6 +374,22 @@ describe("WorkspaceSnapshotter", () => {
       [
         tarEntry("a", "2", Buffer.alloc(0), "."),
         tarEntry("b", "2", Buffer.alloc(0), "a/.."),
+        Buffer.alloc(1024),
+      ],
+    ],
+    [
+      "x -> sub/link/.. followed by sub/link -> ..",
+      [
+        tarEntry("x", "2", Buffer.alloc(0), "sub/link/.."),
+        tarEntry("sub/link", "2", Buffer.alloc(0), ".."),
+        Buffer.alloc(1024),
+      ],
+    ],
+    [
+      "b -> a/.. followed by a -> .",
+      [
+        tarEntry("b", "2", Buffer.alloc(0), "a/.."),
+        tarEntry("a", "2", Buffer.alloc(0), "."),
         Buffer.alloc(1024),
       ],
     ],

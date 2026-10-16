@@ -830,9 +830,7 @@ describe("runner HTTP request handler", () => {
         }),
       );
       expect(oversizedRestore.status).toBe(413);
-      await expect(readFile(join(directory, runId, "large"))).resolves.toEqual(
-        Buffer.alloc(16, 1),
-      );
+      await expect(readFile(join(directory, runId, "large"))).resolves.toEqual(Buffer.alloc(16, 1));
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

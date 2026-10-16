@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id } from "@harness/schemas";
-import { Readable } from "node:stream";
+import { Readable, Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_WEB_FETCH_BYTES } from "./web-fetch-contracts.js";
 import { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
@@ -64,12 +65,12 @@ describe("RemoteSandboxBackend", () => {
       if (path === "/workspace/restore") {
         const body = init?.body;
         if (!(body instanceof ReadableStream)) {
-          throw new Error("Expected a streamed archive upload.");
+          throw new TypeError("Expected a streamed archive upload.");
         }
         const reader = body.getReader();
         for (;;) {
           const chunk = await reader.read();
-          if (chunk.done === true) {
+          if (chunk.done) {
             break;
           }
           uploaded += Buffer.from(chunk.value).toString("utf8");
@@ -79,14 +80,19 @@ describe("RemoteSandboxBackend", () => {
       return response({ exists: true });
     });
     const remote = backend(fetcher);
-    const chunks: Buffer[] = [];
-
-    for await (const chunk of await remote.createArchive(runId, 1024, 2048)) {
-      chunks.push(Buffer.from(chunk));
-    }
+    let downloaded = "";
+    await pipeline(
+      await remote.createArchive(runId, 1024, 2048),
+      new Writable({
+        write(chunk: Buffer, _encoding, callback) {
+          downloaded += chunk.toString("utf8");
+          callback();
+        },
+      }),
+    );
     await remote.restoreArchive(runId, Readable.from([Buffer.from("archive")]), 1024, 2048);
 
-    expect(Buffer.concat(chunks).toString("utf8")).toBe("archive");
+    expect(downloaded).toBe("archive");
     expect(uploaded).toBe("archive");
     await expect(remote.hasWorkspace(runId)).resolves.toBe(true);
   });

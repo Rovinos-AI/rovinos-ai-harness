@@ -240,6 +240,19 @@ beforeEach(() => {
 });
 
 describe("RunRecorder", () => {
+  it("rejects invalid retained snapshot limits before querying the store", async () => {
+    const store = new InMemoryEventStore();
+    const retainedSnapshots = vi.spyOn(store, "retainedSnapshots");
+    const recorder = makeRecorder(store);
+
+    for (const snapshotKeep of [0, -1, 1.5, Number.NaN]) {
+      await expect(recorder.retainedWorkspaceRefs(snapshotKeep)).rejects.toThrow(
+        "Snapshot retention must be a positive integer",
+      );
+    }
+    expect(retainedSnapshots).not.toHaveBeenCalled();
+  });
+
   it("fills envelope fields deterministically and increments sequence numbers", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);

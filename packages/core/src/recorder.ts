@@ -112,6 +112,9 @@ export class RunRecorder {
 
   /** Read the workspace references attached to the snapshots retained by the event store. */
   async retainedWorkspaceRefs(snapshotKeep: number): Promise<WorkspaceRef[]> {
+    if (!Number.isSafeInteger(snapshotKeep) || snapshotKeep < 1) {
+      throw new TypeError("Snapshot retention must be a positive integer");
+    }
     const snapshots = await this.store.retainedSnapshots(this.runId, snapshotKeep);
     return snapshots.flatMap((snapshot) =>
       snapshot.workspaceRef === undefined ? [] : [snapshot.workspaceRef],
