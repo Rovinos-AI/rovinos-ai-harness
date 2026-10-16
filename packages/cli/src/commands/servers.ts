@@ -364,12 +364,13 @@ async function runServersLogin(
 
   const core = await import("@harness/core");
   const keys = createLoginKeys(config, context);
-  const store = await OAuthTokenStore.open(
-    join(core.resolveDataDir(process.env), "mcp-oauth.db"),
-    keys,
-  );
+  let store: OAuthTokenStore | undefined;
   let session: Awaited<ReturnType<typeof startMcpOAuthLogin>> | undefined;
   try {
+    store = await OAuthTokenStore.open(
+      join(core.resolveDataDir(process.env), "mcp-oauth.db"),
+      keys,
+    );
     session = await startMcpOAuthLogin({
       server,
       tokenStore: store,
@@ -395,7 +396,7 @@ async function runServersLogin(
     throw new McpAuthRequiredError();
   } finally {
     await session?.close();
-    store.close();
+    store?.close();
     keys.dispose();
   }
 }

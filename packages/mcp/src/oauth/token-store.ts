@@ -14,6 +14,23 @@ const StoredClientInformationSchema = z
     client_id_issued_at: z.number().optional(),
     client_secret_expires_at: z.number().optional(),
     issuer: z.string().optional(),
+    redirect_uris: z.array(z.string()).optional(),
+    token_endpoint_auth_method: z.string().optional(),
+    grant_types: z.array(z.string()).optional(),
+    response_types: z.array(z.string()).optional(),
+    application_type: z.string().optional(),
+    client_name: z.string().optional(),
+    client_uri: z.string().optional(),
+    logo_uri: z.string().optional(),
+    scope: z.string().optional(),
+    contacts: z.array(z.string()).optional(),
+    tos_uri: z.string().optional(),
+    policy_uri: z.string().optional(),
+    jwks_uri: z.string().optional(),
+    jwks: z.record(z.string(), z.unknown()).optional(),
+    software_id: z.string().optional(),
+    software_version: z.string().optional(),
+    software_statement: z.string().optional(),
   })
   .strict();
 
