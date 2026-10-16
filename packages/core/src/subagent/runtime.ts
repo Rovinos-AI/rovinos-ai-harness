@@ -158,6 +158,7 @@ export function createSubagentTool(options: {
         goal: request.input,
         signal: request.signal,
         budgets: request.budgets,
+        deadlineTs: request.budgetDeadlineTs,
         checkpointEveryEvents: options.config.run.checkpointEveryEvents,
         ...childRunOptions(options.config, options.workspaceSnapshotter),
         policyVersion: options.policyVersion,

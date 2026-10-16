@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { RunConfigSchema } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
-import { deriveChildBudgets, ChildBudgetExceededError } from "./budgets.js";
+import { BudgetTracker } from "../budgets.js";
+import {
+  deriveChildBudgetAllocation,
+  deriveChildBudgets,
+  ChildBudgetExceededError,
+} from "./budgets.js";
 import type { RunState } from "../run-state.js";
 
 const parentState = (overrides: Partial<RunState> = {}): RunState => ({
@@ -77,5 +82,40 @@ describe("deriveChildBudgets", () => {
   it("excludes parent suspension time when calculating the deadline", () => {
     const state = parentState({ suspendedTimeMs: 200 });
     expect(deriveChildBudgets(state, parentBudgets, undefined, 900).maxWallClockMs).toBe(400);
+  });
+
+  it("preserves the inherited absolute deadline across startup latency", () => {
+    const allocation = deriveChildBudgetAllocation(
+      parentState(),
+      parentBudgets,
+      { maxWallClockMs: 300 },
+      { now: 900, parentDeadlineTs: 1_000 },
+    );
+    const childState = parentState({ startedAt: 950 });
+    const tracker = new BudgetTracker(allocation.budgets, undefined, allocation.deadlineTs);
+
+    expect(allocation.deadlineTs).toBe(1_000);
+    expect(allocation.budgets.maxWallClockMs).toBe(100);
+    expect(tracker.deadlineTs(childState)).toBe(1_000);
+    expect(tracker.check(childState, 1_001)).toMatchObject({ ok: false, budget: "wall_clock" });
+  });
+
+  it("splits the remaining step and cost allowance across concurrent children", () => {
+    const budgets = RunConfigSchema.parse({
+      budgets: { maxSteps: 10, maxCostUsd: 0.00001 },
+    }).budgets;
+    const first = deriveChildBudgetAllocation(parentState(), budgets, undefined, {
+      now: 100,
+      availableSlots: 2,
+    });
+    const second = deriveChildBudgetAllocation(parentState(), budgets, undefined, {
+      now: 100,
+      reserved: { steps: first.budgets.maxSteps, costMicros: 5 },
+    });
+
+    expect(first.budgets).toMatchObject({ maxSteps: 5, maxCostUsd: 0.000005 });
+    expect(second.budgets).toMatchObject({ maxSteps: 5, maxCostUsd: 0.000005 });
+    expect(first.budgets.maxSteps + second.budgets.maxSteps).toBe(10);
+    expect((first.budgets.maxCostUsd ?? 0) + (second.budgets.maxCostUsd ?? 0)).toBe(0.00001);
   });
 });

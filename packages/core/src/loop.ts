@@ -52,6 +52,8 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly onStarted?: () => void;
   /** Per-run limits sourced from the validated run configuration. */
   readonly budgets: RunConfig["budgets"];
+  /** Absolute inherited deadline preserved across child startup and resume. */
+  readonly deadlineTs?: number;
   /** Optional inherited budget failure to record before executing this run. */
   readonly initialBudgetViolation?: BudgetViolation;
   readonly checkpointEveryEvents?: RunConfig["checkpointEveryEvents"];
@@ -105,7 +107,11 @@ class RunAbortedError extends HarnessError {
 export async function runLoop(options: RunLoopOptions): Promise<RunLoopResult> {
   const events: Event[] = [];
   let result: RunLoopResult | undefined;
-  const budgetTracker = new BudgetTracker(options.budgets, options.initialBudgetViolation);
+  const budgetTracker = new BudgetTracker(
+    options.budgets,
+    options.initialBudgetViolation,
+    options.deadlineTs,
+  );
   const startEvents: EventPartial[] = [
     {
       type: "run_created",
@@ -174,7 +180,7 @@ export async function continueRunLoop(
   options: RunLoopExecutionOptions,
   events: Event[],
   runId: Id,
-  budgetTracker = new BudgetTracker(options.budgets),
+  budgetTracker = new BudgetTracker(options.budgets, undefined, options.deadlineTs),
 ): Promise<Event> {
   const checkpointer = createRunCheckpointer(options, runId);
   const execution = { runId, checkpointer, budgetTracker };
@@ -228,6 +234,7 @@ async function runLoopSteps(
       budgetTracker: execution.budgetTracker,
       checkpointer: execution.checkpointer,
       events,
+      budgets: options.budgets,
       now: options.clock.now(),
       recorder: options.recorder,
     });
@@ -331,6 +338,7 @@ async function prepareModelStep(
     budgetTracker: execution.budgetTracker,
     checkpointer: execution.checkpointer,
     events,
+    budgets: options.budgets,
     now: options.clock.now(),
     recorder: options.recorder,
   });
@@ -355,7 +363,7 @@ async function runToolCalls(
     if (aborted !== undefined) {
       return aborted;
     }
-    const budget = execution.budgetTracker.check(foldRunState(events), options.clock.now());
+    const budget = execution.budgetTracker.checkWithOpenChildren(events, options.clock.now());
     if (!budget.ok) {
       return recordBudgetFailureAndCheckpoint(
         options.recorder,

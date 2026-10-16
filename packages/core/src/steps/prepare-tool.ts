@@ -98,7 +98,13 @@ export function toolRunContext(
         }),
       );
     },
-    recordSubagentSpawned: async ({ childRunId, role, parentCallId }) => {
+    recordSubagentSpawned: async ({
+      childRunId,
+      role,
+      parentCallId,
+      budgetLimits,
+      budgetDeadlineTs,
+    }) => {
       events.push(
         await recorder.record({
           type: "subagent_spawned",
@@ -106,6 +112,8 @@ export function toolRunContext(
           childRunId,
           role,
           parentCallId,
+          ...(budgetLimits === undefined ? {} : { budgetLimits }),
+          ...(budgetDeadlineTs === undefined ? {} : { budgetDeadlineTs }),
         }),
       );
     },

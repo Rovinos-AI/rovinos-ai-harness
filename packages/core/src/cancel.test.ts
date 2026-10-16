@@ -12,6 +12,7 @@ import { RUN_SPAN } from "./spans.js";
 const runId = Id.parse("00000000000000000000000000");
 const childRunId = Id.parse("22222222222222222222222222");
 const grandchildRunId = Id.parse("33333333333333333333333333");
+const siblingRunId = Id.parse("55555555555555555555555555");
 const segmentId = Id.parse("11111111111111111111111111");
 const tracerProvider = createTestTracerProvider();
 
@@ -341,5 +342,170 @@ describe("cancelRun", () => {
         (event) => event.type === "run_status_changed" && event.to === "cancelled",
       ),
     ).toBe(false);
+  });
+
+  it("records cancellation for an announced child whose run never started", async () => {
+    const store = new InMemoryEventStore();
+    await seedRun(store, "running");
+    await linkChild(store, runId, childRunId, 2);
+
+    await expect(
+      cancelRun(store, runId, new FakeClock(200), new SequentialIdGenerator()),
+    ).resolves.toBe("cancelled");
+
+    expect(await readEvents(store)).toContainEqual(
+      expect.objectContaining({
+        type: "subagent_completed",
+        childRunId,
+        outcome: "cancelled",
+        inputTokens: 0,
+        outputTokens: 0,
+        steps: 0,
+      }),
+    );
+    expect(await (async () => {
+      const events: Event[] = [];
+      for await (const event of store.read(childRunId)) {
+        events.push(event);
+      }
+      return events;
+    })()).toEqual([]);
+  });
+
+  it("sweeps a child announced between the tree scan and parent cancellation", async () => {
+    const store = new InMemoryEventStore();
+    await seedRun(store, "running");
+    const append = store.append.bind(store);
+    let announced = false;
+    vi.spyOn(store, "append").mockImplementation(async (id, events, expectedSeq) => {
+      if (
+        id === runId &&
+        !announced &&
+        events.some((event) => event.type === "run_status_changed")
+      ) {
+        announced = true;
+        await append(
+          id,
+          [
+            {
+              runId,
+              ts: 201,
+              type: "subagent_spawned",
+              v: 1,
+              traceId: "a".repeat(32),
+              spanId: "b".repeat(16),
+              segmentId,
+              childRunId: grandchildRunId,
+              role: "worker",
+              parentCallId: Id.parse("44444444444444444444444444"),
+            },
+          ],
+          expectedSeq,
+        );
+      }
+      return append(id, events, expectedSeq);
+    });
+
+    await expect(
+      cancelRun(store, runId, new FakeClock(200), new SequentialIdGenerator()),
+    ).resolves.toBe("cancelled");
+
+    const parentEvents = await readEvents(store);
+    expect(parentEvents).toContainEqual(
+      expect.objectContaining({
+        type: "subagent_completed",
+        childRunId: grandchildRunId,
+        outcome: "cancelled",
+      }),
+    );
+    expect(parentEvents.at(-1)).toMatchObject({ type: "run_status_changed", to: "cancelled" });
+  });
+
+  it("cancels siblings and the root when a middle-level descendant fails cancellation", async () => {
+    const store = new InMemoryEventStore();
+    await seedRun(store, "running");
+    await linkChild(store, runId, childRunId, 2);
+    await seedChild(store, childRunId, runId, "running");
+    await linkChild(store, childRunId, grandchildRunId, 2);
+    await linkChild(store, childRunId, siblingRunId, 3);
+    await seedChild(store, grandchildRunId, childRunId, "running");
+    await seedChild(store, siblingRunId, childRunId, "running");
+    const append = store.append.bind(store);
+    vi.spyOn(store, "append").mockImplementation((id, events, expectedSeq) => {
+      if (
+        id === grandchildRunId &&
+        events.some(
+          (event) => event.type === "run_status_changed" && event.to === "cancelled",
+        )
+      ) {
+        return Promise.reject(new Error("injected child cancellation failure"));
+      }
+      return append(id, events, expectedSeq);
+    });
+
+    await expect(
+      cancelRun(store, runId, new FakeClock(200), new SequentialIdGenerator()),
+    ).rejects.toBeInstanceOf(AggregateError);
+
+    const [middleEvents, siblingEvents] = await Promise.all([
+      (async () => {
+        const events: Event[] = [];
+        for await (const event of store.read(childRunId)) {
+          events.push(event);
+        }
+        return events;
+      })(),
+      (async () => {
+        const events: Event[] = [];
+        for await (const event of store.read(siblingRunId)) {
+          events.push(event);
+        }
+        return events;
+      })(),
+    ]);
+    expect(
+      middleEvents.findLast((event) => event.type === "run_status_changed"),
+    ).toMatchObject({ type: "run_status_changed", to: "cancelled" });
+    expect(siblingEvents.at(-1)).toMatchObject({
+      type: "run_status_changed",
+      to: "cancelled",
+    });
+    expect((await readEvents(store)).at(-1)).toMatchObject({
+      type: "run_status_changed",
+      to: "cancelled",
+    });
+  });
+
+  it("re-reads and retries a child completion after a sequence conflict", async () => {
+    const store = new InMemoryEventStore();
+    await seedRun(store, "running");
+    await linkChild(store, runId, childRunId, 2);
+    await seedChild(store, childRunId, runId, "running");
+    const append = store.append.bind(store);
+    let raced = false;
+    vi.spyOn(store, "append").mockImplementation(async (id, events, expectedSeq) => {
+      if (
+        id === runId &&
+        !raced &&
+        events.some((event) => event.type === "subagent_completed")
+      ) {
+        raced = true;
+        await append(id, [competingEvent(expectedSeq)], expectedSeq);
+      }
+      return append(id, events, expectedSeq);
+    });
+
+    await expect(
+      cancelRun(store, runId, new FakeClock(200), new SequentialIdGenerator()),
+    ).resolves.toBe("cancelled");
+
+    expect(raced).toBe(true);
+    expect(await readEvents(store)).toContainEqual(
+      expect.objectContaining({
+        type: "subagent_completed",
+        childRunId,
+        outcome: "cancelled",
+      }),
+    );
   });
 });

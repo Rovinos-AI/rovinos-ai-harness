@@ -15,6 +15,18 @@ export const RunContinuationsSchema = z
   .strict()
   .prefault({});
 
+export const RunBudgetsSchema = z
+  .object({
+    maxSteps: z.coerce.number().int().positive().default(200),
+    maxCostUsd: z.coerce.number().positive().optional(),
+    maxWallClockMs: z.coerce.number().int().positive().default(3_600_000),
+    countSuspendedTime: z
+      .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
+      .default(false),
+  })
+  .strict()
+  .prefault({});
+
 export const RunConfigSchema = z
   .object({
     checkpointEveryEvents: z.coerce.number().int().positive().default(20),
@@ -34,17 +46,7 @@ export const RunConfigSchema = z
       })
       .strict()
       .prefault({}),
-    budgets: z
-      .object({
-        maxSteps: z.coerce.number().int().positive().default(200),
-        maxCostUsd: z.coerce.number().positive().optional(),
-        maxWallClockMs: z.coerce.number().int().positive().default(3_600_000),
-        countSuspendedTime: z
-          .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
-          .default(false),
-      })
-      .strict()
-      .prefault({}),
+    budgets: RunBudgetsSchema,
   })
   .strict()
   .prefault({});

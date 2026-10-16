@@ -73,6 +73,10 @@ async function createSpawnTool(
   registry: RoleRegistry,
   onChild: (request: SubagentRunRequest) => void = () => undefined,
   runChild?: SubagentRunner,
+  options: {
+    readonly runConfig?: ReturnType<typeof RunConfigSchema.parse>;
+    readonly existingChild?: Id;
+  } = {},
 ): Promise<AgentSpawnTool> {
   const store = new InMemoryEventStore();
   await store.append(
@@ -93,11 +97,31 @@ async function createSpawnTool(
     ],
     0,
   );
+  if (options.existingChild !== undefined) {
+    await store.append(
+      parentRunId,
+      [
+        {
+          runId: parentRunId,
+          ts: 2,
+          traceId: "a".repeat(32),
+          spanId: "b".repeat(16),
+          segmentId: parentRunId,
+          type: "subagent_spawned",
+          v: 1,
+          childRunId: options.existingChild,
+          role: "worker",
+          parentCallId: Id.parse("33333333333333333333333333"),
+        },
+      ],
+      1,
+    );
+  }
   const supervisor = new SubagentSupervisor({
     store,
     ids: { next: () => childRunId },
     clock: new FakeClock(1),
-    runConfig: RunConfigSchema.parse({}),
+    runConfig: options.runConfig ?? RunConfigSchema.parse({}),
     scopes: new RunScopeRegistry(),
     parentTools: inner,
     parentSpanContext: () => ({
@@ -176,6 +200,37 @@ describe("agent.spawn tool", () => {
     await expect(
       tool.execute(call("agent.spawn", { role: "worker", goal: 3 }), runContext(innerTools())),
     ).resolves.toEqual({ outcome: "error", errorCode: "agent_spawn_invalid", result: null });
+    expect(runChild).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "global depth",
+      runConfig: RunConfigSchema.parse({ subagents: { maxDepth: 0 } }),
+    },
+    {
+      name: "per-run child count",
+      runConfig: RunConfigSchema.parse({ subagents: { maxChildrenPerRun: 1 } }),
+      existingChild: Id.parse("77777777777777777777777777"),
+    },
+    {
+      name: "concurrent child count",
+      runConfig: RunConfigSchema.parse({ subagents: { maxConcurrentChildren: 1 } }),
+      existingChild: Id.parse("77777777777777777777777777"),
+    },
+  ])("returns subagent_limit for the $name limit", async ({ runConfig, existingChild }) => {
+    const runChild = vi.fn();
+    const tool = await createSpawnTool(innerTools(), await roles(), () => undefined, runChild, {
+      runConfig,
+      ...(existingChild === undefined ? {} : { existingChild }),
+    });
+
+    await expect(
+      tool.execute(
+        call("agent.spawn", { role: "worker", goal: "must not start" }),
+        runContext(innerTools()),
+      ),
+    ).resolves.toEqual({ outcome: "error", errorCode: "subagent_limit", result: null });
     expect(runChild).not.toHaveBeenCalled();
   });
 
