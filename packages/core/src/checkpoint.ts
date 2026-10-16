@@ -26,6 +26,14 @@ export interface CheckpointerOptions {
   readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
 }
 
+/** Creates the checkpoint writer for a run using its shared loop options. */
+export function createRunCheckpointer(
+  options: Omit<CheckpointerOptions, "runId">,
+  runId: Id,
+): Checkpointer {
+  return new Checkpointer({ ...options, runId });
+}
+
 /** Error raised when a checkpoint is attempted without a valid active span. */
 export class NoActiveSpanError extends HarnessError {
   /** Stable error code. */

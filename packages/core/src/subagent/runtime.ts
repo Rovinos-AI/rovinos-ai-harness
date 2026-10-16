@@ -19,6 +19,23 @@ import type { RunScopeRegistry } from "./scope.js";
 import { SubagentSupervisor, type SubagentRunRequest } from "./supervisor.js";
 import { finalizeChild } from "./result.js";
 
+function childRunOptions(
+  config: RuntimeConfig,
+  workspaceSnapshotter: WorkspaceSnapshotPort | undefined,
+): {
+  readonly configHash: string;
+  readonly snapshotKeep?: number;
+  readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
+} {
+  return {
+    configHash: configHash(config),
+    ...(config.store?.snapshotKeep === undefined
+      ? {}
+      : { snapshotKeep: config.store.snapshotKeep }),
+    ...(workspaceSnapshotter === undefined ? {} : { workspaceSnapshotter }),
+  };
+}
+
 /** Resolves configured roles against the registered tools and built-in spawn tool. */
 export async function resolveRuntimeRoles(
   config: RuntimeConfig,
@@ -129,13 +146,7 @@ export function createSubagentTool(options: {
         signal: request.signal,
         budgets: options.config.run.budgets,
         checkpointEveryEvents: options.config.run.checkpointEveryEvents,
-        ...(options.config.store?.snapshotKeep === undefined
-          ? {}
-          : { snapshotKeep: options.config.store.snapshotKeep }),
-        ...(options.workspaceSnapshotter === undefined
-          ? {}
-          : { workspaceSnapshotter: options.workspaceSnapshotter }),
-        configHash: configHash(options.config),
+        ...childRunOptions(options.config, options.workspaceSnapshotter),
         policyVersion: options.policyVersion,
         role: request.role.route ?? request.role.id,
         ...(request.role.resultSchema === undefined

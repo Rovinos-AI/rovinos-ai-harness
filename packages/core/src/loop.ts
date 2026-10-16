@@ -10,7 +10,7 @@ import {
 import type { Context, Link } from "@opentelemetry/api";
 import { activeRuns } from "@harness/telemetry";
 import { BudgetTracker, type BudgetViolation } from "./budgets.js";
-import { Checkpointer } from "./checkpoint.js";
+import { createRunCheckpointer, type Checkpointer } from "./checkpoint.js";
 import { foldRunState, isTerminalRunState, planLastModelResponseRecovery } from "./run-state.js";
 import type { RunState } from "./run-state.js";
 import type { Clock, EventPartial, RunRecorder } from "./recorder.js";
@@ -176,20 +176,7 @@ export async function continueRunLoop(
   runId: Id,
   budgetTracker = new BudgetTracker(options.budgets),
 ): Promise<Event> {
-  const checkpointer = new Checkpointer({
-    recorder: options.recorder,
-    runId,
-    context: options.context,
-    ids: options.ids,
-    clock: options.clock,
-    ...(options.checkpointEveryEvents === undefined
-      ? {}
-      : { checkpointEveryEvents: options.checkpointEveryEvents }),
-    ...(options.snapshotKeep === undefined ? {} : { snapshotKeep: options.snapshotKeep }),
-    ...(options.workspaceSnapshotter === undefined
-      ? {}
-      : { workspaceSnapshotter: options.workspaceSnapshotter }),
-  });
+  const checkpointer = createRunCheckpointer(options, runId);
   const execution = { runId, checkpointer, budgetTracker };
   const isTerminal = () => isTerminalRunState(foldRunState(events));
   return activeRuns.track(runId, () => runLoopSteps(options, events, execution), isTerminal);
