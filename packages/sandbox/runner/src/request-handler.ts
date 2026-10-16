@@ -249,18 +249,18 @@ async function withExecutionIdentity<T>(
   }
   try {
     if (gid !== undefined && gid !== originalGid) {
-      process.setegid(gid);
+      process.setegid?.(gid);
     }
     if (uid !== undefined && uid !== originalUid) {
-      process.seteuid(uid);
+      process.seteuid?.(uid);
     }
     return await operation();
   } finally {
     if (uid !== undefined && originalUid !== uid) {
-      process.seteuid(originalUid);
+      process.seteuid?.(originalUid);
     }
     if (gid !== undefined && originalGid !== gid) {
-      process.setegid(originalGid);
+      process.setegid?.(originalGid);
     }
   }
 }
