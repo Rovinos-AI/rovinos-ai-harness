@@ -324,7 +324,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 regex_only: "regex_only";
             }>>;
             presidio: z.ZodOptional<z.ZodObject<{
-                baseUrl: z.ZodString;
+                baseUrl: z.ZodURL;
                 language: z.ZodDefault<z.ZodString>;
                 scoreThreshold: z.ZodDefault<z.ZodNumber>;
             }, z.core.$strict>>;

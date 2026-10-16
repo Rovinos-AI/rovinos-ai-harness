@@ -182,7 +182,10 @@ export function createPresidioReachableCheck(
           fetcher,
           healthUrl,
           { method: "GET" },
-          { timeoutMs, parentSignal: ctx.signal },
+          {
+            timeoutMs,
+            ...(ctx.signal === undefined ? {} : { parentSignal: ctx.signal }),
+          },
           async (response, signal) => {
             if (!response.ok) {
               return { status: "fail", code: "presidio_unreachable" };
