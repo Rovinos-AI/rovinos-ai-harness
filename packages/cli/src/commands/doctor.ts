@@ -6,10 +6,16 @@ import {
   getConfigSecretRefs,
   type HarnessConfig,
 } from "@harness/config";
-import { createServersReachableChecks } from "@harness/mcp";
+import {
+  createServersAuthorizedCheck,
+  createServersReachableChecks,
+  OAuthTokenStore,
+} from "@harness/mcp";
 import { Code, DoctorResultsSchema, HarnessError } from "@harness/schemas";
+import type { SecretRef } from "@harness/schemas";
 import { LocalKeyProvider, LocalKeyProviderError } from "@harness/vault";
 import type { DoctorCheck, DoctorContext, RuntimeConfig } from "@harness/core";
+import { join } from "node:path";
 import type { CommandModule } from "../command.js";
 
 class DoctorChecksFailedError extends HarnessError {
@@ -124,27 +130,58 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
               return fileWarning;
             },
           };
+          let oauthKeyProvider: LocalKeyProvider | undefined;
+          let oauthTokenStore: OAuthTokenStore | undefined;
+          const hasOAuthServers = (config?.servers ?? []).some(
+            (server) => server.transport.kind === "http" && server.transport.auth !== undefined,
+          );
+          if (hasOAuthServers) {
+            try {
+              oauthKeyProvider = new LocalKeyProvider({
+                ...(config?.keys === undefined ? {} : { config: config.keys }),
+                secretResolver: {
+                  resolve: async (ref) => secretResolver.resolve(ref),
+                },
+                env,
+                onWarning: () => undefined,
+              });
+              oauthTokenStore = await OAuthTokenStore.open(
+                join(doctorContext.dataDir, "mcp-oauth.db"),
+                oauthKeyProvider,
+              );
+            } catch {
+              oauthKeyProvider?.dispose();
+              oauthKeyProvider = undefined;
+            }
+          }
+          const mcpDependencies = {
+            resolveSecret: async (ref: SecretRef, signal?: AbortSignal) =>
+              (await secretResolver.resolve(ref, signal)).reveal(),
+            env,
+            ...(oauthTokenStore === undefined ? {} : { oauthTokenStore }),
+          };
           const defaultChecks = [
             ...core.doctorChecks(),
             keysConfiguredCheck(config, env),
-            ...createServersReachableChecks(config?.servers ?? [], {
-              resolveSecret: async (ref, signal) => {
-                return (await secretResolver.resolve(ref, signal)).reveal();
-              },
-              env,
-            }),
+            createServersAuthorizedCheck(config?.servers ?? [], mcpDependencies),
+            ...createServersReachableChecks(config?.servers ?? [], mcpDependencies),
           ];
-          const results = await core.runDoctor(doctorContext, checks ?? defaultChecks);
-          if (program.opts<{ json?: boolean }>().json === true) {
-            context.out.json(DoctorResultsSchema, results);
-          } else {
-            context.out.table([
-              ["id", "status", "code"],
-              ...results.map(({ id, status, code }) => [id, status, code]),
-            ]);
-          }
-          if (results.some(({ status }) => status === "fail")) {
-            throw new DoctorChecksFailedError();
+          try {
+            const results = await core.runDoctor(doctorContext, checks ?? defaultChecks);
+            if (program.opts<{ json?: boolean }>().json === true) {
+              context.out.json(DoctorResultsSchema, results);
+            } else {
+              context.out.table([
+                ["id", "status", "code"],
+                ...results.map(({ id, status, code }) => [id, status, code]),
+              ]);
+            }
+            if (results.some(({ status }) => status === "fail")) {
+              throw new DoctorChecksFailedError();
+            }
+          } finally {
+            oauthTokenStore?.close();
+            oauthKeyProvider?.dispose();
           }
         });
     },

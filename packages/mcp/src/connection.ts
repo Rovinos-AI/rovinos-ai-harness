@@ -9,6 +9,8 @@ import {
 } from "@modelcontextprotocol/client";
 import { compileJsonSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
 import { McpConnectionError, McpProtocolError, isConnectionLossError } from "./errors.js";
+import { McpAuthRequiredError, withOAuthWarningsRedacted } from "./oauth/provider.js";
+import type { OAuthTokenStore } from "./oauth/token-store.js";
 import { invokeMcpTool } from "./mcp-call.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
@@ -26,6 +28,8 @@ export interface McpConnectionDependencies {
   readonly resolveSecret: (ref: SecretRef, signal?: AbortSignal) => Promise<string>;
   /** Optional logger that accepts only safe codes and stderr byte counts. */
   readonly logger?: McpLogger;
+  /** Encrypted per-server credentials used by configured OAuth HTTP transports. */
+  readonly oauthTokenStore?: OAuthTokenStore;
   /** Injectable reconnect delay used by tests and host runtimes. */
   readonly sleep?: (milliseconds: number) => Promise<void>;
   /** Process environment source for the stdio PATH allowlist. */
@@ -172,6 +176,12 @@ export class McpConnection {
     return this.#closed || this.#connectGeneration !== generation;
   }
 
+  #runWithSafeAuthLogging<Result>(operation: () => Promise<Result>): Promise<Result> {
+    return this.#config.transport.kind === "http" && this.#config.transport.auth !== undefined
+      ? withOAuthWarningsRedacted(operation)
+      : operation();
+  }
+
   async #performConnect(generation: number, signal: AbortSignal): Promise<void> {
     const combinedSignal = AbortSignal.any([
       AbortSignal.timeout(this.#config.timeouts.connectMs),
@@ -185,31 +195,39 @@ export class McpConnection {
         this.#state = "unavailable";
         return;
       }
-      transport = await this.#createTransport(combinedSignal);
+      const activeTransport = await this.#createTransport(combinedSignal);
+      transport = activeTransport;
       if (this.#isStale(generation)) {
         this.#state = "unavailable";
-        await transport.close().catch(() => undefined);
+        await activeTransport.close().catch(() => undefined);
         return;
       }
-      client = this.#createClient();
-      await client.connect(transport, {
-        signal: combinedSignal,
-        timeout: this.#config.timeouts.connectMs,
-      });
+      const activeClient = this.#createClient();
+      client = activeClient;
+      await this.#runWithSafeAuthLogging(() =>
+        activeClient.connect(activeTransport, {
+          signal: combinedSignal,
+          timeout: this.#config.timeouts.connectMs,
+        }),
+      );
       if (this.#isStale(generation)) {
         this.#state = "unavailable";
-        await client.close().catch(() => undefined);
+        await activeClient.close().catch(() => undefined);
         return;
       }
-      this.#client = client;
-      this.#protocolEra = client.getProtocolEra();
+      this.#client = activeClient;
+      this.#protocolEra = activeClient.getProtocolEra();
       this.#state = "ready";
-      this.#watchTransport(transport);
-    } catch {
+      this.#watchTransport(activeTransport);
+    } catch (error) {
       this.#markUnavailable();
       await (client ?? transport)?.close().catch(() => undefined);
       throw new McpConnectionError(
-        combinedSignal.aborted ? "mcp_connect_timeout" : "mcp_connect_failed",
+        error instanceof McpAuthRequiredError
+          ? "mcp_auth_required"
+          : combinedSignal.aborted
+            ? "mcp_connect_timeout"
+            : "mcp_connect_failed",
       );
     }
   }
@@ -228,7 +246,7 @@ export class McpConnection {
   }
 
   async #createTransport(signal: AbortSignal): Promise<Transport> {
-    const { createTransport, resolveSecret, env, logger } = this.#dependencies;
+    const { createTransport, resolveSecret, env, logger, oauthTokenStore } = this.#dependencies;
     if (createTransport !== undefined) {
       return createTransport(this.#config, signal);
     }
@@ -238,6 +256,7 @@ export class McpConnection {
         resolveSecret,
         ...(env === undefined ? {} : { env }),
         ...(logger === undefined ? {} : { logger }),
+        ...(oauthTokenStore === undefined ? {} : { oauthTokenStore }),
       },
       signal,
     );
@@ -313,23 +332,25 @@ export class McpConnection {
     }
     let listed: Awaited<ReturnType<typeof listAllTools>>;
     try {
-      listed = await listAllTools({
-        requestPage: (cursor) =>
-          client.request(
-            { method: "tools/list", ...(cursor === undefined ? {} : { params: { cursor } }) },
-            ListToolsResultSchema,
-            { timeout: this.#config.timeouts.callMs },
-          ),
-        era: this.#protocolEra,
-        transport: this.#config.transport.kind,
-        onExcluded: (count) => {
-          this.#dependencies.logger?.log({
-            code: "mcp_tools_excluded",
-            serverId: this.#config.id,
-            count,
-          });
-        },
-      });
+      listed = await this.#runWithSafeAuthLogging(() =>
+        listAllTools({
+          requestPage: (cursor) =>
+            client.request(
+              { method: "tools/list", ...(cursor === undefined ? {} : { params: { cursor } }) },
+              ListToolsResultSchema,
+              { timeout: this.#config.timeouts.callMs },
+            ),
+          era: this.#protocolEra,
+          transport: this.#config.transport.kind,
+          onExcluded: (count) => {
+            this.#dependencies.logger?.log({
+              code: "mcp_tools_excluded",
+              serverId: this.#config.id,
+              count,
+            });
+          },
+        }),
+      );
     } catch (error) {
       throw error instanceof McpConnectionError
         ? error
@@ -365,6 +386,10 @@ export class McpConnection {
     try {
       return await this.#invoke(params, options, toolDefinition);
     } catch (error) {
+      if (error instanceof McpAuthRequiredError) {
+        this.#markUnavailable();
+        throw new McpConnectionError("mcp_auth_required");
+      }
       if (error instanceof McpProtocolError) {
         throw error;
       }
@@ -399,13 +424,15 @@ export class McpConnection {
     if (client === undefined || this.#state !== "ready") {
       throw new McpConnectionError("mcp_connection_lost");
     }
-    return invokeMcpTool({
-      client,
-      server: this.#config,
-      params,
-      ...(options === undefined ? {} : { requestOptions: options }),
-      ...(toolDefinition === undefined ? {} : { toolDefinition }),
-    });
+    return this.#runWithSafeAuthLogging(() =>
+      invokeMcpTool({
+        client,
+        server: this.#config,
+        params,
+        ...(options === undefined ? {} : { requestOptions: options }),
+        ...(toolDefinition === undefined ? {} : { toolDefinition }),
+      }),
+    );
   }
 
   async #ensureReady(signal?: AbortSignal): Promise<void> {

@@ -27,7 +27,13 @@ import { RunScopeRegistry } from "./subagent/scope.js";
 import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
 import { composeToolPorts } from "./runtime-tool-port.js";
-import { McpConnectionError, McpToolPort, type McpLogger } from "@harness/mcp";
+import {
+  McpConnectionError,
+  McpToolPort,
+  OAuthTokenStore,
+  type McpLogger,
+} from "@harness/mcp";
+import type { LocalKeyProvider } from "@harness/vault";
 import type { RoleRegistry } from "./roles.js";
 import type { ToolPort } from "./ports.js";
 import type {
@@ -55,6 +61,8 @@ const mcpLogger: McpLogger = {
 async function createConfiguredMcpToolPort(
   config: RuntimeConfig,
   overrides: RuntimeOverrides,
+  keys: LocalKeyProvider,
+  dataDir: string,
 ): Promise<McpToolPort | undefined> {
   const servers = config.servers ?? [];
   if (overrides.tool !== undefined || servers.length === 0) {
@@ -63,11 +71,18 @@ async function createConfiguredMcpToolPort(
   const secretResolver = overrides.secretResolver ?? {
     resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
   };
+  const oauthTokenStore =
+    servers.some(
+      (server) => server.transport.kind === "http" && server.transport.auth !== undefined,
+    )
+      ? await OAuthTokenStore.open(join(dataDir, "mcp-oauth.db"), keys)
+      : undefined;
   return McpToolPort.create(
     servers,
     {
       resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
       logger: mcpLogger,
+      ...(oauthTokenStore === undefined ? {} : { oauthTokenStore }),
       ...(overrides.mcpTransportFactory === undefined
         ? {}
         : { createTransport: overrides.mcpTransportFactory }),
@@ -167,11 +182,13 @@ interface RuntimeTools {
 async function createRuntimeTools(
   config: RuntimeConfig,
   overrides: RuntimeOverrides,
+  keys: LocalKeyProvider,
+  dataDir: string,
 ): Promise<RuntimeTools> {
   const sandboxBackend = await createRuntimeSandbox(config, overrides);
   let mcpToolPort: McpToolPort | undefined;
   try {
-    mcpToolPort = await createConfiguredMcpToolPort(config, overrides);
+    mcpToolPort = await createConfiguredMcpToolPort(config, overrides, keys, dataDir);
     const tool = createRuntimeTool(config, sandboxBackend, overrides, mcpToolPort);
     return { tool, sandboxBackend, mcpToolPort };
   } catch (error) {
@@ -380,7 +397,7 @@ export async function setupRuntime(
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
-    tools = await createRuntimeTools(runtimeConfig, overrides);
+    tools = await createRuntimeTools(runtimeConfig, overrides, keys, dataDir);
     const { tool, sandboxBackend } = tools;
     const roles = await createRuntimeRoles(runtimeConfig, overrides, tool);
     const rawStore = await createRuntimeStore(runtimeConfig, overrides, clock);

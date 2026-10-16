@@ -6,6 +6,7 @@ import { attr, countMcpDiscoveryFailed, defineSemconvSpan, withSpan } from "@har
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { McpConnectionError } from "./connection.js";
 import type { McpConnection, McpConnectionDependencies } from "./connection.js";
+import type { OAuthTokenStore } from "./oauth/token-store.js";
 import { McpProtocolError } from "./errors.js";
 import { McpPool } from "./pool.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
@@ -344,6 +345,7 @@ export class McpToolPort {
     private readonly pool: McpPool,
     private readonly registry: ToolRegistry,
     private readonly options: McpToolPortOptions,
+    private readonly oauthTokenStore: OAuthTokenStore | undefined,
   ) {}
 
   /**
@@ -367,16 +369,31 @@ export class McpToolPort {
         servers.map(async (server) => {
           try {
             return { config: server, tools: await pool.listTools(server.id) };
-          } catch {
+          } catch (error) {
             dependencies.logger?.log({ code: "mcp_discovery_failed", serverId: server.id });
             countMcpDiscoveryFailed();
+            if (error instanceof McpConnectionError && error.code === "mcp_auth_required") {
+              throw error;
+            }
             throw new McpConnectionError("mcp_list_tools_failed");
           }
         }),
       );
-      return new McpToolPort(pool, new ToolRegistry(discovered), options);
+      return new McpToolPort(
+        pool,
+        new ToolRegistry(discovered),
+        options,
+        dependencies.oauthTokenStore,
+      );
     } catch (error) {
-      await pool.close();
+      try {
+        await pool.close();
+      } finally {
+        dependencies.oauthTokenStore?.close();
+      }
+      if (error instanceof McpConnectionError && error.code === "mcp_auth_required") {
+        throw error;
+      }
       throw error;
     }
   }
@@ -429,7 +446,11 @@ export class McpToolPort {
   }
 
   /** Closes every managed server connection. */
-  close(): Promise<void> {
-    return this.pool.close();
+  async close(): Promise<void> {
+    try {
+      await this.pool.close();
+    } finally {
+      this.oauthTokenStore?.close();
+    }
   }
 }

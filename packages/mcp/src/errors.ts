@@ -16,6 +16,7 @@ export class McpProtocolError extends HarnessError {
 export type McpConnectionErrorCode =
   | "mcp_connect_failed"
   | "mcp_connect_timeout"
+  | "mcp_auth_required"
   | "mcp_connection_lost"
   | "mcp_list_tools_failed"
   | "mcp_too_many_tools"
