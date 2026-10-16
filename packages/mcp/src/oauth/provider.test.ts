@@ -227,6 +227,8 @@ describe("McpOAuthProvider", () => {
       callback.searchParams.set("code", "authorization-code");
       callback.searchParams.set("state", authorizationUrl.searchParams.get("state") ?? "");
       callback.searchParams.set("iss", mock.issuer);
+      expect((await fetch(new URL("/wrong-path", session.redirectUrl))).status).toBe(404);
+      expect((await fetch(callback, { method: "POST" })).status).toBe(404);
       const invalidCallback = new URL(callback);
       invalidCallback.searchParams.set("state", "invalid-state");
       expect((await fetch(invalidCallback)).status).toBe(400);
@@ -240,6 +242,15 @@ describe("McpOAuthProvider", () => {
       expect(stored?.issuer).toBe(mock.issuer);
       expect(stored?.tokens?.access_token).toBe(accessTokenCanary);
       expect(stored?.tokens?.refresh_token).toBe(refreshTokenCanary);
+
+      const authorizedSession = await startMcpOAuthLogin({
+        server: configuration,
+        tokenStore: store,
+        resolveSecret: () => Promise.resolve("configured-secret"),
+      });
+      expect(authorizedSession.authorizationUrl).toBe("");
+      await authorizedSession.complete;
+      await authorizedSession.close();
     } finally {
       await session.close();
       store.close();
@@ -292,6 +303,43 @@ describe("McpOAuthProvider", () => {
       expect(mock.tokenRequest).toBeUndefined();
     } finally {
       await session.close();
+      store.close();
+    }
+  });
+
+  it("fails closed when login setup cannot create a supported OAuth session", async () => {
+    const mock = await startMockOAuthServer();
+    const store = await OAuthTokenStore.open(":memory:", keyProvider);
+    try {
+      await expect(
+        startMcpOAuthLogin({
+          server: serverConfig(mock.baseUrl, {
+            grant: "client_credentials",
+            clientId: "machine-client",
+            clientSecret: "env:OAUTH_SECRET",
+          }),
+          tokenStore: store,
+          resolveSecret: () => Promise.resolve("configured-secret"),
+        }),
+      ).rejects.toMatchObject({ code: "mcp_auth_required" });
+      await expect(
+        startMcpOAuthLogin({
+          server: serverConfig(mock.baseUrl, {
+            grant: "authorization_code",
+            clientSecret: "env:OAUTH_SECRET",
+          }),
+          tokenStore: store,
+          resolveSecret: () => Promise.reject(new Error("secret unavailable")),
+        }),
+      ).rejects.toMatchObject({ code: "mcp_auth_required" });
+      await expect(
+        startMcpOAuthLogin({
+          server: serverConfig("http://127.0.0.1:1"),
+          tokenStore: store,
+          resolveSecret: () => Promise.resolve("configured-secret"),
+        }),
+      ).rejects.toMatchObject({ code: "mcp_auth_required" });
+    } finally {
       store.close();
     }
   });
