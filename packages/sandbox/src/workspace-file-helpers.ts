@@ -25,6 +25,12 @@ export interface WorkspaceFileIdentity {
   readonly mode: number;
 }
 
+export class WorkspaceHardLinkError extends WorkspaceFileError {
+  constructor() {
+    super("fs_path_invalid");
+  }
+}
+
 /** File bytes paired with the identity observed while reading them. */
 export interface WorkspaceFileSnapshot {
   readonly bytes: Buffer;
@@ -34,7 +40,7 @@ export interface WorkspaceFileSnapshot {
 /** Captures identity for a regular file while rejecting hard-link aliases. */
 export function fileIdentity(info: Stats): WorkspaceFileIdentity {
   if (info.nlink > 1) {
-    throw new WorkspaceFileError("fs_path_invalid");
+    throw new WorkspaceHardLinkError();
   }
   return {
     dev: info.dev,
@@ -272,6 +278,7 @@ interface WriteFileOptions {
   readonly mode: "create" | "overwrite";
   readonly signal: AbortSignal;
   readonly expectedIdentity?: WorkspaceFileIdentity;
+  readonly onTemporaryFileCreated?: () => void;
 }
 
 async function createTemporaryFile(
@@ -365,6 +372,7 @@ export async function writeFileAt(
     const temporary = await createTemporaryFile(path, options.expectedIdentity);
     handle = temporary.handle;
     temporaryPath = temporary.path;
+    options.onTemporaryFileCreated?.();
     assertActive(options.signal);
     await handle.writeFile(bytes, { signal: options.signal });
     await handle.sync();

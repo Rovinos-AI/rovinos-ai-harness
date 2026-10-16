@@ -8,6 +8,7 @@ import {
   decodeUtf8Prefix,
   fileIdentity,
   projectPath,
+  WorkspaceHardLinkError,
   WorkspaceFileError,
 } from "./workspace-file-helpers.js";
 
@@ -207,7 +208,7 @@ export async function searchDirectory(directory: string, context: SearchContext)
           return true;
         }
       } catch (error) {
-        if (!(error instanceof WorkspaceFileError && error.code === "fs_path_invalid")) {
+        if (!(error instanceof WorkspaceHardLinkError)) {
           throw error;
         }
       }

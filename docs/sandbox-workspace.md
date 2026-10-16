@@ -85,12 +85,13 @@ used by a command.
 
 Atomic replacements write and sync a temporary sibling, then compare the
 target's device, inode, size, and modification time immediately before rename.
-The runner also needs write permission on the target's parent directory for
-the rename; a permission failure is reported as a closed filesystem operation
-error and leaves the original file unchanged.
+Rename requires write permission on the target's parent directory; when that
+permission is unavailable, the operation may fail without replacing the target.
 This narrows but cannot eliminate the final stat-to-rename race or make parent
 path resolution descriptor-relative. Runner leases serialize normal `exec` and
-file-tool requests; deployments and snapshot/restore code must not mutate an
-active workspace through another process. Quotas are checked during file
-mutations, not continuously enforced against arbitrary changes made by commands
-or external volume writers.
+file-tool requests. Runner dispatch also serializes `fetch`, `exec`, file
+operations, and lease transitions so none overlap a process-wide credential
+switch. Deployments and snapshot/restore code must not mutate an active workspace
+through another process. Quotas are checked during file mutations, not
+continuously enforced against arbitrary changes made by commands or external
+volume writers.

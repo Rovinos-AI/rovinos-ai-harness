@@ -377,6 +377,32 @@ describe("workspace file operation contracts and safety", () => {
       offset: 2,
       bytes: 0,
     });
+    await writeFile(join(project, "prefix-multibyte.txt"), "aé");
+    expect(
+      await files.execute(
+        runId,
+        "read",
+        { path: "prefix-multibyte.txt", offset: 1, length: 2 },
+        signal,
+      ),
+    ).toMatchObject({ binary: false, content: "é", offset: 1, bytes: 2 });
+    await writeFile(join(project, "leading-multibyte.txt"), "éa");
+    expect(
+      await files.execute(
+        runId,
+        "read",
+        { path: "leading-multibyte.txt", offset: 0, length: 2 },
+        signal,
+      ),
+    ).toMatchObject({ binary: false, content: "é", offset: 0, bytes: 2 });
+    expect(
+      await files.execute(
+        runId,
+        "read",
+        { path: "leading-multibyte.txt", offset: 1, length: 2 },
+        signal,
+      ),
+    ).toMatchObject({ binary: false, content: "a", offset: 2, bytes: 1 });
     expect(FsToolResultSchema.safeParse({ binary: true, bytes: 3, path: "secret" }).success).toBe(
       false,
     );
@@ -707,13 +733,13 @@ describe("workspace file operation contracts and safety", () => {
     await writeFile(path, original);
     const snapshot = await readFileSnapshotAt(path);
     const controller = new AbortController();
-    controller.abort();
 
     await expect(
       writeFileAt(path, Buffer.from("replacement"), {
         mode: "overwrite",
         signal: controller.signal,
         expectedIdentity: snapshot.identity,
+        onTemporaryFileCreated: () => controller.abort(),
       }),
     ).rejects.toMatchObject({ code: "fs_operation_failed" });
     const unchanged = await readFile(path);

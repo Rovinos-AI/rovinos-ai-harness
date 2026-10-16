@@ -26,6 +26,7 @@ import { fetchWebContent } from "./web-fetch.js";
 import type { ProxyRequest, ProxyResponse, WebFetchTransport } from "./web-fetch-transport.js";
 import { ensureRunWorkspace } from "../../src/workspace.js";
 import { WorkspaceFileSystem } from "../../src/workspace-files.js";
+import type { RunnerCredentialApi } from "./process-lock.js";
 
 const token = "synthetic-runner-token-that-is-at-least-32-bytes";
 const runId = Id.parse("00000000000000000000000001");
@@ -487,10 +488,20 @@ describe("runner HTTP request handler", () => {
   });
 
   it("serializes lease requests until file operations restore process credentials", async () => {
-    const executionUid = process.getuid?.();
-    const executionGid = process.getgid?.();
-    expect(executionUid).toBeDefined();
-    expect(executionGid).toBeDefined();
+    const executionUid = 10003;
+    const executionGid = 10003;
+    let currentUid = 10002;
+    let currentGid = 10002;
+    const credentials: RunnerCredentialApi = {
+      geteuid: () => currentUid,
+      getegid: () => currentGid,
+      seteuid: (uid) => {
+        currentUid = uid;
+      },
+      setegid: (gid) => {
+        currentGid = gid;
+      },
+    };
     let markStarted: () => void = () => undefined;
     let releaseOperation: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
@@ -502,13 +513,16 @@ describe("runner HTTP request handler", () => {
     const executeFileOperation = vi
       .spyOn(WorkspaceFileSystem.prototype, "execute")
       .mockImplementation(async () => {
-        expect(process.geteuid?.()).toBe(executionUid);
-        expect(process.getegid?.()).toBe(executionGid);
+        expect(credentials.geteuid()).toBe(executionUid);
+        expect(credentials.getegid()).toBe(executionGid);
         markStarted();
         await gate;
         return { binary: false, bytes: 0, content: "", offset: 0, path: "idle.txt" };
       });
-    const handler = createRunnerRequestHandler(makeOptions());
+    const handler = createRunnerRequestHandler(
+      makeOptions({ executionUid, executionGid }),
+      credentials,
+    );
     try {
       const fileResponse = new MemoryResponse();
       const pendingFile = handler(
@@ -523,7 +537,14 @@ describe("runner HTTP request handler", () => {
         fileResponse,
       );
       await started;
-      const leaseResponse = new MemoryResponse();
+      let identityAtLeaseResponse: readonly [number | undefined, number | undefined] | undefined;
+      class LeaseIdentityResponse extends MemoryResponse {
+        override end(body?: string): void {
+          identityAtLeaseResponse = [credentials.geteuid(), credentials.getegid()];
+          super.end(body);
+        }
+      }
+      const leaseResponse = new LeaseIdentityResponse();
       const pendingLease = handler(
         makeRequest({
           url: "/lease",
@@ -539,8 +560,9 @@ describe("runner HTTP request handler", () => {
 
       expect(fileResponse.status).toBe(200);
       expect(leaseResponse.status).toBe(200);
-      expect(process.geteuid?.()).toBe(executionUid);
-      expect(process.getegid?.()).toBe(executionGid);
+      expect(identityAtLeaseResponse).toEqual([10002, 10002]);
+      expect(credentials.geteuid()).toBe(10002);
+      expect(credentials.getegid()).toBe(10002);
       expect(executeFileOperation).toHaveBeenCalledOnce();
     } finally {
       releaseOperation();

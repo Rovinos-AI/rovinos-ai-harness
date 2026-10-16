@@ -16,7 +16,7 @@ import { WorkspaceFileError } from "../../src/workspace-file-helpers.js";
 import { WebFetchRequestSchema } from "../../src/web-fetch-contracts.js";
 import { executeRunnerFetch, WebFetchError } from "./web-fetch.js";
 import type { RunnerServerOptions } from "./server.js";
-import { withRunnerProcessLock } from "./process-lock.js";
+import type { RunnerCredentialApi } from "./process-lock.js";
 
 /** Maximum UTF-8 request body accepted by runner endpoints. */
 export const MAX_RUNNER_REQUEST_BYTES = 2 * 1024 * 1024;
@@ -82,6 +82,7 @@ interface ExecuteRunnerPayloadOptions {
   readonly workspaceFiles: WorkspaceFileSystem;
   readonly executionUid: number | undefined;
   readonly executionGid: number | undefined;
+  readonly credentials: RunnerCredentialApi;
   readonly sendJson: SendJson;
   readonly sendError: SendError;
 }
@@ -235,51 +236,58 @@ function fileOperationFailure(error: unknown): { readonly status: number; readon
   return { status: 500, code: "fs_operation_failed" };
 }
 
-async function withExecutionIdentity<T>(
-  uid: number | undefined,
-  gid: number | undefined,
-  operation: () => Promise<T>,
-): Promise<T> {
-  return withRunnerProcessLock(async () => {
-    const originalUid = process.geteuid?.();
-    const originalGid = process.getegid?.();
-    if (originalUid === undefined || originalGid === undefined) {
-      return operation();
-    }
-    try {
-      setExecutionIdentity(uid, gid, originalUid, originalGid);
-      return await operation();
-    } finally {
-      restoreExecutionIdentity(originalUid, originalGid, uid ?? originalUid, gid ?? originalGid);
-    }
-  });
-}
-
 function setExecutionIdentity(
+  credentials: RunnerCredentialApi,
   uid: number | undefined,
   gid: number | undefined,
   currentUid: number,
   currentGid: number,
 ): void {
   if (gid !== undefined && gid !== currentGid) {
-    process.setegid?.(gid);
+    credentials.setegid?.(gid);
   }
   if (uid !== undefined && uid !== currentUid) {
-    process.seteuid?.(uid);
+    credentials.seteuid?.(uid);
   }
 }
 
 function restoreExecutionIdentity(
+  credentials: RunnerCredentialApi,
   uid: number,
   gid: number,
   currentUid: number,
   currentGid: number,
 ): void {
   if (uid !== currentUid) {
-    process.seteuid?.(uid);
+    credentials.seteuid?.(uid);
   }
   if (gid !== currentGid) {
-    process.setegid?.(gid);
+    credentials.setegid?.(gid);
+  }
+}
+
+async function withExecutionIdentity<T>(
+  uid: number | undefined,
+  gid: number | undefined,
+  credentials: RunnerCredentialApi,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const originalUid = credentials.geteuid();
+  const originalGid = credentials.getegid();
+  if (originalUid === undefined || originalGid === undefined) {
+    return operation();
+  }
+  try {
+    setExecutionIdentity(credentials, uid, gid, originalUid, originalGid);
+    return await operation();
+  } finally {
+    restoreExecutionIdentity(
+      credentials,
+      originalUid,
+      originalGid,
+      uid ?? originalUid,
+      gid ?? originalGid,
+    );
   }
 }
 
@@ -308,7 +316,7 @@ export async function executeRunnerPayload(input: ExecuteRunnerPayloadOptions): 
       sendJson(
         response,
         200,
-        await withExecutionIdentity(input.executionUid, input.executionGid, () =>
+        await withExecutionIdentity(input.executionUid, input.executionGid, input.credentials, () =>
           input.workspaceFiles.execute(
             payload.runId,
             payload.request.operation,

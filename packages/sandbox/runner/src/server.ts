@@ -22,6 +22,8 @@ import {
 } from "./request-handler.js";
 import { RunnerLeaseManager } from "./lease.js";
 import { authorityFrom, validHost, validOrigin } from "./server-origin.js";
+import { withRunnerProcessLock, systemRunnerCredentials } from "./process-lock.js";
+import type { RunnerCredentialApi } from "./process-lock.js";
 
 const REQUEST_TIMEOUT_MS = MAX_EXEC_TIMEOUT_MS + 10_000;
 const TOKEN_HASH_BYTES = 32;
@@ -224,6 +226,7 @@ interface RunnerRequestContext {
   readonly workspaceFiles: WorkspaceFileSystem;
   readonly executionUid: number | undefined;
   readonly executionGid: number | undefined;
+  readonly credentials: RunnerCredentialApi;
   readonly isBusy: () => boolean;
   readonly setBusy: (busy: boolean) => void;
   readonly leases: RunnerLeaseManager;
@@ -288,7 +291,7 @@ async function handleRunnerPayload(
     }
   });
   try {
-    await executeRunnerPayload({
+    await withRunnerProcessLock(() => executeRunnerPayload({
       options: context.options,
       payload,
       response,
@@ -297,9 +300,10 @@ async function handleRunnerPayload(
       workspaceFiles: context.workspaceFiles,
       executionUid: context.executionUid,
       executionGid: context.executionGid,
+      credentials: context.credentials,
       sendJson,
       sendError: writeError,
-    });
+    }));
   } finally {
     context.setBusy(false);
     await context.leases.finishExecution(payload.runId);
@@ -323,6 +327,7 @@ function writeLeaseResult(acquired: boolean, response: RunnerResponse): void {
  */
 export function createRunnerRequestHandler(
   options: RunnerServerOptions,
+  credentials: RunnerCredentialApi = systemRunnerCredentials,
 ): (request: RunnerRequest, response: RunnerResponse) => Promise<void> {
   const allowedHosts = validateRunnerOptions(options);
   const tokenHash = hashToken(options.token);
@@ -345,6 +350,7 @@ export function createRunnerRequestHandler(
     workspaceFiles,
     executionUid,
     executionGid,
+    credentials,
     isBusy: () => activeExec,
     setBusy: (busy) => {
       activeExec = busy;
