@@ -3,11 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { ServerConfigSchema } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
-import {
-  McpPool,
-  createServersAuthorizedCheck,
-  createServersReachableChecks,
-} from "./pool.js";
+import { McpPool, createServersAuthorizedCheck, createServersReachableChecks } from "./pool.js";
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpLogEvent } from "./transports.js";
 

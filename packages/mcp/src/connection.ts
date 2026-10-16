@@ -148,17 +148,13 @@ export class McpConnection {
           combinedSignal,
         );
       }
-      const activeTransport = await createConfiguredTransport(
-        this.#config,
-        this.#dependencies,
-        {
-          clientCredentialsExtensionEnabled: this.#supportsClientCredentialsExtension,
-          onOAuthProvider: (provider) => {
-            this.#oauthProvider = provider;
-          },
-          signal: combinedSignal,
+      const activeTransport = await createConfiguredTransport(this.#config, this.#dependencies, {
+        clientCredentialsExtensionEnabled: this.#supportsClientCredentialsExtension,
+        onOAuthProvider: (provider) => {
+          this.#oauthProvider = provider;
         },
-      );
+        signal: combinedSignal,
+      });
       transport = activeTransport;
       if (this.#isStale(generation)) {
         this.#state = "unavailable";

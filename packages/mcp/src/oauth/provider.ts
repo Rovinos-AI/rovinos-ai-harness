@@ -10,12 +10,7 @@ import type {
   StoredOAuthTokens,
 } from "@modelcontextprotocol/client";
 import { randomBytes, randomInt } from "node:crypto";
-import {
-  HarnessError,
-  SecretRefSchema,
-  type SecretRef,
-  type ServerConfig,
-} from "@harness/schemas";
+import { HarnessError, SecretRefSchema, type SecretRef, type ServerConfig } from "@harness/schemas";
 import type { OAuthCredentialRecord, OAuthTokenStore } from "./token-store.js";
 
 type HttpTransportConfig = Extract<ServerConfig["transport"], { kind: "http" }>;
@@ -128,7 +123,11 @@ export class McpOAuthProvider implements OAuthClientProvider {
   #clientCredentialsExtensionEnabled = false;
   #authorizationUrl: URL | undefined;
 
-  private constructor(options: McpOAuthProviderOptions, record: OAuthCredentialRecord, secret?: string) {
+  private constructor(
+    options: McpOAuthProviderOptions,
+    record: OAuthCredentialRecord,
+    secret?: string,
+  ) {
     this.#serverId = options.serverId;
     this.#config = options.auth;
     if (options.auth.clientIdMetadataUrl !== undefined) {
@@ -224,10 +223,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
         ? this.#record.clientInformation
         : undefined;
     }
-    if (
-      this.#record.issuer === issuer &&
-      this.#record.clientInformation?.issuer === issuer
-    ) {
+    if (this.#record.issuer === issuer && this.#record.clientInformation?.issuer === issuer) {
       return this.#record.clientInformation;
     }
     const knownIssuer = this.#discoveryIssuer ?? this.#record.issuer;
@@ -278,7 +274,10 @@ export class McpOAuthProvider implements OAuthClientProvider {
   }
 
   /** Stores SDK tokens with their validated issuer. */
-  async saveTokens(tokens: StoredOAuthTokens, context?: OAuthClientInformationContext): Promise<void> {
+  async saveTokens(
+    tokens: StoredOAuthTokens,
+    context?: OAuthClientInformationContext,
+  ): Promise<void> {
     const issuer = context?.issuer ?? tokens.issuer;
     if (issuer === undefined) {
       throw new McpAuthRequiredError();

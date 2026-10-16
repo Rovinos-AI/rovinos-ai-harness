@@ -9,12 +9,7 @@ import {
   type McpConnectionDependencies,
   type McpTool,
 } from "@harness/mcp";
-import {
-  Code,
-  HarnessError,
-  ServersCheckResultSchema,
-  type ServerConfig,
-} from "@harness/schemas";
+import { Code, HarnessError, ServersCheckResultSchema, type ServerConfig } from "@harness/schemas";
 import type { LocalKeyProvider } from "@harness/vault";
 import { join } from "node:path";
 import { z } from "zod";
@@ -286,9 +281,7 @@ export function createServersCommand(overrides?: ServersCommandOverrides): Comma
   return {
     name: "servers",
     register(program, context) {
-      const servers = program
-        .command("servers")
-        .description("Manage configured MCP servers");
+      const servers = program.command("servers").description("Manage configured MCP servers");
       servers
         .command("check")
         .description("Check server connectivity and tool registration")

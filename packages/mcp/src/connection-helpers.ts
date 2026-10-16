@@ -77,8 +77,7 @@ export async function clientCredentialsExtensionAvailable(
   if (previouslyAdvertised) {
     return true;
   }
-  return config.transport.kind === "http" &&
-    config.transport.auth?.grant === "client_credentials"
+  return config.transport.kind === "http" && config.transport.auth?.grant === "client_credentials"
     ? resourceAdvertisesClientCredentials(config.transport.url, signal)
     : false;
 }

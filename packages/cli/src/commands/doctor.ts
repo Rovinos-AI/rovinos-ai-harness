@@ -111,8 +111,7 @@ async function loadDoctorConfig(context: CliContext): Promise<LoadedDoctorConfig
   try {
     return { config: await context.loadConfig(), configErrorCode: undefined };
   } catch (error) {
-    const configErrorCode =
-      error instanceof HarnessError ? Code.safeParse(error.code) : undefined;
+    const configErrorCode = error instanceof HarnessError ? Code.safeParse(error.code) : undefined;
     return {
       config: undefined,
       configErrorCode: configErrorCode?.success === true ? configErrorCode.data : undefined,
@@ -208,7 +207,11 @@ function defaultDoctorChecks(
   ];
 }
 
-function printDoctorResults(program: Command, context: CliContext, results: DoctorCheckResult[]): void {
+function printDoctorResults(
+  program: Command,
+  context: CliContext,
+  results: DoctorCheckResult[],
+): void {
   if (program.opts<{ json?: boolean }>().json === true) {
     context.out.json(DoctorResultsSchema, results);
   } else {

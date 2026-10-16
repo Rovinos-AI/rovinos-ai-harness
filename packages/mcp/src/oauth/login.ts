@@ -45,7 +45,9 @@ async function closeCallbackServer(server: Server): Promise<void> {
   });
 }
 
-async function createCallbackServer(port?: number): Promise<{ server: Server; redirectUrl: string }> {
+async function createCallbackServer(
+  port?: number,
+): Promise<{ server: Server; redirectUrl: string }> {
   const server = createServer();
   await new Promise<void>((resolve, reject) => {
     server.once("error", () => {
@@ -129,10 +131,7 @@ export async function startMcpOAuthLogin(
   options: McpOAuthLoginOptions,
 ): Promise<McpOAuthLoginSession> {
   const transportConfig = options.server.transport;
-  if (
-    transportConfig.kind !== "http" ||
-    transportConfig.auth?.grant !== "authorization_code"
-  ) {
+  if (transportConfig.kind !== "http" || transportConfig.auth?.grant !== "authorization_code") {
     throw new McpAuthRequiredError();
   }
   const { server: callbackServer, redirectUrl } = await createCallbackServer(

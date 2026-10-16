@@ -102,7 +102,9 @@ async function runServersLogin(
       server,
       tokenStore: store,
       resolveSecret: async (reference) =>
-        (await (context.secretResolver ?? new CompositeSecretResolver()).resolve(reference)).reveal(),
+        (
+          await (context.secretResolver ?? new CompositeSecretResolver()).resolve(reference)
+        ).reveal(),
     });
     if (session.authorizationUrl.length === 0) {
       printAuthResult(context.out, program, { status: "authorized" });

@@ -32,12 +32,11 @@ export async function createConfiguredMcpToolPort(
   const secretResolver = overrides.secretResolver ?? {
     resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
   };
-  const oauthTokenStore =
-    servers.some(
-      (server) => server.transport.kind === "http" && server.transport.auth !== undefined,
-    )
-      ? await OAuthTokenStore.open(join(dataDir, "mcp-oauth.db"), keys)
-      : undefined;
+  const oauthTokenStore = servers.some(
+    (server) => server.transport.kind === "http" && server.transport.auth !== undefined,
+  )
+    ? await OAuthTokenStore.open(join(dataDir, "mcp-oauth.db"), keys)
+    : undefined;
   return McpToolPort.create(
     servers,
     {

@@ -164,25 +164,30 @@ function consoleOutputText(values: readonly unknown[]): string {
 
 const capturedConsoleOutput: unknown[] = [];
 
-async function createOAuthServer(options: {
-  readonly failTokenExchange?: boolean;
-  readonly unauthorizedMcp?: boolean;
-  readonly requireToken?: boolean;
-  readonly clientCredentialsExtension?: boolean;
-} = {}) {
-  const mcpHandler = createMcpHandler(() => {
-    const server = new McpServer({ name: "oauth-mcp-server", version: "1.0.0" });
-    server.server.registerCapabilities({
-      tools: {},
-      ...(options.clientCredentialsExtension === true
-        ? { extensions: { [clientCredentialsExtension]: {} } }
-        : {}),
-    });
-    server.server.setRequestHandler("tools/list", () => ({
-      tools: [{ name: "listed", inputSchema }],
-    }));
-    return server;
-  }, { legacy: "reject" });
+async function createOAuthServer(
+  options: {
+    readonly failTokenExchange?: boolean;
+    readonly unauthorizedMcp?: boolean;
+    readonly requireToken?: boolean;
+    readonly clientCredentialsExtension?: boolean;
+  } = {},
+) {
+  const mcpHandler = createMcpHandler(
+    () => {
+      const server = new McpServer({ name: "oauth-mcp-server", version: "1.0.0" });
+      server.server.registerCapabilities({
+        tools: {},
+        ...(options.clientCredentialsExtension === true
+          ? { extensions: { [clientCredentialsExtension]: {} } }
+          : {}),
+      });
+      server.server.setRequestHandler("tools/list", () => ({
+        tools: [{ name: "listed", inputSchema }],
+      }));
+      return server;
+    },
+    { legacy: "reject" },
+  );
   let unauthorizedMcp = options.unauthorizedMcp === true;
   let issuer = "";
   const server = createServer((request, response) => {
@@ -226,7 +231,10 @@ async function createOAuthServer(options: {
           .end(Buffer.from(await mcpResponse.arrayBuffer()));
         return;
       }
-      if (request.method === "GET" && url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
+      if (
+        request.method === "GET" &&
+        url.pathname.startsWith("/.well-known/oauth-protected-resource")
+      ) {
         sendJson(response, {
           resource: `http://${host}/mcp`,
           authorization_servers: [issuer],
@@ -269,7 +277,9 @@ async function createOAuthServer(options: {
               `realm="${oauthHeaderCanary}"`,
             ].join(" "),
           });
-          response.end(JSON.stringify({ error: "server_error", error_description: oauthErrorCanary }));
+          response.end(
+            JSON.stringify({ error: "server_error", error_description: oauthErrorCanary }),
+          );
           return;
         }
         sendJson(response, {
@@ -608,19 +618,16 @@ describe("harness servers check", () => {
         },
       ],
     });
-    const { context, stdout, stderr } = createContext(
-      () => Promise.resolve(configWithAuth),
-      {
-        secretResolver: {
-          resolve(ref) {
-            if (ref === "env:OAUTH_KEY") {
-              return Promise.resolve({ reveal: () => oauthKey.toString("base64") });
-            }
-            return Promise.reject(new Error("unexpected secret reference"));
-          },
+    const { context, stdout, stderr } = createContext(() => Promise.resolve(configWithAuth), {
+      secretResolver: {
+        resolve(ref) {
+          if (ref === "env:OAUTH_KEY") {
+            return Promise.resolve({ reveal: () => oauthKey.toString("base64") });
+          }
+          return Promise.reject(new Error("unexpected secret reference"));
         },
       },
-    );
+    });
     const openBrowser = vi.fn(async (url: string) => {
       const authorizationUrl = new URL(url);
       const callback = new URL(authorizationUrl.searchParams.get("redirect_uri") ?? "");
@@ -740,9 +747,7 @@ describe("harness servers check", () => {
       const result = parseJson(ServersCheckResultSchema, stdout[0] ?? "");
 
       expect(exitCode).toBe(ExitCode.ok);
-      expect(result.servers).toEqual([
-        expect.objectContaining({ id: "machine", reachable: true }),
-      ]);
+      expect(result.servers).toEqual([expect.objectContaining({ id: "machine", reachable: true })]);
       expect(closeStore).toHaveBeenCalledOnce();
       expect(disposeKeys).toHaveBeenCalledOnce();
     } finally {
@@ -768,9 +773,7 @@ describe("harness servers check", () => {
     });
     const { context, stdout } = createContext(() => Promise.resolve(configWithoutKeys));
 
-    const exitCode = await main(["--json", "servers", "check"], context, [
-      createServersCommand(),
-    ]);
+    const exitCode = await main(["--json", "servers", "check"], context, [createServersCommand()]);
     const result = parseJson(ServersCheckResultSchema, stdout[0] ?? "");
 
     expect(exitCode).toBe(ExitCode.failure);
@@ -803,19 +806,16 @@ describe("harness servers check", () => {
         },
       ],
     });
-    const { context, stdout, stderr } = createContext(
-      () => Promise.resolve(configWithAuth),
-      {
-        secretResolver: {
-          resolve(ref) {
-            if (ref === "env:OAUTH_KEY") {
-              return Promise.resolve({ reveal: () => oauthKey.toString("base64") });
-            }
-            return Promise.reject(new Error("unexpected secret reference"));
-          },
+    const { context, stdout, stderr } = createContext(() => Promise.resolve(configWithAuth), {
+      secretResolver: {
+        resolve(ref) {
+          if (ref === "env:OAUTH_KEY") {
+            return Promise.resolve({ reveal: () => oauthKey.toString("base64") });
+          }
+          return Promise.reject(new Error("unexpected secret reference"));
         },
       },
-    );
+    });
     const openBrowser = vi.fn(async (url: string) => {
       const authorizationUrl = new URL(url);
       const callback = new URL(authorizationUrl.searchParams.get("redirect_uri") ?? "");

@@ -6,11 +6,7 @@ import type { KeyProvider } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "../connection.js";
 import { z } from "zod";
-import {
-  McpAuthRequiredError,
-  McpOAuthProvider,
-  withOAuthWarningsRedacted,
-} from "./provider.js";
+import { McpAuthRequiredError, McpOAuthProvider, withOAuthWarningsRedacted } from "./provider.js";
 import { startMcpOAuthLogin } from "./login.js";
 import { OAuthTokenStore } from "./token-store.js";
 
@@ -78,7 +74,10 @@ async function startMockOAuthServer(options: MockOAuthOptions = {}) {
           .end();
         return;
       }
-      if (request.method === "GET" && url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
+      if (
+        request.method === "GET" &&
+        url.pathname.startsWith("/.well-known/oauth-protected-resource")
+      ) {
         sendJson(response, {
           resource: `http://${host}/mcp`,
           authorization_servers: [issuer],
@@ -120,11 +119,7 @@ async function startMockOAuthServer(options: MockOAuthOptions = {}) {
       if (request.method === "POST" && url.pathname === "/token") {
         tokenRequest = new URLSearchParams(await readBody(request));
         if (options.failTokenExchange === true) {
-          sendJson(
-            response,
-            { error: "server_error", error_description: errorCanary },
-            400,
-          );
+          sendJson(response, { error: "server_error", error_description: errorCanary }, 400);
           return;
         }
         sendJson(response, {
@@ -222,7 +217,9 @@ describe("McpOAuthProvider", () => {
       const verifier = (await store.load("oauth-server"))?.codeVerifier;
       expect(verifier).toBeDefined();
       expect(
-        createHash("sha256").update(verifier ?? "").digest("base64url"),
+        createHash("sha256")
+          .update(verifier ?? "")
+          .digest("base64url"),
       ).toBe(authorizationUrl.searchParams.get("code_challenge"));
       expect(mock.authorizationRequest).toBeUndefined();
 
@@ -330,7 +327,9 @@ describe("McpOAuthProvider", () => {
       );
       expect(provider.tokens({ issuer: issuerCanary })?.access_token).toBe(accessTokenCanary);
       expect(provider.tokens({ issuer: "https://another-issuer.invalid" })).toBeUndefined();
-      expect(await provider.clientInformation({ issuer: "https://another-issuer.invalid" })).toBeUndefined();
+      expect(
+        await provider.clientInformation({ issuer: "https://another-issuer.invalid" }),
+      ).toBeUndefined();
 
       await provider.saveCodeVerifier("pkce-verifier");
       expect(provider.codeVerifier()).toBe("pkce-verifier");

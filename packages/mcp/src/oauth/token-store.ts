@@ -162,7 +162,9 @@ export class OAuthTokenStore {
       );
       encrypted = encryptedValue;
       this.#database
-        .prepare("INSERT OR REPLACE INTO oauth_credentials (server_id, key_id, value_enc) VALUES (?, ?, ?)")
+        .prepare(
+          "INSERT OR REPLACE INTO oauth_credentials (server_id, key_id, value_enc) VALUES (?, ?, ?)",
+        )
         .run(serverId, keyId, Buffer.from(encryptedValue));
     } catch {
       throw new OAuthTokenStoreError();
@@ -175,9 +177,7 @@ export class OAuthTokenStore {
   /** Deletes every stored credential for one server id. */
   delete(serverId: string): void {
     try {
-      this.#database
-        .prepare("DELETE FROM oauth_credentials WHERE server_id = ?")
-        .run(serverId);
+      this.#database.prepare("DELETE FROM oauth_credentials WHERE server_id = ?").run(serverId);
     } catch {
       throw new OAuthTokenStoreError();
     }

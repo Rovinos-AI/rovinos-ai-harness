@@ -170,9 +170,7 @@ describe("McpToolPort", () => {
         result: null,
       });
       const attributes = spanCollector.getFinishedSpans().at(-1)?.attributes ?? {};
-      expect(attributes["harness.error.code"]).toBe(
-        "mcp_auth_required",
-      );
+      expect(attributes["harness.error.code"]).toBe("mcp_auth_required");
       expect(JSON.stringify(attributes)).not.toContain(canary);
     } finally {
       await current.close();

@@ -205,9 +205,7 @@ export function createServersAuthorizedCheck(
           return {
             status: "fail",
             code: Code.parse(
-              error instanceof McpConnectionError
-                ? error.code
-                : "mcp_authorization_check_failed",
+              error instanceof McpConnectionError ? error.code : "mcp_authorization_check_failed",
             ),
             detail: config.id,
           };
