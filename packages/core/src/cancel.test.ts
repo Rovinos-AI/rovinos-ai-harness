@@ -294,6 +294,31 @@ describe("cancelRun", () => {
     ).toHaveLength(1);
   });
 
+  it("re-reads when the log head advances beyond the event snapshot", async () => {
+    const store = new InMemoryEventStore();
+    await seedRun(store, "running");
+    const readHead = store.head.bind(store);
+    let firstRead = true;
+    vi.spyOn(store, "head").mockImplementation(async (id) => {
+      const head = await readHead(id);
+      if (firstRead && id === runId) {
+        firstRead = false;
+        return head + 1;
+      }
+      return head;
+    });
+
+    await expect(
+      cancelRun(store, runId, new FakeClock(200), new SequentialIdGenerator()),
+    ).resolves.toBe("cancelled");
+
+    expect(firstRead).toBe(false);
+    expect((await readEvents(store)).at(-1)).toMatchObject({
+      type: "run_status_changed",
+      to: "cancelled",
+    });
+  });
+
   it("stops after three consecutive append conflicts", async () => {
     const store = new InMemoryEventStore();
     await seedRun(store, "running");
