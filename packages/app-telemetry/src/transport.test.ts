@@ -2,17 +2,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppSpan } from "@harness/schemas";
 import { createAppTelemetry } from "./index.js";
+import { createAppTelemetryTransport } from "./transport.js";
 import type { AppTelemetryBridge } from "./types.js";
 
 const traceId = "1234567890abcdef1234567890abcdef";
 const validTraceparent = `00-${traceId}-1234567890abcdef-01`;
 type ToolCallArgs = Parameters<AppTelemetryBridge["callTool"]>;
 
-function makeTelemetry(callTool: AppTelemetryBridge["callTool"]) {
+function makeTelemetry(
+  callTool: AppTelemetryBridge["callTool"],
+  options: { readonly hostReady?: Promise<void>; readonly random?: () => number } = {},
+) {
   return createAppTelemetry({
     bridge: { callTool },
     manifest: { spans: ["ui.render", "ui.error", "ui.interaction"] as const },
     now: () => 10,
+    random: () => 0.5,
+    ...options,
   });
 }
 
@@ -56,6 +62,36 @@ describe("app telemetry transport", () => {
     expect(dataCalls(callTool)).toHaveLength(1);
     expect(JSON.stringify(dataCalls(callTool))).not.toContain(validTraceparent);
     expect(JSON.stringify(dataCalls(callTool))).not.toContain(traceId);
+  });
+
+  it("starts the activation timeout only after host connection is ready", async () => {
+    vi.useFakeTimers();
+    let resolveHost: (() => void) | undefined;
+    const hostReady = new Promise<void>((resolve) => {
+      resolveHost = resolve;
+    });
+    const callTool = vi.fn((..._args: ToolCallArgs) => Promise.resolve({}));
+    const telemetry = makeTelemetry(callTool, { hostReady });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(callTool).not.toHaveBeenCalled();
+
+    resolveHost?.();
+    await waitForActive(telemetry);
+    expect(callTool).toHaveBeenCalledTimes(1);
+    await telemetry.dispose();
+  });
+
+  it("accepts tool-result metadata without attaching trace context to spans", async () => {
+    const callTool = vi.fn((..._args: ToolCallArgs) => Promise.resolve({}));
+    const telemetry = makeTelemetry(callTool);
+    await waitForActive(telemetry);
+    telemetry.setHostMetadata({ traceparent: validTraceparent });
+    expect(telemetry.traceContext.traceId).toBe(traceId);
+
+    telemetry.record("ui.render", {});
+    await telemetry.flush();
+    expect(JSON.stringify(dataCalls(callTool))).not.toContain(traceId);
+    await telemetry.dispose();
   });
 
   it.each([
@@ -293,23 +329,224 @@ describe("app telemetry transport", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("retains spans when JSON sizing fails or exceeds the per-call limit", async () => {
+  it("drops an oversized span and continues with later spans", async () => {
+    const callTool = vi.fn((..._args: ToolCallArgs) => Promise.resolve({}));
+    const transport = createAppTelemetryTransport({
+      callTool,
+    });
+    await waitForActive(transport);
+    transport.record({
+      name: "ui.error",
+      code: "x".repeat(15 * 1024),
+      startOffsetMs: 0,
+      durationMs: 0,
+    });
+    for (let count = 0; count < 3; count += 1) {
+      transport.record({
+        name: "ui.render",
+        startOffsetMs: count,
+        durationMs: 0,
+      });
+    }
+    await transport.flush();
+
+    expect(dataCalls(callTool)).toHaveLength(1);
+    expect(dataCalls(callTool)[0]?.spans).toHaveLength(3);
+    expect(transport.stats()).toEqual({ dropped: 1 });
+    await transport.dispose();
+  });
+
+  it("measures UTF-8 batch bytes for non-ASCII span attributes", async () => {
+    const callTool = vi.fn((..._args: ToolCallArgs) => Promise.resolve({}));
+    const telemetry = createAppTelemetryTransport({ callTool });
+    await waitForActive(telemetry);
+    for (let count = 0; count < 20; count += 1) {
+      telemetry.record({
+        name: "ui.error",
+        code: "漢🙂".repeat(200),
+        startOffsetMs: count,
+        durationMs: 0,
+      });
+    }
+    await telemetry.flush();
+
+    const payloads = dataCalls(callTool);
+    expect(payloads.length).toBeGreaterThan(1);
+    expect(
+      payloads.every(
+        (payload) => new TextEncoder().encode(JSON.stringify(payload)).length <= 14_336,
+      ),
+    ).toBe(true);
+    await telemetry.dispose();
+  });
+
+  it("serializes each span once while finding batch limits", async () => {
     const callTool = vi.fn((..._args: ToolCallArgs) => Promise.resolve({}));
     const telemetry = makeTelemetry(callTool);
     await waitForActive(telemetry);
-    const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => {
-      throw new Error("synthetic serialization failure");
+    const stringify = vi.spyOn(JSON, "stringify");
+    for (let count = 0; count < 20; count += 1) {
+      telemetry.record("ui.render", {});
+    }
+    await settle();
+    expect(stringify).toHaveBeenCalledTimes(20);
+    stringify.mockRestore();
+    await telemetry.dispose();
+  });
+
+  it("serializes 20-span threshold batches and drains 50-span maximum batches", async () => {
+    let releaseFirst: (() => void) | undefined;
+    const callTool = vi.fn((...args: ToolCallArgs) => {
+      if (args[1].spans.length === 0) {
+        return Promise.resolve({});
+      }
+      if (releaseFirst === undefined) {
+        return new Promise<unknown>((resolve) => {
+          releaseFirst = () => {
+            resolve({});
+          };
+        });
+      }
+      return Promise.resolve({});
+    });
+    const telemetry = makeTelemetry(callTool);
+    await waitForActive(telemetry);
+    for (let count = 0; count < 20; count += 1) {
+      telemetry.record("ui.render", {});
+    }
+    await vi.waitFor(() => {
+      expect(dataCalls(callTool)).toHaveLength(1);
+    });
+    for (let count = 0; count < 80; count += 1) {
+      telemetry.record("ui.render", {});
+    }
+    releaseFirst?.();
+    await vi.waitFor(() => {
+      expect(dataCalls(callTool)).toHaveLength(3);
+    });
+    expect(dataCalls(callTool).map(({ spans }) => spans.length)).toEqual([20, 50, 30]);
+    await telemetry.dispose();
+  });
+
+  it("keeps concurrent threshold flushes behind the active request", async () => {
+    let releaseFirst: (() => void) | undefined;
+    let activeSends = 0;
+    let maximumActiveSends = 0;
+    const callTool = vi.fn((...args: ToolCallArgs) => {
+      if (args[1].spans.length === 0) {
+        return Promise.resolve({});
+      }
+      activeSends += 1;
+      maximumActiveSends = Math.max(maximumActiveSends, activeSends);
+      if (releaseFirst === undefined) {
+        return new Promise<unknown>((resolve) => {
+          releaseFirst = () => {
+            activeSends -= 1;
+            resolve({});
+          };
+        });
+      }
+      activeSends -= 1;
+      return Promise.resolve({});
+    });
+    const telemetry = makeTelemetry(callTool);
+    await waitForActive(telemetry);
+    for (let count = 0; count < 20; count += 1) {
+      telemetry.record("ui.render", {});
+    }
+    await vi.waitFor(() => {
+      expect(dataCalls(callTool)).toHaveLength(1);
     });
     for (let count = 0; count < 20; count += 1) {
       telemetry.record("ui.render", {});
     }
+    const waitingFlushes = [telemetry.flush(), telemetry.flush(), telemetry.flush()];
+    releaseFirst?.();
+    await Promise.all(waitingFlushes);
+    await vi.waitFor(() => {
+      expect(dataCalls(callTool)).toHaveLength(2);
+    });
+    expect(maximumActiveSends).toBe(1);
+    await telemetry.dispose();
+  });
 
-    await telemetry.flush();
-    stringify.mockReturnValue("x".repeat(14 * 1024 + 1));
-    await telemetry.flush();
-    stringify.mockRestore();
+  it("drains queued spans during disposal and counts abandoned spans", async () => {
+    let releaseFirst: (() => void) | undefined;
+    const callTool = vi.fn((...args: ToolCallArgs) => {
+      if (args[1].spans.length === 0) {
+        return Promise.resolve({});
+      }
+      if (releaseFirst === undefined) {
+        return new Promise<unknown>((resolve) => {
+          releaseFirst = () => {
+            resolve({});
+          };
+        });
+      }
+      return Promise.resolve({});
+    });
+    const telemetry = makeTelemetry(callTool);
+    await waitForActive(telemetry);
+    for (let count = 0; count < 100; count += 1) {
+      telemetry.record("ui.render", {});
+    }
+    const disposing = telemetry.dispose();
+    releaseFirst?.();
+    await disposing;
+    expect(dataCalls(callTool).map(({ spans }) => spans.length)).toEqual([50, 50]);
+    expect(telemetry.stats()).toEqual({ dropped: 0 });
+  });
+
+  it("does not immediately retry a persistently failing 20-span batch", async () => {
+    vi.useFakeTimers();
+    const callTool = vi.fn((...args: ToolCallArgs) =>
+      args[1].spans.length === 0
+        ? Promise.resolve({})
+        : Promise.resolve({ isError: true, content: [{ type: "text", text: "host unavailable" }] }),
+    );
+    const telemetry = makeTelemetry(callTool);
+    await settle();
+    for (let count = 0; count < 20; count += 1) {
+      telemetry.record("ui.render", {});
+    }
+    await settle();
     await telemetry.flush();
     expect(dataCalls(callTool)).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(499);
+    expect(dataCalls(callTool)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(dataCalls(callTool)).toHaveLength(2);
+    await telemetry.dispose();
+  });
+
+  it("backs off on structured host rate-limit errors with bounded jitter", async () => {
+    vi.useFakeTimers();
+    let sends = 0;
+    const callTool = vi.fn((...args: ToolCallArgs) => {
+      if (args[1].spans.length === 0) {
+        return Promise.resolve({});
+      }
+      sends += 1;
+      return Promise.resolve({
+        isError: true,
+        structuredContent: { code: "rate_limited" },
+      });
+    });
+    const telemetry = makeTelemetry(callTool, { random: () => 1 });
+    await settle();
+    telemetry.record("ui.render", {});
+    await telemetry.flush();
+
+    for (const delay of [600, 1_200, 2_400, 4_800, 8_000]) {
+      const previousSends = sends;
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(sends).toBe(previousSends);
+      await vi.advanceTimersByTimeAsync(1);
+      await settle();
+      expect(sends).toBe(previousSends + 1);
+    }
     await telemetry.dispose();
   });
 
@@ -354,6 +591,7 @@ describe("app telemetry transport", () => {
   });
 
   it("retains generic bridge failures for a later flush", async () => {
+    vi.useFakeTimers();
     let fail = true;
     const callTool = vi.fn((...args: ToolCallArgs) => {
       if (args[1].spans.length === 0 || !fail) {
@@ -367,6 +605,9 @@ describe("app telemetry transport", () => {
     await telemetry.flush();
     fail = false;
     await telemetry.flush();
+    expect(dataCalls(callTool)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(500);
+    await settle();
     expect(dataCalls(callTool)).toHaveLength(2);
     await telemetry.dispose();
   });

@@ -46,8 +46,12 @@ export interface AppTelemetryManifest<Names extends readonly AppSpanName[]> {
 /** Options for creating a manifest-scoped telemetry shim. */
 export interface CreateAppTelemetryOptions<Names extends readonly AppSpanName[]> {
   readonly bridge?: AppTelemetryBridge;
+  /** Resolves when the host bridge is connected; activation timeout starts afterward. */
+  readonly hostReady?: Promise<void>;
   readonly manifest: AppTelemetryManifest<Names>;
   readonly now?: () => number;
+  /** Injectable source for bounded retry jitter. */
+  readonly random?: () => number;
 }
 
 /** Informational trace context returned by the host; never attached to app spans. */
@@ -58,7 +62,7 @@ export interface AppTraceContext {
 
 /** Bounded transport counters exposed for local debugging only. */
 export interface AppTelemetryStats {
-  /** Number of pending spans dropped to enforce the queue limit. */
+  /** Number of spans dropped to enforce limits or abandoned during disposal. */
   readonly dropped: number;
 }
 
@@ -68,6 +72,8 @@ export interface AppTelemetry<Names extends readonly AppSpanName[]> {
   readonly active: boolean;
   /** Informational trace identifier supplied by the host. */
   readonly traceContext: AppTraceContext;
+  /** Updates the informational trace context from host tool-result metadata. */
+  setHostMetadata(metadata: unknown): void;
   /** Starts timing a declared span; ending it records its attributes and duration. */
   start<Name extends Names[number]>(
     name: Name,
@@ -84,6 +90,6 @@ export interface AppTelemetry<Names extends readonly AppSpanName[]> {
   flush(): Promise<void>;
   /** Returns local-only transport counters. */
   stats(): AppTelemetryStats;
-  /** Clears timers and listeners, then attempts one final flush. */
+  /** Clears timers and listeners, drains pending spans, and counts any abandoned spans as dropped. */
   dispose(): Promise<void>;
 }

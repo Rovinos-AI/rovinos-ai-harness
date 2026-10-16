@@ -55,6 +55,7 @@ const telemetry = createAppTelemetry({
       return app.callServerTool({ name, arguments: args });
     },
   },
+  hostReady: hostConnection,
   manifest: { spans: ["ui.error", "ui.decision"] },
 });
 const view = createApprovalView(document.body, {
@@ -103,6 +104,7 @@ app.addEventListener("toolinput", (params) => {
   view.receive(params.arguments);
 });
 app.addEventListener("toolresult", (params) => {
+  telemetry.setHostMetadata(params._meta);
   if (params.isError === true) {
     view.receive(undefined);
     return;

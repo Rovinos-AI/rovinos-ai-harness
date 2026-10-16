@@ -201,7 +201,7 @@ function createStart<Name extends AppSpanName>(
 /**
  * Creates a browser-safe shim that only queues manifest-declared spans for its host bridge.
  *
- * @param options - Host bridge, allowed span names, and optional monotonic clock.
+ * @param options - Host bridge, allowed span names, readiness signal, clock, and retry randomness.
  * @returns A no-throw telemetry interface scoped to the supplied manifest.
  */
 export function createAppTelemetry<const Names extends readonly AppSpanName[]>(
@@ -226,7 +226,7 @@ export function createAppTelemetry<const Names extends readonly AppSpanName[]>(
     bridge = undefined;
   }
 
-  const transport = createAppTelemetryTransport(bridge);
+  const transport = createAppTelemetryTransport(bridge, options.hostReady, options.random);
   const now = options.now ?? (() => performance.now());
   const context: RecorderContext = {
     active: () => transport.active,
@@ -244,6 +244,9 @@ export function createAppTelemetry<const Names extends readonly AppSpanName[]>(
     },
     get traceContext() {
       return transport.traceContext;
+    },
+    setHostMetadata(metadata: unknown) {
+      transport.setHostMetadata(metadata);
     },
     start<Name extends Names[number]>(name: Name): { end(attrs?: SpanAttrs<Name>): void } {
       return createStart(context, name);
