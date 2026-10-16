@@ -8,18 +8,29 @@ import {
   type Link,
   type SpanContext,
 } from "@opentelemetry/api";
-import { HarnessError, type Code, type Event, type Id, type JsonValue } from "@harness/schemas";
+import {
+  HarnessError,
+  type Code,
+  type Event,
+  type Id,
+  type JsonValue,
+  type RunConfig,
+} from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { IdGenerator, ModelToolCall, RunContext, ToolPort } from "../ports.js";
+import type { Clock } from "../recorder.js";
+import { foldRunState } from "../run-state.js";
 import type { ResolvedRole } from "../roles.js";
 import type { RunScopeRegistry } from "./scope.js";
 import type { SubagentResult } from "./result.js";
 import { aggregateSubagentUsage } from "./result.js";
+import { deriveChildBudgets } from "./budgets.js";
 
 /** Stable errors raised before a child run can start. */
 export type SubagentErrorCode =
   | "subagent_depth_limit"
   | "subagent_children_limit"
+  | "subagent_limit"
   | "subagent_recorder_unavailable"
   | "subagent_parent_span_missing";
 
@@ -41,6 +52,7 @@ export interface SubagentRunRequest {
   readonly depth: number;
   readonly scopeId: Id;
   readonly role: ResolvedRole;
+  readonly budgets: RunConfig["budgets"];
   readonly input: JsonValue;
   readonly tools: ToolPort;
   readonly signal: AbortSignal;
@@ -65,6 +77,8 @@ export interface SubagentSpawnInput {
 export interface SubagentSupervisorOptions {
   readonly store: EventStore;
   readonly ids: IdGenerator;
+  readonly clock: Clock;
+  readonly runConfig: RunConfig;
   readonly scopes: RunScopeRegistry;
   readonly parentTools: ToolPort;
   readonly runChild: SubagentRunner;
@@ -95,6 +109,9 @@ export class SubagentSupervisor {
     if (depth > role.maxDepth) {
       throw new SubagentError("subagent_depth_limit");
     }
+    if (depth > this.options.runConfig.subagents.maxDepth) {
+      throw new SubagentError("subagent_limit");
+    }
     const recordSpawned = context.recordSubagentSpawned;
     const recordCompleted = context.recordSubagentCompleted;
     if (recordSpawned === undefined || recordCompleted === undefined) {
@@ -105,7 +122,7 @@ export class SubagentSupervisor {
       throw new SubagentError("subagent_parent_span_missing");
     }
 
-    const { childRunId, completionRecorded } = await this.resolveSpawn({
+    const { childRunId, completionRecorded, budgets } = await this.resolveSpawn({
       runId: context.runId,
       parentCallId: call.callId,
       role,
@@ -129,6 +146,7 @@ export class SubagentSupervisor {
         parentRunId: context.runId,
         parentCallId: call.callId,
         depth,
+        budgets,
         scopeId,
         role,
         input: childInput,
@@ -139,30 +157,26 @@ export class SubagentSupervisor {
         rootSpanLinks: [{ context: parentSpanContext }],
       });
     } catch (error) {
-      await this.recordFailedCompletion(childRunId, completionRecorded, recordCompleted);
+      await this.recordFailedCompletion(
+        context.runId,
+        childRunId,
+        completionRecorded,
+        recordCompleted,
+      );
       throw error;
     }
     if (result.status !== "suspended" && !completionRecorded) {
-      const { inputTokens, outputTokens, costMicros } = result.usage;
+      const { inputTokens, outputTokens, costMicros, steps } = result.usage;
       await recordCompleted({
         childRunId,
         outcome: result.status,
         inputTokens,
         outputTokens,
+        steps: steps ?? 0,
         ...(costMicros === undefined ? {} : { costMicros }),
       });
     }
     return result;
-  }
-
-  private async childrenOf(runId: Id): Promise<number> {
-    let count = 0;
-    for await (const event of this.options.store.read(runId)) {
-      if (event.type === "subagent_spawned") {
-        count += 1;
-      }
-    }
-    return count;
   }
 
   private async resolveSpawn(options: {
@@ -170,17 +184,49 @@ export class SubagentSupervisor {
     readonly parentCallId: Id;
     readonly role: ResolvedRole;
     readonly recordSpawned: NonNullable<RunContext["recordSubagentSpawned"]>;
-  }): Promise<{ readonly childRunId: Id; readonly completionRecorded: boolean }> {
+  }): Promise<{
+    readonly childRunId: Id;
+    readonly completionRecorded: boolean;
+    readonly budgets: RunConfig["budgets"];
+  }> {
+    const events = await this.childEvents(options.runId);
+    const parentState = foldRunState(events);
     const existingSpawn = await this.findSpawned(options.runId, options.parentCallId);
     if (existingSpawn !== undefined) {
+      const budgets = deriveChildBudgets(
+        parentState,
+        this.options.runConfig.budgets,
+        options.role.budgets,
+        this.options.clock.now(),
+      );
       return {
         childRunId: existingSpawn.childRunId,
         completionRecorded: await this.hasCompletion(options.runId, existingSpawn.childRunId),
+        budgets,
       };
     }
-    if ((await this.childrenOf(options.runId)) >= options.role.maxChildren) {
+    const completed = new Set(
+      events.flatMap((event) => (event.type === "subagent_completed" ? [event.childRunId] : [])),
+    );
+    const spawned = events.filter((event) => event.type === "subagent_spawned");
+    if (spawned.length >= this.options.runConfig.subagents.maxChildrenPerRun) {
+      throw new SubagentError("subagent_limit");
+    }
+    if (
+      spawned.filter((event) => !completed.has(event.childRunId)).length >=
+      this.options.runConfig.subagents.maxConcurrentChildren
+    ) {
+      throw new SubagentError("subagent_limit");
+    }
+    if (spawned.length >= options.role.maxChildren) {
       throw new SubagentError("subagent_children_limit");
     }
+    const budgets = deriveChildBudgets(
+      parentState,
+      this.options.runConfig.budgets,
+      options.role.budgets,
+      this.options.clock.now(),
+    );
     const childRunId = this.options.ids.next();
     await options.recordSpawned({
       childRunId,
@@ -190,24 +236,29 @@ export class SubagentSupervisor {
     return {
       childRunId,
       completionRecorded: await this.hasCompletion(options.runId, childRunId),
+      budgets,
     };
   }
 
   private async recordFailedCompletion(
+    parentRunId: Id,
     childRunId: Id,
     completionRecorded: boolean,
     recordCompleted: NonNullable<RunContext["recordSubagentCompleted"]>,
   ): Promise<void> {
-    if (completionRecorded) {
+    if (completionRecorded || (await this.hasCompletion(parentRunId, childRunId))) {
       return;
     }
     try {
-      const usage = aggregateSubagentUsage(await this.childEvents(childRunId));
+      const events = await this.childEvents(childRunId);
+      const usage = aggregateSubagentUsage(events);
+      const outcome = foldRunState(events).status === "cancelled" ? "cancelled" : "failed";
       await recordCompleted({
         childRunId,
-        outcome: "failed",
+        outcome,
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
+        steps: usage.steps,
         ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
       });
     } catch {

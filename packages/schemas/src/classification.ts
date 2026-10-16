@@ -110,6 +110,7 @@ export const EVENT_FIELD_CLASS = {
     outcome: "meta",
     inputTokens: "meta",
     outputTokens: "meta",
+    steps: "meta",
     costMicros: "meta",
   },
 } satisfies { [T in EventType]: Record<PayloadKeys<T>, EventFieldClass> };

@@ -35,10 +35,13 @@ const spawnCallId = Id.parse("44444444444444444444444444");
 const resolveCallId = Id.parse("55555555555555555555555555");
 const hash = "a".repeat(64);
 
-function completion(parts: ModelCompletion["parts"]): ModelCompletion {
+function completion(
+  parts: ModelCompletion["parts"],
+  usage: ModelCompletion["usage"] = { inputTokens: 1, outputTokens: 1 },
+): ModelCompletion {
   return {
     parts,
-    usage: { inputTokens: 1, outputTokens: 1 },
+    usage,
     finishReason: parts.some((part) => part.type === "tool_call") ? "tool_calls" : "stop",
     provider: "fake",
     model: "fake",
@@ -271,6 +274,39 @@ class SpawnModel implements ModelPort {
   }
 }
 
+class TwoChildBudgetModel implements ModelPort {
+  private parentCalls = 0;
+  private childCalls = 0;
+
+  complete(request: ModelRequest): Promise<ModelCompletion> {
+    if (request.role === "worker") {
+      this.childCalls += 1;
+      return Promise.resolve(
+        completion([{ type: "text", text: "child answer" }], {
+          inputTokens: 1,
+          outputTokens: 1,
+          costMicros: this.childCalls === 1 ? 6 : 4,
+        }),
+      );
+    }
+    this.parentCalls += 1;
+    if (this.parentCalls <= 2) {
+      const callId = this.parentCalls === 1 ? childCallId : makeCallId;
+      return Promise.resolve(
+        completion([
+          {
+            type: "tool_call",
+            callId,
+            toolId: Code.parse("agent.spawn"),
+            args: { role: "worker", goal: `child ${String(this.parentCalls)}` },
+          },
+        ]),
+      );
+    }
+    return Promise.resolve(completion([{ type: "text", text: "parent answer" }]));
+  }
+}
+
 async function eventsFor(store: EventStore, runId: Id): Promise<Event[]> {
   const events: Event[] = [];
   for await (const event of store.read(runId)) {
@@ -280,6 +316,51 @@ async function eventsFor(store: EventStore, runId: Id): Promise<Event[]> {
 }
 
 describe("runtime subagent spawning", () => {
+  it("caps total parent and child step and cost usage over two children", async () => {
+    const store = new InMemoryEventStore();
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({
+          budgets: { maxSteps: 10, maxCostUsd: 0.00001 },
+        }),
+        models: ModelsConfigSchema.parse({
+          routing: {
+            default: [{ provider: "local", model: "parent" }],
+            roles: { worker: [{ provider: "local", model: "worker" }] },
+          },
+        }),
+        roles: [{ id: "worker", route: "worker", tools: [], maxDepth: 2, maxChildren: 2 }],
+      },
+      {
+        store,
+        transientVault: true,
+        clock: new FakeClock(4),
+        ids: new SequentialIdGenerator(),
+        model: new TwoChildBudgetModel(),
+        tool: {
+          describe: () => undefined,
+          execute: () =>
+            Promise.resolve({ outcome: "error", errorCode: "unknown_tool", result: null }),
+        },
+        policy: allowAllPolicy,
+      },
+    );
+    try {
+      const parent = await runtime.run("start");
+      const completions = parent.events.filter((event) => event.type === "subagent_completed");
+
+      expect(parent.status).toBe("completed");
+      expect(parent.state.steps).toBe(5);
+      expect(parent.state.usage.costMicros).toBe(10);
+      expect(completions).toMatchObject([
+        { outcome: "completed", steps: 1, costMicros: 6 },
+        { outcome: "completed", steps: 1, costMicros: 4 },
+      ]);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("runs a production child after the durable announcement with tokenized input and shared scope", async () => {
     const store = new InMemoryEventStore();
     const appendOrder: { readonly runId: Id; readonly types: readonly string[] }[] = [];

@@ -26,6 +26,14 @@ export const RunConfigSchema = z
       })
       .strict()
       .prefault({}),
+    subagents: z
+      .object({
+        maxDepth: z.coerce.number().int().nonnegative().max(4).default(4),
+        maxChildrenPerRun: z.coerce.number().int().positive().default(8),
+        maxConcurrentChildren: z.coerce.number().int().positive().default(2),
+      })
+      .strict()
+      .prefault({}),
     budgets: z
       .object({
         maxSteps: z.coerce.number().int().positive().default(200),

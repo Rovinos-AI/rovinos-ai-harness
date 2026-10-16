@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, ModelsConfigSchema, type JsonValue, type ToolSpec } from "@harness/schemas";
+import {
+  Code,
+  FakeClock,
+  Id,
+  ModelsConfigSchema,
+  RunConfigSchema,
+  type JsonValue,
+  type ToolSpec,
+} from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import { RoleRegistry } from "../roles.js";
 import type { ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import { AgentSpawnInputSchema, AgentSpawnTool } from "./spawn-tool.js";
 import { SubagentSupervisor } from "./supervisor.js";
-import type { SubagentRunRequest } from "./supervisor.js";
+import type { SubagentRunRequest, SubagentRunner } from "./supervisor.js";
 import { RunScopeRegistry } from "./scope.js";
 
 const parentRunId = Id.parse("00000000000000000000000000");
@@ -60,14 +68,36 @@ function runContext(tools: ToolPort): RunContext {
   };
 }
 
-function createSpawnTool(
+async function createSpawnTool(
   inner: ToolPort,
   registry: RoleRegistry,
   onChild: (request: SubagentRunRequest) => void = () => undefined,
-): AgentSpawnTool {
+  runChild?: SubagentRunner,
+): Promise<AgentSpawnTool> {
+  const store = new InMemoryEventStore();
+  await store.append(
+    parentRunId,
+    [
+      {
+        runId: parentRunId,
+        ts: 1,
+        v: 1,
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        segmentId: parentRunId,
+        type: "run_created",
+        configHash: "c".repeat(64),
+        policyVersion: "test",
+        depth: 0,
+      },
+    ],
+    0,
+  );
   const supervisor = new SubagentSupervisor({
-    store: new InMemoryEventStore(),
+    store,
     ids: { next: () => childRunId },
+    clock: new FakeClock(1),
+    runConfig: RunConfigSchema.parse({}),
     scopes: new RunScopeRegistry(),
     parentTools: inner,
     parentSpanContext: () => ({
@@ -75,15 +105,17 @@ function createSpawnTool(
       spanId: "b".repeat(16),
       traceFlags: 1,
     }),
-    runChild: (request) => {
-      onChild(request);
-      return Promise.resolve({
-        childRunId: request.runId,
-        status: "completed",
-        value: { input: request.input },
-        usage: { inputTokens: 0, outputTokens: 0 },
-      });
-    },
+    runChild:
+      runChild ??
+      ((request) => {
+        onChild(request);
+        return Promise.resolve({
+          childRunId: request.runId,
+          status: "completed",
+          value: { input: request.input },
+          usage: { inputTokens: 0, outputTokens: 0 },
+        });
+      }),
   });
   return new AgentSpawnTool(inner, registry, supervisor);
 }
@@ -108,7 +140,7 @@ describe("agent.spawn tool", () => {
   it("advertises a non-idempotent built-in and preserves other tool behavior", async () => {
     const inner = innerTools();
     const prepare = vi.spyOn(inner, "prepare");
-    const tool = createSpawnTool(inner, await roles());
+    const tool = await createSpawnTool(inner, await roles());
     const spawnCall = call("agent.spawn", { role: "worker", goal: "goal" });
 
     expect(tool.describe("agent.spawn")).toMatchObject({
@@ -139,7 +171,7 @@ describe("agent.spawn tool", () => {
 
   it("returns a schema failure without starting a child", async () => {
     const runChild = vi.fn();
-    const tool = createSpawnTool(innerTools(), await roles(), runChild);
+    const tool = await createSpawnTool(innerTools(), await roles(), runChild);
 
     await expect(
       tool.execute(call("agent.spawn", { role: "worker", goal: 3 }), runContext(innerTools())),
@@ -150,7 +182,7 @@ describe("agent.spawn tool", () => {
   it("awaits a child with role-filtered tools and returns its JSON result", async () => {
     const inner = innerTools();
     const seen: SubagentRunRequest[] = [];
-    const tool = createSpawnTool(inner, await roles(), (request) => seen.push(request));
+    const tool = await createSpawnTool(inner, await roles(), (request) => seen.push(request));
     const context = runContext(tool);
 
     await expect(
@@ -179,7 +211,7 @@ describe("agent.spawn tool", () => {
 
   it("does not handle calls for another tool ID", async () => {
     const inner = innerTools();
-    const tool = createSpawnTool(inner, await roles());
+    const tool = await createSpawnTool(inner, await roles());
 
     await expect(tool.execute(call("fs.read", {}), runContext(inner))).resolves.toMatchObject({
       result: { ok: true },
@@ -188,25 +220,14 @@ describe("agent.spawn tool", () => {
 
   it("returns a typed error for cancelled children with their identity and status", async () => {
     const inner = innerTools();
-    const supervisor = new SubagentSupervisor({
-      store: new InMemoryEventStore(),
-      ids: { next: () => childRunId },
-      scopes: new RunScopeRegistry(),
-      parentTools: inner,
-      parentSpanContext: () => ({
-        traceId: "a".repeat(32),
-        spanId: "b".repeat(16),
-        traceFlags: 1,
+    const tool = await createSpawnTool(inner, await roles(), undefined, (request) =>
+      Promise.resolve({
+        childRunId: request.runId,
+        status: "cancelled",
+        errorCode: "run_cancelled",
+        usage: { inputTokens: 0, outputTokens: 0 },
       }),
-      runChild: (request) =>
-        Promise.resolve({
-          childRunId: request.runId,
-          status: "cancelled",
-          errorCode: "run_cancelled",
-          usage: { inputTokens: 0, outputTokens: 0 },
-        }),
-    });
-    const tool = new AgentSpawnTool(inner, await roles(), supervisor);
+    );
 
     await expect(
       tool.execute(call("agent.spawn", { role: "worker", goal: "cancel" }), runContext(inner)),
@@ -219,25 +240,14 @@ describe("agent.spawn tool", () => {
 
   it("falls back to a typed code for an unusual child failure reason", async () => {
     const inner = innerTools();
-    const supervisor = new SubagentSupervisor({
-      store: new InMemoryEventStore(),
-      ids: { next: () => childRunId },
-      scopes: new RunScopeRegistry(),
-      parentTools: inner,
-      parentSpanContext: () => ({
-        traceId: "a".repeat(32),
-        spanId: "b".repeat(16),
-        traceFlags: 1,
+    const tool = await createSpawnTool(inner, await roles(), undefined, (request) =>
+      Promise.resolve({
+        childRunId: request.runId,
+        status: "failed",
+        errorCode: "failure reason with spaces",
+        usage: { inputTokens: 1, outputTokens: 2 },
       }),
-      runChild: (request) =>
-        Promise.resolve({
-          childRunId: request.runId,
-          status: "failed",
-          errorCode: "failure reason with spaces",
-          usage: { inputTokens: 1, outputTokens: 2 },
-        }),
-    });
-    const tool = new AgentSpawnTool(inner, await roles(), supervisor);
+    );
 
     await expect(
       tool.execute(call("agent.spawn", { role: "worker", goal: "failed" }), runContext(inner)),

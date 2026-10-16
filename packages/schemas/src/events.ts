@@ -243,6 +243,7 @@ const subagentCompletedEvent = z
     outcome: z.enum(["completed", "failed", "cancelled"]),
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
+    steps: z.number().int().nonnegative().optional(),
     costMicros: z.number().int().nonnegative().optional(),
   })
   .strict();

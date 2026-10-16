@@ -46,6 +46,7 @@ export interface RunContext {
     readonly outcome: "completed" | "failed" | "cancelled";
     readonly inputTokens: number;
     readonly outputTokens: number;
+    readonly steps?: number;
     readonly costMicros?: number;
   }) => Promise<void>;
   /** Structured-output contract used only for the child's final result call. */

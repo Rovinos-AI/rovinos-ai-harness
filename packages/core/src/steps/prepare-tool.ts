@@ -114,6 +114,7 @@ export function toolRunContext(
       outcome,
       inputTokens,
       outputTokens,
+      steps,
       costMicros,
     }) => {
       events.push(
@@ -124,6 +125,7 @@ export function toolRunContext(
           outcome,
           inputTokens,
           outputTokens,
+          ...(steps === undefined ? {} : { steps }),
           ...(costMicros === undefined ? {} : { costMicros }),
         }),
       );

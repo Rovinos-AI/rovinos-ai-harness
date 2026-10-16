@@ -88,6 +88,18 @@ export function contextForRole(role: ResolvedRole): ContextPort {
   };
 }
 
+function childValueTransform(
+  runId: SubagentRunRequest["runId"],
+  resolver: AuditingVaultResolver,
+): ValueTransform {
+  return async (schema, value) => {
+    const validated = await validateWithTokens(schema, value, { runId, resolver });
+    return validated.ok
+      ? { ok: true, tokenized: validated.tokenized }
+      : { ok: false, issues: validated.issues };
+  };
+}
+
 /** Creates the runtime's spawn decorator and production child-run callback. */
 export function createSubagentTool(options: {
   readonly config: RuntimeConfig;
@@ -105,10 +117,11 @@ export function createSubagentTool(options: {
   const supervisor = new SubagentSupervisor({
     store: options.store,
     ids: options.ids,
+    clock: options.clock,
+    runConfig: options.config.run,
     scopes: options.scopes,
     parentTools: options.parentTool,
     runChild: async (request: SubagentRunRequest) => {
-      const resolver = options.resolver;
       const result = await runLoop({
         recorder: new RunRecorder(
           options.store,
@@ -125,7 +138,7 @@ export function createSubagentTool(options: {
         ids: options.ids,
         goal: request.input,
         signal: request.signal,
-        budgets: options.config.run.budgets,
+        budgets: request.budgets,
         checkpointEveryEvents: options.config.run.checkpointEveryEvents,
         configHash: configHash(options.config),
         policyVersion: options.policyVersion,
@@ -134,18 +147,10 @@ export function createSubagentTool(options: {
           ? {}
           : {
               finalOutputSchema: request.role.resultSchema,
-              ...(resolver === undefined
+              ...(options.resolver === undefined
                 ? {}
                 : {
-                    valueTransform: (async (schema, value) => {
-                      const validated = await validateWithTokens(schema, value, {
-                        runId: request.runId,
-                        resolver,
-                      });
-                      return validated.ok
-                        ? { ok: true, tokenized: validated.tokenized }
-                        : { ok: false, issues: validated.issues };
-                    }) satisfies ValueTransform,
+                    valueTransform: childValueTransform(request.runId, options.resolver),
                   }),
             }),
         parentRunId: request.parentRunId,
