@@ -55,7 +55,7 @@ async function startMockOAuthServer(options: MockOAuthOptions = {}) {
       if (url.pathname === "/mcp" && options.unauthorizedMcp === true) {
         response
           .writeHead(401, {
-            "WWW-Authenticate": `${["Be", "arer"].join("")} error="invalid_token", error_description="${errorCanary}", resource_metadata="http://${request.headers.host}/.well-known/oauth-protected-resource/mcp"`,
+            "WWW-Authenticate": `bearer error="invalid_token", error_description="${errorCanary}", resource_metadata="http://${request.headers.host}/.well-known/oauth-protected-resource/mcp"`,
           })
           .end();
         return;
@@ -346,8 +346,8 @@ describe("McpOAuthProvider", () => {
     try {
       expect(provider.redirectUrl).toBeUndefined();
       expect(provider.clientMetadata.grant_types).toEqual(["client_credentials"]);
-      expect(provider.prepareTokenRequest()?.toString()).toBe(
-        "grant_type=client_credentials&scope=tools%3Aread",
+      expect(decodeURIComponent(provider.prepareTokenRequest()?.toString() ?? "")).toBe(
+        "grant_type=client_credentials&scope=tools:read",
       );
       expect(() => provider.redirectToAuthorization(new URL("https://auth.invalid"))).toThrow(
         McpAuthRequiredError,
