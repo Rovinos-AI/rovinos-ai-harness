@@ -82,6 +82,9 @@ describe("approval app SDK bootstrap", () => {
     await vi.waitFor(() => {
       expect(bridge.call).toHaveBeenCalled();
     });
+    expect(bridge.call.mock.invocationCallOrder[0]).toBeGreaterThan(
+      bridge.connect.mock.invocationCallOrder[0] ?? 0,
+    );
     const calls = JSON.stringify(bridge.call.mock.calls);
     expect(calls).toContain("harness.telemetry.emit");
     expect(calls).toContain("payload_invalid");
@@ -133,5 +136,6 @@ describe("approval app SDK bootstrap", () => {
     });
     expect(document.body.textContent).not.toContain("SYNTHETIC");
     expect(JSON.stringify(bridge.call.mock.calls)).not.toContain("SYNTHETIC");
+    expect(bridge.call).not.toHaveBeenCalled();
   });
 });

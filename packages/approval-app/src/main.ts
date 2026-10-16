@@ -12,6 +12,16 @@ import { mountApprovalActions } from "./actions.js";
 import { createApprovalView } from "./view.js";
 
 const app = new App({ name: "harness-approval", version: "0.0.0" }, {}, { autoResize: false });
+let finishHostConnection: (connected: boolean) => void = () => undefined;
+const hostConnection = new Promise<void>((resolve, reject) => {
+  finishHostConnection = (connected) => {
+    if (connected) {
+      resolve();
+    } else {
+      reject(new Error("host unavailable"));
+    }
+  };
+});
 
 async function callApprovalTool(
   name: "harness.approvals.resolve" | "harness.approvals.reveal",
@@ -40,7 +50,10 @@ async function callApprovalTool(
 
 const telemetry = createAppTelemetry({
   bridge: {
-    callTool: (name, args) => app.callServerTool({ name, arguments: args }),
+    callTool: async (name, args) => {
+      await hostConnection;
+      return app.callServerTool({ name, arguments: args });
+    },
   },
   manifest: { spans: ["ui.error", "ui.decision"] },
 });
@@ -117,9 +130,16 @@ window.addEventListener(
   () => {
     window.clearInterval(interval);
     view.dispose();
+    void telemetry.dispose();
   },
   { once: true },
 );
-void app.connect().catch(() => {
-  view.receive(undefined);
-});
+void app.connect().then(
+  () => {
+    finishHostConnection(true);
+  },
+  () => {
+    finishHostConnection(false);
+    view.receive(undefined);
+  },
+);
