@@ -202,8 +202,14 @@ export async function searchDirectory(directory: string, context: SearchContext)
         return true;
       }
       state.filesVisited += 1;
-      if (await searchFile(path, relativePath, context)) {
-        return true;
+      try {
+        if (await searchFile(path, relativePath, context)) {
+          return true;
+        }
+      } catch (error) {
+        if (!(error instanceof WorkspaceFileError && error.code === "fs_path_invalid")) {
+          throw error;
+        }
       }
     }
   }

@@ -85,6 +85,9 @@ used by a command.
 
 Atomic replacements write and sync a temporary sibling, then compare the
 target's device, inode, size, and modification time immediately before rename.
+The runner also needs write permission on the target's parent directory for
+the rename; a permission failure is reported as a closed filesystem operation
+error and leaves the original file unchanged.
 This narrows but cannot eliminate the final stat-to-rename race or make parent
 path resolution descriptor-relative. Runner leases serialize normal `exec` and
 file-tool requests; deployments and snapshot/restore code must not mutate an

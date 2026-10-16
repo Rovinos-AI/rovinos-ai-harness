@@ -25,6 +25,7 @@ import type { ExecResult, ExecSpec } from "../../src/types.js";
 import { fetchWebContent } from "./web-fetch.js";
 import type { ProxyRequest, ProxyResponse, WebFetchTransport } from "./web-fetch-transport.js";
 import { ensureRunWorkspace } from "../../src/workspace.js";
+import { WorkspaceFileSystem } from "../../src/workspace-files.js";
 
 const token = "synthetic-runner-token-that-is-at-least-32-bytes";
 const runId = Id.parse("00000000000000000000000001");
@@ -483,6 +484,68 @@ describe("runner HTTP request handler", () => {
     expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
     expect(responses.filter((response) => response.status === 409)).toHaveLength(1);
     expect(await readFile(path, "utf8")).toBe("after");
+  });
+
+  it("serializes lease requests until file operations restore process credentials", async () => {
+    const executionUid = process.getuid?.();
+    const executionGid = process.getgid?.();
+    expect(executionUid).toBeDefined();
+    expect(executionGid).toBeDefined();
+    let markStarted: () => void = () => undefined;
+    let releaseOperation: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseOperation = resolve;
+    });
+    const executeFileOperation = vi
+      .spyOn(WorkspaceFileSystem.prototype, "execute")
+      .mockImplementation(async () => {
+        expect(process.geteuid?.()).toBe(executionUid);
+        expect(process.getegid?.()).toBe(executionGid);
+        markStarted();
+        await gate;
+        return { binary: false, bytes: 0, content: "", offset: 0, path: "idle.txt" };
+      });
+    const handler = createRunnerRequestHandler(makeOptions());
+    try {
+      const fileResponse = new MemoryResponse();
+      const pendingFile = handler(
+        makeRequest({
+          url: "/fs/read",
+          authorization: "Bearer " + token,
+          body: JSON.stringify({
+            runId,
+            request: { operation: "read", input: { path: "idle.txt" } },
+          }),
+        }),
+        fileResponse,
+      );
+      await started;
+      const leaseResponse = new MemoryResponse();
+      const pendingLease = handler(
+        makeRequest({
+          url: "/lease",
+          authorization: "Bearer " + token,
+          body: JSON.stringify({ runId }),
+        }),
+        leaseResponse,
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(leaseResponse.writableEnded).toBe(false);
+      releaseOperation();
+      await Promise.all([pendingFile, pendingLease]);
+
+      expect(fileResponse.status).toBe(200);
+      expect(leaseResponse.status).toBe(200);
+      expect(process.geteuid?.()).toBe(executionUid);
+      expect(process.getegid?.()).toBe(executionGid);
+      expect(executeFileOperation).toHaveBeenCalledOnce();
+    } finally {
+      releaseOperation();
+      executeFileOperation.mockRestore();
+    }
   });
 
   it("executes an authenticated request and returns a schema-validated result", async () => {

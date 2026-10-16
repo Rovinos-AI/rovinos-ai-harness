@@ -33,6 +33,8 @@ import {
 } from "./index.js";
 import type { FsOperation } from "./fs-tools.js";
 import { readFileSnapshotAt, writeFileAt } from "./workspace-file-helpers.js";
+import { countWorkspaceBytes } from "./workspace-file-quota.js";
+import { searchFile } from "./workspace-file-search.js";
 import { createRunnerRequestHandler } from "../runner/src/server.js";
 import type { RunnerResponse, RunnerRequest } from "../runner/src/request-handler.js";
 
@@ -366,6 +368,15 @@ describe("workspace file operation contracts and safety", () => {
       offset: 2,
       bytes: 1,
     });
+    await writeFile(join(project, "multibyte.txt"), "é");
+    expect(
+      await files.execute(runId, "read", { path: "multibyte.txt", offset: 1, length: 1 }, signal),
+    ).toMatchObject({
+      binary: false,
+      content: "",
+      offset: 2,
+      bytes: 0,
+    });
     expect(FsToolResultSchema.safeParse({ binary: true, bytes: 3, path: "secret" }).success).toBe(
       false,
     );
@@ -505,7 +516,7 @@ describe("workspace file operation contracts and safety", () => {
     await expect(readFile(join(outside, "target.txt"), "utf8")).resolves.toBe("unchanged");
   });
 
-  it("rejects protected offload hard links for all file tools", async () => {
+  it("rejects targeted hard links but skips them during recursive search", async () => {
     const root = await workspaceRoot();
     const project = await ensureRunWorkspace(root, runId);
     const protectedPath = join(root, runId, ".harness", "offload", "protected.txt");
@@ -513,12 +524,27 @@ describe("workspace file operation contracts and safety", () => {
     await createHardLink(protectedPath, join(project, "alias.txt"));
 
     await expectFileError("read", root, { path: "alias.txt" }, "fs_path_invalid");
-    await expectFileError(
-      "search",
-      root,
-      { path: "alias.txt", query: "protected", regex: false, limit: 1 },
-      "fs_path_invalid",
-    );
+    const files = new WorkspaceFileSystem(root);
+    await expect(
+      files.execute(
+        runId,
+        "search",
+        { path: "alias.txt", query: "protected", regex: false, limit: 1 },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: "fs_path_invalid" });
+    await writeFile(join(project, "ordinary.txt"), "public content");
+    await expect(
+      files.execute(
+        runId,
+        "search",
+        { path: ".", query: "public", regex: false, limit: 1 },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({
+      matches: [{ path: "ordinary.txt", line: "public content" }],
+      truncated: false,
+    });
     await expectFileError(
       "write",
       root,
@@ -673,6 +699,30 @@ describe("workspace file operation contracts and safety", () => {
     expect((await readdir(project)).filter((name) => name.startsWith(".harness-fs-"))).toEqual([]);
   });
 
+  it("keeps the prior bytes and hash when an atomic replacement is aborted", async () => {
+    const root = await workspaceRoot();
+    const project = await ensureRunWorkspace(root, runId);
+    const path = join(project, "aborted-atomic.txt");
+    const original = "original bytes";
+    await writeFile(path, original);
+    const snapshot = await readFileSnapshotAt(path);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      writeFileAt(path, Buffer.from("replacement"), {
+        mode: "overwrite",
+        signal: controller.signal,
+        expectedIdentity: snapshot.identity,
+      }),
+    ).rejects.toMatchObject({ code: "fs_operation_failed" });
+    const unchanged = await readFile(path);
+    expect(createHash("sha256").update(unchanged).digest("hex")).toBe(
+      createHash("sha256").update(snapshot.bytes).digest("hex"),
+    );
+    expect((await readdir(project)).filter((name) => name.startsWith(".harness-fs-"))).toEqual([]);
+  });
+
   // threat: T-09
   it("enforces the existing per-file and per-run quotas", async () => {
     const root = await workspaceRoot();
@@ -741,6 +791,15 @@ describe("workspace file operation contracts and safety", () => {
       truncated: true,
     });
     await expect(
+      files.execute(runId, "list", { path: ".", depth: 3, limit: 2 }, signal),
+    ).resolves.toMatchObject({ truncated: true });
+    const listed = await files.execute(runId, "list", { path: ".", depth: 3, limit: 20 }, signal);
+    expect(listed).toMatchObject({ truncated: false });
+    expect(listed).toHaveProperty(
+      "entries",
+      expect.arrayContaining([{ path: "nested/deeper/match.txt", type: "file", bytes: 13 }]),
+    );
+    await expect(
       files.execute(
         runId,
         "search",
@@ -766,6 +825,7 @@ describe("workspace file operation contracts and safety", () => {
         { path: "nested/deeper/match.txt", lineNumber: 2 },
       ],
     });
+
     const controller = new AbortController();
     controller.abort();
     await expect(
@@ -773,6 +833,39 @@ describe("workspace file operation contracts and safety", () => {
     ).rejects.toMatchObject({
       code: "fs_operation_failed",
     });
+  });
+
+  it("counts nested project files while excluding the protected workspace directory", async () => {
+    const root = await workspaceRoot();
+    await mkdir(join(root, ".harness", "offload"), { recursive: true });
+    await writeFile(join(root, ".harness", "offload", "private.txt"), "not counted");
+    await mkdir(join(root, "nested"), { recursive: true });
+    await writeFile(join(root, "nested", "file.txt"), "counted");
+
+    await expect(countWorkspaceBytes(root, new AbortController().signal)).resolves.toBe(7);
+
+    const oversized = join(root, "oversized.bin");
+    await writeFile(oversized, "");
+    await truncate(oversized, 500 * 1024 * 1024 + 1);
+    await expect(countWorkspaceBytes(root, new AbortController().signal)).rejects.toMatchObject({
+      code: "workspace_quota_exceeded",
+    });
+  });
+
+  it("rejects an explicitly targeted file that disappears before opening", async () => {
+    const root = await workspaceRoot();
+    const matches: { path: string; lineNumber: number; line: string }[] = [];
+    await expect(
+      searchFile(join(root, "missing.txt"), "missing.txt", {
+        root,
+        prefix: ".",
+        matcher: () => false,
+        limit: 10,
+        matches,
+        signal: new AbortController().signal,
+        state: { filesVisited: 0, bytesScanned: 0 },
+      }),
+    ).rejects.toMatchObject({ code: "fs_path_invalid" });
   });
 
   it("caps total search input and regex line lengths across many large files", async () => {

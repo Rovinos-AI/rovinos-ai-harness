@@ -16,6 +16,7 @@ import { WorkspaceFileError } from "../../src/workspace-file-helpers.js";
 import { WebFetchRequestSchema } from "../../src/web-fetch-contracts.js";
 import { executeRunnerFetch, WebFetchError } from "./web-fetch.js";
 import type { RunnerServerOptions } from "./server.js";
+import { withRunnerProcessLock } from "./process-lock.js";
 
 /** Maximum UTF-8 request body accepted by runner endpoints. */
 export const MAX_RUNNER_REQUEST_BYTES = 2 * 1024 * 1024;
@@ -239,17 +240,19 @@ async function withExecutionIdentity<T>(
   gid: number | undefined,
   operation: () => Promise<T>,
 ): Promise<T> {
-  const originalUid = process.geteuid?.();
-  const originalGid = process.getegid?.();
-  if (originalUid === undefined || originalGid === undefined) {
-    return operation();
-  }
-  try {
-    setExecutionIdentity(uid, gid, originalUid, originalGid);
-    return await operation();
-  } finally {
-    restoreExecutionIdentity(originalUid, originalGid, uid ?? originalUid, gid ?? originalGid);
-  }
+  return withRunnerProcessLock(async () => {
+    const originalUid = process.geteuid?.();
+    const originalGid = process.getegid?.();
+    if (originalUid === undefined || originalGid === undefined) {
+      return operation();
+    }
+    try {
+      setExecutionIdentity(uid, gid, originalUid, originalGid);
+      return await operation();
+    } finally {
+      restoreExecutionIdentity(originalUid, originalGid, uid ?? originalUid, gid ?? originalGid);
+    }
+  });
 }
 
 function setExecutionIdentity(
