@@ -10,6 +10,7 @@ import {
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
+import { LeaseLostError } from "../recorder.js";
 import { RoleRegistry } from "../roles.js";
 import type { ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import { AgentSpawnInputSchema, AgentSpawnTool } from "./spawn-tool.js";
@@ -21,9 +22,9 @@ const parentRunId = Id.parse("00000000000000000000000000");
 const parentCallId = Id.parse("11111111111111111111111111");
 const childRunId = Id.parse("22222222222222222222222222");
 
-async function roles(): Promise<RoleRegistry> {
+async function roles(maxChildren = 2): Promise<RoleRegistry> {
   return RoleRegistry.create({
-    roles: [{ id: "worker", tools: ["fs.read"], maxDepth: 2, maxChildren: 2 }],
+    roles: [{ id: "worker", tools: ["fs.read"], maxDepth: 2, maxChildren }],
     models: ModelsConfigSchema.parse({
       routing: {
         default: [{ provider: "local", model: "model" }],
@@ -207,31 +208,71 @@ describe("agent.spawn tool", () => {
     {
       name: "global depth",
       runConfig: RunConfigSchema.parse({ subagents: { maxDepth: 0 } }),
+      expectedCode: "subagent_limit",
     },
     {
       name: "per-run child count",
       runConfig: RunConfigSchema.parse({ subagents: { maxChildrenPerRun: 1 } }),
       existingChild: Id.parse("77777777777777777777777777"),
+      expectedCode: "subagent_limit",
     },
     {
       name: "concurrent child count",
       runConfig: RunConfigSchema.parse({ subagents: { maxConcurrentChildren: 1 } }),
       existingChild: Id.parse("77777777777777777777777777"),
+      expectedCode: "subagent_limit",
     },
-  ])("returns subagent_limit for the $name limit", async ({ runConfig, existingChild }) => {
+    {
+      name: "role depth",
+      runConfig: RunConfigSchema.parse({}),
+      depth: 2,
+      expectedCode: "subagent_depth_limit",
+    },
+    {
+      name: "role child count",
+      runConfig: RunConfigSchema.parse({}),
+      existingChild: Id.parse("77777777777777777777777777"),
+      roleMaxChildren: 1,
+      expectedCode: "subagent_children_limit",
+    },
+  ])(
+    "returns $expectedCode for the $name limit",
+    async ({ runConfig, existingChild, depth, roleMaxChildren, expectedCode }) => {
     const runChild = vi.fn();
-    const tool = await createSpawnTool(innerTools(), await roles(), () => undefined, runChild, {
-      runConfig,
-      ...(existingChild === undefined ? {} : { existingChild }),
-    });
+    const tool = await createSpawnTool(
+      innerTools(),
+      await roles(roleMaxChildren),
+      () => undefined,
+      runChild,
+      {
+        runConfig,
+        ...(existingChild === undefined ? {} : { existingChild }),
+      },
+    );
 
     await expect(
       tool.execute(
         call("agent.spawn", { role: "worker", goal: "must not start" }),
-        runContext(innerTools()),
+        {
+          ...runContext(innerTools()),
+          ...(depth === undefined ? {} : { depth }),
+        },
       ),
-    ).resolves.toEqual({ outcome: "error", errorCode: "subagent_limit", result: null });
+    ).resolves.toEqual({ outcome: "error", errorCode: expectedCode, result: null });
     expect(runChild).not.toHaveBeenCalled();
+    },
+  );
+
+  it("propagates lease-loss errors instead of converting them to tool results", async () => {
+    const inner = innerTools();
+    const leaseLost = new LeaseLostError(2);
+    const tool = await createSpawnTool(inner, await roles(), undefined, () =>
+      Promise.reject(leaseLost),
+    );
+
+    await expect(
+      tool.execute(call("agent.spawn", { role: "worker", goal: "goal" }), runContext(inner)),
+    ).rejects.toBe(leaseLost);
   });
 
   it("awaits a child with role-filtered tools and returns its JSON result", async () => {

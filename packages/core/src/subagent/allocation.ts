@@ -12,6 +12,7 @@ import {
 } from "./budgets.js";
 
 const spawnLocks = new WeakMap<EventStore, Map<Id, Promise<void>>>();
+const pendingSpawns = new WeakMap<EventStore, Map<Id, number>>();
 
 interface ResolveChildAllocationOptions {
   readonly store: EventStore;
@@ -22,6 +23,7 @@ interface ResolveChildAllocationOptions {
   readonly now: number;
   readonly recordSpawned: NonNullable<RunContext["recordSubagentSpawned"]>;
   readonly childRunId: Id;
+  readonly concurrentSpawns: number;
 }
 
 interface ResolvedChildAllocation {
@@ -34,7 +36,7 @@ interface ResolvedChildAllocation {
 export async function withSpawnLock<T>(
   store: EventStore,
   runId: Id,
-  operation: () => Promise<T>,
+  operation: (concurrentSpawns: number) => Promise<T>,
 ): Promise<T> {
   let runs = spawnLocks.get(store);
   if (runs === undefined) {
@@ -42,6 +44,13 @@ export async function withSpawnLock<T>(
     spawnLocks.set(store, runs);
   }
   const previous = runs.get(runId) ?? Promise.resolve();
+  let pending = pendingSpawns.get(store);
+  if (pending === undefined) {
+    pending = new Map();
+    pendingSpawns.set(store, pending);
+  }
+  const concurrentSpawns = (pending.get(runId) ?? 0) + 1;
+  pending.set(runId, concurrentSpawns);
   let release = (): void => undefined;
   const current = new Promise<void>((resolve) => {
     release = resolve;
@@ -49,9 +58,15 @@ export async function withSpawnLock<T>(
   runs.set(runId, current);
   await previous;
   try {
-    return await operation();
+    return await operation(pending.get(runId) ?? concurrentSpawns);
   } finally {
     release();
+    const remainingSpawns = (pending.get(runId) ?? 1) - 1;
+    if (remainingSpawns === 0) {
+      pending.delete(runId);
+    } else {
+      pending.set(runId, remainingSpawns);
+    }
     if (runs.get(runId) === current) {
       runs.delete(runId);
     }
@@ -175,14 +190,13 @@ async function deriveAllocation(
     now: options.now,
     parentDeadlineTs: parent.deadlineTs,
     reserved: reservation,
-    availableSlots: availableSlots(options, activeCount, spawned.length, existing),
+    availableSlots: availableSlots(options, activeCount, existing),
   });
 }
 
 function availableSlots(
   options: ResolveChildAllocationOptions,
   activeCount: number,
-  totalChildren: number,
   existing: Event | undefined,
 ): number {
   if (existing?.type === "subagent_spawned") {
@@ -191,7 +205,7 @@ function availableSlots(
   if (activeCount > 0) {
     return options.runConfig.subagents.maxConcurrentChildren - activeCount;
   }
-  return totalChildren === 0 ? options.runConfig.subagents.maxConcurrentChildren : 1;
+  return Math.min(options.runConfig.subagents.maxConcurrentChildren, options.concurrentSpawns);
 }
 
 /** Error raised when a configured child count or concurrency ceiling is reached. */

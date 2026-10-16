@@ -123,7 +123,7 @@ export class SubagentSupervisor {
       throw new SubagentError("subagent_parent_span_missing");
     }
 
-    const allocation = await withSpawnLock(this.options.store, context.runId, () =>
+    const allocation = await withSpawnLock(this.options.store, context.runId, (concurrentSpawns) =>
       resolveChildAllocation({
         store: this.options.store,
         runId: context.runId,
@@ -133,6 +133,7 @@ export class SubagentSupervisor {
         now: this.options.clock.now(),
         recordSpawned,
         childRunId: this.options.ids.next(),
+        concurrentSpawns,
       }),
     );
     if (allocation.completion !== undefined) {
@@ -191,6 +192,10 @@ export class SubagentSupervisor {
     const childSignal = deriveChildSignal(options.request.signal);
     let result: SubagentResult;
     try {
+      const completion = await this.findCompletion(options.parentRunId, options.childRunId);
+      if (completion !== undefined) {
+        return await this.cachedResult(completion, options.request.role);
+      }
       result = await this.options.runChild({
         ...options.request,
         signal: childSignal.signal,

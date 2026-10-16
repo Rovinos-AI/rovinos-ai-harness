@@ -29,6 +29,12 @@ export const AgentSpawnInputSchema = z
   .strict();
 
 const AGENT_SPAWN_ID: CodeType = "agent.spawn";
+const SPAWN_ERROR_CODES = new Set<CodeType>([
+  "budget_exceeded",
+  "subagent_children_limit",
+  "subagent_depth_limit",
+  "subagent_limit",
+]);
 const AGENT_SPAWN_SPEC = {
   toolId: AGENT_SPAWN_ID,
   description: "Run an isolated child agent with the selected role.",
@@ -96,7 +102,7 @@ export class AgentSpawnTool implements ToolPort {
         context,
       });
     } catch (error) {
-      if (error instanceof HarnessError) {
+      if (error instanceof HarnessError && SPAWN_ERROR_CODES.has(error.code)) {
         const errorCode = Code.safeParse(error.code);
         if (errorCode.success) {
           return { outcome: "error", errorCode: errorCode.data, result: null };

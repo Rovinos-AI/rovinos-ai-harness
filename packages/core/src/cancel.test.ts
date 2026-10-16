@@ -219,6 +219,28 @@ describe("cancelRun", () => {
     expect(await store.head(runId)).toBe(head);
   });
 
+  it("does not report a busy run as already terminal after every sweep races", async () => {
+    const store = new InMemoryEventStore();
+    await seedRun(store, "running");
+    const readHead = store.head.bind(store);
+    let races = 0;
+    vi.spyOn(store, "head").mockImplementation(async (requestedRunId) => {
+      const head = await readHead(requestedRunId);
+      if (requestedRunId === runId && races < 3) {
+        await store.append(runId, [competingEvent(head)], head);
+        races += 1;
+      }
+      return requestedRunId === runId && races > 0 ? await readHead(requestedRunId) : head;
+    });
+
+    await expect(
+      cancelRun(store, runId, new FakeClock(200), new SequentialIdGenerator()),
+    ).rejects.toMatchObject({ code: "cancel_conflict" });
+
+    expect(races).toBe(3);
+    expect(foldRunState(await readEvents(store)).status).toBe("running");
+  });
+
   it.each(["running", "suspended"] as const)(
     "cancels a %s child and its descendant before cancelling the parent",
     async (childStatus) => {

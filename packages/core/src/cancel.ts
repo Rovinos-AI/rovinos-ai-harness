@@ -78,6 +78,7 @@ async function cancelRunTree(options: {
   const failures: unknown[] = [];
   const attemptedChildren = new Set<Id>();
   let result: CancelRunResult = "already_terminal";
+  let stable = false;
   try {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
@@ -85,6 +86,7 @@ async function cancelRunTree(options: {
         const cancellation = await cancelAfterSweep(options, attemptedChildren);
         if (cancellation !== undefined) {
           result = cancellation;
+          stable = true;
           break;
         }
       } catch (error) {
@@ -99,6 +101,9 @@ async function cancelRunTree(options: {
     visiting.delete(runId);
   }
   visited.add(runId);
+  if (!stable && failures.length === 0) {
+    failures.push(new CancelConflictError());
+  }
   if (failures.length > 0) {
     if (failures.length === 1 && failures[0] instanceof CancelConflictError) {
       throw failures[0];

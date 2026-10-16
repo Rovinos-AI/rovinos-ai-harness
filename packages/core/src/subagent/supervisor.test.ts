@@ -666,6 +666,62 @@ describe("SubagentSupervisor", () => {
     await expect(spawn).resolves.toMatchObject({ status: "completed" });
   });
 
+  it("does not start a child cancelled after the pre-start check", async () => {
+    ensureTracing();
+    const store = new InMemoryEventStore();
+    await seedParent(store);
+    const recorder = new RunRecorder(store, parentRunId, segmentId, 1, new FakeClock(1));
+    const events: Event[] = [];
+    const runContext = toolRunContext(context(), recorder, events);
+    const originalRead = store.read.bind(store);
+    let parentReads = 0;
+    vi.spyOn(store, "read").mockImplementation(async function* (requestedRunId) {
+      const snapshot: Event[] = [];
+      for await (const event of originalRead(requestedRunId)) {
+        snapshot.push(event);
+      }
+      if (requestedRunId === parentRunId) {
+        parentReads += 1;
+        if (parentReads === 2) {
+          await runContext.recordSubagentCompleted?.({
+            childRunId,
+            outcome: "cancelled",
+            inputTokens: 0,
+            outputTokens: 0,
+            steps: 0,
+            costMicros: 0,
+          });
+        }
+      }
+      yield* snapshot;
+    });
+    const runChild = vi.fn();
+    const supervisor = new SubagentSupervisor(
+      supervisorOptions(runChild, {
+        store,
+        parentSpanContext: () => ({
+          traceId: "a".repeat(32),
+          spanId: "b".repeat(16),
+          traceFlags: 1,
+        }),
+      }),
+    );
+
+    await expect(
+      recorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
+        supervisor.spawn({ role, goal: "goal", call: toolCall(), context: runContext }),
+      ),
+    ).resolves.toMatchObject({ status: "cancelled" });
+
+    expect(runChild).not.toHaveBeenCalled();
+    expect(
+      (await eventsOf(store, parentRunId)).filter(
+        (event) => event.type === "subagent_completed" && event.childRunId === childRunId,
+      ),
+    ).toHaveLength(1);
+    expect(await eventsOf(store, childRunId)).toHaveLength(0);
+  });
+
   it("serializes spawn limits with the durable announcement", async () => {
     ensureTracing();
     const store = new InMemoryEventStore();
@@ -721,21 +777,21 @@ describe("SubagentSupervisor", () => {
         return last;
       });
     };
-    const first = spawn(parentCallId);
+    const both = Promise.all([
+      spawn(parentCallId),
+      spawn(Id.parse("55555555555555555555555555")),
+    ]).catch((error: unknown) => error);
     await vi.waitFor(() => {
       expect(runChild).toHaveBeenCalledTimes(1);
     });
 
-    await expect(spawn(Id.parse("55555555555555555555555555"))).rejects.toMatchObject({
-      code: "subagent_limit",
-    });
     finishChild?.({
       childRunId,
       status: "completed",
       value: null,
       usage: { inputTokens: 0, outputTokens: 0, steps: 0 },
     });
-    await expect(first).resolves.toMatchObject({ type: "subagent_completed" });
+    await expect(both).resolves.toMatchObject({ code: "subagent_limit" });
     expect(
       (await eventsOf(store, parentRunId)).filter((event) => event.type === "subagent_spawned"),
     ).toHaveLength(1);
@@ -802,9 +858,6 @@ describe("SubagentSupervisor", () => {
       });
     };
     const first = spawn(parentCallId);
-    await vi.waitFor(() => {
-      expect(childBudgets).toHaveLength(1);
-    });
     const second = spawn(Id.parse("55555555555555555555555555"));
 
     await expect(Promise.all([first, second])).resolves.toHaveLength(2);
@@ -815,6 +868,49 @@ describe("SubagentSupervisor", () => {
     expect(
       (await eventsOf(store, parentRunId)).filter((event) => event.type === "subagent_completed"),
     ).toHaveLength(0);
+  });
+
+  it("gives a lone child the full remaining parent budget", async () => {
+    ensureTracing();
+    const store = new InMemoryEventStore();
+    await seedParent(store);
+    const recorder = new RunRecorder(store, parentRunId, segmentId, 1, new FakeClock(1));
+    let childBudgets: SubagentRunRequest["budgets"] | undefined;
+    const supervisor = new SubagentSupervisor(
+      supervisorOptions(
+        (request) => {
+          childBudgets = request.budgets;
+          return Promise.resolve({
+            childRunId: request.runId,
+            status: "suspended",
+            usage: { inputTokens: 0, outputTokens: 0, steps: 1, costMicros: 1 },
+          });
+        },
+        {
+          store,
+          runConfig: RunConfigSchema.parse({
+            subagents: { maxConcurrentChildren: 2 },
+            budgets: { maxSteps: 10, maxCostUsd: 0.00001 },
+          }),
+          parentSpanContext: () => ({
+            traceId: "a".repeat(32),
+            spanId: "b".repeat(16),
+            traceFlags: 1,
+          }),
+        },
+      ),
+    );
+
+    await recorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
+      supervisor.spawn({
+        role,
+        goal: "goal",
+        call: toolCall(),
+        context: toolRunContext(context(), recorder, []),
+      }),
+    );
+
+    expect(childBudgets).toMatchObject({ maxSteps: 10, maxCostUsd: 0.00001 });
   });
 
   it("caps sequential children to the parent's remaining cost without double counting", async () => {
@@ -915,7 +1011,7 @@ describe("SubagentSupervisor", () => {
     });
 
     expect(childBudgets).toEqual([
-      { steps: 5, costUsd: 0.000005 },
+      { steps: 10, costUsd: 0.00001 },
       { steps: 5, costUsd: 0.000005 },
     ]);
     const state = foldRunState(await eventsOf(store, parentRunId));

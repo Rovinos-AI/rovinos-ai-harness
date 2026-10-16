@@ -883,9 +883,9 @@ describe("runtime subagent spawning", () => {
   it.each([
     {
       name: "steps",
-      budgets: RunConfigSchema.parse({ budgets: { maxSteps: 1 } }).budgets,
+      budgets: RunConfigSchema.parse({ budgets: { maxSteps: 2 } }).budgets,
       deadlineTs: 100,
-      responseCount: 2,
+      responseCount: 3,
       costMicros: 0,
       now: 20,
       exceeded: "steps",
