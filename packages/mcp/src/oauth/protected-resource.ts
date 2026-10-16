@@ -16,16 +16,39 @@ export async function resourceAdvertisesClientCredentials(
 ): Promise<boolean> {
   try {
     const resourceUrl = new URL(serverUrl);
-    const metadataUrl = new URL(
-      `/.well-known/oauth-protected-resource${resourceUrl.pathname}`,
-      resourceUrl.origin,
-    );
+    const challenge = await fetch(resourceUrl, {
+      headers: { accept: "application/json" },
+      redirect: "error",
+      ...(signal === undefined ? {} : { signal }),
+    });
+    const resourceMetadata =
+      challenge.status === 401
+        ? challenge.headers
+            .get("www-authenticate")
+            ?.match(/(?:^|,|\s)\s*resource_metadata\s*=\s*"([^"]+)"/iu)?.[1]
+        : undefined;
+    await challenge.body?.cancel();
+    const metadataUrl =
+      resourceMetadata === undefined
+        ? new URL(
+            `/.well-known/oauth-protected-resource${resourceUrl.pathname}`,
+            resourceUrl.origin,
+          )
+        : new URL(resourceMetadata);
+    if (
+      !["http:", "https:"].includes(metadataUrl.protocol) ||
+      metadataUrl.username !== "" ||
+      metadataUrl.password !== ""
+    ) {
+      return false;
+    }
     const response = await fetch(metadataUrl, {
       headers: { accept: "application/json" },
       redirect: "error",
       ...(signal === undefined ? {} : { signal }),
     });
     if (!response.ok) {
+      await response.body?.cancel();
       return false;
     }
     const metadata = parseJson(ProtectedResourceMetadataSchema, await response.text());

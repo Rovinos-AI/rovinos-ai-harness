@@ -177,6 +177,18 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 kind: z.ZodLiteral<"http">;
                 url: z.ZodURL;
                 headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>>;
+                auth: z.ZodOptional<z.ZodObject<{
+                    kind: z.ZodLiteral<"oauth">;
+                    grant: z.ZodEnum<{
+                        authorization_code: "authorization_code";
+                        client_credentials: "client_credentials";
+                    }>;
+                    clientId: z.ZodOptional<z.ZodString>;
+                    clientIdMetadataUrl: z.ZodOptional<z.ZodURL>;
+                    clientSecret: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>;
+                    scopes: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                    redirectPort: z.ZodOptional<z.ZodNumber>;
+                }, z.core.$strict>>;
             }, z.core.$strict>], "kind">;
             protocol: z.ZodDefault<z.ZodEnum<{
                 "2025-11-25": "2025-11-25";
@@ -212,6 +224,15 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 kind: "http";
                 url: string;
                 headers?: Record<string, string & z.core.$brand<"SecretRef">> | undefined;
+                auth?: {
+                    kind: "oauth";
+                    grant: "authorization_code" | "client_credentials";
+                    clientId?: string | undefined;
+                    clientIdMetadataUrl?: string | undefined;
+                    clientSecret?: (string & z.core.$brand<"SecretRef">) | undefined;
+                    scopes?: string[] | undefined;
+                    redirectPort?: number | undefined;
+                } | undefined;
             };
             protocol: "2025-11-25" | "2026-07-28" | "auto";
             apps: boolean;
@@ -238,6 +259,15 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 kind: "http";
                 url: string;
                 headers?: Record<string, string & z.core.$brand<"SecretRef">> | undefined;
+                auth?: {
+                    kind: "oauth";
+                    grant: "authorization_code" | "client_credentials";
+                    clientId?: string | undefined;
+                    clientIdMetadataUrl?: string | undefined;
+                    clientSecret?: (string & z.core.$brand<"SecretRef">) | undefined;
+                    scopes?: string[] | undefined;
+                    redirectPort?: number | undefined;
+                } | undefined;
             };
             protocol: "2025-11-25" | "2026-07-28" | "auto";
             apps: boolean;

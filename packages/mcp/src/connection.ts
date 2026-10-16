@@ -51,6 +51,7 @@ export class McpConnection {
   #protocolEra: "legacy" | "modern" | undefined;
   #cachedTools: CachedToolList | undefined;
   #supportsClientCredentialsExtension = false;
+  #clientCredentialsExtensionProbe: Promise<boolean> | undefined;
   #oauthProvider: McpOAuthProvider | undefined;
   #closed = false;
   #connectGeneration = 0;
@@ -141,13 +142,7 @@ export class McpConnection {
         this.#state = "unavailable";
         return;
       }
-      if (this.#dependencies.createTransport === undefined) {
-        this.#supportsClientCredentialsExtension = await clientCredentialsExtensionAvailable(
-          this.#config,
-          this.#supportsClientCredentialsExtension,
-          combinedSignal,
-        );
-      }
+      await this.#probeClientCredentialsExtension(combinedSignal);
       const activeTransport = await createConfiguredTransport(this.#config, this.#dependencies, {
         clientCredentialsExtensionEnabled: this.#supportsClientCredentialsExtension,
         onOAuthProvider: (provider) => {
@@ -178,8 +173,9 @@ export class McpConnection {
           }),
       );
       this.#supportsClientCredentialsExtension =
+        this.#supportsClientCredentialsExtension ||
         activeClient.getServerCapabilities()?.extensions?.[OAUTH_CLIENT_CREDENTIALS_EXTENSION] !==
-        undefined;
+          undefined;
       this.#oauthProvider?.setClientCredentialsExtensionEnabled(
         this.#supportsClientCredentialsExtension,
       );
@@ -203,6 +199,18 @@ export class McpConnection {
       }
       throw new McpConnectionError(code);
     }
+  }
+
+  async #probeClientCredentialsExtension(signal: AbortSignal): Promise<void> {
+    if (this.#dependencies.createTransport !== undefined) {
+      return;
+    }
+    this.#clientCredentialsExtensionProbe ??= clientCredentialsExtensionAvailable(
+      this.#config,
+      this.#supportsClientCredentialsExtension,
+      signal,
+    );
+    this.#supportsClientCredentialsExtension = await this.#clientCredentialsExtensionProbe;
   }
 
   async #closeCurrentClient(): Promise<void> {

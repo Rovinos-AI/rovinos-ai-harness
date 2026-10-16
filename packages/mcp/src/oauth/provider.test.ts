@@ -590,23 +590,30 @@ describe("McpOAuthProvider", () => {
     const warn = vi.spyOn(globalThis.console, "warn").mockImplementation((...args: unknown[]) => {
       output.push(...args);
     });
+    const error = vi.spyOn(globalThis.console, "error").mockImplementation((...args: unknown[]) => {
+      output.push(...args);
+    });
     try {
       const authOperation = withOAuthWarningsRedacted(
         () =>
           new Promise<void>((resolve) => {
             setTimeout(() => {
               globalThis.console.warn(errorCanary);
+              globalThis.console.error(errorCanary);
               resolve();
             }, 10);
           }),
       );
       globalThis.console.warn("unrelated-application-warning");
+      globalThis.console.error("unrelated-application-error");
       await authOperation;
 
       expect(output).toContain("unrelated-application-warning");
+      expect(output).toContain("unrelated-application-error");
       expect(output).not.toContain(errorCanary);
     } finally {
       warn.mockRestore();
+      error.mockRestore();
     }
   });
 });
