@@ -405,6 +405,7 @@ describe("WorkspaceSnapshotter", () => {
       code: "workspace_snapshot_unsafe",
     });
     await expect(readFile(join(runRoot, "keep"), "utf8")).resolves.toBe("original");
+    await expect(readdir(runRoot)).resolves.toEqual(["keep"]);
   });
 
   it("rejects a hardlink whose target has not already been accepted", async () => {
