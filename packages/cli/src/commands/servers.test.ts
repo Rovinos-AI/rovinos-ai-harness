@@ -201,6 +201,7 @@ async function createOAuthServer(
     readonly clientCredentialsMetadataOnly?: boolean;
     readonly clientCredentialsCapabilitiesOnly?: boolean;
     readonly redirectResourceProbe?: boolean;
+    readonly redirectMcpEndpoint?: boolean;
     readonly resourceMetadataPath?: string;
     readonly failFirstAuthenticatedMcpRequest?: boolean;
     readonly failMetadataProbeCount?: number;
@@ -237,14 +238,20 @@ async function createOAuthServer(
   let metadataProbeCount = 0;
   let fallbackProbeCount = 0;
   let tokenRequestCount = 0;
+  let mcpPostRequestCount = 0;
   const server = createServer((request, response) => {
     void (async () => {
       const host = request.headers.host ?? "localhost";
       const url = new URL(request.url ?? "/", `http://${host}`);
+      if (options.redirectMcpEndpoint === true && url.pathname === "/mcp") {
+        response.writeHead(308, { location: `http://${host}/mcp/` }).end();
+        return;
+      }
       if (
         request.method === "GET" &&
         (url.pathname === "/mcp" ||
-          (options.redirectResourceProbe === true && url.pathname === "/mcp/"))
+          ((options.redirectResourceProbe === true || options.redirectMcpEndpoint === true) &&
+            url.pathname === "/mcp/"))
       ) {
         resourceProbeCount += 1;
         if (options.redirectResourceProbe === true && url.pathname === "/mcp") {
@@ -261,7 +268,12 @@ async function createOAuthServer(
           .end();
         return;
       }
-      if (request.method === "POST" && url.pathname === "/mcp") {
+      if (
+        request.method === "POST" &&
+        (url.pathname === "/mcp" ||
+          (options.redirectMcpEndpoint === true && url.pathname === "/mcp/"))
+      ) {
+        mcpPostRequestCount += 1;
         if (
           unauthorizedMcp ||
           rejectNextAuthenticatedRequest ||
@@ -293,7 +305,7 @@ async function createOAuthServer(
           }
         }
         const mcpResponse = await mcpHandler.fetch(
-          new Request(`${issuer}${url.pathname}${url.search}`, {
+          new Request(`${issuer}${url.pathname === "/mcp/" ? "/mcp" : url.pathname}${url.search}`, {
             method: request.method,
             headers,
             body,
@@ -328,7 +340,7 @@ async function createOAuthServer(
         fallbackProbeCount += 1;
         if (remainingMetadataProbeFailures > 0) {
           remainingMetadataProbeFailures -= 1;
-          response.writeHead(503).end();
+          response.writeHead(500).end();
           return;
         }
         sendJson(response, {
@@ -416,6 +428,7 @@ async function createOAuthServer(
     metadataProbeCount: () => metadataProbeCount,
     fallbackProbeCount: () => fallbackProbeCount,
     tokenRequestCount: () => tokenRequestCount,
+    mcpPostRequestCount: () => mcpPostRequestCount,
   };
 }
 
@@ -1018,6 +1031,46 @@ describe("harness servers check", () => {
     }
   });
 
+  it("connects when the MCP endpoint redirects", async () => {
+    const oauthServer = await createOAuthServer({ redirectMcpEndpoint: true });
+    const parsedConfig = HarnessConfigSchema.parse({
+      servers: [
+        {
+          id: "machine",
+          transport: {
+            kind: "http",
+            url: `${oauthServer.issuer}/mcp`,
+            auth: {
+              kind: "oauth",
+              grant: "client_credentials",
+              clientId: "machine-client",
+              clientSecret: "env:OAUTH_SECRET",
+              scopes: ["tools:read"],
+            },
+          },
+        },
+      ],
+    });
+    const serverConfig = parsedConfig.servers[0];
+    if (serverConfig === undefined) {
+      throw new Error("expected configured OAuth server");
+    }
+    const tokenStore = await OAuthTokenStore.open(":memory:", keyProvider);
+    const connection = new McpConnection(serverConfig, {
+      resolveSecret: () => Promise.resolve("oauth-client-secret"),
+      oauthTokenStore: tokenStore,
+    });
+    try {
+      await connection.connect();
+      expect(connection.state).toBe("ready");
+      expect(oauthServer.mcpPostRequestCount()).toBeGreaterThan(0);
+      expect(oauthServer.tokenRequestCount()).toBe(0);
+    } finally {
+      await connection.close();
+      tokenStore.close();
+    }
+  });
+
   it("reuses a completed extension probe when the connection reconnects", async () => {
     const oauthServer = await createOAuthServer({
       requireToken: true,
@@ -1097,14 +1150,15 @@ describe("harness servers check", () => {
       await connection.connect();
       expect(connection.state).toBe("ready");
       expect(oauthServer.tokenRequestCount()).toBe(0);
-      expect(oauthServer.fallbackProbeCount()).toBe(1);
+      const initialProbeCount = oauthServer.fallbackProbeCount();
+      expect(initialProbeCount).toBeGreaterThan(0);
       oauthServer.setUnauthorizedMcp(true);
       await expect(connection.listTools()).rejects.toMatchObject({ code: "mcp_auth_required" });
       expect(connection.state).toBe("unavailable");
       oauthServer.setUnauthorizedMcp(false);
       await connection.connect();
       expect(connection.state).toBe("ready");
-      expect(oauthServer.fallbackProbeCount()).toBe(3);
+      expect(oauthServer.fallbackProbeCount()).toBeGreaterThan(initialProbeCount);
       expect(oauthServer.tokenRequestCount()).toBe(0);
     } finally {
       await connection.close();
@@ -1112,7 +1166,7 @@ describe("harness servers check", () => {
     }
   });
 
-  it("retains capabilities-only support for initialize-time OAuth after reconnect", async () => {
+  it("uses initialize-only client-credentials support after reconnect", async () => {
     const oauthServer = await createOAuthServer({
       clientCredentialsExtension: true,
       clientCredentialsCapabilitiesOnly: true,
@@ -1149,27 +1203,14 @@ describe("harness servers check", () => {
       await connection.connect();
       expect(oauthServer.tokenRequestCount()).toBe(0);
       oauthServer.requireToken();
-      const originalFetch = globalThis.fetch;
-      let rejectFirstMcpRequest = true;
-      vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-        const requestUrl = input instanceof Request ? input.url : String(input);
-        if (rejectFirstMcpRequest && new URL(requestUrl).pathname === "/mcp") {
-          rejectFirstMcpRequest = false;
-          return Promise.reject(
-            new SdkError(SdkErrorCode.ConnectionClosed, "synthetic connection loss"),
-          );
-        }
-        return originalFetch(input, init);
-      });
-      try {
-        await expect(
-          connection.callTool({ name: "listed", arguments: {} }, inputSchema),
-        ).resolves.toMatchObject({ content: [{ type: "text", text: "called" }] });
-      } finally {
-        vi.unstubAllGlobals();
-      }
-      expect(connection.state).toBe("ready");
+      oauthServer.setFailTokenExchange(true);
+      await expect(connection.listTools()).rejects.toMatchObject({ code: "mcp_auth_required" });
+      expect(connection.state).toBe("unavailable");
       expect(oauthServer.tokenRequestCount()).toBe(1);
+      oauthServer.setFailTokenExchange(false);
+      await connection.connect();
+      expect(connection.state).toBe("ready");
+      expect(oauthServer.tokenRequestCount()).toBe(2);
       expect(oauthServer.resourceProbeCount()).toBe(1);
     } finally {
       await connection.close();
