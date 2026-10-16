@@ -3,7 +3,12 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import {
+  InMemoryTransport,
+  SdkError,
+  SdkErrorCode,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { trace } from "@opentelemetry/api";
 import { HarnessConfigSchema } from "@harness/config";
@@ -1107,7 +1112,7 @@ describe("harness servers check", () => {
     }
   });
 
-  it("retains capabilities-only support for an OAuth challenge after initialize", async () => {
+  it("retains capabilities-only support for initialize-time OAuth after reconnect", async () => {
     const oauthServer = await createOAuthServer({
       clientCredentialsExtension: true,
       clientCredentialsCapabilitiesOnly: true,
@@ -1116,6 +1121,7 @@ describe("harness servers check", () => {
       servers: [
         {
           id: "machine",
+          idempotentTools: ["listed"],
           transport: {
             kind: "http",
             url: `${oauthServer.issuer}/mcp`,
@@ -1143,11 +1149,28 @@ describe("harness servers check", () => {
       await connection.connect();
       expect(oauthServer.tokenRequestCount()).toBe(0);
       oauthServer.requireToken();
-      await expect(connection.listTools()).resolves.toEqual([
-        expect.objectContaining({ name: "listed" }),
-      ]);
+      const originalFetch = globalThis.fetch;
+      let rejectFirstMcpRequest = true;
+      vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+        const requestUrl = input instanceof Request ? input.url : String(input);
+        if (rejectFirstMcpRequest && new URL(requestUrl).pathname === "/mcp") {
+          rejectFirstMcpRequest = false;
+          return Promise.reject(
+            new SdkError(SdkErrorCode.ConnectionClosed, "synthetic connection loss"),
+          );
+        }
+        return originalFetch(input, init);
+      });
+      try {
+        await expect(
+          connection.callTool({ name: "listed", arguments: {} }, inputSchema),
+        ).resolves.toMatchObject({ content: [{ type: "text", text: "called" }] });
+      } finally {
+        vi.unstubAllGlobals();
+      }
       expect(connection.state).toBe("ready");
       expect(oauthServer.tokenRequestCount()).toBe(1);
+      expect(oauthServer.resourceProbeCount()).toBe(1);
     } finally {
       await connection.close();
       tokenStore.close();
