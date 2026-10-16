@@ -83,6 +83,11 @@ function errorCode(error: unknown): string {
   return "store_error";
 }
 
+/** Converts a worker failure to an Error while retaining non-Error causes. */
+export function normalizeWorkerError(error: unknown): Error {
+  return error instanceof Error ? error : new Error("Concurrency worker error", { cause: error });
+}
+
 function rejectWorkerChannels(channels: WorkerChannels, error: Error): void {
   channels.opened.reject(error);
   for (const channel of channels.ready.values()) {
@@ -119,12 +124,7 @@ function createWorkerSession(options: WorkerSessionOptions): WorkerSession {
   const execArgv =
     options.worker.loader === undefined
       ? undefined
-      : [
-          "--experimental-transform-types",
-          "--disable-warning=ExperimentalWarning",
-          "--experimental-loader",
-          options.worker.loader,
-        ];
+      : ["--disable-warning=ExperimentalWarning", "--experimental-loader", options.worker.loader];
   const worker = new Worker(concurrencyWorkerSource, {
     eval: true,
     ...(execArgv === undefined ? {} : { execArgv }),
@@ -142,7 +142,7 @@ function createWorkerSession(options: WorkerSessionOptions): WorkerSession {
     receiveWorkerMessage(message, channels, worker);
   });
   worker.on("error", (error) => {
-    rejectWorkerChannels(channels, error);
+    rejectWorkerChannels(channels, normalizeWorkerError(error));
   });
   worker.on("exit", (code) => {
     if (code !== 0) {

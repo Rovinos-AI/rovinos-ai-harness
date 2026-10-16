@@ -24,7 +24,7 @@ The Yarn workspace and `@harness/schemas` package are scaffolded; later tasks ad
 
 ## Commands
 
-- Install: `mise trust && mise install && yarn install --immutable` (Node 22, Corepack, and Yarn 4 are pinned).
+- Install: `mise trust && mise install && yarn install --immutable` (Node 26, Corepack, and Yarn 4 are pinned).
 - Repo-wide: `yarn lint`, `yarn typecheck`, `yarn test:unit`, `yarn test:integration` (needs compose services), `yarn test:canary`, `yarn test:replay`.
 - Scope tests to one folder by passing its path, which is forwarded to Vitest: `yarn test:unit packages/core`, `yarn test:integration packages/store`.
 - Checks: `yarn check:spdx`, `yarn check:dco`, `yarn check:licenses`, `yarn lint:telemetry`, `yarn docs:catalog --check`, `yarn gen:collector --check`.

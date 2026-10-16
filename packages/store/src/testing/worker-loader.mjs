@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 /** Resolves source imports that use emitted `.js` extensions to their TypeScript files. */
 export async function resolve(specifier, context, nextResolve) {
@@ -12,4 +13,20 @@ export async function resolve(specifier, context, nextResolve) {
     }
   }
   return nextResolve(specifier, context);
+}
+
+/** Compiles test worker TypeScript modules as ESM. */
+export async function load(url, context, nextLoad) {
+  if (url.endsWith(".ts")) {
+    const source = readFileSync(fileURLToPath(url), "utf8");
+    const output = ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.ESNext,
+        target: ts.ScriptTarget.ES2023,
+        verbatimModuleSyntax: true,
+      },
+    });
+    return { format: "module", shortCircuit: true, source: output.outputText };
+  }
+  return nextLoad(url, context);
 }

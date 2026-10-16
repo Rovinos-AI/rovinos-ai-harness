@@ -155,14 +155,14 @@ it.skipIf(process.env.LINT_SKIP_CONTAINERS === "1")(
       const clean = writeFixture(
         temporaryRoot,
         "Dockerfile.clean",
-        `FROM node:22-slim@sha256:${imageDigest}\n`,
+        `FROM node:26-slim@sha256:${imageDigest}\n`,
       );
       const invalid = writeFixture(
         temporaryRoot,
         "Dockerfile.invalid",
-        `FROM node:22-slim@sha256:${imageDigest}\nRUN echo ready | cat\n`,
+        `FROM node:26-slim@sha256:${imageDigest}\nRUN echo ready | cat\n`,
       );
-      const unpinned = writeFixture(temporaryRoot, "Dockerfile.unpinned", "FROM node:22-slim\n");
+      const unpinned = writeFixture(temporaryRoot, "Dockerfile.unpinned", "FROM node:26-slim\n");
 
       expect(invokeLint("docker", [relative(rootDirectory, clean)])).toBe(true);
       expect(invokeLint("docker", [relative(rootDirectory, invalid)])).toBe(false);
@@ -227,7 +227,8 @@ it("accepts project spelling and rejects an unknown word", () => {
 
 it("makes yarn lint fail when ShellCheck is unavailable", () => {
   const isolatedPath = mkdtempSync(join(tmpdir(), "harness-lint-path-"));
-  const executableNames = new Set(["corepack", "yarn", "node"]);
+  // mise's corepack is a shell wrapper that needs readlink and dirname.
+  const executableNames = new Set(["corepack", "yarn", "node", "readlink", "dirname"]);
   const locations = (process.env.PATH ?? "").split(delimiter);
 
   try {

@@ -27,7 +27,7 @@ steps:
       mise exec -- corepack enable
       mkdir -p "$YARN_GLOBAL_FOLDER/cache"
       echo "##vso[task.prependpath]$(mise where node)/bin"
-      echo "##vso[task.prependpath]$(mise where npm:corepack)/bin"
+      echo "##vso[task.prependpath]$(mise where npm:corepack)/node_modules/.bin"
       shellcheck_bin="$(mise which shellcheck)"
       if [ ! -x "$shellcheck_bin" ]; then
         echo "mise did not install the pinned ShellCheck binary."
