@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, stat, realpath } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,6 +13,7 @@ import {
   SandboxConfigSchema,
   SecretRefSchema,
   SequentialIdGenerator,
+  type WorkspaceRef,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { InProcessBackend, RemoteSandboxBackend, type SandboxBackend } from "@harness/sandbox";
@@ -147,6 +148,7 @@ afterEach(() => {
 });
 
 describe("createRuntime sandbox composition", () => {
+<<<<<<< HEAD
   it("enforces a sensitive-path ask through the decorated runtime", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-policy-"));
     const modelPort = fileToolModel(
@@ -209,6 +211,58 @@ describe("createRuntime sandbox composition", () => {
         toolId: "fs.read",
         outcome: "error",
         errorCode: "fs_path_invalid",
+=======
+  it("retains workspace archives matching the two event-store snapshot refs", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "runtime-sandbox-snapshot-retention-"));
+    const store = new InMemoryEventStore(undefined, { snapshotKeep: 2 });
+    const modelPort = new FakeModelPort([
+      ...["13", "14", "15"].map((suffix) =>
+        completion([
+          {
+            type: "tool_call",
+            callId: Id.parse(`111111111111111111111111${suffix}`),
+            toolId,
+            args: {},
+          },
+        ]),
+      ),
+      completion([{ type: "text", text: "completed" }]),
+    ]);
+    const runtime = await createRuntime(
+      { run: RunConfigSchema.parse({ checkpointEveryEvents: 1 }), store: { snapshotKeep: 2 } },
+      {
+        ...overrides(),
+        store,
+        dataDir,
+        model: modelPort,
+        createTool: (backend) => metadataTool(backend, false),
+        policy: allowAllPolicy,
+      },
+    );
+    try {
+      const runResult = await runtime.run("synthetic workspace checkpoint");
+      const runId = runResult.events[0]?.runId;
+      if (runId === undefined) {
+        throw new Error("Expected the run to have an identifier.");
+      }
+      const checkpoints: string[] = [];
+      for await (const event of store.read(runId)) {
+        if (event.type === "checkpoint_written" && event.workspaceRef !== undefined) {
+          checkpoints.push(event.workspaceRef);
+        }
+      }
+      const retainedRefs = (await store.retainedSnapshots(runId, 2))
+        .map((snapshot) => snapshot.workspaceRef)
+        .filter((ref): ref is WorkspaceRef => ref !== undefined)
+        .reverse();
+      const archiveIds = retainedRefs.map((ref) => ref.slice(3, 29));
+      const archiveNames = await readdir(join(dataDir, "snapshots", runId));
+
+      expect(checkpoints.length).toBeGreaterThanOrEqual(4);
+      expect(archiveNames).toEqual(archiveIds.map((id) => `${id}.tar.gz`));
+      await expect(store.latestSnapshot(runId)).resolves.toMatchObject({
+        workspaceRef: retainedRefs.at(-1),
+>>>>>>> origin/main
       });
     } finally {
       await runtime.close();

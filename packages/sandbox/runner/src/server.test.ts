@@ -2,7 +2,11 @@
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
 import { createServer as createNetServer } from "node:net";
+<<<<<<< HEAD
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+=======
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+>>>>>>> origin/main
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +16,8 @@ import { Id, parseJson } from "@harness/schemas";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { WebFetchResultSchema } from "../../src/web-fetch-contracts.js";
+import { WorkspaceSnapshotter } from "../../src/snapshot.js";
+import { RemoteSandboxBackend } from "../../src/remote.js";
 import {
   createRunnerServer,
   createRunnerRequestHandler,
@@ -30,6 +36,7 @@ import type { RunnerCredentialApi } from "./process-lock.js";
 
 const token = "synthetic-runner-token-that-is-at-least-32-bytes";
 const runId = Id.parse("00000000000000000000000001");
+const otherRunId = Id.parse("00000000000000000000000002");
 const workspaceRoot = mkdtempSync(join(tmpdir(), "sandbox-runner-server-"));
 const spec: ExecSpec = {
   argv: ["/bin/echo", "ok"],
@@ -68,15 +75,21 @@ class MemoryResponse extends EventEmitter {
   status = 0;
   body = "";
   destroyed = false;
+  readonly chunks: Buffer[] = [];
 
-  writeHead(status: number): this {
+  writeHead(status: number, _headers: Record<string, string>): this {
     this.status = status;
     this.headersSent = true;
     return this;
   }
 
+  write(chunk: Buffer): boolean {
+    this.chunks.push(Buffer.from(chunk));
+    return true;
+  }
+
   end(body?: string): void {
-    this.body = body ?? "";
+    this.body = body ?? Buffer.concat(this.chunks).toString("utf8");
     this.writableEnded = true;
     this.emit("close");
   }
@@ -108,6 +121,9 @@ function makeRequest(
     origin?: string;
     authorization?: string;
     body?: string | Buffer;
+    workspaceRunId?: string;
+    maxFileBytes?: number;
+    maxSnapshotBytes?: number;
   } = {},
 ) {
   const request = Readable.from(
@@ -122,6 +138,13 @@ function makeRequest(
       host: options.host ?? "runner.test",
       ...(options.origin === undefined ? {} : { origin: options.origin }),
       ...(options.authorization === undefined ? {} : { authorization: options.authorization }),
+      ...(options.workspaceRunId === undefined ? {} : { "x-run-id": options.workspaceRunId }),
+      ...(options.maxFileBytes === undefined
+        ? {}
+        : { "x-max-file-bytes": String(options.maxFileBytes) }),
+      ...(options.maxSnapshotBytes === undefined
+        ? {}
+        : { "x-max-snapshot-bytes": String(options.maxSnapshotBytes) }),
     },
   });
 }
@@ -801,6 +824,167 @@ describe("runner HTTP request handler", () => {
           });
         });
       }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("round-trips snapshots through the runner-owned workspace", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "sandbox-runner-snapshot-"));
+    const runnerWorkspaceRoot = join(directory, "runner-workspaces");
+    const localWorkspaceRoot = join(directory, "harness-workspaces");
+    const snapshotRoot = join(directory, "snapshots");
+    const runRoot = join(runnerWorkspaceRoot, runId);
+    await mkdir(runRoot, { recursive: true, mode: 0o750 });
+    await writeFile(join(runRoot, "project.txt"), "before", { encoding: "utf8" });
+    await mkdir(join(runnerWorkspaceRoot, otherRunId), { recursive: true, mode: 0o750 });
+    await writeFile(join(runnerWorkspaceRoot, otherRunId, "project.txt"), "other", {
+      encoding: "utf8",
+    });
+    const port = await availablePort();
+    const server = createRunnerServer(
+      makeOptions({
+        workspaceRoot: runnerWorkspaceRoot,
+        allowedHosts: [`127.0.0.1:${String(port)}`],
+      }),
+    );
+    const fetcher: typeof fetch = async (input, init) => {
+      let url: URL;
+      if (input instanceof URL) {
+        url = input;
+      } else if (typeof input === "string") {
+        url = new URL(input);
+      } else {
+        url = new URL(input.url);
+      }
+      url.hostname = "127.0.0.1";
+      return fetch(url, init);
+    };
+    const backend = new RemoteSandboxBackend({
+      url: `http://runner.test:${String(port)}/`,
+      token,
+      fetcher,
+    });
+    let snapshotIndex = 0;
+    const snapshotter = new WorkspaceSnapshotter({
+      workspaceRoot: localWorkspaceRoot,
+      snapshotRoot,
+      ids: {
+        next: () => {
+          snapshotIndex += 1;
+          return `0000000000000000000000000${String(snapshotIndex)}`;
+        },
+      },
+      remoteWorkspace: backend,
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, "127.0.0.1", resolve);
+      });
+      expect(await snapshotter.hasWorkspace(runId)).toBe(true);
+      await expect(lstat(join(localWorkspaceRoot, runId))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      const ref = await snapshotter.snapshot(runId);
+      expect(await readFile(join(runRoot, "project.txt"), "utf8")).toBe("before");
+
+      await chmod(runRoot, 0o750);
+      await writeFile(join(runRoot, "project.txt"), "after", { encoding: "utf8" });
+      await snapshotter.restore(runId, ref);
+
+      expect(await readFile(join(runRoot, "project.txt"), "utf8")).toBe("before");
+
+      await backend.acquireLease(runId);
+      const pinnedRef = await snapshotter.snapshot(runId);
+      await snapshotter.restore(runId, pinnedRef);
+      await expect(snapshotter.snapshot(otherRunId)).rejects.toMatchObject({
+        code: "sandbox_busy",
+      });
+      await backend.releaseLease(runId);
+      await backend.acquireLease(otherRunId);
+      await backend.releaseLease(otherRunId);
+    } finally {
+      if (server.listening) {
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error === undefined) {
+              resolve();
+            } else {
+              reject(error);
+            }
+          });
+        });
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports missing, invalid, and oversized workspace transfers safely", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "sandbox-runner-workspace-errors-"));
+    const handler = createRunnerRequestHandler(makeOptions({ workspaceRoot: directory }));
+    const authorization = ["Bearer", token].join(" ");
+    const requestPayload = (forRun: string) => JSON.stringify({ runId: forRun });
+
+    try {
+      const missing = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/exists",
+          authorization,
+          body: requestPayload(runId),
+        }),
+      );
+      expect(missing.status).toBe(200);
+      expect(missing.body).toBe('{"exists":false}');
+
+      const missingSnapshot = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/snapshot",
+          authorization,
+          body: JSON.stringify({ runId, maxFileBytes: 8, maxSnapshotBytes: 8 }),
+        }),
+      );
+      expect(missingSnapshot.status).toBe(404);
+
+      await writeFile(join(directory, runId), "not a workspace");
+      const invalidWorkspace = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/exists",
+          authorization,
+          body: requestPayload(runId),
+        }),
+      );
+      expect(invalidWorkspace.status).toBe(500);
+      await rm(join(directory, runId));
+
+      await mkdir(join(directory, runId), { recursive: true });
+      await writeFile(join(directory, runId, "large"), Buffer.alloc(16, 1));
+      const oversizedSnapshot = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/snapshot",
+          authorization,
+          body: JSON.stringify({ runId, maxFileBytes: 8, maxSnapshotBytes: 32 }),
+        }),
+      );
+      expect(oversizedSnapshot.status).toBe(413);
+
+      const oversizedRestore = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/restore",
+          authorization,
+          workspaceRunId: runId,
+          maxFileBytes: 8,
+          maxSnapshotBytes: 8,
+          body: Buffer.alloc(16, 1),
+        }),
+      );
+      expect(oversizedRestore.status).toBe(413);
+      await expect(readFile(join(directory, runId, "large"))).resolves.toEqual(Buffer.alloc(16, 1));
+    } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });

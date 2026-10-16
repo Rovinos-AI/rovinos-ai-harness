@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { IncomingMessage } from "node:http";
+import { Readable } from "node:stream";
 import { Id, parseJson } from "@harness/schemas";
 import { z } from "zod";
 import { ExecResultSchema, ExecSpecSchema } from "../../src/types.js";
@@ -27,10 +28,22 @@ const RunnerLeaseRequestSchema = z
   .object({ runId: Id, ttlMs: z.number().int().positive().max(600_000).optional() })
   .strict();
 const RunnerReleaseRequestSchema = z.object({ runId: Id }).strict();
+const RunnerWorkspaceSnapshotRequestSchema = z
+  .object({
+    runId: Id,
+    maxFileBytes: z.number().int().positive(),
+    maxSnapshotBytes: z.number().int().positive(),
+  })
+  .strict();
+const RunnerWorkspaceExistsRequestSchema = z.object({ runId: Id }).strict();
 
 /** Minimal request shape used by the independently testable runner handler. */
 export interface RunnerRequest extends AsyncIterable<Buffer | string> {
-  readonly headers: Pick<IncomingMessage["headers"], "authorization" | "host" | "origin">;
+  readonly headers: Pick<IncomingMessage["headers"], "authorization" | "host" | "origin"> & {
+    readonly "x-run-id"?: string;
+    readonly "x-max-file-bytes"?: string;
+    readonly "x-max-snapshot-bytes"?: string;
+  };
   readonly method?: string | undefined;
   readonly url?: string | undefined;
   resume(): this;
@@ -41,8 +54,9 @@ export interface RunnerResponse {
   readonly headersSent: boolean;
   readonly writableEnded: boolean;
   writeHead(status: number, headers: Record<string, string>): this;
+  write(chunk: Buffer): boolean;
   end(body?: string): void;
-  once(event: "close", listener: () => void): this;
+  once(event: "close" | "drain", listener: () => void): this;
   destroy(): void;
 }
 
@@ -56,6 +70,20 @@ export type RunnerPayload =
     }
   | { readonly kind: "lease"; readonly runId: z.infer<typeof Id>; readonly ttlMs?: number }
   | { readonly kind: "release"; readonly runId: z.infer<typeof Id> }
+  | {
+      readonly kind: "workspace-snapshot";
+      readonly runId: z.infer<typeof Id>;
+      readonly maxFileBytes: number;
+      readonly maxSnapshotBytes: number;
+    }
+  | { readonly kind: "workspace-exists"; readonly runId: z.infer<typeof Id> }
+  | {
+      readonly kind: "workspace-restore";
+      readonly runId: z.infer<typeof Id>;
+      readonly maxFileBytes: number;
+      readonly maxSnapshotBytes: number;
+      readonly archive: Readable;
+    }
   | { readonly kind: "exec"; readonly runId: z.infer<typeof Id>; readonly spec: ExecSpec };
 /** Runner payload kinds handled by the execution and fetch dispatcher. */
 export type RunnerExecutionPayload = Extract<
@@ -86,6 +114,18 @@ interface ExecuteRunnerPayloadOptions {
   readonly sendError: SendError;
 }
 
+function knownRunnerRoute(path: string | undefined): boolean {
+  return (
+    path === "/exec" ||
+    path === "/fetch" ||
+    path === "/lease" ||
+    path === "/release" ||
+    path === "/workspace/snapshot" ||
+    path === "/workspace/exists" ||
+    path === "/workspace/restore"
+  );
+}
+
 async function readRequestBody(
   request: RunnerRequest,
   maxBytes: number,
@@ -108,6 +148,7 @@ async function readRequestBody(
   }
 }
 
+<<<<<<< HEAD
 function isSupportedRoute(method: string | undefined, path: string | undefined): boolean {
   if (method !== "POST") {
     return false;
@@ -137,6 +178,54 @@ function parseFilePayload(
     return undefined;
   }
   return { kind: "fs", runId: parsed.runId, request: parsed.request };
+=======
+function parseRunnerBody(path: string | undefined, body: string): RunnerPayload {
+  if (path === "/fetch") {
+    const parsed = parseJson(RunnerFetchRequestSchema, body, {
+      maxBytes: MAX_RUNNER_REQUEST_BYTES,
+    });
+    return { kind: "fetch", runId: parsed.runId, body };
+  }
+  if (path === "/lease") {
+    const parsed = parseJson(RunnerLeaseRequestSchema, body, {
+      maxBytes: MAX_RUNNER_REQUEST_BYTES,
+    });
+    return {
+      kind: "lease",
+      runId: parsed.runId,
+      ...(parsed.ttlMs === undefined ? {} : { ttlMs: parsed.ttlMs }),
+    };
+  }
+  if (path === "/release") {
+    const parsed = parseJson(RunnerReleaseRequestSchema, body, {
+      maxBytes: MAX_RUNNER_REQUEST_BYTES,
+    });
+    return { kind: "release", runId: parsed.runId };
+  }
+  if (path === "/workspace/snapshot") {
+    const parsed = parseJson(RunnerWorkspaceSnapshotRequestSchema, body, {
+      maxBytes: MAX_RUNNER_REQUEST_BYTES,
+    });
+    return { kind: "workspace-snapshot", ...parsed };
+  }
+  if (path === "/workspace/exists") {
+    const parsed = parseJson(RunnerWorkspaceExistsRequestSchema, body, {
+      maxBytes: MAX_RUNNER_REQUEST_BYTES,
+    });
+    return { kind: "workspace-exists", ...parsed };
+  }
+  const parsed = parseJson(RunnerExecRequestSchema, body, { maxBytes: MAX_RUNNER_REQUEST_BYTES });
+  return { kind: "exec", runId: parsed.runId, spec: parsed.spec };
+}
+
+function parseWorkspaceRestore(request: RunnerRequest): RunnerPayload {
+  const parsed = RunnerWorkspaceSnapshotRequestSchema.parse({
+    runId: request.headers["x-run-id"],
+    maxFileBytes: Number(request.headers["x-max-file-bytes"]),
+    maxSnapshotBytes: Number(request.headers["x-max-snapshot-bytes"]),
+  });
+  return { kind: "workspace-restore", ...parsed, archive: Readable.from(request) };
+>>>>>>> origin/main
 }
 
 /** Reads and validates the authenticated endpoint payload, writing bounded errors as needed. */
@@ -146,7 +235,11 @@ export async function readRunnerPayload(
   isAuthorized: IsAuthorized,
   sendError: SendError,
 ): Promise<RunnerPayload | undefined> {
+<<<<<<< HEAD
   if (!isSupportedRoute(request.method, request.url)) {
+=======
+  if (request.method !== "POST" || !knownRunnerRoute(request.url)) {
+>>>>>>> origin/main
     sendError(response, 404, "sandbox_route_not_found");
     return undefined;
   }
@@ -154,12 +247,25 @@ export async function readRunnerPayload(
     sendError(response, 401, "sandbox_unauthorized");
     return undefined;
   }
+<<<<<<< HEAD
   const body = await readRequestBody(
     request,
     request.url?.startsWith("/fs/") === true
       ? MAX_FS_REQUEST_TRANSPORT_BYTES
       : MAX_RUNNER_REQUEST_BYTES,
   );
+=======
+  if (request.url === "/workspace/restore") {
+    try {
+      return parseWorkspaceRestore(request);
+    } catch {
+      request.resume();
+      sendError(response, 400, "sandbox_request_invalid");
+      return undefined;
+    }
+  }
+  const body = await readRequestBody(request);
+>>>>>>> origin/main
   if ("status" in body) {
     sendError(
       response,
@@ -169,6 +275,7 @@ export async function readRunnerPayload(
     return undefined;
   }
   try {
+<<<<<<< HEAD
     if (request.url === "/fetch") {
       const parsed = parseJson(RunnerFetchRequestSchema, body.body, {
         maxBytes: MAX_RUNNER_REQUEST_BYTES,
@@ -198,6 +305,9 @@ export async function readRunnerPayload(
       maxBytes: MAX_RUNNER_REQUEST_BYTES,
     });
     return { kind: "exec", runId: parsed.runId, spec: parsed.spec };
+=======
+    return parseRunnerBody(request.url, body.body);
+>>>>>>> origin/main
   } catch {
     sendError(response, 400, "sandbox_request_invalid");
     return undefined;

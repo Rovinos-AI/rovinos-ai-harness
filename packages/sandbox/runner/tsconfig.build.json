@@ -13,10 +13,15 @@
     "../src/fs-tools.ts",
     "../src/types.ts",
     "../src/workspace.ts",
+<<<<<<< HEAD
     "../src/workspace-file-helpers.ts",
     "../src/workspace-file-quota.ts",
     "../src/workspace-file-search.ts",
     "../src/workspace-files.ts",
+=======
+    "../src/snapshot-archive.ts",
+    "../src/snapshot-restore.ts",
+>>>>>>> origin/main
     "../src/web-fetch-contracts.ts"
   ],
   "exclude": ["src/**/*.test.ts"],

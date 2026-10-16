@@ -30,6 +30,7 @@
     "@harness/mcp": "workspace:^",
     "@harness/pii": "workspace:^",
     "@harness/policy": "workspace:^",
+    "@harness/sandbox": "workspace:^",
     "@harness/schemas": "workspace:^",
     "@harness/store": "workspace:^",
     "@harness/vault": "workspace:^",

@@ -5,6 +5,7 @@ import { validateWithTokens } from "@harness/pii";
 import type { AuditingVaultResolver } from "@harness/vault";
 import type { ValueTransform } from "@harness/models";
 import type { EventStore } from "@harness/store";
+import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 import { parseRuntimeModelsConfig, type RuntimeConfig } from "../runtime-config.js";
 import { RunRecorder, type Clock } from "../recorder.js";
 import { configHash } from "../runtime-ids.js";
@@ -17,6 +18,23 @@ import { AgentSpawnTool } from "./spawn-tool.js";
 import type { RunScopeRegistry } from "./scope.js";
 import { SubagentSupervisor, type SubagentRunRequest } from "./supervisor.js";
 import { finalizeChild } from "./result.js";
+
+function childRunOptions(
+  config: RuntimeConfig,
+  workspaceSnapshotter: WorkspaceSnapshotPort | undefined,
+): {
+  readonly configHash: string;
+  readonly snapshotKeep?: number;
+  readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
+} {
+  return {
+    configHash: configHash(config),
+    ...(config.store?.snapshotKeep === undefined
+      ? {}
+      : { snapshotKeep: config.store.snapshotKeep }),
+    ...(workspaceSnapshotter === undefined ? {} : { workspaceSnapshotter }),
+  };
+}
 
 /** Resolves configured roles against the registered tools and built-in spawn tool. */
 export async function resolveRuntimeRoles(
@@ -98,6 +116,7 @@ export function createSubagentTool(options: {
   readonly parentTool: ToolPort;
   readonly policy: PolicyPort;
   readonly policyVersion: PolicyPort["version"];
+  readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   readonly roles: RoleRegistry;
   readonly scopes: RunScopeRegistry;
   readonly resolver?: AuditingVaultResolver;
@@ -127,7 +146,7 @@ export function createSubagentTool(options: {
         signal: request.signal,
         budgets: options.config.run.budgets,
         checkpointEveryEvents: options.config.run.checkpointEveryEvents,
-        configHash: configHash(options.config),
+        ...childRunOptions(options.config, options.workspaceSnapshotter),
         policyVersion: options.policyVersion,
         role: request.role.route ?? request.role.id,
         ...(request.role.resultSchema === undefined

@@ -117,6 +117,9 @@ function createInnerStore(): EventStoreLike {
     latestSnapshot() {
       return Promise.resolve(savedSnapshot);
     },
+    retainedSnapshots(_readRunId, limit) {
+      return Promise.resolve(savedSnapshot === undefined || limit < 1 ? [] : [savedSnapshot]);
+    },
     read(_readRunId, range) {
       return (async function* () {
         await Promise.resolve();
