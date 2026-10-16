@@ -67,6 +67,7 @@ export const TOOL_CALL_SPAN: SpanDefinition<SpanDefinitionShape> = defineSpan(
     ...commonAttributes,
     "harness.policy.decision": attr.optional(attr.enum(["allow", "ask", "deny"])),
     "harness.policy.rule_id": attr.optional(attr.code()),
+    "harness.subagent.completion_record_failed": attr.optional(attr.bool()),
   },
   { taskId: "4.1", packageName: "@harness/core" },
 );

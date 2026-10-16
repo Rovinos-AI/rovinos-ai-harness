@@ -373,7 +373,17 @@ describe("runtime subagent spawning", () => {
         ),
       ).toMatchObject({
         outcome: "ok",
-        result: { status: "completed", text: "child answer" },
+        result: {
+          childRunId: spawned.childRunId,
+          status: "completed",
+          value: { text: "child answer" },
+          usage: { inputTokens: 2, outputTokens: 2 },
+        },
+      });
+      expect(parent.events.find((event) => event.type === "subagent_completed")).toMatchObject({
+        outcome: "completed",
+        inputTokens: 2,
+        outputTokens: 2,
       });
     } finally {
       await runtime.close();
