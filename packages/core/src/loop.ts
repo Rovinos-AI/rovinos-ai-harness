@@ -33,6 +33,9 @@ import type {
 } from "./ports.js";
 import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
+import { recordRunCompleted, runStructuredFinalOutput } from "./steps/final-output.js";
+import type { ValueTransform } from "@harness/models";
+import type { z } from "zod";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata {
@@ -57,6 +60,10 @@ export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata 
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
+  /** Optional role result contract enforced on the child's final model call. */
+  readonly finalOutputSchema?: z.ZodType;
+  /** Token-aware validation hook for the final structured result. */
+  readonly valueTransform?: ValueTransform;
   /** Optional summarization compaction, checked before every model call. */
   readonly compaction?: CompactionRuntimeOptions;
   /** Parent context and link for a child run's root span. */
@@ -75,7 +82,8 @@ export interface RunLoopResult {
   readonly events: readonly Event[];
 }
 
-interface RunLoopExecution extends Pick<Event, "runId"> {
+/** Internal dependencies retained while a run loop continues across model steps. */
+export interface RunLoopExecution extends Pick<Event, "runId"> {
   readonly checkpointer: Checkpointer;
   readonly budgetTracker: BudgetTracker;
 }
@@ -194,7 +202,14 @@ async function recoverInterruptedModelResponse(
 ): Promise<Event | undefined> {
   const recovery = planLastModelResponseRecovery(events);
   if (recovery.kind === "final_answer") {
-    return recordFinalAnswer(options, events, execution);
+    const lastResponse = events.findLast((event) => event.type === "model_response");
+    if (
+      options.finalOutputSchema !== undefined &&
+      (lastResponse?.type !== "model_response" || lastResponse.rungUsed === undefined)
+    ) {
+      return finishStructuredFinalOutput(options, events, execution);
+    }
+    return recordRunCompleted(options.recorder, events, execution.checkpointer);
   }
   if (recovery.kind === "tool_calls") {
     return runToolCalls(
@@ -301,26 +316,18 @@ async function finishModelStep(
   if (modelResult.preparedCalls.length > 0) {
     return runToolCalls(options, events, execution, modelResult.preparedCalls);
   }
-  return recordFinalAnswer(options, events, execution);
+  if (options.finalOutputSchema !== undefined) {
+    return finishStructuredFinalOutput(options, events, execution);
+  }
+  return recordRunCompleted(options.recorder, events, execution.checkpointer);
 }
 
-async function recordFinalAnswer(
+async function finishStructuredFinalOutput(
   options: RunLoopExecutionOptions,
   events: Event[],
   execution: RunLoopExecution,
 ): Promise<Event> {
-  await drainSentinelTrips(options.recorder, events);
-  const finished = await options.recorder.record({
-    type: "run_status_changed",
-    v: 1,
-    from: "running",
-    to: "completed",
-    reason: "final_answer",
-  });
-  events.push(finished);
-  await drainSentinelTrips(options.recorder, events);
-  await checkpointAfterStep(execution.checkpointer, events);
-  return finished;
+  return runStructuredFinalOutput(options, events, execution);
 }
 
 async function prepareModelStep(

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createStrategyRegistry, HeuristicTokenCounter } from "@harness/context";
 import { Code, type Message } from "@harness/schemas";
+import { validateWithTokens } from "@harness/pii";
+import type { AuditingVaultResolver } from "@harness/vault";
+import type { ValueTransform } from "@harness/models";
 import type { EventStore } from "@harness/store";
 import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 import { parseRuntimeModelsConfig, type RuntimeConfig } from "../runtime-config.js";
@@ -14,6 +17,7 @@ import { StrategyContextPort } from "../context/context-port.js";
 import { AgentSpawnTool } from "./spawn-tool.js";
 import type { RunScopeRegistry } from "./scope.js";
 import { SubagentSupervisor, type SubagentRunRequest } from "./supervisor.js";
+import { finalizeChild } from "./result.js";
 
 /** Resolves configured roles against the registered tools and built-in spawn tool. */
 export async function resolveRuntimeRoles(
@@ -98,6 +102,7 @@ export function createSubagentTool(options: {
   readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   readonly roles: RoleRegistry;
   readonly scopes: RunScopeRegistry;
+  readonly resolver?: AuditingVaultResolver;
 }): ToolPort {
   const supervisor = new SubagentSupervisor({
     store: options.store,
@@ -105,6 +110,7 @@ export function createSubagentTool(options: {
     scopes: options.scopes,
     parentTools: options.parentTool,
     runChild: async (request: SubagentRunRequest) => {
+      const resolver = options.resolver;
       const result = await runLoop({
         recorder: new RunRecorder(
           options.store,
@@ -132,6 +138,24 @@ export function createSubagentTool(options: {
         configHash: configHash(options.config),
         policyVersion: options.policyVersion,
         role: request.role.route ?? request.role.id,
+        ...(request.role.resultSchema === undefined
+          ? {}
+          : {
+              finalOutputSchema: request.role.resultSchema,
+              ...(resolver === undefined
+                ? {}
+                : {
+                    valueTransform: (async (schema, value) => {
+                      const validated = await validateWithTokens(schema, value, {
+                        runId: request.runId,
+                        resolver,
+                      });
+                      return validated.ok
+                        ? { ok: true, tokenized: validated.tokenized }
+                        : { ok: false, issues: validated.issues };
+                    }) satisfies ValueTransform,
+                  }),
+            }),
         parentRunId: request.parentRunId,
         parentCallId: request.parentCallId,
         scopeId: request.scopeId,
@@ -139,12 +163,15 @@ export function createSubagentTool(options: {
         rootSpanParent: request.rootSpanParent,
         rootSpanLinks: request.rootSpanLinks,
       });
-      const response = result.events.findLast((event) => event.type === "model_response");
-      const text =
-        response?.type === "model_response"
-          ? response.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
-          : "";
-      return { status: result.status, text };
+      if (result.status === "pending" || result.status === "running") {
+        throw new Error("Child run did not reach a final state.");
+      }
+      return finalizeChild({
+        childRunId: request.runId,
+        status: result.status,
+        events: result.events,
+        hasResultSchema: request.role.resultSchema !== undefined,
+      });
     },
   });
   return new AgentSpawnTool(options.parentTool, options.roles, supervisor);

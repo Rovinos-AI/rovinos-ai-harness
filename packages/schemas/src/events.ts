@@ -96,6 +96,7 @@ const modelResponseEvent = z
     repairAttempts: z.number().int().nonnegative(),
     rungUsed: Code.optional(),
     fallbackDepth: z.number().int().nonnegative().default(0),
+    structuredValue: JsonValue.optional(),
     content: z.array(PartSchema),
     providerBlobs: JsonValue,
   })
@@ -240,6 +241,9 @@ const subagentCompletedEvent = z
     type: z.literal("subagent_completed"),
     childRunId: Id,
     outcome: z.enum(["completed", "failed", "cancelled"]),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    costMicros: z.number().int().nonnegative().optional(),
   })
   .strict();
 

@@ -712,6 +712,9 @@ export declare const RunViewSchema: z.ZodObject<{
             completed: "completed";
             failed: "failed";
         }>;
+        inputTokens: z.ZodNumber;
+        outputTokens: z.ZodNumber;
+        costMicros: z.ZodOptional<z.ZodNumber>;
         runId: z.ZodString;
         seq: z.ZodNumber;
         ts: z.ZodNumber;

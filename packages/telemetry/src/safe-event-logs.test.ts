@@ -110,6 +110,9 @@ const events = [
     kind: "subagent_completed",
     childRunId: "00000000000000000000000001",
     outcome: "completed",
+    inputTokens: 4,
+    outputTokens: 2,
+    costMicros: 3,
   }),
   SafeEvent.parse({ ...common, kind: "run_created", configHash: "a".repeat(64) }),
 ];

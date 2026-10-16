@@ -270,6 +270,7 @@ function createRuntimeToolPort(
     workspaceSnapshotter: options.workspaceSnapshotter,
     roles: options.roles,
     scopes: options.scopes,
+    ...(options.pii === undefined ? {} : { resolver: options.pii.resolver }),
   });
   const piiTool =
     options.pii === undefined

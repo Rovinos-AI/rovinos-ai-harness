@@ -2,12 +2,22 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as Apps from "@modelcontextprotocol/ext-apps";
+import type * as AppTelemetry from "@harness/app-telemetry";
+import type { AppSpanName, CreateAppTelemetryOptions } from "@harness/app-telemetry";
 
 const bridge = vi.hoisted(() => ({
   apps: new Map<string, Apps.EventDispatcher<Apps.AppEventMap>>(),
   connect: vi.fn<() => Promise<void>>(),
   call: vi.fn<Apps.App["callServerTool"]>(),
 }));
+const telemetry = vi.hoisted(() => {
+  const instances: {
+    active: boolean;
+    setHostMetadata(metadata: unknown): void;
+    traceContext: { readonly traceId: string | undefined };
+  }[] = [];
+  return { instances };
+});
 
 vi.mock("@modelcontextprotocol/ext-apps", async (importOriginal) => {
   const actual = await importOriginal<typeof Apps>();
@@ -19,6 +29,20 @@ vi.mock("@modelcontextprotocol/ext-apps", async (importOriginal) => {
         super();
         bridge.apps.set("app", this);
       }
+    },
+  };
+});
+
+vi.mock("@harness/app-telemetry", async (importOriginal) => {
+  const actual = await importOriginal<typeof AppTelemetry>();
+  return {
+    ...actual,
+    createAppTelemetry: <const Names extends readonly AppSpanName[]>(
+      options: CreateAppTelemetryOptions<Names>,
+    ) => {
+      const instance = actual.createAppTelemetry(options);
+      telemetry.instances.push(instance);
+      return instance;
     },
   };
 });
@@ -41,6 +65,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.resetModules();
   vi.clearAllMocks();
+  telemetry.instances.length = 0;
   document.body.replaceChildren();
 });
 
@@ -52,6 +77,9 @@ async function start() {
   if (app === undefined) {
     throw new Error("App was not created");
   }
+  await vi.waitFor(() => {
+    expect(telemetry.instances[0]?.active).toBe(true);
+  });
   return app;
 }
 
@@ -79,9 +107,34 @@ describe("approval app SDK bootstrap", () => {
       app.dispatch("toolresult", result);
       expect(document.body.textContent).toContain("Invalid approval payload");
     }
-    await vi.waitFor(() => {
-      expect(bridge.call).toHaveBeenCalled();
+    const instance = telemetry.instances[0];
+    if (instance === undefined) {
+      throw new Error("App telemetry was not created.");
+    }
+    const setHostMetadataSpy = vi.spyOn(instance, "setHostMetadata");
+    app.dispatch("toolresult", {
+      content: [],
+      _meta: { traceparent: "00-1234567890abcdef1234567890abcdef-1234567890abcdef-01" },
     });
+    expect(setHostMetadataSpy).toHaveBeenCalledWith({
+      traceparent: "00-1234567890abcdef1234567890abcdef-1234567890abcdef-01",
+    });
+    expect(instance.traceContext.traceId).toBe("1234567890abcdef1234567890abcdef");
+    await vi.waitFor(() => {
+      expect(
+        bridge.call.mock.calls.some(
+          ([request]) =>
+            request.name === "harness.telemetry.emit" &&
+            request.arguments !== undefined &&
+            "spans" in request.arguments &&
+            Array.isArray(request.arguments.spans) &&
+            request.arguments.spans.length > 0,
+        ),
+      ).toBe(true);
+    });
+    expect(bridge.call.mock.invocationCallOrder[0]).toBeGreaterThan(
+      bridge.connect.mock.invocationCallOrder[0] ?? 0,
+    );
     const calls = JSON.stringify(bridge.call.mock.calls);
     expect(calls).toContain("harness.telemetry.emit");
     expect(calls).toContain("payload_invalid");
@@ -133,5 +186,32 @@ describe("approval app SDK bootstrap", () => {
     });
     expect(document.body.textContent).not.toContain("SYNTHETIC");
     expect(JSON.stringify(bridge.call.mock.calls)).not.toContain("SYNTHETIC");
+    expect(bridge.call).not.toHaveBeenCalled();
+  });
+
+  it("waits for a delayed SDK connection before starting telemetry activation", async () => {
+    vi.useFakeTimers();
+    let resolveConnection: (() => void) | undefined;
+    bridge.connect.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveConnection = resolve;
+      }),
+    );
+    bridge.call.mockResolvedValue({ content: [] });
+    await import("./main.js");
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(bridge.call).not.toHaveBeenCalled();
+
+    resolveConnection?.();
+    await vi.waitFor(() => {
+      expect(bridge.call).toHaveBeenCalledWith({
+        name: "harness.telemetry.emit",
+        arguments: { spans: [] },
+      });
+    });
+    await vi.waitFor(() => {
+      expect(telemetry.instances[0]?.active).toBe(true);
+    });
+    window.dispatchEvent(new Event("pagehide"));
   });
 });
