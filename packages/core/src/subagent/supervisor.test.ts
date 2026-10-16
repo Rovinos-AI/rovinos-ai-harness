@@ -476,7 +476,7 @@ describe("SubagentSupervisor", () => {
     }
     expect(events.filter((event) => event.type === "subagent_spawned")).toHaveLength(1);
     expect(events.filter((event) => event.type === "subagent_completed")).toHaveLength(1);
-    expect(events.filter((event) => event.type === "subagent_spawned")[0]).toMatchObject({
+    expect(events.find((event) => event.type === "subagent_spawned")).toMatchObject({
       childRunId,
       parentCallId,
     });

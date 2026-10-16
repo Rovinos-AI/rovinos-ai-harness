@@ -105,19 +105,12 @@ export class SubagentSupervisor {
       throw new SubagentError("subagent_parent_span_missing");
     }
 
-    const existingSpawn = await this.findSpawned(context.runId, call.callId);
-    if (existingSpawn === undefined && (await this.childrenOf(context.runId)) >= role.maxChildren) {
-      throw new SubagentError("subagent_children_limit");
-    }
-    const childRunId = existingSpawn?.childRunId ?? this.options.ids.next();
-    const completionRecorded = await this.hasCompletion(context.runId, childRunId);
-    if (existingSpawn === undefined) {
-      await recordSpawned({
-        childRunId,
-        role: role.id,
-        parentCallId: call.callId,
-      });
-    }
+    const { childRunId, completionRecorded } = await this.resolveSpawn({
+      runId: context.runId,
+      parentCallId: call.callId,
+      role,
+      recordSpawned,
+    });
 
     const scopeId = this.options.scopes.scopeOf(context.runId);
     this.options.scopes.register(childRunId, scopeId);
@@ -170,6 +163,34 @@ export class SubagentSupervisor {
       }
     }
     return count;
+  }
+
+  private async resolveSpawn(options: {
+    readonly runId: Id;
+    readonly parentCallId: Id;
+    readonly role: ResolvedRole;
+    readonly recordSpawned: NonNullable<RunContext["recordSubagentSpawned"]>;
+  }): Promise<{ readonly childRunId: Id; readonly completionRecorded: boolean }> {
+    const existingSpawn = await this.findSpawned(options.runId, options.parentCallId);
+    if (existingSpawn !== undefined) {
+      return {
+        childRunId: existingSpawn.childRunId,
+        completionRecorded: await this.hasCompletion(options.runId, existingSpawn.childRunId),
+      };
+    }
+    if ((await this.childrenOf(options.runId)) >= options.role.maxChildren) {
+      throw new SubagentError("subagent_children_limit");
+    }
+    const childRunId = this.options.ids.next();
+    await options.recordSpawned({
+      childRunId,
+      role: options.role.id,
+      parentCallId: options.parentCallId,
+    });
+    return {
+      childRunId,
+      completionRecorded: await this.hasCompletion(options.runId, childRunId),
+    };
   }
 
   private async recordFailedCompletion(
