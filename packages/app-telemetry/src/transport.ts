@@ -63,42 +63,6 @@ function isErrorResult(result: unknown): boolean {
   }
 }
 
-function isRateLimited(value: unknown): boolean {
-  try {
-    if (!isRecord(value)) {
-      return false;
-    }
-    if (isRecord(value.structuredContent) && value.structuredContent.code === "rate_limited") {
-      return true;
-    }
-    if (
-      value.code === "rate_limited" ||
-      value.error === "rate_limited" ||
-      value.message === "rate_limited" ||
-      (typeof value.message === "string" && isRateLimitedText(value.message))
-    ) {
-      return true;
-    }
-    if (Array.isArray(value.content)) {
-      return value.content.some(
-        (part: unknown) => isRecord(part) && part.type === "text" && isRateLimitedText(part.text),
-      );
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function isRateLimitedText(value: unknown): boolean {
-  if (typeof value !== "string") {
-    return false;
-  }
-  return /^(?:error:\s*)?(?:rate_limited|\{\s*"(?:code|error)"\s*:\s*"rate_limited"\s*\})$/iu.test(
-    value.trim(),
-  );
-}
-
 function spanByteLength(span: AppSpan): number {
   try {
     return new TextEncoder().encode(JSON.stringify(span)).length;
@@ -315,15 +279,12 @@ class BrowserAppTelemetryTransport implements AppTelemetryTransport {
     }
   }
 
-  #scheduleRetry(rateLimited: boolean): void {
+  #scheduleRetry(): void {
     if (this.#disposed) {
       return;
     }
-    if (rateLimited) {
-      this.#backoffMs =
-        this.#backoffMs === 0 ? initialBackoffMs : Math.min(this.#backoffMs * 2, maxBackoffMs);
-    }
-    const delay = rateLimited ? this.#backoffMs : initialBackoffMs;
+    this.#backoffMs =
+      this.#backoffMs === 0 ? initialBackoffMs : Math.min(this.#backoffMs * 2, maxBackoffMs);
     let randomValue = 0.5;
     try {
       const value = this.#random();
@@ -335,7 +296,7 @@ class BrowserAppTelemetryTransport implements AppTelemetryTransport {
     }
     const jitteredBackoff = Math.min(
       maxBackoffMs,
-      delay * (1 - retryJitterRatio + 2 * retryJitterRatio * randomValue),
+      this.#backoffMs * (1 - retryJitterRatio + 2 * retryJitterRatio * randomValue),
     );
     this.#clearRetryTimer();
     this.#retryTimer = setTimeout(() => {
@@ -349,15 +310,15 @@ class BrowserAppTelemetryTransport implements AppTelemetryTransport {
       const result = await this.#bridge?.callTool("harness.telemetry.emit", { spans: batch });
       if (isErrorResult(result)) {
         this.#restoreBatch(batch);
-        this.#scheduleRetry(isRateLimited(result));
+        this.#scheduleRetry();
         return false;
       }
       this.setHostMetadata(isRecord(result) ? result._meta : undefined);
       this.#backoffMs = 0;
       return true;
-    } catch (error) {
+    } catch {
       this.#restoreBatch(batch);
-      this.#scheduleRetry(isRateLimited(error));
+      this.#scheduleRetry();
       return false;
     }
   }

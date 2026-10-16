@@ -550,6 +550,92 @@ describe("app telemetry transport", () => {
     await telemetry.dispose();
   });
 
+  it("escalates generic failures with jitter and resets the delay after success", async () => {
+    vi.useFakeTimers();
+    let sends = 0;
+    const callTool = vi.fn((...args: ToolCallArgs) => {
+      if (args[1].spans.length === 0) {
+        return Promise.resolve({});
+      }
+      sends += 1;
+      return Promise.resolve(sends < 6 || sends === 7 ? { isError: true } : {});
+    });
+    const telemetry = makeTelemetry(callTool, { random: () => 0.5 });
+    await settle();
+    telemetry.record("ui.render", {});
+    await telemetry.flush();
+
+    for (const delay of [500, 1_000, 2_000, 4_000, 8_000]) {
+      const previousSends = sends;
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(sends).toBe(previousSends);
+      await vi.advanceTimersByTimeAsync(1);
+      await settle();
+      expect(sends).toBe(previousSends + 1);
+    }
+    expect(sends).toBe(6);
+
+    telemetry.record("ui.render", {});
+    await telemetry.flush();
+    expect(sends).toBe(7);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(sends).toBe(7);
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(sends).toBe(8);
+    await telemetry.dispose();
+  });
+
+  it.each([
+    [0, [400, 800, 1_600, 3_200, 6_400, 6_400]],
+    [0.5, [500, 1_000, 2_000, 4_000, 8_000, 8_000]],
+    [1, [600, 1_200, 2_400, 4_800, 8_000, 8_000]],
+  ])("keeps retry jitter bounded for random=%s", async (random, delays) => {
+    vi.useFakeTimers();
+    let sends = 0;
+    const callTool = vi.fn((...args: ToolCallArgs) => {
+      if (args[1].spans.length === 0) {
+        return Promise.resolve({});
+      }
+      sends += 1;
+      return Promise.resolve({ isError: true });
+    });
+    const telemetry = makeTelemetry(callTool, { random: () => random });
+    await settle();
+    telemetry.record("ui.render", {});
+    await telemetry.flush();
+
+    for (const delay of delays) {
+      const previousSends = sends;
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(sends).toBe(previousSends);
+      await vi.advanceTimersByTimeAsync(1);
+      await settle();
+      expect(sends).toBe(previousSends + 1);
+    }
+    expect(Math.max(...delays)).toBeLessThanOrEqual(8_000);
+    await telemetry.dispose();
+  });
+
+  it("counts queued spans dropped after a failed disposal flush", async () => {
+    const callTool = vi.fn((...args: ToolCallArgs) =>
+      Promise.resolve(
+        args[1].spans.length === 0
+          ? {}
+          : { isError: true, content: [{ type: "text", text: "host unavailable" }] },
+      ),
+    );
+    const telemetry = makeTelemetry(callTool);
+    await waitForActive(telemetry);
+    for (let count = 0; count < 3; count += 1) {
+      telemetry.record("ui.render", {});
+    }
+
+    await expect(telemetry.dispose()).resolves.toBeUndefined();
+    expect(telemetry.stats()).toEqual({ dropped: 3 });
+    expect(dataCalls(callTool)).toHaveLength(1);
+  });
+
   it("keeps activation and transport property-access failures silent", async () => {
     const result = Object.defineProperty({}, "isError", {
       get() {

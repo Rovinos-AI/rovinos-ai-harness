@@ -11,7 +11,11 @@ const bridge = vi.hoisted(() => ({
   call: vi.fn<Apps.App["callServerTool"]>(),
 }));
 const telemetry = vi.hoisted(() => {
-  const instances: { active: boolean; setHostMetadata(metadata: unknown): void }[] = [];
+  const instances: {
+    active: boolean;
+    setHostMetadata(metadata: unknown): void;
+    traceContext: { readonly traceId: string | undefined };
+  }[] = [];
   return { instances };
 });
 
@@ -115,6 +119,7 @@ describe("approval app SDK bootstrap", () => {
     expect(setHostMetadataSpy).toHaveBeenCalledWith({
       traceparent: "00-1234567890abcdef1234567890abcdef-1234567890abcdef-01",
     });
+    expect(instance.traceContext.traceId).toBe("1234567890abcdef1234567890abcdef");
     await vi.waitFor(() => {
       expect(
         bridge.call.mock.calls.some(
