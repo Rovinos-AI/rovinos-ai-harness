@@ -385,10 +385,7 @@ describe("WorkspaceSnapshotter", () => {
     const runRoot = join(paths.workspaceRoot, runId);
     await mkdir(runRoot, { recursive: true });
     await writeFile(join(runRoot, "keep"), "original");
-    const ref = await writeArchive(
-      paths,
-      maliciousArchive("link", "1", Buffer.alloc(0), "later"),
-    );
+    const ref = await writeArchive(paths, maliciousArchive("link", "1", Buffer.alloc(0), "later"));
 
     await expect(snapshotter(paths).restore(runId, ref)).rejects.toMatchObject({
       code: "workspace_snapshot_unsafe",

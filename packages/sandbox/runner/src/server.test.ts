@@ -113,6 +113,9 @@ function makeRequest(
     origin?: string;
     authorization?: string;
     body?: string | Buffer;
+    workspaceRunId?: string;
+    maxFileBytes?: number;
+    maxSnapshotBytes?: number;
   } = {},
 ) {
   const request = Readable.from(
@@ -127,6 +130,13 @@ function makeRequest(
       host: options.host ?? "runner.test",
       ...(options.origin === undefined ? {} : { origin: options.origin }),
       ...(options.authorization === undefined ? {} : { authorization: options.authorization }),
+      ...(options.workspaceRunId === undefined ? {} : { "x-run-id": options.workspaceRunId }),
+      ...(options.maxFileBytes === undefined
+        ? {}
+        : { "x-max-file-bytes": String(options.maxFileBytes) }),
+      ...(options.maxSnapshotBytes === undefined
+        ? {}
+        : { "x-max-snapshot-bytes": String(options.maxSnapshotBytes) }),
     },
   });
 }
@@ -752,6 +762,78 @@ describe("runner HTTP request handler", () => {
           });
         });
       }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports missing, invalid, and oversized workspace transfers safely", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "sandbox-runner-workspace-errors-"));
+    const handler = createRunnerRequestHandler(makeOptions({ workspaceRoot: directory }));
+    const authorization = ["Bearer", token].join(" ");
+    const requestPayload = (forRun: string) => JSON.stringify({ runId: forRun });
+
+    try {
+      const missing = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/exists",
+          authorization,
+          body: requestPayload(runId),
+        }),
+      );
+      expect(missing.status).toBe(200);
+      expect(missing.body).toBe('{"exists":false}');
+
+      const missingSnapshot = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/snapshot",
+          authorization,
+          body: JSON.stringify({ runId, maxFileBytes: 8, maxSnapshotBytes: 8 }),
+        }),
+      );
+      expect(missingSnapshot.status).toBe(404);
+
+      await writeFile(join(directory, runId), "not a workspace");
+      const invalidWorkspace = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/exists",
+          authorization,
+          body: requestPayload(runId),
+        }),
+      );
+      expect(invalidWorkspace.status).toBe(500);
+      await rm(join(directory, runId));
+
+      await mkdir(join(directory, runId), { recursive: true });
+      await writeFile(join(directory, runId, "large"), Buffer.alloc(16, 1));
+      const oversizedSnapshot = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/snapshot",
+          authorization,
+          body: JSON.stringify({ runId, maxFileBytes: 8, maxSnapshotBytes: 32 }),
+        }),
+      );
+      expect(oversizedSnapshot.status).toBe(413);
+
+      const oversizedRestore = await call(
+        handler,
+        makeRequest({
+          url: "/workspace/restore",
+          authorization,
+          workspaceRunId: runId,
+          maxFileBytes: 8,
+          maxSnapshotBytes: 8,
+          body: Buffer.alloc(16, 1),
+        }),
+      );
+      expect(oversizedRestore.status).toBe(413);
+      await expect(readFile(join(directory, runId, "large"))).resolves.toEqual(
+        Buffer.alloc(16, 1),
+      );
+    } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });

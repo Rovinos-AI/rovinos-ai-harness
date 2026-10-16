@@ -387,9 +387,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     }
     try {
       return await Promise.all(
-        this.retainedSnapshotsQuery
-          .all(runId, limit)
-          .map((row) => decodeSnapshot(this.codec, row)),
+        this.retainedSnapshotsQuery.all(runId, limit).map((row) => decodeSnapshot(this.codec, row)),
       );
     } catch (error) {
       throw storeError(error);

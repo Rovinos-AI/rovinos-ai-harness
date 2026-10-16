@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Id } from "@harness/schemas";
+import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_WEB_FETCH_BYTES } from "./web-fetch-contracts.js";
 import { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
@@ -53,6 +54,43 @@ function backend(fetcher: typeof fetch, options: { timeoutGraceMs?: number } = {
 }
 
 describe("RemoteSandboxBackend", () => {
+  it("streams workspace snapshot downloads and restores", async () => {
+    let uploaded = "";
+    const fetcher: typeof fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestUrl(input).pathname;
+      if (path === "/workspace/snapshot") {
+        return new Response(Buffer.from("archive"));
+      }
+      if (path === "/workspace/restore") {
+        const body = init?.body;
+        if (!(body instanceof ReadableStream)) {
+          throw new Error("Expected a streamed archive upload.");
+        }
+        const reader = body.getReader();
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done === true) {
+            break;
+          }
+          uploaded += Buffer.from(chunk.value).toString("utf8");
+        }
+        return response({ status: "ok" });
+      }
+      return response({ exists: true });
+    });
+    const remote = backend(fetcher);
+    const chunks: Buffer[] = [];
+
+    for await (const chunk of await remote.createArchive(runId, 1024, 2048)) {
+      chunks.push(Buffer.from(chunk));
+    }
+    await remote.restoreArchive(runId, Readable.from([Buffer.from("archive")]), 1024, 2048);
+
+    expect(Buffer.concat(chunks).toString("utf8")).toBe("archive");
+    expect(uploaded).toBe("archive");
+    await expect(remote.hasWorkspace(runId)).resolves.toBe(true);
+  });
+
   it("sends the run request with bearer authentication and validates the response", async () => {
     const fetcher: typeof fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
       expect(new Headers(init?.headers).get("authorization")).toBe(

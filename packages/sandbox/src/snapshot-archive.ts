@@ -161,21 +161,23 @@ export async function assertWorkspaceArchiveLimits(
 /** Compresses the workspace while excluding ephemeral per-run scratch files. */
 export function createWorkspaceArchive(runRoot: string): Readable {
   try {
-    return Readable.from(tar.c(
-      {
-        cwd: runRoot,
-        gzip: true,
-        portable: true,
-        filter: (path) => {
-          const segments = path
-            .replaceAll("\\", "/")
-            .split("/")
-            .filter((segment) => segment !== "" && segment !== ".");
-          return !(segments[0] === ".harness" && segments[1] === "tmp");
+    return Readable.from(
+      tar.c(
+        {
+          cwd: runRoot,
+          gzip: true,
+          portable: true,
+          filter: (path) => {
+            const segments = path
+              .replaceAll("\\", "/")
+              .split("/")
+              .filter((segment) => segment !== "" && segment !== ".");
+            return !(segments[0] === ".harness" && segments[1] === "tmp");
+          },
         },
-      },
-      ["."],
-    ));
+        ["."],
+      ),
+    );
   } catch {
     throw new WorkspaceSnapshotError();
   }
@@ -213,9 +215,7 @@ function resolveArchiveEntryPath(
   }
 }
 
-function entryHasAllowedType(
-  entry: ArchiveFilterEntry,
-): entry is ReadEntry {
+function entryHasAllowedType(entry: ArchiveFilterEntry): entry is ReadEntry {
   return (
     "type" in entry &&
     (entry.type === "Directory" ||
