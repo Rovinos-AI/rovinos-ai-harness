@@ -9,7 +9,13 @@ import {
   type PiiAction,
 } from "@harness/schemas";
 import { InMemoryVault, type VaultWriter } from "@harness/vault";
-import { PiiBlockedError, PiiTokenizerError, toPiiActionEvent, Tokenizer } from "./index.js";
+import {
+  PiiBlockedError,
+  PiiDetectorError,
+  PiiTokenizerError,
+  toPiiActionEvent,
+  Tokenizer,
+} from "./index.js";
 import type { PiiDetectorRegistry } from "./tokenizer.js";
 
 const runA = "A".repeat(26);
@@ -267,6 +273,18 @@ describe("Tokenizer.tokenizeText", () => {
     ).rejects.toMatchObject({
       code: "pii_vault_failed",
       message: "pii_vault_failed",
+    });
+  });
+
+  it("preserves the safe unavailable code from the async detector registry", async () => {
+    const sensitiveValue = "synthetic-detector-canary";
+    const tokenizer = createTokenizer("tokenize", new InMemoryVault(), () =>
+      Promise.reject(new PiiDetectorError("pii_detector_unavailable")),
+    );
+
+    await expect(tokenizer.tokenizeText(runA, sensitiveValue, context)).rejects.toMatchObject({
+      code: "pii_detector_unavailable",
+      message: "pii_detector_unavailable",
     });
   });
 

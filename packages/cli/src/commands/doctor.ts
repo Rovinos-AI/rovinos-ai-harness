@@ -6,6 +6,7 @@ import {
   getConfigSecretRefs,
   type HarnessConfig,
 } from "@harness/config";
+import { createPresidioReachableCheck } from "@harness/pii";
 import { createServersReachableChecks } from "@harness/mcp";
 import { Code, DoctorResultsSchema, HarnessError } from "@harness/schemas";
 import { LocalKeyProvider, LocalKeyProviderError } from "@harness/vault";
@@ -124,9 +125,14 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
               return fileWarning;
             },
           };
+          const presidioChecks =
+            config.pii.presidio === undefined
+              ? []
+              : [createPresidioReachableCheck(config.pii.presidio)];
           const defaultChecks = [
             ...core.doctorChecks(),
             keysConfiguredCheck(config, env),
+            ...presidioChecks,
             ...createServersReachableChecks(config?.servers ?? [], {
               resolveSecret: async (ref, signal) => {
                 return (await secretResolver.resolve(ref, signal)).reveal();
