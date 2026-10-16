@@ -240,6 +240,9 @@ const subagentCompletedEvent = z
     type: z.literal("subagent_completed"),
     childRunId: Id,
     outcome: z.enum(["completed", "failed", "cancelled"]),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    costMicros: z.number().int().nonnegative().optional(),
   })
   .strict();
 

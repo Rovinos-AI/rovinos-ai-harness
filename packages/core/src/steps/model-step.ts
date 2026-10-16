@@ -13,6 +13,8 @@ import { SpanStatusCode } from "@opentelemetry/api";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
+import type { ValueTransform } from "@harness/models";
+import type { z } from "zod";
 import {
   piiActionRunContext,
   prepareCompletion,
@@ -35,6 +37,9 @@ export interface ModelStepOptions {
   readonly role?: Code;
   readonly provider?: Code;
   readonly modelName?: Code;
+  readonly outputSchema?: z.ZodType;
+  readonly valueTransform?: ValueTransform;
+  readonly includeTools?: boolean;
   readonly contextMetadata: {
     readonly strategyId: Code;
     readonly strategyVersion: Code;
@@ -48,8 +53,9 @@ export interface ModelStepOptions {
 export function modelToolOptions(
   tool: ToolPort,
   messages: Message[],
+  includeTools = true,
 ): Pick<ModelStepOptions, "messages" | "tools"> {
-  const tools = tool.getToolSpecs?.();
+  const tools = includeTools ? tool.getToolSpecs?.() : undefined;
   return {
     messages,
     ...(tools === undefined
@@ -84,6 +90,8 @@ function modelRunContext(options: ModelStepOptions): RunContext {
     runId: options.runId,
     signal: options.signal,
     ...(options.deadlineTs === undefined ? {} : { deadlineTs: options.deadlineTs }),
+    ...(options.outputSchema === undefined ? {} : { outputSchema: options.outputSchema }),
+    ...(options.valueTransform === undefined ? {} : { valueTransform: options.valueTransform }),
   };
 }
 
@@ -152,17 +160,21 @@ export async function modelStep(options: ModelStepOptions): Promise<ModelStepRes
           return requestEvent;
         }
         const code = errorCode(error);
+        const reason =
+          code === "model_output_invalid" && options.outputSchema !== undefined
+            ? "result_invalid"
+            : code;
         span.setStatus({ code: SpanStatusCode.ERROR });
-        span.setAttribute("harness.error.code", code);
+        span.setAttribute("harness.error.code", reason);
         const failed = await options.recorder.record({
           type: "run_status_changed",
           v: 1,
           from: "running",
           to: "failed",
-          reason: code,
+          reason,
         });
         recorded.push(failed);
-        result = { outcome: "failed", code, events: recorded };
+        result = { outcome: "failed", code: reason, events: recorded };
         return failed;
       }
 

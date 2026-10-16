@@ -112,7 +112,15 @@ export const eventSamples = [
   },
   { ...envelope, type: "budget_exceeded", budget: "steps", limit: 1, observed: 2 },
   { ...envelope, type: "subagent_spawned", childRunId: id, role: "researcher" },
-  { ...envelope, type: "subagent_completed", childRunId: id, outcome: "completed" },
+  {
+    ...envelope,
+    type: "subagent_completed",
+    childRunId: id,
+    outcome: "completed",
+    inputTokens: 3,
+    outputTokens: 2,
+    costMicros: 1,
+  },
 ] satisfies Event[];
 
 const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";

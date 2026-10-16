@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ensureTracingFallback } from "@harness/telemetry";
-import { FakeClock, Id, type JsonValue } from "@harness/schemas";
+import { FakeClock, Id, JsonValue } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import { RunRecorder } from "../recorder.js";
@@ -53,6 +53,7 @@ function context(overrides: Partial<RunContext> = {}, tools: ToolPort = parentTo
     toolRegistry: tools,
     depth: 0,
     recordSubagentSpawned: vi.fn(() => Promise.resolve()),
+    recordSubagentCompleted: vi.fn(() => Promise.resolve()),
     ...overrides,
   };
 }
@@ -173,7 +174,12 @@ describe("SubagentSupervisor", () => {
                 }),
             { links: request.rootSpanLinks, parentContext: request.rootSpanParent },
           );
-          return { status: "running" };
+          return {
+            childRunId: request.runId,
+            status: "completed",
+            value: null,
+            usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+          };
         },
         {
           store,
@@ -202,13 +208,13 @@ describe("SubagentSupervisor", () => {
         argsHash: hash,
         args: {},
       });
-      childResult = await supervisor.spawn({
+      childResult = JsonValue.parse(await supervisor.spawn({
         role,
         goal: "tokenized goal",
         inputs: { ref: "<EMAIL_1>" },
         call: toolCall(),
         context: toolContext,
-      });
+      }));
       return recorder.record({
         type: "tool_result",
         v: 1,
@@ -220,7 +226,12 @@ describe("SubagentSupervisor", () => {
       });
     });
 
-    expect(childResult).toEqual({ status: "running" });
+    expect(childResult).toEqual({
+      childRunId,
+      status: "completed",
+      value: null,
+      usage: { inputTokens: 2, outputTokens: 3, costMicros: 4 },
+    });
     expect(childRequest).toMatchObject({
       runId: childRunId,
       parentRunId,
@@ -251,6 +262,9 @@ describe("SubagentSupervisor", () => {
     );
     expect(spawnAppend).toBeGreaterThanOrEqual(0);
     expect(childAppend).toBeGreaterThan(spawnAppend);
+    expect(appendOrder.some(({ runId: requestedRunId, types }) =>
+      requestedRunId === parentRunId && types.includes("subagent_completed"),
+    )).toBe(true);
   });
 
   it("enforces role depth and existing-child limits before recording", async () => {
@@ -275,7 +289,13 @@ describe("SubagentSupervisor", () => {
       1,
     );
     const recordSpawned = vi.fn(() => Promise.resolve());
-    const runChild = vi.fn(() => Promise.resolve(null));
+    const runChild = vi.fn(() =>
+      Promise.resolve({
+        childRunId,
+        status: "completed" as const,
+        usage: { inputTokens: 0, outputTokens: 0 },
+      }),
+    );
     const supervisor = new SubagentSupervisor(
       supervisorOptions(runChild, {
         store,
@@ -311,7 +331,15 @@ describe("SubagentSupervisor", () => {
     const store = new InMemoryEventStore();
     await seedParent(store);
     const supervisor = new SubagentSupervisor(
-      supervisorOptions(() => Promise.resolve(null), { store }),
+      supervisorOptions(
+        () =>
+          Promise.resolve({
+            childRunId,
+            status: "completed",
+            usage: { inputTokens: 0, outputTokens: 0 },
+          }),
+        { store },
+      ),
     );
     const withoutRecorder: RunContext = {
       runId: parentRunId,

@@ -195,11 +195,17 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
       type: "subagent_completed",
       childRunId: "00000000000000000000000002",
       outcome: "completed",
+      inputTokens: 4,
+      outputTokens: 2,
+      costMicros: 3,
     }),
     kind: "subagent_completed",
     fields: {
       childRunId: "00000000000000000000000002",
       outcome: "completed",
+      inputTokens: 4,
+      outputTokens: 2,
+      costMicros: 3,
     },
   },
   {

@@ -91,6 +91,9 @@ export class AgentSpawnTool implements ToolPort {
       call,
       context,
     });
+    if (result.status === "failed" && result.errorCode !== undefined) {
+      return { outcome: "error", errorCode: Code.parse(result.errorCode), result: null };
+    }
     const value: JsonValueType = JsonValue.parse(result);
     return { outcome: "ok", result: value };
   }

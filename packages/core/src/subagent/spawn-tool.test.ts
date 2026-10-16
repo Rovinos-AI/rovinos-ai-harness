@@ -56,6 +56,7 @@ function runContext(tools: ToolPort): RunContext {
     toolRegistry: tools,
     depth: 0,
     recordSubagentSpawned: vi.fn(() => Promise.resolve()),
+    recordSubagentCompleted: vi.fn(() => Promise.resolve()),
   };
 }
 
@@ -76,7 +77,12 @@ function createSpawnTool(
     }),
     runChild: (request) => {
       onChild(request);
-      return Promise.resolve({ runId: request.runId, input: request.input });
+      return Promise.resolve({
+        childRunId: request.runId,
+        status: "completed",
+        value: { input: request.input },
+        usage: { inputTokens: 0, outputTokens: 0 },
+      });
     },
   });
   return new AgentSpawnTool(inner, registry, supervisor);
@@ -159,8 +165,10 @@ describe("agent.spawn tool", () => {
     ).resolves.toEqual({
       outcome: "ok",
       result: {
-        runId: childRunId,
-        input: { goal: "tokenized goal", inputs: { ref: "<EMAIL_1>" } },
+        childRunId,
+        status: "completed",
+        value: { input: { goal: "tokenized goal", inputs: { ref: "<EMAIL_1>" } } },
+        usage: { inputTokens: 0, outputTokens: 0 },
       },
     });
     expect(seen).toHaveLength(1);

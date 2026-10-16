@@ -16,6 +16,7 @@ import type {
 } from "@harness/schemas";
 import type { TranscriptGroup } from "@harness/context";
 import type { VaultAuditHandler } from "@harness/vault";
+import type { ValueTransform } from "@harness/models";
 import { z } from "zod";
 
 /** Provider-neutral request contract shared with the model gateway. */
@@ -35,6 +36,18 @@ export interface RunContext {
     readonly role: Code;
     readonly parentCallId: Id;
   }) => Promise<void>;
+  /** Durable metadata-only completion summary for a terminal child run. */
+  readonly recordSubagentCompleted?: (event: {
+    readonly childRunId: Id;
+    readonly outcome: "completed" | "failed" | "cancelled";
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly costMicros?: number;
+  }) => Promise<void>;
+  /** Structured-output contract used only for the child's final result call. */
+  readonly outputSchema?: z.ZodType;
+  /** Validates tokenized structured output without exposing its resolved value. */
+  readonly valueTransform?: ValueTransform;
   /** Epoch-millisecond wall-clock deadline computed from run budgets. */
   readonly deadlineTs?: number;
   /** Durable metadata-only PII summary sink supplied by the loop. */

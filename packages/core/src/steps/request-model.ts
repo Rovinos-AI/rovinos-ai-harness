@@ -15,7 +15,7 @@ export async function requestModel(
   const estimatedTokens = context.estimate?.(options.messages);
   const result = await modelStep({
     ...options,
-    ...modelToolOptions(options.tool, options.messages),
+    ...modelToolOptions(options.tool, options.messages, options.includeTools),
   });
   if (result.outcome === "response" && estimatedTokens !== undefined) {
     context.observeModelResponse?.(

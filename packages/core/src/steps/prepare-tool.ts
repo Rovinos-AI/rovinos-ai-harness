@@ -109,6 +109,19 @@ export function toolRunContext(
         }),
       );
     },
+    recordSubagentCompleted: async ({ childRunId, outcome, inputTokens, outputTokens, costMicros }) => {
+      events.push(
+        await recorder.record({
+          type: "subagent_completed",
+          v: 1,
+          childRunId,
+          outcome,
+          inputTokens,
+          outputTokens,
+          ...(costMicros === undefined ? {} : { costMicros }),
+        }),
+      );
+    },
   };
 }
 

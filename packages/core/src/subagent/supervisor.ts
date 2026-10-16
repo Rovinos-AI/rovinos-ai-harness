@@ -13,6 +13,7 @@ import type { EventStore } from "@harness/store";
 import type { IdGenerator, ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import type { ResolvedRole } from "../roles.js";
 import type { RunScopeRegistry } from "./scope.js";
+import type { SubagentResult } from "./result.js";
 
 /** Stable errors raised before a child run can start. */
 export type SubagentErrorCode =
@@ -48,7 +49,7 @@ export interface SubagentRunRequest {
 }
 
 /** Executes an isolated child run and returns its JSON-safe result. */
-export type SubagentRunner = (request: SubagentRunRequest) => Promise<JsonValue>;
+export type SubagentRunner = (request: SubagentRunRequest) => Promise<SubagentResult>;
 
 /** Request to create and await one child run. */
 export interface SubagentSpawnInput {
@@ -88,7 +89,7 @@ export class SubagentSupervisor {
    * @param context - Parent run context and durable event callback.
    * @returns The JSON-safe child result.
    */
-  async spawn({ role, goal, inputs, call, context }: SubagentSpawnInput): Promise<JsonValue> {
+  async spawn({ role, goal, inputs, call, context }: SubagentSpawnInput): Promise<SubagentResult> {
     const depth = (context.depth ?? 0) + 1;
     if (depth > role.maxDepth) {
       throw new SubagentError("subagent_depth_limit");
@@ -122,7 +123,7 @@ export class SubagentSupervisor {
       goal,
       ...(inputs === undefined ? {} : { inputs }),
     };
-    return this.options.runChild({
+    const result = await this.options.runChild({
       runId: childRunId,
       parentRunId: context.runId,
       parentCallId: call.callId,
@@ -136,6 +137,21 @@ export class SubagentSupervisor {
       rootSpanParent: trace.setSpanContext(ROOT_CONTEXT, parentSpanContext),
       rootSpanLinks: [{ context: parentSpanContext }],
     });
+    if (result.status !== "suspended") {
+      const recordCompleted = context.recordSubagentCompleted;
+      if (recordCompleted === undefined) {
+        throw new SubagentError("subagent_recorder_unavailable");
+      }
+      const { inputTokens, outputTokens, costMicros } = result.usage;
+      await recordCompleted({
+        childRunId,
+        outcome: result.status,
+        inputTokens,
+        outputTokens,
+        ...(costMicros === undefined ? {} : { costMicros }),
+      });
+    }
+    return result;
   }
 
   private async childrenOf(runId: Id): Promise<number> {

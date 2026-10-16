@@ -80,4 +80,21 @@ describe("Event", () => {
     });
     expect(Event.safeParse({ ...input, inputKind: "other" }).success).toBe(false);
   });
+
+  it("requires nonnegative token usage on terminal subagent events", () => {
+    const completed = eventSamples.find(({ type }) => type === "subagent_completed");
+    if (completed?.type !== "subagent_completed") {
+      throw new Error("Missing subagent completion sample.");
+    }
+
+    expect(
+      Event.parse({ ...completed, inputTokens: 10, outputTokens: 4, costMicros: 3 }),
+    ).toMatchObject({ inputTokens: 10, outputTokens: 4, costMicros: 3 });
+    expect(Event.safeParse({ ...completed, inputTokens: -1 }).success).toBe(false);
+    expect(Event.safeParse({ ...completed, outputTokens: -1 }).success).toBe(false);
+    expect(Event.safeParse({ ...completed, costMicros: -1 }).success).toBe(false);
+    const withoutInput = { ...completed };
+    Reflect.deleteProperty(withoutInput, "inputTokens");
+    expect(Event.safeParse(withoutInput).success).toBe(false);
+  });
 });
