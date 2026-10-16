@@ -46,14 +46,34 @@ export interface AppTelemetryManifest<Names extends readonly AppSpanName[]> {
 /** Options for creating a manifest-scoped telemetry shim. */
 export interface CreateAppTelemetryOptions<Names extends readonly AppSpanName[]> {
   readonly bridge?: AppTelemetryBridge;
+  /** Resolves when the host bridge is connected; activation timeout starts afterward. */
+  readonly hostReady?: Promise<void>;
   readonly manifest: AppTelemetryManifest<Names>;
   readonly now?: () => number;
+  /** Injectable source for bounded retry jitter. */
+  readonly random?: () => number;
+}
+
+/** Informational trace context returned by the host; never attached to app spans. */
+export interface AppTraceContext {
+  /** Host trace identifier, when the tool result contains a valid W3C traceparent. */
+  readonly traceId: string | undefined;
+}
+
+/** Bounded transport counters exposed for local debugging only. */
+export interface AppTelemetryStats {
+  /** Number of spans dropped to enforce limits or abandoned during disposal. */
+  readonly dropped: number;
 }
 
 /** Telemetry methods available to the app for its manifest-declared spans. */
 export interface AppTelemetry<Names extends readonly AppSpanName[]> {
-  /** Whether a callable host bridge was supplied. */
+  /** Whether the host confirmed the telemetry tool is callable. */
   readonly active: boolean;
+  /** Informational trace identifier supplied by the host. */
+  readonly traceContext: AppTraceContext;
+  /** Updates the informational trace context from host tool-result metadata. */
+  setHostMetadata(metadata: unknown): void;
   /** Starts timing a declared span; ending it records its attributes and duration. */
   start<Name extends Names[number]>(
     name: Name,
@@ -68,4 +88,8 @@ export interface AppTelemetry<Names extends readonly AppSpanName[]> {
   ): void;
   /** Sends queued spans to the host; bridge failures are intentionally silent. */
   flush(): Promise<void>;
+  /** Returns local-only transport counters. */
+  stats(): AppTelemetryStats;
+  /** Clears timers and listeners, drains pending spans, and counts any abandoned spans as dropped. */
+  dispose(): Promise<void>;
 }

@@ -43,7 +43,13 @@ const AppPayloadSchema = z
 const CallResponseSchema = CallToolResultSchema;
 const AppCallErrorSchema = z
   .object({
-    error: z.enum(["app_tool_not_allowed", "app_run_mismatch", "app_run_unavailable"]),
+    error: z.enum([
+      "app_tool_not_allowed",
+      "app_run_mismatch",
+      "app_run_unavailable",
+      "app_telemetry_unavailable",
+      "rate_limited",
+    ]),
   })
   .strict();
 const HostReadySchema = z.object({ appId: Code, sessionId: Id }).strict();
@@ -256,6 +262,13 @@ async function routeToolCall(
     });
     if (!response.ok) {
       const error = parseJson(AppCallErrorSchema, await response.text());
+      if (error.error === "rate_limited") {
+        return {
+          content: [{ type: "text", text: error.error }],
+          isError: true,
+          structuredContent: { code: error.error },
+        };
+      }
       throw new ProtocolError(INVALID_REQUEST, error.error);
     }
     return parseJson(CallResponseSchema, await response.text());
