@@ -1170,6 +1170,7 @@ __metadata:
     "@harness/mcp": "workspace:^"
     "@harness/pii": "workspace:^"
     "@harness/policy": "workspace:^"
+    "@harness/sandbox": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
     "@harness/telemetry": "workspace:^"
@@ -1361,6 +1362,7 @@ __metadata:
   resolution: "@harness/sandbox@workspace:packages/sandbox"
   dependencies:
     "@harness/context": "workspace:^"
+    "@harness/crypto": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@opentelemetry/api": "npm:1.9.1"
@@ -1368,6 +1370,7 @@ __metadata:
     "@types/node": "npm:26.6.4"
     fast-check: "npm:4.10.2"
     parse5: "npm:8.0.1"
+    tar: "npm:7.5.22"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.5"
   languageName: unknown
@@ -7086,7 +7089,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tar@npm:^7.5.7":
+"tar@npm:7.5.22, tar@npm:^7.5.7":
   version: 7.5.22
   resolution: "tar@npm:7.5.22"
   dependencies:

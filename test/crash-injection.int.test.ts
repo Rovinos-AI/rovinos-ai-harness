@@ -283,6 +283,10 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.latestSnapshot(forRun);
   }
 
+  retainedSnapshots(forRun: Id, limit: number) {
+    return this.inner.retainedSnapshots(forRun, limit);
+  }
+
   read(forRun: Id, range?: Parameters<EventStore["read"]>[1]) {
     return this.inner.read(forRun, range);
   }
@@ -510,6 +514,10 @@ class PreIntentExecutionStore implements EventStore {
 
   latestSnapshot(forRun: Id) {
     return this.inner.latestSnapshot(forRun);
+  }
+
+  retainedSnapshots(forRun: Id, limit: number) {
+    return this.inner.retainedSnapshots(forRun, limit);
   }
 
   read(forRun: Id, range?: Parameters<EventStore["read"]>[1]) {

@@ -86,6 +86,11 @@ class TestResponse extends EventEmitter {
     return this;
   }
 
+  write(chunk: Buffer): boolean {
+    this.body += chunk.toString("utf8");
+    return true;
+  }
+
   end(body?: string): void {
     this.body = body ?? "";
     this.writableEnded = true;

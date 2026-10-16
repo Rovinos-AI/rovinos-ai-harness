@@ -40,7 +40,9 @@ import {
   requestApproval,
   RunRecorder,
   RUN_SPAN,
+  type ModelPort,
   type ModelCompletion,
+  type PolicyPort,
   type ToolPort,
 } from "@harness/core";
 import { FakeModelPort } from "@harness/core/testing";
@@ -2008,6 +2010,21 @@ describe("retention", () => {
       throw new Error("The run id is not available.");
     }
     current.clock.advance(2 * DAY_MS);
+    const snapshotDirectory = join(current.dataDirectory, "snapshots", runId);
+    const snapshotStore = new SqliteEventStore(current.eventStorePath);
+    try {
+      const latest = await snapshotStore.latestSnapshot(runId);
+      expect(latest?.workspaceRef).toBeDefined();
+      const checkpointEvent = (await readEvents(snapshotStore, runId)).findLast(
+        (event) => event.type === "checkpoint_written",
+      );
+      const eventWorkspaceRef =
+        checkpointEvent?.type === "checkpoint_written" ? checkpointEvent.workspaceRef : undefined;
+      expect(eventWorkspaceRef).toEqual(latest?.workspaceRef);
+      expect(await readdir(snapshotDirectory)).not.toHaveLength(0);
+    } finally {
+      await snapshotStore.close();
+    }
     const databaseFilesBeforeDryRuns = await readdir(current.dataDirectory);
     const databaseBeforeDryRuns = await readFile(current.eventStorePath);
     const migration = await invokeCli(["--json", "store", "migrate", "--dry-run"]);
@@ -2018,6 +2035,7 @@ describe("retention", () => {
     });
     expect(await readFile(current.eventStorePath)).toEqual(databaseBeforeDryRuns);
     expect(await readdir(current.dataDirectory)).toEqual(databaseFilesBeforeDryRuns);
+    expect(await readdir(snapshotDirectory)).not.toHaveLength(0);
 
     const dryRun = await invokeCli(["--json", "store", "purge", "--dry-run"]);
     expect(dryRun.stderr).toEqual([]);
@@ -2034,6 +2052,7 @@ describe("retention", () => {
       skippedActive: 1,
       hookFailures: 0,
     });
+    await expect(readdir(snapshotDirectory)).rejects.toMatchObject({ code: "ENOENT" });
 
     const store = new SqliteEventStore(current.eventStorePath);
     try {
@@ -2054,6 +2073,117 @@ describe("retention", () => {
       await expect(
         runtime.vault.resolve(runId, Token.parse("<EMAIL_1>"), { boundary: "ui" }),
       ).resolves.toBeUndefined();
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("restores the latest checkpoint workspace after a run restart", async () => {
+    const current = fixture();
+    const config = await current.context.loadConfig();
+    const toolId = Code.parse("snapshot.probe");
+    const fileContent = "synthetic workspace snapshot canary";
+    let finishFirstModel: ((value: ModelCompletion) => void) | undefined;
+    let signalFirstModelStarted: (() => void) | undefined;
+    const firstModelStarted = new Promise<void>((resolve) => {
+      signalFirstModelStarted = resolve;
+    });
+    let modelCalls = 0;
+    const model: ModelPort = {
+      complete: () => {
+        modelCalls += 1;
+        if (modelCalls === 1) {
+          return new Promise((resolve) => {
+            finishFirstModel = resolve;
+            signalFirstModelStarted?.();
+          });
+        }
+        return Promise.resolve(completion([], "resumed"));
+      },
+    };
+    let restoredContent: string | undefined;
+    let toolRunId: Id | undefined;
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: async () => {
+        if (toolRunId === undefined) {
+          throw new Error("The run id is unavailable to the test tool.");
+        }
+        restoredContent = await readFile(
+          join(current.dataDirectory, "workspaces", toolRunId, "project", "checkpoint.txt"),
+          "utf8",
+        );
+        return { outcome: "ok", result: { restored: true } };
+      },
+    };
+    const policy: PolicyPort = {
+      version: Code.parse("snapshot_test_policy"),
+      decide: () => ({
+        decision: "ask",
+        ruleId: Code.parse("snapshot_test_rule"),
+        reason: Code.parse("snapshot_test_approval"),
+        editable: [],
+      }),
+    };
+    const runtime = await createRuntime(config, {
+      dataDir: current.dataDirectory,
+      clock: current.clock,
+      ids: current.ids,
+      model,
+      policy,
+      store: new InMemoryEventStore(),
+      sandboxBackend: unusedSandboxBackend,
+      tool,
+      secretResolver: new CompositeSecretResolver(),
+    });
+    try {
+      const execution = runtime.start("snapshot resume");
+      toolRunId = execution.runId;
+      await execution.started;
+      await firstModelStarted;
+      const workspaceFile = join(
+        current.dataDirectory,
+        "workspaces",
+        execution.runId,
+        "project",
+        "checkpoint.txt",
+      );
+      await mkdir(join(current.dataDirectory, "workspaces", execution.runId, "project"), {
+        recursive: true,
+      });
+      await writeFile(workspaceFile, fileContent);
+      const releaseModel = finishFirstModel;
+      if (releaseModel === undefined) {
+        throw new Error("The first model call did not start.");
+      }
+      releaseModel(
+        completion(
+          [
+            {
+              callId: Id.parse("00000000000000000000000021"),
+              toolId,
+              args: {},
+            },
+          ],
+          "awaiting approval",
+        ),
+      );
+      const suspended = await execution.completion;
+      const approvalId = suspended.approvalIds[0];
+      if (approvalId === undefined) {
+        throw new Error("The run did not request approval.");
+      }
+      const checkpoint = await runtime.store.latestSnapshot(execution.runId);
+      expect(checkpoint?.workspaceRef).toBeDefined();
+      await runtime.resolveApproval(execution.runId, approvalId, "approve");
+      await rm(join(current.dataDirectory, "workspaces", execution.runId), {
+        recursive: true,
+        force: true,
+      });
+
+      const resumed = await runtime.resume(execution.runId);
+      expect(resumed.status).toBe("completed");
+      expect(restoredContent).toBe(fileContent);
     } finally {
       await runtime.close();
     }

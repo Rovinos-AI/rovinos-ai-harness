@@ -26,6 +26,7 @@ export const StoreConfigSchema = z
     dialect: z.enum(["sqlite", "postgres"]).optional(),
     connectionString: SecretRefSchema.optional(),
     retention: StoreRetentionConfigSchema.optional(),
+    snapshotKeep: z.number().int().min(1).optional(),
   })
   .strict()
   .refine(
