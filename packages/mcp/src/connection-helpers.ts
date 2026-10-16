@@ -71,15 +71,43 @@ export function runWithSafeAuthLogging<Result>(
 /** Detects client-credentials extension support before initialize can trigger OAuth. */
 export async function clientCredentialsExtensionAvailable(
   config: ServerConfig,
-  previouslyAdvertised: boolean,
   signal: AbortSignal,
 ): Promise<boolean> {
-  if (previouslyAdvertised) {
-    return true;
-  }
   return config.transport.kind === "http" && config.transport.auth?.grant === "client_credentials"
     ? resourceAdvertisesClientCredentials(config.transport.url, signal)
     : false;
+}
+
+/** Retains client-credentials extension support across reconnects. */
+export class ClientCredentialsExtensionSupport {
+  #supported = false;
+  #probe: Promise<boolean> | undefined;
+
+  /** Whether the extension has been advertised by the resource or MCP server. */
+  get supported(): boolean {
+    return this.#supported;
+  }
+
+  /** Records support advertised by the initialized MCP server. */
+  observe(supported: boolean): void {
+    this.#supported ||= supported;
+  }
+
+  /** Probes resource metadata before initialize can trigger OAuth. */
+  async probe(config: ServerConfig, signal: AbortSignal, skip: boolean): Promise<void> {
+    if (skip || this.#supported) {
+      return;
+    }
+    const probe = (this.#probe ??= clientCredentialsExtensionAvailable(config, signal));
+    try {
+      this.#supported ||= await probe;
+    } catch (error) {
+      if (this.#probe === probe) {
+        this.#probe = undefined;
+      }
+      throw error;
+    }
+  }
 }
 
 /** Creates the configured transport and reports the OAuth provider selected for HTTP auth. */

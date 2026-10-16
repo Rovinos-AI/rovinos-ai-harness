@@ -13,6 +13,7 @@ import { ServerConfigSchema, type JsonValue } from "@harness/schemas";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection, McpConnectionError, excludeHeaderDeclaringTools } from "./connection.js";
+import { ClientCredentialsExtensionSupport } from "./connection-helpers.js";
 import { isConnectionLossError } from "./errors.js";
 import * as mcpPackage from "./index.js";
 
@@ -34,6 +35,47 @@ const inputSchema = {
   required: ["value"],
   additionalProperties: false,
 } satisfies Tool["inputSchema"];
+
+describe("ClientCredentialsExtensionSupport", () => {
+  it("retains an initialize capability after a cached negative metadata probe", async () => {
+    const serverConfig = ServerConfigSchema.parse({
+      id: "machine",
+      transport: {
+        kind: "http",
+        url: "https://mcp.example.test/mcp",
+        auth: {
+          kind: "oauth",
+          grant: "client_credentials",
+          clientId: "machine-client",
+          clientSecret: "env:OAUTH_SECRET",
+          scopes: ["tools:read"],
+        },
+      },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const extension = new ClientCredentialsExtensionSupport();
+    try {
+      const signal = new AbortController().signal;
+      await extension.probe(serverConfig, signal, false);
+      expect(extension.supported).toBe(false);
+      extension.observe(true);
+      await extension.probe(serverConfig, signal, false);
+      expect(extension.supported).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 interface MemoryPeer {
   readonly client: InMemoryTransport;

@@ -196,8 +196,10 @@ async function createOAuthServer(
     readonly clientCredentialsMetadataOnly?: boolean;
     readonly resourceMetadataPath?: string;
     readonly failFirstAuthenticatedMcpRequest?: boolean;
+    readonly failMetadataProbeCount?: number;
   } = {},
 ) {
+  const failTokenExchange = options.failTokenExchange === true;
   const mcpHandler = createMcpHandler(
     () => {
       const server = new McpServer({ name: "oauth-mcp-server", version: "1.0.0" });
@@ -211,13 +213,18 @@ async function createOAuthServer(
       server.server.setRequestHandler("tools/list", () => ({
         tools: [{ name: "listed", inputSchema }],
       }));
+      server.server.setRequestHandler("tools/call", () => ({
+        content: [{ type: "text", text: "called" }],
+      }));
       return server;
     },
     { legacy: "reject" },
   );
-  let unauthorizedMcp = options.unauthorizedMcp === true;
+  const unauthorizedMcp = options.unauthorizedMcp === true;
+  const requireToken = options.requireToken === true;
   let rejectNextAuthenticatedRequest = false;
   let failNextAuthenticatedMcpRequest = options.failFirstAuthenticatedMcpRequest === true;
+  let remainingMetadataProbeFailures = options.failMetadataProbeCount ?? 0;
   let issuer = "";
   let resourceProbeCount = 0;
   let metadataProbeCount = 0;
@@ -243,8 +250,7 @@ async function createOAuthServer(
         if (
           unauthorizedMcp ||
           rejectNextAuthenticatedRequest ||
-          (options.requireToken === true &&
-            request.headers.authorization !== ["Bearer", oauthAccessToken].join(" "))
+          (requireToken && request.headers.authorization !== ["Bearer", oauthAccessToken].join(" "))
         ) {
           rejectNextAuthenticatedRequest = false;
           response
@@ -304,6 +310,11 @@ async function createOAuthServer(
         url.pathname.startsWith("/.well-known/oauth-protected-resource")
       ) {
         fallbackProbeCount += 1;
+        if (remainingMetadataProbeFailures > 0) {
+          remainingMetadataProbeFailures -= 1;
+          response.writeHead(503).end();
+          return;
+        }
         sendJson(response, {
           resource: `http://${host}/mcp`,
           authorization_servers: [issuer],
@@ -338,7 +349,7 @@ async function createOAuthServer(
       }
       if (request.method === "POST" && url.pathname === "/token") {
         tokenRequestCount += 1;
-        if (options.failTokenExchange === true) {
+        if (failTokenExchange) {
           response.writeHead(400, {
             "content-type": "application/json",
             "WWW-Authenticate": [
@@ -372,9 +383,6 @@ async function createOAuthServer(
   issuer = `http://127.0.0.1:${String(address.port)}`;
   return {
     issuer,
-    setUnauthorized: (value: boolean) => {
-      unauthorizedMcp = value;
-    },
     rejectNextAuthenticatedRequest: () => {
       rejectNextAuthenticatedRequest = true;
     },
@@ -984,6 +992,50 @@ describe("harness servers check", () => {
       expect(connection.state).toBe("ready");
       expect(oauthServer.resourceProbeCount()).toBe(1);
       expect(oauthServer.fallbackProbeCount()).toBeGreaterThanOrEqual(1);
+    } finally {
+      await connection.close();
+      tokenStore.close();
+    }
+  });
+
+  it("retries a transient protected-resource metadata probe failure on reconnect", async () => {
+    const oauthServer = await createOAuthServer({
+      clientCredentialsExtension: true,
+      failMetadataProbeCount: 1,
+    });
+    const parsedConfig = HarnessConfigSchema.parse({
+      servers: [
+        {
+          id: "machine",
+          transport: {
+            kind: "http",
+            url: `${oauthServer.issuer}/mcp`,
+            auth: {
+              kind: "oauth",
+              grant: "client_credentials",
+              clientId: "machine-client",
+              clientSecret: "env:OAUTH_SECRET",
+              scopes: ["tools:read"],
+            },
+          },
+        },
+      ],
+    });
+    const serverConfig = parsedConfig.servers[0];
+    if (serverConfig === undefined) {
+      throw new Error("expected configured OAuth server");
+    }
+    const tokenStore = await OAuthTokenStore.open(":memory:", keyProvider);
+    const connection = new McpConnection(serverConfig, {
+      resolveSecret: () => Promise.resolve("oauth-client-secret"),
+      oauthTokenStore: tokenStore,
+    });
+    try {
+      await expect(connection.connect()).rejects.toMatchObject({ code: "mcp_connect_failed" });
+      await connection.connect();
+      expect(connection.state).toBe("ready");
+      expect(oauthServer.resourceProbeCount()).toBe(2);
+      expect(oauthServer.fallbackProbeCount()).toBe(2);
     } finally {
       await connection.close();
       tokenStore.close();

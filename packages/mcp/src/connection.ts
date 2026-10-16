@@ -24,7 +24,7 @@ import {
   ListToolsResultSchema,
   OAUTH_CLIENT_CREDENTIALS_EXTENSION,
   RECONNECT_BACKOFF_MS,
-  clientCredentialsExtensionAvailable,
+  ClientCredentialsExtensionSupport,
   createConfiguredTransport,
   createMcpClient,
   defaultSleep,
@@ -50,8 +50,7 @@ export class McpConnection {
   #state: McpConnectionState = "unavailable";
   #protocolEra: "legacy" | "modern" | undefined;
   #cachedTools: CachedToolList | undefined;
-  #supportsClientCredentialsExtension = false;
-  #clientCredentialsExtensionProbe: Promise<boolean> | undefined;
+  readonly #clientCredentialsExtension = new ClientCredentialsExtensionSupport();
   #oauthProvider: McpOAuthProvider | undefined;
   #closed = false;
   #connectGeneration = 0;
@@ -144,7 +143,7 @@ export class McpConnection {
       }
       await this.#probeClientCredentialsExtension(combinedSignal);
       const activeTransport = await createConfiguredTransport(this.#config, this.#dependencies, {
-        clientCredentialsExtensionEnabled: this.#supportsClientCredentialsExtension,
+        clientCredentialsExtensionEnabled: this.#clientCredentialsExtension.supported,
         onOAuthProvider: (provider) => {
           this.#oauthProvider = provider;
         },
@@ -158,7 +157,7 @@ export class McpConnection {
       }
       const activeClient = createMcpClient(
         this.#config,
-        this.#supportsClientCredentialsExtension,
+        this.#clientCredentialsExtension.supported,
         (error) => {
           this.#onToolsChanged(error);
         },
@@ -172,12 +171,12 @@ export class McpConnection {
             timeout: this.#config.timeouts.connectMs,
           }),
       );
-      this.#supportsClientCredentialsExtension =
-        this.#supportsClientCredentialsExtension ||
+      this.#clientCredentialsExtension.observe(
         activeClient.getServerCapabilities()?.extensions?.[OAUTH_CLIENT_CREDENTIALS_EXTENSION] !==
-          undefined;
+          undefined,
+      );
       this.#oauthProvider?.setClientCredentialsExtensionEnabled(
-        this.#supportsClientCredentialsExtension,
+        this.#clientCredentialsExtension.supported,
       );
       if (this.#isStale(generation)) {
         this.#state = "unavailable";
@@ -202,15 +201,11 @@ export class McpConnection {
   }
 
   async #probeClientCredentialsExtension(signal: AbortSignal): Promise<void> {
-    if (this.#dependencies.createTransport !== undefined) {
-      return;
-    }
-    this.#clientCredentialsExtensionProbe ??= clientCredentialsExtensionAvailable(
+    await this.#clientCredentialsExtension.probe(
       this.#config,
-      this.#supportsClientCredentialsExtension,
       signal,
+      this.#dependencies.createTransport !== undefined,
     );
-    this.#supportsClientCredentialsExtension = await this.#clientCredentialsExtensionProbe;
   }
 
   async #closeCurrentClient(): Promise<void> {
