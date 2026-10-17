@@ -114,6 +114,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 baseDelayMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
                 maxDelayMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
                 timeoutMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+                streamTimeoutMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
                 idleTimeoutMs: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
             }, z.core.$strict>>;
             enforcement: z.ZodPrefault<z.ZodObject<{

@@ -311,6 +311,7 @@ describe("model response rehydration", () => {
     const gateway = new ModelGateway(new AdapterRegistry([openai]), {
       ids: { next: () => toolCallId },
       clock: { now: () => 1 },
+      providerStreaming: { openai: false },
     });
     await gateway.complete(
       conversationRequest("openai", [

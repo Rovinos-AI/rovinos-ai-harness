@@ -437,6 +437,7 @@ describe("run, resume, and inspect CLI commands", () => {
               kind: "openai",
               apiKey: "env:MODEL_TEST_API_KEY",
               baseUrl: "https://provider.example/v1",
+              streaming: false,
             },
           ],
           routing: {
