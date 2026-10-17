@@ -2,6 +2,7 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { doctorChecks } from "@harness/core";
 import { HarnessConfigSchema, loadConfig as loadConfigFromFile } from "@harness/config";
 import { DoctorResultsSchema, parseJson, type DoctorCheckStatus } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -208,8 +209,19 @@ describe("harness doctor", () => {
     const configPath = join(dataDirectory, "harness.config.yaml");
     await writeFile(configPath, `run:\n  budgets:\n    maxSteps: ${invalidValue}\n`, "utf8");
     const { context, stdout, stderr } = createContext(() => loadConfigFromFile({ configPath }));
+    const configCheck = doctorChecks().find(({ id }) => id === "config_valid");
+    if (configCheck === undefined) {
+      throw new Error("config_valid check is not registered");
+    }
+    const presidioCheck = {
+      id: "presidio_reachable",
+      title: "Presidio analyzer",
+      run: vi.fn(() => Promise.resolve({ status: "ok" as const, code: "presidio_reachable" })),
+    };
 
-    const exitCode = await main(["--json", "doctor"], context, [createDoctorCommand()]);
+    const exitCode = await main(["--json", "doctor"], context, [
+      createDoctorCommand([configCheck, presidioCheck]),
+    ]);
     const output = stdout.join("") + stderr.join("");
     const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
 
@@ -220,6 +232,12 @@ describe("harness doctor", () => {
       code: "config_invalid",
       detail: "config_invalid",
     });
+    expect(results).toContainEqual({
+      id: "presidio_reachable",
+      status: "ok",
+      code: "presidio_reachable",
+    });
+    expect(presidioCheck.run).toHaveBeenCalledOnce();
     expect(stderr).toEqual(["doctor_failed\n"]);
     expect(output).not.toContain(invalidValue);
   });

@@ -1,7 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { RunConfigSchema } from "@harness/schemas";
+import { parseYaml, RunConfigSchema } from "@harness/schemas";
+import { z } from "zod";
 import { evaluateComposeSecurity } from "./validate.js";
+
+const root = fileURLToPath(new URL("../../", import.meta.url));
+const composeSourceSchema = z
+  .object({
+    services: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
+  })
+  .loose();
+const profileSources = [
+  {
+    profile: "dev",
+    files: ["infra/compose/docker-compose.yml", "infra/compose/docker-compose.dev.yml"],
+  },
+  {
+    profile: "test",
+    files: ["infra/compose/docker-compose.yml", "infra/compose/docker-compose.test.yml"],
+  },
+  {
+    profile: "prod-like",
+    files: ["infra/compose/docker-compose.yml", "infra/compose/docker-compose.prod-like.yml"],
+  },
+] as const;
 
 function service(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -78,6 +103,23 @@ describe("compose security evaluator", () => {
           profile,
         ),
       ).toContain("presidio-analyzer: published_ports");
+    },
+  );
+
+  it.each(profileSources)(
+    "checks Presidio published ports across every $profile Compose source",
+    ({ profile, files }) => {
+      for (const file of files) {
+        const compose = parseYaml(composeSourceSchema, readFileSync(resolve(root, file), "utf8"));
+        const analyzer = compose.services?.["presidio-analyzer"] ?? {};
+        const violations = evaluateComposeSecurity(
+          { services: { "presidio-analyzer": analyzer }, networks: {} },
+          profile,
+        );
+        expect(violations, `${profile}: ${file}`).not.toContain(
+          "presidio-analyzer: published_ports",
+        );
+      }
     },
   );
 

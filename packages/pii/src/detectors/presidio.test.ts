@@ -151,6 +151,7 @@ describe("PresidioDetector", () => {
       code: "pii_detector_unavailable",
     });
     expect(visitedHosts).toEqual(["presidio:3000"]);
+    expect(visitedHosts).not.toContain("second.test:3000");
     expect(fetcher.mock.calls[0]?.[1].redirect).toBe("error");
   });
 

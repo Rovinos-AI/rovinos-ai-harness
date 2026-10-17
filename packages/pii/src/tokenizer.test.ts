@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   EventSchema,
+  PiiPresidioConfigSchema,
   PiiActionSummarySchema,
   PiiPolicySchema,
   type Detection,
@@ -9,6 +10,8 @@ import {
   type PiiAction,
 } from "@harness/schemas";
 import { InMemoryVault, type VaultWriter } from "@harness/vault";
+import { PresidioDetector } from "./detectors/presidio.js";
+import { DetectorRegistry } from "./detectors/registry.js";
 import {
   PiiBlockedError,
   PiiDetectorError,
@@ -211,6 +214,41 @@ describe("Tokenizer.tokenizeText", () => {
       { boundary: "model_input", action: "tokenize", entities: [{ type: "email", count: 1 }] },
     ]);
   });
+
+  it.each(["closed", "half-open"] as const)(
+    "fails tokenization without exposing raw text when Presidio fails in the %s breaker state",
+    async (breakerState) => {
+      let now = 0;
+      const rawText = "tokenizer-presidio-sensitive-value";
+      const fetcher = vi.fn(() => Promise.reject(new Error(rawText)));
+      const detector = new PresidioDetector(
+        PiiPresidioConfigSchema.parse({ baseUrl: "http://presidio:3000" }),
+        { clock: { now: () => now }, fetcher },
+      );
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await expect(detector.detect(rawText)).rejects.toMatchObject({
+          code: "pii_detector_unavailable",
+        });
+      }
+      if (breakerState === "half-open") {
+        now += 30_000;
+      }
+      const tokenizer = new Tokenizer({
+        detectors: new DetectorRegistry({ asyncDetectors: [detector] }),
+        policy: PiiPolicySchema.parse({ defaultAction: "tokenize" }),
+        vault: new InMemoryVault(),
+      });
+
+      const failure = await tokenizer
+        .tokenizeText(runA, rawText, context)
+        .catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({ code: "pii_detector_unavailable" });
+      expect(String(failure)).not.toContain(rawText);
+      expect(JSON.stringify(failure)).not.toContain(rawText);
+      expect(fetcher).toHaveBeenCalledTimes(breakerState === "closed" ? 5 : 6);
+    },
+  );
 
   it("exports a converter that produces a valid pii_action event payload", () => {
     const summary = PiiActionSummarySchema.parse({
