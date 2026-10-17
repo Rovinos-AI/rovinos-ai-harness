@@ -16,6 +16,19 @@ describe("lookupCapabilities", () => {
     });
   });
 
+  it("defaults Bedrock to forced-tool structured output and opaque round trips", () => {
+    expect(lookupCapabilities({ provider: "bedrock", model: "nova-pro" })).toEqual({
+      capabilities: {
+        structuredOutput: "tool",
+        forcedToolChoice: true,
+        parallelToolCalls: false,
+        maxContextTokens: 0,
+        opaqueRoundTrip: true,
+      },
+      source: "default",
+    });
+  });
+
   it("overrides only configured capabilities", () => {
     expect(
       lookupCapabilities(

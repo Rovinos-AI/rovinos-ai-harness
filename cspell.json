@@ -5,10 +5,12 @@
   "ignorePaths": ["**/node_modules/**", "**/dist/**", "**/coverage/**", "**/*.generated.*"],
   "words": [
     "WSENC",
+    "AQID",
     "checkpointed",
     "hardlink",
     "ustar",
     "decryptable",
+    "errortype",
     "hashtextextended",
     "ILIKE",
     "labelledby",
@@ -22,7 +24,9 @@
     "tldts",
     "toolinput",
     "toolresult",
+    "tooluse",
     "transactionally",
+    "unconfigured",
     "unlisten"
   ],
   "dictionaryDefinitions": [
