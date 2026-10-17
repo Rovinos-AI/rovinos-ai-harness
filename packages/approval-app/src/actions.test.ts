@@ -71,12 +71,18 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
   };
   const flush = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const onDecision = vi.fn<(decision: "approve" | "deny" | "edit") => void>();
+  const reportError = (code: "resolve_failed" | "reveal_failed"): void => {
+    record({ name: "ui.error", attrs: { code } });
+    void flush();
+  };
   const mount = mountApprovalActions(actions, editHost, {
     approvalId,
     payload: input,
     isExpired: () => expired,
     bridge,
     telemetry: { record, flush },
+    reportError,
+    decisionDurationMs: () => 0,
     renderRevealed: (values) => {
       rendered.textContent = values.get("/email") ?? tokenizedEmail;
     },

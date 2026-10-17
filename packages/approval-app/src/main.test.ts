@@ -60,8 +60,28 @@ const payload = {
   editableFields: [],
 };
 
+const originalRequestAnimationFrame = Object.getOwnPropertyDescriptor(
+  window,
+  "requestAnimationFrame",
+);
+
+function installAnimationFrame(): void {
+  Object.defineProperty(window, "requestAnimationFrame", {
+    configurable: true,
+    value: (callback: FrameRequestCallback) => {
+      callback(window.performance.now());
+      return 1;
+    },
+  });
+}
+
 afterEach(() => {
   window.dispatchEvent(new Event("pagehide"));
+  if (originalRequestAnimationFrame === undefined) {
+    Reflect.deleteProperty(window, "requestAnimationFrame");
+  } else {
+    Object.defineProperty(window, "requestAnimationFrame", originalRequestAnimationFrame);
+  }
   vi.useRealTimers();
   vi.resetModules();
   vi.clearAllMocks();
@@ -70,6 +90,7 @@ afterEach(() => {
 });
 
 async function start() {
+  installAnimationFrame();
   bridge.connect.mockResolvedValue(undefined);
   bridge.call.mockResolvedValue({ content: [] });
   await import("./main.js");
@@ -178,6 +199,7 @@ describe("approval app SDK bootstrap", () => {
   });
 
   it("handles a failed connection without exposing the exception", async () => {
+    installAnimationFrame();
     bridge.connect.mockRejectedValue(new Error("SYNTHETIC_BRIDGE_CANARY"));
     bridge.call.mockRejectedValue(new Error("SYNTHETIC_TRANSPORT_CANARY"));
     await import("./main.js");
@@ -190,6 +212,7 @@ describe("approval app SDK bootstrap", () => {
   });
 
   it("waits for a delayed SDK connection before starting telemetry activation", async () => {
+    installAnimationFrame();
     vi.useFakeTimers();
     let resolveConnection: (() => void) | undefined;
     bridge.connect.mockReturnValue(
