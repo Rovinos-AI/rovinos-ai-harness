@@ -258,7 +258,6 @@ export function createApprovalView(root: HTMLElement, options: ApprovalViewOptio
     if (contentKey === previousContentKey) {
       return false;
     }
-    previousContentKey = contentKey;
     cleanupActions();
     cleanupActions = (): void => undefined;
     dom.content.replaceChildren();
@@ -269,6 +268,7 @@ export function createApprovalView(root: HTMLElement, options: ApprovalViewOptio
         dom.status.textContent = "Invalid approval payload";
       }
       dom.heading.focus();
+      previousContentKey = contentKey;
       return true;
     }
     const rendered = createPayloadView({
@@ -281,6 +281,7 @@ export function createApprovalView(root: HTMLElement, options: ApprovalViewOptio
     refresh = rendered.refresh;
     refresh();
     dom.heading.focus();
+    previousContentKey = contentKey;
     return true;
   }
 

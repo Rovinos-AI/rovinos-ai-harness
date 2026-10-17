@@ -39,6 +39,7 @@ const ambientErrorCodes = new Set<ApprovalUiErrorCode>([
 ]);
 const maxDecisionDurationMs = 3_600_000;
 const activationPollIntervalMs = 25;
+const activationWaitTimeoutMs = 2_500;
 const maxPendingRenderSpans = 100;
 
 function createInteractionRecorder(telemetry: ApprovalAppTelemetry): {
@@ -135,6 +136,7 @@ interface RenderState {
 
 interface RenderSpanRecorder {
   record(durationMs: number): void;
+  recordError(code: ApprovalUiErrorCode): void;
   dispose(): void;
 }
 
@@ -143,20 +145,47 @@ function createRenderSpanRecorder(
   window: Window,
 ): RenderSpanRecorder {
   const pending: number[] = [];
+  const pendingErrors: ApprovalUiErrorCode[] = [];
   let activationPoll: ReturnType<Window["setInterval"]> | undefined;
+  let activationTimeout: ReturnType<Window["setTimeout"]> | undefined;
+  let activationWaitExpired = false;
 
-  const flushPending = (): void => {
-    if (!telemetry.active || pending.length === 0) {
-      return;
-    }
+  const clearActivationTimers = (): void => {
     if (activationPoll !== undefined) {
       window.clearInterval(activationPoll);
       activationPoll = undefined;
+    }
+    if (activationTimeout !== undefined) {
+      window.clearTimeout(activationTimeout);
+      activationTimeout = undefined;
+    }
+  };
+
+  const flushPending = (): void => {
+    if (!telemetry.active || (pending.length === 0 && pendingErrors.length === 0)) {
+      return;
+    }
+    clearActivationTimers();
+    for (const code of pendingErrors.splice(0)) {
+      telemetry.record("ui.error", { code });
     }
     for (const durationMs of pending.splice(0)) {
       telemetry.record("ui.render", {}, durationMs);
     }
     void telemetry.flush();
+  };
+
+  const waitForActivation = (): void => {
+    if (activationWaitExpired || activationPoll !== undefined) {
+      return;
+    }
+    activationPoll = window.setInterval(flushPending, activationPollIntervalMs);
+    activationTimeout = window.setTimeout(() => {
+      clearActivationTimers();
+      activationWaitExpired = true;
+      pending.length = 0;
+      pendingErrors.length = 0;
+    }, activationWaitTimeoutMs);
   };
 
   return {
@@ -170,14 +199,27 @@ function createRenderSpanRecorder(
         pending.shift();
       }
       pending.push(durationMs);
-      activationPoll ??= window.setInterval(flushPending, activationPollIntervalMs);
+      waitForActivation();
+    },
+    recordError(code) {
+      if (telemetry.active) {
+        telemetry.record("ui.error", { code });
+        void telemetry.flush();
+        return;
+      }
+      if (activationWaitExpired) {
+        return;
+      }
+      if (pendingErrors.length === maxPendingRenderSpans) {
+        pendingErrors.shift();
+      }
+      pendingErrors.push(code);
+      waitForActivation();
     },
     dispose() {
-      if (activationPoll !== undefined) {
-        window.clearInterval(activationPoll);
-        activationPoll = undefined;
-      }
+      clearActivationTimers();
       pending.length = 0;
+      pendingErrors.length = 0;
     },
   };
 }
@@ -250,7 +292,7 @@ export function createApprovalTelemetry(
   let disposed = false;
 
   const reportError = (code: ApprovalUiErrorCode): void => {
-    if (disposed || !telemetry.active) {
+    if (disposed) {
       return;
     }
     if (ambientErrorCodes.has(code)) {
@@ -259,8 +301,7 @@ export function createApprovalTelemetry(
       }
       reportedErrors.add(code);
     }
-    telemetry.record("ui.error", { code });
-    void telemetry.flush();
+    renderSpans.recordError(code);
   };
   const renderLifecycle = createRenderLifecycle(environment, reportError, renderSpans);
 

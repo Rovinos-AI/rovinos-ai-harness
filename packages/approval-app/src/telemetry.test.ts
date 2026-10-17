@@ -163,14 +163,17 @@ describe("approval app telemetry", () => {
     expect(JSON.stringify(records)).not.toContain(canary);
   });
 
-  it("does not consume an ambient error dedupe slot before activation", () => {
+  it("delivers a startup ambient error once telemetry activates", async () => {
+    vi.useFakeTimers();
     const { lifecycle, records, setActive } = setup();
     setActive(false);
     lifecycle.reportError("payload_invalid");
     expect(records).toEqual([]);
     setActive(true);
+    await vi.advanceTimersByTimeAsync(25);
     lifecycle.reportError("payload_invalid");
     expect(records).toEqual([{ name: "ui.error", attrs: { code: "payload_invalid" } }]);
+    lifecycle.dispose();
   });
 
   it("delivers a render span after delayed activation without delaying receive", async () => {
@@ -192,6 +195,43 @@ describe("approval app telemetry", () => {
     setActive(true);
     await vi.advanceTimersByTimeAsync(25);
     expect(records).toEqual([{ name: "ui.render", attrs: {}, durationMs: 20 }]);
+    lifecycle.dispose();
+    await telemetry.flush();
+  });
+
+  it("stops polling and drops queued spans after activation remains inactive", () => {
+    vi.useFakeTimers();
+    const { lifecycle, records, frames, setActive } = setup();
+    setActive(false);
+    lifecycle.receivePayload(() => true);
+    frames.shift()?.(0);
+    frames.shift()?.(0);
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    vi.advanceTimersByTime(2_500);
+    expect(vi.getTimerCount()).toBe(0);
+    setActive(true);
+    vi.advanceTimersByTime(100);
+    expect(records).toEqual([]);
+    lifecycle.dispose();
+  });
+
+  it("delivers a render failure reported before activation after the shim activates", async () => {
+    vi.useFakeTimers();
+    const { telemetry, lifecycle, records, frames, setActive } = setup();
+    setActive(false);
+    lifecycle.receivePayload(() => {
+      throw new Error("SYNTHETIC_STARTUP_RENDER_FAILURE");
+    });
+    frames.shift()?.(0);
+    frames.shift()?.(0);
+    expect(records).toEqual([]);
+    setActive(true);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(records).toEqual([
+      { name: "ui.error", attrs: { code: "render_failed" } },
+      { name: "ui.render", attrs: {}, durationMs: 0 },
+    ]);
+    expect(JSON.stringify(records)).not.toContain("SYNTHETIC");
     lifecycle.dispose();
     await telemetry.flush();
   });

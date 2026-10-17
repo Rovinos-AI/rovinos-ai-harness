@@ -378,6 +378,29 @@ describe("approval actions", () => {
     expect(recordCalls).toEqual([{ name: "ui.error", attrs: { code: "resolve_failed" } }]);
   });
 
+  it("records each resolve failure when a retry also fails", async () => {
+    const { actions, bridge, recordCalls } = setup();
+    bridge.callTool
+      .mockResolvedValueOnce({ ok: false, code: "approval_already_resolved" })
+      .mockResolvedValueOnce({ ok: false, code: "approval_already_resolved" });
+    const approve = actions.querySelector<HTMLButtonElement>("button");
+    approve?.click();
+    await vi.waitFor(() => {
+      expect(
+        actions.parentElement?.querySelector<HTMLElement>('[role="status"]')?.textContent,
+      ).toBe("This approval has already been resolved.");
+    });
+    approve?.click();
+    await vi.waitFor(() => {
+      expect(recordCalls).toHaveLength(2);
+    });
+    expect(bridge.callTool).toHaveBeenCalledTimes(2);
+    expect(recordCalls).toEqual([
+      { name: "ui.error", attrs: { code: "resolve_failed" } },
+      { name: "ui.error", attrs: { code: "resolve_failed" } },
+    ]);
+  });
+
   it("hides bridge exception details from the view and telemetry", async () => {
     const { actions, bridge, recordCalls } = setup();
     bridge.callTool.mockRejectedValue(new Error(rawEmail));
