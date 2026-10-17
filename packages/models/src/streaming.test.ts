@@ -34,7 +34,43 @@ describe("collectProviderStream", () => {
     expect(JSON.stringify(progress)).not.toContain("canary-stream-text");
   });
 
+  it("isolates a throwing progress callback from the provider result", async () => {
+    const result = await collectProviderStream({
+      signal: new AbortController().signal,
+      idleTimeoutMs: 100,
+      requestId,
+      onProgress: () => {
+        throw new Error("subscriber failed");
+      },
+      async *stream() {
+        yield { type: "usage", usage: { inputTokens: 1, outputTokens: 2 } };
+        yield { type: "finish", finishReason: "stop", latencyMs: 1 };
+      },
+    });
+
+    expect(result.usage).toEqual({ inputTokens: 1, outputTokens: 2 });
+  });
+
+  it("does not apply the inter-delta timeout before the first activity", async () => {
+    vi.useFakeTimers();
+    const pending = collectProviderStream({
+      signal: new AbortController().signal,
+      idleTimeoutMs: 10,
+      requestId,
+      async *stream() {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        yield { type: "activity" };
+        yield { type: "finish", finishReason: "stop", latencyMs: 20 };
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(20);
+    await expect(pending).resolves.toMatchObject({ finishReason: "stop" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("aborts a stalled provider stream when the idle timeout expires", async () => {
+    vi.useFakeTimers();
     let streamSignal: AbortSignal | undefined;
     const stream = async function* (signal: AbortSignal): AsyncIterable<ProviderDelta> {
       streamSignal = signal;
@@ -50,15 +86,17 @@ describe("collectProviderStream", () => {
       });
     };
 
-    await expect(
-      collectProviderStream({
-        stream,
-        signal: new AbortController().signal,
-        idleTimeoutMs: 10,
-        requestId,
-      }),
-    ).rejects.toMatchObject({ code: "provider_timeout" });
+    const collecting = collectProviderStream({
+      stream,
+      signal: new AbortController().signal,
+      idleTimeoutMs: 10,
+      requestId,
+    });
+    const rejected = expect(collecting).rejects.toMatchObject({ code: "provider_timeout" });
+    await vi.advanceTimersByTimeAsync(10);
+    await rejected;
     expect(streamSignal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("forwards caller cancellation into the active stream", async () => {
@@ -90,6 +128,40 @@ describe("collectProviderStream", () => {
     await entered;
     controller.abort(reason);
     await expect(collecting).rejects.toBe(reason);
+  });
+
+  it("calls iterator.return and aborts its signal when the caller cancels", async () => {
+    const controller = new AbortController();
+    let streamSignal: AbortSignal | undefined;
+    const returnIterator = vi.fn(() => Promise.resolve({ done: true, value: undefined }));
+    let enteredStream: (() => void) | undefined;
+    const entered = new Promise<void>((resolve) => {
+      enteredStream = resolve;
+    });
+    const stream: AsyncIterable<ProviderDelta> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise<IteratorResult<ProviderDelta>>(() => {
+            enteredStream?.();
+          }),
+        return: returnIterator,
+      }),
+    };
+    const collecting = collectProviderStream({
+      stream: (signal) => {
+        streamSignal = signal;
+        return stream;
+      },
+      signal: controller.signal,
+      idleTimeoutMs: 1_000,
+      requestId,
+    });
+
+    await entered;
+    controller.abort(new Error("caller cancelled"));
+    await expect(collecting).rejects.toThrow("caller cancelled");
+    expect(streamSignal?.aborted).toBe(true);
+    expect(returnIterator).toHaveBeenCalledOnce();
   });
 
   it("does not create a provider stream for an already-aborted request", async () => {
@@ -130,6 +202,62 @@ describe("collectProviderStream", () => {
       }),
     ).rejects.toBe(failure);
     expect(returnIterator).toHaveBeenCalledOnce();
+  });
+
+  it.each(["success", "error", "idle"] as const)(
+    "cleans up the idle timer and caller abort listener on %s",
+    async (outcome) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const addListener = vi.spyOn(controller.signal, "addEventListener");
+      const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+      const collecting = collectProviderStream({
+        signal: controller.signal,
+        idleTimeoutMs: 10,
+        requestId,
+        async *stream() {
+          yield { type: "activity" };
+          if (outcome === "error") {
+            throw new Error("stream failed");
+          }
+          if (outcome === "idle") {
+            await new Promise<never>(() => undefined);
+          }
+          yield { type: "finish", finishReason: "stop", latencyMs: 0 };
+        },
+      });
+      const completion =
+        outcome === "success"
+          ? expect(collecting).resolves.toMatchObject({ finishReason: "stop" })
+          : expect(collecting).rejects.toBeInstanceOf(Error);
+      if (outcome === "idle") {
+        await vi.advanceTimersByTimeAsync(10);
+      }
+      await completion;
+
+      const registeredListener = addListener.mock.calls.find(([type]) => type === "abort")?.[1];
+      expect(registeredListener).toBeDefined();
+      expect(removeListener).toHaveBeenCalledWith("abort", registeredListener);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("attaches the latest usage to a failed stream without assembling its content", async () => {
+    const failure = new ProviderError("provider_unavailable");
+    await expect(
+      collectProviderStream({
+        signal: new AbortController().signal,
+        idleTimeoutMs: 100,
+        requestId,
+        async *stream() {
+          yield { type: "usage", usage: { inputTokens: 2, outputTokens: 3 } };
+          throw failure;
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "provider_unavailable",
+      usage: { inputTokens: 2, outputTokens: 3 },
+    });
   });
 
   it("retains retryable idle-timeout error classification", () => {

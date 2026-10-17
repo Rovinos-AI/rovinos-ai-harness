@@ -1,4 +1,5 @@
 ---
+"@harness/models": patch
 "@harness/sdk": minor
 ---
 

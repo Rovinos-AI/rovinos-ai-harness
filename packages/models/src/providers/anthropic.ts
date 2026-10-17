@@ -227,12 +227,49 @@ function buildRequest(request: ModelRequest, provider: string): JsonValue {
   });
 }
 
-function mapStatusError(status: number, retryAfter: string | undefined): never {
+function retryAfterMs(retryAfter: string | undefined, nowMs: number): number | undefined {
+  if (retryAfter === undefined || retryAfter.trim().length === 0) {
+    return undefined;
+  }
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1_000;
+  }
+  const retryAt = Date.parse(retryAfter);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - nowMs) : undefined;
+}
+
+function mapStatusError(
+  status: number | undefined,
+  retryAfter: string | undefined,
+  nowMs: number,
+  providerType?: string | null,
+): never {
+  if (providerType === "rate_limit_error") {
+    const delay = retryAfterMs(retryAfter, nowMs);
+    throw new ProviderError("provider_rate_limited", {
+      ...(status === undefined ? {} : { status }),
+      ...(delay === undefined ? {} : { retryAfterMs: delay }),
+    });
+  }
+  if (
+    (status === undefined || status === 200 || status >= 500) &&
+    (providerType === "overloaded_error" ||
+      providerType === "api_error" ||
+      providerType === "server_error")
+  ) {
+    throw new ProviderError("provider_unavailable", {
+      ...(status === undefined ? {} : { status }),
+    });
+  }
+  if (status === undefined) {
+    throw new ProviderError("provider_unknown");
+  }
   if (status === 429) {
-    const seconds = retryAfter === undefined ? Number.NaN : Number(retryAfter);
+    const delay = retryAfterMs(retryAfter, nowMs);
     throw new ProviderError("provider_rate_limited", {
       status,
-      ...(Number.isFinite(seconds) && seconds >= 0 ? { retryAfterMs: seconds * 1_000 } : {}),
+      ...(delay === undefined ? {} : { retryAfterMs: delay }),
     });
   }
   switch (status) {
@@ -249,7 +286,7 @@ function mapStatusError(status: number, retryAfter: string | undefined): never {
   }
 }
 
-function mapError(error: unknown, signal: AbortSignal): never {
+function mapError(error: unknown, signal: AbortSignal, nowMs: number): never {
   if (signal.aborted || error instanceof APIConnectionTimeoutError) {
     throw new ProviderError("provider_timeout");
   }
@@ -257,13 +294,10 @@ function mapError(error: unknown, signal: AbortSignal): never {
     throw new ProviderError("provider_unknown");
   }
   const status: unknown = error.status;
-  if (typeof status !== "number") {
-    throw new ProviderError("provider_unknown");
-  }
   const headers: unknown = error.headers;
   const retryAfter =
     headers instanceof Headers ? (headers.get("retry-after") ?? undefined) : undefined;
-  mapStatusError(status, retryAfter);
+  mapStatusError(typeof status === "number" ? status : undefined, retryAfter, nowMs, error.type);
 }
 
 /** Anthropic Messages API adapter with provider-specific content preserved verbatim. */
@@ -361,7 +395,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       if (error instanceof ProviderError) {
         throw error;
       }
-      mapError(error, context.signal);
+      mapError(error, context.signal, context.clock.now());
     }
     return this.mapMessage(response, context, startedAt);
   }
@@ -395,7 +429,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       if (error instanceof ProviderError) {
         throw error;
       }
-      mapError(error, context.signal);
+      mapError(error, context.signal, context.clock.now());
     }
   }
 }

@@ -5,6 +5,7 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages";
 import { JsonValue } from "@harness/schemas";
 import type { Id } from "@harness/schemas";
+import type { ModelUsage } from "@harness/schemas";
 import { z as zod } from "zod";
 import type { ProviderContext, ProviderDelta } from "../types.js";
 
@@ -18,6 +19,7 @@ export interface AnthropicStreamState {
     number,
     { readonly callId: zod.infer<typeof Id>; readonly toolId: string }
   >;
+  usage: ModelUsage;
 }
 
 const AnthropicStreamingParamsSchema = zod.custom<MessageCreateParamsStreaming>((value) => {
@@ -60,6 +62,7 @@ export function createAnthropicStreamState(): AnthropicStreamState {
     callIdsByToolUseId: new Map(),
     toolArgumentsByIndex: new Map(),
     toolIdsByIndex: new Map(),
+    usage: { inputTokens: 0, outputTokens: 0 },
   };
 }
 
@@ -69,9 +72,29 @@ export function* streamEventDeltas(
   state: AnthropicStreamState,
   ids: ProviderContext["ids"],
 ): Generator<ProviderDelta> {
+  let emitted = false;
+  if (event.type === "message_start") {
+    const usage = event.message.usage;
+    state.usage = {
+      inputTokens:
+        usage.input_tokens +
+        (usage.cache_creation_input_tokens ?? 0) +
+        (usage.cache_read_input_tokens ?? 0),
+      outputTokens: usage.output_tokens,
+      ...(typeof usage.cache_read_input_tokens !== "number"
+        ? {}
+        : { cacheReadTokens: usage.cache_read_input_tokens }),
+      ...(typeof usage.cache_creation_input_tokens !== "number"
+        ? {}
+        : { cacheWriteTokens: usage.cache_creation_input_tokens }),
+    };
+    yield { type: "usage", usage: state.usage };
+    emitted = true;
+  }
   if (event.type === "content_block_start") {
     if (event.content_block.type === "text") {
       yield { type: "text", index: event.index, text: "" };
+      emitted = true;
     } else if (event.content_block.type === "tool_use") {
       const callId = ids.next();
       state.callIdsByToolUseId.set(event.content_block.id, callId);
@@ -87,10 +110,12 @@ export function* streamEventDeltas(
         toolId: event.content_block.name,
         arguments: "",
       };
+      emitted = true;
     }
   } else if (event.type === "content_block_delta") {
     if (event.delta.type === "text_delta") {
       yield { type: "text", index: event.index, text: event.delta.text };
+      emitted = true;
     } else if (event.delta.type === "input_json_delta") {
       const tool = state.toolIdsByIndex.get(event.index);
       if (tool !== undefined) {
@@ -104,6 +129,7 @@ export function* streamEventDeltas(
           callId: tool.callId,
           arguments: event.delta.partial_json,
         };
+        emitted = true;
       }
     }
   } else if (event.type === "content_block_stop") {
@@ -115,6 +141,14 @@ export function* streamEventDeltas(
         callId: tool.callId,
         arguments: "{}",
       };
+      emitted = true;
     }
+  } else if (event.type === "message_delta") {
+    state.usage = { ...state.usage, outputTokens: event.usage.output_tokens };
+    yield { type: "usage", usage: state.usage };
+    emitted = true;
+  }
+  if (!emitted) {
+    yield { type: "activity" };
   }
 }

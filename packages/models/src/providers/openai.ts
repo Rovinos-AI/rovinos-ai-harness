@@ -41,15 +41,34 @@ interface StreamToolCall {
 interface OpenAIStreamState {
   content: string;
   contentSeen: boolean;
-  refusal: string | undefined;
+  refusal: string | null | undefined;
   finishReason: string | null;
   usage: ChatCompletionLike["usage"];
   readonly toolCalls: Map<number, StreamToolCall>;
   readonly callIdsByProviderId: Map<string, Id>;
-  readonly extraStringFields: Map<string, string>;
+  readonly extraFields: Map<string, JsonValue>;
 }
 
 type OpenAIToolDelta = NonNullable<ChatCompletionChunk.Choice["delta"]["tool_calls"]>[number];
+
+const ProviderErrorFrameSchema = z
+  .object({
+    type: z.string().optional(),
+    code: z.string().optional(),
+    error: z.unknown().optional(),
+  })
+  .passthrough();
+
+function providerErrorType(error: unknown): string | undefined {
+  const parsed = ProviderErrorFrameSchema.safeParse(error);
+  if (!parsed.success) {
+    return undefined;
+  }
+  const nested = ProviderErrorFrameSchema.safeParse(parsed.data.error);
+  return nested.success
+    ? (nested.data.type ?? nested.data.code ?? parsed.data.type ?? parsed.data.code)
+    : (parsed.data.type ?? parsed.data.code);
+}
 
 function toolCallDelta(
   toolDelta: OpenAIToolDelta,
@@ -83,7 +102,7 @@ function toolCallDelta(
   };
 }
 
-function addExtraStringFields(choice: ChatCompletionChunk.Choice, state: OpenAIStreamState): void {
+function addExtraFields(choice: ChatCompletionChunk.Choice, state: OpenAIStreamState): void {
   const unknownDelta = JsonValue.safeParse(choice.delta);
   if (
     !unknownDelta.success ||
@@ -93,14 +112,15 @@ function addExtraStringFields(choice: ChatCompletionChunk.Choice, state: OpenAIS
     return;
   }
   for (const [key, value] of Object.entries(unknownDelta.data)) {
-    if (
-      key !== "content" &&
-      key !== "refusal" &&
-      key !== "role" &&
-      key !== "tool_calls" &&
-      typeof value === "string"
-    ) {
-      state.extraStringFields.set(key, (state.extraStringFields.get(key) ?? "") + value);
+    if (key !== "content" && key !== "refusal" && key !== "role" && key !== "tool_calls") {
+      const previous = state.extraFields.get(key);
+      if (typeof value === "string" && typeof previous === "string") {
+        state.extraFields.set(key, previous + value);
+      } else if (Array.isArray(value) && Array.isArray(previous)) {
+        state.extraFields.set(key, [...previous, ...value]);
+      } else {
+        state.extraFields.set(key, value);
+      }
     }
   }
 }
@@ -113,7 +133,7 @@ function choiceDeltas(
   readonly deltas: ProviderDelta[];
   readonly content: string;
   readonly contentSeen: boolean;
-  readonly refusal: string | undefined;
+  readonly refusal: string | null | undefined;
   readonly finishReason: string | null;
 } {
   const { delta } = choice;
@@ -127,8 +147,11 @@ function choiceDeltas(
     content += delta.content;
     deltas.push({ type: "text", index: 0, text: delta.content });
   }
-  if (delta.refusal !== undefined && delta.refusal !== null) {
-    refusal = (refusal ?? "") + delta.refusal;
+  if (Object.hasOwn(delta, "refusal")) {
+    refusal =
+      delta.refusal === null
+        ? null
+        : `${typeof refusal === "string" ? refusal : ""}${delta.refusal ?? ""}`;
   }
   for (const toolDelta of delta.tool_calls ?? []) {
     deltas.push(toolCallDelta(toolDelta, state, ids));
@@ -136,7 +159,10 @@ function choiceDeltas(
   if (choice.finish_reason !== null) {
     finishReason = choice.finish_reason;
   }
-  addExtraStringFields(choice, state);
+  addExtraFields(choice, state);
+  if (deltas.length === 0) {
+    deltas.push({ type: "activity" });
+  }
   return { deltas, content, contentSeen, refusal, finishReason };
 }
 
@@ -146,6 +172,9 @@ function* finishOpenAIStream(
   provider: Code,
   startedAt: number,
 ): Generator<ProviderDelta> {
+  if (state.finishReason === null) {
+    throw new ProviderError("provider_unavailable");
+  }
   const toolCalls = [...state.toolCalls.entries()]
     .sort(([left], [right]) => left - right)
     .map(([, tool]) => ({
@@ -161,7 +190,7 @@ function* finishOpenAIStream(
     content: state.contentSeen ? state.content : null,
     ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }),
     ...(state.refusal === undefined ? {} : { refusal: state.refusal }),
-    ...Object.fromEntries(state.extraStringFields),
+    ...Object.fromEntries(state.extraFields),
   };
   const response: ChatCompletionLike = {
     choices: [{ finish_reason: state.finishReason, message }],
@@ -247,7 +276,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         latencyMs: Math.max(0, context.clock.now() - startedAt),
       };
     } catch (error) {
-      throw mapOpenAIError(error);
+      throw mapOpenAIError(error, context.clock.now());
     }
   }
 
@@ -278,7 +307,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       usage: undefined,
       toolCalls: new Map(),
       callIdsByProviderId: new Map(),
-      extraStringFields: new Map(),
+      extraFields: new Map(),
     };
     try {
       const stream = await this.client.chat.completions.create(streamRequest, {
@@ -302,31 +331,64 @@ export class OpenAIAdapter implements ProviderAdapter {
               ? {}
               : { prompt_tokens_details: chunk.usage.prompt_tokens_details }),
           };
+          yield {
+            type: "usage",
+            usage: {
+              inputTokens: chunk.usage.prompt_tokens,
+              outputTokens: chunk.usage.completion_tokens,
+              ...(chunk.usage.prompt_tokens_details?.cached_tokens === undefined
+                ? {}
+                : { cacheReadTokens: chunk.usage.prompt_tokens_details.cached_tokens }),
+            },
+          };
         }
       }
       yield* finishOpenAIStream(state, context, this.provider, startedAt);
     } catch (error) {
-      throw mapOpenAIError(error);
+      throw mapOpenAIError(error, context.clock.now());
     }
   }
 }
 
-function retryAfterMs(headers: Headers | null | undefined): number | undefined {
+function retryAfterMs(headers: Headers | null | undefined, nowMs: number): number | undefined {
   const value = headers?.get("retry-after");
   if (value === null || value === undefined || value.trim().length === 0) {
     return undefined;
   }
   const seconds = Number(value);
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined;
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1_000;
+  }
+  const retryAt = Date.parse(value);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - nowMs) : undefined;
 }
 
 function mapStatusError(
   status: number | undefined,
   headers: Headers | null | undefined,
+  nowMs: number,
+  providerType?: string,
 ): ProviderError {
+  if (providerType === "rate_limit_error") {
+    const delay = retryAfterMs(headers, nowMs);
+    return new ProviderError("provider_rate_limited", {
+      ...(status === undefined ? {} : { status }),
+      ...(delay === undefined ? {} : { retryAfterMs: delay }),
+    });
+  }
+  if (
+    (status === undefined || status === 200 || status >= 500) &&
+    (providerType === "overloaded_error" ||
+      providerType === "api_error" ||
+      providerType === "server_error")
+  ) {
+    return new ProviderError("provider_unavailable", {
+      ...(status === undefined ? {} : { status }),
+    });
+  }
   switch (status) {
     case 429: {
-      const delay = retryAfterMs(headers);
+      const delay = retryAfterMs(headers, nowMs);
       return new ProviderError("provider_rate_limited", {
         status,
         ...(delay === undefined ? {} : { retryAfterMs: delay }),
@@ -350,7 +412,7 @@ function mapStatusError(
   }
 }
 
-function mapOpenAIError(error: unknown): unknown {
+function mapOpenAIError(error: unknown, nowMs: number): unknown {
   if (error instanceof APIUserAbortError || error instanceof APIConnectionTimeoutError) {
     return new ProviderError("provider_timeout");
   }
@@ -363,6 +425,6 @@ function mapOpenAIError(error: unknown): unknown {
 
   const metadata = OpenAIErrorMetadataSchema.safeParse(error);
   return metadata.success
-    ? mapStatusError(metadata.data.status, metadata.data.headers)
+    ? mapStatusError(metadata.data.status, metadata.data.headers, nowMs, providerErrorType(error))
     : new ProviderError("provider_unknown");
 }

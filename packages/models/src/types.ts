@@ -75,6 +75,11 @@ export const ProviderDeltaSchema = z.discriminatedUnion("type", [
     .refine((delta) => delta.part.type === "opaque"),
   z
     .object({
+      type: z.literal("activity"),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("usage"),
       usage: ModelUsageSchema,
     })
@@ -192,7 +197,7 @@ export function assembleDeltas(deltas: readonly ProviderDelta[]): ProviderResult
       }
     } else if (delta.type === "usage") {
       usage = delta.usage;
-    } else {
+    } else if (delta.type === "finish") {
       finishReason = delta.finishReason;
       latencyMs = delta.latencyMs;
     }

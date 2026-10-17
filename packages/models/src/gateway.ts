@@ -251,7 +251,6 @@ export class ModelGateway {
       sleep: this.sleep,
       signal: context.signal,
       ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-      ...(useStream ? { attemptTimeoutMs: null } : {}),
       prepareAttempt: async (signal, lastError) => {
         if (limiter !== undefined) {
           await limiter.acquire(signal, context.deadlineTs, lastError);

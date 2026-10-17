@@ -15,6 +15,7 @@ import { ProviderError } from "../errors.js";
 import { withPromptOutput } from "../enforce/rung-prompt.js";
 import { assembleDeltas, ProviderResultSchema } from "../types.js";
 import type { ProviderDelta } from "../types.js";
+import { collectProviderStream } from "../streaming.js";
 import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { AnthropicAdapter } from "./anthropic.js";
 
@@ -145,6 +146,24 @@ function anthropicEventStream(events: readonly JsonValue[]): Response {
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
+function streamedSseResponse(frames: readonly string[], delayMs = 0): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (const frame of frames) {
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+          controller.enqueue(encoder.encode(frame));
+        }
+        controller.close();
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
 function fixtureFactory(
   options: ProviderContractAdapterOptions,
   _fixture: ProviderContractFixture,
@@ -234,6 +253,141 @@ describe("AnthropicAdapter", () => {
     expect(assembleDeltas(deltas)).toEqual(expected);
     expect(streamedRequest).toMatchObject({ stream: true });
     expect(JSON.stringify(assembleDeltas(deltas).parts)).toContain("sig_fixture");
+    expect(deltas.some((delta) => delta.type === "activity")).toBe(true);
+    expect(deltas.filter((delta) => delta.type === "usage")).toEqual([
+      { type: "usage", usage: { inputTokens: 7, outputTokens: 1 } },
+      { type: "usage", usage: { inputTokens: 7, outputTokens: 11 } },
+      { type: "usage", usage: { inputTokens: 7, outputTokens: 11 } },
+    ]);
+  });
+
+  it("keeps long thinking and signature phases active without emitting their content", async () => {
+    const events: JsonValue[] = [
+      {
+        type: "message_start",
+        message: {
+          ...responseBody,
+          content: [],
+          stop_reason: null,
+          usage: { input_tokens: 1, output_tokens: 0 },
+        },
+      },
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      },
+      ...["private-one", "private-two"].map((thinking): JsonValue => ({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking },
+      })),
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "signature_delta", signature: "private-signature" },
+      },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens: 2 },
+      },
+      { type: "message_stop" },
+    ];
+    const frames = events.flatMap((event) => {
+      const { type } = z.object({ type: z.string() }).loose().parse(event);
+      const json = JSON.stringify(event);
+      const split = json.indexOf(",") + 1;
+      return [
+        ": keepalive\r\n",
+        `event: ${type}\r\ndata: ${json.slice(0, split)}\r\ndata: ${json.slice(split)}\r\n\r\n`,
+      ];
+    });
+    const adapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: () => streamedSseResponse(frames, 18),
+    });
+    const progress: unknown[] = [];
+    const signal = new AbortController().signal;
+    const result = await collectProviderStream({
+      stream: (streamSignal) => adapter.stream(baseRequest, context(streamSignal)),
+      signal,
+      idleTimeoutMs: 75,
+      requestId,
+      onProgress: (update) => progress.push(update),
+    });
+
+    expect(result.usage).toEqual({ inputTokens: 1, outputTokens: 2 });
+    expect(progress).toEqual([
+      { requestId, outputTokens: 0 },
+      { requestId, outputTokens: 2 },
+    ]);
+    expect(JSON.stringify(progress)).not.toContain("private-one");
+    expect(JSON.stringify(result.parts)).toContain("private-signature");
+  });
+
+  it.each([
+    ["overloaded_error", "provider_unavailable"],
+    ["api_error", "provider_unavailable"],
+    ["rate_limit_error", "provider_rate_limited"],
+  ] as const)("maps an HTTP-200 %s stream error to %s", async (type, code) => {
+    const start = {
+      type: "message_start",
+      message: {
+        ...responseBody,
+        content: [],
+        stop_reason: null,
+        usage: { input_tokens: 1, output_tokens: 0 },
+      },
+    };
+    const partial = {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    };
+    const body = [
+      `event: message_start\ndata: ${JSON.stringify(start)}\n\n`,
+      `event: content_block_start\ndata: ${JSON.stringify(partial)}\n\n`,
+      `event: error\ndata: ${JSON.stringify({
+        type: "error",
+        error: { type, message: "synthetic error" },
+      })}\n\n`,
+    ].join("");
+    const adapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: () =>
+        Promise.resolve(new Response(body, { headers: { "content-type": "text/event-stream" } })),
+    });
+    const collect = async () => {
+      const deltas: ProviderDelta[] = [];
+      for await (const delta of adapter.stream(baseRequest, context())) {
+        deltas.push(delta);
+      }
+      return deltas;
+    };
+
+    await expect(collect()).rejects.toMatchObject({ code, retryable: true });
+  });
+
+  it.each([
+    { offsetMs: 2_500, expectedMs: 2_000 },
+    { offsetMs: -2_500, expectedMs: 0 },
+  ])("parses HTTP-date Retry-After using the injected clock", async ({ offsetMs, expectedMs }) => {
+    const nowMs = Date.parse("2026-10-17T16:00:00.000Z");
+    const { adapter } = makeRequest(responseBody, 429, {
+      "retry-after": new Date(nowMs + offsetMs).toUTCString(),
+    });
+
+    await expect(
+      adapter.complete(baseRequest, {
+        signal: new AbortController().signal,
+        ids: { next: () => requestId },
+        clock: { now: () => nowMs },
+      }),
+    ).rejects.toMatchObject({ code: "provider_rate_limited", retryAfterMs: expectedMs });
   });
 
   it("places three cache breakpoints and maps cached usage without mutating recorded content", async () => {

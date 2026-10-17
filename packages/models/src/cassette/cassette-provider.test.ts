@@ -102,7 +102,7 @@ describe("CassetteProvider", () => {
     })();
 
     await expect(promise).rejects.toMatchObject({ code: "provider_unavailable" });
-    expect(seen).toEqual([]);
+    expect(seen).toEqual([{ type: "activity" }]);
     expect(store.entries.size).toBe(0);
   });
 

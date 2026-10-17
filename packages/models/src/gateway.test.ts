@@ -22,6 +22,11 @@ import type { ValueTransform } from "./index.js";
 import { abortableSleep } from "./resilience/retry.js";
 import { AnthropicAdapter } from "./providers/anthropic.js";
 import { OpenAIAdapter } from "./providers/openai.js";
+import {
+  CassetteProvider,
+  type CassetteEntry,
+  type CassetteStore,
+} from "./cassette/cassette-provider.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -148,14 +153,14 @@ describe("ModelGateway", () => {
     });
   });
 
-  it("streams beyond the total timeout and reports token counts without output content", async () => {
+  it("allows first-token latency above the idle timeout within the total cap", async () => {
     const progress: unknown[] = [];
     const complete = vi.fn(() =>
       Promise.reject(new Error("streaming must be selected when the adapter supports it")),
     );
     const stream = vi.fn(async function* (): AsyncGenerator<ProviderDelta> {
-      yield { type: "text", index: 0, text: "canary-stream-output" };
       await new Promise((resolve) => setTimeout(resolve, 20));
+      yield { type: "text", index: 0, text: "canary-stream-output" };
       yield { type: "usage", usage: { inputTokens: 1, outputTokens: 4 } };
       yield { type: "finish", finishReason: "stop", latencyMs: 20 };
     });
@@ -165,8 +170,8 @@ describe("ModelGateway", () => {
       clock: { now: () => 0 },
       retryPolicy: ModelRetryConfigSchema.parse({
         maxAttempts: 1,
-        timeoutMs: 5,
-        idleTimeoutMs: 50,
+        timeoutMs: 100,
+        idleTimeoutMs: 10,
       }),
     });
 
@@ -182,6 +187,38 @@ describe("ModelGateway", () => {
     expect(stream).toHaveBeenCalledOnce();
     expect(progress).toEqual([{ requestId: request.requestId, outputTokens: 4 }]);
     expect(JSON.stringify(progress)).not.toContain("canary-stream-output");
+  });
+
+  it("bounds a stream that keeps producing activity under every idle timeout", async () => {
+    useFakeClock();
+    const adapter: ProviderAdapter = {
+      provider: "sample",
+      kind: "openai",
+      complete: vi.fn(() => Promise.reject(new Error("streaming must be selected"))),
+      async *stream() {
+        for (;;) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          yield { type: "activity" };
+        }
+      },
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({
+        maxAttempts: 1,
+        timeoutMs: 20,
+        idleTimeoutMs: 10,
+      }),
+    });
+    const completion = gateway.complete(request, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+    });
+    const rejected = expect(completion).rejects.toMatchObject({ code: "provider_timeout" });
+
+    await vi.advanceTimersByTimeAsync(20);
+    await rejected;
   });
 
   it("uses complete() when streaming is disabled for the selected provider", async () => {
@@ -218,6 +255,7 @@ describe("ModelGateway", () => {
 
   it("retries a retryable stream failure without exposing partial output", async () => {
     let attempts = 0;
+    const progress: unknown[] = [];
     const adapter: ProviderAdapter = {
       provider: "sample",
       kind: "openai",
@@ -231,6 +269,7 @@ describe("ModelGateway", () => {
           text: attempts === 1 ? "canary-partial-output" : "complete-output",
         };
         if (attempts === 1) {
+          yield { type: "usage", usage: { inputTokens: 1, outputTokens: 9 } };
           throw new ProviderError("provider_unavailable");
         }
         yield { type: "usage", usage: { inputTokens: 1, outputTokens: 2 } };
@@ -252,11 +291,219 @@ describe("ModelGateway", () => {
     const response = await gateway.complete(request, {
       runId: request.requestId,
       signal: new AbortController().signal,
+      onProgress: (update) => progress.push(update),
     });
 
     expect(attempts).toBe(2);
     expect(response.parts).toEqual([{ type: "text", text: "complete-output" }]);
     expect(JSON.stringify(response)).not.toContain("canary-partial-output");
+    expect(progress).toEqual([
+      { requestId: request.requestId, outputTokens: 9 },
+      { requestId: request.requestId, outputTokens: 2 },
+    ]);
+  });
+
+  it("retries an OpenAI SSE error without returning first-attempt text", async () => {
+    const partialChunk = {
+      id: "chunk-partial",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "gpt-4o-mini",
+      choices: [{ index: 0, delta: { content: "first-attempt-only" }, finish_reason: null }],
+    };
+    const errorFrame = {
+      error: { type: "overloaded_error", message: "synthetic error" },
+    };
+    const completeChunk = {
+      id: "chunk-complete",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "gpt-4o-mini",
+      choices: [{ index: 0, delta: { content: "second-attempt-only" }, finish_reason: null }],
+    };
+    const finishChunk = {
+      id: "chunk-finish",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "gpt-4o-mini",
+      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    };
+    const usageChunk = {
+      id: "chunk-usage",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "gpt-4o-mini",
+      choices: [],
+      usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+    };
+    let calls = 0;
+    const adapter = new OpenAIAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test/v1",
+      fetch: () => {
+        calls += 1;
+        const frames =
+          calls === 1
+            ? [partialChunk, errorFrame]
+            : [completeChunk, finishChunk, usageChunk, "[DONE]"];
+        return Promise.resolve(
+          new Response(
+            frames
+              .map((frame) =>
+                frame === "[DONE]" ? "data: [DONE]\n\n" : `data: ${JSON.stringify(frame)}\n\n`,
+              )
+              .join(""),
+            { headers: { "content-type": "text/event-stream" } },
+          ),
+        );
+      },
+    });
+    const openAIRequest: ModelRequest = {
+      ...request,
+      model: { ...request.model, provider: "openai" },
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({
+        maxAttempts: 2,
+        baseDelayMs: 0,
+        maxDelayMs: 0,
+        idleTimeoutMs: 100,
+      }),
+      sleep: () => Promise.resolve(),
+    });
+
+    const response = await gateway.complete(openAIRequest, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+    });
+
+    expect(calls).toBe(2);
+    expect(response.parts.filter((part) => part.type === "text")).toEqual([
+      { type: "text", text: "second-attempt-only" },
+    ]);
+    expect(JSON.stringify(response)).not.toContain("first-attempt-only");
+  });
+
+  it("accounts for usage delivered before a caller aborts the stream", async () => {
+    const controller = new AbortController();
+    const adapter: ProviderAdapter = {
+      provider: "sample",
+      kind: "openai",
+      complete: vi.fn(() => Promise.reject(new Error("streaming must be selected"))),
+      async *stream() {
+        yield { type: "usage", usage: { inputTokens: 3, outputTokens: 4 } };
+        await new Promise<never>(() => undefined);
+      },
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 1, idleTimeoutMs: 1_000 }),
+    });
+    const completion = gateway.complete(request, {
+      runId: request.requestId,
+      signal: controller.signal,
+      onProgress: () => controller.abort(new Error("caller cancelled")),
+    });
+
+    await expect(completion).rejects.toMatchObject({
+      message: "caller cancelled",
+      usage: { inputTokens: 3, outputTokens: 4 },
+    });
+  });
+
+  it("does not retry when a progress subscriber throws", async () => {
+    const stream = vi.fn(async function* (): AsyncGenerator<ProviderDelta> {
+      yield { type: "usage", usage: { inputTokens: 1, outputTokens: 2 } };
+      yield { type: "finish", finishReason: "stop", latencyMs: 1 };
+    });
+    const adapter: ProviderAdapter = {
+      provider: "sample",
+      kind: "openai",
+      complete: vi.fn(() => Promise.reject(new Error("streaming must be selected"))),
+      stream,
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({ maxAttempts: 2, idleTimeoutMs: 100 }),
+    });
+
+    await expect(
+      gateway.complete(request, {
+        runId: request.requestId,
+        signal: new AbortController().signal,
+        onProgress: () => {
+          throw new Error("subscriber failed");
+        },
+      }),
+    ).resolves.toMatchObject({ usage: { outputTokens: 2 } });
+    expect(stream).toHaveBeenCalledOnce();
+  });
+
+  it("keeps cassette-wrapped streams active without exposing output before sanitization", async () => {
+    const entries = new Map<string, CassetteEntry>();
+    const store: CassetteStore = {
+      get: (hash) => Promise.resolve(entries.get(hash)?.response),
+      set: (entry) => {
+        entries.set(entry.hash, entry);
+        return Promise.resolve();
+      },
+    };
+    const inner: ProviderAdapter = {
+      provider: "openai",
+      kind: "openai",
+      complete: vi.fn(() => Promise.reject(new Error("streaming must be selected"))),
+      async *stream() {
+        for (let index = 0; index < 5; index += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 4));
+          yield { type: "text", index: 0, text: `unsafe-${index}` };
+        }
+        yield { type: "usage", usage: { inputTokens: 1, outputTokens: 5 } };
+        yield { type: "finish", finishReason: "stop", latencyMs: 20 };
+      },
+    };
+    const progress: unknown[] = [];
+    const cassette = new CassetteProvider("record", store, inner, {
+      sanitize: (response) => {
+        expect(progress).toEqual([{ requestId: request.requestId, outputTokens: 5 }]);
+        return Promise.resolve({
+          ...response,
+          parts: response.parts.map((part) =>
+            part.type === "text" ? { ...part, text: "sanitized response" } : part,
+          ),
+        });
+      },
+      detectRealData: () => Promise.resolve(false),
+    });
+    const cassetteRequest = {
+      ...request,
+      model: { ...request.model, provider: "cassette" },
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([cassette]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({
+        maxAttempts: 1,
+        timeoutMs: 1_000,
+        idleTimeoutMs: 10,
+      }),
+    });
+
+    const response = await gateway.complete(cassetteRequest, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+      onProgress: (update) => progress.push(update),
+    });
+
+    expect(response.parts).toEqual([{ type: "text", text: "sanitized response" }]);
+    expect([...entries.values()][0]?.response.parts).toEqual([
+      { type: "text", text: "sanitized response" },
+    ]);
+    expect(progress).toEqual([{ requestId: request.requestId, outputTokens: 5 }]);
+    expect(JSON.stringify(progress)).not.toContain("unsafe-");
   });
 
   it("removes foreign opaque parts and retains normalized assistant parts", async () => {

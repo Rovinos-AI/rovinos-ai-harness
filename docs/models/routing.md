@@ -57,6 +57,9 @@ provider's configured value, including after a fallback switch.
 Provider streaming defaults to enabled where the adapter supports it. Set
 `streaming: false` on a provider to use its non-streaming completion path. Stream
 attempts use `retry.idleTimeoutMs` (60 seconds by default) between provider
-deltas, while the run deadline remains in effect; `retry.timeoutMs` continues to
-bound non-streaming attempts. The gateway's `onProgress` hook receives only the
-request ID and reported output-token count, never generated text.
+activity after the first event. `retry.timeoutMs` and the run deadline bound both
+streaming and non-streaming attempts. The gateway's `onProgress` hook receives
+only the request ID and reported output-token count, never generated text.
+
+Adapter authors can find the streaming contract and delta assembly rules in
+[the model adapter guide](./adapter-authoring.md).

@@ -249,7 +249,9 @@ export class CassetteProvider implements ProviderAdapter {
     } else {
       const deltas: ProviderDelta[] = [];
       for await (const delta of this.inner.stream(request, context)) {
-        deltas.push(ProviderDeltaSchema.parse(delta));
+        const parsed = ProviderDeltaSchema.parse(delta);
+        deltas.push(parsed);
+        yield parsed.type === "usage" ? parsed : { type: "activity" };
       }
       response = assembleDeltas(deltas);
     }
