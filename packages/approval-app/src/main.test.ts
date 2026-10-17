@@ -17,8 +17,8 @@ const telemetry = vi.hoisted(() => {
     traceContext: { readonly traceId: string | undefined };
   }[] = [];
   const lifecycles: {
-    reportError: ReturnType<typeof vi.fn>;
-    decisionDurationMs: ReturnType<typeof vi.fn>;
+    reportErrors: string[][];
+    decisionDurationCalls: number;
   }[] = [];
   return { instances, lifecycles };
 });
@@ -73,9 +73,23 @@ vi.mock("./telemetry.js", async (importOriginal) => {
     ...actual,
     createApprovalTelemetry: (...args: Parameters<typeof actual.createApprovalTelemetry>) => {
       const lifecycle = actual.createApprovalTelemetry(...args);
+      const reportError = lifecycle.reportError.bind(lifecycle);
+      const decisionDurationMs = lifecycle.decisionDurationMs.bind(lifecycle);
+      const reportErrors: string[][] = [];
+      let decisionDurationCalls = 0;
+      lifecycle.reportError = (code) => {
+        reportErrors.push([code]);
+        reportError(code);
+      };
+      lifecycle.decisionDurationMs = () => {
+        decisionDurationCalls += 1;
+        return decisionDurationMs();
+      };
       telemetry.lifecycles.push({
-        reportError: vi.spyOn(lifecycle, "reportError"),
-        decisionDurationMs: vi.spyOn(lifecycle, "decisionDurationMs"),
+        reportErrors,
+        get decisionDurationCalls() {
+          return decisionDurationCalls;
+        },
       });
       return lifecycle;
     },
@@ -250,7 +264,7 @@ describe("approval app SDK bootstrap", () => {
     expect(document.body.textContent).not.toContain("SYNTHETIC");
     expect(JSON.stringify(bridge.call.mock.calls)).not.toContain("SYNTHETIC");
     expect(telemetry.instances[0]?.active).toBe(false);
-    expect(telemetry.lifecycles[0]?.reportError.mock.calls).toEqual([
+    expect(telemetry.lifecycles[0]?.reportErrors).toEqual([
       ["bridge_unavailable"],
       ["payload_invalid"],
     ]);
@@ -281,8 +295,8 @@ describe("approval app SDK bootstrap", () => {
     options.reportError("resolve_failed");
     options.decisionDurationMs();
     options.flushInteractions();
-    expect(lifecycle.reportError).toHaveBeenCalledExactlyOnceWith("resolve_failed");
-    expect(lifecycle.decisionDurationMs).toHaveBeenCalledOnce();
+    expect(lifecycle.reportErrors).toEqual([["resolve_failed"]]);
+    expect(lifecycle.decisionDurationCalls).toBe(1);
     window.dispatchEvent(new Event("pagehide"));
   });
 
