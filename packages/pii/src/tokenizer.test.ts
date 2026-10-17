@@ -215,7 +215,39 @@ describe("Tokenizer.tokenizeText", () => {
     ]);
   });
 
-  it.each(["closed", "half-open"] as const)(
+  it("surfaces a closed-breaker Presidio failure through tokenizeText without output or events", async () => {
+    const rawText = "tokenizer-presidio-sensitive-value";
+    const fetcher = vi.fn(() => Promise.reject(new Error(rawText)));
+    const detector = new PresidioDetector(
+      PiiPresidioConfigSchema.parse({ baseUrl: "http://presidio:3000" }),
+      { clock: { now: () => 0 }, fetcher },
+    );
+    const tokenizer = new Tokenizer({
+      detectors: new DetectorRegistry({ asyncDetectors: [detector] }),
+      policy: PiiPolicySchema.parse({ defaultAction: "tokenize" }),
+      vault: new InMemoryVault(),
+    });
+    const recordedEvents: unknown[] = [];
+    let output: string | undefined;
+    const failure = await tokenizer
+      .tokenizeText(runA, rawText, context)
+      .then((result) => {
+        output = result.text;
+        recordedEvents.push(...result.actions.map(toPiiActionEvent));
+        return undefined;
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({ code: "pii_detector_unavailable" });
+    expect(String(failure)).not.toContain(rawText);
+    expect(JSON.stringify(failure)).not.toContain(rawText);
+    expect(output).toBeUndefined();
+    expect(recordedEvents).toEqual([]);
+    expect(JSON.stringify(recordedEvents)).not.toContain(rawText);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it.each(["open", "half-open"] as const)(
     "fails tokenization without exposing raw text when Presidio fails in the %s breaker state",
     async (breakerState) => {
       let now = 0;
@@ -246,7 +278,7 @@ describe("Tokenizer.tokenizeText", () => {
       expect(failure).toMatchObject({ code: "pii_detector_unavailable" });
       expect(String(failure)).not.toContain(rawText);
       expect(JSON.stringify(failure)).not.toContain(rawText);
-      expect(fetcher).toHaveBeenCalledTimes(breakerState === "closed" ? 5 : 6);
+      expect(fetcher).toHaveBeenCalledTimes(breakerState === "half-open" ? 6 : 5);
     },
   );
 
