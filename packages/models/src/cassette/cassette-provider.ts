@@ -65,7 +65,7 @@ function resultDeltas(result: ProviderResult): ProviderDelta[] {
         index,
         callId: part.callId,
         toolId: part.toolId,
-        arguments: JSON.stringify(part.args) ?? "null",
+        arguments: JSON.stringify(part.args),
       });
       index += 1;
     } else if (part.type === "opaque") {

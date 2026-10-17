@@ -4,6 +4,12 @@ import { ProviderError } from "./errors.js";
 import { assembleDeltas, ModelProgressSchema, ProviderDeltaSchema } from "./types.js";
 import type { ModelProgress, ProviderDelta } from "./types.js";
 
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Provider stream aborted.", { cause: signal.reason });
+}
+
 /** Collects one complete provider stream, enforcing idle timeout and preserving only count progress. */
 export async function collectProviderStream(options: {
   readonly stream: (signal: AbortSignal) => AsyncIterable<ProviderDelta>;
@@ -14,7 +20,9 @@ export async function collectProviderStream(options: {
 }): Promise<ReturnType<typeof assembleDeltas>> {
   const { stream, signal, idleTimeoutMs, requestId, onProgress } = options;
   const controller = new AbortController();
-  const forwardAbort = (): void => controller.abort(signal.reason);
+  const forwardAbort = (): void => {
+    controller.abort(signal.reason);
+  };
   if (signal.aborted) {
     forwardAbort();
   } else {
@@ -39,7 +47,9 @@ export async function collectProviderStream(options: {
         }, idleTimeoutMs);
       });
       const aborted = new Promise<never>((_resolve, reject) => {
-        onAbort = () => reject(controller.signal.reason);
+        onAbort = () => {
+          reject(abortError(controller.signal));
+        };
         if (controller.signal.aborted) {
           onAbort();
         } else {
@@ -57,7 +67,7 @@ export async function collectProviderStream(options: {
           controller.signal.removeEventListener("abort", onAbort);
         }
       }
-      if (next.done) {
+      if (next.done === true) {
         complete = true;
         break;
       }

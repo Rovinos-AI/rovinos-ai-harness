@@ -91,6 +91,81 @@ export const ProviderDeltaSchema = z.discriminatedUnion("type", [
 /** Inferred provider-neutral response update. */
 export type ProviderDelta = z.infer<typeof ProviderDeltaSchema>;
 
+type VisibleDeltaPart =
+  | { readonly kind: "text"; text: string }
+  | { readonly kind: "tool_call"; callId?: string; toolId: string; args: string };
+
+function addTextDelta(
+  partsByIndex: Map<number, VisibleDeltaPart>,
+  delta: Extract<ProviderDelta, { readonly type: "text" }>,
+): boolean {
+  const current = partsByIndex.get(delta.index);
+  if (current === undefined) {
+    partsByIndex.set(delta.index, { kind: "text", text: delta.text });
+  } else if (current.kind === "text") {
+    current.text += delta.text;
+  } else {
+    return true;
+  }
+  return false;
+}
+
+function addToolCallDelta(
+  partsByIndex: Map<number, VisibleDeltaPart>,
+  delta: Extract<ProviderDelta, { readonly type: "tool_call" }>,
+): boolean {
+  const current = partsByIndex.get(delta.index);
+  if (current === undefined) {
+    partsByIndex.set(delta.index, {
+      kind: "tool_call",
+      ...(delta.callId === undefined ? {} : { callId: delta.callId }),
+      toolId: delta.toolId ?? "",
+      args: delta.arguments,
+    });
+  } else if (current.kind === "tool_call") {
+    if (delta.callId !== undefined) {
+      if (current.callId !== undefined && current.callId !== delta.callId) {
+        return true;
+      }
+      current.callId = delta.callId;
+    }
+    current.toolId += delta.toolId ?? "";
+    current.args += delta.arguments;
+  } else {
+    return true;
+  }
+  return false;
+}
+
+function assembleVisibleParts(partsByIndex: Map<number, VisibleDeltaPart>): {
+  readonly parts: Part[];
+  readonly invalidToolCall: boolean;
+} {
+  const parts: Part[] = [];
+  for (const [, value] of [...partsByIndex.entries()].sort(([left], [right]) => left - right)) {
+    if (value.kind === "text") {
+      parts.push({ type: "text", text: value.text });
+      continue;
+    }
+    const callId = Id.safeParse(value.callId);
+    const toolId = Code.safeParse(value.toolId);
+    if (!callId.success || !toolId.success) {
+      return { parts: [], invalidToolCall: true };
+    }
+    try {
+      parts.push({
+        type: "tool_call",
+        callId: callId.data,
+        toolId: toolId.data,
+        args: parseJson(JsonValue, value.args),
+      });
+    } catch {
+      return { parts: [], invalidToolCall: true };
+    }
+  }
+  return { parts, invalidToolCall: false };
+}
+
 /**
  * Assembles a complete adapter result from a finished stream.
  *
@@ -98,11 +173,7 @@ export type ProviderDelta = z.infer<typeof ProviderDeltaSchema>;
  * @returns The normalized result consumed by the gateway and cassette layer.
  */
 export function assembleDeltas(deltas: readonly ProviderDelta[]): ProviderResult {
-  const partsByIndex = new Map<
-    number,
-    | { kind: "text"; text: string }
-    | { kind: "tool_call"; callId?: string; toolId: string; args: string }
-  >();
+  const partsByIndex = new Map<number, VisibleDeltaPart>();
   const opaqueParts: Part[] = [];
   let usage: ModelUsage = { inputTokens: 0, outputTokens: 0 };
   let finishReason = Code.parse("other");
@@ -112,35 +183,9 @@ export function assembleDeltas(deltas: readonly ProviderDelta[]): ProviderResult
   for (const input of deltas) {
     const delta = ProviderDeltaSchema.parse(input);
     if (delta.type === "text") {
-      const current = partsByIndex.get(delta.index);
-      if (current === undefined) {
-        partsByIndex.set(delta.index, { kind: "text", text: delta.text });
-      } else if (current.kind === "text") {
-        current.text += delta.text;
-      } else {
-        invalidToolCall = true;
-      }
+      invalidToolCall ||= addTextDelta(partsByIndex, delta);
     } else if (delta.type === "tool_call") {
-      const current = partsByIndex.get(delta.index);
-      if (current === undefined) {
-        partsByIndex.set(delta.index, {
-          kind: "tool_call",
-          ...(delta.callId === undefined ? {} : { callId: delta.callId }),
-          toolId: delta.toolId ?? "",
-          args: delta.arguments,
-        });
-      } else if (current.kind === "tool_call") {
-        if (delta.callId !== undefined) {
-          if (current.callId !== undefined && current.callId !== delta.callId) {
-            invalidToolCall = true;
-          }
-          current.callId = delta.callId;
-        }
-        current.toolId += delta.toolId ?? "";
-        current.args += delta.arguments;
-      } else {
-        invalidToolCall = true;
-      }
+      invalidToolCall ||= addToolCallDelta(partsByIndex, delta);
     } else if (delta.type === "opaque") {
       if (delta.part.type === "opaque") {
         opaqueParts.push(delta.part);
@@ -153,34 +198,10 @@ export function assembleDeltas(deltas: readonly ProviderDelta[]): ProviderResult
     }
   }
 
-  const parts: Part[] = [];
-  if (!invalidToolCall) {
-    for (const [, value] of [...partsByIndex.entries()].sort(([left], [right]) => left - right)) {
-      if (value.kind === "text") {
-        parts.push({ type: "text", text: value.text });
-        continue;
-      }
-      const callId = Id.safeParse(value.callId);
-      const toolId = Code.safeParse(value.toolId);
-      if (!callId.success || !toolId.success) {
-        invalidToolCall = true;
-        break;
-      }
-      try {
-        parts.push({
-          type: "tool_call",
-          callId: callId.data,
-          toolId: toolId.data,
-          args: parseJson(JsonValue, value.args),
-        });
-      } catch {
-        invalidToolCall = true;
-        break;
-      }
-    }
-  }
+  const visibleParts = assembleVisibleParts(partsByIndex);
+  invalidToolCall ||= visibleParts.invalidToolCall;
   return ProviderResultSchema.parse({
-    parts: [...(invalidToolCall ? [] : parts), ...opaqueParts],
+    parts: [...(invalidToolCall ? [] : visibleParts.parts), ...opaqueParts],
     usage,
     finishReason: invalidToolCall ? "tool_args_invalid" : finishReason,
     latencyMs,

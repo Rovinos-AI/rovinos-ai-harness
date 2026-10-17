@@ -702,15 +702,17 @@ describe("OpenAI adapter request behavior", () => {
         const streamingAdapter = new OpenAIAdapter({
           apiKey: { reveal: () => "synthetic-test-key" },
           baseURL: "https://provider.test/v1",
-          fetch: async () => openAIEventStream(chunks),
+          fetch: () => Promise.resolve(openAIEventStream(chunks)),
         });
         const completeAdapter = new OpenAIAdapter({
           apiKey: { reveal: () => "synthetic-test-key" },
           baseURL: "https://provider.test/v1",
-          fetch: async () =>
-            new Response(JSON.stringify(completion(JsonValue.parse(message))), {
-              headers: { "content-type": "application/json" },
-            }),
+          fetch: () =>
+            Promise.resolve(
+              new Response(JSON.stringify(completion(JsonValue.parse(message))), {
+                headers: { "content-type": "application/json" },
+              }),
+            ),
         });
         const context: ProviderContext = {
           signal: new AbortController().signal,
@@ -792,17 +794,19 @@ describe("OpenAI adapter request behavior", () => {
         const streamingAdapter = new OpenAIAdapter({
           apiKey: { reveal: () => "synthetic-test-key" },
           baseURL: "https://provider.test/v1",
-          fetch: async () => openAIEventStream(chunks),
+          fetch: () => Promise.resolve(openAIEventStream(chunks)),
         });
         const completeAdapter = new OpenAIAdapter({
           apiKey: { reveal: () => "synthetic-test-key" },
           baseURL: "https://provider.test/v1",
-          fetch: async () =>
-            new Response(
-              JSON.stringify(completion(JsonValue.parse(rawToolMessage), "tool_calls")),
-              {
-                headers: { "content-type": "application/json" },
-              },
+          fetch: () =>
+            Promise.resolve(
+              new Response(
+                JSON.stringify(completion(JsonValue.parse(rawToolMessage), "tool_calls")),
+                {
+                  headers: { "content-type": "application/json" },
+                },
+              ),
             ),
         });
         const context: ProviderContext = {

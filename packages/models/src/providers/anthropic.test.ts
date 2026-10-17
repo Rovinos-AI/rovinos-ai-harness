@@ -138,7 +138,7 @@ function context(signal = new AbortController().signal) {
 function anthropicEventStream(events: readonly JsonValue[]): Response {
   const body = events
     .map((event) => {
-      const value = z.object({ type: z.string() }).passthrough().parse(event);
+      const value = z.object({ type: z.string() }).loose().parse(event);
       return `event: ${value.type}\ndata: ${JSON.stringify(event)}\n\n`;
     })
     .join("");
@@ -216,9 +216,12 @@ describe("AnthropicAdapter", () => {
     const streamingAdapter = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
       baseURL: "https://provider.test",
-      fetch: async (_input, init) => {
-        streamedRequest = JsonValue.parse(JSON.parse(String(init?.body)));
-        return anthropicEventStream(events);
+      fetch: (_input, init) => {
+        if (typeof init?.body !== "string") {
+          throw new TypeError("Expected a serialized Anthropic request body.");
+        }
+        streamedRequest = parseJson(JsonValue, init.body);
+        return Promise.resolve(anthropicEventStream(events));
       },
     });
 

@@ -5,13 +5,9 @@ import Anthropic, {
   type ClientOptions,
 } from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
-import type {
-  MessageCreateParamsBase,
-  MessageCreateParamsStreaming,
-} from "@anthropic-ai/sdk/resources/messages";
 import {
   Code,
-  Id,
+  type Id,
   JsonValue,
   type Capabilities,
   type ModelRequest,
@@ -19,6 +15,11 @@ import {
 } from "@harness/schemas";
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult } from "../types.js";
+import {
+  createAnthropicStreamState,
+  createAnthropicStreamingParams,
+  streamEventDeltas,
+} from "./anthropic-streaming.js";
 
 /** Secret-shaped input accepted without importing the configuration package. */
 export interface AnthropicApiKey {
@@ -370,64 +371,15 @@ export class AnthropicAdapter implements ProviderAdapter {
     const startedAt = context.clock.now();
     const params = buildRequest(request, this.provider);
     // The builder returns this SDK request shape as JSON because provider blocks are extensible.
-    const streamParams = {
-      ...(params as unknown as MessageCreateParamsBase),
-      stream: true as const,
-    } satisfies MessageCreateParamsStreaming;
+    const streamParams = createAnthropicStreamingParams(params);
     const stream = this.client.messages.stream(streamParams, { signal: context.signal });
-    const callIdsByToolUseId = new Map<string, Id>();
-    const toolArgumentsByIndex = new Map<number, string>();
-    const toolIdsByIndex = new Map<number, { readonly callId: Id; readonly toolId: string }>();
+    const state = createAnthropicStreamState();
     try {
       for await (const event of stream) {
-        if (event.type === "content_block_start") {
-          if (event.content_block.type === "text") {
-            yield { type: "text", index: event.index, text: "" };
-          } else if (event.content_block.type === "tool_use") {
-            const callId = context.ids.next();
-            callIdsByToolUseId.set(event.content_block.id, callId);
-            toolIdsByIndex.set(event.index, { callId, toolId: event.content_block.name });
-            toolArgumentsByIndex.set(event.index, "");
-            yield {
-              type: "tool_call",
-              index: event.index,
-              callId,
-              toolId: event.content_block.name,
-              arguments: "",
-            };
-          }
-        } else if (event.type === "content_block_delta") {
-          if (event.delta.type === "text_delta") {
-            yield { type: "text", index: event.index, text: event.delta.text };
-          } else if (event.delta.type === "input_json_delta") {
-            const tool = toolIdsByIndex.get(event.index);
-            if (tool !== undefined) {
-              toolArgumentsByIndex.set(
-                event.index,
-                (toolArgumentsByIndex.get(event.index) ?? "") + event.delta.partial_json,
-              );
-              yield {
-                type: "tool_call",
-                index: event.index,
-                callId: tool.callId,
-                arguments: event.delta.partial_json,
-              };
-            }
-          }
-        } else if (event.type === "content_block_stop") {
-          const tool = toolIdsByIndex.get(event.index);
-          if (tool !== undefined && toolArgumentsByIndex.get(event.index) === "") {
-            yield {
-              type: "tool_call",
-              index: event.index,
-              callId: tool.callId,
-              arguments: "{}",
-            };
-          }
-        }
+        yield* streamEventDeltas(event, state, context.ids);
       }
       const response = await stream.finalMessage();
-      const result = this.mapMessage(response, context, startedAt, callIdsByToolUseId);
+      const result = this.mapMessage(response, context, startedAt, state.callIdsByToolUseId);
       for (const part of result.parts) {
         if (part.type === "opaque") {
           yield { type: "opaque", part };

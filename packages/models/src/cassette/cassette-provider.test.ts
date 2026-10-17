@@ -63,7 +63,8 @@ describe("CassetteProvider", () => {
       provider: "openai",
       kind: "openai",
       complete: () => Promise.reject(new Error("stream path expected")),
-      stream: async function* () {
+      async *stream() {
+        await Promise.resolve();
         yield { type: "text", index: 0, text: "recorded " };
         yield { type: "text", index: 0, text: "response" };
         yield { type: "usage", usage: result.usage };
@@ -86,7 +87,8 @@ describe("CassetteProvider", () => {
       provider: "openai",
       kind: "openai",
       complete: () => Promise.reject(new Error("stream path expected")),
-      stream: async function* () {
+      async *stream() {
+        await Promise.resolve();
         yield { type: "text", index: 0, text: "canary-partial-response" };
         throw new ProviderError("provider_unavailable");
       },

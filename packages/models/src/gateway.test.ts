@@ -194,6 +194,7 @@ describe("ModelGateway", () => {
       }),
     );
     const stream = vi.fn(async function* (): AsyncGenerator<ProviderDelta> {
+      await Promise.resolve();
       yield { type: "finish", finishReason: "stop", latencyMs: 0 };
     });
     const gateway = new ModelGateway(
@@ -221,7 +222,8 @@ describe("ModelGateway", () => {
       provider: "sample",
       kind: "openai",
       complete: vi.fn(() => Promise.reject(new Error("streaming must be selected"))),
-      stream: async function* () {
+      async *stream() {
+        await Promise.resolve();
         attempts += 1;
         yield {
           type: "text",
@@ -244,7 +246,7 @@ describe("ModelGateway", () => {
         maxDelayMs: 0,
         idleTimeoutMs: 100,
       }),
-      sleep: async () => undefined,
+      sleep: () => Promise.resolve(),
     });
 
     const response = await gateway.complete(request, {

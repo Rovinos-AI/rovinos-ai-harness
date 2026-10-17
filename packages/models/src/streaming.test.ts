@@ -13,8 +13,11 @@ describe("collectProviderStream", () => {
       signal: new AbortController().signal,
       idleTimeoutMs: 100,
       requestId,
-      onProgress: (update) => progress.push(update),
-      stream: async function* () {
+      onProgress: (update) => {
+        progress.push(update);
+      },
+      async *stream() {
+        await Promise.resolve();
         yield { type: "text", index: 0, text: "canary-stream-text" };
         yield { type: "usage", usage: { inputTokens: 2, outputTokens: 3 } };
         yield { type: "finish", finishReason: "stop", latencyMs: 9 };
@@ -37,7 +40,13 @@ describe("collectProviderStream", () => {
       streamSignal = signal;
       yield { type: "text", index: 0, text: "partial" };
       await new Promise<never>((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        signal.addEventListener(
+          "abort",
+          () => {
+            reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
+          },
+          { once: true },
+        );
       });
     };
 
@@ -63,11 +72,17 @@ describe("collectProviderStream", () => {
       signal: controller.signal,
       idleTimeoutMs: 1_000,
       requestId,
-      stream: async function* (signal) {
+      async *stream(signal) {
         yield { type: "text", index: 0, text: "partial" };
         await new Promise<never>((_resolve, reject) => {
           enteredStream?.();
-          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          signal.addEventListener(
+            "abort",
+            () => {
+              reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
+            },
+            { once: true },
+          );
         });
       },
     });
@@ -81,6 +96,7 @@ describe("collectProviderStream", () => {
     const controller = new AbortController();
     controller.abort(new Error("already cancelled"));
     const stream = vi.fn(async function* (): AsyncGenerator<ProviderDelta> {
+      await Promise.resolve();
       yield { type: "finish", finishReason: "stop", latencyMs: 0 };
     });
 
