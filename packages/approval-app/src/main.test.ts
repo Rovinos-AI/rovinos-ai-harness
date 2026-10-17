@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as Apps from "@modelcontextprotocol/ext-apps";
 import type * as AppTelemetry from "@harness/app-telemetry";
 import type { AppSpanName, CreateAppTelemetryOptions } from "@harness/app-telemetry";
+import type * as ApprovalActionsModule from "./actions.js";
+import type * as ApprovalTelemetryModule from "./telemetry.js";
 
 const bridge = vi.hoisted(() => ({
   apps: new Map<string, Apps.EventDispatcher<Apps.AppEventMap>>(),
@@ -16,13 +18,21 @@ const telemetry = vi.hoisted(() => {
     setHostMetadata(metadata: unknown): void;
     traceContext: { readonly traceId: string | undefined };
   }[] = [];
-  const lifecycles: {
+  const hooks: {
     reportErrors: string[][];
     decisionDurationCalls: number;
   }[] = [];
-  return { instances, lifecycles };
+  return { instances, hooks };
 });
-const actionMounts = vi.hoisted(() => ({ options: [] as unknown[] }));
+const actionMounts: {
+  options:
+    | {
+        reportError: (code: "resolve_failed" | "reveal_failed") => void;
+        decisionDurationMs: () => number;
+        flushInteractions: () => void;
+      }
+    | undefined;
+} = vi.hoisted(() => ({ options: undefined }));
 
 vi.mock("@modelcontextprotocol/ext-apps", async (importOriginal) => {
   const actual = await importOriginal<typeof Apps>();
@@ -53,7 +63,7 @@ vi.mock("@harness/app-telemetry", async (importOriginal) => {
 });
 
 vi.mock("./actions.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./actions.js")>();
+  const actual = await importOriginal<typeof ApprovalActionsModule>();
   return {
     ...actual,
     mountApprovalActions: (
@@ -61,14 +71,14 @@ vi.mock("./actions.js", async (importOriginal) => {
       editHost: HTMLElement,
       options: Parameters<typeof actual.mountApprovalActions>[2],
     ) => {
-      actionMounts.options.push(options);
+      actionMounts.options = options;
       return actual.mountApprovalActions(actions, editHost, options);
     },
   };
 });
 
 vi.mock("./telemetry.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./telemetry.js")>();
+  const actual = await importOriginal<typeof ApprovalTelemetryModule>();
   return {
     ...actual,
     createApprovalTelemetry: (...args: Parameters<typeof actual.createApprovalTelemetry>) => {
@@ -85,7 +95,7 @@ vi.mock("./telemetry.js", async (importOriginal) => {
         decisionDurationCalls += 1;
         return decisionDurationMs();
       };
-      telemetry.lifecycles.push({
+      telemetry.hooks.push({
         reportErrors,
         get decisionDurationCalls() {
           return decisionDurationCalls;
@@ -134,13 +144,15 @@ afterEach(async () => {
   }
   vi.useRealTimers();
   await vi.waitFor(() => {
-    expect(telemetry.instances.every((instance) => !instance.active)).toBe(true);
+    if (!telemetry.instances.every((instance) => !instance.active)) {
+      throw new Error("Telemetry disposal has not completed.");
+    }
   });
   vi.resetModules();
   vi.clearAllMocks();
   telemetry.instances.length = 0;
-  telemetry.lifecycles.length = 0;
-  actionMounts.options.length = 0;
+  telemetry.hooks.length = 0;
+  actionMounts.options = undefined;
   document.body.replaceChildren();
 });
 
@@ -264,10 +276,7 @@ describe("approval app SDK bootstrap", () => {
     expect(document.body.textContent).not.toContain("SYNTHETIC");
     expect(JSON.stringify(bridge.call.mock.calls)).not.toContain("SYNTHETIC");
     expect(telemetry.instances[0]?.active).toBe(false);
-    expect(telemetry.lifecycles[0]?.reportErrors).toEqual([
-      ["bridge_unavailable"],
-      ["payload_invalid"],
-    ]);
+    expect(telemetry.hooks[0]?.reportErrors).toEqual([["bridge_unavailable"], ["payload_invalid"]]);
     expect(
       bridge.call.mock.calls.every(([request]) => request.name === "harness.telemetry.emit"),
     ).toBe(true);
@@ -281,14 +290,8 @@ describe("approval app SDK bootstrap", () => {
         payload,
       },
     });
-    const options = actionMounts.options[0] as
-      | {
-          reportError: (code: "resolve_failed" | "reveal_failed") => void;
-          decisionDurationMs: () => number;
-          flushInteractions: () => void;
-        }
-      | undefined;
-    const lifecycle = telemetry.lifecycles[0];
+    const options = actionMounts.options;
+    const lifecycle = telemetry.hooks[0];
     if (options === undefined || lifecycle === undefined) {
       throw new Error("Approval action telemetry hooks were not mounted.");
     }

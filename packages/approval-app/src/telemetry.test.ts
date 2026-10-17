@@ -104,6 +104,7 @@ describe("approval app telemetry", () => {
     const { lifecycle, records, frames, setNow } = setup();
     lifecycle.receivePayload(() => {
       setNow(2);
+      return true;
     });
     expect(frames).toHaveLength(1);
     frames.shift()?.(0);
@@ -119,8 +120,8 @@ describe("approval app telemetry", () => {
 
   it("handles overlapping payload renders and uses only the latest completed render", () => {
     const { lifecycle, frames, records, setNow } = setup();
-    lifecycle.receivePayload(() => undefined);
-    lifecycle.receivePayload(() => undefined);
+    lifecycle.receivePayload(() => true);
+    lifecycle.receivePayload(() => true);
     setNow(5);
     frames.shift()?.(0);
     frames.shift()?.(0);
@@ -179,6 +180,7 @@ describe("approval app telemetry", () => {
     let received = false;
     lifecycle.receivePayload(() => {
       received = true;
+      return true;
     });
     expect(received).toBe(true);
     expect(records).toEqual([]);
@@ -239,7 +241,7 @@ describe("approval app telemetry", () => {
   });
 
   it("does not let unrelated unhandled rejections consume render failure reporting", () => {
-    const { lifecycle, records } = setup();
+    const { records } = setup();
     const rejection = new Event("unhandledrejection");
     Object.defineProperty(rejection, "reason", { value: new Error("bridge failed") });
     window.dispatchEvent(rejection);
@@ -261,9 +263,9 @@ describe("approval app telemetry", () => {
     let now = 100;
     const telemetry = createAppTelemetry({
       bridge: {
-        callTool: async (_name, args) => {
+        callTool: (_name, args) => {
           emitted.push(...args.spans);
-          return { content: [] };
+          return Promise.resolve({ content: [] });
         },
       },
       hostReady: Promise.resolve(),

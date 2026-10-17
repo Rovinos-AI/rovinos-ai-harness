@@ -92,9 +92,13 @@ const view = createApprovalView(document.body, {
         callTool: callApprovalTool,
       },
       telemetry,
-      reportError: uiTelemetry.reportError,
-      decisionDurationMs: uiTelemetry.decisionDurationMs,
-      flushInteractions: uiTelemetry.flushInteractions,
+      reportError: (code) => {
+        uiTelemetry.reportError(code);
+      },
+      decisionDurationMs: () => uiTelemetry.decisionDurationMs(),
+      flushInteractions: () => {
+        uiTelemetry.flushInteractions();
+      },
       renderRevealed,
       onDecision,
     });
