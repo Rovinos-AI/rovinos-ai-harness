@@ -13,6 +13,7 @@ import { ServerConfigSchema, type JsonValue } from "@harness/schemas";
 import { createTestContextManager, createTestTracerProvider } from "@harness/telemetry/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection, McpConnectionError, excludeHeaderDeclaringTools } from "./connection.js";
+import { ClientCredentialsExtensionSupport } from "./connection-helpers.js";
 import { isConnectionLossError } from "./errors.js";
 import * as mcpPackage from "./index.js";
 
@@ -34,6 +35,85 @@ const inputSchema = {
   required: ["value"],
   additionalProperties: false,
 } satisfies Tool["inputSchema"];
+
+describe("ClientCredentialsExtensionSupport", () => {
+  it("retains an initialize capability after a cached negative metadata probe", async () => {
+    const serverConfig = ServerConfigSchema.parse({
+      id: "machine",
+      transport: {
+        kind: "http",
+        url: "https://mcp.example.test/mcp",
+        auth: {
+          kind: "oauth",
+          grant: "client_credentials",
+          clientId: "machine-client",
+          clientSecret: "env:OAUTH_SECRET",
+          scopes: ["tools:read"],
+        },
+      },
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const extension = new ClientCredentialsExtensionSupport();
+    try {
+      const signal = new AbortController().signal;
+      await extension.probe(serverConfig, signal, false);
+      expect(extension.supported).toBe(false);
+      extension.observe(true);
+      await extension.probe(serverConfig, signal, false);
+      expect(extension.supported).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("ignores probe failures but preserves cancellation of the connection signal", async () => {
+    const serverConfig = ServerConfigSchema.parse({
+      id: "machine",
+      transport: {
+        kind: "http",
+        url: "https://mcp.example.test/mcp",
+        auth: {
+          kind: "oauth",
+          grant: "client_credentials",
+          clientId: "machine-client",
+          clientSecret: "env:OAUTH_SECRET",
+          scopes: ["tools:read"],
+        },
+      },
+    });
+    const extension = new ClientCredentialsExtensionSupport();
+    const signal = new AbortController().signal;
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("transient network failure")));
+    try {
+      await expect(extension.probe(serverConfig, signal, false)).resolves.toBeUndefined();
+      await expect(extension.probe(serverConfig, signal, false)).resolves.toBeUndefined();
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const controller = new AbortController();
+    controller.abort();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError")));
+    try {
+      await expect(extension.probe(serverConfig, controller.signal, false)).rejects.toMatchObject({
+        name: "AbortError",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 interface MemoryPeer {
   readonly client: InMemoryTransport;
@@ -200,19 +280,27 @@ describe("McpConnection", () => {
 
   it("exports the MCP connection, pool, and transport APIs from the package entry point", () => {
     expect(Object.keys(mcpPackage).sort()).toEqual([
+      "McpAuthRequiredError",
       "McpConnection",
       "McpConnectionError",
+      "McpOAuthProvider",
       "McpPool",
       "McpPoolError",
       "McpProtocolError",
       "McpToolPort",
+      "OAuthCredentialRecordSchema",
+      "OAuthTokenStore",
+      "OAuthTokenStoreError",
       "ToolRegistry",
       "ToolRegistryError",
       "UNREGISTERED_TOOL_ID",
       "buildRequestMeta",
       "createMcpTransport",
+      "createServersAuthorizedCheck",
       "createServersReachableChecks",
       "normalizeToolId",
+      "startMcpOAuthLogin",
+      "withOAuthWarningsRedacted",
     ]);
   });
 

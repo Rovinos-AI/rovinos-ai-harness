@@ -672,6 +672,22 @@ describe("run", () => {
 });
 
 describe("MCP runtime", () => {
+  it("exposes OAuth server login and logout through the CLI", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const output = createOutput({
+      stdout: (text) => stdout.push(text),
+      stderr: (text) => stderr.push(text),
+    });
+    const program = new Command();
+    const context = createDefaultContext(program, output);
+
+    expect(await main(["servers", "--help"], context)).toBe(ExitCode.ok);
+    expect(stdout.join("")).toContain("login");
+    expect(stdout.join("")).toContain("logout");
+    expect(stderr).toEqual([]);
+  });
+
   it("executes MCP tools through the CLI and validates edited approvals before recording", async () => {
     const current = fixture();
     const directory = join(current.directory, "mcp");

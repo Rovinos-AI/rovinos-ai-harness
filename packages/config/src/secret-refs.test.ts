@@ -42,6 +42,11 @@ describe("getConfigSecretRefs", () => {
             headers: {
               Authorization: "file:/run/secrets/server-token",
             },
+            auth: {
+              kind: "oauth",
+              grant: "client_credentials",
+              clientSecret: "file:/run/secrets/oauth-client-secret",
+            },
           },
         },
       ],
@@ -78,6 +83,7 @@ describe("getConfigSecretRefs", () => {
       "env:DOCTOR_TEST_API_KEY",
       "env:SERVER_TOKEN",
       "file:/run/secrets/server-token",
+      "file:/run/secrets/oauth-client-secret",
       "env:DOCTOR_PRIMARY_KEY",
       "file:/run/secrets/doctor-previous-key",
       "env:DOCTOR_STORE_URL",

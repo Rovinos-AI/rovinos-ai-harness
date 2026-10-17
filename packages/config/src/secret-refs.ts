@@ -22,7 +22,10 @@ export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
   const serverRefs = config.servers.flatMap(({ transport }) =>
     transport.kind === "stdio"
       ? parseSecretRefs(Object.values(transport.env ?? {}))
-      : parseSecretRefs(Object.values(transport.headers ?? {})),
+      : [
+          ...parseSecretRefs(Object.values(transport.headers ?? {})),
+          ...(transport.auth?.clientSecret === undefined ? [] : [transport.auth.clientSecret]),
+        ],
   );
   const keyRefs = config.keys?.keys.map(({ secret }) => secret) ?? [];
   const storeRefs =

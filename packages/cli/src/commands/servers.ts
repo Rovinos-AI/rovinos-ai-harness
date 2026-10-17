@@ -3,22 +3,27 @@ import { CompositeSecretResolver, type HarnessConfig } from "@harness/config";
 import {
   McpConnection,
   McpConnectionError,
+  OAuthTokenStore,
   ToolRegistry,
   ToolRegistryError,
   type McpConnectionDependencies,
   type McpTool,
 } from "@harness/mcp";
 import { Code, HarnessError, ServersCheckResultSchema, type ServerConfig } from "@harness/schemas";
+import type { LocalKeyProvider } from "@harness/vault";
+import { join } from "node:path";
 import { z } from "zod";
 import type { CommandModule } from "../command.js";
+import { createLoginKeys, registerServersAuthCommands } from "./servers-auth.js";
 import type { Output } from "../output.js";
 
 const MCP_PROTOCOL_VERSION_SCHEMA = z.iso.date();
 const APPS_EXTENSION_WARNING = Code.parse("annotations_require_internal");
 const TRACE_DISABLED_WARNING = Code.parse("trace_propagation_disabled");
 const TOOL_HEADER_INVALID = Code.parse("tool_header_invalid");
-
-type ServersCommandOverrides = Pick<McpConnectionDependencies, "createTransport" | "now">;
+type ServersCommandOverrides = Pick<McpConnectionDependencies, "createTransport" | "now"> & {
+  readonly openBrowser?: (url: string) => Promise<void>;
+};
 
 interface DiscoveryResult {
   readonly config: ServerConfig;
@@ -74,6 +79,7 @@ async function discoverServers(
   servers: readonly ServerConfig[],
   context: Parameters<CommandModule["register"]>[1],
   overrides: ServersCommandOverrides | undefined,
+  oauthTokenStore?: OAuthTokenStore,
 ): Promise<DiscoveryResult[]> {
   const defaultResolver = new CompositeSecretResolver();
   const dependencies: McpConnectionDependencies = {
@@ -82,6 +88,7 @@ async function discoverServers(
         ? (await defaultResolver.resolve(ref, signal)).reveal()
         : (await context.secretResolver.resolve(ref, signal)).reveal(),
     env: process.env,
+    ...(oauthTokenStore === undefined ? {} : { oauthTokenStore }),
     ...(overrides?.createTransport === undefined
       ? {}
       : { createTransport: overrides.createTransport }),
@@ -274,9 +281,8 @@ export function createServersCommand(overrides?: ServersCommandOverrides): Comma
   return {
     name: "servers",
     register(program, context) {
-      program
-        .command("servers")
-        .description("Inspect configured MCP servers")
+      const servers = program.command("servers").description("Manage configured MCP servers");
+      servers
         .command("check")
         .description("Check server connectivity and tool registration")
         .option("--server <id>", "check only the selected server")
@@ -288,24 +294,43 @@ export function createServersCommand(overrides?: ServersCommandOverrides): Comma
               ? configured
               : configured.filter(({ id }) => id === options.server);
           const missingServer = options.server !== undefined && selected.length === 0;
-          const discovered = await discoverServers(selected, context, overrides);
-          const result = createResult(discovered);
-          const completed = {
-            ...result,
-            ...(missingServer ? { errorCode: Code.parse("mcp_server_not_found") } : {}),
-          };
-          if (program.optsWithGlobals().json === true) {
-            context.out.json(ServersCheckResultSchema, completed);
-          } else {
-            printHumanResult(context.out, completed);
-          }
-          if (
-            completed.errorCode !== undefined ||
-            completed.servers.some(({ reachable }) => !reachable)
-          ) {
-            throw new ServersCheckFailedError();
+          let keys: LocalKeyProvider | undefined;
+          let store: OAuthTokenStore | undefined;
+          const hasOAuthServers = selected.some(
+            (server) => server.transport.kind === "http" && server.transport.auth !== undefined,
+          );
+          try {
+            if (hasOAuthServers && config.keys !== undefined) {
+              const core = await import("@harness/core");
+              keys = createLoginKeys(config, context);
+              store = await OAuthTokenStore.open(
+                join(core.resolveDataDir(process.env), "mcp-oauth.db"),
+                keys,
+              );
+            }
+            const discovered = await discoverServers(selected, context, overrides, store);
+            const result = createResult(discovered);
+            const completed = {
+              ...result,
+              ...(missingServer ? { errorCode: Code.parse("mcp_server_not_found") } : {}),
+            };
+            if (program.optsWithGlobals().json === true) {
+              context.out.json(ServersCheckResultSchema, completed);
+            } else {
+              printHumanResult(context.out, completed);
+            }
+            if (
+              completed.errorCode !== undefined ||
+              completed.servers.some(({ reachable }) => !reachable)
+            ) {
+              throw new ServersCheckFailedError();
+            }
+          } finally {
+            store?.close();
+            keys?.dispose();
           }
         });
+      registerServersAuthCommands(servers, program, context, overrides?.openBrowser);
     },
   };
 }
