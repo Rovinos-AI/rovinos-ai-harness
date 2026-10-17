@@ -149,6 +149,52 @@ describe("ServerConfigSchema", () => {
     ).toBe(true);
   });
 
+  it("accepts OAuth HTTP configuration and requires a client secret for client credentials", () => {
+    expect(
+      ServerConfigSchema.parse({
+        id: "oauth",
+        transport: {
+          kind: "http",
+          url: "https://mcp.example",
+          auth: {
+            kind: "oauth",
+            grant: "authorization_code",
+            clientIdMetadataUrl: "https://client.example/metadata.json",
+            scopes: ["tools"],
+          },
+        },
+      }).transport,
+    ).toMatchObject({
+      auth: { kind: "oauth", grant: "authorization_code", scopes: ["tools"] },
+    });
+
+    expect(
+      ServerConfigSchema.safeParse({
+        id: "oauth",
+        transport: {
+          kind: "http",
+          url: "https://mcp.example",
+          auth: { kind: "oauth", grant: "client_credentials" },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      ServerConfigSchema.safeParse({
+        id: "oauth",
+        transport: {
+          kind: "http",
+          url: "https://mcp.example",
+          auth: {
+            kind: "oauth",
+            grant: "client_credentials",
+            clientSecret: "env:OAUTH_SECRET",
+            redirectPort: 65_536,
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it.each(["traceparent", "TrAcEsTaTe", "BAGGAGE"])(
     "rejects reserved HTTP header %s with a stable error code",
     (header) => {

@@ -153,6 +153,7 @@ export function createServersReachableChecks(
       },
     ];
   }
+
   return configs.map((config) => ({
     id: Code.parse(`servers_reachable.${config.id}`.slice(0, 64)),
     title: `MCP server ${config.id} reachable`,
@@ -176,4 +177,43 @@ export function createServersReachableChecks(
       }
     },
   }));
+}
+
+/**
+ * Creates a single authorization diagnostic that silently refreshes configured OAuth sessions.
+ *
+ * @param configs - Validated MCP server configurations.
+ * @param dependencies - Connection dependencies including the encrypted OAuth store.
+ * @returns A `servers_authorized` doctor check.
+ */
+export function createServersAuthorizedCheck(
+  configs: readonly ServerConfig[],
+  dependencies: McpConnectionDependencies,
+): ServersReachableCheck {
+  return {
+    id: Code.parse("servers_authorized"),
+    title: "MCP servers authorized",
+    run: async ({ signal }) => {
+      for (const config of configs) {
+        if (config.transport.kind !== "http" || config.transport.auth === undefined) {
+          continue;
+        }
+        const connection = new McpConnection(config, dependencies);
+        try {
+          await connection.connect(signal);
+        } catch (error) {
+          return {
+            status: "fail",
+            code: Code.parse(
+              error instanceof McpConnectionError ? error.code : "mcp_authorization_check_failed",
+            ),
+            detail: config.id,
+          };
+        } finally {
+          await connection.close();
+        }
+      }
+      return { status: "ok", code: Code.parse("servers_authorized") };
+    },
+  };
 }

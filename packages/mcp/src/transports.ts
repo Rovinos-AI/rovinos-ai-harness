@@ -10,6 +10,8 @@ import {
   type SecretRef,
   type ServerConfig,
 } from "@harness/schemas";
+import { McpAuthRequiredError, McpOAuthProvider } from "./oauth/provider.js";
+import type { OAuthTokenStore } from "./oauth/token-store.js";
 
 /** Safe log events emitted by MCP transport and connection lifecycle operations. */
 export type McpLogEvent =
@@ -43,6 +45,12 @@ export interface McpTransportDependencies {
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** Optional safe logger; stderr text is discarded after counting bytes. */
   readonly logger?: McpLogger;
+  /** Encrypted store used only for configured OAuth HTTP transports. */
+  readonly oauthTokenStore?: OAuthTokenStore;
+  /** Extension availability learned from a previous MCP handshake, if any. */
+  readonly clientCredentialsExtensionEnabled?: boolean;
+  /** Gives the connection access to the OAuth provider after transport creation. */
+  readonly onOAuthProvider?: (provider: McpOAuthProvider) => void;
 }
 
 async function resolveValue(
@@ -92,6 +100,7 @@ async function createStdioTransport(
 
 async function createHttpTransport(
   config: Extract<ServerConfig["transport"], { kind: "http" }>,
+  serverId: HarnessCode,
   dependencies: McpTransportDependencies,
   signal?: AbortSignal,
 ): Promise<StreamableHTTPClientTransport> {
@@ -102,8 +111,28 @@ async function createHttpTransport(
     }
     headers[key] = await dependencies.resolveSecret(ref, signal);
   }
+  let authProvider: McpOAuthProvider | undefined;
+  if (config.auth !== undefined) {
+    if (dependencies.oauthTokenStore === undefined) {
+      throw new McpAuthRequiredError();
+    }
+    authProvider = await McpOAuthProvider.create({
+      serverId,
+      auth: config.auth,
+      tokenStore: dependencies.oauthTokenStore,
+      resolveSecret: (ref) => dependencies.resolveSecret(ref, signal),
+    });
+    authProvider.setClientCredentialsExtensionEnabled(
+      dependencies.clientCredentialsExtensionEnabled === true,
+    );
+    dependencies.onOAuthProvider?.(authProvider);
+    if (config.auth.grant === "authorization_code" && !authProvider.hasStoredTokens) {
+      throw new McpAuthRequiredError();
+    }
+  }
   return new StreamableHTTPClientTransport(new URL(config.url), {
     requestInit: { headers },
+    ...(authProvider === undefined ? {} : { authProvider }),
   });
 }
 
@@ -125,5 +154,5 @@ export function createMcpTransport(
 ): Promise<Transport> {
   return config.transport.kind === "stdio"
     ? createStdioTransport(config.transport, config.id, dependencies, signal)
-    : createHttpTransport(config.transport, dependencies, signal);
+    : createHttpTransport(config.transport, config.id, dependencies, signal);
 }
