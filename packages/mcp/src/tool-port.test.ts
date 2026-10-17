@@ -6,6 +6,7 @@ import {
   type CallToolRequest,
   type CallToolResult,
   type Tool,
+  type Transport,
 } from "@modelcontextprotocol/client";
 import { context as otelContext, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SpanContext } from "@opentelemetry/api";
@@ -15,6 +16,7 @@ import { createTestContextManager, createTestSpanCollector } from "@harness/tele
 import { lookupSpanDefinition } from "@harness/telemetry";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { McpConnection } from "./connection.js";
+import { McpAuthRequiredError } from "./oauth/provider.js";
 import { McpToolPort } from "./tool-port.js";
 
 const spanCollector = createTestSpanCollector();
@@ -47,6 +49,7 @@ async function fixture(
     readonly callMs?: number;
     readonly maxResultBytes?: number;
     readonly offloadBinaryResults?: boolean;
+    readonly authRequiredMethod?: "tools/list" | "tools/call";
   } = {},
 ): Promise<Fixture> {
   const [client, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -81,18 +84,44 @@ async function fixture(
     timeouts: { callMs: options.callMs ?? 1_000 },
     maxResultBytes: options.maxResultBytes ?? 1_048_576,
   });
-  const port = await McpToolPort.create(
-    [config],
-    {
-      resolveSecret: () => Promise.reject(new Error("unexpected secret")),
-      createTransport: () => client,
-    },
-    {
-      ...(options.offloadBinaryResults === undefined
-        ? {}
-        : { offloadBinaryResults: options.offloadBinaryResults }),
-    },
-  );
+  const transport: Transport =
+    options.authRequiredMethod === undefined
+      ? client
+      : new Proxy(client, {
+          get(target, property) {
+            if (property === "send") {
+              return (
+                message: Parameters<InMemoryTransport["send"]>[0],
+                sendOptions?: Parameters<InMemoryTransport["send"]>[1],
+              ) => {
+                if ("method" in message && message.method === options.authRequiredMethod) {
+                  throw new McpAuthRequiredError();
+                }
+                return target.send(message, sendOptions);
+              };
+            }
+            const value: unknown = Reflect.get(target, property, target);
+            return value;
+          },
+        });
+  let port: McpToolPort;
+  try {
+    port = await McpToolPort.create(
+      [config],
+      {
+        resolveSecret: () => Promise.reject(new Error("unexpected secret")),
+        createTransport: () => transport,
+      },
+      {
+        ...(options.offloadBinaryResults === undefined
+          ? {}
+          : { offloadBinaryResults: options.offloadBinaryResults }),
+      },
+    );
+  } catch (error) {
+    await serverTransport.close();
+    throw error;
+  }
   return {
     peer,
     port,
@@ -126,6 +155,28 @@ afterAll(() => {
 });
 
 describe("McpToolPort", () => {
+  it("preserves authorization errors during initial tools/list discovery", async () => {
+    await expect(fixture({ authRequiredMethod: "tools/list" })).rejects.toMatchObject({
+      code: "mcp_auth_required",
+    });
+  });
+
+  it("preserves authorization errors returned during public tool execution", async () => {
+    const current = await fixture({ authRequiredMethod: "tools/call" });
+    try {
+      await expect(current.port.execute(call, context())).resolves.toEqual({
+        outcome: "error",
+        errorCode: "mcp_auth_required",
+        result: null,
+      });
+      const attributes = spanCollector.getFinishedSpans().at(-1)?.attributes ?? {};
+      expect(attributes["harness.error.code"]).toBe("mcp_auth_required");
+      expect(JSON.stringify(attributes)).not.toContain(canary);
+    } finally {
+      await current.close();
+    }
+  });
+
   it("executes registered tools and emits only registered call-span attributes", async () => {
     const current = await fixture();
     try {

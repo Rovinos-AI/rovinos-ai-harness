@@ -6,11 +6,25 @@ import {
   getConfigSecretRefs,
   type HarnessConfig,
 } from "@harness/config";
-import { createServersReachableChecks } from "@harness/mcp";
-import { Code, DoctorResultsSchema, HarnessError } from "@harness/schemas";
+import {
+  createServersAuthorizedCheck,
+  createServersReachableChecks,
+  OAuthTokenStore,
+  type McpConnectionDependencies,
+} from "@harness/mcp";
+import {
+  Code,
+  DoctorResultsSchema,
+  HarnessError,
+  type DoctorCheckResult,
+  type SecretRef,
+} from "@harness/schemas";
 import { LocalKeyProvider, LocalKeyProviderError } from "@harness/vault";
 import type { DoctorCheck, DoctorContext, RuntimeConfig } from "@harness/core";
-import type { CommandModule } from "../command.js";
+import type * as Core from "@harness/core";
+import type { Command } from "commander";
+import { join } from "node:path";
+import type { CliContext, CommandModule } from "../command.js";
 
 class DoctorChecksFailedError extends HarnessError {
   override readonly code = "doctor_failed";
@@ -83,72 +97,167 @@ export function createDoctorCommand(checks?: readonly DoctorCheck[]): CommandMod
       program
         .command("doctor")
         .description("Check the local harness environment")
-        .action(async () => {
-          let config: HarnessConfig | undefined;
-          let configErrorCode: string | undefined;
-          try {
-            config = await context.loadConfig();
-          } catch (error) {
-            config = undefined;
-            if (error instanceof HarnessError) {
-              const parsedCode = Code.safeParse(error.code);
-              if (parsedCode.success) {
-                configErrorCode = parsedCode.data;
-              }
-            }
-          }
-          const env = process.env;
-          const core = await import("@harness/core");
-          const envResolver = new EnvSecretResolver(env);
-          const secretResolver = new CompositeSecretResolver({
-            env: envResolver,
-            file: new FileSecretResolver(),
-          });
-          const doctorContext: DoctorContext = {
-            config,
-            ...(configErrorCode === undefined ? {} : { configErrorCode }),
-            secretRefs: config === undefined ? [] : getConfigSecretRefs(config),
-            env,
-            dataDir: core.resolveDataDir(env),
-            resolveSecret: async (ref, signal) => {
-              let fileWarning: "secret_file_permissions" | undefined;
-              const resolver = new CompositeSecretResolver({
-                env: envResolver,
-                file: new FileSecretResolver({
-                  onWarning: (code) => {
-                    fileWarning = code;
-                  },
-                }),
-              });
-              await resolver.resolve(ref, signal);
-              return fileWarning;
-            },
-          };
-          const defaultChecks = [
-            ...core.doctorChecks(),
-            keysConfiguredCheck(config, env),
-            ...createServersReachableChecks(config?.servers ?? [], {
-              resolveSecret: async (ref, signal) => {
-                return (await secretResolver.resolve(ref, signal)).reveal();
-              },
-              env,
-            }),
-          ];
-          const results = await core.runDoctor(doctorContext, checks ?? defaultChecks);
-          if (program.opts<{ json?: boolean }>().json === true) {
-            context.out.json(DoctorResultsSchema, results);
-          } else {
-            context.out.table([
-              ["id", "status", "code"],
-              ...results.map(({ id, status, code }) => [id, status, code]),
-            ]);
-          }
-          if (results.some(({ status }) => status === "fail")) {
-            throw new DoctorChecksFailedError();
-          }
-        });
+        .action(() => runDoctor(program, context, checks));
     },
   };
+}
+
+interface LoadedDoctorConfig {
+  readonly config: HarnessConfig | undefined;
+  readonly configErrorCode: string | undefined;
+}
+
+async function loadDoctorConfig(context: CliContext): Promise<LoadedDoctorConfig> {
+  try {
+    return { config: await context.loadConfig(), configErrorCode: undefined };
+  } catch (error) {
+    const configErrorCode = error instanceof HarnessError ? Code.safeParse(error.code) : undefined;
+    return {
+      config: undefined,
+      configErrorCode: configErrorCode?.success === true ? configErrorCode.data : undefined,
+    };
+  }
+}
+
+interface DoctorContextOptions {
+  readonly config: HarnessConfig | undefined;
+  readonly configErrorCode: string | undefined;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly dataDir: string;
+  readonly envResolver: EnvSecretResolver;
+}
+
+function createDoctorContext(options: DoctorContextOptions): DoctorContext {
+  const { config, configErrorCode, env, dataDir, envResolver } = options;
+  return {
+    config,
+    ...(configErrorCode === undefined ? {} : { configErrorCode }),
+    secretRefs: config === undefined ? [] : getConfigSecretRefs(config),
+    env,
+    dataDir,
+    resolveSecret: async (ref, signal) => {
+      let fileWarning: "secret_file_permissions" | undefined;
+      const resolver = new CompositeSecretResolver({
+        env: envResolver,
+        file: new FileSecretResolver({
+          onWarning: (code) => {
+            fileWarning = code;
+          },
+        }),
+      });
+      await resolver.resolve(ref, signal);
+      return fileWarning;
+    },
+  };
+}
+
+async function openOAuthResources(
+  config: HarnessConfig | undefined,
+  secretResolver: CompositeSecretResolver,
+  env: Readonly<Record<string, string | undefined>>,
+  dataDir: string,
+): Promise<{ readonly keys?: LocalKeyProvider; readonly store?: OAuthTokenStore }> {
+  const hasOAuthServers = (config?.servers ?? []).some(
+    (server) => server.transport.kind === "http" && server.transport.auth !== undefined,
+  );
+  if (!hasOAuthServers) {
+    return {};
+  }
+  let keys: LocalKeyProvider | undefined;
+  try {
+    keys = new LocalKeyProvider({
+      ...(config?.keys === undefined ? {} : { config: config.keys }),
+      secretResolver: { resolve: (ref) => secretResolver.resolve(ref) },
+      env,
+      onWarning: () => undefined,
+    });
+    const store = await OAuthTokenStore.open(join(dataDir, "mcp-oauth.db"), keys);
+    return { keys, store };
+  } catch {
+    keys?.dispose();
+    return {};
+  }
+}
+
+function createMcpDependencies(
+  secretResolver: CompositeSecretResolver,
+  env: Readonly<Record<string, string | undefined>>,
+  store: OAuthTokenStore | undefined,
+): McpConnectionDependencies {
+  return {
+    resolveSecret: async (ref: SecretRef, signal?: AbortSignal) =>
+      (await secretResolver.resolve(ref, signal)).reveal(),
+    env,
+    ...(store === undefined ? {} : { oauthTokenStore: store }),
+  };
+}
+
+function defaultDoctorChecks(
+  core: typeof Core,
+  config: HarnessConfig | undefined,
+  env: Readonly<Record<string, string | undefined>>,
+  dependencies: McpConnectionDependencies,
+): DoctorCheck[] {
+  const servers = config?.servers ?? [];
+  return [
+    ...core.doctorChecks(),
+    keysConfiguredCheck(config, env),
+    createServersAuthorizedCheck(servers, dependencies),
+    ...createServersReachableChecks(servers, dependencies),
+  ];
+}
+
+function printDoctorResults(
+  program: Command,
+  context: CliContext,
+  results: DoctorCheckResult[],
+): void {
+  if (program.opts<{ json?: boolean }>().json === true) {
+    context.out.json(DoctorResultsSchema, results);
+  } else {
+    const rows: string[][] = [["id", "status", "code"]];
+    for (const result of results) {
+      rows.push([result.id, result.status, result.code]);
+    }
+    context.out.table(rows);
+  }
+}
+
+async function runDoctor(
+  program: Command,
+  context: CliContext,
+  checks: readonly DoctorCheck[] | undefined,
+): Promise<void> {
+  const { config, configErrorCode } = await loadDoctorConfig(context);
+  const env = process.env;
+  const core = await import("@harness/core");
+  const envResolver = new EnvSecretResolver(env);
+  const secretResolver = new CompositeSecretResolver({
+    env: envResolver,
+    file: new FileSecretResolver(),
+  });
+  const doctorContext = createDoctorContext({
+    config,
+    configErrorCode,
+    env,
+    dataDir: core.resolveDataDir(env),
+    envResolver,
+  });
+  const resources = await openOAuthResources(config, secretResolver, env, doctorContext.dataDir);
+  try {
+    const dependencies = createMcpDependencies(secretResolver, env, resources.store);
+    const results = await core.runDoctor(
+      doctorContext,
+      checks ?? defaultDoctorChecks(core, config, env, dependencies),
+    );
+    printDoctorResults(program, context, results);
+    if (results.some(({ status }) => status === "fail")) {
+      throw new DoctorChecksFailedError();
+    }
+  } finally {
+    resources.store?.close();
+    resources.keys?.dispose();
+  }
 }
 
 /** The default command registered by the CLI. */
