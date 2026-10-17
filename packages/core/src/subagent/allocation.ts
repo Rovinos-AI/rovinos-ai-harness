@@ -190,22 +190,25 @@ async function deriveAllocation(
     now: options.now,
     parentDeadlineTs: parent.deadlineTs,
     reserved: reservation,
-    availableSlots: availableSlots(options, activeCount, existing),
+    availableSlots: availableSlots(options, activeCount, spawned.length, existing),
   });
 }
 
 function availableSlots(
   options: ResolveChildAllocationOptions,
   activeCount: number,
+  totalChildren: number,
   existing: Event | undefined,
 ): number {
   if (existing?.type === "subagent_spawned") {
     return Math.max(1, options.runConfig.subagents.maxConcurrentChildren - activeCount + 1);
   }
-  if (activeCount > 0) {
-    return options.runConfig.subagents.maxConcurrentChildren - activeCount;
-  }
-  return Math.min(options.runConfig.subagents.maxConcurrentChildren, options.concurrentSpawns);
+  return Math.min(
+    options.concurrentSpawns,
+    options.runConfig.subagents.maxChildrenPerRun - totalChildren,
+    options.role.maxChildren - totalChildren,
+    options.runConfig.subagents.maxConcurrentChildren - activeCount,
+  );
 }
 
 /** Error raised when a configured child count or concurrency ceiling is reached. */

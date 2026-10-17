@@ -880,6 +880,99 @@ describe("runtime subagent spawning", () => {
     }
   });
 
+  it("stops a child cancelled exactly when its run_created event is appended", async () => {
+    const store = new InMemoryEventStore();
+    let cancellationInjected = false;
+    let childModelCalls = 0;
+    const model: ModelPort = {
+      complete: (request) => {
+        if (request.role === "worker") {
+          childModelCalls += 1;
+          return Promise.resolve(completion([{ type: "text", text: "must not run" }]));
+        }
+        return Promise.resolve(
+          completion([
+            {
+              type: "tool_call",
+              callId: spawnCallId,
+              toolId: Code.parse("agent.spawn"),
+              args: { role: "worker", goal: "cancel at child startup" },
+            },
+          ]),
+        );
+      },
+    };
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        pii: PiiConfigSchema.parse({ enabled: false }),
+        models: ModelsConfigSchema.parse({
+          routing: {
+            default: [{ provider: "local", model: "parent" }],
+            roles: { worker: [{ provider: "local", model: "worker" }] },
+          },
+        }),
+        roles: [
+          {
+            id: "worker",
+            route: "worker",
+            tools: [],
+            maxDepth: 2,
+            maxChildren: 1,
+          },
+        ],
+      },
+      {
+        store,
+        transientVault: true,
+        clock: new FakeClock(4),
+        ids: new SequentialIdGenerator(),
+        model,
+        tool: runtimePiiTool([]),
+        scopeRegistry: new RunScopeRegistry(),
+        policy: allowAllPolicy,
+      },
+    );
+    const append = store.append.bind(store);
+    vi.spyOn(store, "append").mockImplementation(async (runId, events, expectedSeq) => {
+      const result = await append(runId, events, expectedSeq);
+      if (
+        !cancellationInjected &&
+        runId !== rootRunId &&
+        events.some((event) => event.type === "run_created")
+      ) {
+        await runtime.cancel(rootRunId);
+        cancellationInjected = true;
+      }
+      return result;
+    });
+    try {
+      const running = runtime.start("cancel child startup", { runId: rootRunId });
+      await running.started;
+      await expect(running.completion).resolves.toMatchObject({ status: "cancelled" });
+
+      const parentEvents = await eventsFor(store, rootRunId);
+      const spawned = parentEvents.find((event) => event.type === "subagent_spawned");
+      if (spawned?.type !== "subagent_spawned") {
+        throw new Error("Expected a child announcement.");
+      }
+      const childEvents = await eventsFor(store, spawned.childRunId);
+      expect(cancellationInjected).toBe(true);
+      expect(childModelCalls).toBe(0);
+      expect(childEvents.at(-1)).toMatchObject({
+        type: "run_status_changed",
+        to: "cancelled",
+      });
+      expect(
+        parentEvents.filter(
+          (event) => event.type === "subagent_completed" && event.childRunId === spawned.childRunId,
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it.each([
     {
       name: "steps",
@@ -941,6 +1034,49 @@ describe("runtime subagent spawning", () => {
       expect(completeModel).not.toHaveBeenCalled();
       expect(resumed.events).toContainEqual(
         expect.objectContaining({ type: "budget_exceeded", budget: scenario.exceeded }),
+      );
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("resumes a recreated child within its persisted two-step budget", async () => {
+    const store = new InMemoryEventStore();
+    const budgets = RunConfigSchema.parse({ budgets: { maxSteps: 2 } }).budgets;
+    await seedSuspendedBudgetChild(store, budgets, 1_000, 1, 0);
+    const complete = vi.fn(() =>
+      Promise.resolve(
+        completion([
+          {
+            type: "tool_call",
+            callId: Id.parse("77777777777777777777777777"),
+            toolId: Code.parse("test.make"),
+            args: {},
+          },
+        ]),
+      ),
+    );
+    const runtime = await createRuntime(
+      { run: RunConfigSchema.parse({}), pii: PiiConfigSchema.parse({ enabled: false }) },
+      {
+        store,
+        transientVault: true,
+        clock: new FakeClock(20),
+        ids: new SequentialIdGenerator(),
+        model: { complete },
+        tool: runtimePiiTool([]),
+        scopeRegistry: new RunScopeRegistry(),
+        policy: allowAllPolicy,
+      },
+    );
+    try {
+      const resumed = await runtime.resume(childRunId);
+
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(resumed.status).toBe("failed");
+      expect(resumed.state.steps).toBe(2);
+      expect(resumed.events).toContainEqual(
+        expect.objectContaining({ type: "budget_exceeded", budget: "steps" }),
       );
     } finally {
       await runtime.close();

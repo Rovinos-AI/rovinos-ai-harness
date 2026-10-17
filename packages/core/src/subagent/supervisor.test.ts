@@ -666,71 +666,6 @@ describe("SubagentSupervisor", () => {
     await expect(spawn).resolves.toMatchObject({ status: "completed" });
   });
 
-  it("does not start a child cancelled after the pre-start check", async () => {
-    ensureTracing();
-    const store = new InMemoryEventStore();
-    await seedParent(store);
-    const recorder = new RunRecorder(store, parentRunId, segmentId, 1, new FakeClock(1));
-    const events: Event[] = [];
-    const runContext = toolRunContext(context(), recorder, events);
-    const originalRead = store.read.bind(store);
-    let parentReads = 0;
-    vi.spyOn(store, "read").mockImplementation(async function* (requestedRunId) {
-      const snapshot: Event[] = [];
-      for await (const event of originalRead(requestedRunId)) {
-        snapshot.push(event);
-      }
-      if (requestedRunId === parentRunId) {
-        parentReads += 1;
-        if (parentReads === 2) {
-          await runContext.recordSubagentCompleted?.({
-            childRunId,
-            outcome: "cancelled",
-            inputTokens: 0,
-            outputTokens: 0,
-            steps: 0,
-            costMicros: 0,
-          });
-        }
-      }
-      yield* snapshot;
-    });
-    const runChild = vi.fn();
-    const supervisor = new SubagentSupervisor(
-      supervisorOptions(runChild, {
-        store,
-        parentSpanContext: () => ({
-          traceId: "a".repeat(32),
-          spanId: "b".repeat(16),
-          traceFlags: 1,
-        }),
-      }),
-    );
-
-    let resultStatus: string | undefined;
-    await expect(
-      recorder.withStepSpan(TOOL_CALL_SPAN, {}, async () => {
-        resultStatus = (
-          await supervisor.spawn({ role, goal: "goal", call: toolCall(), context: runContext })
-        ).status;
-        const last = events.at(-1);
-        if (last === undefined) {
-          throw new Error("Expected the cancellation completion event.");
-        }
-        return last;
-      }),
-    ).resolves.toMatchObject({ type: "subagent_completed", outcome: "cancelled" });
-
-    expect(resultStatus).toBe("cancelled");
-    expect(runChild).not.toHaveBeenCalled();
-    expect(
-      (await eventsOf(store, parentRunId)).filter(
-        (event) => event.type === "subagent_completed" && event.childRunId === childRunId,
-      ),
-    ).toHaveLength(1);
-    expect(await eventsOf(store, childRunId)).toHaveLength(0);
-  });
-
   it("serializes spawn limits with the durable announcement", async () => {
     ensureTracing();
     const store = new InMemoryEventStore();
@@ -749,9 +684,11 @@ describe("SubagentSupervisor", () => {
       },
     };
     let finishChild: ((result: Awaited<ReturnType<SubagentRunner>>) => void) | undefined;
+    let admittedBudgets: SubagentRunRequest["budgets"] | undefined;
     const runChild = vi.fn(
-      () =>
+      (request: SubagentRunRequest) =>
         new Promise<Awaited<ReturnType<SubagentRunner>>>((resolve) => {
+          admittedBudgets = request.budgets;
           finishChild = resolve;
         }),
     );
@@ -760,6 +697,7 @@ describe("SubagentSupervisor", () => {
         store,
         ids,
         runConfig: RunConfigSchema.parse({
+          budgets: { maxSteps: 10, maxCostUsd: 0.00001 },
           subagents: { maxChildrenPerRun: 1, maxConcurrentChildren: 1 },
         }),
         parentSpanContext: () => ({
@@ -801,6 +739,7 @@ describe("SubagentSupervisor", () => {
       usage: { inputTokens: 0, outputTokens: 0, steps: 0 },
     });
     await expect(both).resolves.toMatchObject({ code: "subagent_limit" });
+    expect(admittedBudgets).toMatchObject({ maxSteps: 10, maxCostUsd: 0.00001 });
     expect(
       (await eventsOf(store, parentRunId)).filter((event) => event.type === "subagent_spawned"),
     ).toHaveLength(1);

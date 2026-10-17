@@ -212,6 +212,10 @@ export class SubagentSupervisor {
       childSignal.dispose();
     }
     if (result.status !== "suspended" && !options.completionRecorded) {
+      const completion = await this.findCompletion(options.parentRunId, options.childRunId);
+      if (completion !== undefined) {
+        return this.cachedResult(completion, options.request.role);
+      }
       const { inputTokens, outputTokens, costMicros, steps } = result.usage;
       await options.recordCompleted({
         childRunId: options.childRunId,
