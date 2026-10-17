@@ -120,8 +120,10 @@ export async function createConfiguredModelPort(
   const providerTrust: Partial<
     Record<ModelsConfig["providers"][number]["id"], "hosted" | "local">
   > = {};
+  const providerStreaming: Partial<Record<ModelsConfig["providers"][number]["id"], boolean>> = {};
   for (const provider of models.providers) {
     providerTrust[provider.id] = provider.trust;
+    providerStreaming[provider.id] = provider.streaming;
   }
   return createRoutingModelGateway(
     adapters,
@@ -134,6 +136,7 @@ export async function createConfiguredModelPort(
       requestsPerMinute,
       pricing: models.pricing,
       providerTrust,
+      providerStreaming,
       ...(overrides.requestSanitizer === undefined
         ? {}
         : { requestSanitizer: overrides.requestSanitizer }),

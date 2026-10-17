@@ -26,7 +26,13 @@ const result: ProviderResult = {
 const dependencies = {
   ids: { next: () => request.requestId },
   clock: { now: () => 0 },
-  retryPolicy: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0, timeoutMs: 1_000 },
+  retryPolicy: {
+    maxAttempts: 1,
+    baseDelayMs: 0,
+    maxDelayMs: 0,
+    timeoutMs: 1_000,
+    idleTimeoutMs: 1_000,
+  },
   enforcement: { maxRepairs: 0 },
 };
 

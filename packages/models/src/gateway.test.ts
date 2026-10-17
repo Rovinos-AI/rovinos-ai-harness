@@ -17,7 +17,7 @@ import { ModelGateway } from "./gateway.js";
 import * as ModelExports from "./index.js";
 import { AdapterRegistry } from "./registry.js";
 import { FakeProvider } from "./testing/fake-provider.js";
-import type { ProviderAdapter, ProviderContext } from "./types.js";
+import type { ProviderAdapter, ProviderContext, ProviderDelta } from "./types.js";
 import type { ValueTransform } from "./index.js";
 import { abortableSleep } from "./resilience/retry.js";
 import { AnthropicAdapter } from "./providers/anthropic.js";
@@ -146,6 +146,117 @@ describe("ModelGateway", () => {
       fallbackDepth: 0,
       providerBlobs: null,
     });
+  });
+
+  it("streams beyond the total timeout and reports token counts without output content", async () => {
+    const progress: unknown[] = [];
+    const complete = vi.fn(() =>
+      Promise.reject(new Error("streaming must be selected when the adapter supports it")),
+    );
+    const stream = vi.fn(async function* (): AsyncGenerator<ProviderDelta> {
+      yield { type: "text", index: 0, text: "canary-stream-output" };
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      yield { type: "usage", usage: { inputTokens: 1, outputTokens: 4 } };
+      yield { type: "finish", finishReason: "stop", latencyMs: 20 };
+    });
+    const adapter: ProviderAdapter = { provider: "sample", kind: "openai", complete, stream };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({
+        maxAttempts: 1,
+        timeoutMs: 5,
+        idleTimeoutMs: 50,
+      }),
+    });
+
+    const response = await gateway.complete(request, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+      onProgress: (update) => progress.push(update),
+    });
+
+    expect(response.parts).toEqual([{ type: "text", text: "canary-stream-output" }]);
+    expect(response.usage.outputTokens).toBe(4);
+    expect(complete).not.toHaveBeenCalled();
+    expect(stream).toHaveBeenCalledOnce();
+    expect(progress).toEqual([{ requestId: request.requestId, outputTokens: 4 }]);
+    expect(JSON.stringify(progress)).not.toContain("canary-stream-output");
+  });
+
+  it("uses complete() when streaming is disabled for the selected provider", async () => {
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: "non-streamed answer" }],
+        usage: { inputTokens: 1, outputTokens: 2 },
+        finishReason: "stop",
+        latencyMs: 3,
+      }),
+    );
+    const stream = vi.fn(async function* (): AsyncGenerator<ProviderDelta> {
+      await Promise.resolve();
+      yield { type: "finish", finishReason: "stop", latencyMs: 0 };
+    });
+    const gateway = new ModelGateway(
+      new AdapterRegistry([{ provider: "sample", kind: "openai", complete, stream }]),
+      {
+        ids: { next: () => request.requestId },
+        clock: { now: () => 0 },
+        providerStreaming: { sample: false },
+      },
+    );
+
+    const response = await gateway.complete(request, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+    });
+
+    expect(response.parts).toEqual([{ type: "text", text: "non-streamed answer" }]);
+    expect(complete).toHaveBeenCalledOnce();
+    expect(stream).not.toHaveBeenCalled();
+  });
+
+  it("retries a retryable stream failure without exposing partial output", async () => {
+    let attempts = 0;
+    const adapter: ProviderAdapter = {
+      provider: "sample",
+      kind: "openai",
+      complete: vi.fn(() => Promise.reject(new Error("streaming must be selected"))),
+      async *stream() {
+        await Promise.resolve();
+        attempts += 1;
+        yield {
+          type: "text",
+          index: 0,
+          text: attempts === 1 ? "canary-partial-output" : "complete-output",
+        };
+        if (attempts === 1) {
+          throw new ProviderError("provider_unavailable");
+        }
+        yield { type: "usage", usage: { inputTokens: 1, outputTokens: 2 } };
+        yield { type: "finish", finishReason: "stop", latencyMs: 1 };
+      },
+    };
+    const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
+      ids: { next: () => request.requestId },
+      clock: { now: () => 0 },
+      retryPolicy: ModelRetryConfigSchema.parse({
+        maxAttempts: 2,
+        baseDelayMs: 0,
+        maxDelayMs: 0,
+        idleTimeoutMs: 100,
+      }),
+      sleep: () => Promise.resolve(),
+    });
+
+    const response = await gateway.complete(request, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+    });
+
+    expect(attempts).toBe(2);
+    expect(response.parts).toEqual([{ type: "text", text: "complete-output" }]);
+    expect(JSON.stringify(response)).not.toContain("canary-partial-output");
   });
 
   it("removes foreign opaque parts and retains normalized assistant parts", async () => {
@@ -933,6 +1044,7 @@ describe("ModelGateway", () => {
     const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
+      providerStreaming: { openai_eu: false },
     });
 
     const completion = await gateway.complete(
@@ -1178,6 +1290,7 @@ describe("ModelGateway", () => {
       const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
         ids: { next: () => request.requestId },
         clock: { now: () => 0 },
+        providerStreaming: { [provider]: false },
       });
       const completion = await gateway.complete(
         {
@@ -1251,6 +1364,7 @@ describe("ModelGateway", () => {
     const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },
+      providerStreaming: { openai: false },
     });
     const completion = await gateway.complete(
       {

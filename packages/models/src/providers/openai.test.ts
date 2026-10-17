@@ -15,7 +15,13 @@ import {
   type CassetteEntry,
   type CassetteStore,
 } from "../cassette/cassette-provider.js";
-import { ProviderResultSchema, type ProviderResult } from "../types.js";
+import {
+  assembleDeltas,
+  ProviderResultSchema,
+  type ProviderContext,
+  type ProviderDelta,
+  type ProviderResult,
+} from "../types.js";
 import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { OpenAIAdapter } from "./openai.js";
 import { fromChatResponse, toChatRequest } from "./chat-completions-mapper.js";
@@ -50,6 +56,11 @@ function completion(message: JsonValue, finishReason = "stop") {
     choices: [{ index: 0, message, finish_reason: finishReason }],
     usage,
   };
+}
+
+function openAIEventStream(chunks: readonly JsonValue[]): Response {
+  const body = `${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`;
+  return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
 function fixture(
@@ -639,6 +650,178 @@ describe("OpenAI adapter request behavior", () => {
       apiKey: { reveal: () => "test-key" },
       fetch: mockFetch(dispatcher),
       baseURL: origin,
+    });
+
+    describe("OpenAI streaming adapter", () => {
+      it("assembles text and reasoning deltas into the same opaque result as complete()", async () => {
+        const message = {
+          role: "assistant",
+          content: "answer",
+          reasoning_content: "private reasoning",
+        };
+        const chunks: JsonValue[] = [
+          {
+            id: "chunk-1",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
+          },
+          {
+            id: "chunk-2",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [
+              { index: 0, delta: { reasoning_content: "private reasoning" }, finish_reason: null },
+            ],
+          },
+          {
+            id: "chunk-3",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [{ index: 0, delta: { content: "answer" }, finish_reason: null }],
+          },
+          {
+            id: "chunk-4",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          },
+          {
+            id: "chunk-5",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [],
+            usage,
+          },
+        ];
+        const streamingAdapter = new OpenAIAdapter({
+          apiKey: { reveal: () => "synthetic-test-key" },
+          baseURL: "https://provider.test/v1",
+          fetch: () => Promise.resolve(openAIEventStream(chunks)),
+        });
+        const completeAdapter = new OpenAIAdapter({
+          apiKey: { reveal: () => "synthetic-test-key" },
+          baseURL: "https://provider.test/v1",
+          fetch: () =>
+            Promise.resolve(
+              new Response(JSON.stringify(completion(JsonValue.parse(message))), {
+                headers: { "content-type": "application/json" },
+              }),
+            ),
+        });
+        const context: ProviderContext = {
+          signal: new AbortController().signal,
+          ids: { next: () => id },
+          clock: { now: () => 0 },
+        };
+        const expected = await completeAdapter.complete(request, context);
+        const deltas: ProviderDelta[] = [];
+        for await (const delta of streamingAdapter.stream(request, context)) {
+          deltas.push(delta);
+        }
+
+        expect(assembleDeltas(deltas)).toEqual(expected);
+        expect(JSON.stringify(assembleDeltas(deltas).parts)).toContain("private reasoning");
+      });
+
+      it("assembles fragmented tool-call identifiers, names, and arguments", async () => {
+        const chunks: JsonValue[] = [
+          {
+            id: "chunk-1",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: "assistant",
+                  content: null,
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_openai_1",
+                      type: "function",
+                      function: { name: "look", arguments: '{"key":' },
+                    },
+                  ],
+                },
+                finish_reason: null,
+              },
+            ],
+          },
+          {
+            id: "chunk-2",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      function: { name: "up", arguments: '"value"}' },
+                    },
+                  ],
+                },
+                finish_reason: null,
+              },
+            ],
+          },
+          {
+            id: "chunk-3",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          },
+          {
+            id: "chunk-4",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: "gpt-4o-mini",
+            choices: [],
+            usage,
+          },
+        ];
+        const streamingAdapter = new OpenAIAdapter({
+          apiKey: { reveal: () => "synthetic-test-key" },
+          baseURL: "https://provider.test/v1",
+          fetch: () => Promise.resolve(openAIEventStream(chunks)),
+        });
+        const completeAdapter = new OpenAIAdapter({
+          apiKey: { reveal: () => "synthetic-test-key" },
+          baseURL: "https://provider.test/v1",
+          fetch: () =>
+            Promise.resolve(
+              new Response(
+                JSON.stringify(completion(JsonValue.parse(rawToolMessage), "tool_calls")),
+                {
+                  headers: { "content-type": "application/json" },
+                },
+              ),
+            ),
+        });
+        const context: ProviderContext = {
+          signal: new AbortController().signal,
+          ids: { next: () => id },
+          clock: { now: () => 0 },
+        };
+        const expected = await completeAdapter.complete(request, context);
+        const deltas: ProviderDelta[] = [];
+        for await (const delta of streamingAdapter.stream(request, context)) {
+          deltas.push(delta);
+        }
+
+        expect(assembleDeltas(deltas)).toEqual(expected);
+      });
     });
 
     try {

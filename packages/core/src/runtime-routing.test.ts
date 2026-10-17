@@ -566,6 +566,7 @@ describe("createRuntime model routing", () => {
               kind: "anthropic",
               apiKey: "env:ANTHROPIC_API_KEY",
               maxOutputTokens: 713,
+              streaming: false,
             },
           ],
           routing: { default: [{ provider: "anthropic", model: "claude-test" }] },

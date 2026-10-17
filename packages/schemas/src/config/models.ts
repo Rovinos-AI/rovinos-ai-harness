@@ -34,6 +34,7 @@ export const ModelProviderConfigSchema = z
     baseUrl: z.url().optional(),
     maxOutputTokens: z.number().int().positive().default(4_096),
     requestsPerMinute: z.number().int().positive().optional(),
+    streaming: z.boolean().default(true),
     capabilities: CapabilitiesSchema.partial().strict().optional(),
     trust: z.enum(["hosted", "local"]).default("hosted"),
   })
@@ -69,6 +70,7 @@ export const ModelRetryConfigSchema = z
     baseDelayMs: z.coerce.number().int().nonnegative().default(500),
     maxDelayMs: z.coerce.number().int().nonnegative().default(20_000),
     timeoutMs: z.coerce.number().int().positive().default(120_000),
+    idleTimeoutMs: z.coerce.number().int().positive().default(60_000),
   })
   .strict()
   .prefault({});
