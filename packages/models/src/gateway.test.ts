@@ -215,10 +215,17 @@ describe("ModelGateway", () => {
       runId: request.requestId,
       signal: new AbortController().signal,
     });
-    const rejected = expect(completion).rejects.toMatchObject({ code: "provider_timeout" });
+    const settled = completion.then(
+      () => ({ status: "resolved" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
 
     await vi.advanceTimersByTimeAsync(20);
-    await rejected;
+    const result = await settled;
+    expect(result).toMatchObject({
+      status: "rejected",
+      error: { code: "provider_timeout" },
+    });
   });
 
   it("uses complete() when streaming is disabled for the selected provider", async () => {
@@ -393,6 +400,7 @@ describe("ModelGateway", () => {
       kind: "openai",
       complete: vi.fn(() => Promise.reject(new Error("streaming must be selected"))),
       async *stream() {
+        await Promise.resolve();
         yield { type: "usage", usage: { inputTokens: 3, outputTokens: 4 } };
         await new Promise<never>(() => undefined);
       },
@@ -405,7 +413,9 @@ describe("ModelGateway", () => {
     const completion = gateway.complete(request, {
       runId: request.requestId,
       signal: controller.signal,
-      onProgress: () => controller.abort(new Error("caller cancelled")),
+      onProgress: () => {
+        controller.abort(new Error("caller cancelled"));
+      },
     });
 
     await expect(completion).rejects.toMatchObject({
@@ -416,6 +426,7 @@ describe("ModelGateway", () => {
 
   it("does not retry when a progress subscriber throws", async () => {
     const stream = vi.fn(async function* (): AsyncGenerator<ProviderDelta> {
+      await Promise.resolve();
       yield { type: "usage", usage: { inputTokens: 1, outputTokens: 2 } };
       yield { type: "finish", finishReason: "stop", latencyMs: 1 };
     });
@@ -459,7 +470,7 @@ describe("ModelGateway", () => {
       async *stream() {
         for (let index = 0; index < 5; index += 1) {
           await new Promise((resolve) => setTimeout(resolve, 4));
-          yield { type: "text", index: 0, text: `unsafe-${index}` };
+          yield { type: "text", index: 0, text: `unsafe-${String(index)}` };
         }
         yield { type: "usage", usage: { inputTokens: 1, outputTokens: 5 } };
         yield { type: "finish", finishReason: "stop", latencyMs: 20 };

@@ -25,6 +25,7 @@ import {
   toChatRequest,
   type ChatCompletionLike,
 } from "./chat-completions-mapper.js";
+import { retryAfterMs } from "./retry-after.js";
 
 const OpenAIErrorMetadataSchema = z.object({
   status: z.number().optional(),
@@ -51,13 +52,11 @@ interface OpenAIStreamState {
 
 type OpenAIToolDelta = NonNullable<ChatCompletionChunk.Choice["delta"]["tool_calls"]>[number];
 
-const ProviderErrorFrameSchema = z
-  .object({
-    type: z.string().optional(),
-    code: z.string().optional(),
-    error: z.unknown().optional(),
-  })
-  .passthrough();
+const ProviderErrorFrameSchema = z.looseObject({
+  type: z.string().optional(),
+  code: z.string().optional(),
+  error: z.unknown().optional(),
+});
 
 function providerErrorType(error: unknown): string | undefined {
   const parsed = ProviderErrorFrameSchema.safeParse(error);
@@ -350,27 +349,14 @@ export class OpenAIAdapter implements ProviderAdapter {
   }
 }
 
-function retryAfterMs(headers: Headers | null | undefined, nowMs: number): number | undefined {
-  const value = headers?.get("retry-after");
-  if (value === null || value === undefined || value.trim().length === 0) {
-    return undefined;
-  }
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return seconds * 1_000;
-  }
-  const retryAt = Date.parse(value);
-  return Number.isFinite(retryAt) ? Math.max(0, retryAt - nowMs) : undefined;
-}
-
-function mapStatusError(
+function mapProviderTypeError(
   status: number | undefined,
   headers: Headers | null | undefined,
   nowMs: number,
   providerType?: string,
-): ProviderError {
+): ProviderError | undefined {
   if (providerType === "rate_limit_error") {
-    const delay = retryAfterMs(headers, nowMs);
+    const delay = retryAfterMs(headers?.get("retry-after"), nowMs);
     return new ProviderError("provider_rate_limited", {
       ...(status === undefined ? {} : { status }),
       ...(delay === undefined ? {} : { retryAfterMs: delay }),
@@ -386,9 +372,22 @@ function mapStatusError(
       ...(status === undefined ? {} : { status }),
     });
   }
+  return undefined;
+}
+
+function mapStatusError(
+  status: number | undefined,
+  headers: Headers | null | undefined,
+  nowMs: number,
+  providerType?: string,
+): ProviderError {
+  const typedError = mapProviderTypeError(status, headers, nowMs, providerType);
+  if (typedError !== undefined) {
+    return typedError;
+  }
   switch (status) {
     case 429: {
-      const delay = retryAfterMs(headers, nowMs);
+      const delay = retryAfterMs(headers?.get("retry-after"), nowMs);
       return new ProviderError("provider_rate_limited", {
         status,
         ...(delay === undefined ? {} : { retryAfterMs: delay }),

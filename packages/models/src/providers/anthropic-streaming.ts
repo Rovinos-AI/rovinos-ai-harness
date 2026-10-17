@@ -3,9 +3,7 @@ import type {
   MessageCreateParamsStreaming,
   RawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/messages";
-import { JsonValue } from "@harness/schemas";
-import type { Id } from "@harness/schemas";
-import type { ModelUsage } from "@harness/schemas";
+import { JsonValue, type Id, type ModelUsage } from "@harness/schemas";
 import { z as zod } from "zod";
 import type { ProviderContext, ProviderDelta } from "../types.js";
 
@@ -19,7 +17,6 @@ export interface AnthropicStreamState {
     number,
     { readonly callId: zod.infer<typeof Id>; readonly toolId: string }
   >;
-  usage: ModelUsage;
 }
 
 const AnthropicStreamingParamsSchema = zod.custom<MessageCreateParamsStreaming>((value) => {
@@ -62,93 +59,114 @@ export function createAnthropicStreamState(): AnthropicStreamState {
     callIdsByToolUseId: new Map(),
     toolArgumentsByIndex: new Map(),
     toolIdsByIndex: new Map(),
-    usage: { inputTokens: 0, outputTokens: 0 },
   };
 }
 
+function messageStartUsage(
+  event: Extract<RawMessageStreamEvent, { type: "message_start" }>,
+): ModelUsage {
+  const usage = event.message.usage;
+  return {
+    inputTokens:
+      usage.input_tokens +
+      (usage.cache_creation_input_tokens ?? 0) +
+      (usage.cache_read_input_tokens ?? 0),
+    outputTokens: usage.output_tokens,
+    ...(typeof usage.cache_read_input_tokens !== "number"
+      ? {}
+      : { cacheReadTokens: usage.cache_read_input_tokens }),
+    ...(typeof usage.cache_creation_input_tokens !== "number"
+      ? {}
+      : { cacheWriteTokens: usage.cache_creation_input_tokens }),
+  };
+}
+
+function contentBlockStartDeltas(
+  event: Extract<RawMessageStreamEvent, { type: "content_block_start" }>,
+  state: AnthropicStreamState,
+  ids: ProviderContext["ids"],
+): ProviderDelta[] {
+  if (event.content_block.type === "text") {
+    return [{ type: "text", index: event.index, text: "" }];
+  }
+  if (event.content_block.type !== "tool_use") {
+    return [];
+  }
+  const callId = ids.next();
+  state.callIdsByToolUseId.set(event.content_block.id, callId);
+  state.toolIdsByIndex.set(event.index, { callId, toolId: event.content_block.name });
+  state.toolArgumentsByIndex.set(event.index, "");
+  return [
+    {
+      type: "tool_call",
+      index: event.index,
+      callId,
+      toolId: event.content_block.name,
+      arguments: "",
+    },
+  ];
+}
+
+function contentBlockDeltaDeltas(
+  event: Extract<RawMessageStreamEvent, { type: "content_block_delta" }>,
+  state: AnthropicStreamState,
+): ProviderDelta[] {
+  if (event.delta.type === "text_delta") {
+    return [{ type: "text", index: event.index, text: event.delta.text }];
+  }
+  if (event.delta.type !== "input_json_delta") {
+    return [];
+  }
+  const tool = state.toolIdsByIndex.get(event.index);
+  if (tool === undefined) {
+    return [];
+  }
+  state.toolArgumentsByIndex.set(
+    event.index,
+    (state.toolArgumentsByIndex.get(event.index) ?? "") + event.delta.partial_json,
+  );
+  return [
+    {
+      type: "tool_call",
+      index: event.index,
+      callId: tool.callId,
+      arguments: event.delta.partial_json,
+    },
+  ];
+}
+
+function contentBlockStopDeltas(
+  event: Extract<RawMessageStreamEvent, { type: "content_block_stop" }>,
+  state: AnthropicStreamState,
+): ProviderDelta[] {
+  const tool = state.toolIdsByIndex.get(event.index);
+  if (tool === undefined || state.toolArgumentsByIndex.get(event.index) !== "") {
+    return [];
+  }
+  return [{ type: "tool_call", index: event.index, callId: tool.callId, arguments: "{}" }];
+}
+
 /** Maps provider streaming events into provider-neutral deltas. */
-export function* streamEventDeltas(
+export function streamEventDeltas(
   event: RawMessageStreamEvent,
   state: AnthropicStreamState,
   ids: ProviderContext["ids"],
-): Generator<ProviderDelta> {
-  let emitted = false;
+  usage: ModelUsage,
+): { readonly deltas: ProviderDelta[]; readonly usage: ModelUsage } {
+  let currentUsage = usage;
+  let deltas: ProviderDelta[] = [];
   if (event.type === "message_start") {
-    const usage = event.message.usage;
-    state.usage = {
-      inputTokens:
-        usage.input_tokens +
-        (usage.cache_creation_input_tokens ?? 0) +
-        (usage.cache_read_input_tokens ?? 0),
-      outputTokens: usage.output_tokens,
-      ...(typeof usage.cache_read_input_tokens !== "number"
-        ? {}
-        : { cacheReadTokens: usage.cache_read_input_tokens }),
-      ...(typeof usage.cache_creation_input_tokens !== "number"
-        ? {}
-        : { cacheWriteTokens: usage.cache_creation_input_tokens }),
-    };
-    yield { type: "usage", usage: state.usage };
-    emitted = true;
-  }
-  if (event.type === "content_block_start") {
-    if (event.content_block.type === "text") {
-      yield { type: "text", index: event.index, text: "" };
-      emitted = true;
-    } else if (event.content_block.type === "tool_use") {
-      const callId = ids.next();
-      state.callIdsByToolUseId.set(event.content_block.id, callId);
-      state.toolIdsByIndex.set(event.index, {
-        callId,
-        toolId: event.content_block.name,
-      });
-      state.toolArgumentsByIndex.set(event.index, "");
-      yield {
-        type: "tool_call",
-        index: event.index,
-        callId,
-        toolId: event.content_block.name,
-        arguments: "",
-      };
-      emitted = true;
-    }
+    currentUsage = messageStartUsage(event);
+    deltas = [{ type: "usage", usage: currentUsage }];
+  } else if (event.type === "content_block_start") {
+    deltas = contentBlockStartDeltas(event, state, ids);
   } else if (event.type === "content_block_delta") {
-    if (event.delta.type === "text_delta") {
-      yield { type: "text", index: event.index, text: event.delta.text };
-      emitted = true;
-    } else if (event.delta.type === "input_json_delta") {
-      const tool = state.toolIdsByIndex.get(event.index);
-      if (tool !== undefined) {
-        state.toolArgumentsByIndex.set(
-          event.index,
-          (state.toolArgumentsByIndex.get(event.index) ?? "") + event.delta.partial_json,
-        );
-        yield {
-          type: "tool_call",
-          index: event.index,
-          callId: tool.callId,
-          arguments: event.delta.partial_json,
-        };
-        emitted = true;
-      }
-    }
+    deltas = contentBlockDeltaDeltas(event, state);
   } else if (event.type === "content_block_stop") {
-    const tool = state.toolIdsByIndex.get(event.index);
-    if (tool !== undefined && state.toolArgumentsByIndex.get(event.index) === "") {
-      yield {
-        type: "tool_call",
-        index: event.index,
-        callId: tool.callId,
-        arguments: "{}",
-      };
-      emitted = true;
-    }
+    deltas = contentBlockStopDeltas(event, state);
   } else if (event.type === "message_delta") {
-    state.usage = { ...state.usage, outputTokens: event.usage.output_tokens };
-    yield { type: "usage", usage: state.usage };
-    emitted = true;
+    currentUsage = { ...currentUsage, outputTokens: event.usage.output_tokens };
+    deltas = [{ type: "usage", usage: currentUsage }];
   }
-  if (!emitted) {
-    yield { type: "activity" };
-  }
+  return { deltas: deltas.length === 0 ? [{ type: "activity" }] : deltas, usage: currentUsage };
 }

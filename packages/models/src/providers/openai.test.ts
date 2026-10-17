@@ -1043,7 +1043,7 @@ describe("OpenAI streaming adapter", () => {
         created: 1,
         model: "gpt-4o-mini",
         choices: [
-          { index: 0, delta: { reasoning_content: "private reasoning one" }, finish_reason: null },
+          { index: 0, delta: { reasoning_content: "private reasoning " }, finish_reason: null },
         ],
       },
       {
@@ -1051,9 +1051,7 @@ describe("OpenAI streaming adapter", () => {
         object: "chat.completion.chunk",
         created: 1,
         model: "gpt-4o-mini",
-        choices: [
-          { index: 0, delta: { reasoning_content: "private reasoning two" }, finish_reason: null },
-        ],
+        choices: [{ index: 0, delta: { reasoning_content: "continued" }, finish_reason: null }],
       },
       {
         id: "chunk-refusal",
@@ -1093,7 +1091,8 @@ describe("OpenAI streaming adapter", () => {
     const deltas: ProviderDelta[] = [];
     const signal = new AbortController().signal;
     const result = await collectProviderStream({
-      stream: async function* (streamSignal) {
+      async *stream(streamSignal) {
+        await Promise.resolve();
         for await (const delta of adapter.stream(request, {
           signal: streamSignal,
           ids: { next: () => id },
@@ -1118,7 +1117,7 @@ describe("OpenAI streaming adapter", () => {
             role: "assistant",
             content: null,
             refusal: "private refusal",
-            reasoning_content: "private reasoning oneprivate reasoning two",
+            reasoning_content: "private reasoning continued",
           },
           openaiCallIdByCallId: {},
         },
@@ -1171,16 +1170,15 @@ describe("OpenAI streaming adapter", () => {
       idleTimeoutMs: 1_000,
       requestId: id,
     });
-    const rejected = expect(collecting).rejects.toThrow("caller cancelled");
-
     await reading;
     controller.abort(new Error("caller cancelled"));
-    await rejected;
+    const error = await collecting.catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ message: "caller cancelled" });
     expect(fetchSignal?.aborted).toBe(true);
   });
 });
 
-describe("OpenAI adapter request behavior", () => {
+describe("OpenAI adapter transport behavior", () => {
   it("sends requests through the injected fetch without SDK retries", async () => {
     const dispatcher = new MockAgent();
     dispatcher.disableNetConnect();

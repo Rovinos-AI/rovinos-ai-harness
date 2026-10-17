@@ -307,7 +307,7 @@ describe("AnthropicAdapter", () => {
     const adapter = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
       baseURL: "https://provider.test",
-      fetch: () => streamedSseResponse(frames, 18),
+      fetch: () => Promise.resolve(streamedSseResponse(frames, 18)),
     });
     const progress: unknown[] = [];
     const signal = new AbortController().signal;

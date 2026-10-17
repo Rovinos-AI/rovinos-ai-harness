@@ -43,6 +43,7 @@ describe("collectProviderStream", () => {
         throw new Error("subscriber failed");
       },
       async *stream() {
+        await Promise.resolve();
         yield { type: "usage", usage: { inputTokens: 1, outputTokens: 2 } };
         yield { type: "finish", finishReason: "stop", latencyMs: 1 };
       },
@@ -92,9 +93,16 @@ describe("collectProviderStream", () => {
       idleTimeoutMs: 10,
       requestId,
     });
-    const rejected = expect(collecting).rejects.toMatchObject({ code: "provider_timeout" });
+    const settled = collecting.then(
+      () => ({ status: "resolved" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
     await vi.advanceTimersByTimeAsync(10);
-    await rejected;
+    const outcome = await settled;
+    expect(outcome).toMatchObject({
+      status: "rejected",
+      error: { code: "provider_timeout" },
+    });
     expect(streamSignal?.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -133,7 +141,7 @@ describe("collectProviderStream", () => {
   it("calls iterator.return and aborts its signal when the caller cancels", async () => {
     const controller = new AbortController();
     let streamSignal: AbortSignal | undefined;
-    const returnIterator = vi.fn(() => Promise.resolve({ done: true, value: undefined }));
+    const returnIterator = vi.fn(() => Promise.resolve({ done: true as const, value: undefined }));
     let enteredStream: (() => void) | undefined;
     const entered = new Promise<void>((resolve) => {
       enteredStream = resolve;
@@ -226,14 +234,19 @@ describe("collectProviderStream", () => {
           yield { type: "finish", finishReason: "stop", latencyMs: 0 };
         },
       });
-      const completion =
-        outcome === "success"
-          ? expect(collecting).resolves.toMatchObject({ finishReason: "stop" })
-          : expect(collecting).rejects.toBeInstanceOf(Error);
+      const settled = collecting.then(
+        (value) => ({ status: "resolved" as const, value }),
+        (error: unknown) => ({ status: "rejected" as const, error }),
+      );
       if (outcome === "idle") {
         await vi.advanceTimersByTimeAsync(10);
       }
-      await completion;
+      const result = await settled;
+      expect(result).toMatchObject(
+        outcome === "success"
+          ? { status: "resolved", value: { finishReason: "stop" } }
+          : { status: "rejected" },
+      );
 
       const registeredListener = addListener.mock.calls.find(([type]) => type === "abort")?.[1];
       expect(registeredListener).toBeDefined();
@@ -250,6 +263,7 @@ describe("collectProviderStream", () => {
         idleTimeoutMs: 100,
         requestId,
         async *stream() {
+          await Promise.resolve();
           yield { type: "usage", usage: { inputTokens: 2, outputTokens: 3 } };
           throw failure;
         },

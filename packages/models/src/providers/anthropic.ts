@@ -15,6 +15,7 @@ import {
 } from "@harness/schemas";
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult } from "../types.js";
+import { retryAfterMs } from "./retry-after.js";
 import {
   createAnthropicStreamState,
   createAnthropicStreamingParams,
@@ -227,27 +228,15 @@ function buildRequest(request: ModelRequest, provider: string): JsonValue {
   });
 }
 
-function retryAfterMs(retryAfter: string | undefined, nowMs: number): number | undefined {
-  if (retryAfter === undefined || retryAfter.trim().length === 0) {
-    return undefined;
-  }
-  const seconds = Number(retryAfter);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return seconds * 1_000;
-  }
-  const retryAt = Date.parse(retryAfter);
-  return Number.isFinite(retryAt) ? Math.max(0, retryAt - nowMs) : undefined;
-}
-
-function mapStatusError(
+function mapProviderTypeError(
   status: number | undefined,
   retryAfter: string | undefined,
   nowMs: number,
   providerType?: string | null,
-): never {
+): ProviderError | undefined {
   if (providerType === "rate_limit_error") {
     const delay = retryAfterMs(retryAfter, nowMs);
-    throw new ProviderError("provider_rate_limited", {
+    return new ProviderError("provider_rate_limited", {
       ...(status === undefined ? {} : { status }),
       ...(delay === undefined ? {} : { retryAfterMs: delay }),
     });
@@ -258,9 +247,22 @@ function mapStatusError(
       providerType === "api_error" ||
       providerType === "server_error")
   ) {
-    throw new ProviderError("provider_unavailable", {
+    return new ProviderError("provider_unavailable", {
       ...(status === undefined ? {} : { status }),
     });
+  }
+  return undefined;
+}
+
+function mapStatusError(
+  status: number | undefined,
+  retryAfter: string | undefined,
+  nowMs: number,
+  providerType?: string | null,
+): never {
+  const typedError = mapProviderTypeError(status, retryAfter, nowMs, providerType);
+  if (typedError !== undefined) {
+    throw typedError;
   }
   if (status === undefined) {
     throw new ProviderError("provider_unknown");
@@ -408,9 +410,12 @@ export class AnthropicAdapter implements ProviderAdapter {
     const streamParams = createAnthropicStreamingParams(params);
     const stream = this.client.messages.stream(streamParams, { signal: context.signal });
     const state = createAnthropicStreamState();
+    let usage = { inputTokens: 0, outputTokens: 0 };
     try {
       for await (const event of stream) {
-        yield* streamEventDeltas(event, state, context.ids);
+        const mapped = streamEventDeltas(event, state, context.ids, usage);
+        usage = mapped.usage;
+        yield* mapped.deltas;
       }
       const response = await stream.finalMessage();
       const result = this.mapMessage(response, context, startedAt, state.callIdsByToolUseId);

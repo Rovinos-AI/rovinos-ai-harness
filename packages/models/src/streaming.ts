@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id } from "@harness/schemas";
+import type { Id, ModelUsage } from "@harness/schemas";
 import { attachModelFailureMetadata, ProviderError } from "./errors.js";
-import type { ModelUsage } from "@harness/schemas";
 import { assembleDeltas, ModelProgressSchema, ProviderDeltaSchema } from "./types.js";
 import type { ModelProgress, ProviderDelta } from "./types.js";
 
@@ -9,6 +8,66 @@ function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
     ? signal.reason
     : new Error("Provider stream aborted.", { cause: signal.reason });
+}
+
+async function waitForNext(
+  iterator: AsyncIterator<ProviderDelta>,
+  controller: AbortController,
+  idleTimeoutMs: number,
+  hasReceivedDelta: boolean,
+): Promise<IteratorResult<ProviderDelta>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const idleTimeout = hasReceivedDelta
+    ? new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          const error = new ProviderError("provider_timeout");
+          controller.abort(error);
+          reject(error);
+        }, idleTimeoutMs);
+      })
+    : undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      reject(abortError(controller.signal));
+    };
+    if (controller.signal.aborted) {
+      onAbort();
+    } else {
+      controller.signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+  try {
+    return await Promise.race([
+      iterator.next(),
+      ...(idleTimeout === undefined ? [] : [idleTimeout]),
+      aborted,
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+    if (onAbort !== undefined) {
+      controller.signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
+function reportUsageProgress(
+  delta: ProviderDelta,
+  requestId: Id,
+  onProgress: ((progress: ModelProgress) => void) | undefined,
+  previousOutputTokens: number | undefined,
+): number | undefined {
+  if (delta.type !== "usage" || previousOutputTokens === delta.usage.outputTokens) {
+    return previousOutputTokens;
+  }
+  try {
+    onProgress?.(ModelProgressSchema.parse({ requestId, outputTokens: delta.usage.outputTokens }));
+  } catch {
+    // Progress subscribers must not affect provider completion or retry behavior.
+  }
+  return delta.usage.outputTokens;
 }
 
 /** Collects one complete provider stream, enforcing idle timeout and preserving only count progress. */
@@ -41,42 +100,7 @@ export async function collectProviderStream(options: {
     iterator = stream(controller.signal)[Symbol.asyncIterator]();
     for (;;) {
       signal.throwIfAborted();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let onAbort: (() => void) | undefined;
-      const idleTimeout = hasReceivedDelta
-        ? new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(() => {
-              const error = new ProviderError("provider_timeout");
-              controller.abort(error);
-              reject(error);
-            }, idleTimeoutMs);
-          })
-        : undefined;
-      const aborted = new Promise<never>((_resolve, reject) => {
-        onAbort = () => {
-          reject(abortError(controller.signal));
-        };
-        if (controller.signal.aborted) {
-          onAbort();
-        } else {
-          controller.signal.addEventListener("abort", onAbort, { once: true });
-        }
-      });
-      let next: IteratorResult<ProviderDelta>;
-      try {
-        next = await Promise.race([
-          iterator.next(),
-          ...(idleTimeout === undefined ? [] : [idleTimeout]),
-          aborted,
-        ]);
-      } finally {
-        if (timer !== undefined) {
-          clearTimeout(timer);
-        }
-        if (onAbort !== undefined) {
-          controller.signal.removeEventListener("abort", onAbort);
-        }
-      }
+      const next = await waitForNext(iterator, controller, idleTimeoutMs, hasReceivedDelta);
       if (next.done === true) {
         complete = true;
         break;
@@ -86,16 +110,12 @@ export async function collectProviderStream(options: {
       deltas.push(delta);
       if (delta.type === "usage") {
         lastUsage = delta.usage;
-        if (lastProgressOutputTokens !== delta.usage.outputTokens) {
-          lastProgressOutputTokens = delta.usage.outputTokens;
-          try {
-            onProgress?.(
-              ModelProgressSchema.parse({ requestId, outputTokens: delta.usage.outputTokens }),
-            );
-          } catch {
-            // Progress subscribers must not affect provider completion or retry behavior.
-          }
-        }
+        lastProgressOutputTokens = reportUsageProgress(
+          delta,
+          requestId,
+          onProgress,
+          lastProgressOutputTokens,
+        );
       }
     }
   } catch (error) {
