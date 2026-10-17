@@ -13,7 +13,8 @@ import {
 } from "../contract.js";
 import { ProviderError } from "../errors.js";
 import { withPromptOutput } from "../enforce/rung-prompt.js";
-import { ProviderResultSchema } from "../types.js";
+import { assembleDeltas, ProviderResultSchema } from "../types.js";
+import type { ProviderDelta } from "../types.js";
 import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { AnthropicAdapter } from "./anthropic.js";
 
@@ -134,6 +135,16 @@ function context(signal = new AbortController().signal) {
   };
 }
 
+function anthropicEventStream(events: readonly JsonValue[]): Response {
+  const body = events
+    .map((event) => {
+      const value = z.object({ type: z.string() }).passthrough().parse(event);
+      return `event: ${value.type}\ndata: ${JSON.stringify(event)}\n\n`;
+    })
+    .join("");
+  return new Response(body, { headers: { "content-type": "text/event-stream" } });
+}
+
 function fixtureFactory(
   options: ProviderContractAdapterOptions,
   _fixture: ProviderContractFixture,
@@ -144,6 +155,84 @@ function fixtureFactory(
 runProviderContract("Anthropic Messages API contract", fixtureFactory, fixtures);
 
 describe("AnthropicAdapter", () => {
+  it("assembles streamed text, tool calls, and thinking blocks exactly like complete()", async () => {
+    const messageStart = {
+      type: "message_start",
+      message: {
+        ...responseBody,
+        content: [],
+        stop_reason: null,
+        usage: { input_tokens: 7, output_tokens: 1 },
+      },
+    };
+    const events: JsonValue[] = [
+      messageStart,
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "private reasoning" },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "signature_delta", signature: "sig_fixture" },
+      },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "text", text: "" },
+      },
+      {
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "answer" },
+      },
+      { type: "content_block_stop", index: 1 },
+      {
+        type: "content_block_start",
+        index: 2,
+        content_block: { type: "tool_use", id: "toolu_fixture", name: "lookup", input: {} },
+      },
+      {
+        type: "content_block_delta",
+        index: 2,
+        delta: { type: "input_json_delta", partial_json: '{"query":"x"}' },
+      },
+      { type: "content_block_stop", index: 2 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "tool_use", stop_sequence: null },
+        usage: { output_tokens: 11 },
+      },
+      { type: "message_stop" },
+    ];
+    let streamedRequest: JsonValue | undefined;
+    const streamingAdapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: async (_input, init) => {
+        streamedRequest = JsonValue.parse(JSON.parse(String(init?.body)));
+        return anthropicEventStream(events);
+      },
+    });
+
+    const expected = await makeRequest().adapter.complete(baseRequest, context());
+    const deltas: ProviderDelta[] = [];
+    for await (const delta of streamingAdapter.stream(baseRequest, context())) {
+      deltas.push(delta);
+    }
+
+    expect(assembleDeltas(deltas)).toEqual(expected);
+    expect(streamedRequest).toMatchObject({ stream: true });
+    expect(JSON.stringify(assembleDeltas(deltas).parts)).toContain("sig_fixture");
+  });
+
   it("places three cache breakpoints and maps cached usage without mutating recorded content", async () => {
     const call = makeRequest({
       ...responseBody,

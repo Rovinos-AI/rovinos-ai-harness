@@ -89,7 +89,8 @@ export type ProviderDelta = z.infer<typeof ProviderDeltaSchema>;
 export function assembleDeltas(deltas: readonly ProviderDelta[]): ProviderResult {
   const partsByIndex = new Map<
     number,
-    { kind: "text"; text: string } | { kind: "tool_call"; callId?: string; toolId: string; args: string }
+    | { kind: "text"; text: string }
+    | { kind: "tool_call"; callId?: string; toolId: string; args: string }
   >();
   const opaqueParts: Part[] = [];
   let usage: ModelUsage = { inputTokens: 0, outputTokens: 0 };
@@ -193,10 +194,7 @@ export interface ProviderAdapter {
    */
   complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult>;
   /** Streams normalized provider deltas when the provider supports streaming. */
-  stream?(
-    request: ModelRequest,
-    context: ProviderContext,
-  ): AsyncIterable<ProviderDelta>;
+  stream?(request: ModelRequest, context: ProviderContext): AsyncIterable<ProviderDelta>;
 }
 
 /** Provider usage type shared with normalized messages. */

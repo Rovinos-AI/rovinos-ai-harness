@@ -27,6 +27,7 @@ import {
   type IdGenerator,
   type ProviderAdapter,
 } from "./types.js";
+import { collectProviderStream } from "./streaming.js";
 import type { AdapterRegistry } from "./registry.js";
 import {
   attachModelFailureMetadata,
@@ -68,6 +69,8 @@ export interface ModelGatewayDependencies {
   readonly pricing?: ModelsConfig["pricing"];
   /** Per-provider trust resolved from validated runtime configuration. */
   readonly providerTrust?: Readonly<Partial<Record<Code, "hosted" | "local">>>;
+  /** Per-provider stream policy from validated `models.providers[].streaming` config. */
+  readonly providerStreaming?: Readonly<Partial<Record<Code, boolean>>>;
   /** Boundary hook invoked after provider-specific preparation on every attempt. */
   readonly requestSanitizer?: RequestSanitizer;
 }
@@ -90,6 +93,11 @@ interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
   readonly deadlineTs?: number;
   readonly outputSchema?: OutputSchema;
   readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
+  /** Receives token counts only while a provider stream reports usage. */
+  readonly onProgress?: (progress: {
+    readonly requestId: Id;
+    readonly outputTokens: number;
+  }) => void;
 }
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
@@ -235,6 +243,9 @@ export class ModelGateway {
     },
   ) {
     const { request, context, limiter, semaphore, onAttempt, onFailedAttempt } = options;
+    const useStream =
+      adapter.stream !== undefined &&
+      this.dependencies.providerStreaming?.[adapter.provider] !== false;
     return withRetries({
       policy: this.retryPolicy,
       clock: this.dependencies.clock,
@@ -242,6 +253,7 @@ export class ModelGateway {
       sleep: this.sleep,
       signal: context.signal,
       ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
+      ...(useStream ? { attemptTimeoutMs: null } : {}),
       prepareAttempt: async (signal, lastError) => {
         if (limiter !== undefined) {
           await limiter.acquire(signal, context.deadlineTs, lastError);
@@ -272,12 +284,27 @@ export class ModelGateway {
                   },
                 );
           signal.throwIfAborted();
-          return await adapter.complete(sanitizedRequest, {
+          const providerContext = {
             signal,
             ids: this.dependencies.ids,
             clock: this.dependencies.clock,
             ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-          });
+          };
+          const stream = adapter.stream;
+          if (useStream && stream !== undefined) {
+            return await collectProviderStream({
+              stream: (streamSignal) =>
+                stream.call(adapter, sanitizedRequest, {
+                  ...providerContext,
+                  signal: streamSignal,
+                }),
+              signal,
+              idleTimeoutMs: this.retryPolicy.idleTimeoutMs,
+              requestId: sanitizedRequest.requestId,
+              ...(context.onProgress === undefined ? {} : { onProgress: context.onProgress }),
+            });
+          }
+          return await adapter.complete(sanitizedRequest, providerContext);
         } catch (error) {
           onFailedAttempt(error);
           throw error;

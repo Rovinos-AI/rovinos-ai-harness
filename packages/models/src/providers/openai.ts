@@ -3,6 +3,8 @@ import {
   lookupCapabilities,
   type Capabilities,
   type Code,
+  JsonValue,
+  type Id,
   type ModelRequest,
 } from "@harness/schemas";
 import OpenAI, {
@@ -12,9 +14,15 @@ import OpenAI, {
   APIUserAbortError,
 } from "openai";
 import { z } from "zod";
+import type { ChatCompletionCreateParamsStreaming } from "openai/resources/chat/completions";
 import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
 import { ProviderError } from "../errors.js";
-import { fromChatResponse, toChatRequest } from "./chat-completions-mapper.js";
+import {
+  fromChatResponse,
+  toChatRequest,
+  type ChatCompletionLike,
+} from "./chat-completions-mapper.js";
+import type { ProviderDelta } from "../types.js";
 
 const OpenAIErrorMetadataSchema = z.object({
   status: z.number().optional(),
@@ -84,6 +92,154 @@ export class OpenAIAdapter implements ProviderAdapter {
       const mapped = fromChatResponse(response, context.ids, this.provider);
       return {
         ...mapped,
+        latencyMs: Math.max(0, context.clock.now() - startedAt),
+      };
+    } catch (error) {
+      throw mapOpenAIError(error);
+    }
+  }
+
+  /** @inheritdoc */
+  async *stream(request: ModelRequest, context: ProviderContext): AsyncIterable<ProviderDelta> {
+    const startedAt = context.clock.now();
+    const capabilities = lookupCapabilities(
+      { ...request.model, provider: this.kind },
+      this.capabilities,
+    ).capabilities;
+    const streamRequest: ChatCompletionCreateParamsStreaming = {
+      ...toChatRequest(
+        request,
+        {
+          structuredOutput: capabilities.structuredOutput,
+          parallelToolCalls: capabilities.parallelToolCalls,
+        },
+        this.provider,
+      ),
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+    let content = "";
+    let contentSeen = false;
+    let refusal: string | undefined;
+    let finishReason: string | null = null;
+    let usage: ChatCompletionLike["usage"];
+    const toolCalls = new Map<
+      number,
+      {
+        id: string;
+        type: "function";
+        function: { name: string; arguments: string };
+        callId: Id;
+      }
+    >();
+    const callIdsByProviderId = new Map<string, Id>();
+    const extraStringFields = new Map<string, string>();
+
+    try {
+      const stream = await this.client.chat.completions.create(streamRequest, {
+        signal: context.signal,
+      });
+      for await (const chunk of stream) {
+        const choice = chunk.choices[0];
+        if (choice !== undefined) {
+          if (choice.delta.content !== undefined && choice.delta.content !== null) {
+            contentSeen = true;
+            content += choice.delta.content;
+            yield { type: "text", index: 0, text: choice.delta.content };
+          }
+          if (choice.delta.refusal !== undefined && choice.delta.refusal !== null) {
+            refusal = (refusal ?? "") + choice.delta.refusal;
+          }
+          for (const toolDelta of choice.delta.tool_calls ?? []) {
+            let tool = toolCalls.get(toolDelta.index);
+            if (tool === undefined) {
+              tool = {
+                id: toolDelta.id ?? "",
+                type: "function",
+                function: { name: "", arguments: "" },
+                callId: context.ids.next(),
+              };
+              toolCalls.set(toolDelta.index, tool);
+            }
+            if (toolDelta.id !== undefined) {
+              tool.id = toolDelta.id;
+              callIdsByProviderId.set(tool.id, tool.callId);
+            }
+            const nameDelta = toolDelta.function?.name ?? "";
+            const argumentDelta = toolDelta.function?.arguments ?? "";
+            tool.function.name += nameDelta;
+            tool.function.arguments += argumentDelta;
+            yield {
+              type: "tool_call",
+              index: toolDelta.index + 1,
+              callId: tool.callId,
+              ...(nameDelta.length === 0 ? {} : { toolId: nameDelta }),
+              arguments: argumentDelta,
+            };
+          }
+          if (choice.finish_reason !== null) {
+            finishReason = choice.finish_reason;
+          }
+          const unknownDelta = JsonValue.safeParse(choice.delta);
+          if (
+            unknownDelta.success &&
+            typeof unknownDelta.data === "object" &&
+            unknownDelta.data !== null
+          ) {
+            for (const [key, value] of Object.entries(unknownDelta.data)) {
+              if (
+                key !== "content" &&
+                key !== "refusal" &&
+                key !== "role" &&
+                key !== "tool_calls" &&
+                typeof value === "string"
+              ) {
+                extraStringFields.set(key, (extraStringFields.get(key) ?? "") + value);
+              }
+            }
+          }
+        }
+        if (chunk.usage !== null && chunk.usage !== undefined) {
+          usage = {
+            prompt_tokens: chunk.usage.prompt_tokens,
+            completion_tokens: chunk.usage.completion_tokens,
+            ...(chunk.usage.prompt_tokens_details === undefined
+              ? {}
+              : { prompt_tokens_details: chunk.usage.prompt_tokens_details }),
+          };
+        }
+      }
+      const sortedToolCalls = [...toolCalls.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([, tool]) => ({
+          id: tool.id,
+          type: tool.type,
+          function: tool.function,
+        }));
+      if (sortedToolCalls.some(({ id }) => id.length === 0)) {
+        throw new ProviderError("provider_unknown");
+      }
+      const message = {
+        role: "assistant" as const,
+        content: contentSeen ? content : sortedToolCalls.length > 0 ? null : "",
+        ...(sortedToolCalls.length === 0 ? {} : { tool_calls: sortedToolCalls }),
+        ...(refusal === undefined ? {} : { refusal }),
+        ...Object.fromEntries(extraStringFields),
+      };
+      const response: ChatCompletionLike = {
+        choices: [{ finish_reason: finishReason, message }],
+        ...(usage === undefined ? {} : { usage }),
+      };
+      const mapped = fromChatResponse(response, context.ids, this.provider, callIdsByProviderId);
+      for (const part of mapped.parts) {
+        if (part.type === "opaque") {
+          yield { type: "opaque", part };
+        }
+      }
+      yield { type: "usage", usage: mapped.usage };
+      yield {
+        type: "finish",
+        finishReason: mapped.finishReason,
         latencyMs: Math.max(0, context.clock.now() - startedAt),
       };
     } catch (error) {

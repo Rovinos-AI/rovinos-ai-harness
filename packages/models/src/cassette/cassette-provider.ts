@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, Sha256Hex, type ModelRequest, type Code } from "@harness/schemas";
 import { z } from "zod";
+import { ProviderError } from "../errors.js";
 import {
+  assembleDeltas,
+  ProviderDeltaSchema,
   ProviderResultSchema,
   type ProviderAdapter,
   type ProviderContext,
+  type ProviderDelta,
   type ProviderResult,
 } from "../types.js";
 import { requestHash } from "./hash.js";
@@ -46,6 +50,35 @@ export interface CassettePrivacyOptions {
 export interface CassetteProviderOptions extends Partial<CassettePrivacyOptions> {
   /** Environment values used by the auto-mode guard. */
   readonly env?: Readonly<Record<string, string | undefined>>;
+}
+
+function resultDeltas(result: ProviderResult): ProviderDelta[] {
+  const deltas: ProviderDelta[] = [];
+  let index = 0;
+  for (const part of result.parts) {
+    if (part.type === "text") {
+      deltas.push({ type: "text", index, text: part.text });
+      index += 1;
+    } else if (part.type === "tool_call") {
+      deltas.push({
+        type: "tool_call",
+        index,
+        callId: part.callId,
+        toolId: part.toolId,
+        arguments: JSON.stringify(part.args) ?? "null",
+      });
+      index += 1;
+    } else if (part.type === "opaque") {
+      deltas.push({ type: "opaque", part });
+    } else {
+      throw new ProviderError("provider_unknown");
+    }
+  }
+  deltas.push(
+    { type: "usage", usage: result.usage },
+    { type: "finish", finishReason: result.finishReason, latencyMs: result.latencyMs },
+  );
+  return deltas;
 }
 
 /** Raised when a request has no recorded cassette response. */
@@ -188,6 +221,44 @@ export class CassetteProvider implements ProviderAdapter {
       throw new CassetteInnerRequiredError();
     }
     const response = ProviderResultSchema.parse(await this.inner.complete(request, context));
+    const sanitized = await this.prepareForStorage(response);
+    await this.store.set({ hash, response: sanitized });
+    return sanitized;
+  }
+
+  /** @inheritdoc */
+  async *stream(request: ModelRequest, context: ProviderContext): AsyncIterable<ProviderDelta> {
+    const hash = requestHash(request);
+    if (this.mode !== "record") {
+      const response = await this.store.get(hash, request);
+      if (response !== undefined) {
+        yield* resultDeltas(response);
+        return;
+      }
+      if (this.mode === "replay") {
+        throw new CassetteMissError(hash);
+      }
+    }
+
+    if (this.inner === undefined) {
+      throw new CassetteInnerRequiredError();
+    }
+    let response: ProviderResult;
+    if (this.inner.stream === undefined) {
+      response = ProviderResultSchema.parse(await this.inner.complete(request, context));
+    } else {
+      const deltas: ProviderDelta[] = [];
+      for await (const delta of this.inner.stream(request, context)) {
+        deltas.push(ProviderDeltaSchema.parse(delta));
+      }
+      response = assembleDeltas(deltas);
+    }
+    const sanitized = await this.prepareForStorage(response);
+    await this.store.set({ hash, response: sanitized });
+    yield* resultDeltas(sanitized);
+  }
+
+  private async prepareForStorage(response: ProviderResult): Promise<ProviderResult> {
     const sanitize = this.options.sanitize;
     const detectRealData = this.options.detectRealData;
     if (sanitize === undefined || detectRealData === undefined) {
@@ -203,7 +274,6 @@ export class CassetteProvider implements ProviderAdapter {
     if (detected) {
       throw new CassetteRealDataDetectedError();
     }
-    await this.store.set({ hash, response: sanitized });
     return sanitized;
   }
 }

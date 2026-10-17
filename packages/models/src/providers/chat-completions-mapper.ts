@@ -248,6 +248,7 @@ export function toChatRequest(
 function mapToolCalls(
   toolCalls: NonNullable<ChatCompletionLike["choices"][number]["message"]["tool_calls"]>,
   ids: { readonly next: () => Id },
+  callIdsByProviderId?: ReadonlyMap<string, Id>,
 ): {
   readonly parts: ModelRequest["messages"][number]["parts"];
   readonly openaiCallIdByCallId: Record<string, string>;
@@ -273,7 +274,7 @@ function mapToolCalls(
       invalidArguments = true;
       continue;
     }
-    const callId = ids.next();
+    const callId = callIdsByProviderId?.get(toolCall.id) ?? ids.next();
     openaiCallIdByCallId[callId] = toolCall.id;
     parts.push({ type: "tool_call", callId, toolId: toolId.data, args });
   }
@@ -322,6 +323,7 @@ export function fromChatResponse(
   response: ChatCompletionLike,
   ids: { readonly next: () => Id },
   provider = "openai",
+  callIdsByProviderId?: ReadonlyMap<string, Id>,
 ): {
   readonly parts: ModelRequest["messages"][number]["parts"];
   readonly usage: { readonly inputTokens: number; readonly outputTokens: number };
@@ -336,7 +338,7 @@ export function fromChatResponse(
     };
   }
 
-  const mappedCalls = mapToolCalls(choice.message.tool_calls ?? [], ids);
+  const mappedCalls = mapToolCalls(choice.message.tool_calls ?? [], ids, callIdsByProviderId);
   const parts = mappedCalls.invalidArguments ? [] : mappedCalls.parts;
 
   if (!mappedCalls.invalidArguments && choice.message.content !== null) {

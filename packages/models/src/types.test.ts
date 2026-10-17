@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest";
-import { assembleDeltas, ProviderDeltaSchema, ProviderResultSchema } from "./types.js";
+import {
+  assembleDeltas,
+  ProviderDeltaSchema,
+  ProviderResultSchema,
+  type ProviderDelta,
+} from "./types.js";
 
 describe("provider result contract", () => {
   it("accepts normalized parts, usage, finish reason, and latency", () => {
@@ -31,9 +36,15 @@ describe("provider result contract", () => {
       provider: "anthropic",
       blob: { blocks: [{ type: "thinking", signature: "synthetic-signature" }] },
     };
-    const deltas = [
+    const deltas: ProviderDelta[] = [
       { type: "text", index: 0, text: "Hello " },
-      { type: "tool_call", index: 1, callId: "00000000000000000000000000", toolId: "lookup", arguments: "{\"id\":" },
+      {
+        type: "tool_call",
+        index: 1,
+        callId: "00000000000000000000000000",
+        toolId: "lookup",
+        arguments: '{"id":',
+      },
       { type: "text", index: 0, text: "world." },
       { type: "tool_call", index: 1, arguments: "7}" },
       { type: "opaque", part: opaque },
@@ -56,9 +67,10 @@ describe("provider result contract", () => {
       finishReason: "tool_use",
       latencyMs: 12,
     });
-    expect(ProviderDeltaSchema.safeParse({ type: "text", index: 0, text: "secret", extra: true }).success).toBe(
-      false,
-    );
+    expect(
+      ProviderDeltaSchema.safeParse({ type: "text", index: 0, text: "secret", extra: true })
+        .success,
+    ).toBe(false);
   });
 
   it("marks malformed streamed tool arguments and omits partial visible output", () => {

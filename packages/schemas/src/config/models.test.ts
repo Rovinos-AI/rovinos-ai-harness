@@ -173,9 +173,7 @@ describe("ModelsConfigSchema", () => {
     ).toMatchObject({ maxOutputTokens: 4_096, streaming: true });
     expect(
       ModelsConfigSchema.parse({
-        providers: [
-          { id: "anthropic", kind: "anthropic", maxOutputTokens: 512, streaming: false },
-        ],
+        providers: [{ id: "anthropic", kind: "anthropic", maxOutputTokens: 512, streaming: false }],
       }).providers[0],
     ).toMatchObject({ maxOutputTokens: 512, streaming: false });
     for (const maxOutputTokens of [0, -1, 1.5]) {

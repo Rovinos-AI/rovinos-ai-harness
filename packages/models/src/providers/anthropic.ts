@@ -5,9 +5,20 @@ import Anthropic, {
   type ClientOptions,
 } from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
-import { Code, JsonValue, type Capabilities, type ModelRequest, type Part } from "@harness/schemas";
+import type {
+  MessageCreateParamsBase,
+  MessageCreateParamsStreaming,
+} from "@anthropic-ai/sdk/resources/messages";
+import {
+  Code,
+  Id,
+  JsonValue,
+  type Capabilities,
+  type ModelRequest,
+  type Part,
+} from "@harness/schemas";
 import { ProviderError } from "../errors.js";
-import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
+import type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult } from "../types.js";
 
 /** Secret-shaped input accepted without importing the configuration package. */
 export interface AnthropicApiKey {
@@ -279,23 +290,12 @@ export class AnthropicAdapter implements ProviderAdapter {
     });
   }
 
-  /** @inheritdoc */
-  async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
-    const startedAt = context.clock.now();
-    let response: Message;
-    const params = buildRequest(request, this.provider);
-    try {
-      // Use raw post so opaque blocks (including future block types) pass through verbatim.
-      response = await this.client.post<Message>("/v1/messages", {
-        body: params,
-        signal: context.signal,
-      });
-    } catch (error) {
-      if (error instanceof ProviderError) {
-        throw error;
-      }
-      mapError(error, context.signal);
-    }
+  private mapMessage(
+    response: Message,
+    context: ProviderContext,
+    startedAt: number,
+    callIdsByToolUseId: ReadonlyMap<string, Id> = new Map(),
+  ): ProviderResult {
     try {
       const toolUseIdByCallId: Record<string, string> = {};
       const parts: Part[] = [];
@@ -303,7 +303,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         if (block.type === "text") {
           parts.push({ type: "text", text: block.text });
         } else if (block.type === "tool_use") {
-          const callId = context.ids.next();
+          const callId = callIdsByToolUseId.get(block.id) ?? context.ids.next();
           toolUseIdByCallId[callId] = block.id;
           parts.push({
             type: "tool_call",
@@ -342,6 +342,108 @@ export class AnthropicAdapter implements ProviderAdapter {
       };
     } catch {
       throw new ProviderError("provider_unknown");
+    }
+  }
+
+  /** @inheritdoc */
+  async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
+    const startedAt = context.clock.now();
+    let response: Message;
+    const params = buildRequest(request, this.provider);
+    try {
+      // Use raw post so opaque blocks (including future block types) pass through verbatim.
+      response = await this.client.post<Message>("/v1/messages", {
+        body: params,
+        signal: context.signal,
+      });
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        throw error;
+      }
+      mapError(error, context.signal);
+    }
+    return this.mapMessage(response, context, startedAt);
+  }
+
+  /** @inheritdoc */
+  async *stream(request: ModelRequest, context: ProviderContext): AsyncIterable<ProviderDelta> {
+    const startedAt = context.clock.now();
+    const params = buildRequest(request, this.provider);
+    // The builder returns this SDK request shape as JSON because provider blocks are extensible.
+    const streamParams = {
+      ...(params as unknown as MessageCreateParamsBase),
+      stream: true as const,
+    } satisfies MessageCreateParamsStreaming;
+    const stream = this.client.messages.stream(streamParams, { signal: context.signal });
+    const callIdsByToolUseId = new Map<string, Id>();
+    const toolArgumentsByIndex = new Map<number, string>();
+    const toolIdsByIndex = new Map<number, { readonly callId: Id; readonly toolId: string }>();
+    try {
+      for await (const event of stream) {
+        if (event.type === "content_block_start") {
+          if (event.content_block.type === "text") {
+            yield { type: "text", index: event.index, text: "" };
+          } else if (event.content_block.type === "tool_use") {
+            const callId = context.ids.next();
+            callIdsByToolUseId.set(event.content_block.id, callId);
+            toolIdsByIndex.set(event.index, { callId, toolId: event.content_block.name });
+            toolArgumentsByIndex.set(event.index, "");
+            yield {
+              type: "tool_call",
+              index: event.index,
+              callId,
+              toolId: event.content_block.name,
+              arguments: "",
+            };
+          }
+        } else if (event.type === "content_block_delta") {
+          if (event.delta.type === "text_delta") {
+            yield { type: "text", index: event.index, text: event.delta.text };
+          } else if (event.delta.type === "input_json_delta") {
+            const tool = toolIdsByIndex.get(event.index);
+            if (tool !== undefined) {
+              toolArgumentsByIndex.set(
+                event.index,
+                (toolArgumentsByIndex.get(event.index) ?? "") + event.delta.partial_json,
+              );
+              yield {
+                type: "tool_call",
+                index: event.index,
+                callId: tool.callId,
+                arguments: event.delta.partial_json,
+              };
+            }
+          }
+        } else if (event.type === "content_block_stop") {
+          const tool = toolIdsByIndex.get(event.index);
+          if (tool !== undefined && toolArgumentsByIndex.get(event.index) === "") {
+            yield {
+              type: "tool_call",
+              index: event.index,
+              callId: tool.callId,
+              arguments: "{}",
+            };
+          }
+        }
+      }
+      const response = await stream.finalMessage();
+      const result = this.mapMessage(response, context, startedAt, callIdsByToolUseId);
+      for (const part of result.parts) {
+        if (part.type === "opaque") {
+          yield { type: "opaque", part };
+        }
+      }
+      yield { type: "usage", usage: result.usage };
+      yield {
+        type: "finish",
+        finishReason: result.finishReason,
+        latencyMs: result.latencyMs,
+      };
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        throw error;
+      }
+      mapError(error, context.signal);
     }
   }
 }

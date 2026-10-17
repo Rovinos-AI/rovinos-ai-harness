@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ModelRequest } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
+import type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult } from "../types.js";
+import { assembleDeltas } from "../types.js";
+import { ProviderError } from "../errors.js";
 import {
   CassetteAutoDisabledError,
   CassetteInnerRequiredError,
@@ -55,6 +57,53 @@ afterEach(() => {
 });
 
 describe("CassetteProvider", () => {
+  it("records only the assembled result from a successful stream", async () => {
+    const store = memoryStore();
+    const inner: ProviderAdapter = {
+      provider: "openai",
+      kind: "openai",
+      complete: () => Promise.reject(new Error("stream path expected")),
+      stream: async function* () {
+        yield { type: "text", index: 0, text: "recorded " };
+        yield { type: "text", index: 0, text: "response" };
+        yield { type: "usage", usage: result.usage };
+        yield { type: "finish", finishReason: result.finishReason, latencyMs: result.latencyMs };
+      },
+    };
+    const recorder = new CassetteProvider("record", store, inner, privacyOptions);
+    const deltas: ProviderDelta[] = [];
+    for await (const delta of recorder.stream(request, context)) {
+      deltas.push(delta);
+    }
+
+    expect(assembleDeltas(deltas)).toEqual(result);
+    expect(store.entries.get(requestHash(request))?.response).toEqual(result);
+  });
+
+  it("does not persist or expose output when a provider stream fails partway through", async () => {
+    const store = memoryStore();
+    const inner: ProviderAdapter = {
+      provider: "openai",
+      kind: "openai",
+      complete: () => Promise.reject(new Error("stream path expected")),
+      stream: async function* () {
+        yield { type: "text", index: 0, text: "canary-partial-response" };
+        throw new ProviderError("provider_unavailable");
+      },
+    };
+    const recorder = new CassetteProvider("record", store, inner, privacyOptions);
+    const seen: unknown[] = [];
+    const promise = (async () => {
+      for await (const delta of recorder.stream(request, context)) {
+        seen.push(delta);
+      }
+    })();
+
+    await expect(promise).rejects.toMatchObject({ code: "provider_unavailable" });
+    expect(seen).toEqual([]);
+    expect(store.entries.size).toBe(0);
+  });
+
   it("records and replays a response unchanged", async () => {
     const store = memoryStore();
     const complete = vi.fn(() => Promise.resolve(result));
