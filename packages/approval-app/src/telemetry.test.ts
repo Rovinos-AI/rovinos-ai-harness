@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AppTelemetry } from "@harness/app-telemetry";
-import {
-  createApprovalTelemetry,
-  type ApprovalTelemetryEnvironment,
-} from "./telemetry.js";
+import type { AppTelemetry, SpanAttrs } from "@harness/app-telemetry";
+import { createApprovalTelemetry, type ApprovalTelemetryEnvironment } from "./telemetry.js";
 
 type SpanNames = readonly ["ui.render", "ui.decision", "ui.error", "ui.interaction"];
 type TestTelemetry = AppTelemetry<SpanNames>;
@@ -16,21 +13,49 @@ const originalRequestAnimationFrame = Object.getOwnPropertyDescriptor(
 const originalVisibilityState = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
 function setup() {
-  const records: { readonly name: string; readonly attrs: Record<string, unknown> }[] = [];
+  const records: { readonly name: string; readonly attrs: unknown }[] = [];
+  const hostMetadata: unknown[] = [];
   const renderEnds: ReturnType<typeof vi.fn>[] = [];
   const frames: FrameRequestCallback[] = [];
+  const startedNames: SpanNames[number][] = [];
   let now = 0;
-  const telemetry = {
-    start: vi.fn(() => {
-      const end = vi.fn();
-      renderEnds.push(end);
-      return { end };
-    }),
-    record: vi.fn((name: string, attrs: Record<string, unknown>) => {
-      records.push({ name, attrs });
-    }),
-    flush: vi.fn(() => Promise.resolve()),
-  } as unknown as TestTelemetry;
+  const start = vi.fn((name: SpanNames[number]) => {
+    startedNames.push(name);
+    const end = vi.fn(() => undefined);
+    renderEnds.push(end);
+    return { end };
+  });
+  const record = vi.fn((name: SpanNames[number], attrs: unknown) => {
+    records.push({ name, attrs });
+  });
+  const recordSpan = <Name extends SpanNames[number]>(
+    name: Name,
+    attrs: SpanAttrs<Name>,
+    _durationMs?: number,
+  ): void => {
+    record(name, attrs);
+  };
+  const flush = vi.fn(() => Promise.resolve());
+  const telemetry: TestTelemetry = {
+    active: true,
+    traceContext: { traceId: undefined },
+    setHostMetadata(metadata: unknown) {
+      hostMetadata.push(metadata);
+    },
+    start(name: SpanNames[number]) {
+      return start(name);
+    },
+    record: recordSpan,
+    flush() {
+      return flush();
+    },
+    stats() {
+      return { dropped: 0 };
+    },
+    dispose() {
+      return Promise.resolve();
+    },
+  };
   const environment: ApprovalTelemetryEnvironment = {
     window,
     document,
@@ -50,6 +75,8 @@ function setup() {
     records,
     renderEnds,
     frames,
+    startedNames,
+    flush,
     setNow: (value: number) => {
       now = value;
     },
@@ -72,9 +99,11 @@ afterEach(() => {
 
 describe("approval app telemetry", () => {
   it("records one render after two animation frames and measures decision time from first paint", () => {
-    const { lifecycle, telemetry, renderEnds, frames, setNow } = setup();
-    lifecycle.receivePayload(() => setNow(2));
-    expect(telemetry.start).toHaveBeenCalledExactlyOnceWith("ui.render");
+    const { lifecycle, renderEnds, frames, setNow, startedNames } = setup();
+    lifecycle.receivePayload(() => {
+      setNow(2);
+    });
+    expect(startedNames).toEqual(["ui.render"]);
     expect(frames).toHaveLength(1);
     frames.shift()?.(0);
     setNow(12);
@@ -83,10 +112,12 @@ describe("approval app telemetry", () => {
     expect(renderEnds[0]).toHaveBeenCalledOnce();
     setNow(19);
     expect(lifecycle.decisionDurationMs()).toBe(7);
+    setNow(10);
+    expect(lifecycle.decisionDurationMs()).toBe(0);
   });
 
   it("handles overlapping payload renders and uses only the latest completed render", () => {
-    const { lifecycle, telemetry, frames, renderEnds, setNow } = setup();
+    const { lifecycle, frames, renderEnds, setNow, startedNames } = setup();
     lifecycle.receivePayload(() => undefined);
     lifecycle.receivePayload(() => undefined);
     setNow(5);
@@ -99,7 +130,7 @@ describe("approval app telemetry", () => {
     expect(renderEnds.every((end) => end.mock.calls.length === 1)).toBe(true);
     setNow(18);
     expect(lifecycle.decisionDurationMs()).toBe(8);
-    expect(telemetry.start).toHaveBeenCalledTimes(2);
+    expect(startedNames).toHaveLength(2);
   });
 
   it("deduplicates closed errors and never records window error or rejection messages", () => {
@@ -128,7 +159,7 @@ describe("approval app telemetry", () => {
   });
 
   it("aggregates interactions by kind and flushes one span of each kind when hidden", () => {
-    const { lifecycle, telemetry, records } = setup();
+    const { records, flush } = setup();
     document.dispatchEvent(new Event("click"));
     document.dispatchEvent(new Event("click"));
     document.dispatchEvent(new Event("focus"));
@@ -145,11 +176,11 @@ describe("approval app telemetry", () => {
       { name: "ui.interaction", attrs: { kind: "focus", count: 1 } },
       { name: "ui.interaction", attrs: { kind: "edit", count: 2 } },
     ]);
-    expect(telemetry.flush).toHaveBeenCalledTimes(2);
+    expect(flush).toHaveBeenCalledTimes(2);
   });
 
   it("bounds interaction counts and flushes pending counts on disposal only once", () => {
-    const { lifecycle, records, telemetry } = setup();
+    const { lifecycle, records, flush } = setup();
     for (let count = 0; count < 1002; count += 1) {
       document.dispatchEvent(new Event("click"));
     }
@@ -161,12 +192,12 @@ describe("approval app telemetry", () => {
       { name: "ui.interaction", attrs: { kind: "click", count: 1000 } },
       { name: "ui.interaction", attrs: { kind: "edit", count: 1 } },
     ]);
-    expect(telemetry.flush).toHaveBeenCalledOnce();
+    expect(flush).toHaveBeenCalledOnce();
     expect(lifecycle.decisionDurationMs()).toBe(0);
   });
 
   it("does not flush visible changes and ignores errors after disposal", () => {
-    const { lifecycle, records, telemetry } = setup();
+    const { lifecycle, records, flush } = setup();
     document.dispatchEvent(new Event("click"));
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -179,6 +210,6 @@ describe("approval app telemetry", () => {
     window.dispatchEvent(new ErrorEvent("error", { message: "SYNTHETIC_CANARY" }));
     document.dispatchEvent(new Event("securitypolicyviolation"));
     expect(records).toHaveLength(callsAtDispose);
-    expect(telemetry.flush).toHaveBeenCalledOnce();
+    expect(flush).toHaveBeenCalledOnce();
   });
 });

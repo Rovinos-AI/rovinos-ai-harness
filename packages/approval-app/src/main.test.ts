@@ -68,6 +68,7 @@ const originalRequestAnimationFrame = Object.getOwnPropertyDescriptor(
 function installAnimationFrame(): void {
   Object.defineProperty(window, "requestAnimationFrame", {
     configurable: true,
+    writable: true,
     value: (callback: FrameRequestCallback) => {
       callback(window.performance.now());
       return 1;
@@ -208,7 +209,10 @@ describe("approval app SDK bootstrap", () => {
     });
     expect(document.body.textContent).not.toContain("SYNTHETIC");
     expect(JSON.stringify(bridge.call.mock.calls)).not.toContain("SYNTHETIC");
-    expect(bridge.call).not.toHaveBeenCalled();
+    expect(telemetry.instances[0]?.active).toBe(false);
+    expect(
+      bridge.call.mock.calls.every(([request]) => request.name === "harness.telemetry.emit"),
+    ).toBe(true);
   });
 
   it("waits for a delayed SDK connection before starting telemetry activation", async () => {

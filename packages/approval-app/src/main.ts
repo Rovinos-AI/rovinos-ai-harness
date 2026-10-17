@@ -93,8 +93,10 @@ const view = createApprovalView(document.body, {
         callTool: callApprovalTool,
       },
       telemetry,
-      reportError: uiTelemetry.reportError,
-      decisionDurationMs: uiTelemetry.decisionDurationMs,
+      reportError: (code) => {
+        uiTelemetry.reportError(code);
+      },
+      decisionDurationMs: () => uiTelemetry.decisionDurationMs(),
       renderRevealed,
       onDecision,
     });
@@ -105,7 +107,9 @@ const view = createApprovalView(document.body, {
 });
 
 app.addEventListener("toolinput", (params) => {
-  uiTelemetry.receivePayload(() => view.receive(params.arguments));
+  uiTelemetry.receivePayload(() => {
+    view.receive(params.arguments);
+  });
 });
 app.addEventListener("toolresult", (params) => {
   uiTelemetry.receivePayload(() => {
@@ -150,6 +154,8 @@ void app.connect().then(
   () => {
     finishHostConnection(false);
     hostUnavailable = true;
-    uiTelemetry.receivePayload(() => view.receive(undefined));
+    uiTelemetry.receivePayload(() => {
+      view.receive(undefined);
+    });
   },
 );

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AppTelemetry } from "@harness/app-telemetry";
 
-const spanNames = ["ui.render", "ui.decision", "ui.error", "ui.interaction"] as const;
-
-type ApprovalAppTelemetry = AppTelemetry<typeof spanNames>;
+type ApprovalAppTelemetry = AppTelemetry<
+  readonly ["ui.render", "ui.decision", "ui.error", "ui.interaction"]
+>;
 
 /** Closed error codes emitted by the approval app. */
 export type ApprovalUiErrorCode =
@@ -32,6 +32,99 @@ export interface ApprovalTelemetry {
 const interactionKinds = ["click", "focus", "edit"] as const;
 type InteractionKind = (typeof interactionKinds)[number];
 
+function createInteractionRecorder(telemetry: ApprovalAppTelemetry): {
+  increment(kind: InteractionKind): void;
+  flush(): void;
+} {
+  const counts: Record<InteractionKind, number> = { click: 0, focus: 0, edit: 0 };
+  return {
+    increment(kind) {
+      counts[kind] = Math.min(1000, counts[kind] + 1);
+    },
+    flush() {
+      for (const kind of interactionKinds) {
+        const count = counts[kind];
+        if (count > 0) {
+          telemetry.record("ui.interaction", { kind, count });
+          counts[kind] = 0;
+        }
+      }
+    },
+  };
+}
+
+interface LifecycleCallbacks {
+  readonly onError: () => void;
+  readonly onUnhandledRejection: () => void;
+  readonly onCspViolation: () => void;
+  readonly onClick: () => void;
+  readonly onFocus: () => void;
+  readonly onEdit: () => void;
+  readonly onPageHide: () => void;
+  readonly onVisibilityChange: () => void;
+}
+
+function createLifecycleCallbacks(
+  environment: ApprovalTelemetryEnvironment,
+  reportError: (code: ApprovalUiErrorCode) => void,
+  interactions: ReturnType<typeof createInteractionRecorder>,
+  flushInteractions: () => void,
+): LifecycleCallbacks {
+  return {
+    onError: () => {
+      reportError("render_failed");
+    },
+    onUnhandledRejection: () => {
+      reportError("render_failed");
+    },
+    onCspViolation: () => {
+      reportError("csp_blocked");
+    },
+    onClick: () => {
+      interactions.increment("click");
+    },
+    onFocus: () => {
+      interactions.increment("focus");
+    },
+    onEdit: () => {
+      interactions.increment("edit");
+    },
+    onPageHide: () => {
+      flushInteractions();
+    },
+    onVisibilityChange: () => {
+      if (environment.document.visibilityState === "hidden") {
+        flushInteractions();
+      }
+    },
+  };
+}
+
+function installLifecycleListeners(
+  environment: ApprovalTelemetryEnvironment,
+  callbacks: LifecycleCallbacks,
+): () => void {
+  const { document, window } = environment;
+  window.addEventListener("error", callbacks.onError);
+  window.addEventListener("unhandledrejection", callbacks.onUnhandledRejection);
+  window.addEventListener("pagehide", callbacks.onPageHide);
+  document.addEventListener("securitypolicyviolation", callbacks.onCspViolation);
+  document.addEventListener("click", callbacks.onClick);
+  document.addEventListener("focus", callbacks.onFocus, true);
+  document.addEventListener("input", callbacks.onEdit);
+  document.addEventListener("visibilitychange", callbacks.onVisibilityChange);
+  return () => {
+    window.removeEventListener("error", callbacks.onError);
+    window.removeEventListener("unhandledrejection", callbacks.onUnhandledRejection);
+    window.removeEventListener("pagehide", callbacks.onPageHide);
+    document.removeEventListener("securitypolicyviolation", callbacks.onCspViolation);
+    document.removeEventListener("click", callbacks.onClick);
+    document.removeEventListener("focus", callbacks.onFocus, true);
+    document.removeEventListener("input", callbacks.onEdit);
+    document.removeEventListener("visibilitychange", callbacks.onVisibilityChange);
+  };
+}
+
 /**
  * Instruments approval app lifecycle events without exporting event or payload content.
  *
@@ -48,11 +141,7 @@ export function createApprovalTelemetry(
   },
 ): ApprovalTelemetry {
   const reportedErrors = new Set<ApprovalUiErrorCode>();
-  const interactionCounts: Record<InteractionKind, number> = {
-    click: 0,
-    focus: 0,
-    edit: 0,
-  };
+  const interactions = createInteractionRecorder(telemetry);
   let renderGeneration = 0;
   let renderedAt: number | undefined;
   let disposed = false;
@@ -66,42 +155,15 @@ export function createApprovalTelemetry(
     void telemetry.flush();
   };
 
-  const incrementInteraction = (kind: InteractionKind): void => {
-    interactionCounts[kind] = Math.min(1000, interactionCounts[kind] + 1);
-  };
-
   const flushInteractions = (): void => {
-    for (const kind of interactionKinds) {
-      const count = interactionCounts[kind];
-      if (count > 0) {
-        telemetry.record("ui.interaction", { kind, count });
-        interactionCounts[kind] = 0;
-      }
-    }
+    interactions.flush();
     void telemetry.flush();
   };
 
-  const onError = (): void => reportError("render_failed");
-  const onUnhandledRejection = (): void => reportError("render_failed");
-  const onCspViolation = (): void => reportError("csp_blocked");
-  const onClick = (): void => incrementInteraction("click");
-  const onFocus = (): void => incrementInteraction("focus");
-  const onEdit = (): void => incrementInteraction("edit");
-  const onPageHide = (): void => flushInteractions();
-  const onVisibilityChange = (): void => {
-    if (environment.document.visibilityState === "hidden") {
-      flushInteractions();
-    }
-  };
-
-  environment.window.addEventListener("error", onError);
-  environment.window.addEventListener("unhandledrejection", onUnhandledRejection);
-  environment.window.addEventListener("pagehide", onPageHide);
-  environment.document.addEventListener("securitypolicyviolation", onCspViolation);
-  environment.document.addEventListener("click", onClick);
-  environment.document.addEventListener("focus", onFocus, true);
-  environment.document.addEventListener("input", onEdit);
-  environment.document.addEventListener("visibilitychange", onVisibilityChange);
+  const removeListeners = installLifecycleListeners(
+    environment,
+    createLifecycleCallbacks(environment, reportError, interactions, flushInteractions),
+  );
 
   return {
     receivePayload(receive) {
@@ -132,14 +194,7 @@ export function createApprovalTelemetry(
       }
       flushInteractions();
       disposed = true;
-      environment.window.removeEventListener("error", onError);
-      environment.window.removeEventListener("unhandledrejection", onUnhandledRejection);
-      environment.window.removeEventListener("pagehide", onPageHide);
-      environment.document.removeEventListener("securitypolicyviolation", onCspViolation);
-      environment.document.removeEventListener("click", onClick);
-      environment.document.removeEventListener("focus", onFocus, true);
-      environment.document.removeEventListener("input", onEdit);
-      environment.document.removeEventListener("visibilitychange", onVisibilityChange);
+      removeListeners();
     },
   };
 }

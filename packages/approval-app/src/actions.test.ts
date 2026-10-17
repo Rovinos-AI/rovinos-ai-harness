@@ -39,6 +39,7 @@ interface ActionFixture {
     callTool: ReturnType<typeof vi.fn<ApprovalActionsBridge["callTool"]>>;
   };
   readonly recordCalls: { readonly name: string; readonly attrs: Record<string, unknown> }[];
+  readonly decisionDurations: number[];
   readonly flush: ReturnType<typeof vi.fn<() => Promise<void>>>;
   readonly onDecision: ReturnType<typeof vi.fn<(decision: "approve" | "deny" | "edit") => void>>;
   readonly rendered: HTMLElement;
@@ -66,13 +67,18 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     callTool: vi.fn<ApprovalActionsBridge["callTool"]>(),
   };
   const recordCalls: { name: string; attrs: Record<string, unknown> }[] = [];
-  const record = (name: string, attrs: Record<string, unknown>): void => {
+  const decisionDurations: number[] = [];
+  const record = (name: string, attrs: Record<string, unknown>, durationMs?: number): void => {
     recordCalls.push({ name, attrs });
+    if (name === "ui.decision" && durationMs !== undefined) {
+      decisionDurations.push(durationMs);
+    }
   };
   const flush = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const onDecision = vi.fn<(decision: "approve" | "deny" | "edit") => void>();
+  const decisionDurationMs = vi.fn(() => 42);
   const reportError = (code: "resolve_failed" | "reveal_failed"): void => {
-    record({ name: "ui.error", attrs: { code } });
+    record("ui.error", { code });
     void flush();
   };
   const mount = mountApprovalActions(actions, editHost, {
@@ -82,7 +88,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     bridge,
     telemetry: { record, flush },
     reportError,
-    decisionDurationMs: () => 0,
+    decisionDurationMs,
     renderRevealed: (values) => {
       rendered.textContent = values.get("/email") ?? tokenizedEmail;
     },
@@ -93,6 +99,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     editHost,
     bridge,
     recordCalls,
+    decisionDurations,
     flush,
     onDecision,
     rendered,
@@ -143,7 +150,7 @@ afterEach(() => {
 
 describe("approval actions", () => {
   it("approves once, disables all actions while pending, and records only a successful decision", async () => {
-    const { actions, bridge, recordCalls, flush, onDecision } = setup();
+    const { actions, bridge, recordCalls, decisionDurations, flush, onDecision } = setup();
     let finish: (result: unknown) => void = () => undefined;
     bridge.callTool.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     actions.querySelector<HTMLButtonElement>("button")?.click();
@@ -159,6 +166,7 @@ describe("approval actions", () => {
       ).toBe("Approval granted.");
     });
     expect(recordCalls).toEqual([{ name: "ui.decision", attrs: { decision: "approve" } }]);
+    expect(decisionDurations).toEqual([42]);
     expect(onDecision).toHaveBeenCalledExactlyOnceWith("approve");
     expect(flush).toHaveBeenCalledOnce();
     expect(JSON.stringify(recordCalls)).not.toContain(rawEmail);

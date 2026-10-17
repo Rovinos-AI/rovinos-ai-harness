@@ -6,10 +6,7 @@ import { mountRevealFlow, type RevealFlow } from "./reveal.js";
 
 /** Terminal outcome returned by the approval resolve tool. */
 export type ApprovalDecision = "approve" | "deny" | "edit";
-type AppTelemetryForActions = Pick<
-  AppTelemetry<readonly ["ui.decision"]>,
-  "record" | "flush"
->;
+type AppTelemetryForActions = Pick<AppTelemetry<readonly ["ui.decision"]>, "record" | "flush">;
 
 /** The host bridge methods used by the approval decision and reveal controls. */
 export interface ApprovalActionsBridge {
