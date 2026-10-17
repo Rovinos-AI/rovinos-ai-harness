@@ -25,6 +25,7 @@ export interface ApprovalActionsOptions {
   readonly telemetry: AppTelemetryForActions;
   readonly reportError: (code: "resolve_failed" | "reveal_failed") => void;
   readonly decisionDurationMs: () => number;
+  readonly flushInteractions: () => void;
   readonly renderRevealed: (values: ReadonlyMap<string, string>) => void;
   readonly onDecision: (decision: ApprovalDecision) => void;
 }
@@ -174,6 +175,7 @@ async function resolveDecision(
     }
     context.options.telemetry.record("ui.decision", { decision }, decisionDurationMs);
     void context.options.telemetry.flush();
+    context.options.flushInteractions();
     status.textContent = decisionStatus(decision);
     context.options.onDecision(decision);
     context.state.editForm?.remove();

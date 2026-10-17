@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AppTelemetry, SpanAttrs } from "@harness/app-telemetry";
+import { createAppTelemetry, type AppTelemetry, type SpanAttrs } from "@harness/app-telemetry";
+import type { AppSpan } from "@harness/schemas";
 import { createApprovalTelemetry, type ApprovalTelemetryEnvironment } from "./telemetry.js";
 
 type SpanNames = readonly ["ui.render", "ui.decision", "ui.error", "ui.interaction"];
 type TestTelemetry = AppTelemetry<SpanNames>;
+const spanNames: SpanNames = ["ui.render", "ui.decision", "ui.error", "ui.interaction"];
 const originalRequestAnimationFrame = Object.getOwnPropertyDescriptor(
   window,
   "requestAnimationFrame",
@@ -13,37 +15,36 @@ const originalRequestAnimationFrame = Object.getOwnPropertyDescriptor(
 const originalVisibilityState = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
 function setup() {
-  const records: { readonly name: string; readonly attrs: unknown }[] = [];
+  const records: {
+    readonly name: string;
+    readonly attrs: unknown;
+    readonly durationMs?: number;
+  }[] = [];
   const hostMetadata: unknown[] = [];
-  const renderEnds: ReturnType<typeof vi.fn>[] = [];
   const frames: FrameRequestCallback[] = [];
-  const startedNames: SpanNames[number][] = [];
+  let active = true;
   let now = 0;
-  const start = vi.fn((name: SpanNames[number]) => {
-    startedNames.push(name);
-    const end = vi.fn(() => undefined);
-    renderEnds.push(end);
-    return { end };
-  });
-  const record = vi.fn((name: SpanNames[number], attrs: unknown) => {
-    records.push({ name, attrs });
+  const record = vi.fn((name: SpanNames[number], attrs: unknown, durationMs?: number) => {
+    records.push({ name, attrs, ...(durationMs === undefined ? {} : { durationMs }) });
   });
   const recordSpan = <Name extends SpanNames[number]>(
     name: Name,
     attrs: SpanAttrs<Name>,
-    _durationMs?: number,
+    durationMs?: number,
   ): void => {
-    record(name, attrs);
+    record(name, attrs, durationMs);
   };
   const flush = vi.fn(() => Promise.resolve());
   const telemetry: TestTelemetry = {
-    active: true,
+    get active() {
+      return active;
+    },
     traceContext: { traceId: undefined },
     setHostMetadata(metadata: unknown) {
       hostMetadata.push(metadata);
     },
-    start(name: SpanNames[number]) {
-      return start(name);
+    start() {
+      return { end: vi.fn() };
     },
     record: recordSpan,
     flush() {
@@ -73,10 +74,11 @@ function setup() {
     telemetry,
     lifecycle,
     records,
-    renderEnds,
     frames,
-    startedNames,
     flush,
+    setActive: (value: boolean) => {
+      active = value;
+    },
     setNow: (value: number) => {
       now = value;
     },
@@ -99,17 +101,16 @@ afterEach(() => {
 
 describe("approval app telemetry", () => {
   it("records one render after two animation frames and measures decision time from first paint", () => {
-    const { lifecycle, renderEnds, frames, setNow, startedNames } = setup();
+    const { lifecycle, records, frames, setNow } = setup();
     lifecycle.receivePayload(() => {
       setNow(2);
     });
-    expect(startedNames).toEqual(["ui.render"]);
     expect(frames).toHaveLength(1);
     frames.shift()?.(0);
     setNow(12);
     expect(frames).toHaveLength(1);
     frames.shift()?.(0);
-    expect(renderEnds[0]).toHaveBeenCalledOnce();
+    expect(records).toEqual([{ name: "ui.render", attrs: {}, durationMs: 12 }]);
     setNow(19);
     expect(lifecycle.decisionDurationMs()).toBe(7);
     setNow(10);
@@ -117,7 +118,7 @@ describe("approval app telemetry", () => {
   });
 
   it("handles overlapping payload renders and uses only the latest completed render", () => {
-    const { lifecycle, frames, renderEnds, setNow, startedNames } = setup();
+    const { lifecycle, frames, records, setNow } = setup();
     lifecycle.receivePayload(() => undefined);
     lifecycle.receivePayload(() => undefined);
     setNow(5);
@@ -126,14 +127,12 @@ describe("approval app telemetry", () => {
     setNow(10);
     frames.shift()?.(0);
     frames.shift()?.(0);
-    expect(renderEnds).toHaveLength(2);
-    expect(renderEnds.every((end) => end.mock.calls.length === 1)).toBe(true);
+    expect(records.filter(({ name }) => name === "ui.render")).toHaveLength(2);
     setNow(18);
     expect(lifecycle.decisionDurationMs()).toBe(8);
-    expect(startedNames).toHaveLength(2);
   });
 
-  it("deduplicates closed errors and never records window error or rejection messages", () => {
+  it("deduplicates ambient errors and never records window error messages", () => {
     const { lifecycle, records } = setup();
     lifecycle.reportError("payload_invalid");
     lifecycle.reportError("payload_invalid");
@@ -142,10 +141,13 @@ describe("approval app telemetry", () => {
     const rejection = new Event("unhandledrejection");
     Object.defineProperty(rejection, "reason", { value: new Error(canary) });
     window.dispatchEvent(rejection);
+    window.dispatchEvent(new ErrorEvent("error", { message: canary }));
     document.dispatchEvent(new Event("securitypolicyviolation"));
     document.dispatchEvent(new Event("securitypolicyviolation"));
     lifecycle.reportError("bridge_unavailable");
     lifecycle.reportError("resolve_failed");
+    lifecycle.reportError("resolve_failed");
+    lifecycle.reportError("reveal_failed");
     lifecycle.reportError("reveal_failed");
     expect(records).toEqual([
       { name: "ui.error", attrs: { code: "payload_invalid" } },
@@ -153,9 +155,176 @@ describe("approval app telemetry", () => {
       { name: "ui.error", attrs: { code: "csp_blocked" } },
       { name: "ui.error", attrs: { code: "bridge_unavailable" } },
       { name: "ui.error", attrs: { code: "resolve_failed" } },
+      { name: "ui.error", attrs: { code: "resolve_failed" } },
+      { name: "ui.error", attrs: { code: "reveal_failed" } },
       { name: "ui.error", attrs: { code: "reveal_failed" } },
     ]);
     expect(JSON.stringify(records)).not.toContain(canary);
+  });
+
+  it("does not consume an ambient error dedupe slot before activation", () => {
+    const { lifecycle, records, setActive } = setup();
+    setActive(false);
+    lifecycle.reportError("payload_invalid");
+    expect(records).toEqual([]);
+    setActive(true);
+    lifecycle.reportError("payload_invalid");
+    expect(records).toEqual([{ name: "ui.error", attrs: { code: "payload_invalid" } }]);
+  });
+
+  it("delivers a render span after delayed activation without delaying receive", async () => {
+    vi.useFakeTimers();
+    const { telemetry, lifecycle, records, frames, setActive, setNow } = setup();
+    setActive(false);
+    let received = false;
+    lifecycle.receivePayload(() => {
+      received = true;
+    });
+    expect(received).toBe(true);
+    expect(records).toEqual([]);
+    setNow(8);
+    frames.shift()?.(0);
+    setNow(20);
+    frames.shift()?.(0);
+    expect(records).toEqual([]);
+    setActive(true);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(records).toEqual([{ name: "ui.render", attrs: {}, durationMs: 20 }]);
+    lifecycle.dispose();
+    await telemetry.flush();
+  });
+
+  it("preserves the first-paint baseline across an unchanged payload delivery", () => {
+    const { lifecycle, frames, setNow } = setup();
+    lifecycle.receivePayload(() => true);
+    setNow(10);
+    frames.shift()?.(0);
+    setNow(20);
+    frames.shift()?.(0);
+    setNow(30);
+    lifecycle.receivePayload(() => false);
+    setNow(40);
+    frames.shift()?.(0);
+    setNow(45);
+    expect(lifecycle.decisionDurationMs()).toBe(25);
+  });
+
+  it("reports a throwing receive and completes its render lifecycle", () => {
+    const { lifecycle, records, frames, setNow } = setup();
+    const canary = "SYNTHETIC_RECEIVE_ERROR";
+    lifecycle.receivePayload(() => {
+      throw new Error(canary);
+    });
+    expect(frames).toHaveLength(1);
+    expect(records).toEqual([{ name: "ui.error", attrs: { code: "render_failed" } }]);
+    setNow(5);
+    frames.shift()?.(0);
+    frames.shift()?.(0);
+    expect(records).toContainEqual({
+      name: "ui.render",
+      attrs: {},
+      durationMs: 5,
+    });
+    expect(JSON.stringify(records)).not.toContain(canary);
+  });
+
+  it("clamps a decision duration to the span maximum", () => {
+    const { lifecycle, frames, setNow } = setup();
+    lifecycle.receivePayload(() => true);
+    frames.shift()?.(0);
+    setNow(1);
+    frames.shift()?.(0);
+    setNow(4_000_001);
+    expect(lifecycle.decisionDurationMs()).toBe(3_600_000);
+  });
+
+  it("does not let unrelated unhandled rejections consume render failure reporting", () => {
+    const { lifecycle, records } = setup();
+    const rejection = new Event("unhandledrejection");
+    Object.defineProperty(rejection, "reason", { value: new Error("bridge failed") });
+    window.dispatchEvent(rejection);
+    expect(records).toEqual([]);
+    window.dispatchEvent(new ErrorEvent("error", { message: "SYNTHETIC_RENDER_ERROR" }));
+    expect(records).toEqual([{ name: "ui.error", attrs: { code: "render_failed" } }]);
+  });
+
+  it("emits schema-shaped spans through the real telemetry shim with measured durations", async () => {
+    const emitted: AppSpan[] = [];
+    const frames: FrameRequestCallback[] = [];
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        frames.push(callback);
+        return frames.length;
+      },
+    });
+    let now = 100;
+    const telemetry = createAppTelemetry({
+      bridge: {
+        callTool: async (_name, args) => {
+          emitted.push(...args.spans);
+          return { content: [] };
+        },
+      },
+      hostReady: Promise.resolve(),
+      manifest: { spans: spanNames },
+      now: () => now,
+    });
+    await vi.waitFor(() => {
+      expect(telemetry.active).toBe(true);
+    });
+    const environment: ApprovalTelemetryEnvironment = { window, document, now: () => now };
+    const lifecycle = createApprovalTelemetry(telemetry, environment);
+    lifecycle.receivePayload(() => true);
+    now = 120;
+    frames.shift()?.(0);
+    now = 140;
+    frames.shift()?.(0);
+    lifecycle.reportError("payload_invalid");
+    document.dispatchEvent(new Event("click"));
+    document.dispatchEvent(new Event("input"));
+    lifecycle.flushInteractions();
+    now = 160;
+    telemetry.record("ui.decision", { decision: "approve" }, lifecycle.decisionDurationMs());
+    await telemetry.flush();
+    await vi.waitFor(() => {
+      expect(emitted).toHaveLength(5);
+    });
+    expect(emitted.map(({ name }) => name)).toEqual([
+      "ui.render",
+      "ui.error",
+      "ui.interaction",
+      "ui.interaction",
+      "ui.decision",
+    ]);
+    const allowedAttributes: Record<SpanNames[number], readonly string[]> = {
+      "ui.render": ["name", "startOffsetMs", "durationMs"],
+      "ui.decision": ["name", "decision", "startOffsetMs", "durationMs"],
+      "ui.error": ["name", "code", "startOffsetMs", "durationMs"],
+      "ui.interaction": ["name", "kind", "count", "startOffsetMs", "durationMs"],
+    };
+    for (const span of emitted) {
+      expect(Object.keys(span).sort()).toEqual([...allowedAttributes[span.name]].sort());
+    }
+    expect(emitted[0]?.durationMs).toBe(40);
+    expect(emitted[1]).toMatchObject({ name: "ui.error", code: "payload_invalid" });
+    expect(emitted[2]).toMatchObject({
+      name: "ui.interaction",
+      kind: "click",
+      count: 1,
+    });
+    expect(emitted[3]).toMatchObject({
+      name: "ui.interaction",
+      kind: "edit",
+      count: 1,
+    });
+    expect(emitted[4]).toMatchObject({
+      name: "ui.decision",
+      decision: "approve",
+      durationMs: 20,
+    });
+    lifecycle.dispose();
+    await telemetry.dispose();
   });
 
   it("aggregates interactions by kind and flushes one span of each kind when hidden", () => {

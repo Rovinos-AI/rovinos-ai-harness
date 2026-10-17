@@ -23,14 +23,23 @@ export interface ApprovalTelemetryEnvironment {
 
 /** Lifecycle hooks for metadata-only approval app spans. */
 export interface ApprovalTelemetry {
-  receivePayload(receive: () => void): void;
+  receivePayload(receive: () => boolean | void): void;
   reportError(code: ApprovalUiErrorCode): void;
   decisionDurationMs(): number;
+  flushInteractions(): void;
   dispose(): void;
 }
 
 const interactionKinds = ["click", "focus", "edit"] as const;
 type InteractionKind = (typeof interactionKinds)[number];
+const ambientErrorCodes = new Set<ApprovalUiErrorCode>([
+  "payload_invalid",
+  "csp_blocked",
+  "render_failed",
+]);
+const maxDecisionDurationMs = 3_600_000;
+const activationPollIntervalMs = 25;
+const maxPendingRenderSpans = 100;
 
 function createInteractionRecorder(telemetry: ApprovalAppTelemetry): {
   increment(kind: InteractionKind): void;
@@ -55,7 +64,6 @@ function createInteractionRecorder(telemetry: ApprovalAppTelemetry): {
 
 interface LifecycleCallbacks {
   readonly onError: () => void;
-  readonly onUnhandledRejection: () => void;
   readonly onCspViolation: () => void;
   readonly onClick: () => void;
   readonly onFocus: () => void;
@@ -72,9 +80,6 @@ function createLifecycleCallbacks(
 ): LifecycleCallbacks {
   return {
     onError: () => {
-      reportError("render_failed");
-    },
-    onUnhandledRejection: () => {
       reportError("render_failed");
     },
     onCspViolation: () => {
@@ -106,7 +111,6 @@ function installLifecycleListeners(
 ): () => void {
   const { document, window } = environment;
   window.addEventListener("error", callbacks.onError);
-  window.addEventListener("unhandledrejection", callbacks.onUnhandledRejection);
   window.addEventListener("pagehide", callbacks.onPageHide);
   document.addEventListener("securitypolicyviolation", callbacks.onCspViolation);
   document.addEventListener("click", callbacks.onClick);
@@ -115,7 +119,6 @@ function installLifecycleListeners(
   document.addEventListener("visibilitychange", callbacks.onVisibilityChange);
   return () => {
     window.removeEventListener("error", callbacks.onError);
-    window.removeEventListener("unhandledrejection", callbacks.onUnhandledRejection);
     window.removeEventListener("pagehide", callbacks.onPageHide);
     document.removeEventListener("securitypolicyviolation", callbacks.onCspViolation);
     document.removeEventListener("click", callbacks.onClick);
@@ -142,17 +145,56 @@ export function createApprovalTelemetry(
 ): ApprovalTelemetry {
   const reportedErrors = new Set<ApprovalUiErrorCode>();
   const interactions = createInteractionRecorder(telemetry);
+  const pendingRenderSpans: number[] = [];
   let renderGeneration = 0;
   let renderedAt: number | undefined;
+  let activationPoll: ReturnType<Window["setInterval"]> | undefined;
   let disposed = false;
 
   const reportError = (code: ApprovalUiErrorCode): void => {
-    if (disposed || reportedErrors.has(code)) {
+    if (disposed || !telemetry.active) {
       return;
     }
-    reportedErrors.add(code);
+    if (ambientErrorCodes.has(code)) {
+      if (reportedErrors.has(code)) {
+        return;
+      }
+      reportedErrors.add(code);
+    }
     telemetry.record("ui.error", { code });
     void telemetry.flush();
+  };
+
+  const flushPendingRenderSpans = (): void => {
+    if (!telemetry.active || pendingRenderSpans.length === 0) {
+      return;
+    }
+    if (activationPoll !== undefined) {
+      environment.window.clearInterval(activationPoll);
+      activationPoll = undefined;
+    }
+    for (const durationMs of pendingRenderSpans.splice(0)) {
+      telemetry.record("ui.render", {}, durationMs);
+    }
+    void telemetry.flush();
+  };
+
+  const recordRenderSpan = (durationMs: number): void => {
+    if (telemetry.active) {
+      telemetry.record("ui.render", {}, durationMs);
+      void telemetry.flush();
+      return;
+    }
+    if (pendingRenderSpans.length === maxPendingRenderSpans) {
+      pendingRenderSpans.shift();
+    }
+    pendingRenderSpans.push(durationMs);
+    if (activationPoll === undefined) {
+      activationPoll = environment.window.setInterval(
+        flushPendingRenderSpans,
+        activationPollIntervalMs,
+      );
+    }
   };
 
   const flushInteractions = (): void => {
@@ -167,17 +209,25 @@ export function createApprovalTelemetry(
 
   return {
     receivePayload(receive) {
-      const generation = ++renderGeneration;
-      renderedAt = undefined;
-      const span = telemetry.start("ui.render");
-      receive();
+      const receivedAt = environment.now();
+      let contentChanged = true;
+      try {
+        contentChanged = receive() !== false;
+      } catch {
+        reportError("render_failed");
+      }
+      if (contentChanged) {
+        renderGeneration += 1;
+        renderedAt = undefined;
+      }
+      const generation = renderGeneration;
       environment.window.requestAnimationFrame(() => {
         environment.window.requestAnimationFrame(() => {
           const completedAt = environment.now();
-          if (generation === renderGeneration) {
+          if (generation === renderGeneration && renderedAt === undefined) {
             renderedAt = completedAt;
           }
-          span.end();
+          recordRenderSpan(Math.max(0, completedAt - receivedAt));
         });
       });
     },
@@ -186,14 +236,23 @@ export function createApprovalTelemetry(
       if (renderedAt === undefined) {
         return 0;
       }
-      return Math.max(0, environment.now() - renderedAt);
+      const durationMs = environment.now() - renderedAt;
+      return Number.isFinite(durationMs)
+        ? Math.min(maxDecisionDurationMs, Math.max(0, durationMs))
+        : 0;
     },
+    flushInteractions,
     dispose() {
       if (disposed) {
         return;
       }
       flushInteractions();
       disposed = true;
+      if (activationPoll !== undefined) {
+        environment.window.clearInterval(activationPoll);
+        activationPoll = undefined;
+      }
+      pendingRenderSpans.length = 0;
       removeListeners();
     },
   };

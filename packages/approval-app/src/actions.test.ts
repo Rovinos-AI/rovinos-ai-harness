@@ -41,6 +41,7 @@ interface ActionFixture {
   readonly recordCalls: { readonly name: string; readonly attrs: Record<string, unknown> }[];
   readonly decisionDurations: number[];
   readonly flush: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  readonly flushInteractions: ReturnType<typeof vi.fn<() => void>>;
   readonly onDecision: ReturnType<typeof vi.fn<(decision: "approve" | "deny" | "edit") => void>>;
   readonly rendered: HTMLElement;
   readonly mount: ApprovalActions;
@@ -75,6 +76,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     }
   };
   const flush = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const flushInteractions = vi.fn<() => void>();
   const onDecision = vi.fn<(decision: "approve" | "deny" | "edit") => void>();
   const decisionDurationMs = vi.fn(() => 42);
   const reportError = (code: "resolve_failed" | "reveal_failed"): void => {
@@ -89,6 +91,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     telemetry: { record, flush },
     reportError,
     decisionDurationMs,
+    flushInteractions,
     renderRevealed: (values) => {
       rendered.textContent = values.get("/email") ?? tokenizedEmail;
     },
@@ -101,6 +104,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     recordCalls,
     decisionDurations,
     flush,
+    flushInteractions,
     onDecision,
     rendered,
     mount,
@@ -150,7 +154,15 @@ afterEach(() => {
 
 describe("approval actions", () => {
   it("approves once, disables all actions while pending, and records only a successful decision", async () => {
-    const { actions, bridge, recordCalls, decisionDurations, flush, onDecision } = setup();
+    const {
+      actions,
+      bridge,
+      recordCalls,
+      decisionDurations,
+      flush,
+      flushInteractions,
+      onDecision,
+    } = setup();
     let finish: (result: unknown) => void = () => undefined;
     bridge.callTool.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     actions.querySelector<HTMLButtonElement>("button")?.click();
@@ -169,6 +181,7 @@ describe("approval actions", () => {
     expect(decisionDurations).toEqual([42]);
     expect(onDecision).toHaveBeenCalledExactlyOnceWith("approve");
     expect(flush).toHaveBeenCalledOnce();
+    expect(flushInteractions).toHaveBeenCalledOnce();
     expect(JSON.stringify(recordCalls)).not.toContain(rawEmail);
   });
 

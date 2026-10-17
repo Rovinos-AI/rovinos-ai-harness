@@ -60,11 +60,10 @@ const telemetry = createAppTelemetry({
   manifest: { spans: ["ui.error", "ui.decision", "ui.render", "ui.interaction"] },
 });
 const uiTelemetry = createApprovalTelemetry(telemetry);
-let hostUnavailable = false;
 const view = createApprovalView(document.body, {
   clock: { now: () => Date.now() },
   onError: (code) => {
-    uiTelemetry.reportError(hostUnavailable ? "bridge_unavailable" : code);
+    uiTelemetry.reportError(code);
   },
   onPayload: ({
     payload,
@@ -93,10 +92,9 @@ const view = createApprovalView(document.body, {
         callTool: callApprovalTool,
       },
       telemetry,
-      reportError: (code) => {
-        uiTelemetry.reportError(code);
-      },
-      decisionDurationMs: () => uiTelemetry.decisionDurationMs(),
+      reportError: uiTelemetry.reportError,
+      decisionDurationMs: uiTelemetry.decisionDurationMs,
+      flushInteractions: uiTelemetry.flushInteractions,
       renderRevealed,
       onDecision,
     });
@@ -108,54 +106,53 @@ const view = createApprovalView(document.body, {
 
 app.addEventListener("toolinput", (params) => {
   uiTelemetry.receivePayload(() => {
-    view.receive(params.arguments);
+    return view.receive(params.arguments);
   });
 });
 app.addEventListener("toolresult", (params) => {
   uiTelemetry.receivePayload(() => {
     telemetry.setHostMetadata(params._meta);
     if (params.isError === true) {
-      view.receive(undefined);
-      return;
+      return view.receive(undefined);
     }
     if (params.structuredContent !== undefined) {
-      view.receive(params.structuredContent);
-      return;
+      return view.receive(params.structuredContent);
     }
     const text = params.content.find((part) => part.type === "text");
     try {
-      view.receive(
+      return view.receive(
         text?.type === "text"
           ? parseJson(ApprovalAppInputSchema.or(ApprovalPayloadSchema), text.text)
           : undefined,
       );
     } catch {
-      view.receive(undefined);
+      return view.receive(undefined);
     }
   });
 });
 const interval = window.setInterval(() => {
   view.tick();
 }, 1000);
-window.addEventListener(
-  "pagehide",
-  () => {
-    window.clearInterval(interval);
-    uiTelemetry.dispose();
-    view.dispose();
-    void telemetry.dispose();
-  },
-  { once: true },
-);
+const onPageHide = (event: PageTransitionEvent): void => {
+  if (event.persisted) {
+    return;
+  }
+  window.removeEventListener("pagehide", onPageHide);
+  window.clearInterval(interval);
+  uiTelemetry.dispose();
+  view.dispose();
+  void telemetry.dispose();
+};
+window.addEventListener("pagehide", onPageHide);
 void app.connect().then(
   () => {
     finishHostConnection(true);
   },
   () => {
     finishHostConnection(false);
-    hostUnavailable = true;
+    uiTelemetry.reportError("bridge_unavailable");
     uiTelemetry.receivePayload(() => {
-      view.receive(undefined);
+      return view.receive(undefined);
     });
   },
 );
