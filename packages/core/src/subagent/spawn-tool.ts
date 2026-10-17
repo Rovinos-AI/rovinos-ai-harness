@@ -59,7 +59,7 @@ export class AgentSpawnTool implements ToolPort {
   ) {}
 
   /** Returns a non-idempotent, bounded description for the spawn tool. */
-  describe(toolId: CodeType): ToolDescription | undefined {
+  describe(toolId: CodeType, args?: JsonValueType): ToolDescription | undefined {
     if (toolId === AGENT_SPAWN_ID) {
       return {
         idempotent: false,
@@ -68,7 +68,7 @@ export class AgentSpawnTool implements ToolPort {
         inputSchema: AGENT_SPAWN_SPEC.inputSchema,
       };
     }
-    return this.inner.describe(toolId);
+    return this.inner.describe(toolId, args);
   }
 
   /** Advertises the spawn schema and all other underlying tools. */
