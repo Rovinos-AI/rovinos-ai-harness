@@ -37,6 +37,17 @@ export const ProviderResultSchema = z
 /** Inferred provider-neutral adapter completion. */
 export type ProviderResult = z.infer<typeof ProviderResultSchema>;
 
+/** Progress metadata shared with gateway subscribers; deliberately excludes response content. */
+export const ModelProgressSchema = z
+  .object({
+    requestId: Id,
+    outputTokens: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Inferred count-only model progress update. */
+export type ModelProgress = z.infer<typeof ModelProgressSchema>;
+
 /** One provider-neutral update emitted while a response is being generated. */
 export const ProviderDeltaSchema = z.discriminatedUnion("type", [
   z

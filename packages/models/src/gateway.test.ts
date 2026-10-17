@@ -184,6 +184,37 @@ describe("ModelGateway", () => {
     expect(JSON.stringify(progress)).not.toContain("canary-stream-output");
   });
 
+  it("uses complete() when streaming is disabled for the selected provider", async () => {
+    const complete = vi.fn(() =>
+      Promise.resolve({
+        parts: [{ type: "text" as const, text: "non-streamed answer" }],
+        usage: { inputTokens: 1, outputTokens: 2 },
+        finishReason: "stop",
+        latencyMs: 3,
+      }),
+    );
+    const stream = vi.fn(async function* (): AsyncGenerator<ProviderDelta> {
+      yield { type: "finish", finishReason: "stop", latencyMs: 0 };
+    });
+    const gateway = new ModelGateway(
+      new AdapterRegistry([{ provider: "sample", kind: "openai", complete, stream }]),
+      {
+        ids: { next: () => request.requestId },
+        clock: { now: () => 0 },
+        providerStreaming: { sample: false },
+      },
+    );
+
+    const response = await gateway.complete(request, {
+      runId: request.requestId,
+      signal: new AbortController().signal,
+    });
+
+    expect(response.parts).toEqual([{ type: "text", text: "non-streamed answer" }]);
+    expect(complete).toHaveBeenCalledOnce();
+    expect(stream).not.toHaveBeenCalled();
+  });
+
   it("retries a retryable stream failure without exposing partial output", async () => {
     let attempts = 0;
     const adapter: ProviderAdapter = {

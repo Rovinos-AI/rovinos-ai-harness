@@ -25,6 +25,7 @@ import {
   ProviderResultSchema,
   type Clock,
   type IdGenerator,
+  type ModelProgress,
   type ProviderAdapter,
 } from "./types.js";
 import { collectProviderStream } from "./streaming.js";
@@ -94,10 +95,7 @@ interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
   readonly outputSchema?: OutputSchema;
   readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
   /** Receives token counts only while a provider stream reports usage. */
-  readonly onProgress?: (progress: {
-    readonly requestId: Id;
-    readonly outputTokens: number;
-  }) => void;
+  readonly onProgress?: (progress: ModelProgress) => void;
 }
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */

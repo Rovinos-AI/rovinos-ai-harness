@@ -221,7 +221,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       }
       const message = {
         role: "assistant" as const,
-        content: contentSeen ? content : sortedToolCalls.length > 0 ? null : "",
+        content: contentSeen ? content : null,
         ...(sortedToolCalls.length === 0 ? {} : { tool_calls: sortedToolCalls }),
         ...(refusal === undefined ? {} : { refusal }),
         ...Object.fromEntries(extraStringFields),

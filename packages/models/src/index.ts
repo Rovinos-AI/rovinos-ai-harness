@@ -66,9 +66,11 @@ export {
 } from "./providers/anthropic.js";
 export {
   assembleDeltas,
+  ModelProgressSchema,
   ProviderDeltaSchema,
   ProviderResultSchema,
   type ProviderDelta,
+  type ModelProgress,
   type ProviderAdapter,
   type ProviderContext,
   type ProviderResult,

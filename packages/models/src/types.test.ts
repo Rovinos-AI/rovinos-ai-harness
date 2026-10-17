@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assembleDeltas,
+  ModelProgressSchema,
   ProviderDeltaSchema,
   ProviderResultSchema,
   type ProviderDelta,
@@ -28,6 +29,22 @@ describe("provider result contract", () => {
     };
 
     expect(ProviderResultSchema.safeParse(result).success).toBe(false);
+  });
+
+  it("accepts only request ids and nonnegative output-token progress", () => {
+    expect(
+      ModelProgressSchema.parse({
+        requestId: "00000000000000000000000000",
+        outputTokens: 3,
+      }),
+    ).toEqual({ requestId: "00000000000000000000000000", outputTokens: 3 });
+    expect(
+      ModelProgressSchema.safeParse({
+        requestId: "00000000000000000000000000",
+        outputTokens: 3,
+        text: "not allowed",
+      }).success,
+    ).toBe(false);
   });
 
   it("assembles ordered text, tool-call arguments, usage, and opaque provider data", () => {

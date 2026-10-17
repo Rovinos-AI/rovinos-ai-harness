@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Id } from "@harness/schemas";
 import { ProviderError } from "./errors.js";
-import { assembleDeltas, ProviderDeltaSchema } from "./types.js";
-import type { ProviderDelta } from "./types.js";
+import { assembleDeltas, ModelProgressSchema, ProviderDeltaSchema } from "./types.js";
+import type { ModelProgress, ProviderDelta } from "./types.js";
 
 /** Collects one complete provider stream, enforcing idle timeout and preserving only count progress. */
 export async function collectProviderStream(options: {
@@ -10,10 +10,7 @@ export async function collectProviderStream(options: {
   readonly signal: AbortSignal;
   readonly idleTimeoutMs: number;
   readonly requestId: Id;
-  readonly onProgress?: (progress: {
-    readonly requestId: Id;
-    readonly outputTokens: number;
-  }) => void;
+  readonly onProgress?: (progress: ModelProgress) => void;
 }): Promise<ReturnType<typeof assembleDeltas>> {
   const { stream, signal, idleTimeoutMs, requestId, onProgress } = options;
   const controller = new AbortController();
@@ -67,7 +64,9 @@ export async function collectProviderStream(options: {
       const delta = ProviderDeltaSchema.parse(next.value);
       deltas.push(delta);
       if (delta.type === "usage") {
-        onProgress?.({ requestId, outputTokens: delta.usage.outputTokens });
+        onProgress?.(
+          ModelProgressSchema.parse({ requestId, outputTokens: delta.usage.outputTokens }),
+        );
       }
     }
   } finally {
