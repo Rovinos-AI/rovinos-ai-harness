@@ -37,6 +37,15 @@ const providerDefaults: ReadonlyMap<string, Capabilities> = new Map([
     },
   ],
   [
+    "bedrock",
+    {
+      ...defaultCapabilities,
+      structuredOutput: "tool",
+      forcedToolChoice: true,
+      opaqueRoundTrip: true,
+    },
+  ],
+  [
     "openai",
     {
       ...defaultCapabilities,

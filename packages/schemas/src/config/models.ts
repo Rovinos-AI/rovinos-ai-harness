@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Models retry configuration is owned by task 14.12.
-// Models provider and routing configuration is owned by task 14.13.
+// Models provider and routing configuration is owned by tasks 14.13 and 14.19.
 // Models pricing configuration is owned by task 14.14.
 import { z } from "zod";
 import { CapabilitiesSchema } from "../capabilities.js";
@@ -29,9 +29,11 @@ export const ModelRoutingConfigSchema = z
 export const ModelProviderConfigSchema = z
   .object({
     id: Code,
-    kind: z.enum(["anthropic", "openai", "openai_compatible"]),
+    kind: z.enum(["anthropic", "bedrock", "openai", "openai_compatible"]),
     apiKey: SecretRefSchema.optional(),
     baseUrl: z.url().optional(),
+    region: z.string().min(1).optional(),
+    modelIds: z.record(Code, z.string().min(1)).optional(),
     maxOutputTokens: z.number().int().positive().default(4_096),
     requestsPerMinute: z.number().int().positive().optional(),
     capabilities: CapabilitiesSchema.partial().strict().optional(),
@@ -39,6 +41,32 @@ export const ModelProviderConfigSchema = z
   })
   .strict()
   .superRefine((provider, context) => {
+    if (provider.kind === "bedrock") {
+      if (provider.region === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["region"],
+          message: "Bedrock providers require a region.",
+          params: { errorCode: "provider_region_required" },
+        });
+      }
+      if (provider.modelIds === undefined || Object.keys(provider.modelIds).length === 0) {
+        context.addIssue({
+          code: "custom",
+          path: ["modelIds"],
+          message: "Bedrock providers require at least one model id.",
+          params: { errorCode: "provider_model_ids_required" },
+        });
+      }
+      if (provider.apiKey !== undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["apiKey"],
+          message: "Bedrock credentials use the AWS default provider chain.",
+          params: { errorCode: "provider_api_key_unsupported" },
+        });
+      }
+    }
     if (provider.kind === "openai_compatible" && provider.baseUrl === undefined) {
       context.addIssue({
         code: "custom",

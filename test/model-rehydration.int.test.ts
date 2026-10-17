@@ -5,10 +5,12 @@ import { join } from "node:path";
 import {
   AdapterRegistry,
   AnthropicAdapter,
+  BedrockAdapter,
   ModelGateway,
   OpenAIAdapter,
   prepareMessagesForProvider,
 } from "@harness/models";
+import type { BedrockAdapterOptions } from "@harness/models";
 import { Id, JsonValue, parseJson } from "@harness/schemas";
 import type { KeyProvider, Message, NewEvent, Part } from "@harness/schemas";
 import { AesGcmContentCodec, SqliteEventStore } from "@harness/store";
@@ -65,10 +67,18 @@ function context() {
   };
 }
 
-function conversationRequest(provider: "anthropic" | "openai", messages: Message[]) {
+function conversationRequest(provider: "anthropic" | "bedrock" | "openai", messages: Message[]) {
   return {
     requestId,
-    model: { provider, model: provider === "anthropic" ? "claude-test" : "gpt-test" },
+    model: {
+      provider,
+      model:
+        provider === "anthropic"
+          ? "claude-test"
+          : provider === "bedrock"
+            ? "bedrock-test"
+            : "gpt-test",
+    },
     messages,
     maxOutputTokens: 32,
   };
@@ -130,6 +140,38 @@ async function persistAndReadResponse(provider: string, parts: Part[]): Promise<
     await store.close();
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+function bedrockRequestHandler(
+  responses: JsonValue[],
+  requestBodies: JsonValue[],
+): NonNullable<BedrockAdapterOptions["requestHandler"]> {
+  return {
+    async handle(request) {
+      const body =
+        typeof request.body === "string"
+          ? request.body
+          : request.body instanceof Uint8Array
+            ? new TextDecoder().decode(request.body)
+            : undefined;
+      if (body === undefined) {
+        throw new Error("Missing Bedrock request body");
+      }
+      requestBodies.push(parseJson(JsonValue, body));
+      const nextResponse = responses.shift();
+      if (nextResponse === undefined) {
+        throw new Error("Missing Bedrock fixture response");
+      }
+      return {
+        response: {
+          statusCode: 200,
+          headers: { "content-type": "application/json" },
+          body: new TextEncoder().encode(JSON.stringify(nextResponse)),
+        },
+      };
+    },
+    destroy() {},
+  };
 }
 
 describe("model response rehydration", () => {
@@ -241,6 +283,56 @@ describe("model response rehydration", () => {
       throw new Error("Missing rehydrated OpenAI assistant message");
     }
     expect(JSON.stringify(assistantMessage)).toBe(JSON.stringify(rawMessage));
+  });
+
+  it("round-trips Bedrock reasoning signatures through encrypted SQLite", async () => {
+    const reasoningBlocks = [
+      {
+        reasoningContent: {
+          reasoningText: { text: "synthetic reasoning", signature: "synthetic-signature" },
+        },
+      },
+      { text: "synthetic answer" },
+    ];
+    const requestBodies: JsonValue[] = [];
+    const responses: JsonValue[] = [
+      {
+        output: { message: { role: "assistant", content: reasoningBlocks } },
+        stopReason: "end_turn",
+        usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+      },
+      {
+        output: { message: { role: "assistant", content: [{ text: "continued" }] } },
+        stopReason: "end_turn",
+        usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3 },
+      },
+    ];
+    const adapter = new BedrockAdapter({
+      region: "us-east-1",
+      modelIds: { "bedrock-test": "amazon.nova-pro-v1:0" },
+      requestHandler: bedrockRequestHandler(responses, requestBodies),
+      credentialsProvider: () =>
+        Promise.resolve({ accessKeyId: "synthetic-access-key", secretAccessKey: "synthetic-secret" }),
+    });
+    const completion = await adapter.complete(
+      conversationRequest("bedrock", initialMessages()),
+      context(),
+    );
+    const storedParts = await persistAndReadResponse("bedrock", completion.parts);
+    const messages = prepareMessagesForProvider(
+      [...initialMessages(), { role: "assistant", parts: storedParts }],
+      "bedrock",
+    );
+
+    await adapter.complete(conversationRequest("bedrock", messages), context());
+
+    const requestBody = z
+      .object({
+        messages: z.array(z.object({ role: z.string(), content: JsonValue })),
+      })
+      .parse(requestBodies.at(-1));
+    const assistantMessage = requestBody.messages.find(({ role }) => role === "assistant");
+    expect(JSON.stringify(assistantMessage?.content)).toBe(JSON.stringify(reasoningBlocks));
   });
 
   it("continues with normalized tool calls and matching tool-result ids after a provider switch", async () => {

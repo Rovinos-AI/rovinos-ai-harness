@@ -133,6 +133,47 @@ describe("ModelsConfigSchema", () => {
     ).toThrow();
     expect(() =>
       ModelsConfigSchema.parse({
+        providers: [
+          {
+            id: "bedrock",
+            kind: "bedrock",
+            region: "us-east-1",
+            modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+          },
+        ],
+      }),
+    ).not.toThrow();
+    for (const provider of [
+      {
+        id: "bedrock",
+        kind: "bedrock",
+        modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+      },
+      {
+        id: "bedrock",
+        kind: "bedrock",
+        region: "us-east-1",
+      },
+      {
+        id: "bedrock",
+        kind: "bedrock",
+        region: "us-east-1",
+        modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+        accessKeyId: "synthetic",
+        secretAccessKey: "synthetic",
+      },
+      {
+        id: "bedrock",
+        kind: "bedrock",
+        region: "us-east-1",
+        modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+        apiKey: "env:AWS_ACCESS_KEY_ID",
+      },
+    ]) {
+      expect(() => ModelsConfigSchema.parse({ providers: [provider] })).toThrow();
+    }
+    expect(() =>
+      ModelsConfigSchema.parse({
         providers: [{ id: "remote", kind: "openai_compatible", baseUrl: "http://model.example" }],
       }),
     ).toThrow();
