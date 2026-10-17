@@ -123,6 +123,31 @@ describe("CassetteProvider", () => {
     });
   });
 
+  it("replays streamed tool-call and opaque response parts", async () => {
+    const store = memoryStore();
+    const replayResult: ProviderResult = {
+      ...result,
+      parts: [
+        { type: "text", text: "recorded response" },
+        {
+          type: "tool_call",
+          callId: "00000000000000000000000002",
+          toolId: "lookup",
+          args: { key: "value" },
+        },
+        { type: "opaque", provider: "openai", blob: { responseId: "response_fixture" } },
+      ],
+    };
+    await store.set({ hash: requestHash(request), response: replayResult });
+    const replay = new CassetteProvider("replay", store);
+    const deltas: ProviderDelta[] = [];
+    for await (const delta of replay.stream(request, context)) {
+      deltas.push(delta);
+    }
+
+    expect(assembleDeltas(deltas)).toEqual(replayResult);
+  });
+
   it("reports the missing request hash in replay mode", async () => {
     const replay = new CassetteProvider("replay", memoryStore());
 
