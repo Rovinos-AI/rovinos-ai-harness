@@ -65,7 +65,10 @@ export {
   type AnthropicApiKey,
 } from "./providers/anthropic.js";
 export {
+  assembleDeltas,
+  ProviderDeltaSchema,
   ProviderResultSchema,
+  type ProviderDelta,
   type ProviderAdapter,
   type ProviderContext,
   type ProviderResult,
