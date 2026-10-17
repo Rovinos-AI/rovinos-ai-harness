@@ -1,17 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  AccessDeniedException,
-  BedrockRuntimeClient,
-  InternalServerException,
-  ModelErrorException,
-  ModelNotReadyException,
-  ModelTimeoutException,
-  ResourceNotFoundException,
-  ServiceUnavailableException,
-  ThrottlingException,
-  ValidationException,
-  ConverseCommand,
-} from "@aws-sdk/client-bedrock-runtime";
+import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import type {
   BedrockRuntimeClientConfig,
   ContentBlock,
@@ -28,6 +16,7 @@ import {
   type ModelRequest,
   type Part,
 } from "@harness/schemas";
+import { mapBedrockError } from "./bedrock-errors.js";
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
 
@@ -132,8 +121,20 @@ function restoreBinaryValues(value: JsonValue, binaryContainer = false): unknown
 }
 
 function restoreOpaqueContent(content: readonly JsonValue[]): ContentBlock[] {
-  // Converse has an extensible content union; the opaque JSON blob preserves future block fields.
-  return content.map((block) => restoreBinaryValues(block) as ContentBlock);
+  return content.map((block) => {
+    if (!isJsonObject(block)) {
+      throw new ProviderError("provider_bad_request");
+    }
+    const entries = Object.entries(block);
+    const first = entries[0];
+    if (entries.length !== 1 || first === undefined) {
+      throw new ProviderError("provider_bad_request");
+    }
+    const [name, value] = first;
+    return {
+      $unknown: [name, restoreBinaryValues(value, BINARY_CONTAINER_KEYS.has(name))],
+    };
+  });
 }
 
 function toJsonValue(value: unknown): JsonValue {
@@ -160,8 +161,7 @@ function toToolResult(
   return {
     toolResult: {
       toolUseId: findToolUseId(request, messageIndex, part.callId, provider),
-      content:
-        typeof part.result === "string" ? [{ text: part.result }] : [{ json: part.result }],
+      content: typeof part.result === "string" ? [{ text: part.result }] : [{ json: part.result }],
       status: part.isError ? ("error" as const) : ("success" as const),
     },
   };
@@ -199,9 +199,10 @@ function buildMessages(request: ModelRequest, provider: Code): BedrockMessage[] 
     if (message.role === "system") {
       continue;
     }
-    const opaque = message.role === "assistant"
-      ? message.parts.find((part) => part.type === "opaque" && part.provider === provider)
-      : undefined;
+    const opaque =
+      message.role === "assistant"
+        ? message.parts.find((part) => part.type === "opaque" && part.provider === provider)
+        : undefined;
     const content: ContentBlock[] =
       opaque?.type === "opaque"
         ? restoreOpaqueContent(readOpaqueContent(opaque.blob))
@@ -252,25 +253,29 @@ function buildSystem(request: ModelRequest) {
   );
 }
 
+interface BedrockRequestOptions {
+  readonly provider: Code;
+  readonly maxOutputTokens: number;
+  readonly capabilities: Capabilities;
+}
+
 function buildRequest(
   request: ModelRequest,
   modelId: string,
-  provider: Code,
-  maxOutputTokens: number,
-  capabilities: Capabilities,
+  options: BedrockRequestOptions,
 ): ConverseCommandInput {
   const toolConfig = buildToolConfig(request);
   const system = buildSystem(request);
   return {
     modelId,
-    messages: buildMessages(request, provider),
+    messages: buildMessages(request, options.provider),
     inferenceConfig: {
-      maxTokens: request.maxOutputTokens ?? maxOutputTokens,
+      maxTokens: request.maxOutputTokens ?? options.maxOutputTokens,
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
     },
     ...(system.length === 0 ? {} : { system }),
     ...(toolConfig === undefined ? {} : { toolConfig }),
-    ...(request.output === undefined || capabilities.structuredOutput !== "native"
+    ...(request.output === undefined || options.capabilities.structuredOutput !== "native"
       ? {}
       : {
           outputConfig: {
@@ -288,44 +293,27 @@ function buildRequest(
   };
 }
 
-function mappedError(error: unknown, signal: AbortSignal): ProviderError {
-  if (error instanceof ModelTimeoutException) {
-    return new ProviderError("provider_timeout", { status: 408 });
+function mapResponsePart(
+  block: ContentBlock,
+  context: ProviderContext,
+  toolUseIdByCallId: Map<string, string>,
+): Part[] {
+  if ("text" in block) {
+    return [{ type: "text", text: block.text }];
   }
-  if (signal.aborted || (error instanceof Error && error.name === "AbortError")) {
-    return new ProviderError("provider_timeout");
+  if ("toolUse" in block) {
+    const callId = context.ids.next();
+    toolUseIdByCallId.set(callId, block.toolUse.toolUseId ?? `toolu_${callId}`);
+    return [
+      {
+        type: "tool_call",
+        callId,
+        toolId: Code.parse(block.toolUse.name),
+        args: JsonValue.parse(block.toolUse.input),
+      },
+    ];
   }
-  if (error instanceof ThrottlingException) {
-    return new ProviderError("provider_rate_limited", { status: 429 });
-  }
-  if (error instanceof AccessDeniedException) {
-    return new ProviderError("provider_auth", { status: 403 });
-  }
-  if (error instanceof ValidationException) {
-    return new ProviderError("provider_bad_request", { status: 400 });
-  }
-  if (error instanceof ResourceNotFoundException) {
-    return new ProviderError("provider_bad_request", { status: 404 });
-  }
-  if (
-    error instanceof InternalServerException ||
-    error instanceof ServiceUnavailableException ||
-    error instanceof ModelNotReadyException
-  ) {
-    return new ProviderError("provider_unavailable", { status: 503 });
-  }
-  if (error instanceof ModelErrorException) {
-    if (error.originalStatusCode === 429) {
-      return new ProviderError("provider_rate_limited", { status: 429 });
-    }
-    if (error.originalStatusCode !== undefined && error.originalStatusCode >= 500) {
-      return new ProviderError("provider_unavailable", { status: error.originalStatusCode });
-    }
-    return new ProviderError("provider_bad_request", {
-      ...(error.originalStatusCode === undefined ? {} : { status: error.originalStatusCode }),
-    });
-  }
-  return new ProviderError("provider_unknown");
+  return [];
 }
 
 function mapResponse(
@@ -338,22 +326,8 @@ function mapResponse(
   if (content === undefined) {
     throw new ProviderError("provider_unknown");
   }
-  const toolUseIdByCallId: Record<string, string> = {};
-  const parts: Part[] = [];
-  for (const block of content) {
-    if ("text" in block) {
-      parts.push({ type: "text", text: block.text });
-    } else if ("toolUse" in block) {
-      const callId = context.ids.next();
-      toolUseIdByCallId[callId] = block.toolUse.toolUseId ?? `toolu_${callId}`;
-      parts.push({
-        type: "tool_call",
-        callId,
-        toolId: Code.parse(block.toolUse.name),
-        args: JsonValue.parse(block.toolUse.input),
-      });
-    }
-  }
+  const toolUseIdByCallId = new Map<string, string>();
+  const parts = content.flatMap((block) => mapResponsePart(block, context, toolUseIdByCallId));
   return {
     parts: [
       ...parts,
@@ -362,7 +336,7 @@ function mapResponse(
         provider,
         blob: {
           content: toJsonValue(content),
-          toolUseIdByCallId,
+          toolUseIdByCallId: Object.fromEntries(toolUseIdByCallId),
         },
       },
     ],
@@ -422,13 +396,17 @@ export class BedrockAdapter implements ProviderAdapter {
       this.capabilities,
     ).capabilities;
     const command = new ConverseCommand(
-      buildRequest(request, modelId, this.provider, this.maxOutputTokens, capabilities),
+      buildRequest(request, modelId, {
+        provider: this.provider,
+        maxOutputTokens: this.maxOutputTokens,
+        capabilities,
+      }),
     );
     let response: ConverseResponse;
     try {
       response = await this.client.send(command, { abortSignal: context.signal });
     } catch (error) {
-      throw mappedError(error, context.signal);
+      throw mapBedrockError(error, context.signal);
     }
     try {
       return mapResponse(response, context, this.provider, startedAt);

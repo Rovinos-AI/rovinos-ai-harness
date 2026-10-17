@@ -68,17 +68,14 @@ function context() {
 }
 
 function conversationRequest(provider: "anthropic" | "bedrock" | "openai", messages: Message[]) {
+  const models = {
+    anthropic: "claude-test",
+    bedrock: "bedrock-test",
+    openai: "gpt-test",
+  };
   return {
     requestId,
-    model: {
-      provider,
-      model:
-        provider === "anthropic"
-          ? "claude-test"
-          : provider === "bedrock"
-            ? "bedrock-test"
-            : "gpt-test",
-    },
+    model: { provider, model: models[provider] },
     messages,
     maxOutputTokens: 32,
   };
@@ -142,35 +139,44 @@ async function persistAndReadResponse(provider: string, parts: Part[]): Promise<
   }
 }
 
+interface MockBedrockRequest {
+  readonly body?: unknown;
+}
+
+function readBedrockRequestBody(body: unknown): string | undefined {
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body instanceof Uint8Array) {
+    return new TextDecoder().decode(body);
+  }
+  return undefined;
+}
+
 function bedrockRequestHandler(
   responses: JsonValue[],
   requestBodies: JsonValue[],
 ): NonNullable<BedrockAdapterOptions["requestHandler"]> {
   return {
-    async handle(request) {
-      const body =
-        typeof request.body === "string"
-          ? request.body
-          : request.body instanceof Uint8Array
-            ? new TextDecoder().decode(request.body)
-            : undefined;
+    handle(request: MockBedrockRequest) {
+      const body = readBedrockRequestBody(request.body);
       if (body === undefined) {
-        throw new Error("Missing Bedrock request body");
+        return Promise.reject(new Error("Missing Bedrock request body"));
       }
       requestBodies.push(parseJson(JsonValue, body));
       const nextResponse = responses.shift();
       if (nextResponse === undefined) {
-        throw new Error("Missing Bedrock fixture response");
+        return Promise.reject(new Error("Missing Bedrock fixture response"));
       }
-      return {
+      return Promise.resolve({
         response: {
           statusCode: 200,
           headers: { "content-type": "application/json" },
           body: new TextEncoder().encode(JSON.stringify(nextResponse)),
         },
-      };
+      });
     },
-    destroy() {},
+    destroy: () => undefined,
   };
 }
 
@@ -312,7 +318,10 @@ describe("model response rehydration", () => {
       modelIds: { "bedrock-test": "amazon.nova-pro-v1:0" },
       requestHandler: bedrockRequestHandler(responses, requestBodies),
       credentialsProvider: () =>
-        Promise.resolve({ accessKeyId: "synthetic-access-key", secretAccessKey: "synthetic-secret" }),
+        Promise.resolve({
+          accessKeyId: "synthetic-access-key",
+          secretAccessKey: "synthetic-secret",
+        }),
     });
     const completion = await adapter.complete(
       conversationRequest("bedrock", initialMessages()),

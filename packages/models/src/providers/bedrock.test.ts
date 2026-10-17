@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from "node:fs";
+import { ModelErrorException } from "@aws-sdk/client-bedrock-runtime";
 import { JsonValue, parseJson } from "@harness/schemas";
 import type { ModelRequest } from "@harness/schemas";
-import { fetch as undiciFetch } from "undici";
+import { Headers, Response, type fetch as undiciFetch } from "undici";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
@@ -13,6 +14,7 @@ import {
 } from "../contract.js";
 import { ProviderError } from "../errors.js";
 import { ProviderResultSchema } from "../types.js";
+import { mapBedrockError } from "./bedrock-errors.js";
 import type { BedrockAdapterOptions } from "./bedrock.js";
 import { BedrockAdapter } from "./bedrock.js";
 
@@ -60,29 +62,39 @@ const fixtures = parseJson(
   readFileSync(new URL("./__fixtures__/bedrock/contract.json", import.meta.url), "utf8"),
 );
 
+interface MockBedrockRequest {
+  readonly path: string;
+  readonly method: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body?: unknown;
+}
+
+interface MockBedrockHandlerOptions {
+  readonly abortSignal?: AbortSignal;
+}
+
+function readRequestBody(body: unknown): string | undefined {
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body instanceof Uint8Array) {
+    return new TextDecoder().decode(body);
+  }
+  return undefined;
+}
+
 function createRequestHandler(
   fetcher: typeof undiciFetch,
   baseUrl: string,
   onPath?: (path: string) => void,
 ): NonNullable<BedrockAdapterOptions["requestHandler"]> {
   return {
-    async handle(request, options) {
+    async handle(request: MockBedrockRequest, options?: MockBedrockHandlerOptions) {
       onPath?.(request.path);
-      const headers = new Headers();
-      for (const [name, value] of Object.entries(request.headers)) {
-        if (typeof value === "string") {
-          headers.set(name, value);
-        }
-      }
-      const body =
-        typeof request.body === "string"
-          ? request.body
-          : request.body instanceof Uint8Array
-            ? new TextDecoder().decode(request.body)
-            : undefined;
+      const body = readRequestBody(request.body);
       const response = await fetcher(new URL(request.path, baseUrl), {
         method: request.method,
-        headers,
+        headers: new Headers(request.headers),
         ...(body === undefined ? {} : { body }),
         ...(options?.abortSignal === undefined ? {} : { signal: options.abortSignal }),
       });
@@ -94,7 +106,7 @@ function createRequestHandler(
         },
       };
     },
-    destroy() {},
+    destroy: () => undefined,
   };
 }
 
@@ -135,7 +147,7 @@ function makeCall(
   const adapter = new BedrockAdapter({
     region: "us-east-1",
     modelIds: { "test-model": "amazon.nova-pro-v1:0" },
-    capabilities,
+    ...(capabilities === undefined ? {} : { capabilities }),
     requestHandler: createRequestHandler(fetcher, "https://bedrock.test", (path) => {
       requestPath = path;
     }),
@@ -201,16 +213,19 @@ describe("BedrockAdapter", () => {
   });
 
   it("maps automatic tool choice and omits tools when disabled", async () => {
-    const automatic = makeCall({ ...responseBody, output: { message: { content: [{ text: "ok" }] } } });
-    await automatic.adapter.complete(
-      { ...baseRequest, toolChoice: "auto" },
-      context(),
-    );
+    const automatic = makeCall({
+      ...responseBody,
+      output: { message: { content: [{ text: "ok" }] } },
+    });
+    await automatic.adapter.complete({ ...baseRequest, toolChoice: "auto" }, context());
     expect(automatic.getRequestBody()).toMatchObject({
       toolConfig: { toolChoice: { auto: {} } },
     });
 
-    const disabled = makeCall({ ...responseBody, output: { message: { content: [{ text: "ok" }] } } });
+    const disabled = makeCall({
+      ...responseBody,
+      output: { message: { content: [{ text: "ok" }] } },
+    });
     await disabled.adapter.complete({ ...baseRequest, toolChoice: "none" }, context());
     expect(disabled.getRequestBody()).not.toHaveProperty("toolConfig");
   });
@@ -341,20 +356,15 @@ describe("BedrockAdapter", () => {
     [408, "ModelTimeoutException", "provider_timeout", 408],
     [404, "ResourceNotFoundException", "provider_bad_request", 404],
   ] as const)("maps %s %s without retrying", async (status, name, code, mappedStatus) => {
-    const call = makeCall(
-      { message: "synthetic provider failure", __type: name },
-      status,
-      { "x-amzn-errortype": name },
-    );
+    const call = makeCall({ message: "synthetic provider failure", __type: name }, status, {
+      "x-amzn-errortype": name,
+    });
     const error = await call.adapter.complete(baseRequest, context()).then(
       () => undefined,
       (caught: unknown) => caught,
     );
     expect(error).toBeInstanceOf(ProviderError);
-    expect(error).toMatchObject({
-      code,
-      ...(mappedStatus === undefined ? {} : { status: mappedStatus }),
-    });
+    expect(error).toMatchObject({ code, status: mappedStatus });
     expect(call.getRequestCount()).toBe(1);
   });
 
@@ -366,7 +376,10 @@ describe("BedrockAdapter", () => {
       modelIds: { "test-model": "amazon.nova-pro-v1:0" },
       requestHandler: createRequestHandler(fetcher, "https://bedrock.test"),
       credentialsProvider: () =>
-        Promise.resolve({ accessKeyId: "synthetic-access-key", secretAccessKey: "synthetic-secret" }),
+        Promise.resolve({
+          accessKeyId: "synthetic-access-key",
+          secretAccessKey: "synthetic-secret",
+        }),
     });
     const error = await adapter.complete(baseRequest, context()).then(
       () => undefined,
@@ -375,6 +388,22 @@ describe("BedrockAdapter", () => {
     expect(error).toMatchObject({ code: "provider_unknown", message: "provider_unknown" });
     expect(error).not.toHaveProperty("cause");
     expect(error).not.toHaveProperty("status");
+  });
+
+  it.each([
+    [429, "provider_rate_limited", 429],
+    [503, "provider_unavailable", 503],
+    [400, "provider_bad_request", 400],
+    [undefined, "provider_bad_request", undefined],
+  ] as const)("maps model errors with original status %s", (status, code, mappedStatus) => {
+    const error = new ModelErrorException({
+      message: "synthetic model failure",
+      $metadata: {},
+      ...(status === undefined ? {} : { originalStatusCode: status }),
+    });
+    const mapped = mapBedrockError(error, new AbortController().signal);
+    expect(mapped).toMatchObject({ code });
+    expect(mapped.status).toBe(mappedStatus);
   });
 
   it("rejects malformed opaque content without sending a request", async () => {
