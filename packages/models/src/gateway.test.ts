@@ -189,17 +189,20 @@ describe("ModelGateway", () => {
     expect(JSON.stringify(progress)).not.toContain("canary-stream-output");
   });
 
-  it("bounds a stream that keeps producing activity under every idle timeout", async () => {
+  it("allows a stream to exceed timeoutMs while remaining under streamTimeoutMs", async () => {
     useFakeClock();
     const adapter: ProviderAdapter = {
       provider: "sample",
       kind: "openai",
       complete: vi.fn(() => Promise.reject(new Error("streaming must be selected"))),
       async *stream() {
-        for (;;) {
+        for (let index = 0; index < 6; index += 1) {
           await new Promise((resolve) => setTimeout(resolve, 5));
           yield { type: "activity" };
         }
+        yield { type: "text", index: 0, text: "completed under stream cap" };
+        yield { type: "usage", usage: { inputTokens: 1, outputTokens: 1 } };
+        yield { type: "finish", finishReason: "stop", latencyMs: 30 };
       },
     };
     const gateway = new ModelGateway(new AdapterRegistry([adapter]), {
@@ -208,6 +211,7 @@ describe("ModelGateway", () => {
       retryPolicy: ModelRetryConfigSchema.parse({
         maxAttempts: 1,
         timeoutMs: 20,
+        streamTimeoutMs: 100,
         idleTimeoutMs: 10,
       }),
     });
@@ -215,16 +219,9 @@ describe("ModelGateway", () => {
       runId: request.requestId,
       signal: new AbortController().signal,
     });
-    const settled = completion.then(
-      () => ({ status: "resolved" as const }),
-      (error: unknown) => ({ status: "rejected" as const, error }),
-    );
-
-    await vi.advanceTimersByTimeAsync(20);
-    const result = await settled;
-    expect(result).toMatchObject({
-      status: "rejected",
-      error: { code: "provider_timeout" },
+    await vi.advanceTimersByTimeAsync(40);
+    await expect(completion).resolves.toMatchObject({
+      parts: [{ type: "text", text: "completed under stream cap" }],
     });
   });
 
@@ -478,14 +475,15 @@ describe("ModelGateway", () => {
     };
     const progress: unknown[] = [];
     const cassette = new CassetteProvider("record", store, inner, {
-      sanitize: (response) => {
+      sanitize: async (response) => {
         expect(progress).toEqual([{ requestId: request.requestId, outputTokens: 5 }]);
-        return Promise.resolve({
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return {
           ...response,
           parts: response.parts.map((part) =>
             part.type === "text" ? { ...part, text: "sanitized response" } : part,
           ),
-        });
+        };
       },
       detectRealData: () => Promise.resolve(false),
     });

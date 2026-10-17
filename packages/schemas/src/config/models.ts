@@ -70,6 +70,7 @@ export const ModelRetryConfigSchema = z
     baseDelayMs: z.coerce.number().int().nonnegative().default(500),
     maxDelayMs: z.coerce.number().int().nonnegative().default(20_000),
     timeoutMs: z.coerce.number().int().positive().default(120_000),
+    streamTimeoutMs: z.coerce.number().int().positive().default(600_000),
     idleTimeoutMs: z.coerce.number().int().positive().default(60_000),
   })
   .strict()

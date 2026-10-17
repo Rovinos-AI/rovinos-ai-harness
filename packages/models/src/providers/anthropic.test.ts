@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from "node:fs";
 import type { ClientOptions } from "@anthropic-ai/sdk";
-import { JsonValue, parseJson } from "@harness/schemas";
+import { JsonValue, ModelRetryConfigSchema, parseJson } from "@harness/schemas";
 import type { ModelRequest } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import { withPromptOutput } from "../enforce/rung-prompt.js";
 import { assembleDeltas, ProviderResultSchema } from "../types.js";
 import type { ProviderDelta } from "../types.js";
 import { collectProviderStream } from "../streaming.js";
+import { withRetries } from "../resilience/retry.js";
 import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { AnthropicAdapter } from "./anthropic.js";
 
@@ -301,20 +302,22 @@ describe("AnthropicAdapter", () => {
       const split = json.indexOf(",") + 1;
       return [
         ": keepalive\r\n",
-        `event: ${type}\r\ndata: ${json.slice(0, split)}\r\ndata: ${json.slice(split)}\r\n\r\n`,
+        `event: ${type}\r\nda`,
+        `ta: ${json.slice(0, split)}\r\n`,
+        `data: ${json.slice(split)}\r\n\r\n`,
       ];
     });
     const adapter = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
       baseURL: "https://provider.test",
-      fetch: () => Promise.resolve(streamedSseResponse(frames, 18)),
+      fetch: () => Promise.resolve(streamedSseResponse(frames, 3)),
     });
     const progress: unknown[] = [];
     const signal = new AbortController().signal;
     const result = await collectProviderStream({
       stream: (streamSignal) => adapter.stream(baseRequest, context(streamSignal)),
       signal,
-      idleTimeoutMs: 75,
+      idleTimeoutMs: 30,
       requestId,
       onProgress: (update) => progress.push(update),
     });
@@ -370,6 +373,139 @@ describe("AnthropicAdapter", () => {
     };
 
     await expect(collect()).rejects.toMatchObject({ code, retryable: true });
+  });
+
+  it("discards partial Anthropic output when retrying a mid-stream error", async () => {
+    const start = {
+      type: "message_start",
+      message: {
+        ...responseBody,
+        content: [],
+        stop_reason: null,
+        usage: { input_tokens: 1, output_tokens: 0 },
+      },
+    };
+    const firstAttempt = [
+      start,
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "discard me" },
+      },
+    ];
+    const secondAttempt = [
+      start,
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "second only" },
+      },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens: 2 },
+      },
+      { type: "message_stop" },
+    ];
+    let attempt = 0;
+    const adapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: () => {
+        attempt += 1;
+        const eventFrames =
+          attempt === 1
+            ? [
+                ...firstAttempt.map(
+                  (event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+                ),
+                `event: error\ndata: ${JSON.stringify({
+                  type: "error",
+                  error: { type: "overloaded_error", message: "synthetic overload" },
+                })}\n\n`,
+              ]
+            : secondAttempt.map(
+                (event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+              );
+        return Promise.resolve(streamedSseResponse(eventFrames));
+      },
+    });
+
+    const result = await withRetries({
+      policy: ModelRetryConfigSchema.parse({ maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 }),
+      clock: { now: () => 0 },
+      random: () => 0,
+      sleep: () => Promise.resolve(),
+      signal: new AbortController().signal,
+      operation: (signal) =>
+        collectProviderStream({
+          stream: (streamSignal) => adapter.stream(baseRequest, context(streamSignal)),
+          signal,
+          idleTimeoutMs: 100,
+          requestId,
+        }),
+    });
+
+    expect(attempt).toBe(2);
+    expect(result.parts).toContainEqual({ type: "text", text: "second only" });
+    expect(JSON.stringify(result.parts)).not.toContain("discard me");
+  });
+
+  it("aborts the Anthropic fetch body when the caller cancels", async () => {
+    const controller = new AbortController();
+    let fetchSignal: AbortSignal | undefined;
+    let bodyCancelled = false;
+    const adapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: (_input, init) => {
+        fetchSignal = init?.signal ?? undefined;
+        const start = {
+          type: "message_start",
+          message: {
+            ...responseBody,
+            content: [],
+            stop_reason: null,
+            usage: { input_tokens: 1, output_tokens: 0 },
+          },
+        };
+        const body = new ReadableStream<Uint8Array>({
+          start(streamController) {
+            streamController.enqueue(
+              new TextEncoder().encode(`event: message_start\ndata: ${JSON.stringify(start)}\n\n`),
+            );
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                bodyCancelled = true;
+                streamController.error(new Error("fetch body aborted"));
+              },
+              { once: true },
+            );
+          },
+        });
+        return Promise.resolve(
+          new Response(body, { headers: { "content-type": "text/event-stream" } }),
+        );
+      },
+    });
+
+    const completion = collectProviderStream({
+      stream: (signal) => adapter.stream(baseRequest, context(signal)),
+      signal: controller.signal,
+      idleTimeoutMs: 1_000,
+      requestId,
+      onProgress: () => {
+        controller.abort(new Error("caller cancelled"));
+      },
+    });
+
+    await expect(completion).rejects.toMatchObject({ message: "caller cancelled" });
+    expect(fetchSignal?.aborted).toBe(true);
+    expect(bodyCancelled).toBe(true);
   });
 
   it.each([

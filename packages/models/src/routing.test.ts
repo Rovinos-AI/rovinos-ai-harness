@@ -31,6 +31,7 @@ const dependencies = {
     baseDelayMs: 0,
     maxDelayMs: 0,
     timeoutMs: 1_000,
+    streamTimeoutMs: 600_000,
     idleTimeoutMs: 1_000,
   },
   enforcement: { maxRepairs: 0 },

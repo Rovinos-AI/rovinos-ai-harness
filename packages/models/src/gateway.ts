@@ -250,6 +250,7 @@ export class ModelGateway {
       random: this.random,
       sleep: this.sleep,
       signal: context.signal,
+      ...(useStream ? { attemptTimeoutMs: this.retryPolicy.streamTimeoutMs } : {}),
       ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
       prepareAttempt: async (signal, lastError) => {
         if (limiter !== undefined) {
@@ -273,6 +274,7 @@ export class ModelGateway {
             signal,
             ids: this.dependencies.ids,
             clock: this.dependencies.clock,
+            ...(useStream ? { idleTimeoutMs: this.retryPolicy.idleTimeoutMs } : {}),
             ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
           };
           if (useStream) {

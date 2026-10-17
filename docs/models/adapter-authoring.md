@@ -22,6 +22,8 @@ for streamed metadata, concatenate string fragments, append array fragments,
 and retain the latest scalar or object value.
 
 The collector applies `models.retry.idleTimeoutMs` between activity updates
-after the first update. The gateway also bounds every attempt, streamed or not,
-with `models.retry.timeoutMs` and the run deadline. See
+after the first event. Streaming attempts are bounded by
+`models.retry.streamTimeoutMs` (10 minutes by default) and the run deadline;
+the first event is covered by the total timeout, not the idle timer. Non-streaming
+attempts use `models.retry.timeoutMs`. See
 [model routing](./routing.md) for provider streaming configuration.

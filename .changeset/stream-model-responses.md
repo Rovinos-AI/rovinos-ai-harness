@@ -1,5 +1,5 @@
 ---
-"@harness/models": patch
+"@harness/models": minor
 "@harness/sdk": minor
 ---
 

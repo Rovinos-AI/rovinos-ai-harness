@@ -81,6 +81,45 @@ function resultDeltas(result: ProviderResult): ProviderDelta[] {
   return deltas;
 }
 
+async function* withActivityHeartbeat<T>(
+  operation: Promise<T>,
+  idleTimeoutMs: number | undefined,
+): AsyncGenerator<ProviderDelta, T> {
+  if (idleTimeoutMs === undefined) {
+    return operation;
+  }
+  const completion = operation.then(
+    (value) => ({ type: "success" as const, value }),
+    (error: unknown) => ({ type: "failure" as const, error }),
+  );
+  const intervalMs = Math.max(1, Math.floor(idleTimeoutMs / 2));
+  for (;;) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let outcome: Awaited<typeof completion> | { readonly type: "heartbeat" };
+    try {
+      outcome = await Promise.race([
+        completion,
+        new Promise<{ readonly type: "heartbeat" }>((resolve) => {
+          timer = setTimeout(() => {
+            resolve({ type: "heartbeat" });
+          }, intervalMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    }
+    if (outcome.type === "heartbeat") {
+      yield { type: "activity" };
+    } else if (outcome.type === "failure") {
+      throw outcome.error;
+    } else {
+      return outcome.value;
+    }
+  }
+}
+
 /** Raised when a request has no recorded cassette response. */
 export class CassetteMissError extends HarnessError {
   readonly code = "cassette_miss";
@@ -255,8 +294,14 @@ export class CassetteProvider implements ProviderAdapter {
       }
       response = assembleDeltas(deltas);
     }
-    const sanitized = await this.prepareForStorage(response);
-    await this.store.set({ hash, response: sanitized });
+    const sanitized = yield* withActivityHeartbeat(
+      (async () => {
+        const value = await this.prepareForStorage(response);
+        await this.store.set({ hash, response: value });
+        return value;
+      })(),
+      context.idleTimeoutMs,
+    );
     yield* resultDeltas(sanitized);
   }
 

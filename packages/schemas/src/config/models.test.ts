@@ -14,6 +14,7 @@ describe("ModelsConfigSchema", () => {
         baseDelayMs: 500,
         maxDelayMs: 20_000,
         timeoutMs: 120_000,
+        streamTimeoutMs: 600_000,
         idleTimeoutMs: 60_000,
       },
       enforcement: { maxRepairs: 2 },
@@ -36,7 +37,7 @@ describe("ModelsConfigSchema", () => {
   it("accepts configured retry overrides", () => {
     expect(
       ModelsConfigSchema.parse({
-        retry: { maxAttempts: "5", timeoutMs: "2000" },
+        retry: { maxAttempts: "5", timeoutMs: "2000", streamTimeoutMs: "300000" },
         enforcement: { maxRepairs: "1" },
         maxConcurrent: "2",
       }),
@@ -46,6 +47,7 @@ describe("ModelsConfigSchema", () => {
         baseDelayMs: 500,
         maxDelayMs: 20_000,
         timeoutMs: 2_000,
+        streamTimeoutMs: 300_000,
         idleTimeoutMs: 60_000,
       },
       enforcement: { maxRepairs: 1 },

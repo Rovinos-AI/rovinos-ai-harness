@@ -62,7 +62,7 @@ export interface RetryOptions<T> extends RetryDependencies {
   readonly policy: ModelRetryConfig;
   readonly signal: AbortSignal;
   readonly deadlineTs?: number;
-  /** Overrides the per-attempt timeout; null disables it for idle-bounded streams. */
+  /** Overrides the per-attempt timeout; null disables it. */
   readonly attemptTimeoutMs?: number | null;
   readonly onAttempt?: (attempt: number) => void;
   readonly prepareAttempt?: (signal: AbortSignal, lastError: unknown) => Promise<() => void>;
