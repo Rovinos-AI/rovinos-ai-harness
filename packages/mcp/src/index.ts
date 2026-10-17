@@ -18,11 +18,29 @@ export {
 export {
   McpPool,
   McpPoolError,
+  createServersAuthorizedCheck,
   createServersReachableChecks,
   type McpServerState,
   type ServersReachableCheck,
   type ServersReachableCheckContext,
 } from "./pool.js";
+export {
+  McpAuthRequiredError,
+  McpOAuthProvider,
+  withOAuthWarningsRedacted,
+  type McpOAuthProviderOptions,
+} from "./oauth/provider.js";
+export {
+  startMcpOAuthLogin,
+  type McpOAuthLoginOptions,
+  type McpOAuthLoginSession,
+} from "./oauth/login.js";
+export {
+  OAuthTokenStore,
+  OAuthTokenStoreError,
+  OAuthCredentialRecordSchema,
+  type OAuthCredentialRecord,
+} from "./oauth/token-store.js";
 export {
   createMcpTransport,
   type McpLogger,

@@ -5,6 +5,8 @@ import { diag } from "@opentelemetry/api";
 import { HarnessError, PiiConfigSchema } from "@harness/schemas";
 import type { PiiConfig } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
+import type { McpToolPort } from "@harness/mcp";
+import type { LocalKeyProvider } from "@harness/vault";
 import type { EventStore } from "@harness/store";
 import { createSandboxBackend, RemoteSandboxBackend, type SandboxBackend } from "@harness/sandbox";
 import { createRuntimeStore } from "./runtime-store.js";
@@ -13,6 +15,7 @@ import { createRuntimeModelAndStore } from "./runtime-setup-model.js";
 import { createRuntimePolicy } from "./runtime-policy.js";
 import { resolveDataDir } from "./runtime-data-dir.js";
 import { createRuntimeVault } from "./runtime-vault.js";
+import { createConfiguredMcpToolPort } from "./runtime-mcp.js";
 import { ensureTracing } from "./runtime-tracing-init.js";
 import { unavailableTool } from "./runtime-default-ports.js";
 import { NaiveContext } from "./context/naive-context.js";
@@ -21,7 +24,6 @@ import { resolveRuntimeRoles } from "./subagent/runtime.js";
 import { systemClock, SystemIdGenerator } from "./runtime-ids.js";
 import { createRuntimeWorkspaceSnapshotter } from "./runtime-workspace-snapshot.js";
 import { composeSandboxTools } from "./runtime-tool-port.js";
-import { McpConnectionError, McpToolPort, type McpLogger } from "@harness/mcp";
 import type { RoleRegistry } from "./roles.js";
 import type { ToolPort } from "./ports.js";
 import type {
@@ -33,42 +35,6 @@ import type {
 
 const roleConfigLogger = diag.createComponentLogger({ namespace: "harness.core" });
 const sandboxLogger = diag.createComponentLogger({ namespace: "harness.sandbox" });
-const mcpDiagnosticLogger = diag.createComponentLogger({ namespace: "harness.mcp" });
-const mcpLogger: McpLogger = {
-  log: (event) => {
-    mcpDiagnosticLogger.warn(
-      event.code,
-      event.code === "mcp_stderr"
-        ? { serverId: event.serverId, bytes: event.bytes }
-        : { serverId: event.serverId },
-    );
-  },
-};
-
-async function createConfiguredMcpToolPort(
-  config: RuntimeConfig,
-  overrides: RuntimeOverrides,
-): Promise<McpToolPort | undefined> {
-  const servers = config.servers ?? [];
-  if (overrides.tool !== undefined || servers.length === 0) {
-    return undefined;
-  }
-  const secretResolver = overrides.secretResolver ?? {
-    resolve: () => Promise.reject(new McpConnectionError("mcp_connect_failed")),
-  };
-  return McpToolPort.create(
-    servers,
-    {
-      resolveSecret: async (ref) => (await secretResolver.resolve(ref)).reveal(),
-      logger: mcpLogger,
-      ...(overrides.mcpTransportFactory === undefined
-        ? {}
-        : { createTransport: overrides.mcpTransportFactory }),
-    },
-    { offloadBinaryResults: overrides.workspace !== undefined },
-  );
-}
-
 async function closeSetupResources(options: {
   readonly mcpToolPort?: McpToolPort | undefined;
   readonly sandboxBackend?: SandboxBackend | undefined;
@@ -173,11 +139,13 @@ interface RuntimeTools {
 async function createRuntimeTools(
   config: RuntimeConfig,
   overrides: RuntimeOverrides,
+  keys: LocalKeyProvider,
+  dataDir: string,
 ): Promise<RuntimeTools> {
   const sandboxBackend = await createRuntimeSandbox(config, overrides);
   let mcpToolPort: McpToolPort | undefined;
   try {
-    mcpToolPort = await createConfiguredMcpToolPort(config, overrides);
+    mcpToolPort = await createConfiguredMcpToolPort(config, overrides, keys, dataDir);
     const tool = createRuntimeTool(config, sandboxBackend, overrides, mcpToolPort);
     return { tool, sandboxBackend, mcpToolPort };
   } catch (error) {
@@ -272,7 +240,7 @@ export async function setupRuntime(
     vault = runtimeVault;
     const scopes = overrides.scopeRegistry ?? new RunScopeRegistry();
     const policy = await createRuntimePolicy(runtimeConfig, overrides);
-    tools = await createRuntimeTools(runtimeConfig, overrides);
+    tools = await createRuntimeTools(runtimeConfig, overrides, keys, dataDir);
     const { tool, sandboxBackend } = tools;
     const workspaceSnapshotter = createRuntimeWorkspaceSnapshotter({
       dataDir,

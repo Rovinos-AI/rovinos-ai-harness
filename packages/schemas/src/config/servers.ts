@@ -28,6 +28,28 @@ const ToolNamesSchema = z.array(z.string().min(1)).superRefine((names, context) 
   }
 });
 
+const OAuthAuthSchema = z
+  .object({
+    kind: z.literal("oauth"),
+    grant: z.enum(["authorization_code", "client_credentials"]),
+    clientId: z.string().min(1).optional(),
+    clientIdMetadataUrl: z.url().optional(),
+    clientSecret: SecretRefSchema.optional(),
+    scopes: z.array(z.string().min(1)).optional(),
+    redirectPort: z.number().int().min(1).max(65_535).optional(),
+  })
+  .strict()
+  .superRefine((auth, context) => {
+    if (auth.grant === "client_credentials" && auth.clientSecret === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["clientSecret"],
+        message: "Client credentials authorization requires a client secret reference.",
+        params: { errorCode: "server_oauth_secret_required" },
+      });
+    }
+  });
+
 const StdioTransportSchema = z
   .object({
     kind: z.literal("stdio"),
@@ -81,6 +103,7 @@ const HttpTransportSchema = z
       }
     }),
     headers: z.record(z.string(), SecretRefSchema).optional(),
+    auth: OAuthAuthSchema.optional(),
   })
   .strict()
   .superRefine((transport, context) => {

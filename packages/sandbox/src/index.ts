@@ -73,6 +73,7 @@ export type {
 export { RemoteSandboxBackend, RemoteSandboxError } from "./remote.js";
 export type { RemoteSandboxBackendOptions } from "./remote.js";
 export { WorkspaceFileError, WorkspaceFileSystem } from "./workspace-files.js";
+export { openUrlInBrowser } from "./open-browser.js";
 export {
   ExecLimitsSchema,
   ExecResultSchema,
