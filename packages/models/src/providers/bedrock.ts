@@ -31,6 +31,8 @@ import {
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
 
+const BINARY_CONTAINER_KEYS = new Set(["audio", "document", "image", "reasoningContent", "video"]);
+
 /** Credentials used by tests; production callers should omit this to use the AWS default chain. */
 export interface BedrockCredentials {
   readonly accessKeyId: string;
@@ -119,13 +121,12 @@ function restoreBinaryValues(value: JsonValue, binaryContainer = false): unknown
     return value;
   }
 
-  const binaryKeys = new Set(["audio", "document", "image", "reasoningContent", "video"]);
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => [
       key,
       binaryContainer && (key === "bytes" || key === "redactedContent") && typeof entry === "string"
         ? decodeBase64(entry)
-        : restoreBinaryValues(entry, binaryContainer || binaryKeys.has(key)),
+        : restoreBinaryValues(entry, binaryContainer || BINARY_CONTAINER_KEYS.has(key)),
     ]),
   );
 }

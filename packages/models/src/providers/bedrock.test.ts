@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { JsonValue, parseJson } from "@harness/schemas";
 import type { ModelRequest } from "@harness/schemas";
 import { fetch as undiciFetch } from "undici";
-import type { Dispatcher } from "undici";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
