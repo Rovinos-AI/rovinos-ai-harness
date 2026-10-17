@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { doctorChecks } from "@harness/core";
 import { HarnessConfigSchema, loadConfig as loadConfigFromFile } from "@harness/config";
-import { DoctorResultsSchema, parseJson, type DoctorCheckStatus } from "@harness/schemas";
+import { createPresidioReachableCheck } from "@harness/pii";
+import {
+  DoctorResultsSchema,
+  parseJson,
+  PiiPresidioConfigSchema,
+  type DoctorCheckStatus,
+} from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
@@ -213,11 +219,10 @@ describe("harness doctor", () => {
     if (configCheck === undefined) {
       throw new Error("config_valid check is not registered");
     }
-    const presidioCheck = {
-      id: "presidio_reachable",
-      title: "Presidio analyzer",
-      run: vi.fn(() => Promise.resolve({ status: "ok" as const, code: "presidio_reachable" })),
-    };
+    const presidioCheck = createPresidioReachableCheck(
+      PiiPresidioConfigSchema.parse({ baseUrl: "http://127.0.0.1:1" }),
+      { timeoutMs: 1 },
+    );
 
     const exitCode = await main(["--json", "doctor"], context, [
       createDoctorCommand([configCheck, presidioCheck]),
@@ -234,10 +239,9 @@ describe("harness doctor", () => {
     });
     expect(results).toContainEqual({
       id: "presidio_reachable",
-      status: "ok",
-      code: "presidio_reachable",
+      status: "fail",
+      code: "presidio_unreachable",
     });
-    expect(presidioCheck.run).toHaveBeenCalledOnce();
     expect(stderr).toEqual(["doctor_failed\n"]);
     expect(output).not.toContain(invalidValue);
   });
