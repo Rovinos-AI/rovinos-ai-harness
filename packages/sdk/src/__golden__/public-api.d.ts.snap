@@ -62,6 +62,11 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                     fail: "fail";
                 }>>;
             }, z.core.$strict>>;
+            subagents: z.ZodPrefault<z.ZodObject<{
+                maxDepth: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+                maxChildrenPerRun: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+                maxConcurrentChildren: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+            }, z.core.$strict>>;
             budgets: z.ZodPrefault<z.ZodObject<{
                 maxSteps: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
                 maxCostUsd: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
@@ -352,6 +357,15 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                     mod97: "mod97";
                 }>>;
             }, z.core.$strict>>>;
+            failMode: z.ZodDefault<z.ZodEnum<{
+                closed: "closed";
+                regex_only: "regex_only";
+            }>>;
+            presidio: z.ZodOptional<z.ZodObject<{
+                baseUrl: z.ZodURL;
+                language: z.ZodDefault<z.ZodString>;
+                scoreThreshold: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
             detokenize: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 toolId: z.ZodString;
                 args: z.ZodArray<z.ZodString>;

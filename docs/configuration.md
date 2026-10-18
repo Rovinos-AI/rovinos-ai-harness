@@ -14,6 +14,8 @@ Environment values with the `HARNESS__` prefix override file values. Separate ne
 
 `run.budgets.maxSteps` defaults to `200`, and `run.budgets.maxWallClockMs` defaults to `3600000`. Both must be positive integers. `run.budgets.maxCostUsd` is optional and must be a positive number when supplied. Reported model costs are accumulated as integer micro-dollars; responses without cost metadata do not count toward the cost budget. `run.budgets.countSuspendedTime` defaults to `false`; suspended intervals between `suspended` and `running` status events are excluded from the wall-clock budget unless it is set to `true`. The run start time and usage are recovered from the event log, so budgets do not reset on resume.
 
+`run.subagents.maxDepth` defaults to `4` and cannot exceed that global ceiling. `run.subagents.maxChildrenPerRun` defaults to `8`, and `run.subagents.maxConcurrentChildren` defaults to `2`. Each spawned child inherits the parent's remaining step, cost, and absolute wall-clock deadline, further capped by its role budgets. Unfinished children reserve their allocated step and cost budgets, including while suspended; those limits and deadlines remain in force after resume. Parent usage includes terminal child usage. Cancelling a run cancels its unfinished child tree before recording the parent's cancellation.
+
 `run.checkpointEveryEvents` defaults to `20` and must be a positive integer. The run loop writes a checkpoint when that many events have accrued since the previous checkpoint, and always writes one before returning a suspended run.
 
 `run.shutdownGraceMs` defaults to `20000` and must be a positive integer. On SIGTERM or SIGINT, the run aborts in-flight work, suspends at a safe point, and writes a checkpoint before exiting with code 143 or 130. If the grace period expires first, the process attempts a best-effort checkpoint and exits with code 1. Set the container's `stop_grace_period` longer than this value so the container runtime does not terminate the process before graceful shutdown can finish.
@@ -44,6 +46,25 @@ pointers in the stored approval arguments and are audited at the `ui` boundary.
 Set `HARNESS_CASSETTE_AUTO=0` to disable cassette auto mode. Record and auto modes require caller-provided storage-boundary sanitization and a final PII detector check before a response can be written.
 
 Store, model, server, policy, PII, telemetry, and sandbox fragments are strict schemas owned by their respective packages. `telemetry.sentinel.minValueLength` defaults to `6` and controls the minimum length of vault values included in leak-sentinel scans; shorter values are counted and skipped. The sentinel is enabled by default; `telemetry.sentinel.enabled: false` is accepted only outside production. Configuration should contain secret references rather than secret values; secret resolution is covered by task 20.3.
+
+The Presidio analyzer is optional and is enabled by configuring `pii.presidio`. Its base URL,
+language, and score threshold control the sidecar request; the default language is `en` and the
+default threshold is `0.5`. Use `https:` for remote analyzers; `http:` is restricted to loopback
+addresses and single-label internal Compose hostnames. Redirects are rejected so request text is
+never forwarded to a host other than the configured analyzer. `pii.failMode` defaults to `closed`, so an unavailable
+configured analyzer fails PII detection rather than passing its input through. Set it to
+`regex_only` to continue with synchronous detectors during an analyzer outage; this degraded
+operation increments `harness.pii.detector_degraded`. Presidio supplements the built-in detectors
+and does not guarantee that every sensitive value will be detected.
+
+```yaml
+pii:
+  failMode: closed
+  presidio:
+    baseUrl: http://presidio-analyzer:3000
+    language: en
+    scoreThreshold: 0.5
+```
 
 The `store.dialect` is `sqlite` by default; select `postgres` and provide `store.connectionString` as a secret reference for the runtime and the store-management commands (both use the same configured store):
 
