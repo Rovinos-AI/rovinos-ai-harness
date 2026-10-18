@@ -17,6 +17,11 @@ function statusCode(error: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
 }
 
+function originalStatusCode(error: unknown): number | undefined {
+  const value = asObject(error)?.originalStatusCode;
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
+}
+
 function readHeader(headers: unknown, name: string): string | undefined {
   if (typeof Headers !== "undefined" && headers instanceof Headers) {
     return headers.get(name) ?? undefined;
@@ -42,12 +47,7 @@ function retryAfterMs(error: unknown): number | undefined {
 }
 
 function mapModelError(error: unknown, status: number | undefined): ProviderError {
-  const originalStatus = asObject(error)?.originalStatusCode;
-  const mappedStatus =
-    status ??
-    (typeof originalStatus === "number" && Number.isSafeInteger(originalStatus)
-      ? originalStatus
-      : undefined);
+  const mappedStatus = status ?? originalStatusCode(error);
   if (mappedStatus === 429) {
     const delay = retryAfterMs(error);
     return new ProviderError("provider_rate_limited", {
@@ -109,14 +109,15 @@ export function mapBedrockError(error: unknown, signal: AbortSignal): ProviderEr
       });
     }
     case "ModelStreamErrorException": {
-      const mapped = mapModelError(error, status);
+      const streamStatus = originalStatusCode(error) ?? status;
+      if (streamStatus !== undefined && streamStatus >= 500) {
+        return new ProviderError("provider_unavailable", { status: streamStatus });
+      }
       const delay = retryAfterMs(error);
-      return mapped.code === "provider_bad_request"
-        ? new ProviderError("provider_rate_limited", {
-            status: status ?? 429,
-            ...(delay === undefined ? {} : { retryAfterMs: delay }),
-          })
-        : mapped;
+      return new ProviderError("provider_rate_limited", {
+        status: 429,
+        ...(delay === undefined ? {} : { retryAfterMs: delay }),
+      });
     }
     case "AccessDeniedException":
       return new ProviderError("provider_auth", { status: status ?? 403 });

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { ModelErrorException } from "@aws-sdk/client-bedrock-runtime";
 import { JsonValue, parseJson } from "@harness/schemas";
-import type { ModelRequest } from "@harness/schemas";
+import type { JsonValue as JsonValueType, ModelRequest } from "@harness/schemas";
 import { Headers, Response, type fetch as undiciFetch } from "undici";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -260,6 +260,14 @@ describe("BedrockAdapter", () => {
     await second.adapter.complete(
       {
         ...baseRequest,
+        tools: [
+          {
+            toolId: "additional",
+            description: "Additional tool",
+            inputSchema: { type: "object" },
+          },
+          ...(baseRequest.tools ?? []),
+        ],
         messages: [
           ...baseRequest.messages,
           { role: "assistant", parts: persistedResult.parts },
@@ -273,6 +281,12 @@ describe("BedrockAdapter", () => {
       },
       context(),
     );
+    expect(second.getRequestBody()).toMatchObject({
+      toolConfig: {
+        tools: [{ toolSpec: { name: "h1" } }, { toolSpec: { name: "h0" } }],
+        toolChoice: { tool: { name: "h0" } },
+      },
+    });
     const sentMessages = z
       .object({
         messages: z.array(z.object({ role: z.string(), content: JsonValue })),
@@ -429,10 +443,10 @@ describe("BedrockAdapter", () => {
   });
 
   it.each([
-    [[1, 2], "[1,2]"],
-    [5, "5"],
-    [null, "null"],
-  ] as const)("serializes non-object JSON tool results as text", async (result, serialized) => {
+    { result: [1, 2] as JsonValueType, serialized: "[1,2]" },
+    { result: 5 as JsonValueType, serialized: "5" },
+    { result: null, serialized: "null" },
+  ])("serializes non-object JSON tool results as text", async ({ result, serialized }) => {
     const first = makeCall();
     const firstResult = await first.adapter.complete(baseRequest, context());
     const second = makeCall({
@@ -861,6 +875,25 @@ describe("BedrockAdapter", () => {
     }
   });
 
+  it("uses the original throttled status for a model-stream exception", () => {
+    const mapped = mapBedrockError(
+      {
+        name: "ModelStreamErrorException",
+        originalStatusCode: 429,
+        $metadata: {
+          httpStatusCode: 424,
+          httpHeaders: { "retry-after": "1" },
+        },
+      },
+      new AbortController().signal,
+    );
+    expect(mapped).toMatchObject({
+      code: "provider_rate_limited",
+      status: 429,
+      retryAfterMs: 1_000,
+    });
+  });
+
   it("maps caller abort to a non-retryable cancellation without retrying send", async () => {
     const controller = new AbortController();
     let requestCount = 0;
@@ -921,7 +954,7 @@ describe("BedrockAdapter", () => {
         Promise.resolve({
           accessKeyId: credentials[0] ?? "",
           secretAccessKey: credentials[1] ?? "",
-          sessionToken: credentials[2],
+          ...(credentials[2] === undefined ? {} : { sessionToken: credentials[2] }),
         }),
     });
     const error = await adapter.complete(baseRequest, context()).then(

@@ -47,7 +47,7 @@ export interface BedrockAdapterOptions {
   readonly credentialsProvider?: () => Promise<BedrockCredentials>;
 }
 
-function isJsonObject(value: JsonValue): value is Record<string, JsonValue> {
+function isJsonObject(value: JsonValue | undefined): value is Record<string, JsonValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -439,6 +439,9 @@ function mapResponsePart(
   }
   if ("toolUse" in block) {
     const callId = context.ids.next();
+    if (block.toolUse.name === undefined) {
+      throw new ProviderError("provider_bad_request");
+    }
     const toolId = toolNames.fromWire.get(block.toolUse.name);
     if (toolId === undefined || block.toolUse.toolUseId === undefined) {
       throw new ProviderError("provider_bad_request");
@@ -470,24 +473,29 @@ function mapResponse(
   }
   const toolUseIdByCallId = new Map<string, string>();
   const toolIdByCallId = new Map<string, string>();
-  const sanitizedContent = content.map((block) => {
-    if ("toolUse" in block) {
-      if (block.toolUse.toolUseId === undefined) {
-        throw new ProviderError("provider_unknown");
-      }
-      return {
-        ...block,
-        toolUse: {
-          ...block.toolUse,
-          toolUseId: safeToolUseId(block.toolUse.toolUseId),
-        },
-      };
-    }
-    return block;
-  });
-  const parts = sanitizedContent.flatMap((block) =>
+  const parts = content.flatMap((block) =>
     mapResponsePart(block, context, toolUseIdByCallId, toolIdByCallId, toolNames),
   );
+  const sanitizedContent = content.map((block) => {
+    const serialized = toJsonValue(block);
+    if (!("toolUse" in block)) {
+      return serialized;
+    }
+    if (
+      block.toolUse.toolUseId === undefined ||
+      !isJsonObject(serialized) ||
+      !isJsonObject(serialized.toolUse)
+    ) {
+      throw new ProviderError("provider_unknown");
+    }
+    return {
+      ...serialized,
+      toolUse: {
+        ...serialized.toolUse,
+        toolUseId: safeToolUseId(block.toolUse.toolUseId),
+      },
+    };
+  });
   const usage = response.usage;
   if (
     usage?.inputTokens === undefined ||
@@ -520,7 +528,7 @@ function mapResponse(
         type: "opaque",
         provider,
         blob: {
-          content: toJsonValue(sanitizedContent),
+          content: sanitizedContent,
           toolUseIdByCallId: Object.fromEntries(toolUseIdByCallId),
           toolIdByCallId: Object.fromEntries(toolIdByCallId),
           wireNameByToolId: toolNames.wireNamesByToolId,
