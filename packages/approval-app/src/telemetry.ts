@@ -149,6 +149,26 @@ function releasePendingErrors(
   }
 }
 
+function queuePendingError(
+  code: ApprovalUiErrorCode,
+  pendingErrors: ApprovalUiErrorCode[],
+  activationWaitExpired: boolean,
+  releaseError: (code: ApprovalUiErrorCode) => void,
+): boolean {
+  if (activationWaitExpired) {
+    releaseError(code);
+    return false;
+  }
+  if (pendingErrors.length === maxPendingRenderSpans) {
+    const droppedCode = pendingErrors.shift();
+    if (droppedCode !== undefined) {
+      releaseError(droppedCode);
+    }
+  }
+  pendingErrors.push(code);
+  return true;
+}
+
 function createRenderSpanRecorder(
   telemetry: ApprovalAppTelemetry,
   window: Window,
@@ -217,17 +237,9 @@ function createRenderSpanRecorder(
         void telemetry.flush();
         return;
       }
-      if (activationWaitExpired) {
-        releaseError(code);
+      if (!queuePendingError(code, pendingErrors, activationWaitExpired, releaseError)) {
         return;
       }
-      if (pendingErrors.length === maxPendingRenderSpans) {
-        const droppedCode = pendingErrors.shift();
-        if (droppedCode !== undefined) {
-          releaseError(droppedCode);
-        }
-      }
-      pendingErrors.push(code);
       waitForActivation();
     },
     dispose() {
