@@ -215,6 +215,20 @@ describe("approval app telemetry", () => {
     lifecycle.dispose();
   });
 
+  it("releases an ambient error dedupe slot when the inactive queue expires", () => {
+    vi.useFakeTimers();
+    const { lifecycle, records, setActive } = setup();
+    setActive(false);
+    lifecycle.reportError("payload_invalid");
+    expect(records).toEqual([]);
+    vi.advanceTimersByTime(2_500);
+    expect(vi.getTimerCount()).toBe(0);
+    setActive(true);
+    lifecycle.reportError("payload_invalid");
+    expect(records).toEqual([{ name: "ui.error", attrs: { code: "payload_invalid" } }]);
+    lifecycle.dispose();
+  });
+
   it("delivers a render failure reported before activation after the shim activates", async () => {
     vi.useFakeTimers();
     const { telemetry, lifecycle, records, frames, setActive } = setup();

@@ -401,6 +401,29 @@ describe("approval actions", () => {
     ]);
   });
 
+  it("records each reveal failure when a retry also fails", async () => {
+    const { actions, bridge, recordCalls } = setup();
+    bridge.callTool
+      .mockResolvedValueOnce({ values: [{ pointer: "/email", value: 42 }] })
+      .mockResolvedValueOnce({ values: [{ pointer: "/email", value: 42 }] });
+    const reveal = actions.querySelector<HTMLButtonElement>("button:last-child");
+    const confirmReveal = async (): Promise<void> => {
+      const expectedRecordCount = recordCalls.length + 1;
+      reveal?.click();
+      document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
+      await vi.waitFor(() => {
+        expect(recordCalls).toHaveLength(expectedRecordCount);
+      });
+    };
+    await confirmReveal();
+    await confirmReveal();
+    expect(bridge.callTool).toHaveBeenCalledTimes(2);
+    expect(recordCalls).toEqual([
+      { name: "ui.error", attrs: { code: "reveal_failed" } },
+      { name: "ui.error", attrs: { code: "reveal_failed" } },
+    ]);
+  });
+
   it("hides bridge exception details from the view and telemetry", async () => {
     const { actions, bridge, recordCalls } = setup();
     bridge.callTool.mockRejectedValue(new Error(rawEmail));

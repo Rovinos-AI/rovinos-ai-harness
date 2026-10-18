@@ -140,9 +140,19 @@ interface RenderSpanRecorder {
   dispose(): void;
 }
 
+function releasePendingErrors(
+  pendingErrors: ApprovalUiErrorCode[],
+  releaseError: (code: ApprovalUiErrorCode) => void,
+): void {
+  for (const code of pendingErrors.splice(0)) {
+    releaseError(code);
+  }
+}
+
 function createRenderSpanRecorder(
   telemetry: ApprovalAppTelemetry,
   window: Window,
+  releaseError: (code: ApprovalUiErrorCode) => void,
 ): RenderSpanRecorder {
   const pending: number[] = [];
   const pendingErrors: ApprovalUiErrorCode[] = [];
@@ -184,7 +194,7 @@ function createRenderSpanRecorder(
       clearActivationTimers();
       activationWaitExpired = true;
       pending.length = 0;
-      pendingErrors.length = 0;
+      releasePendingErrors(pendingErrors, releaseError);
     }, activationWaitTimeoutMs);
   };
 
@@ -288,7 +298,9 @@ export function createApprovalTelemetry(
 ): ApprovalTelemetry {
   const reportedErrors = new Set<ApprovalUiErrorCode>();
   const interactions = createInteractionRecorder(telemetry);
-  const renderSpans = createRenderSpanRecorder(telemetry, environment.window);
+  const renderSpans = createRenderSpanRecorder(telemetry, environment.window, (code) => {
+    reportedErrors.delete(code);
+  });
   let disposed = false;
 
   const reportError = (code: ApprovalUiErrorCode): void => {

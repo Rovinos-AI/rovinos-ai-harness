@@ -258,6 +258,7 @@ export function createApprovalView(root: HTMLElement, options: ApprovalViewOptio
     if (contentKey === previousContentKey) {
       return false;
     }
+    previousContentKey = undefined;
     cleanupActions();
     cleanupActions = (): void => undefined;
     dom.content.replaceChildren();

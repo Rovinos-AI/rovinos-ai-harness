@@ -105,6 +105,31 @@ describe("approval view", () => {
     expect(document.querySelector("h1")?.textContent).toBe(payload.summary);
   });
 
+  it("repairs the prior view after a different payload throws during DOM rendering", () => {
+    const view = createApprovalView(document.body, {
+      clock: { now: () => 1000 },
+      onError: vi.fn(),
+    });
+    expect(view.receive(payload)).toBe(true);
+    const content = document.querySelector("main > div");
+    if (content === null) {
+      throw new Error("Expected the view content container");
+    }
+    const append = vi.spyOn(content, "append").mockImplementation(() => {
+      throw new Error("Synthetic render failure");
+    });
+    expect(() =>
+      view.receive({
+        ...payload,
+        summary: "Different payload",
+      }),
+    ).toThrow("Synthetic render failure");
+    append.mockRestore();
+    expect(view.receive(payload)).toBe(true);
+    expect(document.querySelector("h1")?.textContent).toBe(payload.summary);
+    expect(document.body.textContent).toContain("mail.send");
+  });
+
   it("distinguishes JSON strings, primitives, arrays, objects, and empty containers", () => {
     setup({
       ...payload,
