@@ -215,7 +215,7 @@ describe("approval app telemetry", () => {
     lifecycle.dispose();
   });
 
-  it("releases an ambient error dedupe slot when the inactive queue expires", () => {
+  it("releases dedupe slots for errors dropped after the activation deadline", () => {
     vi.useFakeTimers();
     const { lifecycle, records, setActive } = setup();
     setActive(false);
@@ -223,6 +223,22 @@ describe("approval app telemetry", () => {
     expect(records).toEqual([]);
     vi.advanceTimersByTime(2_500);
     expect(vi.getTimerCount()).toBe(0);
+    lifecycle.reportError("payload_invalid");
+    expect(records).toEqual([]);
+    setActive(true);
+    lifecycle.reportError("payload_invalid");
+    expect(records).toEqual([{ name: "ui.error", attrs: { code: "payload_invalid" } }]);
+    lifecycle.dispose();
+  });
+
+  it("releases an ambient error dedupe slot when the pending queue evicts it", () => {
+    vi.useFakeTimers();
+    const { lifecycle, records, setActive } = setup();
+    setActive(false);
+    lifecycle.reportError("payload_invalid");
+    for (let index = 0; index < 100; index += 1) {
+      lifecycle.reportError("resolve_failed");
+    }
     setActive(true);
     lifecycle.reportError("payload_invalid");
     expect(records).toEqual([{ name: "ui.error", attrs: { code: "payload_invalid" } }]);

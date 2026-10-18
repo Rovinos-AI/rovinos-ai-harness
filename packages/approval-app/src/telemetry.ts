@@ -218,10 +218,14 @@ function createRenderSpanRecorder(
         return;
       }
       if (activationWaitExpired) {
+        releaseError(code);
         return;
       }
       if (pendingErrors.length === maxPendingRenderSpans) {
-        pendingErrors.shift();
+        const droppedCode = pendingErrors.shift();
+        if (droppedCode !== undefined) {
+          releaseError(droppedCode);
+        }
       }
       pendingErrors.push(code);
       waitForActivation();
