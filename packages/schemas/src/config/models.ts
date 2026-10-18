@@ -42,6 +42,14 @@ export const ModelProviderConfigSchema = z
   .strict()
   .superRefine((provider, context) => {
     if (provider.kind === "bedrock") {
+      if (provider.region !== undefined && !/^[a-z]{2}(-[a-z]+)+-\d+$/u.test(provider.region)) {
+        context.addIssue({
+          code: "custom",
+          path: ["region"],
+          message: "Bedrock region must be a valid AWS region identifier.",
+          params: { errorCode: "provider_region_invalid" },
+        });
+      }
       if (provider.region === undefined) {
         context.addIssue({
           code: "custom",

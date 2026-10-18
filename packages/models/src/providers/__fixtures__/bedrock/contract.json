@@ -28,12 +28,14 @@
           "provider": "bedrock",
           "blob": {
             "content": [{ "text": "answer" }],
-            "toolUseIdByCallId": {}
+            "toolUseIdByCallId": {},
+            "toolIdByCallId": {},
+            "wireNameByToolId": {}
           }
         }
       ],
       "usage": { "inputTokens": 2, "outputTokens": 3 },
-      "finishReason": "end_turn"
+      "finishReason": "stop"
     }
   },
   {
@@ -62,7 +64,7 @@
               {
                 "toolUse": {
                   "toolUseId": "tooluse_fixture",
-                  "name": "lookup",
+                  "name": "h0",
                   "input": { "query": "x" }
                 }
               }
@@ -89,17 +91,19 @@
               {
                 "toolUse": {
                   "toolUseId": "tooluse_fixture",
-                  "name": "lookup",
+                  "name": "h0",
                   "input": { "query": "x" }
                 }
               }
             ],
-            "toolUseIdByCallId": { "00000000000000000000000000": "tooluse_fixture" }
+            "toolUseIdByCallId": { "00000000000000000000000000": "tooluse_fixture" },
+            "toolIdByCallId": { "00000000000000000000000000": "lookup" },
+            "wireNameByToolId": { "lookup": "h0" }
           }
         }
       ],
       "usage": { "inputTokens": 2, "outputTokens": 3 },
-      "finishReason": "tool_use"
+      "finishReason": "tool_calls"
     }
   },
   {
@@ -138,12 +142,12 @@
     },
     "expected": {
       "usage": {
-        "inputTokens": 7,
+        "inputTokens": 15,
         "outputTokens": 11,
         "cacheReadTokens": 5,
         "cacheWriteTokens": 3
       },
-      "finishReason": "max_tokens"
+      "finishReason": "length"
     }
   },
   {
