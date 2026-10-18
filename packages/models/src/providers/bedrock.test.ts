@@ -381,6 +381,7 @@ describe("BedrockAdapter", () => {
   });
 
   it("sanitizes provider tool-use IDs before storing and replaying tool results", async () => {
+    const sanitizedId = `toolu_${Buffer.from("provider.id:1", "utf8").toString("base64url")}`;
     const first = makeCall({
       output: {
         message: {
@@ -401,7 +402,7 @@ describe("BedrockAdapter", () => {
         content: z.array(z.object({ toolUse: z.object({ toolUseId: z.string() }) })),
       })
       .parse(opaque.blob).content;
-    expect(savedContent[0]?.toolUse.toolUseId).toBe("toolu_cHJvdmlkZXIuaWQ6MQ");
+    expect(savedContent[0]?.toolUse.toolUseId).toBe(sanitizedId);
     expect(savedContent[0]?.toolUse.toolUseId).toMatch(/^[A-Za-z0-9_-]+$/u);
     const toolCall = firstResult.parts.find((part) => part.type === "tool_call");
     expect(toolCall?.type).toBe("tool_call");
@@ -437,9 +438,7 @@ describe("BedrockAdapter", () => {
     const messages = z
       .object({ messages: z.array(z.object({ role: z.string(), content: JsonValue })) })
       .parse(second.getRequestBody()).messages;
-    expect(messages.at(-1)?.content).toMatchObject([
-      { toolResult: { toolUseId: "toolu_cHJvdmlkZXIuaWQ6MQ" } },
-    ]);
+    expect(messages.at(-1)?.content).toMatchObject([{ toolResult: { toolUseId: sanitizedId } }]);
   });
 
   it.each([

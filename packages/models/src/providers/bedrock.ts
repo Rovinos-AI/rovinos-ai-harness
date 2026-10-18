@@ -2,25 +2,20 @@
 import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import type {
   BedrockRuntimeClientConfig,
-  ContentBlock,
   ConverseCommandInput,
   ConverseResponse,
-  Message as BedrockMessage,
 } from "@aws-sdk/client-bedrock-runtime";
-import { Buffer } from "node:buffer";
-import {
-  Code,
-  JsonValue,
-  lookupCapabilities,
-  type Capabilities,
-  type ModelRequest,
-  type Part,
-} from "@harness/schemas";
+import { Code, lookupCapabilities, type Capabilities, type ModelRequest } from "@harness/schemas";
 import { mapBedrockError } from "./bedrock-errors.js";
+import {
+  buildMessages,
+  createToolNameMapping,
+  mappedToolName,
+  type ToolNameMapping,
+} from "./bedrock-messages.js";
+import { mapBedrockResponse } from "./bedrock-response.js";
 import { ProviderError } from "../errors.js";
 import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
-
-const BEDROCK_TOOL_NAME = /^[a-zA-Z0-9_-]{1,64}$/u;
 
 /** Credentials used by tests; production callers should omit this to use the AWS default chain. */
 export interface BedrockCredentials {
