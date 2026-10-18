@@ -74,6 +74,16 @@ export const ModelRetryConfigSchema = z
     idleTimeoutMs: z.coerce.number().int().positive().default(60_000),
   })
   .strict()
+  .superRefine((retry, context) => {
+    if (retry.streamTimeoutMs < retry.timeoutMs) {
+      context.addIssue({
+        code: "custom",
+        path: ["streamTimeoutMs"],
+        message: "Streaming timeout must be at least the request timeout.",
+        params: { errorCode: "stream_timeout_before_request_timeout" },
+      });
+    }
+  })
   .prefault({});
 
 /** Configured input, output, and optional cached-token prices in integer micros per million tokens. */

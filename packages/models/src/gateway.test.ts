@@ -170,7 +170,8 @@ describe("ModelGateway", () => {
       clock: { now: () => 0 },
       retryPolicy: ModelRetryConfigSchema.parse({
         maxAttempts: 1,
-        timeoutMs: 100,
+        timeoutMs: 10,
+        streamTimeoutMs: 100,
         idleTimeoutMs: 10,
       }),
     });

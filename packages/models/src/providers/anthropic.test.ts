@@ -283,6 +283,11 @@ describe("AnthropicAdapter", () => {
         index: 0,
         delta: { type: "thinking_delta", thinking },
       })),
+      ...Array.from({ length: 12 }, (_, index): JsonValue => ({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: `private-${String(index)}` },
+      })),
       {
         type: "content_block_delta",
         index: 0,
@@ -310,14 +315,14 @@ describe("AnthropicAdapter", () => {
     const adapter = new AnthropicAdapter({
       apiKey: { reveal: () => "synthetic-test-key" },
       baseURL: "https://provider.test",
-      fetch: () => Promise.resolve(streamedSseResponse(frames, 3)),
+      fetch: () => Promise.resolve(streamedSseResponse(frames, 5)),
     });
     const progress: unknown[] = [];
     const signal = new AbortController().signal;
     const result = await collectProviderStream({
       stream: (streamSignal) => adapter.stream(baseRequest, context(streamSignal)),
       signal,
-      idleTimeoutMs: 30,
+      idleTimeoutMs: 50,
       requestId,
       onProgress: (update) => progress.push(update),
     });

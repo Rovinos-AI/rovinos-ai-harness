@@ -73,6 +73,15 @@ describe("ModelsConfigSchema", () => {
     expect(() => ModelsConfigSchema.parse({ retry: { unrecognized: true } })).toThrow();
   });
 
+  it("requires the streaming timeout to cover the request timeout", () => {
+    expect(() =>
+      ModelRetryConfigSchema.parse({ timeoutMs: 120_001, streamTimeoutMs: 120_000 }),
+    ).toThrow();
+    expect(
+      ModelRetryConfigSchema.parse({ timeoutMs: 120_000, streamTimeoutMs: 120_000 }),
+    ).toMatchObject({ timeoutMs: 120_000, streamTimeoutMs: 120_000 });
+  });
+
   it("validates per-model input and output prices", () => {
     expect(
       ModelsConfigSchema.parse({
