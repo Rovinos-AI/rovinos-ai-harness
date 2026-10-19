@@ -63,6 +63,7 @@ export const EVENT_FIELD_CLASS = {
     argsHash: "meta",
     args: "content",
   },
+  tool_execution_started: { callId: "meta", toolId: "meta" },
   tool_result: {
     callId: "meta",
     toolId: "meta",

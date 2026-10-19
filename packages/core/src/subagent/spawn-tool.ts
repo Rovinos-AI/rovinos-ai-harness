@@ -18,6 +18,7 @@ import type { RoleRegistry } from "../roles.js";
 import { z } from "zod";
 import type { SubagentResult } from "./result.js";
 import type { SubagentSupervisor } from "./supervisor.js";
+import type { ToolResumeStrategy } from "../resume-policy.js";
 
 /** Strict model input for the built-in `agent.spawn` tool. */
 export const AgentSpawnInputSchema = z
@@ -77,6 +78,34 @@ export class AgentSpawnTool implements ToolPort {
     return [...specs.filter(({ toolId }) => toolId !== AGENT_SPAWN_ID), AGENT_SPAWN_SPEC];
   }
 
+  /** Provides durable child recovery only for the non-idempotent spawn tool. */
+  resumeStrategy(toolId: CodeType): ToolResumeStrategy | undefined {
+    if (toolId !== AGENT_SPAWN_ID) {
+      return this.inner.resumeStrategy?.(toolId);
+    }
+    return {
+      onDanglingIntent: async (call, state, context) => {
+        const parsed = AgentSpawnInputSchema.safeParse(call.args);
+        if (!parsed.success) {
+          return {
+            kind: "result" as const,
+            execution: {
+              outcome: "error" as const,
+              errorCode: "agent_spawn_invalid",
+              result: null,
+            },
+          };
+        }
+        return this.supervisor.resumeDanglingIntent({
+          call,
+          state,
+          context,
+          role: this.roles.resolveRole(parsed.data.role),
+        });
+      },
+    };
+  }
+
   /** Leaves spawn inputs tokenized for the child run; delegates other preparation. */
   prepare(call: ModelToolCall, context: RunContext): Promise<ModelToolCall> {
     return this.inner.prepare?.(call, context) ?? Promise.resolve(call);
@@ -109,6 +138,9 @@ export class AgentSpawnTool implements ToolPort {
         }
       }
       throw error;
+    }
+    if (result.status === "suspended") {
+      return { outcome: "ok", result: null, suspend: true };
     }
     if (result.status === "failed" || result.status === "cancelled") {
       const errorCode = Code.safeParse(result.errorCode);

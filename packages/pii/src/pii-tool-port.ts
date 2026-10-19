@@ -35,6 +35,7 @@ export interface PiiToolContext {
 export interface PiiToolResult {
   readonly binary?: boolean;
   readonly metadata?: JsonValue;
+  readonly suspend?: boolean;
   readonly outcome: "ok" | "error";
   readonly result: JsonValue;
   readonly errorCode?: Code;
@@ -202,6 +203,15 @@ export class PiiToolPort implements PiiToolPortLike {
       }
       return { outcome: "error", errorCode: "tool_failed", result: null };
     }
+    return this.sanitizeRecoveredResult(call, context, execution);
+  }
+
+  /** Tokenizes a recovered tool result without executing the underlying tool again. */
+  async sanitizeRecoveredResult(
+    call: PiiToolCall,
+    context: PiiToolContext,
+    execution: PiiToolResult,
+  ): Promise<PiiToolResult> {
     if (execution.binary === true) {
       return binaryResult(execution, call, context, this.deps.tokenizer);
     }
@@ -240,6 +250,7 @@ async function binaryResult(
     outcome: execution.outcome,
     result: payload.data,
     binary: true,
+    ...(execution.suspend === true ? { suspend: true } : {}),
     ...(execution.outcome === "error" ? { errorCode: "tool_failed" } : {}),
     ...(metadata === undefined ? {} : { metadata }),
   };
@@ -277,6 +288,7 @@ async function tokenizeToolOutput(
     const result = {
       outcome: execution.outcome,
       result: markJsonSanitized(stored.value),
+      ...(execution.suspend === true ? { suspend: true } : {}),
       ...(execution.outcome === "error"
         ? { errorCode: safeToolErrorCode(execution.errorCode) }
         : {}),

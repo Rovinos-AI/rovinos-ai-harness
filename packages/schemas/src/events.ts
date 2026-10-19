@@ -124,6 +124,15 @@ const toolIntentEvent = z
   })
   .strict();
 
+const toolExecutionStartedEvent = z
+  .object({
+    ...eventEnvelopeShape,
+    type: z.literal("tool_execution_started"),
+    callId: Id,
+    toolId: Code,
+  })
+  .strict();
+
 const toolResultEvent = z
   .object({
     ...eventEnvelopeShape,
@@ -273,6 +282,7 @@ export const EventSchema = z.discriminatedUnion("type", [
   modelRequestEvent,
   modelResponseEvent,
   toolIntentEvent,
+  toolExecutionStartedEvent,
   toolResultEvent,
   approvalRequestedEvent,
   approvalResolvedEvent,

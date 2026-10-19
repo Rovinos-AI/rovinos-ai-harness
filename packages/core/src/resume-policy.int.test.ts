@@ -22,6 +22,7 @@ import { InMemoryEventStore } from "@harness/store";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { foldRunState, type ToolIntentEvent } from "./run-state.js";
 import { RunRecorder } from "./recorder.js";
+import type { ToolPort } from "./ports.js";
 import { planDanglingIntents } from "./resume-policy.js";
 import {
   applyDanglingIntents,
@@ -332,7 +333,97 @@ describe("dangling tool intent resume", () => {
     });
   });
 
-  it("does not execute a non-idempotent call until approval", async () => {
+  describe("tool resume strategy", () => {
+    it("records recovered child completion before its tool result", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+      const { events } = await createDanglingIntent(recorder, false);
+      const tool: ToolPort = {
+        describe: () => ({ idempotent: false, timeoutMs: 1_000 }),
+        execute: () => Promise.resolve({ outcome: "ok", result: null }),
+        resumeStrategy: () => ({
+          onDanglingIntent: () =>
+            Promise.resolve({
+              kind: "result",
+              execution: {
+                outcome: "ok",
+                result: { childRunId: "55555555555555555555555555", status: "completed" },
+              },
+              completion: {
+                childRunId: "55555555555555555555555555",
+                outcome: "completed",
+                inputTokens: 2,
+                outputTokens: 3,
+                steps: 1,
+              },
+            }),
+        }),
+      };
+      const state = foldRunState(events);
+      await applyDanglingIntents(
+        {
+          recorder,
+          tool,
+          clock,
+          runId,
+          signal: new AbortController().signal,
+          ids: new SequentialIdGenerator(),
+        },
+        state,
+        planDanglingIntents(state, tool),
+      );
+
+      const stored: Event[] = [];
+      for await (const event of store.read(runId)) {
+        stored.push(event);
+      }
+      expect(stored.slice(-2).map(({ type }) => type)).toEqual([
+        "subagent_completed",
+        "tool_result",
+      ]);
+    });
+
+    it("suspends instead of recording a tool result while the child awaits approval", async () => {
+      const store = new InMemoryEventStore();
+      const clock = new FakeClock(100);
+      const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
+      const { events } = await createDanglingIntent(recorder, false);
+      const tool: ToolPort = {
+        describe: () => ({ idempotent: false, timeoutMs: 1_000 }),
+        execute: () => Promise.resolve({ outcome: "ok", result: null }),
+        resumeStrategy: () => ({
+          onDanglingIntent: () => Promise.resolve({ kind: "suspend" }),
+        }),
+      };
+      const state = foldRunState(events);
+      await applyDanglingIntents(
+        {
+          recorder,
+          tool,
+          clock,
+          runId,
+          signal: new AbortController().signal,
+          ids: new SequentialIdGenerator(),
+        },
+        state,
+        planDanglingIntents(state, tool),
+      );
+
+      const stored: Event[] = [];
+      for await (const event of store.read(runId)) {
+        stored.push(event);
+      }
+      expect(stored.at(-1)).toMatchObject({
+        type: "run_status_changed",
+        to: "suspended",
+        reason: "awaiting_subagent",
+      });
+      expect(stored.some((event) => event.type === "tool_result")).toBe(false);
+    });
+  });
+
+  it("executes a non-idempotent dangling call once after resume-ambiguity approval", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
     const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
@@ -413,9 +504,12 @@ describe("dangling tool intent resume", () => {
       throw new Error("Expected approval resolution event.");
     }
 
-    const resultEvents = await resolveDanglingIntentApproval(options, intent, request, resolution);
-    expect(resultEvents.map(({ type }) => type)).toEqual(["tool_result"]);
-    expect(resultEvents[0]).toMatchObject({ callId, outcome: "ok" });
+    const resultEvents = await resolveDanglingIntentApproval(options, intent, {
+      approval: request,
+      resolution,
+    });
+    expect(resultEvents.map(({ type }) => type)).toEqual(["tool_execution_started", "tool_result"]);
+    expect(resultEvents[1]).toMatchObject({ callId, outcome: "ok" });
     expect(tool.calls).toHaveLength(1);
     const stored: Event[] = [];
     for await (const event of store.read(runId)) {
@@ -578,21 +672,22 @@ describe("dangling tool intent resume", () => {
       throw new Error("Expected approval resolution event.");
     }
     await expect(
-      resolveDanglingIntentApproval(
-        options,
-        intent,
-        { ...requestEvent, callId: thirdCallId },
+      resolveDanglingIntentApproval(options, intent, {
+        approval: { ...requestEvent, callId: thirdCallId },
         resolution,
-      ),
+      }),
     ).rejects.toBeInstanceOf(ResumeActionMismatchError);
     await expect(
-      resolveDanglingIntentApproval(options, intent, requestEvent, {
-        ...resolution,
-        approvalId: thirdCallId,
+      resolveDanglingIntentApproval(options, intent, {
+        approval: requestEvent,
+        resolution: { ...resolution, approvalId: thirdCallId },
       }),
     ).rejects.toBeInstanceOf(ResumeActionMismatchError);
 
-    const result = await resolveDanglingIntentApproval(options, intent, requestEvent, resolution);
+    const result = await resolveDanglingIntentApproval(options, intent, {
+      approval: requestEvent,
+      resolution,
+    });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       type: "tool_result",

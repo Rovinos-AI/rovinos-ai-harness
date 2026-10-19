@@ -9,9 +9,9 @@ function brokenFactory(): EventStoreFactory {
   return () => {
     const reference = new InMemoryEventStore();
     const store: EventStore = {
-      async append(runId, events, expectedSeq) {
+      async append(runId, events, expectedSeq, leaseOwner) {
         try {
-          return await reference.append(runId, events, expectedSeq);
+          return await reference.append(runId, events, expectedSeq, leaseOwner);
         } catch (error) {
           if (error instanceof SeqConflictError) {
             return { nextSeq: expectedSeq + events.length };
@@ -19,8 +19,11 @@ function brokenFactory(): EventStoreFactory {
           throw error;
         }
       },
-      appendWithSnapshot: (runId, events, expectedSeq, snapshot) =>
-        reference.appendWithSnapshot(runId, events, expectedSeq, snapshot),
+      appendWithSnapshot: (runId, events, expectedSeq, snapshot, leaseOwner) =>
+        reference.appendWithSnapshot(runId, events, expectedSeq, snapshot, leaseOwner),
+      claimRunExecution: (...args) => reference.claimRunExecution(...args),
+      renewRunExecution: (...args) => reference.renewRunExecution(...args),
+      releaseRunExecution: (...args) => reference.releaseRunExecution(...args),
       latestSnapshot: (runId) => reference.latestSnapshot(runId),
       retainedSnapshots: (runId, limit) => reference.retainedSnapshots(runId, limit),
       read: (runId, range) => reference.read(runId, range),

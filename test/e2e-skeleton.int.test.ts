@@ -67,7 +67,7 @@ import {
   SandboxExecTool,
   type SandboxBackend,
 } from "@harness/sandbox";
-import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
+import { InMemoryEventStore, SqliteEventStore, type EventStore } from "@harness/store";
 import { ProviderError, type ProviderAdapter } from "@harness/models";
 import { FakeProvider } from "@harness/models/testing";
 import { ApprovalNotificationSchema, buildApprovalPayload } from "@harness/policy";
@@ -227,7 +227,7 @@ function syntheticTools(
   };
 }
 
-async function readEvents(store: SqliteEventStore, runId: Id) {
+async function readEvents(store: EventStore, runId: Id) {
   const events: Event[] = [];
   for await (const event of store.read(runId)) {
     events.push(event);
@@ -1571,6 +1571,128 @@ describe("resume", () => {
       }
     } finally {
       await store.close();
+    }
+  });
+
+  it("resumes an in-flight child through the runtime and delivers its result once", async () => {
+    const store = new InMemoryEventStore();
+    const childToolId = Code.parse("e2e.child_write");
+    const spawnCallId = Id.parse("77777777777777777777777771");
+    const childCallId = Id.parse("77777777777777777777777772");
+    let parentCalls = 0;
+    let childCalls = 0;
+    let childWrites = 0;
+    const model: ModelPort = {
+      complete: (request) => {
+        if (request.role === "worker") {
+          childCalls += 1;
+          return Promise.resolve(
+            childCalls === 1
+              ? completion(
+                  [{ callId: childCallId, toolId: childToolId, args: { value: "synthetic" } }],
+                  "write one value",
+                )
+              : completion([], "child complete"),
+          );
+        }
+        parentCalls += 1;
+        return Promise.resolve(
+          parentCalls === 1
+            ? completion(
+                [
+                  {
+                    callId: spawnCallId,
+                    toolId: "agent.spawn",
+                    args: { role: "worker", goal: "write one value" },
+                  },
+                ],
+                "spawn one child",
+              )
+            : completion([], "parent complete"),
+        );
+      },
+    };
+    const tool: ToolPort = {
+      describe: (toolId) =>
+        toolId === childToolId ? { idempotent: false, timeoutMs: 1_000 } : undefined,
+      getToolSpecs: () => [
+        { toolId: childToolId, description: "Write once", inputSchema: { type: "object" } },
+      ],
+      execute: () => {
+        childWrites += 1;
+        return Promise.resolve({ outcome: "ok", result: { written: true } });
+      },
+    };
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        pii: PiiConfigSchema.parse({ enabled: false }),
+        models: ModelsConfigSchema.parse({
+          routing: {
+            default: [{ provider: "local", model: "parent" }],
+            roles: { worker: [{ provider: "local", model: "worker" }] },
+          },
+        }),
+        roles: [
+          { id: "worker", route: "worker", tools: [childToolId], maxDepth: 2, maxChildren: 1 },
+        ],
+      },
+      {
+        store,
+        clock: new FakeClock(1_000),
+        ids: new SequentialIdGenerator(),
+        model,
+        tool,
+        context: new NaiveContext(),
+        policy: {
+          version: Code.parse("e2e.policy"),
+          decide: (call) => ({
+            decision: call.toolId === childToolId ? "ask" : "allow",
+            ruleId: Code.parse("e2e.rule"),
+            reason: "e2e_decision",
+            editable: [],
+          }),
+        },
+        transientVault: true,
+      },
+    );
+    try {
+      const initial = await runtime.run("delegate a write");
+      expect(initial.status).toBe("suspended");
+      const parentRunId = initial.events[0]?.runId;
+      if (parentRunId === undefined) {
+        throw new Error("Expected the parent run id.");
+      }
+      const parentEvents = await readEvents(store, parentRunId);
+      const spawn = parentEvents.find((event) => event.type === "subagent_spawned");
+      if (spawn?.type !== "subagent_spawned") {
+        throw new Error("Expected a durable child announcement.");
+      }
+      const childEvents = await readEvents(store, spawn.childRunId);
+      const approval = childEvents.find((event) => event.type === "approval_requested");
+      if (approval?.type !== "approval_requested") {
+        throw new Error("Expected the child approval request.");
+      }
+
+      await runtime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
+      const resumed = await runtime.resume(parentRunId);
+      const completedParentEvents = await readEvents(store, parentRunId);
+      expect(resumed.status).toBe("completed");
+      expect(childWrites).toBe(1);
+      expect(
+        completedParentEvents.filter((event) => event.type === "subagent_spawned"),
+      ).toHaveLength(1);
+      expect(
+        completedParentEvents.filter((event) => event.type === "subagent_completed"),
+      ).toHaveLength(1);
+      expect(
+        completedParentEvents.filter(
+          (event) => event.type === "tool_result" && event.callId === spawnCallId,
+        ),
+      ).toHaveLength(1);
+      expect(childCalls).toBe(2);
+    } finally {
+      await runtime.close();
     }
   });
 });

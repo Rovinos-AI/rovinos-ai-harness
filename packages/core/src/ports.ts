@@ -23,6 +23,7 @@ import type {
   TokenizedModelGatewayResponse,
   ValueTransform,
 } from "@harness/models";
+import type { ToolResumeStrategy } from "./resume-policy.js";
 import { z } from "zod";
 
 /** Provider-neutral request contract shared with the model gateway. */
@@ -104,6 +105,8 @@ export interface ToolDescription {
 export interface ToolExecutionResult {
   /** True only for a ToolBinaryPayloadSchema byte array; outer offloading is required. */
   readonly binary?: boolean;
+  /** Signals that the run must suspend without recording a tool result. */
+  readonly suspend?: boolean;
   readonly outcome: "ok" | "error";
   readonly result: JsonValue;
   readonly errorCode?: Code;
@@ -111,6 +114,8 @@ export interface ToolExecutionResult {
 
 /** Tool executor used by the run loop. */
 export interface ToolPort {
+  /** Returns custom durable recovery behavior for a tool's dangling intent. */
+  resumeStrategy?(toolId: Code): ToolResumeStrategy | undefined;
   /** Sanitizes arguments before any durable model response or tool intent is recorded. */
   prepare?(call: ModelToolCall, context: RunContext): Promise<ModelToolCall>;
   /**
