@@ -69,6 +69,72 @@ function registerEnqueueConformance(factory: RunQueueFactoryCreator): void {
   });
 }
 
+function registerCompletedEnqueueConformance(factory: RunQueueFactoryCreator): void {
+  it("allows the same run and idempotency key to be enqueued after completion", async () => {
+    const clock = new FakeClock(100);
+    const instance = await factory(clock);
+    try {
+      const queue = instance.open();
+      const input = {
+        kind: "start" as const,
+        runId: "00000000000000000000000007",
+        idempotencyKey: "synthetic-reused-idempotency-key",
+      };
+      const first = await queue.enqueue(input);
+      const [claimed] = await queue.claim("worker.first", 1, 100);
+      expect(claimed?.jobId).toBe(first.jobId);
+      expect(await queue.complete(first.jobId, "worker.first")).toBe(true);
+
+      const requeued = await queue.enqueue(input);
+
+      expect(requeued.jobId).not.toBe(first.jobId);
+      expect(requeued.runId).toBe(first.runId);
+      expect(requeued.idempotencyKey).toBe(first.idempotencyKey);
+    } finally {
+      await instance.cleanup();
+    }
+  });
+}
+
+function registerEnqueueCompletionRaceConformance(factory: RunQueueFactoryCreator): void {
+  it("does not fail when enqueue races with completion by run ID or idempotency key", async () => {
+    const instance = await factory(new FakeClock(100));
+    try {
+      const queue = instance.open();
+      const byRun = await queue.enqueue({
+        kind: "start",
+        runId: "00000000000000000000000008",
+      });
+      await queue.claim("worker.first", 1, 100);
+      const [runDuplicate, runCompleted] = await Promise.all([
+        queue.enqueue({ kind: "resume", runId: byRun.runId }),
+        queue.complete(byRun.jobId, "worker.first"),
+      ]);
+      expect(runDuplicate.runId).toBe(byRun.runId);
+      expect(runCompleted).toBe(true);
+
+      const byKey = await queue.enqueue({
+        kind: "start",
+        runId: "00000000000000000000000009",
+        idempotencyKey: "synthetic-racing-idempotency-key",
+      });
+      await queue.claim("worker.second", 1, 100);
+      const [keyDuplicate, keyCompleted] = await Promise.all([
+        queue.enqueue({
+          kind: "resume",
+          runId: "00000000000000000000000010",
+          idempotencyKey: "synthetic-racing-idempotency-key",
+        }),
+        queue.complete(byKey.jobId, "worker.second"),
+      ]);
+      expect(keyDuplicate.idempotencyKey).toBe(byKey.idempotencyKey);
+      expect(keyCompleted).toBe(true);
+    } finally {
+      await instance.cleanup();
+    }
+  });
+}
+
 function registerClaimConformance(factory: RunQueueFactoryCreator): void {
   it("claims each job once across two connections for 200 races", async () => {
     await withQueue(factory, async (instance) => {
@@ -88,9 +154,50 @@ function registerClaimConformance(factory: RunQueueFactoryCreator): void {
         if (owner === undefined) {
           throw new Error("A claimed job must have a lease owner");
         }
+
         await expect(first.complete(job.jobId, owner)).resolves.toBe(true);
       }
     });
+  });
+}
+
+function registerOrderingConformance(factory: RunQueueFactoryCreator): void {
+  it("orders claimable jobs by priority and availability time", async () => {
+    const clock = new FakeClock(100);
+    const instance = await factory(clock);
+    try {
+      const queue = instance.open();
+      const lowerPriority = await queue.enqueue({
+        kind: "start",
+        runId: "00000000000000000000000011",
+        priority: 1,
+      });
+      const highPriorityFuture = await queue.enqueue({
+        kind: "start",
+        runId: "00000000000000000000000012",
+        priority: 10,
+        availableAt: 200,
+      });
+      const higherPriority = await queue.enqueue({
+        kind: "start",
+        runId: "00000000000000000000000013",
+        priority: 10,
+      });
+
+      const firstBatch = await queue.claim("worker.first", 3, 100);
+      expect(firstBatch.map(({ jobId }) => jobId)).toEqual([
+        higherPriority.jobId,
+        lowerPriority.jobId,
+      ]);
+      for (const claimed of firstBatch) {
+        expect(await queue.complete(claimed.jobId, "worker.first")).toBe(true);
+      }
+      clock.advance(100);
+      const [availableLater] = await queue.claim("worker.second", 1, 100);
+      expect(availableLater?.jobId).toBe(highPriorityFuture.jobId);
+    } finally {
+      await instance.cleanup();
+    }
   });
 }
 
@@ -174,21 +281,51 @@ function registerRetryConformance(factory: RunQueueFactoryCreator): void {
       await instance.cleanup();
     }
   });
+
+  it("dead-letters a final-attempt job after its lease expires", async () => {
+    const clock = new FakeClock(100);
+    const instance = await factory(clock);
+    try {
+      const queue = instance.open();
+      const job = await queue.enqueue({
+        kind: "start",
+        runId: "00000000000000000000000014",
+        maxAttempts: 1,
+      });
+      await queue.claim("worker.first", 1, 20);
+      clock.advance(20);
+
+      expect(await queue.claim("worker.second", 1, 20)).toHaveLength(0);
+      expect(await queue.getDeadLetter(job.jobId)).toMatchObject({
+        attempts: 1,
+        maxAttempts: 1,
+        lastErrorCode: "worker.lease_expired",
+      });
+    } finally {
+      await instance.cleanup();
+    }
+  });
 }
 
 function registerReleaseConformance(factory: RunQueueFactoryCreator): void {
-  it("releases a lease for immediate graceful requeue", async () => {
-    await withQueue(factory, async (instance) => {
+  it("refunds the final attempt on release for immediate graceful requeue", async () => {
+    const instance = await factory(new FakeClock(100));
+    try {
       const queue = instance.open();
       const job = await queue.enqueue({
         kind: "resume",
         runId: "00000000000000000000000006",
+        maxAttempts: 1,
       });
-      await queue.claim("worker.first", 1, 100);
+      const [claimed] = await queue.claim("worker.first", 1, 100);
+      expect(claimed?.attempts).toBe(1);
       expect(await queue.release(job.jobId, "worker.first")).toBe(true);
       const [reclaimed] = await queue.claim("worker.second", 1, 100);
       expect(reclaimed?.jobId).toBe(job.jobId);
-    });
+      expect(reclaimed?.attempts).toBe(1);
+    } finally {
+      await instance.cleanup();
+    }
   });
 }
 
@@ -196,7 +333,10 @@ function registerReleaseConformance(factory: RunQueueFactoryCreator): void {
 export function runQueueConformance(name: string, factory: RunQueueFactoryCreator): void {
   describe(name, () => {
     registerEnqueueConformance(factory);
+    registerCompletedEnqueueConformance(factory);
+    registerEnqueueCompletionRaceConformance(factory);
     registerClaimConformance(factory);
+    registerOrderingConformance(factory);
     registerLeaseConformance(factory);
     registerRetryConformance(factory);
     registerReleaseConformance(factory);

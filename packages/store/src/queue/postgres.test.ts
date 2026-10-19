@@ -11,6 +11,8 @@ const fakePg = vi.hoisted(() => {
   const migrations = new Map<string, string>();
   const locks = new Map<string, number>();
   let nextClientId = 0;
+  let nextConnectionWait: (() => Promise<void>) | undefined;
+  let beforeNextForUpdate: (() => void) | undefined;
 
   function stringValue(values: unknown[], index: number): string {
     const value = values[index];
@@ -45,6 +47,11 @@ const fakePg = vi.hoisted(() => {
     rowCount: number;
   } {
     const sql = query.replaceAll(/\s+/gu, " ").trim();
+    if (sql.includes("FOR UPDATE") && beforeNextForUpdate !== undefined) {
+      const hook = beforeNextForUpdate;
+      beforeNextForUpdate = undefined;
+      hook();
+    }
     if (sql === "COMMIT" || sql === "ROLLBACK") {
       releaseLocks(clientId);
       return { rows: [], rowCount: 0 };
@@ -63,27 +70,29 @@ const fakePg = vi.hoisted(() => {
       const jobId = stringValue(values, 0);
       const runId = stringValue(values, 2);
       const key = values[6];
-      const existing = [...jobs.values()].some(
+      const existing = [...jobs.values()].find(
         (row) => row.run_id === runId || (key !== null && row.idempotency_key === key),
       );
-      if (!existing) {
-        jobs.set(jobId, {
-          job_id: jobId,
-          kind: stringValue(values, 1),
-          run_id: runId,
-          priority: numberValue(values, 3),
-          available_at: numberValue(values, 4),
-          attempts: 0,
-          max_attempts: numberValue(values, 5),
-          lease_owner: null,
-          lease_expires_at: null,
-          idempotency_key: key,
-          last_error_code: null,
-          created_at: numberValue(values, 7),
-          updated_at: numberValue(values, 7),
-        });
+      if (existing !== undefined) {
+        return { rows: [], rowCount: 0 };
       }
-      return { rows: [], rowCount: existing ? 0 : 1 };
+      const row = {
+        job_id: jobId,
+        kind: stringValue(values, 1),
+        run_id: runId,
+        priority: numberValue(values, 3),
+        available_at: numberValue(values, 4),
+        attempts: 0,
+        max_attempts: numberValue(values, 5),
+        lease_owner: null,
+        lease_expires_at: null,
+        idempotency_key: key,
+        last_error_code: null,
+        created_at: numberValue(values, 7),
+        updated_at: numberValue(values, 7),
+      };
+      jobs.set(jobId, row);
+      return { rows: [row], rowCount: 1 };
     }
     if (sql.startsWith("SELECT * FROM run_queue WHERE run_id =")) {
       const runId = stringValue(values, 0);
@@ -92,34 +101,26 @@ const fakePg = vi.hoisted(() => {
         (candidate) =>
           candidate.run_id === runId || (key !== null && candidate.idempotency_key === key),
       );
+      if (row !== undefined) {
+        locks.set(String(row.job_id), clientId);
+      }
       return { rows: row === undefined ? [] : [row], rowCount: row === undefined ? 0 : 1 };
     }
-    if (sql.startsWith("WITH expired AS (DELETE FROM run_queue")) {
+    if (sql.startsWith("SELECT * FROM run_queue WHERE attempts >= max_attempts")) {
       const now = numberValue(values, 0);
-      for (const [jobId, row] of jobs) {
-        if (
+      const rows = [...jobs.values()].filter(
+        (row) =>
           typeof row.attempts === "number" &&
           typeof row.max_attempts === "number" &&
           typeof row.lease_expires_at === "number" &&
           row.attempts >= row.max_attempts &&
-          row.lease_expires_at <= now
-        ) {
-          dead.set(jobId, {
-            job_id: jobId,
-            kind: row.kind,
-            run_id: row.run_id,
-            priority: row.priority,
-            attempts: row.attempts,
-            max_attempts: row.max_attempts,
-            idempotency_key: row.idempotency_key,
-            last_error_code: row.last_error_code ?? "worker.lease_expired",
-            created_at: row.created_at,
-            dead_at: now,
-          });
-          jobs.delete(jobId);
-        }
+          row.lease_expires_at <= now &&
+          !locks.has(String(row.job_id)),
+      );
+      for (const row of rows) {
+        locks.set(String(row.job_id), clientId);
       }
-      return { rows: [], rowCount: 0 };
+      return { rows, rowCount: rows.length };
     }
     if (sql.startsWith("SELECT * FROM run_queue WHERE available_at <=")) {
       const now = numberValue(values, 0);
@@ -136,7 +137,20 @@ const fakePg = vi.hoisted(() => {
               (typeof row.lease_expires_at === "number" && row.lease_expires_at <= now)) &&
             !locks.has(String(row.job_id)),
         )
-        .sort((left, right) => Number(right.priority) - Number(left.priority))
+        .sort((left, right) => {
+          const byPriority = Number(right.priority) - Number(left.priority);
+          if (byPriority !== 0) {
+            return byPriority;
+          }
+          const byAvailability = Number(left.available_at) - Number(right.available_at);
+          if (byAvailability !== 0) {
+            return byAvailability;
+          }
+          const byCreation = Number(left.created_at) - Number(right.created_at);
+          return byCreation !== 0
+            ? byCreation
+            : String(left.job_id).localeCompare(String(right.job_id));
+        })
         .slice(0, limit);
       for (const row of rows) {
         locks.set(String(row.job_id), clientId);
@@ -190,14 +204,10 @@ const fakePg = vi.hoisted(() => {
     }
     if (sql.startsWith("SELECT * FROM run_queue WHERE job_id =") && sql.endsWith("FOR UPDATE")) {
       const row = jobs.get(stringValue(values, 0));
-      const now = numberValue(values, 2);
-      const result =
-        row !== undefined &&
-        row.lease_owner === values[1] &&
-        typeof row.lease_expires_at === "number" &&
-        row.lease_expires_at > now
-          ? row
-          : undefined;
+      const result = row !== undefined && row.lease_owner === values[1] ? row : undefined;
+      if (result !== undefined) {
+        locks.set(String(result.job_id), clientId);
+      }
       return { rows: result === undefined ? [] : [result], rowCount: result === undefined ? 0 : 1 };
     }
     if (sql.startsWith("INSERT INTO run_queue_dead (")) {
@@ -209,12 +219,11 @@ const fakePg = vi.hoisted(() => {
         attempts: numberValue(values, 4),
         max_attempts: numberValue(values, 5),
         idempotency_key: values[6],
-        last_error_code: stringValue(values, 7),
+        last_error_code: values[7] === null ? "worker.lease_expired" : stringValue(values, 7),
         created_at: numberValue(values, 8),
         dead_at: numberValue(values, 9),
       };
       dead.set(String(row.job_id), row);
-      jobs.delete(String(row.job_id));
       return { rows: [], rowCount: 1 };
     }
     if (sql.startsWith("DELETE FROM run_queue WHERE job_id =")) {
@@ -248,6 +257,7 @@ const fakePg = vi.hoisted(() => {
       }
       Object.assign(row, {
         available_at: now,
+        attempts: Math.max(0, Number(row.attempts) - 1),
         updated_at: now,
         lease_owner: null,
         lease_expires_at: null,
@@ -264,12 +274,25 @@ const fakePg = vi.hoisted(() => {
   return {
     handle,
     newClientId: () => nextClientId++,
+    async waitForNextConnection(): Promise<void> {
+      const wait = nextConnectionWait;
+      nextConnectionWait = undefined;
+      await wait?.();
+    },
+    pauseNextConnection(wait: () => Promise<void>): void {
+      nextConnectionWait = wait;
+    },
+    beforeNextLockedQuery(hook: () => void): void {
+      beforeNextForUpdate = hook;
+    },
     reset() {
       jobs.clear();
       dead.clear();
       migrations.clear();
       locks.clear();
       nextClientId = 0;
+      nextConnectionWait = undefined;
+      beforeNextForUpdate = undefined;
     },
   };
 });
@@ -280,13 +303,14 @@ vi.mock("pg", () => ({
       return Promise.resolve(fakePg.handle(query, values));
     }
 
-    connect() {
+    async connect() {
+      await fakePg.waitForNextConnection();
       const clientId = fakePg.newClientId();
-      return Promise.resolve({
+      return {
         query: (query: string, values: unknown[] = []) =>
           Promise.resolve(fakePg.handle(query, values, clientId)),
         release: () => undefined,
-      });
+      };
     }
 
     on(): this {
@@ -346,6 +370,93 @@ it("expires exhausted leases into dead letters on claim", async () => {
     expect(await queue.getDeadLetter(job.jobId)).toMatchObject({
       lastErrorCode: "worker.lease_expired",
     });
+  } finally {
+    await instance.cleanup();
+  }
+});
+
+it("sets claim deadlines after a delayed connection checkout", async () => {
+  const clock = new FakeClock(100);
+  const instance = await postgresFactory(clock);
+  try {
+    const queue = instance.open();
+    await queue.enqueue({
+      kind: "start",
+      runId: "00000000000000000000000015",
+    });
+    let signalConnected: (() => void) | undefined;
+    const connected = new Promise<void>((resolve) => {
+      signalConnected = () => {
+        resolve();
+      };
+    });
+    let continueConnection: (() => void) | undefined;
+    const connectionGate = new Promise<void>((resolve) => {
+      continueConnection = () => {
+        resolve();
+      };
+    });
+    fakePg.pauseNextConnection(async () => {
+      signalConnected?.();
+      await connectionGate;
+    });
+
+    const claimPromise = queue.claim("worker.delayed", 1, 50);
+    await connected;
+    clock.advance(100);
+    continueConnection?.();
+
+    const [claimed] = await claimPromise;
+    expect(claimed?.leaseExpiresAt).toBe(250);
+  } finally {
+    await instance.cleanup();
+  }
+});
+
+it("rechecks lease expiry after ownership-row lock acquisition", async () => {
+  const clock = new FakeClock(100);
+  const instance = await postgresFactory(clock);
+  try {
+    const queue = instance.open();
+    const operations: readonly {
+      worker: string;
+      expected: unknown;
+      run: (jobId: string, workerId: string) => Promise<unknown>;
+    }[] = [
+      {
+        worker: "worker.heartbeat",
+        expected: false,
+        run: (jobId, workerId) => queue.heartbeat(jobId, workerId, 20),
+      },
+      {
+        worker: "worker.complete",
+        expected: false,
+        run: (jobId, workerId) => queue.complete(jobId, workerId),
+      },
+      {
+        worker: "worker.fail",
+        expected: "lease_lost",
+        run: (jobId, workerId) => queue.fail(jobId, workerId, "model.failed", 0),
+      },
+      {
+        worker: "worker.release",
+        expected: false,
+        run: (jobId, workerId) => queue.release(jobId, workerId),
+      },
+    ];
+
+    for (const [index, operation] of operations.entries()) {
+      const job = await queue.enqueue({
+        kind: "start",
+        runId: (index + 16).toString().padStart(26, "0"),
+      });
+      await queue.claim(operation.worker, 1, 10);
+      fakePg.beforeNextLockedQuery(() => {
+        clock.advance(10);
+      });
+
+      await expect(operation.run(job.jobId, operation.worker)).resolves.toBe(operation.expected);
+    }
   } finally {
     await instance.cleanup();
   }

@@ -15,9 +15,9 @@ CREATE TABLE IF NOT EXISTS run_queue (
   updated_at BIGINT NOT NULL
 );
 
+-- Only unfinished jobs live in run_queue, so this enforces one active job per run.
 CREATE UNIQUE INDEX IF NOT EXISTS run_queue_run_id_idx
   ON run_queue (run_id);
--- Only unfinished jobs live in run_queue, so this enforces one active job per run.
 CREATE INDEX IF NOT EXISTS run_queue_claim_idx
   ON run_queue (available_at, priority DESC, created_at);
 

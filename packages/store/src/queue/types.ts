@@ -138,7 +138,7 @@ export interface RunQueue {
   close(): Promise<void>;
 }
 
-/** Hash an idempotency key so raw caller-provided values are never persisted. */
+/** Apply a plain SHA-256 hash so raw caller-provided idempotency keys are never persisted. */
 export function hashIdempotencyKey(key: string | undefined): string | undefined {
   return key === undefined
     ? undefined

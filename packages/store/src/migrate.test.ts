@@ -160,7 +160,7 @@ describe("SQLite schema migrations", () => {
 
   it("loads and applies the checked-in schema with the required indexes and tables", () => {
     const db = new Database(":memory:");
-    expect(migrate(db, "sqlite")).toEqual(["0001", "0002", "0003", "0004", "0005"]);
+    expect(migrate(db, "sqlite")).toEqual(["0001", "0002", "0003", "0004", "0005", "0006"]);
     const names = db
       .prepare<[], { name: string }>(
         "SELECT name FROM sqlite_master WHERE type IN ('table', 'index') ORDER BY name",
@@ -183,6 +183,7 @@ describe("SQLite schema migrations", () => {
         "idempotency_keys",
         "idempotency_keys_run_id_idx",
         "run_execution_leases",
+        "run_queue_run_id_idx",
       ]),
     );
     expect(db.prepare("PRAGMA table_info(events)").all()).toEqual(

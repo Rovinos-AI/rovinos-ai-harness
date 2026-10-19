@@ -168,24 +168,28 @@ export class SqliteRunQueue implements RunQueue {
   enqueue(input: Parameters<RunQueue["enqueue"]>[0]): Promise<RunQueueJob> {
     return sqliteOperation(() => {
       const job = parseQueueInput(EnqueueRunJobSchema, input);
-      const now = this.now();
       const idempotencyKey = hashIdempotencyKey(job.idempotencyKey) ?? null;
-      this.enqueueStatement.run(
-        parseQueueInput(QueueJobIdSchema, this.ids.next()),
-        job.kind,
-        job.runId,
-        job.priority,
-        job.availableAt ?? now,
-        job.maxAttempts ?? this.maxAttempts,
-        idempotencyKey,
-        now,
-        now,
-      );
-      const row = this.findDuplicateStatement.get(job.runId, idempotencyKey, idempotencyKey);
-      if (row === undefined) {
-        throw new Error("Queue insert did not produce an active job");
-      }
-      return queueJob(row);
+      return this.db
+        .transaction(() => {
+          const now = this.now();
+          this.enqueueStatement.run(
+            parseQueueInput(QueueJobIdSchema, this.ids.next()),
+            job.kind,
+            job.runId,
+            job.priority,
+            job.availableAt ?? now,
+            job.maxAttempts ?? this.maxAttempts,
+            idempotencyKey,
+            now,
+            now,
+          );
+          const row = this.findDuplicateStatement.get(job.runId, idempotencyKey, idempotencyKey);
+          if (row === undefined) {
+            throw new Error("Queue insert did not produce an active job");
+          }
+          return queueJob(row);
+        })
+        .immediate();
     });
   }
 
@@ -195,9 +199,9 @@ export class SqliteRunQueue implements RunQueue {
       const worker = parseQueueInput(WorkerIdSchema, workerId);
       const count = parseQueueInput(limitSchema, limit);
       const duration = parseQueueInput(durationSchema, leaseMs);
-      const now = this.now();
       return this.db
         .transaction(() => {
+          const now = this.now();
           const leaseExpiresAt = parseQueueInput(z.number().int().nonnegative(), now + duration);
           this.deadLetterStatement.run("worker.lease_expired", now, now);
           this.db
@@ -229,13 +233,17 @@ export class SqliteRunQueue implements RunQueue {
         workerId,
       });
       const duration = parseQueueInput(durationSchema, leaseMs);
-      const now = this.now();
-      const leaseExpiresAt = parseQueueInput(z.number().int().nonnegative(), now + duration);
       const result = this.db
-        .prepare(
-          "UPDATE run_queue SET lease_expires_at = MAX(lease_expires_at, ?), updated_at = ? WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
-        )
-        .run(leaseExpiresAt, now, id, worker, now);
+        .transaction(() => {
+          const now = this.now();
+          const leaseExpiresAt = parseQueueInput(z.number().int().nonnegative(), now + duration);
+          return this.db
+            .prepare(
+              "UPDATE run_queue SET lease_expires_at = MAX(lease_expires_at, ?), updated_at = ? WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
+            )
+            .run(leaseExpiresAt, now, id, worker, now);
+        })
+        .immediate();
       return result.changes === 1;
     });
   }
@@ -248,10 +256,15 @@ export class SqliteRunQueue implements RunQueue {
         workerId,
       });
       const result = this.db
-        .prepare(
-          "DELETE FROM run_queue WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
-        )
-        .run(id, worker, this.now());
+        .transaction(() => {
+          const now = this.now();
+          return this.db
+            .prepare(
+              "DELETE FROM run_queue WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
+            )
+            .run(id, worker, now);
+        })
+        .immediate();
       return result.changes === 1;
     });
   }
@@ -270,9 +283,9 @@ export class SqliteRunQueue implements RunQueue {
       });
       const code = parseQueueInput(QueueErrorCodeSchema, errorCode);
       const retryDelay = parseQueueInput(z.number().int().nonnegative(), retryAfterMs);
-      const now = this.now();
       return this.db
         .transaction(() => {
+          const now = this.now();
           const row = this.db
             .prepare<[string, string, number], QueueRow>(
               "SELECT * FROM run_queue WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
@@ -319,12 +332,16 @@ export class SqliteRunQueue implements RunQueue {
         jobId,
         workerId,
       });
-      const now = this.now();
       const result = this.db
-        .prepare(
-          "UPDATE run_queue SET available_at = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
-        )
-        .run(now, now, id, worker, now);
+        .transaction(() => {
+          const now = this.now();
+          return this.db
+            .prepare(
+              "UPDATE run_queue SET available_at = ?, attempts = MAX(attempts - 1, 0), lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
+            )
+            .run(now, now, id, worker, now);
+        })
+        .immediate();
       return result.changes === 1;
     });
   }
