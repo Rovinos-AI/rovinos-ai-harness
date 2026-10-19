@@ -8,7 +8,10 @@ import type { RuntimeConfig } from "./runtime-config.js";
 const ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** System clock used by runtimes unless a deterministic clock is supplied. */
-export const systemClock: Clock = { now: () => Date.now() };
+export const systemClock: Clock = {
+  /** Reads the current wall-clock time in milliseconds. */
+  now: () => Date.now(),
+};
 
 /** Computes a stable digest of the validated runtime configuration. */
 export function configHash(config: RuntimeConfig): ReturnType<typeof Sha256Hex.parse> {

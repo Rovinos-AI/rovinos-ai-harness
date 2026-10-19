@@ -22,6 +22,7 @@ const portSchema = z.coerce.number().int().min(0).max(65_535);
 /** Registers `harness serve`, serving the control-plane over stdio or loopback HTTP. */
 export const serveCommand: CommandModule = {
   name: "serve",
+  /** Registers the `serve` command. */
   register(program, context) {
     program
       .command("serve")

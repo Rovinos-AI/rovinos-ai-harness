@@ -259,6 +259,7 @@ async function runLint(rawOptions: unknown, context: CliContext, jsonMode: boole
 /** Registers offline policy test and lint commands. */
 export const policyCommand: CommandModule = {
   name: "policy",
+  /** Registers the `policy` command. */
   register(program, context) {
     const policy = program.command("policy").description("Test and lint policy files");
     policy
