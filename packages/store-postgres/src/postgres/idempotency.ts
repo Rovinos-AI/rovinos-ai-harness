@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Pool } from "pg";
 import { Id } from "@harness/schemas";
-import { InvalidEventError, StoreUnavailableError, parseIdempotencyKeyTakeover  } from "@harness/store/adapter-internal";
+import {
+  InvalidEventError,
+  StoreUnavailableError,
+  parseIdempotencyKeyTakeover,
+} from "@harness/store/adapter-internal";
 import {
   IdempotencyKeyHashSchema,
   type IdempotencyKeyHash,

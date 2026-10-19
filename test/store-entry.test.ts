@@ -6,12 +6,10 @@ import { runEventStoreConformance } from "@harness/store/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-const manifestSchema = z
-  .object({
-    dependencies: z.record(z.string(), z.string()).optional(),
-    devDependencies: z.record(z.string(), z.string()).optional(),
-  })
-  .passthrough();
+const manifestSchema = z.looseObject({
+  dependencies: z.record(z.string(), z.string()).optional(),
+  devDependencies: z.record(z.string(), z.string()).optional(),
+});
 
 describe("@harness/store entry point", () => {
   it("does not export test-only conformance helpers", () => {

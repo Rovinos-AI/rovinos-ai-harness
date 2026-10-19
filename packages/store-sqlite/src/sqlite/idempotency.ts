@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
 import { Id } from "@harness/schemas";
-import { InvalidEventError, parseIdempotencyKeyTakeover  } from "@harness/store/adapter-internal";
+import { InvalidEventError, parseIdempotencyKeyTakeover } from "@harness/store/adapter-internal";
 import { sqliteStoreError } from "./outbox.js";
 import {
   IdempotencyKeyHashSchema,

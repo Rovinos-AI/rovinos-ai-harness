@@ -20,9 +20,7 @@ import {
   type ContentCodec,
   type ContentCodecContext,
 } from "@harness/store";
-import {
-  SqliteEventStore,
-} from "./index.js";
+import { SqliteEventStore } from "./index.js";
 
 const runId = Id.parse("00000000000000000000000001");
 const encryptionKeyId = "sqlite-test-key";

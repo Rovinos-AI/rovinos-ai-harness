@@ -31,11 +31,7 @@ import {
   UNREGISTERED_TOOL_ID,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
-import {
-  InMemoryEventStore,
-  SeqConflictError,
-  type EventStore,
-} from "@harness/store";
+import { InMemoryEventStore, SeqConflictError, type EventStore } from "@harness/store";
 import { SqliteEventStore } from "@harness/store-sqlite";
 import {
   CalibratingTokenCounter,

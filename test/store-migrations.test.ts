@@ -5,14 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { migrate, type PostgresMigrationClient, type PostgresMigrationDriver } from "@harness/store/adapter-internal";
+import {
+  migrate,
+  type PostgresMigrationClient,
+  type PostgresMigrationDriver,
+} from "@harness/store/adapter-internal";
 import { StoreMigrationError } from "@harness/store";
 
 const sqliteMigrationDirectory = fileURLToPath(
   new URL("../packages/store-sqlite/migrations/sqlite/", import.meta.url),
-);
-const postgresMigrationDirectory = fileURLToPath(
-  new URL("../packages/store-postgres/migrations/postgres/", import.meta.url),
 );
 
 const temporaryDirectories: string[] = [];
@@ -168,9 +169,12 @@ describe("SQLite schema migrations", () => {
 
   it("loads and applies the checked-in schema with the required indexes and tables", () => {
     const db = new Database(":memory:");
-    expect(
-      migrate(db, "sqlite", { migrationDirectory: sqliteMigrationDirectory }),
-    ).toEqual(["0001", "0002", "0003", "0004"]);
+    expect(migrate(db, "sqlite", { migrationDirectory: sqliteMigrationDirectory })).toEqual([
+      "0001",
+      "0002",
+      "0003",
+      "0004",
+    ]);
     const names = db
       .prepare<[], { name: string }>(
         "SELECT name FROM sqlite_master WHERE type IN ('table', 'index') ORDER BY name",

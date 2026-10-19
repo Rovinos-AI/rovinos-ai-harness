@@ -2,7 +2,7 @@
 import { Id, RunStatus, joinEvent, parseJson, type Event as StoredEvent } from "@harness/schemas";
 import type Database from "better-sqlite3";
 import { z } from "zod";
-import type { ContentCodec, EncodedSnapshot, RunSummary  } from "@harness/store/adapter-internal";
+import type { ContentCodec, EncodedSnapshot, RunSummary } from "@harness/store/adapter-internal";
 import {
   ContentDecryptFailedError,
   InvalidEventError,

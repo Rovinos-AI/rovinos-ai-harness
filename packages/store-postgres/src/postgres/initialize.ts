@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { type Pool, type QueryResultRow } from "pg";
 import { fileURLToPath } from "node:url";
-import { StoreEncryptionMismatchError, StoreMigrationError, migrate  } from "@harness/store/adapter-internal";
-import type { ContentCodec, Clock  } from "@harness/store/adapter-internal";
+import {
+  StoreEncryptionMismatchError,
+  StoreMigrationError,
+  migrate,
+} from "@harness/store/adapter-internal";
+import type { ContentCodec, Clock } from "@harness/store/adapter-internal";
 import { storeError } from "./helpers.js";
 
 async function migrateSchema(pool: Pool, clock: Clock, skipMigrations: boolean): Promise<void> {
   try {
-    const versions = await migrate(
-      pool,
-      "postgres",
-      {
-        ...(skipMigrations ? { dryRun: true } : { appliedAt: clock.now() }),
-        migrationDirectory: fileURLToPath(new URL("../../migrations/postgres/", import.meta.url)),
-      },
-    );
+    const versions = await migrate(pool, "postgres", {
+      ...(skipMigrations ? { dryRun: true } : { appliedAt: clock.now() }),
+      migrationDirectory: fileURLToPath(new URL("../../migrations/postgres/", import.meta.url)),
+    });
     if (skipMigrations && versions.length > 0) {
       throw new StoreMigrationError("schema_migration_pending");
     }

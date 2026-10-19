@@ -10,10 +10,7 @@ import {
   type EventStore,
   type StoreKeyRotation,
 } from "@harness/store";
-import {
-  migratePostgresConnection,
-  PostgresEventStore,
-} from "@harness/store-postgres";
+import { migratePostgresConnection, PostgresEventStore } from "@harness/store-postgres";
 import { migrateSqliteFile, SqliteEventStore } from "@harness/store-sqlite";
 import {
   InMemoryVault,

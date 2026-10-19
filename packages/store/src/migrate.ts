@@ -33,21 +33,19 @@ export interface SqliteMigrationDriver {
   /** Execute SQL that does not bind values. */
   exec(query: string): unknown;
   /** Prepare a parameterized statement used by the migration runner. */
-  prepare<BindParameters extends unknown[] = [], Result = unknown>(
-    query: string,
-  ): SqliteMigrationStatement<BindParameters, Result>;
+  prepare(query: string): SqliteMigrationStatement;
   /** Create an immediate transaction for applying the migration set. */
   transaction<Result>(callback: () => Result): { immediate(): Result };
 }
 
 /** Minimal SQLite statement surface used to read and record migration history. */
-export interface SqliteMigrationStatement<BindParameters extends unknown[], Result> {
+export interface SqliteMigrationStatement {
   /** Read a single migration-history row. */
-  get(...parameters: BindParameters): Result | undefined;
+  get(table: string, name: string): { present: number } | undefined;
   /** Read all migration-history rows. */
-  all(...parameters: BindParameters): Result[];
+  all(): MigrationRow[];
   /** Insert a migration-history row. */
-  run(...parameters: BindParameters): unknown;
+  run(version: string, checksum: string, appliedAt: number): unknown;
 }
 
 /** Minimal Postgres client surface used to apply a migration transaction. */
@@ -113,14 +111,10 @@ function migrateSqlite(
 ): string[] {
   const hasHistory = (): boolean =>
     db
-      .prepare<[string, string], { present: number }>(
-        "SELECT 1 AS present FROM sqlite_master WHERE type = ? AND name = ?",
-      )
+      .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = ? AND name = ?")
       .get("table", "schema_migrations") !== undefined;
   const readHistory = (): MigrationRow[] =>
-    db
-      .prepare<[], MigrationRow>("SELECT version, checksum FROM schema_migrations ORDER BY version")
-      .all();
+    db.prepare("SELECT version, checksum FROM schema_migrations ORDER BY version").all();
   if (dryRun) {
     return pendingMigrations(migrations, hasHistory() ? readHistory() : []).map(
       ({ version }) => version,
@@ -132,7 +126,7 @@ function migrateSqlite(
       "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL)",
     );
     const pending = pendingMigrations(migrations, readHistory());
-    const recordApplied = db.prepare<[string, string, number], unknown>(
+    const recordApplied = db.prepare(
       "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (?, ?, ?)",
     );
     for (const migration of pending) {
@@ -204,11 +198,7 @@ async function migratePostgres(
  * @param opts Dry-run, migration-directory, and timestamp options.
  * @returns Versions pending before this call, or pending versions in dry-run mode.
  */
-export function migrate<TDriver extends object>(
-  driver: TDriver,
-  dialect: "sqlite",
-  opts: MigrationOptions,
-): string[];
+export function migrate(driver: unknown, dialect: "sqlite", opts: MigrationOptions): string[];
 /**
  * Apply the store's ordered, checksummed schema migrations to Postgres.
  * @param driver Pooled Postgres connection.
@@ -222,7 +212,7 @@ export function migrate(
   opts: MigrationOptions,
 ): Promise<string[]>;
 export function migrate(
-  driver: object,
+  driver: unknown,
   dialect: "sqlite" | "postgres",
   opts: MigrationOptions,
 ): string[] | Promise<string[]> {
@@ -241,8 +231,10 @@ export function migrate(
   return migratePostgres(driver, migrations, options.dryRun, appliedAt);
 }
 
-function isSqliteMigrationDriver(driver: object): driver is SqliteMigrationDriver {
+function isSqliteMigrationDriver(driver: unknown): driver is SqliteMigrationDriver {
   return (
+    typeof driver === "object" &&
+    driver !== null &&
     "exec" in driver &&
     typeof driver.exec === "function" &&
     "prepare" in driver &&
@@ -252,8 +244,10 @@ function isSqliteMigrationDriver(driver: object): driver is SqliteMigrationDrive
   );
 }
 
-function isPostgresMigrationDriver(driver: object): driver is PostgresMigrationDriver {
+function isPostgresMigrationDriver(driver: unknown): driver is PostgresMigrationDriver {
   return (
+    typeof driver === "object" &&
+    driver !== null &&
     "query" in driver &&
     typeof driver.query === "function" &&
     "connect" in driver &&

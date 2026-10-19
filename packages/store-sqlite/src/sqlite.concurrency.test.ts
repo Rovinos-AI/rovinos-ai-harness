@@ -3,7 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteEventStore } from "./index.js";
-import { runConcurrencyConformance, type MultiEventStoreFactoryCreator } from "@harness/store/testing";
+import {
+  runConcurrencyConformance,
+  type MultiEventStoreFactoryCreator,
+} from "@harness/store/testing";
 
 const sqliteMultiFactory: MultiEventStoreFactoryCreator = async () => {
   const directory = await mkdtemp(join(tmpdir(), "harness-store-concurrency-"));

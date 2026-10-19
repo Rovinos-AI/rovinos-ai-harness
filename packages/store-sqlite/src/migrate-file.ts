@@ -36,10 +36,7 @@ function validated<T>(schema: z.ZodType<T>, value: unknown): T {
  * @param options Dry-run and migration timestamp options.
  * @returns Applied migration versions, or pending versions in dry-run mode.
  */
-export function migrateSqliteFile(
-  path: string,
-  options: StoreFileMigrationOptions = {},
-): string[] {
+export function migrateSqliteFile(path: string, options: StoreFileMigrationOptions = {}): string[] {
   const databasePath = validated(filePathSchema, path);
   const parsedOptions = validated(migrationOptionsSchema, options);
   if (!parsedOptions.dryRun) {

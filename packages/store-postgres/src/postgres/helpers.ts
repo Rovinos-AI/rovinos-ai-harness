@@ -11,7 +11,7 @@ import {
 } from "@harness/schemas";
 import type { PoolClient, QueryResultRow } from "pg";
 import { z } from "zod";
-import type { ContentCodec, EncodedSnapshot, RunSummary  } from "@harness/store/adapter-internal";
+import type { ContentCodec, EncodedSnapshot, RunSummary } from "@harness/store/adapter-internal";
 import {
   ContentDecryptFailedError,
   InvalidEventError,

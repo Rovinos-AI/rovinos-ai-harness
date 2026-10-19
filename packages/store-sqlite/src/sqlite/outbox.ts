@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type Database from "better-sqlite3";
 import { Code, Id, type Event as StoredEvent } from "@harness/schemas";
-import type { ContentCodec, Clock  } from "@harness/store/adapter-internal";
+import type { ContentCodec, Clock } from "@harness/store/adapter-internal";
 import { InvalidEventError, StoreUnavailableError } from "@harness/store/adapter-internal";
 import {
   decodeStoredContent,

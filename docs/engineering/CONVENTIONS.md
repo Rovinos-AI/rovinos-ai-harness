@@ -72,13 +72,13 @@ Dependency direction: the canonical allowlist is `docs/engineering/layers.json`.
 | `mcp` | `schemas`, `telemetry`, `crypto` |
 | `sandbox` | `schemas`, `telemetry`, `crypto`, `context` |
 | `approval-app` | `schemas`, `app-telemetry` |
-| `core` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox` |
+| `core` | `schemas`, `telemetry`, `crypto`, `store`, `store-postgres`, `store-sqlite`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox` |
 | `host` | `schemas`, `telemetry`, `core` |
 | `control-plane` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
 | `replay` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
 | `eval` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core` |
-| `cli` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config`, `control-plane`, `host` |
-| `sdk` | `schemas`, `telemetry`, `crypto`, `store`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config` |
+| `cli` | `schemas`, `telemetry`, `crypto`, `store`, `store-postgres`, `store-sqlite`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config`, `control-plane`, `host` |
+| `sdk` | `schemas`, `telemetry`, `crypto`, `store`, `store-postgres`, `store-sqlite`, `vault`, `pii`, `models`, `context`, `policy`, `mcp`, `sandbox`, `core`, `config` |
 <!-- END GENERATED: agents-index -->
 
 ## 2. Tooling
