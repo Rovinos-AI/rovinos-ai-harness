@@ -97,7 +97,8 @@ Runs and human approval resolutions record the actor principal in event metadata
 `run_created.requestedBy` and `approval_resolved.approverId`. Principals are
 kind-prefixed codes such as `cli.operator`, `token.<tokenId>`,
 `eval.simulated`, and `system.sweeper`. A continuation or subagent inherits
-the root run's requester.
+the root run's requester. Token IDs are limited to 58 characters and CLI names
+to 60 so their prefixed principals remain within the 64-character Code limit.
 
 Set `cli.principal` in the harness config or pass `--as <name>` to attribute
 CLI-created runs and approvals to `cli.<name>`. CLI principals are attribution

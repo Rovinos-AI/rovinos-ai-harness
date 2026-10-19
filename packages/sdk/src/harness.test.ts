@@ -280,10 +280,12 @@ describe("@harness/sdk", () => {
 
     expect(serialized).not.toContain("cli.requester");
     expect(serialized).not.toContain("cli.approver");
-    const requesterPseudonym = resolved.recentEvents.find((event) => event.kind === "run_created")
-      ?.requestedByPseudonym;
-    const approverPseudonym = resolved.recentEvents.find((event) => event.kind === "approval_wait")
-      ?.approverPseudonym;
+    const requesterPseudonym = resolved.recentEvents.find(
+      (event) => event.kind === "run_created",
+    )?.requestedByPseudonym;
+    const approverPseudonym = resolved.recentEvents.find(
+      (event) => event.kind === "approval_wait",
+    )?.approverPseudonym;
     expect(requesterPseudonym).toMatch(/^p_[a-z2-7]{26}$/u);
     expect(approverPseudonym).toMatch(/^p_[a-z2-7]{26}$/u);
   });

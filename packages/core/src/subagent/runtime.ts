@@ -34,7 +34,9 @@ async function parentRequester(
   store: EventStore,
   runId: Id,
 ): Promise<Extract<Event, { type: "run_created" }>["requestedBy"]> {
-  const event = (await readEvents(store, runId)).find((candidate) => candidate.type === "run_created");
+  const event = (await readEvents(store, runId)).find(
+    (candidate) => candidate.type === "run_created",
+  );
   return event?.type === "run_created" ? event.requestedBy : undefined;
 }
 

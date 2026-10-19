@@ -12,7 +12,7 @@ const MAX_RATE_LIMITER_BUCKETS = 4_096;
 
 const principalSchema = z
   .object({
-    tokenId: Code,
+    tokenId: Code.max(58),
     scopes: z.array(ControlPlaneAuthScopeSchema),
     runIds: z.array(Id).min(1).optional(),
   })

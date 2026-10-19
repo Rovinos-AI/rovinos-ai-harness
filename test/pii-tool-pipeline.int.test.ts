@@ -328,6 +328,7 @@ describe("PII tool pipeline", () => {
       { to: email, note: email },
       clock,
       tool,
+      { decidedBy: "human", approverId: "cli.test" },
     );
     expect(resolution).toMatchObject({
       decision: "edit",

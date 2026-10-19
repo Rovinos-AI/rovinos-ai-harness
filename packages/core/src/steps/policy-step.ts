@@ -120,7 +120,9 @@ export function policyIntentFields(decision: PolicyDecision): PolicyIntentFields
     ...(decision.separationOfDuties === undefined
       ? {}
       : { policySeparationOfDuties: decision.separationOfDuties }),
-    ...(decision.approvalTtlMs === undefined ? {} : { policyApprovalTtlMs: decision.approvalTtlMs }),
+    ...(decision.approvalTtlMs === undefined
+      ? {}
+      : { policyApprovalTtlMs: decision.approvalTtlMs }),
     ...(decision.escalateAfterMs === undefined
       ? {}
       : { policyEscalateAfterMs: decision.escalateAfterMs }),

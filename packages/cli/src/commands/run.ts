@@ -124,33 +124,35 @@ export const runCommand: CommandModule = {
           readonly fakeModel?: string;
           readonly as?: string;
         }) => {
-        const input = await readInput(options.input);
-        const config = await context.loadConfig();
-        const model =
-          options.fakeModel === undefined ? undefined : await readFakeModel(options.fakeModel);
-        const runtime = await createCommandRuntime(
-          context,
-          config,
-          model === undefined ? undefined : { model },
-        );
-        try {
-          // TODO(13.7): Tokenize goal content before it enters the run loop.
-          const goal: JsonValue =
-            input.metadata === undefined
-              ? { goal: input.goal }
-              : { goal: input.goal, metadata: input.metadata };
-          const result = await runtime.run(goal, { requestedBy: cliPrincipal(config, options.as) });
-          const firstEvent = result.events[0];
-          if (firstEvent === undefined) {
-            throw new RunStatusError("run_failed");
+          const input = await readInput(options.input);
+          const config = await context.loadConfig();
+          const model =
+            options.fakeModel === undefined ? undefined : await readFakeModel(options.fakeModel);
+          const runtime = await createCommandRuntime(
+            context,
+            config,
+            model === undefined ? undefined : { model },
+          );
+          try {
+            // TODO(13.7): Tokenize goal content before it enters the run loop.
+            const goal: JsonValue =
+              input.metadata === undefined
+                ? { goal: input.goal }
+                : { goal: input.goal, metadata: input.metadata };
+            const result = await runtime.run(goal, {
+              requestedBy: cliPrincipal(config, options.as),
+            });
+            const firstEvent = result.events[0];
+            if (firstEvent === undefined) {
+              throw new RunStatusError("run_failed");
+            }
+            const output: RunResult = { runId: firstEvent.runId, status: result.status };
+            context.out.json(RunResultSchema, output);
+            context.out.print(`${output.runId}\n`);
+            throwForRunStatus(result.status, result.events);
+          } finally {
+            await runtime.close();
           }
-          const output: RunResult = { runId: firstEvent.runId, status: result.status };
-          context.out.json(RunResultSchema, output);
-          context.out.print(`${output.runId}\n`);
-          throwForRunStatus(result.status, result.events);
-        } finally {
-          await runtime.close();
-        }
         },
       );
   },

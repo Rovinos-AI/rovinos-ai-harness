@@ -1,22 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  HarnessError,
-  type Code,
-  type Event,
-  type Id,
-  type JsonValue,
-  type Principal,
-} from "@harness/schemas";
+import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
+import { ApprovalEditError } from "@harness/policy";
+import { ApprovalEditPreparationError, prepareApprovalEdits } from "./approval-edits.js";
 import {
-  ApprovalEditError,
-  ApprovalPayloadSchema,
-  diffToEdits,
-  validateEdits,
-} from "@harness/policy";
+  assertApproverMayResolve,
+  type ApprovalResolutionMetadata,
+} from "./approval-principals.js";
 import type { Checkpointer } from "./checkpoint.js";
 import { LeaseLostError, RunRecorder, type Clock, type EventPartial } from "./recorder.js";
-import { foldRunState, type RunState, type ToolIntentEvent } from "./run-state.js";
+import { foldRunState, type RunState } from "./run-state.js";
 import { APPROVAL_WAIT_SPAN } from "./spans.js";
 import type { ToolPort } from "./ports.js";
 import {
@@ -25,39 +18,13 @@ import {
   resolveDanglingIntentApproval,
 } from "./steps/resume-tool-step.js";
 import type { ResumeToolStepOptions } from "./steps/tool-step.js";
-import { prepareToolCall, toolRunContext } from "./steps/prepare-tool.js";
 
 export { ApprovalEditsRequiredError };
+export { ApprovalPrincipalRequiredError, ApproverIsRequesterError } from "./approval-principals.js";
+export type { ApprovalResolutionMetadata };
 
 /** A human decision supported by an approval resolution. */
 export type ApprovalDecision = Extract<Event, { type: "approval_resolved" }>["decision"];
-
-/** Metadata describing who or what resolved an approval. */
-export interface ApprovalResolutionMetadata {
-  readonly decidedBy: Extract<Event, { type: "approval_resolved" }>["decidedBy"];
-  readonly approverId?: Principal;
-  readonly reason?: Code;
-}
-
-function assertApproverMayResolve(
-  created: Event | undefined,
-  intent: ToolIntentEvent | undefined,
-  metadata: ApprovalResolutionMetadata,
-): void {
-  if (metadata.decidedBy !== "human") {
-    return;
-  }
-  if (metadata.approverId === undefined) {
-    throw new ApprovalPrincipalRequiredError();
-  }
-  if (
-    created?.type === "run_created" &&
-    created.requestedBy === metadata.approverId &&
-    intent?.policySeparationOfDuties === true
-  ) {
-    throw new ApproverIsRequesterError();
-  }
-}
 
 /** Inputs and checkpoint state required to suspend a run for one approval. */
 export interface RequestApprovalOptions {
@@ -121,26 +88,6 @@ export class ApprovalResolutionConflictError extends HarnessError {
   }
 }
 
-/** Error raised when a human resolution omits its required principal. */
-export class ApprovalPrincipalRequiredError extends HarnessError {
-  readonly code = "approval_principal_required";
-
-  constructor() {
-    super("Human approval resolution requires an approver identity.");
-    this.name = "ApprovalPrincipalRequiredError";
-  }
-}
-
-/** Error raised when separation of duties forbids the requester from approving. */
-export class ApproverIsRequesterError extends HarnessError {
-  readonly code = "approver_is_requester";
-
-  constructor() {
-    super("The run requester cannot resolve this approval.");
-    this.name = "ApproverIsRequesterError";
-  }
-}
-
 /** Error raised when an approval cannot be requested from the current run state. */
 export class ApprovalRequestStateError extends HarnessError {
   readonly code = "approval_invalid_state";
@@ -152,64 +99,7 @@ export class ApprovalRequestStateError extends HarnessError {
   }
 }
 
-class ApprovalEditPreparationError extends HarnessError {
-  readonly code = "pii_prepare_failed";
-
-  constructor() {
-    super("Approval edits require a PII-aware tool port.");
-  }
-}
-
 const systemClock: Clock = { now: Date.now };
-
-interface PrepareApprovalEditOptions {
-  readonly tool: ToolPort;
-  readonly approval: Extract<Event, { type: "approval_requested" }>;
-  readonly intent: Extract<Event, { type: "tool_intent" }>;
-  readonly edits: JsonValue;
-  readonly runId: Id;
-  readonly recorder: RunRecorder;
-  readonly events: Event[];
-}
-
-async function prepareApprovalEdits(options: PrepareApprovalEditOptions): Promise<JsonValue> {
-  const { tool, approval, intent, edits, runId, recorder, events } = options;
-  const parsedPayload = ApprovalPayloadSchema.safeParse(approval.payload);
-  if (
-    !parsedPayload.success ||
-    parsedPayload.data.callId !== intent.callId ||
-    parsedPayload.data.toolId !== intent.toolId
-  ) {
-    throw new ApprovalEditError("edit_invalid");
-  }
-  const pointerEdits = diffToEdits(parsedPayload.data.args, edits);
-  const context = toolRunContext({ runId, signal: new AbortController().signal }, recorder, events);
-  const validateSchema =
-    tool.validateInputSchema === undefined
-      ? undefined
-      : (args: JsonValue, schema: JsonValue) =>
-          tool.validateInputSchema?.(intent.toolId, args, schema, context) ??
-          Promise.resolve(false);
-  return validateEdits(
-    parsedPayload.data,
-    pointerEdits,
-    tool.describe(intent.toolId, intent.args)?.inputSchema,
-    {
-      tokenize: async (args) => {
-        const prepared = await prepareToolCall(
-          tool,
-          { callId: approval.callId, toolId: intent.toolId, args },
-          context,
-        );
-        if (prepared.errorCode !== undefined) {
-          throw new ApprovalEditPreparationError();
-        }
-        return prepared.call.args;
-      },
-      ...(validateSchema === undefined ? {} : { validateSchema }),
-    },
-  );
-}
 
 /**
  * Records an approval request, suspends the run, and forces a checkpoint.
@@ -376,11 +266,7 @@ export async function resolveApproval(
     if (state.status !== "suspended") {
       throw new ApprovalRunNotSuspendedError();
     }
-    assertApproverMayResolve(
-      runEvents[0],
-      state.pendingToolCalls.get(request.callId),
-      metadata,
-    );
+    assertApproverMayResolve(runEvents[0], state.pendingToolCalls.get(request.callId), metadata);
 
     const resolvedAt = Math.floor(clock.now());
     const recorder = new RunRecorder(store, runId, lastEvent.segmentId, state.nextSeq, {

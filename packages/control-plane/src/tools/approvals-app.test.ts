@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, InMemoryTransport, type Client as McpClient } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { Code, type Id, type NewEvent } from "@harness/schemas";
+import { Code, type Id, type NewEvent, type Principal } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { AuditingVaultResolver, Token } from "@harness/vault";
@@ -28,6 +28,8 @@ async function createApproval(
     readonly resolved?: boolean;
     readonly editable?: boolean;
     readonly revealCases?: boolean;
+    readonly requestedBy?: Principal;
+    readonly separationOfDuties?: boolean;
   } = {},
 ): Promise<{ readonly runId: Id; readonly approvalId: Id }> {
   const builders = createEventBuilders();
@@ -47,7 +49,10 @@ async function createApproval(
       : {}),
   };
   const events: NewEvent[] = [
-    builders.runCreated(runId),
+    {
+      ...builders.runCreated(runId),
+      ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
+    },
     builders.runStatusChanged(runId, "pending", "running"),
     {
       runId,
@@ -61,6 +66,9 @@ async function createApproval(
       toolId: "tool.synthetic",
       idempotent: false,
       policyDecision: "ask",
+      ...(options.separationOfDuties === undefined
+        ? {}
+        : { policySeparationOfDuties: options.separationOfDuties }),
       ruleId: "approval.synthetic",
       argsHash: "c".repeat(64),
       args,
@@ -148,7 +156,13 @@ async function connect(
     clientCapabilities: () =>
       options.hasElicitation === true ? { elicitation: { form: {} } } : undefined,
     onAudit: options.onAudit ?? (() => undefined),
-    authorize: options.authorize ?? (() => ({ allowed: true, tokenId: Code.parse("token.test") })),
+    authorize:
+      options.authorize ??
+      (() => ({
+        allowed: true,
+        tokenId: Code.parse("token.test"),
+        principal: "token.token.test",
+      })),
     ...(options.allowReveal === undefined ? {} : { allowReveal: options.allowReveal }),
     ...(options.resolver === undefined ? {} : { vaultResolver: options.resolver }),
     ...(options.onAudit === undefined ? {} : { onAudit: options.onAudit }),
@@ -224,6 +238,42 @@ describe("app-only approval tools", () => {
     expect(JSON.stringify(audits)).not.toContain(ARGUMENT_CANARY);
   });
 
+  it("preserves an authenticated token whose id is unknown for separation of duties", async () => {
+    const resolveApproval = vi.fn(({ approverId }: { readonly approverId: string }) => {
+      if (approverId === "token.unknown") {
+        return Promise.reject(
+          Object.assign(new Error("self approval"), {
+            code: "approver_is_requester",
+          }),
+        );
+      }
+      return Promise.resolve(undefined);
+    });
+    const { store, client } = await connect({
+      isAppContext: true,
+      authorize: () => ({
+        allowed: true,
+        tokenId: Code.parse("unknown"),
+        principal: "token.unknown",
+      }),
+      resolveApproval,
+    });
+    const approval = await createApproval(store, {
+      requestedBy: "token.unknown",
+      separationOfDuties: true,
+    });
+
+    const result = await client.callTool({
+      name: "harness.approvals.resolve",
+      arguments: { approvalId: approval.approvalId, decision: "approve" },
+    });
+
+    expect(result.structuredContent).toEqual({ ok: false, code: "approver_is_requester" });
+    expect(resolveApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ approverId: "token.unknown" }),
+    );
+  });
+
   it("returns metadata-only failure codes for unknown, resolved, and inaccessible approvals", async () => {
     const resolveApproval = vi.fn(() => Promise.resolve(undefined));
     const authorized = await connect({
@@ -245,6 +295,7 @@ describe("app-only approval tools", () => {
       authorize: (_context, scope) => ({
         allowed: scope !== "approve",
         tokenId: Code.parse("token.test"),
+        principal: "token.token.test",
       }),
       resolveApproval,
     });
@@ -300,6 +351,7 @@ describe("app-only approval tools", () => {
       authorize: (_context, scope) => ({
         allowed: scope !== "reveal",
         tokenId: Code.parse("token.test"),
+        principal: "token.token.test",
       }),
     });
     const deniedApproval = await createApproval(denied.store);
@@ -417,6 +469,7 @@ describe("app-only approval tools", () => {
       authorize: (_context, scope) => ({
         allowed: scope === "reveal",
         tokenId: Code.parse("token.test"),
+        principal: "token.token.test",
       }),
       resolver,
     });

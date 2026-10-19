@@ -356,15 +356,10 @@ async function decide(
       const resolution = edited ? "edit" : decision;
       const action = { approve: "Approve", edit: "Approve with edits", deny: "Deny" }[resolution];
       await confirm(context, options.yes, `${action} approval ${approvalId}?`);
-      const resolved = await runtime.resolveApproval(
-        pending.runId,
-        approvalId,
-        resolution,
-        {
-          ...(edits === undefined ? {} : { edits }),
-          metadata: cliApprovalMetadata(config, options.as),
-        },
-      );
+      const resolved = await runtime.resolveApproval(pending.runId, approvalId, resolution, {
+        ...(edits === undefined ? {} : { edits }),
+        metadata: cliApprovalMetadata(config, options.as),
+      });
       const resumed = options.resume === true ? await runtime.resume(pending.runId) : undefined;
       context.out.json(ApprovalResolveResultSchema, {
         approvalId,
@@ -391,7 +386,8 @@ function decisionCommand(
   const command = approvals
     .command(decision)
     .description(`${decision === "approve" ? "Approve" : "Deny"} a pending approval`)
-    .argument("<approvalId>", "approval identifier").option("--yes", "skip the confirmation prompt")
+    .argument("<approvalId>", "approval identifier")
+    .option("--yes", "skip the confirmation prompt")
     .option("--as <name>", "attribute this decision to a CLI principal")
     .option("--resume", "resume the run immediately after resolving");
   if (decision === "approve") {

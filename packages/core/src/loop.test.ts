@@ -1091,6 +1091,33 @@ describe("approval lifecycle", () => {
     expect(foldRunState(await readApprovalEvents(store)).status).toBe("failed");
   });
 
+  it("keeps approval edits tokenized when PII preparation fails", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock);
+    await requestApprovalForRun(recorder, clock, state);
+    const prepare = vi.fn((_call: Parameters<NonNullable<ToolPort["prepare"]>>[0]) =>
+      Promise.reject(
+        Object.assign(new Error("synthetic preparation failure"), {
+          code: "pii_prepare_failed",
+        }),
+      ),
+    );
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: false, timeoutMs: 1_000 }),
+      prepare,
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+    };
+
+    await expect(
+      resolveApproval(store, runId, approvalId, "edit", { z: 1, a: 4 }, clock, tool),
+    ).rejects.toMatchObject({ code: "pii_prepare_failed" });
+    expect(prepare).toHaveBeenCalledOnce();
+    expect((await readApprovalEvents(store)).some(({ type }) => type === "approval_resolved")).toBe(
+      false,
+    );
+  });
+
   it.each(["approve", "deny"] as const)(
     "resolves and resumes %s through separate durable SQLite connections",
     async (decision) => {

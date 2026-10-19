@@ -87,7 +87,8 @@ export function registerApproveTool(server: McpServer, options: ApproveToolOptio
               runId: found.runId,
               approvalId: parsed.approvalId,
               decision: parsed.edits === undefined ? "approve" : "edit",
-              approverId: principal === undefined ? "cli.control_plane" : `token.${principal.tokenId}`,
+              approverId:
+                principal === undefined ? "cli.control_plane" : `token.${principal.tokenId}`,
               ...(parsed.edits === undefined ? {} : { edits: parsed.edits }),
             });
             return decisionResult(true);

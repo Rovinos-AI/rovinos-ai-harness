@@ -7,6 +7,7 @@ import {
   RevealRequest,
   RevealResponse,
   type Id,
+  type Principal,
 } from "@harness/schemas";
 import type { AuditingVaultResolver } from "@harness/vault";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
@@ -36,6 +37,7 @@ export type ApprovalAppScope = "approve" | "reveal";
 export interface ApprovalAppAuthorization {
   readonly allowed: boolean;
   readonly tokenId: Code;
+  readonly principal: Principal;
 }
 
 /** Metadata-only audit entry emitted for each app-only approval operation. */
@@ -126,7 +128,12 @@ export function registerApprovalAppTools(server: McpServer, options: ApprovalApp
 type FoundApproval = NonNullable<Awaited<ReturnType<typeof findApprovalRequest>>>;
 
 type PendingApprovalAccess =
-  | { readonly success: true; readonly found: FoundApproval; readonly tokenId: Code }
+  | {
+      readonly success: true;
+      readonly found: FoundApproval;
+      readonly tokenId: Code;
+      readonly principal: Principal;
+    }
   | { readonly success: false; readonly tokenId: Code; readonly code: string };
 
 async function findAccessiblePendingApproval(input: {
@@ -154,7 +161,7 @@ async function findAccessiblePendingApproval(input: {
   if (run?.state.pendingApprovals.has(input.approvalId) !== true) {
     return { success: false, tokenId: access.tokenId, code: "approval_not_found" };
   }
-  return { success: true, found, tokenId: access.tokenId };
+  return { success: true, found, tokenId: access.tokenId, principal: access.principal };
 }
 
 async function handleResolveRequest(
@@ -172,7 +179,7 @@ async function handleResolveRequest(
   if (!pending.success) {
     return resolveFailure(options, pending.tokenId, pending.code);
   }
-  const { found, tokenId } = pending;
+  const { found, tokenId, principal } = pending;
   const gate = await requireApprovalConfirmation({
     options,
     context,
@@ -203,7 +210,7 @@ async function handleResolveRequest(
       runId: found.runId,
       approvalId: request.approvalId,
       decision: request.decision,
-      approverId: tokenId === unknownTokenId ? "cli.control_plane" : `token.${tokenId}`,
+      approverId: principal,
       ...(applied.edits === undefined ? {} : { edits: applied.edits }),
     });
     return decisionResult(options, {
@@ -314,7 +321,7 @@ async function authorize(
   runId: Id,
 ): Promise<ApprovalAppAuthorization> {
   if (options.authorize === undefined) {
-    return { allowed: false, tokenId: unknownTokenId };
+    return { allowed: false, tokenId: unknownTokenId, principal: "cli.control_plane" };
   }
   return options.authorize(context, scope, runId);
 }

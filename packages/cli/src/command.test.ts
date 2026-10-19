@@ -14,9 +14,12 @@ describe("cliPrincipal", () => {
 
   it("validates names supplied with --as", () => {
     expect(cliPrincipal(HarnessConfigSchema.parse({}), "operator")).toBe("cli.operator");
+    expect(cliPrincipal(HarnessConfigSchema.parse({}), "a".repeat(60))).toBe(
+      `cli.${"a".repeat(60)}`,
+    );
     let error: unknown;
     try {
-      cliPrincipal(HarnessConfigSchema.parse({}), "invalid name");
+      cliPrincipal(HarnessConfigSchema.parse({}), "a".repeat(61));
     } catch (caught) {
       error = caught;
     }

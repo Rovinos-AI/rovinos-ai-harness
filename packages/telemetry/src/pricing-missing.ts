@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { context as otelContext, logs, SeverityNumber, type Logger } from "@opentelemetry/api";
+import { context as otelContext } from "@opentelemetry/api";
+import { logs, SeverityNumber, type Logger } from "@opentelemetry/api-logs";
 import { Code } from "@harness/schemas";
 import { attr } from "./attr.js";
 import { defineLogRecord } from "./log-registry.js";
@@ -9,6 +10,7 @@ const pricingMissingDefinition = defineLogRecord("harness.model.pricing_missing"
   "harness.model.name": attr.code(),
 });
 
+/** Emits a bounded diagnostic when a model has no configured price. */
 export function emitPricingMissing(
   provider: Code,
   model: Code,

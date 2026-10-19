@@ -454,6 +454,7 @@ describe("control-plane HTTP transport", () => {
           authorize: (_context, scope) => ({
             allowed: scope === "reveal",
             tokenId: Code.parse("token.http"),
+            principal: "token.token.http",
           }),
           vaultResolver: resolver,
         },

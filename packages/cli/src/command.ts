@@ -86,7 +86,7 @@ export function cliPrincipal(config: HarnessConfig, as?: string): Principal {
     return Principal.parse(config.cli?.principal ?? "cli.local");
   }
   const name = Code.safeParse(as);
-  if (!name.success) {
+  if (!name.success || name.data.length > 60) {
     throw new CliPrincipalError();
   }
   return Principal.parse(`cli.${name.data}`);

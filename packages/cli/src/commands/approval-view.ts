@@ -227,7 +227,7 @@ async function resolveApprovalCall(options: {
       request.data.decision,
       {
         ...(edits === undefined ? {} : { edits }),
-      metadata: cliApprovalMetadata(options.config),
+        metadata: cliApprovalMetadata(options.config),
       },
     );
     return {

@@ -1674,7 +1674,9 @@ describe("resume", () => {
         throw new Error("Expected the child approval request.");
       }
 
-      await runtime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
+      await runtime.resolveApproval(spawn.childRunId, approval.approvalId, "approve", {
+        metadata: { decidedBy: "human", approverId: "cli.test" },
+      });
       const resumed = await runtime.resume(parentRunId);
       const completedParentEvents = await readEvents(store, parentRunId);
       expect(resumed.status).toBe("completed");
@@ -2532,7 +2534,9 @@ describe("retention", () => {
       }
       const checkpoint = await runtime.store.latestSnapshot(execution.runId);
       expect(checkpoint?.workspaceRef).toBeDefined();
-      await runtime.resolveApproval(execution.runId, approvalId, "approve");
+      await runtime.resolveApproval(execution.runId, approvalId, "approve", {
+        metadata: { decidedBy: "human", approverId: "cli.test" },
+      });
       await rm(join(current.dataDirectory, "workspaces", execution.runId), {
         recursive: true,
         force: true,

@@ -260,9 +260,7 @@ function projectApprovalResolved(
     kind: "approval_wait",
     decision: event.decision,
     decidedBy: event.decidedBy,
-    ...(pseudonyms?.approverId === undefined
-      ? {}
-      : { approverPseudonym: pseudonyms.approverId }),
+    ...(pseudonyms?.approverId === undefined ? {} : { approverPseudonym: pseudonyms.approverId }),
     ...(event.reason === undefined ? {} : { reason: event.reason }),
     waitMs: event.waitMs,
   });
