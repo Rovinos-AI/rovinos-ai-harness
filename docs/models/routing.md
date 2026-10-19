@@ -13,6 +13,7 @@ models:
     - id: openai
       kind: openai
       apiKey: env:OPENAI_API_KEY
+      streaming: true
   routing:
     default:
       - provider: anthropic
@@ -52,3 +53,16 @@ construction. An unknown id fails startup with `routing_provider_unknown`.
 Each provider can set `maxOutputTokens` to a positive integer; it defaults to
 4096. When a request omits its own limit, the gateway fills in the selected
 provider's configured value, including after a fallback switch.
+
+Provider streaming defaults to enabled where the adapter supports it. Set
+`streaming: false` on a provider to use its non-streaming completion path. Stream
+attempts use `retry.idleTimeoutMs` (60 seconds by default) between provider
+activity after the first event. `retry.timeoutMs` and the run deadline bound both
+non-streaming attempts; streaming attempts instead use `retry.streamTimeoutMs`
+(10 minutes by default), plus the run deadline. The first provider event is
+bounded by the total stream timeout, not the idle timeout. The gateway's
+`onProgress` hook receives only the request ID and reported output-token count,
+never generated text.
+
+Adapter authors can find the streaming contract and delta assembly rules in
+[the model adapter guide](./adapter-authoring.md).

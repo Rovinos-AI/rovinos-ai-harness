@@ -25,8 +25,10 @@ import {
   ProviderResultSchema,
   type Clock,
   type IdGenerator,
+  type ModelProgress,
   type ProviderAdapter,
 } from "./types.js";
+import { collectProviderStream } from "./streaming.js";
 import type { AdapterRegistry } from "./registry.js";
 import {
   attachModelFailureMetadata,
@@ -34,7 +36,6 @@ import {
   ProviderError,
   readModelFailureMetadata,
 } from "./errors.js";
-import { prepareMessagesForProvider } from "./blobs.js";
 import { TokenBucketRateLimiter } from "./resilience/limiter.js";
 import { abortableSleep, withRetries, type Random, type Sleep } from "./resilience/retry.js";
 import { Semaphore } from "./resilience/semaphore.js";
@@ -54,6 +55,7 @@ import { awaitRunValidation } from "./enforce/validation-deadline.js";
 import { appendRepairMessages } from "./enforce/repair.js";
 import { createPricingAccountant } from "./pricing.js";
 import { aggregateModelUsage, reportModelUsage } from "./usage.js";
+import { prepareProviderRequest } from "./provider-request.js";
 
 /** Dependencies injected into every provider adapter call by the gateway. */
 export interface ModelGatewayDependencies {
@@ -68,6 +70,8 @@ export interface ModelGatewayDependencies {
   readonly pricing?: ModelsConfig["pricing"];
   /** Per-provider trust resolved from validated runtime configuration. */
   readonly providerTrust?: Readonly<Partial<Record<Code, "hosted" | "local">>>;
+  /** Per-provider stream policy from validated `models.providers[].streaming` config. */
+  readonly providerStreaming?: Readonly<Partial<Record<Code, boolean>>>;
   /** Boundary hook invoked after provider-specific preparation on every attempt. */
   readonly requestSanitizer?: RequestSanitizer;
 }
@@ -90,6 +94,8 @@ interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
   readonly deadlineTs?: number;
   readonly outputSchema?: OutputSchema;
   readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
+  /** Receives token counts only while a provider stream reports usage. */
+  readonly onProgress?: (progress: ModelProgress) => void;
 }
 
 /** Runtime context supplied to a gateway call, optionally including a typed output contract. */
@@ -235,12 +241,16 @@ export class ModelGateway {
     },
   ) {
     const { request, context, limiter, semaphore, onAttempt, onFailedAttempt } = options;
+    const stream = adapter.stream?.bind(adapter);
+    const useStream =
+      stream !== undefined && this.dependencies.providerStreaming?.[adapter.provider] !== false;
     return withRetries({
       policy: this.retryPolicy,
       clock: this.dependencies.clock,
       random: this.random,
       sleep: this.sleep,
       signal: context.signal,
+      ...(useStream ? { attemptTimeoutMs: this.retryPolicy.streamTimeoutMs } : {}),
       ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
       prepareAttempt: async (signal, lastError) => {
         if (limiter !== undefined) {
@@ -251,45 +261,42 @@ export class ModelGateway {
       operation: async (signal) => {
         onAttempt();
         try {
-          const preparedMessages = prepareMessagesForProvider(request.messages, adapter.provider);
-          const preparedRequest = { ...request, messages: preparedMessages };
-          const sanitizedRequest =
-            this.dependencies.requestSanitizer === undefined
-              ? preparedRequest
-              : await this.dependencies.requestSanitizer(
-                  preparedRequest,
-                  {
-                    ...request.model,
-                    provider: adapter.provider,
-                    trust: this.dependencies.providerTrust?.[adapter.provider] ?? "hosted",
-                  },
-                  {
-                    runId: context.runId,
-                    ...(context.recordPiiAction === undefined
-                      ? {}
-                      : { recordPiiAction: context.recordPiiAction }),
-                    signal,
-                  },
-                );
+          const sanitizedRequest = await prepareProviderRequest({
+            request,
+            provider: adapter.provider,
+            trust: this.dependencies.providerTrust?.[adapter.provider] ?? "hosted",
+            context,
+            sanitizer: this.dependencies.requestSanitizer,
+            signal,
+          });
           signal.throwIfAborted();
-          return await adapter.complete(sanitizedRequest, {
+          const providerContext = {
             signal,
             ids: this.dependencies.ids,
             clock: this.dependencies.clock,
+            ...(useStream ? { idleTimeoutMs: this.retryPolicy.idleTimeoutMs } : {}),
             ...(context.deadlineTs === undefined ? {} : { deadlineTs: context.deadlineTs }),
-          });
+          };
+          if (useStream) {
+            return await collectProviderStream({
+              stream: (streamSignal) =>
+                stream(sanitizedRequest, {
+                  ...providerContext,
+                  signal: streamSignal,
+                }),
+              signal,
+              idleTimeoutMs: this.retryPolicy.idleTimeoutMs,
+              requestId: sanitizedRequest.requestId,
+              ...(context.onProgress === undefined ? {} : { onProgress: context.onProgress }),
+            });
+          }
+          return await adapter.complete(sanitizedRequest, providerContext);
         } catch (error) {
           onFailedAttempt(error);
           throw error;
         }
       },
     });
-  }
-
-  private accountAndReportUsage(model: ModelRef, usage: ModelUsage): ModelUsage {
-    const accounted = this.accountUsage(model, usage);
-    reportModelUsage(model, accounted, this.options.deferSpanUsage === true);
-    return accounted;
   }
 
   private async completePrepared<OutputSchema extends z.ZodType>(
@@ -344,7 +351,8 @@ export class ModelGateway {
           continue;
         }
 
-        const usage = this.accountAndReportUsage(request.model, aggregateUsage);
+        const usage = this.accountUsage(request.model, aggregateUsage);
+        reportModelUsage(request.model, usage, this.options.deferSpanUsage === true);
         return {
           parts: enforced.parts,
           usage,
@@ -364,7 +372,8 @@ export class ModelGateway {
       if (aggregateUsage === undefined) {
         throw error;
       }
-      const usage = this.accountAndReportUsage(request.model, aggregateUsage);
+      const usage = this.accountUsage(request.model, aggregateUsage);
+      reportModelUsage(request.model, usage, this.options.deferSpanUsage === true);
       throw attachModelFailureMetadata(error, {
         usage,
         latencyMs: aggregateLatencyMs,

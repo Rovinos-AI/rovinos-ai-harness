@@ -5,9 +5,22 @@ import Anthropic, {
   type ClientOptions,
 } from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages";
-import { Code, JsonValue, type Capabilities, type ModelRequest, type Part } from "@harness/schemas";
+import {
+  Code,
+  type Id,
+  JsonValue,
+  type Capabilities,
+  type ModelRequest,
+  type Part,
+} from "@harness/schemas";
 import { ProviderError } from "../errors.js";
-import type { ProviderAdapter, ProviderContext, ProviderResult } from "../types.js";
+import type { ProviderAdapter, ProviderContext, ProviderDelta, ProviderResult } from "../types.js";
+import { retryAfterMs } from "./retry-after.js";
+import {
+  createAnthropicStreamState,
+  createAnthropicStreamingParams,
+  streamEventDeltas,
+} from "./anthropic-streaming.js";
 
 /** Secret-shaped input accepted without importing the configuration package. */
 export interface AnthropicApiKey {
@@ -217,12 +230,50 @@ function buildRequest(request: ModelRequest, provider: string): JsonValue {
   });
 }
 
-function mapStatusError(status: number, retryAfter: string | undefined): never {
+function mapProviderTypeError(
+  status: number | undefined,
+  retryAfter: string | undefined,
+  nowMs: number,
+  providerType?: string | null,
+): ProviderError | undefined {
+  if (providerType === "rate_limit_error") {
+    const delay = retryAfterMs(retryAfter, nowMs);
+    return new ProviderError("provider_rate_limited", {
+      ...(status === undefined ? {} : { status }),
+      ...(delay === undefined ? {} : { retryAfterMs: delay }),
+    });
+  }
+  if (
+    (status === undefined || status === 200 || status >= 500) &&
+    (providerType === "overloaded_error" ||
+      providerType === "api_error" ||
+      providerType === "server_error")
+  ) {
+    return new ProviderError("provider_unavailable", {
+      ...(status === undefined ? {} : { status }),
+    });
+  }
+  return undefined;
+}
+
+function mapStatusError(
+  status: number | undefined,
+  retryAfter: string | undefined,
+  nowMs: number,
+  providerType?: string | null,
+): never {
+  const typedError = mapProviderTypeError(status, retryAfter, nowMs, providerType);
+  if (typedError !== undefined) {
+    throw typedError;
+  }
+  if (status === undefined) {
+    throw new ProviderError("provider_unknown");
+  }
   if (status === 429) {
-    const seconds = retryAfter === undefined ? Number.NaN : Number(retryAfter);
+    const delay = retryAfterMs(retryAfter, nowMs);
     throw new ProviderError("provider_rate_limited", {
       status,
-      ...(Number.isFinite(seconds) && seconds >= 0 ? { retryAfterMs: seconds * 1_000 } : {}),
+      ...(delay === undefined ? {} : { retryAfterMs: delay }),
     });
   }
   switch (status) {
@@ -239,7 +290,7 @@ function mapStatusError(status: number, retryAfter: string | undefined): never {
   }
 }
 
-function mapError(error: unknown, signal: AbortSignal): never {
+function mapError(error: unknown, signal: AbortSignal, nowMs: number): never {
   if (signal.aborted || error instanceof APIConnectionTimeoutError) {
     throw new ProviderError("provider_timeout");
   }
@@ -247,13 +298,10 @@ function mapError(error: unknown, signal: AbortSignal): never {
     throw new ProviderError("provider_unknown");
   }
   const status: unknown = error.status;
-  if (typeof status !== "number") {
-    throw new ProviderError("provider_unknown");
-  }
   const headers: unknown = error.headers;
   const retryAfter =
     headers instanceof Headers ? (headers.get("retry-after") ?? undefined) : undefined;
-  mapStatusError(status, retryAfter);
+  mapStatusError(typeof status === "number" ? status : undefined, retryAfter, nowMs, error.type);
 }
 
 /** Anthropic Messages API adapter with provider-specific content preserved verbatim. */
@@ -281,23 +329,12 @@ export class AnthropicAdapter implements ProviderAdapter {
     });
   }
 
-  /** @inheritdoc */
-  async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
-    const startedAt = context.clock.now();
-    let response: Message;
-    const params = buildRequest(request, this.provider);
-    try {
-      // Use raw post so opaque blocks (including future block types) pass through verbatim.
-      response = await this.client.post<Message>("/v1/messages", {
-        body: params,
-        signal: context.signal,
-      });
-    } catch (error) {
-      if (error instanceof ProviderError) {
-        throw error;
-      }
-      mapError(error, context.signal);
-    }
+  private mapMessage(
+    response: Message,
+    context: ProviderContext,
+    startedAt: number,
+    callIdsByToolUseId: ReadonlyMap<string, Id> = new Map(),
+  ): ProviderResult {
     try {
       const toolUseIdByCallId: Record<string, string> = {};
       const parts: Part[] = [];
@@ -305,7 +342,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         if (block.type === "text") {
           parts.push({ type: "text", text: block.text });
         } else if (block.type === "tool_use") {
-          const callId = context.ids.next();
+          const callId = callIdsByToolUseId.get(block.id) ?? context.ids.next();
           toolUseIdByCallId[callId] = block.id;
           parts.push({
             type: "tool_call",
@@ -344,6 +381,62 @@ export class AnthropicAdapter implements ProviderAdapter {
       };
     } catch {
       throw new ProviderError("provider_unknown");
+    }
+  }
+
+  /** @inheritdoc */
+  async complete(request: ModelRequest, context: ProviderContext): Promise<ProviderResult> {
+    const startedAt = context.clock.now();
+    let response: Message;
+    const params = buildRequest(request, this.provider);
+    try {
+      // Use raw post so opaque blocks (including future block types) pass through verbatim.
+      response = await this.client.post<Message>("/v1/messages", {
+        body: params,
+        signal: context.signal,
+      });
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        throw error;
+      }
+      mapError(error, context.signal, context.clock.now());
+    }
+    return this.mapMessage(response, context, startedAt);
+  }
+
+  /** @inheritdoc */
+  async *stream(request: ModelRequest, context: ProviderContext): AsyncIterable<ProviderDelta> {
+    const startedAt = context.clock.now();
+    const params = buildRequest(request, this.provider);
+    // The builder returns this SDK request shape as JSON because provider blocks are extensible.
+    const streamParams = createAnthropicStreamingParams(params);
+    const stream = this.client.messages.stream(streamParams, { signal: context.signal });
+    const state = createAnthropicStreamState();
+    let usage = { inputTokens: 0, outputTokens: 0 };
+    try {
+      for await (const event of stream) {
+        const mapped = streamEventDeltas(event, state, context.ids, usage);
+        usage = mapped.usage;
+        yield* mapped.deltas;
+      }
+      const response = await stream.finalMessage();
+      const result = this.mapMessage(response, context, startedAt, state.callIdsByToolUseId);
+      for (const part of result.parts) {
+        if (part.type === "opaque") {
+          yield { type: "opaque", part };
+        }
+      }
+      yield { type: "usage", usage: result.usage };
+      yield {
+        type: "finish",
+        finishReason: result.finishReason,
+        latencyMs: result.latencyMs,
+      };
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        throw error;
+      }
+      mapError(error, context.signal, context.clock.now());
     }
   }
 }

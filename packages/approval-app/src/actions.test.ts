@@ -39,7 +39,9 @@ interface ActionFixture {
     callTool: ReturnType<typeof vi.fn<ApprovalActionsBridge["callTool"]>>;
   };
   readonly recordCalls: { readonly name: string; readonly attrs: Record<string, unknown> }[];
+  readonly decisionDurations: number[];
   readonly flush: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  readonly flushInteractions: ReturnType<typeof vi.fn<() => void>>;
   readonly onDecision: ReturnType<typeof vi.fn<(decision: "approve" | "deny" | "edit") => void>>;
   readonly rendered: HTMLElement;
   readonly mount: ApprovalActions;
@@ -66,17 +68,30 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     callTool: vi.fn<ApprovalActionsBridge["callTool"]>(),
   };
   const recordCalls: { name: string; attrs: Record<string, unknown> }[] = [];
-  const record = (name: string, attrs: Record<string, unknown>): void => {
+  const decisionDurations: number[] = [];
+  const record = (name: string, attrs: Record<string, unknown>, durationMs?: number): void => {
     recordCalls.push({ name, attrs });
+    if (name === "ui.decision" && durationMs !== undefined) {
+      decisionDurations.push(durationMs);
+    }
   };
   const flush = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const flushInteractions = vi.fn<() => void>();
   const onDecision = vi.fn<(decision: "approve" | "deny" | "edit") => void>();
+  const decisionDurationMs = vi.fn(() => 42);
+  const reportError = (code: "resolve_failed" | "reveal_failed"): void => {
+    record("ui.error", { code });
+    void flush();
+  };
   const mount = mountApprovalActions(actions, editHost, {
     approvalId,
     payload: input,
     isExpired: () => expired,
     bridge,
     telemetry: { record, flush },
+    reportError,
+    decisionDurationMs,
+    flushInteractions,
     renderRevealed: (values) => {
       rendered.textContent = values.get("/email") ?? tokenizedEmail;
     },
@@ -87,7 +102,9 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     editHost,
     bridge,
     recordCalls,
+    decisionDurations,
     flush,
+    flushInteractions,
     onDecision,
     rendered,
     mount,
@@ -137,7 +154,15 @@ afterEach(() => {
 
 describe("approval actions", () => {
   it("approves once, disables all actions while pending, and records only a successful decision", async () => {
-    const { actions, bridge, recordCalls, flush, onDecision } = setup();
+    const {
+      actions,
+      bridge,
+      recordCalls,
+      decisionDurations,
+      flush,
+      flushInteractions,
+      onDecision,
+    } = setup();
     let finish: (result: unknown) => void = () => undefined;
     bridge.callTool.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     actions.querySelector<HTMLButtonElement>("button")?.click();
@@ -153,8 +178,10 @@ describe("approval actions", () => {
       ).toBe("Approval granted.");
     });
     expect(recordCalls).toEqual([{ name: "ui.decision", attrs: { decision: "approve" } }]);
+    expect(decisionDurations).toEqual([42]);
     expect(onDecision).toHaveBeenCalledExactlyOnceWith("approve");
     expect(flush).toHaveBeenCalledOnce();
+    expect(flushInteractions).toHaveBeenCalledOnce();
     expect(JSON.stringify(recordCalls)).not.toContain(rawEmail);
   });
 
@@ -349,6 +376,52 @@ describe("approval actions", () => {
       ).toBe("This approval has already been resolved.");
     });
     expect(recordCalls).toEqual([{ name: "ui.error", attrs: { code: "resolve_failed" } }]);
+  });
+
+  it("records each resolve failure when a retry also fails", async () => {
+    const { actions, bridge, recordCalls } = setup();
+    bridge.callTool
+      .mockResolvedValueOnce({ ok: false, code: "approval_already_resolved" })
+      .mockResolvedValueOnce({ ok: false, code: "approval_already_resolved" });
+    const approve = actions.querySelector<HTMLButtonElement>("button");
+    approve?.click();
+    await vi.waitFor(() => {
+      expect(
+        actions.parentElement?.querySelector<HTMLElement>('[role="status"]')?.textContent,
+      ).toBe("This approval has already been resolved.");
+    });
+    approve?.click();
+    await vi.waitFor(() => {
+      expect(recordCalls).toHaveLength(2);
+    });
+    expect(bridge.callTool).toHaveBeenCalledTimes(2);
+    expect(recordCalls).toEqual([
+      { name: "ui.error", attrs: { code: "resolve_failed" } },
+      { name: "ui.error", attrs: { code: "resolve_failed" } },
+    ]);
+  });
+
+  it("records each reveal failure when a retry also fails", async () => {
+    const { actions, bridge, recordCalls } = setup();
+    bridge.callTool
+      .mockResolvedValueOnce({ values: [{ pointer: "/email", value: 42 }] })
+      .mockResolvedValueOnce({ values: [{ pointer: "/email", value: 42 }] });
+    const reveal = actions.querySelector<HTMLButtonElement>("button:last-child");
+    const confirmReveal = async (): Promise<void> => {
+      const expectedRecordCount = recordCalls.length + 1;
+      reveal?.click();
+      document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
+      await vi.waitFor(() => {
+        expect(recordCalls).toHaveLength(expectedRecordCount);
+      });
+    };
+    await confirmReveal();
+    await confirmReveal();
+    expect(bridge.callTool).toHaveBeenCalledTimes(2);
+    expect(recordCalls).toEqual([
+      { name: "ui.error", attrs: { code: "reveal_failed" } },
+      { name: "ui.error", attrs: { code: "reveal_failed" } },
+    ]);
   });
 
   it("hides bridge exception details from the view and telemetry", async () => {

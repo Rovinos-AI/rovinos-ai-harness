@@ -78,6 +78,7 @@ export const ModelProviderConfigSchema = z
     modelIds: z.record(Code, z.string().min(1)).optional(),
     maxOutputTokens: z.number().int().positive().default(4_096),
     requestsPerMinute: z.number().int().positive().optional(),
+    streaming: z.boolean().default(true),
     capabilities: CapabilitiesSchema.partial().strict().optional(),
     trust: z.enum(["hosted", "local"]).default("hosted"),
   })
@@ -116,8 +117,20 @@ export const ModelRetryConfigSchema = z
     baseDelayMs: z.coerce.number().int().nonnegative().default(500),
     maxDelayMs: z.coerce.number().int().nonnegative().default(20_000),
     timeoutMs: z.coerce.number().int().positive().default(120_000),
+    streamTimeoutMs: z.coerce.number().int().positive().default(600_000),
+    idleTimeoutMs: z.coerce.number().int().positive().default(60_000),
   })
   .strict()
+  .superRefine((retry, context) => {
+    if (retry.streamTimeoutMs < retry.timeoutMs) {
+      context.addIssue({
+        code: "custom",
+        path: ["streamTimeoutMs"],
+        message: "Streaming timeout must be at least the request timeout.",
+        params: { errorCode: "stream_timeout_before_request_timeout" },
+      });
+    }
+  })
   .prefault({});
 
 /** Configured input, output, and optional cached-token prices in integer micros per million tokens. */

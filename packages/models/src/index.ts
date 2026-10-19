@@ -66,7 +66,12 @@ export {
 } from "./providers/anthropic.js";
 export { BedrockAdapter, type BedrockAdapterOptions } from "./providers/bedrock.js";
 export {
+  assembleDeltas,
+  ModelProgressSchema,
+  ProviderDeltaSchema,
   ProviderResultSchema,
+  type ProviderDelta,
+  type ModelProgress,
   type ProviderAdapter,
   type ProviderContext,
   type ProviderResult,
