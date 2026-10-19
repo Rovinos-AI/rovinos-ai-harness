@@ -508,6 +508,8 @@ Requests from apps to open links or add messages or context for the model are of
 
 `harness serve --stdio | --http` serves both protocol eras (SDK v2 `createMcpHandler`) and exposes `start_run`, `continue_run`, `list_runs`, `get_run`, `get_run_timeline`, `approve`, `deny`, `resume_run`, `cancel_run`, `review_approval` and `review_input` (elicitation through MRTR), `list_pending_inputs`, `answer_input`, `open_report`, `harness://runs` resources for live updates through `subscriptions/listen`, the MCP App views above, and the app-only `harness.approvals.resolve`, `harness.approvals.reveal`, and `harness.inputs.answer`. Human confirmation for decisions uses MRTR elicitation with a sealed, single-use `requestState` bound to the token, tool, arguments, and a short expiry. Security defaults:
 
+HTTP mode requires at least one configured bearer token; see [Control-plane security](docs/control-plane-security.md) for token setup.
+
 - loopback binding, and TLS required for anything else
 - bearer tokens with scopes `read | read_content | approve | run | reveal | admin` and optional run filters
 - Host and Origin checks, per-token rate limits

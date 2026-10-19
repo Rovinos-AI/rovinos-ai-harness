@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Code, type Id } from "@harness/schemas";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
+import type { ControlPlaneAuditHandler } from "../auth.js";
+import { withControlPlaneAuthorization } from "../auth.js";
 import type { ConfirmationClientCapabilities, ConfirmationGate } from "../confirmation-gate.js";
 import { decisionOutputSchema, runLifecycleInputSchema } from "../schemas.js";
 import type { RunSupervisor } from "../run-supervisor.js";
@@ -13,6 +15,7 @@ export interface CancelRunToolOptions {
   readonly clientCapabilities: (
     context: ServerContext,
   ) => ConfirmationClientCapabilities | undefined;
+  readonly onAudit?: ControlPlaneAuditHandler;
 }
 
 /** Registers the confirmation-gated `cancel_run` tool. */
@@ -27,33 +30,42 @@ export function registerCancelRunTool(server: McpServer, options: CancelRunToolO
     },
     async (input, context) => {
       const parsed = runLifecycleInputSchema.parse(input);
-      const gate = await options.confirmationGate.requireHuman(context, {
-        toolName: "cancel_run",
-        targetId: parsed.runId,
-        arguments: parsed,
-        summary: `Cancel run ${parsed.runId}?`,
-        clientCapabilities: options.clientCapabilities(context),
-      });
-      if (gate.status === "input_required") {
-        return gate.result;
-      }
-      if (gate.status === "denied") {
-        return decisionResult(false, gate.code);
-      }
-      if (options.cancelRun === undefined) {
-        return decisionResult(false, "control_plane_runtime_unavailable");
-      }
+      return withControlPlaneAuthorization({
+        context,
+        tool: Code.parse("cancel_run"),
+        scope: "run",
+        runId: parsed.runId,
+        operation: async () => {
+          const gate = await options.confirmationGate.requireHuman(context, {
+            toolName: "cancel_run",
+            targetId: parsed.runId,
+            arguments: parsed,
+            summary: `Cancel run ${parsed.runId}?`,
+            clientCapabilities: options.clientCapabilities(context),
+          });
+          if (gate.status === "input_required") {
+            return gate.result;
+          }
+          if (gate.status === "denied") {
+            return decisionResult(false, gate.code);
+          }
+          if (options.cancelRun === undefined) {
+            return decisionResult(false, "control_plane_runtime_unavailable");
+          }
 
-      options.supervisor.abort(parsed.runId);
-      try {
-        const result = await options.cancelRun(parsed.runId);
-        if (result === "already_terminal") {
-          return decisionResult(true, "already_terminal");
-        }
-        return decisionResult(true);
-      } catch (error) {
-        return decisionResult(false, safeErrorCode(error));
-      }
+          options.supervisor.abort(parsed.runId);
+          try {
+            const result = await options.cancelRun(parsed.runId);
+            if (result === "already_terminal") {
+              return decisionResult(true, "already_terminal");
+            }
+            return decisionResult(true);
+          } catch (error) {
+            return decisionResult(false, safeErrorCode(error));
+          }
+        },
+        audit: options.onAudit,
+      });
     },
   );
 }

@@ -5,11 +5,15 @@ services:
     environment:
       HARNESS_DATA_DIR: /var/lib/harness/event-store
       HARNESS_VAULT_DATA_DIR: /var/lib/harness/vault
+      HARNESS_CONFIG: /run/harness/control-plane.yaml
       SANDBOX_RUNNER_TOKEN: null
       SANDBOX_RUNNER_TOKEN_FILE: /run/secrets/sandbox_runner_token
     volumes:
       - harness-event-store:/var/lib/harness/event-store
       - harness-vault:/var/lib/harness/vault
+      - ${CONTROL_PLANE_CONFIG_FILE:-../../test/fixtures/control-plane-empty.yaml}:/run/harness/control-plane.yaml:ro
+    secrets:
+      - control_plane_token
     restart: unless-stopped
     stop_grace_period: 30s
     stop_signal: SIGTERM
@@ -43,5 +47,7 @@ volumes:
   harness-event-store: {}
   harness-vault: {}
 secrets:
+  control_plane_token:
+    file: ${CONTROL_PLANE_TOKEN_SECRET_FILE:-../../test/fixtures/empty-secret}
   sandbox_runner_token:
     file: ${SANDBOX_RUNNER_TOKEN_SECRET_FILE:-/dev/null}

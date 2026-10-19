@@ -35,6 +35,10 @@ export function createSandboxComposeInvocation(
     "sandbox",
     "--file",
     "infra/compose/docker-compose.yml",
+    "--profile",
+    "dev",
+    "--file",
+    "infra/compose/docker-compose.dev.yml",
   ];
 
   if (allow.length > 0) {

@@ -3,6 +3,8 @@ import { Code } from "@harness/schemas";
 import { toSafeEvent } from "@harness/telemetry";
 import type { EventStore } from "@harness/store";
 import type { McpServer } from "@modelcontextprotocol/server";
+import type { ControlPlaneAuditHandler } from "../auth.js";
+import { withControlPlaneAuthorization } from "../auth.js";
 import {
   getRunInputSchema,
   getRunOutputSchema,
@@ -54,7 +56,11 @@ export function getRunText(output: Awaited<ReturnType<typeof getRun>>): string {
 }
 
 /** Registers the `get_run` read-only MCP tool. */
-export function registerGetRunTool(server: McpServer, store: EventStore): void {
+export function registerGetRunTool(
+  server: McpServer,
+  store: EventStore,
+  audit?: ControlPlaneAuditHandler,
+): void {
   server.registerTool(
     "get_run",
     {
@@ -63,15 +69,25 @@ export function registerGetRunTool(server: McpServer, store: EventStore): void {
       outputSchema: getRunOutputSchema,
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => {
-      const output = await getRun(store, input);
-      if (output === undefined) {
-        return { isError: true, content: [{ type: "text", text: "run_not_found" }] };
-      }
-      return {
-        structuredContent: output,
-        content: [{ type: "text", text: getRunText(output) }],
-      };
+    async (input, context) => {
+      const parsed = getRunInputSchema.parse(input);
+      return withControlPlaneAuthorization({
+        context,
+        tool: Code.parse("get_run"),
+        scope: "read",
+        runId: parsed.runId,
+        operation: async () => {
+          const output = await getRun(store, parsed);
+          if (output === undefined) {
+            return { isError: true, content: [{ type: "text" as const, text: "run_not_found" }] };
+          }
+          return {
+            structuredContent: output,
+            content: [{ type: "text" as const, text: getRunText(output) }],
+          };
+        },
+        audit,
+      });
     },
   );
 }

@@ -8,6 +8,25 @@ export {
   type ControlPlaneServerOptions,
 } from "./server.js";
 export {
+  authenticateBearerToken,
+  ControlPlaneAuthError,
+  ControlPlaneRateLimiter,
+  hasControlPlaneScope,
+  requireControlPlaneScope,
+  resolveControlPlaneTokens,
+  sha256Digest,
+  tokenDigestMatches,
+  validControlPlaneHostOrigin,
+  validateControlPlaneBinding,
+  withControlPlaneAuthorization,
+  type ControlPlaneAudit,
+  type ControlPlaneAuditHandler,
+  type ControlPlaneClock,
+  type ControlPlanePrincipal,
+  type ControlPlaneSecret,
+  type ControlPlaneSecretResolver,
+} from "./auth.js";
+export {
   ConfirmationGate,
   type ConfirmationGateOptions,
   type ConfirmationGateResult,
