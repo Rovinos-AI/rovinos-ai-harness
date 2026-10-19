@@ -3,6 +3,7 @@ import type { ModelRequest, Part } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { ProviderError } from "./errors.js";
 import {
+  assertAbortCompletion,
   runProviderContract,
   type ProviderContractAdapterOptions,
   type ProviderContractFixture,
@@ -125,6 +126,22 @@ const fixtures = [
 ];
 
 describe("provider contract fixture format", () => {
+  it("measures synchronous abort-listener time in the cancellation bound", async () => {
+    const controller = new AbortController();
+    controller.signal.addEventListener("abort", () => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 110);
+    });
+    let rejectCompletion: ((reason: ProviderError) => void) | undefined;
+    const completion = new Promise<never>((_resolve, reject) => {
+      rejectCompletion = reject;
+    });
+    controller.signal.addEventListener("abort", () => {
+      rejectCompletion?.(new ProviderError("provider_timeout"));
+    });
+
+    await expect(assertAbortCompletion(completion, controller, () => true)).rejects.toThrow();
+  });
+
   it("accepts and rejects the complete fixture contract", async () => {
     const { ProviderContractFixtureSchema } = await import("./contract.js");
 

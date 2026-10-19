@@ -59,6 +59,7 @@ export default defineConfig({
             "**/*.int.test.ts",
             "**/*.canary.test.ts",
             "**/*.replay.test.ts",
+            "**/*.live.test.ts",
           ],
         },
       },
@@ -82,6 +83,13 @@ export default defineConfig({
         test: {
           name: "replay",
           include: ["**/*.replay.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "live",
+          include: ["**/*.live.test.ts"],
         },
       },
     ],

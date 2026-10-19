@@ -7,6 +7,10 @@ the Vertex model id in each `ModelRequest`. The adapter uses Google Application
 Default Credentials (ADC) by default; configure ADC in the runtime environment
 before making requests.
 
+If setting `httpOptions.baseUrl`, use an HTTPS endpoint controlled by a trusted
+operator. The adapter rejects non-HTTPS base URLs because requests carry ADC
+credentials; it does not treat arbitrary HTTPS hosts as trusted.
+
 ```ts
 import { VertexAdapter } from "@harness/models";
 
@@ -32,6 +36,15 @@ remains responsible for retries. Safety blocks map to
 `provider_content_filtered`; quota, permission, and other HTTP failures map to
 the provider error taxonomy without retaining provider error messages.
 
-The adapter is not registered by `core.createRuntime` or the CLI yet; configure
-the adapter directly until the runtime registration task wires provider
-configuration through the runtime.
+## Verification basis
+
+The `@google/genai` 2.30.0 SDK supports Vertex mode (`vertexai: true`), native
+`responseJsonSchema`, thought signatures, and `httpOptions.retryOptions.attempts`
+(verified for task 14.20). SDK retries are configured to one attempt.
+
+## Known gaps
+
+- Runtime and CLI provider registration are not wired; construct `VertexAdapter`
+  directly until the runtime registration task is implemented.
+- Live behavior has not been exercised without Vertex credentials; run
+  `yarn test:live:vertex` in a credentialed environment to opt in.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Capabilities, ModelRequest, ModelResponse } from "@harness/schemas";
+import { Code, type Capabilities, type ModelRequest, type ModelResponse } from "@harness/schemas";
 import type { z } from "zod";
 import {
   EnforcementRungUnavailableError,
@@ -20,6 +20,7 @@ import { providerSchemaRules } from "../provider-schema-rules.js";
 export interface PreparedEnforcement {
   readonly request: ModelRequest;
   readonly rung?: EnforcementRung;
+  readonly droppedSchemaKeywords?: z.infer<typeof Code>[];
 }
 
 interface ProviderEnforcement {
@@ -64,10 +65,9 @@ export function prepareEnforcementRequest(
     throw new EnforcementRungUnavailableError();
   }
 
-  const schema =
-    schemaRules === undefined
-      ? toJsonSchema(outputSchema)
-      : lowerForProvider(outputSchema, provider.kind).schema;
+  const loweredSchema =
+    schemaRules === undefined ? undefined : lowerForProvider(outputSchema, provider.kind);
+  const schema = loweredSchema?.schema ?? toJsonSchema(outputSchema);
   const output = {
     name: request.output?.name ?? "result",
     schema,
@@ -76,6 +76,7 @@ export function prepareEnforcementRequest(
   return {
     request: prepareRequestForRung(request, output, rung),
     rung,
+    ...(loweredSchema === undefined ? {} : { droppedSchemaKeywords: loweredSchema.dropped }),
   };
 }
 

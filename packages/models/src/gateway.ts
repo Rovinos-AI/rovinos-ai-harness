@@ -4,8 +4,8 @@ import {
   lookupCapabilities,
   ModelEnforcementConfigSchema,
   ModelRetryConfigSchema,
+  JsonValue,
   type Id,
-  type JsonValue,
   type ModelsConfig,
   type ModelRef,
   type ModelRequest,
@@ -20,7 +20,7 @@ import {
   emitPricingMissing,
   setActiveSpanAttribute,
 } from "@harness/telemetry";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   ProviderResultSchema,
   type Clock,
@@ -177,6 +177,38 @@ function parseProviderResult(result: unknown): z.infer<typeof ProviderResultSche
   return parsed.data;
 }
 
+function preserveDroppedSchemaKeywords(
+  parts: ModelResponse["parts"],
+  provider: Code,
+  dropped: readonly Code[] | undefined,
+): ModelResponse["parts"] {
+  if (provider !== "vertex" || dropped === undefined || dropped.length === 0) {
+    return parts;
+  }
+  return parts.map((part) => {
+    if (
+      part.type !== "opaque" ||
+      part.provider !== provider ||
+      typeof part.blob !== "object" ||
+      part.blob === null ||
+      Array.isArray(part.blob)
+    ) {
+      return part;
+    }
+    const existing = z.array(Code).safeParse(part.blob.droppedSchemaKeywords);
+    if (!existing.success) {
+      return part;
+    }
+    return {
+      ...part,
+      blob: JsonValue.parse({
+        ...part.blob,
+        droppedSchemaKeywords: [...new Set([...existing.data, ...dropped])].sort(),
+      }),
+    };
+  });
+}
+
 /** Minimal provider-selecting model port implementation. */
 export class ModelGateway {
   private readonly retryPolicy: ModelRetryConfig;
@@ -328,7 +360,15 @@ export class ModelGateway {
             aggregateLatencyMs += metadata.latencyMs ?? 0;
           },
         });
-        const result = parseProviderResult(adapterResult);
+        const providerResult = parseProviderResult(adapterResult);
+        const result = {
+          ...providerResult,
+          parts: preserveDroppedSchemaKeywords(
+            providerResult.parts,
+            adapter.kind,
+            prepared.droppedSchemaKeywords,
+          ),
+        };
         aggregateUsage = aggregateModelUsage(aggregateUsage, result.usage);
         aggregateLatencyMs += result.latencyMs;
 

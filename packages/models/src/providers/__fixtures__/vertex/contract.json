@@ -99,7 +99,7 @@
         }
       ],
       "usage": { "inputTokens": 2, "outputTokens": 3 },
-      "finishReason": "stop"
+      "finishReason": "tool_calls"
     }
   },
   {
