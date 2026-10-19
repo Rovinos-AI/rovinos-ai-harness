@@ -26,9 +26,7 @@ describe.each(dockerfiles)("%s", (dockerfile) => {
     );
 
     expect(baseImages.length).toBeGreaterThan(0);
-    expect(baseImages.every((image) => image?.includes("@sha256:") === true)).toBe(
-      true,
-    );
+    expect(baseImages.every((image) => image?.includes("@sha256:") === true)).toBe(true);
     expect(baseImages.every((image) => imageLock.split("\n").includes(image ?? ""))).toBe(true);
   });
 });

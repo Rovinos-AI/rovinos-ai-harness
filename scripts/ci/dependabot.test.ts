@@ -126,7 +126,6 @@ it("configures weekly grouped updates and review gates", () => {
             "dependency-name": "postgres",
             "update-types": ["version-update:semver-major"],
           },
-          { "dependency-name": "jdx/mise" },
         ],
       },
     ],
