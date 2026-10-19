@@ -14,6 +14,8 @@ describe("sandbox Compose configuration", () => {
 
     expect(invocation.args).toContain("sandbox-egress");
     expect(invocation.args).toContain("infra/compose/docker-compose.egress.yml");
+    expect(invocation.args).toContain("dev");
+    expect(invocation.args).toContain("infra/compose/docker-compose.dev.yml");
     expect(invocation.env.SANDBOX_EGRESS_ALLOW).toBe(JSON.stringify(allow));
     expect(invocation.env.SANDBOX_RUNNER_TOKEN).toBe("synthetic-compose-token");
     expect(environment).not.toHaveProperty("SANDBOX_EGRESS_ALLOW");
@@ -27,6 +29,7 @@ describe("sandbox Compose configuration", () => {
 
     expect(invocation.args).not.toContain("sandbox-egress");
     expect(invocation.args).not.toContain("infra/compose/docker-compose.egress.yml");
+    expect(invocation.args).toContain("infra/compose/docker-compose.dev.yml");
     expect(invocation.env.SANDBOX_EGRESS_ALLOW).toBeUndefined();
     expect(invocation.env.SANDBOX_EGRESS_PROXY_URL).toBeUndefined();
   });

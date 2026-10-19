@@ -2,6 +2,13 @@
 services:
   harness:
     profiles: [dev]
+    command: ["serve", "--http"]
+    environment:
+      HARNESS_CONFIG: /run/harness/control-plane.yaml
+    volumes:
+      - ${CONTROL_PLANE_CONFIG_FILE:?Set CONTROL_PLANE_CONFIG_FILE}:/run/harness/control-plane.yaml:ro
+    secrets:
+      - control_plane_token
     stop_grace_period: 30s
     stop_signal: SIGTERM
   otel-collector:
@@ -15,3 +22,6 @@ services:
     ports:
       - "127.0.0.1:4318:4318"
       - "127.0.0.1::13133"
+secrets:
+  control_plane_token:
+    file: ${CONTROL_PLANE_TOKEN_SECRET_FILE:?Set CONTROL_PLANE_TOKEN_SECRET_FILE}

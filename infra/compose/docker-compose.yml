@@ -5,7 +5,7 @@ services:
       context: ../..
       dockerfile: Dockerfile
     image: ${HARNESS_IMAGE:-harness:local}
-    command: ["serve"]
+    command: ["serve", "--http"]
     environment:
       HARNESS_DATA_DIR: /tmp/harness
     init: true

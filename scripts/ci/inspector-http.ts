@@ -2,7 +2,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 
-export const INSPECTOR_HTTP_TOKEN = "INSPECTOR_CONFORMANCE_TOKEN";
+export const INSPECTOR_HTTP_TOKEN = "INSPECTOR_CONFORMANCE_TEST_TOKEN_LONG_ENOUGH";
 
 /** Running HTTP server process and its MCP endpoint. */
 export interface RunningInspectorServer {

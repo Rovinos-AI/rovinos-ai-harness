@@ -4,13 +4,21 @@ import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, resolve as resolvePath } from "node:path";
-import { InspectResultSchema, RunResultSchema, parseJson } from "@harness/schemas";
+import {
+  ControlPlaneConfigSchema,
+  InspectResultSchema,
+  RunResultSchema,
+  parseJson,
+} from "@harness/schemas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const projectName = `harness-prod-like-${String(process.pid)}`;
 const runnerToken = randomBytes(32).toString("base64url");
+const controlPlaneToken = randomBytes(32).toString("base64url");
 let secretDirectory = "";
 let runnerTokenFile = "";
+let controlPlaneTokenFile = "";
+let controlPlaneConfigFile = "";
 const composeArgs = [
   "compose",
   "--env-file",
@@ -38,6 +46,8 @@ function compose(args: readonly string[]): string {
   const environment = { ...composeEnvironment };
   delete environment.SANDBOX_RUNNER_TOKEN;
   environment.SANDBOX_RUNNER_TOKEN_SECRET_FILE = runnerTokenFile;
+  environment.CONTROL_PLANE_CONFIG_FILE = controlPlaneConfigFile;
+  environment.CONTROL_PLANE_TOKEN_SECRET_FILE = controlPlaneTokenFile;
   return execFileSync("docker", [...composeArgs, ...args], {
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
@@ -79,6 +89,24 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
     secretDirectory = await mkdtemp(join(mountableTemp, "harness-prod-like-"));
     runnerTokenFile = resolvePath(secretDirectory, "sandbox-runner-token");
     await writeFile(runnerTokenFile, runnerToken, { encoding: "utf8", mode: 0o444 });
+    controlPlaneTokenFile = resolvePath(secretDirectory, "control-plane-token");
+    await writeFile(controlPlaneTokenFile, controlPlaneToken, { encoding: "utf8", mode: 0o444 });
+    controlPlaneConfigFile = resolvePath(secretDirectory, "control-plane.json");
+    const controlPlane = ControlPlaneConfigSchema.parse({
+      auth: {
+        tokens: [
+          {
+            id: "token.prod-like-test",
+            secret: "file:/run/secrets/control_plane_token",
+            scopes: ["admin"],
+          },
+        ],
+      },
+    });
+    await writeFile(controlPlaneConfigFile, `${JSON.stringify({ controlPlane })}\n`, {
+      encoding: "utf8",
+      mode: 0o444,
+    });
   });
 
   afterAll(async () => {
@@ -95,15 +123,16 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
 
     const collectorAddress = serviceAddress("otel-collector", "internal");
     const healthChecks = [
-      "const check = async (url, healthy) => {",
+      "const check = async (url, healthy, options) => {",
       "for (let retry = 0; retry < 20; retry += 1) {",
-      "try { const response = await fetch(url); if (healthy(response)) return true; } catch {}",
+      "try { const response = await fetch(url, options); if (healthy(response)) return true; } catch {}",
       "await new Promise((resolve) => setTimeout(resolve, 250));",
       "}",
       "return false;",
       "};",
+      "const controlPlaneToken = require('node:fs').readFileSync('/run/secrets/control_plane_token', 'utf8').trim();",
       "Promise.all([",
-      "check('http://127.0.0.1:3000/mcp', (response) => response.status < 500),",
+      "check('http://127.0.0.1:3000/mcp', (response) => response.status !== 401 && response.status !== 403 && response.status < 500, { headers: { authorization: 'Bearer ' + controlPlaneToken } }),",
       `check('http://${collectorAddress}:13133/', (response) => response.ok),`,
       "]).then((results) => {",
       "if (!results[0]) process.stdout.write('control_plane_unhealthy\\n');",
