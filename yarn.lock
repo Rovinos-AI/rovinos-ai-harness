@@ -1473,6 +1473,8 @@ __metadata:
     "@harness/sandbox": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
+    "@harness/store-postgres": "workspace:^"
+    "@harness/store-sqlite": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"
@@ -1542,6 +1544,8 @@ __metadata:
     "@harness/sandbox": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
+    "@harness/store-postgres": "workspace:^"
+    "@harness/store-sqlite": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
     "@modelcontextprotocol/server": "npm:2.3.1"
@@ -1705,9 +1709,39 @@ __metadata:
     "@harness/models": "workspace:^"
     "@harness/schemas": "workspace:^"
     "@harness/store": "workspace:^"
+    "@harness/store-postgres": "workspace:^"
+    "@harness/store-sqlite": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@types/pg": "npm:8.23.1"
     pg: "npm:8.23.1"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@harness/store-postgres@workspace:^, @harness/store-postgres@workspace:packages/store-postgres":
+  version: 0.0.0-use.local
+  resolution: "@harness/store-postgres@workspace:packages/store-postgres"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    "@harness/store": "workspace:^"
+    "@types/pg": "npm:8.23.1"
+    pg: "npm:8.23.1"
+    typescript: "npm:5.9.3"
+    vitest: "npm:3.2.6"
+    zod: "npm:4.6.7"
+  languageName: unknown
+  linkType: soft
+
+"@harness/store-sqlite@workspace:^, @harness/store-sqlite@workspace:packages/store-sqlite":
+  version: 0.0.0-use.local
+  resolution: "@harness/store-sqlite@workspace:packages/store-sqlite"
+  dependencies:
+    "@harness/schemas": "workspace:^"
+    "@harness/store": "workspace:^"
+    "@types/better-sqlite3": "npm:9.6.0"
+    better-sqlite3: "npm:13.0.3"
     typescript: "npm:5.9.3"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.7"
@@ -1720,10 +1754,6 @@ __metadata:
   dependencies:
     "@harness/crypto": "workspace:^"
     "@harness/schemas": "workspace:^"
-    "@types/better-sqlite3": "npm:9.6.0"
-    "@types/pg": "npm:8.23.1"
-    better-sqlite3: "npm:13.0.3"
-    pg: "npm:8.23.1"
     typescript: "npm:5.9.3"
     vitest: "npm:3.2.6"
     zod: "npm:4.6.7"
@@ -8180,6 +8210,8 @@ __metadata:
     "@harness/schemas": "workspace:^"
     "@harness/sdk": "workspace:^"
     "@harness/store": "workspace:^"
+    "@harness/store-postgres": "workspace:^"
+    "@harness/store-sqlite": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@harness/vault": "workspace:^"
     "@modelcontextprotocol/client": "npm:2.3.1"

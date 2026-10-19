@@ -13,7 +13,8 @@ import {
   Sha256Hex,
   type Event as HarnessEvent,
 } from "@harness/schemas";
-import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
+import { InMemoryEventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { createEventBuilders } from "@harness/store/testing";
 import {
   createTestContextManager,

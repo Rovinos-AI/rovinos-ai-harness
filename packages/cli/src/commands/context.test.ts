@@ -13,7 +13,8 @@ import {
   type JsonValue,
 } from "@harness/schemas";
 import { StrategyComparisonReportSchema } from "@harness/context";
-import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
+import { InMemoryEventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";

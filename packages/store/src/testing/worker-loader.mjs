@@ -5,6 +5,12 @@ import ts from "typescript";
 
 /** Resolves source imports that use emitted `.js` extensions to their TypeScript files. */
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier.startsWith("@harness/store/")) {
+    return nextResolve(specifier, {
+      ...context,
+      conditions: [...context.conditions, "source"],
+    });
+  }
   if (specifier.endsWith(".js") && context.parentURL?.startsWith("file:")) {
     const sourceUrl = new URL(specifier.slice(0, -3) + ".ts", context.parentURL);
     const compiledUrl = new URL(specifier, context.parentURL);

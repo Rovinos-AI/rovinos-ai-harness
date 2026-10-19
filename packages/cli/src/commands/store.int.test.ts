@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessConfigSchema } from "@harness/config";
 import { FakeClock, StoreMigrateResultSchema, parseJson } from "@harness/schemas";
-import { migrate, PostgresEventStore } from "@harness/store";
+import { migrate } from "@harness/store/adapter-internal";
+import { PostgresEventStore } from "@harness/store-postgres";
 import { createEventBuilders } from "@harness/store/testing";
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createStoreCommand } from "./store.js";
 import { ExitCode } from "../exit-codes.js";
@@ -13,7 +15,7 @@ import { createOutput } from "../output.js";
 
 // Derived from the store's migration files so adding a migration does not break this assertion.
 const postgresMigrationVersions = (
-  await readdir(new URL("../../../store/migrations/postgres/", import.meta.url))
+  await readdir(new URL("../../../store-postgres/migrations/postgres/", import.meta.url))
 )
   .filter((file) => file.endsWith(".sql"))
   .map((file) => file.slice(0, 4))
@@ -62,7 +64,14 @@ describe.skipIf(connectionString.length === 0)("store maintenance with Postgres"
         clock: new FakeClock(3 * 86_400_000),
       };
       const command = createStoreCommand({
-        migrate: (_config, dryRun, appliedAt) => migrate(pool, "postgres", { dryRun, appliedAt }),
+        migrate: (_config, dryRun, appliedAt) =>
+          migrate(pool, "postgres", {
+            dryRun,
+            appliedAt,
+            migrationDirectory: fileURLToPath(
+              new URL("../../../store-postgres/migrations/postgres/", import.meta.url),
+            ),
+          }),
         openStore: (_config, dryRun) =>
           Promise.resolve(
             new PostgresEventStore(connectionString, { schema, skipMigrations: dryRun }),
