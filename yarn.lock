@@ -1789,8 +1789,8 @@ __metadata:
   resolution: "@harness/models@workspace:packages/models"
   dependencies:
     "@anthropic-ai/sdk": "npm:0.133.0"
-    "@google/genai": "npm:2.30.0"
     "@aws-sdk/client-bedrock-runtime": "npm:3.1045.0"
+    "@google/genai": "npm:2.30.0"
     "@harness/schemas": "workspace:^"
     "@harness/telemetry": "workspace:^"
     "@opentelemetry/api": "npm:1.9.1"
@@ -4123,6 +4123,8 @@ __metadata:
   version: 9.3.1
   resolution: "bignumber.js@npm:9.3.1"
   checksum: 10c0/61342ba5fe1c10887f0ecf5be02ff6709271481aff48631f86b4d37d55a99b87ce441cfd54df3d16d10ee07ceab7e272fc0be430c657ffafbbbf7b7d631efb75
+  languageName: node
+  linkType: hard
 
 "bowser@npm:^2.11.0":
   version: 2.14.1
