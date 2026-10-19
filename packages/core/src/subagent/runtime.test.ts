@@ -406,6 +406,8 @@ describe("production subagent runtime", () => {
           childRunId,
           role: "worker",
           parentCallId,
+          budgetLimits: RunConfigSchema.parse({}).budgets,
+          budgetDeadlineTs: 1_000,
         },
       ]);
       const last = parentEvents.at(-1);

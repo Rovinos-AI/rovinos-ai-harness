@@ -990,10 +990,10 @@ describe("tool-step resume handling", () => {
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
         type: "tool_result",
-        outcome: decision === "approve" ? "ok" : "error",
-        ...(decision === "deny" ? { errorCode: "resume_ambiguous" } : {}),
+        outcome: "error",
+        errorCode: "resume_ambiguous",
       });
-      expect(tool.calls).toHaveLength(decision === "approve" ? 1 : 0);
+      expect(tool.calls).toHaveLength(0);
       const stored: Event[] = [];
       for await (const event of store.read(runId)) {
         stored.push(event);

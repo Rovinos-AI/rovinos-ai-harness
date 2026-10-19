@@ -252,7 +252,10 @@ describe("recoverSubagentSpawn", () => {
 
   it("fails closed and records completion when the announcement has no budget bounds", async () => {
     const store = new InMemoryEventStore();
-    const parentEvents = await seed(store, { budgetMetadata: false });
+    const parentEvents = await seed(store, {
+      budgetMetadata: false,
+      childStatus: "running",
+    });
 
     await expect(recoverSubagentSpawn(createOptions(store, parentEvents))).resolves.toMatchObject({
       kind: "result",

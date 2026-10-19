@@ -491,8 +491,12 @@ describe("dangling tool intent resume", () => {
 
     const resultEvents = await resolveDanglingIntentApproval(options, intent, request, resolution);
     expect(resultEvents.map(({ type }) => type)).toEqual(["tool_result"]);
-    expect(resultEvents[0]).toMatchObject({ callId, outcome: "ok" });
-    expect(tool.calls).toHaveLength(1);
+    expect(resultEvents[0]).toMatchObject({
+      callId,
+      outcome: "error",
+      errorCode: "resume_ambiguous",
+    });
+    expect(tool.calls).toHaveLength(0);
     const stored: Event[] = [];
     for await (const event of store.read(runId)) {
       stored.push(event);

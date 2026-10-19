@@ -440,6 +440,9 @@ export async function resolveDanglingIntentApproval(
   if (description === undefined) {
     return recordDanglingFailure(options, intent, "unknown_tool");
   }
+  if (!intent.idempotent || !description.idempotent) {
+    return recordDanglingFailure(options, intent, "resume_ambiguous");
+  }
   await options.beforeToolExecution?.();
   return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
 }

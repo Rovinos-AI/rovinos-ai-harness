@@ -299,18 +299,6 @@ class BoundaryRecordingStore implements EventStore {
     return this.inner.releaseRunExecution(...args);
   }
 
-  claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {
-    return this.inner.claimRunExecution(...args);
-  }
-
-  renewRunExecution(...args: Parameters<EventStore["renewRunExecution"]>) {
-    return this.inner.renewRunExecution(...args);
-  }
-
-  releaseRunExecution(...args: Parameters<EventStore["releaseRunExecution"]>) {
-    return this.inner.releaseRunExecution(...args);
-  }
-
   latestSnapshot(forRun: Id) {
     return this.inner.latestSnapshot(forRun);
   }
@@ -544,6 +532,18 @@ class PreIntentExecutionStore implements EventStore {
     leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot, leaseOwner);
+  }
+
+  claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {
+    return this.inner.claimRunExecution(...args);
+  }
+
+  renewRunExecution(...args: Parameters<EventStore["renewRunExecution"]>) {
+    return this.inner.renewRunExecution(...args);
+  }
+
+  releaseRunExecution(...args: Parameters<EventStore["releaseRunExecution"]>) {
+    return this.inner.releaseRunExecution(...args);
   }
 
   latestSnapshot(forRun: Id) {
@@ -993,7 +993,15 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
         const childRan = childEvents.some(
           (event) => event.type === "model_request" || event.type === "tool_intent",
         );
-        expect(counts.writes).toBe(childRan ? 1 : 0);
+        const crashBoundary = reference.boundaries[crashAt - 1];
+        const crashCommittedUnexecutedIntent =
+          mode === "after_commit" &&
+          crashBoundary?.eventTypes.includes("tool_intent") === true &&
+          crashBoundary.callIds.includes(subagentToolCallId);
+        expect(
+          counts.writes,
+          `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",")})`,
+        ).toBe(childRan && !crashCommittedUnexecutedIntent ? 1 : 0);
         if (childRan) {
           expect(
             childEvents.filter(
