@@ -1,15 +1,53 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { RunResumePolicySchema } from "@harness/schemas";
 import type { RunState, ToolIntentEvent } from "./run-state.js";
-import type { ToolPort } from "./ports.js";
+import type { Id } from "@harness/schemas";
+import type { ModelToolCall, ToolExecutionResult, ToolPort } from "./ports.js";
 import type { z } from "zod";
 
 /** Policy selected for a dangling non-idempotent tool intent. */
 export type ResumePolicy = z.infer<typeof RunResumePolicySchema>;
 
+/** Optional completion metadata recorded before a recovered tool result. */
+export interface ToolResumeCompletion {
+  readonly childRunId: Id;
+  readonly outcome: "completed" | "failed" | "cancelled";
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly steps?: number;
+  readonly costMicros?: number;
+}
+
+/** Result of reconciling a dangling intent with tool-specific durable state. */
+export type ToolResumeDecision =
+  | { readonly kind: "rerun" }
+  | {
+      readonly kind: "result";
+      readonly execution: ToolExecutionResult;
+      readonly completion?: ToolResumeCompletion;
+    }
+  | { readonly kind: "suspend" };
+
+/** State available to a tool-specific resume strategy. */
+export interface ToolResumeContext {
+  readonly runId: Id;
+  readonly signal: AbortSignal;
+  readonly toolRegistry: ToolPort;
+}
+
+/** Resolves dangling intents using tool-specific durable recovery semantics. */
+export interface ToolResumeStrategy {
+  onDanglingIntent(
+    call: ModelToolCall,
+    state: RunState,
+    context: ToolResumeContext,
+  ): Promise<ToolResumeDecision>;
+}
+
 /** Decision for one tool intent that has no recorded result. */
 export type DanglingIntentAction =
   | { readonly kind: "rerun"; readonly callId: ToolIntentEvent["callId"] }
+  | { readonly kind: "strategy"; readonly callId: ToolIntentEvent["callId"] }
   | { readonly kind: "escalate"; readonly callId: ToolIntentEvent["callId"] }
   | {
       readonly kind: "fail";
@@ -43,6 +81,9 @@ export function planDanglingIntents(
     }
     if (intent.policyDecision === "ask") {
       return { kind: "escalate", callId: intent.callId };
+    }
+    if (toolPort.resumeStrategy?.(intent.toolId) !== undefined) {
+      return { kind: "strategy", callId: intent.callId };
     }
     if (intent.idempotent && description.idempotent) {
       return { kind: "rerun", callId: intent.callId };

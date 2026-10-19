@@ -35,6 +35,7 @@ export interface PiiToolContext {
 export interface PiiToolResult {
   readonly binary?: boolean;
   readonly metadata?: JsonValue;
+  readonly suspend?: boolean;
   readonly outcome: "ok" | "error";
   readonly result: JsonValue;
   readonly errorCode?: Code;
@@ -240,6 +241,7 @@ async function binaryResult(
     outcome: execution.outcome,
     result: payload.data,
     binary: true,
+    ...(execution.suspend === true ? { suspend: true } : {}),
     ...(execution.outcome === "error" ? { errorCode: "tool_failed" } : {}),
     ...(metadata === undefined ? {} : { metadata }),
   };
@@ -277,6 +279,7 @@ async function tokenizeToolOutput(
     const result = {
       outcome: execution.outcome,
       result: markJsonSanitized(stored.value),
+      ...(execution.suspend === true ? { suspend: true } : {}),
       ...(execution.outcome === "error"
         ? { errorCode: safeToolErrorCode(execution.errorCode) }
         : {}),

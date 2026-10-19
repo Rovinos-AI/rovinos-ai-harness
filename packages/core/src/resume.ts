@@ -60,6 +60,26 @@ export class RunAwaitingApprovalError extends HarnessError {
   }
 }
 
+const activeResumes = new WeakMap<EventStore, Set<Id>>();
+
+function claimResumeLock(store: EventStore, runId: Id): () => void {
+  let runs = activeResumes.get(store);
+  if (runs === undefined) {
+    runs = new Set();
+    activeResumes.set(store, runs);
+  }
+  if (runs.has(runId)) {
+    throw new ResumeConflictError();
+  }
+  runs.add(runId);
+  return () => {
+    runs?.delete(runId);
+    if (runs?.size === 0) {
+      activeResumes.delete(store);
+    }
+  };
+}
+
 /** Inputs for resuming an existing run. */
 export interface ResumeRunOptions extends Omit<RunLoopExecutionOptions, "recorder"> {
   readonly store: EventStore;
@@ -97,19 +117,19 @@ async function registerRunScope(options: RunScopeRestoreOptions): Promise<void> 
   if (created?.type !== "run_created") {
     throw new CorruptLogError();
   }
-  if (created.scopeId !== undefined) {
-    scopes.register(runId, created.scopeId);
-    return;
-  }
   if (visited.has(runId)) {
     throw new CorruptLogError();
   }
   visited.add(runId);
   if (created.parentRunId === undefined) {
-    scopes.register(runId, runId);
+    scopes.register(runId, created.scopeId ?? runId);
     return;
   }
   const parentEvents = await readEvents(store, created.parentRunId);
+  if (parentEvents.length === 0 && created.scopeId !== undefined) {
+    scopes.register(runId, created.scopeId);
+    return;
+  }
   await registerRunScope({
     store,
     runId: created.parentRunId,
@@ -117,7 +137,11 @@ async function registerRunScope(options: RunScopeRestoreOptions): Promise<void> 
     scopes,
     visited,
   });
-  scopes.register(runId, scopes.scopeOf(created.parentRunId));
+  const parentScope = scopes.scopeOf(created.parentRunId);
+  if (created.scopeId !== undefined && created.scopeId !== parentScope) {
+    throw new CorruptLogError();
+  }
+  scopes.register(runId, parentScope);
 }
 
 function linkFromTraceparent(traceparent: string): Link | undefined {
@@ -386,43 +410,48 @@ async function claimAndContinue(execution: ResumeExecution): Promise<Event> {
  * @throws ResumeConflictError when another writer wins the resume claim.
  */
 export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResult> {
-  const { events, snapshot, state, head } = await readResumeHistory(options);
-  const segmentId = options.ids.next();
-  const recorder = new RunRecorder(options.store, options.runId, segmentId, head, options.clock);
-  const newEventStart = events.length;
-  const checkpointer = new Checkpointer({
-    recorder,
-    runId: options.runId,
-    context: options.context,
-    ids: options.ids,
-    clock: options.clock,
-    ...(options.checkpointEveryEvents === undefined
-      ? {}
-      : { checkpointEveryEvents: options.checkpointEveryEvents }),
-    ...(options.snapshotKeep === undefined ? {} : { snapshotKeep: options.snapshotKeep }),
-    ...(options.workspaceSnapshotter === undefined
-      ? {}
-      : { workspaceSnapshotter: options.workspaceSnapshotter }),
-  });
-  const eventsAfterSnapshot =
-    snapshot === undefined ? events.slice() : events.filter((event) => event.seq > snapshot.atSeq);
-  const execution: ResumeExecution = {
-    options,
-    state,
-    events,
-    snapshot,
-    eventsAfterSnapshot,
-    recorder,
-    checkpointer,
-  };
-  await activeRuns.track(
-    options.runId,
-    () =>
-      recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), {
-        links: [previousSegmentLink(events, snapshot?.traceparent)],
-      }),
-    () => isTerminalRunState(foldRunState(events)),
-  );
+  const release = claimResumeLock(options.store, options.runId);
+  try {
+    const { events, snapshot, state, head } = await readResumeHistory(options);
+    const segmentId = options.ids.next();
+    const recorder = new RunRecorder(options.store, options.runId, segmentId, head, options.clock);
+    const newEventStart = events.length;
+    const checkpointer = new Checkpointer({
+      recorder,
+      runId: options.runId,
+      context: options.context,
+      ids: options.ids,
+      clock: options.clock,
+      ...(options.checkpointEveryEvents === undefined
+        ? {}
+        : { checkpointEveryEvents: options.checkpointEveryEvents }),
+      ...(options.snapshotKeep === undefined ? {} : { snapshotKeep: options.snapshotKeep }),
+      ...(options.workspaceSnapshotter === undefined
+        ? {}
+        : { workspaceSnapshotter: options.workspaceSnapshotter }),
+    });
+    const eventsAfterSnapshot =
+      snapshot === undefined ? events.slice() : events.filter((event) => event.seq > snapshot.atSeq);
+    const execution: ResumeExecution = {
+      options,
+      state,
+      events,
+      snapshot,
+      eventsAfterSnapshot,
+      recorder,
+      checkpointer,
+    };
+    await activeRuns.track(
+      options.runId,
+      () =>
+        recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), {
+          links: [previousSegmentLink(events, snapshot?.traceparent)],
+        }),
+      () => isTerminalRunState(foldRunState(events)),
+    );
 
-  return resultForResume(events, newEventStart);
+    return resultForResume(events, newEventStart);
+  } finally {
+    release();
+  }
 }

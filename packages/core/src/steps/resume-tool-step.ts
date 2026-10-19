@@ -18,7 +18,7 @@ import type { EventPartial } from "../recorder.js";
 import type { ModelToolCall, PolicyDecision } from "../ports.js";
 import { requestPolicyApproval } from "./policy-step.js";
 import { APPROVAL_WAIT_SPAN, TOOL_CALL_SPAN } from "../spans.js";
-import type { DanglingIntentAction } from "../resume-policy.js";
+import type { DanglingIntentAction, ToolResumeDecision } from "../resume-policy.js";
 import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
 import { runToolCall, type ResumeToolStepOptions } from "./tool-step.js";
 
@@ -224,6 +224,18 @@ async function applyDanglingIntentAction(
   if (action.kind === "escalate") {
     return "escalate";
   }
+  if (action.kind === "strategy") {
+    const strategy = options.tool.resumeStrategy?.(intent.toolId);
+    if (strategy === undefined) {
+      throw new ResumeActionMismatchError();
+    }
+    const decision = await strategy.onDanglingIntent(callFromIntent(intent), state, {
+      runId: options.runId,
+      signal: options.signal,
+      toolRegistry: options.tool,
+    });
+    return applyToolResumeDecision(options, intent, decision);
+  }
 
   const description = options.tool.describe(intent.toolId, intent.args);
   if (description === undefined) {
@@ -234,6 +246,69 @@ async function applyDanglingIntentAction(
   }
   await options.beforeToolExecution?.();
   return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
+}
+
+async function applyToolResumeDecision(
+  options: ResumeToolStepOptions,
+  intent: ToolIntentEvent,
+  decision: ToolResumeDecision,
+): Promise<readonly Event[]> {
+  if (decision.kind === "rerun") {
+    const description = options.tool.describe(intent.toolId, intent.args);
+    if (description === undefined) {
+      return recordDanglingFailure(options, intent, "unknown_tool");
+    }
+    await options.beforeToolExecution?.();
+    return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
+  }
+  if (decision.kind === "suspend") {
+    const suspended = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
+      options.recorder.record({
+        type: "run_status_changed",
+        v: 1,
+        from: "running",
+        to: "suspended",
+        reason: "awaiting_subagent",
+      }),
+    );
+    return [suspended];
+  }
+
+  const batch: EventPartial[] = [];
+  if (decision.completion !== undefined) {
+    batch.push({
+      type: "subagent_completed",
+      v: 1,
+      ...decision.completion,
+    });
+  }
+  batch.push({
+    type: "tool_result",
+    v: 1,
+    callId: intent.callId,
+    toolId: intent.toolId,
+    outcome: decision.execution.outcome,
+    ...(decision.execution.outcome === "error"
+      ? { errorCode: decision.execution.errorCode ?? "tool_failed" }
+      : {}),
+    latencyMs: 0,
+    result: decision.execution.result,
+  });
+  const events: Event[] = [];
+  await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
+    setPolicySpanAttributes(intent);
+    events.push(...(await options.recorder.recordBatch(batch)));
+    if (decision.execution.outcome === "error") {
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      span.setAttribute("harness.error.code", decision.execution.errorCode ?? "tool_failed");
+    }
+    const last = events.at(-1);
+    if (last === undefined) {
+      throw new ResumeEventMissingError();
+    }
+    return last;
+  });
+  return events;
 }
 
 /** Applies a resolved approval without appending another intent. */
@@ -310,6 +385,16 @@ export async function applyDanglingIntents(
     } else {
       events.push(...applied);
       options.onEvents?.(applied);
+      if (
+        applied.some(
+          (event) =>
+            event.type === "run_status_changed" &&
+            event.to === "suspended" &&
+            event.reason === "awaiting_subagent",
+        )
+      ) {
+        return events;
+      }
     }
   }
   if (escalations.length > 0) {

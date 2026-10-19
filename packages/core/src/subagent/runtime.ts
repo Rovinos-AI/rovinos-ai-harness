@@ -10,6 +10,7 @@ import { parseRuntimeModelsConfig, type RuntimeConfig } from "../runtime-config.
 import { RunRecorder, type Clock } from "../recorder.js";
 import { configHash } from "../runtime-ids.js";
 import { runLoop } from "../loop.js";
+import { RunAwaitingApprovalError, RunAlreadyTerminalError, resumeRun } from "../resume.js";
 import type { ContextPort, IdGenerator, ModelPort, PolicyPort, ToolPort } from "../ports.js";
 import { RoleRegistry, RoleRegistryError } from "../roles.js";
 import type { ResolvedRole } from "../roles.js";
@@ -171,6 +172,64 @@ export function createSubagentTool(options: {
     runConfig: options.config.run,
     scopes: options.scopes,
     parentTools: options.parentTool,
+    resumeChild: async (request: SubagentRunRequest) => {
+      let resumeError: unknown;
+      try {
+        await resumeRun({
+          store: options.store,
+          runId: request.runId,
+          clock: options.clock,
+          ids: options.ids,
+          model: options.model,
+          tool: request.tools,
+          policy: options.policy,
+          context: contextForRole(request.role),
+          signal: request.signal,
+          scopes: options.scopes,
+          goal: request.input,
+          budgets: request.budgets,
+          deadlineTs: request.budgetDeadlineTs,
+          checkpointEveryEvents: options.config.run.checkpointEveryEvents,
+          ...(options.config.store?.snapshotKeep === undefined
+            ? {}
+            : { snapshotKeep: options.config.store.snapshotKeep }),
+          resumePolicy: options.config.run.resume.onNonIdempotent,
+          ...(options.workspaceSnapshotter === undefined
+            ? {}
+            : { workspaceSnapshotter: options.workspaceSnapshotter }),
+          role: request.role.route ?? request.role.id,
+          ...(request.role.resultSchema === undefined
+            ? {}
+            : {
+                finalOutputSchema: request.role.resultSchema,
+                ...(options.resolver === undefined
+                  ? {}
+                  : {
+                      valueTransform: childValueTransform(request.runId, options.resolver),
+                    }),
+              }),
+        });
+      } catch (error) {
+        resumeError = error;
+        if (!(error instanceof RunAwaitingApprovalError) && !(error instanceof RunAlreadyTerminalError)) {
+          throw error;
+        }
+      }
+      const events = await readEvents(options.store, request.runId);
+      if (events.length === 0) {
+        throw resumeError ?? new Error("Child run disappeared during resume.");
+      }
+      const status = foldRunState(events).status;
+      if (status === "pending" || status === "running") {
+        throw resumeError ?? new Error("Child run did not reach a resumable state.");
+      }
+      return finalizeChild({
+        childRunId: request.runId,
+        status,
+        events,
+        hasResultSchema: request.role.resultSchema !== undefined,
+      });
+    },
     runChild: async (request: SubagentRunRequest) => {
       const recorder = new RunRecorder(
         options.store,

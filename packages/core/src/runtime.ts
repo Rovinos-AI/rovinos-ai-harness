@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Event, type Id } from "@harness/schemas";
+import { HarnessError, type Code, type Event, type Id } from "@harness/schemas";
 import { PiiToolPort } from "@harness/pii";
 import { OffloadingToolPort } from "@harness/context";
 import { forceFlushTelemetry, sentinelTripQueue } from "@harness/telemetry";
@@ -281,9 +281,13 @@ function createRuntimeToolPort(
           config: options.pii.config,
           resolver: options.pii.resolver,
         });
-  return options.overrides.workspace === undefined
+  const composed = options.overrides.workspace === undefined
     ? piiTool
     : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, options.ids);
+  return Object.assign(composed, {
+    resumeStrategy: (toolId: Code) =>
+      subagentTool.resumeStrategy?.(toolId) ?? options.tool.resumeStrategy?.(toolId),
+  });
 }
 
 function composeRuntime(

@@ -196,6 +196,15 @@ export async function executePreparedTool(options: ExecutePreparedToolOptions): 
       result: null,
     });
   }
+  if (execution.suspend === true) {
+    return options.recorder.record({
+      type: "run_status_changed",
+      v: 1,
+      from: "running",
+      to: "suspended",
+      reason: "awaiting_subagent",
+    });
+  }
   const result = await options.recorder.record(
     executionPayload(
       options.call,

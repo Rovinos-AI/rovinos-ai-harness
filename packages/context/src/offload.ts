@@ -119,6 +119,7 @@ export interface OffloadRunContext {
 export interface OffloadToolExecutionResult {
   readonly binary?: boolean;
   readonly metadata?: JsonValueType;
+  readonly suspend?: boolean;
   readonly outcome: "ok" | "error";
   readonly result: JsonValueType;
   readonly errorCode?: Code;
@@ -499,6 +500,7 @@ export class OffloadingToolPort implements OffloadToolPortLike {
 
     return {
       outcome: execution.outcome,
+      ...(execution.suspend === true ? { suspend: true } : {}),
       ...(execution.errorCode === undefined ? {} : { errorCode: execution.errorCode }),
       result: JsonValue.parse(
         OffloadedStub.parse({
