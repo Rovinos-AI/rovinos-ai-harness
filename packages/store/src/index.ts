@@ -33,6 +33,25 @@ export { JsonContentCodec } from "./codec.js";
 export { InMemoryEventStore } from "./memory.js";
 export { PostgresEventStore } from "./postgres/adapter.js";
 export { SqliteEventStore } from "./sqlite/adapter.js";
+export { PostgresRunQueue } from "./queue/postgres.js";
+export { SqliteRunQueue } from "./queue/sqlite.js";
+export {
+  EnqueueRunJobSchema,
+  InvalidRunQueueInputError,
+  RunQueueDeadLetterSchema,
+  RunQueueFailResultSchema,
+  RunQueueJobSchema,
+  RunQueueKindSchema,
+  type EnqueueRunJob,
+  type RunQueue,
+  type RunQueueDeadLetter,
+  type RunQueueFailResult,
+  type RunQueueIdGenerator,
+  type RunQueueJob,
+  type RunQueueKind,
+  type RunQueueOptions,
+  SystemRunQueueIdGenerator,
+} from "./queue/types.js";
 export type { ContentCodec, ContentCodecContext, EncodedContent } from "./codec.js";
 export type { PostgresEventStoreOptions } from "./postgres/adapter.js";
 export {
