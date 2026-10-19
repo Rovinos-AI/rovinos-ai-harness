@@ -33,8 +33,13 @@ export function registerDenyTool(server: McpServer, options: DenyToolOptions): v
     },
     async (input, context) => {
       const parsed = denyInputSchema.parse(input);
-      requireControlPlaneScope(context, Code.parse("deny"), "approve", options.onAudit);
-      const found = await findApprovalRequest(options.store, parsed.approvalId);
+      const principal = requireControlPlaneScope(
+        context,
+        Code.parse("deny"),
+        "approve",
+        options.onAudit,
+      );
+      const found = await findApprovalRequest(options.store, parsed.approvalId, principal?.runIds);
       return withControlPlaneAuthorization({
         context,
         tool: Code.parse("deny"),

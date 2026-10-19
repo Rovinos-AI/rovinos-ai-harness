@@ -274,7 +274,7 @@ describe("control-plane inspection tools", () => {
     );
 
     expect(first.runs).toHaveLength(1);
-    expect(first.nextCursor).toBe("restricted:1");
+    expect(first.nextCursor).toMatch(/^restricted:/u);
     expect(second.runs).toHaveLength(1);
     expect(second.nextCursor).toBeUndefined();
     expect(new Set([...first.runs, ...second.runs].map(({ runId }) => runId))).toEqual(
@@ -282,6 +282,80 @@ describe("control-plane inspection tools", () => {
     );
     expect(completed.runs.map(({ runId }) => runId)).toEqual([completedId]);
     expect(invalidCursor.runs).toEqual(first.runs);
+  });
+
+  it("filters run summaries before reading histories and counts subagent steps consistently", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    await addRun(store, builders);
+    await addRun(store, builders);
+    const orderedSummaries = await store.listRuns({ limit: 2 });
+    const allowedRunId = orderedSummaries.runs[0]?.runId;
+    const omittedRunId = orderedSummaries.runs[1]?.runId;
+    if (allowedRunId === undefined || omittedRunId === undefined) {
+      throw new Error("Missing ordered run fixtures.");
+    }
+    const modelResponse = eventSamples.find((event) => event.type === "model_response");
+    const subagentCompletion = eventSamples.find((event) => event.type === "subagent_completed");
+    if (
+      modelResponse?.type !== "model_response" ||
+      subagentCompletion?.type !== "subagent_completed"
+    ) {
+      throw new Error("Missing step-count event fixtures.");
+    }
+    await store.append(
+      allowedRunId,
+      [
+        { ...modelResponse, runId: allowedRunId, segmentId: allowedRunId },
+        { ...subagentCompletion, runId: allowedRunId, segmentId: allowedRunId, steps: 3 },
+      ],
+      await store.head(allowedRunId),
+    );
+    const firstSummaryPage = await store.listRuns({ limit: 1 });
+    expect(firstSummaryPage.runs[0]?.runId).toBe(allowedRunId);
+    const readSpy = vi.spyOn(store, "read");
+
+    const restricted = await listRuns(store, { limit: 1 }, [allowedRunId]);
+
+    expect(restricted.runs[0]?.runId).toBe(allowedRunId);
+    expect(restricted.runs[0]?.steps).toBe(4);
+    const updatedSummary = await store.listRuns({ limit: 1 });
+    expect(readSpy).toHaveBeenCalledWith(allowedRunId, {
+      toSeq: updatedSummary.runs[0]?.lastSeq,
+    });
+    expect(readSpy).not.toHaveBeenCalledWith(omittedRunId, expect.anything());
+
+    const unrestricted = await listRuns(store, { limit: 1 });
+    expect(unrestricted.runs[0]?.steps).toBe(4);
+  });
+
+  it("does not read histories for summaries excluded by the run allowlist", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const newestRunId = await addRun(store, builders);
+    const olderRunId = await addRun(store, builders);
+    const firstSummaryPage = await store.listRuns({ limit: 1 });
+    const selectedRunId = firstSummaryPage.runs[0]?.runId;
+    if (selectedRunId === undefined) {
+      throw new Error("Missing summary fixture.");
+    }
+    const nextSummaryPage = await store.listRuns({
+      limit: 1,
+      ...(firstSummaryPage.nextCursor === undefined ? {} : { cursor: firstSummaryPage.nextCursor }),
+    });
+    const allowedRunId = nextSummaryPage.runs[0]?.runId;
+    if (allowedRunId === undefined) {
+      throw new Error("Missing older summary fixture.");
+    }
+    expect(allowedRunId).not.toBe(selectedRunId);
+    expect([newestRunId, olderRunId]).toContain(allowedRunId);
+    const readSpy = vi.spyOn(store, "read");
+
+    const skipped = await listRuns(store, { limit: 1 }, [allowedRunId]);
+
+    expect(skipped.runs).toEqual([]);
+    expect(skipped.nextCursor).toBeDefined();
+    expect(readSpy).not.toHaveBeenCalled();
   });
 
   it("returns folded usage, approval metadata, and safe recent events", async () => {

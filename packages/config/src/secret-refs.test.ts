@@ -76,20 +76,20 @@ describe("getConfigSecretRefs", () => {
             secretRef: "env:APPROVAL_WEBHOOK_TOKEN",
           },
         },
-        controlPlane: {
-          auth: {
-            tokens: [
-              {
-                id: "token.viewer",
-                secret: "env:CONTROL_PLANE_TOKEN",
-                scopes: ["read"],
-              },
-            ],
-          },
-          tls: {
-            certFile: "file:/run/secrets/control-plane-cert",
-            keyFile: "file:/run/secrets/control-plane-key",
-          },
+      },
+      controlPlane: {
+        auth: {
+          tokens: [
+            {
+              id: "token.viewer",
+              secret: "env:CONTROL_PLANE_TOKEN",
+              scopes: ["read"],
+            },
+          ],
+        },
+        tls: {
+          certFile: "file:/run/secrets/control-plane-cert",
+          keyFile: "file:/run/secrets/control-plane-key",
         },
       },
     });

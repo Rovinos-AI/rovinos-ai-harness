@@ -13,7 +13,9 @@ the decision tools.
 
 HTTP mode requires at least one configured token. Each `controlPlane.auth.tokens` entry has a
 `Code` id, a `SecretRef`, one or more scopes, and an optional `runIds` allowlist. The secret is
-resolved at startup; only its SHA-256 digest is kept for request verification. Comparisons use
+resolved at startup and must contain at least 32 characters; only its SHA-256 digest is kept for
+request verification. Token ids must be unique, and a configured `runIds` allowlist cannot be
+empty. Comparisons use
 fixed-size SHA-256 digests and `timingSafeEqual`. Missing and invalid credentials receive the same
 401 response before MCP dispatch, including for `initialize`, `tools/list`, and `tools/call`.
 Credentials are not included in audit records or response bodies.
@@ -26,9 +28,9 @@ allowlist or a mismatched Origin are rejected before MCP handling. An absent Ori
 non-browser MCP clients; browser requests with an Origin must match the request host and listener
 scheme.
 
-`controlPlane.rateLimitPerMinute` configures an in-memory token bucket per token (default 120
-requests/minute). The bucket uses the injected clock and applies to every authenticated HTTP
-request. Limits are local to one server process.
+`controlPlane.rateLimitPerMinute` configures in-memory token buckets (default 120 requests/minute).
+Authenticated requests are limited per token, and failed authentication attempts are limited per
+remote address. Limits are local to one server process.
 
 ## Scopes, runs, and audit
 
@@ -40,7 +42,9 @@ token's scopes. A token with `runIds` can list only those runs and cannot inspec
 resume, or cancel another run. Omitting `runIds` grants access to every run for the token's scopes.
 
 Authenticated tool calls emit metadata-only audit records with `tokenId`, `tool`, and `outcome`
-codes. The log does not contain bearer values, run content, tool arguments, or error messages.
+codes. Rejected HTTP requests are also audited with a fixed `unauthenticated` token id when no
+identity was authenticated. The log does not contain bearer values, remote addresses, run content,
+tool arguments, or error messages.
 Stdio mode is treated as trusted local access and does not require a bearer token.
 
 The pinned MCP server SDK does not provide a trusted app-origin marker to a tool handler. The

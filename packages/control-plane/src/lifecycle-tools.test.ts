@@ -5,11 +5,14 @@ import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { Code, JsonValue, type Id, type NewEvent } from "@harness/schemas";
 import { ApprovalEditError } from "@harness/policy";
-import type { ServerContext } from "@modelcontextprotocol/server";
+import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmationGate, type ConfirmationRequest } from "./confirmation-gate.js";
 import { createControlPlaneServer } from "./server.js";
+import { toMcpAuthInfo } from "./auth.js";
 import type { ResolveApprovalOperation } from "./tools/approve.js";
+import { registerApproveTool } from "./tools/approve.js";
+import { registerDenyTool } from "./tools/deny.js";
 import { findApprovalRequest } from "./tools/run-state.js";
 
 interface TestConnection {
@@ -174,6 +177,73 @@ describe("confirmation-gated control-plane tools", () => {
     await expect(findApprovalRequest(store, builders.nextRunId())).resolves.toBeUndefined();
 
     expect(listRuns).toHaveBeenCalledTimes(2);
+    await store.close();
+  });
+
+  it("searches only allowlisted runs and makes hidden approvals indistinguishable from missing ones", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const hidden = await addPendingApproval(store, builders);
+    const allowed = await addPendingApproval(store, builders);
+    const confirmationGate = new ConfirmationGate({
+      store,
+      key: Buffer.alloc(32, 19),
+      isAppContext: () => false,
+    });
+    const handlers = new Map<
+      string,
+      (input: unknown, context: ServerContext) => Promise<unknown>
+    >();
+    const server = {
+      registerTool: (
+        name: string,
+        _definition: unknown,
+        handler: (input: unknown, context: ServerContext) => Promise<unknown>,
+      ) => handlers.set(name, handler),
+    } as unknown as McpServer;
+    const onAudit = () => undefined;
+    registerApproveTool(server, {
+      store,
+      confirmationGate,
+      clientCapabilities: () => undefined,
+      onAudit,
+    });
+    registerDenyTool(server, {
+      store,
+      confirmationGate,
+      clientCapabilities: () => undefined,
+      onAudit,
+    });
+    const context = {
+      http: {
+        authInfo: toMcpAuthInfo({
+          tokenId: Code.parse("token.restricted"),
+          scopes: ["approve"],
+          runIds: [allowed.runId],
+        }),
+      },
+    } as unknown as ServerContext;
+    const readSpy = vi.spyOn(store, "read");
+    const listSpy = vi.spyOn(store, "listRuns");
+    const approve = handlers.get("approve");
+    const deny = handlers.get("deny");
+    if (approve === undefined || deny === undefined) {
+      throw new Error("Approval tool handlers were not registered.");
+    }
+
+    const hiddenApprove = await approve({ approvalId: hidden.approvalId }, context);
+    const missingApprove = await approve({ approvalId: builders.nextRunId() }, context);
+    const hiddenDeny = await deny({ approvalId: hidden.approvalId }, context);
+    const missingDeny = await deny({ approvalId: builders.nextRunId() }, context);
+
+    for (const result of [hiddenApprove, missingApprove, hiddenDeny, missingDeny]) {
+      expect(result).toMatchObject({
+        structuredContent: { ok: false, code: "approval_not_found" },
+      });
+    }
+    expect(readSpy).toHaveBeenCalledWith(allowed.runId);
+    expect(readSpy).not.toHaveBeenCalledWith(hidden.runId, expect.anything());
+    expect(listSpy).not.toHaveBeenCalled();
     await store.close();
   });
 

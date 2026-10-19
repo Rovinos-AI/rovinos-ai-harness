@@ -19,7 +19,7 @@ const authTokenSchema = z
     id: Code,
     secret: SecretRefSchema,
     scopes: z.array(ControlPlaneAuthScopeSchema).min(1),
-    runIds: z.array(Id).optional(),
+    runIds: z.array(Id).min(1).optional(),
   })
   .strict();
 
@@ -30,7 +30,20 @@ export const ControlPlaneConfigSchema = z
     auth: z
       .object({ tokens: z.array(authTokenSchema).default([]) })
       .strict()
-      .default({ tokens: [] }),
+      .default({ tokens: [] })
+      .superRefine(({ tokens }, context) => {
+        const ids = new Set<string>();
+        tokens.forEach((token, index) => {
+          if (ids.has(token.id)) {
+            context.addIssue({
+              code: "custom",
+              path: ["tokens", index, "id"],
+              message: "Token IDs must be unique.",
+            });
+          }
+          ids.add(token.id);
+        });
+      }),
     listen: z
       .object({
         host: z.string().min(1).default("127.0.0.1"),

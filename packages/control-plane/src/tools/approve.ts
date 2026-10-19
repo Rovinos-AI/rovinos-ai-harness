@@ -45,8 +45,13 @@ export function registerApproveTool(server: McpServer, options: ApproveToolOptio
     },
     async (input, context) => {
       const parsed = approveInputSchema.parse(input);
-      requireControlPlaneScope(context, Code.parse("approve"), "approve", options.onAudit);
-      const found = await findApprovalRequest(options.store, parsed.approvalId);
+      const principal = requireControlPlaneScope(
+        context,
+        Code.parse("approve"),
+        "approve",
+        options.onAudit,
+      );
+      const found = await findApprovalRequest(options.store, parsed.approvalId, principal?.runIds);
       return withControlPlaneAuthorization({
         context,
         tool: Code.parse("approve"),

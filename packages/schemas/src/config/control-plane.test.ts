@@ -55,6 +55,19 @@ describe("ControlPlaneConfigSchema", () => {
     { auth: { tokens: [{ id: "bad id", secret: "env:TOKEN", scopes: ["read"] }] } },
     { auth: { tokens: [{ id: "valid.id", secret: "inline", scopes: ["read"] }] } },
     { auth: { tokens: [{ id: "valid.id", secret: "env:TOKEN", scopes: ["invalid"] }] } },
+    {
+      auth: {
+        tokens: [
+          { id: "token.same", secret: "env:FIRST", scopes: ["read"] },
+          { id: "token.same", secret: "env:SECOND", scopes: ["read"] },
+        ],
+      },
+    },
+    {
+      auth: {
+        tokens: [{ id: "token.viewer", secret: "env:TOKEN", scopes: ["read"], runIds: [] }],
+      },
+    },
     { listen: { host: "", port: 3_000 } },
     { listen: { host: "127.0.0.1", port: 65_536 } },
     { tls: { certFile: "file:relative", keyFile: "file:/run/secrets/key" } },

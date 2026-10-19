@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ControlPlaneConfigSchema, HarnessError, type ControlPlaneConfig } from "@harness/schemas";
+import {
+  Code,
+  ControlPlaneConfigSchema,
+  HarnessError,
+  type ControlPlaneConfig,
+} from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { createMcpHandler } from "@modelcontextprotocol/server";
@@ -15,6 +20,9 @@ import {
   toMcpAuthInfo,
   validControlPlaneHostOrigin,
   validateControlPlaneBinding,
+  sha256Digest,
+  type ControlPlaneAudit,
+  type ControlPlaneAuditHandler,
   type ControlPlaneClock,
   type ControlPlaneSecretResolver,
 } from "./auth.js";
@@ -22,6 +30,8 @@ import { controlPlaneHttpPortSchema } from "./schemas.js";
 import type { ControlPlaneServerOptions } from "./server.js";
 
 const HTTP_PATH = "/mcp";
+const HTTP_TOOL = Code.parse("http_request");
+const UNAUTHENTICATED_TOKEN = Code.parse("unauthenticated");
 
 /** A running authenticated HTTP endpoint. */
 export interface ControlPlaneHttpHandle {
@@ -70,11 +80,14 @@ export async function startControlPlaneHttpTransport({
   const handler = createMcpHandler(() => createMcpServer(store, sharedOptions));
   const requestHandler = toNodeHandler(handler);
   const limiter = new ControlPlaneRateLimiter(controlPlane.rateLimitPerMinute);
+  const failedAuthLimiter = new ControlPlaneRateLimiter(controlPlane.rateLimitPerMinute);
   const handleRequest = createRequestListener({
     controlPlane,
     tokens,
     limiter,
+    failedAuthLimiter,
     clock: options.clock,
+    audit: options.onAudit ?? emitControlPlaneAudit,
     requestHandler,
   });
   const server = await createHttpServer(controlPlane, options.secretResolver, handleRequest);
@@ -97,7 +110,9 @@ function createRequestListener(input: {
   readonly controlPlane: ControlPlaneConfig;
   readonly tokens: Awaited<ReturnType<typeof resolveControlPlaneTokens>>;
   readonly limiter: ControlPlaneRateLimiter;
+  readonly failedAuthLimiter: ControlPlaneRateLimiter;
   readonly clock: ControlPlaneClock | undefined;
+  readonly audit: ControlPlaneAuditHandler;
   readonly requestHandler: ReturnType<typeof toNodeHandler>;
 }): (request: IncomingMessage, response: ServerResponse) => void {
   return (request, response) => {
@@ -113,11 +128,35 @@ function createRequestListener(input: {
         tls: input.controlPlane.tls !== undefined,
       })
     ) {
+      emitAuditSafely(input.audit, {
+        tokenId: UNAUTHENTICATED_TOKEN,
+        tool: HTTP_TOOL,
+        outcome: Code.parse("control_plane_host_invalid"),
+      });
       response.writeHead(403, { "cache-control": "no-store" }).end();
       return;
     }
     const principal = authenticateBearerToken(request.headers.authorization, input.tokens);
     if (principal === undefined) {
+      const remoteAddress = request.socket.remoteAddress ?? "unknown";
+      const failedAuthKey = Code.parse(
+        `failed_auth.${sha256Digest(remoteAddress).toString("hex").slice(0, 32)}`,
+      );
+      const now = input.clock?.now() ?? Date.now();
+      if (!input.failedAuthLimiter.tryAcquire(failedAuthKey, now)) {
+        emitAuditSafely(input.audit, {
+          tokenId: UNAUTHENTICATED_TOKEN,
+          tool: HTTP_TOOL,
+          outcome: Code.parse("control_plane_rate_limited"),
+        });
+        response.writeHead(429, { "cache-control": "no-store" }).end();
+        return;
+      }
+      emitAuditSafely(input.audit, {
+        tokenId: UNAUTHENTICATED_TOKEN,
+        tool: HTTP_TOOL,
+        outcome: Code.parse("control_plane_auth_invalid"),
+      });
       response
         .writeHead(401, {
           "cache-control": "no-store",
@@ -127,9 +166,15 @@ function createRequestListener(input: {
       return;
     }
     if (!input.limiter.tryAcquire(principal.tokenId, input.clock?.now() ?? Date.now())) {
+      emitAuditSafely(input.audit, {
+        tokenId: principal.tokenId,
+        tool: HTTP_TOOL,
+        outcome: Code.parse("control_plane_rate_limited"),
+      });
       response.writeHead(429, { "cache-control": "no-store" }).end();
       return;
     }
+
     const authenticatedRequest = {
       method: request.method ?? "GET",
       url: request.url ?? "/",
@@ -147,6 +192,14 @@ function createRequestListener(input: {
       }
     });
   };
+}
+
+function emitAuditSafely(handler: ControlPlaneAuditHandler, audit: ControlPlaneAudit): void {
+  try {
+    handler(audit);
+  } catch {
+    return;
+  }
 }
 
 async function createHttpServer(

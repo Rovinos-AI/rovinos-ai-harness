@@ -2101,7 +2101,7 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
 describe("control plane", () => {
   it("requires configured HTTP authentication and serves scoped tools", async () => {
     const store = new InMemoryEventStore();
-    const token = "SYNTHETIC_CONTROL_PLANE_E2E_TOKEN";
+    const token = "SYNTHETIC_CONTROL_PLANE_E2E_TOKEN_LONG_ENOUGH";
     const server = await startControlPlaneHttp(store, 0, {
       controlPlane: ControlPlaneConfigSchema.parse({
         auth: {

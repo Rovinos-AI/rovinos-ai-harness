@@ -8,12 +8,13 @@ import type { AuthInfo, ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 const DIGEST_BYTES = 32;
+const MAX_RATE_LIMITER_BUCKETS = 4_096;
 
 const principalSchema = z
   .object({
     tokenId: Code,
     scopes: z.array(ControlPlaneAuthScopeSchema),
-    runIds: z.array(Id).optional(),
+    runIds: z.array(Id).min(1).optional(),
   })
   .strict();
 
@@ -36,7 +37,7 @@ interface ControlPlaneAuthorizationInput<T> {
   readonly scope: ControlPlaneAuthScope;
   readonly runId?: Id;
   readonly operation: () => Promise<T>;
-  readonly audit?: ControlPlaneAuditHandler;
+  readonly audit?: ControlPlaneAuditHandler | undefined;
 }
 
 /** Opaque secret value returned by the configured secret resolver. */
@@ -56,6 +57,7 @@ export class ControlPlaneAuthError extends HarnessError {
   override readonly code:
     | "control_plane_auth_required"
     | "control_plane_auth_invalid"
+    | "control_plane_token_secret_too_short"
     | "control_plane_tokens_required"
     | "control_plane_secret_resolver_missing"
     | "control_plane_scope_required"
@@ -95,13 +97,17 @@ export async function resolveControlPlaneTokens(
   return Promise.all(
     config.auth.tokens.map(async ({ id, secret, scopes, runIds }) => {
       const resolved = await resolver.resolve(secret);
+      const tokenSecret = resolved.reveal();
+      if (tokenSecret.length < 32) {
+        throw new ControlPlaneAuthError("control_plane_token_secret_too_short");
+      }
       return {
         principal: principalSchema.parse({
           tokenId: id,
           scopes,
           ...(runIds === undefined ? {} : { runIds }),
         }),
-        digest: sha256Digest(resolved.reveal()),
+        digest: sha256Digest(tokenSecret),
       };
     }),
   );
@@ -186,7 +192,7 @@ export function requireControlPlaneScope(
 ): ControlPlanePrincipal | undefined {
   const principal = controlPlanePrincipal(context);
   if (principal !== undefined && !hasControlPlaneScope(principal, scope)) {
-    (audit ?? emitControlPlaneAudit)({
+    emitAuditSafely(audit ?? emitControlPlaneAudit, {
       tokenId: principal.tokenId,
       tool,
       outcome: Code.parse("control_plane_scope_required"),
@@ -210,6 +216,7 @@ export async function withControlPlaneAuthorization<T>({
     return operation();
   }
   const writeAudit = audit ?? emitControlPlaneAudit;
+  let result: T;
   try {
     if (!hasControlPlaneScope(principal, scope)) {
       throw new ControlPlaneAuthError("control_plane_scope_required");
@@ -221,13 +228,21 @@ export async function withControlPlaneAuthorization<T>({
     ) {
       throw new ControlPlaneAuthError("run_not_found");
     }
-    const result = await operation();
-    writeAudit({ tokenId: principal.tokenId, tool, outcome: resultOutcome(result) });
-    return result;
+    result = await operation();
   } catch (error) {
-    writeAudit({ tokenId: principal.tokenId, tool, outcome: errorOutcome(error) });
+    emitAuditSafely(writeAudit, {
+      tokenId: principal.tokenId,
+      tool,
+      outcome: errorOutcome(error),
+    });
     throw error;
   }
+  emitAuditSafely(writeAudit, {
+    tokenId: principal.tokenId,
+    tool,
+    outcome: resultOutcome(result),
+  });
+  return result;
 }
 
 /** Validates the configured bind host, enforcing TLS for all non-loopback interfaces. */
@@ -244,7 +259,8 @@ export function validControlPlaneHostOrigin(input: {
   readonly allowedHosts: readonly string[];
   readonly tls: boolean;
 }): boolean {
-  const requestAuthority = parseAuthority(input.host);
+  const scheme = input.tls ? "https" : "http";
+  const requestAuthority = parseAuthority(input.host, scheme);
   if (
     requestAuthority === undefined ||
     !input.allowedHosts.some((allowed) => parseHostname(allowed) === requestAuthority.hostname)
@@ -281,6 +297,19 @@ export class ControlPlaneRateLimiter {
   tryAcquire(tokenId: Code, now: number): boolean {
     if (!Number.isFinite(now) || now < 0) {
       return false;
+    }
+    if (!this.buckets.has(tokenId) && this.buckets.size >= MAX_RATE_LIMITER_BUCKETS) {
+      let oldestTokenId: Code | undefined;
+      let oldestUpdatedAt = Number.POSITIVE_INFINITY;
+      for (const [candidateId, candidate] of this.buckets) {
+        if (candidate.updatedAt < oldestUpdatedAt) {
+          oldestTokenId = candidateId;
+          oldestUpdatedAt = candidate.updatedAt;
+        }
+      }
+      if (oldestTokenId !== undefined) {
+        this.buckets.delete(oldestTokenId);
+      }
     }
     const bucket = this.buckets.get(tokenId) ?? { tokens: this.capacity, updatedAt: now };
     const elapsed = Math.max(0, now - bucket.updatedAt);
@@ -325,12 +354,13 @@ function parseHostname(value: string): string | undefined {
 
 function parseAuthority(
   value: string | undefined,
+  scheme = "http",
 ): { readonly hostname: string; readonly authority: string } | undefined {
   if (value === undefined || value.length === 0 || /[/?#@\s]/u.test(value)) {
     return undefined;
   }
   try {
-    const parsed = new URL(`http://${value}`);
+    const parsed = new URL(`${scheme}://${value}`);
     if (
       parsed.username !== "" ||
       parsed.password !== "" ||
@@ -360,6 +390,14 @@ function errorOutcome(error: unknown): Code {
 }
 
 function resultOutcome(result: unknown): Code {
+  if (
+    typeof result === "object" &&
+    result !== null &&
+    "resultType" in result &&
+    result.resultType === "input_required"
+  ) {
+    return Code.parse("input_required");
+  }
   if (typeof result === "object" && result !== null && "isError" in result) {
     if (result.isError === true) {
       const output =
@@ -376,4 +414,12 @@ function resultOutcome(result: unknown): Code {
     }
   }
   return Code.parse("success");
+}
+
+function emitAuditSafely(handler: ControlPlaneAuditHandler, audit: ControlPlaneAudit): void {
+  try {
+    handler(audit);
+  } catch {
+    return;
+  }
 }

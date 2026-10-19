@@ -15,7 +15,7 @@ import {
   withControlPlaneAuthorization,
 } from "./auth.js";
 
-const TOKEN_CANARY = "CONTROL_PLANE_TOKEN_CANARY";
+const TOKEN_CANARY = "CONTROL_PLANE_TOKEN_CANARY_LONG_ENOUGH";
 const RUN_ID = Id.parse("00000000000000000000000001");
 const OTHER_RUN_ID = Id.parse("00000000000000000000000002");
 
@@ -89,6 +89,12 @@ describe("control-plane authentication", () => {
     await expect(resolveControlPlaneTokens(config(), undefined)).rejects.toMatchObject({
       code: "control_plane_secret_resolver_missing",
     });
+    await expect(resolveControlPlaneTokens(config(), resolver("short"))).rejects.toMatchObject({
+      code: "control_plane_token_secret_too_short",
+    });
+    await expect(
+      resolveControlPlaneTokens(config(), resolver("x".repeat(32))),
+    ).resolves.toHaveLength(1);
   });
 });
 
@@ -223,6 +229,7 @@ describe("control-plane scopes and run filtering", () => {
       tool: Code.parse("get_run"),
       outcome: Code.parse("success"),
     });
+
     await expect(
       withControlPlaneAuthorization({
         context: contextWithPrincipal(token.principal),
@@ -240,6 +247,34 @@ describe("control-plane scopes and run filtering", () => {
       outcome: Code.parse("run_not_found"),
     });
     expect(JSON.stringify(audit.mock.calls)).not.toContain(TOKEN_CANARY);
+  });
+
+  it("audits input-required separately and ignores audit sink failures", async () => {
+    const [token] = await resolvedTokens(["approve"]);
+    if (token === undefined) {
+      throw new Error("Missing test token.");
+    }
+    const audit = vi.fn(() => {
+      throw new Error("synthetic audit sink failure");
+    });
+    const inputRequired = { resultType: "input_required" as const };
+
+    await expect(
+      withControlPlaneAuthorization({
+        context: contextWithPrincipal(token.principal),
+        tool: Code.parse("approve"),
+        scope: "approve",
+        operation: () => Promise.resolve(inputRequired),
+        audit,
+      }),
+    ).resolves.toBe(inputRequired);
+
+    expect(audit).toHaveBeenCalledOnce();
+    expect(audit).toHaveBeenCalledWith({
+      tokenId: Code.parse("token.test"),
+      tool: Code.parse("approve"),
+      outcome: Code.parse("input_required"),
+    });
   });
 
   it("treats an absent auth context as a trusted local stdio call", async () => {
@@ -311,13 +346,31 @@ describe("control-plane network safeguards", () => {
     [{ host: "localhost", origin: "https://localhost", allowedHosts: ["localhost"] }, false],
     [{ host: "localhost", origin: "not a URL", allowedHosts: ["localhost"] }, false],
     [{ host: undefined, allowedHosts: ["localhost"] }, false],
+    [
+      {
+        host: "control.example.test:443",
+        origin: "https://control.example.test",
+        allowedHosts: ["control.example.test"],
+        tls: true,
+      },
+      true,
+    ],
+    [
+      {
+        host: "control.example.test:80",
+        origin: "https://control.example.test",
+        allowedHosts: ["control.example.test"],
+        tls: true,
+      },
+      false,
+    ],
   ] as const)("validates allowed Host and same-host Origin values %#", (input, expected) => {
     expect(
       validControlPlaneHostOrigin({
         ...input,
         origin: "origin" in input ? input.origin : undefined,
         allowedHosts: input.allowedHosts,
-        tls: false,
+        tls: "tls" in input ? input.tls : false,
       }),
     ).toBe(expected);
   });

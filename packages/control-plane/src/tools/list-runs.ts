@@ -10,7 +10,6 @@ import {
   type ListRunsInput,
   type ListRunsOutput,
 } from "../schemas.js";
-import { readRunState } from "./run-state.js";
 
 async function countRunMetadata(store: EventStore, runId: Id, lastSeq: number) {
   let steps = 0;
@@ -18,6 +17,8 @@ async function countRunMetadata(store: EventStore, runId: Id, lastSeq: number) {
   for await (const event of store.read(runId, { toSeq: lastSeq })) {
     if (event.type === "model_response") {
       steps += 1;
+    } else if (event.type === "subagent_completed") {
+      steps += event.steps ?? 0;
     } else if (event.type === "approval_requested") {
       pendingApprovals.add(event.approvalId);
     } else if (event.type === "approval_resolved") {
@@ -94,48 +95,43 @@ async function listAccessibleRuns(
   input: ReturnType<typeof listRunsInputSchema.parse>,
   allowedRunIds: readonly Id[],
 ): Promise<ListRunsOutput> {
-  const summaries = await Promise.all(
-    [...new Set(allowedRunIds)].map(async (runId) => {
-      const run = await readRunState(store, runId);
-      const first = run?.events[0];
-      const last = run?.events.at(-1);
-      if (run === undefined || first === undefined || last === undefined) {
-        return undefined;
-      }
-      return {
-        runId,
-        status: run.state.status,
-        createdAt: first.ts,
-        lastTs: last.ts,
-        lastSeq: last.seq,
-        steps: run.state.steps,
-        pendingApprovals: run.state.pendingApprovals.size,
-      };
-    }),
+  const cursor = restrictedStoreCursor(input.cursor);
+  const page = await store.listRuns({
+    limit: input.limit,
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(cursor === undefined ? {} : { cursor }),
+  });
+  const allowed = new Set(allowedRunIds);
+  const summaries = page.runs.filter(({ runId }) => allowed.has(runId));
+  const runs = await Promise.all(
+    summaries.map(async (summary) => ({
+      ...summary,
+      ...(await countRunMetadata(store, summary.runId, summary.lastSeq)),
+    })),
   );
-  const matching = summaries
-    .filter((summary) => summary !== undefined)
-    .filter((summary) => input.status === undefined || summary.status === input.status)
-    .sort(
-      (left, right) => right.createdAt - left.createdAt || left.runId.localeCompare(right.runId),
-    );
-  const start = restrictedCursorIndex(input.cursor);
-  const runs = matching.slice(start, start + input.limit);
-  const nextIndex = start + runs.length;
   return listRunsOutputSchema.parse({
     runs,
-    ...(nextIndex < matching.length ? { nextCursor: `restricted:${String(nextIndex)}` } : {}),
+    ...(page.nextCursor === undefined
+      ? {}
+      : { nextCursor: `restricted:${encodeURIComponent(page.nextCursor)}` }),
   });
 }
 
-function restrictedCursorIndex(cursor: string | undefined): number {
+function restrictedStoreCursor(cursor: string | undefined): string | undefined {
   if (cursor === undefined) {
-    return 0;
+    return undefined;
   }
-  const match = /^restricted:(\d+)$/.exec(cursor);
-  if (match === null) {
-    return 0;
+  const match = /^restricted:(.+)$/.exec(cursor);
+  const storeCursor = match?.[1];
+  if (
+    storeCursor === undefined ||
+    (/^\d+$/u.test(storeCursor) && storeCursor.length < 26)
+  ) {
+    return undefined;
   }
-  const index = Number(match[1]);
-  return Number.isSafeInteger(index) ? index : 0;
+  try {
+    return decodeURIComponent(storeCursor);
+  } catch {
+    return undefined;
+  }
 }

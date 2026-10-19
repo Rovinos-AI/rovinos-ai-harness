@@ -9,6 +9,7 @@ interface MockRequest {
   readonly url?: string;
   readonly method?: string;
   readonly headers: Record<string, string | undefined>;
+  readonly socket: { readonly remoteAddress?: string };
   [Symbol.asyncIterator](): AsyncIterator<unknown>;
 }
 
@@ -146,21 +147,29 @@ vi.mock("./resources/approval.js", () => ({
 
 import { startControlPlaneHttp, startControlPlaneStdio } from "./server.js";
 
-function request(url: string, headers: Record<string, string | undefined> = {}): MockRequest {
+function request(
+  url: string,
+  headers: Record<string, string | undefined> = {},
+  remoteAddress = "127.0.0.1",
+): MockRequest {
   return {
     url,
     method: "POST",
     headers: { host: "127.0.0.1", authorization: AUTHORIZATION, ...headers },
+    socket: { remoteAddress },
     [Symbol.asyncIterator]: () => ({
       next: () => Promise.resolve({ done: true, value: undefined }),
     }),
   };
 }
 
-const HTTP_TOKEN = "CONTROL_PLANE_HTTP_TEST_TOKEN";
+const HTTP_TOKEN = "CONTROL_PLANE_HTTP_TEST_TOKEN_LONG_ENOUGH";
 const AUTHORIZATION = ["Be", "arer ", HTTP_TOKEN].join("");
 
-function httpOptions(options: ControlPlaneServerOptions = {}): ControlPlaneServerOptions {
+function httpOptions(
+  options: ControlPlaneServerOptions = {},
+  rateLimitPerMinute = 120,
+): ControlPlaneServerOptions {
   return {
     controlPlane: ControlPlaneConfigSchema.parse({
       auth: {
@@ -172,6 +181,7 @@ function httpOptions(options: ControlPlaneServerOptions = {}): ControlPlaneServe
           },
         ],
       },
+      rateLimitPerMinute,
     }),
     secretResolver: { resolve: () => Promise.resolve({ reveal: () => HTTP_TOKEN }) },
     ...options,
@@ -245,6 +255,76 @@ describe("control-plane transports", () => {
     await handle.close();
     expect(mocks.createMcpHandler).toHaveBeenCalledOnce();
     expect(mocks.createServer).toHaveBeenCalledOnce();
+  });
+
+  it("audits rejected requests and rate-limits failed and authenticated requests", async () => {
+    mocks.reset();
+    const audits: { tokenId: string; tool: string; outcome: string }[] = [];
+    const handle = await startControlPlaneHttp(
+      new InMemoryEventStore(),
+      0,
+      httpOptions({ onAudit: (audit) => audits.push(audit) }, 1),
+    );
+
+    const badHost = response();
+    mocks.dispatch(request("/mcp", { host: "untrusted.example" }), badHost);
+    expect(badHost.statusCode).toBe(403);
+
+    const failedAuth = response();
+    mocks.dispatch(request("/mcp", { authorization: undefined }, "127.0.0.2"), failedAuth);
+    expect(failedAuth.statusCode).toBe(401);
+    const throttledAuth = response();
+    mocks.dispatch(request("/mcp", { authorization: "******" }, "127.0.0.2"), throttledAuth);
+    expect(throttledAuth.statusCode).toBe(429);
+
+    const authenticated = response();
+    mocks.dispatch(request("/mcp"), authenticated);
+    const throttledToken = response();
+    mocks.dispatch(request("/mcp"), throttledToken);
+    expect(throttledToken.statusCode).toBe(429);
+    expect(audits).toEqual([
+      {
+        tokenId: "unauthenticated",
+        tool: "http_request",
+        outcome: "control_plane_host_invalid",
+      },
+      {
+        tokenId: "unauthenticated",
+        tool: "http_request",
+        outcome: "control_plane_auth_invalid",
+      },
+      {
+        tokenId: "unauthenticated",
+        tool: "http_request",
+        outcome: "control_plane_rate_limited",
+      },
+      {
+        tokenId: "token.test",
+        tool: "http_request",
+        outcome: "control_plane_rate_limited",
+      },
+    ]);
+    await handle.close();
+  });
+
+  it("does not let a throwing HTTP audit sink alter rejected responses", async () => {
+    mocks.reset();
+    const handle = await startControlPlaneHttp(
+      new InMemoryEventStore(),
+      0,
+      httpOptions({
+        onAudit: () => {
+          throw new Error("synthetic audit failure");
+        },
+      }),
+    );
+    const outgoing = response();
+
+    expect(() =>
+      mocks.dispatch(request("/mcp", { authorization: undefined }), outgoing),
+    ).not.toThrow();
+    expect(outgoing.statusCode).toBe(401);
+    await handle.close();
   });
 
   it("returns a code-only 500 when a store read rejects in the request handler", async () => {

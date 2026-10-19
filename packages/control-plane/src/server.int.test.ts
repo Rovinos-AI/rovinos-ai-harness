@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { ControlPlaneServerOptions } from "./server.js";
 import { startControlPlaneHttp } from "./server.js";
 
-const HTTP_TOKEN = "CONTROL_PLANE_HTTP_TEST_TOKEN";
+const HTTP_TOKEN = "CONTROL_PLANE_HTTP_TEST_TOKEN_LONG_ENOUGH";
 const AUTHORIZATION = ["Be", "arer ", HTTP_TOKEN].join("");
 
 function controlPlaneOptions(
