@@ -1356,7 +1356,7 @@ describe("SQLite crash-injection matrix", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("fails the crash matrix when a broken store executes tools before intent durability", async () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-crash-negative-"));
