@@ -1,24 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ProviderError } from "../errors.js";
 
-function asObject(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function errorName(error: unknown): string | undefined {
-  const name = asObject(error)?.name;
+  const name = isRecord(error) ? error.name : undefined;
   return typeof name === "string" ? name : undefined;
 }
 
 function statusCode(error: unknown): number | undefined {
-  const value = asObject(asObject(error)?.$metadata)?.httpStatusCode;
+  const metadata = isRecord(error) && isRecord(error.$metadata) ? error.$metadata : undefined;
+  const value = metadata?.httpStatusCode;
   return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
 }
 
 function originalStatusCode(error: unknown): number | undefined {
-  const value = asObject(error)?.originalStatusCode;
+  const value = isRecord(error) ? error.originalStatusCode : undefined;
   return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
 }
 
@@ -26,7 +25,7 @@ function readHeader(headers: unknown, name: string): string | undefined {
   if (typeof Headers !== "undefined" && headers instanceof Headers) {
     return headers.get(name) ?? undefined;
   }
-  const record = asObject(headers);
+  const record = isRecord(headers) ? headers : undefined;
   const value =
     record === undefined
       ? undefined
@@ -35,10 +34,12 @@ function readHeader(headers: unknown, name: string): string | undefined {
 }
 
 function retryAfterMs(error: unknown): number | undefined {
-  const object = asObject(error);
+  const object = isRecord(error) ? error : undefined;
+  const response = isRecord(object?.$response) ? object.$response : undefined;
+  const metadata = isRecord(object?.$metadata) ? object.$metadata : undefined;
   const value =
-    readHeader(asObject(object?.$response)?.headers, "retry-after") ??
-    readHeader(asObject(object?.$metadata)?.httpHeaders, "retry-after");
+    readHeader(response?.headers, "retry-after") ??
+    readHeader(metadata?.httpHeaders, "retry-after");
   if (value === undefined) {
     return undefined;
   }
@@ -90,6 +91,48 @@ function mapStatus(status: number | undefined): ProviderError {
   });
 }
 
+type BedrockErrorMapper = (error: unknown, status: number | undefined) => ProviderError;
+
+function mapThrottled(error: unknown, status: number | undefined): ProviderError {
+  const delay = retryAfterMs(error);
+  return new ProviderError("provider_rate_limited", {
+    status: status ?? 429,
+    ...(delay === undefined ? {} : { retryAfterMs: delay }),
+  });
+}
+
+function mapStreamError(error: unknown, status: number | undefined): ProviderError {
+  const streamStatus = originalStatusCode(error) ?? status;
+  if (streamStatus !== undefined && streamStatus >= 500) {
+    return new ProviderError("provider_unavailable", { status: streamStatus });
+  }
+  return mapThrottled(error, 429);
+}
+
+const exceptionMappers: Readonly<Record<string, BedrockErrorMapper>> = {
+  ModelTimeoutException: (_error, status) =>
+    new ProviderError("provider_timeout", { status: status ?? 408 }),
+  ThrottlingException: mapThrottled,
+  ServiceQuotaExceededException: mapThrottled,
+  ModelStreamErrorException: mapStreamError,
+  AccessDeniedException: (_error, status) =>
+    new ProviderError("provider_auth", { status: status ?? 403 }),
+  ValidationException: (_error, status) =>
+    new ProviderError("provider_bad_request", { status: status ?? 400 }),
+  ResourceNotFoundException: (_error, status) =>
+    new ProviderError("provider_bad_request", { status: status ?? 404 }),
+  InternalServerException: (_error, status) =>
+    new ProviderError("provider_unavailable", { status: status ?? 500 }),
+  ServiceUnavailableException: (_error, status) =>
+    new ProviderError("provider_unavailable", { status: status ?? 503 }),
+  ModelNotReadyException: (_error, status) =>
+    new ProviderError("provider_unavailable", { status: status ?? 503 }),
+  ContentFilteredException: (_error, status) =>
+    new ProviderError("provider_content_filtered", { status: status ?? 400 }),
+  GuardrailIntervenedException: (_error, status) =>
+    new ProviderError("provider_content_filtered", { status: status ?? 400 }),
+};
+
 /** Maps Bedrock SDK exceptions to the provider error taxonomy without retaining provider messages. */
 export function mapBedrockError(error: unknown, signal: AbortSignal): ProviderError | Error {
   const name = errorName(error);
@@ -97,45 +140,10 @@ export function mapBedrockError(error: unknown, signal: AbortSignal): ProviderEr
     return cancelledError();
   }
   const status = statusCode(error);
-  switch (name) {
-    case "ModelTimeoutException":
-      return new ProviderError("provider_timeout", { status: status ?? 408 });
-    case "ThrottlingException":
-    case "ServiceQuotaExceededException": {
-      const delay = retryAfterMs(error);
-      return new ProviderError("provider_rate_limited", {
-        status: status ?? 429,
-        ...(delay === undefined ? {} : { retryAfterMs: delay }),
-      });
-    }
-    case "ModelStreamErrorException": {
-      const streamStatus = originalStatusCode(error) ?? status;
-      if (streamStatus !== undefined && streamStatus >= 500) {
-        return new ProviderError("provider_unavailable", { status: streamStatus });
-      }
-      const delay = retryAfterMs(error);
-      return new ProviderError("provider_rate_limited", {
-        status: 429,
-        ...(delay === undefined ? {} : { retryAfterMs: delay }),
-      });
-    }
-    case "AccessDeniedException":
-      return new ProviderError("provider_auth", { status: status ?? 403 });
-    case "ValidationException":
-      return new ProviderError("provider_bad_request", { status: status ?? 400 });
-    case "ResourceNotFoundException":
-      return new ProviderError("provider_bad_request", { status: status ?? 404 });
-    case "InternalServerException":
-      return new ProviderError("provider_unavailable", { status: status ?? 500 });
-    case "ServiceUnavailableException":
-    case "ModelNotReadyException":
-      return new ProviderError("provider_unavailable", { status: status ?? 503 });
-    case "ContentFilteredException":
-    case "GuardrailIntervenedException":
-      return new ProviderError("provider_content_filtered", { status: status ?? 400 });
-    case "ModelErrorException":
-      return mapModelError(error, status);
-    default:
-      return mapStatus(status);
+  if (name === "ModelErrorException") {
+    return mapModelError(error, status);
   }
+  return (
+    (name === undefined ? undefined : exceptionMappers[name])?.(error, status) ?? mapStatus(status)
+  );
 }

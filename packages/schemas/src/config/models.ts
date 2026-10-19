@@ -26,6 +26,48 @@ export const ModelRoutingConfigSchema = z
   .prefault({});
 
 /** Provider adapter configuration owned by the model gateway. */
+function validateBedrockProvider(
+  provider: {
+    readonly apiKey?: string | undefined;
+    readonly modelIds?: Readonly<Record<string, unknown>> | undefined;
+    readonly region?: string | undefined;
+  },
+  context: z.RefinementCtx,
+): void {
+  if (provider.region !== undefined && !/^[a-z]{2}(?:-[a-z]+)+-\d+$/u.test(provider.region)) {
+    context.addIssue({
+      code: "custom",
+      path: ["region"],
+      message: "Bedrock region must be a valid AWS region identifier.",
+      params: { errorCode: "provider_region_invalid" },
+    });
+  }
+  if (provider.region === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["region"],
+      message: "Bedrock providers require a region.",
+      params: { errorCode: "provider_region_required" },
+    });
+  }
+  if (provider.modelIds === undefined || Object.keys(provider.modelIds).length === 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["modelIds"],
+      message: "Bedrock providers require at least one model id.",
+      params: { errorCode: "provider_model_ids_required" },
+    });
+  }
+  if (provider.apiKey !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["apiKey"],
+      message: "Bedrock credentials use the AWS default provider chain.",
+      params: { errorCode: "provider_api_key_unsupported" },
+    });
+  }
+}
+
 export const ModelProviderConfigSchema = z
   .object({
     id: Code,
@@ -42,38 +84,7 @@ export const ModelProviderConfigSchema = z
   .strict()
   .superRefine((provider, context) => {
     if (provider.kind === "bedrock") {
-      if (provider.region !== undefined && !/^[a-z]{2}(-[a-z]+)+-\d+$/u.test(provider.region)) {
-        context.addIssue({
-          code: "custom",
-          path: ["region"],
-          message: "Bedrock region must be a valid AWS region identifier.",
-          params: { errorCode: "provider_region_invalid" },
-        });
-      }
-      if (provider.region === undefined) {
-        context.addIssue({
-          code: "custom",
-          path: ["region"],
-          message: "Bedrock providers require a region.",
-          params: { errorCode: "provider_region_required" },
-        });
-      }
-      if (provider.modelIds === undefined || Object.keys(provider.modelIds).length === 0) {
-        context.addIssue({
-          code: "custom",
-          path: ["modelIds"],
-          message: "Bedrock providers require at least one model id.",
-          params: { errorCode: "provider_model_ids_required" },
-        });
-      }
-      if (provider.apiKey !== undefined) {
-        context.addIssue({
-          code: "custom",
-          path: ["apiKey"],
-          message: "Bedrock credentials use the AWS default provider chain.",
-          params: { errorCode: "provider_api_key_unsupported" },
-        });
-      }
+      validateBedrockProvider(provider, context);
     }
     if (provider.kind === "openai_compatible" && provider.baseUrl === undefined) {
       context.addIssue({

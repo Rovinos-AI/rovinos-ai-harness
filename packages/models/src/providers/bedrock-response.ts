@@ -73,37 +73,37 @@ function serializeContentBlock(block: ContentBlock): JsonValue {
   };
 }
 
+function isValidTokenCount(value: number | undefined): value is number {
+  return value !== undefined && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isOptionalTokenCountValid(value: number | undefined): boolean {
+  return value === undefined || isValidTokenCount(value);
+}
+
 function normalizeUsage(usage: ConverseResponse["usage"]): ModelUsage {
+  if (usage === undefined) {
+    throw new ProviderError("provider_unknown");
+  }
+  const { inputTokens, outputTokens, cacheReadInputTokens, cacheWriteInputTokens } = usage;
   if (
-    usage === undefined ||
-    usage.inputTokens === undefined ||
-    usage.outputTokens === undefined ||
-    !Number.isSafeInteger(usage.inputTokens) ||
-    !Number.isSafeInteger(usage.outputTokens) ||
-    usage.inputTokens < 0 ||
-    usage.outputTokens < 0
+    !isValidTokenCount(inputTokens) ||
+    !isValidTokenCount(outputTokens) ||
+    !isOptionalTokenCountValid(cacheReadInputTokens) ||
+    !isOptionalTokenCountValid(cacheWriteInputTokens)
   ) {
     throw new ProviderError("provider_unknown");
   }
-  const cacheReadTokens = usage.cacheReadInputTokens;
-  const cacheWriteTokens = usage.cacheWriteInputTokens;
-  if (
-    (cacheReadTokens !== undefined &&
-      (!Number.isSafeInteger(cacheReadTokens) || cacheReadTokens < 0)) ||
-    (cacheWriteTokens !== undefined &&
-      (!Number.isSafeInteger(cacheWriteTokens) || cacheWriteTokens < 0))
-  ) {
-    throw new ProviderError("provider_unknown");
-  }
-  const inputTokens = usage.inputTokens + (cacheReadTokens ?? 0) + (cacheWriteTokens ?? 0);
-  if (!Number.isSafeInteger(inputTokens)) {
+  const normalizedInputTokens =
+    inputTokens + (cacheReadInputTokens ?? 0) + (cacheWriteInputTokens ?? 0);
+  if (!Number.isSafeInteger(normalizedInputTokens)) {
     throw new ProviderError("provider_unknown");
   }
   return {
-    inputTokens,
-    outputTokens: usage.outputTokens,
-    ...(cacheReadTokens === undefined ? {} : { cacheReadTokens }),
-    ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
+    inputTokens: normalizedInputTokens,
+    outputTokens,
+    ...(cacheReadInputTokens === undefined ? {} : { cacheReadTokens: cacheReadInputTokens }),
+    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteTokens: cacheWriteInputTokens }),
   };
 }
 

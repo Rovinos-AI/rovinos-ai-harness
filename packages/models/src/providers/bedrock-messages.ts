@@ -235,8 +235,7 @@ function toolResultContent(result: JsonValue) {
   if (isJsonObject(result)) {
     return [{ json: result }];
   }
-  const text = JSON.stringify(result);
-  return [{ text: text === undefined ? "null" : text }];
+  return [{ text: JSON.stringify(result) }];
 }
 
 function toToolResult(

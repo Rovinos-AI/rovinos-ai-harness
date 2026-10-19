@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { ModelErrorException } from "@aws-sdk/client-bedrock-runtime";
 import { JsonValue, parseJson } from "@harness/schemas";
-import type { JsonValue as JsonValueType, ModelRequest } from "@harness/schemas";
+import type { ModelRequest } from "@harness/schemas";
 import { Headers, Response, type fetch as undiciFetch } from "undici";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -403,7 +403,7 @@ describe("BedrockAdapter", () => {
       })
       .parse(opaque.blob).content;
     expect(savedContent[0]?.toolUse.toolUseId).toBe(sanitizedId);
-    expect(savedContent[0]?.toolUse.toolUseId).toMatch(/^[A-Za-z0-9_-]+$/u);
+    expect(savedContent[0]?.toolUse.toolUseId).toMatch(/^[\w-]+$/u);
     const toolCall = firstResult.parts.find((part) => part.type === "tool_call");
     expect(toolCall?.type).toBe("tool_call");
     if (toolCall?.type !== "tool_call") {
@@ -442,8 +442,8 @@ describe("BedrockAdapter", () => {
   });
 
   it.each([
-    { result: [1, 2] as JsonValueType, serialized: "[1,2]" },
-    { result: 5 as JsonValueType, serialized: "5" },
+    { result: [1, 2], serialized: "[1,2]" },
+    { result: 5, serialized: "5" },
     { result: null, serialized: "null" },
   ])("serializes non-object JSON tool results as text", async ({ result, serialized }) => {
     const first = makeCall();
@@ -867,11 +867,10 @@ describe("BedrockAdapter", () => {
       new AbortController().signal,
     );
     expect(mapped).toMatchObject({ code, status });
-    if (retryAfterMs === undefined) {
-      expect(mapped).not.toHaveProperty("retryAfterMs");
-    } else {
-      expect(mapped).toHaveProperty("retryAfterMs", retryAfterMs);
-    }
+    expect("retryAfterMs" in mapped).toBe(retryAfterMs !== undefined);
+    expect(mapped).toMatchObject({
+      ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+    });
   });
 
   it("uses the original throttled status for a model-stream exception", () => {
@@ -979,11 +978,10 @@ describe("BedrockAdapter", () => {
     });
     const mapped = mapBedrockError(error, new AbortController().signal);
     expect(mapped).toMatchObject({ code });
-    if (mappedStatus === undefined) {
-      expect(mapped).not.toHaveProperty("status");
-    } else {
-      expect(mapped).toHaveProperty("status", mappedStatus);
-    }
+    expect("status" in mapped).toBe(mappedStatus !== undefined);
+    expect(mapped).toMatchObject({
+      ...(mappedStatus === undefined ? {} : { status: mappedStatus }),
+    });
   });
 
   it("rejects malformed opaque content without sending a request", async () => {
