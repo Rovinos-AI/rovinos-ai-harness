@@ -213,6 +213,8 @@ function buildRequest(request: ModelRequest, provider: string): JsonValue {
   let toolChoice: JsonValue | undefined;
   if (request.toolChoice === "auto") {
     toolChoice = { type: "auto" };
+  } else if (request.toolChoice === "required") {
+    toolChoice = { type: "any" };
   } else if (request.toolChoice !== undefined && request.toolChoice !== "none") {
     toolChoice = { type: "tool", name: request.toolChoice.forced };
   }
