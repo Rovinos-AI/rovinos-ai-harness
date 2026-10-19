@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from "node:fs";
 import type { GoogleGenAIOptions } from "@google/genai";
-import { OAuth2Client } from "google-auth-library";
+import { JWT } from "google-auth-library";
 import { JsonValue, parseJson } from "@harness/schemas";
 import type { ModelRequest } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
@@ -20,31 +20,65 @@ const baseRequest: ModelRequest = {
   model: { provider: "vertex", model: "gemini-test" },
   messages: [{ role: "user", parts: [{ type: "text", text: "hello" }] }],
 };
+type VertexFetch = NonNullable<NonNullable<GoogleGenAIOptions["httpOptions"]>["fetch"]>;
 const fixtures = parseJson(
   z.array(ProviderContractFixtureSchema),
   readFileSync(new URL("./__fixtures__/vertex/contract.json", import.meta.url), "utf8"),
 );
 
 function testAuthOptions(): GoogleGenAIOptions["googleAuthOptions"] {
-  const authClient = new OAuth2Client();
-  authClient.setCredentials({ access_token: "synthetic-test-token" });
+  const authClient = new JWT({
+    email: "synthetic-vertex@example.test",
+    key: "synthetic-test-key",
+  });
+  authClient.getRequestHeaders = async () =>
+    new Headers({ authorization: "******" });
   return { authClient };
+}
+
+function abortableFetch<T>(pending: Promise<T>, signal: AbortSignal | null | undefined): Promise<T> {
+  if (signal === undefined || signal === null) {
+    return pending;
+  }
+  return new Promise<T>((resolve, reject) => {
+    const removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      removeAbortListener();
+      reject(new DOMException("The request was aborted.", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+    }
+    pending.then(
+      (value) => {
+        removeAbortListener();
+        resolve(value);
+      },
+      (error: unknown) => {
+        removeAbortListener();
+        reject(error);
+      },
+    );
+  });
 }
 
 function sdkFetch(
   fetch: ProviderContractAdapterOptions["fetch"],
-): NonNullable<GoogleGenAIOptions["httpOptions"]>["fetch"] {
+  ignoreTransportAbort = false,
+): VertexFetch {
   return async (input, init) => {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const response = await fetch(url, {
+    const pending = fetch(url, {
       ...(init?.method === undefined ? {} : { method: init.method }),
       ...(init?.headers === undefined
         ? {}
         : { headers: Object.fromEntries(new Headers(init.headers)) }),
       ...(typeof init?.body === "string" ? { body: init.body } : {}),
-      ...(init?.signal === undefined ? {} : { signal: init.signal }),
+      ...(!ignoreTransportAbort && init?.signal !== undefined ? { signal: init.signal } : {}),
     });
+    const response = await abortableFetch(pending, init?.signal);
     return new Response(await response.text(), {
       status: response.status,
       headers: Object.fromEntries(response.headers),
@@ -52,14 +86,17 @@ function sdkFetch(
   };
 }
 
-function contractAdapter(options: ProviderContractAdapterOptions): VertexAdapter {
+function contractAdapter(
+  options: ProviderContractAdapterOptions,
+  fixture: (typeof fixtures)[number],
+): VertexAdapter {
   return new VertexAdapter({
     project: "fixture-project",
     location: "us-central1",
     httpOptions: {
       baseUrl: options.baseUrl,
       apiVersion: "v1",
-      fetch: sdkFetch(options.fetch),
+      fetch: sdkFetch(options.fetch, fixture.scenario === "abort_signal"),
       retryOptions: { attempts: 5 },
     },
     googleAuthOptions: testAuthOptions(),
@@ -88,7 +125,7 @@ function mockedAdapter(
   readonly requests: () => JsonValue[];
 } {
   const requests: JsonValue[] = [];
-  const fetch: NonNullable<GoogleGenAIOptions["httpOptions"]>["fetch"] = async (_input, init) => {
+  const fetch: VertexFetch = async (_input, init) => {
     if (typeof init?.body === "string") {
       requests.push(parseJson(JsonValue, init.body));
     }

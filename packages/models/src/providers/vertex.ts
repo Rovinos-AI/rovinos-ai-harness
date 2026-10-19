@@ -354,6 +354,39 @@ function mapError(error: unknown, signal: AbortSignal): never {
   throw new ProviderError("provider_unknown", { status: error.status });
 }
 
+function awaitWithAbort<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(new ProviderError("provider_timeout"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(new ProviderError("provider_timeout"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    try {
+      operation().then(
+        (value) => {
+          cleanup();
+          resolve(value);
+        },
+        (error: unknown) => {
+          cleanup();
+          reject(error);
+        },
+      );
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
+  });
+}
+
 /** Vertex AI adapter for Gemini models using Application Default Credentials. */
 export class VertexAdapter implements ProviderAdapter {
   readonly provider: z.infer<typeof Code>;
@@ -392,16 +425,20 @@ export class VertexAdapter implements ProviderAdapter {
     const builtContents = buildContents(request, this.provider);
     const builtConfig = buildConfig(request, context.signal, this.maxOutputTokens);
     try {
-      const response = await this.client.models.generateContent({
-        model: request.model.model,
-        contents: builtContents.contents,
-        config: {
-          ...builtConfig.config,
-          ...(builtContents.systemInstruction === undefined
-            ? {}
-            : { systemInstruction: builtContents.systemInstruction }),
-        },
-      });
+      const response = await awaitWithAbort(
+        () =>
+          this.client.models.generateContent({
+            model: request.model.model,
+            contents: builtContents.contents,
+            config: {
+              ...builtConfig.config,
+              ...(builtContents.systemInstruction === undefined
+                ? {}
+                : { systemInstruction: builtContents.systemInstruction }),
+            },
+          }),
+        context.signal,
+      );
       return mapResponse(
         response,
         context,

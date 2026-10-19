@@ -129,10 +129,10 @@ async function assertAbortCompletion(
   controller: AbortController,
   didFetch: () => boolean,
 ): Promise<void> {
-  const startedAt = performance.now();
   // SDK-backed adapters may dispatch fetch in a microtask after complete() is called.
   await new Promise<void>((resolve) => setImmediate(resolve));
   controller.abort();
+  const abortedAt = performance.now();
   const error = await completion.then(
     () => undefined,
     (caught: unknown) => caught,
@@ -142,7 +142,7 @@ async function assertAbortCompletion(
     (error instanceof Error && error.name === "AbortError") ||
       (error instanceof ProviderError && error.code === "provider_timeout"),
   ).toBe(true);
-  expect(performance.now() - startedAt).toBeLessThan(100);
+  expect(performance.now() - abortedAt).toBeLessThan(100);
 }
 
 async function assertProviderFailure(
