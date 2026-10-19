@@ -14,6 +14,7 @@ class AlreadyTerminalError extends HarnessError {
 /** Registers the `harness cancel` command. */
 export const cancelCommand: CommandModule = {
   name: "cancel",
+  /** Registers the `cancel` command. */
   register(program, context) {
     program
       .command("cancel")

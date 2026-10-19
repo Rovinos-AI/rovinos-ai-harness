@@ -34,12 +34,25 @@ const context = {
 };
 const disabledTelemetry: TelemetryConfig = {
   sentinel: { minValueLength: 6, enabled: false },
+  correlation: { enabled: false },
 };
 const runId = Id.parse("A".repeat(26));
 
 function makeTripQueue(): TripQueue {
   return new TripQueue({ emit: vi.fn(), enabled: () => true });
 }
+
+function makeEmptyGate(): SentinelGate {
+  return new SentinelGate(
+    new VaultRunView({
+      version: () => Promise.resolve(0),
+      listRawValueEntries: () => Promise.resolve([]),
+    }),
+    new ActiveRuns(),
+    { tripQueue: makeTripQueue() },
+  );
+}
+
 const testOwnerTask = { taskId: "4.7", packageName: "@harness/telemetry" } as const;
 
 function defineTestSpan() {
@@ -50,6 +63,7 @@ function defineTestSpan() {
       "harness.test.count": attr.int(),
       "harness.test.mode": attr.enum(["fast", "safe"]),
       "harness.run.id": attr.optional(attr.id()),
+      "harness.user.pseudonym": attr.optional(attr.pseudonym()),
     },
     testOwnerTask,
   );
@@ -177,6 +191,45 @@ describe("sanitizeSpan", () => {
       ["unregistered_attr"],
       ["event_stripped"],
     ]);
+  });
+
+  it("enforces the correlation opt-in before exporting a registered pseudonym", async () => {
+    const definition = defineTestSpan();
+    const input = makeReadableSpan({
+      attributes: {
+        "harness.user.pseudonym": `p_${"a".repeat(26)}`,
+      },
+    });
+
+    expect(sanitizeSpan(input)?.attributes).toEqual({});
+
+    const omittedNext = createNextProcessor();
+    const omitted = new AllowlistSpanProcessor(omittedNext, { gate: makeEmptyGate() });
+    omitted.onEnd(input);
+    await omitted.forceFlush();
+    expect(omittedNext.onEnd.mock.calls[0]?.[0].attributes).toEqual({});
+
+    const disabledNext = createNextProcessor();
+    const disabled = new AllowlistSpanProcessor(disabledNext, {
+      telemetry: disabledTelemetry,
+    });
+    disabled.onEnd(input);
+    await disabled.forceFlush();
+    expect(disabledNext.onEnd.mock.calls[0]?.[0].attributes).toEqual({});
+
+    const enabledNext = createNextProcessor();
+    const enabled = new AllowlistSpanProcessor(enabledNext, {
+      telemetry: {
+        ...disabledTelemetry,
+        correlation: { enabled: true },
+      },
+    });
+    enabled.onEnd(input);
+    await enabled.forceFlush();
+    expect(enabledNext.onEnd.mock.calls[0]?.[0].attributes).toEqual({
+      "harness.user.pseudonym": `p_${"a".repeat(26)}`,
+    });
+    expect(definition.shape["harness.user.pseudonym"]).toBeDefined();
   });
 
   it("strips events, status messages, link attributes, and non-allowlisted resource attributes", () => {

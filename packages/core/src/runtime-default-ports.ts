@@ -20,11 +20,14 @@ class ToolNotConfiguredError extends HarnessError {
 
 /** Model port returned when the runtime has no configured model provider. */
 export const missingModelPort: ModelPort = {
+  /** Rejects every completion with a not-configured error. */
   complete: () => Promise.reject(new ModelNotConfiguredError()),
 };
 
 /** Tool port returned when no tool adapter has been configured. */
 export const unavailableTool: ToolPort = {
+  /** Reports no tool descriptions. */
   describe: () => undefined,
+  /** Rejects every execution with a not-configured error. */
   execute: () => Promise.reject(new ToolNotConfiguredError()),
 };

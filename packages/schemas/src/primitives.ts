@@ -13,6 +13,12 @@ export const Code = z.string().regex(/^[a-z0-9_.-]{1,64}$/u);
 /** Inferred code type. */
 export type Code = z.infer<typeof Code>;
 
+/** Validates a lowercase base32 pseudonym produced by the vault helper. */
+export const Pseudonym = z.string().regex(/^p_[a-z2-7]{26}$/u);
+
+/** Inferred pseudonym type. */
+export type Pseudonym = z.infer<typeof Pseudonym>;
+
 /** Safe tool id used when an event refers to an unknown model-proposed tool. */
 export const UNREGISTERED_TOOL_ID = Code.parse("unregistered_tool");
 

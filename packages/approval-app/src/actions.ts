@@ -6,17 +6,20 @@ import { mountRevealFlow, type RevealFlow } from "./reveal.js";
 
 /** Terminal outcome returned by the approval resolve tool. */
 export type ApprovalDecision = "approve" | "deny" | "edit";
-type AppTelemetryForActions = Pick<
-  AppTelemetry<readonly ["ui.decision", "ui.error"]>,
-  "record" | "flush"
->;
+type AppTelemetryForActions = Pick<AppTelemetry<readonly ["ui.decision"]>, "record" | "flush">;
+
+/** Tagged outcome from a host tool call; transport failures are not tool unavailability. */
+export type ApprovalToolCallOutcome =
+  | { readonly kind: "response"; readonly value: unknown }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "failure" };
 
 /** The host bridge methods used by the approval decision and reveal controls. */
 export interface ApprovalActionsBridge {
   readonly callTool: (
     name: "harness.approvals.resolve" | "harness.approvals.reveal",
     args: Record<string, unknown>,
-  ) => Promise<unknown>;
+  ) => Promise<ApprovalToolCallOutcome>;
 }
 
 /** Dependencies injected into the approval actions for host calls and safe telemetry. */
@@ -26,8 +29,12 @@ export interface ApprovalActionsOptions {
   readonly isExpired: () => boolean;
   readonly bridge: ApprovalActionsBridge;
   readonly telemetry: AppTelemetryForActions;
+  readonly reportError: (code: "resolve_failed" | "reveal_failed") => void;
+  readonly decisionDurationMs: () => number;
+  readonly flushInteractions: () => void;
   readonly renderRevealed: (values: ReadonlyMap<string, string>) => void;
   readonly onDecision: (decision: ApprovalDecision) => void;
+  readonly onResolveUnavailable?: () => void;
 }
 
 /** Mounted action controls and a non-sensitive state hook for expiry tests. */
@@ -128,8 +135,7 @@ const isExpired = (context: ActionContext): boolean => context.options.isExpired
 function reportError(context: ActionContext, code: UiErrorCode, message: string): void {
   const { status } = context;
   status.textContent = message;
-  context.options.telemetry.record("ui.error", { code });
-  void context.options.telemetry.flush();
+  context.options.reportError(code);
 }
 
 function decisionStatus(decision: ApprovalDecision): string {
@@ -152,6 +158,7 @@ async function resolveDecision(
   if (isExpired(context)) {
     return;
   }
+  const decisionDurationMs = context.options.decisionDurationMs();
   const request = ResolveRequest.safeParse({
     approvalId: context.options.approvalId,
     decision,
@@ -164,17 +171,26 @@ async function resolveDecision(
   setBusy(context, true);
   status.textContent = "Submitting decision.";
   try {
-    const response = ResolveResponse.safeParse(
-      await context.options.bridge.callTool("harness.approvals.resolve", request.data),
-    );
+    const result = await context.options.bridge.callTool("harness.approvals.resolve", request.data);
+    if (result.kind === "unavailable" && context.options.onResolveUnavailable !== undefined) {
+      context.options.onResolveUnavailable();
+      return;
+    }
+    if (result.kind !== "response") {
+      reportError(context, "resolve_failed", errorMessage(undefined));
+      setBusy(context, false);
+      return;
+    }
+    const response = ResolveResponse.safeParse(result.value);
     if (!response.success || !response.data.ok) {
       const code = response.success ? response.data.code : undefined;
       reportError(context, "resolve_failed", errorMessage(code));
       setBusy(context, false);
       return;
     }
-    context.options.telemetry.record("ui.decision", { decision });
+    context.options.telemetry.record("ui.decision", { decision }, decisionDurationMs);
     void context.options.telemetry.flush();
+    context.options.flushInteractions();
     status.textContent = decisionStatus(decision);
     context.options.onDecision(decision);
     context.state.editForm?.remove();
@@ -270,7 +286,15 @@ export function mountApprovalActions(
     approvalId: options.approvalId,
     payload: options.payload,
     isExpired: options.isExpired,
-    bridge: { callTool: (name, args) => options.bridge.callTool(name, args) },
+    bridge: {
+      callTool: async (name, args) => {
+        const result = await options.bridge.callTool(name, args);
+        if (result.kind !== "response") {
+          throw new Error("reveal_failed");
+        }
+        return result.value;
+      },
+    },
     status: context.status,
     renderRevealed: options.renderRevealed,
     isBusy: () => context.state.busy,

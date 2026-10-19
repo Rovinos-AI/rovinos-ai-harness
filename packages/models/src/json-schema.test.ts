@@ -127,19 +127,15 @@ const providerRulesFixture = {
       "required",
       "title",
       "type",
+      "format",
+      "maximum",
+      "minimum",
+      "oneOf",
+      "prefixItems",
     ],
     requireAdditionalPropertiesFalse: false,
     requireAllProperties: false,
-    unsupportedKeywords: [
-      "default",
-      "format",
-      "maximum",
-      "maxLength",
-      "minimum",
-      "minLength",
-      "oneOf",
-      "pattern",
-    ],
+    unsupportedKeywords: ["default", "maxLength", "minLength", "pattern"],
   },
 };
 
@@ -211,6 +207,30 @@ describe("provider schema compatibility rules", () => {
     expect(PROVIDER_SCHEMA_RULES).toEqual(providerRulesFixture);
     expect(providerSchemaRules("openai")).toEqual(providerRulesFixture.openai);
     expect(providerSchemaRules("unknown")).toBeUndefined();
+  });
+
+  it("keeps Vertex-supported response constraints and records dropped constraints", () => {
+    const lowered = lowerForProvider(
+      {
+        type: "object",
+        properties: {
+          age: { type: "integer", minimum: 0, maximum: 120 },
+          code: { type: "string", pattern: "^[a-z]+$", format: "uuid" },
+        },
+        required: ["age", "code"],
+        default: {},
+      },
+      "vertex",
+    );
+
+    expect(lowered.schema).toMatchObject({
+      type: "object",
+      properties: {
+        age: { type: "integer", minimum: 0, maximum: 120 },
+        code: { type: "string", format: "uuid" },
+      },
+    });
+    expect(lowered.dropped).toEqual(["default", "pattern"]);
   });
 });
 
@@ -302,12 +322,22 @@ describe("provider schema lowering", () => {
       },
       required: ["score", "state"],
     };
+    const vertexGolden: JsonSchema = {
+      type: "object",
+      properties: {
+        code: { type: "string" },
+        score: { type: "number", minimum: 0 },
+        state: { type: "string", enum: ["ready", "stopped"] },
+        optional: { type: "string" },
+      },
+      required: ["score", "state"],
+    };
     const goldenByProvider: Record<ProviderId, JsonSchema> = {
       anthropic: conservativeGolden,
       azure_openai: strictGolden,
       bedrock: conservativeGolden,
       openai: strictGolden,
-      vertex: conservativeGolden,
+      vertex: vertexGolden,
     };
 
     for (const [provider, expected] of Object.entries(goldenByProvider)) {

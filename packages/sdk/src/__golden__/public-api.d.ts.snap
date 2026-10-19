@@ -136,11 +136,14 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 id: z.ZodString;
                 kind: z.ZodEnum<{
                     anthropic: "anthropic";
+                    bedrock: "bedrock";
                     openai: "openai";
                     openai_compatible: "openai_compatible";
                 }>;
                 apiKey: z.ZodOptional<z.core.$ZodBranded<z.ZodString, "SecretRef", "out">>;
                 baseUrl: z.ZodOptional<z.ZodURL>;
+                region: z.ZodOptional<z.ZodString>;
+                modelIds: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
                 maxOutputTokens: z.ZodDefault<z.ZodNumber>;
                 requestsPerMinute: z.ZodOptional<z.ZodNumber>;
                 streaming: z.ZodDefault<z.ZodBoolean>;
@@ -389,6 +392,9 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             sentinel: z.ZodPrefault<z.ZodObject<{
                 minValueLength: z.ZodDefault<z.ZodNumber>;
                 enabled: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strict>>;
+            correlation: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
         sandbox: z.ZodPrefault<z.ZodObject<{

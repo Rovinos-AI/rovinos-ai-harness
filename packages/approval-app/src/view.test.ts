@@ -87,6 +87,49 @@ describe("approval view", () => {
     expect(document.body.textContent).toContain("plain text");
   });
 
+  it("retries an identical payload after its first DOM render throws", () => {
+    const view = createApprovalView(document.body, {
+      clock: { now: () => 1000 },
+      onError: vi.fn(),
+    });
+    const content = document.querySelector("main > div");
+    if (content === null) {
+      throw new Error("Expected the view content container");
+    }
+    const append = vi.spyOn(content, "append").mockImplementation(() => {
+      throw new Error("Synthetic render failure");
+    });
+    expect(() => view.receive(payload)).toThrow("Synthetic render failure");
+    append.mockRestore();
+    expect(view.receive(payload)).toBe(true);
+    expect(document.querySelector("h1")?.textContent).toBe(payload.summary);
+  });
+
+  it("repairs the prior view after a different payload throws during DOM rendering", () => {
+    const view = createApprovalView(document.body, {
+      clock: { now: () => 1000 },
+      onError: vi.fn(),
+    });
+    expect(view.receive(payload)).toBe(true);
+    const content = document.querySelector("main > div");
+    if (content === null) {
+      throw new Error("Expected the view content container");
+    }
+    const append = vi.spyOn(content, "append").mockImplementation(() => {
+      throw new Error("Synthetic render failure");
+    });
+    expect(() =>
+      view.receive({
+        ...payload,
+        summary: "Different payload",
+      }),
+    ).toThrow("Synthetic render failure");
+    append.mockRestore();
+    expect(view.receive(payload)).toBe(true);
+    expect(document.querySelector("h1")?.textContent).toBe(payload.summary);
+    expect(document.body.textContent).toContain("mail.send");
+  });
+
   it("distinguishes JSON strings, primitives, arrays, objects, and empty containers", () => {
     setup({
       ...payload,
@@ -252,7 +295,7 @@ describe("approval view", () => {
     const view = createApprovalView(document.body, { clock: { now: () => 0 }, onError: vi.fn() });
     view.tick();
     expect(document.activeElement).toBe(document.querySelector("h1"));
-    expect(document.querySelector('[role="status"]')?.textContent).toBe("Waiting for host");
+    expect(document.querySelector('[role="status"]')?.textContent).toBe("Waiting for host...");
   });
 
   it("keeps the approval id separate and replaces token pills only for the reveal display", () => {

@@ -8,10 +8,14 @@ import {
   RevealResponse,
   parseJson,
 } from "@harness/schemas/browser";
-import { mountApprovalActions } from "./actions.js";
+import { mountApprovalActions, type ApprovalToolCallOutcome } from "./actions.js";
+import { createApprovalFallback } from "./fallback.js";
+import { createApprovalTelemetry } from "./telemetry.js";
 import { createApprovalView } from "./view.js";
 
 const app = new App({ name: "harness-approval", version: "0.0.0" }, {}, { autoResize: false });
+const fallback = createApprovalFallback(document.body);
+const unavailableToolCodes = new Set(["app_tool_not_allowed", "unknown_tool", "tool_not_found"]);
 let finishHostConnection: (connected: boolean) => void = () => undefined;
 const hostConnection = new Promise<void>((resolve, reject) => {
   finishHostConnection = (connected) => {
@@ -26,26 +30,64 @@ const hostConnection = new Promise<void>((resolve, reject) => {
 async function callApprovalTool(
   name: "harness.approvals.resolve" | "harness.approvals.reveal",
   args: Record<string, unknown>,
-): Promise<unknown> {
-  const result = await app.callServerTool({ name, arguments: args });
-  if (result.isError === true) {
-    return undefined;
+): Promise<ApprovalToolCallOutcome> {
+  let result: Awaited<ReturnType<App["callServerTool"]>>;
+  try {
+    result = await app.callServerTool({ name, arguments: args });
+  } catch (error) {
+    if (isUnavailableToolError(error)) {
+      return { kind: "unavailable" };
+    }
+    return { kind: "failure" };
   }
   if (result.structuredContent !== undefined) {
-    return result.structuredContent;
+    return { kind: "response", value: result.structuredContent };
   }
   const text = result.content.find((part) => part.type === "text");
+  if (result.isError === true) {
+    if (text?.type === "text") {
+      try {
+        return {
+          kind: "response",
+          value: parseJson(
+            name === "harness.approvals.resolve" ? ResolveResponse : RevealResponse,
+            text.text,
+          ),
+        };
+      } catch {
+        if (unavailableToolCodes.has(text.text)) {
+          return { kind: "unavailable" };
+        }
+      }
+    }
+    return { kind: "failure" };
+  }
   if (text?.type !== "text") {
-    return undefined;
+    return { kind: "failure" };
   }
   try {
-    return parseJson(
-      name === "harness.approvals.resolve" ? ResolveResponse : RevealResponse,
-      text.text,
-    );
+    return {
+      kind: "response",
+      value: parseJson(
+        name === "harness.approvals.resolve" ? ResolveResponse : RevealResponse,
+        text.text,
+      ),
+    };
   } catch {
-    return undefined;
+    return { kind: "failure" };
   }
+}
+
+function isUnavailableToolError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  if ("code" in error && error.code === -32601) {
+    return true;
+  }
+  return "message" in error && typeof error.message === "string"
+    ? unavailableToolCodes.has(error.message)
+    : false;
 }
 
 const telemetry = createAppTelemetry({
@@ -56,13 +98,26 @@ const telemetry = createAppTelemetry({
     },
   },
   hostReady: hostConnection,
-  manifest: { spans: ["ui.error", "ui.decision"] },
+  manifest: { spans: ["ui.error", "ui.decision", "ui.render", "ui.interaction"] },
 });
+const uiTelemetry = createApprovalTelemetry(telemetry);
+let hostConnected = false;
+let resolveUnavailable = false;
+let markResolveUnavailable: (() => void) | undefined;
+const hideFallback = (): void => {
+  if (!resolveUnavailable) {
+    fallback.hide();
+  }
+};
+const fallbackTimer = window.setTimeout(() => {
+  if (!hostConnected) {
+    fallback.show();
+  }
+}, 3000);
 const view = createApprovalView(document.body, {
   clock: { now: () => Date.now() },
   onError: (code) => {
-    telemetry.record("ui.error", { code });
-    void telemetry.flush();
+    uiTelemetry.reportError(code);
   },
   onPayload: ({
     payload,
@@ -73,6 +128,10 @@ const view = createApprovalView(document.body, {
     renderRevealed,
     onDecision,
   }) => {
+    hideFallback();
+    if (resolveUnavailable) {
+      fallback.show(payload.ui.fallbackText, approvalId);
+    }
     if (approvalId === undefined) {
       for (const button of actions.querySelectorAll("button")) {
         button.disabled = true;
@@ -83,6 +142,23 @@ const view = createApprovalView(document.body, {
       editHost.append(status);
       return undefined;
     }
+    const markUnavailable = (): void => {
+      if (resolveUnavailable) {
+        return;
+      }
+      resolveUnavailable = true;
+      uiTelemetry.reportError("bridge_unavailable");
+      fallback.show(payload.ui.fallbackText, approvalId);
+      for (const control of actions.querySelectorAll("button")) {
+        control.disabled = true;
+      }
+      for (const control of editHost.querySelectorAll<
+        HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
+      >("button, input, textarea")) {
+        control.disabled = true;
+      }
+    };
+    markResolveUnavailable = markUnavailable;
     const mountedActions = mountApprovalActions(actions, editHost, {
       approvalId,
       payload,
@@ -91,57 +167,92 @@ const view = createApprovalView(document.body, {
         callTool: callApprovalTool,
       },
       telemetry,
+      onResolveUnavailable: markUnavailable,
+      reportError: (code) => {
+        uiTelemetry.reportError(code);
+      },
+      decisionDurationMs: () => uiTelemetry.decisionDurationMs(),
+      flushInteractions: () => {
+        uiTelemetry.flushInteractions();
+      },
       renderRevealed,
       onDecision,
     });
+    if (resolveUnavailable) {
+      for (const control of actions.querySelectorAll("button")) {
+        control.disabled = true;
+      }
+      for (const control of editHost.querySelectorAll<
+        HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
+      >("button, input, textarea")) {
+        control.disabled = true;
+      }
+    }
     return () => {
       mountedActions.dispose();
+      if (markResolveUnavailable === markUnavailable) {
+        markResolveUnavailable = undefined;
+      }
     };
   },
 });
 
+app.onteardown = () => {
+  markResolveUnavailable?.();
+  return {};
+};
+
 app.addEventListener("toolinput", (params) => {
-  view.receive(params.arguments);
+  uiTelemetry.receivePayload(() => {
+    return view.receive(params.arguments);
+  });
 });
 app.addEventListener("toolresult", (params) => {
-  telemetry.setHostMetadata(params._meta);
-  if (params.isError === true) {
-    view.receive(undefined);
-    return;
-  }
-  if (params.structuredContent !== undefined) {
-    view.receive(params.structuredContent);
-    return;
-  }
-  const text = params.content.find((part) => part.type === "text");
-  try {
-    view.receive(
-      text?.type === "text"
-        ? parseJson(ApprovalAppInputSchema.or(ApprovalPayloadSchema), text.text)
-        : undefined,
-    );
-  } catch {
-    view.receive(undefined);
-  }
+  uiTelemetry.receivePayload(() => {
+    telemetry.setHostMetadata(params._meta);
+    if (params.isError === true) {
+      return view.receive(undefined);
+    }
+    if (params.structuredContent !== undefined) {
+      return view.receive(params.structuredContent);
+    }
+    const text = params.content.find((part) => part.type === "text");
+    try {
+      return view.receive(
+        text?.type === "text"
+          ? parseJson(ApprovalAppInputSchema.or(ApprovalPayloadSchema), text.text)
+          : undefined,
+      );
+    } catch {
+      return view.receive(undefined);
+    }
+  });
 });
 const interval = window.setInterval(() => {
   view.tick();
 }, 1000);
-window.addEventListener(
-  "pagehide",
-  () => {
-    window.clearInterval(interval);
-    view.dispose();
-    void telemetry.dispose();
-  },
-  { once: true },
-);
+const onPageHide = (event: PageTransitionEvent): void => {
+  if (event.persisted) {
+    return;
+  }
+  window.removeEventListener("pagehide", onPageHide);
+  window.clearInterval(interval);
+  window.clearTimeout(fallbackTimer);
+  fallback.dispose();
+  uiTelemetry.dispose();
+  view.dispose();
+  void telemetry.dispose();
+};
+window.addEventListener("pagehide", onPageHide);
 void app.connect().then(
   () => {
+    hostConnected = true;
+    window.clearTimeout(fallbackTimer);
+    hideFallback();
     finishHostConnection(true);
   },
   () => {
     finishHostConnection(false);
-    view.receive(undefined);
+    uiTelemetry.reportError("bridge_unavailable");
   },
 );

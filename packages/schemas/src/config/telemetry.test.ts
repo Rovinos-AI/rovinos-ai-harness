@@ -6,18 +6,28 @@ describe("TelemetryConfigSchema", () => {
   it("defaults the sentinel minimum value length", () => {
     expect(TelemetryConfigSchema.parse({})).toEqual({
       sentinel: { minValueLength: 6 },
+      correlation: { enabled: false },
+    });
+  });
+
+  it("enables correlation only when explicitly configured", () => {
+    expect(TelemetryConfigSchema.parse({ correlation: { enabled: true } })).toEqual({
+      sentinel: { minValueLength: 6 },
+      correlation: { enabled: true },
     });
   });
 
   it("accepts a configured minimum value length", () => {
     expect(TelemetryConfigSchema.parse({ sentinel: { minValueLength: 10 } })).toEqual({
       sentinel: { minValueLength: 10 },
+      correlation: { enabled: false },
     });
   });
 
   it("accepts an explicit development-only sentinel disable setting", () => {
     expect(TelemetryConfigSchema.parse({ sentinel: { enabled: false } })).toEqual({
       sentinel: { minValueLength: 6, enabled: false },
+      correlation: { enabled: false },
     });
   });
 
@@ -29,5 +39,8 @@ describe("TelemetryConfigSchema", () => {
       false,
     );
     expect(TelemetryConfigSchema.safeParse({ unexpected: true }).success).toBe(false);
+    expect(TelemetryConfigSchema.safeParse({ correlation: { enabled: "yes" } }).success).toBe(
+      false,
+    );
   });
 });

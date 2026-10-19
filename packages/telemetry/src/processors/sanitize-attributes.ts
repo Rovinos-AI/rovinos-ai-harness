@@ -52,15 +52,25 @@ function isSuccessfulParse(
  *
  * @param definition - The registered span or log-record definition.
  * @param attrs - The untrusted attributes to sanitize.
+ * @param correlationEnabled - Whether telemetry correlation was explicitly enabled.
  * @returns A new set containing only safe, valid scalar attributes.
  */
-export function sanitizeAttributes(definition: AttributeDefinition, attrs: unknown): Attributes {
+export function sanitizeAttributes(
+  definition: AttributeDefinition,
+  attrs: unknown,
+  correlationEnabled = false,
+): Attributes {
   if (!isRecord(definition.shape) || !isRecord(attrs)) {
     throw new TypeError("Telemetry attributes are malformed.");
   }
 
   const sanitized: Attributes = {};
   for (const [key, value] of Object.entries(attrs)) {
+    if (key === "harness.user.pseudonym" && !correlationEnabled) {
+      countDroppedTelemetry("correlation_disabled");
+      continue;
+    }
+
     if (!Object.hasOwn(definition.shape, key)) {
       countDroppedTelemetry("unregistered_attr");
       continue;
