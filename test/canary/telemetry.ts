@@ -55,7 +55,10 @@ export function createCanaryTelemetry(vault: VaultRunReader): CanaryTelemetry {
       shutdown: () => Promise.resolve(),
     },
     gate: new SentinelGate(new VaultRunView(vault), undefined, { maxPrepareMs: 1_000 }),
-    telemetry: { sentinel: { minValueLength: 6, enabled: true } },
+    telemetry: {
+      sentinel: { minValueLength: 6, enabled: true },
+      correlation: { enabled: false },
+    },
   });
   if (!trace.setGlobalTracerProvider(sdk.tracerProvider)) {
     throw new Error("The canary tracer provider could not be registered.");
@@ -132,7 +135,10 @@ export async function captureWithoutSentinel(canary: string): Promise<string> {
       forceFlush: () => Promise.resolve(),
       shutdown: () => Promise.resolve(),
     },
-    telemetry: { sentinel: { enabled: false, minValueLength: 6 } },
+    telemetry: {
+      sentinel: { enabled: false, minValueLength: 6 },
+      correlation: { enabled: false },
+    },
   });
   const definition = defineSpan(
     "harness.canary.negative_control",

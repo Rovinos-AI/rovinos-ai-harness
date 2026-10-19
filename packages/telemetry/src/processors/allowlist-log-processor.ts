@@ -53,6 +53,7 @@ function lookupDefinition(record: Record<string, unknown>): LogRecordDefinition 
 function sanitizedCopy(
   record: Record<string, unknown>,
   definition: LogRecordDefinition,
+  correlationEnabled: boolean,
 ): ReadWriteLogRecord {
   if (
     !isHrTime(record.hrTime) ||
@@ -68,7 +69,7 @@ function sanitizedCopy(
     throw new TypeError("Log record is malformed.");
   }
 
-  const attributes = sanitizeAttributes(definition, record.attributes);
+  const attributes = sanitizeAttributes(definition, record.attributes, correlationEnabled);
   const spanContext = isSpanContext(record.spanContext) ? record.spanContext : undefined;
   const severityNumber = isSeverityNumber(record.severityNumber)
     ? record.severityNumber
@@ -129,7 +130,11 @@ export class AllowlistLogRecordProcessor implements LogRecordProcessor {
         countDroppedTelemetry("unregistered_log_record");
         return;
       }
-      const sanitized = sanitizedCopy(input, definition);
+      const sanitized = sanitizedCopy(
+        input,
+        definition,
+        this.options.telemetry?.correlation.enabled === true,
+      );
       if (this.options.gate !== undefined && definition.name !== "harness.sentinel.trip") {
         const runId = Id.safeParse(sanitized.attributes["harness.run.id"]);
         const result = await this.options.gate.check({

@@ -18,6 +18,7 @@ const fixtureSpan = defineSpan(
     "harness.fixture.mode": attr.enum(["safe", "fast"]),
     "harness.fixture.count": attr.optional(attr.int()),
     "harness.fixture.enabled": attr.bool(),
+    "harness.fixture.pseudonym": attr.optional(attr.pseudonym()),
   },
   ownerTask,
 );
@@ -61,6 +62,7 @@ describe("attribute catalog generator", () => {
       | \`harness.fixture.enabled\` | boolean | Required | \`@harness/telemetry\` |
       | \`harness.fixture.id\` | Id | Required | \`@harness/telemetry\` |
       | \`harness.fixture.mode\` | enum: \`safe\`, \`fast\` | Required | \`@harness/telemetry\` |
+      | \`harness.fixture.pseudonym\` | Pseudonym | Optional | \`@harness/telemetry\` |
 
       Owner task: \`4.7\`.
 
