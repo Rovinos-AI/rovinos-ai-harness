@@ -117,10 +117,7 @@ function modelCompletion(
   };
 }
 
-async function createRuntimeApproval(
-  payload: ApprovalPayload,
-  options: FixtureOptions,
-): Promise<{
+async function createRuntimeApproval(payload: ApprovalPayload): Promise<{
   readonly runtime: Runtime;
   readonly runId: Id;
   readonly approvalId: Id;
@@ -150,23 +147,9 @@ async function createRuntimeApproval(
       );
     },
   };
-  let invalidEditReturned = false;
   const tool: ToolPort = {
     prepare: (call) => Promise.resolve(call),
-    validateInputSchema: (_id, args) => {
-      if (
-        options.invalidEditOnce === true &&
-        !invalidEditReturned &&
-        typeof args === "object" &&
-        args !== null &&
-        !Array.isArray(args) &&
-        args.count === 2
-      ) {
-        invalidEditReturned = true;
-        return Promise.resolve(false);
-      }
-      return Promise.resolve(true);
-    },
+    validateInputSchema: () => Promise.resolve(true),
     describe: (id) =>
       id === toolId
         ? { idempotent: true, timeoutMs: 1_000, inputSchema: JsonValue.parse({ type: "object" }) }
@@ -246,7 +229,7 @@ async function withFixture(
     });
   };
   const runtimeFixture =
-    options.runtimeBacked === true ? await createRuntimeApproval(payload, options) : undefined;
+    options.runtimeBacked === true ? await createRuntimeApproval(payload) : undefined;
   const fixturePayload = runtimeFixture?.payload ?? payload;
   const fixtureApprovalId = runtimeFixture?.approvalId ?? approvalId;
   const fixtureRunId = runtimeFixture?.runId ?? runId;
@@ -281,6 +264,14 @@ async function withFixture(
         if (runtimeFixture !== undefined && call.toolName === resolveTool) {
           const request = ResolveRequest.safeParse(call.arguments);
           if (!request.success) {
+            return toolResult({ ok: false, code: "edit_invalid" }, true);
+          }
+          if (
+            options.invalidEditOnce === true &&
+            request.data.decision === "edit" &&
+            !invalidEditReturned
+          ) {
+            invalidEditReturned = true;
             return toolResult({ ok: false, code: "edit_invalid" }, true);
           }
           try {
@@ -384,6 +375,22 @@ async function withFixture(
       dropBridge: async () => {
         hostState.closed = true;
         await host.close();
+        await page.evaluate(() => {
+          const appFrame = document.querySelector("iframe");
+          const appWindow = appFrame?.contentWindow;
+          if (appWindow === null || appWindow === undefined) {
+            throw new Error("The reference host app frame is missing.");
+          }
+          appWindow.postMessage(
+            {
+              jsonrpc: "2.0",
+              id: "bridge-drop",
+              method: "ui/resource-teardown",
+              params: {},
+            },
+            "*",
+          );
+        });
       },
     });
     await context.tracing.stop();
@@ -534,6 +541,8 @@ describe("approval app in the reference host", () => {
       await count.press("Enter");
       await expectStatus(fixture.frame, "The edited values are invalid.");
       expect(await count.isDisabled()).toBe(false);
+      expect(fixture.eventLog).toEqual([]);
+      expect(fixture.runtimeStatuses).toEqual([]);
       await count.press("Enter");
       await expectStatus(fixture.frame, "Edits submitted.");
       expect(fixture.eventLog).toContainEqual({ type: "approval_resolved", decision: "edit" });
@@ -558,7 +567,7 @@ describe("approval app in the reference host", () => {
       expect(fixture.eventLog).toContainEqual({ type: "pii_action", boundary: "ui" });
       expect(fixture.appCalls.filter((name) => name === revealTool)).toHaveLength(1);
       await fixture.page.clock.fastForward(30_000);
-      await fixture.frame.getByText("<EMAIL_1>", { exact: true }).waitFor();
+      await fixture.frame.getByRole("img", { name: "<EMAIL_1>" }).waitFor();
       await expectSafeTelemetry(
         fixture,
         ["ui.render", "ui.interaction"],
@@ -612,38 +621,24 @@ describe("approval app in the reference host", () => {
     );
   }, 30_000);
 
-  it("shows CLI instructions and disables actions when resolve is unavailable", async () => {
-    await withFixture(
-      createPayload(),
-      { resolveUnavailable: true, installClock: true },
-      async (fixture) => {
-        await fixture.frame
-          .getByRole("button", { name: "Approve", exact: true })
-          .click({ timeout: 5_000 });
-        await fixture.frame
-          .getByText("Review this action in the command line.", { exact: true })
-          .waitFor({ timeout: 5_000 });
-        expect(await fixture.frame.locator('[aria-label="Approve command"]').inputValue()).toBe(
-          `harness approvals approve ${fixture.approvalId}`,
-        );
-        for (const button of await fixture.frame
-          .locator('nav[aria-label="Approval actions"] button')
-          .all()) {
-          expect(await button.isDisabled()).toBe(true);
-        }
-        expect(fixture.eventLog).toEqual([]);
-        await fixture.dropBridge();
-        await fixture.page.clock.fastForward(6_000);
-        await fixture.frame
-          .getByText("Review this action in the command line.", { exact: true })
-          .waitFor();
-        expect(await fixture.frame.locator('[aria-label="Approve command"]').inputValue()).toBe(
-          `harness approvals approve ${fixture.approvalId}`,
-        );
-        expect(
-          await fixture.frame.getByRole("button", { name: "Approve", exact: true }).isDisabled(),
-        ).toBe(true);
-      },
-    );
+  it("shows CLI instructions when the host tears down the bridge", async () => {
+    await withFixture(createPayload(), { installClock: true }, async (fixture) => {
+      const fallback = fixture.frame.locator(
+        'section[aria-labelledby="approval-fallback-heading"]',
+      );
+      expect(await fallback.isHidden()).toBe(true);
+      await fixture.dropBridge();
+      await fixture.page.clock.fastForward(6_000);
+      await fallback.waitFor({ state: "visible" });
+      expect(await fixture.frame.locator('[aria-label="Approve command"]').inputValue()).toBe(
+        `harness approvals approve ${fixture.approvalId}`,
+      );
+      for (const button of await fixture.frame
+        .locator('nav[aria-label="Approval actions"] button')
+        .all()) {
+        expect(await button.isDisabled()).toBe(true);
+      }
+      expect(fixture.eventLog).toEqual([]);
+    });
   }, 30_000);
 });

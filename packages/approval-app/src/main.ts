@@ -45,9 +45,22 @@ async function callApprovalTool(
   }
   const text = result.content.find((part) => part.type === "text");
   if (result.isError === true) {
-    return text?.type === "text" && unavailableToolCodes.has(text.text)
-      ? { kind: "unavailable" }
-      : { kind: "failure" };
+    if (text?.type === "text") {
+      try {
+        return {
+          kind: "response",
+          value: parseJson(
+            name === "harness.approvals.resolve" ? ResolveResponse : RevealResponse,
+            text.text,
+          ),
+        };
+      } catch {
+        if (unavailableToolCodes.has(text.text)) {
+          return { kind: "unavailable" };
+        }
+      }
+    }
+    return { kind: "failure" };
   }
   if (text?.type !== "text") {
     return { kind: "failure" };
@@ -90,6 +103,7 @@ const telemetry = createAppTelemetry({
 const uiTelemetry = createApprovalTelemetry(telemetry);
 let hostConnected = false;
 let resolveUnavailable = false;
+let markResolveUnavailable: (() => void) | undefined;
 const hideFallback = (): void => {
   if (!resolveUnavailable) {
     fallback.hide();
@@ -128,6 +142,23 @@ const view = createApprovalView(document.body, {
       editHost.append(status);
       return undefined;
     }
+    const markUnavailable = (): void => {
+      if (resolveUnavailable) {
+        return;
+      }
+      resolveUnavailable = true;
+      uiTelemetry.reportError("bridge_unavailable");
+      fallback.show(payload.ui.fallbackText, approvalId);
+      for (const control of actions.querySelectorAll("button")) {
+        control.disabled = true;
+      }
+      for (const control of editHost.querySelectorAll<
+        HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
+      >("button, input, textarea")) {
+        control.disabled = true;
+      }
+    };
+    markResolveUnavailable = markUnavailable;
     const mountedActions = mountApprovalActions(actions, editHost, {
       approvalId,
       payload,
@@ -136,11 +167,7 @@ const view = createApprovalView(document.body, {
         callTool: callApprovalTool,
       },
       telemetry,
-      onResolveUnavailable: () => {
-        resolveUnavailable = true;
-        uiTelemetry.reportError("bridge_unavailable");
-        fallback.show(payload.ui.fallbackText, approvalId);
-      },
+      onResolveUnavailable: markUnavailable,
       reportError: (code) => {
         uiTelemetry.reportError(code);
       },
@@ -163,9 +190,17 @@ const view = createApprovalView(document.body, {
     }
     return () => {
       mountedActions.dispose();
+      if (markResolveUnavailable === markUnavailable) {
+        markResolveUnavailable = undefined;
+      }
     };
   },
 });
+
+app.onteardown = () => {
+  markResolveUnavailable?.();
+  return {};
+};
 
 app.addEventListener("toolinput", (params) => {
   uiTelemetry.receivePayload(() => {

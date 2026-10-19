@@ -316,6 +316,56 @@ describe("approval app SDK bootstrap", () => {
     });
   });
 
+  it("parses structured failures encoded as JSON text in an isError result", async () => {
+    const app = await start();
+    let invalidEditReturned = false;
+    bridge.call.mockImplementation((request) => {
+      if (request.name !== "harness.approvals.resolve") {
+        return Promise.resolve({ content: [] });
+      }
+      if (invalidEditReturned) {
+        return Promise.resolve({ content: [], structuredContent: { ok: true } });
+      }
+      invalidEditReturned = true;
+      return Promise.resolve({
+        content: [{ type: "text", text: JSON.stringify({ ok: false, code: "edit_invalid" }) }],
+        isError: true,
+      });
+    });
+    app.dispatch("toolinput", {
+      arguments: {
+        approvalId: "00000000000000000000000003",
+        payload: { ...payload, args: { count: 1 }, editableFields: ["/count"] },
+      },
+    });
+    document
+      .querySelector<HTMLButtonElement>('nav[aria-label="Approval actions"] button:nth-child(3)')
+      ?.click();
+    const input = document.querySelector<HTMLInputElement>("#approval-edit-0");
+    if (input === null) {
+      throw new Error("Expected the edit input.");
+    }
+    input.value = "2";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const submit = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Submit edits",
+    );
+    if (submit === undefined) {
+      throw new Error("Expected the edit submit button.");
+    }
+    submit.click();
+    await vi.waitFor(() => {
+      const statuses = document.querySelectorAll('[role="status"]');
+      expect(statuses[statuses.length - 1]?.textContent).toBe("The edited values are invalid.");
+    });
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    await vi.waitFor(() => {
+      const statuses = document.querySelectorAll('[role="status"]');
+      expect(statuses[statuses.length - 1]?.textContent).toBe("Edits submitted.");
+    });
+  });
+
   it("keeps unavailable-tool fallback sticky across rerenders and a late host connection", async () => {
     installAnimationFrame();
     let finishConnection: (() => void) | undefined;
