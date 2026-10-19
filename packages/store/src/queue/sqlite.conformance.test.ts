@@ -11,7 +11,7 @@ let nextDirectory = 0;
 
 const sqliteFactory: RunQueueFactoryCreator = async (clock: Clock) => {
   const directory = await mkdtemp(join(tmpdir(), "harness-run-queue-"));
-  const path = join(directory, `${nextDirectory++}.sqlite`);
+  const path = join(directory, `${String(nextDirectory++)}.sqlite`);
   const ids = new SequentialIdGenerator();
   const queues = new Set<SqliteRunQueue>();
   return {

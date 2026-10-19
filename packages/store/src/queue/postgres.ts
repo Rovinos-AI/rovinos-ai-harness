@@ -41,7 +41,10 @@ interface QueueRow extends QueryResultRow {
 
 const optionsSchema = RunQueueOptionsSchema.extend({
   poolSize: z.number().int().min(1).max(100).default(10),
-  schema: z.string().regex(/^[a-z_]\w{0,62}$/i).default("public"),
+  schema: z
+    .string()
+    .regex(/^[a-z_]\w{0,62}$/i)
+    .default("public"),
 }).strict();
 const connectionStringSchema = z
   .url()
@@ -51,7 +54,9 @@ const connectionStringSchema = z
   );
 const durationSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const limitSchema = z.number().int().min(1).max(1000);
-const identifierPairSchema = z.object({ jobId: QueueJobIdSchema, workerId: WorkerIdSchema }).strict();
+const identifierPairSchema = z
+  .object({ jobId: QueueJobIdSchema, workerId: WorkerIdSchema })
+  .strict();
 
 function numberColumn(value: string | number): number {
   return typeof value === "number" ? value : Number(value);
@@ -78,7 +83,10 @@ function queueJob(row: QueueRow): RunQueueJob {
 }
 
 function retryTimestamp(now: number, retryAfterMs: number, attempts: number): number {
-  const exponential = Math.min(Number.MAX_SAFE_INTEGER - now, retryAfterMs * 2 ** Math.min(attempts - 1, 52));
+  const exponential = Math.min(
+    Number.MAX_SAFE_INTEGER - now,
+    retryAfterMs * 2 ** Math.min(attempts - 1, 52),
+  );
   return now + Math.max(0, Math.trunc(exponential));
 }
 
@@ -120,7 +128,7 @@ export class PostgresRunQueue implements RunQueue {
   }
 
   private now(): number {
-    return z.number().int().nonnegative().safe().parse(this.clock.now());
+    return z.number().int().nonnegative().parse(this.clock.now());
   }
 
   private ensureInitialized(): Promise<void> {
@@ -203,10 +211,7 @@ export class PostgresRunQueue implements RunQueue {
         [now, count],
       );
       const claimed: RunQueueJob[] = [];
-      const leaseExpiresAt = parseQueueInput(
-        z.number().int().nonnegative().safe(),
-        now + duration,
-      );
+      const leaseExpiresAt = parseQueueInput(z.number().int().nonnegative(), now + duration);
       for (const row of selected.rows) {
         const result = await client.query<QueueRow>(
           "UPDATE run_queue SET lease_owner = $1, lease_expires_at = $2, attempts = attempts + 1, updated_at = $3 WHERE job_id = $4 RETURNING *",
@@ -223,16 +228,16 @@ export class PostgresRunQueue implements RunQueue {
 
   /** {@inheritDoc RunQueue.heartbeat} */
   async heartbeat(jobId: string, workerId: string, leaseMs: number): Promise<boolean> {
-    const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, { jobId, workerId });
+    const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
+      jobId,
+      workerId,
+    });
     const duration = parseQueueInput(durationSchema, leaseMs);
     const now = this.now();
-    const leaseExpiresAt = parseQueueInput(
-      z.number().int().nonnegative().safe(),
-      now + duration,
-    );
+    const leaseExpiresAt = parseQueueInput(z.number().int().nonnegative(), now + duration);
     return this.transaction(async (client) => {
       const result = await client.query(
-        "UPDATE run_queue SET lease_expires_at = $1, updated_at = $2 WHERE job_id = $3 AND lease_owner = $4 AND lease_expires_at > $2",
+        "UPDATE run_queue SET lease_expires_at = GREATEST(lease_expires_at, $1), updated_at = $2 WHERE job_id = $3 AND lease_owner = $4 AND lease_expires_at > $2",
         [leaseExpiresAt, now, id, worker],
       );
       return result.rowCount === 1;
@@ -241,7 +246,10 @@ export class PostgresRunQueue implements RunQueue {
 
   /** {@inheritDoc RunQueue.complete} */
   async complete(jobId: string, workerId: string): Promise<boolean> {
-    const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, { jobId, workerId });
+    const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
+      jobId,
+      workerId,
+    });
     const now = this.now();
     return this.transaction(async (client) => {
       const result = await client.query(
@@ -259,9 +267,12 @@ export class PostgresRunQueue implements RunQueue {
     errorCode: string,
     retryAfterMs: number,
   ): Promise<RunQueueFailResult> {
-    const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, { jobId, workerId });
+    const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
+      jobId,
+      workerId,
+    });
     const code = parseQueueInput(QueueErrorCodeSchema, errorCode);
-    const retryDelay = parseQueueInput(z.number().int().nonnegative().safe(), retryAfterMs);
+    const retryDelay = parseQueueInput(z.number().int().nonnegative(), retryAfterMs);
     const now = this.now();
     return this.transaction(async (client) => {
       const result = await client.query<QueueRow>(
@@ -301,7 +312,10 @@ export class PostgresRunQueue implements RunQueue {
 
   /** {@inheritDoc RunQueue.release} */
   async release(jobId: string, workerId: string): Promise<boolean> {
-    const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, { jobId, workerId });
+    const { jobId: id, workerId: worker } = parseQueueInput(identifierPairSchema, {
+      jobId,
+      workerId,
+    });
     const now = this.now();
     return this.transaction(async (client) => {
       const result = await client.query(

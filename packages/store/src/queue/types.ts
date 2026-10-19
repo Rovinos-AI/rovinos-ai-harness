@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, randomBytes } from "node:crypto";
-import { Code, Id, Sha256Hex } from "@harness/schemas";
-import { HarnessError } from "@harness/schemas";
+import { Code, HarnessError, Id, Sha256Hex } from "@harness/schemas";
 import { z } from "zod";
 import { systemClock, type Clock } from "../types.js";
 
@@ -15,8 +14,8 @@ export const EnqueueRunJobSchema = z
   .object({
     kind: RunQueueKindSchema,
     runId: Id,
-    priority: z.number().int().safe().default(0),
-    availableAt: z.number().int().nonnegative().safe().optional(),
+    priority: z.number().int().default(0),
+    availableAt: z.number().int().nonnegative().optional(),
     maxAttempts: z.number().int().min(1).max(100).optional(),
     idempotencyKey: z.string().min(1).max(1024).optional(),
   })
@@ -32,16 +31,16 @@ export const RunQueueJobSchema = z
     jobId: Id,
     kind: RunQueueKindSchema,
     runId: Id,
-    priority: z.number().int().safe(),
-    availableAt: z.number().int().nonnegative().safe(),
-    attempts: z.number().int().nonnegative().safe(),
+    priority: z.number().int(),
+    availableAt: z.number().int().nonnegative(),
+    attempts: z.number().int().nonnegative(),
     maxAttempts: z.number().int().min(1).max(100),
     leaseOwner: Code.optional(),
-    leaseExpiresAt: z.number().int().nonnegative().safe().optional(),
+    leaseExpiresAt: z.number().int().nonnegative().optional(),
     idempotencyKey: Sha256Hex.optional(),
     lastErrorCode: Code.optional(),
-    createdAt: z.number().int().nonnegative().safe(),
-    updatedAt: z.number().int().nonnegative().safe(),
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
   })
   .strict();
 /** Metadata-only queue job. */
@@ -58,12 +57,12 @@ export const RunQueueDeadLetterSchema = z
     jobId: Id,
     kind: RunQueueKindSchema,
     runId: Id,
-    attempts: z.number().int().nonnegative().safe(),
+    attempts: z.number().int().nonnegative(),
     maxAttempts: z.number().int().min(1).max(100),
     idempotencyKey: Sha256Hex.optional(),
     lastErrorCode: Code,
-    createdAt: z.number().int().nonnegative().safe(),
-    deadAt: z.number().int().nonnegative().safe(),
+    createdAt: z.number().int().nonnegative(),
+    deadAt: z.number().int().nonnegative(),
   })
   .strict();
 /** Metadata-only dead-letter entry. */
@@ -147,10 +146,7 @@ export function hashIdempotencyKey(key: string | undefined): string | undefined 
 }
 
 /** Parse untrusted queue input while retaining paths, but not values or messages. */
-export function parseQueueInput<T extends z.ZodType>(
-  schema: T,
-  input: unknown,
-): z.infer<T> {
+export function parseQueueInput<T extends z.ZodType>(schema: T, input: unknown): z.infer<T> {
   const result = schema.safeParse(input);
   if (!result.success) {
     throw new InvalidRunQueueInputError(

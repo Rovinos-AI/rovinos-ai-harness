@@ -160,7 +160,7 @@ describe("SQLite schema migrations", () => {
 
   it("loads and applies the checked-in schema with the required indexes and tables", () => {
     const db = new Database(":memory:");
-    expect(migrate(db, "sqlite")).toEqual(["0001", "0002", "0003", "0004"]);
+    expect(migrate(db, "sqlite")).toEqual(["0001", "0002", "0003", "0004", "0005"]);
     const names = db
       .prepare<[], { name: string }>(
         "SELECT name FROM sqlite_master WHERE type IN ('table', 'index') ORDER BY name",

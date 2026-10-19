@@ -28,12 +28,7 @@ const postgresFactory: RunQueueFactoryCreator = async (clock: Clock) => {
   const queues = new Set<PostgresRunQueue>();
   return {
     open() {
-      const queue = new PostgresRunQueue(
-        connectionString,
-        { poolSize: 3, schema },
-        clock,
-        ids,
-      );
+      const queue = new PostgresRunQueue(connectionString, { poolSize: 3, schema }, clock, ids);
       queues.add(queue);
       return queue;
     },
