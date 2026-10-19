@@ -119,8 +119,9 @@ function toolResultPart(
     throw new ProviderError("provider_bad_request");
   }
   const result = JsonValue.parse(part.result);
-  const response =
-    typeof result === "object" && result !== null && !Array.isArray(result)
+  const response = part.isError
+    ? { error: result }
+    : typeof result === "object" && result !== null && !Array.isArray(result)
       ? result
       : { result };
   return {
@@ -316,6 +317,9 @@ function mapResponse(
     usage: {
       inputTokens: usage?.promptTokenCount ?? 0,
       outputTokens: usage?.candidatesTokenCount ?? 0,
+      ...(usage?.cachedContentTokenCount === undefined
+        ? {}
+        : { cacheReadTokens: usage.cachedContentTokenCount }),
     },
     finishReason: Code.parse(mapFinishReason(response)),
     latencyMs: Math.max(0, context.clock.now() - startedAt),

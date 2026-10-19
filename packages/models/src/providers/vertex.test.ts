@@ -318,6 +318,51 @@ describe("Vertex AI adapter", () => {
     expect(mock.requests()).toHaveLength(0);
   });
 
+  it("maps failed tool results as function errors", async () => {
+    const mock = mockedAdapter({ candidates: [] });
+    const request: ModelRequest = {
+      ...baseRequest,
+      messages: [
+        ...baseRequest.messages,
+        {
+          role: "assistant",
+          parts: [{ type: "tool_call", callId: requestId, toolId: "lookup", args: {} }],
+        },
+        {
+          role: "tool",
+          parts: [
+            {
+              type: "tool_result",
+              callId: requestId,
+              result: { reason: "synthetic-error" },
+              isError: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    await mock.adapter.complete(request, context());
+
+    expect(mock.requests()[0]).toMatchObject({
+      contents: [
+        { role: "user", parts: [{ text: "hello" }] },
+        { role: "model", parts: [{ functionCall: { name: "lookup", args: {} } }] },
+        {
+          role: "user",
+          parts: [
+            {
+              functionResponse: {
+                name: "lookup",
+                response: { error: { reason: "synthetic-error" } },
+              },
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it("keeps malformed function calls opaque instead of exposing invalid tool arguments", async () => {
     const mock = mockedAdapter({
       candidates: [
