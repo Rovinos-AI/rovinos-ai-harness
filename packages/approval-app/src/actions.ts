@@ -28,6 +28,7 @@ export interface ApprovalActionsOptions {
   readonly flushInteractions: () => void;
   readonly renderRevealed: (values: ReadonlyMap<string, string>) => void;
   readonly onDecision: (decision: ApprovalDecision) => void;
+  readonly onResolveUnavailable?: () => void;
 }
 
 /** Mounted action controls and a non-sensitive state hook for expiry tests. */
@@ -164,9 +165,15 @@ async function resolveDecision(
   setBusy(context, true);
   status.textContent = "Submitting decision.";
   try {
-    const response = ResolveResponse.safeParse(
-      await context.options.bridge.callTool("harness.approvals.resolve", request.data),
-    );
+    const result = await context.options.bridge.callTool("harness.approvals.resolve", request.data);
+    if (
+      result === undefined &&
+      context.options.onResolveUnavailable !== undefined
+    ) {
+      context.options.onResolveUnavailable();
+      return;
+    }
+    const response = ResolveResponse.safeParse(result);
     if (!response.success || !response.data.ok) {
       const code = response.success ? response.data.code : undefined;
       reportError(context, "resolve_failed", errorMessage(code));

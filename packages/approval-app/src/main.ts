@@ -9,6 +9,7 @@ import {
   parseJson,
 } from "@harness/schemas/browser";
 import { mountApprovalActions } from "./actions.js";
+import { createApprovalFallback } from "./fallback.js";
 import { createApprovalTelemetry } from "./telemetry.js";
 import { createApprovalView } from "./view.js";
 
@@ -60,6 +61,13 @@ const telemetry = createAppTelemetry({
   manifest: { spans: ["ui.error", "ui.decision", "ui.render", "ui.interaction"] },
 });
 const uiTelemetry = createApprovalTelemetry(telemetry);
+let hostConnected = false;
+let fallback: ReturnType<typeof createApprovalFallback> | undefined;
+const fallbackTimer = window.setTimeout(() => {
+  if (!hostConnected) {
+    fallback?.show();
+  }
+}, 3000);
 const view = createApprovalView(document.body, {
   clock: { now: () => Date.now() },
   onError: (code) => {
@@ -74,6 +82,7 @@ const view = createApprovalView(document.body, {
     renderRevealed,
     onDecision,
   }) => {
+    fallback?.hide();
     if (approvalId === undefined) {
       for (const button of actions.querySelectorAll("button")) {
         button.disabled = true;
@@ -92,6 +101,10 @@ const view = createApprovalView(document.body, {
         callTool: callApprovalTool,
       },
       telemetry,
+      onResolveUnavailable: () => {
+        uiTelemetry.reportError("bridge_unavailable");
+        fallback?.show(payload.ui.fallbackText, approvalId);
+      },
       reportError: (code) => {
         uiTelemetry.reportError(code);
       },
@@ -134,6 +147,7 @@ app.addEventListener("toolresult", (params) => {
     }
   });
 });
+fallback = createApprovalFallback(document.body);
 const interval = window.setInterval(() => {
   view.tick();
 }, 1000);
@@ -143,6 +157,8 @@ const onPageHide = (event: PageTransitionEvent): void => {
   }
   window.removeEventListener("pagehide", onPageHide);
   window.clearInterval(interval);
+  window.clearTimeout(fallbackTimer);
+  fallback?.dispose();
   uiTelemetry.dispose();
   view.dispose();
   void telemetry.dispose();
@@ -150,13 +166,13 @@ const onPageHide = (event: PageTransitionEvent): void => {
 window.addEventListener("pagehide", onPageHide);
 void app.connect().then(
   () => {
+    hostConnected = true;
+    window.clearTimeout(fallbackTimer);
+    fallback?.hide();
     finishHostConnection(true);
   },
   () => {
     finishHostConnection(false);
     uiTelemetry.reportError("bridge_unavailable");
-    uiTelemetry.receivePayload(() => {
-      return view.receive(undefined);
-    });
   },
 );

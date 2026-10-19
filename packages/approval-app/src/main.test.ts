@@ -266,17 +266,21 @@ describe("approval app SDK bootstrap", () => {
   });
 
   it("handles a failed connection without exposing the exception", async () => {
+    vi.useFakeTimers();
     installAnimationFrame();
     bridge.connect.mockRejectedValue(new Error("SYNTHETIC_BRIDGE_CANARY"));
     bridge.call.mockRejectedValue(new Error("SYNTHETIC_TRANSPORT_CANARY"));
     await import("./main.js");
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toContain("Invalid approval payload");
-    });
+    expect(document.body.textContent).toContain("Waiting for host...");
+    await vi.advanceTimersByTimeAsync(3001);
+    expect(document.body.textContent).toContain("The host bridge is unavailable.");
+    expect(document.querySelector<HTMLInputElement>('[aria-label="Approve command"]')?.value).toBe(
+      "harness approvals approve <id>",
+    );
     expect(document.body.textContent).not.toContain("SYNTHETIC");
     expect(JSON.stringify(bridge.call.mock.calls)).not.toContain("SYNTHETIC");
     expect(telemetry.instances[0]?.active).toBe(false);
-    expect(telemetry.hooks[0]?.reportErrors).toEqual([["bridge_unavailable"], ["payload_invalid"]]);
+    expect(telemetry.hooks[0]?.reportErrors).toEqual([["bridge_unavailable"]]);
     expect(
       bridge.call.mock.calls.every(([request]) => request.name === "harness.telemetry.emit"),
     ).toBe(true);

@@ -43,6 +43,7 @@ interface ActionFixture {
   readonly flush: ReturnType<typeof vi.fn<() => Promise<void>>>;
   readonly flushInteractions: ReturnType<typeof vi.fn<() => void>>;
   readonly onDecision: ReturnType<typeof vi.fn<(decision: "approve" | "deny" | "edit") => void>>;
+  readonly onResolveUnavailable: ReturnType<typeof vi.fn<() => void>>;
   readonly rendered: HTMLElement;
   readonly mount: ApprovalActions;
   readonly setExpired: (expired: boolean) => void;
@@ -78,6 +79,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
   const flush = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const flushInteractions = vi.fn<() => void>();
   const onDecision = vi.fn<(decision: "approve" | "deny" | "edit") => void>();
+  const onResolveUnavailable = vi.fn<() => void>();
   const decisionDurationMs = vi.fn(() => 42);
   const reportError = (code: "resolve_failed" | "reveal_failed"): void => {
     record("ui.error", { code });
@@ -96,6 +98,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
       rendered.textContent = values.get("/email") ?? tokenizedEmail;
     },
     onDecision,
+    onResolveUnavailable,
   });
   return {
     actions,
@@ -106,6 +109,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
     flush,
     flushInteractions,
     onDecision,
+    onResolveUnavailable,
     rendered,
     mount,
     setExpired: (value) => {
@@ -376,6 +380,18 @@ describe("approval actions", () => {
       ).toBe("This approval has already been resolved.");
     });
     expect(recordCalls).toEqual([{ name: "ui.error", attrs: { code: "resolve_failed" } }]);
+  });
+
+  it("disables the decision controls and shows fallback when the resolve tool is unavailable", async () => {
+    const { actions, bridge, recordCalls, onResolveUnavailable } = setup();
+    bridge.callTool.mockResolvedValue(undefined);
+    actions.querySelector("button")?.click();
+
+    await vi.waitFor(() => {
+      expect(onResolveUnavailable).toHaveBeenCalledOnce();
+    });
+    expect([...actions.querySelectorAll("button")].every((control) => control.disabled)).toBe(true);
+    expect(recordCalls).toEqual([]);
   });
 
   it("records each resolve failure when a retry also fails", async () => {

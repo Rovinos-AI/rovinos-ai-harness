@@ -295,7 +295,7 @@ describe("approval view", () => {
     const view = createApprovalView(document.body, { clock: { now: () => 0 }, onError: vi.fn() });
     view.tick();
     expect(document.activeElement).toBe(document.querySelector("h1"));
-    expect(document.querySelector('[role="status"]')?.textContent).toBe("Waiting for host");
+    expect(document.querySelector('[role="status"]')?.textContent).toBe("Waiting for host...");
   });
 
   it("keeps the approval id separate and replaces token pills only for the reveal display", () => {
