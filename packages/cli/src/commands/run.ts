@@ -110,6 +110,7 @@ function throwForRunStatus(
 /** Registers the `harness run` command. */
 export const runCommand: CommandModule = {
   name: "run",
+  /** Registers the `run` command. */
   register(program, context) {
     program
       .command("run")

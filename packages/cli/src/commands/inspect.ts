@@ -33,6 +33,7 @@ async function readEvents(
 /** Registers the `harness inspect` command. */
 export const inspectCommand: CommandModule = {
   name: "inspect",
+  /** Registers the `inspect` command. */
   register(program, context) {
     program
       .command("inspect")

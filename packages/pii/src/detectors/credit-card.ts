@@ -89,6 +89,7 @@ function appendGroupedDetections(
 export const creditCardDetector: Detector = {
   id: "credit_card",
   entityTypes: ["credit_card"],
+  /** Finds credit card numbers that pass the Luhn check. */
   detect(text) {
     validateText(text);
     const detections: Detection[] = [];
