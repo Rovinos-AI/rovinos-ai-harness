@@ -13,12 +13,14 @@ import { activeRuns, type ActiveRuns } from "./active-runs.js";
 import { SentinelMatcher } from "./matcher.js";
 import { sentinelTripQueue, type TripQueue } from "./trips.js";
 import type { RunValueSet, VaultRunView } from "./run-values.js";
+import { normalizeForScan, variantsOf } from "./variants.js";
 
 const SentinelGateOptionsSchema = z
   .object({
     maxCombinedValues: z.number().int().positive().default(100_000),
     maxPrepareMs: z.number().positive().default(250),
     maxScanMs: z.number().positive().default(5),
+    minValueLength: z.number().int().min(1).default(6),
   })
   .strict();
 
@@ -57,6 +59,7 @@ export interface SentinelGateOptions {
   readonly maxCombinedValues?: number;
   readonly maxPrepareMs?: number;
   readonly maxScanMs?: number;
+  readonly minValueLength?: number;
   readonly now?: () => number;
   readonly matcherForValues?: (values: readonly string[]) => SentinelMatcherLike;
   readonly tripQueue?: TripQueue;
@@ -83,6 +86,7 @@ export class SentinelGate {
   private readonly maxCombinedValues: number;
   private readonly maxPrepareMs: number;
   private readonly maxScanMs: number;
+  private readonly minValueLength: number;
   private readonly now: () => number;
   private readonly matcherForValues: (values: readonly string[]) => SentinelMatcherLike;
   private readonly tripQueue: TripQueue;
@@ -99,17 +103,22 @@ export class SentinelGate {
     private readonly runs: ActiveRuns = activeRuns,
     options: SentinelGateOptions = {},
   ) {
-    const { maxCombinedValues, maxPrepareMs, maxScanMs } = SentinelGateOptionsSchema.parse({
-      maxCombinedValues: options.maxCombinedValues,
-      maxPrepareMs: options.maxPrepareMs,
-      maxScanMs: options.maxScanMs,
-    });
+    const { maxCombinedValues, maxPrepareMs, maxScanMs, minValueLength } =
+      SentinelGateOptionsSchema.parse({
+        maxCombinedValues: options.maxCombinedValues,
+        maxPrepareMs: options.maxPrepareMs,
+        maxScanMs: options.maxScanMs,
+        minValueLength: options.minValueLength,
+      });
     this.maxCombinedValues = maxCombinedValues;
     this.maxPrepareMs = maxPrepareMs;
     this.maxScanMs = maxScanMs;
+    this.minValueLength = minValueLength;
     this.now = options.now ?? (() => performance.now());
     this.matcherForValues =
-      options.matcherForValues ?? ((patterns) => SentinelMatcher.forValues(patterns));
+      options.matcherForValues ??
+      ((patterns) =>
+        SentinelMatcher.forValues(patterns, (value) => variantsOf(value, this.minValueLength)));
     this.tripQueue = options.tripQueue ?? sentinelTripQueue;
   }
 
@@ -131,10 +140,16 @@ export class SentinelGate {
       const scanStartedAt = this.now();
       let matches: readonly { readonly patternIndex: number }[];
       try {
-        matches = preparedMatcher.matcher.findAll(
-          request.text,
-          () => this.scanStatus(scanStartedAt) !== "ok",
-        );
+        const matchedIndexes = new Set<number>();
+        for (const text of new Set(normalizeForScan(request.text))) {
+          for (const { patternIndex } of preparedMatcher.matcher.findAll(
+            text,
+            () => this.scanStatus(scanStartedAt) !== "ok",
+          )) {
+            matchedIndexes.add(patternIndex);
+          }
+        }
+        matches = [...matchedIndexes].map((patternIndex) => ({ patternIndex }));
       } catch {
         const reason = this.scanStatus(scanStartedAt) === "timeout" ? "timeout" : "error";
         this.enqueueTrip(runId, []);
