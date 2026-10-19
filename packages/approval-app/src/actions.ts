@@ -8,12 +8,18 @@ import { mountRevealFlow, type RevealFlow } from "./reveal.js";
 export type ApprovalDecision = "approve" | "deny" | "edit";
 type AppTelemetryForActions = Pick<AppTelemetry<readonly ["ui.decision"]>, "record" | "flush">;
 
+/** Tagged outcome from a host tool call; transport failures are not tool unavailability. */
+export type ApprovalToolCallOutcome =
+  | { readonly kind: "response"; readonly value: unknown }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "failure" };
+
 /** The host bridge methods used by the approval decision and reveal controls. */
 export interface ApprovalActionsBridge {
   readonly callTool: (
     name: "harness.approvals.resolve" | "harness.approvals.reveal",
     args: Record<string, unknown>,
-  ) => Promise<unknown>;
+  ) => Promise<ApprovalToolCallOutcome>;
 }
 
 /** Dependencies injected into the approval actions for host calls and safe telemetry. */
@@ -28,6 +34,7 @@ export interface ApprovalActionsOptions {
   readonly flushInteractions: () => void;
   readonly renderRevealed: (values: ReadonlyMap<string, string>) => void;
   readonly onDecision: (decision: ApprovalDecision) => void;
+  readonly onResolveUnavailable?: () => void;
 }
 
 /** Mounted action controls and a non-sensitive state hook for expiry tests. */
@@ -164,9 +171,17 @@ async function resolveDecision(
   setBusy(context, true);
   status.textContent = "Submitting decision.";
   try {
-    const response = ResolveResponse.safeParse(
-      await context.options.bridge.callTool("harness.approvals.resolve", request.data),
-    );
+    const result = await context.options.bridge.callTool("harness.approvals.resolve", request.data);
+    if (result.kind === "unavailable" && context.options.onResolveUnavailable !== undefined) {
+      context.options.onResolveUnavailable();
+      return;
+    }
+    if (result.kind !== "response") {
+      reportError(context, "resolve_failed", errorMessage(undefined));
+      setBusy(context, false);
+      return;
+    }
+    const response = ResolveResponse.safeParse(result.value);
     if (!response.success || !response.data.ok) {
       const code = response.success ? response.data.code : undefined;
       reportError(context, "resolve_failed", errorMessage(code));
@@ -271,7 +286,15 @@ export function mountApprovalActions(
     approvalId: options.approvalId,
     payload: options.payload,
     isExpired: options.isExpired,
-    bridge: { callTool: (name, args) => options.bridge.callTool(name, args) },
+    bridge: {
+      callTool: async (name, args) => {
+        const result = await options.bridge.callTool(name, args);
+        if (result.kind !== "response") {
+          throw new Error("reveal_failed");
+        }
+        return result.value;
+      },
+    },
     status: context.status,
     renderRevealed: options.renderRevealed,
     isBusy: () => context.state.busy,

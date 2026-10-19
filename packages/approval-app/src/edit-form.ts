@@ -103,6 +103,20 @@ function readControlValue(control: FieldControl): Json | undefined {
   return formControl.input.checked;
 }
 
+function bindEnterSubmission(controls: readonly FieldControl[], submitEdits: () => void): void {
+  for (const field of controls) {
+    if (field.control.kind === "text" || field.control.kind === "number") {
+      field.control.input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.isComposing) {
+          return;
+        }
+        event.preventDefault();
+        submitEdits();
+      });
+    }
+  }
+}
+
 /**
  * Builds a safe edit form with one typed control for each policy-approved pointer.
  *
@@ -150,15 +164,14 @@ export function createEditForm(
   error.setAttribute("role", "alert");
   form.append(error);
   const submit = element(document, "button", "Submit edits");
-  submit.type = "submit";
+  submit.type = "button";
   const cancel = element(document, "button", "Cancel");
   cancel.type = "button";
   cancel.addEventListener("click", () => {
     form.remove();
   });
   form.append(submit, cancel);
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
+  const submitEdits = (): void => {
     error.textContent = "";
     const edits: { pointer: string; value: Json }[] = [];
     for (const control of controls) {
@@ -176,6 +189,12 @@ export function createEditForm(
       }
     }
     onSubmit(edits);
+  };
+  submit.addEventListener("click", submitEdits);
+  bindEnterSubmission(controls, submitEdits);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitEdits();
   });
   return form;
 }
