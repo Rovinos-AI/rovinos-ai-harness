@@ -21,6 +21,7 @@ const privateKeys = candidateDetector(
 export const secretsDetector: Detector = {
   id: "secrets",
   entityTypes: ["api_key"],
+  /** Finds API keys and private keys in text. */
   detect: (text) =>
     [...keys.detect(text), ...privateKeys.detect(text)].sort((a, b) => a.start - b.start),
 };

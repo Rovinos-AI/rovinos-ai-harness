@@ -16,6 +16,18 @@ describe("lookupCapabilities", () => {
     });
   });
 
+  it("defaults Vertex to native structured output while honoring configured overrides", () => {
+    expect(lookupCapabilities({ provider: "vertex", model: "unknown" }).capabilities).toMatchObject(
+      {
+        structuredOutput: "native",
+      },
+    );
+    expect(
+      lookupCapabilities({ provider: "vertex", model: "unknown" }, { structuredOutput: "none" })
+        .capabilities,
+    ).toMatchObject({ structuredOutput: "none" });
+  });
+
   it("defaults Bedrock to forced-tool structured output and opaque round trips", () => {
     expect(lookupCapabilities({ provider: "bedrock", model: "nova-pro" })).toEqual({
       capabilities: {

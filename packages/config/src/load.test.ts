@@ -487,7 +487,13 @@ store: {}`,
     });
 
     expect(config).toEqual({
-      controlPlane: { allowReveal: false },
+      controlPlane: {
+        allowReveal: false,
+        auth: { tokens: [] },
+        listen: { host: "127.0.0.1", port: 3_000 },
+        allowedHosts: ["127.0.0.1", "localhost", "::1"],
+        rateLimitPerMinute: 120,
+      },
       run: {
         checkpointEveryEvents: 20,
         shutdownGraceMs: 20_000,
@@ -530,7 +536,10 @@ store: {}`,
       policy: {},
       pii: { defaultAction: "tokenize", rules: [], enabled: true, failMode: "closed" },
       vault: { backend: "sqlite", purgeAfterDays: 7 },
-      telemetry: { sentinel: { minValueLength: 6 } },
+      telemetry: {
+        sentinel: { minValueLength: 6 },
+        correlation: { enabled: false },
+      },
       sandbox: {},
     });
   });

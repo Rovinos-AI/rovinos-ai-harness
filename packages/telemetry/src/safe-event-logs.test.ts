@@ -239,7 +239,10 @@ describe("SafeEvent log projection", () => {
   it("uses the allowlist processor before the real log exporter", async () => {
     const exporter = new InMemoryLogRecordExporter();
     const processor = new AllowlistLogRecordProcessor(new SimpleLogRecordProcessor({ exporter }), {
-      telemetry: { sentinel: { minValueLength: 6, enabled: false } } satisfies TelemetryConfig,
+      telemetry: {
+        sentinel: { minValueLength: 6, enabled: false },
+        correlation: { enabled: false },
+      } satisfies TelemetryConfig,
     });
     const provider = new LoggerProvider({
       resource: resourceFromAttributes({

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Sentinel value filtering is owned by task 8.1; gate configuration is owned by task 8.3.
+// Sentinel settings are owned by tasks 8.1 and 8.3; correlation is opt-in under task 12.8.
 import { z } from "zod";
 
 const TelemetrySentinelConfigSchema = z
@@ -10,9 +10,17 @@ const TelemetrySentinelConfigSchema = z
   .strict()
   .prefault({});
 
+const TelemetryCorrelationConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+  })
+  .strict()
+  .prefault({});
+
 export const TelemetryConfigSchema = z
   .object({
     sentinel: TelemetrySentinelConfigSchema,
+    correlation: TelemetryCorrelationConfigSchema,
   })
   .strict()
   .prefault({});

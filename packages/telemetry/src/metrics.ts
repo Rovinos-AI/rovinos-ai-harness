@@ -10,6 +10,7 @@ export const TELEMETRY_DROP_REASONS = [
   "unregistered_log_record",
   "unregistered_attr",
   "invalid_attr",
+  "correlation_disabled",
   "event_stripped",
   "leak_sentinel",
   "processor_error",

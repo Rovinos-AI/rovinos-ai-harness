@@ -224,6 +224,7 @@ function registerRetire(keys: Command, program: Command, context: CliContext): v
 /** Registers local key-management commands. */
 export const keysCommand: CommandModule = {
   name: "keys",
+  /** Registers the `keys` command. */
   register(program, context) {
     const keys = program.command("keys").description("Manage encryption keys");
     registerGenerate(keys, context, program);

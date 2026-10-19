@@ -9,6 +9,7 @@ const HealthcheckResultSchema = z.object({ status: z.literal("healthy") }).stric
 /** Registers the local-state-only `harness healthcheck` command. */
 export const healthcheckCommand: CommandModule = {
   name: "healthcheck",
+  /** Registers the `healthcheck` command. */
   register(program, context) {
     program
       .command("healthcheck")

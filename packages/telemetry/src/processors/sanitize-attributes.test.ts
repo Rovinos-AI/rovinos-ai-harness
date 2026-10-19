@@ -21,6 +21,7 @@ describe("sanitizeAttributes", () => {
       shape: {
         "harness.test.code": attr.code(),
         "harness.test.count": attr.nonnegativeInt(),
+        "harness.user.pseudonym": attr.optional(attr.pseudonym()),
       },
     };
     const source = {
@@ -72,5 +73,30 @@ describe("sanitizeAttributes", () => {
 
     expect(sanitizeAttributes(definition, { "harness.test.code": "value" })).toEqual({});
     expect(metricMocks.record).toHaveBeenCalledWith("invalid_attr");
+  });
+
+  it.each([undefined, false])(
+    "drops user pseudonyms when correlation is not enabled (%s)",
+    (correlationEnabled) => {
+      const sanitized = sanitizeAttributes(
+        { shape: { "harness.user.pseudonym": attr.optional(attr.pseudonym()) } },
+        { "harness.user.pseudonym": `p_${"a".repeat(26)}` },
+        correlationEnabled,
+      );
+
+      expect(sanitized).toEqual({});
+      expect(metricMocks.record).toHaveBeenCalledWith("correlation_disabled");
+    },
+  );
+
+  it("keeps user pseudonyms when correlation is enabled", () => {
+    const pseudonym = `p_${"a".repeat(26)}`;
+    const sanitized = sanitizeAttributes(
+      { shape: { "harness.user.pseudonym": attr.optional(attr.pseudonym()) } },
+      { "harness.user.pseudonym": pseudonym },
+      true,
+    );
+
+    expect(sanitized).toEqual({ "harness.user.pseudonym": pseudonym });
   });
 });

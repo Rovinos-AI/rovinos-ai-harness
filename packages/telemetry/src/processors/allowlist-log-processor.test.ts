@@ -28,6 +28,7 @@ const spanContext: SpanContext = {
 };
 const disabledTelemetry: TelemetryConfig = {
   sentinel: { minValueLength: 6, enabled: false },
+  correlation: { enabled: false },
 };
 const runId = Id.parse("A".repeat(26));
 
@@ -35,11 +36,23 @@ function makeTripQueue(): TripQueue {
   return new TripQueue({ emit: vi.fn(), enabled: () => true });
 }
 
+function makeEmptyGate(): SentinelGate {
+  return new SentinelGate(
+    new VaultRunView({
+      version: () => Promise.resolve(0),
+      listRawValueEntries: () => Promise.resolve([]),
+    }),
+    new ActiveRuns(),
+    { tripQueue: makeTripQueue() },
+  );
+}
+
 function defineTestLogRecord() {
   return defineLogRecord("harness.test.log_record", {
     "harness.test.code": attr.code(),
     "harness.test.count": attr.nonnegativeInt(),
     "harness.run.id": attr.optional(attr.id()),
+    "harness.user.pseudonym": attr.optional(attr.pseudonym()),
   });
 }
 
@@ -137,6 +150,40 @@ describe("AllowlistLogRecordProcessor", () => {
       ["unregistered_log_record"],
       ["unregistered_log_record"],
     ]);
+  });
+
+  it("enforces the correlation opt-in before exporting a registered pseudonym", async () => {
+    defineTestLogRecord();
+    const input = makeSdkLogRecord({
+      attributes: { "harness.user.pseudonym": `p_${"a".repeat(26)}` },
+    });
+
+    const omittedNext = createNextProcessor();
+    const omitted = new AllowlistLogRecordProcessor(omittedNext, { gate: makeEmptyGate() });
+    omitted.onEmit(input);
+    await omitted.forceFlush();
+    expect(omittedNext.onEmit.mock.calls[0]?.[0].attributes).toEqual({});
+
+    const disabledNext = createNextProcessor();
+    const disabled = new AllowlistLogRecordProcessor(disabledNext, {
+      telemetry: disabledTelemetry,
+    });
+    disabled.onEmit(input);
+    await disabled.forceFlush();
+    expect(disabledNext.onEmit.mock.calls[0]?.[0].attributes).toEqual({});
+
+    const enabledNext = createNextProcessor();
+    const enabled = new AllowlistLogRecordProcessor(enabledNext, {
+      telemetry: {
+        ...disabledTelemetry,
+        correlation: { enabled: true },
+      },
+    });
+    enabled.onEmit(input);
+    await enabled.forceFlush();
+    expect(enabledNext.onEmit.mock.calls[0]?.[0].attributes).toEqual({
+      "harness.user.pseudonym": `p_${"a".repeat(26)}`,
+    });
   });
 
   it("preserves allowlisted resource attributes and drops all others", async () => {

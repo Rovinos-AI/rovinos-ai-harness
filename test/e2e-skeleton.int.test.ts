@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
-// Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: gateway token progress to live run updates (14.16 -> #157; 24.5 -> #234)
+// Not wired yet: Vertex AI provider registration in runtime configuration (14.20 -> #161)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
+// Not wired yet: user pseudonym emission in runtime telemetry (12.8 -> #139)
 import { Command } from "commander";
-import { Client, InMemoryTransport, type Tool, type Transport } from "@modelcontextprotocol/client";
+import {
+  Client,
+  InMemoryTransport,
+  StreamableHTTPClientTransport,
+  type Tool,
+  type Transport,
+} from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
@@ -25,7 +32,7 @@ import {
   main,
   type CliContext,
 } from "@harness/cli/programmatic";
-import { createControlPlaneServer } from "@harness/control-plane";
+import { createControlPlaneServer, startControlPlaneHttp } from "@harness/control-plane";
 import { createHarness } from "@harness/sdk";
 import {
   CompositeSecretResolver,
@@ -68,6 +75,7 @@ import {
   ApprovalShowResultSchema,
   ApprovalSweepResultSchema,
   Code,
+  ControlPlaneConfigSchema,
   FakeClock,
   Id,
   JsonValue,
@@ -456,7 +464,10 @@ beforeAll(async () => {
       undefined,
       { maxPrepareMs: 1_000 },
     ),
-    telemetry: { sentinel: { minValueLength: 6, enabled: true } },
+    telemetry: {
+      sentinel: { minValueLength: 6, enabled: true },
+      correlation: { enabled: false },
+    },
   });
   const forceFlush = telemetry.tracerProvider.forceFlush.bind(telemetry.tracerProvider);
   vi.spyOn(telemetry.tracerProvider, "forceFlush").mockImplementation(async () => {
@@ -2094,6 +2105,51 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
 });
 
 describe("control plane", () => {
+  it("requires configured HTTP authentication and serves scoped tools", async () => {
+    const store = new InMemoryEventStore();
+    const token = "SYNTHETIC_CONTROL_PLANE_E2E_TOKEN_LONG_ENOUGH";
+    const authorization = `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${token}`;
+    const server = await startControlPlaneHttp(store, 0, {
+      controlPlane: ControlPlaneConfigSchema.parse({
+        auth: {
+          tokens: [
+            {
+              id: "token.readonly",
+              secret: "env:CONTROL_PLANE_E2E_TOKEN",
+              scopes: ["read"],
+            },
+          ],
+        },
+      }),
+      secretResolver: { resolve: () => Promise.resolve({ reveal: () => token }) },
+      approvalHtml: "<html>test</html>",
+    });
+    const client = new Client({ name: "control-plane-auth-e2e", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(server.endpoint), {
+      requestInit: { headers: { authorization } },
+    });
+    try {
+      const unauthenticated = await fetch(server.endpoint, {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      });
+      expect(unauthenticated.status).toBe(401);
+      expect(await unauthenticated.text()).toBe("");
+
+      await client.connect(transport);
+      const { tools } = await client.listTools();
+      expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
+    } finally {
+      await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
   it("exposes app-only decisions and supervises a runtime cancellation through MCP", async () => {
     const store = new InMemoryEventStore();
     const runId = Id.parse("00000000000000000000000042");
