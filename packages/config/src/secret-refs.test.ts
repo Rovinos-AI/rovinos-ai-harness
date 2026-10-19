@@ -77,6 +77,21 @@ describe("getConfigSecretRefs", () => {
           },
         },
       },
+      controlPlane: {
+        auth: {
+          tokens: [
+            {
+              id: "token.viewer",
+              secret: "env:CONTROL_PLANE_TOKEN",
+              scopes: ["read"],
+            },
+          ],
+        },
+        tls: {
+          certFile: "file:/run/secrets/control-plane-cert",
+          keyFile: "file:/run/secrets/control-plane-key",
+        },
+      },
     });
 
     expect(getConfigSecretRefs(config)).toEqual([
@@ -90,6 +105,9 @@ describe("getConfigSecretRefs", () => {
       "env:DOCTOR_VAULT_URL",
       "env:SANDBOX_RUNNER_TOKEN",
       "env:APPROVAL_WEBHOOK_TOKEN",
+      "env:CONTROL_PLANE_TOKEN",
+      "file:/run/secrets/control-plane-cert",
+      "file:/run/secrets/control-plane-key",
     ]);
   });
 });

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJson, RunConfigSchema } from "@harness/schemas";
 import { z } from "zod";
@@ -273,6 +274,11 @@ function renderProfile(profile: ComposeProfile): ComposeConfig {
     cwd: root,
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
+    env: {
+      ...process.env,
+      CONTROL_PLANE_CONFIG_FILE: join(root, "test/fixtures/control-plane-auth.yaml"),
+      CONTROL_PLANE_TOKEN_SECRET_FILE: join(root, "test/fixtures/control-plane-token"),
+    },
   });
   return parseJson(composeConfigSchema, rendered);
 }
