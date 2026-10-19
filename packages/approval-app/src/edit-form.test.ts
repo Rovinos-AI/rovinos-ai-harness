@@ -98,6 +98,26 @@ describe("approval edit form", () => {
     expect(document.body.contains(form)).toBe(false);
   });
 
+  it("submits from a non-native button so the sandbox cannot trigger form navigation", () => {
+    const onSubmit = vi.fn();
+    const form = createEditForm(document, payload, onSubmit);
+    const input = form.querySelector<HTMLInputElement>("#approval-edit-0");
+    const submit = [...form.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Submit edits",
+    );
+    if (input === null || submit === undefined) {
+      throw new Error("Expected edit input and submit control");
+    }
+
+    input.value = "updated@example.test";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(submit.textContent).toBe("Submit edits");
+    submit.click();
+    expect(onSubmit).toHaveBeenCalledWith([
+      { pointer: "/profile~1name", value: "updated@example.test" },
+    ]);
+  });
+
   it("labels the root pointer as all arguments and passes axe", async () => {
     const rootPayload: ApprovalPayload = {
       ...payload,

@@ -65,7 +65,9 @@ describe("approval fallback", () => {
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain("Command copied.");
     });
-    expect(writeText).toHaveBeenCalledExactlyOnceWith("harness approvals deny 00000000000000000000000002");
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(
+      "harness approvals deny 00000000000000000000000002",
+    );
     fallback.dispose();
   });
 

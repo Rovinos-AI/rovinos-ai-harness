@@ -14,6 +14,7 @@ import { createApprovalTelemetry } from "./telemetry.js";
 import { createApprovalView } from "./view.js";
 
 const app = new App({ name: "harness-approval", version: "0.0.0" }, {}, { autoResize: false });
+const fallback = createApprovalFallback(document.body);
 let finishHostConnection: (connected: boolean) => void = () => undefined;
 const hostConnection = new Promise<void>((resolve, reject) => {
   finishHostConnection = (connected) => {
@@ -29,7 +30,12 @@ async function callApprovalTool(
   name: "harness.approvals.resolve" | "harness.approvals.reveal",
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const result = await app.callServerTool({ name, arguments: args });
+  let result: Awaited<ReturnType<App["callServerTool"]>>;
+  try {
+    result = await app.callServerTool({ name, arguments: args });
+  } catch {
+    return undefined;
+  }
   if (result.isError === true) {
     return undefined;
   }
@@ -62,10 +68,9 @@ const telemetry = createAppTelemetry({
 });
 const uiTelemetry = createApprovalTelemetry(telemetry);
 let hostConnected = false;
-let fallback: ReturnType<typeof createApprovalFallback> | undefined;
 const fallbackTimer = window.setTimeout(() => {
   if (!hostConnected) {
-    fallback?.show();
+    fallback.show();
   }
 }, 3000);
 const view = createApprovalView(document.body, {
@@ -82,7 +87,7 @@ const view = createApprovalView(document.body, {
     renderRevealed,
     onDecision,
   }) => {
-    fallback?.hide();
+    fallback.hide();
     if (approvalId === undefined) {
       for (const button of actions.querySelectorAll("button")) {
         button.disabled = true;
@@ -103,7 +108,7 @@ const view = createApprovalView(document.body, {
       telemetry,
       onResolveUnavailable: () => {
         uiTelemetry.reportError("bridge_unavailable");
-        fallback?.show(payload.ui.fallbackText, approvalId);
+        fallback.show(payload.ui.fallbackText, approvalId);
       },
       reportError: (code) => {
         uiTelemetry.reportError(code);
@@ -147,7 +152,6 @@ app.addEventListener("toolresult", (params) => {
     }
   });
 });
-fallback = createApprovalFallback(document.body);
 const interval = window.setInterval(() => {
   view.tick();
 }, 1000);
@@ -158,7 +162,7 @@ const onPageHide = (event: PageTransitionEvent): void => {
   window.removeEventListener("pagehide", onPageHide);
   window.clearInterval(interval);
   window.clearTimeout(fallbackTimer);
-  fallback?.dispose();
+  fallback.dispose();
   uiTelemetry.dispose();
   view.dispose();
   void telemetry.dispose();
@@ -168,7 +172,7 @@ void app.connect().then(
   () => {
     hostConnected = true;
     window.clearTimeout(fallbackTimer);
-    fallback?.hide();
+    fallback.hide();
     finishHostConnection(true);
   },
   () => {

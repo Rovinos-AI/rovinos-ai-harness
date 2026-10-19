@@ -2,11 +2,18 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser, type BrowserContext, type FrameLocator, type Page } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type FrameLocator,
+  type Page,
+} from "playwright";
+import type { CallToolResult } from "@modelcontextprotocol/client";
 import { createReferenceHost, type AppCall } from "@harness/host";
+import { Id } from "@harness/schemas";
 import {
   ApprovalPayloadSchema,
-  Id,
   ResolveRequest,
   RevealRequest,
   type ApprovalPayload,
@@ -27,7 +34,6 @@ interface FixtureOptions {
   readonly resolveUnavailable?: boolean;
   readonly resolveFailure?: boolean;
   readonly invalidEditOnce?: boolean;
-  readonly dropBridge?: boolean;
 }
 
 interface ApprovalFixture {
@@ -75,9 +81,7 @@ async function withFixture(
   const eventLog: ApprovalLogEntry[] = [];
   const telemetry: unknown[] = [];
   let invalidEditReturned = false;
-  const allowedTools = options.resolveUnavailable
-    ? [revealTool]
-    : [resolveTool, revealTool];
+  const allowedTools = [resolveTool, revealTool];
   const host = await createReferenceHost(
     {
       apps: [
@@ -101,24 +105,24 @@ async function withFixture(
       hasPendingApproval: () => !eventLog.some((event) => event.type === "approval_resolved"),
       isIdOwnedByRun: () => true,
       toolInput: { approvalId, payload },
-      onAppCall: async (call: AppCall) => handleAppCall(call, eventLog, options, () => {
-        if (invalidEditReturned) {
-          return false;
-        }
-        invalidEditReturned = true;
-        return true;
-      }),
-      onTelemetryEmit: async (_session, args) => {
+      onAppCall: (call: AppCall) =>
+        Promise.resolve(
+          handleAppCall(call, eventLog, options, () => {
+            if (invalidEditReturned) {
+              return false;
+            }
+            invalidEditReturned = true;
+            return true;
+          }),
+        ),
+      onTelemetryEmit: (_session, args) => {
         telemetry.push(args);
-        return { content: [] };
+        return Promise.resolve({ content: [] });
       },
     },
   );
   const context: BrowserContext = await browser.newContext();
   const page = await context.newPage();
-  if (options.dropBridge) {
-    await page.route("**/api/events**", (route) => route.abort());
-  }
   await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   try {
     await page.goto(host.url, { waitUntil: "domcontentloaded" });
@@ -138,21 +142,46 @@ async function withFixture(
   }
 }
 
-async function handleAppCall(
+async function withDisconnectedApp(run: (page: Page) => Promise<void>): Promise<void> {
+  if (browser === undefined) {
+    throw new Error("Playwright browser was not initialized.");
+  }
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+  try {
+    await page.setContent(approvalHtml);
+    await run(page);
+    await context.tracing.stop();
+  } catch (error) {
+    await mkdir(traceDirectory, { recursive: true });
+    await context.tracing.stop({
+      path: join(traceDirectory, `approval-app-disconnected-${String(Date.now())}.zip`),
+    });
+    throw error;
+  } finally {
+    await context.close();
+  }
+}
+
+function handleAppCall(
   call: AppCall,
   eventLog: ApprovalLogEntry[],
   options: FixtureOptions,
   takeInvalidEdit: () => boolean,
-) {
+): CallToolResult {
   if (call.toolName === resolveTool) {
+    if (options.resolveUnavailable === true) {
+      return { content: [], isError: true };
+    }
     const request = ResolveRequest.safeParse(call.arguments);
     if (!request.success) {
       return toolResult({ ok: false, code: "edit_invalid" });
     }
-    if (options.resolveFailure) {
+    if (options.resolveFailure === true) {
       return toolResult({ ok: false, code: "approval_already_resolved" });
     }
-    if (request.data.decision === "edit" && options.invalidEditOnce && takeInvalidEdit()) {
+    if (request.data.decision === "edit" && options.invalidEditOnce === true && takeInvalidEdit()) {
       return toolResult({ ok: false, code: "edit_invalid" });
     }
     eventLog.push({ type: "approval_resolved", decision: request.data.decision });
@@ -175,18 +204,16 @@ async function handleAppCall(
   return { content: [], isError: true };
 }
 
-function expectRunResumed(fixture: ApprovalFixture, decision: "approve" | "deny" | "edit"): void {
-  expect(fixture.eventLog).toContainEqual({ type: "approval_resolved", decision });
-  expect(fixture.eventLog).toContainEqual({
-    type: "run_status_changed",
-    status: "completed",
-  });
-}
-
 async function flushAppTelemetry(frame: FrameLocator): Promise<void> {
   await frame.locator("body").evaluate(() => {
     window.dispatchEvent(new Event("pagehide"));
   });
+}
+
+async function expectStatus(frame: FrameLocator, expected: string): Promise<void> {
+  const status = frame.locator('[role="status"]').filter({ hasText: expected }).last();
+  await status.waitFor();
+  expect(await status.textContent()).toBe(expected);
 }
 
 beforeAll(async () => {
@@ -205,16 +232,18 @@ describe("approval app in the reference host", () => {
   it("approves and resumes the run", async () => {
     await withFixture(createPayload(), {}, async (fixture) => {
       await fixture.frame.getByRole("button", { name: "Approve", exact: true }).click();
-      await fixture.frame.getByText("Approval granted.", { exact: true }).waitFor();
-      expectRunResumed(fixture, "approve");
+      await expectStatus(fixture.frame, "Approval granted.");
+      expect(fixture.eventLog).toContainEqual({ type: "approval_resolved", decision: "approve" });
+      expect(fixture.eventLog).toContainEqual({ type: "run_status_changed", status: "completed" });
     });
   }, 30_000);
 
   it("denies and resumes the run", async () => {
     await withFixture(createPayload(), {}, async (fixture) => {
       await fixture.frame.getByRole("button", { name: "Deny", exact: true }).click();
-      await fixture.frame.getByText("Approval denied.", { exact: true }).waitFor();
-      expectRunResumed(fixture, "deny");
+      await expectStatus(fixture.frame, "Approval denied.");
+      expect(fixture.eventLog).toContainEqual({ type: "approval_resolved", decision: "deny" });
+      expect(fixture.eventLog).toContainEqual({ type: "run_status_changed", status: "completed" });
     });
   }, 30_000);
 
@@ -227,10 +256,11 @@ describe("approval app in the reference host", () => {
       await fixture.frame.getByRole("button", { name: "Edit", exact: true }).click();
       await fixture.frame.locator("#approval-edit-0").fill("2");
       await fixture.frame.getByRole("button", { name: "Submit edits" }).click();
-      await fixture.frame.getByText("The edited values are invalid.", { exact: true }).waitFor();
+      await expectStatus(fixture.frame, "The edited values are invalid.");
       await fixture.frame.getByRole("button", { name: "Submit edits" }).click();
-      await fixture.frame.getByText("Edits submitted.", { exact: true }).waitFor();
-      expectRunResumed(fixture, "edit");
+      await expectStatus(fixture.frame, "Edits submitted.");
+      expect(fixture.eventLog).toContainEqual({ type: "approval_resolved", decision: "edit" });
+      expect(fixture.eventLog).toContainEqual({ type: "run_status_changed", status: "completed" });
     });
   }, 30_000);
 
@@ -249,7 +279,9 @@ describe("approval app in the reference host", () => {
 
   it("disables actions for an expired approval", async () => {
     await withFixture(createPayload({ expiresAt: 0 }), {}, async (fixture) => {
-      for (const button of await fixture.frame.getByRole("button").all()) {
+      for (const button of await fixture.frame
+        .locator('nav[aria-label="Approval actions"] button')
+        .all()) {
         expect(await button.isDisabled()).toBe(true);
       }
       expect(fixture.eventLog).toEqual([]);
@@ -259,7 +291,9 @@ describe("approval app in the reference host", () => {
   it("shows the server failure by code without recording a decision", async () => {
     await withFixture(createPayload(), { resolveFailure: true }, async (fixture) => {
       await fixture.frame.getByRole("button", { name: "Approve", exact: true }).click();
-      await fixture.frame.getByText("This approval has already been resolved.", { exact: true }).waitFor();
+      await fixture.frame
+        .getByText("This approval has already been resolved.", { exact: true })
+        .waitFor();
       expect(fixture.eventLog).toEqual([]);
     });
   }, 30_000);
@@ -275,9 +309,9 @@ describe("approval app in the reference host", () => {
       async (fixture) => {
         expect(await fixture.frame.locator("img").count()).toBe(0);
         expect(await fixture.frame.locator("body").textContent()).toContain(xss);
-        expect(
-          await fixture.frame.locator("body").evaluate(() => Reflect.get(window, "__approvalXss")),
-        ).toBeUndefined();
+        expect(await fixture.frame.locator("body").evaluate(() => "__approvalXss" in window)).toBe(
+          false,
+        );
         await flushAppTelemetry(fixture.frame);
         expect(JSON.stringify(fixture.telemetry)).not.toContain("SYNTHETIC_UI_TELEMETRY_CANARY");
         expect(JSON.stringify(fixture.telemetry)).not.toContain("<img");
@@ -287,14 +321,18 @@ describe("approval app in the reference host", () => {
 
   it("shows CLI instructions and disables actions when resolve is unavailable", async () => {
     await withFixture(createPayload(), { resolveUnavailable: true }, async (fixture) => {
-      await fixture.frame.getByRole("button", { name: "Approve", exact: true }).click();
+      await fixture.frame
+        .getByRole("button", { name: "Approve", exact: true })
+        .click({ timeout: 5_000 });
       await fixture.frame
         .getByText("Review this action in the command line.", { exact: true })
-        .waitFor();
-      expect(
-        await fixture.frame.locator('[aria-label="Approve command"]').inputValue(),
-      ).toBe(`harness approvals approve ${approvalId}`);
-      for (const button of await fixture.frame.getByRole("button").all()) {
+        .waitFor({ timeout: 5_000 });
+      expect(await fixture.frame.locator('[aria-label="Approve command"]').inputValue()).toBe(
+        `harness approvals approve ${approvalId}`,
+      );
+      for (const button of await fixture.frame
+        .locator('nav[aria-label="Approval actions"] button')
+        .all()) {
         expect(await button.isDisabled()).toBe(true);
       }
       expect(fixture.eventLog).toEqual([]);
@@ -302,12 +340,12 @@ describe("approval app in the reference host", () => {
   }, 30_000);
 
   it("shows fallback instructions after the host bridge drops", async () => {
-    await withFixture(createPayload(), { dropBridge: true }, async (fixture) => {
-      await fixture.frame.getByText("Waiting for host...", { exact: true }).waitFor();
-      await fixture.frame
+    await withDisconnectedApp(async (page) => {
+      await page.getByText("Waiting for host...", { exact: true }).waitFor();
+      await page
         .getByText("The host bridge is unavailable.", { exact: false })
         .waitFor({ timeout: 6_000 });
-      expect(await fixture.frame.locator('[aria-label="Approve command"]').inputValue()).toBe(
+      expect(await page.locator('[aria-label="Approve command"]').inputValue()).toBe(
         "harness approvals approve <id>",
       );
     });

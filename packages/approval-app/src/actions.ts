@@ -166,10 +166,7 @@ async function resolveDecision(
   status.textContent = "Submitting decision.";
   try {
     const result = await context.options.bridge.callTool("harness.approvals.resolve", request.data);
-    if (
-      result === undefined &&
-      context.options.onResolveUnavailable !== undefined
-    ) {
+    if (result === undefined && context.options.onResolveUnavailable !== undefined) {
       context.options.onResolveUnavailable();
       return;
     }

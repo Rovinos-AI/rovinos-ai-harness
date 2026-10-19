@@ -68,10 +68,14 @@ export function createApprovalFallback(root: HTMLElement): ApprovalFallback {
   const instructions = document.createElement("p");
   const commands = document.createElement("div");
   card.append(heading, instructions, commands);
-  root.append(card);
+  let mounted = false;
 
   return {
     show(fallbackText, approvalId) {
+      if (!mounted) {
+        root.append(card);
+        mounted = true;
+      }
       const id = approvalId ?? "<id>";
       instructions.textContent =
         fallbackText ?? "The host bridge is unavailable. Resolve this approval from the CLI.";
