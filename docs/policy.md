@@ -90,3 +90,26 @@ header and `idempotencyKey` body field. Receivers must ignore duplicate
 notifications with the same key, since a delivery can be repeated if the
 sweeper cannot persist its sent marker.
 Control-plane integrations can invoke the sweep periodically.
+
+## Who approved
+
+Runs and human approval resolutions record the actor principal in event metadata:
+`run_created.requestedBy` and `approval_resolved.approverId`. Principals are
+kind-prefixed codes such as `cli.operator`, `token.<tokenId>`,
+`eval.simulated`, and `system.sweeper`. A continuation or subagent inherits
+the root run's requester.
+
+Set `cli.principal` in the harness config or pass `--as <name>` to attribute
+CLI-created runs and approvals to `cli.<name>`. CLI principals are attribution
+only, not authentication; deployments that require authenticated approvals
+should use the control plane's authenticated token principal.
+
+Set `separationOfDuties: true` on an individual policy rule, or set
+`policy.approvals.separationOfDuties: true` globally, to prevent a requester
+from approving their own run. A rejected self-approval returns
+`approver_is_requester` (CLI exit code 4). Expiry decisions are not affected.
+
+Requester and approver principals are excluded from the safe telemetry
+projection by default. When `telemetry.correlation.enabled` is enabled, the SDK
+may include keyed pseudonyms for those principals; the raw principal values
+remain in event metadata and are not projected.

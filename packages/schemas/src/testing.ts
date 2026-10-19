@@ -66,6 +66,7 @@ export const eventSamples = [
     approvalId: id,
     decision: "approve",
     decidedBy: "human",
+    approverId: "cli.test",
     waitMs: 1,
   },
   {

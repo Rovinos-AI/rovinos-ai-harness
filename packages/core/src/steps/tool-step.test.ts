@@ -1113,6 +1113,7 @@ async function resolveEvent(
         approvalId,
         decision,
         decidedBy: "human",
+        approverId: "cli.test",
         waitMs: 0,
         ...(edits === undefined ? {} : { edits }),
       },

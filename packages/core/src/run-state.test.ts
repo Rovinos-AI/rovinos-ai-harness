@@ -110,6 +110,7 @@ function approvalResolved(seq: number, approvalId = id): Event {
     approvalId,
     decision: "approve",
     decidedBy: "human",
+    approverId: "cli.test",
     waitMs: 1,
   };
 }

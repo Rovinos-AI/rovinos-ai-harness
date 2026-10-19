@@ -104,6 +104,7 @@ describe("read-only SQLite inspection", () => {
           approvalId,
           decision: "approve",
           decidedBy: "human",
+          approverId: "cli.test",
           waitMs: 1,
         },
       ],

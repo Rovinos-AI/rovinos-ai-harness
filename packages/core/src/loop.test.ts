@@ -23,6 +23,7 @@ import {
   Event,
   Id,
   JsonValue,
+  Principal,
   PiiConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
@@ -77,7 +78,7 @@ import {
   ApprovalRequestStateError,
   ApprovalRunNotSuspendedError,
   requestApproval,
-  resolveApproval,
+  resolveApproval as resolveApprovalWithoutTestIdentity,
 } from "./approvals.js";
 import {
   ResumeConflictError,
@@ -86,6 +87,20 @@ import {
   resumeRun,
 } from "./resume.js";
 import type { ResumeRunOptions } from "./resume.js";
+
+const resolveApproval = (...args: Parameters<typeof resolveApprovalWithoutTestIdentity>) => {
+  const [store, runId, approvalId, decision, edits, clock, tool, metadata] = args;
+  return resolveApprovalWithoutTestIdentity(
+    store,
+    runId,
+    approvalId,
+    decision,
+    edits,
+    clock,
+    tool,
+    metadata ?? { decidedBy: "human", approverId: "cli.test" },
+  );
+};
 
 const allowTestPolicy: PolicyPort = {
   version: "test.policy",
@@ -337,12 +352,21 @@ async function createApprovalRun(
   clock: FakeClock,
   args: JsonValueType = { z: 1, a: 3 },
   editable: readonly string[] = ["/a"],
+  identity: { readonly requestedBy?: string; readonly separationOfDuties?: boolean } = {},
 ) {
   const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
   let events: Event[] = [];
   await recorder.withStepSpan(RUN_SPAN, {}, async () => {
     events = await recorder.recordBatch([
-      { type: "run_created", v: 1, configHash, policyVersion: "test.policy" },
+      {
+        type: "run_created",
+        v: 1,
+        configHash,
+        policyVersion: "test.policy",
+        ...(identity.requestedBy === undefined
+          ? {}
+          : { requestedBy: Principal.parse(identity.requestedBy) }),
+      },
       { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
       {
         type: "tool_intent",
@@ -354,6 +378,9 @@ async function createApprovalRun(
         ruleId: "test_rule",
         policyReason: "manual_review",
         policyEditable: [...editable],
+        ...(identity.separationOfDuties === undefined
+          ? {}
+          : { policySeparationOfDuties: identity.separationOfDuties }),
         argsHash: "51221262a85f34235978c8dc712134f6e04b6078190d87ef73bee21422c8af3e",
         args,
       },
@@ -891,13 +918,39 @@ describe("approval lifecycle", () => {
       resolveApproval(store, runId, approvalId, "edit", undefined, clock),
     ).rejects.toBeInstanceOf(ApprovalEditsRequiredError);
     await requestApprovalForRun(recorder, clock, state);
+    await expect(
+      resolveApprovalWithoutTestIdentity(store, runId, approvalId, "approve", undefined, clock),
+    ).rejects.toMatchObject({ code: "approval_principal_required" });
     await resolveApproval(store, runId, approvalId, "approve", undefined, clock);
     await expect(
       resolveApproval(store, runId, approvalId, "deny", undefined, clock),
     ).rejects.toBeInstanceOf(ApprovalAlreadyResolvedError);
   });
 
-  it("resumes reading a legacy resolution as a human decision", async () => {
+  it("does not apply separation of duties to expiry decisions", async () => {
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(100);
+    const { recorder, state } = await createApprovalRun(store, clock, undefined, undefined, {
+      requestedBy: "cli.requester",
+      separationOfDuties: true,
+    });
+    await requestApprovalForRun(recorder, clock, state);
+
+    const resolution = await resolveApprovalWithoutTestIdentity(
+      store,
+      runId,
+      approvalId,
+      "deny",
+      undefined,
+      clock,
+      undefined,
+      { decidedBy: "expiry", reason: Code.parse("expired") },
+    );
+
+    expect(resolution).toMatchObject({ decidedBy: "expiry", reason: "expired" });
+  });
+
+  it("resumes a human resolution with an approver identity", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
     const { recorder, state } = await createApprovalRun(store, clock);
@@ -918,6 +971,7 @@ describe("approval lifecycle", () => {
       type: "approval_resolved",
       approvalId,
       decision: "approve",
+      approverId: "cli.legacy",
       waitMs: 0,
     });
     await store.append(runId, [legacyResolution], events.length);

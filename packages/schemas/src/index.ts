@@ -15,7 +15,7 @@ export {
   type JsonSchemaValidator,
 } from "./json-schema.js";
 export { JsonValue } from "./json.js";
-export { Principal, type Principal } from "./principal.js";
+export { Principal } from "./principal.js";
 export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.js";
 export { AppContentEnvelopeSchema, type AppContentEnvelope } from "./app-content.js";
 export {

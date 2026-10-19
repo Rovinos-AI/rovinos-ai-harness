@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { EVENT_FIELD_CLASS, Event, eventSamples } from "@harness/schemas";
+import { EVENT_FIELD_CLASS, Event, Pseudonym, eventSamples } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { SafeEvent, safeEventSchemas, toSafeEvent } from "./safe-event.js";
 import { z } from "zod";
@@ -326,6 +326,36 @@ describe("SafeEvent projection", () => {
     });
     expect(toSafeEvent(noParentCallId, "sanitizer.v1")).not.toHaveProperty("parentCallId");
     expect(toSafeEvent(noRuleIdIntent, "sanitizer.v1")).not.toHaveProperty("ruleId");
+  });
+
+  it("omits raw principals by default and accepts only explicit pseudonyms", () => {
+    const runCreated = validEvent({
+      type: "run_created",
+      configHash: "c".repeat(64),
+      policyVersion: "run.policy.v1",
+      requestedBy: "cli.requester",
+    });
+    const approvalResolved = validEvent({
+      type: "approval_resolved",
+      approvalId: "00000000000000000000000002",
+      decision: "approve",
+      decidedBy: "human",
+      approverId: "cli.approver",
+      waitMs: 5,
+    });
+    const requestedByPseudonym = Pseudonym.parse(`p_${"a".repeat(26)}`);
+    const approverPseudonym = Pseudonym.parse(`p_${"b".repeat(26)}`);
+
+    expect(JSON.stringify(toSafeEvent(runCreated, "sanitizer.v1"))).not.toContain("cli.requester");
+    expect(JSON.stringify(toSafeEvent(approvalResolved, "sanitizer.v1"))).not.toContain(
+      "cli.approver",
+    );
+    expect(
+      toSafeEvent(runCreated, "sanitizer.v1", { requestedBy: requestedByPseudonym }),
+    ).toMatchObject({ requestedByPseudonym });
+    expect(
+      toSafeEvent(approvalResolved, "sanitizer.v1", { approverId: approverPseudonym }),
+    ).toMatchObject({ approverPseudonym });
   });
 
   it("never exports canaries from any classified content field", () => {

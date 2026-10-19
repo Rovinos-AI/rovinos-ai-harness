@@ -388,6 +388,7 @@ describe("dangling tool intent resume", () => {
           approvalId: request.approvalId,
           decision: "approve",
           decidedBy: "human",
+          approverId: "cli.test",
           waitMs: 0,
         },
         {
@@ -552,6 +553,7 @@ describe("dangling tool intent resume", () => {
           approvalId: requestEvent.approvalId,
           decision: "deny",
           decidedBy: "human",
+          approverId: "cli.test",
           waitMs: 0,
         },
         {

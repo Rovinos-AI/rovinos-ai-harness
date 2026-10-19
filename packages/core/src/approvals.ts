@@ -351,7 +351,7 @@ export async function resolveApproval(
     }
   }
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const { state, lastEvent, events } = await readState(store, runId);
+    const { state, lastEvent, events: runEvents } = await readState(store, runId);
     const request = pendingApproval(state, approvalId);
     if (state.status !== "suspended") {
       throw new ApprovalRunNotSuspendedError();
@@ -359,7 +359,7 @@ export async function resolveApproval(
     if (metadata.decidedBy === "human" && metadata.approverId === undefined) {
       throw new ApprovalPrincipalRequiredError();
     }
-    const created = events[0];
+    const created = runEvents[0];
     const intent = state.pendingToolCalls.get(request.callId);
     if (
       metadata.decidedBy === "human" &&

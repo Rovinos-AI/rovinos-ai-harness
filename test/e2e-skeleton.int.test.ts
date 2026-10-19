@@ -8,6 +8,8 @@
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
 // Not wired yet: user pseudonym emission in runtime telemetry (12.8 -> #139)
+// Not wired yet: control-plane start_run requester attribution (18.5 -> #178)
+// Not wired yet: simulated eval approver identity (16.6 -> #172)
 import { Command } from "commander";
 import {
   Client,
@@ -849,6 +851,8 @@ describe("MCP runtime", () => {
         "run",
         "--input",
         inputPath,
+        "--as",
+        "e2e_operator",
       ]);
       expect(firstRun.code).toBe(ExitCode.suspended);
       const firstRunId = jsonResult(RunResultSchema, firstRun.stdout).runId;
@@ -856,6 +860,10 @@ describe("MCP runtime", () => {
       let firstApprovalId: Id;
       try {
         const firstEvents = await readEvents(store, firstRunId);
+        expect(firstEvents[0]).toMatchObject({
+          type: "run_created",
+          requestedBy: "cli.e2e_operator",
+        });
         const approval = firstEvents.find((event) => event.type === "approval_requested");
         if (approval?.type !== "approval_requested") {
           throw new Error("The MCP call did not request approval.");
@@ -956,6 +964,7 @@ describe("MCP runtime", () => {
       expect(serverCalls).toEqual([{ value: "edited" }]);
       expect(firstRunEvents.find((event) => event.type === "approval_resolved")).toMatchObject({
         decision: "edit",
+        approverId: "cli.local",
         edits: { value: "edited" },
       });
 

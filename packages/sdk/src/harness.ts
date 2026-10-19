@@ -9,7 +9,7 @@ import {
   type Event,
   type Id,
 } from "@harness/schemas";
-import { toSafeEvent, type SafeEvent } from "@harness/telemetry";
+import type { SafeEvent } from "@harness/telemetry";
 import { SdkError } from "./types.js";
 import { contentEntries, readEvents, safeEvents } from "./event-views.js";
 import { runtimeOverridesFrom } from "./runtime-overrides.js";
@@ -94,6 +94,7 @@ class HarnessClient implements Harness {
   constructor(
     private readonly runtime: Runtime,
     private readonly piiEnabled: boolean,
+    private readonly correlationEnabled: boolean,
   ) {}
 
   async startRun(options: StartRunOptions): Promise<RunStartResult> {
@@ -212,7 +213,12 @@ class HarnessClient implements Harness {
       steps: state.steps,
       usage: state.usage,
       pendingApprovals: Array.from(state.pendingApprovals.keys()),
-      recentEvents: safeEvents(events.slice(-20), firstEvent.policyVersion),
+      recentEvents: await safeEvents(
+        events.slice(-20),
+        firstEvent.policyVersion,
+        this.correlationEnabled,
+        this.runtime.keys,
+      ),
     });
   }
 
@@ -404,9 +410,14 @@ class HarnessClient implements Harness {
         signal: controller.signal,
         ...(options.maxBuffered === undefined ? {} : { maxBuffered: options.maxBuffered }),
       })) {
-        const safe = toSafeEvent(event, created.policyVersion);
-        if (safe !== null) {
-          yield safe;
+        const safe = await safeEvents(
+          [event],
+          created.policyVersion,
+          this.correlationEnabled,
+          this.runtime.keys,
+        );
+        for (const safeEvent of safe) {
+          yield safeEvent;
         }
       }
     } finally {
@@ -432,5 +443,5 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
       ? parsedOptions.config
       : await loadConfig({ configPath: parsedOptions.configPath });
   const runtime = await createRuntime(config, runtimeOverrides);
-  return new HarnessClient(runtime, config.pii.enabled);
+  return new HarnessClient(runtime, config.pii.enabled, config.telemetry.correlation.enabled);
 }

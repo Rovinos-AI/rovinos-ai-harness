@@ -20,9 +20,8 @@ across restarts. Use opaque identifiers only; do not include sensitive data. The
 the domain-separated, unsalted SHA-256 hash, never the raw key, so low-entropy keys may be guessed
 from the table. Run the worker-backed queue mode only after task 24.2 is available.
 
-An optional `role` is passed to model routing. `requestedBy` is validated but not recorded because
-the current `run_created` event contract has no audit field for it. It is not an authorization
-mechanism.
+An optional `role` is passed to model routing. `requestedBy` records the run's requesting principal
+in `run_created` metadata; it is not an authorization mechanism.
 
 ## Metadata and events
 
@@ -30,6 +29,10 @@ mechanism.
 and `SafeEvent`s only. `watch` yields safe events in sequence order and supports `fromSeq` and an
 optional `AbortSignal`. Call `close` to stop subscriptions, wait for detached runs, and release
 resources.
+
+Requester and approver principals are omitted from safe events by default. When
+`telemetry.correlation.enabled` is true, safe events include keyed pseudonyms for recorded
+principals; raw principal values are never projected.
 
 ## Explicit content access
 
@@ -40,11 +43,9 @@ detokenizes values. Set `pii.enabled` to `true` (the default) when content acces
 
 ## Approvals and human input
 
-`resolveApproval` resolves a pending approval by id and decision. The `principal` input is validated
-but is not recorded: the current `approval_resolved` event contract has no principal field. The
-event records `decidedBy: "human"`. Do not use `principal` as an authorization check; approval
-authority must be enforced by the embedding application. For `edit`, the runtime applies its
-PII-aware tool validation.
+`resolveApproval` resolves a pending approval by id and decision. Its `principal` is required and
+recorded as `approval_resolved.approverId`; requester and approver principals use the kind-prefixed
+`Principal` contract. For `edit`, the runtime applies its PII-aware tool validation.
 
 `answerInput(requestId, ...)` is reserved for the epic 25 human-input contract and currently rejects
 with the safe `sdk_input_unavailable` code. Its `requestId` and options are validated and are not
@@ -55,8 +56,5 @@ included in that error.
 - (verify) Durable SDK idempotency uses an `idempotency_keys` store table, rather than event
   metadata, so the raw key and its hash stay out of the event contract. The store atomically
   inserts or retrieves the run id and removes the record when that run is deleted.
-- `requestedBy` is validated but not persisted until the event contract provides an audit field.
-- The SDK does not add principal data to an existing event schema. A future schema task must define
-  that audit field before the SDK can persist the `resolveApproval` principal.
 - The input-answer API is present for the documented SDK shape but remains unavailable until its
   owning human-input contract is implemented (human input broker 25.3, issue #241).

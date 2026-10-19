@@ -3,7 +3,14 @@ import type { ModelPort, PolicyPort, ToolPort } from "@harness/core";
 import { CrashingEventStore } from "@harness/core/testing";
 import { HarnessConfigSchema } from "@harness/config";
 import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
-import { Code, FakeClock, Id, SequentialIdGenerator, type Event } from "@harness/schemas";
+import {
+  Code,
+  FakeClock,
+  Id,
+  Principal,
+  SequentialIdGenerator,
+  type Event,
+} from "@harness/schemas";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,6 +93,10 @@ const askPolicy: PolicyPort = {
     editable: [],
   }),
 };
+const separationAskPolicy: PolicyPort = {
+  ...askPolicy,
+  decide: (...args) => ({ ...askPolicy.decide(...args), separationOfDuties: true }),
+};
 
 const fakeTool: ToolPort = {
   describe: () => ({ idempotent: true, timeoutMs: 1000 }),
@@ -106,6 +117,9 @@ async function createTestHarness(
     readonly model?: ModelPort;
     readonly approval?: boolean;
     readonly piiEnabled?: boolean;
+    readonly correlationEnabled?: boolean;
+    readonly globalSeparation?: boolean;
+    readonly ruleSeparation?: boolean;
     readonly store?: InMemoryEventStore;
     readonly idStart?: bigint;
   } = {},
@@ -114,6 +128,12 @@ async function createTestHarness(
   const harness = await createHarness({
     config: HarnessConfigSchema.parse({
       ...(options.piiEnabled === false ? { pii: { enabled: false } } : {}),
+      ...(options.correlationEnabled === true
+        ? { telemetry: { correlation: { enabled: true } } }
+        : {}),
+      ...(options.globalSeparation === true
+        ? { policy: { approvals: { separationOfDuties: true } } }
+        : {}),
     }),
     overrides: {
       store,
@@ -124,7 +144,12 @@ async function createTestHarness(
           : idsStartingAt(options.idStart),
       transientVault: true,
       model: options.model ?? (options.approval === true ? approvalModel() : fakeModel()),
-      ...(options.approval === true ? { policy: askPolicy, tool: fakeTool } : {}),
+      ...(options.approval === true
+        ? {
+            policy: options.ruleSeparation === true ? separationAskPolicy : askPolicy,
+            tool: fakeTool,
+          }
+        : {}),
     },
   });
   harnesses.push(harness);
@@ -201,7 +226,7 @@ describe("@harness/sdk", () => {
       goal: "Synthetic task",
       metadata: { source: "sdk" },
       role: Code.parse("worker"),
-      requestedBy: Code.parse("app.demo"),
+      requestedBy: Principal.parse("cli.demo"),
       idempotencyKey: "repeat-this-request",
     };
 
@@ -209,9 +234,11 @@ describe("@harness/sdk", () => {
     const second = await harness.startRun(request);
 
     expect(second.runId).toBe(first.runId);
-    const runInput = (await readStoredEvents(store, first.runId)).find(
-      (event) => event.type === "run_input",
-    );
+    const storedEvents = await readStoredEvents(store, first.runId);
+    const runInput = storedEvents.find((event) => event.type === "run_input");
+    expect(storedEvents.find((event) => event.type === "run_created")).toMatchObject({
+      requestedBy: "cli.demo",
+    });
     expect(runInput?.type).toBe("run_input");
     if (runInput?.type !== "run_input") {
       throw new Error("Expected the initial run input.");
@@ -227,7 +254,72 @@ describe("@harness/sdk", () => {
       usage: { inputTokens: 2, outputTokens: 3 },
     });
     expect(JSON.stringify(run)).not.toContain("Synthetic task");
+    expect(JSON.stringify(run.recentEvents)).not.toContain("cli.demo");
+    expect(JSON.stringify(run.recentEvents)).not.toContain("requestedByPseudonym");
     expect((await harness.startRun(request)).status).toBe("completed");
+  });
+
+  it("pseudonymizes requester and approver only when correlation is enabled", async () => {
+    const { harness } = await createTestHarness({ approval: true, correlationEnabled: true });
+    const started = await harness.startRun({
+      goal: "Synthetic approval task",
+      requestedBy: Principal.parse("cli.requester"),
+    });
+    const pending = await waitForRun(harness, started.runId, "suspended");
+    const approvalId = pending.pendingApprovals[0];
+    if (approvalId === undefined) {
+      throw new Error("Expected a pending approval.");
+    }
+
+    await harness.resolveApproval(approvalId, "approve", {
+      principal: Principal.parse("cli.approver"),
+    });
+    await harness.resumeRun(started.runId);
+    const resolved = await waitForRun(harness, started.runId, "completed");
+    const serialized = JSON.stringify(resolved.recentEvents);
+
+    expect(serialized).not.toContain("cli.requester");
+    expect(serialized).not.toContain("cli.approver");
+    expect(resolved.recentEvents).toContainEqual(
+      expect.objectContaining({
+        kind: "run_created",
+        requestedByPseudonym: expect.stringMatching(/^p_[a-z2-7]{26}$/u),
+      }),
+    );
+    expect(resolved.recentEvents).toContainEqual(
+      expect.objectContaining({
+        kind: "approval_wait",
+        approverPseudonym: expect.stringMatching(/^p_[a-z2-7]{26}$/u),
+      }),
+    );
+  });
+
+  it.each([
+    { scope: "rule", options: { approval: true, ruleSeparation: true } },
+    { scope: "global", options: { approval: true, globalSeparation: true } },
+  ])("enforces separation of duties configured $scope", async ({ options }) => {
+    const { harness, store } = await createTestHarness(options);
+    const requestedBy = Principal.parse("cli.requester");
+    const started = await harness.startRun({ goal: "Synthetic separation task", requestedBy });
+    const pending = await waitForRun(harness, started.runId, "suspended");
+    const approvalId = pending.pendingApprovals[0];
+    if (approvalId === undefined) {
+      throw new Error("Expected a pending approval.");
+    }
+
+    await expect(
+      harness.resolveApproval(approvalId, "approve", { principal: requestedBy }),
+    ).rejects.toMatchObject({ code: "approver_is_requester" });
+    await harness.resolveApproval(approvalId, "approve", {
+      principal: Principal.parse("cli.approver"),
+    });
+    await harness.resumeRun(started.runId);
+
+    expect(
+      (await readStoredEvents(store, started.runId)).find(
+        (event) => event.type === "approval_resolved",
+      ),
+    ).toMatchObject({ decidedBy: "human", approverId: "cli.approver" });
   });
 
   it("deduplicates concurrent starts with the same idempotency key", async () => {
@@ -519,14 +611,14 @@ describe("@harness/sdk", () => {
     }
 
     const resolved = await harness.resolveApproval(approvalId, "approve", {
-      principal: Code.parse("human.test"),
+      principal: Principal.parse("cli.test"),
     });
     expect(resolved).toMatchObject({ runId: started.runId, approvalId, decision: "approve" });
     expect(
       (await readStoredEvents(store, started.runId)).find(
         (event) => event.type === "approval_resolved" && event.approvalId === approvalId,
       ),
-    ).toMatchObject({ decidedBy: "human" });
+    ).toMatchObject({ decidedBy: "human", approverId: "cli.test" });
     const resumed = await harness.resumeRun(started.runId);
     expect(resumed.status).toBe("completed");
   });

@@ -4,6 +4,7 @@ import {
   FakeClock,
   Id,
   ModelsConfigSchema,
+  Principal,
   RunConfigSchema,
   SequentialIdGenerator,
 } from "@harness/schemas";
@@ -187,6 +188,7 @@ describe("production subagent runtime", () => {
           configHash,
           policyVersion: "test",
           scopeId: parentRunId,
+          requestedBy: Principal.parse("cli.requester"),
         },
         {
           type: "run_status_changed",
@@ -277,6 +279,7 @@ describe("production subagent runtime", () => {
       parentRunId,
       parentCallId,
       scopeId: parentRunId,
+      requestedBy: "cli.requester",
       depth: 1,
     });
     expect(childEvents.find((event) => event.type === "run_input")).toMatchObject({

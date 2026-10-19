@@ -125,6 +125,7 @@ function resolutionOperation(store: EventStore): ResolveApprovalOperation {
       approvalId,
       decision,
       decidedBy: "human",
+      approverId: "token.test",
       waitMs: 16,
       ...(reason === undefined ? {} : { reason }),
       ...(edits === undefined ? {} : { edits }),

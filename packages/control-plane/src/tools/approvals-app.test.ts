@@ -109,6 +109,7 @@ async function createApproval(
           approvalId,
           decision: "approve",
           decidedBy: "human",
+          approverId: "cli.test",
           waitMs: 1,
         },
       ],
@@ -208,6 +209,7 @@ describe("app-only approval tools", () => {
       runId: approval.runId,
       approvalId: approval.approvalId,
       decision: "edit",
+      approverId: "token.token.test",
       edits: { name: ARGUMENT_CANARY, email: TOKEN },
     });
     expect(audits).toEqual([

@@ -65,6 +65,27 @@ export interface CommandModule {
   register(program: Command, ctx: CliContext): void;
 }
 
+class CliPrincipalError extends HarnessError {
+  readonly code = "usage";
+
+  constructor() {
+    super("CLI principal name is invalid.");
+    this.name = "CliPrincipalError";
+  }
+}
+
+/** Resolves an attributable, unauthenticated CLI principal from `--as` or config. */
+export function cliPrincipal(config: HarnessConfig, as?: string): Principal {
+  if (as === undefined) {
+    return Principal.parse(config.cli?.principal ?? "cli.local");
+  }
+  const name = Code.safeParse(as);
+  if (!name.success) {
+    throw new CliPrincipalError();
+  }
+  return Principal.parse(`cli.${name.data}`);
+}
+
 /** Creates a runtime lazily so command help does not load store and run-loop modules. */
 export async function createCommandRuntime(
   context: CliContext,
@@ -75,26 +96,6 @@ export async function createCommandRuntime(
     return context.createRuntime(config, overrides);
   }
 
-  /** Resolves an attributable, unauthenticated CLI principal from `--as` or config. */
-  export function cliPrincipal(config: HarnessConfig, as?: string): Principal {
-    if (as === undefined) {
-      return Principal.parse(config.cli?.principal ?? "cli.local");
-    }
-    const name = Code.safeParse(as);
-    if (!name.success) {
-      throw new CliPrincipalError();
-    }
-    return Principal.parse(`cli.${name.data}`);
-  }
-
-  class CliPrincipalError extends HarnessError {
-    readonly code = "usage";
-
-    constructor() {
-      super("CLI principal name is invalid.");
-      this.name = "CliPrincipalError";
-    }
-  }
   const core = await import("@harness/core");
   return core.createRuntime(config, overrides);
 }
