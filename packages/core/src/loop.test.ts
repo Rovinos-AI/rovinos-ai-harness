@@ -53,6 +53,7 @@ import { NaiveContext } from "./context/naive-context.js";
 import { StrategyContextPort } from "./context/context-port.js";
 import { RunRecorder, type EventPartial } from "./recorder.js";
 import { runLoop as runCoreLoop } from "./loop.js";
+import type { ToolResumeDecision, ToolResumeStrategy } from "./resume-policy.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import { Checkpointer } from "./checkpoint.js";
 import { foldRunState } from "./run-state.js";
@@ -2818,6 +2819,81 @@ describe("runLoop", () => {
       expect(stored.filter(({ type }) => type === "tool_result")).toHaveLength(1);
       expect(result.state.pendingToolCalls.has(ambiguousCallId)).toBe(true);
       expect(result.state.pendingApprovals.size).toBe(1);
+    });
+
+    it("applies rerun, suspend, and result decisions from a tool resume strategy", async () => {
+      const decisions: readonly ToolResumeDecision[] = [
+        { kind: "rerun" },
+        { kind: "suspend" },
+        {
+          kind: "result",
+          execution: { outcome: "error", errorCode: "subagent_failed", result: null },
+          completion: {
+            childRunId: Id.parse("66666666666666666666666666"),
+            outcome: "failed",
+            inputTokens: 2,
+            outputTokens: 3,
+            steps: 1,
+          },
+        },
+      ];
+      for (const strategyDecision of decisions) {
+        const store = new InMemoryEventStore();
+        const clock = new FakeClock(100);
+        await createRunHistory(store, clock, [
+          {
+            type: "tool_intent",
+            v: 1,
+            callId: modelCallId,
+            toolId: "subagent_tool",
+            idempotent: false,
+            policyDecision: "allow",
+            argsHash: "a".repeat(64),
+            args: { role: "worker", goal: "resume child" },
+          },
+        ]);
+        const execute = vi.fn(() =>
+          Promise.resolve({ outcome: "ok" as const, result: { rerun: true } }),
+        );
+        const onDanglingIntent = vi.fn<ToolResumeStrategy["onDanglingIntent"]>(
+          async (call, state, context) => {
+            expect(call.callId).toBe(modelCallId);
+            expect(state.pendingToolCalls.has(modelCallId)).toBe(true);
+            expect(context.runId).toBe(runId);
+            return strategyDecision;
+          },
+        );
+        const tool: ToolPort = {
+          describe: (toolId) =>
+            toolId === "subagent_tool" ? { idempotent: false, timeoutMs: 1_000 } : undefined,
+          execute,
+          resumeStrategy: (toolId) =>
+            toolId === "subagent_tool" ? { onDanglingIntent } : undefined,
+        };
+        const result = await resumeRun(createResumeOptions(store, clock, { tool }));
+        const events = await readApprovalEvents(store);
+
+        expect(onDanglingIntent).toHaveBeenCalledOnce();
+        if (strategyDecision.kind === "rerun") {
+          expect(result.status).toBe("completed");
+          expect(execute).toHaveBeenCalledOnce();
+          expect(events.filter((event) => event.type === "tool_result")).toHaveLength(1);
+        } else if (strategyDecision.kind === "suspend") {
+          expect(result.status).toBe("suspended");
+          expect(execute).not.toHaveBeenCalled();
+          expect(events).toContainEqual(
+            expect.objectContaining({ type: "run_status_changed", reason: "awaiting_subagent" }),
+          );
+        } else {
+          expect(result.status).toBe("completed");
+          expect(execute).not.toHaveBeenCalled();
+          expect(events.filter((event) => event.type === "subagent_completed")).toHaveLength(1);
+          expect(events.find((event) => event.type === "tool_result")).toMatchObject({
+            outcome: "error",
+            errorCode: "subagent_failed",
+          });
+        }
+      }
     });
 
     it("re-suspends an unresolved approval, then applies its durable decision", async () => {

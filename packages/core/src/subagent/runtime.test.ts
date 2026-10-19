@@ -23,6 +23,7 @@ import type {
 } from "../ports.js";
 import { RUN_SPAN, TOOL_CALL_SPAN } from "../spans.js";
 import { RunRecorder } from "../recorder.js";
+import { foldRunState } from "../run-state.js";
 import { contextForRole, resolveRuntimeRoles, createSubagentTool } from "./runtime.js";
 import { RunScopeRegistry } from "./scope.js";
 import { RoleRegistry, type ResolvedRole } from "../roles.js";
@@ -294,6 +295,184 @@ describe("production subagent runtime", () => {
       outcome: "completed",
       inputTokens: 1,
       outputTokens: 1,
+    });
+  });
+
+  it("resumes an in-flight child using its parent scope and role runtime", async () => {
+    ensureTracing();
+    const store = new InMemoryEventStore();
+    const clock = new FakeClock(10);
+    const ids = new SequentialIdGenerator();
+    const childRunId = Id.parse("66666666666666666666666666");
+    const scopes = new RunScopeRegistry();
+    scopes.register(parentRunId, parentRunId);
+    const requests: ModelRequest[] = [];
+    const model: ModelPort = {
+      complete: (request) => {
+        requests.push(request);
+        return Promise.resolve(completion());
+      },
+    };
+    const parentTools: ToolPort = {
+      describe: (toolId) =>
+        toolId === "test.read" ? { idempotent: true, timeoutMs: 1_000 } : undefined,
+      getToolSpecs: () => [{ toolId: "test.read", description: "Read", inputSchema: {} }],
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+    };
+    const models = ModelsConfigSchema.parse({
+      routing: {
+        default: [{ provider: "local", model: "parent" }],
+        roles: { worker_route: [{ provider: "local", model: "worker-model" }] },
+      },
+    });
+    const config = {
+      run: RunConfigSchema.parse({}),
+      models,
+      roles: [
+        {
+          id: "worker",
+          route: "worker_route",
+          tools: ["test.read"],
+          maxDepth: 2,
+          maxChildren: 2,
+        },
+      ],
+    };
+    const roles = await resolveRuntimeRoles(config, process.cwd(), parentTools, () => undefined);
+    const policy: PolicyPort = {
+      version: Code.parse("test.policy"),
+      decide: () => ({
+        decision: "allow",
+        ruleId: "test_allow",
+        reason: "test_allowed",
+        editable: [],
+      }),
+    };
+    const childTool = createSubagentTool({
+      config,
+      clock,
+      ids,
+      store,
+      model,
+      parentTool: parentTools,
+      policy,
+      policyVersion: policy.version,
+      roles,
+      scopes,
+    });
+    const parentRecorder = new RunRecorder(
+      store,
+      parentRunId,
+      Id.parse("88888888888888888888888888"),
+      0,
+      clock,
+    );
+    const spawnCall = {
+      callId: parentCallId,
+      toolId: Code.parse("agent.spawn"),
+      args: { role: "worker", goal: "recover this child" },
+    };
+    let parentEvents: Event[] = [];
+    await parentRecorder.withStepSpan(RUN_SPAN, {}, async () => {
+      parentEvents = await parentRecorder.recordBatch([
+        {
+          type: "run_created",
+          v: 1,
+          configHash,
+          policyVersion: "test",
+          scopeId: parentRunId,
+          depth: 0,
+        },
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "pending",
+          to: "running",
+          reason: "start",
+        },
+        {
+          type: "tool_intent",
+          v: 1,
+          callId: parentCallId,
+          toolId: "agent.spawn",
+          idempotent: false,
+          policyDecision: "allow",
+          argsHash: configHash,
+          args: spawnCall.args,
+        },
+        {
+          type: "subagent_spawned",
+          v: 1,
+          childRunId,
+          role: "worker",
+          parentCallId,
+        },
+      ]);
+      const last = parentEvents.at(-1);
+      if (last === undefined) {
+        throw new Error("Expected a durable child announcement.");
+      }
+      return last;
+    });
+    const childRecorder = new RunRecorder(
+      store,
+      childRunId,
+      Id.parse("55555555555555555555555555"),
+      0,
+      clock,
+    );
+    await childRecorder.withStepSpan(RUN_SPAN, {}, async () => {
+      const events = await childRecorder.recordBatch([
+        {
+          type: "run_created",
+          v: 1,
+          configHash,
+          policyVersion: "test",
+          parentRunId,
+          parentCallId,
+          scopeId: parentRunId,
+          depth: 1,
+        },
+        { type: "run_input", v: 1, input: { goal: "recover this child" }, inputKind: "initial" },
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "pending",
+          to: "running",
+          reason: "start",
+        },
+      ]);
+      const last = events.at(-1);
+      if (last === undefined) {
+        throw new Error("Expected a started child run.");
+      }
+      return last;
+    });
+
+    const strategy = childTool.resumeStrategy?.(Code.parse("agent.spawn"));
+    if (strategy === undefined) {
+      throw new Error("Expected the spawn recovery strategy.");
+    }
+    const decision = await strategy.onDanglingIntent(
+      spawnCall,
+      foldRunState(parentEvents),
+      {
+        runId: parentRunId,
+        signal: new AbortController().signal,
+        toolRegistry: childTool,
+      },
+    );
+
+    expect(decision).toMatchObject({
+      kind: "result",
+      completion: { childRunId, outcome: "completed" },
+      execution: { outcome: "ok" },
+    });
+    expect(scopes.scopeOf(childRunId)).toBe(parentRunId);
+    expect(requests[0]?.role).toBe("worker_route");
+    expect((await readEvents(store, childRunId)).at(-1)).toMatchObject({
+      type: "run_status_changed",
+      to: "completed",
     });
   });
 

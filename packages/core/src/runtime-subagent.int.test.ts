@@ -819,7 +819,9 @@ describe("runtime subagent spawning", () => {
             roles: { worker: [{ provider: "local", model: "worker" }] },
           },
         }),
-        roles: [{ id: "worker", route: "worker", tools: ["test.write"], maxDepth: 2 }],
+        roles: [
+          { id: "worker", route: "worker", tools: ["test.write"], maxDepth: 2, maxChildren: 1 },
+        ],
       },
       {
         store,

@@ -1612,7 +1612,9 @@ describe("resume", () => {
             roles: { worker: [{ provider: "local", model: "worker" }] },
           },
         }),
-        roles: [{ id: "worker", route: "worker", tools: [childToolId], maxDepth: 2 }],
+        roles: [
+          { id: "worker", route: "worker", tools: [childToolId], maxDepth: 2, maxChildren: 1 },
+        ],
       },
       {
         store,

@@ -32,6 +32,7 @@ import {
   type ModelPort,
   type ModelRequest,
   type PolicyPort,
+  type ToolPort,
 } from "@harness/core";
 import { SummarizingStrategy } from "@harness/context";
 import {
