@@ -1,0 +1,187 @@
+[
+  {
+    "scenario": "text_only",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "vertex", "model": "gemini-test" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": { "role": "model", "parts": [{ "text": "answer" }] },
+            "finishReason": "STOP"
+          }
+        ],
+        "usageMetadata": { "promptTokenCount": 2, "candidatesTokenCount": 3 }
+      }
+    },
+    "expected": {
+      "parts": [
+        { "type": "text", "text": "answer" },
+        {
+          "type": "opaque",
+          "provider": "vertex",
+          "blob": {
+            "content": { "role": "model", "parts": [{ "text": "answer" }] },
+            "droppedSchemaKeywords": [],
+            "functionCalls": {}
+          }
+        }
+      ],
+      "usage": { "inputTokens": 2, "outputTokens": 3 },
+      "finishReason": "stop"
+    }
+  },
+  {
+    "scenario": "tool_call",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "vertex", "model": "gemini-test" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "functionCall": {
+                    "id": "call_fixture",
+                    "name": "lookup",
+                    "args": { "query": "x" }
+                  },
+                  "thoughtSignature": "signature_fixture"
+                }
+              ]
+            },
+            "finishReason": "STOP"
+          }
+        ],
+        "usageMetadata": { "promptTokenCount": 2, "candidatesTokenCount": 3 }
+      }
+    },
+    "expected": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "callId": "00000000000000000000000000",
+          "toolId": "lookup",
+          "args": { "query": "x" }
+        },
+        {
+          "type": "opaque",
+          "provider": "vertex",
+          "blob": {
+            "content": {
+              "role": "model",
+              "parts": [
+                {
+                  "functionCall": {
+                    "id": "call_fixture",
+                    "name": "lookup",
+                    "args": { "query": "x" }
+                  },
+                  "thoughtSignature": "signature_fixture"
+                }
+              ]
+            },
+            "droppedSchemaKeywords": [],
+            "functionCalls": {
+              "00000000000000000000000000": { "id": "call_fixture", "name": "lookup" }
+            }
+          }
+        }
+      ],
+      "usage": { "inputTokens": 2, "outputTokens": 3 },
+      "finishReason": "stop"
+    }
+  },
+  {
+    "scenario": "usage_mapping",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "vertex", "model": "gemini-test" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": { "role": "model", "parts": [] },
+            "finishReason": "MAX_TOKENS"
+          }
+        ],
+        "usageMetadata": { "promptTokenCount": 7, "candidatesTokenCount": 11 }
+      }
+    },
+    "expected": {
+      "usage": { "inputTokens": 7, "outputTokens": 11 },
+      "finishReason": "length"
+    }
+  },
+  {
+    "scenario": "error_429",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "vertex", "model": "gemini-test" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 429,
+      "body": { "error": { "code": 429, "status": "RESOURCE_EXHAUSTED", "message": "quota" } }
+    },
+    "expected": { "status": 429 }
+  },
+  {
+    "scenario": "error_500",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "vertex", "model": "gemini-test" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 500,
+      "body": { "error": { "code": 500, "status": "INTERNAL", "message": "unavailable" } }
+    },
+    "expected": { "status": 500 }
+  },
+  {
+    "scenario": "error_401",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "vertex", "model": "gemini-test" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 403,
+      "body": { "error": { "code": 403, "status": "PERMISSION_DENIED", "message": "denied" } }
+    },
+    "expected": { "status": 403 }
+  },
+  {
+    "scenario": "abort_signal",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "vertex", "model": "gemini-test" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }]
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "candidates": [
+          {
+            "content": { "role": "model", "parts": [{ "text": "answer" }] },
+            "finishReason": "STOP"
+          }
+        ]
+      }
+    }
+  }
+]

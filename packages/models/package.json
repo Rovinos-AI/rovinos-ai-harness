@@ -45,6 +45,7 @@
   "devDependencies": {
     "@opentelemetry/api": "1.9.1",
     "ajv": "8.20.0",
+    "google-auth-library": "10.3.0",
     "undici": "8.11.2",
     "vitest": "3.2.6"
   }

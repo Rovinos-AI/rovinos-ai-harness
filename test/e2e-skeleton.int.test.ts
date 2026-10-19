@@ -4,6 +4,7 @@
 // Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: gateway token progress to live run updates (14.16 -> #157; 24.5 -> #234)
+// Not wired yet: Vertex AI provider registration in runtime configuration (14.20 -> #161)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
 import { Command } from "commander";

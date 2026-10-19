@@ -64,13 +64,27 @@ const conservativeToolRule = providerSchemaRuleSchema.parse({
   ],
 });
 
+const vertexSchemaRule = providerSchemaRuleSchema.parse({
+  allowedKeywords: [
+    ...commonKeywords,
+    "format",
+    "maximum",
+    "minimum",
+    "oneOf",
+    "prefixItems",
+  ],
+  requireAdditionalPropertiesFalse: false,
+  requireAllProperties: false,
+  unsupportedKeywords: ["default", "maxLength", "minLength", "pattern"],
+});
+
 /** Provider schema subsets are conservative; verify against current provider docs before changing. */
 export const PROVIDER_SCHEMA_RULES: Readonly<Record<ProviderId, ProviderSchemaRule>> = {
   anthropic: conservativeToolRule,
   azure_openai: openAiSchemaRule,
   bedrock: conservativeToolRule,
   openai: openAiSchemaRule,
-  vertex: conservativeToolRule,
+  vertex: vertexSchemaRule,
 };
 
 /**
