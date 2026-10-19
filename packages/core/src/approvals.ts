@@ -420,8 +420,8 @@ export async function applyResolvedApprovals(
       !Array.isArray(approval.payload) &&
       approval.payload.kind === "resume_ambiguity";
     const applied = await (isResumeAmbiguity
-      ? resolveDanglingIntentApproval(options, intent, approval, resolution)
-      : applyApprovalDecision(options, intent, approval, resolution));
+      ? resolveDanglingIntentApproval(options, intent, { approval, resolution, state })
+      : applyApprovalDecision(options, intent, approval, { resolution, state }));
     events.push(...applied);
     options.onEvents?.(applied);
   }

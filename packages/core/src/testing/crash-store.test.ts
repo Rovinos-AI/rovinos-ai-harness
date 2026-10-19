@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Id, SequentialIdGenerator } from "@harness/schemas";
+import { Code, Id, SequentialIdGenerator } from "@harness/schemas";
 import { InMemoryEventStore, type EventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import { CrashingEventStore, SimulatedCrash } from "./crash-store.js";
@@ -119,6 +119,54 @@ describe("CrashingEventStore", () => {
     await store.close();
   });
 
+  it("keeps failing appends after a persistent crash", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new CrashingEventStore(inner, {
+      crashAt: 1,
+      mode: "before_commit",
+      persistentCrash: true,
+    });
+
+    await expect(store.append(runId, [startEvent()], 0)).rejects.toBeInstanceOf(SimulatedCrash);
+    await expect(store.append(runId, [startEvent()], 0)).rejects.toBeInstanceOf(SimulatedCrash);
+    expect(store.appendCalls).toBe(2);
+    await inner.close();
+  });
+
+  it("does not commit append calls after a persistent after-commit crash", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new CrashingEventStore(inner, {
+      crashAt: 1,
+      mode: "after_commit",
+      persistentCrash: true,
+    });
+
+    await expect(store.append(runId, [startEvent()], 0)).rejects.toBeInstanceOf(SimulatedCrash);
+    await expect(store.append(runId, [statusEvent()], 1)).rejects.toBeInstanceOf(SimulatedCrash);
+    expect(store.appendCalls).toBe(2);
+    await expect(store.head(runId)).resolves.toBe(1);
+    await inner.close();
+  });
+
+  it("does not commit appendWithSnapshot calls after a persistent after-commit crash", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new CrashingEventStore(inner, {
+      crashAt: 1,
+      mode: "after_commit",
+      persistentCrash: true,
+    });
+    const { event, snapshot } = checkpointAppend();
+
+    await expect(store.append(runId, [startEvent()], 0)).rejects.toBeInstanceOf(SimulatedCrash);
+    await expect(store.appendWithSnapshot(runId, [event], 1, snapshot)).rejects.toBeInstanceOf(
+      SimulatedCrash,
+    );
+    expect(store.appendCalls).toBe(2);
+    await expect(store.head(runId)).resolves.toBe(1);
+    await expect(store.latestSnapshot(runId)).resolves.toBeUndefined();
+    await inner.close();
+  });
+
   it("delegates approval notification lease operations", async () => {
     const inner = new InMemoryEventStore();
     const store = new CrashingEventStore(inner, { crashAt: 1, mode: "before_commit" });
@@ -148,6 +196,87 @@ describe("CrashingEventStore", () => {
 
     await expect(store.claimIdempotencyKey(keyHash, runId, 100)).resolves.toBe(runId);
     await expect(store.releaseIdempotencyKey(keyHash, runId)).resolves.toBeUndefined();
+    await store.close();
+  });
+
+  it("delegates execution leases, snapshots, watches, outbox, and deletion", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new CrashingEventStore(inner, { crashAt: 100, mode: "before_commit" });
+    const owner = Id.parse("00000000000000000000000005");
+    const replacement = Id.parse("00000000000000000000000006");
+    const leaseRunId = Id.parse("00000000000000000000000007");
+    const keyHash = "e".repeat(64);
+
+    await store.append(runId, [startEvent()], 0);
+    await expect(store.claimRunExecution(runId, owner, 10, 100)).resolves.toBe(true);
+    await expect(store.renewRunExecution(runId, owner, 20, 100)).resolves.toBe(true);
+    await store.releaseRunExecution(runId, owner);
+    await expect(store.claimRunExecution(runId, replacement, 30, 100)).resolves.toBe(true);
+    const { event, snapshot } = checkpointAppend();
+    await expect(store.appendWithSnapshot(runId, [event], 1, snapshot)).resolves.toEqual({
+      nextSeq: 2,
+    });
+    await expect(store.latestSnapshot(runId)).resolves.toMatchObject({ atSeq: 1 });
+    await expect(store.retainedSnapshots(runId, 1)).resolves.toHaveLength(1);
+
+    const eventController = new AbortController();
+    const eventIterator = store
+      .watch(runId, {
+        fromSeq: 0,
+        signal: eventController.signal,
+      })
+      [Symbol.asyncIterator]();
+    await expect(eventIterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { type: "run_created" },
+    });
+    eventController.abort();
+    await eventIterator.return?.();
+
+    const summaryController = new AbortController();
+    const summaryIterator = store
+      .watchRuns({ signal: summaryController.signal })
+      [Symbol.asyncIterator]();
+    await expect(summaryIterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { runId, status: "pending" },
+    });
+    summaryController.abort();
+    await summaryIterator.return?.();
+
+    const sinkId = Code.parse("test.sink");
+    const batch = await store.fetchOutbox(sinkId, 10);
+    expect(batch.events).toHaveLength(2);
+    await store.ackOutbox(sinkId, batch.cursor);
+    await expect(store.fetchOutbox(sinkId, 10)).resolves.toMatchObject({
+      events: [],
+      cursor: batch.cursor,
+    });
+    await expect(store.consumeConfirmationState("synthetic-state", 100, 10)).resolves.toBe(true);
+    await expect(store.consumeConfirmationState("synthetic-state", 100, 10)).resolves.toBe(false);
+    await expect(store.claimIdempotencyKey(keyHash, leaseRunId, 10)).resolves.toBe(leaseRunId);
+    await expect(
+      store.takeoverIdempotencyKey(keyHash, {
+        expectedRunId: leaseRunId,
+        runId: replacement,
+        createdAt: 20,
+        staleBefore: 10,
+      }),
+    ).resolves.toBe(true);
+    await store.releaseIdempotencyKey(keyHash, replacement);
+
+    await store.append(
+      runId,
+      [
+        {
+          ...statusEvent(),
+          from: "pending",
+          to: "completed",
+        },
+      ],
+      2,
+    );
+    await expect(store.deleteRun(runId)).resolves.toBe(3);
     await store.close();
   });
 
