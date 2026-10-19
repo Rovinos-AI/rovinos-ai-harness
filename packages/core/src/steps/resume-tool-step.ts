@@ -346,6 +346,9 @@ export async function applyApprovalDecision(
     });
     return [result];
   }
+  if (state?.toolExecutionStarted?.has(intent.callId) === true) {
+    return recordDanglingFailure(options, intent, "resume_ambiguous");
+  }
   let args = intent.args;
   if (resolution.decision === "edit") {
     if (resolution.edits === undefined) {
@@ -429,6 +432,7 @@ export async function resolveDanglingIntentApproval(
   intent: ToolIntentEvent,
   approval: ApprovalRequestedEvent,
   resolution: Extract<Event, { type: "approval_resolved" }>,
+  state?: RunState,
 ): Promise<readonly Event[]> {
   if (approval.callId !== intent.callId || resolution.approvalId !== approval.approvalId) {
     throw new ResumeActionMismatchError();
@@ -436,12 +440,12 @@ export async function resolveDanglingIntentApproval(
   if (resolution.decision === "deny") {
     return recordDanglingFailure(options, intent, "resume_ambiguous");
   }
+  if (state?.toolExecutionStarted?.has(intent.callId) === true) {
+    return recordDanglingFailure(options, intent, "resume_ambiguous");
+  }
   const description = options.tool.describe(intent.toolId, intent.args);
   if (description === undefined) {
     return recordDanglingFailure(options, intent, "unknown_tool");
-  }
-  if (!intent.idempotent || !description.idempotent) {
-    return recordDanglingFailure(options, intent, "resume_ambiguous");
   }
   await options.beforeToolExecution?.();
   return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });

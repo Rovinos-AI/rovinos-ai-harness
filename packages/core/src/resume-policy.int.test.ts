@@ -409,7 +409,7 @@ describe("dangling tool intent resume", () => {
     });
   });
 
-  it("does not execute a non-idempotent call until approval", async () => {
+  it("executes a non-idempotent dangling call once after resume-ambiguity approval", async () => {
     const store = new InMemoryEventStore();
     const clock = new FakeClock(100);
     const recorder = new RunRecorder(store, runId, segmentId, 0, clock);
@@ -490,13 +490,12 @@ describe("dangling tool intent resume", () => {
     }
 
     const resultEvents = await resolveDanglingIntentApproval(options, intent, request, resolution);
-    expect(resultEvents.map(({ type }) => type)).toEqual(["tool_result"]);
-    expect(resultEvents[0]).toMatchObject({
-      callId,
-      outcome: "error",
-      errorCode: "resume_ambiguous",
-    });
-    expect(tool.calls).toHaveLength(0);
+    expect(resultEvents.map(({ type }) => type)).toEqual([
+      "tool_execution_started",
+      "tool_result",
+    ]);
+    expect(resultEvents[1]).toMatchObject({ callId, outcome: "ok" });
+    expect(tool.calls).toHaveLength(1);
     const stored: Event[] = [];
     for await (const event of store.read(runId)) {
       stored.push(event);

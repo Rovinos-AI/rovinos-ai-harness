@@ -665,7 +665,7 @@ describe("approval lifecycle", () => {
         },
         resumedState,
       );
-      const result = applied[0];
+      const result = applied.at(-1);
       if (result === undefined) {
         throw new Error("Expected the approval result.");
       }
@@ -677,7 +677,9 @@ describe("approval lifecycle", () => {
         waitMs: 25,
         ...(edits === undefined ? {} : { edits }),
       });
-      expect(applied.map(({ type }) => type)).toEqual(["tool_result"]);
+      expect(applied.map(({ type }) => type)).toEqual(
+        decision === "deny" ? ["tool_result"] : ["tool_execution_started", "tool_result"],
+      );
       expect(tool.calls).toHaveLength(decision === "deny" ? 0 : 1);
       const expectedArgs = decision === "edit" ? { z: 1, a: 4 } : { z: 1, a: 3 };
       expect(tool.calls.map(({ call }) => call.args)).toEqual(
@@ -1106,7 +1108,7 @@ describe("approval lifecycle", () => {
           resumedState,
         );
 
-        expect(applied[0]).toMatchObject({
+        expect(applied.at(-1)).toMatchObject({
           type: "tool_result",
           outcome: decision === "approve" ? "ok" : "denied",
           ...(decision === "deny" ? { errorCode: "approval_denied" } : {}),

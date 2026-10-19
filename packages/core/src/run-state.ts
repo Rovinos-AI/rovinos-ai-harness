@@ -23,6 +23,7 @@ export interface RunState {
     readonly costMicros: number;
   };
   readonly pendingToolCalls: ReadonlyMap<ToolIntentEvent["callId"], ToolIntentEvent>;
+  readonly toolExecutionStarted?: ReadonlySet<ToolIntentEvent["callId"]>;
   readonly pendingApprovals: ReadonlyMap<
     ApprovalRequestedEvent["approvalId"],
     ApprovalRequestedEvent
@@ -57,6 +58,7 @@ interface MutableRunState {
     costMicros: number;
   };
   pendingToolCalls: Map<ToolIntentEvent["callId"], ToolIntentEvent>;
+  toolExecutionStarted: Set<ToolIntentEvent["callId"]>;
   pendingApprovals: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   approvalRequests: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   resolvedApprovals: Map<
@@ -76,8 +78,8 @@ export class CorruptLogError extends HarnessError {
   readonly code = "corrupt_log";
 
   /** Creates an error for a corrupt event log. */
-  constructor() {
-    super("Run event log is corrupt.");
+  constructor(message = "Run event log is corrupt.") {
+    super(message);
     this.name = "CorruptLogError";
   }
 }
@@ -196,7 +198,9 @@ function applyToolResult(
   }
   const pendingToolCalls = new Map(state.pendingToolCalls);
   pendingToolCalls.delete(event.callId);
-  return { ...state, pendingToolCalls };
+  const toolExecutionStarted = new Set(state.toolExecutionStarted);
+  toolExecutionStarted.delete(event.callId);
+  return { ...state, pendingToolCalls, toolExecutionStarted };
 }
 
 function applyToolLifecycle(state: MutableRunState, event: Event): MutableRunState | undefined {
@@ -205,6 +209,17 @@ function applyToolLifecycle(state: MutableRunState, event: Event): MutableRunSta
   }
   if (event.type === "tool_result") {
     return applyToolResult(state, event);
+  }
+  if (event.type === "tool_execution_started") {
+    if (!state.pendingToolCalls.has(event.callId)) {
+      throw new CorruptLogError("Tool execution marker has no pending intent.");
+    }
+    if (state.toolExecutionStarted.has(event.callId)) {
+      throw new CorruptLogError("Tool execution marker was duplicated.");
+    }
+    const toolExecutionStarted = new Set(state.toolExecutionStarted);
+    toolExecutionStarted.add(event.callId);
+    return { ...state, toolExecutionStarted };
   }
   return undefined;
 }
@@ -325,6 +340,7 @@ export function foldRunState(events: Iterable<Event>): RunState {
     steps: 0,
     usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
     pendingToolCalls: new Map(),
+    toolExecutionStarted: new Set(),
     pendingApprovals: new Map(),
     approvalRequests: new Map(),
     resolvedApprovals: new Map(),

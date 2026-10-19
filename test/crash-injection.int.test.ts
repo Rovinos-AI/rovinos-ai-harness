@@ -263,7 +263,11 @@ class BoundaryRecordingStore implements EventStore {
       method: "append",
       eventTypes: events.map(({ type }) => type),
       callIds: events.flatMap((event) =>
-        event.type === "tool_intent" || event.type === "tool_result" ? [event.callId] : [],
+        event.type === "tool_intent" ||
+        event.type === "tool_execution_started" ||
+        event.type === "tool_result"
+          ? [event.callId]
+          : [],
       ),
     });
     return this.inner.append(forRun, events, expectedSeq, leaseOwner);
@@ -281,7 +285,11 @@ class BoundaryRecordingStore implements EventStore {
       method: "appendWithSnapshot",
       eventTypes: events.map(({ type }) => type),
       callIds: events.flatMap((event) =>
-        event.type === "tool_intent" || event.type === "tool_result" ? [event.callId] : [],
+        event.type === "tool_intent" ||
+        event.type === "tool_execution_started" ||
+        event.type === "tool_result"
+          ? [event.callId]
+          : [],
       ),
     });
     return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot, leaseOwner);
@@ -711,10 +719,15 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
             boundary?.eventTypes.includes("tool_result") === true &&
             boundary.callIds.includes(nonIdempotentCallId);
           const crashedBeforeEffect =
-            mode === "after_commit" &&
-            boundary?.eventTypes.includes("tool_intent") === true &&
-            boundary.callIds.includes(nonIdempotentCallId);
-          expect(crashedAfterEffect || crashedBeforeEffect).toBe(true);
+            (mode === "after_commit" &&
+              boundary?.eventTypes.includes("tool_intent") === true &&
+              boundary.callIds.includes(nonIdempotentCallId)) ||
+            (boundary?.eventTypes.includes("tool_execution_started") === true &&
+              boundary.callIds.includes(nonIdempotentCallId));
+          expect(
+            crashedAfterEffect || crashedBeforeEffect,
+            `${mode} append ${String(crashAt)} (${boundary?.eventTypes.join(",")})`,
+          ).toBe(true);
           expect(scenario.counts.nonIdempotent).toBe(crashedAfterEffect ? 1 : 0);
           continue;
         }
@@ -727,6 +740,11 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
         );
         expect(scenario.counts.nonIdempotent).toBe(1);
         expect(scenario.counts.idempotent).toBeLessThanOrEqual(2);
+      } catch (error) {
+        throw new Error(
+          `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",")})`,
+          { cause: error },
+        );
       } finally {
         await freshRuntime.close();
         await rm(directory, { recursive: true, force: true });
@@ -993,15 +1011,14 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
         const childRan = childEvents.some(
           (event) => event.type === "model_request" || event.type === "tool_intent",
         );
-        const crashBoundary = reference.boundaries[crashAt - 1];
-        const crashCommittedUnexecutedIntent =
+        const crashAfterExecutionClaim =
           mode === "after_commit" &&
-          crashBoundary?.eventTypes.includes("tool_intent") === true &&
-          crashBoundary.callIds.includes(subagentToolCallId);
+          reference.boundaries[crashAt - 1]?.eventTypes.includes("tool_execution_started") ===
+            true;
         expect(
           counts.writes,
           `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",")})`,
-        ).toBe(childRan && !crashCommittedUnexecutedIntent ? 1 : 0);
+        ).toBe(childRan && !crashAfterExecutionClaim ? 1 : 0);
         if (childRan) {
           expect(
             childEvents.filter(
@@ -1010,10 +1027,34 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
           ).toHaveLength(1);
           expect(
             childEvents.filter(
+              (event) =>
+                event.type === "tool_execution_started" &&
+                event.callId === subagentToolCallId,
+            ),
+          ).toHaveLength(1);
+          expect(
+            childEvents.filter(
               (event) => event.type === "tool_result" && event.callId === subagentToolCallId,
             ),
           ).toHaveLength(1);
+          if (
+            mode === "before_commit" &&
+            reference.boundaries[crashAt - 1]?.eventTypes.includes("tool_result") === true &&
+            reference.boundaries[crashAt - 1]?.callIds.includes(subagentToolCallId) === true
+          ) {
+            expect(
+              childEvents.filter(
+                (event) =>
+                  event.type === "tool_result" && event.callId === subagentToolCallId,
+              ),
+            ).toMatchObject([{ outcome: "error", errorCode: "resume_ambiguous" }]);
+          }
         }
+      } catch (error) {
+        throw new Error(
+          `${mode} append ${String(crashAt)} child (${reference.boundaries[crashAt - 1]?.eventTypes.join(",")})`,
+          { cause: error },
+        );
       } finally {
         await freshRuntime.close();
         await rm(directory, { recursive: true, force: true });

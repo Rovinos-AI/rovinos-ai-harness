@@ -345,6 +345,19 @@ async function executeAndRecord(
     readonly executedArgsHash: string | undefined;
   },
 ): Promise<Event> {
+  if (
+    options.description.idempotent === false &&
+    options.intentEvent?.type === "tool_intent" &&
+    input.options.tool.resumeStrategy?.(options.call.toolId) === undefined
+  ) {
+    const started = await input.options.recorder.record({
+      type: "tool_execution_started",
+      v: 1,
+      callId: options.intentEvent.callId,
+      toolId: options.intentEvent.toolId,
+    });
+    input.events.push(started);
+  }
   const event = await executePreparedTool({
     recorder: input.options.recorder,
     call: options.call,
