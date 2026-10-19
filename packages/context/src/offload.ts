@@ -484,6 +484,15 @@ export class OffloadingToolPort implements OffloadToolPortLike {
     }
 
     const execution = await this.inner.execute(call, context);
+    return this.offloadRecoveredResult(call, context, execution);
+  }
+
+  /** Offloads a recovered result without invoking the underlying tool again. */
+  async offloadRecoveredResult(
+    call: OffloadToolCall,
+    _context: OffloadRunContext,
+    execution: OffloadToolExecutionResult,
+  ): Promise<OffloadToolExecutionResult> {
     if (execution.binary === true && !ToolBinaryPayloadSchema.safeParse(execution.result).success) {
       return toolError("pii_input_invalid");
     }

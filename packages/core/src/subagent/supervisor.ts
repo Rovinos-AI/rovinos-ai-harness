@@ -199,7 +199,6 @@ export class SubagentSupervisor {
     return recoverSubagentSpawn({
       store: this.options.store,
       scopes: this.options.scopes,
-      runConfig: this.options.runConfig,
       role: input.role,
       call: input.call,
       state: input.state,

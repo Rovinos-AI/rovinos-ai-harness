@@ -421,7 +421,7 @@ export async function applyResolvedApprovals(
       approval.payload.kind === "resume_ambiguity";
     const applied = await (isResumeAmbiguity
       ? resolveDanglingIntentApproval(options, intent, approval, resolution)
-      : applyApprovalDecision(options, intent, approval, resolution));
+      : applyApprovalDecision(options, intent, approval, resolution, state));
     events.push(...applied);
     options.onEvents?.(applied);
   }

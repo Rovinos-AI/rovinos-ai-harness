@@ -16,6 +16,7 @@ import {
   ContentDecryptFailedError,
   InvalidEventError,
   KeyNotFoundError,
+  RunExecutionLeaseLostError,
   SeqConflictError,
   StoreUnavailableError,
   isPreservedStoreError,
@@ -325,6 +326,7 @@ export interface AppendTransactionOptions {
   expectedSeq: number;
   encodedSnapshot?: EncodedSnapshot;
   snapshotKeep?: number;
+  leaseOwner?: Id;
 }
 
 /** Append a batch atomically while holding the run's sequence row lock. */
@@ -332,7 +334,14 @@ export async function appendTransaction(
   client: PoolClient,
   options: AppendTransactionOptions,
 ): Promise<number> {
-  const { runId, encoded, expectedSeq, encodedSnapshot, snapshotKeep = 5 } = options;
+  const {
+    runId,
+    encoded,
+    expectedSeq,
+    encodedSnapshot,
+    snapshotKeep = 5,
+    leaseOwner,
+  } = options;
   const first = encoded[0]?.event;
   const last = encoded.at(-1)?.event;
   if (first === undefined || last === undefined) {
@@ -359,6 +368,15 @@ export async function appendTransaction(
     actualSeq = integer(run.next_seq);
     if (actualSeq !== expectedSeq) {
       throw new SeqConflictError(expectedSeq, actualSeq);
+    }
+    if (leaseOwner !== undefined) {
+      const leaseResult = await client.query<{ owner_id: string }>(
+        "SELECT owner_id FROM run_execution_leases WHERE run_id = $1 FOR UPDATE",
+        [runId],
+      );
+      if (leaseResult.rows[0]?.owner_id !== leaseOwner) {
+        throw new RunExecutionLeaseLostError();
+      }
     }
     if (actualSeq === 0 && first.type !== "run_created") {
       throw new InvalidEventError([[0, "type"]]);

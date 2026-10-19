@@ -133,6 +133,40 @@ describe("CrashingEventStore", () => {
     await inner.close();
   });
 
+  it("does not commit append calls after a persistent after-commit crash", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new CrashingEventStore(inner, {
+      crashAt: 1,
+      mode: "after_commit",
+      persistentCrash: true,
+    });
+
+    await expect(store.append(runId, [startEvent()], 0)).rejects.toBeInstanceOf(SimulatedCrash);
+    await expect(store.append(runId, [statusEvent()], 1)).rejects.toBeInstanceOf(SimulatedCrash);
+    expect(store.appendCalls).toBe(2);
+    await expect(store.head(runId)).resolves.toBe(1);
+    await inner.close();
+  });
+
+  it("does not commit appendWithSnapshot calls after a persistent after-commit crash", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new CrashingEventStore(inner, {
+      crashAt: 1,
+      mode: "after_commit",
+      persistentCrash: true,
+    });
+    const { event, snapshot } = checkpointAppend();
+
+    await expect(store.append(runId, [startEvent()], 0)).rejects.toBeInstanceOf(SimulatedCrash);
+    await expect(store.appendWithSnapshot(runId, [event], 1, snapshot)).rejects.toBeInstanceOf(
+      SimulatedCrash,
+    );
+    expect(store.appendCalls).toBe(2);
+    await expect(store.head(runId)).resolves.toBe(1);
+    await expect(store.latestSnapshot(runId)).resolves.toBeUndefined();
+    await inner.close();
+  });
+
   it("delegates approval notification lease operations", async () => {
     const inner = new InMemoryEventStore();
     const store = new CrashingEventStore(inner, { crashAt: 1, mode: "before_commit" });

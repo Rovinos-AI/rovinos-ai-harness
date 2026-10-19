@@ -34,10 +34,11 @@ export class PostgresEventWriter {
     runId: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     this.assertWritable();
     const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
-    return this.appendEncoded(runId, encoded, expectedSeq);
+    return this.appendEncoded(runId, encoded, expectedSeq, undefined, leaseOwner);
   }
 
   async appendWithSnapshot(
@@ -45,6 +46,7 @@ export class PostgresEventWriter {
     events: readonly NewEvent[],
     expectedSeq: number,
     snapshot: Snapshot,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     this.assertWritable();
     const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
@@ -52,7 +54,7 @@ export class PostgresEventWriter {
       encodeEvents(this.codec, runId, events, expectedSeq),
       encodeSnapshot(this.codec, validatedSnapshot),
     ]);
-    return this.appendEncoded(runId, encoded, expectedSeq, encodedSnapshot);
+    return this.appendEncoded(runId, encoded, expectedSeq, encodedSnapshot, leaseOwner);
   }
 
   private async appendEncoded(
@@ -60,6 +62,7 @@ export class PostgresEventWriter {
     encoded: readonly EncodedEvent[],
     expectedSeq: number,
     encodedSnapshot?: EncodedSnapshot,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     await this.ensureInitialized();
     let client: PoolClient;
@@ -76,6 +79,7 @@ export class PostgresEventWriter {
           expectedSeq,
           ...(encodedSnapshot === undefined ? {} : { encodedSnapshot }),
           snapshotKeep: this.snapshotKeep,
+          ...(leaseOwner === undefined ? {} : { leaseOwner }),
         }),
       };
     } finally {

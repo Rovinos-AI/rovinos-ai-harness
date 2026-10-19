@@ -21,6 +21,7 @@ export interface ToolResumeCompletion {
 /** Result of reconciling a dangling intent with tool-specific durable state. */
 export type ToolResumeDecision =
   | { readonly kind: "rerun" }
+  | { readonly kind: "shutdown" }
   | {
       readonly kind: "result";
       readonly execution: ToolExecutionResult;

@@ -33,6 +33,7 @@ import {
 } from "@harness/schemas";
 import {
   InMemoryEventStore,
+  RunExecutionLeaseLostError,
   SeqConflictError,
   SqliteEventStore,
   type EventStore,
@@ -525,6 +526,15 @@ function createResumeOptions(
     budgets: defaultBudgets,
     ...overrides,
   };
+}
+
+function delegatingStore(store: EventStore): EventStore {
+  return new Proxy(store, {
+    get: (target, property) => {
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 beforeAll(() => {
@@ -3141,21 +3151,6 @@ describe("runLoop", () => {
       const store = new InMemoryEventStore();
       const clock = new FakeClock(100);
       await createRunHistory(store, clock);
-      const readHead = store.head.bind(store);
-      let headReads = 0;
-      let releaseBarrier: (() => void) | undefined;
-      const bothHeadsRead = new Promise<void>((resolve) => {
-        releaseBarrier = resolve;
-      });
-      vi.spyOn(store, "head").mockImplementation(async (requestedRunId) => {
-        const currentHead = await readHead(requestedRunId);
-        headReads += 1;
-        if (headReads === 2) {
-          releaseBarrier?.();
-        }
-        await bothHeadsRead;
-        return currentHead;
-      });
 
       const attempts = await Promise.allSettled([
         resumeRun(createResumeOptions(store, clock)),
@@ -3171,6 +3166,47 @@ describe("runLoop", () => {
         throw new Error("Expected one concurrent resume attempt to lose.");
       }
       expect(loser.reason).toBeInstanceOf(ResumeConflictError);
+    });
+
+    it("fences stale owners and preserves sequence conflicts across store clients", async () => {
+      const inner = new InMemoryEventStore();
+      const firstClient = delegatingStore(inner);
+      const secondClient = delegatingStore(inner);
+      const clock = new FakeClock(100);
+      await createRunHistory(inner, clock);
+      const owner = Id.parse("22222222222222222222222222");
+      const staleOwner = Id.parse("33333333333333333333333333");
+
+      await expect(firstClient.claimRunExecution(runId, owner, 100, 30_000)).resolves.toBe(true);
+      await expect(secondClient.claimRunExecution(runId, staleOwner, 100, 30_000)).resolves.toBe(
+        false,
+      );
+      await expect(
+        firstClient.append(runId, [], await firstClient.head(runId), staleOwner),
+      ).rejects.toBeInstanceOf(RunExecutionLeaseLostError);
+      await firstClient.releaseRunExecution(runId, owner);
+
+      const nextSeq = await firstClient.head(runId);
+      const event = {
+        runId,
+        ts: 101,
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        segmentId,
+        type: "run_status_changed" as const,
+        v: 1 as const,
+        from: "running" as const,
+        to: "suspended" as const,
+        reason: "interrupted" as const,
+      };
+      const writes = await Promise.allSettled([
+        firstClient.append(runId, [event], nextSeq),
+        secondClient.append(runId, [event], nextSeq),
+      ]);
+      expect(writes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+      expect(writes.filter(({ status }) => status === "rejected")).toMatchObject([
+        { reason: expect.any(SeqConflictError) },
+      ]);
     });
 
     it("rejects a terminal run", async () => {

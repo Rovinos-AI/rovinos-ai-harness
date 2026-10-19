@@ -4,6 +4,7 @@ export {
   ContentEncryptFailedError,
   InvalidEventError,
   KeyNotFoundError,
+  RunExecutionLeaseLostError,
   SeqConflictError,
   StoreEncryptionMismatchError,
   StoreMigrationError,

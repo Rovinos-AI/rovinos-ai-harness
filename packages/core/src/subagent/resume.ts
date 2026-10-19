@@ -3,7 +3,6 @@ import {
   JsonValue as JsonValueSchema,
   type Event,
   type Id,
-  type RunConfig,
 } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import { ROOT_CONTEXT, trace } from "@opentelemetry/api";
@@ -23,7 +22,6 @@ interface RecoverSubagentOptions {
   readonly store: EventStore;
   readonly scopes: RunScopeRegistry;
   readonly childTools: ToolPort;
-  readonly runConfig: RunConfig;
   readonly role: ResolvedRole;
   readonly call: ModelToolCall;
   readonly state: RunState;
@@ -74,10 +72,21 @@ function resultDecision(
   };
 }
 
-function missingChild(): ToolResumeDecision {
+function missingChild(childRunId?: Id): ToolResumeDecision {
   return {
     kind: "result",
     execution: { outcome: "error", errorCode: "subagent_missing", result: null },
+    ...(childRunId === undefined
+      ? {}
+      : {
+          completion: {
+            childRunId,
+            outcome: "failed" as const,
+            inputTokens: 0,
+            outputTokens: 0,
+            steps: 0,
+          },
+        }),
   };
 }
 
@@ -96,12 +105,12 @@ export async function recoverSubagentSpawn(
     return { kind: "rerun" };
   }
   if (spawned.role !== options.role.id) {
-    return missingChild();
+    return missingChild(spawned.childRunId);
   }
 
   const childEvents = await readEvents(options.store, spawned.childRunId);
   if (childEvents.length === 0) {
-    return missingChild();
+    return missingChild(spawned.childRunId);
   }
   const created = childEvents.find((event) => event.type === "run_created");
   if (
@@ -109,12 +118,30 @@ export async function recoverSubagentSpawn(
     created.parentRunId !== options.context.runId ||
     created.parentCallId !== options.call.callId
   ) {
-    return missingChild();
+    return missingChild(spawned.childRunId);
+  }
+
+  if (spawned.budgetLimits === undefined || spawned.budgetDeadlineTs === undefined) {
+    return {
+      kind: "result",
+      execution: {
+        outcome: "error",
+        errorCode: "subagent_budget_missing",
+        result: null,
+      },
+      completion: {
+        childRunId: spawned.childRunId,
+        outcome: "failed",
+        inputTokens: 0,
+        outputTokens: 0,
+        steps: 0,
+      },
+    };
   }
 
   const scopeId = options.scopes.scopeOf(options.context.runId);
   if (created.scopeId !== undefined && created.scopeId !== scopeId) {
-    return missingChild();
+    return missingChild(spawned.childRunId);
   }
   options.scopes.register(spawned.childRunId, scopeId);
   const completed = parentEvents.some(
@@ -135,8 +162,24 @@ export async function recoverSubagentSpawn(
   }
 
   const input = childEvents.find((event) => event.type === "run_input");
-  if (input?.type !== "run_input") {
-    return missingChild();
+  const callArgs =
+    typeof options.call.args === "object" &&
+    options.call.args !== null &&
+    !Array.isArray(options.call.args)
+      ? options.call.args
+      : undefined;
+  const recoveredInput =
+    input?.type === "run_input"
+      ? input.input
+      : childEvents.length === 1 &&
+          typeof callArgs?.goal === "string"
+        ? JsonValueSchema.parse({
+            goal: callArgs.goal,
+            ...(callArgs.inputs === undefined ? {} : { inputs: callArgs.inputs }),
+          })
+        : undefined;
+  if (recoveredInput === undefined) {
+    return missingChild(spawned.childRunId);
   }
   const parentSpanContext = {
     traceId: spawned.traceId,
@@ -150,16 +193,27 @@ export async function recoverSubagentSpawn(
     depth: created.depth ?? 1,
     scopeId,
     role: options.role,
-    budgets: spawned.budgetLimits ?? options.runConfig.budgets,
-    budgetDeadlineTs: spawned.budgetDeadlineTs ?? Number.POSITIVE_INFINITY,
-    input: input.input,
+    budgets: spawned.budgetLimits,
+    budgetDeadlineTs: spawned.budgetDeadlineTs,
+    input: recoveredInput,
     tools: options.childTools,
     signal: options.context.signal,
     parentSpanContext,
     rootSpanParent: trace.setSpanContext(ROOT_CONTEXT, parentSpanContext),
     rootSpanLinks: [{ context: parentSpanContext }],
   };
-  const result = await options.runChild(request);
+  let result: SubagentResult;
+  try {
+    result = await options.runChild(request);
+  } catch (error) {
+    if (options.context.signal.reason === "shutdown") {
+      return { kind: "shutdown" };
+    }
+    throw error;
+  }
+  if (options.context.signal.reason === "shutdown") {
+    return { kind: "shutdown" };
+  }
   if (result.status === "suspended") {
     return { kind: "suspend" };
   }

@@ -44,7 +44,7 @@ function event(runId: Id, seq: number, payload: Record<string, unknown>): Event 
   });
 }
 
-function parentHistory(includeSpawn: boolean): Event[] {
+function parentHistory(includeSpawn: boolean, includeBudgetMetadata = true): Event[] {
   const events: Event[] = [
     event(parentRunId, 0, {
       type: "run_created",
@@ -80,6 +80,12 @@ function parentHistory(includeSpawn: boolean): Event[] {
         childRunId,
         role: "worker",
         parentCallId: callId,
+        ...(includeBudgetMetadata
+          ? {
+              budgetLimits: RunConfigSchema.parse({}).budgets,
+              budgetDeadlineTs: 1_000,
+            }
+          : {}),
       }),
     );
   }
@@ -129,11 +135,19 @@ async function seed(store: InMemoryEventStore, options: {
   readonly includeSpawn?: boolean;
   readonly childStatus?: "running" | "completed";
   readonly completed?: boolean;
+  readonly budgetMetadata?: boolean;
+  readonly childOnlyCreated?: boolean;
 } = {}): Promise<Event[]> {
-  const events = parentHistory(options.includeSpawn ?? true);
+  const events = parentHistory(
+    options.includeSpawn ?? true,
+    options.budgetMetadata ?? true,
+  );
   await store.append(parentRunId, events, 0);
   if (options.includeSpawn !== false && options.childStatus !== undefined) {
     const child = childHistory(options.childStatus);
+    if (options.childOnlyCreated === true) {
+      child.splice(1);
+    }
     await store.append(childRunId, child, 0);
   }
   if (options.completed === true) {
@@ -156,6 +170,7 @@ function createOptions(
   store: InMemoryEventStore,
   parentEvents: readonly Event[],
   runChild: SubagentRunner = vi.fn<SubagentRunner>(),
+  signal = new AbortController().signal,
 ) {
   const scopes = new RunScopeRegistry();
   scopes.register(parentRunId, parentRunId);
@@ -165,7 +180,7 @@ function createOptions(
   };
   const context: ToolResumeContext = {
     runId: parentRunId,
-    signal: new AbortController().signal,
+    signal,
     toolRegistry: tools,
   };
   return {
@@ -231,6 +246,18 @@ describe("recoverSubagentSpawn", () => {
     await expect(recoverSubagentSpawn(createOptions(store, parentEvents))).resolves.toMatchObject({
       kind: "result",
       execution: { outcome: "error", errorCode: "subagent_missing" },
+      completion: { childRunId, outcome: "failed" },
+    });
+  });
+
+  it("fails closed and records completion when the announcement has no budget bounds", async () => {
+    const store = new InMemoryEventStore();
+    const parentEvents = await seed(store, { budgetMetadata: false });
+
+    await expect(recoverSubagentSpawn(createOptions(store, parentEvents))).resolves.toMatchObject({
+      kind: "result",
+      execution: { outcome: "error", errorCode: "subagent_budget_missing" },
+      completion: { childRunId, outcome: "failed" },
     });
   });
 
@@ -276,6 +303,55 @@ describe("recoverSubagentSpawn", () => {
         usage: { inputTokens: 2, outputTokens: 3 },
       };
     });
+
+    it("recovers a child log containing only run_created", async () => {
+      const store = new InMemoryEventStore();
+      const parentEvents = await seed(store, {
+        childStatus: "running",
+        childOnlyCreated: true,
+      });
+      const runChild = vi.fn<SubagentRunner>(async (request) => {
+        expect(request.input).toEqual({ goal: "recover child" });
+        await store.append(
+          childRunId,
+          [
+            event(childRunId, 1, {
+              type: "run_input",
+              v: 1,
+              input: request.input,
+              inputKind: "initial",
+            }),
+            event(childRunId, 2, {
+              type: "run_status_changed",
+              v: 1,
+              from: "pending",
+              to: "running",
+              reason: "start",
+            }),
+            event(childRunId, 3, {
+              type: "run_status_changed",
+              v: 1,
+              from: "running",
+              to: "completed",
+              reason: "completed",
+            }),
+          ],
+          1,
+        );
+        return {
+          childRunId,
+          status: "completed",
+          value: { text: "recovered" },
+          usage: { inputTokens: 0, outputTokens: 0 },
+        };
+      });
+
+      await expect(recoverSubagentSpawn(createOptions(store, parentEvents, runChild))).resolves.toMatchObject({
+        kind: "result",
+        execution: { outcome: "ok" },
+      });
+      expect(runChild).toHaveBeenCalledOnce();
+    });
     const options = createOptions(store, parentEvents, runChild);
 
     await expect(recoverSubagentSpawn(options)).resolves.toMatchObject({
@@ -297,6 +373,20 @@ describe("recoverSubagentSpawn", () => {
       childRunId,
       status: "suspended",
       usage: { inputTokens: 0, outputTokens: 0 },
+    });
+
+    it("leaves the spawn dangling when shutdown arrives while the child resumes", async () => {
+      const store = new InMemoryEventStore();
+      const parentEvents = await seed(store, { childStatus: "running" });
+      const controller = new AbortController();
+      const runChild: SubagentRunner = async () => {
+        controller.abort("shutdown");
+        throw new Error("child shutdown");
+      };
+
+      await expect(
+        recoverSubagentSpawn(createOptions(store, parentEvents, runChild, controller.signal)),
+      ).resolves.toEqual({ kind: "shutdown" });
     });
 
     await expect(recoverSubagentSpawn(createOptions(store, parentEvents, runChild))).resolves.toEqual({

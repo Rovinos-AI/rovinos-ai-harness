@@ -56,12 +56,17 @@ export class CrashingEventStore implements EventStore {
     runId: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     const shouldCrash = this.shouldCrash();
-    if (shouldCrash && this.options.mode === "before_commit") {
+    if (
+      shouldCrash &&
+      (this.options.mode === "before_commit" ||
+        (this.options.persistentCrash === true && this.appendCount > this.options.crashAt))
+    ) {
       return Promise.reject(new SimulatedCrash());
     }
-    const result = this.inner.append(runId, events, expectedSeq);
+    const result = this.inner.append(runId, events, expectedSeq, leaseOwner);
     return shouldCrash ? result.then(() => Promise.reject(new SimulatedCrash())) : result;
   }
 
@@ -70,15 +75,31 @@ export class CrashingEventStore implements EventStore {
     events: readonly NewEvent[],
     expectedSeq: number,
     snapshot: Snapshot,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     const shouldCrash = this.shouldCrash();
-    if (shouldCrash && this.options.mode === "before_commit") {
+    if (
+      shouldCrash &&
+      (this.options.mode === "before_commit" ||
+        (this.options.persistentCrash === true && this.appendCount > this.options.crashAt))
+    ) {
       return Promise.reject(new SimulatedCrash());
     }
-    const result = this.inner.appendWithSnapshot(runId, events, expectedSeq, snapshot);
+    const result = this.inner.appendWithSnapshot(runId, events, expectedSeq, snapshot, leaseOwner);
     return shouldCrash ? result.then(() => Promise.reject(new SimulatedCrash())) : result;
   }
 
+  claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {
+    return this.inner.claimRunExecution(...args);
+  }
+
+  renewRunExecution(...args: Parameters<EventStore["renewRunExecution"]>) {
+    return this.inner.renewRunExecution(...args);
+  }
+
+  releaseRunExecution(...args: Parameters<EventStore["releaseRunExecution"]>) {
+    return this.inner.releaseRunExecution(...args);
+  }
   latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
     return this.inner.latestSnapshot(runId);
   }

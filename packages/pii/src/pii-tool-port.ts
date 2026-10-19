@@ -203,6 +203,15 @@ export class PiiToolPort implements PiiToolPortLike {
       }
       return { outcome: "error", errorCode: "tool_failed", result: null };
     }
+    return this.sanitizeRecoveredResult(call, context, execution);
+  }
+
+  /** Tokenizes a recovered tool result without executing the underlying tool again. */
+  async sanitizeRecoveredResult(
+    call: PiiToolCall,
+    context: PiiToolContext,
+    execution: PiiToolResult,
+  ): Promise<PiiToolResult> {
     if (execution.binary === true) {
       return binaryResult(execution, call, context, this.deps.tokenizer);
     }

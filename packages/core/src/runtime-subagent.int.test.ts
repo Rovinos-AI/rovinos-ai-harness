@@ -19,6 +19,7 @@ import type { ModelPort, ModelRequest, ModelCompletion, ToolPort } from "./ports
 import { InMemoryEventStore, type EventStore } from "@harness/store";
 import { InMemoryVault, AuditingVaultResolver, Token } from "@harness/vault";
 import { PiiToolPort, Tokenizer } from "@harness/pii";
+import { InMemoryWorkspace, OffloadedStub } from "@harness/context";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntime } from "./runtime.js";
 import type { RuntimeConfig } from "./runtime-config.js";
@@ -451,6 +452,15 @@ async function eventsFor(store: EventStore, runId: Id): Promise<Event[]> {
   return events;
 }
 
+function delegatingStore(store: EventStore): EventStore {
+  return new Proxy(store, {
+    get: (target, property) => {
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 class TestShutdownProcess implements ShutdownProcessLike {
   exitCode: number | undefined;
   private readonly listeners = new Map<"SIGINT" | "SIGTERM", (() => void)[]>();
@@ -751,12 +761,128 @@ describe("runtime subagent spawning", () => {
 
   it("resumes an approval-suspended child once and serializes parent resumes", async () => {
     const store = new InMemoryEventStore();
+    const firstStore = delegatingStore(store);
+    const secondStore = delegatingStore(store);
     let childModelCalls = 0;
     let parentModelCalls = 0;
     let writeCount = 0;
     let signalChildResume = (): void => undefined;
     const childResumeStarted = new Promise<void>((resolve) => {
       signalChildResume = resolve;
+    });
+
+    it("tokenizes and offloads a recovered child result before recording the spawn result", async () => {
+      const store = new InMemoryEventStore();
+      const workspace = new InMemoryWorkspace();
+      let parentCalls = 0;
+      let childCalls = 0;
+      const model: ModelPort = {
+        complete: (request) => {
+          if (request.role === "worker") {
+            childCalls += 1;
+            return Promise.resolve(
+              childCalls === 1
+                ? completion([
+                    {
+                      type: "tool_call",
+                      callId: childCallId,
+                      toolId: Code.parse("test.write"),
+                      args: {},
+                    },
+                  ])
+                : completion([
+                    { type: "text", text: `${email}${"x".repeat(9_000)}` },
+                  ]),
+            );
+          }
+          parentCalls += 1;
+          return Promise.resolve(
+            parentCalls === 1
+              ? completion([
+                  {
+                    type: "tool_call",
+                    callId: spawnCallId,
+                    toolId: Code.parse("agent.spawn"),
+                    args: { role: "worker", goal: "return a synthetic value" },
+                  },
+                ])
+              : completion([{ type: "text", text: "parent complete" }]),
+          );
+        },
+      };
+      const runtime = await createRuntime(
+        {
+          run: RunConfigSchema.parse({}),
+          pii: PiiConfigSchema.parse({ defaultAction: "tokenize" }),
+          models: ModelsConfigSchema.parse({
+            routing: {
+              default: [{ provider: "local", model: "parent" }],
+              roles: { worker: [{ provider: "local", model: "worker" }] },
+            },
+          }),
+          roles: [
+            { id: "worker", route: "worker", tools: ["test.write"], maxDepth: 2, maxChildren: 1 },
+          ],
+        },
+        {
+          store,
+          workspace,
+          transientVault: true,
+          clock: new FakeClock(4),
+          ids: new SequentialIdGenerator(),
+          model,
+          tool: {
+            describe: (toolId) =>
+              toolId === "test.write" ? { idempotent: false, timeoutMs: 1_000 } : undefined,
+            getToolSpecs: () => [
+              { toolId: "test.write", description: "Write once", inputSchema: { type: "object" } },
+            ],
+            execute: () => Promise.resolve({ outcome: "ok", result: null }),
+          },
+          policy: {
+            version: Code.parse("test.policy"),
+            decide: (call) => ({
+              decision: call.toolId === "test.write" ? "ask" : "allow",
+              ruleId: "test.rule",
+              reason: "test_decision",
+              editable: [],
+            }),
+          },
+        },
+      );
+      try {
+        const initial = await runtime.run("recover child result");
+        const parentRunId = initial.events[0]?.runId;
+        const spawn = initial.events.find((event) => event.type === "subagent_spawned");
+        if (parentRunId === undefined || spawn?.type !== "subagent_spawned") {
+          throw new Error("Expected a child announcement.");
+        }
+        const childApproval = (await eventsFor(store, spawn.childRunId)).find(
+          (event) => event.type === "approval_requested",
+        );
+        if (childApproval?.type !== "approval_requested") {
+          throw new Error("Expected the child tool approval.");
+        }
+        await runtime.resolveApproval(spawn.childRunId, childApproval.approvalId, "approve");
+        await expect(runtime.resume(spawn.childRunId)).resolves.toMatchObject({
+          status: "completed",
+        });
+        const recovered = await runtime.resume(parentRunId);
+        const spawnResult = recovered.events.find(
+          (event) => event.type === "tool_result" && event.callId === spawnCallId,
+        );
+        if (spawnResult?.type !== "tool_result") {
+          throw new Error("Expected a recovered spawn result.");
+        }
+        const stub = OffloadedStub.parse(spawnResult.result);
+
+        expect(recovered.status).toBe("completed");
+        expect(stub.$offloaded.preview).toContain("<EMAIL_1>");
+        expect(JSON.stringify(spawnResult)).not.toContain(email);
+        expect(childCalls).toBe(2);
+      } finally {
+        await runtime.close();
+      }
     });
     let releaseChildResume = (): void => undefined;
     const childResumeGate = new Promise<void>((resolve) => {
@@ -804,13 +930,13 @@ describe("runtime subagent spawning", () => {
       getToolSpecs: () => [
         { toolId: "test.write", description: "Write once", inputSchema: { type: "object" } },
       ],
-      execute: () => {
+      execute: (_call, context) => {
+        expect(context.depth).toBe(1);
         writeCount += 1;
         return Promise.resolve({ outcome: "ok", result: { written: true } });
       },
     };
-    const runtime = await createRuntime(
-      {
+    const runtimeConfig: RuntimeConfig = {
         run: RunConfigSchema.parse({}),
         pii: PiiConfigSchema.parse({ enabled: false }),
         models: ModelsConfigSchema.parse({
@@ -822,9 +948,8 @@ describe("runtime subagent spawning", () => {
         roles: [
           { id: "worker", route: "worker", tools: ["test.write"], maxDepth: 2, maxChildren: 1 },
         ],
-      },
-      {
-        store,
+      };
+    const runtimeOverrides = {
         transientVault: true,
         clock: new FakeClock(4),
         ids: new SequentialIdGenerator(),
@@ -833,20 +958,38 @@ describe("runtime subagent spawning", () => {
         policy: {
           version: Code.parse("test.policy"),
           decide: (call) => ({
-            decision: call.toolId === "test.write" ? "ask" : "allow",
+            decision:
+              call.toolId === "test.write" || call.toolId === "agent.spawn" ? "ask" : "allow",
             ruleId: "test.rule",
             reason: "test_decision",
             editable: [],
           }),
         },
-      },
-    );
+      };
+    const runtime = await createRuntime(runtimeConfig, {
+      ...runtimeOverrides,
+      store: firstStore,
+    });
+    const secondRuntime = await createRuntime(runtimeConfig, {
+      ...runtimeOverrides,
+      store: secondStore,
+    });
     try {
       const initial = runtime.start("delegate", { runId: rootRunId });
       await initial.started;
       await expect(initial.completion).resolves.toMatchObject({ status: "suspended" });
 
-      const parentEvents = await eventsFor(store, rootRunId);
+      let parentEvents = await eventsFor(store, rootRunId);
+      const spawnApproval = parentEvents.find(
+        (event) => event.type === "approval_requested" && event.callId === spawnCallId,
+      );
+      if (spawnApproval?.type !== "approval_requested") {
+        throw new Error("Expected the parent spawn to wait for approval.");
+      }
+      await runtime.resolveApproval(rootRunId, spawnApproval.approvalId, "approve");
+      await expect(runtime.resume(rootRunId)).resolves.toMatchObject({ status: "suspended" });
+
+      parentEvents = await eventsFor(store, rootRunId);
       const spawn = parentEvents.find((event) => event.type === "subagent_spawned");
       if (spawn?.type !== "subagent_spawned") {
         throw new Error("Expected a durable child announcement.");
@@ -869,7 +1012,9 @@ describe("runtime subagent spawning", () => {
 
       const firstResume = runtime.resume(rootRunId);
       await childResumeStarted;
-      await expect(runtime.resume(rootRunId)).rejects.toMatchObject({ code: "resume_conflict" });
+      await expect(secondRuntime.resume(rootRunId)).rejects.toMatchObject({
+        code: "resume_conflict",
+      });
       releaseChildResume();
       await expect(firstResume).resolves.toMatchObject({ status: "completed" });
 
@@ -886,6 +1031,7 @@ describe("runtime subagent spawning", () => {
     } finally {
       releaseChildResume();
       await runtime.close();
+      await secondRuntime.close();
     }
   });
 

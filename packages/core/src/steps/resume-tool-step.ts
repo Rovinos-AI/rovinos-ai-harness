@@ -249,17 +249,25 @@ async function applyDanglingIntentAction(
 }
 
 async function applyToolResumeDecision(
-  options: ResumeToolStepOptions,
+  options: Omit<ResumeToolStepOptions, "ids">,
   intent: ToolIntentEvent,
   decision: ToolResumeDecision,
+  recoveredCall: ModelToolCall = callFromIntent(intent),
+  preparedCall = false,
 ): Promise<readonly Event[]> {
   if (decision.kind === "rerun") {
-    const description = options.tool.describe(intent.toolId, intent.args);
+    const description = options.tool.describe(recoveredCall.toolId, recoveredCall.args);
     if (description === undefined) {
       return recordDanglingFailure(options, intent, "unknown_tool");
     }
     await options.beforeToolExecution?.();
-    return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
+    return runToolCall(options, recoveredCall, description, {
+      existingIntent: intent,
+      ...(preparedCall ? { prepared: { call: recoveredCall } } : {}),
+    });
+  }
+  if (decision.kind === "shutdown") {
+    return [];
   }
   if (decision.kind === "suspend") {
     const suspended = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
@@ -317,6 +325,7 @@ export async function applyApprovalDecision(
   intent: ToolIntentEvent,
   approval: ApprovalRequestedEvent,
   resolution: Extract<Event, { type: "approval_resolved" }>,
+  state?: RunState,
 ): Promise<readonly Event[]> {
   if (approval.callId !== intent.callId || resolution.approvalId !== approval.approvalId) {
     throw new ResumeActionMismatchError();
@@ -353,9 +362,18 @@ export async function applyApprovalDecision(
     args = resolution.edits;
   }
   const call: ModelToolCall = { callId: intent.callId, toolId: intent.toolId, args };
-  const description = options.tool.describe(intent.toolId, intent.args);
+  const description = options.tool.describe(intent.toolId, args);
   if (description !== undefined) {
     await options.beforeToolExecution?.();
+  }
+  const strategy = state === undefined ? undefined : options.tool.resumeStrategy?.(intent.toolId);
+  if (strategy !== undefined && state !== undefined) {
+    const decision = await strategy.onDanglingIntent(call, state, {
+      runId: options.runId,
+      signal: options.signal,
+      toolRegistry: options.tool,
+    });
+    return applyToolResumeDecision(options, intent, decision, call, true);
   }
   return runToolCall(options, call, description, {
     existingIntent: intent,

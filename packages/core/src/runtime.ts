@@ -273,22 +273,45 @@ function createRuntimeToolPort(
     scopes: options.scopes,
     ...(options.pii === undefined ? {} : { resolver: options.pii.resolver }),
   });
-  const piiTool =
+  const piiPort =
     options.pii === undefined
-      ? subagentTool
+      ? undefined
       : new PiiToolPort(subagentTool, {
           tokenizer: options.pii.tokenizer,
           config: options.pii.config,
           resolver: options.pii.resolver,
         });
-  const composed = options.overrides.workspace === undefined
-    ? piiTool
-    : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, options.ids);
+  const piiTool = piiPort ?? subagentTool;
+  const offloadingPort =
+    options.overrides.workspace === undefined
+      ? undefined
+      : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, options.ids);
+  const composed = offloadingPort ?? piiTool;
   const spawnResumeStrategy = subagentTool.resumeStrategy?.bind(subagentTool);
   const innerResumeStrategy = options.tool.resumeStrategy?.bind(options.tool);
   return Object.assign(composed, {
-    resumeStrategy: (toolId: Code) =>
-      spawnResumeStrategy?.(toolId) ?? innerResumeStrategy?.(toolId),
+    resumeStrategy: (toolId: Code) => {
+      const strategy = spawnResumeStrategy?.(toolId) ?? innerResumeStrategy?.(toolId);
+      if (strategy === undefined) {
+        return undefined;
+      }
+      return {
+        onDanglingIntent: async (call, state, context) => {
+          const decision = await strategy.onDanglingIntent(call, state, context);
+          if (decision.kind !== "result") {
+            return decision;
+          }
+          let execution = decision.execution;
+          if (piiPort !== undefined) {
+            execution = await piiPort.sanitizeRecoveredResult(call, context, execution);
+          }
+          if (offloadingPort !== undefined) {
+            execution = await offloadingPort.offloadRecoveredResult(call, context, execution);
+          }
+          return { ...decision, execution };
+        },
+      };
+    },
   });
 }
 

@@ -331,7 +331,9 @@ describe("dangling tool intent resume", () => {
       toolId: "resume_tool",
       args: { value: 1 },
     });
+  });
 
+  describe("tool resume strategy", () => {
     it("records recovered child completion before its tool result", async () => {
       const store = new InMemoryEventStore();
       const clock = new FakeClock(100);

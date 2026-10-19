@@ -19,7 +19,6 @@ import {
 import {
   createRuntime,
   NaiveContext,
-  LeaseLostError,
   resumeRun,
   resolveApproval,
   RunAlreadyTerminalError,
@@ -257,6 +256,7 @@ class BoundaryRecordingStore implements EventStore {
     forRun: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     this.boundaries.push({
       runId: forRun,
@@ -266,7 +266,7 @@ class BoundaryRecordingStore implements EventStore {
         event.type === "tool_intent" || event.type === "tool_result" ? [event.callId] : [],
       ),
     });
-    return this.inner.append(forRun, events, expectedSeq);
+    return this.inner.append(forRun, events, expectedSeq, leaseOwner);
   }
 
   appendWithSnapshot(
@@ -274,6 +274,7 @@ class BoundaryRecordingStore implements EventStore {
     events: readonly NewEvent[],
     expectedSeq: number,
     snapshot: Parameters<EventStore["appendWithSnapshot"]>[3],
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     this.boundaries.push({
       runId: forRun,
@@ -283,7 +284,31 @@ class BoundaryRecordingStore implements EventStore {
         event.type === "tool_intent" || event.type === "tool_result" ? [event.callId] : [],
       ),
     });
-    return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot);
+    return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot, leaseOwner);
+  }
+
+  claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {
+    return this.inner.claimRunExecution(...args);
+  }
+
+  renewRunExecution(...args: Parameters<EventStore["renewRunExecution"]>) {
+    return this.inner.renewRunExecution(...args);
+  }
+
+  releaseRunExecution(...args: Parameters<EventStore["releaseRunExecution"]>) {
+    return this.inner.releaseRunExecution(...args);
+  }
+
+  claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {
+    return this.inner.claimRunExecution(...args);
+  }
+
+  renewRunExecution(...args: Parameters<EventStore["renewRunExecution"]>) {
+    return this.inner.renewRunExecution(...args);
+  }
+
+  releaseRunExecution(...args: Parameters<EventStore["releaseRunExecution"]>) {
+    return this.inner.releaseRunExecution(...args);
   }
 
   latestSnapshot(forRun: Id) {
@@ -498,6 +523,7 @@ class PreIntentExecutionStore implements EventStore {
     forRun: Id,
     events: readonly Parameters<EventStore["append"]>[1][number][],
     expectedSeq: number,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     for (const event of events) {
       if (event.type === "tool_intent") {
@@ -507,7 +533,7 @@ class PreIntentExecutionStore implements EventStore {
         );
       }
     }
-    return this.inner.append(forRun, events, expectedSeq);
+    return this.inner.append(forRun, events, expectedSeq, leaseOwner);
   }
 
   appendWithSnapshot(
@@ -515,8 +541,9 @@ class PreIntentExecutionStore implements EventStore {
     events: Parameters<EventStore["appendWithSnapshot"]>[1],
     expectedSeq: number,
     snapshot: Parameters<EventStore["appendWithSnapshot"]>[3],
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
-    return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot);
+    return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot, leaseOwner);
   }
 
   latestSnapshot(forRun: Id) {
@@ -873,7 +900,7 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
       try {
         await firstRuntime.run("subagent crash matrix");
       } catch (error) {
-        if (!(error instanceof SimulatedCrash) && !(error instanceof LeaseLostError)) {
+        if (!(error instanceof SimulatedCrash)) {
           throw error;
         }
         crashed = true;
@@ -906,65 +933,78 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
         }
 
         let parentEvents = await readEvents(restartStore, parentRunId);
-        const spawn = parentEvents.find((event) => event.type === "subagent_spawned");
-        if (spawn?.type === "subagent_spawned") {
-          const childEvents = await readEvents(restartStore, spawn.childRunId);
-          const parentStatus = parentEvents.findLast(
-            (event) => event.type === "run_status_changed",
+        const spawn = parentEvents.find(
+          (event) => event.type === "subagent_spawned" && event.parentCallId === subagentSpawnCallId,
+        );
+        if (spawn?.type !== "subagent_spawned") {
+          throw new Error("Expected the recovered parent to announce its child.");
+        }
+        let childEvents = await readEvents(restartStore, spawn.childRunId);
+        const parentStatus = parentEvents.findLast(
+          (event) => event.type === "run_status_changed",
+        );
+        if (parentStatus?.type === "run_status_changed" && parentStatus.to === "suspended") {
+          const approval = childEvents.find(
+            (event) =>
+              event.type === "approval_requested" &&
+              event.callId === subagentToolCallId &&
+              !childEvents.some(
+                (candidate) =>
+                  candidate.type === "approval_resolved" &&
+                  candidate.approvalId === event.approvalId,
+              ),
           );
-          if (parentStatus?.type === "run_status_changed" && parentStatus.to === "suspended") {
-            const approval = childEvents.find(
-              (event) =>
-                event.type === "approval_requested" &&
-                event.callId === subagentToolCallId &&
-                !childEvents.some(
-                  (candidate) =>
-                    candidate.type === "approval_resolved" &&
-                    candidate.approvalId === event.approvalId,
-                ),
-            );
-            if (counts.writes === 0 && approval?.type === "approval_requested") {
-              await freshRuntime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
-              try {
-                await freshRuntime.resume(parentRunId);
-              } catch (error) {
-                if (!(error instanceof RunAlreadyTerminalError)) {
-                  throw error;
-                }
-              }
+          if (approval?.type !== "approval_requested") {
+            throw new Error("Expected child approval before resuming the parent.");
+          }
+          await freshRuntime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
+          try {
+            await freshRuntime.resume(parentRunId);
+          } catch (error) {
+            if (!(error instanceof RunAlreadyTerminalError)) {
+              throw error;
             }
           }
-          parentEvents = await readEvents(restartStore, parentRunId);
-          const announcedChildren = parentEvents.filter(
-            (event): event is Extract<Event, { type: "subagent_spawned" }> =>
-              event.type === "subagent_spawned" && event.parentCallId === subagentSpawnCallId,
-          );
-          expect(announcedChildren).toHaveLength(1);
-          expect(new Set(announcedChildren.map((event) => event.childRunId)).size).toBe(1);
-          const finalChildEvents = await readEvents(restartStore, spawn.childRunId);
-          if (finalChildEvents.length === 0) {
-            expect(counts.writes).toBe(0);
-            expect(parentEvents).toContainEqual(
-              expect.objectContaining({
-                type: "tool_result",
-                callId: subagentSpawnCallId,
-                outcome: "error",
-                errorCode: "subagent_missing",
-              }),
-            );
-          } else {
-            expect(counts.writes).toBe(1);
-            expect(
-              finalChildEvents.filter(
-                (event) => event.type === "tool_intent" && event.callId === subagentToolCallId,
-              ),
-            ).toHaveLength(1);
-            expect(
-              finalChildEvents.filter(
-                (event) => event.type === "tool_result" && event.callId === subagentToolCallId,
-              ).length,
-            ).toBeLessThanOrEqual(1);
-          }
+        }
+        parentEvents = await readEvents(restartStore, parentRunId);
+        childEvents = await readEvents(restartStore, spawn.childRunId);
+        const finalStatus = parentEvents.findLast(
+          (event) => event.type === "run_status_changed",
+        );
+        expect(finalStatus).toMatchObject({ type: "run_status_changed", to: "completed" });
+        const announcedChildren = parentEvents.filter(
+          (event) =>
+            event.type === "subagent_spawned" && event.parentCallId === subagentSpawnCallId,
+        );
+        expect(announcedChildren).toHaveLength(1);
+        expect(
+          parentEvents.filter(
+            (event) => event.type === "subagent_completed" && event.childRunId === spawn.childRunId,
+          ),
+        ).toHaveLength(1);
+        expect(
+          parentEvents.filter(
+            (event) => event.type === "tool_result" && event.callId === subagentSpawnCallId,
+          ),
+        ).toHaveLength(1);
+        expect(childEvents.filter((event) => event.type === "run_created")).toHaveLength(
+          childEvents.length === 0 ? 0 : 1,
+        );
+        const childRan = childEvents.some(
+          (event) => event.type === "model_request" || event.type === "tool_intent",
+        );
+        expect(counts.writes).toBe(childRan ? 1 : 0);
+        if (childRan) {
+          expect(
+            childEvents.filter(
+              (event) => event.type === "tool_intent" && event.callId === subagentToolCallId,
+            ),
+          ).toHaveLength(1);
+          expect(
+            childEvents.filter(
+              (event) => event.type === "tool_result" && event.callId === subagentToolCallId,
+            ),
+          ).toHaveLength(1);
         }
       } finally {
         await freshRuntime.close();

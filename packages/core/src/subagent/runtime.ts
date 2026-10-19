@@ -20,6 +20,7 @@ import type { RunScopeRegistry } from "./scope.js";
 import { SubagentSupervisor, type SubagentRunRequest } from "./supervisor.js";
 import { finalizeChild } from "./result.js";
 import { foldRunState, isTerminalRunState } from "../run-state.js";
+import { RUN_SPAN } from "../spans.js";
 
 async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
   const events: Event[] = [];
@@ -175,6 +176,47 @@ export function createSubagentTool(options: {
     resumeChild: async (request: SubagentRunRequest) => {
       let resumeError: unknown;
       try {
+        const initialEvents = await readEvents(options.store, request.runId);
+        if (
+          initialEvents.length === 1 &&
+          foldRunState(initialEvents).status === "pending" &&
+          initialEvents[0]?.type === "run_created"
+        ) {
+          const recorder = new RunRecorder(
+            options.store,
+            request.runId,
+            options.ids.next(),
+            1,
+            options.clock,
+          );
+          await recorder.withStepSpan(
+            RUN_SPAN,
+            {},
+            async () => {
+              const recorded = await recorder.recordBatch([
+                {
+                  type: "run_input",
+                  v: 1,
+                  input: request.input,
+                  inputKind: "initial",
+                },
+                {
+                  type: "run_status_changed",
+                  v: 1,
+                  from: "pending",
+                  to: "running",
+                  reason: "start",
+                },
+              ]);
+              const last = recorded.at(-1);
+              if (last === undefined) {
+                throw new Error("Expected child startup events.");
+              }
+              return last;
+            },
+            { parentContext: request.rootSpanParent, links: request.rootSpanLinks },
+          );
+        }
         await resumeRun({
           store: options.store,
           runId: request.runId,
@@ -189,6 +231,7 @@ export function createSubagentTool(options: {
           goal: request.input,
           budgets: request.budgets,
           deadlineTs: request.budgetDeadlineTs,
+          depth: request.depth,
           checkpointEveryEvents: options.config.run.checkpointEveryEvents,
           ...(options.config.store?.snapshotKeep === undefined
             ? {}

@@ -14,6 +14,7 @@ import { planDanglingIntents, type ResumePolicy } from "./resume-policy.js";
 import { CorruptLogError, foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
 import { RUN_SPAN } from "./spans.js";
 import { applyDanglingIntents } from "./steps/resume-tool-step.js";
+import { suspendForShutdown } from "./steps/shutdown.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 
 /** Error raised when attempting to resume a completed, failed, or cancelled run. */
@@ -61,6 +62,8 @@ export class RunAwaitingApprovalError extends HarnessError {
 }
 
 const activeResumes = new WeakMap<EventStore, Set<Id>>();
+const RESUME_LEASE_MS = 30_000;
+const RESUME_LEASE_RENEW_MS = 10_000;
 
 function claimResumeLock(store: EventStore, runId: Id): () => void {
   let runs = activeResumes.get(store);
@@ -322,12 +325,16 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
         runId: options.runId,
         ids: options.ids,
         signal: options.signal,
+        depth: options.depth,
         beforeToolExecution,
         onEvents: (recorded) => events.push(...recorded),
       },
       danglingState,
       actions,
     );
+    if (options.signal.reason === "shutdown") {
+      return suspendForShutdown(recorder, events, checkpointer);
+    }
 
     const resumedState = foldRunState(events);
     await applyResolvedApprovals(
@@ -338,6 +345,7 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
         clock: options.clock,
         runId: options.runId,
         signal: options.signal,
+        depth: options.depth,
         beforeToolExecution,
         onEvents: (recorded) => events.push(...recorded),
       },
@@ -411,10 +419,56 @@ async function claimAndContinue(execution: ResumeExecution): Promise<Event> {
  */
 export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResult> {
   const release = claimResumeLock(options.store, options.runId);
+  const leaseOwner = options.ids.next();
+  const leaseController = new AbortController();
+  let leaseClaimed = false;
+  let renewalTimer: ReturnType<typeof setInterval> | undefined;
+  let renewalPending = false;
   try {
-    const { events, snapshot, state, head } = await readResumeHistory(options);
+    leaseClaimed = await options.store.claimRunExecution(
+      options.runId,
+      leaseOwner,
+      options.clock.now(),
+      RESUME_LEASE_MS,
+    );
+    if (!leaseClaimed) {
+      throw new ResumeConflictError();
+    }
+    const executionOptions = {
+      ...options,
+      signal: AbortSignal.any([options.signal, leaseController.signal]),
+    };
+    renewalTimer = setInterval(() => {
+      if (renewalPending) {
+        return;
+      }
+      renewalPending = true;
+      void options.store
+        .renewRunExecution(options.runId, leaseOwner, options.clock.now(), RESUME_LEASE_MS)
+        .then((renewed) => {
+          if (!renewed) {
+            leaseController.abort("resume_lease_lost");
+          }
+        })
+        .catch(() => {
+          leaseController.abort("resume_lease_lost");
+        })
+        .finally(() => {
+          renewalPending = false;
+        });
+    }, RESUME_LEASE_RENEW_MS);
+    renewalTimer.unref?.();
+    const { events, snapshot, state, head } = await readResumeHistory(executionOptions);
     const segmentId = options.ids.next();
-    const recorder = new RunRecorder(options.store, options.runId, segmentId, head, options.clock);
+    const recorder = new RunRecorder(
+      options.store,
+      options.runId,
+      segmentId,
+      head,
+      options.clock,
+      undefined,
+      leaseOwner,
+    );
     const newEventStart = events.length;
     const checkpointer = new Checkpointer({
       recorder,
@@ -433,7 +487,7 @@ export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResul
     const eventsAfterSnapshot =
       snapshot === undefined ? events.slice() : events.filter((event) => event.seq > snapshot.atSeq);
     const execution: ResumeExecution = {
-      options,
+      options: executionOptions,
       state,
       events,
       snapshot,
@@ -452,6 +506,12 @@ export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResul
 
     return resultForResume(events, newEventStart);
   } finally {
+    if (renewalTimer !== undefined) {
+      clearInterval(renewalTimer);
+    }
+    if (leaseClaimed) {
+      await options.store.releaseRunExecution(options.runId, leaseOwner);
+    }
     release();
   }
 }
