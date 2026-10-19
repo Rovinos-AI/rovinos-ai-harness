@@ -30,7 +30,7 @@ const PseudonymizeOptionsSchema = z
 /** Validated inputs for {@link pseudonymize}. */
 export type PseudonymizeOptions = z.infer<typeof PseudonymizeOptionsSchema>;
 
-class PseudonymizationError extends HarnessError {
+class PseudonymError extends HarnessError {
   readonly code = "pseudonym_input_invalid";
 
   constructor() {
@@ -48,12 +48,12 @@ function encodeBase32(bytes: Uint8Array): string {
     bits += 8;
     while (bits >= 5) {
       bits -= 5;
-      output += BASE32_ALPHABET[(buffer >> bits) & 31];
+      output += BASE32_ALPHABET.charAt((buffer >> bits) & 31);
     }
   }
 
   if (bits > 0) {
-    output += BASE32_ALPHABET[(buffer << (5 - bits)) & 31];
+    output += BASE32_ALPHABET.charAt((buffer << (5 - bits)) & 31);
   }
 
   return output;
@@ -71,16 +71,16 @@ export async function pseudonymize(options: PseudonymizeOptions): Promise<Pseudo
   try {
     parsed = PseudonymizeOptionsSchema.safeParse(options);
   } catch {
-    throw new PseudonymizationError();
+    throw new PseudonymError();
   }
   if (!parsed.success) {
-    throw new PseudonymizationError();
+    throw new PseudonymError();
   }
 
   const { value, scope, keyProvider, keyId } = parsed.data;
   const selectedKeyId = keyId ?? keyProvider.currentKeyId();
   if (!Code.safeParse(selectedKeyId).success) {
-    throw new PseudonymizationError();
+    throw new PseudonymError();
   }
 
   const masterKey = await keyProvider.getKey(selectedKeyId);

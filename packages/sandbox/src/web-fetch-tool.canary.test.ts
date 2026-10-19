@@ -30,7 +30,10 @@ describe("web.fetch URL telemetry canary", () => {
     const telemetry = createTelemetrySdk({
       spanExporter,
       logExporter,
-      telemetry: { sentinel: { enabled: false, minValueLength: 6 } },
+      telemetry: {
+        sentinel: { enabled: false, minValueLength: 6 },
+        correlation: { enabled: false },
+      },
     });
     const tool = new WebFetchTool({
       backend: {

@@ -16,6 +16,7 @@ import { sanitizeSpan } from "../processors/allowlist-span-processor.js";
 
 const disabledTelemetry: TelemetryConfig = {
   sentinel: { minValueLength: 6, enabled: false },
+  correlation: { enabled: false },
 };
 
 export const adversarialStrings = fc.oneof(

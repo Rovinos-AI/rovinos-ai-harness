@@ -2,29 +2,33 @@
 import { describe, expect, it } from "vitest";
 import { pseudonymize } from "./pseudonym.js";
 
-const runA = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-const runB = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
+const runA = "00000000000000000000000000";
+const runB = "00000000000000000000000001";
 const keyA = new Uint8Array(32).fill(7);
 const keyB = new Uint8Array(32).fill(8);
 
 function keyProvider() {
   return {
     currentKeyId: () => "current",
-    getKey: async (keyId: string) => {
+    getKey: (keyId: string) => {
       if (keyId === "current") {
-        return keyA;
+        return Promise.resolve(keyA);
       }
       if (keyId === "previous") {
-        return keyB;
+        return Promise.resolve(keyB);
       }
-      throw new Error("synthetic key not found");
+      return Promise.reject(new Error("synthetic key not found"));
     },
   };
 }
 
 describe("pseudonymize", () => {
   it("returns a deterministic pseudonym with the required format", async () => {
-    const options = { value: "alice@example.test", scope: "global" as const, keyProvider: keyProvider() };
+    const options = {
+      value: "alice@example.test",
+      scope: "global" as const,
+      keyProvider: keyProvider(),
+    };
 
     const first = await pseudonymize(options);
     const second = await pseudonymize(options);

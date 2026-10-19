@@ -28,6 +28,7 @@ const spanContext: SpanContext = {
 };
 const disabledTelemetry: TelemetryConfig = {
   sentinel: { minValueLength: 6, enabled: false },
+  correlation: { enabled: false },
 };
 const runId = Id.parse("A".repeat(26));
 
