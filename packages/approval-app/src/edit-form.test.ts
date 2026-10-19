@@ -98,6 +98,63 @@ describe("approval edit form", () => {
     expect(document.body.contains(form)).toBe(false);
   });
 
+  it("submits from a non-native button so the sandbox cannot trigger form navigation", () => {
+    const onSubmit = vi.fn();
+    const form = createEditForm(document, payload, onSubmit);
+    const input = form.querySelector<HTMLInputElement>("#approval-edit-0");
+    const submit = [...form.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Submit edits",
+    );
+    if (input === null || submit === undefined) {
+      throw new Error("Expected edit input and submit control");
+    }
+
+    input.value = "updated@example.test";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(submit.textContent).toBe("Submit edits");
+    submit.click();
+    expect(onSubmit).toHaveBeenCalledWith([
+      { pointer: "/profile~1name", value: "updated@example.test" },
+    ]);
+  });
+
+  it("submits single-line inputs on Enter without intercepting IME or JSON newlines", () => {
+    const onSubmit = vi.fn();
+    const form = createEditForm(document, payload, onSubmit);
+    const input = form.querySelector<HTMLInputElement>("#approval-edit-0");
+    const textarea = form.querySelector<HTMLTextAreaElement>("#approval-edit-3");
+    if (input === null || textarea === null) {
+      throw new Error("Expected single-line and JSON edit controls");
+    }
+    input.value = "updated@example.test";
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    input.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith([
+      { pointer: "/profile~1name", value: "updated@example.test" },
+    ]);
+
+    onSubmit.mockClear();
+    const composing = new KeyboardEvent("keydown", {
+      key: "Enter",
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    const newline = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    textarea.dispatchEvent(newline);
+    expect(newline.defaultPrevented).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("labels the root pointer as all arguments and passes axe", async () => {
     const rootPayload: ApprovalPayload = {
       ...payload,
