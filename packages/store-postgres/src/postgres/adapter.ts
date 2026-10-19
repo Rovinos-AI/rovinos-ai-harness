@@ -175,18 +175,49 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
     runId: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
-    return this.writer.append(runId, events, expectedSeq);
+    return this.writer.append(runId, events, expectedSeq, leaseOwner);
   }
 
   /** {@inheritDoc EventStore.appendWithSnapshot} */
   async appendWithSnapshot(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    snapshot: Snapshot,
+    ...args: Parameters<EventStore["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
-    return this.writer.appendWithSnapshot(runId, events, expectedSeq, snapshot);
+    const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
+    return this.writer.appendWithSnapshot(runId, events, expectedSeq, snapshot, leaseOwner);
+  }
+
+  /** {@inheritDoc EventStore.claimRunExecution} */
+  async claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
+    this.assertWritable();
+    await this.ensureInitialized();
+    const result = await this.pool.query(
+      "INSERT INTO run_execution_leases (run_id, owner_id, expires_at) VALUES ($1, $2, $3) ON CONFLICT (run_id) DO UPDATE SET owner_id = EXCLUDED.owner_id, expires_at = EXCLUDED.expires_at WHERE run_execution_leases.expires_at <= $4 RETURNING owner_id",
+      [runId, owner, now + leaseMs, now],
+    );
+    return result.rows.length === 1;
+  }
+
+  /** {@inheritDoc EventStore.renewRunExecution} */
+  async renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
+    this.assertWritable();
+    await this.ensureInitialized();
+    const result = await this.pool.query(
+      "UPDATE run_execution_leases SET expires_at = $1 WHERE run_id = $2 AND owner_id = $3 AND expires_at > $4 RETURNING owner_id",
+      [now + leaseMs, runId, owner, now],
+    );
+    return result.rows.length === 1;
+  }
+
+  /** {@inheritDoc EventStore.releaseRunExecution} */
+  async releaseRunExecution(runId: Id, owner: Id): Promise<void> {
+    this.assertWritable();
+    await this.ensureInitialized();
+    await this.pool.query("DELETE FROM run_execution_leases WHERE run_id = $1 AND owner_id = $2", [
+      runId,
+      owner,
+    ]);
   }
 
   /** {@inheritDoc EventStore.read} */

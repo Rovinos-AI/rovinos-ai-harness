@@ -45,13 +45,22 @@ interface WatchRunsOptionsLike {
 
 /** Structural event-store contract implemented by the wrapped store. */
 export interface EventStoreLike {
-  append(runId: Id, events: readonly NewEvent[], expectedSeq: number): Promise<{ nextSeq: number }>;
+  append(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    leaseOwner?: Id,
+  ): Promise<{ nextSeq: number }>;
   appendWithSnapshot(
     runId: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
     snapshot: Snapshot,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }>;
+  claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean>;
+  renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean>;
+  releaseRunExecution(runId: Id, owner: Id): Promise<void>;
   latestSnapshot(runId: Id): Promise<Snapshot | undefined>;
   retainedSnapshots(runId: Id, limit: number): Promise<Snapshot[]>;
   read(runId: Id, range?: { fromSeq?: number; toSeq?: number }): AsyncIterable<Event>;
@@ -142,18 +151,17 @@ export class PiiEventStore implements EventStoreLike {
     runId: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     const prepared = await this.prepareEvents(runId, events, expectedSeq);
     await this.notifySummaries(prepared.summaries);
-    return this.inner.append(runId, prepared.events, expectedSeq);
+    return this.inner.append(runId, prepared.events, expectedSeq, leaseOwner);
   }
 
   async appendWithSnapshot(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    snapshot: Snapshot,
+    ...args: Parameters<EventStoreLike["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
+    const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     const prepared = await this.prepareEvents(runId, events, expectedSeq);
     let sanitizedSnapshot: Snapshot;
     let snapshotSummaries: readonly PiiActionSummary[];
@@ -173,7 +181,13 @@ export class PiiEventStore implements EventStoreLike {
     } catch {
       throw new PiiStorageFailedError();
     }
-    return this.inner.appendWithSnapshot(runId, prepared.events, expectedSeq, sanitizedSnapshot);
+    return this.inner.appendWithSnapshot(
+      runId,
+      prepared.events,
+      expectedSeq,
+      sanitizedSnapshot,
+      leaseOwner,
+    );
   }
 
   latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
@@ -198,6 +212,18 @@ export class PiiEventStore implements EventStoreLike {
 
   head(runId: Id): Promise<number> {
     return this.inner.head(runId);
+  }
+
+  claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
+    return this.inner.claimRunExecution(runId, owner, now, leaseMs);
+  }
+
+  renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
+    return this.inner.renewRunExecution(runId, owner, now, leaseMs);
+  }
+
+  releaseRunExecution(runId: Id, owner: Id): Promise<void> {
+    return this.inner.releaseRunExecution(runId, owner);
   }
 
   deleteRun(runId: Id): Promise<number> {

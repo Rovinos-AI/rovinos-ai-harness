@@ -12,6 +12,7 @@ import {
   InvalidEventError,
   JsonContentCodec,
   KeyNotFoundError,
+  RunExecutionLeaseLostError,
   SeqConflictError,
   StoreEncryptionMismatchError,
   StoreMigrationError,
@@ -130,6 +131,34 @@ describe("read-only SQLite inspection", () => {
     } finally {
       await reader.close();
     }
+  });
+
+  describe("SQLite run execution leases", () => {
+    it("fences stale append owners and permits takeover only after expiry", async () => {
+      const store = new SqliteEventStore(await temporaryDatabase());
+      const owner = Id.parse("00000000000000000000000002");
+      const nextOwner = Id.parse("00000000000000000000000003");
+      try {
+        await store.append(runId, [runCreated(runId, 1)], 0);
+        await expect(store.claimRunExecution(runId, owner, 10, 20)).resolves.toBe(true);
+        await expect(store.claimRunExecution(runId, nextOwner, 20, 20)).resolves.toBe(false);
+        await expect(
+          store.append(runId, [modelRequest(runId, 2)], 1, nextOwner),
+        ).rejects.toBeInstanceOf(RunExecutionLeaseLostError);
+        await expect(store.renewRunExecution(runId, owner, 20, 20)).resolves.toBe(true);
+        await expect(store.claimRunExecution(runId, nextOwner, 39, 20)).resolves.toBe(false);
+        await expect(store.claimRunExecution(runId, nextOwner, 40, 20)).resolves.toBe(true);
+        await expect(
+          store.append(runId, [modelRequest(runId, 2)], 1, owner),
+        ).rejects.toBeInstanceOf(RunExecutionLeaseLostError);
+        await store.releaseRunExecution(runId, nextOwner);
+        await expect(store.append(runId, [modelRequest(runId, 2)], 1)).resolves.toMatchObject({
+          nextSeq: 2,
+        });
+      } finally {
+        await store.close();
+      }
+    });
   });
 
   it("reads existing events without changing database files or allowing writes", async () => {
