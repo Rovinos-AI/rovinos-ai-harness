@@ -9,6 +9,8 @@ const policy = {
   baseDelayMs: 10,
   maxDelayMs: 30,
   timeoutMs: 1_000,
+  streamTimeoutMs: 600_000,
+  idleTimeoutMs: 1_000,
 };
 
 function retryOptions<T>(overrides: Partial<RetryOptions<T>>): RetryOptions<T> {

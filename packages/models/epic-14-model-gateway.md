@@ -384,7 +384,7 @@ Shared design for this epic:
 **Implementation guidance:**
 
 1. `ProviderDelta` is a provider-neutral union (text delta, tool-call argument delta, opaque block delta, usage, finish). `assembleDeltas` builds a `ProviderResult` equal to the non-streamed result for the same fixture, including opaque blobs byte-for-byte.
-2. Timeouts: with streaming, apply an idle timeout between deltas (`models.retry.idleTimeoutMs`, default 60 s) in addition to the overall deadline; abort cancels the stream.
+2. Timeouts: with streaming, apply a total deadline (`models.retry.streamTimeoutMs`, default 10 min and at least `timeoutMs`) and an idle timeout between deltas (`models.retry.idleTimeoutMs`, default 60 s) after the first delta; abort cancels the stream.
 3. `onProgress({ requestId, outputTokens })` carries counts only (never text) and feeds live run updates (24.5).
 4. Enforcement, repair, events, and cassettes operate on the assembled result only; partial output is never recorded. A stream that fails midway is retried like a failed request (retryable errors only).
 **Tests to write:** assembled stream equals non-stream fixtures for each adapter (text, tool calls, thinking blocks); idle timeout; abort mid-stream; progress callback receives counts only (canary text absent); failure midway records nothing partial.

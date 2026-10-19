@@ -18,7 +18,7 @@ function abortError(signal: AbortSignal): Error {
 interface AttemptSignals {
   readonly combined: AbortSignal;
   readonly run: AbortSignal;
-  readonly timeout: AbortSignal;
+  readonly timeout: AbortSignal | undefined;
   readonly deadline: AbortSignal | undefined;
 }
 
@@ -62,6 +62,8 @@ export interface RetryOptions<T> extends RetryDependencies {
   readonly policy: ModelRetryConfig;
   readonly signal: AbortSignal;
   readonly deadlineTs?: number;
+  /** Overrides the per-attempt timeout; null disables it. */
+  readonly attemptTimeoutMs?: number | null;
   readonly onAttempt?: (attempt: number) => void;
   readonly prepareAttempt?: (signal: AbortSignal, lastError: unknown) => Promise<() => void>;
   readonly operation: (signal: AbortSignal, lastError: unknown) => Promise<T>;
@@ -149,7 +151,7 @@ function abortAttempt(signals: AttemptSignals, lastError: unknown): never {
   if (signals.deadline?.aborted === true) {
     throw new DeadlineExceededError(lastError);
   }
-  if (signals.timeout.aborted) {
+  if (signals.timeout?.aborted === true) {
     throw new ProviderError("provider_timeout");
   }
   signals.combined.throwIfAborted();
@@ -163,15 +165,19 @@ async function runAttempt<T>(
 ): Promise<T> {
   checkDeadline(options.deadlineTs, options.clock, lastError);
   options.signal.throwIfAborted();
-  const timeoutSignal = AbortSignal.timeout(options.policy.timeoutMs);
+  const timeoutSignal =
+    options.attemptTimeoutMs === null
+      ? undefined
+      : AbortSignal.timeout(options.attemptTimeoutMs ?? options.policy.timeoutMs);
   const deadlineSignal =
     options.deadlineTs === undefined
       ? undefined
       : AbortSignal.timeout(Math.max(0, options.deadlineTs - options.clock.now()));
-  const signals =
-    deadlineSignal === undefined
-      ? [options.signal, timeoutSignal]
-      : [options.signal, timeoutSignal, deadlineSignal];
+  const signals = [
+    options.signal,
+    ...(timeoutSignal === undefined ? [] : [timeoutSignal]),
+    ...(deadlineSignal === undefined ? [] : [deadlineSignal]),
+  ];
   const signal = AbortSignal.any(signals);
   const attemptSignals: AttemptSignals = {
     combined: signal,

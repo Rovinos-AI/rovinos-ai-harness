@@ -14,6 +14,8 @@ describe("ModelsConfigSchema", () => {
         baseDelayMs: 500,
         maxDelayMs: 20_000,
         timeoutMs: 120_000,
+        streamTimeoutMs: 600_000,
+        idleTimeoutMs: 60_000,
       },
       enforcement: { maxRepairs: 2 },
       maxConcurrent: 4,
@@ -35,7 +37,7 @@ describe("ModelsConfigSchema", () => {
   it("accepts configured retry overrides", () => {
     expect(
       ModelsConfigSchema.parse({
-        retry: { maxAttempts: "5", timeoutMs: "2000" },
+        retry: { maxAttempts: "5", timeoutMs: "2000", streamTimeoutMs: "300000" },
         enforcement: { maxRepairs: "1" },
         maxConcurrent: "2",
       }),
@@ -45,6 +47,8 @@ describe("ModelsConfigSchema", () => {
         baseDelayMs: 500,
         maxDelayMs: 20_000,
         timeoutMs: 2_000,
+        streamTimeoutMs: 300_000,
+        idleTimeoutMs: 60_000,
       },
       enforcement: { maxRepairs: 1 },
       maxConcurrent: 2,
@@ -67,6 +71,15 @@ describe("ModelsConfigSchema", () => {
     expect(() => ModelRetryConfigSchema.parse({ maxAttempts: 0 })).toThrow();
     expect(() => ModelEnforcementConfigSchema.parse({ maxRepairs: -1 })).toThrow();
     expect(() => ModelsConfigSchema.parse({ retry: { unrecognized: true } })).toThrow();
+  });
+
+  it("requires the streaming timeout to cover the request timeout", () => {
+    expect(() =>
+      ModelRetryConfigSchema.parse({ timeoutMs: 120_001, streamTimeoutMs: 120_000 }),
+    ).toThrow();
+    expect(
+      ModelRetryConfigSchema.parse({ timeoutMs: 120_000, streamTimeoutMs: 120_000 }),
+    ).toMatchObject({ timeoutMs: 120_000, streamTimeoutMs: 120_000 });
   });
 
   it("validates per-model input and output prices", () => {
@@ -167,13 +180,13 @@ describe("ModelsConfigSchema", () => {
     expect(
       ModelsConfigSchema.parse({
         providers: [{ id: "anthropic", kind: "anthropic" }],
-      }).providers[0]?.maxOutputTokens,
-    ).toBe(4_096);
+      }).providers[0],
+    ).toMatchObject({ maxOutputTokens: 4_096, streaming: true });
     expect(
       ModelsConfigSchema.parse({
-        providers: [{ id: "anthropic", kind: "anthropic", maxOutputTokens: 512 }],
-      }).providers[0]?.maxOutputTokens,
-    ).toBe(512);
+        providers: [{ id: "anthropic", kind: "anthropic", maxOutputTokens: 512, streaming: false }],
+      }).providers[0],
+    ).toMatchObject({ maxOutputTokens: 512, streaming: false });
     for (const maxOutputTokens of [0, -1, 1.5]) {
       expect(() =>
         ModelsConfigSchema.parse({
