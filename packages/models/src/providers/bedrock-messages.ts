@@ -278,7 +278,7 @@ function mapPart(part: Part, options: PartMappingOptions): ContentBlock[] {
   if (part.type === "tool_result") {
     return [toToolResult(options.request, options.messageIndex, part, options.provider)];
   }
-  throw new ProviderError("provider_bad_request");
+  return [];
 }
 
 /** Builds Bedrock messages, preferring provider-specific assistant content when available. */

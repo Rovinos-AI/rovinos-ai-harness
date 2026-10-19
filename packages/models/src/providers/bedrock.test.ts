@@ -215,6 +215,58 @@ describe("BedrockAdapter", () => {
     expect(call.getRequestPath()).toContain("amazon.nova-pro-v1");
   });
 
+  it("replays text from an assistant message with foreign opaque content", async () => {
+    const call = makeCall({
+      output: { message: { role: "assistant", content: [{ text: "continued" }] } },
+      stopReason: "end_turn",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    });
+
+    await call.adapter.complete(
+      {
+        ...baseRequest,
+        messages: [
+          {
+            role: "assistant",
+            parts: [
+              { type: "text", text: "prior answer" },
+              { type: "opaque", provider: "anthropic", blob: { raw: "provider payload" } },
+            ],
+          },
+        ],
+      },
+      context(),
+    );
+
+    expect(call.getRequestBody()).toMatchObject({
+      messages: [{ role: "assistant", content: [{ text: "prior answer" }] }],
+    });
+  });
+
+  it("rejects a history with no mappable message content", async () => {
+    const call = makeCall();
+    const error = await call.adapter
+      .complete(
+        {
+          ...baseRequest,
+          messages: [
+            {
+              role: "assistant",
+              parts: [{ type: "opaque", provider: "anthropic", blob: { raw: "provider payload" } }],
+            },
+          ],
+        },
+        context(),
+      )
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+    expect(error).toMatchObject({ code: "provider_bad_request" });
+    expect(call.getRequestCount()).toBe(0);
+  });
+
   it("maps automatic tool choice and omits tools when disabled", async () => {
     const automatic = makeCall({
       ...responseBody,
