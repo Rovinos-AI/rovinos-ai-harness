@@ -10,12 +10,6 @@ export {
   StoreReadOnlyError,
   StoreUnavailableError,
 } from "./errors.js";
-export { migrate } from "./migrate.js";
-export {
-  migratePostgresConnection,
-  migrateSqliteFile,
-  type StoreFileMigrationOptions,
-} from "./migrate-file.js";
 export { AesGcmContentCodec } from "./aes-gcm-codec.js";
 export {
   ReencryptBatchInputSchema,
@@ -31,10 +25,7 @@ export {
 } from "./rotate.js";
 export { JsonContentCodec } from "./codec.js";
 export { InMemoryEventStore } from "./memory.js";
-export { PostgresEventStore } from "./postgres/adapter.js";
-export { SqliteEventStore } from "./sqlite/adapter.js";
 export type { ContentCodec, ContentCodecContext, EncodedContent } from "./codec.js";
-export type { PostgresEventStoreOptions } from "./postgres/adapter.js";
 export {
   IdempotencyKeyHashSchema,
   snapshotStoreOptionsSchema,

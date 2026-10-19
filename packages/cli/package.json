@@ -39,6 +39,8 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@harness/store-postgres": "workspace:^",
+    "@harness/store-sqlite": "workspace:^",
     "@harness/telemetry": "workspace:^",
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/server": "2.3.1",

@@ -40,7 +40,8 @@ import {
   type FakeModelOptions,
   type FakeToolDefinition,
 } from "@harness/core/testing";
-import { SqliteEventStore, type EventStore } from "@harness/store";
+import type { EventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ensureTracingFallback } from "@harness/telemetry";

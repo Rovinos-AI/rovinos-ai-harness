@@ -13,7 +13,8 @@ import {
 import type { BedrockAdapterOptions } from "@harness/models";
 import { Id, JsonValue, parseJson } from "@harness/schemas";
 import type { KeyProvider, Message, NewEvent, Part } from "@harness/schemas";
-import { AesGcmContentCodec, SqliteEventStore } from "@harness/store";
+import { AesGcmContentCodec } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 

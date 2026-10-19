@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "customConditions": ["source"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../store/tsconfig.build.json" },
+    { "path": "../schemas/tsconfig.build.json" }
+  ]
+}

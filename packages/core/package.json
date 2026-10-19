@@ -31,6 +31,8 @@
     "@harness/sandbox": "workspace:^",
     "@harness/schemas": "workspace:^",
     "@harness/store": "workspace:^",
+    "@harness/store-postgres": "workspace:^",
+    "@harness/store-sqlite": "workspace:^",
     "@harness/telemetry": "workspace:^",
     "@harness/vault": "workspace:^",
     "@opentelemetry/api": "1.9.1",

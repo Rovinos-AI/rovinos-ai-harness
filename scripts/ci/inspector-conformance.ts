@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Id, parseJson, type NewEvent } from "@harness/schemas";
-import { SqliteEventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { z } from "zod";
 
 const root = resolvePath(import.meta.dirname, "../..");

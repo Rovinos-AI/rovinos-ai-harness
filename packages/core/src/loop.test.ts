@@ -34,9 +34,9 @@ import {
 import {
   InMemoryEventStore,
   SeqConflictError,
-  SqliteEventStore,
   type EventStore,
 } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import {
   CalibratingTokenCounter,
   HeuristicTokenCounter,

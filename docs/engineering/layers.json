@@ -6,6 +6,8 @@
   "telemetry": ["schemas"],
   "config": ["schemas"],
   "store": ["schemas", "telemetry", "crypto"],
+  "store-postgres": ["schemas", "store"],
+  "store-sqlite": ["schemas", "store"],
   "vault": ["schemas", "telemetry", "crypto"],
   "pii": ["schemas", "telemetry", "vault"],
   "models": ["schemas", "telemetry"],

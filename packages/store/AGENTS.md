@@ -1,6 +1,6 @@
 # AGENTS.md: packages/store
 
-EventStore interface and adapters (in-memory, SQLite, Postgres), conformance suites, snapshots, outbox, migrations, retention.
+EventStore interface, in-memory store, conformance suites, snapshots, outbox, migrations, retention, and adapter-shared helpers.
 
 <!-- BEGIN GENERATED: agents-index (node scripts/gen-agents-index.mjs) -->
 
