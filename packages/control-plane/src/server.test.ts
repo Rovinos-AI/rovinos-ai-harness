@@ -256,6 +256,34 @@ describe("control-plane inspection tools", () => {
     expect(completed.runs.map(({ runId }) => runId)).toEqual([completedId]);
   });
 
+  it("filters a run allowlist before pagination and skips missing IDs", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const completedId = await addRun(store, builders, { status: "completed" });
+    const runningId = await addRun(store, builders);
+    const missingId = builders.nextRunId();
+    const allowedIds = [runningId, completedId, runningId, missingId];
+
+    const first = await listRuns(store, { limit: 1 }, allowedIds);
+    const second = await listRuns(store, { limit: 1, cursor: first.nextCursor }, allowedIds);
+    const completed = await listRuns(store, { status: "completed", limit: 10 }, allowedIds);
+    const invalidCursor = await listRuns(
+      store,
+      { limit: 1, cursor: "restricted:9007199254740992" },
+      allowedIds,
+    );
+
+    expect(first.runs).toHaveLength(1);
+    expect(first.nextCursor).toBe("restricted:1");
+    expect(second.runs).toHaveLength(1);
+    expect(second.nextCursor).toBeUndefined();
+    expect(new Set([...first.runs, ...second.runs].map(({ runId }) => runId))).toEqual(
+      new Set([completedId, runningId]),
+    );
+    expect(completed.runs.map(({ runId }) => runId)).toEqual([completedId]);
+    expect(invalidCursor.runs).toEqual(first.runs);
+  });
+
   it("returns folded usage, approval metadata, and safe recent events", async () => {
     const store = new InMemoryEventStore();
     const runId = await addRun(store, createEventBuilders(), { sensitive: true });

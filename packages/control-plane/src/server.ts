@@ -1,29 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  HarnessError,
-  JsonValue,
-  ResolveRequest,
-  ResolveResponse,
-  RevealRequest,
-  RevealResponse,
-} from "@harness/schemas";
-import type { Code, Id } from "@harness/schemas";
+import { Code, type ControlPlaneConfig, type Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { AuditingVaultResolver } from "@harness/vault";
-import {
-  localhostHostValidation,
-  localhostOriginValidation,
-  toNodeHandler,
-} from "@modelcontextprotocol/node";
-import {
-  CLIENT_CAPABILITIES_META_KEY,
-  createMcpHandler,
-  McpServer,
-} from "@modelcontextprotocol/server";
-import type { ServerContext, Tool } from "@modelcontextprotocol/server";
+import { CLIENT_CAPABILITIES_META_KEY, McpServer } from "@modelcontextprotocol/server";
+import type { ServerContext } from "@modelcontextprotocol/server";
 import { serveStdio, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
-import { createServer, type Server } from "node:http";
 import { z } from "zod";
+import { emitApprovalAppAudit, emitControlPlaneAudit } from "@harness/telemetry";
 import {
   confirmationClientCapabilitiesSchema,
   ConfirmationGate,
@@ -31,18 +14,6 @@ import {
   type ConfirmationGateOptions,
 } from "./confirmation-gate.js";
 import { RunSupervisor } from "./run-supervisor.js";
-import {
-  approveInputSchema,
-  controlPlaneHttpPortSchema,
-  decisionOutputSchema,
-  denyInputSchema,
-  getRunInputSchema,
-  getRunOutputSchema,
-  listRunsInputSchema,
-  listRunsOutputSchema,
-  resumeRunOutputSchema,
-  runLifecycleInputSchema,
-} from "./schemas.js";
 import type { ResolveApprovalOperation } from "./tools/approve.js";
 import { registerApproveTool } from "./tools/approve.js";
 import { registerCancelRunTool } from "./tools/cancel-run.js";
@@ -56,15 +27,23 @@ import {
   type ApprovalAppAuthorization,
   type ApprovalAppScope,
 } from "./tools/approvals-app.js";
-import { emitApprovalAppAudit } from "@harness/telemetry";
 import {
   APPROVAL_RESOURCE_URI,
   loadApprovalHtml,
   registerApprovalResource,
 } from "./resources/approval.js";
+import {
+  controlPlanePrincipal,
+  hasControlPlaneScope,
+  type ControlPlaneAuditHandler,
+  type ControlPlaneClock,
+  type ControlPlaneSecretResolver,
+} from "./auth.js";
+import { startControlPlaneHttpTransport, type ControlPlaneHttpHandle } from "./http-server.js";
+import { toolDefinitions, toolScope } from "./tool-definitions.js";
 
-const HTTP_HOST = "127.0.0.1";
-const HTTP_PATH = "/mcp";
+export type { ControlPlaneHttpHandle };
+
 const MCP_APP_EXTENSION = "io.modelcontextprotocol/ui";
 const MCP_APP_MIME = "text/html;profile=mcp-app";
 
@@ -77,6 +56,14 @@ export interface ControlPlaneOperations {
 
 /** Optional dependencies for control-plane mutation and confirmation tools. */
 export interface ControlPlaneServerOptions {
+  /** Parsed server authentication, network binding, and reveal configuration. */
+  readonly controlPlane?: ControlPlaneConfig;
+  /** Secret resolver used for control-plane bearer tokens and TLS material. */
+  readonly secretResolver?: ControlPlaneSecretResolver;
+  /** Clock used by the per-token HTTP request limiter. */
+  readonly clock?: ControlPlaneClock;
+  /** Metadata-only audit sink; defaults to the sanctioned telemetry logger. */
+  readonly onAudit?: ControlPlaneAuditHandler;
   readonly operations?: ControlPlaneOperations;
   readonly maxConcurrentRuns?: number;
   readonly runSupervisor?: RunSupervisor;
@@ -104,22 +91,6 @@ export interface ControlPlaneServerOptions {
   readonly approvalHtml?: string;
 }
 
-class ControlPlaneListenError extends HarnessError {
-  override readonly code = "control_plane_listen_failed";
-
-  constructor() {
-    super("The control-plane HTTP listener failed.");
-  }
-}
-
-/** A running loopback HTTP endpoint. */
-export interface ControlPlaneHttpHandle {
-  /** MCP endpoint URL. */
-  endpoint: string;
-  /** Closes the listener and active connections. */
-  close(): Promise<void>;
-}
-
 /** Creates the MCP server with metadata-only inspection and confirmation-gated mutation tools. */
 export function createControlPlaneServer(
   store: EventStore,
@@ -141,8 +112,8 @@ export function createControlPlaneServer(
   server.server.registerCapabilities({ tools: {} });
   const clientCapabilities = (context: ServerContext): ConfirmationClientCapabilities | undefined =>
     requestClientCapabilities(context, server);
-  registerListRunsTool(server, store);
-  registerGetRunTool(server, store);
+  registerListRunsTool(server, store, options.onAudit);
+  registerGetRunTool(server, store, options.onAudit);
   registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
   registerConfiguredApprovalTools({
     server,
@@ -152,39 +123,70 @@ export function createControlPlaneServer(
     clientCapabilities,
   });
   const supervisor = options.runSupervisor ?? createRunSupervisor(options);
-  registerApproveTool(server, {
+  registerLifecycleTools({
+    server,
     store,
-    confirmationGate,
-    ...(options.operations?.resolveApproval === undefined
-      ? {}
-      : { resolveApproval: options.operations.resolveApproval }),
-    clientCapabilities,
-  });
-  registerDenyTool(server, {
-    store,
-    confirmationGate,
-    ...(options.operations?.resolveApproval === undefined
-      ? {}
-      : { resolveApproval: options.operations.resolveApproval }),
-    clientCapabilities,
-  });
-  registerResumeRunTool(server, { confirmationGate, supervisor, clientCapabilities });
-  registerCancelRunTool(server, {
+    options,
     confirmationGate,
     supervisor,
-    ...(options.operations?.cancelRun === undefined
-      ? {}
-      : { cancelRun: options.operations.cancelRun }),
     clientCapabilities,
   });
   const definitions = toolDefinitions();
   server.server.setRequestHandler("tools/list", (_request, context) => {
     const supportsApps = supportsMcpApps(requestClientCapabilities(context, server));
+    const principal = controlPlanePrincipal(context);
     return {
-      tools: definitions.filter((tool) => tool._meta?.ui === undefined || supportsApps),
+      tools: definitions.filter(
+        (tool) =>
+          (tool._meta?.ui === undefined || supportsApps) &&
+          (principal === undefined || hasControlPlaneScope(principal, toolScope(tool.name))),
+      ),
     };
   });
   return server;
+}
+
+function registerLifecycleTools(input: {
+  readonly server: McpServer;
+  readonly store: EventStore;
+  readonly options: ControlPlaneServerOptions;
+  readonly confirmationGate: ConfirmationGate;
+  readonly supervisor: RunSupervisor;
+  readonly clientCapabilities: (
+    context: ServerContext,
+  ) => ConfirmationClientCapabilities | undefined;
+}): void {
+  const resolveApproval = input.options.operations?.resolveApproval;
+  const onAudit = input.options.onAudit;
+  registerApproveTool(input.server, {
+    store: input.store,
+    confirmationGate: input.confirmationGate,
+    ...(resolveApproval === undefined ? {} : { resolveApproval }),
+    clientCapabilities: input.clientCapabilities,
+    ...(onAudit === undefined ? {} : { onAudit }),
+  });
+  registerDenyTool(input.server, {
+    store: input.store,
+    confirmationGate: input.confirmationGate,
+    ...(resolveApproval === undefined ? {} : { resolveApproval }),
+    clientCapabilities: input.clientCapabilities,
+    ...(onAudit === undefined ? {} : { onAudit }),
+  });
+  registerResumeRunTool(input.server, {
+    confirmationGate: input.confirmationGate,
+    supervisor: input.supervisor,
+    clientCapabilities: input.clientCapabilities,
+    ...(onAudit === undefined ? {} : { onAudit }),
+  });
+  registerCancelRunTool(input.server, {
+    confirmationGate: input.confirmationGate,
+    supervisor: input.supervisor,
+    ...(input.options.operations?.cancelRun === undefined
+      ? {}
+      : { cancelRun: input.options.operations.cancelRun }),
+    clientCapabilities: input.clientCapabilities,
+    ...(onAudit === undefined ? {} : { onAudit }),
+  });
 }
 
 function registerConfiguredApprovalTools(input: {
@@ -196,14 +198,36 @@ function registerConfiguredApprovalTools(input: {
     context: ServerContext,
   ) => ConfirmationClientCapabilities | undefined;
 }): void {
+  const configuredAuthorize = input.options.approvalApp?.authorize;
+  const emitApprovalAudit = input.options.approvalApp?.onAudit ?? emitApprovalAppAudit;
   registerApprovalAppTools(input.server, {
     ...input.options.approvalApp,
     store: input.store,
     confirmationGate: input.confirmationGate,
     clientCapabilities: input.clientCapabilities,
+    authorize: async (context, scope, runId) => {
+      const principal = controlPlanePrincipal(context);
+      const configuredAuthorization =
+        configuredAuthorize === undefined
+          ? undefined
+          : await configuredAuthorize(context, scope, runId);
+      if (principal !== undefined) {
+        return {
+          tokenId: configuredAuthorization?.tokenId ?? principal.tokenId,
+          allowed:
+            hasControlPlaneScope(principal, scope) &&
+            (principal.runIds === undefined || principal.runIds.includes(runId)) &&
+            (configuredAuthorization?.allowed ?? true),
+        };
+      }
+      return configuredAuthorization ?? { allowed: false, tokenId: Code.parse("unknown") };
+    },
     revealRateLimiter:
       input.options.approvalApp?.revealRateLimiter ?? new ApprovalAppRevealRateLimiter(),
-    onAudit: input.options.approvalApp?.onAudit ?? emitApprovalAppAudit,
+    onAudit: (audit) => {
+      emitApprovalAudit(audit);
+      (input.options.onAudit ?? emitControlPlaneAudit)(audit);
+    },
     ...(input.options.operations?.resolveApproval === undefined
       ? {}
       : { resolveApproval: input.options.operations.resolveApproval }),
@@ -219,77 +243,18 @@ export function startControlPlaneStdio(
   return serveStdio(() => createControlPlaneServer(store, sharedOptions));
 }
 
-/** Starts a loopback-only stateless HTTP MCP endpoint with Host and Origin checks. */
-export async function startControlPlaneHttp(
+/** Starts an authenticated HTTP MCP endpoint with TLS, Host, Origin, scope, and rate checks. */
+export function startControlPlaneHttp(
   store: EventStore,
   port: number,
   options: ControlPlaneServerOptions = {},
 ): Promise<ControlPlaneHttpHandle> {
-  const checkedPort = controlPlaneHttpPortSchema.parse(port);
-  const sharedOptions = withSharedControlPlaneState(store, options);
-  const handler = createMcpHandler(() => createControlPlaneServer(store, sharedOptions));
-  const requestHandler = toNodeHandler(handler);
-  const validateHost = localhostHostValidation();
-  const validateOrigin = localhostOriginValidation();
-  const server: Server = createServer((request, response) => {
-    if ((request.url ?? "").split("?", 1)[0] !== HTTP_PATH) {
-      response.writeHead(404).end();
-      return;
-    }
-
-    if (!validateHost(request, response) || !validateOrigin(request, response)) {
-      return;
-    }
-    void requestHandler(
-      {
-        method: request.method ?? "GET",
-        url: request.url ?? "/",
-        headers: request.headers,
-        [Symbol.asyncIterator]: () => request[Symbol.asyncIterator](),
-      },
-      response,
-    ).catch(() => {
-      if (!response.headersSent) {
-        response
-          .writeHead(500, { "content-type": "text/plain; charset=utf-8" })
-          .end("control_plane_request_failed");
-      } else if (!response.writableEnded) {
-        response.end();
-      }
-    });
-  });
-  await listen(server, checkedPort);
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new ControlPlaneListenError();
-  }
-  return {
-    endpoint: `http://${HTTP_HOST}:${String(address.port)}${HTTP_PATH}`,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error !== undefined) {
-            reject(new ControlPlaneListenError());
-            return;
-          }
-          resolve();
-        });
-        server.closeAllConnections();
-      }),
-  };
-}
-
-function listen(server: Server, port: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onError = (): void => {
-      server.off("error", onError);
-      reject(new ControlPlaneListenError());
-    };
-    server.once("error", onError);
-    server.listen(port, HTTP_HOST, () => {
-      server.off("error", onError);
-      resolve();
-    });
+  return startControlPlaneHttpTransport({
+    store,
+    port,
+    options: { ...options, onAudit: options.onAudit ?? emitControlPlaneAudit },
+    createMcpServer: createControlPlaneServer,
+    withSharedState: withSharedControlPlaneState,
   });
 }
 
@@ -313,6 +278,13 @@ function withSharedControlPlaneState(
     approvalHtml: options.approvalHtml ?? loadApprovalHtml(),
     approvalApp: {
       ...options.approvalApp,
+      ...(options.approvalApp?.allowReveal === undefined &&
+      options.controlPlane?.allowReveal === undefined
+        ? {}
+        : {
+            allowReveal:
+              options.approvalApp?.allowReveal ?? options.controlPlane?.allowReveal ?? false,
+          }),
       revealRateLimiter:
         options.approvalApp?.revealRateLimiter ?? new ApprovalAppRevealRateLimiter(),
     },
@@ -350,80 +322,4 @@ function requestClientCapabilities(
   const legacyCapabilities = server.server.getClientCapabilities();
   const parsedCapabilities = confirmationClientCapabilitiesSchema.safeParse(legacyCapabilities);
   return parsedCapabilities.success ? parsedCapabilities.data : undefined;
-}
-
-function toolDefinitions(): Tool[] {
-  return [
-    {
-      name: "list_runs",
-      description: "List run status and metadata counts.",
-      inputSchema: objectInputSchema(listRunsInputSchema),
-      outputSchema: z.toJSONSchema(listRunsOutputSchema),
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-    },
-    {
-      name: "get_run",
-      description: "Get run status, usage, approvals, and recent safe event metadata.",
-      inputSchema: objectInputSchema(getRunInputSchema),
-      outputSchema: z.toJSONSchema(getRunOutputSchema),
-      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-    },
-    {
-      name: "approve",
-      description: "Approve a pending approval without resuming its run.",
-      inputSchema: objectInputSchema(approveInputSchema),
-      outputSchema: z.toJSONSchema(decisionOutputSchema),
-      annotations: { idempotentHint: false, openWorldHint: false },
-      _meta: { ui: { visibility: ["app"] } },
-    },
-    {
-      name: "harness.approvals.resolve",
-      description: "Resolve a pending approval from its human review view.",
-      inputSchema: objectInputSchema(ResolveRequest),
-      outputSchema: z.toJSONSchema(ResolveResponse),
-      annotations: { openWorldHint: false },
-      _meta: { ui: { visibility: ["app"], resourceUri: APPROVAL_RESOURCE_URI } },
-    },
-    {
-      name: "harness.approvals.reveal",
-      description: "Reveal selected approval argument values after authorization.",
-      inputSchema: objectInputSchema(RevealRequest),
-      outputSchema: z.toJSONSchema(RevealResponse),
-      annotations: { openWorldHint: false },
-      _meta: { ui: { visibility: ["app"], resourceUri: APPROVAL_RESOURCE_URI } },
-    },
-    {
-      name: "deny",
-      description: "Deny a pending approval without resuming its run.",
-      inputSchema: objectInputSchema(denyInputSchema),
-      outputSchema: z.toJSONSchema(decisionOutputSchema),
-      annotations: { idempotentHint: true, openWorldHint: false },
-      _meta: { ui: { visibility: ["app"] } },
-    },
-    {
-      name: "resume_run",
-      description: "Resume a run asynchronously.",
-      inputSchema: objectInputSchema(runLifecycleInputSchema),
-      outputSchema: z.toJSONSchema(resumeRunOutputSchema),
-      annotations: { openWorldHint: false },
-    },
-    {
-      name: "cancel_run",
-      description: "Request cancellation of a run.",
-      inputSchema: objectInputSchema(runLifecycleInputSchema),
-      outputSchema: z.toJSONSchema(decisionOutputSchema),
-      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
-    },
-  ];
-}
-
-function objectInputSchema(schema: z.ZodType): Tool["inputSchema"] {
-  return z
-    .object({
-      type: z.literal("object"),
-      properties: z.record(z.string(), JsonValue).optional(),
-      required: z.array(z.string()).optional(),
-    })
-    .loose()
-    .parse(z.toJSONSchema(schema));
 }

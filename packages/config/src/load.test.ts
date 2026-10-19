@@ -487,7 +487,13 @@ store: {}`,
     });
 
     expect(config).toEqual({
-      controlPlane: { allowReveal: false },
+      controlPlane: {
+        allowReveal: false,
+        auth: { tokens: [] },
+        listen: { host: "127.0.0.1", port: 3_000 },
+        allowedHosts: ["127.0.0.1", "localhost", "::1"],
+        rateLimitPerMinute: 120,
+      },
       run: {
         checkpointEveryEvents: 20,
         shutdownGraceMs: 20_000,

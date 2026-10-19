@@ -19,15 +19,15 @@ class ServeCommandError extends HarnessError {
 
 const portSchema = z.coerce.number().int().min(0).max(65_535);
 
-/** Registers `harness serve`, serving the control-plane over stdio or loopback HTTP. */
+/** Registers `harness serve`, serving the control-plane over stdio or configured HTTP. */
 export const serveCommand: CommandModule = {
   name: "serve",
   register(program, context) {
     program
       .command("serve")
-      .description("Serve the harness control plane over stdio or loopback HTTP")
+      .description("Serve the harness control plane over stdio or HTTP")
       .option("--stdio", "serve MCP over standard input and output")
-      .option("--http", "serve MCP over loopback HTTP")
+      .option("--http", "serve MCP over configured HTTP")
       .option("--port <port>", "HTTP listener port")
       .action(
         async (options: {
@@ -35,24 +35,7 @@ export const serveCommand: CommandModule = {
           readonly http?: boolean;
           readonly port?: string;
         }) => {
-          const http = options.http === true || options.stdio !== true;
-          if (
-            (options.stdio === true && options.http === true) ||
-            (options.port !== undefined && !http)
-          ) {
-            throw new ServeCommandError("serve_options_invalid");
-          }
-          if (program.opts<{ json?: boolean }>().json === true && !http) {
-            throw new ServeCommandError("stdio_json_unsupported");
-          }
-          let port = 3_000;
-          if (http) {
-            const parsedPort = portSchema.safeParse(options.port ?? "3000");
-            if (!parsedPort.success) {
-              throw new ServeCommandError("serve_port_invalid");
-            }
-            port = parsedPort.data;
-          }
+          const mode = parseServeOptions(options, program.opts<{ json?: boolean }>().json === true);
 
           const config = await context.loadConfig();
           const tool = await context.createToolPort?.(config);
@@ -66,14 +49,28 @@ export const serveCommand: CommandModule = {
             const { startControlPlaneHttp, startControlPlaneStdio } =
               await import("@harness/control-plane");
             const operations = createControlPlaneOperations(runtime, tool);
-            if (http) {
-              const handle = await startControlPlaneHttp(runtime.store, port, { operations });
+            const controlPlaneOptions = {
+              ...(config.controlPlane === undefined ? {} : { controlPlane: config.controlPlane }),
+              ...(context.secretResolver === undefined
+                ? {}
+                : { secretResolver: context.secretResolver }),
+              clock: context.clock,
+            };
+            if (mode.http) {
+              const handle = await startControlPlaneHttp(
+                runtime.store,
+                mode.port ?? config.controlPlane?.listen.port ?? 3_000,
+                { ...controlPlaneOptions, operations },
+              );
               closeServer = () => handle.close();
               context.out.json(ServeResultSchema, { status: "serving" });
               context.out.print(`${handle.endpoint}\n`);
               await waitForShutdown(false);
             } else {
-              const handle = startControlPlaneStdio(runtime.store, { operations });
+              const handle = startControlPlaneStdio(runtime.store, {
+                ...controlPlaneOptions,
+                operations,
+              });
               closeServer = () => handle.close();
               await waitForShutdown(true);
             }
@@ -88,6 +85,27 @@ export const serveCommand: CommandModule = {
       );
   },
 };
+
+function parseServeOptions(
+  options: { readonly stdio?: boolean; readonly http?: boolean; readonly port?: string },
+  json: boolean,
+): { readonly http: boolean; readonly port?: number } {
+  const http = options.http === true || options.stdio !== true;
+  if ((options.stdio === true && options.http === true) || (options.port !== undefined && !http)) {
+    throw new ServeCommandError("serve_options_invalid");
+  }
+  if (json && !http) {
+    throw new ServeCommandError("stdio_json_unsupported");
+  }
+  if (options.port === undefined) {
+    return { http };
+  }
+  const parsedPort = portSchema.safeParse(options.port);
+  if (!parsedPort.success) {
+    throw new ServeCommandError("serve_port_invalid");
+  }
+  return { http, port: parsedPort.data };
+}
 
 function createControlPlaneOperations(
   runtime: Runtime,

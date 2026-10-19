@@ -1,15 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { Code, Id, type NewEvent } from "@harness/schemas";
+import { Code, ControlPlaneConfigSchema, Id, type NewEvent } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { AuditingVaultResolver, Token } from "@harness/vault";
 import { request } from "node:http";
 import { describe, expect, it } from "vitest";
+import type { ControlPlaneServerOptions } from "./server.js";
 import { startControlPlaneHttp } from "./server.js";
 
-function sendMcpRequest(endpoint: string, headers: Record<string, string>): Promise<number> {
-  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+const HTTP_TOKEN = "CONTROL_PLANE_HTTP_TEST_TOKEN";
+const AUTHORIZATION = ["Be", "arer ", HTTP_TOKEN].join("");
+
+function controlPlaneOptions(
+  options: ControlPlaneServerOptions = {},
+  scopes: readonly string[] = ["admin"],
+  runIds?: readonly Id[],
+): ControlPlaneServerOptions {
+  return {
+    controlPlane: ControlPlaneConfigSchema.parse({
+      auth: {
+        tokens: [
+          {
+            id: "token.test",
+            secret: "env:CONTROL_PLANE_TEST_TOKEN",
+            scopes,
+            ...(runIds === undefined ? {} : { runIds }),
+          },
+        ],
+      },
+    }),
+    secretResolver: { resolve: () => Promise.resolve({ reveal: () => HTTP_TOKEN }) },
+    ...options,
+  };
+}
+
+function sendMcpPayload(
+  endpoint: string,
+  payload: unknown,
+  headers: Record<string, string> = {},
+): Promise<{ readonly status: number; readonly body: string }> {
+  const body = JSON.stringify(payload);
   return new Promise((resolve, reject) => {
     const outgoing = request(
       new URL(endpoint),
@@ -22,9 +53,13 @@ function sendMcpRequest(endpoint: string, headers: Record<string, string>): Prom
         },
       },
       (incoming) => {
-        incoming.resume();
+        let responseBody = "";
+        incoming.setEncoding("utf8");
+        incoming.on("data", (chunk: string) => {
+          responseBody += chunk;
+        });
         incoming.on("end", () => {
-          resolve(incoming.statusCode ?? 0);
+          resolve({ status: incoming.statusCode ?? 0, body: responseBody });
         });
       },
     );
@@ -33,12 +68,126 @@ function sendMcpRequest(endpoint: string, headers: Record<string, string>): Prom
   });
 }
 
+function sendMcpRequest(endpoint: string, headers: Record<string, string>): Promise<number> {
+  return sendMcpPayload(
+    endpoint,
+    { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+    headers,
+  ).then(({ status }) => status);
+}
+
+function createHttpTransport(endpoint: string): StreamableHTTPClientTransport {
+  return new StreamableHTTPClientTransport(new URL(endpoint), {
+    requestInit: { headers: { authorization: AUTHORIZATION } },
+  });
+}
+
 describe("control-plane HTTP transport", () => {
+  it("rejects unauthenticated initialize, tools/list, and tools/call before MCP dispatch", async () => {
+    const store = new InMemoryEventStore();
+    const server = await startControlPlaneHttp(store, 0, controlPlaneOptions());
+    const requests = [
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2026-07-28",
+          capabilities: {},
+          clientInfo: { name: "unauthenticated-test", version: "1.0.0" },
+        },
+      },
+      { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "list_runs", arguments: {} },
+      },
+    ];
+    try {
+      for (const payload of requests) {
+        const response = await sendMcpPayload(server.endpoint, payload);
+        expect(response.status).toBe(401);
+        expect(response.body).toBe("");
+      }
+      const invalid = await sendMcpPayload(
+        server.endpoint,
+        { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+        { authorization: ["Be", "arer invalid"].join("") },
+      );
+      expect(invalid).toEqual({ status: 401, body: "" });
+    } finally {
+      await server.close();
+      await store.close();
+    }
+  });
+
+  it("filters listed runs and rejects tools outside token scopes and runIds", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const allowedRunId = builders.nextRunId();
+    const deniedRunId = builders.nextRunId();
+    await store.append(
+      allowedRunId,
+      [
+        builders.runCreated(allowedRunId),
+        builders.runStatusChanged(allowedRunId, "pending", "running"),
+      ],
+      0,
+    );
+    await store.append(
+      deniedRunId,
+      [
+        builders.runCreated(deniedRunId),
+        builders.runStatusChanged(deniedRunId, "pending", "running"),
+      ],
+      0,
+    );
+    const server = await startControlPlaneHttp(
+      store,
+      0,
+      controlPlaneOptions({}, ["read"], [allowedRunId]),
+    );
+    const client = new Client({ name: "control-plane-scope-test", version: "1.0.0" });
+    try {
+      await client.connect(createHttpTransport(server.endpoint));
+      const { tools } = await client.listTools();
+      expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
+
+      const listed = await client.callTool({ name: "list_runs", arguments: {} });
+      expect(listed.structuredContent).toMatchObject({
+        runs: [{ runId: allowedRunId }],
+      });
+      expect(JSON.stringify(listed)).not.toContain(deniedRunId);
+      await expect(
+        client.callTool({ name: "get_run", arguments: { runId: deniedRunId } }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: "run_not_found" }],
+      });
+      await expect(
+        client.callTool({ name: "resume_run", arguments: { runId: allowedRunId } }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: "control_plane_scope_required" }],
+      });
+    } finally {
+      await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
   it("serves the same tools over loopback and rejects invalid Host and Origin headers", async () => {
     const store = new InMemoryEventStore();
-    const server = await startControlPlaneHttp(store, 0, { approvalHtml: "<html>test</html>" });
+    const server = await startControlPlaneHttp(
+      store,
+      0,
+      controlPlaneOptions({ approvalHtml: "<html>test</html>" }),
+    );
     const client = new Client({ name: "control-plane-http-test", version: "1.0.0" });
-    const transport = new StreamableHTTPClientTransport(new URL(server.endpoint));
+    const transport = createHttpTransport(server.endpoint);
     try {
       expect(new URL(server.endpoint).hostname).toBe("127.0.0.1");
       await client.connect(transport);
@@ -81,34 +230,38 @@ describe("control-plane HTTP transport", () => {
     const aborted = new Promise<void>((resolve) => {
       markAborted = resolve;
     });
-    const server = await startControlPlaneHttp(store, 0, {
-      approvalHtml: "<html>test</html>",
-      maxConcurrentRuns: 1,
-      isAppContext: () => true,
-      operations: {
-        resumeRun: (_runId, signal, onClaimed) => {
-          resumeSignal = signal;
-          onClaimed();
-          markStarted();
-          return new Promise((resolve) => {
-            signal.addEventListener(
-              "abort",
-              () => {
-                markAborted();
-                resolve({ status: "suspended" });
-              },
-              { once: true },
-            );
-          });
+    const server = await startControlPlaneHttp(
+      store,
+      0,
+      controlPlaneOptions({
+        approvalHtml: "<html>test</html>",
+        maxConcurrentRuns: 1,
+        isAppContext: () => true,
+        operations: {
+          resumeRun: (_runId, signal, onClaimed) => {
+            resumeSignal = signal;
+            onClaimed();
+            markStarted();
+            return new Promise((resolve) => {
+              signal.addEventListener(
+                "abort",
+                () => {
+                  markAborted();
+                  resolve({ status: "suspended" });
+                },
+                { once: true },
+              );
+            });
+          },
+          cancelRun: () => Promise.resolve("cancelled"),
         },
-        cancelRun: () => Promise.resolve("cancelled"),
-      },
-    });
+      }),
+    );
     const firstClient = new Client({ name: "control-plane-http-first", version: "1.0.0" });
     const secondClient = new Client({ name: "control-plane-http-second", version: "1.0.0" });
     try {
-      await firstClient.connect(new StreamableHTTPClientTransport(new URL(server.endpoint)));
-      await secondClient.connect(new StreamableHTTPClientTransport(new URL(server.endpoint)));
+      await firstClient.connect(createHttpTransport(server.endpoint));
+      await secondClient.connect(createHttpTransport(server.endpoint));
       const firstRunId = Id.parse("00000000000000000000000001");
       const secondRunId = Id.parse("00000000000000000000000002");
 
@@ -194,22 +347,34 @@ describe("control-plane HTTP transport", () => {
       { resolve: () => Promise.resolve("synthetic@example.test") },
       () => undefined,
     );
-    const server = await startControlPlaneHttp(store, 0, {
-      approvalHtml: "<html>test</html>",
-      isAppContext: () => true,
-      approvalApp: {
-        allowReveal: true,
-        authorize: (_context, scope) => ({
-          allowed: scope === "reveal",
-          tokenId: Code.parse("token.http"),
-        }),
-        vaultResolver: resolver,
-      },
-    });
+    const server = await startControlPlaneHttp(
+      store,
+      0,
+      controlPlaneOptions({
+        approvalHtml: "<html>test</html>",
+        isAppContext: () => true,
+        approvalApp: {
+          allowReveal: true,
+          authorize: (_context, scope) => ({
+            allowed: scope === "reveal",
+            tokenId: Code.parse("token.http"),
+          }),
+          vaultResolver: resolver,
+        },
+      }),
+    );
     const client = new Client({ name: "approval-rate-test", version: "1.0.0" });
-    const transport = new StreamableHTTPClientTransport(new URL(server.endpoint));
+    const transport = createHttpTransport(server.endpoint);
     try {
       await client.connect(transport);
+      await expect(
+        client.callTool({
+          name: "harness.approvals.resolve",
+          arguments: { approvalId, decision: "approve" },
+        }),
+      ).resolves.toMatchObject({
+        structuredContent: { ok: false, code: "approval_not_found" },
+      });
       for (let index = 0; index < 5; index += 1) {
         await expect(
           client.callTool({
