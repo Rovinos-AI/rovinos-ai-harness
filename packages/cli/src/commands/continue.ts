@@ -68,6 +68,7 @@ function throwForRunStatus(
 /** Registers the `harness continue` command. */
 export const continueCommand: CommandModule = {
   name: "continue",
+  /** Registers the `continue` command. */
   register(program, context) {
     program
       .command("continue")

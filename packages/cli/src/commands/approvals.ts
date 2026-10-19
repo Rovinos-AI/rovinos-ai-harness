@@ -412,6 +412,7 @@ function registerSweep(approvals: Command, context: CliContext): void {
 /** Registers the `harness approvals` command group. */
 export const approvalsCommand: CommandModule = {
   name: "approvals",
+  /** Registers the `approvals` command. */
   register(program, context) {
     const approvals = program.command("approvals").description("List and resolve approvals");
     registerList(approvals, context);

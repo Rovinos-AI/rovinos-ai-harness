@@ -87,6 +87,12 @@
       "version": "1.33.0",
       "reason": "MPL-2.0 platform package for Inspector's transitive lightningcss dependency.",
       "expires": "2027-10-14"
+    },
+    {
+      "package": "@modelcontextprotocol/inspector",
+      "version": "2.11.0",
+      "reason": "Manifest says SEE LICENSE IN LICENSE; the LICENSE file grants MIT or Apache-2.0 terms, both on the allowlist.",
+      "expires": "2027-01-19"
     }
   ]
 }

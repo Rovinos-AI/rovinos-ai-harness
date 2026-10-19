@@ -315,6 +315,7 @@ async function runContextCommand(
 /** Registers read-only inspection of a stored run with any built-in context strategy. */
 export const contextCommand: CommandModule = {
   name: "context",
+  /** Registers the `context` command. */
   register(program, context) {
     program
       .command("context")

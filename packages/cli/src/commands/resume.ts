@@ -33,6 +33,7 @@ export function assertResumeStatus(
 /** Registers the `harness resume` command. */
 export const resumeCommand: CommandModule = {
   name: "resume",
+  /** Registers the `resume` command. */
   register(program, context) {
     program
       .command("resume")

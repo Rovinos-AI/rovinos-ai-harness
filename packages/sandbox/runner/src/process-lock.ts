@@ -13,9 +13,13 @@ export interface RunnerCredentialApi {
 }
 
 export const systemRunnerCredentials: RunnerCredentialApi = {
+  /** Reads the effective user id when the platform supports it. */
   geteuid: () => process.geteuid?.(),
+  /** Reads the effective group id when the platform supports it. */
   getegid: () => process.getegid?.(),
+  /** Switches the effective user id when the platform supports it. */
   seteuid: (uid) => process.seteuid?.(uid),
+  /** Switches the effective group id when the platform supports it. */
   setegid: (gid) => process.setegid?.(gid),
 };
 
