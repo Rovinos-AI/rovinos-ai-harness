@@ -6,7 +6,7 @@ import {
   type NewEvent,
 } from "@harness/schemas";
 import type { EncodedSnapshot } from "./codec.js";
-import { InvalidEventError } from "./errors.js";
+import { InvalidEventError, StoreUnavailableError } from "./errors.js";
 import type { ListRunsOptions, RunSummary } from "./types.js";
 
 /** Builds a validated, keyset-paginated summary of in-memory runs. */
@@ -51,6 +51,18 @@ export function listMemoryRuns(
   const runs = summaries.slice(start, end);
   const nextCursor = end < summaries.length ? runs.at(-1)?.runId : undefined;
   return nextCursor === undefined ? { runs } : { runs, nextCursor };
+}
+
+/** Return an in-memory run listing with the EventStore asynchronous error contract. */
+export function listMemoryRunsSafely(
+  storedRuns: ReadonlyMap<Id, readonly StoredEvent[]>,
+  options: ListRunsOptions,
+): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
+  try {
+    return Promise.resolve(listMemoryRuns(storedRuns, options));
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new StoreUnavailableError());
+  }
 }
 
 function currentStatus(events: readonly StoredEvent[]): RunSummary["status"] {

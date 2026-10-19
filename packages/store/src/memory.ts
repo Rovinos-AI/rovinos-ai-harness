@@ -44,7 +44,7 @@ import {
 } from "./subscriptions.js";
 import {
   hasDuplicateSnapshot,
-  listMemoryRuns,
+  listMemoryRunsSafely,
   validateEventBatch,
 } from "./memory-helpers.js";
 
@@ -314,7 +314,7 @@ export class InMemoryEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.listRuns} */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
-    return Promise.resolve().then(() => listMemoryRuns(this.runs, opts));
+    return listMemoryRunsSafely(this.runs, opts);
   }
 
   /** {@inheritDoc EventStore.findRunsByTrace} */
