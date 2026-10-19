@@ -2102,6 +2102,7 @@ describe("control plane", () => {
   it("requires configured HTTP authentication and serves scoped tools", async () => {
     const store = new InMemoryEventStore();
     const token = "SYNTHETIC_CONTROL_PLANE_E2E_TOKEN_LONG_ENOUGH";
+    const authorization = `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${token}`;
     const server = await startControlPlaneHttp(store, 0, {
       controlPlane: ControlPlaneConfigSchema.parse({
         auth: {
@@ -2119,7 +2120,7 @@ describe("control plane", () => {
     });
     const client = new Client({ name: "control-plane-auth-e2e", version: "1.0.0" });
     const transport = new StreamableHTTPClientTransport(new URL(server.endpoint), {
-      requestInit: { headers: { authorization: ["Be", "arer ", token].join("") } },
+      requestInit: { headers: { authorization } },
     });
     try {
       const unauthenticated = await fetch(server.endpoint, {

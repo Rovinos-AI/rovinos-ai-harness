@@ -27,11 +27,7 @@ import {
   type ApprovalAppAuthorization,
   type ApprovalAppScope,
 } from "./tools/approvals-app.js";
-import {
-  APPROVAL_RESOURCE_URI,
-  loadApprovalHtml,
-  registerApprovalResource,
-} from "./resources/approval.js";
+import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
 import {
   controlPlanePrincipal,
   hasControlPlaneScope,

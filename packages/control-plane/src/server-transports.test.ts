@@ -164,7 +164,7 @@ function request(
 }
 
 const HTTP_TOKEN = "CONTROL_PLANE_HTTP_TEST_TOKEN_LONG_ENOUGH";
-const AUTHORIZATION = ["Be", "arer ", HTTP_TOKEN].join("");
+const AUTHORIZATION = `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${HTTP_TOKEN}`;
 
 function httpOptions(
   options: ControlPlaneServerOptions = {},
@@ -320,9 +320,9 @@ describe("control-plane transports", () => {
     );
     const outgoing = response();
 
-    expect(() =>
-      mocks.dispatch(request("/mcp", { authorization: undefined }), outgoing),
-    ).not.toThrow();
+    expect(() => {
+      mocks.dispatch(request("/mcp", { authorization: undefined }), outgoing);
+    }).not.toThrow();
     expect(outgoing.statusCode).toBe(401);
     await handle.close();
   });

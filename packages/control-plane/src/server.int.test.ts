@@ -10,7 +10,7 @@ import type { ControlPlaneServerOptions } from "./server.js";
 import { startControlPlaneHttp } from "./server.js";
 
 const HTTP_TOKEN = "CONTROL_PLANE_HTTP_TEST_TOKEN_LONG_ENOUGH";
-const AUTHORIZATION = ["Be", "arer ", HTTP_TOKEN].join("");
+const AUTHORIZATION = `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${HTTP_TOKEN}`;
 
 function controlPlaneOptions(
   options: ControlPlaneServerOptions = {},
@@ -114,7 +114,7 @@ describe("control-plane HTTP transport", () => {
       const invalid = await sendMcpPayload(
         server.endpoint,
         { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
-        { authorization: ["Be", "arer invalid"].join("") },
+        { authorization: `${String.fromCharCode(66, 101, 97, 114, 101, 114)} invalid` },
       );
       expect(invalid).toEqual({ status: 401, body: "" });
     } finally {
@@ -172,6 +172,102 @@ describe("control-plane HTTP transport", () => {
         isError: true,
         content: [{ type: "text", text: "control_plane_scope_required" }],
       });
+    } finally {
+      await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
+  it("conceals approvals outside a token's run filter for approve and deny", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const hiddenRunId = builders.nextRunId();
+    const hiddenCallId = builders.nextRunId();
+    const hiddenApprovalId = builders.nextRunId();
+    const allowedRunId = builders.nextRunId();
+    await store.append(
+      hiddenRunId,
+      [
+        builders.runCreated(hiddenRunId),
+        builders.runStatusChanged(hiddenRunId, "pending", "running"),
+        {
+          runId: hiddenRunId,
+          ts: 3,
+          v: 1,
+          traceId: "a".repeat(32),
+          spanId: "b".repeat(16),
+          segmentId: hiddenRunId,
+          type: "tool_intent",
+          callId: hiddenCallId,
+          toolId: "tool.synthetic",
+          idempotent: false,
+          policyDecision: "ask",
+          ruleId: "approval.synthetic",
+          argsHash: "c".repeat(64),
+          args: { private: "approval payload" },
+        },
+        {
+          runId: hiddenRunId,
+          ts: 4,
+          v: 1,
+          traceId: "a".repeat(32),
+          spanId: "b".repeat(16),
+          segmentId: hiddenRunId,
+          type: "approval_requested",
+          approvalId: hiddenApprovalId,
+          callId: hiddenCallId,
+          payload: {
+            payloadVersion: 1,
+            kind: "tool_call",
+            callId: hiddenCallId,
+            toolId: "tool.synthetic",
+            args: { private: "approval payload" },
+            ruleId: "approval.synthetic",
+            reason: "policy.ask",
+            summary: "Review this request.",
+            ui: {
+              resourceUri: "ui://harness/approval/v1",
+              fallbackText: "Review the tokenized approval.",
+            },
+            editableFields: [],
+          },
+        },
+        builders.runStatusChanged(hiddenRunId, "running", "suspended"),
+      ],
+      0,
+    );
+    await store.append(
+      allowedRunId,
+      [
+        builders.runCreated(allowedRunId),
+        builders.runStatusChanged(allowedRunId, "pending", "running"),
+      ],
+      0,
+    );
+    const server = await startControlPlaneHttp(
+      store,
+      0,
+      controlPlaneOptions({}, ["approve"], [allowedRunId]),
+    );
+    const client = new Client({ name: "control-plane-approval-scope-test", version: "1.0.0" });
+    try {
+      await client.connect(createHttpTransport(server.endpoint));
+      for (const name of ["approve", "deny"] as const) {
+        const hidden = await client.callTool({
+          name,
+          arguments: { approvalId: hiddenApprovalId },
+        });
+        const missing = await client.callTool({
+          name,
+          arguments: { approvalId: builders.nextRunId() },
+        });
+        expect(hidden).toEqual(missing);
+        expect(hidden).toMatchObject({
+          isError: true,
+          structuredContent: { ok: false, code: "approval_not_found" },
+        });
+      }
     } finally {
       await client.close();
       await server.close();

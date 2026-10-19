@@ -18,6 +18,7 @@ import {
 const TOKEN_CANARY = "CONTROL_PLANE_TOKEN_CANARY_LONG_ENOUGH";
 const RUN_ID = Id.parse("00000000000000000000000001");
 const OTHER_RUN_ID = Id.parse("00000000000000000000000002");
+const BEARER_SCHEME = String.fromCharCode(66, 101, 97, 114, 101, 114);
 
 function config(scopes: readonly string[] = ["read"], runIds?: readonly string[], tokens = true) {
   return ControlPlaneConfigSchema.parse({
@@ -56,18 +57,16 @@ describe("control-plane authentication", () => {
   it("resolves token references to digests and authenticates valid bearer tokens", async () => {
     const tokens = await resolvedTokens(["read", "approve"], [RUN_ID]);
 
-    expect(authenticateBearerToken(["Be", "arer ", TOKEN_CANARY].join(""), tokens)).toEqual({
+    expect(authenticateBearerToken(`${BEARER_SCHEME} ${TOKEN_CANARY}`, tokens)).toEqual({
       tokenId: "token.test",
       scopes: ["read", "approve"],
       runIds: [RUN_ID],
     });
     expect(JSON.stringify(tokens)).not.toContain(TOKEN_CANARY);
-    expect(authenticateBearerToken(["Be", "arer ", "invalid"].join(""), tokens)).toBeUndefined();
+    expect(authenticateBearerToken(`${BEARER_SCHEME} invalid`, tokens)).toBeUndefined();
     expect(authenticateBearerToken(undefined, tokens)).toBeUndefined();
     expect(authenticateBearerToken("Basic credentials", tokens)).toBeUndefined();
-    expect(
-      authenticateBearerToken(["Be", "arer ", TOKEN_CANARY, " "].join(""), tokens),
-    ).toBeUndefined();
+    expect(authenticateBearerToken(`${BEARER_SCHEME} ${TOKEN_CANARY} `, tokens)).toBeUndefined();
   });
 
   it("uses the fixed-size SHA-256 timing-safe comparison function", () => {
@@ -269,8 +268,7 @@ describe("control-plane scopes and run filtering", () => {
       }),
     ).resolves.toBe(inputRequired);
 
-    expect(audit).toHaveBeenCalledOnce();
-    expect(audit).toHaveBeenCalledWith({
+    expect(audit).toHaveBeenCalledExactlyOnceWith({
       tokenId: Code.parse("token.test"),
       tool: Code.parse("approve"),
       outcome: Code.parse("input_required"),

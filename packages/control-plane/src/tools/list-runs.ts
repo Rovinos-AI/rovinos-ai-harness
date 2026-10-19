@@ -123,10 +123,7 @@ function restrictedStoreCursor(cursor: string | undefined): string | undefined {
   }
   const match = /^restricted:(.+)$/.exec(cursor);
   const storeCursor = match?.[1];
-  if (
-    storeCursor === undefined ||
-    (/^\d+$/u.test(storeCursor) && storeCursor.length < 26)
-  ) {
+  if (storeCursor === undefined || (/^\d+$/u.test(storeCursor) && storeCursor.length < 26)) {
     return undefined;
   }
   try {

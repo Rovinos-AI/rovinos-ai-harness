@@ -52,6 +52,16 @@ interface HttpServerDependencies {
   ) => ControlPlaneServerOptions;
 }
 
+interface RequestListenerInput {
+  readonly controlPlane: ControlPlaneConfig;
+  readonly tokens: Awaited<ReturnType<typeof resolveControlPlaneTokens>>;
+  readonly limiter: ControlPlaneRateLimiter;
+  readonly failedAuthLimiter: ControlPlaneRateLimiter;
+  readonly clock: ControlPlaneClock | undefined;
+  readonly audit: ControlPlaneAuditHandler;
+  readonly requestHandler: ReturnType<typeof toNodeHandler>;
+}
+
 class ControlPlaneListenError extends HarnessError {
   override readonly code = "control_plane_listen_failed";
 
@@ -106,15 +116,9 @@ export async function startControlPlaneHttpTransport({
   };
 }
 
-function createRequestListener(input: {
-  readonly controlPlane: ControlPlaneConfig;
-  readonly tokens: Awaited<ReturnType<typeof resolveControlPlaneTokens>>;
-  readonly limiter: ControlPlaneRateLimiter;
-  readonly failedAuthLimiter: ControlPlaneRateLimiter;
-  readonly clock: ControlPlaneClock | undefined;
-  readonly audit: ControlPlaneAuditHandler;
-  readonly requestHandler: ReturnType<typeof toNodeHandler>;
-}): (request: IncomingMessage, response: ServerResponse) => void {
+function createRequestListener(
+  input: RequestListenerInput,
+): (request: IncomingMessage, response: ServerResponse) => void {
   return (request, response) => {
     if ((request.url ?? "").split("?", 1)[0] !== HTTP_PATH) {
       response.writeHead(404).end();
@@ -128,50 +132,16 @@ function createRequestListener(input: {
         tls: input.controlPlane.tls !== undefined,
       })
     ) {
-      emitAuditSafely(input.audit, {
-        tokenId: UNAUTHENTICATED_TOKEN,
-        tool: HTTP_TOOL,
-        outcome: Code.parse("control_plane_host_invalid"),
-      });
-      response.writeHead(403, { "cache-control": "no-store" }).end();
+      rejectHostRequest(input.audit, response);
       return;
     }
     const principal = authenticateBearerToken(request.headers.authorization, input.tokens);
     if (principal === undefined) {
-      const remoteAddress = request.socket.remoteAddress ?? "unknown";
-      const failedAuthKey = Code.parse(
-        `failed_auth.${sha256Digest(remoteAddress).toString("hex").slice(0, 32)}`,
-      );
-      const now = input.clock?.now() ?? Date.now();
-      if (!input.failedAuthLimiter.tryAcquire(failedAuthKey, now)) {
-        emitAuditSafely(input.audit, {
-          tokenId: UNAUTHENTICATED_TOKEN,
-          tool: HTTP_TOOL,
-          outcome: Code.parse("control_plane_rate_limited"),
-        });
-        response.writeHead(429, { "cache-control": "no-store" }).end();
-        return;
-      }
-      emitAuditSafely(input.audit, {
-        tokenId: UNAUTHENTICATED_TOKEN,
-        tool: HTTP_TOOL,
-        outcome: Code.parse("control_plane_auth_invalid"),
-      });
-      response
-        .writeHead(401, {
-          "cache-control": "no-store",
-          "www-authenticate": "Bearer",
-        })
-        .end();
+      rejectUnauthenticatedRequest(input, request, response);
       return;
     }
     if (!input.limiter.tryAcquire(principal.tokenId, input.clock?.now() ?? Date.now())) {
-      emitAuditSafely(input.audit, {
-        tokenId: principal.tokenId,
-        tool: HTTP_TOOL,
-        outcome: Code.parse("control_plane_rate_limited"),
-      });
-      response.writeHead(429, { "cache-control": "no-store" }).end();
+      rejectRateLimitedRequest(input.audit, principal.tokenId, response);
       return;
     }
 
@@ -192,6 +162,54 @@ function createRequestListener(input: {
       }
     });
   };
+}
+
+function rejectHostRequest(audit: ControlPlaneAuditHandler, response: ServerResponse): void {
+  emitAuditSafely(audit, {
+    tokenId: UNAUTHENTICATED_TOKEN,
+    tool: HTTP_TOOL,
+    outcome: Code.parse("control_plane_host_invalid"),
+  });
+  response.writeHead(403, { "cache-control": "no-store" }).end();
+}
+
+function rejectUnauthenticatedRequest(
+  input: RequestListenerInput,
+  request: IncomingMessage,
+  response: ServerResponse,
+): void {
+  const remoteAddress = request.socket.remoteAddress ?? "unknown";
+  const failedAuthKey = Code.parse(
+    `failed_auth.${sha256Digest(remoteAddress).toString("hex").slice(0, 32)}`,
+  );
+  if (!input.failedAuthLimiter.tryAcquire(failedAuthKey, input.clock?.now() ?? Date.now())) {
+    rejectRateLimitedRequest(input.audit, UNAUTHENTICATED_TOKEN, response);
+    return;
+  }
+  emitAuditSafely(input.audit, {
+    tokenId: UNAUTHENTICATED_TOKEN,
+    tool: HTTP_TOOL,
+    outcome: Code.parse("control_plane_auth_invalid"),
+  });
+  response
+    .writeHead(401, {
+      "cache-control": "no-store",
+      "www-authenticate": "Bearer",
+    })
+    .end();
+}
+
+function rejectRateLimitedRequest(
+  audit: ControlPlaneAuditHandler,
+  tokenId: Code,
+  response: ServerResponse,
+): void {
+  emitAuditSafely(audit, {
+    tokenId,
+    tool: HTTP_TOOL,
+    outcome: Code.parse("control_plane_rate_limited"),
+  });
+  response.writeHead(429, { "cache-control": "no-store" }).end();
 }
 
 function emitAuditSafely(handler: ControlPlaneAuditHandler, audit: ControlPlaneAudit): void {
