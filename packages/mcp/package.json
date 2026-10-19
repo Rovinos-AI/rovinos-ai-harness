@@ -30,6 +30,6 @@
     "@modelcontextprotocol/server": "2.3.1",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "26.6.5",
-    "vitest": "3.2.6"
+    "vitest": "5.0.5"
   }
 }
