@@ -2894,13 +2894,10 @@ describe("runLoop", () => {
         );
         expect(
           events.some(
-            (event) =>
-              event.type === "run_status_changed" && event.reason === "awaiting_subagent",
+            (event) => event.type === "run_status_changed" && event.reason === "awaiting_subagent",
           ),
         ).toBe(suspends);
-        expect(
-          toolResults.map(({ outcome, errorCode }) => ({ outcome, errorCode })),
-        ).toEqual(
+        expect(toolResults.map(({ outcome, errorCode }) => ({ outcome, errorCode }))).toEqual(
           suspends
             ? []
             : [completes ? { outcome: "error", errorCode: "subagent_failed" } : { outcome: "ok" }],

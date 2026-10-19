@@ -707,12 +707,9 @@ describe("tool-step resume handling", () => {
     });
 
     await expect(
-      applyApprovalDecision(
-        { ...resumeOptions(recorder, tool), policy },
-        intent,
-        approval,
-        { resolution },
-      ),
+      applyApprovalDecision({ ...resumeOptions(recorder, tool), policy }, intent, approval, {
+        resolution,
+      }),
     ).rejects.toMatchObject({ code: "approval_edit_not_allowed" });
     expect(tool.calls).toHaveLength(0);
   });
@@ -982,11 +979,10 @@ describe("tool-step resume handling", () => {
         throw new Error("Expected a dangling tool intent.");
       }
 
-      const result = await resolveDanglingIntentApproval(
-        resumeOptions(recorder, tool),
-        intent,
-        { approval: request, resolution },
-      );
+      const result = await resolveDanglingIntentApproval(resumeOptions(recorder, tool), intent, {
+        approval: request,
+        resolution,
+      });
       expect(result.map(({ type }) => type)).toEqual(
         decision === "approve" ? ["tool_execution_started", "tool_result"] : ["tool_result"],
       );

@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  Event,
-  type Event as StoredEvent,
-  type Id,
-  type NewEvent,
-} from "@harness/schemas";
+import { Event, type Event as StoredEvent, type Id, type NewEvent } from "@harness/schemas";
 import type { EncodedSnapshot } from "./codec.js";
 import { InvalidEventError, StoreUnavailableError } from "./errors.js";
 import type { ListRunsOptions, RunSummary } from "./types.js";

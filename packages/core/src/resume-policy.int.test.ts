@@ -362,7 +362,14 @@ describe("dangling tool intent resume", () => {
       };
       const state = foldRunState(events);
       await applyDanglingIntents(
-        { recorder, tool, clock, runId, signal: new AbortController().signal, ids: new SequentialIdGenerator() },
+        {
+          recorder,
+          tool,
+          clock,
+          runId,
+          signal: new AbortController().signal,
+          ids: new SequentialIdGenerator(),
+        },
         state,
         planDanglingIntents(state, tool),
       );
@@ -391,7 +398,14 @@ describe("dangling tool intent resume", () => {
       };
       const state = foldRunState(events);
       await applyDanglingIntents(
-        { recorder, tool, clock, runId, signal: new AbortController().signal, ids: new SequentialIdGenerator() },
+        {
+          recorder,
+          tool,
+          clock,
+          runId,
+          signal: new AbortController().signal,
+          ids: new SequentialIdGenerator(),
+        },
         state,
         planDanglingIntents(state, tool),
       );
@@ -493,10 +507,7 @@ describe("dangling tool intent resume", () => {
       approval: request,
       resolution,
     });
-    expect(resultEvents.map(({ type }) => type)).toEqual([
-      "tool_execution_started",
-      "tool_result",
-    ]);
+    expect(resultEvents.map(({ type }) => type)).toEqual(["tool_execution_started", "tool_result"]);
     expect(resultEvents[1]).toMatchObject({ callId, outcome: "ok" });
     expect(tool.calls).toHaveLength(1);
     const stored: Event[] = [];
@@ -659,14 +670,10 @@ describe("dangling tool intent resume", () => {
       throw new Error("Expected approval resolution event.");
     }
     await expect(
-      resolveDanglingIntentApproval(
-        options,
-        intent,
-        {
-          approval: { ...requestEvent, callId: thirdCallId },
-          resolution,
-        },
-      ),
+      resolveDanglingIntentApproval(options, intent, {
+        approval: { ...requestEvent, callId: thirdCallId },
+        resolution,
+      }),
     ).rejects.toBeInstanceOf(ResumeActionMismatchError);
     await expect(
       resolveDanglingIntentApproval(options, intent, {

@@ -131,8 +131,8 @@ export function isPreservedStoreError(
   error: unknown,
 ): error is
   | SeqConflictError
-| RunExecutionLeaseLostError
-| InvalidEventError
+  | RunExecutionLeaseLostError
+  | InvalidEventError
   | ContentDecryptFailedError
   | KeyNotFoundError
   | StoreEncryptionMismatchError

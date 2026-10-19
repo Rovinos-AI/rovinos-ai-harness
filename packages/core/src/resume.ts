@@ -424,7 +424,9 @@ async function resumeFromHistory(
     events,
     snapshot,
     eventsAfterSnapshot:
-      snapshot === undefined ? events.slice() : events.filter((event) => event.seq > snapshot.atSeq),
+      snapshot === undefined
+        ? events.slice()
+        : events.filter((event) => event.seq > snapshot.atSeq),
     recorder,
     checkpointer,
   };

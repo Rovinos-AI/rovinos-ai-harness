@@ -18,11 +18,7 @@ import {
   type EncodedSnapshot,
   type SnapshotRow,
 } from "../codec.js";
-import {
-  InvalidEventError,
-  SeqConflictError,
-  StoreMigrationError,
-} from "../errors.js";
+import { InvalidEventError, SeqConflictError, StoreMigrationError } from "../errors.js";
 import {
   systemClock,
   sqliteStoreOptionsSchema,
@@ -301,7 +297,6 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
           insertSnapshot(this.insertSnapshot, encodedSnapshot);
           this.pruneSnapshots.run(runId, runId, this.snapshotKeep);
         }
-
       });
       appendTransaction.immediate();
       this.changeEmitter.notify(runId);
@@ -457,5 +452,4 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
       return Promise.reject(storeError(error));
     }
   }
-
 }

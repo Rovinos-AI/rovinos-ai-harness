@@ -334,14 +334,7 @@ export async function appendTransaction(
   client: PoolClient,
   options: AppendTransactionOptions,
 ): Promise<number> {
-  const {
-    runId,
-    encoded,
-    expectedSeq,
-    encodedSnapshot,
-    snapshotKeep = 5,
-    leaseOwner,
-  } = options;
+  const { runId, encoded, expectedSeq, encodedSnapshot, snapshotKeep = 5, leaseOwner } = options;
   const { first, last } = appendBoundaryEvents(encoded);
 
   let transactionStarted = false;

@@ -208,10 +208,10 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
   async releaseRunExecution(runId: Id, owner: Id): Promise<void> {
     this.assertWritable();
     await this.ensureInitialized();
-    await this.pool.query(
-      "DELETE FROM run_execution_leases WHERE run_id = $1 AND owner_id = $2",
-      [runId, owner],
-    );
+    await this.pool.query("DELETE FROM run_execution_leases WHERE run_id = $1 AND owner_id = $2", [
+      runId,
+      owner,
+    ]);
   }
 
   /** {@inheritDoc EventStore.read} */

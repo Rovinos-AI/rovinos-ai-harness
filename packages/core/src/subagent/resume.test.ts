@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  EventSchema,
-  Id,
-  RunConfigSchema,
-  type Event,
-} from "@harness/schemas";
+import { EventSchema, Id, RunConfigSchema, type Event } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelToolCall, ToolPort } from "../ports.js";
@@ -131,17 +126,17 @@ function childHistory(status: "running" | "completed" = "running"): Event[] {
   return events;
 }
 
-async function seed(store: InMemoryEventStore, options: {
-  readonly includeSpawn?: boolean;
-  readonly childStatus?: "running" | "completed";
-  readonly completed?: boolean;
-  readonly budgetMetadata?: boolean;
-  readonly childOnlyCreated?: boolean;
-} = {}): Promise<Event[]> {
-  const events = parentHistory(
-    options.includeSpawn ?? true,
-    options.budgetMetadata ?? true,
-  );
+async function seed(
+  store: InMemoryEventStore,
+  options: {
+    readonly includeSpawn?: boolean;
+    readonly childStatus?: "running" | "completed";
+    readonly completed?: boolean;
+    readonly budgetMetadata?: boolean;
+    readonly childOnlyCreated?: boolean;
+  } = {},
+): Promise<Event[]> {
+  const events = parentHistory(options.includeSpawn ?? true, options.budgetMetadata ?? true);
   await store.append(parentRunId, events, 0);
   if (options.includeSpawn !== false && options.childStatus !== undefined) {
     const child = childHistory(options.childStatus);
@@ -382,7 +377,9 @@ describe("recoverSubagentSpawn", () => {
         usage: { inputTokens: 0, outputTokens: 0 },
       });
 
-    await expect(recoverSubagentSpawn(createOptions(store, parentEvents, runChild))).resolves.toEqual({
+    await expect(
+      recoverSubagentSpawn(createOptions(store, parentEvents, runChild)),
+    ).resolves.toEqual({
       kind: "suspend",
     });
   });

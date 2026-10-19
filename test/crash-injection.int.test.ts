@@ -778,7 +778,9 @@ function subagentCrashConfig() {
         roles: { worker: [{ provider: "local", model: "worker" }] },
       },
     }),
-    roles: [{ id: "worker", route: "worker", tools: [subagentToolId], maxDepth: 1, maxChildren: 1 }],
+    roles: [
+      { id: "worker", route: "worker", tools: [subagentToolId], maxDepth: 1, maxChildren: 1 },
+    ],
   };
 }
 
@@ -833,11 +835,7 @@ function subagentCrashModel(): ModelPort {
   };
 }
 
-function createSubagentCrashRuntime(
-  store: EventStore,
-  recordWrite: () => void,
-  ids: IdGenerator,
-) {
+function createSubagentCrashRuntime(store: EventStore, recordWrite: () => void, ids: IdGenerator) {
   const tool: ToolPort = {
     describe: (toolId) =>
       toolId === subagentToolId ? { idempotent: false, timeoutMs: 1_000 } : undefined,
@@ -970,15 +968,14 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
 
         let parentEvents = await readEvents(restartStore, parentRunId);
         const spawn = parentEvents.find(
-          (event) => event.type === "subagent_spawned" && event.parentCallId === subagentSpawnCallId,
+          (event) =>
+            event.type === "subagent_spawned" && event.parentCallId === subagentSpawnCallId,
         );
         if (spawn?.type !== "subagent_spawned") {
           throw new Error("Expected the recovered parent to announce its child.");
         }
         let childEvents = await readEvents(restartStore, spawn.childRunId);
-        const parentStatus = parentEvents.findLast(
-          (event) => event.type === "run_status_changed",
-        );
+        const parentStatus = parentEvents.findLast((event) => event.type === "run_status_changed");
         if (parentStatus?.type === "run_status_changed" && parentStatus.to === "suspended") {
           const approval = childEvents.find(
             (event) =>
@@ -1004,9 +1001,7 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
         }
         parentEvents = await readEvents(restartStore, parentRunId);
         childEvents = await readEvents(restartStore, spawn.childRunId);
-        const finalStatus = parentEvents.findLast(
-          (event) => event.type === "run_status_changed",
-        );
+        const finalStatus = parentEvents.findLast((event) => event.type === "run_status_changed");
         expect(finalStatus).toMatchObject({ type: "run_status_changed", to: "completed" });
         const announcedChildren = parentEvents.filter(
           (event) =>
@@ -1031,8 +1026,7 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
         );
         const crashAfterExecutionClaim =
           mode === "after_commit" &&
-          reference.boundaries[crashAt - 1]?.eventTypes.includes("tool_execution_started") ===
-            true;
+          reference.boundaries[crashAt - 1]?.eventTypes.includes("tool_execution_started") === true;
         expect(
           counts.writes,
           `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",") ?? "no-boundary"})`,
@@ -1046,8 +1040,7 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
           expect(
             childEvents.filter(
               (event) =>
-                event.type === "tool_execution_started" &&
-                event.callId === subagentToolCallId,
+                event.type === "tool_execution_started" && event.callId === subagentToolCallId,
             ),
           ).toHaveLength(1);
           expect(
@@ -1062,8 +1055,7 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
           ) {
             expect(
               childEvents.filter(
-                (event) =>
-                  event.type === "tool_result" && event.callId === subagentToolCallId,
+                (event) => event.type === "tool_result" && event.callId === subagentToolCallId,
               ),
             ).toMatchObject([{ outcome: "error", errorCode: "resume_ambiguous" }]);
           }
@@ -1349,8 +1341,16 @@ describe("SQLite crash-injection matrix", () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-subagent-crash-reference-"));
     try {
       const reference = await discoverSubagentReference(directory);
-      expect(reference.boundaries.some(({ runId: boundaryRunId }) => boundaryRunId === reference.parentRunId)).toBe(true);
-      expect(reference.boundaries.some(({ runId: boundaryRunId }) => boundaryRunId === reference.childRunId)).toBe(true);
+      expect(
+        reference.boundaries.some(
+          ({ runId: boundaryRunId }) => boundaryRunId === reference.parentRunId,
+        ),
+      ).toBe(true);
+      expect(
+        reference.boundaries.some(
+          ({ runId: boundaryRunId }) => boundaryRunId === reference.childRunId,
+        ),
+      ).toBe(true);
       expect(reference.appendCount).toBeGreaterThan(0);
       await runSubagentCrashMatrix(reference);
     } finally {

@@ -455,15 +455,11 @@ describe("production subagent runtime", () => {
     if (strategy === undefined) {
       throw new Error("Expected the spawn recovery strategy.");
     }
-    const decision = await strategy.onDanglingIntent(
-      spawnCall,
-      foldRunState(parentEvents),
-      {
-        runId: parentRunId,
-        signal: new AbortController().signal,
-        toolRegistry: childTool,
-      },
-    );
+    const decision = await strategy.onDanglingIntent(spawnCall, foldRunState(parentEvents), {
+      runId: parentRunId,
+      signal: new AbortController().signal,
+      toolRegistry: childTool,
+    });
 
     expect(decision).toMatchObject({
       kind: "result",

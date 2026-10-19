@@ -784,9 +784,7 @@ describe("runtime subagent spawning", () => {
             );
           }
           signalChildResume();
-          return childResumeGate.then(() =>
-            completion([{ type: "text", text: "child complete" }]),
-          );
+          return childResumeGate.then(() => completion([{ type: "text", text: "child complete" }]));
         }
         parentModelCalls += 1;
         return Promise.resolve(
@@ -816,35 +814,34 @@ describe("runtime subagent spawning", () => {
       },
     };
     const runtimeConfig: RuntimeConfig = {
-        run: RunConfigSchema.parse({}),
-        pii: PiiConfigSchema.parse({ enabled: false }),
-        models: ModelsConfigSchema.parse({
-          routing: {
-            default: [{ provider: "local", model: "parent" }],
-            roles: { worker: [{ provider: "local", model: "worker" }] },
-          },
-        }),
-        roles: [
-          { id: "worker", route: "worker", tools: ["test.write"], maxDepth: 2, maxChildren: 1 },
-        ],
-      };
-    const runtimeOverrides: RuntimeOverrides = {
-        transientVault: true,
-        clock: new FakeClock(4),
-        ids: new SequentialIdGenerator(),
-        model,
-        tool,
-        policy: {
-          version: Code.parse("test.policy"),
-          decide: (call) => ({
-            decision:
-              call.toolId === "test.write" || call.toolId === "agent.spawn" ? "ask" : "allow",
-            ruleId: "test.rule",
-            reason: "test_decision",
-            editable: [],
-          }),
+      run: RunConfigSchema.parse({}),
+      pii: PiiConfigSchema.parse({ enabled: false }),
+      models: ModelsConfigSchema.parse({
+        routing: {
+          default: [{ provider: "local", model: "parent" }],
+          roles: { worker: [{ provider: "local", model: "worker" }] },
         },
-      };
+      }),
+      roles: [
+        { id: "worker", route: "worker", tools: ["test.write"], maxDepth: 2, maxChildren: 1 },
+      ],
+    };
+    const runtimeOverrides: RuntimeOverrides = {
+      transientVault: true,
+      clock: new FakeClock(4),
+      ids: new SequentialIdGenerator(),
+      model,
+      tool,
+      policy: {
+        version: Code.parse("test.policy"),
+        decide: (call) => ({
+          decision: call.toolId === "test.write" || call.toolId === "agent.spawn" ? "ask" : "allow",
+          ruleId: "test.rule",
+          reason: "test_decision",
+          editable: [],
+        }),
+      },
+    };
     const runtime = await createRuntime(runtimeConfig, {
       ...runtimeOverrides,
       store: firstStore,
@@ -898,8 +895,12 @@ describe("runtime subagent spawning", () => {
       await expect(firstResume).resolves.toMatchObject({ status: "completed" });
 
       const completedParentEvents = await eventsFor(store, rootRunId);
-      expect(completedParentEvents.filter((event) => event.type === "subagent_spawned")).toHaveLength(1);
-      expect(completedParentEvents.filter((event) => event.type === "subagent_completed")).toHaveLength(1);
+      expect(
+        completedParentEvents.filter((event) => event.type === "subagent_spawned"),
+      ).toHaveLength(1);
+      expect(
+        completedParentEvents.filter((event) => event.type === "subagent_completed"),
+      ).toHaveLength(1);
       expect(
         completedParentEvents.filter(
           (event) => event.type === "tool_result" && event.callId === spawnCallId,
@@ -934,9 +935,7 @@ describe("runtime subagent spawning", () => {
                     args: {},
                   },
                 ])
-              : completion([
-                  { type: "text", text: `${email} ${"x".repeat(30_000)}` },
-                ]),
+              : completion([{ type: "text", text: `${email} ${"x".repeat(30_000)}` }]),
           );
         }
         parentCalls += 1;

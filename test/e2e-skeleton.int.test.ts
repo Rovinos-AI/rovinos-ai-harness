@@ -1664,8 +1664,12 @@ describe("resume", () => {
       const completedParentEvents = await readEvents(store, parentRunId);
       expect(resumed.status).toBe("completed");
       expect(childWrites).toBe(1);
-      expect(completedParentEvents.filter((event) => event.type === "subagent_spawned")).toHaveLength(1);
-      expect(completedParentEvents.filter((event) => event.type === "subagent_completed")).toHaveLength(1);
+      expect(
+        completedParentEvents.filter((event) => event.type === "subagent_spawned"),
+      ).toHaveLength(1);
+      expect(
+        completedParentEvents.filter((event) => event.type === "subagent_completed"),
+      ).toHaveLength(1);
       expect(
         completedParentEvents.filter(
           (event) => event.type === "tool_result" && event.callId === spawnCallId,

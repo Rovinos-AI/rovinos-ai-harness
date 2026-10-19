@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  JsonValue as JsonValueSchema,
-  type Event,
-  type Id,
-} from "@harness/schemas";
+import { JsonValue as JsonValueSchema, type Event, type Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import { ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import type { ModelToolCall, ToolPort } from "../ports.js";
@@ -11,11 +7,7 @@ import type { ToolResumeContext, ToolResumeDecision } from "../resume-policy.js"
 import { foldRunState, type RunState } from "../run-state.js";
 import type { ResolvedRole } from "../roles.js";
 import type { RunScopeRegistry } from "./scope.js";
-import {
-  aggregateSubagentUsage,
-  finalizeChild,
-  type SubagentResult,
-} from "./result.js";
+import { aggregateSubagentUsage, finalizeChild, type SubagentResult } from "./result.js";
 import type { SubagentRunRequest, SubagentRunner } from "./supervisor.js";
 
 type SpawnedEvent = Extract<Event, { type: "subagent_spawned" }>;

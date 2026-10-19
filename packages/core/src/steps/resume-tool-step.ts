@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { UNREGISTERED_TOOL_ID } from "@harness/schemas";
 import type { Code, Event, JsonValue as JsonValueSchema } from "@harness/schemas";
-import {
-  ApprovalPayloadSchema,
-  approvalEditsAreAllowed,
-  diffToEdits,
-} from "@harness/policy";
+import { ApprovalPayloadSchema, approvalEditsAreAllowed, diffToEdits } from "@harness/policy";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { EventPartial } from "../recorder.js";

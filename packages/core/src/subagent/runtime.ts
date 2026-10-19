@@ -178,7 +178,13 @@ async function startPendingChild(
   ) {
     return;
   }
-  const recorder = new RunRecorder(options.store, request.runId, options.ids.next(), 1, options.clock);
+  const recorder = new RunRecorder(
+    options.store,
+    request.runId,
+    options.ids.next(),
+    1,
+    options.clock,
+  );
   await recorder.withStepSpan(
     RUN_SPAN,
     {},
@@ -272,7 +278,10 @@ async function resumeChild(
     await startPendingChild(options, request);
     await resumeRun(resumeChildOptions(options, request));
   } catch (error) {
-    if (!(error instanceof RunAwaitingApprovalError) && !(error instanceof RunAlreadyTerminalError)) {
+    if (
+      !(error instanceof RunAwaitingApprovalError) &&
+      !(error instanceof RunAlreadyTerminalError)
+    ) {
       throw error instanceof Error ? error : new Error("Child resume failed.");
     }
     resumeError = error;
@@ -284,7 +293,13 @@ async function runNewChild(
   options: SubagentRuntimeOptions,
   request: SubagentRunRequest,
 ): Promise<SubagentResult> {
-  const recorder = new RunRecorder(options.store, request.runId, options.ids.next(), 0, options.clock);
+  const recorder = new RunRecorder(
+    options.store,
+    request.runId,
+    options.ids.next(),
+    0,
+    options.clock,
+  );
   const result = await runLoop({
     recorder,
     clock: options.clock,

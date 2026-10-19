@@ -24,10 +24,7 @@ import type { ResolvedRole } from "../roles.js";
 import type { RunScopeRegistry } from "./scope.js";
 import type { SubagentResult } from "./result.js";
 import { recoverSubagentSpawn } from "./resume.js";
-import type {
-  ToolResumeContext,
-  ToolResumeDecision,
-} from "../resume-policy.js";
+import type { ToolResumeContext, ToolResumeDecision } from "../resume-policy.js";
 import type { RunState } from "../run-state.js";
 import { aggregateSubagentUsage, finalizeChild } from "./result.js";
 import { resolveChildAllocation, withSpawnLock } from "./allocation.js";
@@ -377,8 +374,7 @@ function deriveChildSignal(parentSignal: AbortSignal): {
 export function restrictToolPort(parent: ToolPort, roleTools: readonly Code[]): ToolPort {
   const allowed = new Set(roleTools.filter((toolId) => parent.describe(toolId) !== undefined));
   return {
-    resumeStrategy: (toolId) =>
-      allowed.has(toolId) ? parent.resumeStrategy?.(toolId) : undefined,
+    resumeStrategy: (toolId) => (allowed.has(toolId) ? parent.resumeStrategy?.(toolId) : undefined),
     ...(parent.getToolSpecs === undefined
       ? {}
       : {
