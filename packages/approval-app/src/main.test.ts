@@ -265,18 +265,229 @@ describe("approval app SDK bootstrap", () => {
     expect(window.sessionStorage.length).toBe(0);
   });
 
+  it("preserves structured server failures returned with isError and allows an edit retry", async () => {
+    const app = await start();
+    let invalidEditReturned = false;
+    bridge.call.mockImplementation((request) => {
+      if (request.name !== "harness.approvals.resolve") {
+        return Promise.resolve({ content: [] });
+      }
+      if (invalidEditReturned) {
+        return Promise.resolve({ content: [], structuredContent: { ok: true } });
+      }
+      invalidEditReturned = true;
+      return Promise.resolve({
+        content: [{ type: "text", text: "edit_invalid" }],
+        structuredContent: { ok: false, code: "edit_invalid" },
+        isError: true,
+      });
+    });
+    app.dispatch("toolinput", {
+      arguments: {
+        approvalId: "00000000000000000000000003",
+        payload: { ...payload, args: { count: 1 }, editableFields: ["/count"] },
+      },
+    });
+    document
+      .querySelector<HTMLButtonElement>('nav[aria-label="Approval actions"] button:nth-child(3)')
+      ?.click();
+    const input = document.querySelector<HTMLInputElement>("#approval-edit-0");
+    if (input === null) {
+      throw new Error("Expected the edit input.");
+    }
+    input.value = "2";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const submit = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Submit edits",
+    );
+    if (submit === undefined) {
+      throw new Error("Expected the edit submit button.");
+    }
+    submit.click();
+    await vi.waitFor(() => {
+      const alerts = document.querySelectorAll('[role="status"]');
+      expect(alerts[alerts.length - 1]?.textContent).toBe("The edited values are invalid.");
+    });
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    await vi.waitFor(() => {
+      const statuses = document.querySelectorAll('[role="status"]');
+      expect(statuses[statuses.length - 1]?.textContent).toBe("Edits submitted.");
+    });
+  });
+
+  it("parses structured failures encoded as JSON text in an isError result", async () => {
+    const app = await start();
+    let invalidEditReturned = false;
+    bridge.call.mockImplementation((request) => {
+      if (request.name !== "harness.approvals.resolve") {
+        return Promise.resolve({ content: [] });
+      }
+      if (invalidEditReturned) {
+        return Promise.resolve({ content: [], structuredContent: { ok: true } });
+      }
+      invalidEditReturned = true;
+      return Promise.resolve({
+        content: [{ type: "text", text: JSON.stringify({ ok: false, code: "edit_invalid" }) }],
+        isError: true,
+      });
+    });
+    app.dispatch("toolinput", {
+      arguments: {
+        approvalId: "00000000000000000000000003",
+        payload: { ...payload, args: { count: 1 }, editableFields: ["/count"] },
+      },
+    });
+    document
+      .querySelector<HTMLButtonElement>('nav[aria-label="Approval actions"] button:nth-child(3)')
+      ?.click();
+    const input = document.querySelector<HTMLInputElement>("#approval-edit-0");
+    if (input === null) {
+      throw new Error("Expected the edit input.");
+    }
+    input.value = "2";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const submit = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Submit edits",
+    );
+    if (submit === undefined) {
+      throw new Error("Expected the edit submit button.");
+    }
+    submit.click();
+    await vi.waitFor(() => {
+      const statuses = document.querySelectorAll('[role="status"]');
+      expect(statuses[statuses.length - 1]?.textContent).toBe("The edited values are invalid.");
+    });
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    await vi.waitFor(() => {
+      const statuses = document.querySelectorAll('[role="status"]');
+      expect(statuses[statuses.length - 1]?.textContent).toBe("Edits submitted.");
+    });
+  });
+
+  it("keeps unavailable-tool fallback sticky across rerenders and a late host connection", async () => {
+    installAnimationFrame();
+    let finishConnection: (() => void) | undefined;
+    bridge.connect.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishConnection = resolve;
+      }),
+    );
+    bridge.call.mockImplementation((request) =>
+      request.name === "harness.approvals.resolve"
+        ? Promise.reject(Object.assign(new Error("app_tool_not_allowed"), { code: -32600 }))
+        : Promise.resolve({ content: [] }),
+    );
+    await import("./main.js");
+    const app = bridge.apps.get("app");
+    if (app === undefined) {
+      throw new Error("App was not created");
+    }
+    app.dispatch("toolinput", {
+      arguments: {
+        approvalId: "00000000000000000000000003",
+        payload,
+      },
+    });
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Approval actions"] button')?.click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("Review");
+      expect(document.querySelector('[aria-label="Approve command"]')).not.toBeNull();
+    });
+    app.dispatch("toolinput", {
+      arguments: {
+        approvalId: "00000000000000000000000003",
+        payload,
+      },
+    });
+    expect(
+      [
+        ...document.querySelectorAll<HTMLButtonElement>(
+          'nav[aria-label="Approval actions"] button',
+        ),
+      ].every((control) => control.disabled),
+    ).toBe(true);
+    finishConnection?.();
+    await vi.waitFor(() => {
+      expect(
+        document
+          .querySelector('section[aria-labelledby="approval-fallback-heading"]')
+          ?.hasAttribute("hidden"),
+      ).toBe(false);
+    });
+    expect(document.querySelector<HTMLInputElement>('[aria-label="Approve command"]')?.value).toBe(
+      "harness approvals approve 00000000000000000000000003",
+    );
+  });
+
+  it("treats JSON-RPC method-not-found as an unavailable resolve tool", async () => {
+    const app = await start();
+    bridge.call.mockImplementation((request) =>
+      request.name === "harness.approvals.resolve"
+        ? Promise.reject(Object.assign(new Error("method_not_found"), { code: -32601 }))
+        : Promise.resolve({ content: [] }),
+    );
+    app.dispatch("toolinput", {
+      arguments: {
+        approvalId: "00000000000000000000000003",
+        payload,
+      },
+    });
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Approval actions"] button')?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[aria-label="Approve command"]')).not.toBeNull();
+    });
+    expect(
+      document.querySelector<HTMLButtonElement>('nav[aria-label="Approval actions"] button')
+        ?.disabled,
+    ).toBe(true);
+  });
+
+  it("treats other resolve transport errors as retryable failures", async () => {
+    const app = await start();
+    bridge.call.mockImplementation((request) =>
+      request.name === "harness.approvals.resolve"
+        ? Promise.reject(new Error("SYNTHETIC_TRANSPORT_CANARY"))
+        : Promise.resolve({ content: [] }),
+    );
+    app.dispatch("toolinput", {
+      arguments: {
+        approvalId: "00000000000000000000000003",
+        payload,
+      },
+    });
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Approval actions"] button')?.click();
+    await vi.waitFor(() => {
+      const statuses = document.querySelectorAll('[role="status"]');
+      expect(statuses[statuses.length - 1]?.textContent).toBe(
+        "The approval could not be resolved.",
+      );
+    });
+    expect(
+      document.querySelector<HTMLButtonElement>('nav[aria-label="Approval actions"] button')
+        ?.disabled,
+    ).toBe(false);
+    expect(document.querySelector('[aria-label="Approve command"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("SYNTHETIC_TRANSPORT_CANARY");
+  });
+
   it("handles a failed connection without exposing the exception", async () => {
+    vi.useFakeTimers();
     installAnimationFrame();
     bridge.connect.mockRejectedValue(new Error("SYNTHETIC_BRIDGE_CANARY"));
     bridge.call.mockRejectedValue(new Error("SYNTHETIC_TRANSPORT_CANARY"));
     await import("./main.js");
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toContain("Invalid approval payload");
-    });
+    expect(document.body.textContent).toContain("Waiting for host...");
+    await vi.advanceTimersByTimeAsync(3001);
+    expect(document.body.textContent).toContain("The host bridge is unavailable.");
+    expect(document.querySelector<HTMLInputElement>('[aria-label="Approve command"]')?.value).toBe(
+      "harness approvals approve <id>",
+    );
     expect(document.body.textContent).not.toContain("SYNTHETIC");
     expect(JSON.stringify(bridge.call.mock.calls)).not.toContain("SYNTHETIC");
     expect(telemetry.instances[0]?.active).toBe(false);
-    expect(telemetry.hooks[0]?.reportErrors).toEqual([["bridge_unavailable"], ["payload_invalid"]]);
+    expect(telemetry.hooks[0]?.reportErrors).toEqual([["bridge_unavailable"]]);
     expect(
       bridge.call.mock.calls.every(([request]) => request.name === "harness.telemetry.emit"),
     ).toBe(true);

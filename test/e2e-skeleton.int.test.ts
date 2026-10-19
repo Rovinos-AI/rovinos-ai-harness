@@ -8,6 +8,7 @@
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
+// Not wired yet: user pseudonym emission in runtime telemetry (12.8 -> #139)
 import { Command } from "commander";
 import { Client, InMemoryTransport, type Tool, type Transport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
@@ -456,7 +457,10 @@ beforeAll(async () => {
       undefined,
       { maxPrepareMs: 1_000 },
     ),
-    telemetry: { sentinel: { minValueLength: 6, enabled: true } },
+    telemetry: {
+      sentinel: { minValueLength: 6, enabled: true },
+      correlation: { enabled: false },
+    },
   });
   const forceFlush = telemetry.tracerProvider.forceFlush.bind(telemetry.tracerProvider);
   vi.spyOn(telemetry.tracerProvider, "forceFlush").mockImplementation(async () => {

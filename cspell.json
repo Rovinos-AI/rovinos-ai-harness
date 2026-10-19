@@ -18,6 +18,7 @@
     "noreferrer",
     "onopenlink",
     "onrequestdisplaymode",
+    "onteardown",
     "onupdatemodelcontext",
     "plpgsql",
     "sizechange",

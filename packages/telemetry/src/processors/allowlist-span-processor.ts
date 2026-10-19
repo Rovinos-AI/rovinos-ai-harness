@@ -123,9 +123,13 @@ function isReadableSpanValid(span: ReadableSpan): boolean {
  * Rebuilds a finished span using only attributes registered for its span name.
  *
  * @param span - Finished span from the OpenTelemetry SDK.
+ * @param correlationEnabled - Whether telemetry correlation was explicitly enabled.
  * @returns A sanitized span, or `undefined` when it is unregistered or malformed.
  */
-export function sanitizeSpan(span: ReadableSpan): ReadableSpan | undefined {
+export function sanitizeSpan(
+  span: ReadableSpan,
+  correlationEnabled = false,
+): ReadableSpan | undefined {
   try {
     if (!isReadableSpanValid(span)) {
       throw new TypeError("Readable span is malformed.");
@@ -137,7 +141,7 @@ export function sanitizeSpan(span: ReadableSpan): ReadableSpan | undefined {
       return undefined;
     }
 
-    const attributes = sanitizeAttributes(definition, span.attributes);
+    const attributes = sanitizeAttributes(definition, span.attributes, correlationEnabled);
     if (span.events.length > 0) {
       countDroppedTelemetry("event_stripped");
     }
@@ -218,7 +222,7 @@ export class AllowlistSpanProcessor implements SpanProcessor {
 
   private async processSpan(span: ReadableSpan): Promise<void> {
     try {
-      const sanitized = sanitizeSpan(span);
+      const sanitized = sanitizeSpan(span, this.options.telemetry?.correlation.enabled === true);
       if (sanitized === undefined) {
         return;
       }
