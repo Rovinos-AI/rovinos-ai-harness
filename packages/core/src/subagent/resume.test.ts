@@ -304,54 +304,6 @@ describe("recoverSubagentSpawn", () => {
       };
     });
 
-    it("recovers a child log containing only run_created", async () => {
-      const store = new InMemoryEventStore();
-      const parentEvents = await seed(store, {
-        childStatus: "running",
-        childOnlyCreated: true,
-      });
-      const runChild = vi.fn<SubagentRunner>(async (request) => {
-        expect(request.input).toEqual({ goal: "recover child" });
-        await store.append(
-          childRunId,
-          [
-            event(childRunId, 1, {
-              type: "run_input",
-              v: 1,
-              input: request.input,
-              inputKind: "initial",
-            }),
-            event(childRunId, 2, {
-              type: "run_status_changed",
-              v: 1,
-              from: "pending",
-              to: "running",
-              reason: "start",
-            }),
-            event(childRunId, 3, {
-              type: "run_status_changed",
-              v: 1,
-              from: "running",
-              to: "completed",
-              reason: "completed",
-            }),
-          ],
-          1,
-        );
-        return {
-          childRunId,
-          status: "completed",
-          value: { text: "recovered" },
-          usage: { inputTokens: 0, outputTokens: 0 },
-        };
-      });
-
-      await expect(recoverSubagentSpawn(createOptions(store, parentEvents, runChild))).resolves.toMatchObject({
-        kind: "result",
-        execution: { outcome: "ok" },
-      });
-      expect(runChild).toHaveBeenCalledOnce();
-    });
     const options = createOptions(store, parentEvents, runChild);
 
     await expect(recoverSubagentSpawn(options)).resolves.toMatchObject({
@@ -366,6 +318,57 @@ describe("recoverSubagentSpawn", () => {
     expect(options.scopes.scopeOf(childRunId)).toBe(parentRunId);
   });
 
+  it("recovers a child log containing only run_created", async () => {
+    const store = new InMemoryEventStore();
+    const parentEvents = await seed(store, {
+      childStatus: "running",
+      childOnlyCreated: true,
+    });
+    const runChild = vi.fn<SubagentRunner>(async (request: SubagentRunRequest) => {
+      expect(request.input).toEqual({ goal: "recover child" });
+      await store.append(
+        childRunId,
+        [
+          event(childRunId, 1, {
+            type: "run_input",
+            v: 1,
+            input: request.input,
+            inputKind: "initial",
+          }),
+          event(childRunId, 2, {
+            type: "run_status_changed",
+            v: 1,
+            from: "pending",
+            to: "running",
+            reason: "start",
+          }),
+          event(childRunId, 3, {
+            type: "run_status_changed",
+            v: 1,
+            from: "running",
+            to: "completed",
+            reason: "completed",
+          }),
+        ],
+        1,
+      );
+      return {
+        childRunId,
+        status: "completed",
+        value: { text: "recovered" },
+        usage: { inputTokens: 0, outputTokens: 0 },
+      };
+    });
+
+    await expect(
+      recoverSubagentSpawn(createOptions(store, parentEvents, runChild)),
+    ).resolves.toMatchObject({
+      kind: "result",
+      execution: { outcome: "ok" },
+    });
+    expect(runChild).toHaveBeenCalledOnce();
+  });
+
   it("suspends the parent when the resumed child still awaits approval", async () => {
     const store = new InMemoryEventStore();
     const parentEvents = await seed(store, { childStatus: "running" });
@@ -375,23 +378,23 @@ describe("recoverSubagentSpawn", () => {
       usage: { inputTokens: 0, outputTokens: 0 },
     });
 
-    it("leaves the spawn dangling when shutdown arrives while the child resumes", async () => {
-      const store = new InMemoryEventStore();
-      const parentEvents = await seed(store, { childStatus: "running" });
-      const controller = new AbortController();
-      const runChild: SubagentRunner = async () => {
-        controller.abort("shutdown");
-        throw new Error("child shutdown");
-      };
-
-      await expect(
-        recoverSubagentSpawn(createOptions(store, parentEvents, runChild, controller.signal)),
-      ).resolves.toEqual({ kind: "shutdown" });
-    });
-
     await expect(recoverSubagentSpawn(createOptions(store, parentEvents, runChild))).resolves.toEqual({
       kind: "suspend",
     });
+  });
+
+  it("leaves the spawn dangling when shutdown arrives while the child resumes", async () => {
+    const store = new InMemoryEventStore();
+    const parentEvents = await seed(store, { childStatus: "running" });
+    const controller = new AbortController();
+    const runChild: SubagentRunner = async () => {
+      controller.abort("shutdown");
+      throw new Error("child shutdown");
+    };
+
+    await expect(
+      recoverSubagentSpawn(createOptions(store, parentEvents, runChild, controller.signal)),
+    ).resolves.toEqual({ kind: "shutdown" });
   });
 
   it("returns a missing-child error if the announcement points to an invalid child log", async () => {

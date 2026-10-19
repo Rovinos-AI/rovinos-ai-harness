@@ -12,8 +12,10 @@ import {
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
-import type { ToolPort } from "./ports.js";
+import type { ModelToolCall, ToolPort } from "./ports.js";
 import { LeaseLostError, type Clock } from "./recorder.js";
+import type { RunState } from "./run-state.js";
+import type { ToolResumeContext } from "./resume-policy.js";
 import { resumeRun } from "./resume.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
@@ -296,7 +298,11 @@ function createRuntimeToolPort(
         return undefined;
       }
       return {
-        onDanglingIntent: async (call, state, context) => {
+        onDanglingIntent: async (
+          call: ModelToolCall,
+          state: RunState,
+          context: ToolResumeContext,
+        ) => {
           const decision = await strategy.onDanglingIntent(call, state, context);
           if (decision.kind !== "result") {
             return decision;
