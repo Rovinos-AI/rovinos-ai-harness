@@ -44,8 +44,7 @@ import {
 } from "./subscriptions.js";
 import {
   hasDuplicateSnapshot,
-  matchesContinuation,
-  startAfterCursor,
+  listMemoryRuns,
   validateEventBatch,
 } from "./memory-helpers.js";
 
@@ -82,7 +81,14 @@ export class InMemoryEventStore implements EventStore {
     leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     try {
-      return Promise.resolve(this.appendEvents(runId, events, expectedSeq, undefined, leaseOwner));
+      return Promise.resolve(
+        this.appendEvents({
+          runId,
+          events,
+          expectedSeq,
+          ...(leaseOwner === undefined ? {} : { leaseOwner }),
+        }),
+      );
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new StoreUnavailableError());
     }
@@ -90,28 +96,32 @@ export class InMemoryEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.appendWithSnapshot} */
   async appendWithSnapshot(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    snapshot: Snapshot,
-    leaseOwner?: Id,
+    ...args: Parameters<EventStore["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
+    const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     try {
       const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
       const encodedSnapshot = await encodeSnapshot(this.codec, validatedSnapshot);
-      return this.appendEvents(runId, events, expectedSeq, encodedSnapshot, leaseOwner);
+      return this.appendEvents({
+        runId,
+        events,
+        expectedSeq,
+        encodedSnapshot,
+        ...(leaseOwner === undefined ? {} : { leaseOwner }),
+      });
     } catch (error) {
       throw error instanceof Error ? error : new StoreUnavailableError();
     }
   }
 
-  private appendEvents(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    encodedSnapshot?: EncodedSnapshot,
-    leaseOwner?: Id,
-  ): { nextSeq: number } {
+  private appendEvents(options: {
+    readonly runId: Id;
+    readonly events: readonly NewEvent[];
+    readonly expectedSeq: number;
+    readonly encodedSnapshot?: EncodedSnapshot;
+    readonly leaseOwner?: Id;
+  }): { nextSeq: number } {
+    const { runId, events, expectedSeq, encodedSnapshot, leaseOwner } = options;
     if (leaseOwner !== undefined && this.executionLeases.get(runId)?.owner !== leaseOwner) {
       throw new RunExecutionLeaseLostError();
     }
@@ -157,7 +167,7 @@ export class InMemoryEventStore implements EventStore {
   /** {@inheritDoc EventStore.renewRunExecution} */
   renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
     const existing = this.executionLeases.get(runId);
-    if (existing === undefined || existing.owner !== owner || existing.expiresAt <= now) {
+    if (existing?.owner !== owner || existing.expiresAt <= now) {
       return Promise.resolve(false);
     }
     this.executionLeases.set(runId, { owner, expiresAt: now + leaseMs });
@@ -304,56 +314,7 @@ export class InMemoryEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.listRuns} */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
-    if (!Number.isInteger(opts.limit) || opts.limit < 1) {
-      return Promise.reject(new InvalidEventError([["limit"]]));
-    }
-
-    const summaries: RunSummary[] = [];
-    for (const [runId, events] of this.runs) {
-      const created = events.find((event) => event.type === "run_created");
-      const last = events.at(-1);
-      if (created === undefined || last === undefined) {
-        continue;
-      }
-      if (!matchesContinuation(created, opts.continuationOf)) {
-        continue;
-      }
-
-      let status: RunSummary["status"] = "pending";
-      for (const event of events) {
-        if (event.type === "run_status_changed") {
-          status = event.to;
-        }
-      }
-      if (opts.status !== undefined && opts.status !== status) {
-        continue;
-      }
-      summaries.push({
-        runId,
-        createdAt: created.ts,
-        status,
-        lastSeq: last.seq,
-        lastTs: last.ts,
-      });
-    }
-
-    summaries.sort((left, right) => {
-      const createdAtOrder = right.createdAt - left.createdAt;
-      if (createdAtOrder !== 0) {
-        return createdAtOrder;
-      }
-      return left.runId.localeCompare(right.runId);
-    });
-
-    const start = startAfterCursor(summaries, opts.cursor);
-    if (start === undefined) {
-      return Promise.reject(new InvalidEventError([["cursor"]]));
-    }
-
-    const end = start + opts.limit;
-    const runs = summaries.slice(start, end);
-    const nextCursor = end < summaries.length ? runs.at(-1)?.runId : undefined;
-    return Promise.resolve(nextCursor === undefined ? { runs } : { runs, nextCursor });
+    return Promise.resolve().then(() => listMemoryRuns(this.runs, opts));
   }
 
   /** {@inheritDoc EventStore.findRunsByTrace} */

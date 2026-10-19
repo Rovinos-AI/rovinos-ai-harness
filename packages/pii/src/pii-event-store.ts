@@ -159,12 +159,9 @@ export class PiiEventStore implements EventStoreLike {
   }
 
   async appendWithSnapshot(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    snapshot: Snapshot,
-    leaseOwner?: Id,
+    ...args: Parameters<EventStoreLike["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
+    const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     const prepared = await this.prepareEvents(runId, events, expectedSeq);
     let sanitizedSnapshot: Snapshot;
     let snapshotSummaries: readonly PiiActionSummary[];

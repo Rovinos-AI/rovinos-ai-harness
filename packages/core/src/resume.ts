@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, type Event, type Id, type Snapshot } from "@harness/schemas";
-import type { Link } from "@opentelemetry/api";
 import type { EventStore } from "@harness/store";
 import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 import { activeRuns } from "@harness/telemetry";
@@ -11,11 +10,13 @@ import { continueRunLoop, type RunLoopExecutionOptions, type RunLoopResult } fro
 import { recordBudgetFailureAndCheckpoint } from "./steps/model-preflight.js";
 import { LeaseLostError, RunRecorder, type EventPartial } from "./recorder.js";
 import { planDanglingIntents, type ResumePolicy } from "./resume-policy.js";
-import { CorruptLogError, foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
+import { foldRunState, isTerminalRunState, type RunState } from "./run-state.js";
 import { RUN_SPAN } from "./spans.js";
 import { applyDanglingIntents } from "./steps/resume-tool-step.js";
 import { suspendForShutdown } from "./steps/shutdown.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
+import { previousSegmentLink, readRunEvents, restoreRunScope } from "./resume-history.js";
+import { claimResumeLock } from "./resume-lock.js";
 
 /** Error raised when attempting to resume a completed, failed, or cancelled run. */
 export class RunAlreadyTerminalError extends HarnessError {
@@ -61,27 +62,8 @@ export class RunAwaitingApprovalError extends HarnessError {
   }
 }
 
-const activeResumes = new WeakMap<EventStore, Set<Id>>();
 const RESUME_LEASE_MS = 30_000;
 const RESUME_LEASE_RENEW_MS = 10_000;
-
-function claimResumeLock(store: EventStore, runId: Id): () => void {
-  let runs = activeResumes.get(store);
-  if (runs === undefined) {
-    runs = new Set();
-    activeResumes.set(store, runs);
-  }
-  if (runs.has(runId)) {
-    throw new ResumeConflictError();
-  }
-  runs.add(runId);
-  return () => {
-    runs?.delete(runId);
-    if (runs?.size === 0) {
-      activeResumes.delete(store);
-    }
-  };
-}
 
 /** Inputs for resuming an existing run. */
 export interface ResumeRunOptions extends Omit<RunLoopExecutionOptions, "recorder"> {
@@ -95,93 +77,6 @@ export interface ResumeRunOptions extends Omit<RunLoopExecutionOptions, "recorde
   readonly workspaceSnapshotter?: WorkspaceSnapshotPort;
   /** Called immediately after this worker wins the durable resume claim. */
   readonly onClaimed?: () => void;
-}
-
-async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
-  const events: Event[] = [];
-  for await (const event of store.read(runId)) {
-    events.push(event);
-  }
-  return events;
-}
-
-interface RunScopeRestoreOptions {
-  readonly store: EventStore;
-  readonly runId: Id;
-  readonly events: readonly Event[];
-  readonly scopes: RunScopeRegistry;
-  readonly visited?: Set<Id>;
-}
-
-async function registerRunScope(options: RunScopeRestoreOptions): Promise<void> {
-  const { store, runId, events, scopes } = options;
-  const visited = options.visited ?? new Set<Id>();
-  const created = events.find((event) => event.type === "run_created");
-  if (created?.type !== "run_created") {
-    throw new CorruptLogError();
-  }
-  if (visited.has(runId)) {
-    throw new CorruptLogError();
-  }
-  visited.add(runId);
-  if (created.parentRunId === undefined) {
-    scopes.register(runId, created.scopeId ?? runId);
-    return;
-  }
-  const parentEvents = await readEvents(store, created.parentRunId);
-  if (parentEvents.length === 0 && created.scopeId !== undefined) {
-    scopes.register(runId, created.scopeId);
-    return;
-  }
-  await registerRunScope({
-    store,
-    runId: created.parentRunId,
-    events: parentEvents,
-    scopes,
-    visited,
-  });
-  const parentScope = scopes.scopeOf(created.parentRunId);
-  if (created.scopeId !== undefined && created.scopeId !== parentScope) {
-    throw new CorruptLogError();
-  }
-  scopes.register(runId, parentScope);
-}
-
-function linkFromTraceparent(traceparent: string): Link | undefined {
-  const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/u.exec(traceparent);
-  const traceId = match?.[1];
-  const spanId = match?.[2];
-  const flags = match?.[3];
-  if (traceId === undefined || spanId === undefined || flags === undefined) {
-    return undefined;
-  }
-  return {
-    context: {
-      traceId,
-      spanId,
-      traceFlags: Number.parseInt(flags, 16),
-      isRemote: true,
-    },
-  };
-}
-
-function previousSegmentLink(events: readonly Event[], traceparent?: string): Link {
-  const checkpointLink = traceparent === undefined ? undefined : linkFromTraceparent(traceparent);
-  if (checkpointLink !== undefined) {
-    return checkpointLink;
-  }
-  const last = events.at(-1);
-  if (last === undefined) {
-    throw new Error("Expected a prior run event.");
-  }
-  return {
-    context: {
-      traceId: last.traceId,
-      spanId: last.spanId,
-      traceFlags: 1,
-      isRemote: true,
-    },
-  };
 }
 
 function withoutApprovalIntents(state: RunState): RunState {
@@ -225,24 +120,21 @@ interface ResumeExecution {
   readonly checkpointer: Checkpointer;
 }
 
-async function readResumeHistory(options: ResumeRunOptions): Promise<{
+interface ResumeHistory {
   readonly events: Event[];
   readonly snapshot: Snapshot | undefined;
   readonly state: RunState;
   readonly head: number;
-}> {
+}
+
+async function readResumeHistory(options: ResumeRunOptions): Promise<ResumeHistory> {
   const [events, snapshot, head] = await Promise.all([
-    readEvents(options.store, options.runId),
+    readRunEvents(options.store, options.runId),
     options.store.latestSnapshot(options.runId),
     options.store.head(options.runId),
   ]);
   if (options.scopes !== undefined) {
-    await registerRunScope({
-      store: options.store,
-      runId: options.runId,
-      events,
-      scopes: options.scopes,
-    });
+    await restoreRunScope(options.store, options.runId, events, options.scopes);
   }
   const state = foldRunState(events);
   if (state.status === "completed" || state.status === "failed" || state.status === "cancelled") {
@@ -308,6 +200,37 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
       throw new ResumeBudgetExceededError();
     }
   };
+  const recoveryResult = await applyResumeActions(execution, beforeToolExecution);
+  if (recoveryResult !== undefined) {
+    return recoveryResult;
+  }
+
+  let resumedState = foldRunState(events);
+  if (resumedState.pendingApprovals.size > 0 && resumedState.status === "running") {
+    events.push(
+      await recorder.record({
+        type: "run_status_changed",
+        v: 1,
+        from: "running",
+        to: "suspended",
+        reason: "awaiting_approval",
+      }),
+    );
+    resumedState = foldRunState(events);
+  }
+  if (resumedState.status === "suspended") {
+    const checkpoint = await checkpointer.write(resumedState, "suspended");
+    events.push(checkpoint);
+    return checkpoint;
+  }
+  return continueRunLoop({ ...options, recorder }, events, options.runId);
+}
+
+async function applyResumeActions(
+  execution: ResumeExecution,
+  beforeToolExecution: () => Promise<void>,
+): Promise<Event | undefined> {
+  const { options, recorder, events, checkpointer } = execution;
   const danglingState = withoutApprovalIntents(foldRunState(events));
   const actions = planDanglingIntents(
     danglingState,
@@ -333,10 +256,8 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
       actions,
     );
     if (options.signal.reason === "shutdown") {
-      return suspendForShutdown(recorder, events, checkpointer);
+      return await suspendForShutdown(recorder, events, checkpointer);
     }
-
-    const resumedState = foldRunState(events);
     await applyResolvedApprovals(
       {
         recorder,
@@ -349,38 +270,19 @@ async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
         beforeToolExecution,
         onEvents: (recorded) => events.push(...recorded),
       },
-      resumedState,
+      foldRunState(events),
     );
   } catch (error) {
-    if (error instanceof ResumeBudgetExceededError) {
-      const failed = events.at(-1);
-      if (failed === undefined) {
-        throw new Error("Expected the budget failure event.");
-      }
-      return failed;
+    if (!(error instanceof ResumeBudgetExceededError)) {
+      throw error;
     }
-    throw error;
+    const failed = events.at(-1);
+    if (failed === undefined) {
+      throw new Error("Expected the budget failure event.");
+    }
+    return failed;
   }
-
-  let resumedState = foldRunState(events);
-  if (resumedState.pendingApprovals.size > 0 && resumedState.status === "running") {
-    events.push(
-      await recorder.record({
-        type: "run_status_changed",
-        v: 1,
-        from: "running",
-        to: "suspended",
-        reason: "awaiting_approval",
-      }),
-    );
-    resumedState = foldRunState(events);
-  }
-  if (resumedState.status === "suspended") {
-    const checkpoint = await checkpointer.write(resumedState, "suspended");
-    events.push(checkpoint);
-    return checkpoint;
-  }
-  return continueRunLoop({ ...options, recorder }, events, options.runId);
+  return undefined;
 }
 
 async function restoreWorkspace(execution: ResumeExecution): Promise<void> {
@@ -417,13 +319,19 @@ async function claimAndContinue(execution: ResumeExecution): Promise<Event> {
  * @throws RunAlreadyTerminalError when the run has already finished.
  * @throws ResumeConflictError when another writer wins the resume claim.
  */
-export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResult> {
-  const release = claimResumeLock(options.store, options.runId);
+export function resumeRun(options: ResumeRunOptions): Promise<RunLoopResult> {
+  const release = claimResumeLock(options.store, options.runId, () => new ResumeConflictError());
+  return withResumeLease(options, release);
+}
+
+async function withResumeLease(
+  options: ResumeRunOptions,
+  release: () => void,
+): Promise<RunLoopResult> {
   const leaseOwner = options.ids.next();
   const leaseController = new AbortController();
   let leaseClaimed = false;
   let renewalTimer: ReturnType<typeof setInterval> | undefined;
-  let renewalPending = false;
   try {
     leaseClaimed = await options.store.claimRunExecution(
       options.runId,
@@ -438,73 +346,10 @@ export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResul
       ...options,
       signal: AbortSignal.any([options.signal, leaseController.signal]),
     };
-    renewalTimer = setInterval(() => {
-      if (renewalPending) {
-        return;
-      }
-      renewalPending = true;
-      void options.store
-        .renewRunExecution(options.runId, leaseOwner, options.clock.now(), RESUME_LEASE_MS)
-        .then((renewed) => {
-          if (!renewed) {
-            leaseController.abort("resume_lease_lost");
-          }
-        })
-        .catch(() => {
-          leaseController.abort("resume_lease_lost");
-        })
-        .finally(() => {
-          renewalPending = false;
-        });
-    }, RESUME_LEASE_RENEW_MS);
-    renewalTimer.unref?.();
+    renewalTimer = startLeaseRenewal(options, leaseOwner, leaseController);
+    renewalTimer.unref();
     const { events, snapshot, state, head } = await readResumeHistory(executionOptions);
-    const segmentId = options.ids.next();
-    const recorder = new RunRecorder(
-      options.store,
-      options.runId,
-      segmentId,
-      head,
-      options.clock,
-      undefined,
-      leaseOwner,
-    );
-    const newEventStart = events.length;
-    const checkpointer = new Checkpointer({
-      recorder,
-      runId: options.runId,
-      context: options.context,
-      ids: options.ids,
-      clock: options.clock,
-      ...(options.checkpointEveryEvents === undefined
-        ? {}
-        : { checkpointEveryEvents: options.checkpointEveryEvents }),
-      ...(options.snapshotKeep === undefined ? {} : { snapshotKeep: options.snapshotKeep }),
-      ...(options.workspaceSnapshotter === undefined
-        ? {}
-        : { workspaceSnapshotter: options.workspaceSnapshotter }),
-    });
-    const eventsAfterSnapshot =
-      snapshot === undefined ? events.slice() : events.filter((event) => event.seq > snapshot.atSeq);
-    const execution: ResumeExecution = {
-      options: executionOptions,
-      state,
-      events,
-      snapshot,
-      eventsAfterSnapshot,
-      recorder,
-      checkpointer,
-    };
-    await activeRuns.track(
-      options.runId,
-      () =>
-        recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), {
-          links: [previousSegmentLink(events, snapshot?.traceparent)],
-        }),
-      () => isTerminalRunState(foldRunState(events)),
-    );
-
-    return resultForResume(events, newEventStart);
+    return await resumeFromHistory(executionOptions, leaseOwner, { events, snapshot, state, head });
   } finally {
     if (renewalTimer !== undefined) {
       clearInterval(renewalTimer);
@@ -514,4 +359,82 @@ export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResul
     }
     release();
   }
+}
+
+function startLeaseRenewal(
+  options: ResumeRunOptions,
+  leaseOwner: Id,
+  leaseController: AbortController,
+): ReturnType<typeof setInterval> {
+  let renewalPending = false;
+  return setInterval(() => {
+    if (renewalPending) {
+      return;
+    }
+    renewalPending = true;
+    void options.store
+      .renewRunExecution(options.runId, leaseOwner, options.clock.now(), RESUME_LEASE_MS)
+      .then((renewed) => {
+        if (!renewed) {
+          leaseController.abort("resume_lease_lost");
+        }
+      })
+      .catch(() => {
+        leaseController.abort("resume_lease_lost");
+      })
+      .finally(() => {
+        renewalPending = false;
+      });
+  }, RESUME_LEASE_RENEW_MS);
+}
+
+async function resumeFromHistory(
+  options: ResumeRunOptions,
+  leaseOwner: Id,
+  history: ResumeHistory,
+): Promise<RunLoopResult> {
+  const { events, snapshot, state, head } = history;
+  const recorder = new RunRecorder(
+    options.store,
+    options.runId,
+    options.ids.next(),
+    head,
+    options.clock,
+    undefined,
+    leaseOwner,
+  );
+  const newEventStart = events.length;
+  const checkpointer = new Checkpointer({
+    recorder,
+    runId: options.runId,
+    context: options.context,
+    ids: options.ids,
+    clock: options.clock,
+    ...(options.checkpointEveryEvents === undefined
+      ? {}
+      : { checkpointEveryEvents: options.checkpointEveryEvents }),
+    ...(options.snapshotKeep === undefined ? {} : { snapshotKeep: options.snapshotKeep }),
+    ...(options.workspaceSnapshotter === undefined
+      ? {}
+      : { workspaceSnapshotter: options.workspaceSnapshotter }),
+  });
+  const execution: ResumeExecution = {
+    options,
+    state,
+    events,
+    snapshot,
+    eventsAfterSnapshot:
+      snapshot === undefined ? events.slice() : events.filter((event) => event.seq > snapshot.atSeq),
+    recorder,
+    checkpointer,
+  };
+  await activeRuns.track(
+    options.runId,
+    () =>
+      recorder.withStepSpan(RUN_SPAN, {}, () => claimAndContinue(execution), {
+        links: [previousSegmentLink(events, snapshot?.traceparent)],
+      }),
+    () => isTerminalRunState(foldRunState(events)),
+  );
+  return resultForResume(events, newEventStart);
 }

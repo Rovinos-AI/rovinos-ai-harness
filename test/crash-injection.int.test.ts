@@ -726,7 +726,7 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
               boundary.callIds.includes(nonIdempotentCallId));
           expect(
             crashedAfterEffect || crashedBeforeEffect,
-            `${mode} append ${String(crashAt)} (${boundary?.eventTypes.join(",")})`,
+            `${mode} append ${String(crashAt)} (${boundary?.eventTypes.join(",") ?? "no-boundary"})`,
           ).toBe(true);
           expect(scenario.counts.nonIdempotent).toBe(crashedAfterEffect ? 1 : 0);
           continue;
@@ -742,7 +742,7 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
         expect(scenario.counts.idempotent).toBeLessThanOrEqual(2);
       } catch (error) {
         throw new Error(
-          `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",")})`,
+          `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",") ?? "no-boundary"})`,
           { cause: error },
         );
       } finally {
@@ -835,7 +835,7 @@ function subagentCrashModel(): ModelPort {
 
 function createSubagentCrashRuntime(
   store: EventStore,
-  counts: { writes: number },
+  recordWrite: () => void,
   ids: IdGenerator,
 ) {
   const tool: ToolPort = {
@@ -849,7 +849,7 @@ function createSubagentCrashRuntime(
       },
     ],
     execute: () => {
-      counts.writes += 1;
+      recordWrite();
       return Promise.resolve({ outcome: "ok", result: { written: true } });
     },
   };
@@ -873,7 +873,13 @@ async function discoverSubagentReference(directory: string): Promise<SubagentCra
     crashAt: Number.MAX_SAFE_INTEGER,
     mode: "before_commit",
   });
-  const runtime = await createSubagentCrashRuntime(store, counts, idsAfter(0));
+  const runtime = await createSubagentCrashRuntime(
+    store,
+    () => {
+      counts.writes += 1;
+    },
+    idsAfter(0),
+  );
   try {
     const result = await runtime.run("subagent crash matrix");
     const parentRunId = result.events[0]?.runId;
@@ -912,7 +918,13 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
         mode,
         persistentCrash: true,
       });
-      const firstRuntime = await createSubagentCrashRuntime(crashingStore, counts, idsAfter(0));
+      const firstRuntime = await createSubagentCrashRuntime(
+        crashingStore,
+        () => {
+          counts.writes += 1;
+        },
+        idsAfter(0),
+      );
       let crashed = false;
       let initialEvents: Event[] = [];
       try {
@@ -933,7 +945,13 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
         crashAt: Number.MAX_SAFE_INTEGER,
         mode: "before_commit",
       });
-      const freshRuntime = await createSubagentCrashRuntime(restartStore, counts, idsAfter(100));
+      const freshRuntime = await createSubagentCrashRuntime(
+        restartStore,
+        () => {
+          counts.writes += 1;
+        },
+        idsAfter(100),
+      );
       let parentRunId = reference.parentRunId;
       try {
         const inputExists = initialEvents.some((event) => event.type === "run_input");
@@ -1017,7 +1035,7 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
             true;
         expect(
           counts.writes,
-          `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",")})`,
+          `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",") ?? "no-boundary"})`,
         ).toBe(childRan && !crashAfterExecutionClaim ? 1 : 0);
         if (childRan) {
           expect(
@@ -1052,7 +1070,7 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
         }
       } catch (error) {
         throw new Error(
-          `${mode} append ${String(crashAt)} child (${reference.boundaries[crashAt - 1]?.eventTypes.join(",")})`,
+          `${mode} append ${String(crashAt)} child (${reference.boundaries[crashAt - 1]?.eventTypes.join(",") ?? "no-boundary"})`,
           { cause: error },
         );
       } finally {
@@ -1331,8 +1349,8 @@ describe("SQLite crash-injection matrix", () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-subagent-crash-reference-"));
     try {
       const reference = await discoverSubagentReference(directory);
-      expect(reference.boundaries.some(({ runId }) => runId === reference.parentRunId)).toBe(true);
-      expect(reference.boundaries.some(({ runId }) => runId === reference.childRunId)).toBe(true);
+      expect(reference.boundaries.some(({ runId: boundaryRunId }) => boundaryRunId === reference.parentRunId)).toBe(true);
+      expect(reference.boundaries.some(({ runId: boundaryRunId }) => boundaryRunId === reference.childRunId)).toBe(true);
       expect(reference.appendCount).toBeGreaterThan(0);
       await runSubagentCrashMatrix(reference);
     } finally {

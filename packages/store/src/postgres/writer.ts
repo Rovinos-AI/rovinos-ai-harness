@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Pool, PoolClient } from "pg";
-import type { Id, NewEvent, Snapshot } from "@harness/schemas";
+import type { Id, NewEvent } from "@harness/schemas";
 import type { ContentCodec, EncodedSnapshot } from "../codec.js";
 import { encodeSnapshot, validateSnapshotAppend } from "../codec.js";
 import { appendTransaction, encodeEvents, storeError, type EncodedEvent } from "./helpers.js";
+import type { EventStore } from "../types.js";
 
 /** Dependencies used by a Postgres event writer. */
 export interface PostgresEventWriterOptions {
@@ -38,32 +39,41 @@ export class PostgresEventWriter {
   ): Promise<{ nextSeq: number }> {
     this.assertWritable();
     const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
-    return this.appendEncoded(runId, encoded, expectedSeq, undefined, leaseOwner);
+    return this.appendEncoded({
+      runId,
+      encoded,
+      expectedSeq,
+      ...(leaseOwner === undefined ? {} : { leaseOwner }),
+    });
   }
 
   async appendWithSnapshot(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    snapshot: Snapshot,
-    leaseOwner?: Id,
+    ...args: Parameters<EventStore["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
+    const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     this.assertWritable();
     const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
     const [encoded, encodedSnapshot] = await Promise.all([
       encodeEvents(this.codec, runId, events, expectedSeq),
       encodeSnapshot(this.codec, validatedSnapshot),
     ]);
-    return this.appendEncoded(runId, encoded, expectedSeq, encodedSnapshot, leaseOwner);
+    return this.appendEncoded({
+      runId,
+      encoded,
+      expectedSeq,
+      encodedSnapshot,
+      ...(leaseOwner === undefined ? {} : { leaseOwner }),
+    });
   }
 
-  private async appendEncoded(
-    runId: Id,
-    encoded: readonly EncodedEvent[],
-    expectedSeq: number,
-    encodedSnapshot?: EncodedSnapshot,
-    leaseOwner?: Id,
-  ): Promise<{ nextSeq: number }> {
+  private async appendEncoded(options: {
+    readonly runId: Id;
+    readonly encoded: readonly EncodedEvent[];
+    readonly expectedSeq: number;
+    readonly encodedSnapshot?: EncodedSnapshot;
+    readonly leaseOwner?: Id;
+  }): Promise<{ nextSeq: number }> {
+    const { runId, encoded, expectedSeq, encodedSnapshot, leaseOwner } = options;
     await this.ensureInitialized();
     let client: PoolClient;
     try {

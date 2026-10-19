@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { RunResumePolicySchema } from "@harness/schemas";
+import type { Id, RunResumePolicySchema } from "@harness/schemas";
 import type { RunState, ToolIntentEvent } from "./run-state.js";
-import type { Id } from "@harness/schemas";
 import type { ModelToolCall, ToolExecutionResult, ToolPort } from "./ports.js";
 import type { z } from "zod";
 

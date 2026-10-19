@@ -375,11 +375,12 @@ describe("recoverSubagentSpawn", () => {
   it("suspends the parent when the resumed child still awaits approval", async () => {
     const store = new InMemoryEventStore();
     const parentEvents = await seed(store, { childStatus: "running" });
-    const runChild: SubagentRunner = async () => ({
-      childRunId,
-      status: "suspended",
-      usage: { inputTokens: 0, outputTokens: 0 },
-    });
+    const runChild: SubagentRunner = () =>
+      Promise.resolve({
+        childRunId,
+        status: "suspended",
+        usage: { inputTokens: 0, outputTokens: 0 },
+      });
 
     await expect(recoverSubagentSpawn(createOptions(store, parentEvents, runChild))).resolves.toEqual({
       kind: "suspend",
@@ -390,9 +391,9 @@ describe("recoverSubagentSpawn", () => {
     const store = new InMemoryEventStore();
     const parentEvents = await seed(store, { childStatus: "running" });
     const controller = new AbortController();
-    const runChild: SubagentRunner = async () => {
+    const runChild: SubagentRunner = () => {
       controller.abort("shutdown");
-      throw new Error("child shutdown");
+      return Promise.reject(new Error("child shutdown"));
     };
 
     await expect(

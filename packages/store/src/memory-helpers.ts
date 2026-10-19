@@ -1,8 +1,67 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Event, type Event as StoredEvent, type Id, type NewEvent } from "@harness/schemas";
+import {
+  Event,
+  type Event as StoredEvent,
+  type Id,
+  type NewEvent,
+} from "@harness/schemas";
 import type { EncodedSnapshot } from "./codec.js";
 import { InvalidEventError } from "./errors.js";
-import type { RunSummary } from "./types.js";
+import type { ListRunsOptions, RunSummary } from "./types.js";
+
+/** Builds a validated, keyset-paginated summary of in-memory runs. */
+export function listMemoryRuns(
+  storedRuns: ReadonlyMap<Id, readonly StoredEvent[]>,
+  options: ListRunsOptions,
+): { runs: RunSummary[]; nextCursor?: string } {
+  if (!Number.isInteger(options.limit) || options.limit < 1) {
+    throw new InvalidEventError([["limit"]]);
+  }
+  const summaries: RunSummary[] = [];
+  for (const [runId, events] of storedRuns) {
+    const created = events.find((event) => event.type === "run_created");
+    const last = events.at(-1);
+    if (created?.type !== "run_created" || last === undefined) {
+      continue;
+    }
+    if (!matchesContinuation(created, options.continuationOf)) {
+      continue;
+    }
+    const status = currentStatus(events);
+    if (options.status !== undefined && options.status !== status) {
+      continue;
+    }
+    summaries.push({
+      runId,
+      createdAt: created.ts,
+      status,
+      lastSeq: last.seq,
+      lastTs: last.ts,
+    });
+  }
+  summaries.sort((left, right) => {
+    const createdAtOrder = right.createdAt - left.createdAt;
+    return createdAtOrder === 0 ? left.runId.localeCompare(right.runId) : createdAtOrder;
+  });
+  const start = startAfterCursor(summaries, options.cursor);
+  if (start === undefined) {
+    throw new InvalidEventError([["cursor"]]);
+  }
+  const end = start + options.limit;
+  const runs = summaries.slice(start, end);
+  const nextCursor = end < summaries.length ? runs.at(-1)?.runId : undefined;
+  return nextCursor === undefined ? { runs } : { runs, nextCursor };
+}
+
+function currentStatus(events: readonly StoredEvent[]): RunSummary["status"] {
+  let status: RunSummary["status"] = "pending";
+  for (const event of events) {
+    if (event.type === "run_status_changed") {
+      status = event.to;
+    }
+  }
+  return status;
+}
 
 /** Index just past `cursor` in the listing, 0 without a cursor, or undefined if it is unknown. */
 export function startAfterCursor(

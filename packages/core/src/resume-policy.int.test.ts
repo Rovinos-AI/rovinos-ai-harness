@@ -489,7 +489,10 @@ describe("dangling tool intent resume", () => {
       throw new Error("Expected approval resolution event.");
     }
 
-    const resultEvents = await resolveDanglingIntentApproval(options, intent, request, resolution);
+    const resultEvents = await resolveDanglingIntentApproval(options, intent, {
+      approval: request,
+      resolution,
+    });
     expect(resultEvents.map(({ type }) => type)).toEqual([
       "tool_execution_started",
       "tool_result",
@@ -659,18 +662,23 @@ describe("dangling tool intent resume", () => {
       resolveDanglingIntentApproval(
         options,
         intent,
-        { ...requestEvent, callId: thirdCallId },
-        resolution,
+        {
+          approval: { ...requestEvent, callId: thirdCallId },
+          resolution,
+        },
       ),
     ).rejects.toBeInstanceOf(ResumeActionMismatchError);
     await expect(
-      resolveDanglingIntentApproval(options, intent, requestEvent, {
-        ...resolution,
-        approvalId: thirdCallId,
+      resolveDanglingIntentApproval(options, intent, {
+        approval: requestEvent,
+        resolution: { ...resolution, approvalId: thirdCallId },
       }),
     ).rejects.toBeInstanceOf(ResumeActionMismatchError);
 
-    const result = await resolveDanglingIntentApproval(options, intent, requestEvent, resolution);
+    const result = await resolveDanglingIntentApproval(options, intent, {
+      approval: requestEvent,
+      resolution,
+    });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       type: "tool_result",

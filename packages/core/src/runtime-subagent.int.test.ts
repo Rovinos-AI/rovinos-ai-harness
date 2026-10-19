@@ -17,6 +17,7 @@ import {
 import type { SandboxBackend } from "@harness/sandbox";
 import type { ModelPort, ModelRequest, ModelCompletion, ToolPort } from "./ports.js";
 import { InMemoryEventStore, type EventStore } from "@harness/store";
+import { delegatingStore } from "./testing/delegating-store.js";
 import { InMemoryVault, AuditingVaultResolver, Token } from "@harness/vault";
 import { PiiToolPort, Tokenizer } from "@harness/pii";
 import { InMemoryWorkspace, OffloadedStub } from "@harness/context";
@@ -450,15 +451,6 @@ async function eventsFor(store: EventStore, runId: Id): Promise<Event[]> {
     events.push(event);
   }
   return events;
-}
-
-function delegatingStore(store: EventStore): EventStore {
-  return new Proxy(store, {
-    get: (target, property) => {
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
 }
 
 class TestShutdownProcess implements ShutdownProcessLike {

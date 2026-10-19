@@ -18,6 +18,9 @@ import {
 } from "./result.js";
 import type { SubagentRunRequest, SubagentRunner } from "./supervisor.js";
 
+type SpawnedEvent = Extract<Event, { type: "subagent_spawned" }>;
+type RunCreatedEvent = Extract<Event, { type: "run_created" }>;
+
 interface RecoverSubagentOptions {
   readonly store: EventStore;
   readonly scopes: RunScopeRegistry;
@@ -27,6 +30,13 @@ interface RecoverSubagentOptions {
   readonly state: RunState;
   readonly context: ToolResumeContext;
   readonly runChild: SubagentRunner;
+}
+
+interface ExistingChild {
+  readonly spawned: SpawnedEvent;
+  readonly childEvents: readonly Event[];
+  readonly created: RunCreatedEvent;
+  readonly completed: boolean;
 }
 
 async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
@@ -101,52 +111,67 @@ export async function recoverSubagentSpawn(
   const spawned = parentEvents.find(
     (event) => event.type === "subagent_spawned" && event.parentCallId === options.call.callId,
   );
-  if (spawned === undefined || spawned.type !== "subagent_spawned") {
+  if (spawned?.type !== "subagent_spawned") {
     return { kind: "rerun" };
   }
-  if (spawned.role !== options.role.id) {
-    return missingChild(spawned.childRunId);
+  const existing = await loadExistingChild(options, spawned, parentEvents);
+  if ("decision" in existing) {
+    return existing.decision;
   }
+  return continueExistingChild(options, existing);
+}
 
-  const childEvents = await readEvents(options.store, spawned.childRunId);
-  if (childEvents.length === 0) {
-    return missingChild(spawned.childRunId);
+async function loadExistingChild(
+  options: RecoverSubagentOptions,
+  spawned: SpawnedEvent,
+  parentEvents: readonly Event[],
+): Promise<ExistingChild | { readonly decision: ToolResumeDecision }> {
+  if (spawned.role !== options.role.id) {
+    return { decision: missingChild(spawned.childRunId) };
   }
+  const childEvents = await readEvents(options.store, spawned.childRunId);
   const created = childEvents.find((event) => event.type === "run_created");
   if (
     created?.type !== "run_created" ||
     created.parentRunId !== options.context.runId ||
     created.parentCallId !== options.call.callId
   ) {
-    return missingChild(spawned.childRunId);
+    return { decision: missingChild(spawned.childRunId) };
   }
-
-  if (spawned.budgetLimits === undefined || spawned.budgetDeadlineTs === undefined) {
-    return {
-      kind: "result",
-      execution: {
-        outcome: "error",
-        errorCode: "subagent_budget_missing",
-        result: null,
-      },
-      completion: {
-        childRunId: spawned.childRunId,
-        outcome: "failed",
-        inputTokens: 0,
-        outputTokens: 0,
-        steps: 0,
-      },
-    };
-  }
-
   const scopeId = options.scopes.scopeOf(options.context.runId);
   if (created.scopeId !== undefined && created.scopeId !== scopeId) {
-    return missingChild(spawned.childRunId);
+    return { decision: missingChild(spawned.childRunId) };
   }
-  options.scopes.register(spawned.childRunId, scopeId);
   const completed = parentEvents.some(
     (event) => event.type === "subagent_completed" && event.childRunId === spawned.childRunId,
   );
+  return { spawned, childEvents, created, completed };
+}
+
+function missingBudgetDecision(childRunId: Id): ToolResumeDecision {
+  return {
+    kind: "result",
+    execution: { outcome: "error", errorCode: "subagent_budget_missing", result: null },
+    completion: {
+      childRunId,
+      outcome: "failed",
+      inputTokens: 0,
+      outputTokens: 0,
+      steps: 0,
+    },
+  };
+}
+
+async function continueExistingChild(
+  options: RecoverSubagentOptions,
+  existing: ExistingChild,
+): Promise<ToolResumeDecision> {
+  const { spawned, childEvents, created, completed } = existing;
+  if (spawned.budgetLimits === undefined || spawned.budgetDeadlineTs === undefined) {
+    return missingBudgetDecision(spawned.childRunId);
+  }
+  const scopeId = options.scopes.scopeOf(options.context.runId);
+  options.scopes.register(spawned.childRunId, scopeId);
   const status = foldRunState(childEvents).status;
   if (status === "completed" || status === "failed" || status === "cancelled") {
     return resultDecision(
@@ -168,16 +193,7 @@ export async function recoverSubagentSpawn(
     !Array.isArray(options.call.args)
       ? options.call.args
       : undefined;
-  const recoveredInput =
-    input?.type === "run_input"
-      ? input.input
-      : childEvents.length === 1 &&
-          typeof callArgs?.goal === "string"
-        ? JsonValueSchema.parse({
-            goal: callArgs.goal,
-            ...(callArgs.inputs === undefined ? {} : { inputs: callArgs.inputs }),
-          })
-        : undefined;
+  const recoveredInput = recoverInput(input, childEvents, callArgs);
   if (recoveredInput === undefined) {
     return missingChild(spawned.childRunId);
   }
@@ -190,7 +206,7 @@ export async function recoverSubagentSpawn(
     runId: spawned.childRunId,
     parentRunId: options.context.runId,
     parentCallId: options.call.callId,
-    depth: created.depth ?? 1,
+    depth: created.depth,
     scopeId,
     role: options.role,
     budgets: spawned.budgetLimits,
@@ -219,4 +235,21 @@ export async function recoverSubagentSpawn(
   }
   const resumedEvents = await readEvents(options.store, spawned.childRunId);
   return resultDecision(result, resumedEvents, completed);
+}
+
+function recoverInput(
+  input: Event | undefined,
+  childEvents: readonly Event[],
+  callArgs: Record<string, JsonValueSchema> | undefined,
+): JsonValueSchema | undefined {
+  if (input?.type === "run_input") {
+    return input.input;
+  }
+  if (childEvents.length !== 1 || typeof callArgs?.goal !== "string") {
+    return undefined;
+  }
+  return JsonValueSchema.parse({
+    goal: callArgs.goal,
+    ...(callArgs.inputs === undefined ? {} : { inputs: callArgs.inputs }),
+  });
 }

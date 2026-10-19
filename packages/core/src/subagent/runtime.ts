@@ -18,7 +18,7 @@ import { StrategyContextPort } from "../context/context-port.js";
 import { AgentSpawnTool } from "./spawn-tool.js";
 import type { RunScopeRegistry } from "./scope.js";
 import { SubagentSupervisor, type SubagentRunRequest } from "./supervisor.js";
-import { finalizeChild } from "./result.js";
+import { finalizeChild, type SubagentResult } from "./result.js";
 import { foldRunState, isTerminalRunState } from "../run-state.js";
 import { RUN_SPAN } from "../spans.js";
 
@@ -151,8 +151,7 @@ function childValueTransform(
   };
 }
 
-/** Creates the runtime's spawn decorator and production child-run callback. */
-export function createSubagentTool(options: {
+interface SubagentRuntimeOptions {
   readonly config: RuntimeConfig;
   readonly clock: Clock;
   readonly ids: IdGenerator;
@@ -165,7 +164,172 @@ export function createSubagentTool(options: {
   readonly roles: RoleRegistry;
   readonly scopes: RunScopeRegistry;
   readonly resolver?: AuditingVaultResolver;
-}): ToolPort {
+}
+
+async function startPendingChild(
+  options: SubagentRuntimeOptions,
+  request: SubagentRunRequest,
+): Promise<void> {
+  const initialEvents = await readEvents(options.store, request.runId);
+  if (
+    initialEvents.length !== 1 ||
+    foldRunState(initialEvents).status !== "pending" ||
+    initialEvents[0]?.type !== "run_created"
+  ) {
+    return;
+  }
+  const recorder = new RunRecorder(options.store, request.runId, options.ids.next(), 1, options.clock);
+  await recorder.withStepSpan(
+    RUN_SPAN,
+    {},
+    async () => {
+      const recorded = await recorder.recordBatch([
+        { type: "run_input", v: 1, input: request.input, inputKind: "initial" },
+        {
+          type: "run_status_changed",
+          v: 1,
+          from: "pending",
+          to: "running",
+          reason: "start",
+        },
+      ]);
+      const last = recorded.at(-1);
+      if (last === undefined) {
+        throw new Error("Expected child startup events.");
+      }
+      return last;
+    },
+    { parentContext: request.rootSpanParent, links: request.rootSpanLinks },
+  );
+}
+
+function resumeChildOptions(
+  options: SubagentRuntimeOptions,
+  request: SubagentRunRequest,
+): Parameters<typeof resumeRun>[0] {
+  return {
+    store: options.store,
+    runId: request.runId,
+    clock: options.clock,
+    ids: options.ids,
+    model: options.model,
+    tool: request.tools,
+    policy: options.policy,
+    context: contextForRole(request.role),
+    signal: request.signal,
+    scopes: options.scopes,
+    goal: request.input,
+    budgets: request.budgets,
+    deadlineTs: request.budgetDeadlineTs,
+    depth: request.depth,
+    checkpointEveryEvents: options.config.run.checkpointEveryEvents,
+    ...(options.config.store?.snapshotKeep === undefined
+      ? {}
+      : { snapshotKeep: options.config.store.snapshotKeep }),
+    resumePolicy: options.config.run.resume.onNonIdempotent,
+    ...(options.workspaceSnapshotter === undefined
+      ? {}
+      : { workspaceSnapshotter: options.workspaceSnapshotter }),
+    role: request.role.route ?? request.role.id,
+    ...(request.role.resultSchema === undefined
+      ? {}
+      : {
+          finalOutputSchema: request.role.resultSchema,
+          ...(options.resolver === undefined
+            ? {}
+            : { valueTransform: childValueTransform(request.runId, options.resolver) }),
+        }),
+  };
+}
+
+async function childAfterResume(
+  options: SubagentRuntimeOptions,
+  request: SubagentRunRequest,
+  resumeError: Error | undefined,
+): Promise<SubagentResult> {
+  const events = await readEvents(options.store, request.runId);
+  if (events.length === 0) {
+    throw resumeError ?? new Error("Child run disappeared during resume.");
+  }
+  const status = foldRunState(events).status;
+  if (status === "pending" || status === "running") {
+    throw resumeError ?? new Error("Child run did not reach a resumable state.");
+  }
+  return finalizeChild({
+    childRunId: request.runId,
+    status,
+    events,
+    hasResultSchema: request.role.resultSchema !== undefined,
+  });
+}
+
+async function resumeChild(
+  options: SubagentRuntimeOptions,
+  request: SubagentRunRequest,
+): Promise<SubagentResult> {
+  let resumeError: Error | undefined;
+  try {
+    await startPendingChild(options, request);
+    await resumeRun(resumeChildOptions(options, request));
+  } catch (error) {
+    if (!(error instanceof RunAwaitingApprovalError) && !(error instanceof RunAlreadyTerminalError)) {
+      throw error instanceof Error ? error : new Error("Child resume failed.");
+    }
+    resumeError = error;
+  }
+  return childAfterResume(options, request, resumeError);
+}
+
+async function runNewChild(
+  options: SubagentRuntimeOptions,
+  request: SubagentRunRequest,
+): Promise<SubagentResult> {
+  const recorder = new RunRecorder(options.store, request.runId, options.ids.next(), 0, options.clock);
+  const result = await runLoop({
+    recorder,
+    clock: options.clock,
+    model: options.model,
+    tool: request.tools,
+    policy: options.policy,
+    context: contextForRole(request.role),
+    ids: options.ids,
+    goal: request.input,
+    signal: request.signal,
+    shouldContinue: childStartupGuard(options.store, request),
+    budgets: request.budgets,
+    deadlineTs: request.budgetDeadlineTs,
+    checkpointEveryEvents: options.config.run.checkpointEveryEvents,
+    ...childRunOptions(options.config, options.workspaceSnapshotter),
+    policyVersion: options.policyVersion,
+    role: request.role.route ?? request.role.id,
+    ...(request.role.resultSchema === undefined
+      ? {}
+      : {
+          finalOutputSchema: request.role.resultSchema,
+          ...(options.resolver === undefined
+            ? {}
+            : { valueTransform: childValueTransform(request.runId, options.resolver) }),
+        }),
+    parentRunId: request.parentRunId,
+    parentCallId: request.parentCallId,
+    scopeId: request.scopeId,
+    depth: request.depth,
+    rootSpanParent: request.rootSpanParent,
+    rootSpanLinks: request.rootSpanLinks,
+  });
+  if (result.status === "pending" || result.status === "running") {
+    throw new Error("Child run did not reach a final state.");
+  }
+  return finalizeChild({
+    childRunId: request.runId,
+    status: result.status,
+    events: result.events,
+    hasResultSchema: request.role.resultSchema !== undefined,
+  });
+}
+
+/** Creates the runtime's spawn decorator and production child-run callback. */
+export function createSubagentTool(options: SubagentRuntimeOptions): ToolPort {
   const supervisor = new SubagentSupervisor({
     store: options.store,
     ids: options.ids,
@@ -173,158 +337,8 @@ export function createSubagentTool(options: {
     runConfig: options.config.run,
     scopes: options.scopes,
     parentTools: options.parentTool,
-    resumeChild: async (request: SubagentRunRequest) => {
-      let resumeError: unknown;
-      try {
-        const initialEvents = await readEvents(options.store, request.runId);
-        if (
-          initialEvents.length === 1 &&
-          foldRunState(initialEvents).status === "pending" &&
-          initialEvents[0]?.type === "run_created"
-        ) {
-          const recorder = new RunRecorder(
-            options.store,
-            request.runId,
-            options.ids.next(),
-            1,
-            options.clock,
-          );
-          await recorder.withStepSpan(
-            RUN_SPAN,
-            {},
-            async () => {
-              const recorded = await recorder.recordBatch([
-                {
-                  type: "run_input",
-                  v: 1,
-                  input: request.input,
-                  inputKind: "initial",
-                },
-                {
-                  type: "run_status_changed",
-                  v: 1,
-                  from: "pending",
-                  to: "running",
-                  reason: "start",
-                },
-              ]);
-              const last = recorded.at(-1);
-              if (last === undefined) {
-                throw new Error("Expected child startup events.");
-              }
-              return last;
-            },
-            { parentContext: request.rootSpanParent, links: request.rootSpanLinks },
-          );
-        }
-        await resumeRun({
-          store: options.store,
-          runId: request.runId,
-          clock: options.clock,
-          ids: options.ids,
-          model: options.model,
-          tool: request.tools,
-          policy: options.policy,
-          context: contextForRole(request.role),
-          signal: request.signal,
-          scopes: options.scopes,
-          goal: request.input,
-          budgets: request.budgets,
-          deadlineTs: request.budgetDeadlineTs,
-          depth: request.depth,
-          checkpointEveryEvents: options.config.run.checkpointEveryEvents,
-          ...(options.config.store?.snapshotKeep === undefined
-            ? {}
-            : { snapshotKeep: options.config.store.snapshotKeep }),
-          resumePolicy: options.config.run.resume.onNonIdempotent,
-          ...(options.workspaceSnapshotter === undefined
-            ? {}
-            : { workspaceSnapshotter: options.workspaceSnapshotter }),
-          role: request.role.route ?? request.role.id,
-          ...(request.role.resultSchema === undefined
-            ? {}
-            : {
-                finalOutputSchema: request.role.resultSchema,
-                ...(options.resolver === undefined
-                  ? {}
-                  : {
-                      valueTransform: childValueTransform(request.runId, options.resolver),
-                    }),
-              }),
-        });
-      } catch (error) {
-        resumeError = error;
-        if (!(error instanceof RunAwaitingApprovalError) && !(error instanceof RunAlreadyTerminalError)) {
-          throw error;
-        }
-      }
-      const events = await readEvents(options.store, request.runId);
-      if (events.length === 0) {
-        throw resumeError ?? new Error("Child run disappeared during resume.");
-      }
-      const status = foldRunState(events).status;
-      if (status === "pending" || status === "running") {
-        throw resumeError ?? new Error("Child run did not reach a resumable state.");
-      }
-      return finalizeChild({
-        childRunId: request.runId,
-        status,
-        events,
-        hasResultSchema: request.role.resultSchema !== undefined,
-      });
-    },
-    runChild: async (request: SubagentRunRequest) => {
-      const recorder = new RunRecorder(
-        options.store,
-        request.runId,
-        options.ids.next(),
-        0,
-        options.clock,
-      );
-      const result = await runLoop({
-        recorder,
-        clock: options.clock,
-        model: options.model,
-        tool: request.tools,
-        policy: options.policy,
-        context: contextForRole(request.role),
-        ids: options.ids,
-        goal: request.input,
-        signal: request.signal,
-        shouldContinue: childStartupGuard(options.store, request),
-        budgets: request.budgets,
-        deadlineTs: request.budgetDeadlineTs,
-        checkpointEveryEvents: options.config.run.checkpointEveryEvents,
-        ...childRunOptions(options.config, options.workspaceSnapshotter),
-        policyVersion: options.policyVersion,
-        role: request.role.route ?? request.role.id,
-        ...(request.role.resultSchema === undefined
-          ? {}
-          : {
-              finalOutputSchema: request.role.resultSchema,
-              ...(options.resolver === undefined
-                ? {}
-                : {
-                    valueTransform: childValueTransform(request.runId, options.resolver),
-                  }),
-            }),
-        parentRunId: request.parentRunId,
-        parentCallId: request.parentCallId,
-        scopeId: request.scopeId,
-        depth: request.depth,
-        rootSpanParent: request.rootSpanParent,
-        rootSpanLinks: request.rootSpanLinks,
-      });
-      if (result.status === "pending" || result.status === "running") {
-        throw new Error("Child run did not reach a final state.");
-      }
-      return finalizeChild({
-        childRunId: request.runId,
-        status: result.status,
-        events: result.events,
-        hasResultSchema: request.role.resultSchema !== undefined,
-      });
-    },
+    resumeChild: (request) => resumeChild(options, request),
+    runChild: (request) => runNewChild(options, request),
   });
   return new AgentSpawnTool(options.parentTool, options.roles, supervisor);
 }

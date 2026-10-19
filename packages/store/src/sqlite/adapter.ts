@@ -20,7 +20,6 @@ import {
 } from "../codec.js";
 import {
   InvalidEventError,
-  RunExecutionLeaseLostError,
   SeqConflictError,
   StoreMigrationError,
 } from "../errors.js";
@@ -66,8 +65,14 @@ import { openReadOnlyDatabase } from "./read-only.js";
 import { deleteRunTransaction } from "./retention.js";
 import { SqliteApprovalNotifications } from "./approval-notifications.js";
 import { SqliteConfirmationStates } from "./confirmation-states.js";
+import {
+  claimSqliteExecutionLease,
+  releaseSqliteExecutionLease,
+  renewSqliteExecutionLease,
+} from "./execution-leases.js";
 import { findRunsByTrace } from "./traces.js";
 import { encodeEvents, type EncodedEvent } from "./event-encoding.js";
+import { assertExecutionLease, nextRunStatus } from "./append-helpers.js";
 import type { StoreKeyRotation } from "../rotate.js";
 import { countSqliteRowsByKey, reencryptSqliteBatch } from "./rotation.js";
 import { listSqliteRuns, prepareListRunsQuery, type ListRunsQueryParams } from "./run-listing.js";
@@ -202,77 +207,61 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
-    return this.writeAppend(runId, encoded, expectedSeq, undefined, leaseOwner);
+    return this.writeAppend({
+      runId,
+      encoded,
+      expectedSeq,
+      ...(leaseOwner === undefined ? {} : { leaseOwner }),
+    });
   }
 
   /** {@inheritDoc EventStore.appendWithSnapshot} */
   async appendWithSnapshot(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    snapshot: Snapshot,
-    leaseOwner?: Id,
+    ...args: Parameters<EventStore["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
+    const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
     const [encoded, encodedSnapshot] = await Promise.all([
       encodeEvents(this.codec, runId, events, expectedSeq),
       encodeSnapshot(this.codec, validatedSnapshot),
     ]);
-    return this.writeAppend(runId, encoded, expectedSeq, encodedSnapshot, leaseOwner);
+    return this.writeAppend({
+      runId,
+      encoded,
+      expectedSeq,
+      encodedSnapshot,
+      ...(leaseOwner === undefined ? {} : { leaseOwner }),
+    });
   }
 
   /** {@inheritDoc EventStore.claimRunExecution} */
   claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
-    const result = this.db
-      .prepare<
-        [Id, Id, number, number],
-        { changes: number }
-      >(
-        "INSERT INTO run_execution_leases (run_id, owner_id, expires_at) VALUES (?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET owner_id = excluded.owner_id, expires_at = excluded.expires_at WHERE run_execution_leases.expires_at <= ?",
-      )
-      .run(runId, owner, now + leaseMs, now);
-    return Promise.resolve(result.changes === 1);
+    return claimSqliteExecutionLease({ db: this.db, runId, owner, now, leaseMs });
   }
 
   /** {@inheritDoc EventStore.renewRunExecution} */
   renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
-    const result = this.db
-      .prepare<[number, Id, Id, number], { changes: number }>(
-        "UPDATE run_execution_leases SET expires_at = ? WHERE run_id = ? AND owner_id = ? AND expires_at > ?",
-      )
-      .run(now + leaseMs, runId, owner, now);
-    return Promise.resolve(result.changes === 1);
+    return renewSqliteExecutionLease({ db: this.db, runId, owner, now, leaseMs });
   }
 
   /** {@inheritDoc EventStore.releaseRunExecution} */
   releaseRunExecution(runId: Id, owner: Id): Promise<void> {
-    this.db
-      .prepare<[Id, Id]>("DELETE FROM run_execution_leases WHERE run_id = ? AND owner_id = ?")
-      .run(runId, owner);
-    return Promise.resolve();
+    return releaseSqliteExecutionLease({ db: this.db, runId, owner });
   }
 
-  private writeAppend(
-    runId: Id,
-    encoded: readonly EncodedEvent[],
-    expectedSeq: number,
-    encodedSnapshot?: EncodedSnapshot,
-    leaseOwner?: Id,
-  ): { nextSeq: number } {
+  private writeAppend(options: {
+    readonly runId: Id;
+    readonly encoded: readonly EncodedEvent[];
+    readonly expectedSeq: number;
+    readonly encodedSnapshot?: EncodedSnapshot;
+    readonly leaseOwner?: Id;
+  }): { nextSeq: number } {
+    const { runId, encoded, expectedSeq, encodedSnapshot, leaseOwner } = options;
     const validated = encoded.map(({ event }) => event);
 
     try {
       const appendTransaction = this.db.transaction(() => {
-        if (leaseOwner !== undefined) {
-          const lease = this.db
-            .prepare<[Id], { owner_id: Id }>(
-              "SELECT owner_id FROM run_execution_leases WHERE run_id = ?",
-            )
-            .get(runId);
-          if (lease?.owner_id !== leaseOwner) {
-            throw new RunExecutionLeaseLostError();
-          }
-        }
+        assertExecutionLease(this.db, runId, leaseOwner);
         const existingRun = this.getRun.get(runId);
         const actualSeq = existingRun?.next_seq ?? 0;
         if (actualSeq !== expectedSeq) {
@@ -306,21 +295,13 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
           );
         }
 
-        const currentStatus = RunStatus.safeParse(existingRun?.status ?? "pending");
-        if (!currentStatus.success) {
-          throw new InvalidEventError([["status"]]);
-        }
-        let status = currentStatus.data;
-        for (const event of validated) {
-          if (event.type === "run_status_changed") {
-            status = event.to;
-          }
-        }
+        const status = nextRunStatus(existingRun?.status, validated);
         this.updateRun.run(expectedSeq + validated.length, status, last.ts, runId);
         if (encodedSnapshot !== undefined) {
           insertSnapshot(this.insertSnapshot, encodedSnapshot);
           this.pruneSnapshots.run(runId, runId, this.snapshotKeep);
         }
+
       });
       appendTransaction.immediate();
       this.changeEmitter.notify(runId);
@@ -476,4 +457,5 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
       return Promise.reject(storeError(error));
     }
   }
+
 }

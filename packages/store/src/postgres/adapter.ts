@@ -176,12 +176,9 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
 
   /** {@inheritDoc EventStore.appendWithSnapshot} */
   async appendWithSnapshot(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    snapshot: Snapshot,
-    leaseOwner?: Id,
+    ...args: Parameters<EventStore["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
+    const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     return this.writer.appendWithSnapshot(runId, events, expectedSeq, snapshot, leaseOwner);
   }
 

@@ -38,6 +38,7 @@ import {
   SqliteEventStore,
   type EventStore,
 } from "@harness/store";
+import { delegatingStore } from "./testing/delegating-store.js";
 import {
   CalibratingTokenCounter,
   HeuristicTokenCounter,
@@ -526,15 +527,6 @@ function createResumeOptions(
     budgets: defaultBudgets,
     ...overrides,
   };
-}
-
-function delegatingStore(store: EventStore): EventStore {
-  return new Proxy(store, {
-    get: (target, property) => {
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
 }
 
 beforeAll(() => {
@@ -2868,11 +2860,11 @@ describe("runLoop", () => {
           Promise.resolve({ outcome: "ok" as const, result: { rerun: true } }),
         );
         const onDanglingIntent = vi.fn<ToolResumeStrategy["onDanglingIntent"]>(
-          async (call, state, context) => {
+          (call, state, resumeContext) => {
             expect(call.callId).toBe(modelCallId);
             expect(state.pendingToolCalls.has(modelCallId)).toBe(true);
-            expect(context.runId).toBe(runId);
-            return strategyDecision;
+            expect(resumeContext.runId).toBe(runId);
+            return Promise.resolve(strategyDecision);
           },
         );
         const tool: ToolPort = {
@@ -2886,25 +2878,26 @@ describe("runLoop", () => {
         const events = await readApprovalEvents(store);
 
         expect(onDanglingIntent).toHaveBeenCalledOnce();
-        if (strategyDecision.kind === "rerun") {
-          expect(result.status).toBe("completed");
-          expect(execute).toHaveBeenCalledOnce();
-          expect(events.filter((event) => event.type === "tool_result")).toHaveLength(1);
-        } else if (strategyDecision.kind === "suspend") {
-          expect(result.status).toBe("suspended");
-          expect(execute).not.toHaveBeenCalled();
-          expect(events).toContainEqual(
-            expect.objectContaining({ type: "run_status_changed", reason: "awaiting_subagent" }),
-          );
-        } else {
-          expect(result.status).toBe("completed");
-          expect(execute).not.toHaveBeenCalled();
-          expect(events.filter((event) => event.type === "subagent_completed")).toHaveLength(1);
-          expect(events.find((event) => event.type === "tool_result")).toMatchObject({
-            outcome: "error",
-            errorCode: "subagent_failed",
-          });
-        }
+        const reruns = strategyDecision.kind === "rerun";
+        const suspends = strategyDecision.kind === "suspend";
+        const completes = strategyDecision.kind === "result";
+        expect(result.status).toBe(suspends ? "suspended" : "completed");
+        expect(execute).toHaveBeenCalledTimes(reruns ? 1 : 0);
+        expect(events.filter((event) => event.type === "tool_result")).toHaveLength(1);
+        expect(events.filter((event) => event.type === "subagent_completed")).toHaveLength(
+          completes ? 1 : 0,
+        );
+        expect(
+          events.some(
+            (event) =>
+              event.type === "run_status_changed" && event.reason === "awaiting_subagent",
+          ),
+        ).toBe(suspends);
+        expect(events.find((event) => event.type === "tool_result")).toMatchObject(
+          completes
+            ? { outcome: "error", errorCode: "subagent_failed" }
+            : { outcome: "ok" },
+        );
       }
     });
 
@@ -3206,9 +3199,10 @@ describe("runLoop", () => {
         secondClient.append(runId, [event], nextSeq),
       ]);
       expect(writes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
-      expect(writes.filter(({ status }) => status === "rejected")).toMatchObject([
-        { reason: expect.any(SeqConflictError) },
-      ]);
+      const rejected = writes.find(
+        (write): write is PromiseRejectedResult => write.status === "rejected",
+      );
+      expect(rejected?.reason).toBeInstanceOf(SeqConflictError);
     });
 
     it("rejects a terminal run", async () => {

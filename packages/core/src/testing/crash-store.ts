@@ -71,12 +71,9 @@ export class CrashingEventStore implements EventStore {
   }
 
   appendWithSnapshot(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    snapshot: Snapshot,
-    leaseOwner?: Id,
-  ): Promise<{ nextSeq: number }> {
+    ...args: Parameters<EventStore["appendWithSnapshot"]>
+  ): ReturnType<EventStore["appendWithSnapshot"]> {
+    const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     const shouldCrash = this.shouldCrash();
     if (
       shouldCrash &&
@@ -89,15 +86,21 @@ export class CrashingEventStore implements EventStore {
     return shouldCrash ? result.then(() => Promise.reject(new SimulatedCrash())) : result;
   }
 
-  claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {
+  claimRunExecution(
+    ...args: Parameters<EventStore["claimRunExecution"]>
+  ): ReturnType<EventStore["claimRunExecution"]> {
     return this.inner.claimRunExecution(...args);
   }
 
-  renewRunExecution(...args: Parameters<EventStore["renewRunExecution"]>) {
+  renewRunExecution(
+    ...args: Parameters<EventStore["renewRunExecution"]>
+  ): ReturnType<EventStore["renewRunExecution"]> {
     return this.inner.renewRunExecution(...args);
   }
 
-  releaseRunExecution(...args: Parameters<EventStore["releaseRunExecution"]>) {
+  releaseRunExecution(
+    ...args: Parameters<EventStore["releaseRunExecution"]>
+  ): ReturnType<EventStore["releaseRunExecution"]> {
     return this.inner.releaseRunExecution(...args);
   }
   latestSnapshot(runId: Id): Promise<Snapshot | undefined> {
