@@ -65,14 +65,7 @@ const conservativeToolRule = providerSchemaRuleSchema.parse({
 });
 
 const vertexSchemaRule = providerSchemaRuleSchema.parse({
-  allowedKeywords: [
-    ...commonKeywords,
-    "format",
-    "maximum",
-    "minimum",
-    "oneOf",
-    "prefixItems",
-  ],
+  allowedKeywords: [...commonKeywords, "format", "maximum", "minimum", "oneOf", "prefixItems"],
   requireAdditionalPropertiesFalse: false,
   requireAllProperties: false,
   unsupportedKeywords: ["default", "maxLength", "minLength", "pattern"],

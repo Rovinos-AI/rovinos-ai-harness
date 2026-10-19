@@ -17,14 +17,14 @@ describe("lookupCapabilities", () => {
   });
 
   it("defaults Vertex to native structured output while honoring configured overrides", () => {
-    expect(lookupCapabilities({ provider: "vertex", model: "unknown" }).capabilities).toMatchObject({
-      structuredOutput: "native",
-    });
+    expect(lookupCapabilities({ provider: "vertex", model: "unknown" }).capabilities).toMatchObject(
+      {
+        structuredOutput: "native",
+      },
+    );
     expect(
-      lookupCapabilities(
-        { provider: "vertex", model: "unknown" },
-        { structuredOutput: "none" },
-      ).capabilities,
+      lookupCapabilities({ provider: "vertex", model: "unknown" }, { structuredOutput: "none" })
+        .capabilities,
     ).toMatchObject({ structuredOutput: "none" });
   });
 

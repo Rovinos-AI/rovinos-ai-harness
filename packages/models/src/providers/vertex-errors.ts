@@ -12,6 +12,7 @@ const SAFETY_BLOCKS = new Set([
   "SPII",
 ]);
 
+/** Error wrapper retaining only HTTP metadata needed by the adapter mapper. */
 export class VertexHttpError extends Error {
   constructor(
     readonly status: number,
@@ -80,7 +81,8 @@ function mapHttpStatus(
     return new ProviderError("provider_content_filtered", { status });
   }
   if (status === 429) {
-    const delay = retryAfterMs(retryAfter, nowMs) ?? (body === undefined ? undefined : retryInfoMs(body));
+    const delay =
+      retryAfterMs(retryAfter, nowMs) ?? (body === undefined ? undefined : retryInfoMs(body));
     return new ProviderError("provider_rate_limited", {
       status,
       ...(delay === undefined ? {} : { retryAfterMs: delay }),
@@ -128,11 +130,8 @@ function mapUnclassifiedError(error: unknown): ProviderError {
   return new ProviderError("provider_unknown");
 }
 
-export function mapVertexError(
-  error: unknown,
-  signal: AbortSignal,
-  nowMs: number,
-): ProviderError {
+/** Maps SDK, authentication, transport, and HTTP failures to provider error codes. */
+export function mapVertexError(error: unknown, signal: AbortSignal, nowMs: number): ProviderError {
   if (
     signal.aborted ||
     (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError"))

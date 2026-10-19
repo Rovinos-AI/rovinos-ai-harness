@@ -34,17 +34,21 @@ function testAuthOptions(): GoogleGenAIOptions["googleAuthOptions"] {
     email: "synthetic-vertex@example.test",
     key: "synthetic-test-key",
   });
-  authClient.getRequestHeaders = async () =>
-    new Headers({ authorization: "******" });
+  authClient.getRequestHeaders = () => Promise.resolve(new Headers({ authorization: "******" }));
   return { authClient };
 }
 
-function abortableFetch<T>(pending: Promise<T>, signal: AbortSignal | null | undefined): Promise<T> {
+function abortableFetch<T>(
+  pending: Promise<T>,
+  signal: AbortSignal | null | undefined,
+): Promise<T> {
   if (signal === undefined || signal === null) {
     return pending;
   }
   return new Promise<T>((resolve, reject) => {
-    const removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+    const removeAbortListener = () => {
+      signal.removeEventListener("abort", onAbort);
+    };
     const onAbort = () => {
       removeAbortListener();
       reject(new DOMException("The request was aborted.", "AbortError"));
@@ -60,7 +64,7 @@ function abortableFetch<T>(pending: Promise<T>, signal: AbortSignal | null | und
       },
       (error: unknown) => {
         removeAbortListener();
-        reject(error);
+        reject(error instanceof Error ? error : new Error("test_fetch_failed"));
       },
     );
   });
@@ -71,8 +75,14 @@ function sdkFetch(
   ignoreTransportAbort = false,
 ): VertexFetch {
   return async (input, init) => {
-    const url =
-      typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    let url: string;
+    if (typeof input === "string") {
+      url = input;
+    } else if (input instanceof URL) {
+      url = input.href;
+    } else {
+      url = input.url;
+    }
     const pending = fetch(url, {
       ...(init?.method === undefined ? {} : { method: init.method }),
       ...(init?.headers === undefined
@@ -106,10 +116,7 @@ function contractAdapter(
   });
 }
 
-function context(
-  signal = new AbortController().signal,
-  callIds: readonly string[] = [requestId],
-) {
+function context(signal = new AbortController().signal, callIds: readonly string[] = [requestId]) {
   let now = 0;
   let nextCallId = 0;
   return {
@@ -134,15 +141,22 @@ function mockedAdapter(
   readonly requests: () => JsonValue[];
 } {
   const requests: JsonValue[] = [];
-  const fetch: VertexFetch = fetchOverride ?? (async (_input, init) => {
-    if (typeof init?.body === "string") {
-      requests.push(parseJson(JsonValue, init.body));
-    }
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { "content-type": "application/json", ...Object.fromEntries(new Headers(headers)) },
+  const fetch: VertexFetch =
+    fetchOverride ??
+    ((_input, init) => {
+      if (typeof init?.body === "string") {
+        requests.push(parseJson(JsonValue, init.body));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: {
+            "content-type": "application/json",
+            ...Object.fromEntries(new Headers(headers)),
+          },
+        }),
+      );
     });
-  });
   return {
     adapter: new VertexAdapter({
       project: "fixture-project",
@@ -211,9 +225,7 @@ describe("Vertex AI adapter", () => {
       },
       tools: [
         {
-          functionDeclarations: [
-            { name: "lookup", parametersJsonSchema: { type: "object" } },
-          ],
+          functionDeclarations: [{ name: "lookup", parametersJsonSchema: { type: "object" } }],
         },
       ],
       toolConfig: {
@@ -346,7 +358,9 @@ describe("Vertex AI adapter", () => {
         { role: "assistant", parts: first.parts },
         {
           role: "tool",
-          parts: [{ type: "tool_result", callId: requestId, result: { result: "a" }, isError: false }],
+          parts: [
+            { type: "tool_result", callId: requestId, result: { result: "a" }, isError: false },
+          ],
         },
         {
           role: "tool",
@@ -367,8 +381,20 @@ describe("Vertex AI adapter", () => {
         {
           role: "user",
           parts: [
-            { functionResponse: { id: "provider-call-1", name: "lookup", response: { result: "a" } } },
-            { functionResponse: { id: "provider-call-2", name: "lookup", response: { result: "b" } } },
+            {
+              functionResponse: {
+                id: "provider-call-1",
+                name: "lookup",
+                response: { result: "a" },
+              },
+            },
+            {
+              functionResponse: {
+                id: "provider-call-2",
+                name: "lookup",
+                response: { result: "b" },
+              },
+            },
           ],
         },
       ],
@@ -389,9 +415,7 @@ describe("Vertex AI adapter", () => {
     ["UNSPECIFIED", "other"],
   ])("maps finish reason %s", async (finishReason, expected) => {
     const mock = mockedAdapter({
-      candidates: [
-        { content: { role: "model", parts: [] }, finishReason },
-      ],
+      candidates: [{ content: { role: "model", parts: [] }, finishReason }],
     });
     const result = await mock.adapter.complete(baseRequest, context());
 
@@ -423,7 +447,9 @@ describe("Vertex AI adapter", () => {
       { error: { code: status, status: "FAILED", message: "provider-error-canary" } },
       status,
     );
-    const error = await mock.adapter.complete(baseRequest, context()).catch((caught: unknown) => caught);
+    const error = await mock.adapter
+      .complete(baseRequest, context())
+      .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ProviderError);
     expect(error).toMatchObject({ code, status });
@@ -432,21 +458,23 @@ describe("Vertex AI adapter", () => {
 
   it("maps safety HTTP errors and keeps their bodies out of ProviderError", async () => {
     const mock = mockedAdapter(
-      { error: { code: 400, details: [{ reason: "PROHIBITED_CONTENT" }], message: "safety-canary" } },
+      {
+        error: { code: 400, details: [{ reason: "PROHIBITED_CONTENT" }], message: "safety-canary" },
+      },
       400,
     );
-    const error = await mock.adapter.complete(baseRequest, context()).catch((caught: unknown) => caught);
+    const error = await mock.adapter
+      .complete(baseRequest, context())
+      .catch((caught: unknown) => caught);
 
     expect(error).toMatchObject({ code: "provider_content_filtered", status: 400 });
     expect(JSON.stringify(error)).not.toContain("safety-canary");
   });
 
   it("maps Retry-After and RetryInfo to a safe retry delay", async () => {
-    const headerMock = mockedAdapter(
-      { error: { code: 429, message: "quota-canary" } },
-      429,
-      { "retry-after": "2" },
-    );
+    const headerMock = mockedAdapter({ error: { code: 429, message: "quota-canary" } }, 429, {
+      "retry-after": "2",
+    });
     const headerError = await headerMock.adapter
       .complete(baseRequest, context())
       .catch((caught: unknown) => caught);
@@ -473,11 +501,11 @@ describe("Vertex AI adapter", () => {
     [new TypeError("fetch failed", { cause: { code: "ECONNRESET" } }), "provider_unavailable"],
     [new Error("Could not load the default credentials."), "provider_auth"],
   ])("maps non-HTTP failures without leaking their message", async (failure, code) => {
-    const failedFetch: VertexFetch = async () => {
-      throw failure;
-    };
+    const failedFetch: VertexFetch = () => Promise.reject(failure);
     const mock = mockedAdapter({}, 200, {}, failedFetch);
-    const error = await mock.adapter.complete(baseRequest, context()).catch((caught: unknown) => caught);
+    const error = await mock.adapter
+      .complete(baseRequest, context())
+      .catch((caught: unknown) => caught);
 
     expect(error).toMatchObject({ code });
     expect(JSON.stringify(error)).not.toContain(failure.message);
@@ -498,34 +526,58 @@ describe("Vertex AI adapter", () => {
     expect(() => new VertexAdapter(options)).toThrow();
   });
 
+  it.each(["123456789012", "example.com:fixture-project"])(
+    "accepts safe Google Cloud project identifier %s",
+    (project) => {
+      expect(() => new VertexAdapter({ project, location: "us-central1" })).not.toThrow();
+    },
+  );
+
   it.each([
-    [{ toolChoice: "none" as const, tools: [{ toolId: "lookup", description: "", inputSchema: {} }] }, false],
-    [{ toolChoice: "auto" as const, tools: [] }, false],
-    [{ toolChoice: "auto" as const, tools: [{ toolId: "lookup", description: "", inputSchema: {} }] }, true],
-    [
-      {
-        toolChoice: { forced: "lookup" },
+    {
+      name: "none",
+      fields: {
+        toolChoice: "none" as const,
         tools: [{ toolId: "lookup", description: "", inputSchema: {} }],
       },
-      true,
-    ],
-  ])("includes tool config only when callable tools are present", async (fields, hasTools) => {
+    },
+    { name: "auto without declarations", fields: { toolChoice: "auto" as const, tools: [] } },
+  ])("omits tool config for $name", async ({ fields }) => {
     const mock = mockedAdapter({ candidates: [{ content: { role: "model", parts: [] } }] });
 
     await mock.adapter.complete({ ...baseRequest, ...fields }, context());
 
     const sent = mock.requests()[0];
-    if (hasTools) {
-      expect(sent).toHaveProperty("tools", expect.any(Array));
-      expect(sent).toHaveProperty("toolConfig", expect.any(Object));
-      expect(sent).toHaveProperty(
-        "toolConfig.functionCallingConfig.mode",
-        fields.toolChoice === "auto" ? "AUTO" : "ANY",
-      );
-    } else {
-      expect(sent).not.toHaveProperty("tools");
-      expect(sent).not.toHaveProperty("toolConfig");
-    }
+    expect(sent).not.toHaveProperty("tools");
+    expect(sent).not.toHaveProperty("toolConfig");
+  });
+
+  it.each([
+    {
+      name: "auto",
+      fields: {
+        toolChoice: "auto" as const,
+        tools: [{ toolId: "lookup", description: "", inputSchema: {} }],
+      },
+      mode: "AUTO",
+    },
+    {
+      name: "forced",
+      fields: {
+        toolChoice: { forced: "lookup" },
+        tools: [{ toolId: "lookup", description: "", inputSchema: {} }],
+      },
+      mode: "ANY",
+    },
+  ])("includes callable tools for $name", async ({ fields, mode }) => {
+    const mock = mockedAdapter({ candidates: [{ content: { role: "model", parts: [] } }] });
+
+    await mock.adapter.complete({ ...baseRequest, ...fields }, context());
+
+    const sent = mock.requests()[0];
+    expect(sent).toHaveProperty("tools", expect.any(Array));
+    expect(sent).toHaveProperty("toolConfig", expect.any(Object));
+    expect(sent).toHaveProperty("toolConfig.functionCallingConfig.mode", mode);
   });
 
   it("rejects a forced tool that is not declared before sending a request", async () => {
@@ -567,7 +619,9 @@ describe("Vertex AI adapter", () => {
     });
 
     expect(mock.requests()[0]).toMatchObject({
-      generationConfig: { responseJsonSchema: { type: "object", properties: { answer: { type: "string" } } } },
+      generationConfig: {
+        responseJsonSchema: { type: "object", properties: { answer: { type: "string" } } },
+      },
     });
     expect(response.parts.at(-1)).toMatchObject({
       type: "opaque",
@@ -585,7 +639,9 @@ describe("Vertex AI adapter", () => {
       ],
     };
 
-    const error = await mock.adapter.complete(request, context()).catch((caught: unknown) => caught);
+    const error = await mock.adapter
+      .complete(request, context())
+      .catch((caught: unknown) => caught);
 
     expect(error).toMatchObject({ code: "provider_bad_request" });
     expect(mock.requests()).toHaveLength(0);
@@ -604,7 +660,9 @@ describe("Vertex AI adapter", () => {
       ],
     };
 
-    const error = await mock.adapter.complete(request, context()).catch((caught: unknown) => caught);
+    const error = await mock.adapter
+      .complete(request, context())
+      .catch((caught: unknown) => caught);
 
     expect(error).toMatchObject({ code: "provider_bad_request" });
     expect(mock.requests()).toHaveLength(0);
@@ -665,7 +723,9 @@ describe("Vertex AI adapter", () => {
       ],
     });
 
-    const error = await mock.adapter.complete(baseRequest, context()).catch((caught: unknown) => caught);
+    const error = await mock.adapter
+      .complete(baseRequest, context())
+      .catch((caught: unknown) => caught);
 
     expect(error).toMatchObject({ code: "provider_unknown" });
   });

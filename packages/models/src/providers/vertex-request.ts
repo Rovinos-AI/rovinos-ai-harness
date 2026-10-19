@@ -34,6 +34,7 @@ export const VertexOpaqueBlobSchema = z
   })
   .strict();
 
+/** Provider call identifier retained so subsequent tool results match the raw call. */
 export type VertexFunctionCall = z.infer<typeof VertexFunctionCallSchema>;
 type VertexCode = z.infer<typeof Code>;
 
@@ -48,6 +49,7 @@ interface BuildContentsState {
   lastToolContent: Content | undefined;
 }
 
+/** Parses an adapter-owned opaque response, rejecting malformed replay data. */
 export function readVertexOpaque(blob: JsonValue): z.infer<typeof VertexOpaqueBlobSchema> {
   const parsed = VertexOpaqueBlobSchema.safeParse(blob);
   if (!parsed.success) {
@@ -178,7 +180,13 @@ function replayableContent(
     return undefined;
   }
   const parsed = readVertexOpaque(opaque.blob);
-  return sameNormalizedParts(message, parsed) ? parsed.content : undefined;
+  if (!sameNormalizedParts(message, parsed)) {
+    return undefined;
+  }
+  return {
+    parts: parsed.content.parts,
+    ...(parsed.content.role === undefined ? {} : { role: parsed.content.role }),
+  };
 }
 
 function appendSystemParts(message: ModelRequest["messages"][number], parts: VertexPart[]): void {
@@ -220,25 +228,23 @@ function appendMessageContent(
   state: BuildContentsState,
   message: ModelRequest["messages"][number],
   parts: VertexPart[],
-): void {
+): Content | undefined {
   if (parts.length === 0) {
-    if (message.role !== "tool") {
-      state.lastToolContent = undefined;
-    }
-    return;
+    return message.role === "tool" ? state.lastToolContent : undefined;
   }
   if (message.role === "tool" && state.lastToolContent?.parts !== undefined) {
     state.lastToolContent.parts.push(...parts);
-    return;
+    return state.lastToolContent;
   }
   const content: Content = {
     role: message.role === "assistant" ? "model" : "user",
     parts,
   };
   state.contents.push(content);
-  state.lastToolContent = message.role === "tool" ? content : undefined;
+  return message.role === "tool" ? content : undefined;
 }
 
+/** Converts normalized messages to Vertex content, replaying unchanged opaque turns. */
 export function buildContents(request: ModelRequest, provider: string): BuiltContents {
   const state: BuildContentsState = {
     contents: [],
@@ -251,13 +257,18 @@ export function buildContents(request: ModelRequest, provider: string): BuiltCon
       appendSystemParts(message, state.systemParts);
       continue;
     }
-    const replayed = message.role === "assistant" ? replayableContent(message, provider) : undefined;
+    const replayed =
+      message.role === "assistant" ? replayableContent(message, provider) : undefined;
     if (replayed !== undefined) {
       state.lastToolContent = undefined;
       state.contents.push(replayed);
       continue;
     }
-    appendMessageContent(state, message, buildMessageParts(request, index, provider));
+    state.lastToolContent = appendMessageContent(
+      state,
+      message,
+      buildMessageParts(request, index, provider),
+    );
   }
   return {
     contents: state.contents,
@@ -283,15 +294,22 @@ function lowerTools(
     const lowered = lowerForProvider(readJsonObject(tool.inputSchema), "vertex");
     lowered.dropped.forEach((keyword) => droppedSchemaKeywords.add(keyword));
     return {
-      name: tool.toolId,
-      description: tool.description,
-      parametersJsonSchema: lowered.schema,
+      functionDeclarations: [
+        {
+          name: tool.toolId,
+          description: tool.description,
+          parametersJsonSchema: lowered.schema,
+        },
+      ],
     };
   });
 }
 
 function validateForcedTool(request: ModelRequest, forcedTool: string | undefined): void {
-  if (forcedTool !== undefined && !(request.tools ?? []).some((tool) => tool.toolId === forcedTool)) {
+  if (
+    forcedTool !== undefined &&
+    !(request.tools ?? []).some((tool) => tool.toolId === forcedTool)
+  ) {
     throw new ProviderError("provider_bad_request");
   }
 }
@@ -308,13 +326,15 @@ function toolCallingConfig(
     tools,
     toolConfig: {
       functionCallingConfig: {
-        mode: forcedTool === undefined ? FunctionCallingConfigMode.AUTO : FunctionCallingConfigMode.ANY,
+        mode:
+          forcedTool === undefined ? FunctionCallingConfigMode.AUTO : FunctionCallingConfigMode.ANY,
         ...(forcedTool === undefined ? {} : { allowedFunctionNames: [forcedTool] }),
       },
     },
   };
 }
 
+/** Converts tools, output constraints, and cancellation into Vertex generation config. */
 export function buildConfig(
   request: ModelRequest,
   signal: AbortSignal,

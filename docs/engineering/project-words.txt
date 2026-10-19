@@ -131,6 +131,7 @@ regclass
 realpath
 rescan
 rescanned
+replayable
 resumability
 retryability
 rootfs

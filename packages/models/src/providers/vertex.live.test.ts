@@ -14,18 +14,30 @@ const hasVertexConfig =
   model !== undefined &&
   model.length > 0;
 
+function requireVertexConfig(): {
+  readonly project: string;
+  readonly location: string;
+  readonly model: string;
+} {
+  if (!hasVertexConfig) {
+    throw new Error("vertex_live_configuration_required");
+  }
+  return { project, location, model };
+}
+
 describe.skipIf(!hasVertexConfig)("LIVE Vertex AI Gemini", () => {
   it("completes a minimal request with Application Default Credentials", async () => {
-    if (!hasVertexConfig || project === undefined || location === undefined || model === undefined) {
-      return;
-    }
+    const config = requireVertexConfig();
     const request: ModelRequest = {
       requestId: "00000000000000000000000000",
-      model: { provider: "vertex", model },
+      model: { provider: "vertex", model: config.model },
       messages: [{ role: "user", parts: [{ type: "text", text: "Reply with one word." }] }],
       maxOutputTokens: 16,
     };
-    const result = await new VertexAdapter({ project, location }).complete(request, {
+    const result = await new VertexAdapter({
+      project: config.project,
+      location: config.location,
+    }).complete(request, {
       signal: new AbortController().signal,
       ids: { next: () => request.requestId },
       clock: { now: () => 0 },

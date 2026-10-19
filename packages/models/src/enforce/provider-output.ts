@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type Capabilities, type ModelRequest, type ModelResponse } from "@harness/schemas";
-import type { z } from "zod";
+import {
+  Code,
+  JsonValue,
+  type Capabilities,
+  type ModelRequest,
+  type ModelResponse,
+} from "@harness/schemas";
+import { z } from "zod";
+import { ProviderError } from "../errors.js";
+import { ProviderResultSchema, type ProviderResult } from "../types.js";
 import {
   EnforcementRungUnavailableError,
   OutputWithToolsUnsupportedError,
@@ -32,6 +40,59 @@ interface ProviderEnforcement {
 interface ProviderOutputContext<OutputSchema extends z.ZodType> {
   readonly outputSchema?: OutputSchema;
   readonly valueTransform?: ValueTransform | undefined;
+}
+
+function parseProviderResult(result: unknown): ProviderResult {
+  const parsed = ProviderResultSchema.safeParse(result);
+  if (!parsed.success) {
+    throw new ProviderError("provider_unknown");
+  }
+  return parsed.data;
+}
+
+function preserveDroppedSchemaKeywords(
+  parts: ModelResponse["parts"],
+  provider: string,
+  dropped: readonly z.infer<typeof Code>[] | undefined,
+): ModelResponse["parts"] {
+  if (provider !== "vertex" || dropped === undefined || dropped.length === 0) {
+    return parts;
+  }
+  return parts.map((part) => {
+    if (
+      part.type !== "opaque" ||
+      part.provider !== provider ||
+      typeof part.blob !== "object" ||
+      part.blob === null ||
+      Array.isArray(part.blob)
+    ) {
+      return part;
+    }
+    const existing = z.array(Code).safeParse(part.blob.droppedSchemaKeywords);
+    if (!existing.success) {
+      return part;
+    }
+    return {
+      ...part,
+      blob: JsonValue.parse({
+        ...part.blob,
+        droppedSchemaKeywords: [...new Set([...existing.data, ...dropped])].sort(),
+      }),
+    };
+  });
+}
+
+/** Validates provider output and restores schema-lowering metadata for the gateway. */
+export function prepareProviderResult(
+  result: unknown,
+  provider: string,
+  dropped: readonly z.infer<typeof Code>[] | undefined,
+): ProviderResult {
+  const parsed = parseProviderResult(result);
+  return {
+    ...parsed,
+    parts: preserveDroppedSchemaKeywords(parsed.parts, provider, dropped),
+  };
 }
 
 /**
