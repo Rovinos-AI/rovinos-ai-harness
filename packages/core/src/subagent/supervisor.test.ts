@@ -86,6 +86,7 @@ function supervisorOptions(
     scopes: options.scopes ?? new RunScopeRegistry(),
     parentTools: options.tools ?? parentTools(),
     runChild,
+    resumeChild: runChild,
     ...(options.parentSpanContext === undefined
       ? {}
       : { parentSpanContext: options.parentSpanContext }),

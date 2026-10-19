@@ -165,7 +165,12 @@ type UnexportedEvent = Extract<
   Event,
   {
     type:
-      "run_input" | "model_request" | "approval_requested" | "context_compacted" | "app_content";
+      | "run_input"
+      | "model_request"
+      | "tool_execution_started"
+      | "approval_requested"
+      | "context_compacted"
+      | "app_content";
   }
 >;
 
@@ -185,6 +190,7 @@ function isUnexportedEvent(event: Event): event is UnexportedEvent {
   return (
     event.type === "run_input" ||
     event.type === "model_request" ||
+    event.type === "tool_execution_started" ||
     event.type === "approval_requested" ||
     event.type === "context_compacted" ||
     event.type === "app_content"

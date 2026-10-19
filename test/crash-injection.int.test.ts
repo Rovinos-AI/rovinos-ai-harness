@@ -6,6 +6,8 @@ import {
   FakeClock,
   Code,
   Id,
+  ModelsConfigSchema,
+  PiiConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
   type Event,
@@ -29,6 +31,7 @@ import {
   type ModelPort,
   type ModelRequest,
   type PolicyPort,
+  type ToolPort,
 } from "@harness/core";
 import { SummarizingStrategy } from "@harness/context";
 import {
@@ -40,7 +43,8 @@ import {
   type FakeModelOptions,
   type FakeToolDefinition,
 } from "@harness/core/testing";
-import { SqliteEventStore, type EventStore } from "@harness/store";
+import type { EventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ensureTracingFallback } from "@harness/telemetry";
@@ -78,6 +82,7 @@ interface Reference {
 }
 
 interface AppendBoundary {
+  readonly runId: Id;
   readonly method: "append" | "appendWithSnapshot";
   readonly eventTypes: readonly Event["type"][];
   readonly callIds: readonly Id[];
@@ -252,15 +257,21 @@ class BoundaryRecordingStore implements EventStore {
     forRun: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     this.boundaries.push({
+      runId: forRun,
       method: "append",
       eventTypes: events.map(({ type }) => type),
       callIds: events.flatMap((event) =>
-        event.type === "tool_intent" || event.type === "tool_result" ? [event.callId] : [],
+        event.type === "tool_intent" ||
+        event.type === "tool_execution_started" ||
+        event.type === "tool_result"
+          ? [event.callId]
+          : [],
       ),
     });
-    return this.inner.append(forRun, events, expectedSeq);
+    return this.inner.append(forRun, events, expectedSeq, leaseOwner);
   }
 
   appendWithSnapshot(
@@ -268,15 +279,33 @@ class BoundaryRecordingStore implements EventStore {
     events: readonly NewEvent[],
     expectedSeq: number,
     snapshot: Parameters<EventStore["appendWithSnapshot"]>[3],
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     this.boundaries.push({
+      runId: forRun,
       method: "appendWithSnapshot",
       eventTypes: events.map(({ type }) => type),
       callIds: events.flatMap((event) =>
-        event.type === "tool_intent" || event.type === "tool_result" ? [event.callId] : [],
+        event.type === "tool_intent" ||
+        event.type === "tool_execution_started" ||
+        event.type === "tool_result"
+          ? [event.callId]
+          : [],
       ),
     });
-    return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot);
+    return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot, leaseOwner);
+  }
+
+  claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {
+    return this.inner.claimRunExecution(...args);
+  }
+
+  renewRunExecution(...args: Parameters<EventStore["renewRunExecution"]>) {
+    return this.inner.renewRunExecution(...args);
+  }
+
+  releaseRunExecution(...args: Parameters<EventStore["releaseRunExecution"]>) {
+    return this.inner.releaseRunExecution(...args);
   }
 
   latestSnapshot(forRun: Id) {
@@ -491,6 +520,7 @@ class PreIntentExecutionStore implements EventStore {
     forRun: Id,
     events: readonly Parameters<EventStore["append"]>[1][number][],
     expectedSeq: number,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     for (const event of events) {
       if (event.type === "tool_intent") {
@@ -500,7 +530,7 @@ class PreIntentExecutionStore implements EventStore {
         );
       }
     }
-    return this.inner.append(forRun, events, expectedSeq);
+    return this.inner.append(forRun, events, expectedSeq, leaseOwner);
   }
 
   appendWithSnapshot(
@@ -508,8 +538,21 @@ class PreIntentExecutionStore implements EventStore {
     events: Parameters<EventStore["appendWithSnapshot"]>[1],
     expectedSeq: number,
     snapshot: Parameters<EventStore["appendWithSnapshot"]>[3],
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
-    return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot);
+    return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot, leaseOwner);
+  }
+
+  claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {
+    return this.inner.claimRunExecution(...args);
+  }
+
+  renewRunExecution(...args: Parameters<EventStore["renewRunExecution"]>) {
+    return this.inner.renewRunExecution(...args);
+  }
+
+  releaseRunExecution(...args: Parameters<EventStore["releaseRunExecution"]>) {
+    return this.inner.releaseRunExecution(...args);
   }
 
   latestSnapshot(forRun: Id) {
@@ -677,10 +720,15 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
             boundary?.eventTypes.includes("tool_result") === true &&
             boundary.callIds.includes(nonIdempotentCallId);
           const crashedBeforeEffect =
-            mode === "after_commit" &&
-            boundary?.eventTypes.includes("tool_intent") === true &&
-            boundary.callIds.includes(nonIdempotentCallId);
-          expect(crashedAfterEffect || crashedBeforeEffect).toBe(true);
+            (mode === "after_commit" &&
+              boundary?.eventTypes.includes("tool_intent") === true &&
+              boundary.callIds.includes(nonIdempotentCallId)) ||
+            (boundary?.eventTypes.includes("tool_execution_started") === true &&
+              boundary.callIds.includes(nonIdempotentCallId));
+          expect(
+            crashedAfterEffect || crashedBeforeEffect,
+            `${mode} append ${String(crashAt)} (${boundary?.eventTypes.join(",") ?? "no-boundary"})`,
+          ).toBe(true);
           expect(scenario.counts.nonIdempotent).toBe(crashedAfterEffect ? 1 : 0);
           continue;
         }
@@ -693,12 +741,336 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
         );
         expect(scenario.counts.nonIdempotent).toBe(1);
         expect(scenario.counts.idempotent).toBeLessThanOrEqual(2);
+      } catch (error) {
+        throw new Error(
+          `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",") ?? "no-boundary"})`,
+          { cause: error },
+        );
       } finally {
         await freshRuntime.close();
         await rm(directory, { recursive: true, force: true });
       }
     }
     expect(sawResumeAmbiguity).toBe(true);
+  }
+}
+
+interface SubagentCrashReference {
+  readonly appendCount: number;
+  readonly parentRunId: Id;
+  readonly childRunId: Id;
+  readonly boundaries: readonly AppendBoundary[];
+}
+
+const subagentSpawnCallId = Id.parse("88888888888888888888888880");
+const subagentToolCallId = Id.parse("88888888888888888888888881");
+const subagentToolId = Code.parse("write_once");
+
+function subagentCrashConfig() {
+  return {
+    run: RunConfigSchema.parse({
+      checkpointEveryEvents: 3,
+      resume: { onNonIdempotent: "escalate" },
+    }),
+    pii: PiiConfigSchema.parse({ enabled: false }),
+    models: ModelsConfigSchema.parse({
+      routing: {
+        default: [{ provider: "local", model: "parent" }],
+        roles: { worker: [{ provider: "local", model: "worker" }] },
+      },
+    }),
+    roles: [
+      { id: "worker", route: "worker", tools: [subagentToolId], maxDepth: 1, maxChildren: 1 },
+    ],
+  };
+}
+
+function subagentCrashModel(): ModelPort {
+  const response = (parts: ModelCompletion["parts"]): ModelCompletion => ({
+    parts,
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: parts.some((part) => part.type === "tool_call") ? "tool_calls" : "stop",
+    provider: "fake",
+    model: "crash-matrix",
+    latencyMs: 1,
+    schemaValid: true,
+    repairAttempts: 0,
+    fallbackDepth: 0,
+    providerBlobs: null,
+  });
+  const resultRecorded = (request: ModelRequest, callId: Id): boolean =>
+    request.messages.some((message) =>
+      message.parts.some((part) => part.type === "tool_result" && part.callId === callId),
+    );
+  return {
+    complete: (request) => {
+      if (request.role === "worker") {
+        return Promise.resolve(
+          resultRecorded(request, subagentToolCallId)
+            ? response([{ type: "text", text: "child finished" }])
+            : response([
+                { type: "text", text: "run the child tool" },
+                {
+                  type: "tool_call",
+                  callId: subagentToolCallId,
+                  toolId: subagentToolId,
+                  args: { value: "synthetic" },
+                },
+              ]),
+        );
+      }
+      return Promise.resolve(
+        resultRecorded(request, subagentSpawnCallId)
+          ? response([{ type: "text", text: "parent finished" }])
+          : response([
+              { type: "text", text: "spawn one child" },
+              {
+                type: "tool_call",
+                callId: subagentSpawnCallId,
+                toolId: Code.parse("agent.spawn"),
+                args: { role: "worker", goal: "recover one child" },
+              },
+            ]),
+      );
+    },
+  };
+}
+
+function createSubagentCrashRuntime(store: EventStore, recordWrite: () => void, ids: IdGenerator) {
+  const tool: ToolPort = {
+    describe: (toolId) =>
+      toolId === subagentToolId ? { idempotent: false, timeoutMs: 1_000 } : undefined,
+    getToolSpecs: () => [
+      {
+        toolId: subagentToolId,
+        description: "Write a synthetic value once",
+        inputSchema: { type: "object" },
+      },
+    ],
+    execute: () => {
+      recordWrite();
+      return Promise.resolve({ outcome: "ok", result: { written: true } });
+    },
+  };
+  return createRuntime(subagentCrashConfig(), {
+    store,
+    clock: new FakeClock(100),
+    ids,
+    model: subagentCrashModel(),
+    tool,
+    context: new NaiveContext(),
+    policy: allowAllPolicy,
+    transientVault: true,
+  });
+}
+
+async function discoverSubagentReference(directory: string): Promise<SubagentCrashReference> {
+  const database = new SqliteEventStore(join(directory, "subagent-reference.sqlite"));
+  const boundaries = new BoundaryRecordingStore(database);
+  const counts = { writes: 0 };
+  const store = new CrashingEventStore(boundaries, {
+    crashAt: Number.MAX_SAFE_INTEGER,
+    mode: "before_commit",
+  });
+  const runtime = await createSubagentCrashRuntime(
+    store,
+    () => {
+      counts.writes += 1;
+    },
+    idsAfter(0),
+  );
+  try {
+    const result = await runtime.run("subagent crash matrix");
+    const parentRunId = result.events[0]?.runId;
+    if (parentRunId === undefined) {
+      throw new Error("Expected the reference parent run.");
+    }
+    const parentEvents = await readEvents(store, parentRunId);
+    const spawned = parentEvents.find((event) => event.type === "subagent_spawned");
+    if (spawned?.type !== "subagent_spawned") {
+      throw new Error("Expected the reference child announcement.");
+    }
+    const childEvents = await readEvents(store, spawned.childRunId);
+    expect(counts.writes).toBe(1);
+    expect(childEvents.some((event) => event.type === "tool_result")).toBe(true);
+    return {
+      appendCount: boundaries.boundaries.length,
+      parentRunId,
+      childRunId: spawned.childRunId,
+      boundaries: boundaries.boundaries,
+    };
+  } finally {
+    await runtime.close();
+  }
+}
+
+async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promise<void> {
+  for (const mode of ["before_commit", "after_commit"] as const) {
+    for (let crashAt = 1; crashAt <= reference.appendCount; crashAt += 1) {
+      const directory = await mkdtemp(join(tmpdir(), "harness-subagent-crash-"));
+      const filename = join(directory, "events.sqlite");
+      const firstDatabase = new SqliteEventStore(filename);
+      const initialBoundaries = new BoundaryRecordingStore(firstDatabase);
+      const counts = { writes: 0 };
+      const crashingStore = new CrashingEventStore(initialBoundaries, {
+        crashAt,
+        mode,
+        persistentCrash: true,
+      });
+      const firstRuntime = await createSubagentCrashRuntime(
+        crashingStore,
+        () => {
+          counts.writes += 1;
+        },
+        idsAfter(0),
+      );
+      let crashed = false;
+      let initialEvents: Event[] = [];
+      try {
+        await firstRuntime.run("subagent crash matrix");
+      } catch (error) {
+        if (!(error instanceof SimulatedCrash)) {
+          throw error;
+        }
+        crashed = true;
+      }
+      initialEvents = await readEvents(crashingStore, reference.parentRunId);
+      await firstRuntime.close();
+      expect(crashed, `${mode} append ${String(crashAt)} was not reached`).toBe(true);
+
+      const restartDatabase = new SqliteEventStore(filename);
+      const restartBoundaries = new BoundaryRecordingStore(restartDatabase);
+      const restartStore = new CrashingEventStore(restartBoundaries, {
+        crashAt: Number.MAX_SAFE_INTEGER,
+        mode: "before_commit",
+      });
+      const freshRuntime = await createSubagentCrashRuntime(
+        restartStore,
+        () => {
+          counts.writes += 1;
+        },
+        idsAfter(100),
+      );
+      let parentRunId = reference.parentRunId;
+      try {
+        const inputExists = initialEvents.some((event) => event.type === "run_input");
+        if (!inputExists) {
+          await freshRuntime.run("subagent crash matrix");
+          parentRunId = idAt(100);
+        } else {
+          try {
+            await freshRuntime.resume(parentRunId);
+          } catch (error) {
+            if (!(error instanceof RunAlreadyTerminalError)) {
+              throw error;
+            }
+          }
+        }
+
+        let parentEvents = await readEvents(restartStore, parentRunId);
+        const spawn = parentEvents.find(
+          (event) =>
+            event.type === "subagent_spawned" && event.parentCallId === subagentSpawnCallId,
+        );
+        if (spawn?.type !== "subagent_spawned") {
+          throw new Error("Expected the recovered parent to announce its child.");
+        }
+        let childEvents = await readEvents(restartStore, spawn.childRunId);
+        const parentStatus = parentEvents.findLast((event) => event.type === "run_status_changed");
+        if (parentStatus?.type === "run_status_changed" && parentStatus.to === "suspended") {
+          const approval = childEvents.find(
+            (event) =>
+              event.type === "approval_requested" &&
+              event.callId === subagentToolCallId &&
+              !childEvents.some(
+                (candidate) =>
+                  candidate.type === "approval_resolved" &&
+                  candidate.approvalId === event.approvalId,
+              ),
+          );
+          if (approval?.type !== "approval_requested") {
+            throw new Error("Expected child approval before resuming the parent.");
+          }
+          await freshRuntime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
+          try {
+            await freshRuntime.resume(parentRunId);
+          } catch (error) {
+            if (!(error instanceof RunAlreadyTerminalError)) {
+              throw error;
+            }
+          }
+        }
+        parentEvents = await readEvents(restartStore, parentRunId);
+        childEvents = await readEvents(restartStore, spawn.childRunId);
+        const finalStatus = parentEvents.findLast((event) => event.type === "run_status_changed");
+        expect(finalStatus).toMatchObject({ type: "run_status_changed", to: "completed" });
+        const announcedChildren = parentEvents.filter(
+          (event) =>
+            event.type === "subagent_spawned" && event.parentCallId === subagentSpawnCallId,
+        );
+        expect(announcedChildren).toHaveLength(1);
+        expect(
+          parentEvents.filter(
+            (event) => event.type === "subagent_completed" && event.childRunId === spawn.childRunId,
+          ),
+        ).toHaveLength(1);
+        expect(
+          parentEvents.filter(
+            (event) => event.type === "tool_result" && event.callId === subagentSpawnCallId,
+          ),
+        ).toHaveLength(1);
+        expect(childEvents.filter((event) => event.type === "run_created")).toHaveLength(
+          childEvents.length === 0 ? 0 : 1,
+        );
+        const childRan = childEvents.some(
+          (event) => event.type === "model_request" || event.type === "tool_intent",
+        );
+        const crashAfterExecutionClaim =
+          mode === "after_commit" &&
+          reference.boundaries[crashAt - 1]?.eventTypes.includes("tool_execution_started") === true;
+        expect(
+          counts.writes,
+          `${mode} append ${String(crashAt)} (${reference.boundaries[crashAt - 1]?.eventTypes.join(",") ?? "no-boundary"})`,
+        ).toBe(childRan && !crashAfterExecutionClaim ? 1 : 0);
+        if (childRan) {
+          expect(
+            childEvents.filter(
+              (event) => event.type === "tool_intent" && event.callId === subagentToolCallId,
+            ),
+          ).toHaveLength(1);
+          expect(
+            childEvents.filter(
+              (event) =>
+                event.type === "tool_execution_started" && event.callId === subagentToolCallId,
+            ),
+          ).toHaveLength(1);
+          expect(
+            childEvents.filter(
+              (event) => event.type === "tool_result" && event.callId === subagentToolCallId,
+            ),
+          ).toHaveLength(1);
+          if (
+            mode === "before_commit" &&
+            reference.boundaries[crashAt - 1]?.eventTypes.includes("tool_result") === true &&
+            reference.boundaries[crashAt - 1]?.callIds.includes(subagentToolCallId) === true
+          ) {
+            expect(
+              childEvents.filter(
+                (event) => event.type === "tool_result" && event.callId === subagentToolCallId,
+              ),
+            ).toMatchObject([{ outcome: "error", errorCode: "resume_ambiguous" }]);
+          }
+        }
+      } catch (error) {
+        throw new Error(
+          `${mode} append ${String(crashAt)} child (${reference.boundaries[crashAt - 1]?.eventTypes.join(",") ?? "no-boundary"})`,
+          { cause: error },
+        );
+      } finally {
+        await freshRuntime.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
   }
 }
 
@@ -965,6 +1337,27 @@ describe("SQLite crash-injection matrix", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("resumes children across every append boundary in both logs", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harness-subagent-crash-reference-"));
+    try {
+      const reference = await discoverSubagentReference(directory);
+      expect(
+        reference.boundaries.some(
+          ({ runId: boundaryRunId }) => boundaryRunId === reference.parentRunId,
+        ),
+      ).toBe(true);
+      expect(
+        reference.boundaries.some(
+          ({ runId: boundaryRunId }) => boundaryRunId === reference.childRunId,
+        ),
+      ).toBe(true);
+      expect(reference.appendCount).toBeGreaterThan(0);
+      await runSubagentCrashMatrix(reference);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("fails the crash matrix when a broken store executes tools before intent durability", async () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-crash-negative-"));

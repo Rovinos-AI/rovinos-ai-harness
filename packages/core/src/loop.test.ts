@@ -29,14 +29,17 @@ import {
   HarnessError,
   Traceparent,
   UNREGISTERED_TOOL_ID,
+  type Event as StoredEvent,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
 import {
   InMemoryEventStore,
+  RunExecutionLeaseLostError,
   SeqConflictError,
-  SqliteEventStore,
   type EventStore,
 } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
+import { delegatingStore } from "./testing/delegating-store.js";
 import {
   CalibratingTokenCounter,
   HeuristicTokenCounter,
@@ -53,6 +56,7 @@ import { NaiveContext } from "./context/naive-context.js";
 import { StrategyContextPort } from "./context/context-port.js";
 import { RunRecorder, type EventPartial } from "./recorder.js";
 import { runLoop as runCoreLoop } from "./loop.js";
+import type { ToolResumeDecision, ToolResumeStrategy } from "./resume-policy.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import { Checkpointer } from "./checkpoint.js";
 import { foldRunState } from "./run-state.js";
@@ -654,7 +658,7 @@ describe("approval lifecycle", () => {
         },
         resumedState,
       );
-      const result = applied[0];
+      const result = applied.at(-1);
       if (result === undefined) {
         throw new Error("Expected the approval result.");
       }
@@ -666,7 +670,9 @@ describe("approval lifecycle", () => {
         waitMs: 25,
         ...(edits === undefined ? {} : { edits }),
       });
-      expect(applied.map(({ type }) => type)).toEqual(["tool_result"]);
+      expect(applied.map(({ type }) => type)).toEqual(
+        decision === "deny" ? ["tool_result"] : ["tool_execution_started", "tool_result"],
+      );
       expect(tool.calls).toHaveLength(decision === "deny" ? 0 : 1);
       const expectedArgs = decision === "edit" ? { z: 1, a: 4 } : { z: 1, a: 3 };
       expect(tool.calls.map(({ call }) => call.args)).toEqual(
@@ -1095,7 +1101,7 @@ describe("approval lifecycle", () => {
           resumedState,
         );
 
-        expect(applied[0]).toMatchObject({
+        expect(applied.at(-1)).toMatchObject({
           type: "tool_result",
           outcome: decision === "approve" ? "ok" : "denied",
           ...(decision === "deny" ? { errorCode: "approval_denied" } : {}),
@@ -2820,6 +2826,85 @@ describe("runLoop", () => {
       expect(result.state.pendingApprovals.size).toBe(1);
     });
 
+    it("applies rerun, suspend, and result decisions from a tool resume strategy", async () => {
+      const decisions: readonly ToolResumeDecision[] = [
+        { kind: "rerun" },
+        { kind: "suspend" },
+        {
+          kind: "result",
+          execution: { outcome: "error", errorCode: "subagent_failed", result: null },
+          completion: {
+            childRunId: Id.parse("66666666666666666666666666"),
+            outcome: "failed",
+            inputTokens: 2,
+            outputTokens: 3,
+            steps: 1,
+          },
+        },
+      ];
+      for (const strategyDecision of decisions) {
+        const store = new InMemoryEventStore();
+        const clock = new FakeClock(100);
+        await createRunHistory(store, clock, [
+          {
+            type: "tool_intent",
+            v: 1,
+            callId: modelCallId,
+            toolId: "subagent_tool",
+            idempotent: false,
+            policyDecision: "allow",
+            argsHash: "a".repeat(64),
+            args: { role: "worker", goal: "resume child" },
+          },
+        ]);
+        const execute = vi.fn(() =>
+          Promise.resolve({ outcome: "ok" as const, result: { rerun: true } }),
+        );
+        const onDanglingIntent = vi.fn<ToolResumeStrategy["onDanglingIntent"]>(
+          (call, state, resumeContext) => {
+            expect(call.callId).toBe(modelCallId);
+            expect(state.pendingToolCalls.has(modelCallId)).toBe(true);
+            expect(resumeContext.runId).toBe(runId);
+            return Promise.resolve(strategyDecision);
+          },
+        );
+        const tool: ToolPort = {
+          describe: (toolId) =>
+            toolId === "subagent_tool" ? { idempotent: false, timeoutMs: 1_000 } : undefined,
+          execute,
+          resumeStrategy: (toolId) =>
+            toolId === "subagent_tool" ? { onDanglingIntent } : undefined,
+        };
+        const result = await resumeRun(createResumeOptions(store, clock, { tool }));
+        const events = await readApprovalEvents(store);
+        const toolResults = events.filter(
+          (event): event is Extract<StoredEvent, { type: "tool_result" }> =>
+            event.type === "tool_result",
+        );
+
+        expect(onDanglingIntent).toHaveBeenCalledOnce();
+        const reruns = strategyDecision.kind === "rerun";
+        const suspends = strategyDecision.kind === "suspend";
+        const completes = strategyDecision.kind === "result";
+        expect(result.status).toBe(suspends ? "suspended" : "completed");
+        expect(execute).toHaveBeenCalledTimes(reruns ? 1 : 0);
+        expect(toolResults).toHaveLength(suspends ? 0 : 1);
+        expect(events.filter((event) => event.type === "subagent_completed")).toHaveLength(
+          completes ? 1 : 0,
+        );
+        expect(
+          events.some(
+            (event) => event.type === "run_status_changed" && event.reason === "awaiting_subagent",
+          ),
+        ).toBe(suspends);
+        expect(toolResults.map(({ outcome, errorCode }) => ({ outcome, errorCode }))).toEqual(
+          suspends
+            ? []
+            : [completes ? { outcome: "error", errorCode: "subagent_failed" } : { outcome: "ok" }],
+        );
+      }
+    });
+
     it("re-suspends an unresolved approval, then applies its durable decision", async () => {
       const store = new InMemoryEventStore();
       const clock = new FakeClock(100);
@@ -3065,21 +3150,6 @@ describe("runLoop", () => {
       const store = new InMemoryEventStore();
       const clock = new FakeClock(100);
       await createRunHistory(store, clock);
-      const readHead = store.head.bind(store);
-      let headReads = 0;
-      let releaseBarrier: (() => void) | undefined;
-      const bothHeadsRead = new Promise<void>((resolve) => {
-        releaseBarrier = resolve;
-      });
-      vi.spyOn(store, "head").mockImplementation(async (requestedRunId) => {
-        const currentHead = await readHead(requestedRunId);
-        headReads += 1;
-        if (headReads === 2) {
-          releaseBarrier?.();
-        }
-        await bothHeadsRead;
-        return currentHead;
-      });
 
       const attempts = await Promise.allSettled([
         resumeRun(createResumeOptions(store, clock)),
@@ -3095,6 +3165,48 @@ describe("runLoop", () => {
         throw new Error("Expected one concurrent resume attempt to lose.");
       }
       expect(loser.reason).toBeInstanceOf(ResumeConflictError);
+    });
+
+    it("fences stale owners and preserves sequence conflicts across store clients", async () => {
+      const inner = new InMemoryEventStore();
+      const firstClient = delegatingStore(inner);
+      const secondClient = delegatingStore(inner);
+      const clock = new FakeClock(100);
+      await createRunHistory(inner, clock);
+      const owner = Id.parse("22222222222222222222222222");
+      const staleOwner = Id.parse("33333333333333333333333333");
+
+      await expect(firstClient.claimRunExecution(runId, owner, 100, 30_000)).resolves.toBe(true);
+      await expect(secondClient.claimRunExecution(runId, staleOwner, 100, 30_000)).resolves.toBe(
+        false,
+      );
+      await expect(
+        firstClient.append(runId, [], await firstClient.head(runId), staleOwner),
+      ).rejects.toBeInstanceOf(RunExecutionLeaseLostError);
+      await firstClient.releaseRunExecution(runId, owner);
+
+      const nextSeq = await firstClient.head(runId);
+      const event = {
+        runId,
+        ts: 101,
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+        segmentId,
+        type: "run_status_changed" as const,
+        v: 1 as const,
+        from: "running" as const,
+        to: "suspended" as const,
+        reason: "interrupted" as const,
+      };
+      const writes = await Promise.allSettled([
+        firstClient.append(runId, [event], nextSeq),
+        secondClient.append(runId, [event], nextSeq),
+      ]);
+      expect(writes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+      const rejected = writes.find(
+        (write): write is PromiseRejectedResult => write.status === "rejected",
+      );
+      expect(rejected?.reason).toBeInstanceOf(SeqConflictError);
     });
 
     it("rejects a terminal run", async () => {

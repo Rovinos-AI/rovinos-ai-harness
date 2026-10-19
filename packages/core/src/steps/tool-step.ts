@@ -7,6 +7,7 @@ import { countPolicyDecision } from "@harness/telemetry";
 import type { Checkpointer } from "../checkpoint.js";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
+import { recordDeniedResult } from "./tool-result.js";
 import type { IdGenerator, ModelToolCall, PolicyPort, ToolPort } from "../ports.js";
 import { foldRunState, type ToolIntentEvent } from "../run-state.js";
 import {
@@ -345,6 +346,19 @@ async function executeAndRecord(
     readonly executedArgsHash: string | undefined;
   },
 ): Promise<Event> {
+  if (
+    !options.description.idempotent &&
+    options.intentEvent?.type === "tool_intent" &&
+    input.options.tool.resumeStrategy?.(options.call.toolId) === undefined
+  ) {
+    const started = await input.options.recorder.record({
+      type: "tool_execution_started",
+      v: 1,
+      callId: options.intentEvent.callId,
+      toolId: options.intentEvent.toolId,
+    });
+    input.events.push(started);
+  }
   const event = await executePreparedTool({
     recorder: input.options.recorder,
     call: options.call,
@@ -388,25 +402,6 @@ function executionContext(options: ToolStepExecutionOptions, events: Event[]) {
     options.recorder,
     events,
   );
-}
-
-function recordDeniedResult(
-  recorder: RunRecorder,
-  call: ModelToolCall,
-  code: Code,
-  executedArgsHash?: string,
-): Promise<Event> {
-  return recorder.record({
-    type: "tool_result",
-    v: 1,
-    callId: call.callId,
-    toolId: call.toolId,
-    outcome: "denied",
-    errorCode: code,
-    latencyMs: 0,
-    ...executedArgsHashField(executedArgsHash),
-    result: null,
-  });
 }
 
 /** Records prepared tool intents durably before execution, then records results. */

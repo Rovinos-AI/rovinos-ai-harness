@@ -100,7 +100,12 @@ export interface EventStore {
    * @throws SeqConflictError when the stored head differs from expectedSeq.
    * @throws InvalidEventError when an event is invalid or belongs to another run.
    */
-  append(runId: Id, events: readonly NewEvent[], expectedSeq: number): Promise<{ nextSeq: number }>;
+  append(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    leaseOwner?: Id,
+  ): Promise<{ nextSeq: number }>;
 
   /**
    * Validate and append events and their checkpoint snapshot atomically.
@@ -115,7 +120,17 @@ export interface EventStore {
     events: readonly NewEvent[],
     expectedSeq: number,
     snapshot: Snapshot,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }>;
+
+  /** Atomically claim an execution lease for one run until its expiry. */
+  claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean>;
+
+  /** Extend a currently owned execution lease, returning false after ownership is lost. */
+  renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean>;
+
+  /** Release a run execution lease only when the supplied owner is current. */
+  releaseRunExecution(runId: Id, owner: Id): Promise<void>;
 
   /**
    * Retrieve the retained snapshot with the greatest atSeq for a run.

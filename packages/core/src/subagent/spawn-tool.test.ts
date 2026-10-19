@@ -118,6 +118,17 @@ async function createSpawnTool(
       1,
     );
   }
+  const childRunner: SubagentRunner =
+    runChild ??
+    ((request) => {
+      onChild(request);
+      return Promise.resolve({
+        childRunId: request.runId,
+        status: "completed",
+        value: { input: request.input },
+        usage: { inputTokens: 0, outputTokens: 0 },
+      });
+    });
   const supervisor = new SubagentSupervisor({
     store,
     ids: { next: () => childRunId },
@@ -130,17 +141,8 @@ async function createSpawnTool(
       spanId: "b".repeat(16),
       traceFlags: 1,
     }),
-    runChild:
-      runChild ??
-      ((request) => {
-        onChild(request);
-        return Promise.resolve({
-          childRunId: request.runId,
-          status: "completed",
-          value: { input: request.input },
-          usage: { inputTokens: 0, outputTokens: 0 },
-        });
-      }),
+    runChild: childRunner,
+    resumeChild: childRunner,
   });
   return new AgentSpawnTool(inner, registry, supervisor);
 }

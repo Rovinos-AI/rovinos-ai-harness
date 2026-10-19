@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Id } from "@harness/schemas";
+import { Code, type Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { McpServer } from "@modelcontextprotocol/server";
+import type { ControlPlaneAuditHandler } from "../auth.js";
+import { controlPlanePrincipal, withControlPlaneAuthorization } from "../auth.js";
 import {
   listRunsInputSchema,
   listRunsOutputSchema,
@@ -15,6 +17,8 @@ async function countRunMetadata(store: EventStore, runId: Id, lastSeq: number) {
   for await (const event of store.read(runId, { toSeq: lastSeq })) {
     if (event.type === "model_response") {
       steps += 1;
+    } else if (event.type === "subagent_completed") {
+      steps += event.steps ?? 0;
     } else if (event.type === "approval_requested") {
       pendingApprovals.add(event.approvalId);
     } else if (event.type === "approval_resolved") {
@@ -25,8 +29,15 @@ async function countRunMetadata(store: EventStore, runId: Id, lastSeq: number) {
 }
 
 /** Lists run metadata and derived step and approval counts. */
-export async function listRuns(store: EventStore, input: ListRunsInput): Promise<ListRunsOutput> {
+export async function listRuns(
+  store: EventStore,
+  input: ListRunsInput,
+  runIds?: readonly Id[],
+): Promise<ListRunsOutput> {
   const parsedInput = listRunsInputSchema.parse(input);
+  if (runIds !== undefined) {
+    return listAccessibleRuns(store, parsedInput, runIds);
+  }
   const page = await store.listRuns({
     limit: parsedInput.limit,
     ...(parsedInput.status === undefined ? {} : { status: parsedInput.status }),
@@ -48,7 +59,11 @@ export async function listRuns(store: EventStore, input: ListRunsInput): Promise
 }
 
 /** Registers the `list_runs` read-only MCP tool. */
-export function registerListRunsTool(server: McpServer, store: EventStore): void {
+export function registerListRunsTool(
+  server: McpServer,
+  store: EventStore,
+  audit?: ControlPlaneAuditHandler,
+): void {
   server.registerTool(
     "list_runs",
     {
@@ -57,12 +72,63 @@ export function registerListRunsTool(server: McpServer, store: EventStore): void
       outputSchema: listRunsOutputSchema,
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => {
-      const output = await listRuns(store, input);
-      return {
-        structuredContent: output,
-        content: [{ type: "text", text: `${String(output.runs.length)} runs.` }],
-      };
-    },
+    async (input, context) =>
+      withControlPlaneAuthorization({
+        context,
+        tool: Code.parse("list_runs"),
+        scope: "read",
+        operation: async () => {
+          const principal = controlPlanePrincipal(context);
+          const output = await listRuns(store, input, principal?.runIds);
+          return {
+            structuredContent: output,
+            content: [{ type: "text" as const, text: `${String(output.runs.length)} runs.` }],
+          };
+        },
+        audit,
+      }),
   );
+}
+
+async function listAccessibleRuns(
+  store: EventStore,
+  input: ReturnType<typeof listRunsInputSchema.parse>,
+  allowedRunIds: readonly Id[],
+): Promise<ListRunsOutput> {
+  const cursor = restrictedStoreCursor(input.cursor);
+  const page = await store.listRuns({
+    limit: input.limit,
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(cursor === undefined ? {} : { cursor }),
+  });
+  const allowed = new Set(allowedRunIds);
+  const summaries = page.runs.filter(({ runId }) => allowed.has(runId));
+  const runs = await Promise.all(
+    summaries.map(async (summary) => ({
+      ...summary,
+      ...(await countRunMetadata(store, summary.runId, summary.lastSeq)),
+    })),
+  );
+  return listRunsOutputSchema.parse({
+    runs,
+    ...(page.nextCursor === undefined
+      ? {}
+      : { nextCursor: `restricted:${encodeURIComponent(page.nextCursor)}` }),
+  });
+}
+
+function restrictedStoreCursor(cursor: string | undefined): string | undefined {
+  if (cursor === undefined) {
+    return undefined;
+  }
+  const match = /^restricted:(.+)$/.exec(cursor);
+  const storeCursor = match?.[1];
+  if (storeCursor === undefined || (/^\d+$/u.test(storeCursor) && storeCursor.length < 26)) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(storeCursor);
+  } catch {
+    return undefined;
+  }
 }

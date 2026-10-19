@@ -34,6 +34,7 @@ export async function readRunState(
 export async function findApprovalRequest(
   store: EventStore,
   approvalId: Id,
+  runIds?: readonly Id[],
 ): Promise<
   | {
       readonly runId: Id;
@@ -42,6 +43,20 @@ export async function findApprovalRequest(
     }
   | undefined
 > {
+  if (runIds !== undefined) {
+    for (const runId of new Set(runIds)) {
+      const run = await readRunState(store, runId);
+      const request = run?.state.approvalRequests.get(approvalId);
+      if (run !== undefined && request !== undefined) {
+        return {
+          runId,
+          request,
+          resolved: run.state.resolvedApprovals.has(approvalId),
+        };
+      }
+    }
+    return undefined;
+  }
   let cursor: string | undefined;
   for (;;) {
     const page = await store.listRuns({ limit: 50, ...(cursor === undefined ? {} : { cursor }) });

@@ -13,7 +13,7 @@ import {
   type NewEvent,
 } from "@harness/schemas";
 import { emailDetector, PiiEventStore, Tokenizer } from "@harness/pii";
-import { SqliteEventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
 
 const traceId = "a".repeat(32);

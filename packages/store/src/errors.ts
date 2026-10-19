@@ -20,6 +20,15 @@ export class SeqConflictError extends HarnessError {
   }
 }
 
+/** Raised when a writer's durable run-execution lease is no longer current. */
+export class RunExecutionLeaseLostError extends HarnessError {
+  readonly code = "run_execution_lease_lost";
+
+  constructor() {
+    super("The run execution lease was lost.");
+  }
+}
+
 /** Raised when the event store cannot complete an operation. */
 export class StoreUnavailableError extends HarnessError {
   /** Stable error code. */
@@ -122,6 +131,7 @@ export function isPreservedStoreError(
   error: unknown,
 ): error is
   | SeqConflictError
+  | RunExecutionLeaseLostError
   | InvalidEventError
   | ContentDecryptFailedError
   | KeyNotFoundError
@@ -130,6 +140,7 @@ export function isPreservedStoreError(
   | StoreReadOnlyError {
   return (
     error instanceof SeqConflictError ||
+    error instanceof RunExecutionLeaseLostError ||
     error instanceof InvalidEventError ||
     error instanceof ContentDecryptFailedError ||
     error instanceof KeyNotFoundError ||

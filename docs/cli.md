@@ -95,9 +95,9 @@ receives SIGINT or SIGTERM. HTTP mode also accepts `--json`, which writes the va
 `{"status":"serving"}` result to stdout and the endpoint to stderr. JSON mode is not available with
 stdio because stdout carries the MCP protocol.
 
-HTTP mode has no authentication yet; bearer-token authentication is planned for task 18.5. Until
-then, access is limited by loopback binding and `Host`/`Origin` validation. Any local process running
-as the same user can read run metadata.
+HTTP mode requires at least one configured bearer token and rejects unauthenticated requests before
+MCP dispatch. Configure token scopes and secret references as described in
+[Control-plane security](control-plane-security.md); stdio remains the trusted local transport.
 
 ## `harness run`
 

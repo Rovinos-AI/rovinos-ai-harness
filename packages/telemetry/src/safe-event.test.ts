@@ -233,6 +233,11 @@ const unexportedEvents = [
     inputKind: "initial",
   }),
   validEvent({
+    type: "tool_execution_started",
+    callId: "00000000000000000000000002",
+    toolId: "tool.test",
+  }),
+  validEvent({
     type: "approval_requested",
     approvalId: "00000000000000000000000002",
     callId: "00000000000000000000000002",

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
-// Not wired yet: control-plane network listener behind the TLS proxy (18.5 -> #178)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: gateway token progress to live run updates (14.16 -> #157; 24.5 -> #234)
 // Not wired yet: Vertex AI provider registration in runtime configuration (14.20 -> #161)
@@ -10,7 +9,13 @@
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
 // Not wired yet: user pseudonym emission in runtime telemetry (12.8 -> #139)
 import { Command } from "commander";
-import { Client, InMemoryTransport, type Tool, type Transport } from "@modelcontextprotocol/client";
+import {
+  Client,
+  InMemoryTransport,
+  StreamableHTTPClientTransport,
+  type Tool,
+  type Transport,
+} from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { trace } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
@@ -27,7 +32,7 @@ import {
   main,
   type CliContext,
 } from "@harness/cli/programmatic";
-import { createControlPlaneServer } from "@harness/control-plane";
+import { createControlPlaneServer, startControlPlaneHttp } from "@harness/control-plane";
 import { createHarness } from "@harness/sdk";
 import {
   CompositeSecretResolver,
@@ -60,7 +65,8 @@ import {
   SandboxExecTool,
   type SandboxBackend,
 } from "@harness/sandbox";
-import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
+import { InMemoryEventStore, type EventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { ProviderError, type ProviderAdapter } from "@harness/models";
 import { FakeProvider } from "@harness/models/testing";
 import { ApprovalNotificationSchema, buildApprovalPayload } from "@harness/policy";
@@ -69,6 +75,7 @@ import {
   ApprovalShowResultSchema,
   ApprovalSweepResultSchema,
   Code,
+  ControlPlaneConfigSchema,
   FakeClock,
   Id,
   JsonValue,
@@ -219,7 +226,7 @@ function syntheticTools(
   };
 }
 
-async function readEvents(store: SqliteEventStore, runId: Id) {
+async function readEvents(store: EventStore, runId: Id) {
   const events: Event[] = [];
   for await (const event of store.read(runId)) {
     events.push(event);
@@ -1558,6 +1565,128 @@ describe("resume", () => {
       await store.close();
     }
   });
+
+  it("resumes an in-flight child through the runtime and delivers its result once", async () => {
+    const store = new InMemoryEventStore();
+    const childToolId = Code.parse("e2e.child_write");
+    const spawnCallId = Id.parse("77777777777777777777777771");
+    const childCallId = Id.parse("77777777777777777777777772");
+    let parentCalls = 0;
+    let childCalls = 0;
+    let childWrites = 0;
+    const model: ModelPort = {
+      complete: (request) => {
+        if (request.role === "worker") {
+          childCalls += 1;
+          return Promise.resolve(
+            childCalls === 1
+              ? completion(
+                  [{ callId: childCallId, toolId: childToolId, args: { value: "synthetic" } }],
+                  "write one value",
+                )
+              : completion([], "child complete"),
+          );
+        }
+        parentCalls += 1;
+        return Promise.resolve(
+          parentCalls === 1
+            ? completion(
+                [
+                  {
+                    callId: spawnCallId,
+                    toolId: "agent.spawn",
+                    args: { role: "worker", goal: "write one value" },
+                  },
+                ],
+                "spawn one child",
+              )
+            : completion([], "parent complete"),
+        );
+      },
+    };
+    const tool: ToolPort = {
+      describe: (toolId) =>
+        toolId === childToolId ? { idempotent: false, timeoutMs: 1_000 } : undefined,
+      getToolSpecs: () => [
+        { toolId: childToolId, description: "Write once", inputSchema: { type: "object" } },
+      ],
+      execute: () => {
+        childWrites += 1;
+        return Promise.resolve({ outcome: "ok", result: { written: true } });
+      },
+    };
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        pii: PiiConfigSchema.parse({ enabled: false }),
+        models: ModelsConfigSchema.parse({
+          routing: {
+            default: [{ provider: "local", model: "parent" }],
+            roles: { worker: [{ provider: "local", model: "worker" }] },
+          },
+        }),
+        roles: [
+          { id: "worker", route: "worker", tools: [childToolId], maxDepth: 2, maxChildren: 1 },
+        ],
+      },
+      {
+        store,
+        clock: new FakeClock(1_000),
+        ids: new SequentialIdGenerator(),
+        model,
+        tool,
+        context: new NaiveContext(),
+        policy: {
+          version: Code.parse("e2e.policy"),
+          decide: (call) => ({
+            decision: call.toolId === childToolId ? "ask" : "allow",
+            ruleId: Code.parse("e2e.rule"),
+            reason: "e2e_decision",
+            editable: [],
+          }),
+        },
+        transientVault: true,
+      },
+    );
+    try {
+      const initial = await runtime.run("delegate a write");
+      expect(initial.status).toBe("suspended");
+      const parentRunId = initial.events[0]?.runId;
+      if (parentRunId === undefined) {
+        throw new Error("Expected the parent run id.");
+      }
+      const parentEvents = await readEvents(store, parentRunId);
+      const spawn = parentEvents.find((event) => event.type === "subagent_spawned");
+      if (spawn?.type !== "subagent_spawned") {
+        throw new Error("Expected a durable child announcement.");
+      }
+      const childEvents = await readEvents(store, spawn.childRunId);
+      const approval = childEvents.find((event) => event.type === "approval_requested");
+      if (approval?.type !== "approval_requested") {
+        throw new Error("Expected the child approval request.");
+      }
+
+      await runtime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
+      const resumed = await runtime.resume(parentRunId);
+      const completedParentEvents = await readEvents(store, parentRunId);
+      expect(resumed.status).toBe("completed");
+      expect(childWrites).toBe(1);
+      expect(
+        completedParentEvents.filter((event) => event.type === "subagent_spawned"),
+      ).toHaveLength(1);
+      expect(
+        completedParentEvents.filter((event) => event.type === "subagent_completed"),
+      ).toHaveLength(1);
+      expect(
+        completedParentEvents.filter(
+          (event) => event.type === "tool_result" && event.callId === spawnCallId,
+        ),
+      ).toHaveLength(1);
+      expect(childCalls).toBe(2);
+    } finally {
+      await runtime.close();
+    }
+  });
 });
 
 async function dockerAvailable(): Promise<boolean> {
@@ -2098,6 +2227,51 @@ describe.skipIf(!(await dockerAvailable()))("configured remote sandbox", () => {
 });
 
 describe("control plane", () => {
+  it("requires configured HTTP authentication and serves scoped tools", async () => {
+    const store = new InMemoryEventStore();
+    const token = "SYNTHETIC_CONTROL_PLANE_E2E_TOKEN_LONG_ENOUGH";
+    const authorization = `${String.fromCharCode(66, 101, 97, 114, 101, 114)} ${token}`;
+    const server = await startControlPlaneHttp(store, 0, {
+      controlPlane: ControlPlaneConfigSchema.parse({
+        auth: {
+          tokens: [
+            {
+              id: "token.readonly",
+              secret: "env:CONTROL_PLANE_E2E_TOKEN",
+              scopes: ["read"],
+            },
+          ],
+        },
+      }),
+      secretResolver: { resolve: () => Promise.resolve({ reveal: () => token }) },
+      approvalHtml: "<html>test</html>",
+    });
+    const client = new Client({ name: "control-plane-auth-e2e", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(server.endpoint), {
+      requestInit: { headers: { authorization } },
+    });
+    try {
+      const unauthenticated = await fetch(server.endpoint, {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      });
+      expect(unauthenticated.status).toBe(401);
+      expect(await unauthenticated.text()).toBe("");
+
+      await client.connect(transport);
+      const { tools } = await client.listTools();
+      expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
+    } finally {
+      await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
   it("exposes app-only decisions and supervises a runtime cancellation through MCP", async () => {
     const store = new InMemoryEventStore();
     const runId = Id.parse("00000000000000000000000042");
