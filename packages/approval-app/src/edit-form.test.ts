@@ -118,6 +118,43 @@ describe("approval edit form", () => {
     ]);
   });
 
+  it("submits single-line inputs on Enter without intercepting IME or JSON newlines", () => {
+    const onSubmit = vi.fn();
+    const form = createEditForm(document, payload, onSubmit);
+    const input = form.querySelector<HTMLInputElement>("#approval-edit-0");
+    const textarea = form.querySelector<HTMLTextAreaElement>("#approval-edit-3");
+    if (input === null || textarea === null) {
+      throw new Error("Expected single-line and JSON edit controls");
+    }
+    input.value = "updated@example.test";
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    input.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith([
+      { pointer: "/profile~1name", value: "updated@example.test" },
+    ]);
+
+    onSubmit.mockClear();
+    const composing = new KeyboardEvent("keydown", {
+      key: "Enter",
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    const newline = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    textarea.dispatchEvent(newline);
+    expect(newline.defaultPrevented).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("labels the root pointer as all arguments and passes axe", async () => {
     const rootPayload: ApprovalPayload = {
       ...payload,

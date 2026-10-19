@@ -103,6 +103,20 @@ function readControlValue(control: FieldControl): Json | undefined {
   return formControl.input.checked;
 }
 
+function bindEnterSubmission(controls: readonly FieldControl[], submitEdits: () => void): void {
+  for (const field of controls) {
+    if (field.control.kind === "text" || field.control.kind === "number") {
+      field.control.input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.isComposing) {
+          return;
+        }
+        event.preventDefault();
+        submitEdits();
+      });
+    }
+  }
+}
+
 /**
  * Builds a safe edit form with one typed control for each policy-approved pointer.
  *
@@ -177,6 +191,7 @@ export function createEditForm(
     onSubmit(edits);
   };
   submit.addEventListener("click", submitEdits);
+  bindEnterSubmission(controls, submitEdits);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     submitEdits();

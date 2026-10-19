@@ -8,13 +8,14 @@ import {
   RevealResponse,
   parseJson,
 } from "@harness/schemas/browser";
-import { mountApprovalActions } from "./actions.js";
+import { mountApprovalActions, type ApprovalToolCallOutcome } from "./actions.js";
 import { createApprovalFallback } from "./fallback.js";
 import { createApprovalTelemetry } from "./telemetry.js";
 import { createApprovalView } from "./view.js";
 
 const app = new App({ name: "harness-approval", version: "0.0.0" }, {}, { autoResize: false });
 const fallback = createApprovalFallback(document.body);
+const unavailableToolCodes = new Set(["app_tool_not_allowed", "unknown_tool", "tool_not_found"]);
 let finishHostConnection: (connected: boolean) => void = () => undefined;
 const hostConnection = new Promise<void>((resolve, reject) => {
   finishHostConnection = (connected) => {
@@ -29,31 +30,51 @@ const hostConnection = new Promise<void>((resolve, reject) => {
 async function callApprovalTool(
   name: "harness.approvals.resolve" | "harness.approvals.reveal",
   args: Record<string, unknown>,
-): Promise<unknown> {
+): Promise<ApprovalToolCallOutcome> {
   let result: Awaited<ReturnType<App["callServerTool"]>>;
   try {
     result = await app.callServerTool({ name, arguments: args });
-  } catch {
-    return undefined;
-  }
-  if (result.isError === true) {
-    return undefined;
+  } catch (error) {
+    if (isUnavailableToolError(error)) {
+      return { kind: "unavailable" };
+    }
+    return { kind: "failure" };
   }
   if (result.structuredContent !== undefined) {
-    return result.structuredContent;
+    return { kind: "response", value: result.structuredContent };
   }
   const text = result.content.find((part) => part.type === "text");
+  if (result.isError === true) {
+    return text?.type === "text" && unavailableToolCodes.has(text.text)
+      ? { kind: "unavailable" }
+      : { kind: "failure" };
+  }
   if (text?.type !== "text") {
-    return undefined;
+    return { kind: "failure" };
   }
   try {
-    return parseJson(
-      name === "harness.approvals.resolve" ? ResolveResponse : RevealResponse,
-      text.text,
-    );
+    return {
+      kind: "response",
+      value: parseJson(
+        name === "harness.approvals.resolve" ? ResolveResponse : RevealResponse,
+        text.text,
+      ),
+    };
   } catch {
-    return undefined;
+    return { kind: "failure" };
   }
+}
+
+function isUnavailableToolError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+  if ("code" in error && error.code === -32601) {
+    return true;
+  }
+  return "message" in error && typeof error.message === "string"
+    ? unavailableToolCodes.has(error.message)
+    : false;
 }
 
 const telemetry = createAppTelemetry({
@@ -68,6 +89,12 @@ const telemetry = createAppTelemetry({
 });
 const uiTelemetry = createApprovalTelemetry(telemetry);
 let hostConnected = false;
+let resolveUnavailable = false;
+const hideFallback = (): void => {
+  if (!resolveUnavailable) {
+    fallback.hide();
+  }
+};
 const fallbackTimer = window.setTimeout(() => {
   if (!hostConnected) {
     fallback.show();
@@ -87,7 +114,10 @@ const view = createApprovalView(document.body, {
     renderRevealed,
     onDecision,
   }) => {
-    fallback.hide();
+    hideFallback();
+    if (resolveUnavailable) {
+      fallback.show(payload.ui.fallbackText, approvalId);
+    }
     if (approvalId === undefined) {
       for (const button of actions.querySelectorAll("button")) {
         button.disabled = true;
@@ -107,6 +137,7 @@ const view = createApprovalView(document.body, {
       },
       telemetry,
       onResolveUnavailable: () => {
+        resolveUnavailable = true;
         uiTelemetry.reportError("bridge_unavailable");
         fallback.show(payload.ui.fallbackText, approvalId);
       },
@@ -120,6 +151,16 @@ const view = createApprovalView(document.body, {
       renderRevealed,
       onDecision,
     });
+    if (resolveUnavailable) {
+      for (const control of actions.querySelectorAll("button")) {
+        control.disabled = true;
+      }
+      for (const control of editHost.querySelectorAll<
+        HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement
+      >("button, input, textarea")) {
+        control.disabled = true;
+      }
+    }
     return () => {
       mountedActions.dispose();
     };
@@ -172,7 +213,7 @@ void app.connect().then(
   () => {
     hostConnected = true;
     window.clearTimeout(fallbackTimer);
-    fallback.hide();
+    hideFallback();
     finishHostConnection(true);
   },
   () => {

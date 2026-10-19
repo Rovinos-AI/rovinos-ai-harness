@@ -6,12 +6,17 @@ import {
   mountApprovalActions,
   type ApprovalActions,
   type ApprovalActionsBridge,
+  type ApprovalToolCallOutcome,
 } from "./actions.js";
 
 const approvalId = "00000000000000000000000001";
 const tokenizedEmail = "<EMAIL_1>";
 const rawEmail = "SYNTHETIC_RAW_VALUE_CANARY@example.test";
 let modalCalls = 0;
+
+function toolResponse(value: unknown): ApprovalToolCallOutcome {
+  return { kind: "response", value };
+}
 
 const payload: ApprovalPayload = {
   payloadVersion: 1,
@@ -167,7 +172,7 @@ describe("approval actions", () => {
       flushInteractions,
       onDecision,
     } = setup();
-    let finish: (result: unknown) => void = () => undefined;
+    let finish: (result: ApprovalToolCallOutcome) => void = () => undefined;
     bridge.callTool.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     actions.querySelector<HTMLButtonElement>("button")?.click();
     expect([...actions.querySelectorAll("button")].every((control) => control.disabled)).toBe(true);
@@ -175,7 +180,7 @@ describe("approval actions", () => {
       approvalId,
       decision: "approve",
     });
-    finish({ ok: true });
+    finish(toolResponse({ ok: true }));
     await vi.waitFor(() => {
       expect(
         actions.parentElement?.querySelector<HTMLElement>('[role="status"]')?.textContent,
@@ -191,7 +196,7 @@ describe("approval actions", () => {
 
   it("denies with the host-local resolve tool and reports the final state", async () => {
     const { actions, bridge, recordCalls, onDecision } = setup();
-    bridge.callTool.mockResolvedValue({ ok: true });
+    bridge.callTool.mockResolvedValue(toolResponse({ ok: true }));
     actions.querySelectorAll<HTMLButtonElement>("button")[1]?.click();
     await vi.waitFor(() => {
       expect(
@@ -208,7 +213,7 @@ describe("approval actions", () => {
 
   it("submits only changed typed edits and keeps the tokenized value visible initially", async () => {
     const { actions, editHost, bridge, recordCalls } = setup();
-    bridge.callTool.mockResolvedValue({ ok: true });
+    bridge.callTool.mockResolvedValue(toolResponse({ ok: true }));
     actions.querySelectorAll<HTMLButtonElement>("button")[2]?.click();
     const form = editHost.querySelector<HTMLFormElement>("form");
     if (form === null) {
@@ -258,12 +263,14 @@ describe("approval actions", () => {
   it("requires confirmation, cancels without a call, and masks revealed values after 30 seconds", async () => {
     vi.useFakeTimers();
     const { actions, bridge, recordCalls, rendered, mount } = setup();
-    bridge.callTool.mockResolvedValue({
-      values: [
-        { pointer: "/email", value: rawEmail },
-        { pointer: "/not-requested", value: "SYNTHETIC_EXTRA_CANARY" },
-      ],
-    });
+    bridge.callTool.mockResolvedValue(
+      toolResponse({
+        values: [
+          { pointer: "/email", value: rawEmail },
+          { pointer: "/not-requested", value: "SYNTHETIC_EXTRA_CANARY" },
+        ],
+      }),
+    );
     const reveal = actions.querySelector<HTMLButtonElement>("button:last-child");
     reveal?.click();
     const confirmation = document.querySelector<HTMLDialogElement>("dialog");
@@ -327,8 +334,8 @@ describe("approval actions", () => {
     bridge.callTool.mockImplementation((name) =>
       Promise.resolve(
         name === "harness.approvals.reveal"
-          ? { values: [{ pointer: "/email", value: rawEmail }] }
-          : { ok: true },
+          ? toolResponse({ values: [{ pointer: "/email", value: rawEmail }] })
+          : toolResponse({ ok: true }),
       ),
     );
     actions.querySelector<HTMLButtonElement>("button:last-child")?.click();
@@ -353,8 +360,8 @@ describe("approval actions", () => {
   it("replaces previously revealed values after another successful reveal", async () => {
     const { actions, bridge, rendered, mount } = setup();
     bridge.callTool
-      .mockResolvedValueOnce({ values: [{ pointer: "/email", value: rawEmail }] })
-      .mockResolvedValueOnce({ values: [] });
+      .mockResolvedValueOnce(toolResponse({ values: [{ pointer: "/email", value: rawEmail }] }))
+      .mockResolvedValueOnce(toolResponse({ values: [] }));
     const reveal = actions.querySelector<HTMLButtonElement>("button:last-child");
     reveal?.click();
     document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
@@ -372,7 +379,9 @@ describe("approval actions", () => {
 
   it("reports resolve errors using code-only messages and emits no exception text", async () => {
     const { actions, bridge, recordCalls } = setup();
-    bridge.callTool.mockResolvedValue({ ok: false, code: "approval_already_resolved" });
+    bridge.callTool.mockResolvedValue(
+      toolResponse({ ok: false, code: "approval_already_resolved" }),
+    );
     actions.querySelector("button")?.click();
     await vi.waitFor(() => {
       expect(
@@ -384,7 +393,7 @@ describe("approval actions", () => {
 
   it("disables the decision controls and shows fallback when the resolve tool is unavailable", async () => {
     const { actions, bridge, recordCalls, onResolveUnavailable } = setup();
-    bridge.callTool.mockResolvedValue(undefined);
+    bridge.callTool.mockResolvedValue({ kind: "unavailable" });
     actions.querySelector("button")?.click();
 
     await vi.waitFor(() => {
@@ -397,8 +406,8 @@ describe("approval actions", () => {
   it("records each resolve failure when a retry also fails", async () => {
     const { actions, bridge, recordCalls } = setup();
     bridge.callTool
-      .mockResolvedValueOnce({ ok: false, code: "approval_already_resolved" })
-      .mockResolvedValueOnce({ ok: false, code: "approval_already_resolved" });
+      .mockResolvedValueOnce(toolResponse({ ok: false, code: "approval_already_resolved" }))
+      .mockResolvedValueOnce(toolResponse({ ok: false, code: "approval_already_resolved" }));
     const approve = actions.querySelector<HTMLButtonElement>("button");
     approve?.click();
     await vi.waitFor(() => {
@@ -420,8 +429,8 @@ describe("approval actions", () => {
   it("records each reveal failure when a retry also fails", async () => {
     const { actions, bridge, recordCalls } = setup();
     bridge.callTool
-      .mockResolvedValueOnce({ values: [{ pointer: "/email", value: 42 }] })
-      .mockResolvedValueOnce({ values: [{ pointer: "/email", value: 42 }] });
+      .mockResolvedValueOnce(toolResponse({ values: [{ pointer: "/email", value: 42 }] }))
+      .mockResolvedValueOnce(toolResponse({ values: [{ pointer: "/email", value: 42 }] }));
     const reveal = actions.querySelector<HTMLButtonElement>("button:last-child");
     const confirmReveal = async (): Promise<void> => {
       const expectedRecordCount = recordCalls.length + 1;
@@ -457,7 +466,9 @@ describe("approval actions", () => {
   it("keeps all controls disabled and refuses edits when a pending decision expires", async () => {
     const { actions, editHost, bridge, setExpired } = setup();
     actions.querySelectorAll<HTMLButtonElement>("button")[2]?.click();
-    bridge.callTool.mockResolvedValue({ ok: false, code: "approval_run_not_suspended" });
+    bridge.callTool.mockResolvedValue(
+      toolResponse({ ok: false, code: "approval_run_not_suspended" }),
+    );
     actions.querySelector<HTMLButtonElement>("button")?.click();
     expect(
       [...editHost.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button")].every(
@@ -492,7 +503,7 @@ describe("approval actions", () => {
 
   it("refuses malformed reveal results, reports a metadata-only error, and clears values on dispose", async () => {
     const { actions, bridge, recordCalls, rendered, mount } = setup();
-    bridge.callTool.mockResolvedValue({ values: [{ pointer: "/email", value: 42 }] });
+    bridge.callTool.mockResolvedValue(toolResponse({ values: [{ pointer: "/email", value: 42 }] }));
     actions.querySelector<HTMLButtonElement>("button:last-child")?.click();
     document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
     await vi.waitFor(() => {
@@ -503,9 +514,9 @@ describe("approval actions", () => {
     expect(rendered.textContent).toBe(tokenizedEmail);
     expect(recordCalls).toEqual([{ name: "ui.error", attrs: { code: "reveal_failed" } }]);
 
-    bridge.callTool.mockResolvedValueOnce({
-      values: [{ pointer: "/email", value: rawEmail }],
-    });
+    bridge.callTool.mockResolvedValueOnce(
+      toolResponse({ values: [{ pointer: "/email", value: rawEmail }] }),
+    );
     actions.querySelector<HTMLButtonElement>("button:last-child")?.click();
     document.querySelector<HTMLButtonElement>("dialog button:first-of-type")?.click();
     await vi.waitFor(() => {
