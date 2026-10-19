@@ -185,6 +185,14 @@ Owner task: `6.5`.
 | `harness.approval.value_count` | integer | Required | `@harness/telemetry` |
 | `harness.auth.token.id` | Code | Required | `@harness/telemetry` |
 
+### `harness.control_plane.operation`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.auth.token.id` | Code | Required | `@harness/telemetry` |
+| `harness.control_plane.outcome` | Code | Required | `@harness/telemetry` |
+| `harness.control_plane.tool` | Code | Required | `@harness/telemetry` |
+
 ### `harness.keys.rotated`
 
 | Attribute | Type | Presence | Owning package |
