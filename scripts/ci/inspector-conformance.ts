@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Id, parseJson, type NewEvent } from "@harness/schemas";
+import { ControlPlaneConfigSchema, Id, parseJson, type NewEvent } from "@harness/schemas";
 import { SqliteEventStore } from "@harness/store";
 import { z } from "zod";
+import {
+  INSPECTOR_HTTP_TOKEN,
+  minimalInspectorEnvironment,
+  startInspectorHttpServer,
+  type RunningInspectorServer,
+} from "./inspector-http.js";
 
 const root = resolvePath(import.meta.dirname, "../..");
 const harness = resolvePath(root, "packages/cli/dist/bin.js");
@@ -22,12 +28,6 @@ interface ProcessResult {
   readonly status: number;
   readonly stdout: string;
   readonly stderr: string;
-}
-
-interface RunningServer {
-  readonly child: ChildProcess;
-  readonly endpoint: string;
-  readonly close: () => Promise<void>;
 }
 
 interface InspectorRequest {
@@ -108,20 +108,6 @@ function runProcess(args: readonly string[], env: NodeJS.ProcessEnv): Promise<Pr
   });
 }
 
-function minimalEnvironment(home: string, configPath: string, dataDir: string): NodeJS.ProcessEnv {
-  return {
-    PATH: process.env.PATH ?? "",
-    HOME: home,
-    USERPROFILE: home,
-    HARNESS_CONFIG: configPath,
-    HARNESS_DATA_DIR: dataDir,
-    MCP_INSPECTOR_SECRET_STORE: "memory",
-    MCP_STORAGE_DIR: join(home, "storage"),
-    MCP_CATALOG_PATH: join(home, "catalog.json"),
-    MCP_AUTO_OPEN_ENABLED: "false",
-  };
-}
-
 function argsForTransport(request: InspectorRequest): string[] {
   const args = [
     "--protocol-era",
@@ -152,6 +138,12 @@ function argsForTransport(request: InspectorRequest): string[] {
 
 async function invoke(request: InspectorRequest): Promise<ProcessResult> {
   const result = await runProcess(argsForTransport(request), request.env);
+  if (
+    request.transport === "http" &&
+    `${result.stdout}${result.stderr}`.includes(INSPECTOR_HTTP_TOKEN)
+  ) {
+    failure("The Inspector exposed the HTTP bearer-token canary.");
+  }
   if (result.status !== 0) {
     inspectorError(
       result,
@@ -231,23 +223,38 @@ async function checkTransport(
   endpoint: string | undefined,
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const request = { transport, endpoint, env };
+  const flags =
+    transport === "http"
+      ? [
+          "--header",
+          ["Authorization:", ["Be", "arer ", INSPECTOR_HTTP_TOKEN].join("")].join(" "),
+          "--stored-auth-only",
+        ]
+      : [];
+  const request = { transport, endpoint, env, flags };
+  const invokeWithFlags = (extraFlags: readonly string[]) =>
+    invoke({
+      ...request,
+      protocolEra: "modern",
+      method: "tools/list",
+      flags: [...flags, ...extraFlags],
+    });
   for (const era of ["modern", "legacy"] as const) {
     assertProtocol(await invoke({ ...request, protocolEra: era, method: "initialize" }), era);
   }
-  const list = (flags: readonly string[]) =>
-    invoke({ ...request, protocolEra: "modern", method: "tools/list", flags });
-  assertAppVisibility(toolRows(await list(["--app-info"])), false);
+  assertAppVisibility(toolRows(await invokeWithFlags(["--app-info"])), false);
   // The Inspector rejects --strict with --app-info, so gate the full Apps-advertised list separately.
-  await list(["--strict", "--advertise-apps"]);
-  assertAppVisibility(toolRows(await list(["--app-info", "--advertise-apps"])), true);
+  await invokeWithFlags(["--strict", "--advertise-apps"]);
+  assertAppVisibility(toolRows(await invokeWithFlags(["--app-info", "--advertise-apps"])), true);
   const resource = jsonObject(
     (
       await invoke({
-        ...request,
+        transport,
+        endpoint,
+        env,
         protocolEra: "modern",
         method: "resources/read",
-        flags: ["--uri", "ui://harness/approval/v1"],
+        flags: [...flags, "--uri", "ui://harness/approval/v1"],
       })
     ).stdout,
     "approval resources/read",
@@ -264,59 +271,25 @@ async function checkTransport(
   }
 }
 
-async function startHttpServer(env: NodeJS.ProcessEnv): Promise<RunningServer> {
-  const child = spawn(process.execPath, [harness, "serve", "--http", "--port", "0"], {
-    cwd: root,
+async function checkUnauthenticatedHttp(endpoint: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const result = await runProcess(
+    argsForTransport({
+      transport: "http",
+      endpoint,
+      env,
+      protocolEra: "modern",
+      method: "initialize",
+      flags: ["--stored-auth-only"],
+    }),
     env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let stdout = "";
-  let stderr = "";
-  const endpoint = await new Promise<string>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      child.kill("SIGTERM");
-      reject(new Error("harness serve --http timed out."));
-    }, 30_000);
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-      const match = /http:\/\/127\.0\.0\.1:\d+\/mcp/u.exec(stdout);
-      if (match?.[0] !== undefined) {
-        clearTimeout(timeout);
-        resolve(match[0]);
-      }
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.once("error", (error: Error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-    child.once("close", (status) => {
-      clearTimeout(timeout);
-      reject(new Error(`harness serve --http exited ${String(status)}: ${stderr}`));
-    });
-  });
-  return {
-    child,
-    endpoint,
-    close: () =>
-      new Promise<void>((resolve) => {
-        if (child.exitCode !== null || child.signalCode !== null) {
-          resolve();
-          return;
-        }
-        const timeout = setTimeout(() => {
-          child.kill("SIGKILL");
-          resolve();
-        }, 5_000);
-        child.once("close", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-        child.kill("SIGTERM");
-      }),
-  };
+  );
+  const output = `${result.stdout}${result.stderr}`;
+  if (output.includes(INSPECTOR_HTTP_TOKEN)) {
+    failure("The unauthenticated Inspector attempt exposed the HTTP bearer-token canary.");
+  }
+  if (result.status !== 3 || !output.includes("auth_required")) {
+    failure("Unauthenticated Inspector initialization did not exit 3 with auth_required.");
+  }
 }
 
 function fixtureSource(): string {
@@ -385,14 +358,26 @@ export async function runInspectorConformance(): Promise<void> {
   const home = join(workDir, "home");
   const dataDir = join(workDir, "data");
   const configPath = join(workDir, "harness.config.json");
-  let httpServer: RunningServer | undefined;
+  let httpServer: RunningInspectorServer | undefined;
   try {
     await Promise.all([mkdir(home), mkdir(dataDir)]);
-    await writeFile(configPath, "{}\n", { mode: 0o600 });
+    const controlPlane = ControlPlaneConfigSchema.parse({
+      auth: {
+        tokens: [
+          {
+            id: "token.inspector",
+            secret: "env:CONTROL_PLANE_INSPECTOR_TOKEN",
+            scopes: ["admin"],
+          },
+        ],
+      },
+    });
+    await writeFile(configPath, `${JSON.stringify({ controlPlane })}\n`, { mode: 0o600 });
     await seedSyntheticRun(dataDir);
-    const env = minimalEnvironment(home, configPath, dataDir);
+    const env = minimalInspectorEnvironment(home, configPath, dataDir);
     await checkTransport("stdio", undefined, env);
-    httpServer = await startHttpServer(env);
+    httpServer = await startInspectorHttpServer({ root, harness, env });
+    await checkUnauthenticatedHttp(httpServer.endpoint, env);
     await checkTransport("http", httpServer.endpoint, env);
     await checkStrictNegative(env);
   } finally {

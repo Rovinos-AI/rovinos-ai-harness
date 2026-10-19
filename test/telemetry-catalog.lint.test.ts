@@ -28,6 +28,7 @@ const expectedSpanNames = [
 ];
 const expectedLogNames = [
   "harness.approval_app.operation",
+  "harness.control_plane.operation",
   "harness.keys.rotated",
   "harness.model.pricing_cache_missing",
   "harness.model.pricing_missing",

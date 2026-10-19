@@ -16,7 +16,12 @@ import {
   type ContentCodec,
   type EncodedSnapshot,
 } from "./codec.js";
-import { InvalidEventError, SeqConflictError, StoreUnavailableError } from "./errors.js";
+import {
+  InvalidEventError,
+  RunExecutionLeaseLostError,
+  SeqConflictError,
+  StoreUnavailableError,
+} from "./errors.js";
 import {
   type EventStore,
   type ListRunsOptions,
@@ -39,8 +44,7 @@ import {
 } from "./subscriptions.js";
 import {
   hasDuplicateSnapshot,
-  matchesContinuation,
-  startAfterCursor,
+  listMemoryRunsSafely,
   validateEventBatch,
 } from "./memory-helpers.js";
 
@@ -58,6 +62,7 @@ export class InMemoryEventStore implements EventStore {
   >();
   private readonly confirmationStates = new Map<string, number>();
   private readonly idempotencyKeys = new Map<string, MemoryIdempotencyClaim>();
+  private readonly executionLeases = new Map<Id, { readonly owner: Id; expiresAt: number }>();
   private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -73,9 +78,17 @@ export class InMemoryEventStore implements EventStore {
     runId: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
+    leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     try {
-      return Promise.resolve(this.appendEvents(runId, events, expectedSeq));
+      return Promise.resolve(
+        this.appendEvents({
+          runId,
+          events,
+          expectedSeq,
+          ...(leaseOwner === undefined ? {} : { leaseOwner }),
+        }),
+      );
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new StoreUnavailableError());
     }
@@ -83,26 +96,35 @@ export class InMemoryEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.appendWithSnapshot} */
   async appendWithSnapshot(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    snapshot: Snapshot,
+    ...args: Parameters<EventStore["appendWithSnapshot"]>
   ): Promise<{ nextSeq: number }> {
+    const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     try {
       const validatedSnapshot = validateSnapshotAppend(runId, events, expectedSeq, snapshot);
       const encodedSnapshot = await encodeSnapshot(this.codec, validatedSnapshot);
-      return this.appendEvents(runId, events, expectedSeq, encodedSnapshot);
+      return this.appendEvents({
+        runId,
+        events,
+        expectedSeq,
+        encodedSnapshot,
+        ...(leaseOwner === undefined ? {} : { leaseOwner }),
+      });
     } catch (error) {
       throw error instanceof Error ? error : new StoreUnavailableError();
     }
   }
 
-  private appendEvents(
-    runId: Id,
-    events: readonly NewEvent[],
-    expectedSeq: number,
-    encodedSnapshot?: EncodedSnapshot,
-  ): { nextSeq: number } {
+  private appendEvents(options: {
+    readonly runId: Id;
+    readonly events: readonly NewEvent[];
+    readonly expectedSeq: number;
+    readonly encodedSnapshot?: EncodedSnapshot;
+    readonly leaseOwner?: Id;
+  }): { nextSeq: number } {
+    const { runId, events, expectedSeq, encodedSnapshot, leaseOwner } = options;
+    if (leaseOwner !== undefined && this.executionLeases.get(runId)?.owner !== leaseOwner) {
+      throw new RunExecutionLeaseLostError();
+    }
     const stored = this.runs.get(runId) ?? [];
     if (expectedSeq !== stored.length) {
       throw new SeqConflictError(expectedSeq, stored.length);
@@ -130,6 +152,34 @@ export class InMemoryEventStore implements EventStore {
     }
     this.changeEmitter.notify(runId);
     return { nextSeq: expectedSeq + validated.length };
+  }
+
+  /** {@inheritDoc EventStore.claimRunExecution} */
+  claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
+    const existing = this.executionLeases.get(runId);
+    if (existing !== undefined && existing.expiresAt > now) {
+      return Promise.resolve(false);
+    }
+    this.executionLeases.set(runId, { owner, expiresAt: now + leaseMs });
+    return Promise.resolve(true);
+  }
+
+  /** {@inheritDoc EventStore.renewRunExecution} */
+  renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
+    const existing = this.executionLeases.get(runId);
+    if (existing?.owner !== owner || existing.expiresAt <= now) {
+      return Promise.resolve(false);
+    }
+    this.executionLeases.set(runId, { owner, expiresAt: now + leaseMs });
+    return Promise.resolve(true);
+  }
+
+  /** {@inheritDoc EventStore.releaseRunExecution} */
+  releaseRunExecution(runId: Id, owner: Id): Promise<void> {
+    if (this.executionLeases.get(runId)?.owner === owner) {
+      this.executionLeases.delete(runId);
+    }
+    return Promise.resolve();
   }
 
   private recordTraceRuns(runId: Id, events: readonly StoredEvent[]): void {
@@ -241,6 +291,7 @@ export class InMemoryEventStore implements EventStore {
 
     this.runs.delete(runId);
     this.snapshots.delete(runId);
+    this.executionLeases.delete(runId);
     deleteMemoryIdempotencyKeyClaims(this.idempotencyKeys, runId);
     for (const [approvalId, notification] of this.approvalNotifications) {
       if (notification.runId === runId) {
@@ -263,56 +314,7 @@ export class InMemoryEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.listRuns} */
   listRuns(opts: ListRunsOptions): Promise<{ runs: RunSummary[]; nextCursor?: string }> {
-    if (!Number.isInteger(opts.limit) || opts.limit < 1) {
-      return Promise.reject(new InvalidEventError([["limit"]]));
-    }
-
-    const summaries: RunSummary[] = [];
-    for (const [runId, events] of this.runs) {
-      const created = events.find((event) => event.type === "run_created");
-      const last = events.at(-1);
-      if (created === undefined || last === undefined) {
-        continue;
-      }
-      if (!matchesContinuation(created, opts.continuationOf)) {
-        continue;
-      }
-
-      let status: RunSummary["status"] = "pending";
-      for (const event of events) {
-        if (event.type === "run_status_changed") {
-          status = event.to;
-        }
-      }
-      if (opts.status !== undefined && opts.status !== status) {
-        continue;
-      }
-      summaries.push({
-        runId,
-        createdAt: created.ts,
-        status,
-        lastSeq: last.seq,
-        lastTs: last.ts,
-      });
-    }
-
-    summaries.sort((left, right) => {
-      const createdAtOrder = right.createdAt - left.createdAt;
-      if (createdAtOrder !== 0) {
-        return createdAtOrder;
-      }
-      return left.runId.localeCompare(right.runId);
-    });
-
-    const start = startAfterCursor(summaries, opts.cursor);
-    if (start === undefined) {
-      return Promise.reject(new InvalidEventError([["cursor"]]));
-    }
-
-    const end = start + opts.limit;
-    const runs = summaries.slice(start, end);
-    const nextCursor = end < summaries.length ? runs.at(-1)?.runId : undefined;
-    return Promise.resolve(nextCursor === undefined ? { runs } : { runs, nextCursor });
+    return listMemoryRunsSafely(this.runs, opts);
   }
 
   /** {@inheritDoc EventStore.findRunsByTrace} */

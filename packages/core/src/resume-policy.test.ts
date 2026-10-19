@@ -127,4 +127,24 @@ describe("planDanglingIntents", () => {
       callId: callIds.idempotent_tool,
     });
   });
+
+  it("delegates registered tool intents to their custom resume strategy", () => {
+    const strategyPort: ToolPort = {
+      ...toolPort,
+      resumeStrategy: (toolId) =>
+        toolId === "non_idempotent_tool"
+          ? { onDanglingIntent: () => Promise.resolve({ kind: "rerun" }) }
+          : undefined,
+    };
+
+    expect(planDanglingIntents(testState(), strategyPort)[1]).toEqual({
+      kind: "strategy",
+      callId: callIds.non_idempotent_tool,
+    });
+    expect(planDanglingIntents(testState({ denied: true }), strategyPort)[1]).toEqual({
+      kind: "fail",
+      callId: callIds.non_idempotent_tool,
+      errorCode: "pii_blocked",
+    });
+  });
 });

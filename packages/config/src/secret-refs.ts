@@ -36,6 +36,12 @@ export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
     config.policy.approvals?.notifier.kind === "webhook"
       ? [config.policy.approvals.notifier.secretRef]
       : [];
+  const controlPlaneRefs = [
+    ...(config.controlPlane?.auth.tokens.map(({ secret }) => secret) ?? []),
+    ...(config.controlPlane?.tls === undefined
+      ? []
+      : [config.controlPlane.tls.certFile, config.controlPlane.tls.keyFile]),
+  ];
   return [
     ...modelRefs,
     ...serverRefs,
@@ -44,5 +50,6 @@ export function getConfigSecretRefs(config: HarnessConfig): SecretRef[] {
     ...vaultRefs,
     ...runnerRefs,
     ...approvalRefs,
+    ...controlPlaneRefs,
   ];
 }

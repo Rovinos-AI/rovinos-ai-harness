@@ -50,6 +50,7 @@ export const eventSamples = [
     argsHash: sha256,
     args: {},
   },
+  { ...envelope, type: "tool_execution_started", callId: id, toolId: "test.tool" },
   {
     ...envelope,
     type: "tool_result",

@@ -177,6 +177,26 @@ describe("confirmation-gated control-plane tools", () => {
     await store.close();
   });
 
+  it("searches only allowlisted runs and makes hidden approvals indistinguishable from missing ones", async () => {
+    const store = new InMemoryEventStore();
+    const builders = createEventBuilders();
+    const hidden = await addPendingApproval(store, builders);
+    const allowed = await addPendingApproval(store, builders);
+    const readSpy = vi.spyOn(store, "read");
+    const listSpy = vi.spyOn(store, "listRuns");
+
+    await expect(
+      findApprovalRequest(store, hidden.approvalId, [allowed.runId]),
+    ).resolves.toBeUndefined();
+    await expect(
+      findApprovalRequest(store, builders.nextRunId(), [allowed.runId]),
+    ).resolves.toBeUndefined();
+    expect(readSpy).toHaveBeenCalledWith(allowed.runId);
+    expect(readSpy).not.toHaveBeenCalledWith(hidden.runId, expect.anything());
+    expect(listSpy).not.toHaveBeenCalled();
+    await store.close();
+  });
+
   it("requires supported elicitation when no trusted app context is supplied", async () => {
     const store = new InMemoryEventStore();
     const { runId, approvalId } = await addPendingApproval(store, createEventBuilders());

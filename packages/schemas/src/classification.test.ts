@@ -127,7 +127,20 @@ describe("EVENT_FIELD_CLASS", () => {
 
   it("maps all declared event types", () => {
     const eventTypes = Object.keys(EVENT_FIELD_CLASS);
-    expect(eventTypes).toHaveLength(16);
+    expect(eventTypes).toHaveLength(17);
     expect(eventTypes).toEqual(expect.arrayContaining(eventSamples.map(({ type }) => type)));
+  });
+
+  it("classifies tool execution start identifiers as metadata only", () => {
+    const event = eventSamples.find(({ type }) => type === "tool_execution_started");
+    if (event?.type !== "tool_execution_started") {
+      throw new Error("Missing tool_execution_started sample.");
+    }
+
+    expect(EVENT_FIELD_CLASS.tool_execution_started).toEqual({
+      callId: "meta",
+      toolId: "meta",
+    });
+    expect(splitEvent(event).content).toEqual({});
   });
 });

@@ -101,6 +101,7 @@ export class RunRecorder {
     startSeq: number,
     private readonly clock: Clock,
     private readonly tripQueue: TripQueue = sentinelTripQueue,
+    private readonly leaseOwner?: Id,
   ) {
     this.nextSequence = startSeq;
   }
@@ -290,7 +291,7 @@ export class RunRecorder {
     }));
 
     try {
-      const result = await this.store.append(this.runId, newEvents, expectedSeq);
+      const result = await this.store.append(this.runId, newEvents, expectedSeq, this.leaseOwner);
       this.nextSequence = result.nextSeq;
     } catch (error) {
       if (error instanceof SeqConflictError) {
@@ -326,10 +327,16 @@ export class RunRecorder {
     };
 
     try {
-      const result = await this.store.appendWithSnapshot(this.runId, [newEvent], expectedSeq, {
-        ...snapshot,
-        atSeq: expectedSeq,
-      });
+      const result = await this.store.appendWithSnapshot(
+        this.runId,
+        [newEvent],
+        expectedSeq,
+        {
+          ...snapshot,
+          atSeq: expectedSeq,
+        },
+        this.leaseOwner,
+      );
       this.nextSequence = result.nextSeq;
     } catch (error) {
       if (error instanceof SeqConflictError) {

@@ -1,68 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  HarnessError,
-  JsonValue as JsonValueSchema,
-  UNREGISTERED_TOOL_ID,
-  type Code,
-  type Event,
-} from "@harness/schemas";
-import {
-  ApprovalPayloadSchema,
-  approvalEditsAreAllowed,
-  buildApprovalPayload,
-  diffToEdits,
-} from "@harness/policy";
+import { UNREGISTERED_TOOL_ID } from "@harness/schemas";
+import type { Code, Event, JsonValue as JsonValueSchema } from "@harness/schemas";
+import { ApprovalPayloadSchema, approvalEditsAreAllowed, diffToEdits } from "@harness/policy";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { EventPartial } from "../recorder.js";
 import type { ModelToolCall, PolicyDecision } from "../ports.js";
 import { requestPolicyApproval } from "./policy-step.js";
-import { APPROVAL_WAIT_SPAN, TOOL_CALL_SPAN } from "../spans.js";
-import type { DanglingIntentAction } from "../resume-policy.js";
+import { TOOL_CALL_SPAN } from "../spans.js";
+import type { DanglingIntentAction, ToolResumeDecision } from "../resume-policy.js";
 import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
 import { runToolCall, type ResumeToolStepOptions } from "./tool-step.js";
+import { requestResumeApprovals } from "./resume-approval-request.js";
+import {
+  ApprovalEditNotAllowedError,
+  ApprovalEditsRequiredError,
+  ResumeActionMismatchError,
+  ResumeEventMissingError,
+} from "./resume-errors.js";
 
-class ResumeEventMissingError extends HarnessError {
-  readonly code = "resume_event_missing";
-
-  constructor() {
-    super("Expected a recorded resume event.");
-    this.name = "ResumeEventMissingError";
-  }
-}
-
-/** Error raised when a resume action or approval does not identify its intent. */
-export class ResumeActionMismatchError extends HarnessError {
-  readonly code = "resume_action_mismatch";
-
-  /** Creates an error for a mismatched resume action or approval. */
-  constructor() {
-    super("Resume action or approval does not match its intent.");
-    this.name = "ResumeActionMismatchError";
-  }
-}
-
-/** Error raised when an edit decision has no replacement arguments. */
-export class ApprovalEditsRequiredError extends HarnessError {
-  readonly code = "approval_edits_required";
-
-  /** Creates an error for an edit decision without replacement arguments. */
-  constructor() {
-    super("An edit approval decision requires replacement arguments.");
-    this.name = "ApprovalEditsRequiredError";
-  }
-}
-
-/** Error raised when an approval edit modifies a field outside the editable pointers. */
-export class ApprovalEditNotAllowedError extends HarnessError {
-  readonly code = "approval_edit_not_allowed";
-
-  /** Creates an error for an approval edit outside the allowed pointers. */
-  constructor() {
-    super("Approval edits may only change fields listed as editable.");
-    this.name = "ApprovalEditNotAllowedError";
-  }
-}
+export {
+  ApprovalEditNotAllowedError,
+  ApprovalEditsRequiredError,
+  ResumeActionMismatchError,
+} from "./resume-errors.js";
 
 function resultToolId(options: Pick<ResumeToolStepOptions, "tool">, intent: ToolIntentEvent): Code {
   return options.tool.describe(intent.toolId, intent.args) === undefined
@@ -140,53 +101,6 @@ function policyDecisionFromIntent(intent: ToolIntentEvent): PolicyDecision {
   };
 }
 
-async function requestResumeApprovals(
-  options: ResumeToolStepOptions,
-  intents: readonly ToolIntentEvent[],
-): Promise<readonly Event[]> {
-  const events: Event[] = [];
-  await options.recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () => {
-    const now = Math.floor(options.clock.now());
-    const batch: EventPartial[] = intents.map((intent) => {
-      const payload = buildApprovalPayload({
-        kind: "resume_ambiguity",
-        call: callFromIntent(intent),
-        rule: {
-          id: intent.ruleId ?? "default",
-          reason: intent.policyReason ?? "resume_ambiguous",
-          ...(intent.policyApprovalTtlMs === undefined
-            ? {}
-            : { approvalTtlMs: intent.policyApprovalTtlMs }),
-        },
-        now,
-      });
-      return {
-        type: "approval_requested",
-        v: 1,
-        approvalId: options.ids.next(),
-        callId: intent.callId,
-        payload: JsonValueSchema.parse(payload),
-        ...(payload.expiresAt === undefined ? {} : { expiresAt: payload.expiresAt }),
-      };
-    });
-    batch.push({
-      type: "run_status_changed",
-      v: 1,
-      from: "running",
-      to: "suspended",
-      reason: "resume_ambiguity",
-    });
-    const recorded = await options.recorder.recordBatch(batch);
-    events.push(...recorded);
-    const last = recorded.at(-1);
-    if (last === undefined) {
-      throw new ResumeEventMissingError();
-    }
-    return last;
-  });
-  return events;
-}
-
 function callFromIntent(intent: ToolIntentEvent): ModelToolCall {
   return { callId: intent.callId, toolId: intent.toolId, args: intent.args };
 }
@@ -224,6 +138,18 @@ async function applyDanglingIntentAction(
   if (action.kind === "escalate") {
     return "escalate";
   }
+  if (action.kind === "strategy") {
+    const strategy = options.tool.resumeStrategy?.(intent.toolId);
+    if (strategy === undefined) {
+      throw new ResumeActionMismatchError();
+    }
+    const decision = await strategy.onDanglingIntent(callFromIntent(intent), state, {
+      runId: options.runId,
+      signal: options.signal,
+      toolRegistry: options.tool,
+    });
+    return applyToolResumeDecision(options, intent, decision);
+  }
 
   const description = options.tool.describe(intent.toolId, intent.args);
   if (description === undefined) {
@@ -236,13 +162,88 @@ async function applyDanglingIntentAction(
   return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
 }
 
+async function applyToolResumeDecision(
+  options: Omit<ResumeToolStepOptions, "ids">,
+  intent: ToolIntentEvent,
+  decision: ToolResumeDecision,
+  recovery: { readonly call?: ModelToolCall; readonly prepared?: boolean } = {},
+): Promise<readonly Event[]> {
+  const recoveredCall = recovery.call ?? callFromIntent(intent);
+  if (decision.kind === "rerun") {
+    const description = options.tool.describe(recoveredCall.toolId, recoveredCall.args);
+    if (description === undefined) {
+      return recordDanglingFailure(options, intent, "unknown_tool");
+    }
+    await options.beforeToolExecution?.();
+    return runToolCall(options, recoveredCall, description, {
+      existingIntent: intent,
+      ...(recovery.prepared === true ? { prepared: { call: recoveredCall } } : {}),
+    });
+  }
+  if (decision.kind === "shutdown") {
+    return [];
+  }
+  if (decision.kind === "suspend") {
+    const suspended = await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, () =>
+      options.recorder.record({
+        type: "run_status_changed",
+        v: 1,
+        from: "running",
+        to: "suspended",
+        reason: "awaiting_subagent",
+      }),
+    );
+    return [suspended];
+  }
+
+  const batch: EventPartial[] = [];
+  if (decision.completion !== undefined) {
+    batch.push({
+      type: "subagent_completed",
+      v: 1,
+      ...decision.completion,
+    });
+  }
+  batch.push({
+    type: "tool_result",
+    v: 1,
+    callId: intent.callId,
+    toolId: intent.toolId,
+    outcome: decision.execution.outcome,
+    ...(decision.execution.outcome === "error"
+      ? { errorCode: decision.execution.errorCode ?? "tool_failed" }
+      : {}),
+    latencyMs: 0,
+    result: decision.execution.result,
+  });
+  const events: Event[] = [];
+  await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, async (span) => {
+    setPolicySpanAttributes(intent);
+    events.push(...(await options.recorder.recordBatch(batch)));
+    if (decision.execution.outcome === "error") {
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      span.setAttribute("harness.error.code", decision.execution.errorCode ?? "tool_failed");
+    }
+    const last = events.at(-1);
+    if (last === undefined) {
+      throw new ResumeEventMissingError();
+    }
+    return last;
+  });
+  return events;
+}
+
 /** Applies a resolved approval without appending another intent. */
 export async function applyApprovalDecision(
   options: Omit<ResumeToolStepOptions, "ids">,
   intent: ToolIntentEvent,
   approval: ApprovalRequestedEvent,
-  resolution: Extract<Event, { type: "approval_resolved" }>,
+  approvalDecision: {
+    readonly resolution: Extract<Event, { type: "approval_resolved" }>;
+    readonly state?: RunState;
+  },
 ): Promise<readonly Event[]> {
+  const { resolution, state } = approvalDecision;
   if (approval.callId !== intent.callId || resolution.approvalId !== approval.approvalId) {
     throw new ResumeActionMismatchError();
   }
@@ -262,25 +263,58 @@ export async function applyApprovalDecision(
     });
     return [result];
   }
-  let args = intent.args;
-  if (resolution.decision === "edit") {
-    if (resolution.edits === undefined) {
-      throw new ApprovalEditsRequiredError();
-    }
-    const payload = ApprovalPayloadSchema.safeParse(approval.payload);
-    if (
-      !payload.success ||
-      payload.data.callId !== intent.callId ||
-      !approvalEditsAreAllowed(payload.data, diffToEdits(intent.args, resolution.edits))
-    ) {
-      throw new ApprovalEditNotAllowedError();
-    }
-    args = resolution.edits;
+  if (state?.toolExecutionStarted?.has(intent.callId) === true) {
+    return recordDanglingFailure(options, intent, "resume_ambiguous");
   }
+  const args = approvedArgs(intent, approval, resolution);
+  return applyAuthorizedApproval(options, intent, { resolution, state, args });
+}
+
+function approvedArgs(
+  intent: ToolIntentEvent,
+  approval: ApprovalRequestedEvent,
+  resolution: Extract<Event, { type: "approval_resolved" }>,
+): JsonValueSchema {
+  if (resolution.decision !== "edit") {
+    return intent.args;
+  }
+  if (resolution.edits === undefined) {
+    throw new ApprovalEditsRequiredError();
+  }
+  const payload = ApprovalPayloadSchema.safeParse(approval.payload);
+  if (
+    !payload.success ||
+    payload.data.callId !== intent.callId ||
+    !approvalEditsAreAllowed(payload.data, diffToEdits(intent.args, resolution.edits))
+  ) {
+    throw new ApprovalEditNotAllowedError();
+  }
+  return resolution.edits;
+}
+
+async function applyAuthorizedApproval(
+  options: Omit<ResumeToolStepOptions, "ids">,
+  intent: ToolIntentEvent,
+  approvalDecision: {
+    readonly resolution: Extract<Event, { type: "approval_resolved" }>;
+    readonly state: RunState | undefined;
+    readonly args: JsonValueSchema;
+  },
+): Promise<readonly Event[]> {
+  const { resolution, state, args } = approvalDecision;
   const call: ModelToolCall = { callId: intent.callId, toolId: intent.toolId, args };
-  const description = options.tool.describe(intent.toolId, intent.args);
+  const description = options.tool.describe(intent.toolId, args);
   if (description !== undefined) {
     await options.beforeToolExecution?.();
+  }
+  const strategy = state === undefined ? undefined : options.tool.resumeStrategy?.(intent.toolId);
+  if (strategy !== undefined && state !== undefined) {
+    const decision = await strategy.onDanglingIntent(call, state, {
+      runId: options.runId,
+      signal: options.signal,
+      toolRegistry: options.tool,
+    });
+    return applyToolResumeDecision(options, intent, decision, { call, prepared: true });
   }
   return runToolCall(options, call, description, {
     existingIntent: intent,
@@ -310,6 +344,16 @@ export async function applyDanglingIntents(
     } else {
       events.push(...applied);
       options.onEvents?.(applied);
+      if (
+        applied.some(
+          (event) =>
+            event.type === "run_status_changed" &&
+            event.to === "suspended" &&
+            event.reason === "awaiting_subagent",
+        )
+      ) {
+        return events;
+      }
     }
   }
   if (escalations.length > 0) {
@@ -324,13 +368,20 @@ export async function applyDanglingIntents(
 export async function resolveDanglingIntentApproval(
   options: Omit<ResumeToolStepOptions, "ids">,
   intent: ToolIntentEvent,
-  approval: ApprovalRequestedEvent,
-  resolution: Extract<Event, { type: "approval_resolved" }>,
+  approvalDecision: {
+    readonly approval: ApprovalRequestedEvent;
+    readonly resolution: Extract<Event, { type: "approval_resolved" }>;
+    readonly state?: RunState;
+  },
 ): Promise<readonly Event[]> {
+  const { approval, resolution, state } = approvalDecision;
   if (approval.callId !== intent.callId || resolution.approvalId !== approval.approvalId) {
     throw new ResumeActionMismatchError();
   }
   if (resolution.decision === "deny") {
+    return recordDanglingFailure(options, intent, "resume_ambiguous");
+  }
+  if (state?.toolExecutionStarted?.has(intent.callId) === true) {
     return recordDanglingFailure(options, intent, "resume_ambiguous");
   }
   const description = options.tool.describe(intent.toolId, intent.args);
