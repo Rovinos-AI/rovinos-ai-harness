@@ -16,6 +16,7 @@ export {
   type VaultPurgerOptions,
 } from "./purger.js";
 export { normalize } from "./normalize.js";
+export { pseudonymize, type PseudonymizeOptions } from "./pseudonym.js";
 export { findTokens, isToken, Token, tokenType, tokenTypeName } from "./token.js";
 export type { Token as TokenType } from "./token.js";
 export {

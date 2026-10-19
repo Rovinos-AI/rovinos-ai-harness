@@ -101,6 +101,7 @@ describe("attribute schemas", () => {
       { schema: attr.spanId(), kind: "id" },
       { schema: attr.code(), kind: "code" },
       { schema: attr.hash(), kind: "hash" },
+      { schema: attr.pseudonym(), kind: "pseudonym" },
       { schema: attr.enum(["one", "two"]), kind: "enum" },
       { schema: attr.int(), kind: "int" },
       { schema: attr.nonnegativeInt(), kind: "int" },
@@ -131,6 +132,8 @@ describe("attribute schemas", () => {
     expect(attr.spanId().safeParse("b".repeat(15)).success).toBe(false);
     expect(attr.code().safeParse("tool_failed").success).toBe(true);
     expect(attr.hash().safeParse("a".repeat(64)).success).toBe(true);
+    expect(attr.pseudonym().safeParse(`p_${"a".repeat(26)}`).success).toBe(true);
+    expect(attr.pseudonym().safeParse("alice@example.test").success).toBe(false);
     expect(attr.enum(["one", "two"]).safeParse("one").success).toBe(true);
     expect(attr.enum(["one", "two"]).safeParse("three").success).toBe(false);
     expect(attr.int().safeParse(2).success).toBe(true);

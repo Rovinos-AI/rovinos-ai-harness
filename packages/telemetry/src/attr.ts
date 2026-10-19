@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, Sha256Hex, SpanId, TraceId } from "@harness/schemas";
+import { Code, Id, Pseudonym, Sha256Hex, SpanId, TraceId } from "@harness/schemas";
 import { z } from "zod";
 
 /** Safe telemetry attribute kinds used by the attribute catalog and processors. */
 export interface AttrMeta {
-  readonly kind: "id" | "code" | "hash" | "enum" | "int" | "num" | "bool";
+  readonly kind: "id" | "code" | "hash" | "pseudonym" | "enum" | "int" | "num" | "bool";
   readonly values?: readonly string[];
   readonly optional?: true;
 }
@@ -57,6 +57,8 @@ export const attr = {
   code: (): typeof Code => register(Code, { kind: "code" }),
   /** Validates a lowercase SHA-256 hex digest. */
   hash: (): typeof Sha256Hex => register(Sha256Hex, { kind: "hash" }),
+  /** Validates a keyed pseudonym without accepting arbitrary strings. */
+  pseudonym: (): typeof Pseudonym => register(Pseudonym, { kind: "pseudonym" }),
   /** Restricts an attribute to one of the supplied string values. */
   enum: <const Values extends readonly [string, ...string[]]>(
     values: Values,
