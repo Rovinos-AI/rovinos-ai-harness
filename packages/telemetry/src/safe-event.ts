@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type Event, type Code as EventCode } from "@harness/schemas";
+import { Code, type Event, type Code as EventCode, type Pseudonym } from "@harness/schemas";
 import { attr } from "./attr.js";
 import { z } from "zod";
 
@@ -54,6 +54,7 @@ const approvalWait = z
     kind: attr.enum(["approval_wait"]),
     decision: attr.enum(["approve", "deny", "edit"]),
     decidedBy: attr.enum(["human", "policy", "expiry"]),
+    approverPseudonym: attr.optional(attr.pseudonym()),
     reason: attr.optional(attr.code()),
     waitMs: attr.nonnegativeInt(),
   })
@@ -133,6 +134,7 @@ const runCreated = z
     ...commonFields,
     kind: attr.enum(["run_created"]),
     configHash: attr.hash(),
+    requestedByPseudonym: attr.optional(attr.pseudonym()),
   })
   .strict();
 
@@ -160,6 +162,12 @@ export type SafeEvent = z.infer<typeof SafeEvent>;
 type SafeEventEnvelope = Pick<Event, "runId" | "seq" | "ts" | "traceId" | "spanId"> & {
   policyVersion: EventCode;
 };
+
+/** Identity pseudonyms explicitly supplied by an opt-in correlation exporter. */
+export interface SafeEventPseudonyms {
+  readonly requestedBy?: Pseudonym;
+  readonly approverId?: Pseudonym;
+}
 
 type UnexportedEvent = Extract<
   Event,
@@ -239,12 +247,16 @@ function projectToolIntent(
 function projectApprovalResolved(
   event: Extract<Event, { type: "approval_resolved" }>,
   envelope: SafeEventEnvelope,
+  pseudonyms?: SafeEventPseudonyms,
 ): SafeEvent {
   return SafeEvent.parse({
     ...envelope,
     kind: "approval_wait",
     decision: event.decision,
     decidedBy: event.decidedBy,
+    ...(pseudonyms?.approverId === undefined
+      ? {}
+      : { approverPseudonym: pseudonyms.approverId }),
     ...(event.reason === undefined ? {} : { reason: event.reason }),
     waitMs: event.waitMs,
   });
@@ -333,12 +345,16 @@ function projectSubagentCompleted(
 function projectRunCreated(
   event: Extract<Event, { type: "run_created" }>,
   envelope: SafeEventEnvelope,
+  pseudonyms?: SafeEventPseudonyms,
 ): SafeEvent {
   // The shared policyVersion is the exporter's sanitizer version, not the source run version.
   return SafeEvent.parse({
     ...envelope,
     kind: "run_created",
     configHash: event.configHash,
+    ...(pseudonyms?.requestedBy === undefined
+      ? {}
+      : { requestedByPseudonym: pseudonyms.requestedBy }),
   });
 }
 
@@ -349,7 +365,11 @@ function projectRunCreated(
  * @param policyVersion - Current sanitizer policy version used by the exporter.
  * @returns The safe event, or `null` when the event type is not exported.
  */
-export function toSafeEvent(event: Event, policyVersion: EventCode): SafeEvent | null {
+export function toSafeEvent(
+  event: Event,
+  policyVersion: EventCode,
+  pseudonyms?: SafeEventPseudonyms,
+): SafeEvent | null {
   const envelope = createEnvelope(event, policyVersion);
   if (isUnexportedEvent(event)) {
     return null;
@@ -363,7 +383,7 @@ export function toSafeEvent(event: Event, policyVersion: EventCode): SafeEvent |
     case "tool_intent":
       return projectToolIntent(event, envelope);
     case "approval_resolved":
-      return projectApprovalResolved(event, envelope);
+      return projectApprovalResolved(event, envelope, pseudonyms);
     case "checkpoint_written":
       return projectCheckpoint(event, envelope);
     case "run_status_changed":
@@ -377,7 +397,7 @@ export function toSafeEvent(event: Event, policyVersion: EventCode): SafeEvent |
     case "subagent_completed":
       return projectSubagentCompleted(event, envelope);
     case "run_created":
-      return projectRunCreated(event, envelope);
+      return projectRunCreated(event, envelope, pseudonyms);
     default: {
       const exhaustiveEvent: never = event;
       return exhaustiveEvent;

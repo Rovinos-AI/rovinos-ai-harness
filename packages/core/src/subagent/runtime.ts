@@ -172,6 +172,9 @@ export function createSubagentTool(options: {
     scopes: options.scopes,
     parentTools: options.parentTool,
     runChild: async (request: SubagentRunRequest) => {
+      const parentCreated = (await readEvents(options.store, request.parentRunId)).find(
+        (event) => event.type === "run_created",
+      );
       const recorder = new RunRecorder(
         options.store,
         request.runId,
@@ -208,6 +211,9 @@ export function createSubagentTool(options: {
             }),
         parentRunId: request.parentRunId,
         parentCallId: request.parentCallId,
+        ...(parentCreated?.type === "run_created" && parentCreated.requestedBy !== undefined
+          ? { requestedBy: parentCreated.requestedBy }
+          : {}),
         scopeId: request.scopeId,
         depth: request.depth,
         rootSpanParent: request.rootSpanParent,

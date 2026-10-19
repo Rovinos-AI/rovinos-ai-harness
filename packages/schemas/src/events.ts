@@ -5,6 +5,7 @@ import { JsonPointerSchema } from "./config/pii.js";
 import { JsonValue } from "./json.js";
 import { MessageSchema, PartSchema } from "./messages.js";
 import { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
+import { Principal } from "./principal.js";
 
 /** Supported run lifecycle states. */
 export const RunStatus = z.enum([
@@ -41,6 +42,7 @@ const runCreatedEvent = z
     parentRunId: Id.optional(),
     parentCallId: Id.optional(),
     continuationOf: Id.optional(),
+    requestedBy: Principal.optional(),
     scopeId: Id.optional(),
     depth: z.number().int().nonnegative().default(0),
   })
@@ -114,6 +116,7 @@ const toolIntentEvent = z
     ruleId: Code.optional(),
     policyReason: Code.optional(),
     policyEditable: z.array(JsonPointerSchema).optional(),
+    policySeparationOfDuties: z.boolean().optional(),
     policyApprovalTtlMs: z.number().int().positive().optional(),
     policyEscalateAfterMs: z.number().int().positive().optional(),
     argsHash: Sha256Hex,
@@ -154,11 +157,22 @@ const approvalResolvedEvent = z
     approvalId: Id,
     decision: z.enum(["approve", "deny", "edit"]),
     decidedBy: z.enum(["human", "policy", "expiry"]).default("human"),
+    approverId: Principal.optional(),
     reason: Code.optional(),
     waitMs: z.number().int().nonnegative(),
     edits: JsonValue.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((event, context) => {
+    if (event.decidedBy === "human" && event.approverId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["approverId"],
+        message: "Human approval resolutions require an approver identity.",
+        params: { errorCode: "approval_principal_required" },
+      });
+    }
+  });
 
 const appContentEvent = z
   .object({

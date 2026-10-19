@@ -11,6 +11,7 @@ import type {
   ModelUsage as SharedModelUsage,
   Part,
   PiiActionSummary,
+  Principal,
   RunConfig,
   Sha256Hex,
   ToolSpec,
@@ -170,6 +171,7 @@ export const PolicyDecisionSchema = z
     editable: z.array(JsonPointerSchema),
     approvalTtlMs: z.number().int().positive().optional(),
     escalateAfterMs: z.number().int().positive().optional(),
+    separationOfDuties: z.boolean().optional(),
   })
   .strict();
 
@@ -283,6 +285,7 @@ export interface NewRunMetadata {
   readonly parentRunId?: Id;
   readonly parentCallId?: Id;
   readonly continuationOf?: Id;
+  readonly requestedBy?: Principal;
   readonly scopeId?: Id;
   readonly depth?: number;
 }

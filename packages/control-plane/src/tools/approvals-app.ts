@@ -203,6 +203,7 @@ async function handleResolveRequest(
       runId: found.runId,
       approvalId: request.approvalId,
       decision: request.decision,
+      approverId: tokenId === unknownTokenId ? "cli.control_plane" : `token.${tokenId}`,
       ...(applied.edits === undefined ? {} : { edits: applied.edits }),
     });
     return decisionResult(options, {

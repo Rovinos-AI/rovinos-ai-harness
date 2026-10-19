@@ -143,6 +143,7 @@ export const RuleSchema = z
     editable: z.array(JsonPointerSchema).optional(),
     approvalTtlMs: z.number().int().positive().optional(),
     escalateAfterMs: z.number().int().positive().optional(),
+    separationOfDuties: z.boolean().optional(),
   })
   .strict()
   .superRefine((rule, context) => {

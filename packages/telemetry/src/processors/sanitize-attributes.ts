@@ -66,7 +66,14 @@ export function sanitizeAttributes(
 
   const sanitized: Attributes = {};
   for (const [key, value] of Object.entries(attrs)) {
-    if (key === "harness.user.pseudonym" && !correlationEnabled) {
+    if (
+      [
+        "harness.user.pseudonym",
+        "harness.approval.approver_pseudonym",
+        "harness.run.requested_by_pseudonym",
+      ].includes(key) &&
+      !correlationEnabled
+    ) {
       countDroppedTelemetry("correlation_disabled");
       continue;
     }

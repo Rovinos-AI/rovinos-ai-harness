@@ -15,7 +15,7 @@ import {
   type Event,
 } from "@harness/schemas";
 import type { CliContext, CommandModule } from "../command.js";
-import { createCommandRuntime } from "../command.js";
+import { cliPrincipal, createCommandRuntime } from "../command.js";
 import { waitForShutdown } from "../serve.js";
 import { createApprovalResolverLease, revealApprovalArgs } from "./approval-reveal.js";
 import { runApprovalSweep } from "./approval-sweep.js";
@@ -38,6 +38,7 @@ interface PendingApproval {
 }
 
 interface DecisionOptions {
+  readonly as?: string;
   readonly yes?: boolean;
   readonly resume?: boolean;
   readonly edit?: string;
@@ -360,6 +361,12 @@ async function decide(
         approvalId,
         resolution,
         edits === undefined ? undefined : { edits },
+        {
+          metadata: {
+            decidedBy: "human",
+            approverId: cliPrincipal(config, options.as),
+          },
+        },
       );
       const resumed = options.resume === true ? await runtime.resume(pending.runId) : undefined;
       context.out.json(ApprovalResolveResultSchema, {
@@ -389,6 +396,7 @@ function decisionCommand(
     .description(`${decision === "approve" ? "Approve" : "Deny"} a pending approval`)
     .argument("<approvalId>", "approval identifier")
     .option("--yes", "skip the confirmation prompt")
+    .option("--as <name>", "attribute this decision to a CLI principal")
     .option("--resume", "resume the run immediately after resolving");
   if (decision === "approve") {
     command.option("--edit <json-file>", "replacement tool arguments (JSON file) to approve with");

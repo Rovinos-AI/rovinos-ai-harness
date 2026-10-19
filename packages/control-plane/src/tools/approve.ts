@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type Id, type JsonValue } from "@harness/schemas";
+import { Code, type Id, type JsonValue, type Principal } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
@@ -14,6 +14,7 @@ export interface ResolveApprovalRequest {
   readonly runId: Id;
   readonly approvalId: Id;
   readonly decision: ApprovalDecision;
+  readonly approverId: Principal;
   readonly edits?: JsonValue;
   readonly reason?: Code;
 }
@@ -86,6 +87,7 @@ export function registerApproveTool(server: McpServer, options: ApproveToolOptio
               runId: found.runId,
               approvalId: parsed.approvalId,
               decision: parsed.edits === undefined ? "approve" : "edit",
+              approverId: principal === undefined ? "cli.control_plane" : `token.${principal.tokenId}`,
               ...(parsed.edits === undefined ? {} : { edits: parsed.edits }),
             });
             return decisionResult(true);

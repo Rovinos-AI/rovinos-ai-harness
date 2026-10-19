@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type Event, type Id, type JsonValue } from "@harness/schemas";
+import {
+  HarnessError,
+  type Code,
+  type Event,
+  type Id,
+  type JsonValue,
+  type Principal,
+} from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
 import {
   ApprovalEditError,
@@ -28,6 +35,7 @@ export type ApprovalDecision = Extract<Event, { type: "approval_resolved" }>["de
 /** Metadata describing who or what resolved an approval. */
 export interface ApprovalResolutionMetadata {
   readonly decidedBy: Extract<Event, { type: "approval_resolved" }>["decidedBy"];
+  readonly approverId?: Principal;
   readonly reason?: Code;
 }
 
@@ -90,6 +98,26 @@ export class ApprovalResolutionConflictError extends HarnessError {
   constructor() {
     super("Approval resolution conflicted with concurrent run events.");
     this.name = "ApprovalResolutionConflictError";
+  }
+}
+
+/** Error raised when a human resolution omits its required principal. */
+export class ApprovalPrincipalRequiredError extends HarnessError {
+  readonly code = "approval_principal_required";
+
+  constructor() {
+    super("Human approval resolution requires an approver identity.");
+    this.name = "ApprovalPrincipalRequiredError";
+  }
+}
+
+/** Error raised when separation of duties forbids the requester from approving. */
+export class ApproverIsRequesterError extends HarnessError {
+  readonly code = "approver_is_requester";
+
+  constructor() {
+    super("The run requester cannot resolve this approval.");
+    this.name = "ApproverIsRequesterError";
   }
 }
 
@@ -255,6 +283,7 @@ async function readState(
 ): Promise<{
   readonly state: RunState;
   readonly lastEvent: Event;
+  readonly events: readonly Event[];
 }> {
   const events: Event[] = [];
   for await (const event of store.read(runId)) {
@@ -264,7 +293,7 @@ async function readState(
   if (lastEvent === undefined) {
     throw new ApprovalNotFoundError();
   }
-  return { state: foldRunState(events), lastEvent };
+  return { state: foldRunState(events), lastEvent, events };
 }
 
 async function retryApprovalResolution(options: {
@@ -322,10 +351,24 @@ export async function resolveApproval(
     }
   }
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const { state, lastEvent } = await readState(store, runId);
+    const { state, lastEvent, events } = await readState(store, runId);
     const request = pendingApproval(state, approvalId);
     if (state.status !== "suspended") {
       throw new ApprovalRunNotSuspendedError();
+    }
+    if (metadata.decidedBy === "human" && metadata.approverId === undefined) {
+      throw new ApprovalPrincipalRequiredError();
+    }
+    const created = events[0];
+    const intent = state.pendingToolCalls.get(request.callId);
+    if (
+      metadata.decidedBy === "human" &&
+      metadata.approverId !== undefined &&
+      created?.type === "run_created" &&
+      created.requestedBy === metadata.approverId &&
+      intent?.policySeparationOfDuties === true
+    ) {
+      throw new ApproverIsRequesterError();
     }
 
     const resolvedAt = Math.floor(clock.now());
@@ -360,6 +403,7 @@ export async function resolveApproval(
           approvalId,
           decision,
           decidedBy: metadata.decidedBy,
+          ...(metadata.approverId === undefined ? {} : { approverId: metadata.approverId }),
           ...(metadata.reason === undefined ? {} : { reason: metadata.reason }),
           waitMs: Math.max(0, resolvedAt - request.ts),
           ...(resolvedEdits === undefined ? {} : { edits: resolvedEdits }),

@@ -81,6 +81,9 @@ function intentPartial(options: {
     ruleId: options.decision.ruleId,
     policyReason: options.decision.reason,
     policyEditable: options.decision.editable,
+    ...(options.decision.separationOfDuties === undefined
+      ? {}
+      : { policySeparationOfDuties: options.decision.separationOfDuties }),
     ...(options.decision.approvalTtlMs === undefined
       ? {}
       : { policyApprovalTtlMs: options.decision.approvalTtlMs }),

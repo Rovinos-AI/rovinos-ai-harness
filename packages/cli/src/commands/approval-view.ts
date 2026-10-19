@@ -226,7 +226,10 @@ async function resolveApprovalCall(options: {
       request.data.decision,
       {
         ...(edits === undefined ? {} : { edits }),
-        metadata: { decidedBy: "human" },
+        metadata: {
+          decidedBy: "human",
+          approverId: options.config.cli?.principal ?? "cli.local",
+        },
       },
     );
     return {

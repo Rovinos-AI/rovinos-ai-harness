@@ -149,6 +149,7 @@ class HarnessClient implements Harness {
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
       ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
+      ...(input.requestedBy === undefined ? {} : { requestedBy: input.requestedBy }),
     });
     this.trackRun(runId, completion);
     const start = started.then(() => runId);
@@ -255,7 +256,7 @@ class HarnessClient implements Harness {
     }
     await this.runtime.resolveApproval(runId, parsedApprovalId, parsedDecision, {
       ...(parsedOptions.edits === undefined ? {} : { edits: parsedOptions.edits }),
-      metadata: { decidedBy: "human" },
+      metadata: { decidedBy: "human", approverId: parsedOptions.principal },
     });
     return ApprovalResolutionResultSchema.parse({
       runId,

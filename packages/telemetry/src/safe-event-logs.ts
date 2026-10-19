@@ -82,6 +82,7 @@ export const safeEventLogAttributeMap = {
     spanId: "harness.span.id",
     decision: "harness.approval.decision",
     decidedBy: "harness.approval.decided_by",
+    approverPseudonym: "harness.approval.approver_pseudonym",
     reason: "harness.approval.reason",
     waitMs: "harness.approval.wait_ms",
   },
@@ -159,6 +160,7 @@ export const safeEventLogAttributeMap = {
     traceId: "harness.trace.id",
     spanId: "harness.span.id",
     configHash: "harness.run.config_hash",
+    requestedByPseudonym: "harness.run.requested_by_pseudonym",
   },
 } as const satisfies Record<SafeEventType["kind"], Readonly<Record<string, string>>>;
 
@@ -191,6 +193,7 @@ const logDefinitions = {
     ...commonShape,
     "harness.approval.decision": attr.enum(["approve", "deny", "edit"]),
     "harness.approval.decided_by": attr.enum(["human", "policy", "expiry"]),
+    "harness.approval.approver_pseudonym": attr.optional(attr.pseudonym()),
     "harness.approval.reason": attr.optional(attr.code()),
     "harness.approval.wait_ms": attr.nonnegativeInt(),
   }),
@@ -254,6 +257,7 @@ const logDefinitions = {
   run_created: defineLogRecord("harness.safe.run_created", {
     ...commonShape,
     "harness.run.config_hash": attr.hash(),
+    "harness.run.requested_by_pseudonym": attr.optional(attr.pseudonym()),
   }),
 } satisfies Record<SafeEventType["kind"], LogRecordDefinition>;
 

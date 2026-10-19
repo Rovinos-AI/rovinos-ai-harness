@@ -37,6 +37,9 @@ export function decidePolicy(
       ...(evaluated.escalateAfterMs === undefined
         ? {}
         : { escalateAfterMs: evaluated.escalateAfterMs }),
+      ...(evaluated.separationOfDuties === undefined
+        ? {}
+        : { separationOfDuties: evaluated.separationOfDuties }),
     });
   } catch {
     return { decision: "deny", ruleId: "default", reason: "policy_error", editable: [] };
@@ -114,6 +117,9 @@ export async function requestPolicyApproval(options: {
       id: decision.ruleId,
       reason: decision.reason,
       editable: decision.editable,
+      ...(decision.separationOfDuties === undefined
+        ? {}
+        : { separationOfDuties: decision.separationOfDuties }),
       ...(decision.approvalTtlMs === undefined ? {} : { approvalTtlMs: decision.approvalTtlMs }),
     },
     now: Math.floor(clock.now()),
