@@ -2,7 +2,13 @@
 import type { Command } from "commander";
 import type { HarnessConfig } from "@harness/config";
 import { Code, HarnessError, Principal } from "@harness/schemas";
-import type { ConfiguredKeyRotation, Runtime, RuntimeOverrides, ToolPort } from "@harness/core";
+import type {
+  ApprovalResolutionMetadata,
+  ConfiguredKeyRotation,
+  Runtime,
+  RuntimeOverrides,
+  ToolPort,
+} from "@harness/core";
 import type { AuditingVaultResolver } from "@harness/vault";
 import type { Output } from "./output.js";
 
@@ -84,6 +90,14 @@ export function cliPrincipal(config: HarnessConfig, as?: string): Principal {
     throw new CliPrincipalError();
   }
   return Principal.parse(`cli.${name.data}`);
+}
+
+/** Creates identity metadata for a human CLI approval decision. */
+export function cliApprovalMetadata(
+  config: HarnessConfig,
+  as?: string,
+): ApprovalResolutionMetadata {
+  return { decidedBy: "human" as const, approverId: cliPrincipal(config, as) };
 }
 
 /** Creates a runtime lazily so command help does not load store and run-loop modules. */

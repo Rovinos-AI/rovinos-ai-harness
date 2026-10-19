@@ -16,7 +16,7 @@ import {
 } from "@harness/policy";
 import type { Checkpointer } from "./checkpoint.js";
 import { LeaseLostError, RunRecorder, type Clock, type EventPartial } from "./recorder.js";
-import { foldRunState, type RunState } from "./run-state.js";
+import { foldRunState, type RunState, type ToolIntentEvent } from "./run-state.js";
 import { APPROVAL_WAIT_SPAN } from "./spans.js";
 import type { ToolPort } from "./ports.js";
 import {
@@ -37,6 +37,26 @@ export interface ApprovalResolutionMetadata {
   readonly decidedBy: Extract<Event, { type: "approval_resolved" }>["decidedBy"];
   readonly approverId?: Principal;
   readonly reason?: Code;
+}
+
+function assertApproverMayResolve(
+  created: Event | undefined,
+  intent: ToolIntentEvent | undefined,
+  metadata: ApprovalResolutionMetadata,
+): void {
+  if (metadata.decidedBy !== "human") {
+    return;
+  }
+  if (metadata.approverId === undefined) {
+    throw new ApprovalPrincipalRequiredError();
+  }
+  if (
+    created?.type === "run_created" &&
+    created.requestedBy === metadata.approverId &&
+    intent?.policySeparationOfDuties === true
+  ) {
+    throw new ApproverIsRequesterError();
+  }
 }
 
 /** Inputs and checkpoint state required to suspend a run for one approval. */
@@ -356,20 +376,11 @@ export async function resolveApproval(
     if (state.status !== "suspended") {
       throw new ApprovalRunNotSuspendedError();
     }
-    if (metadata.decidedBy === "human" && metadata.approverId === undefined) {
-      throw new ApprovalPrincipalRequiredError();
-    }
-    const created = runEvents[0];
-    const intent = state.pendingToolCalls.get(request.callId);
-    if (
-      metadata.decidedBy === "human" &&
-      metadata.approverId !== undefined &&
-      created?.type === "run_created" &&
-      created.requestedBy === metadata.approverId &&
-      intent?.policySeparationOfDuties === true
-    ) {
-      throw new ApproverIsRequesterError();
-    }
+    assertApproverMayResolve(
+      runEvents[0],
+      state.pendingToolCalls.get(request.callId),
+      metadata,
+    );
 
     const resolvedAt = Math.floor(clock.now());
     const recorder = new RunRecorder(store, runId, lastEvent.segmentId, state.nextSeq, {
@@ -380,20 +391,20 @@ export async function resolveApproval(
       const event = await recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () => {
         let resolvedEdits = edits;
         if (decision === "edit" && edits !== undefined && tool !== undefined) {
-          const intent = state.pendingToolCalls.get(request.callId);
-          if (intent === undefined) {
+          const editIntent = state.pendingToolCalls.get(request.callId);
+          if (editIntent === undefined) {
             throw new ApprovalNotFoundError();
           }
           resolvedEdits = await prepareApprovalEdits({
             tool,
             approval: request,
-            intent,
+            intent: editIntent,
             edits,
             runId,
             recorder,
             events,
           });
-          if (tool.describe(intent.toolId, intent.args) === undefined) {
+          if (tool.describe(editIntent.toolId, editIntent.args) === undefined) {
             throw new ApprovalEditError("edit_invalid");
           }
         }

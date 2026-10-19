@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { z } from "zod";
+import type { z } from "zod";
 import { Code } from "./primitives.js";
 
 /** A validated actor identity recorded on run and approval events. */

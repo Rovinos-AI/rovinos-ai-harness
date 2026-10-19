@@ -15,7 +15,7 @@ import {
   type Event,
 } from "@harness/schemas";
 import type { CliContext, CommandModule } from "../command.js";
-import { cliPrincipal, createCommandRuntime } from "../command.js";
+import { cliApprovalMetadata, createCommandRuntime } from "../command.js";
 import { waitForShutdown } from "../serve.js";
 import { createApprovalResolverLease, revealApprovalArgs } from "./approval-reveal.js";
 import { runApprovalSweep } from "./approval-sweep.js";
@@ -360,12 +360,9 @@ async function decide(
         pending.runId,
         approvalId,
         resolution,
-        edits === undefined ? undefined : { edits },
         {
-          metadata: {
-            decidedBy: "human",
-            approverId: cliPrincipal(config, options.as),
-          },
+          ...(edits === undefined ? {} : { edits }),
+          metadata: cliApprovalMetadata(config, options.as),
         },
       );
       const resumed = options.resume === true ? await runtime.resume(pending.runId) : undefined;
@@ -394,8 +391,7 @@ function decisionCommand(
   const command = approvals
     .command(decision)
     .description(`${decision === "approve" ? "Approve" : "Deny"} a pending approval`)
-    .argument("<approvalId>", "approval identifier")
-    .option("--yes", "skip the confirmation prompt")
+    .argument("<approvalId>", "approval identifier").option("--yes", "skip the confirmation prompt")
     .option("--as <name>", "attribute this decision to a CLI principal")
     .option("--resume", "resume the run immediately after resolving");
   if (decision === "approve") {

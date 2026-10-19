@@ -248,12 +248,14 @@ describe("confirmation-gated control-plane tools", () => {
       runId: approved.runId,
       approvalId: approved.approvalId,
       decision: "approve",
+      approverId: "cli.control_plane",
     });
     expect(resolveApproval).toHaveBeenNthCalledWith(2, {
       runId: denied.runId,
       approvalId: denied.approvalId,
       decision: "deny",
       reason: Code.parse("reviewed"),
+      approverId: "cli.control_plane",
     });
     const repeatedDeny = await client.callTool({
       name: "deny",

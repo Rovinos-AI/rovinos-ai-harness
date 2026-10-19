@@ -28,6 +28,14 @@ async function readEvents(store: EventStore, runId: Id): Promise<Event[]> {
   return events;
 }
 
+async function parentRequester(
+  store: EventStore,
+  runId: Id,
+): Promise<Extract<Event, { type: "run_created" }>["requestedBy"]> {
+  const event = (await readEvents(store, runId)).find((candidate) => candidate.type === "run_created");
+  return event?.type === "run_created" ? event.requestedBy : undefined;
+}
+
 function childStartupGuard(
   store: EventStore,
   request: SubagentRunRequest,
@@ -172,9 +180,7 @@ export function createSubagentTool(options: {
     scopes: options.scopes,
     parentTools: options.parentTool,
     runChild: async (request: SubagentRunRequest) => {
-      const parentCreated = (await readEvents(options.store, request.parentRunId)).find(
-        (event) => event.type === "run_created",
-      );
+      const requestedBy = await parentRequester(options.store, request.parentRunId);
       const recorder = new RunRecorder(
         options.store,
         request.runId,
@@ -211,9 +217,7 @@ export function createSubagentTool(options: {
             }),
         parentRunId: request.parentRunId,
         parentCallId: request.parentCallId,
-        ...(parentCreated?.type === "run_created" && parentCreated.requestedBy !== undefined
-          ? { requestedBy: parentCreated.requestedBy }
-          : {}),
+        ...(requestedBy === undefined ? {} : { requestedBy }),
         scopeId: request.scopeId,
         depth: request.depth,
         rootSpanParent: request.rootSpanParent,

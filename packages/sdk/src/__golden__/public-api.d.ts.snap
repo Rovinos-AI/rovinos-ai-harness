@@ -307,6 +307,7 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                     timeoutMs: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
                 }, z.core.$strict>], "kind">>;
                 allowInsecureLocalhost: z.ZodDefault<z.ZodBoolean>;
+                separationOfDuties: z.ZodDefault<z.ZodBoolean>;
             }, z.core.$strict>>;
         }, z.core.$strict>>;
         pii: z.ZodPrefault<z.ZodObject<{
@@ -440,6 +441,9 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             allowedHosts: z.ZodDefault<z.ZodArray<z.ZodString>>;
             rateLimitPerMinute: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>>;
+        cli: z.ZodOptional<z.ZodObject<{
+            principal: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     overrides: z.ZodOptional<z.ZodObject<{
         store: z.ZodOptional<z.ZodCustom<import("@harness/store").EventStore, import("@harness/store").EventStore>>;
@@ -673,6 +677,7 @@ export declare const RunViewSchema: z.ZodObject<{
             human: "human";
             policy: "policy";
         }>;
+        approverPseudonym: z.ZodOptional<z.ZodString>;
         reason: z.ZodOptional<z.ZodString>;
         waitMs: z.ZodNumber;
         runId: z.ZodString;
@@ -804,6 +809,7 @@ export declare const RunViewSchema: z.ZodObject<{
             run_created: "run_created";
         }>;
         configHash: z.ZodString;
+        requestedByPseudonym: z.ZodOptional<z.ZodString>;
         runId: z.ZodString;
         seq: z.ZodNumber;
         ts: z.ZodNumber;
@@ -923,7 +929,7 @@ export interface Harness {
      *
      * Idempotency keys are opaque identifiers and must not contain sensitive data. Their unsalted
      * SHA-256 hashes are stored, so low-entropy keys may be guessed from the store.
-     * `requestedBy` is validated but not recorded by the current event contract.
+     * `requestedBy` is recorded as the run creator's principal when provided.
      */
     startRun(options: StartRunOptions): Promise<RunStartResult>;
     /** Start a linked follow-up run for a completed run. */
@@ -937,8 +943,7 @@ export interface Harness {
     /** Request cooperative cancellation of a run. */
     cancelRun(runId: RunId): Promise<CancelRunResult>;
     /**
-     * Resolve a pending approval; `principal` is validated but not recorded by the current event contract.
-     * The event records `decidedBy: "human"`.
+     * Resolve a pending approval as the validated `principal`.
      */
     resolveApproval(approvalId: RunId, decision: ApprovalDecision, options: ResolveApprovalOptions): Promise<ApprovalResolutionResult>;
     /** Answer a human-input request; validates `requestId` before reporting that epic 25 is unavailable. */

@@ -20,6 +20,7 @@ import {
 } from "@opentelemetry/api";
 import {
   FakeClock,
+  Code,
   Event,
   Id,
   JsonValue,

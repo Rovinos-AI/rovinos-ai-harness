@@ -259,7 +259,7 @@ describe("@harness/sdk", () => {
     expect((await harness.startRun(request)).status).toBe("completed");
   });
 
-  it("pseudonymizes requester and approver only when correlation is enabled", async () => {
+  it("creates requester and approver pseudonyms only when correlation is enabled", async () => {
     const { harness } = await createTestHarness({ approval: true, correlationEnabled: true });
     const started = await harness.startRun({
       goal: "Synthetic approval task",
@@ -280,18 +280,12 @@ describe("@harness/sdk", () => {
 
     expect(serialized).not.toContain("cli.requester");
     expect(serialized).not.toContain("cli.approver");
-    expect(resolved.recentEvents).toContainEqual(
-      expect.objectContaining({
-        kind: "run_created",
-        requestedByPseudonym: expect.stringMatching(/^p_[a-z2-7]{26}$/u),
-      }),
-    );
-    expect(resolved.recentEvents).toContainEqual(
-      expect.objectContaining({
-        kind: "approval_wait",
-        approverPseudonym: expect.stringMatching(/^p_[a-z2-7]{26}$/u),
-      }),
-    );
+    const requesterPseudonym = resolved.recentEvents.find((event) => event.kind === "run_created")
+      ?.requestedByPseudonym;
+    const approverPseudonym = resolved.recentEvents.find((event) => event.kind === "approval_wait")
+      ?.approverPseudonym;
+    expect(requesterPseudonym).toMatch(/^p_[a-z2-7]{26}$/u);
+    expect(approverPseudonym).toMatch(/^p_[a-z2-7]{26}$/u);
   });
 
   it.each([

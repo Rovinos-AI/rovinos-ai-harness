@@ -6,6 +6,7 @@ import { loadConfig, type HarnessConfig } from "@harness/config";
 import {
   JsonValue as JsonValueSchema,
   RunInputSchema,
+  type Code,
   type Event,
   type Id,
 } from "@harness/schemas";
@@ -141,6 +142,10 @@ class HarnessClient implements Harness {
     return result === undefined ? { runId: candidateRunId } : { result };
   }
 
+  private projectSafeEvents(events: readonly Event[], policyVersion: Code) {
+    return safeEvents(events, policyVersion, this.correlationEnabled, this.runtime.keys);
+  }
+
   private async launchRun(
     input: StartRunOptions,
     runInput: ReturnType<typeof JsonValueSchema.parse>,
@@ -213,12 +218,7 @@ class HarnessClient implements Harness {
       steps: state.steps,
       usage: state.usage,
       pendingApprovals: Array.from(state.pendingApprovals.keys()),
-      recentEvents: await safeEvents(
-        events.slice(-20),
-        firstEvent.policyVersion,
-        this.correlationEnabled,
-        this.runtime.keys,
-      ),
+      recentEvents: await this.projectSafeEvents(events.slice(-20), firstEvent.policyVersion),
     });
   }
 
@@ -410,15 +410,7 @@ class HarnessClient implements Harness {
         signal: controller.signal,
         ...(options.maxBuffered === undefined ? {} : { maxBuffered: options.maxBuffered }),
       })) {
-        const safe = await safeEvents(
-          [event],
-          created.policyVersion,
-          this.correlationEnabled,
-          this.runtime.keys,
-        );
-        for (const safeEvent of safe) {
-          yield safeEvent;
-        }
+        yield* await this.projectSafeEvents([event], created.policyVersion);
       }
     } finally {
       options.signal?.removeEventListener("abort", onAbort);

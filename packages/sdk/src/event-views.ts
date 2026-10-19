@@ -21,7 +21,7 @@ export async function readEvents(runtime: Runtime, runId: Id): Promise<Event[]> 
   return events;
 }
 
-/** Projects events through the safe-event allowlist and optionally pseudonymizes principals. */
+/** Projects events through the safe-event allowlist and optionally adds principal pseudonyms. */
 export async function safeEvents(
   events: readonly Event[],
   policyVersion: Code,
