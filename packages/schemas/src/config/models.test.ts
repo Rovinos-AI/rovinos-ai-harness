@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ModelEnforcementConfigSchema,
+  ModelProviderConfigSchema,
   ModelRetryConfigSchema,
   ModelsConfigSchema,
 } from "./models.js";
@@ -133,6 +134,7 @@ describe("ModelsConfigSchema", () => {
       ],
       roles: { planner: [{ provider: "anthropic", model: "claude-sonnet" }] },
     });
+
     expect(() =>
       ModelsConfigSchema.parse({
         routing: { default: [{ provider: "openai", model: "gpt-4o-mini" }], roles: {} },
@@ -144,6 +146,47 @@ describe("ModelsConfigSchema", () => {
     expect(() =>
       ModelsConfigSchema.parse({ providers: [{ id: "local", kind: "openai_compatible" }] }),
     ).toThrow();
+    expect(() =>
+      ModelsConfigSchema.parse({
+        providers: [
+          {
+            id: "bedrock",
+            kind: "bedrock",
+            region: "us-east-1",
+            modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+          },
+        ],
+      }),
+    ).not.toThrow();
+    for (const provider of [
+      {
+        id: "bedrock",
+        kind: "bedrock",
+        modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+      },
+      {
+        id: "bedrock",
+        kind: "bedrock",
+        region: "us-east-1",
+      },
+      {
+        id: "bedrock",
+        kind: "bedrock",
+        region: "us-east-1",
+        modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+        accessKeyId: "synthetic",
+        secretAccessKey: "synthetic",
+      },
+      {
+        id: "bedrock",
+        kind: "bedrock",
+        region: "us-east-1",
+        modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+        apiKey: "env:AWS_ACCESS_KEY_ID",
+      },
+    ]) {
+      expect(() => ModelsConfigSchema.parse({ providers: [provider] })).toThrow();
+    }
     expect(() =>
       ModelsConfigSchema.parse({
         providers: [{ id: "remote", kind: "openai_compatible", baseUrl: "http://model.example" }],
@@ -194,5 +237,24 @@ describe("ModelsConfigSchema", () => {
         }),
       ).toThrow();
     }
+  });
+
+  it("parses Bedrock provider configuration and rejects malformed AWS regions", () => {
+    expect(
+      ModelProviderConfigSchema.parse({
+        id: "bedrock",
+        kind: "bedrock",
+        region: "us-east-1",
+        modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+      }),
+    ).toMatchObject({ kind: "bedrock", region: "us-east-1" });
+    expect(() =>
+      ModelProviderConfigSchema.parse({
+        id: "bedrock",
+        kind: "bedrock",
+        region: "us-east-1.evil.com",
+        modelIds: { "nova-pro": "amazon.nova-pro-v1:0" },
+      }),
+    ).toThrow();
   });
 });

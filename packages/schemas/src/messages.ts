@@ -74,7 +74,9 @@ export const ModelRequestSchema = z
     stablePrefixMessages: z.number().int().nonnegative().optional(),
     tools: z.array(ToolSpecSchema).optional(),
     output: z.object({ name: Code, schema: JsonValue, schemaHash: Sha256Hex }).strict().optional(),
-    toolChoice: z.union([z.enum(["auto", "none"]), z.object({ forced: Code }).strict()]).optional(),
+    toolChoice: z
+      .union([z.enum(["auto", "none", "required"]), z.object({ forced: Code }).strict()])
+      .optional(),
     maxOutputTokens: z.number().int().nonnegative().optional(),
     temperature: z.number().optional(),
   })

@@ -64,6 +64,7 @@ export {
   type AnthropicAdapterOptions,
   type AnthropicApiKey,
 } from "./providers/anthropic.js";
+export { BedrockAdapter, type BedrockAdapterOptions } from "./providers/bedrock.js";
 export {
   assembleDeltas,
   ModelProgressSchema,

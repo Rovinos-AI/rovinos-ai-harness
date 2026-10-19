@@ -6,6 +6,7 @@
 // Not wired yet: gateway token progress to live run updates (14.16 -> #157; 24.5 -> #234)
 // Not wired yet: SDK answerInput (epic 25, human input broker 25.3 -> #241)
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
+// Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
 import { Command } from "commander";
 import { Client, InMemoryTransport, type Tool, type Transport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";

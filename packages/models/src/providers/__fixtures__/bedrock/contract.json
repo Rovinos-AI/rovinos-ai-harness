@@ -1,0 +1,220 @@
+[
+  {
+    "scenario": "text_only",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "bedrock", "model": "test-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }],
+      "maxOutputTokens": 32
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "output": {
+          "message": {
+            "role": "assistant",
+            "content": [{ "text": "answer" }]
+          }
+        },
+        "stopReason": "end_turn",
+        "usage": { "inputTokens": 2, "outputTokens": 3, "totalTokens": 5 }
+      }
+    },
+    "expected": {
+      "parts": [
+        { "type": "text", "text": "answer" },
+        {
+          "type": "opaque",
+          "provider": "bedrock",
+          "blob": {
+            "content": [{ "text": "answer" }],
+            "toolUseIdByCallId": {},
+            "toolIdByCallId": {},
+            "wireNameByToolId": {}
+          }
+        }
+      ],
+      "usage": { "inputTokens": 2, "outputTokens": 3 },
+      "finishReason": "stop"
+    }
+  },
+  {
+    "scenario": "tool_call",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "bedrock", "model": "test-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }],
+      "tools": [
+        {
+          "toolId": "lookup",
+          "description": "Find a record",
+          "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } } }
+        }
+      ],
+      "toolChoice": { "forced": "lookup" },
+      "maxOutputTokens": 32
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "output": {
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "toolUse": {
+                  "toolUseId": "tooluse_fixture",
+                  "name": "h0",
+                  "input": { "query": "x" }
+                }
+              }
+            ]
+          }
+        },
+        "stopReason": "tool_use",
+        "usage": { "inputTokens": 2, "outputTokens": 3, "totalTokens": 5 }
+      }
+    },
+    "expected": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "callId": "00000000000000000000000000",
+          "toolId": "lookup",
+          "args": { "query": "x" }
+        },
+        {
+          "type": "opaque",
+          "provider": "bedrock",
+          "blob": {
+            "content": [
+              {
+                "toolUse": {
+                  "toolUseId": "tooluse_fixture",
+                  "name": "h0",
+                  "input": { "query": "x" }
+                }
+              }
+            ],
+            "toolUseIdByCallId": { "00000000000000000000000000": "tooluse_fixture" },
+            "toolIdByCallId": { "00000000000000000000000000": "lookup" },
+            "wireNameByToolId": { "lookup": "h0" }
+          }
+        }
+      ],
+      "usage": { "inputTokens": 2, "outputTokens": 3 },
+      "finishReason": "tool_calls"
+    }
+  },
+  {
+    "scenario": "usage_mapping",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "bedrock", "model": "test-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }],
+      "maxOutputTokens": 32
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "output": {
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "reasoningContent": {
+                  "reasoningText": { "text": "synthetic reasoning", "signature": "sig_fixture" }
+                }
+              },
+              { "text": "answer" }
+            ]
+          }
+        },
+        "stopReason": "max_tokens",
+        "usage": {
+          "inputTokens": 7,
+          "outputTokens": 11,
+          "totalTokens": 18,
+          "cacheReadInputTokens": 5,
+          "cacheWriteInputTokens": 3
+        }
+      }
+    },
+    "expected": {
+      "usage": {
+        "inputTokens": 15,
+        "outputTokens": 11,
+        "cacheReadTokens": 5,
+        "cacheWriteTokens": 3
+      },
+      "finishReason": "length"
+    }
+  },
+  {
+    "scenario": "error_429",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "bedrock", "model": "test-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }],
+      "maxOutputTokens": 32
+    },
+    "httpResponse": {
+      "status": 429,
+      "headers": { "x-amzn-errortype": "ThrottlingException" },
+      "body": { "message": "synthetic throttle", "__type": "ThrottlingException" }
+    },
+    "expected": { "status": 429 }
+  },
+  {
+    "scenario": "error_500",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "bedrock", "model": "test-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }],
+      "maxOutputTokens": 32
+    },
+    "httpResponse": {
+      "status": 503,
+      "headers": { "x-amzn-errortype": "ServiceUnavailableException" },
+      "body": { "message": "synthetic service error", "__type": "ServiceUnavailableException" }
+    },
+    "expected": { "status": 503 }
+  },
+  {
+    "scenario": "error_401",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "bedrock", "model": "test-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }],
+      "maxOutputTokens": 32
+    },
+    "httpResponse": {
+      "status": 403,
+      "headers": { "x-amzn-errortype": "AccessDeniedException" },
+      "body": { "message": "synthetic access denied", "__type": "AccessDeniedException" }
+    },
+    "expected": { "status": 403 }
+  },
+  {
+    "scenario": "abort_signal",
+    "request": {
+      "requestId": "00000000000000000000000000",
+      "model": { "provider": "bedrock", "model": "test-model" },
+      "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "hello" }] }],
+      "maxOutputTokens": 32
+    },
+    "httpResponse": {
+      "status": 200,
+      "body": {
+        "output": {
+          "message": {
+            "role": "assistant",
+            "content": [{ "text": "answer" }]
+          }
+        },
+        "stopReason": "end_turn",
+        "usage": { "inputTokens": 2, "outputTokens": 3, "totalTokens": 5 }
+      }
+    }
+  }
+]
