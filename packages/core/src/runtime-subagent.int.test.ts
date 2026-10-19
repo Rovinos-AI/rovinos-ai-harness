@@ -749,6 +749,144 @@ describe("runtime subagent spawning", () => {
     }
   });
 
+  it("resumes an approval-suspended child once and serializes parent resumes", async () => {
+    const store = new InMemoryEventStore();
+    let childModelCalls = 0;
+    let parentModelCalls = 0;
+    let writeCount = 0;
+    let signalChildResume = (): void => undefined;
+    const childResumeStarted = new Promise<void>((resolve) => {
+      signalChildResume = resolve;
+    });
+    let releaseChildResume = (): void => undefined;
+    const childResumeGate = new Promise<void>((resolve) => {
+      releaseChildResume = resolve;
+    });
+    const model: ModelPort = {
+      complete: (request) => {
+        if (request.role === "worker") {
+          childModelCalls += 1;
+          if (childModelCalls === 1) {
+            return Promise.resolve(
+              completion([
+                {
+                  type: "tool_call",
+                  callId: childCallId,
+                  toolId: Code.parse("test.write"),
+                  args: { value: "once" },
+                },
+              ]),
+            );
+          }
+          signalChildResume();
+          return childResumeGate.then(() =>
+            completion([{ type: "text", text: "child complete" }]),
+          );
+        }
+        parentModelCalls += 1;
+        return Promise.resolve(
+          parentModelCalls === 1
+            ? completion([
+                {
+                  type: "tool_call",
+                  callId: spawnCallId,
+                  toolId: Code.parse("agent.spawn"),
+                  args: { role: "worker", goal: "resume this child" },
+                },
+              ])
+            : completion([{ type: "text", text: "parent complete" }]),
+        );
+      },
+    };
+    const tool: ToolPort = {
+      describe: (toolId) =>
+        toolId === "test.write" ? { idempotent: false, timeoutMs: 1_000 } : undefined,
+      getToolSpecs: () => [
+        { toolId: "test.write", description: "Write once", inputSchema: { type: "object" } },
+      ],
+      execute: () => {
+        writeCount += 1;
+        return Promise.resolve({ outcome: "ok", result: { written: true } });
+      },
+    };
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        pii: PiiConfigSchema.parse({ enabled: false }),
+        models: ModelsConfigSchema.parse({
+          routing: {
+            default: [{ provider: "local", model: "parent" }],
+            roles: { worker: [{ provider: "local", model: "worker" }] },
+          },
+        }),
+        roles: [{ id: "worker", route: "worker", tools: ["test.write"], maxDepth: 2 }],
+      },
+      {
+        store,
+        transientVault: true,
+        clock: new FakeClock(4),
+        ids: new SequentialIdGenerator(),
+        model,
+        tool,
+        policy: {
+          version: Code.parse("test.policy"),
+          decide: (call) => ({
+            decision: call.toolId === "test.write" ? "ask" : "allow",
+            ruleId: "test.rule",
+            reason: "test_decision",
+            editable: [],
+          }),
+        },
+      },
+    );
+    try {
+      const initial = runtime.start("delegate", { runId: rootRunId });
+      await initial.started;
+      await expect(initial.completion).resolves.toMatchObject({ status: "suspended" });
+
+      const parentEvents = await eventsFor(store, rootRunId);
+      const spawn = parentEvents.find((event) => event.type === "subagent_spawned");
+      if (spawn?.type !== "subagent_spawned") {
+        throw new Error("Expected a durable child announcement.");
+      }
+      expect(parentEvents.findLast((event) => event.type === "run_status_changed")).toMatchObject({
+        type: "run_status_changed",
+        to: "suspended",
+        reason: "awaiting_subagent",
+      });
+      expect(
+        parentEvents.some((event) => event.type === "tool_result" && event.callId === spawnCallId),
+      ).toBe(false);
+      const childApproval = (await eventsFor(store, spawn.childRunId)).find(
+        (event) => event.type === "approval_requested",
+      );
+      if (childApproval?.type !== "approval_requested") {
+        throw new Error("Expected the child to wait for approval.");
+      }
+      await runtime.resolveApproval(spawn.childRunId, childApproval.approvalId, "approve");
+
+      const firstResume = runtime.resume(rootRunId);
+      await childResumeStarted;
+      await expect(runtime.resume(rootRunId)).rejects.toMatchObject({ code: "resume_conflict" });
+      releaseChildResume();
+      await expect(firstResume).resolves.toMatchObject({ status: "completed" });
+
+      const completedParentEvents = await eventsFor(store, rootRunId);
+      expect(completedParentEvents.filter((event) => event.type === "subagent_spawned")).toHaveLength(1);
+      expect(completedParentEvents.filter((event) => event.type === "subagent_completed")).toHaveLength(1);
+      expect(
+        completedParentEvents.filter(
+          (event) => event.type === "tool_result" && event.callId === spawnCallId,
+        ),
+      ).toHaveLength(1);
+      expect(writeCount).toBe(1);
+      expect(childModelCalls).toBe(2);
+    } finally {
+      releaseChildResume();
+      await runtime.close();
+    }
+  });
+
   it("cancels a live child and grandchild and records terminal completion at each parent", async () => {
     const store = new InMemoryEventStore();
     const scopes = new RunScopeRegistry();

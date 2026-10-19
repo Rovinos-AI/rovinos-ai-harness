@@ -197,6 +197,9 @@ export async function executePreparedTool(options: ExecutePreparedToolOptions): 
     });
   }
   if (execution.suspend === true) {
+    if (options.signal.reason === "shutdown" && options.intentEvent !== undefined) {
+      return options.intentEvent;
+    }
     return options.recorder.record({
       type: "run_status_changed",
       v: 1,

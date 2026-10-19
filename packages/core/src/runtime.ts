@@ -284,9 +284,11 @@ function createRuntimeToolPort(
   const composed = options.overrides.workspace === undefined
     ? piiTool
     : new OffloadingToolPort(piiTool, options.overrides.workspace, {}, options.ids);
+  const spawnResumeStrategy = subagentTool.resumeStrategy?.bind(subagentTool);
+  const innerResumeStrategy = options.tool.resumeStrategy?.bind(options.tool);
   return Object.assign(composed, {
     resumeStrategy: (toolId: Code) =>
-      subagentTool.resumeStrategy?.(toolId) ?? options.tool.resumeStrategy?.(toolId),
+      spawnResumeStrategy?.(toolId) ?? innerResumeStrategy?.(toolId),
   });
 }
 

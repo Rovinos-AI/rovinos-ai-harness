@@ -25,13 +25,14 @@ export class SimulatedCrash extends HarnessError {
 export interface CrashingEventStoreOptions {
   readonly crashAt: number;
   readonly mode: "before_commit" | "after_commit";
+  readonly persistentCrash?: boolean;
 }
 
 /**
- * Injects one crash at a selected append boundary while delegating all store reads.
+ * Injects a crash at a selected append boundary while delegating all store reads.
  *
  * @param inner - Store whose persisted state is retained across simulated restarts.
- * @param options - One-based append boundary and whether it crashes before or after commit.
+ * @param options - One-based append boundary, crash mode, and optional persistent failure.
  */
 export class CrashingEventStore implements EventStore {
   private appendCount = 0;
@@ -175,7 +176,10 @@ export class CrashingEventStore implements EventStore {
 
   private shouldCrash(): boolean {
     this.appendCount += 1;
-    if (this.crashed || this.appendCount !== this.options.crashAt) {
+    if (this.crashed) {
+      return this.options.persistentCrash === true;
+    }
+    if (this.appendCount !== this.options.crashAt) {
       return false;
     }
     this.crashed = true;

@@ -119,6 +119,20 @@ describe("CrashingEventStore", () => {
     await store.close();
   });
 
+  it("keeps failing appends after a persistent crash", async () => {
+    const inner = new InMemoryEventStore();
+    const store = new CrashingEventStore(inner, {
+      crashAt: 1,
+      mode: "before_commit",
+      persistentCrash: true,
+    });
+
+    await expect(store.append(runId, [startEvent()], 0)).rejects.toBeInstanceOf(SimulatedCrash);
+    await expect(store.append(runId, [startEvent()], 0)).rejects.toBeInstanceOf(SimulatedCrash);
+    expect(store.appendCalls).toBe(2);
+    await inner.close();
+  });
+
   it("delegates approval notification lease operations", async () => {
     const inner = new InMemoryEventStore();
     const store = new CrashingEventStore(inner, { crashAt: 1, mode: "before_commit" });

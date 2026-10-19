@@ -6,6 +6,8 @@ import {
   FakeClock,
   Code,
   Id,
+  ModelsConfigSchema,
+  PiiConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
   type Event,
@@ -17,6 +19,7 @@ import {
 import {
   createRuntime,
   NaiveContext,
+  LeaseLostError,
   resumeRun,
   resolveApproval,
   RunAlreadyTerminalError,
@@ -78,6 +81,7 @@ interface Reference {
 }
 
 interface AppendBoundary {
+  readonly runId: Id;
   readonly method: "append" | "appendWithSnapshot";
   readonly eventTypes: readonly Event["type"][];
   readonly callIds: readonly Id[];
@@ -254,6 +258,7 @@ class BoundaryRecordingStore implements EventStore {
     expectedSeq: number,
   ): Promise<{ nextSeq: number }> {
     this.boundaries.push({
+      runId: forRun,
       method: "append",
       eventTypes: events.map(({ type }) => type),
       callIds: events.flatMap((event) =>
@@ -270,6 +275,7 @@ class BoundaryRecordingStore implements EventStore {
     snapshot: Parameters<EventStore["appendWithSnapshot"]>[3],
   ): Promise<{ nextSeq: number }> {
     this.boundaries.push({
+      runId: forRun,
       method: "appendWithSnapshot",
       eventTypes: events.map(({ type }) => type),
       callIds: events.flatMap((event) =>
@@ -702,6 +708,271 @@ async function runCrashMatrix(reference: Reference, brokenOrdering = false): Pro
   }
 }
 
+interface SubagentCrashReference {
+  readonly appendCount: number;
+  readonly parentRunId: Id;
+  readonly childRunId: Id;
+  readonly boundaries: readonly AppendBoundary[];
+}
+
+const subagentSpawnCallId = Id.parse("88888888888888888888888880");
+const subagentToolCallId = Id.parse("88888888888888888888888881");
+const subagentToolId = Code.parse("write_once");
+
+function subagentCrashConfig() {
+  return {
+    run: RunConfigSchema.parse({
+      checkpointEveryEvents: 3,
+      resume: { onNonIdempotent: "escalate" },
+    }),
+    pii: PiiConfigSchema.parse({ enabled: false }),
+    models: ModelsConfigSchema.parse({
+      routing: {
+        default: [{ provider: "local", model: "parent" }],
+        roles: { worker: [{ provider: "local", model: "worker" }] },
+      },
+    }),
+    roles: [{ id: "worker", route: "worker", tools: [subagentToolId], maxDepth: 1, maxChildren: 1 }],
+  };
+}
+
+function subagentCrashModel(): ModelPort {
+  const response = (parts: ModelCompletion["parts"]): ModelCompletion => ({
+    parts,
+    usage: { inputTokens: 1, outputTokens: 1 },
+    finishReason: parts.some((part) => part.type === "tool_call") ? "tool_calls" : "stop",
+    provider: "fake",
+    model: "crash-matrix",
+    latencyMs: 1,
+    schemaValid: true,
+    repairAttempts: 0,
+    fallbackDepth: 0,
+    providerBlobs: null,
+  });
+  const resultRecorded = (request: ModelRequest, callId: Id): boolean =>
+    request.messages.some((message) =>
+      message.parts.some((part) => part.type === "tool_result" && part.callId === callId),
+    );
+  return {
+    complete: (request) => {
+      if (request.role === "worker") {
+        return Promise.resolve(
+          resultRecorded(request, subagentToolCallId)
+            ? response([{ type: "text", text: "child finished" }])
+            : response([
+                { type: "text", text: "run the child tool" },
+                {
+                  type: "tool_call",
+                  callId: subagentToolCallId,
+                  toolId: subagentToolId,
+                  args: { value: "synthetic" },
+                },
+              ]),
+        );
+      }
+      return Promise.resolve(
+        resultRecorded(request, subagentSpawnCallId)
+          ? response([{ type: "text", text: "parent finished" }])
+          : response([
+              { type: "text", text: "spawn one child" },
+              {
+                type: "tool_call",
+                callId: subagentSpawnCallId,
+                toolId: Code.parse("agent.spawn"),
+                args: { role: "worker", goal: "recover one child" },
+              },
+            ]),
+      );
+    },
+  };
+}
+
+function createSubagentCrashRuntime(
+  store: EventStore,
+  counts: { writes: number },
+  ids: IdGenerator,
+) {
+  const tool: ToolPort = {
+    describe: (toolId) =>
+      toolId === subagentToolId ? { idempotent: false, timeoutMs: 1_000 } : undefined,
+    getToolSpecs: () => [
+      {
+        toolId: subagentToolId,
+        description: "Write a synthetic value once",
+        inputSchema: { type: "object" },
+      },
+    ],
+    execute: () => {
+      counts.writes += 1;
+      return Promise.resolve({ outcome: "ok", result: { written: true } });
+    },
+  };
+  return createRuntime(subagentCrashConfig(), {
+    store,
+    clock: new FakeClock(100),
+    ids,
+    model: subagentCrashModel(),
+    tool,
+    context: new NaiveContext(),
+    policy: allowAllPolicy,
+    transientVault: true,
+  });
+}
+
+async function discoverSubagentReference(directory: string): Promise<SubagentCrashReference> {
+  const database = new SqliteEventStore(join(directory, "subagent-reference.sqlite"));
+  const boundaries = new BoundaryRecordingStore(database);
+  const counts = { writes: 0 };
+  const store = new CrashingEventStore(boundaries, {
+    crashAt: Number.MAX_SAFE_INTEGER,
+    mode: "before_commit",
+  });
+  const runtime = await createSubagentCrashRuntime(store, counts, idsAfter(0));
+  try {
+    const result = await runtime.run("subagent crash matrix");
+    const parentRunId = result.events[0]?.runId;
+    if (parentRunId === undefined) {
+      throw new Error("Expected the reference parent run.");
+    }
+    const parentEvents = await readEvents(store, parentRunId);
+    const spawned = parentEvents.find((event) => event.type === "subagent_spawned");
+    if (spawned?.type !== "subagent_spawned") {
+      throw new Error("Expected the reference child announcement.");
+    }
+    const childEvents = await readEvents(store, spawned.childRunId);
+    expect(counts.writes).toBe(1);
+    expect(childEvents.some((event) => event.type === "tool_result")).toBe(true);
+    return {
+      appendCount: boundaries.boundaries.length,
+      parentRunId,
+      childRunId: spawned.childRunId,
+      boundaries: boundaries.boundaries,
+    };
+  } finally {
+    await runtime.close();
+  }
+}
+
+async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promise<void> {
+  for (const mode of ["before_commit", "after_commit"] as const) {
+    for (let crashAt = 1; crashAt <= reference.appendCount; crashAt += 1) {
+      const directory = await mkdtemp(join(tmpdir(), "harness-subagent-crash-"));
+      const filename = join(directory, "events.sqlite");
+      const firstDatabase = new SqliteEventStore(filename);
+      const initialBoundaries = new BoundaryRecordingStore(firstDatabase);
+      const counts = { writes: 0 };
+      const crashingStore = new CrashingEventStore(initialBoundaries, {
+        crashAt,
+        mode,
+        persistentCrash: true,
+      });
+      const firstRuntime = await createSubagentCrashRuntime(crashingStore, counts, idsAfter(0));
+      let crashed = false;
+      let initialEvents: Event[] = [];
+      try {
+        await firstRuntime.run("subagent crash matrix");
+      } catch (error) {
+        if (!(error instanceof SimulatedCrash) && !(error instanceof LeaseLostError)) {
+          throw error;
+        }
+        crashed = true;
+      }
+      initialEvents = await readEvents(crashingStore, reference.parentRunId);
+      await firstRuntime.close();
+      expect(crashed, `${mode} append ${String(crashAt)} was not reached`).toBe(true);
+
+      const restartDatabase = new SqliteEventStore(filename);
+      const restartBoundaries = new BoundaryRecordingStore(restartDatabase);
+      const restartStore = new CrashingEventStore(restartBoundaries, {
+        crashAt: Number.MAX_SAFE_INTEGER,
+        mode: "before_commit",
+      });
+      const freshRuntime = await createSubagentCrashRuntime(restartStore, counts, idsAfter(100));
+      let parentRunId = reference.parentRunId;
+      try {
+        const inputExists = initialEvents.some((event) => event.type === "run_input");
+        if (!inputExists) {
+          await freshRuntime.run("subagent crash matrix");
+          parentRunId = idAt(100);
+        } else {
+          try {
+            await freshRuntime.resume(parentRunId);
+          } catch (error) {
+            if (!(error instanceof RunAlreadyTerminalError)) {
+              throw error;
+            }
+          }
+        }
+
+        let parentEvents = await readEvents(restartStore, parentRunId);
+        const spawn = parentEvents.find((event) => event.type === "subagent_spawned");
+        if (spawn?.type === "subagent_spawned") {
+          const childEvents = await readEvents(restartStore, spawn.childRunId);
+          const parentStatus = parentEvents.findLast(
+            (event) => event.type === "run_status_changed",
+          );
+          if (parentStatus?.type === "run_status_changed" && parentStatus.to === "suspended") {
+            const approval = childEvents.find(
+              (event) =>
+                event.type === "approval_requested" &&
+                event.callId === subagentToolCallId &&
+                !childEvents.some(
+                  (candidate) =>
+                    candidate.type === "approval_resolved" &&
+                    candidate.approvalId === event.approvalId,
+                ),
+            );
+            if (counts.writes === 0 && approval?.type === "approval_requested") {
+              await freshRuntime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
+              try {
+                await freshRuntime.resume(parentRunId);
+              } catch (error) {
+                if (!(error instanceof RunAlreadyTerminalError)) {
+                  throw error;
+                }
+              }
+            }
+          }
+          parentEvents = await readEvents(restartStore, parentRunId);
+          const announcedChildren = parentEvents.filter(
+            (event): event is Extract<Event, { type: "subagent_spawned" }> =>
+              event.type === "subagent_spawned" && event.parentCallId === subagentSpawnCallId,
+          );
+          expect(announcedChildren).toHaveLength(1);
+          expect(new Set(announcedChildren.map((event) => event.childRunId)).size).toBe(1);
+          const finalChildEvents = await readEvents(restartStore, spawn.childRunId);
+          if (finalChildEvents.length === 0) {
+            expect(counts.writes).toBe(0);
+            expect(parentEvents).toContainEqual(
+              expect.objectContaining({
+                type: "tool_result",
+                callId: subagentSpawnCallId,
+                outcome: "error",
+                errorCode: "subagent_missing",
+              }),
+            );
+          } else {
+            expect(counts.writes).toBe(1);
+            expect(
+              finalChildEvents.filter(
+                (event) => event.type === "tool_intent" && event.callId === subagentToolCallId,
+              ),
+            ).toHaveLength(1);
+            expect(
+              finalChildEvents.filter(
+                (event) => event.type === "tool_result" && event.callId === subagentToolCallId,
+              ).length,
+            ).toBeLessThanOrEqual(1);
+          }
+        }
+      } finally {
+        await freshRuntime.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  }
+}
+
 describe("SQLite crash-injection matrix", () => {
   it("recovers between an unstructured final response and its structured call", async () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-structured-final-crash-"));
@@ -961,6 +1232,19 @@ describe("SQLite crash-injection matrix", () => {
       const reference = await discoverReference(directory);
       expect(reference.appendCount).toBeGreaterThan(0);
       await runCrashMatrix(reference);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("resumes children across every append boundary in both logs", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "harness-subagent-crash-reference-"));
+    try {
+      const reference = await discoverSubagentReference(directory);
+      expect(reference.boundaries.some(({ runId }) => runId === reference.parentRunId)).toBe(true);
+      expect(reference.boundaries.some(({ runId }) => runId === reference.childRunId)).toBe(true);
+      expect(reference.appendCount).toBeGreaterThan(0);
+      await runSubagentCrashMatrix(reference);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
