@@ -4,16 +4,10 @@ import {
   lookupCapabilities,
   ModelEnforcementConfigSchema,
   ModelRetryConfigSchema,
-  type Id,
-  type JsonValue,
-  type ModelsConfig,
   type ModelRef,
   type ModelRequest,
-  type ModelResponse,
   type ModelUsage,
-  type ModelEnforcementConfig,
   type ModelRetryConfig,
-  type PiiActionSummary,
 } from "@harness/schemas";
 import {
   emitPricingCacheMissing,
@@ -21,160 +15,106 @@ import {
   setActiveSpanAttribute,
 } from "@harness/telemetry";
 import type { z } from "zod";
-import {
-  ProviderResultSchema,
-  type Clock,
-  type IdGenerator,
-  type ModelProgress,
-  type ProviderAdapter,
-} from "./types.js";
+import type { ProviderAdapter } from "./types.js";
 import { collectProviderStream } from "./streaming.js";
 import type { AdapterRegistry } from "./registry.js";
-import {
-  attachModelFailureMetadata,
-  ModelOutputInvalidError,
-  ProviderError,
-  readModelFailureMetadata,
-} from "./errors.js";
+import { readModelFailureMetadata } from "./errors.js";
 import { TokenBucketRateLimiter } from "./resilience/limiter.js";
 import { abortableSleep, withRetries, type Random, type Sleep } from "./resilience/retry.js";
 import { Semaphore } from "./resilience/semaphore.js";
 import {
-  type EnforcementResult,
-  type EnforcementIssue,
-  type EnforcementRung,
-  type TokenizedEnforcementResult,
-  type ValueTransform,
-} from "./enforce/index.js";
-import {
   enforceProviderOutput,
+  prepareProviderResult,
   prepareEnforcementRequest,
-  type PreparedEnforcement,
 } from "./enforce/provider-output.js";
 import { awaitRunValidation } from "./enforce/validation-deadline.js";
-import { appendRepairMessages } from "./enforce/repair.js";
 import { createPricingAccountant } from "./pricing.js";
 import { aggregateModelUsage, reportModelUsage } from "./usage.js";
 import { prepareProviderRequest } from "./provider-request.js";
+import { appendRepairOrThrow, rethrowWithAccountedUsage } from "./gateway-failure.js";
+import type {
+  AnyModelGatewayResponse,
+  ModelGatewayContext,
+  ModelGatewayContextBase,
+  ModelGatewayDependencies,
+  ModelGatewayOptions,
+  ModelGatewayResponse,
+  PreparedCompletionOptions,
+  TokenizedModelGatewayContext,
+  TokenizedModelGatewayResponse,
+} from "./gateway-types.js";
 
-/** Dependencies injected into every provider adapter call by the gateway. */
-export interface ModelGatewayDependencies {
-  readonly ids: IdGenerator;
-  readonly clock: Clock;
-  readonly retryPolicy?: ModelRetryConfig;
-  readonly enforcement?: ModelEnforcementConfig;
-  readonly random?: Random;
-  readonly sleep?: Sleep;
-  readonly requestsPerMinute?: Readonly<Partial<Record<Code, number>>>;
-  readonly maxConcurrent?: number;
-  readonly pricing?: ModelsConfig["pricing"];
-  /** Per-provider trust resolved from validated runtime configuration. */
-  readonly providerTrust?: Readonly<Partial<Record<Code, "hosted" | "local">>>;
-  /** Per-provider stream policy from validated `models.providers[].streaming` config. */
-  readonly providerStreaming?: Readonly<Partial<Record<Code, boolean>>>;
-  /** Boundary hook invoked after provider-specific preparation on every attempt. */
-  readonly requestSanitizer?: RequestSanitizer;
+export type {
+  ModelGatewayContext,
+  ModelGatewayDependencies,
+  ModelGatewayOptions,
+  ModelGatewayResponse,
+  RequestSanitizer,
+  TokenizedModelGatewayContext,
+  TokenizedModelGatewayResponse,
+} from "./gateway-types.js";
+
+function validateGatewayOutput(options: {
+  readonly parts: ModelGatewayResponse["parts"];
+  readonly context: ModelGatewayContext;
+  readonly prepared: PreparedCompletionOptions<z.ZodType>["prepared"];
+  readonly clock: ModelGatewayDependencies["clock"];
+}) {
+  return awaitRunValidation(
+    () => enforceProviderOutput(options.parts, options.context, options.prepared.rung),
+    options.context,
+    options.clock,
+  );
 }
 
-/** Sanitizes a full provider request for one routed provider attempt. */
-export type RequestSanitizer = (
-  request: ModelRequest,
-  target: ModelRef & { readonly trust: "hosted" | "local" },
-  context: {
-    readonly runId: Id;
-    readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
-    readonly signal: AbortSignal;
-  },
-) => Promise<ModelRequest>;
-
-/** Runtime context supplied to a gateway call, optionally including a typed output contract. */
-interface ModelGatewayContextBase<OutputSchema extends z.ZodType> {
-  readonly runId: Id;
-  readonly signal: AbortSignal;
-  readonly deadlineTs?: number;
-  readonly outputSchema?: OutputSchema;
-  readonly recordPiiAction?: (summary: PiiActionSummary) => Promise<void>;
-  /** Receives token counts only while a provider stream reports usage. */
-  readonly onProgress?: (progress: ModelProgress) => void;
+function prepareResult(
+  result: unknown,
+  adapter: ProviderAdapter,
+  prepared: PreparedCompletionOptions<z.ZodType>["prepared"],
+) {
+  return prepareProviderResult(result, adapter.kind, prepared.droppedSchemaKeywords);
 }
 
-/** Runtime context supplied to a gateway call, optionally including a typed output contract. */
-export type ModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType> =
-  ModelGatewayContextBase<OutputSchema> &
-    ({ readonly valueTransform?: undefined } | { readonly valueTransform: ValueTransform });
-
-/** Gateway context used when the caller provides an async token-preserving validator. */
-export type TokenizedModelGatewayContext<OutputSchema extends z.ZodType = z.ZodType> =
-  ModelGatewayContextBase<OutputSchema> & { readonly valueTransform: ValueTransform };
-
-/** Gateway enforcement configuration. */
-export interface ModelGatewayOptions {
-  /** Highest rung on the native (1) < tool (2) < prompt (3) ladder. */
-  readonly maxRung?: EnforcementRung;
-  /** Defers model usage span attributes to the caller after routing aggregation. */
-  readonly deferSpanUsage?: boolean;
-}
-
-/** Provider completion with optional structured-output validation details. */
-export type ModelGatewayResponse<OutputSchema extends z.ZodType = z.ZodType> = ModelResponse & {
-  readonly providerBlobs: JsonValue;
-  readonly enforcement?: EnforcementResult<OutputSchema>;
-};
-
-/** Provider completion whose successful enforcement value remains tokenized JSON. */
-export type TokenizedModelGatewayResponse = ModelResponse & {
-  readonly providerBlobs: JsonValue;
-  readonly enforcement?: TokenizedEnforcementResult;
-};
-
-type AnyModelGatewayResponse<OutputSchema extends z.ZodType> =
-  ModelGatewayResponse<OutputSchema> | TokenizedModelGatewayResponse;
-
-interface PreparedCompletionOptions<OutputSchema extends z.ZodType> {
+function requestOutputRepair(options: {
   readonly request: ModelRequest;
-  readonly context: ModelGatewayContext<OutputSchema>;
-  readonly adapter: ProviderAdapter;
-  readonly prepared: PreparedEnforcement;
-  readonly limiter: TokenBucketRateLimiter | undefined;
-  readonly semaphore: Semaphore;
-}
-
-function appendRepairOrThrow(options: {
-  readonly currentRequest: ModelRequest;
-  readonly parts: ModelResponse["parts"];
-  readonly issues: readonly EnforcementIssue[];
-  readonly rungUsed?: EnforcementRung;
-  readonly outputSchema: JsonValue | undefined;
+  readonly parts: ModelGatewayResponse["parts"];
+  readonly enforcement: Awaited<ReturnType<typeof enforceProviderOutput>>["result"];
   readonly repairAttempts: number;
   readonly maxRepairs: number;
   readonly usage: ModelUsage | undefined;
   readonly latencyMs: number;
-}): ModelRequest {
-  if (options.repairAttempts >= options.maxRepairs) {
-    throw new ModelOutputInvalidError(
-      options.repairAttempts,
-      options.issues,
-      options.outputSchema,
-      {
-        ...(options.usage === undefined ? {} : { usage: options.usage }),
-        latencyMs: options.latencyMs,
-      },
-    );
+}): ModelRequest | undefined {
+  const enforcement = options.enforcement;
+  if (enforcement === undefined || !("issues" in enforcement)) {
+    return undefined;
   }
-  return appendRepairMessages(
-    options.currentRequest,
-    options.parts,
-    options.issues,
-    options.rungUsed,
-  );
+  return appendRepairOrThrow({
+    currentRequest: options.request,
+    parts: options.parts,
+    issues: enforcement.issues,
+    ...(enforcement.rungUsed === undefined ? {} : { rungUsed: enforcement.rungUsed }),
+    outputSchema: options.request.output?.schema,
+    repairAttempts: options.repairAttempts,
+    maxRepairs: options.maxRepairs,
+    usage: options.usage,
+    latencyMs: options.latencyMs,
+  });
 }
 
-function parseProviderResult(result: unknown): z.infer<typeof ProviderResultSchema> {
-  const parsed = ProviderResultSchema.safeParse(result);
-  if (!parsed.success) {
-    throw new ProviderError("provider_unknown");
-  }
-  return parsed.data;
+function recordAttempt(attempts: number): void {
+  setActiveSpanAttribute("harness.model.attempts", attempts);
+}
+
+function failedAttemptTotals(
+  error: unknown,
+  usage: ModelUsage | undefined,
+  latencyMs: number,
+): { readonly usage: ModelUsage | undefined; readonly latencyMs: number } {
+  const metadata = readModelFailureMetadata(error);
+  return {
+    usage: metadata.usage === undefined ? usage : aggregateModelUsage(usage, metadata.usage),
+    latencyMs: latencyMs + (metadata.latencyMs ?? 0),
+  };
 }
 
 /** Minimal provider-selecting model port implementation. */
@@ -317,36 +257,36 @@ export class ModelGateway {
           limiter,
           semaphore,
           onAttempt: () => {
-            attempts += 1;
-            setActiveSpanAttribute("harness.model.attempts", attempts);
+            recordAttempt(++attempts);
           },
           onFailedAttempt: (error) => {
-            const metadata = readModelFailureMetadata(error);
-            if (metadata.usage !== undefined) {
-              aggregateUsage = aggregateModelUsage(aggregateUsage, metadata.usage);
-            }
-            aggregateLatencyMs += metadata.latencyMs ?? 0;
+            const totals = failedAttemptTotals(error, aggregateUsage, aggregateLatencyMs);
+            aggregateUsage = totals.usage;
+            aggregateLatencyMs = totals.latencyMs;
           },
         });
-        const result = parseProviderResult(adapterResult);
+        const result = prepareResult(adapterResult, adapter, prepared);
         aggregateUsage = aggregateModelUsage(aggregateUsage, result.usage);
         aggregateLatencyMs += result.latencyMs;
 
-        const validateOutput = () => enforceProviderOutput(result.parts, context, prepared.rung);
-        const enforced = await awaitRunValidation(validateOutput, context, this.dependencies.clock);
+        const enforced = await validateGatewayOutput({
+          parts: result.parts,
+          context,
+          prepared,
+          clock: this.dependencies.clock,
+        });
         const enforcement = enforced.result;
-        if (enforcement !== undefined && "issues" in enforcement) {
-          currentRequest = appendRepairOrThrow({
-            currentRequest,
-            parts: result.parts,
-            issues: enforcement.issues,
-            ...(enforcement.rungUsed === undefined ? {} : { rungUsed: enforcement.rungUsed }),
-            outputSchema: currentRequest.output?.schema,
-            repairAttempts,
-            maxRepairs: this.maxRepairs,
-            usage: aggregateUsage,
-            latencyMs: aggregateLatencyMs,
-          });
+        const repairRequest = requestOutputRepair({
+          request: currentRequest,
+          parts: result.parts,
+          enforcement,
+          repairAttempts,
+          maxRepairs: this.maxRepairs,
+          usage: aggregateUsage,
+          latencyMs: aggregateLatencyMs,
+        });
+        if (repairRequest !== undefined) {
+          currentRequest = repairRequest;
           repairAttempts += 1;
           continue;
         }
@@ -369,15 +309,14 @@ export class ModelGateway {
         };
       }
     } catch (error) {
-      if (aggregateUsage === undefined) {
-        throw error;
-      }
-      const usage = this.accountUsage(request.model, aggregateUsage);
-      reportModelUsage(request.model, usage, this.options.deferSpanUsage === true);
-      throw attachModelFailureMetadata(error, {
-        usage,
+      rethrowWithAccountedUsage({
+        error,
+        model: request.model,
+        usage: aggregateUsage,
         latencyMs: aggregateLatencyMs,
         repairAttempts,
+        deferUsage: this.options.deferSpanUsage === true,
+        accountUsage: this.accountUsage,
       });
     }
   }

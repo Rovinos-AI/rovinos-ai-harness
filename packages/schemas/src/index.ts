@@ -61,6 +61,7 @@ export {
 export {
   Code,
   Id,
+  Pseudonym,
   Sha256Hex,
   SpanId,
   TraceId,

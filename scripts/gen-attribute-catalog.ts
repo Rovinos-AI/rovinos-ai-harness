@@ -41,6 +41,8 @@ function attributeType(meta: AttrMeta): string {
       return "Code";
     case "hash":
       return "SHA-256 hash";
+    case "pseudonym":
+      return "Pseudonym";
     case "enum":
       return `enum: ${(meta.values ?? []).map((value) => `\`${value}\``).join(", ")}`;
     case "int":

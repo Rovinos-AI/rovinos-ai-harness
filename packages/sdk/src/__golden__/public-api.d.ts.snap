@@ -393,6 +393,9 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
                 minValueLength: z.ZodDefault<z.ZodNumber>;
                 enabled: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strict>>;
+            correlation: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+            }, z.core.$strict>>;
         }, z.core.$strict>>;
         sandbox: z.ZodPrefault<z.ZodObject<{
             allowUnsafeInProcess: z.ZodOptional<z.ZodBoolean>;

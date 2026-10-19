@@ -135,7 +135,7 @@ function createViewDom(root: HTMLElement): ApprovalViewDom {
   const main = element(document, "main");
   const heading = element(document, "h1", "Waiting for approval");
   heading.tabIndex = -1;
-  const status = element(document, "p", "Waiting for host");
+  const status = element(document, "p", "Waiting for host...");
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
   const content = element(document, "div");

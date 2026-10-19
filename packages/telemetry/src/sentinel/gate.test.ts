@@ -311,12 +311,16 @@ describe("assertSentinelGate", () => {
     expect(() => {
       assertSentinelGate(
         undefined,
-        { sentinel: { minValueLength: 6, enabled: false } },
+        { sentinel: { minValueLength: 6, enabled: false }, correlation: { enabled: false } },
         "production",
       );
     }).toThrow(SentinelRequiredError);
     expect(() => {
-      assertSentinelGate(undefined, { sentinel: { minValueLength: 6, enabled: false } }, "test");
+      assertSentinelGate(
+        undefined,
+        { sentinel: { minValueLength: 6, enabled: false }, correlation: { enabled: false } },
+        "test",
+      );
     }).not.toThrow();
   });
 });

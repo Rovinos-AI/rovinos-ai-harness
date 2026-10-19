@@ -536,7 +536,10 @@ store: {}`,
       policy: {},
       pii: { defaultAction: "tokenize", rules: [], enabled: true, failMode: "closed" },
       vault: { backend: "sqlite", purgeAfterDays: 7 },
-      telemetry: { sentinel: { minValueLength: 6 } },
+      telemetry: {
+        sentinel: { minValueLength: 6 },
+        correlation: { enabled: false },
+      },
       sandbox: {},
     });
   });

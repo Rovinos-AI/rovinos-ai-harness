@@ -7,6 +7,7 @@ Rovinos
 ShellCheck
 TypeScript
 ULID
+vertexai
 Vitest
 Yarn
 Zod
@@ -56,6 +57,7 @@ PRNG
 Preapproved
 Rovinos
 SDKC
+SPII
 STRAT
 Semgrep
 Seqs
@@ -129,6 +131,7 @@ regclass
 realpath
 rescan
 rescanned
+replayable
 resumability
 retryability
 rootfs

@@ -124,14 +124,14 @@ function createContractAdapter(
  * Yields one event-loop turn before aborting so SDK adapters can dispatch fetch
  * from their startup microtasks; the assertion then exercises in-flight cancellation.
  */
-async function assertAbortCompletion(
+export async function assertAbortCompletion(
   completion: Promise<unknown>,
   controller: AbortController,
   didFetch: () => boolean,
 ): Promise<void> {
-  const startedAt = performance.now();
   // SDK-backed adapters may dispatch fetch in a microtask after complete() is called.
   await new Promise<void>((resolve) => setImmediate(resolve));
+  const abortedAt = performance.now();
   controller.abort();
   const error = await completion.then(
     () => undefined,
@@ -142,7 +142,7 @@ async function assertAbortCompletion(
     (error instanceof Error && error.name === "AbortError") ||
       (error instanceof ProviderError && error.code === "provider_timeout"),
   ).toBe(true);
-  expect(performance.now() - startedAt).toBeLessThan(100);
+  expect(performance.now() - abortedAt).toBeLessThan(100);
 }
 
 async function assertProviderFailure(

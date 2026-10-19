@@ -12,7 +12,10 @@ describe("approval app operation audit canary", () => {
     const sdk = createTelemetrySdk({
       spanExporter: new InMemorySpanExporter(),
       logExporter: exporter,
-      telemetry: { sentinel: { enabled: false, minValueLength: 6 } },
+      telemetry: {
+        sentinel: { enabled: false, minValueLength: 6 },
+        correlation: { enabled: false },
+      },
     });
     const audit = {
       tokenId: Code.parse("token.test"),

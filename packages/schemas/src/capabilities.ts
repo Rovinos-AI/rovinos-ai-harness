@@ -55,6 +55,13 @@ const providerDefaults: ReadonlyMap<string, Capabilities> = new Map([
       opaqueRoundTrip: true,
     },
   ],
+  [
+    "vertex",
+    {
+      ...defaultCapabilities,
+      structuredOutput: "native",
+    },
+  ],
 ]);
 
 /**
