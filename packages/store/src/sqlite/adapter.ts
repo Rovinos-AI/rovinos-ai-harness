@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
-import {
+import type {
+  Id,
+  TraceId,
+  Event as StoredEvent,
+  NewEvent,
   RunStatus,
-  type Id,
-  type TraceId,
-  type Event as StoredEvent,
-  type NewEvent,
-  type Snapshot,
+  Snapshot,
 } from "@harness/schemas";
 import {
   JsonContentCodec,

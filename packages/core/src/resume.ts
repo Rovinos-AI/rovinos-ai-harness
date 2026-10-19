@@ -319,7 +319,7 @@ async function claimAndContinue(execution: ResumeExecution): Promise<Event> {
  * @throws RunAlreadyTerminalError when the run has already finished.
  * @throws ResumeConflictError when another writer wins the resume claim.
  */
-export function resumeRun(options: ResumeRunOptions): Promise<RunLoopResult> {
+export async function resumeRun(options: ResumeRunOptions): Promise<RunLoopResult> {
   const release = claimResumeLock(options.store, options.runId, () => new ResumeConflictError());
   return withResumeLease(options, release);
 }

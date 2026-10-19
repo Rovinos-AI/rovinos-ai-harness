@@ -29,6 +29,7 @@ import {
   HarnessError,
   Traceparent,
   UNREGISTERED_TOOL_ID,
+  type Event as StoredEvent,
   type JsonValue as JsonValueType,
 } from "@harness/schemas";
 import {
@@ -2876,6 +2877,10 @@ describe("runLoop", () => {
         };
         const result = await resumeRun(createResumeOptions(store, clock, { tool }));
         const events = await readApprovalEvents(store);
+        const toolResults = events.filter(
+          (event): event is Extract<StoredEvent, { type: "tool_result" }> =>
+            event.type === "tool_result",
+        );
 
         expect(onDanglingIntent).toHaveBeenCalledOnce();
         const reruns = strategyDecision.kind === "rerun";
@@ -2883,7 +2888,7 @@ describe("runLoop", () => {
         const completes = strategyDecision.kind === "result";
         expect(result.status).toBe(suspends ? "suspended" : "completed");
         expect(execute).toHaveBeenCalledTimes(reruns ? 1 : 0);
-        expect(events.filter((event) => event.type === "tool_result")).toHaveLength(1);
+        expect(toolResults).toHaveLength(suspends ? 0 : 1);
         expect(events.filter((event) => event.type === "subagent_completed")).toHaveLength(
           completes ? 1 : 0,
         );
@@ -2893,10 +2898,12 @@ describe("runLoop", () => {
               event.type === "run_status_changed" && event.reason === "awaiting_subagent",
           ),
         ).toBe(suspends);
-        expect(events.find((event) => event.type === "tool_result")).toMatchObject(
-          completes
-            ? { outcome: "error", errorCode: "subagent_failed" }
-            : { outcome: "ok" },
+        expect(
+          toolResults.map(({ outcome, errorCode }) => ({ outcome, errorCode })),
+        ).toEqual(
+          suspends
+            ? []
+            : [completes ? { outcome: "error", errorCode: "subagent_failed" } : { outcome: "ok" }],
         );
       }
     });
