@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from "node:fs";
 import type { ClientOptions } from "@anthropic-ai/sdk";
-import { JsonValue, parseJson } from "@harness/schemas";
+import { JsonValue, ModelRetryConfigSchema, parseJson } from "@harness/schemas";
 import type { ModelRequest } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -13,7 +13,10 @@ import {
 } from "../contract.js";
 import { ProviderError } from "../errors.js";
 import { withPromptOutput } from "../enforce/rung-prompt.js";
-import { ProviderResultSchema } from "../types.js";
+import { assembleDeltas, ProviderResultSchema } from "../types.js";
+import type { ProviderDelta } from "../types.js";
+import { collectProviderStream } from "../streaming.js";
+import { withRetries } from "../resilience/retry.js";
 import { enforceToolOutput } from "../enforce/rung-tool.js";
 import { AnthropicAdapter } from "./anthropic.js";
 
@@ -134,6 +137,34 @@ function context(signal = new AbortController().signal) {
   };
 }
 
+function anthropicEventStream(events: readonly JsonValue[]): Response {
+  const body = events
+    .map((event) => {
+      const value = z.object({ type: z.string() }).loose().parse(event);
+      return `event: ${value.type}\ndata: ${JSON.stringify(event)}\n\n`;
+    })
+    .join("");
+  return new Response(body, { headers: { "content-type": "text/event-stream" } });
+}
+
+function streamedSseResponse(frames: readonly string[], delayMs = 0): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (const frame of frames) {
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+          controller.enqueue(encoder.encode(frame));
+        }
+        controller.close();
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}
+
 function fixtureFactory(
   options: ProviderContractAdapterOptions,
   _fixture: ProviderContractFixture,
@@ -144,6 +175,362 @@ function fixtureFactory(
 runProviderContract("Anthropic Messages API contract", fixtureFactory, fixtures);
 
 describe("AnthropicAdapter", () => {
+  it("assembles streamed text, tool calls, and thinking blocks exactly like complete()", async () => {
+    const messageStart = {
+      type: "message_start",
+      message: {
+        ...responseBody,
+        content: [],
+        stop_reason: null,
+        usage: { input_tokens: 7, output_tokens: 1 },
+      },
+    };
+    const events: JsonValue[] = [
+      messageStart,
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "private reasoning" },
+      },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "signature_delta", signature: "sig_fixture" },
+      },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "text", text: "" },
+      },
+      {
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "answer" },
+      },
+      { type: "content_block_stop", index: 1 },
+      {
+        type: "content_block_start",
+        index: 2,
+        content_block: { type: "tool_use", id: "toolu_fixture", name: "lookup", input: {} },
+      },
+      {
+        type: "content_block_delta",
+        index: 2,
+        delta: { type: "input_json_delta", partial_json: '{"query":"x"}' },
+      },
+      { type: "content_block_stop", index: 2 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "tool_use", stop_sequence: null },
+        usage: { output_tokens: 11 },
+      },
+      { type: "message_stop" },
+    ];
+    let streamedRequest: JsonValue | undefined;
+    const streamingAdapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: (_input, init) => {
+        if (typeof init?.body !== "string") {
+          throw new TypeError("Expected a serialized Anthropic request body.");
+        }
+        streamedRequest = parseJson(JsonValue, init.body);
+        return Promise.resolve(anthropicEventStream(events));
+      },
+    });
+
+    const expected = await makeRequest().adapter.complete(baseRequest, context());
+    const deltas: ProviderDelta[] = [];
+    for await (const delta of streamingAdapter.stream(baseRequest, context())) {
+      deltas.push(delta);
+    }
+
+    expect(assembleDeltas(deltas)).toEqual(expected);
+    expect(streamedRequest).toMatchObject({ stream: true });
+    expect(JSON.stringify(assembleDeltas(deltas).parts)).toContain("sig_fixture");
+    expect(deltas.some((delta) => delta.type === "activity")).toBe(true);
+    expect(deltas.filter((delta) => delta.type === "usage")).toEqual([
+      { type: "usage", usage: { inputTokens: 7, outputTokens: 1 } },
+      { type: "usage", usage: { inputTokens: 7, outputTokens: 11 } },
+      { type: "usage", usage: { inputTokens: 7, outputTokens: 11 } },
+    ]);
+  });
+
+  it("keeps long thinking and signature phases active without emitting their content", async () => {
+    const events: JsonValue[] = [
+      {
+        type: "message_start",
+        message: {
+          ...responseBody,
+          content: [],
+          stop_reason: null,
+          usage: { input_tokens: 1, output_tokens: 0 },
+        },
+      },
+      {
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      },
+      ...["private-one", "private-two"].map((thinking): JsonValue => ({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking },
+      })),
+      ...Array.from({ length: 12 }, (_, index): JsonValue => ({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: `private-${String(index)}` },
+      })),
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "signature_delta", signature: "private-signature" },
+      },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens: 2 },
+      },
+      { type: "message_stop" },
+    ];
+    const frames = events.flatMap((event) => {
+      const { type } = z.object({ type: z.string() }).loose().parse(event);
+      const json = JSON.stringify(event);
+      const split = json.indexOf(",") + 1;
+      return [
+        ": keepalive\r\n",
+        `event: ${type}\r\nda`,
+        `ta: ${json.slice(0, split)}\r\n`,
+        `data: ${json.slice(split)}\r\n\r\n`,
+      ];
+    });
+    const adapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: () => Promise.resolve(streamedSseResponse(frames, 5)),
+    });
+    const progress: unknown[] = [];
+    const signal = new AbortController().signal;
+    const result = await collectProviderStream({
+      stream: (streamSignal) => adapter.stream(baseRequest, context(streamSignal)),
+      signal,
+      idleTimeoutMs: 50,
+      requestId,
+      onProgress: (update) => progress.push(update),
+    });
+
+    expect(result.usage).toEqual({ inputTokens: 1, outputTokens: 2 });
+    expect(progress).toEqual([
+      { requestId, outputTokens: 0 },
+      { requestId, outputTokens: 2 },
+    ]);
+    expect(JSON.stringify(progress)).not.toContain("private-one");
+    expect(JSON.stringify(result.parts)).toContain("private-signature");
+  });
+
+  it.each([
+    ["overloaded_error", "provider_unavailable"],
+    ["api_error", "provider_unavailable"],
+    ["rate_limit_error", "provider_rate_limited"],
+  ] as const)("maps an HTTP-200 %s stream error to %s", async (type, code) => {
+    const start = {
+      type: "message_start",
+      message: {
+        ...responseBody,
+        content: [],
+        stop_reason: null,
+        usage: { input_tokens: 1, output_tokens: 0 },
+      },
+    };
+    const partial = {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    };
+    const body = [
+      `event: message_start\ndata: ${JSON.stringify(start)}\n\n`,
+      `event: content_block_start\ndata: ${JSON.stringify(partial)}\n\n`,
+      `event: error\ndata: ${JSON.stringify({
+        type: "error",
+        error: { type, message: "synthetic error" },
+      })}\n\n`,
+    ].join("");
+    const adapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: () =>
+        Promise.resolve(new Response(body, { headers: { "content-type": "text/event-stream" } })),
+    });
+    const collect = async () => {
+      const deltas: ProviderDelta[] = [];
+      for await (const delta of adapter.stream(baseRequest, context())) {
+        deltas.push(delta);
+      }
+      return deltas;
+    };
+
+    await expect(collect()).rejects.toMatchObject({ code, retryable: true });
+  });
+
+  it("discards partial Anthropic output when retrying a mid-stream error", async () => {
+    const start = {
+      type: "message_start",
+      message: {
+        ...responseBody,
+        content: [],
+        stop_reason: null,
+        usage: { input_tokens: 1, output_tokens: 0 },
+      },
+    };
+    const firstAttempt = [
+      start,
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "discard me" },
+      },
+    ];
+    const secondAttempt = [
+      start,
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "second only" },
+      },
+      { type: "content_block_stop", index: 0 },
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { output_tokens: 2 },
+      },
+      { type: "message_stop" },
+    ];
+    let attempt = 0;
+    const adapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: () => {
+        attempt += 1;
+        const eventFrames =
+          attempt === 1
+            ? [
+                ...firstAttempt.map(
+                  (event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+                ),
+                `event: error\ndata: ${JSON.stringify({
+                  type: "error",
+                  error: { type: "overloaded_error", message: "synthetic overload" },
+                })}\n\n`,
+              ]
+            : secondAttempt.map(
+                (event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+              );
+        return Promise.resolve(streamedSseResponse(eventFrames));
+      },
+    });
+
+    const result = await withRetries({
+      policy: ModelRetryConfigSchema.parse({ maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 }),
+      clock: { now: () => 0 },
+      random: () => 0,
+      sleep: () => Promise.resolve(),
+      signal: new AbortController().signal,
+      operation: (signal) =>
+        collectProviderStream({
+          stream: (streamSignal) => adapter.stream(baseRequest, context(streamSignal)),
+          signal,
+          idleTimeoutMs: 100,
+          requestId,
+        }),
+    });
+
+    expect(attempt).toBe(2);
+    expect(result.parts).toContainEqual({ type: "text", text: "second only" });
+    expect(JSON.stringify(result.parts)).not.toContain("discard me");
+  });
+
+  it("aborts the Anthropic fetch body when the caller cancels", async () => {
+    const controller = new AbortController();
+    let fetchSignal: AbortSignal | undefined;
+    let bodyCancelled = false;
+    const adapter = new AnthropicAdapter({
+      apiKey: { reveal: () => "synthetic-test-key" },
+      baseURL: "https://provider.test",
+      fetch: (_input, init) => {
+        fetchSignal = init?.signal ?? undefined;
+        const start = {
+          type: "message_start",
+          message: {
+            ...responseBody,
+            content: [],
+            stop_reason: null,
+            usage: { input_tokens: 1, output_tokens: 0 },
+          },
+        };
+        const body = new ReadableStream<Uint8Array>({
+          start(streamController) {
+            streamController.enqueue(
+              new TextEncoder().encode(`event: message_start\ndata: ${JSON.stringify(start)}\n\n`),
+            );
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                bodyCancelled = true;
+                streamController.error(new Error("fetch body aborted"));
+              },
+              { once: true },
+            );
+          },
+        });
+        return Promise.resolve(
+          new Response(body, { headers: { "content-type": "text/event-stream" } }),
+        );
+      },
+    });
+
+    const completion = collectProviderStream({
+      stream: (signal) => adapter.stream(baseRequest, context(signal)),
+      signal: controller.signal,
+      idleTimeoutMs: 1_000,
+      requestId,
+      onProgress: () => {
+        controller.abort(new Error("caller cancelled"));
+      },
+    });
+
+    await expect(completion).rejects.toMatchObject({ message: "caller cancelled" });
+    expect(fetchSignal?.aborted).toBe(true);
+    expect(bodyCancelled).toBe(true);
+  });
+
+  it.each([
+    { offsetMs: 2_500, expectedMs: 2_000 },
+    { offsetMs: -2_500, expectedMs: 0 },
+  ])("parses HTTP-date Retry-After using the injected clock", async ({ offsetMs, expectedMs }) => {
+    const nowMs = Date.parse("2026-10-17T16:00:00.000Z");
+    const { adapter } = makeRequest(responseBody, 429, {
+      "retry-after": new Date(nowMs + offsetMs).toUTCString(),
+    });
+
+    await expect(
+      adapter.complete(baseRequest, {
+        signal: new AbortController().signal,
+        ids: { next: () => requestId },
+        clock: { now: () => nowMs },
+      }),
+    ).rejects.toMatchObject({ code: "provider_rate_limited", retryAfterMs: expectedMs });
+  });
+
   it("places three cache breakpoints and maps cached usage without mutating recorded content", async () => {
     const call = makeRequest({
       ...responseBody,
