@@ -414,6 +414,31 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
         }, z.core.$strict>>;
         controlPlane: z.ZodOptional<z.ZodDefault<z.ZodObject<{
             allowReveal: z.ZodDefault<z.ZodBoolean>;
+            auth: z.ZodDefault<z.ZodObject<{
+                tokens: z.ZodDefault<z.ZodArray<z.ZodObject<{
+                    id: z.ZodString;
+                    secret: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+                    scopes: z.ZodArray<z.ZodEnum<{
+                        admin: "admin";
+                        approve: "approve";
+                        read: "read";
+                        read_content: "read_content";
+                        reveal: "reveal";
+                        run: "run";
+                    }>>;
+                    runIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                }, z.core.$strict>>>;
+            }, z.core.$strict>>;
+            listen: z.ZodDefault<z.ZodObject<{
+                host: z.ZodDefault<z.ZodString>;
+                port: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
+            tls: z.ZodOptional<z.ZodObject<{
+                certFile: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+                keyFile: z.core.$ZodBranded<z.ZodString, "SecretRef", "out">;
+            }, z.core.$strict>>;
+            allowedHosts: z.ZodDefault<z.ZodArray<z.ZodString>>;
+            rateLimitPerMinute: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>>;
     }, z.core.$strict>;
     overrides: z.ZodOptional<z.ZodObject<{

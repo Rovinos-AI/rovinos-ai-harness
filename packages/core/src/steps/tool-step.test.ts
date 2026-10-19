@@ -474,13 +474,14 @@ describe("tool-step resume handling", () => {
       "tool_intent",
       "tool_result",
       "tool_intent",
+      "tool_execution_started",
       "tool_result",
     ]);
     expect(events[1]).toMatchObject({ outcome: "ok" });
     expect(events[3]).toMatchObject({ outcome: "denied", errorCode: "unknown_tool" });
     expect(events[2]).toMatchObject({ toolId: UNREGISTERED_TOOL_ID });
     expect(events[3]).toMatchObject({ toolId: UNREGISTERED_TOOL_ID });
-    expect(events[5]).toMatchObject({ outcome: "error", errorCode: "tool_failed" });
+    expect(events[6]).toMatchObject({ outcome: "error", errorCode: "tool_failed" });
     expect(tool.calls).toHaveLength(2);
     const stored: Event[] = [];
     for await (const event of store.read(runId)) {
@@ -706,12 +707,9 @@ describe("tool-step resume handling", () => {
     });
 
     await expect(
-      applyApprovalDecision(
-        { ...resumeOptions(recorder, tool), policy },
-        intent,
-        approval,
+      applyApprovalDecision({ ...resumeOptions(recorder, tool), policy }, intent, approval, {
         resolution,
-      ),
+      }),
     ).rejects.toMatchObject({ code: "approval_edit_not_allowed" });
     expect(tool.calls).toHaveLength(0);
   });
@@ -754,7 +752,7 @@ describe("tool-step resume handling", () => {
         { ...resumeOptions(recorder, tool), policy },
         intent,
         approval,
-        resolution,
+        { resolution },
       );
 
       expect(events[0]).toMatchObject({
@@ -981,17 +979,18 @@ describe("tool-step resume handling", () => {
         throw new Error("Expected a dangling tool intent.");
       }
 
-      const result = await resolveDanglingIntentApproval(
-        resumeOptions(recorder, tool),
-        intent,
-        request,
+      const result = await resolveDanglingIntentApproval(resumeOptions(recorder, tool), intent, {
+        approval: request,
         resolution,
+      });
+      expect(result.map(({ type }) => type)).toEqual(
+        decision === "approve" ? ["tool_execution_started", "tool_result"] : ["tool_result"],
       );
-      expect(result).toHaveLength(1);
-      expect(result[0]).toMatchObject({
+      expect(result.at(-1)).toMatchObject({
         type: "tool_result",
-        outcome: decision === "approve" ? "ok" : "error",
-        ...(decision === "deny" ? { errorCode: "resume_ambiguous" } : {}),
+        ...(decision === "approve"
+          ? { outcome: "ok" }
+          : { outcome: "error", errorCode: "resume_ambiguous" }),
       });
       expect(tool.calls).toHaveLength(decision === "approve" ? 1 : 0);
       const stored: Event[] = [];

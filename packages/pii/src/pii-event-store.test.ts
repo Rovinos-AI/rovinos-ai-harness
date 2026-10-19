@@ -96,8 +96,9 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
 function createInnerStore(): EventStoreLike {
   let events: Event[] = [];
   let savedSnapshot: Snapshot | undefined;
+  let executionOwner: Id | undefined;
   return {
-    append(appendRunId, newEvents, expectedSeq) {
+    append(appendRunId, newEvents, expectedSeq, _leaseOwner) {
       if (appendRunId !== runId || expectedSeq !== events.length || newEvents.length === 0) {
         throw new Error("Unexpected test-store append.");
       }
@@ -109,10 +110,26 @@ function createInnerStore(): EventStoreLike {
       ];
       return Promise.resolve({ nextSeq: events.length });
     },
-    async appendWithSnapshot(appendRunId, newEvents, expectedSeq, nextSnapshot) {
+    async appendWithSnapshot(appendRunId, newEvents, expectedSeq, nextSnapshot, _leaseOwner) {
       const result = await this.append(appendRunId, newEvents, expectedSeq);
       savedSnapshot = nextSnapshot;
       return result;
+    },
+    claimRunExecution(_runId, owner) {
+      if (executionOwner !== undefined) {
+        return Promise.resolve(false);
+      }
+      executionOwner = owner;
+      return Promise.resolve(true);
+    },
+    renewRunExecution(_runId, owner) {
+      return Promise.resolve(executionOwner === owner);
+    },
+    releaseRunExecution(_runId, owner) {
+      if (executionOwner === owner) {
+        executionOwner = undefined;
+      }
+      return Promise.resolve();
     },
     latestSnapshot() {
       return Promise.resolve(savedSnapshot);

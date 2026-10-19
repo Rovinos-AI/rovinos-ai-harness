@@ -108,10 +108,16 @@ The sandbox Compose profile requires `SANDBOX_RUNNER_TOKEN`; provide it through 
 Render and start Compose from the repository root with the collector version file:
 
 ```sh
+CONTROL_PLANE_CONFIG_FILE=/secure/control-plane.yaml \
+CONTROL_PLANE_TOKEN_SECRET_FILE=/secure/control-plane-token \
 SANDBOX_RUNNER_TOKEN="$(cat /secure/sandbox-runner-token)" \
   docker compose --env-file infra/collector/VERSION \
-  --file infra/compose/docker-compose.yml --profile sandbox up --detach --build
+  --file infra/compose/docker-compose.yml \
+  --file infra/compose/docker-compose.dev.yml \
+  --profile dev --profile sandbox up --detach --build
 ```
+
+The control-plane config must use `file:/run/secrets/control_plane_token` for its token secret.
 
 `limits.outputBytes` also limits the maximum size of any file written by a command through its file-size resource limit; this coupling remains until task 19.5 adds per-run workspace quotas. The runner's per-run workspace isolation is also deferred to task 19.5.
 

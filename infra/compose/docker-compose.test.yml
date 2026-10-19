@@ -4,6 +4,12 @@ services:
     extends:
       file: docker-compose.yml
       service: harness
+    environment:
+      HARNESS_CONFIG: /run/harness/control-plane.yaml
+    volumes:
+      - ../../test/fixtures/control-plane-auth.yaml:/run/harness/control-plane.yaml:ro
+    secrets:
+      - control_plane_token
     healthcheck:
       test: ["CMD", "node", "dist/bin.js", "healthcheck"]
   otel-collector:
@@ -111,3 +117,6 @@ networks:
 volumes:
   harness-workspaces: {}
   sample-mcp-state: {}
+secrets:
+  control_plane_token:
+    file: ../../test/fixtures/control-plane-token

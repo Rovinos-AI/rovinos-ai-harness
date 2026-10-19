@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
-const composeFile = "infra/compose/docker-compose.yml";
+const composeFile = "infra/compose/docker-compose.test.yml";
 const imageName = `harness:integration-${String(process.pid)}`;
 const projectName = `harness-docker-${String(process.pid)}`;
 const composeEnvironment = { ...process.env, HARNESS_IMAGE: imageName };
@@ -85,6 +85,7 @@ describe("Docker image", () => {
         "--wait",
         "--no-build",
         "--pull=never",
+        "harness",
       ],
       composeEnvironment,
     );

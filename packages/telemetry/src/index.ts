@@ -22,6 +22,7 @@ export {
   safeEventLogAttributeMap,
 } from "./safe-event-logs.js";
 export { emitApprovalAppAudit } from "./approval-app-audit.js";
+export { emitControlPlaneAudit } from "./control-plane-audit.js";
 export {
   countDroppedTelemetry,
   countHostAppRejected,

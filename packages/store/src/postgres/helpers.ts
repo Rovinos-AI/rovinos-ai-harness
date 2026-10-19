@@ -16,6 +16,7 @@ import {
   ContentDecryptFailedError,
   InvalidEventError,
   KeyNotFoundError,
+  RunExecutionLeaseLostError,
   SeqConflictError,
   StoreUnavailableError,
   isPreservedStoreError,
@@ -325,6 +326,7 @@ export interface AppendTransactionOptions {
   expectedSeq: number;
   encodedSnapshot?: EncodedSnapshot;
   snapshotKeep?: number;
+  leaseOwner?: Id;
 }
 
 /** Append a batch atomically while holding the run's sequence row lock. */
@@ -332,12 +334,8 @@ export async function appendTransaction(
   client: PoolClient,
   options: AppendTransactionOptions,
 ): Promise<number> {
-  const { runId, encoded, expectedSeq, encodedSnapshot, snapshotKeep = 5 } = options;
-  const first = encoded[0]?.event;
-  const last = encoded.at(-1)?.event;
-  if (first === undefined || last === undefined) {
-    throw new InvalidEventError([[]]);
-  }
+  const { runId, encoded, expectedSeq, encodedSnapshot, snapshotKeep = 5, leaseOwner } = options;
+  const { first, last } = appendBoundaryEvents(encoded);
 
   let transactionStarted = false;
   let actualSeq = 0;
@@ -360,6 +358,7 @@ export async function appendTransaction(
     if (actualSeq !== expectedSeq) {
       throw new SeqConflictError(expectedSeq, actualSeq);
     }
+    await assertExecutionLease(client, runId, leaseOwner);
     if (actualSeq === 0 && first.type !== "run_created") {
       throw new InvalidEventError([[0, "type"]]);
     }
@@ -379,11 +378,7 @@ export async function appendTransaction(
       );
     }
 
-    const finalEvent = encoded.at(-1);
-    if (finalEvent === undefined) {
-      throw new StoreUnavailableError();
-    }
-    const finalSeq = finalEvent.event.seq.toString();
+    const finalSeq = last.seq.toString();
     await client.query("SELECT pg_notify($1, $2)", ["harness_events", `${runId}:${finalSeq}`]);
     await client.query("COMMIT");
     transactionStarted = false;
@@ -393,5 +388,34 @@ export async function appendTransaction(
       await client.query("ROLLBACK").catch(() => undefined);
     }
     throw storeError(error, expectedSeq, actualSeq, true);
+  }
+}
+
+function appendBoundaryEvents(encoded: readonly EncodedEvent[]): {
+  readonly first: EncodedEvent["event"];
+  readonly last: EncodedEvent["event"];
+} {
+  const first = encoded[0]?.event;
+  const last = encoded.at(-1)?.event;
+  if (first === undefined || last === undefined) {
+    throw new InvalidEventError([[]]);
+  }
+  return { first, last };
+}
+
+async function assertExecutionLease(
+  client: PoolClient,
+  runId: Id,
+  leaseOwner: Id | undefined,
+): Promise<void> {
+  if (leaseOwner === undefined) {
+    return;
+  }
+  const leaseResult = await client.query<{ owner_id: string }>(
+    "SELECT owner_id FROM run_execution_leases WHERE run_id = $1 FOR UPDATE",
+    [runId],
+  );
+  if (leaseResult.rows[0]?.owner_id !== leaseOwner) {
+    throw new RunExecutionLeaseLostError();
   }
 }
