@@ -5,15 +5,24 @@ import { describe, expect, it, vi } from "vitest";
 import type * as Crypto from "@harness/crypto";
 import { encodeBase32, pseudonymize, type PseudonymizeOptions } from "./pseudonym.js";
 
-const cryptoMocks = vi.hoisted(() => ({
-  hkdf: vi.fn<(masterKey: Uint8Array, info: string | Uint8Array, length?: number) => Uint8Array>(),
-  hmac: vi.fn<(key: Uint8Array, data: Uint8Array) => Uint8Array>(),
-  capture: {
+const cryptoMocks = vi.hoisted(() => {
+  const capture: {
+    derivedKey: Uint8Array;
+    mac: Uint8Array;
+    message: Uint8Array;
+  } = {
     derivedKey: new Uint8Array(),
     mac: new Uint8Array(),
     message: new Uint8Array(),
-  },
-}));
+  };
+  return {
+    hkdf: vi.fn<
+      (masterKey: Uint8Array, info: string | Uint8Array, length?: number) => Uint8Array
+    >(),
+    hmac: vi.fn<(key: Uint8Array, data: Uint8Array) => Uint8Array>(),
+    capture,
+  };
+});
 
 vi.mock("@harness/crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof Crypto>();
