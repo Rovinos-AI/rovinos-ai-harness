@@ -25,6 +25,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",
     "@google/genai": "2.30.0",
+    "@aws-sdk/client-bedrock-runtime": "3.1045.0",
     "@harness/schemas": "workspace:^",
     "@harness/telemetry": "workspace:^",
     "openai": "7.32.0",

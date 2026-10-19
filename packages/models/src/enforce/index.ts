@@ -194,13 +194,85 @@ export function stripSyntheticToolCall(parts: readonly Part[]): Part[] {
       return [part];
     }
     let blob: JsonValue | undefined;
+    let removeOpaque = false;
     if (part.provider === "anthropic") {
       blob = sanitizeAnthropicBlob(part.blob, syntheticCallIds);
     } else if (part.provider === "openai") {
       blob = sanitizeOpenAiBlob(part.blob, syntheticCallIds);
+    } else if (part.provider === "bedrock") {
+      const sanitized = sanitizeBedrockBlob(part.blob, syntheticCallIds);
+      blob = sanitized?.blob;
+      removeOpaque = sanitized?.remove === true;
+    }
+    if (removeOpaque) {
+      return [];
     }
     return blob === undefined ? [part] : [{ ...part, blob }];
   });
+}
+
+function sanitizeBedrockBlob(
+  value: JsonValue,
+  syntheticCallIds: ReadonlySet<string>,
+): { readonly blob: JsonValue; readonly remove: boolean } | undefined {
+  const blob = asJsonObject(value);
+  const content = blob?.content;
+  const idsByCallId = asJsonObject(blob?.toolUseIdByCallId);
+  const namesByCallId = asJsonObject(blob?.toolIdByCallId);
+  if (
+    blob === undefined ||
+    !Array.isArray(content) ||
+    idsByCallId === undefined ||
+    namesByCallId === undefined
+  ) {
+    return undefined;
+  }
+
+  const providerIds = new Set(
+    [...syntheticCallIds].flatMap((callId) => {
+      const toolId = namesByCallId[callId];
+      const providerId = idsByCallId[callId];
+      return toolId === "emit_result" && typeof providerId === "string" ? [providerId] : [];
+    }),
+  );
+  if (providerIds.size === 0) {
+    return undefined;
+  }
+
+  const filteredContent = content.filter((block) => {
+    const item = asJsonObject(block);
+    const toolUse = asJsonObject(item?.toolUse);
+    return typeof toolUse?.toolUseId !== "string" || !providerIds.has(toolUse.toolUseId);
+  });
+  if (filteredContent.length === 0) {
+    return { blob, remove: true };
+  }
+  const remainingSyntheticIds = new Set(
+    [...syntheticCallIds].filter((callId) => namesByCallId[callId] === "emit_result"),
+  );
+  const remainingIds = Object.fromEntries(
+    Object.entries(idsByCallId).filter(([callId]) => !remainingSyntheticIds.has(callId)),
+  );
+  const remainingNames = Object.fromEntries(
+    Object.entries(namesByCallId).filter(([callId]) => !remainingSyntheticIds.has(callId)),
+  );
+  const wireNames = asJsonObject(blob.wireNameByToolId);
+  return {
+    blob: {
+      ...blob,
+      content: filteredContent,
+      toolUseIdByCallId: remainingIds,
+      toolIdByCallId: remainingNames,
+      ...(wireNames === undefined
+        ? {}
+        : {
+            wireNameByToolId: Object.fromEntries(
+              Object.entries(wireNames).filter(([toolId]) => toolId !== "emit_result"),
+            ),
+          }),
+    },
+    remove: false,
+  };
 }
 
 function sanitizeAnthropicBlob(
