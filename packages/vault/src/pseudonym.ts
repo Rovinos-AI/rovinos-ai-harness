@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { hkdfSha256, hmacSha256 } from "@harness/crypto";
-import { Code, HarnessError, Id, Pseudonym, type KeyProvider } from "@harness/schemas";
+import {
+  Code,
+  HarnessError,
+  Id,
+  KEY_PROVIDER_KEY_BYTES,
+  Pseudonym,
+  type KeyProvider,
+} from "@harness/schemas";
 import { z } from "zod";
 import { normalize } from "./normalize.js";
 
@@ -18,6 +25,14 @@ function isKeyProvider(value: unknown): value is KeyProvider {
   );
 }
 
+function isValidMasterKey(value: unknown): value is Uint8Array {
+  try {
+    return value instanceof Uint8Array && value.byteLength === KEY_PROVIDER_KEY_BYTES;
+  } catch {
+    return false;
+  }
+}
+
 const PseudonymizeOptionsSchema = z
   .object({
     value: z.string(),
@@ -30,15 +45,26 @@ const PseudonymizeOptionsSchema = z
 /** Validated inputs for {@link pseudonymize}. */
 export type PseudonymizeOptions = z.infer<typeof PseudonymizeOptionsSchema>;
 
-class PseudonymError extends HarnessError {
-  readonly code = "pseudonym_input_invalid";
+type PseudonymErrorCode =
+  "pseudonym_input_invalid" | "pseudonym_key_invalid" | "pseudonym_key_unavailable";
 
-  constructor() {
-    super("Pseudonym input is invalid");
+const pseudonymErrorMessages: Record<PseudonymErrorCode, string> = {
+  pseudonym_input_invalid: "Pseudonym input is invalid",
+  pseudonym_key_invalid: "Pseudonym key is invalid",
+  pseudonym_key_unavailable: "Pseudonym key is unavailable",
+};
+
+class PseudonymError extends HarnessError {
+  readonly code: PseudonymErrorCode;
+
+  constructor(code: PseudonymErrorCode) {
+    super(pseudonymErrorMessages[code]);
+    this.code = code;
   }
 }
 
-function encodeBase32(bytes: Uint8Array): string {
+/** Encode bytes as lowercase RFC 4648 base32 without padding. */
+export function encodeBase32(bytes: Uint8Array): string {
   let output = "";
   let buffer = 0;
   let bits = 0;
@@ -64,37 +90,56 @@ function encodeBase32(bytes: Uint8Array): string {
  *
  * @param options - Identifier, global or run scope, key provider, and optional key version.
  * @returns A lowercase base32 pseudonym safe for a registered telemetry attribute.
- * @throws `pseudonym_input_invalid` for invalid input without echoing the identifier.
+ * @throws `pseudonym_input_invalid`, `pseudonym_key_invalid`, or
+ * `pseudonym_key_unavailable` without echoing the identifier or provider error.
  */
 export async function pseudonymize(options: PseudonymizeOptions): Promise<Pseudonym> {
   let parsed: ReturnType<typeof PseudonymizeOptionsSchema.safeParse>;
   try {
     parsed = PseudonymizeOptionsSchema.safeParse(options);
   } catch {
-    throw new PseudonymError();
+    throw new PseudonymError("pseudonym_input_invalid");
   }
   if (!parsed.success) {
-    throw new PseudonymError();
+    throw new PseudonymError("pseudonym_input_invalid");
   }
 
   const { value, scope, keyProvider, keyId } = parsed.data;
-  const selectedKeyId = keyId ?? keyProvider.currentKeyId();
-  if (!Code.safeParse(selectedKeyId).success) {
-    throw new PseudonymError();
+  const normalizedValue = normalize("user", value).trim();
+  if (normalizedValue.length === 0) {
+    throw new PseudonymError("pseudonym_input_invalid");
   }
 
-  const masterKey = await keyProvider.getKey(selectedKeyId);
-  const derivedKey = hkdfSha256(masterKey, PSEUDONYM_KEY_INFO);
-  const data = Buffer.from(`${scope}\0${normalize("user", value)}`, "utf8");
+  let selectedKeyId: string;
   try {
-    const mac = hmacSha256(derivedKey, data);
-    try {
-      return Pseudonym.parse(`p_${encodeBase32(mac.subarray(0, 16))}`);
-    } finally {
-      mac.fill(0);
-    }
+    selectedKeyId = keyId ?? keyProvider.currentKeyId();
+  } catch {
+    throw new PseudonymError("pseudonym_key_unavailable");
+  }
+  if (!Code.safeParse(selectedKeyId).success) {
+    throw new PseudonymError("pseudonym_input_invalid");
+  }
+
+  let masterKey: unknown;
+  try {
+    masterKey = await keyProvider.getKey(selectedKeyId);
+  } catch {
+    throw new PseudonymError("pseudonym_key_unavailable");
+  }
+  if (!isValidMasterKey(masterKey)) {
+    throw new PseudonymError("pseudonym_key_invalid");
+  }
+
+  const derivedKey = hkdfSha256(masterKey, PSEUDONYM_KEY_INFO);
+  let data: Buffer | undefined;
+  let mac: Uint8Array | undefined;
+  try {
+    data = Buffer.from(`${scope}\0${normalizedValue}`, "utf8");
+    mac = hmacSha256(derivedKey, data);
+    return Pseudonym.parse(`p_${encodeBase32(mac.subarray(0, 16))}`);
   } finally {
+    mac?.fill(0);
     derivedKey.fill(0);
-    data.fill(0);
+    data?.fill(0);
   }
 }
