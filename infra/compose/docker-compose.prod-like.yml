@@ -11,7 +11,7 @@ services:
     volumes:
       - harness-event-store:/var/lib/harness/event-store
       - harness-vault:/var/lib/harness/vault
-      - ${CONTROL_PLANE_CONFIG_FILE:?Set CONTROL_PLANE_CONFIG_FILE}:/run/harness/control-plane.yaml:ro
+      - ${CONTROL_PLANE_CONFIG_FILE:-../../test/fixtures/control-plane-empty.yaml}:/run/harness/control-plane.yaml:ro
     secrets:
       - control_plane_token
     restart: unless-stopped
@@ -48,6 +48,6 @@ volumes:
   harness-vault: {}
 secrets:
   control_plane_token:
-    file: ${CONTROL_PLANE_TOKEN_SECRET_FILE:?Set CONTROL_PLANE_TOKEN_SECRET_FILE}
+    file: ${CONTROL_PLANE_TOKEN_SECRET_FILE:-../../test/fixtures/empty-secret}
   sandbox_runner_token:
     file: ${SANDBOX_RUNNER_TOKEN_SECRET_FILE:-/dev/null}

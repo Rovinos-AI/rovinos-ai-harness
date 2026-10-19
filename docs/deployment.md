@@ -66,10 +66,11 @@ lookup HMACs without re-encrypting every value.
 ## Keys and secrets
 
 Do not put tokens, passwords, or encryption keys in Compose YAML or commit them in an env file.
-The `dev` and `prod-like` profiles require `CONTROL_PLANE_CONFIG_FILE` and
+The `dev` and `prod-like` profiles accept `CONTROL_PLANE_CONFIG_FILE` and
 `CONTROL_PLANE_TOKEN_SECRET_FILE`. The config file must reference the mounted token as
 `file:/run/secrets/control_plane_token` under `controlPlane.auth.tokens`; HTTP starts only after that
-token resolves successfully. Keep both host files protected and out of source control.
+token resolves successfully. Their safe defaults contain no configured tokens, so the harness fails
+closed until both values point to protected host files. Keep those files out of source control.
 The prod-like sandbox runner reads `SANDBOX_RUNNER_TOKEN_FILE` from the mounted
 `sandbox_runner_token` Docker secret. Set `SANDBOX_RUNNER_TOKEN_SECRET_FILE` to a protected host-side
 file before starting the prod-like profile; ensure the file is readable by the runner's runtime UID
