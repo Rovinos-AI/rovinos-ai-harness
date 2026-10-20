@@ -32,12 +32,12 @@ import type {
   ToolPort,
 } from "./ports.js";
 import type { WorkspaceSnapshotPort } from "@harness/sandbox";
-import type { UsageLedgerDelta } from "@harness/store";
 import { compactBeforeModelCall, type CompactionRuntimeOptions } from "./steps/compaction-step.js";
 import { recordRunCompleted, runStructuredFinalOutput } from "./steps/final-output.js";
 import type { ValueTransform } from "@harness/models";
 import type { z } from "zod";
 import type { QuotaIdentity, QuotaService } from "./quotas.js";
+import { modelQuotaHooks } from "./model-quota-hooks.js";
 
 /** Dependencies and initial input for a new run. */
 export interface RunLoopOptions extends NewRunMetadata, RunContinuationMetadata {
@@ -188,8 +188,7 @@ async function runLoopSteps(
   if (recovered !== undefined) {
     return recovered;
   }
-  const checkQuota = quotaCheck(options);
-  const usageUpdatesForCost = quotaUsageUpdates(options);
+  const quotaHooks = modelQuotaHooks(options);
   for (;;) {
     await drainSentinelTrips(options.recorder, events);
     const aborted = await suspendIfShutdown(options, events, execution);
@@ -203,7 +202,7 @@ async function runLoopSteps(
       budgets: options.budgets,
       now: options.clock.now(),
       recorder: options.recorder,
-      ...(checkQuota === undefined ? {} : { checkQuota }),
+      ...quotaHooks,
     });
     if (preflight.event !== undefined) {
       return preflight.event;
@@ -222,7 +221,7 @@ async function runLoopSteps(
       },
       goal: options.goal,
       deadlineTs: preflight.deadlineTs,
-      ...(usageUpdatesForCost === undefined ? {} : { usageUpdatesForCost }),
+      ...quotaHooks,
     });
     const prepared = await prepareModelStep(options, events, execution);
     if (prepared.event !== undefined) {
@@ -242,7 +241,7 @@ async function runLoopSteps(
         ...(options.role === undefined ? {} : { role: options.role }),
         ...(options.provider === undefined ? {} : { provider: options.provider }),
         ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
-        ...(usageUpdatesForCost === undefined ? {} : { usageUpdatesForCost }),
+        ...quotaHooks,
       },
       options.context,
     );
@@ -303,7 +302,7 @@ async function prepareModelStep(
       ? await options.context.build(events.slice())
       : await options.context.build(events.slice(), options.previousEventLogs);
   const contextMetadata = builtContext.metadata;
-  const checkQuota = quotaCheck(options);
+  const { checkQuota } = modelQuotaHooks(options);
   const preflight = await preflightModelBudget({
     budgetTracker: execution.budgetTracker,
     checkpointer: execution.checkpointer,
@@ -321,28 +320,6 @@ async function prepareModelStep(
   return stopped === undefined
     ? { context: builtContext.messages, contextMetadata, deadlineTs: preflight.deadlineTs }
     : { context: builtContext.messages, contextMetadata, ...preflight, event: stopped };
-}
-
-function quotaCheck(
-  options: RunLoopExecutionOptions,
-): (() => Promise<BudgetViolation | undefined>) | undefined {
-  const service = options.quotaService;
-  if (service === undefined) {
-    return undefined;
-  }
-  const identity = options.quotaIdentity ?? {};
-  return () => service.checkBeforeModelCall(identity);
-}
-
-function quotaUsageUpdates(
-  options: RunLoopExecutionOptions,
-): ((costMicros: number | undefined) => readonly UsageLedgerDelta[]) | undefined {
-  const service = options.quotaService;
-  if (service === undefined) {
-    return undefined;
-  }
-  const identity = options.quotaIdentity ?? {};
-  return (costMicros) => service.usageUpdatesForCost(identity, costMicros);
 }
 
 async function runToolCalls(

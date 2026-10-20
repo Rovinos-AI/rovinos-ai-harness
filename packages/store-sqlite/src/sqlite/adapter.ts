@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import Database from "better-sqlite3";
-import { fileURLToPath } from "node:url";
-import { Code } from "@harness/schemas";
+import type Database from "better-sqlite3";
 import type {
+  Code,
   Id,
   TraceId,
   Event as StoredEvent,
@@ -15,7 +14,6 @@ import {
   decodeSnapshot,
   encodeSnapshot,
   JsonContentCodec,
-  migrate,
   snapshotKeep,
   sqliteStoreOptionsSchema,
   systemClock,
@@ -23,13 +21,7 @@ import {
   waitForChangeWithPolling,
   watchEvents,
   watchRunSummaries,
-  InvalidEventError,
-  UsageLimitExceededError,
-  UsageLedgerPeriodSchema,
-  UsageLedgerRowSchema,
   parseUsageLedgerDeltas,
-  SeqConflictError,
-  StoreMigrationError,
   type ContentCodec,
   type Clock,
   type ChangeSubscription,
@@ -55,8 +47,6 @@ import {
 import {
   decodeStoredContent,
   eventFromRow,
-  initializeEncryptionMetadata,
-  validateEncryptionMetadata,
   insertSnapshot,
   parseStoredMeta,
   prepareRunSummaryQuery,
@@ -65,7 +55,7 @@ import {
   type RunRow,
   type RunSummaryRow,
 } from "./serialization.js";
-import { openReadOnlyDatabase } from "./read-only.js";
+import { openSqliteDatabase } from "./connection.js";
 import { deleteRunTransaction } from "./retention.js";
 import { SqliteApprovalNotifications } from "./approval-notifications.js";
 import { SqliteConfirmationStates } from "./confirmation-states.js";
@@ -76,7 +66,8 @@ import {
 } from "./execution-leases.js";
 import { findRunsByTrace } from "./traces.js";
 import { encodeEvents, type EncodedEvent } from "./event-encoding.js";
-import { assertExecutionLease, nextRunStatus } from "./append-helpers.js";
+import { writeSqliteAppend } from "./append-writer.js";
+import { readSqliteUsageLedger } from "./usage-ledger.js";
 import { countSqliteRowsByKey, reencryptSqliteBatch } from "./rotation.js";
 import { listSqliteRuns, prepareListRunsQuery, type ListRunsQueryParams } from "./run-listing.js";
 
@@ -142,39 +133,13 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     clock: Clock = systemClock,
   ) {
     const parsedOptions = sqliteStoreOptionsSchema.parse(options);
-    this.db = parsedOptions.readOnly ? openReadOnlyDatabase(path) : new Database(path);
+    this.db = openSqliteDatabase(path, codec, parsedOptions.readOnly, clock);
     this.codec = codec;
     this.snapshotKeep = snapshotKeep({ snapshotKeep: parsedOptions.snapshotKeep });
     this.pollIntervalMs = parsedOptions.pollIntervalMs;
-    try {
-      if (!parsedOptions.readOnly) {
-        this.db.pragma("journal_mode = WAL");
-        this.db.pragma("synchronous = NORMAL");
-        migrate(this.db, "sqlite", {
-          appliedAt: clock.now(),
-          migrationDirectory: fileURLToPath(new URL("../../migrations/sqlite/", import.meta.url)),
-        });
-        initializeEncryptionMetadata(this.db, this.codec.encrypted);
-      } else {
-        if (
-          migrate(this.db, "sqlite", {
-            dryRun: true,
-            migrationDirectory: fileURLToPath(new URL("../../migrations/sqlite/", import.meta.url)),
-          }).length > 0
-        ) {
-          throw new StoreMigrationError("schema_migration_pending");
-        }
-        validateEncryptionMetadata(this.db, this.codec.encrypted);
-      }
-      this.db.pragma("busy_timeout = 5000");
-      this.db.pragma("foreign_keys = ON");
-      this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
-      this.approvalNotifications = new SqliteApprovalNotifications(this.db);
-      this.confirmationStates = new SqliteConfirmationStates(this.db);
-    } catch (error) {
-      this.db.close();
-      throw error;
-    }
+    this.outbox = new SqliteOutboxReader(this.db, this.codec, clock);
+    this.approvalNotifications = new SqliteApprovalNotifications(this.db);
+    this.confirmationStates = new SqliteConfirmationStates(this.db);
 
     this.insertRun = this.db.prepare<[Id, number, number]>(
       "INSERT INTO runs (run_id, created_at, status, next_seq, last_ts) VALUES (?, ?, 'pending', 0, ?)",
@@ -269,7 +234,8 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   async appendWithUsage(
     ...args: Parameters<EventStore["appendWithUsage"]>
   ): Promise<{ nextSeq: number }> {
-    const [runId, events, expectedSeq, usageUpdates, leaseOwner] = args;
+    const [runId, events, expectedSeq, options] = args;
+    const { usageUpdates, leaseOwner } = options;
     return this.writeAppend({
       runId,
       encoded: await encodeEvents(this.codec, runId, events, expectedSeq),
@@ -285,39 +251,13 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     period: UsageLedgerPeriod,
     periodStarts: readonly number[],
   ): Promise<UsageLedgerRow[]> {
-    const parsedQuotaId = Code.safeParse(quotaId);
-    const parsedPeriod = UsageLedgerPeriodSchema.safeParse(period);
-    if (
-      !parsedQuotaId.success ||
-      !parsedPeriod.success ||
-      periodStarts.some((periodStart) => !Number.isSafeInteger(periodStart) || periodStart < 0)
-    ) {
-      return Promise.reject(new InvalidEventError([["quotaId"]]));
-    }
-    try {
-      return Promise.resolve(
-        periodStarts.flatMap((periodStart) => {
-          const row = this.readUsageLedgerQuery.get(
-            parsedQuotaId.data,
-            parsedPeriod.data,
-            periodStart,
-          );
-          return row === undefined
-            ? []
-            : [
-                UsageLedgerRowSchema.parse({
-                  quotaId: row.quota_id,
-                  period: row.period,
-                  periodStart: row.period_start,
-                  costMicros: row.cost_micros,
-                  runsStarted: row.runs_started,
-                }),
-              ];
-        }),
-      );
-    } catch (error) {
-      return Promise.reject(storeError(error));
-    }
+    return readSqliteUsageLedger({
+      quotaId,
+      period,
+      periodStarts,
+      readRow: (parsedQuotaId, parsedPeriod, periodStart) =>
+        this.readUsageLedgerQuery.get(parsedQuotaId, parsedPeriod, periodStart),
+    });
   }
 
   /** {@inheritDoc EventStore.claimRunExecution} */
@@ -343,80 +283,27 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     readonly usageUpdates?: readonly UsageLedgerDelta[];
     readonly leaseOwner?: Id;
   }): { nextSeq: number } {
-    const { runId, encoded, expectedSeq, encodedSnapshot, leaseOwner } = options;
-    const validated = encoded.map(({ event }) => event);
-
-    try {
-      const appendTransaction = this.db.transaction(() => {
-        assertExecutionLease(this.db, runId, leaseOwner);
-        const existingRun = this.getRun.get(runId);
-        const actualSeq = existingRun?.next_seq ?? 0;
-        if (actualSeq !== expectedSeq) {
-          throw new SeqConflictError(expectedSeq, actualSeq);
-        }
-
-        const first = validated[0];
-        const last = validated.at(-1);
-        if (first === undefined || last === undefined) {
-          throw new InvalidEventError([[]]);
-        }
-        if (existingRun === undefined) {
-          if (first.type !== "run_created") {
-            throw new InvalidEventError([[0, "type"]]);
-          }
-          this.insertRun.run(runId, first.ts, first.ts);
-        }
-
-        for (const { event, metaJson, blob, keyId } of encoded) {
-          this.insertEvent.run(
-            runId,
-            event.seq,
-            event.ts,
-            event.type,
-            event.traceId,
-            event.spanId,
-            event.segmentId,
-            metaJson,
-            blob,
-            keyId,
-          );
-        }
-
-        for (const delta of options.usageUpdates ?? []) {
-          const current = this.readUsageLedgerQuery.get(
-            delta.quotaId,
-            delta.period,
-            delta.periodStart,
-          );
-          const currentRuns = current?.runs_started ?? 0;
-          if (
-            delta.maxRunsStarted !== undefined &&
-            currentRuns + delta.runsStarted > delta.maxRunsStarted
-          ) {
-            throw new UsageLimitExceededError(delta.quotaId);
-          }
-          this.upsertUsageLedger.run(
-            delta.quotaId,
-            delta.period,
-            delta.periodStart,
-            delta.costMicros,
-            delta.runsStarted,
-          );
-        }
-
-        const status = nextRunStatus(existingRun?.status, validated);
-        this.updateRun.run(expectedSeq + validated.length, status, last.ts, runId);
-        if (encodedSnapshot !== undefined) {
-          insertSnapshot(this.insertSnapshot, encodedSnapshot);
-          this.pruneSnapshots.run(runId, runId, this.snapshotKeep);
-        }
-      });
-      appendTransaction.immediate();
-      this.changeEmitter.notify(runId);
-      return { nextSeq: expectedSeq + validated.length };
-    } catch (error) {
-      throw storeError(error);
-    }
+    return writeSqliteAppend({
+      db: this.db,
+      notifyChange: (runId) => {
+        this.changeEmitter.notify(runId);
+      },
+      snapshotKeep: this.snapshotKeep,
+      commands: {
+        getRun: (runId) => this.getRun.get(runId),
+        insertRun: (runId, createdAt, lastTs) => this.insertRun.run(runId, createdAt, lastTs),
+        insertEvent: (...args) => this.insertEvent.run(...args),
+        readUsageLedger: (quotaId, period, periodStart) =>
+          this.readUsageLedgerQuery.get(quotaId, period, periodStart),
+        upsertUsageLedger: (...args) => this.upsertUsageLedger.run(...args),
+        updateRun: (...args) => this.updateRun.run(...args),
+        insertSnapshot: (snapshot) => {
+          insertSnapshot(this.insertSnapshot, snapshot);
+        },
+        pruneSnapshots: (runId, keep) => this.pruneSnapshots.run(runId, runId, keep),
+      },
+      append: options,
+    });
   }
 
   /** {@inheritDoc EventStore.read} */

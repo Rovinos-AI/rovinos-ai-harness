@@ -21,11 +21,7 @@ import {
   type Snapshot,
   type WorkspaceRef,
 } from "@harness/schemas";
-import {
-  SeqConflictError,
-  type EventStore,
-  type UsageLedgerDelta,
-} from "@harness/store";
+import { SeqConflictError, type EventStore, type UsageLedgerDelta } from "@harness/store";
 import {
   sentinelTripQueue,
   setActiveSpanAttribute,
@@ -306,13 +302,10 @@ export class RunRecorder {
       const result =
         usageUpdates.length === 0
           ? await this.store.append(this.runId, newEvents, expectedSeq, this.leaseOwner)
-          : await this.store.appendWithUsage(
-              this.runId,
-              newEvents,
-              expectedSeq,
+          : await this.store.appendWithUsage(this.runId, newEvents, expectedSeq, {
               usageUpdates,
-              this.leaseOwner,
-            );
+              ...(this.leaseOwner === undefined ? {} : { leaseOwner: this.leaseOwner }),
+            });
       this.nextSequence = result.nextSeq;
     } catch (error) {
       if (error instanceof SeqConflictError) {

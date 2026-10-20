@@ -32,11 +32,13 @@ totals. If a limit has been reached, it records `budget_exceeded` with
 `budget: quota`, marks the run failed, and does not issue another model call.
 Because final cost is reported by the model response, a response already in
 flight can bring a period above its configured limit; that usage is still
-recorded atomically and subsequent model calls are stopped.
+recorded atomically and subsequent model calls are stopped. Concurrent runs may
+all pass the pre-call check before any response is charged, so their in-flight
+cost can overshoot a shared limit; this is not a spend reservation.
 
-`maxConcurrentRuns` is evaluated at worker claim time using the number of
-matching runs in `running` status. The runtime service exposes this check, but
-worker claim integration is not wired until task 24.3 (#232).
+`maxConcurrentRuns` is currently inert: the worker queue does not yet call the
+quota claim check. It will be enforced atomically at worker claim time by task
+24.3 (#232); until then, configuring this field does not limit concurrent runs.
 
 Quota rejections increment `harness.quota.rejections` with the configured quota
 code as the only attribute. Principal identities are not included in metrics.

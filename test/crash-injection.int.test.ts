@@ -297,14 +297,14 @@ class BoundaryRecordingStore implements EventStore {
   }
 
   appendWithUsage(...args: Parameters<EventStore["appendWithUsage"]>) {
-    const [forRun, events, expectedSeq, usageUpdates, leaseOwner] = args;
+    const [forRun, events, expectedSeq, options] = args;
     this.boundaries.push({
       runId: forRun,
       method: "appendWithUsage",
       eventTypes: events.map(({ type }) => type),
       callIds: [],
     });
-    return this.inner.appendWithUsage(forRun, events, expectedSeq, usageUpdates, leaseOwner);
+    return this.inner.appendWithUsage(forRun, events, expectedSeq, options);
   }
 
   readUsageLedger(...args: Parameters<EventStore["readUsageLedger"]>) {

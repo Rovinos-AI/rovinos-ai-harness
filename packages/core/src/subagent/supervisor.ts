@@ -88,10 +88,7 @@ export interface SubagentSupervisorOptions {
   readonly parentTools: ToolPort;
   readonly runChild: SubagentRunner;
   readonly resumeChild: SubagentRunner;
-  readonly assertQuotaStart?: (
-    role: ResolvedRole,
-    parentRunId: Id,
-  ) => Promise<void>;
+  readonly assertQuotaStart?: (role: ResolvedRole, parentRunId: Id) => Promise<void>;
   readonly parentSpanContext?: () => SpanContext | undefined;
 }
 

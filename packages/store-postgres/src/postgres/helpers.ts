@@ -27,6 +27,7 @@ import {
   UsageLimitExceededError,
   isPreservedStoreError,
 } from "@harness/store/adapter-internal";
+import { insertPostgresEventBatches } from "./event-insert.js";
 import { insertSnapshot } from "./snapshot.js";
 
 const envelopeKeys = new Set(["runId", "seq", "ts", "type", "traceId", "spanId", "segmentId"]);
@@ -258,15 +259,6 @@ export function runListPage(
   return nextCursor === undefined ? { runs } : { runs, nextCursor };
 }
 
-function batchPlaceholders(offset: number): string {
-  return `(${Array.from({ length: 10 }, (_, index) => {
-    const position = `$${(offset + index + 1).toString()}`;
-    return index === 7 ? `${position}::jsonb` : position;
-  }).join(", ")})`;
-}
-
-const MAX_EVENTS_PER_INSERT = 5_000;
-
 function nextStatus(currentStatus: string, encoded: readonly EncodedEvent[]): RunStatus {
   const parsed = RunStatus.safeParse(currentStatus);
   if (!parsed.success) {
@@ -281,45 +273,24 @@ function nextStatus(currentStatus: string, encoded: readonly EncodedEvent[]): Ru
   return status;
 }
 
-async function insertEventBatches(
+async function applyUsageUpdates(
   client: PoolClient,
-  encoded: readonly EncodedEvent[],
-  options: { runId: Id; expectedSeq: number; status: RunStatus; lastTs: number },
+  usageUpdates: readonly UsageLedgerDelta[],
 ): Promise<void> {
-  const { runId, expectedSeq, status, lastTs } = options;
-  for (let offset = 0; offset < encoded.length; offset += MAX_EVENTS_PER_INSERT) {
-    const batch = encoded.slice(offset, offset + MAX_EVENTS_PER_INSERT);
-    const values: (number | string | null)[] = [];
-    const valueRows = batch.map(({ event, meta, blob, keyId }, index) => {
-      values.push(
-        runId,
-        event.seq,
-        event.ts,
-        event.type,
-        event.traceId,
-        event.spanId,
-        event.segmentId,
-        meta,
-        blob,
-        keyId,
-      );
-      return batchPlaceholders(index * 10);
-    });
-    const insert = `INSERT INTO events (run_id, seq, ts, type, trace_id, span_id, segment_id, meta, content_blob, key_id)
-      VALUES ${valueRows.join(", ")}`;
-    if (offset + batch.length === encoded.length) {
-      const updateOffset = values.length;
-      values.push(expectedSeq + encoded.length, status, lastTs);
-      await client.query(
-        `WITH inserted_events AS (${insert}
-          RETURNING run_id
-        )
-        UPDATE runs SET next_seq = $${(updateOffset + 1).toString()}, status = $${(updateOffset + 2).toString()}, last_ts = $${(updateOffset + 3).toString()}
-        WHERE run_id IN (SELECT run_id FROM inserted_events)`,
-        values,
-      );
-    } else {
-      await client.query(insert, values);
+  for (const delta of usageUpdates) {
+    const result = await client.query<{ quota_id: string }>(
+      "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, runs_started) SELECT $1, $2, $3, $4, $5 WHERE $6::BIGINT IS NULL OR $5 <= $6 ON CONFLICT (quota_id, period, period_start) DO UPDATE SET cost_micros = usage_ledger.cost_micros + EXCLUDED.cost_micros, runs_started = usage_ledger.runs_started + EXCLUDED.runs_started WHERE $6::BIGINT IS NULL OR usage_ledger.runs_started + EXCLUDED.runs_started <= $6 RETURNING quota_id",
+      [
+        delta.quotaId,
+        delta.period,
+        delta.periodStart,
+        delta.costMicros,
+        delta.runsStarted,
+        delta.maxRunsStarted ?? null,
+      ],
+    );
+    if (result.rows.length !== 1) {
+      throw new UsageLimitExceededError(delta.quotaId);
     }
   }
 }
@@ -378,28 +349,13 @@ export async function appendTransaction(
     }
 
     const status = nextStatus(run.status, encoded);
-    await insertEventBatches(client, encoded, {
+    await insertPostgresEventBatches(client, encoded, {
       runId,
       expectedSeq,
       status,
       lastTs: last.ts,
     });
-    for (const delta of usageUpdates ?? []) {
-      const result = await client.query<{ quota_id: string }>(
-        "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, runs_started) SELECT $1, $2, $3, $4, $5 WHERE $6::BIGINT IS NULL OR $5 <= $6 ON CONFLICT (quota_id, period, period_start) DO UPDATE SET cost_micros = usage_ledger.cost_micros + EXCLUDED.cost_micros, runs_started = usage_ledger.runs_started + EXCLUDED.runs_started WHERE $6::BIGINT IS NULL OR usage_ledger.runs_started + EXCLUDED.runs_started <= $6 RETURNING quota_id",
-        [
-          delta.quotaId,
-          delta.period,
-          delta.periodStart,
-          delta.costMicros,
-          delta.runsStarted,
-          delta.maxRunsStarted ?? null,
-        ],
-      );
-      if (result.rows.length !== 1) {
-        throw new UsageLimitExceededError(delta.quotaId);
-      }
-    }
+    await applyUsageUpdates(client, usageUpdates ?? []);
     if (encodedSnapshot !== undefined) {
       await insertSnapshot(client, encodedSnapshot);
       await client.query(

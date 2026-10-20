@@ -189,8 +189,8 @@ export async function readStoredQuotaIdentity(
     if (event.type === "run_created" && event.requestedBy !== undefined) {
       requestedBy = event.requestedBy;
     }
-    if (role === undefined && event.type === "model_request" && event.role !== undefined) {
-      role = event.role;
+    if (role === undefined && event.type === "run_created" && event.quotaRole !== undefined) {
+      role = event.quotaRole;
     }
   }
   return {

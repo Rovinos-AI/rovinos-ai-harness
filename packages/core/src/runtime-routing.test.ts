@@ -572,9 +572,7 @@ describe("createRuntime model routing", () => {
       complete: () => {
         modelCalls += 1;
         return Promise.resolve({
-          parts: [
-            { type: "tool_call", callId, toolId: "quota_tool", args: {} },
-          ],
+          parts: [{ type: "tool_call", callId, toolId: "quota_tool", args: {} }],
           usage: { inputTokens: 1, outputTokens: 0, costMicros: 10 },
           finishReason: "tool_calls",
           provider: "local",
@@ -620,7 +618,12 @@ describe("createRuntime model routing", () => {
       expect(modelCalls).toBe(1);
       expect(result.status).toBe("failed");
       expect(result.events).toContainEqual(
-        expect.objectContaining({ type: "budget_exceeded", budget: "quota", limit: 10, observed: 10 }),
+        expect.objectContaining({
+          type: "budget_exceeded",
+          budget: "quota",
+          limit: 10,
+          observed: 10,
+        }),
       );
       const response = result.events.find((event) => event.type === "model_response");
       if (response?.type !== "model_response") {

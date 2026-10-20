@@ -1,15 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  HarnessError,
-  type Code,
-  type Principal,
-  type QuotaConfig,
-} from "@harness/schemas";
-import {
-  type EventStore,
-  type UsageLedgerDelta,
-  type UsageLedgerPeriod,
-} from "@harness/store";
+import { HarnessError, type Code, type Principal, type QuotaConfig } from "@harness/schemas";
+import { type EventStore, type UsageLedgerDelta, type UsageLedgerPeriod } from "@harness/store";
 import { countQuotaRejection } from "@harness/telemetry";
 import type { Clock } from "./recorder.js";
 import type { BudgetViolation } from "./budgets.js";
@@ -35,7 +26,12 @@ function periodStart(now: number, period: UsageLedgerPeriod): number {
     throw new RangeError("Quota clock must return a nonnegative epoch-millisecond value.");
   }
   if (period === "hour") {
-    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), date.getUTCHours());
+    return Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate(),
+      date.getUTCHours(),
+    );
   }
   if (period === "day") {
     return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
@@ -164,10 +160,7 @@ export class QuotaService {
   }
 
   /** Reject a worker claim when the quota's active-run count has reached its limit. */
-  assertCanClaim(
-    identity: QuotaIdentity,
-    activeRunsByQuota: ReadonlyMap<Code, number>,
-  ): void {
+  assertCanClaim(identity: QuotaIdentity, activeRunsByQuota: ReadonlyMap<Code, number>): void {
     for (const quota of this.matching(identity)) {
       if (
         quota.maxConcurrentRuns !== undefined &&

@@ -2,7 +2,7 @@
 import {
   Code,
   type Id,
-  TraceId,
+  type TraceId,
   type Event as StoredEvent,
   type NewEvent,
   type Snapshot,
@@ -21,7 +21,6 @@ import {
   RunExecutionLeaseLostError,
   SeqConflictError,
   StoreUnavailableError,
-  UsageLimitExceededError,
 } from "./errors.js";
 import {
   type EventStore,
@@ -38,13 +37,6 @@ import {
 } from "./types.js";
 import { z } from "zod";
 import {
-  claimMemoryIdempotencyKey,
-  deleteMemoryIdempotencyKeyClaims,
-  releaseMemoryIdempotencyKey,
-  takeoverMemoryIdempotencyKey,
-  type MemoryIdempotencyClaim,
-} from "./idempotency.js";
-import {
   ChangeEmitter,
   summaryFromEvents,
   watchEvents,
@@ -55,24 +47,17 @@ import {
   listMemoryRunsSafely,
   validateEventBatch,
 } from "./memory-helpers.js";
+import { MemoryStoreAuxiliary } from "./memory-auxiliary.js";
+import { memoryUsageLedgerKey, stageMemoryUsageUpdates } from "./memory-usage.js";
 
 /** In-memory reference implementation of the append-only event store contract. */
 export class InMemoryEventStore implements EventStore {
   private readonly runs = new Map<Id, StoredEvent[]>();
   private readonly changeEmitter = new ChangeEmitter();
-  private readonly traceRuns = new Map<TraceId, Map<Id, number>>();
   private readonly snapshots = new Map<Id, EncodedSnapshot[]>();
-  private readonly outboxEvents: { globalSeq: number; event: StoredEvent }[] = [];
-  private readonly sinkCursors = new Map<string, number>();
-  private readonly approvalNotifications = new Map<
-    Id,
-    { readonly runId: Id; readonly claimedAt: number; readonly sentAt?: number }
-  >();
-  private readonly confirmationStates = new Map<string, number>();
-  private readonly idempotencyKeys = new Map<string, MemoryIdempotencyClaim>();
+  private readonly auxiliary = new MemoryStoreAuxiliary();
   private readonly executionLeases = new Map<Id, { readonly owner: Id; expiresAt: number }>();
   private readonly usageLedger = new Map<string, UsageLedgerRow>();
-  private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
 
@@ -128,10 +113,10 @@ export class InMemoryEventStore implements EventStore {
     runId: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
-    usageUpdates: readonly UsageLedgerDelta[],
-    leaseOwner?: Id,
+    options: Parameters<EventStore["appendWithUsage"]>[3],
   ): Promise<{ nextSeq: number }> {
     try {
+      const { usageUpdates, leaseOwner } = options;
       return Promise.resolve(
         this.appendEvents({
           runId,
@@ -160,7 +145,15 @@ export class InMemoryEventStore implements EventStore {
     }
     return Promise.resolve(
       periods.flatMap((periodStart) => {
-        const row = this.usageLedger.get(`${parsedQuotaId.data}:${parsedPeriod.data}:${periodStart}`);
+        const row = this.usageLedger.get(
+          memoryUsageLedgerKey({
+            quotaId: parsedQuotaId.data,
+            period: parsedPeriod.data,
+            periodStart,
+            costMicros: 0,
+            runsStarted: 0,
+          }),
+        );
         return row === undefined ? [] : [UsageLedgerRowSchema.parse(row)];
       }),
     );
@@ -193,34 +186,16 @@ export class InMemoryEventStore implements EventStore {
       throw new InvalidEventError([["snapshotId"]]);
     }
 
-    const updatedUsage = new Map<string, UsageLedgerRow>();
-    for (const delta of options.usageUpdates ?? []) {
-      const key = `${delta.quotaId}:${delta.period}:${delta.periodStart}`;
-      const previous =
-        updatedUsage.get(key) ??
-        this.usageLedger.get(key) ?? {
-          quotaId: delta.quotaId,
-          period: delta.period,
-          periodStart: delta.periodStart,
-          costMicros: 0,
-          runsStarted: 0,
-        };
-      const next = UsageLedgerRowSchema.parse({
-        ...previous,
-        costMicros: previous.costMicros + delta.costMicros,
-        runsStarted: previous.runsStarted + delta.runsStarted,
-      });
-      if (delta.maxRunsStarted !== undefined && next.runsStarted > delta.maxRunsStarted) {
-        throw new UsageLimitExceededError(delta.quotaId);
-      }
-      updatedUsage.set(key, next);
-    }
+    const updatedUsage = stageMemoryUsageUpdates({
+      ledger: this.usageLedger,
+      updates: options.usageUpdates ?? [],
+    });
 
     this.runs.set(runId, [...stored, ...validated]);
     for (const [key, row] of updatedUsage) {
       this.usageLedger.set(key, row);
     }
-    this.recordTraceRuns(runId, validated);
+    this.auxiliary.recordTraceRuns(runId, validated);
     if (encodedSnapshot !== undefined) {
       this.snapshots.set(
         runId,
@@ -259,24 +234,6 @@ export class InMemoryEventStore implements EventStore {
       this.executionLeases.delete(runId);
     }
     return Promise.resolve();
-  }
-
-  private recordTraceRuns(runId: Id, events: readonly StoredEvent[]): void {
-    for (const event of events) {
-      let runs = this.traceRuns.get(event.traceId);
-      if (runs === undefined) {
-        runs = new Map<Id, number>();
-        this.traceRuns.set(event.traceId, runs);
-      }
-      if (!runs.has(runId)) {
-        runs.set(runId, this.nextGlobalSeq);
-      }
-      this.outboxEvents.push({
-        globalSeq: this.nextGlobalSeq + 1,
-        event: structuredClone(event),
-      });
-      this.nextGlobalSeq += 1;
-    }
   }
 
   /** {@inheritDoc EventStore.latestSnapshot} */
@@ -371,23 +328,7 @@ export class InMemoryEventStore implements EventStore {
     this.runs.delete(runId);
     this.snapshots.delete(runId);
     this.executionLeases.delete(runId);
-    deleteMemoryIdempotencyKeyClaims(this.idempotencyKeys, runId);
-    for (const [approvalId, notification] of this.approvalNotifications) {
-      if (notification.runId === runId) {
-        this.approvalNotifications.delete(approvalId);
-      }
-    }
-    for (let index = this.outboxEvents.length - 1; index >= 0; index -= 1) {
-      if (this.outboxEvents[index]?.event.runId === runId) {
-        this.outboxEvents.splice(index, 1);
-      }
-    }
-    for (const [traceId, runs] of this.traceRuns) {
-      runs.delete(runId);
-      if (runs.size === 0) {
-        this.traceRuns.delete(traceId);
-      }
-    }
+    this.auxiliary.deleteRun(runId);
     return Promise.resolve(events.length);
   }
 
@@ -398,51 +339,17 @@ export class InMemoryEventStore implements EventStore {
 
   /** {@inheritDoc EventStore.findRunsByTrace} */
   findRunsByTrace(traceId: TraceId): Promise<Id[]> {
-    if (!TraceId.safeParse(traceId).success) {
-      return Promise.reject(new InvalidEventError([["traceId"]]));
-    }
-    const runs = this.traceRuns.get(traceId);
-    if (runs === undefined) {
-      return Promise.resolve([]);
-    }
-    return Promise.resolve(
-      [...runs.entries()].sort((left, right) => left[1] - right[1]).map(([runId]) => runId),
-    );
+    return this.auxiliary.findRunsByTrace(traceId);
   }
 
   /** {@inheritDoc EventStore.fetchOutbox} */
   fetchOutbox(sinkId: Code, limit: number): Promise<{ events: StoredEvent[]; cursor: number }> {
-    const parsedSinkId = Code.safeParse(sinkId);
-    if (!parsedSinkId.success) {
-      return Promise.reject(new InvalidEventError([["sinkId"]]));
-    }
-    if (!Number.isSafeInteger(limit) || limit < 1) {
-      return Promise.reject(new InvalidEventError([["limit"]]));
-    }
-    const lastAcked = this.sinkCursors.get(parsedSinkId.data) ?? 0;
-    const batch = this.outboxEvents
-      .filter(({ globalSeq }) => globalSeq > lastAcked)
-      .slice(0, limit);
-    return Promise.resolve({
-      events: batch.map(({ event }) => structuredClone(event)),
-      cursor: batch.at(-1)?.globalSeq ?? lastAcked,
-    });
+    return this.auxiliary.fetchOutbox(sinkId, limit);
   }
 
   /** {@inheritDoc EventStore.ackOutbox} */
   ackOutbox(sinkId: Code, cursor: number): Promise<void> {
-    const parsedSinkId = Code.safeParse(sinkId);
-    if (!parsedSinkId.success) {
-      return Promise.reject(new InvalidEventError([["sinkId"]]));
-    }
-    if (!Number.isSafeInteger(cursor) || cursor < 0) {
-      return Promise.reject(new InvalidEventError([["cursor"]]));
-    }
-    const previous = this.sinkCursors.get(parsedSinkId.data) ?? 0;
-    if (cursor > previous) {
-      this.sinkCursors.set(parsedSinkId.data, cursor);
-    }
-    return Promise.resolve();
+    return this.auxiliary.ackOutbox(sinkId, cursor);
   }
 
   /** {@inheritDoc EventStore.claimApprovalNotification} */
@@ -452,17 +359,7 @@ export class InMemoryEventStore implements EventStore {
     claimedAt: number,
     leaseMs: number,
   ): Promise<boolean> {
-    const current = this.approvalNotifications.get(approvalId);
-    if (
-      current !== undefined &&
-      (current.runId !== runId ||
-        current.sentAt !== undefined ||
-        current.claimedAt > claimedAt - leaseMs)
-    ) {
-      return Promise.resolve(false);
-    }
-    this.approvalNotifications.set(approvalId, { runId, claimedAt });
-    return Promise.resolve(true);
+    return this.auxiliary.claimApprovalNotification(approvalId, runId, claimedAt, leaseMs);
   }
 
   markApprovalNotificationSent(
@@ -471,48 +368,22 @@ export class InMemoryEventStore implements EventStore {
     claimedAt: number,
     sentAt: number,
   ): Promise<boolean> {
-    const current = this.approvalNotifications.get(approvalId);
-    if (
-      current?.runId !== runId ||
-      current.claimedAt !== claimedAt ||
-      current.sentAt !== undefined
-    ) {
-      return Promise.resolve(false);
-    }
-    this.approvalNotifications.set(approvalId, { runId, claimedAt, sentAt });
-    return Promise.resolve(true);
+    return this.auxiliary.markApprovalNotificationSent(approvalId, runId, claimedAt, sentAt);
   }
 
   /** {@inheritDoc EventStore.releaseApprovalNotification} */
   releaseApprovalNotification(approvalId: Id, runId: Id, claimedAt: number): Promise<void> {
-    const current = this.approvalNotifications.get(approvalId);
-    if (
-      current?.runId === runId &&
-      current.claimedAt === claimedAt &&
-      current.sentAt === undefined
-    ) {
-      this.approvalNotifications.delete(approvalId);
-    }
-    return Promise.resolve();
+    return this.auxiliary.releaseApprovalNotification(approvalId, runId, claimedAt);
   }
 
   /** {@inheritDoc EventStore.consumeConfirmationState} */
   consumeConfirmationState(stateId: string, expiresAt: number, now: number): Promise<boolean> {
-    for (const [consumedStateId, consumedExpiry] of this.confirmationStates) {
-      if (consumedExpiry <= now) {
-        this.confirmationStates.delete(consumedStateId);
-      }
-    }
-    if (this.confirmationStates.has(stateId)) {
-      return Promise.resolve(false);
-    }
-    this.confirmationStates.set(stateId, expiresAt);
-    return Promise.resolve(true);
+    return this.auxiliary.consumeConfirmationState(stateId, expiresAt, now);
   }
 
   /** {@inheritDoc EventStore.claimIdempotencyKey} */
   claimIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id, createdAt: number): Promise<Id> {
-    return claimMemoryIdempotencyKey(this.idempotencyKeys, keyHash, runId, createdAt);
+    return this.auxiliary.claimIdempotencyKey(keyHash, runId, createdAt);
   }
 
   /** {@inheritDoc EventStore.takeoverIdempotencyKey} */
@@ -520,14 +391,12 @@ export class InMemoryEventStore implements EventStore {
     keyHash: IdempotencyKeyHash,
     options: Parameters<EventStore["takeoverIdempotencyKey"]>[1],
   ): Promise<boolean> {
-    return Promise.resolve().then(() =>
-      takeoverMemoryIdempotencyKey(this.idempotencyKeys, this.runs, keyHash, options),
-    );
+    return this.auxiliary.takeoverIdempotencyKey(keyHash, options, this.runs);
   }
 
   /** {@inheritDoc EventStore.releaseIdempotencyKey} */
   releaseIdempotencyKey(keyHash: IdempotencyKeyHash, runId: Id): Promise<void> {
-    return releaseMemoryIdempotencyKey(this.idempotencyKeys, keyHash, runId);
+    return this.auxiliary.releaseIdempotencyKey(keyHash, runId);
   }
 
   /** {@inheritDoc EventStore.close} */

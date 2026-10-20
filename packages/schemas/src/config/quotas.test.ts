@@ -25,7 +25,9 @@ describe("QuotaConfigSchema", () => {
 
   it("rejects unknown fields, invalid codes, and non-positive limits", () => {
     expect(QuotaConfigSchema.safeParse({ id: "Bad", match: {} }).success).toBe(false);
-    expect(QuotaConfigSchema.safeParse({ id: "quota", match: {}, extra: true }).success).toBe(false);
+    expect(QuotaConfigSchema.safeParse({ id: "quota", match: {}, extra: true }).success).toBe(
+      false,
+    );
     expect(
       QuotaConfigSchema.safeParse({
         id: "quota",

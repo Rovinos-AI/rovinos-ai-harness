@@ -75,7 +75,8 @@ export class PostgresEventWriter {
   async appendWithUsage(
     ...args: Parameters<EventStore["appendWithUsage"]>
   ): Promise<{ nextSeq: number }> {
-    const [runId, events, expectedSeq, usageUpdates, leaseOwner] = args;
+    const [runId, events, expectedSeq, options] = args;
+    const { usageUpdates, leaseOwner } = options;
     this.assertWritable();
     const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
     return this.appendEncoded({

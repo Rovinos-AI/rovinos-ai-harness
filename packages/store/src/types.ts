@@ -38,6 +38,14 @@ export const UsageLedgerRowSchema = z
 /** Persisted quota usage for one period. */
 export type UsageLedgerRow = z.infer<typeof UsageLedgerRowSchema>;
 
+/** Options for atomically appending events and applying quota usage. */
+export interface UsageAppendOptions {
+  /** Quota usage increments committed with the appended events. */
+  readonly usageUpdates: readonly UsageLedgerDelta[];
+  /** Optional execution lease owner. */
+  readonly leaseOwner?: Id;
+}
+
 /** Validate and combine increments targeting the same quota period. */
 export function parseUsageLedgerDeltas(input: unknown): UsageLedgerDelta[] {
   const parsed = UsageLedgerDeltaSchema.array().safeParse(input);
@@ -52,14 +60,9 @@ export function parseUsageLedgerDeltas(input: unknown): UsageLedgerDelta[] {
   }
   const combined = new Map<string, UsageLedgerDelta>();
   for (const delta of parsed.data) {
-    const key = `${delta.quotaId}:${delta.period}:${delta.periodStart}`;
+    const key = `${delta.quotaId}:${delta.period}:${String(delta.periodStart)}`;
     const previous = combined.get(key);
-    const maxRunsStarted =
-      previous?.maxRunsStarted === undefined
-        ? delta.maxRunsStarted
-        : delta.maxRunsStarted === undefined
-          ? previous.maxRunsStarted
-          : Math.min(previous.maxRunsStarted, delta.maxRunsStarted);
+    const maxRunsStarted = minimumDefined(previous?.maxRunsStarted, delta.maxRunsStarted);
     combined.set(
       key,
       UsageLedgerDeltaSchema.parse({
@@ -71,6 +74,16 @@ export function parseUsageLedgerDeltas(input: unknown): UsageLedgerDelta[] {
         ...(maxRunsStarted === undefined ? {} : { maxRunsStarted }),
       }),
     );
+  }
+
+  function minimumDefined(left: number | undefined, right: number | undefined): number | undefined {
+    if (left === undefined) {
+      return right;
+    }
+    if (right === undefined) {
+      return left;
+    }
+    return Math.min(left, right);
   }
   return [...combined.values()];
 }
@@ -208,8 +221,7 @@ export interface EventStore {
     runId: Id,
     events: readonly NewEvent[],
     expectedSeq: number,
-    usageUpdates: readonly UsageLedgerDelta[],
-    leaseOwner?: Id,
+    options: UsageAppendOptions,
   ): Promise<{ nextSeq: number }>;
 
   /** Read persisted usage for the requested quota periods. */

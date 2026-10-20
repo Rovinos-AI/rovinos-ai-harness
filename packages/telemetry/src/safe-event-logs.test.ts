@@ -101,6 +101,13 @@ const events = [
   }),
   SafeEvent.parse({
     ...common,
+    kind: "budget_exceeded",
+    budget: "quota",
+    limit: 2.5,
+    observed: 3,
+  }),
+  SafeEvent.parse({
+    ...common,
     kind: "subagent_spawned",
     childRunId: "00000000000000000000000001",
     role: "researcher",

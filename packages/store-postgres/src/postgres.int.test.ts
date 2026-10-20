@@ -157,24 +157,21 @@ runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
 
 it("serializes concurrent quota ledger updates with event appends", async () => {
   const { admin, schema } = await createSchema();
-  const stores = Array.from(
+  const ledgerStores = Array.from(
     { length: 10 },
     () => new PostgresEventStore(connectionString, { schema }),
   );
   const builders = createEventBuilders();
   try {
-    const runIds = stores.map(() => builders.nextRunId());
+    const runIds = ledgerStores.map(() => builders.nextRunId());
     const results = await Promise.allSettled(
-      stores.map((store, index) => {
+      ledgerStores.map((store, index) => {
         const runId = runIds[index];
         if (runId === undefined) {
           throw new Error("Expected a run id");
         }
-        return store.appendWithUsage(
-          runId,
-          [builders.runCreated(runId)],
-          0,
-          [
+        return store.appendWithUsage(runId, [builders.runCreated(runId)], 0, {
+          usageUpdates: [
             {
               quotaId: "hourly",
               period: "hour",
@@ -184,25 +181,27 @@ it("serializes concurrent quota ledger updates with event appends", async () => 
               maxRunsStarted: 5,
             },
           ],
-        );
+        });
       }),
     );
 
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(5);
     expect(results.filter(({ status }) => status === "rejected")).toHaveLength(5);
-    await expect(stores[0]?.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
+    const firstStore = ledgerStores[0];
+    if (firstStore === undefined) {
+      throw new Error("Expected a ledger store");
+    }
+    await expect(firstStore.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
       { quotaId: "hourly", period: "hour", periodStart: 3_600_000, costMicros: 0, runsStarted: 5 },
     ]);
-    for (const [index, result] of results.entries()) {
-      if (result.status === "rejected") {
-        const runId = runIds[index];
-        if (runId !== undefined) {
-          await expect(stores[0]?.head(runId)).resolves.toBe(0);
-        }
-      }
-    }
+    const rejectedRunIds = results.flatMap((result, index) =>
+      result.status === "rejected" && runIds[index] !== undefined ? [runIds[index]] : [],
+    );
+    expect(rejectedRunIds).toHaveLength(5);
+    const rejectedHeads = await Promise.all(rejectedRunIds.map((runId) => firstStore.head(runId)));
+    expect(rejectedHeads).toEqual([0, 0, 0, 0, 0]);
   } finally {
-    await Promise.all(stores.map((store) => store.close()));
+    await Promise.all(ledgerStores.map((store) => store.close()));
     await dropSchema(admin, schema);
   }
 });

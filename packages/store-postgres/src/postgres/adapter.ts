@@ -3,7 +3,6 @@ import {
   Code,
   Id,
   type Code as SinkId,
-  type Code as CodeType,
   type Event,
   type NewEvent,
   type Snapshot,
@@ -28,10 +27,6 @@ import {
   type ListRunsOptions,
   type ReencryptBatchInput,
   type RunSummary,
-  UsageLedgerRowSchema,
-  UsageLedgerPeriodSchema,
-  type UsageLedgerRow,
-  type UsageLedgerPeriod,
   type SnapshotRow,
   type StoreKeyRotation,
 } from "@harness/store/adapter-internal";
@@ -52,6 +47,7 @@ import { isRunTerminal, PostgresSubscriptions } from "./subscriptions.js";
 import { watchPostgresRuns } from "./watch-runs.js";
 import { countPostgresRowsByKey, reencryptPostgresBatch } from "./rotation.js";
 import { PostgresEventWriter } from "./writer.js";
+import { queryPostgresUsageLedger, readPostgresUsageLedger } from "./usage-ledger.js";
 
 const connectionStringSchema = z
   .url()
@@ -202,43 +198,18 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
 
   /** {@inheritDoc EventStore.readUsageLedger} */
   async readUsageLedger(
-    quotaId: CodeType,
-    period: UsageLedgerPeriod,
+    quotaId: Parameters<EventStore["readUsageLedger"]>[0],
+    period: Parameters<EventStore["readUsageLedger"]>[1],
     periodStarts: readonly number[],
-  ): Promise<UsageLedgerRow[]> {
-    const parsedQuotaId = Code.safeParse(quotaId);
-    const parsedPeriod = UsageLedgerPeriodSchema.safeParse(period);
-    if (
-      !parsedQuotaId.success ||
-      !parsedPeriod.success ||
-      periodStarts.some((period) => !Number.isSafeInteger(period) || period < 0)
-    ) {
-      throw new InvalidEventError([["quotaId"]]);
-    }
-    try {
-      await this.ensureInitialized();
-      const result = await this.pool.query<{
-        quota_id: string;
-        period: UsageLedgerPeriod;
-        period_start: number | string;
-        cost_micros: number | string;
-        runs_started: number | string;
-      }>(
-        "SELECT quota_id, period, period_start, cost_micros, runs_started FROM usage_ledger WHERE quota_id = $1 AND period = $2 AND period_start = ANY($3::BIGINT[])",
-        [parsedQuotaId.data, parsedPeriod.data, [...periodStarts]],
-      );
-      return result.rows.map((row) =>
-        UsageLedgerRowSchema.parse({
-          quotaId: row.quota_id,
-          period: row.period,
-          periodStart: integer(row.period_start),
-          costMicros: integer(row.cost_micros),
-          runsStarted: integer(row.runs_started),
-        }),
-      );
-    } catch (error) {
-      throw storeError(error);
-    }
+  ): ReturnType<EventStore["readUsageLedger"]> {
+    return readPostgresUsageLedger({
+      ensureInitialized: () => this.ensureInitialized(),
+      query: (parsedQuotaId, parsedPeriod, requestedStarts) =>
+        queryPostgresUsageLedger(this.pool, parsedQuotaId, parsedPeriod, requestedStarts),
+      quotaId,
+      period,
+      periodStarts,
+    });
   }
 
   /** {@inheritDoc EventStore.claimRunExecution} */

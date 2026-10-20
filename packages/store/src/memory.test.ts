@@ -141,22 +141,20 @@ describe("InMemoryEventStore", () => {
     const store = new InMemoryEventStore();
     await store.append(runId, [runCreated(runId, 10)], 0);
 
-    await store.appendWithUsage(
-      runId,
-      [modelResponse(runId, 11, 500)],
-      1,
-      [{ quotaId: "daily", period: "day", periodStart: 0, costMicros: 500, runsStarted: 0 }],
-    );
+    await store.appendWithUsage(runId, [modelResponse(runId, 11, 500)], 1, {
+      usageUpdates: [
+        { quotaId: "daily", period: "day", periodStart: 0, costMicros: 500, runsStarted: 0 },
+      ],
+    });
     await expect(store.readUsageLedger("daily", "day", [0])).resolves.toEqual([
       { quotaId: "daily", period: "day", periodStart: 0, costMicros: 500, runsStarted: 0 },
     ]);
     await expect(
-      store.appendWithUsage(
-        runId,
-        [modelResponse(runId, 12, 200)],
-        1,
-        [{ quotaId: "daily", period: "day", periodStart: 0, costMicros: 200, runsStarted: 0 }],
-      ),
+      store.appendWithUsage(runId, [modelResponse(runId, 12, 200)], 1, {
+        usageUpdates: [
+          { quotaId: "daily", period: "day", periodStart: 0, costMicros: 200, runsStarted: 0 },
+        ],
+      }),
     ).rejects.toBeInstanceOf(SeqConflictError);
 
     await expect(store.head(runId)).resolves.toBe(2);
@@ -173,11 +171,8 @@ describe("InMemoryEventStore", () => {
     );
     const results = await Promise.allSettled(
       runIds.map((id, index) =>
-        store.appendWithUsage(
-          id,
-          [runCreated(id, index + 1)],
-          0,
-          [
+        store.appendWithUsage(id, [runCreated(id, index + 1)], 0, {
+          usageUpdates: [
             {
               quotaId: "hourly",
               period: "hour",
@@ -187,7 +182,7 @@ describe("InMemoryEventStore", () => {
               maxRunsStarted: 5,
             },
           ],
-        ),
+        }),
       ),
     );
 

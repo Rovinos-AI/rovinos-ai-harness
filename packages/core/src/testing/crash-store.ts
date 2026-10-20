@@ -89,7 +89,7 @@ export class CrashingEventStore implements EventStore {
   appendWithUsage(
     ...args: Parameters<EventStore["appendWithUsage"]>
   ): ReturnType<EventStore["appendWithUsage"]> {
-    const [runId, events, expectedSeq, usageUpdates, leaseOwner] = args;
+    const [runId, events, expectedSeq, options] = args;
     const shouldCrash = this.shouldCrash();
     if (
       shouldCrash &&
@@ -98,13 +98,7 @@ export class CrashingEventStore implements EventStore {
     ) {
       return Promise.reject(new SimulatedCrash());
     }
-    const result = this.inner.appendWithUsage(
-      runId,
-      events,
-      expectedSeq,
-      usageUpdates,
-      leaseOwner,
-    );
+    const result = this.inner.appendWithUsage(runId, events, expectedSeq, options);
     return shouldCrash ? result.then(() => Promise.reject(new SimulatedCrash())) : result;
   }
 

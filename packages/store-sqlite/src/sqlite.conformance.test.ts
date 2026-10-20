@@ -122,12 +122,11 @@ it("commits usage with model responses and enforces hourly starts under concurre
   const builders = createEventBuilders();
   try {
     await store.append(runId, [builders.runCreated(runId)], 0);
-    await store.appendWithUsage(
-      runId,
-      [modelResponse(runId, 700)],
-      1,
-      [{ quotaId: "daily", period: "day", periodStart: 0, costMicros: 700, runsStarted: 0 }],
-    );
+    await store.appendWithUsage(runId, [modelResponse(runId, 700)], 1, {
+      usageUpdates: [
+        { quotaId: "daily", period: "day", periodStart: 0, costMicros: 700, runsStarted: 0 },
+      ],
+    });
     await expect(store.readUsageLedger("daily", "day", [0])).resolves.toEqual([
       { quotaId: "daily", period: "day", periodStart: 0, costMicros: 700, runsStarted: 0 },
     ]);
@@ -137,12 +136,13 @@ it("commits usage with model responses and enforces hourly starts under concurre
     );
     const writers = runIds.map(() => new SqliteEventStore(path));
     const results = await Promise.allSettled(
-      runIds.map((id, index) =>
-        writers[index]?.appendWithUsage(
-          id,
-          [builders.runCreated(id)],
-          0,
-          [
+      runIds.map((id, index) => {
+        const writer = writers[index];
+        if (writer === undefined) {
+          throw new Error("Expected a SQLite store writer");
+        }
+        return writer.appendWithUsage(id, [builders.runCreated(id)], 0, {
+          usageUpdates: [
             {
               quotaId: "hourly",
               period: "hour",
@@ -152,22 +152,27 @@ it("commits usage with model responses and enforces hourly starts under concurre
               maxRunsStarted: 5,
             },
           ],
-        ),
-      ),
+        });
+      }),
     );
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(5);
     expect(results.filter(({ status }) => status === "rejected")).toHaveLength(5);
     await expect(store.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
       { quotaId: "hourly", period: "hour", periodStart: 3_600_000, costMicros: 0, runsStarted: 5 },
     ]);
-    for (const [index, result] of results.entries()) {
-      if (result.status === "rejected") {
-        const id = runIds[index];
-        if (id !== undefined) {
-          await expect(store.head(id)).resolves.toBe(0);
+    const rejectedRunIds = results.flatMap((result, index) =>
+      result.status === "rejected" ? [runIds[index]] : [],
+    );
+    expect(rejectedRunIds).toHaveLength(5);
+    const rejectedHeads = await Promise.all(
+      rejectedRunIds.map(async (id) => {
+        if (id === undefined) {
+          throw new Error("Expected the rejected run id");
         }
-      }
-    }
+        return store.head(id);
+      }),
+    );
+    expect(rejectedHeads).toEqual([0, 0, 0, 0, 0]);
     await Promise.all(writers.map((writer) => writer.close()));
   } finally {
     await store.close();

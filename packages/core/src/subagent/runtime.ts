@@ -229,7 +229,7 @@ async function resumeChildOptions(
 ): Promise<Parameters<typeof resumeRun>[0]> {
   const requestedBy = await parentRequester(options.store, request.parentRunId);
   const quotaIdentity: QuotaIdentity = {
-    role: request.role.route ?? request.role.id,
+    role: request.role.id,
     ...(requestedBy === undefined ? {} : { requestedBy }),
   };
   return {
@@ -316,7 +316,7 @@ async function runNewChild(
 ): Promise<SubagentResult> {
   const requestedBy = await parentRequester(options.store, request.parentRunId);
   const quotaIdentity: QuotaIdentity = {
-    role: request.role.route ?? request.role.id,
+    role: request.role.id,
     ...(requestedBy === undefined ? {} : { requestedBy }),
   };
   const recorder = new RunRecorder(
@@ -388,7 +388,7 @@ export function createSubagentTool(options: SubagentRuntimeInput): ToolPort {
     assertQuotaStart: async (role, parentRunId) => {
       const requestedBy = await parentRequester(runtimeOptions.store, parentRunId);
       await runtimeOptions.quotaService.assertCanStart({
-        role: role.route ?? role.id,
+        role: role.id,
         ...(requestedBy === undefined ? {} : { requestedBy }),
       });
     },

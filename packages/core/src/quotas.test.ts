@@ -20,18 +20,22 @@ const dailyAndHourly = QuotasConfigSchema.parse([
 
 function storeWith(rows: readonly UsageLedgerRow[] = []) {
   const readUsageLedger = vi.fn(
-    async (
+    (
       quotaId: string,
       period: UsageLedgerPeriod,
       periodStarts: readonly number[],
     ): Promise<UsageLedgerRow[]> =>
-      rows.filter(
-        (row) =>
-          row.quotaId === quotaId && row.period === period && periodStarts.includes(row.periodStart),
+      Promise.resolve(
+        rows.filter(
+          (row) =>
+            row.quotaId === quotaId &&
+            row.period === period &&
+            periodStarts.includes(row.periodStart),
+        ),
       ),
   );
   return {
-    store: { readUsageLedger } as Pick<EventStore, "readUsageLedger">,
+    store: { readUsageLedger } satisfies Pick<EventStore, "readUsageLedger">,
     readUsageLedger,
   };
 }
@@ -75,8 +79,9 @@ describe("QuotaService", () => {
 
   it("rejects starts only after a configured window is exhausted", async () => {
     const empty = storeWith();
-    await expect(new QuotaService(dailyAndHourly, empty.store, clock).assertCanStart(identity))
-      .resolves.toBeUndefined();
+    await expect(
+      new QuotaService(dailyAndHourly, empty.store, clock).assertCanStart(identity),
+    ).resolves.toBeUndefined();
     expect(empty.readUsageLedger).toHaveBeenCalledTimes(3);
     expect(empty.readUsageLedger.mock.calls).toEqual([
       ["team", "day", [Date.UTC(2026, 9, 20)]],
@@ -138,10 +143,12 @@ describe("QuotaService", () => {
     const { store } = storeWith();
     const service = new QuotaService(dailyAndHourly, store, clock);
 
-    expect(() => service.assertCanClaim(identity, new Map([["team", 1]]))).not.toThrow();
-    expect(() => service.assertCanClaim(identity, new Map([["team", 2]]))).toThrow(
-      QuotaExceededError,
-    );
+    expect(() => {
+      service.assertCanClaim(identity, new Map([["team", 1]]));
+    }).not.toThrow();
+    expect(() => {
+      service.assertCanClaim(identity, new Map([["team", 2]]));
+    }).toThrow(QuotaExceededError);
     service.recordRejection("unconfigured");
   });
 

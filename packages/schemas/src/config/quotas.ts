@@ -18,21 +18,29 @@ export const QuotaConfigSchema = z
     match: QuotaMatchSchema,
     dailyCostUsd: z.number().positive().optional(),
     monthlyCostUsd: z.number().positive().optional(),
-    maxConcurrentRuns: z.number().int().positive().optional(),
+    maxConcurrentRuns: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Currently inert; enforced by workers in task 24.3."),
     maxRunsPerHour: z.number().int().positive().optional(),
   })
   .strict();
 
 /** The configured quota set. */
-export const QuotasConfigSchema = z.array(QuotaConfigSchema).default([]).superRefine((quotas, ctx) => {
-  const ids = new Set<string>();
-  for (const [index, quota] of quotas.entries()) {
-    if (ids.has(quota.id)) {
-      ctx.addIssue({ code: "custom", path: [index, "id"], message: "Quota ids must be unique" });
+export const QuotasConfigSchema = z
+  .array(QuotaConfigSchema)
+  .default([])
+  .superRefine((quotas, ctx) => {
+    const ids = new Set<string>();
+    for (const [index, quota] of quotas.entries()) {
+      if (ids.has(quota.id)) {
+        ctx.addIssue({ code: "custom", path: [index, "id"], message: "Quota ids must be unique" });
+      }
+      ids.add(quota.id);
     }
-    ids.add(quota.id);
-  }
-});
+  });
 
 /** Inferred quota configuration. */
 export type QuotaConfig = z.infer<typeof QuotaConfigSchema>;
