@@ -11,7 +11,7 @@ const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const composeSchema = z.object({ services: z.record(z.string(), z.unknown()) });
 const serviceSchema = z.object({ healthcheck: z.unknown() });
 const healthcheckSchema = z.looseObject({ start_period: z.string(), test: z.array(z.string()) });
-const documentedPresidioStartPeriodMs = 600_000;
+const documentedPresidioStartPeriodMs = 120_000;
 
 function service(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {

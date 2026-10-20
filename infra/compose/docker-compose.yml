@@ -44,8 +44,9 @@ services:
         - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=2).read()"
       interval: 5s
       timeout: 3s
-      # Cold stayed unhealthy beyond 4m25s; warm restart was healthy in 10.05s on this Docker agent.
-      start_period: 600s
+      # Measured on the CI agent (2026-10-20): cold start healthy in 7 s idle and 9-12 s while the
+      # unit suite runs. 120 s (about 10x) absorbs parallel Compose stacks starting at once.
+      start_period: 120s
       retries: 20
     networks:
       - internal

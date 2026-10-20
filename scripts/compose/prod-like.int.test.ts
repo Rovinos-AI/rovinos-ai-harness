@@ -108,8 +108,8 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
       encoding: "utf8",
       mode: 0o444,
     });
-    compose(["up", "--detach", "--wait", "--wait-timeout", "720"], 730_000);
-  }, 750_000);
+    compose(["up", "--detach", "--wait", "--wait-timeout", "300"], 310_000);
+  }, 330_000);
 
   afterAll(async () => {
     if (secretDirectory !== "") {
