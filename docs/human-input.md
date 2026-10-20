@@ -47,4 +47,5 @@ This task adds schemas and defaults only. Request handling, answer brokering,
 URL checks, and user-interface channels are delivered by later Epic 25 tasks.
 Request messages, schemas, URLs, opaque request state, and answers are event
 content; the telemetry projection uses only bounded request and resolution
-metadata.
+metadata. Resolution events repeat the request source, mode, and round so the
+safe `input_wait` projection can be made from a single event.

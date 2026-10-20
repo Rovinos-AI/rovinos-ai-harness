@@ -37,6 +37,16 @@ const contentFields = Object.entries(EVENT_FIELD_CLASS).flatMap(([type, fields])
 );
 
 function contentCanaryValue(type: EventType, field: string, canary: string): unknown {
+  if (type === "input_requested" && field === "schema") {
+    return {
+      type: "object",
+      description: canary,
+      properties: { value: { type: "string" } },
+    };
+  }
+  if (type === "input_requested" && field === "url") {
+    return `https://example.test/${encodeURIComponent(canary)}`;
+  }
   if (type === "model_request" && field === "messages") {
     return [{ role: "user", parts: [{ type: "text", text: canary }] }];
   }
