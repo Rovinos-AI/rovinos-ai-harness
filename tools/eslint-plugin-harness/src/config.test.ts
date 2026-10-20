@@ -289,6 +289,14 @@ describe("ESLint configuration", () => {
     expect(await lint("export const answer = 42;")).toEqual([]);
   });
 
+  it("enables the raw tracer rule as an error", async () => {
+    const config: unknown = await eslint.calculateConfigForFile(
+      resolve(rootDirectory, "packages/core/src/recorder.ts"),
+    );
+    const rules = isRecord(config) && isRecord(config.rules) ? config.rules : {};
+    expect(firstRuleSetting(rules["harness/no-raw-tracer"])).toBe(2);
+  });
+
   it("applies generated and build ignores globally", async () => {
     for (const filename of [
       "packages/schemas/dist/index.js",
