@@ -8,6 +8,8 @@
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
 // Not wired yet: user pseudonym emission in runtime telemetry (12.8 -> #139)
+// Not wired yet: control-plane start_run requester attribution (18.5 -> #178)
+// Not wired yet: simulated eval approver identity (16.6 -> #172)
 import { Command } from "commander";
 import {
   Client,
@@ -878,6 +880,8 @@ describe("MCP runtime", () => {
         "run",
         "--input",
         inputPath,
+        "--as",
+        "e2e_operator",
       ]);
       expect(firstRun.code).toBe(ExitCode.suspended);
       const firstRunId = jsonResult(RunResultSchema, firstRun.stdout).runId;
@@ -885,6 +889,10 @@ describe("MCP runtime", () => {
       let firstApprovalId: Id;
       try {
         const firstEvents = await readEvents(store, firstRunId);
+        expect(firstEvents[0]).toMatchObject({
+          type: "run_created",
+          requestedBy: "cli.e2e_operator",
+        });
         const approval = firstEvents.find((event) => event.type === "approval_requested");
         if (approval?.type !== "approval_requested") {
           throw new Error("The MCP call did not request approval.");
@@ -985,6 +993,7 @@ describe("MCP runtime", () => {
       expect(serverCalls).toEqual([{ value: "edited" }]);
       expect(firstRunEvents.find((event) => event.type === "approval_resolved")).toMatchObject({
         decision: "edit",
+        approverId: "cli.local",
         edits: { value: "edited" },
       });
 
@@ -1694,7 +1703,9 @@ describe("resume", () => {
         throw new Error("Expected the child approval request.");
       }
 
-      await runtime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
+      await runtime.resolveApproval(spawn.childRunId, approval.approvalId, "approve", {
+        metadata: { decidedBy: "human", approverId: "cli.test" },
+      });
       const resumed = await runtime.resume(parentRunId);
       const completedParentEvents = await readEvents(store, parentRunId);
       expect(resumed.status).toBe("completed");
@@ -2552,7 +2563,9 @@ describe("retention", () => {
       }
       const checkpoint = await runtime.store.latestSnapshot(execution.runId);
       expect(checkpoint?.workspaceRef).toBeDefined();
-      await runtime.resolveApproval(execution.runId, approvalId, "approve");
+      await runtime.resolveApproval(execution.runId, approvalId, "approve", {
+        metadata: { decidedBy: "human", approverId: "cli.test" },
+      });
       await rm(join(current.dataDirectory, "workspaces", execution.runId), {
         recursive: true,
         force: true,

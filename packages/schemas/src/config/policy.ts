@@ -37,6 +37,7 @@ export const ApprovalConfigSchema = z
   .object({
     notifier: ApprovalNotifierConfigSchema.default({ kind: "log" }),
     allowInsecureLocalhost: z.boolean().default(false),
+    separationOfDuties: z.boolean().default(false),
   })
   .strict()
   .superRefine((config, context) => {

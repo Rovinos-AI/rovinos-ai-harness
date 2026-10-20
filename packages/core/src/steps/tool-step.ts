@@ -20,6 +20,7 @@ import {
   decidePolicy,
   effectiveDecision,
   emitReevaluatedDecision,
+  policyIntentFields,
   requestPolicyApproval,
   setPolicySpanAttributes,
 } from "./policy-step.js";
@@ -78,16 +79,7 @@ function intentPartial(options: {
     callId: options.call.callId,
     toolId: options.call.toolId,
     idempotent: options.description?.idempotent ?? false,
-    policyDecision: options.decision.decision,
-    ruleId: options.decision.ruleId,
-    policyReason: options.decision.reason,
-    policyEditable: options.decision.editable,
-    ...(options.decision.approvalTtlMs === undefined
-      ? {}
-      : { policyApprovalTtlMs: options.decision.approvalTtlMs }),
-    ...(options.decision.escalateAfterMs === undefined
-      ? {}
-      : { policyEscalateAfterMs: options.decision.escalateAfterMs }),
+    ...policyIntentFields(options.decision),
     argsHash: options.argsHash,
     args: options.call.args,
   };

@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Command } from "commander";
 import type { HarnessConfig } from "@harness/config";
-import type { ConfiguredKeyRotation, Runtime, RuntimeOverrides, ToolPort } from "@harness/core";
+import { Code, HarnessError, Principal } from "@harness/schemas";
+import type {
+  ApprovalResolutionMetadata,
+  ConfiguredKeyRotation,
+  Runtime,
+  RuntimeOverrides,
+  ToolPort,
+} from "@harness/core";
 import type { AuditingVaultResolver } from "@harness/vault";
 import type { Output } from "./output.js";
 
@@ -64,6 +71,35 @@ export interface CommandModule {
   register(program: Command, ctx: CliContext): void;
 }
 
+class CliPrincipalError extends HarnessError {
+  readonly code = "usage";
+
+  constructor() {
+    super("CLI principal name is invalid.");
+    this.name = "CliPrincipalError";
+  }
+}
+
+/** Resolves an attributable, unauthenticated CLI principal from `--as` or config. */
+export function cliPrincipal(config: HarnessConfig, as?: string): Principal {
+  if (as === undefined) {
+    return Principal.parse(config.cli?.principal ?? "cli.local");
+  }
+  const name = Code.safeParse(as);
+  if (!name.success || name.data.length > 60) {
+    throw new CliPrincipalError();
+  }
+  return Principal.parse(`cli.${name.data}`);
+}
+
+/** Creates identity metadata for a human CLI approval decision. */
+export function cliApprovalMetadata(
+  config: HarnessConfig,
+  as?: string,
+): ApprovalResolutionMetadata {
+  return { decidedBy: "human" as const, approverId: cliPrincipal(config, as) };
+}
+
 /** Creates a runtime lazily so command help does not load store and run-loop modules. */
 export async function createCommandRuntime(
   context: CliContext,
@@ -73,6 +109,7 @@ export async function createCommandRuntime(
   if (context.createRuntime !== undefined) {
     return context.createRuntime(config, overrides);
   }
+
   const core = await import("@harness/core");
   return core.createRuntime(config, overrides);
 }

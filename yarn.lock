@@ -1932,6 +1932,7 @@ __metadata:
     "@harness/store-postgres": "workspace:^"
     "@harness/store-sqlite": "workspace:^"
     "@harness/telemetry": "workspace:^"
+    "@harness/vault": "workspace:^"
     "@types/pg": "npm:8.23.1"
     pg: "npm:8.23.1"
     typescript: "npm:5.9.3"

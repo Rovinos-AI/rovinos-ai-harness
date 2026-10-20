@@ -23,10 +23,6 @@ const keysRotatedDefinition = defineLogRecord("harness.keys.rotated", {
   "harness.keys.vault.rows_rotated": attr.nonnegativeInt(),
   "harness.keys.store.rows_rotated": attr.nonnegativeInt(),
 });
-const pricingMissingDefinition = defineLogRecord("harness.model.pricing_missing", {
-  "harness.model.provider": attr.code(),
-  "harness.model.name": attr.code(),
-});
 const pricingCacheMissingDefinition = defineLogRecord("harness.model.pricing_cache_missing", {
   "harness.model.provider": attr.code(),
   "harness.model.name": attr.code(),
@@ -82,6 +78,7 @@ export const safeEventLogAttributeMap = {
     spanId: "harness.span.id",
     decision: "harness.approval.decision",
     decidedBy: "harness.approval.decided_by",
+    approverPseudonym: "harness.approval.approver_pseudonym",
     reason: "harness.approval.reason",
     waitMs: "harness.approval.wait_ms",
   },
@@ -159,6 +156,7 @@ export const safeEventLogAttributeMap = {
     traceId: "harness.trace.id",
     spanId: "harness.span.id",
     configHash: "harness.run.config_hash",
+    requestedByPseudonym: "harness.run.requested_by_pseudonym",
   },
 } as const satisfies Record<SafeEventType["kind"], Readonly<Record<string, string>>>;
 
@@ -191,6 +189,7 @@ const logDefinitions = {
     ...commonShape,
     "harness.approval.decision": attr.enum(["approve", "deny", "edit"]),
     "harness.approval.decided_by": attr.enum(["human", "policy", "expiry"]),
+    "harness.approval.approver_pseudonym": attr.optional(attr.pseudonym()),
     "harness.approval.reason": attr.optional(attr.code()),
     "harness.approval.wait_ms": attr.nonnegativeInt(),
   }),
@@ -254,6 +253,7 @@ const logDefinitions = {
   run_created: defineLogRecord("harness.safe.run_created", {
     ...commonShape,
     "harness.run.config_hash": attr.hash(),
+    "harness.run.requested_by_pseudonym": attr.optional(attr.pseudonym()),
   }),
 } satisfies Record<SafeEventType["kind"], LogRecordDefinition>;
 
@@ -391,28 +391,6 @@ export function emitKeysRotated(
 }
 
 /** Emits a bounded diagnostic when a model has no configured price. */
-export function emitPricingMissing(
-  provider: Code,
-  model: Code,
-  logger: Logger = safeEventLogger,
-): void {
-  const attributes = pricingMissingDefinition.schema.parse({
-    "harness.model.provider": provider,
-    "harness.model.name": model,
-  });
-  try {
-    logger.emit({
-      body: Code.parse("pricing_missing"),
-      eventName: pricingMissingDefinition.name,
-      severityNumber: SeverityNumber.WARN,
-      attributes,
-      context: otelContext.active(),
-    });
-  } catch {
-    return;
-  }
-}
-
 /** Emits a bounded diagnostic when a cached-token price falls back to input pricing. */
 export function emitPricingCacheMissing(
   provider: Code,
@@ -435,3 +413,5 @@ export function emitPricingCacheMissing(
     return;
   }
 }
+
+export { emitPricingMissing } from "./pricing-missing.js";
