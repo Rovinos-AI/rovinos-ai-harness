@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
+// Not wired yet: human input contracts into runtime input handling (25.1 -> #239)
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: gateway token progress to live run updates (14.16 -> #157; 24.5 -> #234)
