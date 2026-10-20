@@ -541,6 +541,11 @@ store: {}`,
         correlation: { enabled: false },
       },
       sandbox: {},
+      elicitation: {
+        channels: [],
+        requireHttps: true,
+        expiresAfterMs: 604_800_000,
+      },
     });
   });
 

@@ -71,6 +71,23 @@ describe("Event", () => {
     });
   });
 
+  it("requires an approver for human input resolutions and omits answers on declines", () => {
+    const resolution = eventSamples.find(({ type }) => type === "input_resolved");
+    if (resolution?.type !== "input_resolved") {
+      throw new Error("Missing input_resolved sample.");
+    }
+
+    const withoutApprover = { ...resolution };
+    Reflect.deleteProperty(withoutApprover, "approverId");
+    expect(Event.safeParse(withoutApprover).success).toBe(false);
+    expect(
+      Event.safeParse({ ...withoutApprover, decidedBy: "expiry" }).success,
+    ).toBe(true);
+    expect(
+      Event.safeParse({ ...resolution, action: "decline", answer: { private: "value" } }).success,
+    ).toBe(false);
+  });
+
   it("accepts continuation links and follow-up inputs as metadata", () => {
     const created = eventSamples.find(({ type }) => type === "run_created");
     const input = eventSamples.find(({ type }) => type === "run_input");

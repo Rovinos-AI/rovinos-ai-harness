@@ -6,6 +6,7 @@ import { JsonValue } from "./json.js";
 import { MessageSchema, PartSchema } from "./messages.js";
 import { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
 import { Principal } from "./principal.js";
+import { FormSchema } from "./human-input.js";
 
 /** Supported run lifecycle states. */
 export const RunStatus = z.enum([
@@ -183,6 +184,75 @@ const approvalResolvedEvent = z
     }
   });
 
+const inputRequestedEvent = z
+  .object({
+    ...eventEnvelopeShape,
+    type: z.literal("input_requested"),
+    requestId: Id,
+    source: z.enum(["mcp_mrtr", "mcp_legacy", "agent"]),
+    serverId: Code.optional(),
+    callId: Id.optional(),
+    round: z.number().int().nonnegative(),
+    mode: z.enum(["form", "url"]),
+    expiresAt: z.number().int().nonnegative().optional(),
+    inputKey: z.string().min(1).max(128).optional(),
+    message: z.string().max(2_000),
+    schema: FormSchema.optional(),
+    url: z.url().optional(),
+    requestState: JsonValue.optional(),
+  })
+  .strict()
+  .superRefine((event, context) => {
+    if (
+      event.source !== "mcp_legacy" &&
+      event.schema !== undefined &&
+      Object.values(event.schema.properties).some(
+        (field) => field.type === "string" && field.pattern !== undefined,
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["schema"],
+        message: "Regular-expression patterns are supported only for legacy servers.",
+        params: { errorCode: "input_schema_unsupported" },
+      });
+    }
+  });
+
+const inputResolvedEvent = z
+  .object({
+    ...eventEnvelopeShape,
+    type: z.literal("input_resolved"),
+    requestId: Id,
+    source: z.enum(["mcp_mrtr", "mcp_legacy", "agent"]),
+    mode: z.enum(["form", "url"]),
+    round: z.number().int().nonnegative(),
+    action: z.enum(["accept", "decline", "cancel"]),
+    decidedBy: z.enum(["human", "simulated", "expiry", "timeout", "policy"]),
+    approverId: Principal.optional(),
+    waitMs: z.number().int().nonnegative(),
+    answer: JsonValue.optional(),
+  })
+  .strict()
+  .superRefine((event, context) => {
+    if (event.decidedBy === "human" && event.approverId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["approverId"],
+        message: "Human input resolutions require an approver identity.",
+        params: { errorCode: "input_approver_required" },
+      });
+    }
+    if (event.action !== "accept" && event.answer !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["answer"],
+        message: "Declined and cancelled input requests cannot include an answer.",
+        params: { errorCode: "input_response_invalid" },
+      });
+    }
+  });
+
 const appContentEvent = z
   .object({
     ...eventEnvelopeShape,
@@ -286,6 +356,8 @@ export const EventSchema = z.discriminatedUnion("type", [
   toolResultEvent,
   approvalRequestedEvent,
   approvalResolvedEvent,
+  inputRequestedEvent,
+  inputResolvedEvent,
   appContentEvent,
   checkpointWrittenEvent,
   contextCompactedEvent,

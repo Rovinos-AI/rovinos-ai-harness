@@ -19,6 +19,14 @@ export { Principal } from "./principal.js";
 export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.js";
 export { AppContentEnvelopeSchema, type AppContentEnvelope } from "./app-content.js";
 export {
+  FormSchema,
+  InputRequestSchema,
+  InputResponseSchema,
+  formSchemaToZod,
+  type InputRequest,
+  type InputResponse,
+} from "./human-input.js";
+export {
   ApprovalAppInputSchema,
   ResolveRequest,
   ResolveResponse,
@@ -168,6 +176,12 @@ export {
   type Detection,
 } from "./pii-detection.js";
 export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
+export {
+  ElicitationConfigSchema,
+  ServerElicitationConfigSchema,
+  type ElicitationConfig,
+  type ServerElicitationConfig,
+} from "./config/elicitation.js";
 export { CliConfigSchema, type CliConfig } from "./config/cli.js";
 export { HostConfigSchema, type HostConfig } from "./config/host.js";
 export {
