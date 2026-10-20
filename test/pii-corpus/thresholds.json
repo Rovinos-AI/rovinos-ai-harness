@@ -1,0 +1,22 @@
+{
+  "regex": {
+    "email": { "minPrecision": 0.98, "minRecall": 0.99 },
+    "phone": { "minPrecision": 0.95, "minRecall": 0.95 },
+    "credit_card": { "minPrecision": 0.98, "minRecall": 0.99 },
+    "iban": { "minPrecision": 0.98, "minRecall": 0.98 },
+    "ip_address": { "minPrecision": 0.95, "minRecall": 0.95 },
+    "api_key": { "minPrecision": 0.95, "minRecall": 0.95 },
+    "url_credentials": { "minPrecision": 0.95, "minRecall": 0.95 }
+  },
+  "presidio": {
+    "email": { "minPrecision": 0.8, "minRecall": 0.8 },
+    "phone": { "minPrecision": 0.8, "minRecall": 0.8 },
+    "credit_card": { "minPrecision": 0.8, "minRecall": 0.8 },
+    "iban": { "minPrecision": 0.8, "minRecall": 0.8 },
+    "ip_address": { "minPrecision": 0.8, "minRecall": 0.8 },
+    "api_key": { "minPrecision": 0.8, "minRecall": 0.8 },
+    "url_credentials": { "minPrecision": 0.8, "minRecall": 0.8 },
+    "person_name": { "minPrecision": 0.8, "minRecall": 0.8 },
+    "location": { "minPrecision": 0.8, "minRecall": 0.8 }
+  }
+}
