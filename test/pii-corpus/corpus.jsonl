@@ -1,27 +1,67 @@
-{"id":"pii-negative-timestamp","text":"The fixture was created at 2025-06-15T12:34:56Z.","spans":[]}
-{"id":"pii-person-3","text":"The sample profile belongs to Jordan Sample","spans":[{"start":30,"end":43,"entityType":"person_name"}]}
-{"id":"pii-ip-1","text":"Connect to 192.0.2.10","spans":[{"start":11,"end":21,"entityType":"ip_address"}]}
-{"id":"pii-url-1","text":"The demo URL is https://demo-user:synthetic-pass@localhost","spans":[{"start":16,"end":58,"entityType":"url_credentials"}]}
-{"id":"pii-negative-luhn","text":"The invalid test card is 4111111111111112.","spans":[]}
-{"id":"pii-ip-2","text":"The documentation address is 2001:db8::1","spans":[{"start":29,"end":40,"entityType":"ip_address"}]}
-{"id":"pii-negative-order","text":"Order ORD-987654321012 is queued for processing.","spans":[]}
-{"id":"pii-phone-3","text":"For a test call use 415-555-0199","spans":[{"start":20,"end":32,"entityType":"phone"}]}
-{"id":"pii-card-1","text":"The synthetic payment number is 4111111111111111","spans":[{"start":32,"end":48,"entityType":"credit_card"}]}
-{"id":"pii-location-1","text":"The synthetic location is Paris","spans":[{"start":26,"end":31,"entityType":"location"}]}
-{"id":"pii-location-2","text":"The test office is in London","spans":[{"start":22,"end":28,"entityType":"location"}]}
-{"id":"pii-location-3","text":"The demo destination is New York","spans":[{"start":24,"end":32,"entityType":"location"}]}
-{"id":"pii-phone-1","text":"Call +14155550123","spans":[{"start":5,"end":17,"entityType":"phone"}]}
-{"id":"pii-iban-2","text":"The test account is DE89370400440532013000","spans":[{"start":20,"end":42,"entityType":"iban"}]}
-{"id":"pii-person-2","text":"The test operator is Grace Sample","spans":[{"start":21,"end":33,"entityType":"person_name"}]}
-{"id":"pii-url-2","text":"Use this synthetic endpoint http://test-user:placeholder-pass@localhost","spans":[{"start":28,"end":71,"entityType":"url_credentials"}]}
-{"id":"pii-phone-2","text":"The demo number is (415) 555-0132","spans":[{"start":19,"end":33,"entityType":"phone"}]}
-{"id":"pii-iban-1","text":"The demo transfer uses GB82WEST12345698765432","spans":[{"start":23,"end":45,"entityType":"iban"}]}
+{"id":"pii-email-5","text":"The test mailbox is qa-team@example.test","spans":[{"start":20,"end":40,"entityType":"email"}]}
+{"id":"pii-ip-4","text":"Reach the test service at 203.0.113.17","spans":[{"start":26,"end":38,"entityType":"ip_address"}]}
+{"id":"pii-phone-6","text":"The test contact number is 212 555 0114","spans":[{"start":27,"end":39,"entityType":"phone"}]}
+{"id":"pii-negative-luhn-2","text":"Reject the checksum-invalid number 4000000000000003.","spans":[]}
+{"id":"pii-location-6","text":"The synthetic hub is Berlin","spans":[{"start":21,"end":27,"entityType":"location"}]}
 {"id":"pii-email-3","text":"Reply to support+demo@example.test","spans":[{"start":9,"end":34,"entityType":"email"}]}
+{"id":"pii-iban-2","text":"The test account is DE89370400440532013000","spans":[{"start":20,"end":42,"entityType":"iban"}]}
+{"id":"pii-location-5","text":"The test site is in Ottawa","spans":[{"start":20,"end":26,"entityType":"location"}]}
+{"id":"pii-card-4","text":"Use the sandbox payment card 378282246310005","spans":[{"start":29,"end":44,"entityType":"credit_card"}]}
 {"id":"pii-email-1","text":"Send the notice to ada@example.test","spans":[{"start":19,"end":35,"entityType":"email"}]}
-{"id":"pii-email-2","text":"The synthetic contact is grace.hopper@example.test","spans":[{"start":25,"end":50,"entityType":"email"}]}
-{"id":"pii-negative-ip","text":"The invalid documentation address is 999.999.999.999.","spans":[]}
-{"id":"pii-card-2","text":"Use the test card 4012888888881881","spans":[{"start":18,"end":34,"entityType":"credit_card"}]}
-{"id":"pii-key-2","text":"The placeholder token is ghp_000000000000000000000000000000000000","spans":[{"start":25,"end":65,"entityType":"api_key"}]}
-{"id":"pii-negative-version","text":"The test runner reports version v26.12.0.","spans":[]}
-{"id":"pii-person-1","text":"The assigned reviewer is Alice Example","spans":[{"start":25,"end":38,"entityType":"person_name"}]}
+{"id":"pii-url-3","text":"The synthetic service URL is https://sample-user:fake-pass@service.invalid","spans":[{"start":29,"end":74,"entityType":"url_credentials"},{"start":49,"end":74,"entityType":"email"}]}
+{"id":"pii-iban-5","text":"The demo settlement account is CH9300762011623852957","spans":[{"start":31,"end":52,"entityType":"iban"}]}
+{"id":"pii-email-4","text":"Route a copy to casey.sample@example.test","spans":[{"start":16,"end":41,"entityType":"email"}]}
+{"id":"pii-card-5","text":"The test checkout card is 6011111111111117","spans":[{"start":26,"end":42,"entityType":"credit_card"}]}
+{"id":"pii-negative-luhn","text":"The invalid test card is 4111111111111112.","spans":[]}
+{"id":"pii-location-3","text":"The demo destination is New York","spans":[{"start":24,"end":32,"entityType":"location"}]}
+{"id":"pii-location-4","text":"The sandbox region is Tokyo","spans":[{"start":22,"end":27,"entityType":"location"}]}
+{"id":"pii-phone-5","text":"Use the demo line 212-555-0107","spans":[{"start":18,"end":30,"entityType":"phone"}]}
+{"id":"pii-phone-7","text":"Dial the synthetic office at (312) 555 0198","spans":[{"start":29,"end":43,"entityType":"phone"}]}
+{"id":"pii-phone-4","text":"The sample hotline is +12025550123","spans":[{"start":22,"end":34,"entityType":"phone"}]}
+{"id":"pii-iban-3","text":"The synthetic mandate uses FR1420041010050500013M02606","spans":[{"start":27,"end":54,"entityType":"iban"}]}
+{"id":"pii-negative-date-2","text":"The fixture expires on 15-06-2025.","spans":[]}
+{"id":"pii-person-2","text":"The test operator is Grace Sample","spans":[{"start":21,"end":33,"entityType":"person_name"}]}
 {"id":"pii-key-1","text":"The fake service key is AKIA0000000000000000","spans":[{"start":24,"end":44,"entityType":"api_key"}]}
+{"id":"pii-negative-version","text":"The test runner reports version v26.12.0.","spans":[]}
+{"id":"pii-ip-6","text":"The sandbox address is 2001:db8:1234:5678::1","spans":[{"start":23,"end":44,"entityType":"ip_address"}]}
+{"id":"pii-ip-3","text":"The synthetic node uses 198.51.100.42","spans":[{"start":24,"end":37,"entityType":"ip_address"}]}
+{"id":"pii-negative-timestamp-2","text":"The log entry time is 2024-11-03 09:08:07 UTC.","spans":[]}
+{"id":"pii-card-3","text":"The synthetic charge uses 5555555555554444","spans":[{"start":26,"end":42,"entityType":"credit_card"}]}
+{"id":"pii-negative-order","text":"Order ORD-987654321012 is queued for processing.","spans":[]}
+{"id":"pii-person-6","text":"The test approver is Riley Placeholder","spans":[{"start":21,"end":38,"entityType":"person_name"}]}
+{"id":"pii-ip-1","text":"Connect to 192.0.2.10","spans":[{"start":11,"end":21,"entityType":"ip_address"}]}
+{"id":"pii-person-4","text":"The synthetic author is Casey Sample","spans":[{"start":24,"end":36,"entityType":"person_name"}]}
+{"id":"pii-phone-1","text":"Call +14155550123","spans":[{"start":5,"end":17,"entityType":"phone"}]}
+{"id":"pii-location-1","text":"The synthetic location is Paris","spans":[{"start":26,"end":31,"entityType":"location"}]}
+{"id":"pii-location-7","text":"The demo endpoint is in Sydney","spans":[{"start":24,"end":30,"entityType":"location"}]}
+{"id":"pii-negative-ip","text":"The invalid documentation address is 999.999.999.999.","spans":[]}
+{"id":"pii-person-5","text":"The demo account owner is Morgan Example","spans":[{"start":26,"end":40,"entityType":"person_name"}]}
+{"id":"pii-key-5","text":"The synthetic JWT is eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.signatureplaceholder123","spans":[{"start":21,"end":84,"entityType":"api_key"}]}
+{"id":"pii-person-1","text":"The assigned reviewer is Alice Example","spans":[{"start":25,"end":38,"entityType":"person_name"}]}
+{"id":"pii-location-2","text":"The test office is in London","spans":[{"start":22,"end":28,"entityType":"location"}]}
+{"id":"pii-key-3","text":"The demo access key is AKIA1111111111111111","spans":[{"start":23,"end":43,"entityType":"api_key"}]}
+{"id":"pii-iban-1","text":"The demo transfer uses GB82WEST12345698765432","spans":[{"start":23,"end":45,"entityType":"iban"}]}
+{"id":"pii-url-1","text":"The demo URL is https://demo-user:synthetic-pass@localhost","spans":[{"start":16,"end":58,"entityType":"url_credentials"}]}
+{"id":"pii-negative-email","text":"The malformed address is reader@-example.test.","spans":[]}
+{"id":"pii-ip-2","text":"The documentation address is 2001:db8::1","spans":[{"start":29,"end":40,"entityType":"ip_address"}]}
+{"id":"pii-url-5","text":"The fixture endpoint is https://fixture-user:test-password@sandbox.example.test","spans":[{"start":24,"end":79,"entityType":"url_credentials"},{"start":45,"end":79,"entityType":"email"}]}
+{"id":"pii-negative-url","text":"The public test URL is https://example.test/status.","spans":[]}
+{"id":"pii-negative-order-2","text":"Batch 12345678901234 is ready for shipment.","spans":[]}
+{"id":"pii-negative-version-2","text":"Dependency version 3.14.159 is pinned for this test.","spans":[]}
+{"id":"pii-phone-3","text":"For a test call use 415-555-0199","spans":[{"start":20,"end":32,"entityType":"phone"}]}
+{"id":"pii-negative-date-1","text":"The test window starts on 2025-06-15.","spans":[]}
+{"id":"pii-card-1","text":"The synthetic payment number is 4111111111111111","spans":[{"start":32,"end":48,"entityType":"credit_card"}]}
+{"id":"pii-url-4","text":"Use the test connection http://demo-user:placeholder-pass@api.example.test","spans":[{"start":24,"end":74,"entityType":"url_credentials"},{"start":41,"end":74,"entityType":"email"}]}
+{"id":"pii-key-2","text":"The placeholder token is ghp_000000000000000000000000000000000000","spans":[{"start":25,"end":65,"entityType":"api_key"}]}
+{"id":"pii-negative-timestamp","text":"The fixture was created at 2025-06-15T12:34:56Z.","spans":[]}
+{"id":"pii-card-2","text":"Use the test card 4012888888881881","spans":[{"start":18,"end":34,"entityType":"credit_card"}]}
+{"id":"pii-ip-5","text":"The IPv6 fixture is 2001:db8:85a3::8a2e:370:7334","spans":[{"start":20,"end":48,"entityType":"ip_address"}]}
+{"id":"pii-phone-2","text":"The demo number is (415) 555-0132","spans":[{"start":19,"end":33,"entityType":"phone"}]}
+{"id":"pii-email-2","text":"The synthetic contact is grace.hopper@example.test","spans":[{"start":25,"end":50,"entityType":"email"}]}
+{"id":"pii-email-6","text":"Contact morgan_example@example.test","spans":[{"start":8,"end":35,"entityType":"email"}]}
+{"id":"pii-negative-ip-2","text":"The malformed IPv4 fixture is 300.1.1.1.","spans":[]}
+{"id":"pii-iban-4","text":"Use the sandbox account NL91ABNA0417164300","spans":[{"start":24,"end":42,"entityType":"iban"}]}
+{"id":"pii-url-2","text":"Use this synthetic endpoint http://test-user:placeholder-pass@localhost","spans":[{"start":28,"end":71,"entityType":"url_credentials"}]}
+{"id":"pii-negative-ipv6","text":"The invalid IPv6 test value is 2001:db8::gggg.","spans":[]}
+{"id":"pii-person-3","text":"The sample profile belongs to Jordan Sample","spans":[{"start":30,"end":43,"entityType":"person_name"}]}
+{"id":"pii-key-4","text":"The fake GitHub token is ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","spans":[{"start":25,"end":65,"entityType":"api_key"}]}

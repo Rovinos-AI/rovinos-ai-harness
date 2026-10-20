@@ -11,7 +11,7 @@ describe("generatePiiCorpus", () => {
 
     expect(second).toBe(first);
     expect(createHash("sha256").update(first).digest("hex")).toBe(
-      "a0aab0164181d41462588969bfab6927d5c96909afe6f7863b654af80c42fcfe",
+      "cd1b8e3903d904c37f2d2afb357a9266b365547180d14c5fe7b0e660c65f6344",
     );
   });
 
@@ -25,6 +25,28 @@ describe("generatePiiCorpus", () => {
     expect(samples.some(({ id, spans }) => id.includes("negative") && spans.length === 0)).toBe(
       true,
     );
+    const positiveCounts = new Map<string, number>();
+    for (const sample of samples) {
+      for (const { entityType } of sample.spans) {
+        positiveCounts.set(entityType, (positiveCounts.get(entityType) ?? 0) + 1);
+      }
+    }
+    for (const entityType of [
+      "api_key",
+      "credit_card",
+      "email",
+      "iban",
+      "ip_address",
+      "location",
+      "person_name",
+      "phone",
+      "url_credentials",
+    ]) {
+      expect(positiveCounts.get(entityType)).toBeGreaterThanOrEqual(5);
+    }
+    expect(
+      samples.filter(({ id, spans }) => id.includes("negative") && spans.length === 0),
+    ).toHaveLength(15);
     for (const sample of samples) {
       for (const span of sample.spans) {
         expect(sample.text.slice(span.start, span.end)).not.toBe("");

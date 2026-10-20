@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { DetectionSchema, parseJson } from "@harness/schemas";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   evaluatePiiReport,
+  formatPiiReport,
   PiiReportSchema,
   PiiThresholdsSchema,
+  runPiiReport,
   type PiiReport,
 } from "./pii-report.js";
 import { PiiCorpusSampleSchema } from "./gen-pii-corpus.js";
@@ -26,13 +26,13 @@ function sample(id: string, spans: { start: number; end: number; entityType: str
   return PiiCorpusSampleSchema.parse({ id, text: "abcdefghij", spans });
 }
 
-function detection(start: number, end: number) {
+function detection(start: number, end: number, detectorId = "synthetic") {
   return DetectionSchema.parse({
     entityType: "email",
     start,
     end,
     confidence: 1,
-    detectorId: "synthetic",
+    detectorId,
   });
 }
 
@@ -80,19 +80,60 @@ describe("evaluatePiiReport", () => {
     expect(report.passed).toBe(true);
   });
 
-  it("fails an entity when its exact metrics miss the configured threshold", () => {
+  it("fails thresholds when precision is undefined even if the minimum is zero", () => {
     const report: PiiReport = evaluatePiiReport(
       [sample("pii-missed", [{ start: 1, end: 5, entityType: "email" }])],
       [[]],
       "regex",
-      thresholds({ email: { minPrecision: 0.98, minRecall: 0.99 } }),
+      thresholds({ email: { minPrecision: 0, minRecall: 0 } }),
     );
 
     expect(report.passed).toBe(false);
     expect(report.entities.email?.passed).toBe(false);
+    expect(report.entities.email?.exact.precision).toBeNull();
+    expect(formatPiiReport(report)).toContain("email | n/a / 0.000 / 0.000");
   });
 
-  it("returns a non-zero process exit code when a threshold fails", () => {
+  it("counts agreeing detectors as one prediction", () => {
+    const report = evaluatePiiReport(
+      [sample("pii-agreeing-detectors", [{ start: 1, end: 5, entityType: "email" }])],
+      [[detection(1, 5, "regex"), detection(1, 5, "presidio")]],
+      "presidio",
+      thresholds(),
+    );
+
+    expect(report.entities.email?.exact).toMatchObject({
+      truePositive: 1,
+      falsePositive: 0,
+      falseNegative: 0,
+      precision: 1,
+      recall: 1,
+    });
+  });
+
+  it("finds a maximum-cardinality assignment for overlapping spans", () => {
+    const report = evaluatePiiReport(
+      [
+        sample("pii-iou-matching", [
+          { start: 0, end: 4, entityType: "email" },
+          { start: 4, end: 8, entityType: "email" },
+        ]),
+      ],
+      [[detection(0, 8), detection(0, 2)]],
+      "regex",
+      thresholds(),
+    );
+
+    expect(report.entities.email?.iou50).toMatchObject({
+      truePositive: 2,
+      falsePositive: 0,
+      falseNegative: 0,
+      precision: 1,
+      recall: 1,
+    });
+  });
+
+  it("returns a non-zero status when a threshold fails", () => {
     const directory = temporaryDirectory();
     const corpusPath = join(directory, "corpus.jsonl");
     const thresholdsPath = join(directory, "thresholds.json");
@@ -111,24 +152,18 @@ describe("evaluatePiiReport", () => {
       }),
     );
 
-    const result = spawnSync(
-      process.execPath,
-      [
-        "--experimental-strip-types",
-        fileURLToPath(new URL("./pii-report.ts", import.meta.url)),
-        "--mode",
-        "regex",
-        "--corpus",
-        corpusPath,
-        "--thresholds",
-        thresholdsPath,
-        "--out-dir",
-        outputDirectory,
-      ],
-      { cwd: process.cwd(), encoding: "utf8", timeout: 30_000 },
-    );
+    const status = runPiiReport([
+      "--mode",
+      "regex",
+      "--corpus",
+      corpusPath,
+      "--thresholds",
+      thresholdsPath,
+      "--out-dir",
+      outputDirectory,
+    ]);
 
-    expect(result.status).toBe(1);
+    expect(status).toBe(1);
     expect(
       parseJson(PiiReportSchema, readFileSync(join(outputDirectory, "pii-report.json"), "utf8"))
         .passed,

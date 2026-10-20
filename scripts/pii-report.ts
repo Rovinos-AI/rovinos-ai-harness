@@ -41,7 +41,7 @@ const PiiMetricSchema = z
     truePositive: z.number().int().nonnegative(),
     falsePositive: z.number().int().nonnegative(),
     falseNegative: z.number().int().nonnegative(),
-    precision: z.number().min(0).max(1),
+    precision: z.number().min(0).max(1).nullable(),
     recall: z.number().min(0).max(1),
     f1: z.number().min(0).max(1),
   })
@@ -95,11 +95,12 @@ export function evaluatePiiReport(
   }
 
   const entityTypes = new Set<string>();
+  const sampleDetections = detections.map(deduplicateDetections);
   for (const [index, sample] of samples.entries()) {
     for (const span of sample.spans) {
       entityTypes.add(span.entityType);
     }
-    for (const detection of detections[index] ?? []) {
+    for (const detection of sampleDetections[index] ?? []) {
       entityTypes.add(detection.entityType);
     }
   }
@@ -112,7 +113,7 @@ export function evaluatePiiReport(
     let iou50Counts: MatchCounts = { truePositive: 0, falsePositive: 0, falseNegative: 0 };
     for (const [index, sample] of samples.entries()) {
       const gold = sample.spans.filter((span) => span.entityType === entityType);
-      const predicted = (detections[index] ?? []).filter(
+      const predicted = (sampleDetections[index] ?? []).filter(
         (detection) => detection.entityType === entityType,
       );
       exactCounts = addCounts(exactCounts, matchCounts(gold, predicted, 1));
@@ -123,12 +124,26 @@ export function evaluatePiiReport(
     const iou50 = toMetric(iou50Counts);
     const entityPassed =
       threshold === null ||
-      (exact.precision >= threshold.minPrecision && exact.recall >= threshold.minRecall);
+      (exact.precision !== null &&
+        exact.precision >= threshold.minPrecision &&
+        exact.recall >= threshold.minRecall);
     entities[entityType] = { exact, iou50, threshold, passed: entityPassed };
     passed &&= entityPassed;
   }
 
   return PiiReportSchema.parse({ mode, sampleCount: samples.length, passed, entities });
+}
+
+function deduplicateDetections(detections: readonly Detection[]): Detection[] {
+  const seen = new Set<string>();
+  return detections.filter((detection) => {
+    const key = JSON.stringify([detection.entityType, detection.start, detection.end]);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function addCounts(total: MatchCounts, counts: MatchCounts): MatchCounts {
@@ -157,11 +172,11 @@ function matchCounts(
   minimumIou: number,
 ): MatchCounts {
   const candidates: {
-    readonly goldIndex: number;
     readonly predictionIndex: number;
     readonly iou: number;
-  }[] = [];
-  for (const [goldIndex, expected] of gold.entries()) {
+  }[][] = [];
+  for (const expected of gold) {
+    const matchingPredictions: (typeof candidates)[number] = [];
     for (const [predictionIndex, prediction] of predictions.entries()) {
       const iou = intersectionOverUnion(expected, prediction);
       const matches =
@@ -169,51 +184,54 @@ function matchCounts(
           ? expected.start === prediction.start && expected.end === prediction.end
           : iou >= minimumIou;
       if (matches) {
-        candidates.push({ goldIndex, predictionIndex, iou });
+        matchingPredictions.push({ predictionIndex, iou });
       }
     }
+    matchingPredictions.sort((left, right) => {
+      const iouDifference = right.iou - left.iou;
+      return iouDifference === 0 ? left.predictionIndex - right.predictionIndex : iouDifference;
+    });
+    candidates.push(matchingPredictions);
   }
-  candidates.sort((left, right) => {
-    const iouDifference = right.iou - left.iou;
-    if (iouDifference !== 0) {
-      return iouDifference;
+  const matchedPredictions = new Map<number, number>();
+  const assign = (goldIndex: number, visitedPredictions: Set<number>): boolean => {
+    for (const { predictionIndex } of candidates[goldIndex] ?? []) {
+      if (visitedPredictions.has(predictionIndex)) {
+        continue;
+      }
+      visitedPredictions.add(predictionIndex);
+      const previousGoldIndex = matchedPredictions.get(predictionIndex);
+      if (previousGoldIndex === undefined || assign(previousGoldIndex, visitedPredictions)) {
+        matchedPredictions.set(predictionIndex, goldIndex);
+        return true;
+      }
     }
-    const goldDifference = left.goldIndex - right.goldIndex;
-    if (goldDifference !== 0) {
-      return goldDifference;
-    }
-    return left.predictionIndex - right.predictionIndex;
-  });
-
-  const matchedGold = new Set<number>();
-  const matchedPredictions = new Set<number>();
-  for (const candidate of candidates) {
-    if (
-      !matchedGold.has(candidate.goldIndex) &&
-      !matchedPredictions.has(candidate.predictionIndex)
-    ) {
-      matchedGold.add(candidate.goldIndex);
-      matchedPredictions.add(candidate.predictionIndex);
-    }
+    return false;
+  };
+  for (const goldIndex of gold.keys()) {
+    assign(goldIndex, new Set());
   }
-  const truePositive = matchedGold.size;
+  const truePositive = matchedPredictions.size;
   return {
     truePositive,
     falsePositive: predictions.length - matchedPredictions.size,
-    falseNegative: gold.length - matchedGold.size,
+    falseNegative: gold.length - matchedPredictions.size,
   };
 }
 
 function toMetric(counts: MatchCounts): z.infer<typeof PiiMetricSchema> {
   const precisionDenominator = counts.truePositive + counts.falsePositive;
   const recallDenominator = counts.truePositive + counts.falseNegative;
-  const precision = precisionDenominator === 0 ? 1 : counts.truePositive / precisionDenominator;
+  const precision = precisionDenominator === 0 ? null : counts.truePositive / precisionDenominator;
   const recall = recallDenominator === 0 ? 1 : counts.truePositive / recallDenominator;
   return {
     ...counts,
     precision,
     recall,
-    f1: precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall),
+    f1:
+      precision === null || precision + recall === 0
+        ? 0
+        : (2 * precision * recall) / (precision + recall),
   };
 }
 
@@ -244,7 +262,11 @@ export function formatPiiReport(report: PiiReport): string {
 }
 
 function formatMetric(metric: z.infer<typeof PiiMetricSchema>): string {
-  return [metric.precision, metric.recall, metric.f1].map((value) => value.toFixed(3)).join(" / ");
+  return [
+    metric.precision === null ? "n/a" : metric.precision.toFixed(3),
+    metric.recall.toFixed(3),
+    metric.f1.toFixed(3),
+  ].join(" / ");
 }
 
 function readCorpus(path: string): PiiCorpusSample[] {
@@ -360,7 +382,8 @@ function parseOptions(args: readonly string[]): ReportOptions {
   };
 }
 
-function runPiiReport(args: readonly string[]): number {
+/** Runs the configured detector report and returns its exit status. */
+export function runPiiReport(args: readonly string[]): number {
   const options = parseOptions(args);
   const samples = readCorpus(options.corpusPath);
   const thresholds = parseJson(PiiThresholdsSchema, readFileSync(options.thresholdsPath, "utf8"));
