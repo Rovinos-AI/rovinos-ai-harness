@@ -42,7 +42,7 @@ const composeEnvironment: NodeJS.ProcessEnv = {
 const dockerAvailable =
   spawnSync("docker", ["info"], { stdio: "ignore", timeout: 5_000 }).status === 0;
 
-function compose(args: readonly string[]): string {
+function compose(args: readonly string[], timeout = 300_000): string {
   const environment = { ...composeEnvironment };
   delete environment.SANDBOX_RUNNER_TOKEN;
   environment.SANDBOX_RUNNER_TOKEN_SECRET_FILE = runnerTokenFile;
@@ -52,6 +52,7 @@ function compose(args: readonly string[]): string {
     encoding: "utf8",
     maxBuffer: 10 * 1024 * 1024,
     env: environment,
+    timeout,
   });
 }
 
@@ -75,11 +76,11 @@ function serviceAddress(service: string, network: string): string {
 describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
   afterAll(() => {
     try {
-      compose(["down", "--volumes", "--remove-orphans"]);
+      compose(["down", "--volumes", "--remove-orphans"], 120_000);
     } catch {
       // Cleanup is best-effort after a failed startup or health check.
     }
-  });
+  }, 150_000);
 
   beforeAll(async () => {
     // Docker bind-mounts the secret file. Colima shares only $HOME with its VM, so os.tmpdir()
@@ -107,17 +108,16 @@ describe.skipIf(!dockerAvailable)("prod-like Compose profile", () => {
       encoding: "utf8",
       mode: 0o444,
     });
-  });
+    compose(["up", "--detach", "--wait", "--wait-timeout", "720"], 730_000);
+  }, 750_000);
 
   afterAll(async () => {
     if (secretDirectory !== "") {
       await rm(secretDirectory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("checks service health and resumes a run checkpointed during container stop", async () => {
-    compose(["up", "--detach", "--wait"]);
-
     expect(inspect("harness", "{{.State.Health.Status}}")).toBe("healthy");
     expect(inspect("sandbox-runner", "{{.State.Health.Status}}")).toBe("healthy");
 
