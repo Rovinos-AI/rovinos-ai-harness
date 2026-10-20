@@ -4,7 +4,7 @@ import { HarnessConfigSchema } from "@harness/config";
 import type { ModelPort } from "@harness/core";
 import { createHarness } from "@harness/sdk";
 import { Code, FakeClock, Id, SequentialIdGenerator } from "@harness/schemas";
-import { SqliteEventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { randomBytes, createHash } from "node:crypto";
 import { tmpdir } from "node:os";

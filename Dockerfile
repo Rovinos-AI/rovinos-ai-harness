@@ -42,8 +42,25 @@ WORKDIR /app
 RUN groupadd --gid 10001 harness \
     && useradd --uid 10001 --gid harness --no-create-home --shell /usr/sbin/nologin harness \
     && mkdir -p /var/lib/harness/event-store /var/lib/harness/vault \
-    && chown -R 10001:10001 /var/lib/harness
+    && chown -R 10001:10001 /var/lib/harness /app \
+    && rm -rf /usr/bin/apt /usr/bin/apt-get /usr/bin/apt-cache /usr/bin/apt-cdrom /usr/bin/apt-config \
+      /usr/bin/dpkg* /usr/sbin/dpkg* /usr/lib/apt /usr/lib/dpkg \
+      /var/lib/apt /var/lib/dpkg /var/cache/apt \
+      /usr/share/doc/apt /usr/share/doc/dpkg /usr/share/man/man1/apt* \
+      /usr/share/man/man8/apt* /usr/share/man/man1/dpkg* /usr/share/man/man8/dpkg* \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+      /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
+    && command -v node \
+    && ! command -v apt-get \
+    && ! command -v dpkg \
+    && ! command -v npm \
+    && ! command -v docker
 COPY --from=build --chown=10001:10001 /out/ ./
 USER 10001
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/Rovinos-AI/rovinos-ai-harness" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.revision="${REVISION}"
 ENTRYPOINT ["node", "dist/bin.js"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD ["node", "dist/bin.js", "--version"]

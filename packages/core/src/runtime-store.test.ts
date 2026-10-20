@@ -10,7 +10,8 @@ import {
   SecretRefSchema,
   type KeyProvider,
 } from "@harness/schemas";
-import { AesGcmContentCodec, SqliteEventStore, StoreUnavailableError } from "@harness/store";
+import { AesGcmContentCodec, StoreUnavailableError } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { SqliteVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openConfiguredKeyRotation, openConfiguredVaultAdmin } from "./runtime-store.js";

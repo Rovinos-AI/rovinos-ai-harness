@@ -91,7 +91,7 @@ interface EventStore {
 **Parent:** #7 Event store
 **Task Description:** Implement the default durable adapter on SQLite with transactional, conflict-checked appends and a pluggable content codec.
 **Expected Inputs:** DB file path (or `:memory:`), optional `ContentCodec`.
-**Expected Output:** `packages/store/src/sqlite/{adapter.ts,schema.sql.ts}`, `packages/store/src/codec.ts` (`ContentCodec`, `JsonContentCodec`).
+**Expected Output:** `packages/store-sqlite/src/sqlite/{adapter.ts,schema.sql.ts}`, `packages/store/src/codec.ts` (`ContentCodec`, `JsonContentCodec`).
 **Dependencies:** `better-sqlite3` (verify native build works on Azure ubuntu agents and in the Docker image).
 **Items it depends on:** 7.1, 7.2.
 **Implementation guidance:**
@@ -163,7 +163,7 @@ interface EventStore {
 **Parent:** #7 Event store
 **Task Description:** Implement the Postgres adapter and run both conformance suites against a Postgres service container in the integration stage.
 **Expected Inputs:** Postgres connection URL.
-**Expected Output:** `packages/store/src/postgres/adapter.ts`, `postgres.int.test.ts`, `postgres` service in `infra/compose/docker-compose.test.yml`, `TEST_POSTGRES_URL` env wiring in the pipeline.
+**Expected Output:** `packages/store-postgres/src/postgres/adapter.ts`, `postgres.int.test.ts`, `postgres` service in `infra/compose/docker-compose.test.yml`, `TEST_POSTGRES_URL` env wiring in the pipeline.
 **Dependencies:** `pg`, Docker image `postgres:16`.
 **Items it depends on:** 7.4, 7.5, 1.8.
 **Implementation guidance:**
@@ -305,7 +305,7 @@ interface EventStore {
 **Parent:** #7 Event store
 **Task Description:** Replace inline `CREATE TABLE IF NOT EXISTS` with ordered, checksummed, transactional migrations.
 **Expected Inputs:** SQL migration files per dialect.
-**Expected Output:** `packages/store/migrations/{sqlite,postgres}/0001_init.sql` (consolidating all tables from 7.3 to 7.10), `packages/store/src/migrate.ts` (`migrate(driver, dialect, opts)`), `schema_migrations` table, CLI doc stub for `harness store migrate`.
+**Expected Output:** `packages/store-sqlite/migrations/0001_init.sql` and `packages/store-postgres/migrations/0001_init.sql` (consolidating all tables from 7.3 to 7.10), `packages/store/src/migrate.ts` (`migrate(driver, dialect, opts)`), `schema_migrations` table, CLI doc stub for `harness store migrate`.
 **Dependencies:** none.
 **Items it depends on:** 7.3, 7.6, 7.10, 7.11.
 **Implementation guidance:**
