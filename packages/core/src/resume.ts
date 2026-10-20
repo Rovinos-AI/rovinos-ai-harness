@@ -62,6 +62,17 @@ export class RunAwaitingApprovalError extends HarnessError {
   }
 }
 
+/** Error raised when a suspended run still has unresolved human inputs. */
+export class RunAwaitingInputError extends HarnessError {
+  readonly code = "run_awaiting_input";
+
+  /** Creates the awaiting-input resume error. */
+  constructor() {
+    super("The run cannot progress until its pending input is resolved.");
+    this.name = "RunAwaitingInputError";
+  }
+}
+
 const RESUME_LEASE_MS = 30_000;
 const RESUME_LEASE_RENEW_MS = 10_000;
 
@@ -153,6 +164,9 @@ async function readResumeHistory(options: ResumeRunOptions): Promise<ResumeHisto
     !hasResolvedApprovalToApply(state)
   ) {
     throw new RunAwaitingApprovalError();
+  }
+  if (state.pendingInputs.size > 0) {
+    throw new RunAwaitingInputError();
   }
   return { events, snapshot, state, head };
 }
@@ -249,6 +263,7 @@ async function applyResumeActions(
         ids: options.ids,
         signal: options.signal,
         ...(options.depth === undefined ? {} : { depth: options.depth }),
+        history: events,
         beforeToolExecution,
         onEvents: (recorded) => events.push(...recorded),
       },

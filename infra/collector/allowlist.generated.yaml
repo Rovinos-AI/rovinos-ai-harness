@@ -63,7 +63,7 @@ processors:
     error_mode: "ignore"
     metrics:
       metric:
-        - "not (name == \"harness.host.app_rejected\" or name == \"harness.host.app_spans_accepted\" or name == \"harness.mcp.discovery_failed\" or name == \"harness.model.cache_read_tokens\" or name == \"harness.model.cache_write_tokens\" or name == \"harness.model.cost_micros\" or name == \"harness.model.tokens\" or name == \"harness.pii.blob_hit\" or name == \"harness.pii.detector_degraded\" or name == \"harness.policy.decisions\" or name == \"harness.quota.rejections\" or name == \"harness.sentinel.scope_reduced\" or name == \"harness.sentinel.short_values_skipped\" or name == \"harness.telemetry.dropped\")"
+        - "not (name == \"harness.host.app_rejected\" or name == \"harness.host.app_spans_accepted\" or name == \"harness.mcp.discovery_failed\" or name == \"harness.mcp.input_requests\" or name == \"harness.model.cache_read_tokens\" or name == \"harness.model.cache_write_tokens\" or name == \"harness.model.cost_micros\" or name == \"harness.model.tokens\" or name == \"harness.pii.blob_hit\" or name == \"harness.pii.detector_degraded\" or name == \"harness.policy.decisions\" or name == \"harness.quota.rejections\" or name == \"harness.sentinel.scope_reduced\" or name == \"harness.sentinel.short_values_skipped\" or name == \"harness.telemetry.dropped\")"
   transform/metric_attributes:
     error_mode: "ignore"
     metric_statements:
@@ -72,6 +72,7 @@ processors:
       - "keep_keys(datapoint.attributes, [\"harness.host.app_rejected.reason\"]) where metric.name == \"harness.host.app_rejected\""
       - "keep_keys(datapoint.attributes, []) where metric.name == \"harness.host.app_spans_accepted\""
       - "keep_keys(datapoint.attributes, []) where metric.name == \"harness.mcp.discovery_failed\""
+      - "keep_keys(datapoint.attributes, [\"harness.mcp.input_requests.outcome\"]) where metric.name == \"harness.mcp.input_requests\""
       - "keep_keys(datapoint.attributes, [\"harness.model.name\", \"harness.model.provider\"]) where metric.name == \"harness.model.cache_read_tokens\""
       - "keep_keys(datapoint.attributes, [\"harness.model.name\", \"harness.model.provider\"]) where metric.name == \"harness.model.cache_write_tokens\""
       - "keep_keys(datapoint.attributes, [\"harness.model.name\", \"harness.model.provider\"]) where metric.name == \"harness.model.cost_micros\""

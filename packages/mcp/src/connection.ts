@@ -16,6 +16,7 @@ import {
 import { McpAuthRequiredError } from "./oauth/provider.js";
 import type { McpOAuthProvider } from "./oauth/provider.js";
 import { invokeMcpTool } from "./mcp-call.js";
+import type { ElicitationRetry } from "./elicitation/mrtr.js";
 import { getServerMetadata, type McpServerMetadata } from "./server-metadata.js";
 import { listAllTools, type McpTool } from "./tool-list.js";
 import type { McpConnectionDependencies, McpConnectionState } from "./connection-types.js";
@@ -320,6 +321,7 @@ export class McpConnection {
     inputSchema: unknown,
     options?: CallToolRequestOptions,
     toolDefinition?: McpTool,
+    inputRetry?: ElicitationRetry,
   ): Promise<CallToolResult> {
     try {
       const validate = getOrCreateValidator(inputSchema);
@@ -330,7 +332,7 @@ export class McpConnection {
 
     await this.#ensureReady(options?.signal);
     try {
-      return await this.#invoke(params, options, toolDefinition);
+      return await this.#invoke(params, options, toolDefinition, inputRetry);
     } catch (error) {
       if (error instanceof McpAuthRequiredError) {
         this.#markUnavailable();
@@ -351,7 +353,7 @@ export class McpConnection {
       }
       await this.#reconnect(options?.signal);
       try {
-        return await this.#invoke(params, options, toolDefinition);
+        return await this.#invoke(params, options, toolDefinition, inputRetry);
       } catch (retryError) {
         if (retryError instanceof McpProtocolError) {
           throw retryError;
@@ -365,6 +367,7 @@ export class McpConnection {
     params: CallToolRequest["params"],
     options?: CallToolRequestOptions,
     toolDefinition?: McpTool,
+    inputRetry?: ElicitationRetry,
   ): Promise<CallToolResult> {
     const client = this.#client;
     if (client === undefined || this.#state !== "ready") {
@@ -379,6 +382,7 @@ export class McpConnection {
           params,
           ...(options === undefined ? {} : { requestOptions: options }),
           ...(toolDefinition === undefined ? {} : { toolDefinition }),
+          ...(inputRetry === undefined ? {} : { inputRetry }),
         }),
     );
   }

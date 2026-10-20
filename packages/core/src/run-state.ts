@@ -9,6 +9,10 @@ export type ToolIntentEvent = Extract<Event, { type: "tool_intent" }>;
 
 /** An approval request that has not yet been resolved. */
 export type ApprovalRequestedEvent = Extract<Event, { type: "approval_requested" }>;
+/** An input request that has not yet been resolved. */
+export type InputRequestedEvent = Extract<Event, { type: "input_requested" }>;
+/** A durable resolution of a human input request. */
+export type InputResolvedEvent = Extract<Event, { type: "input_resolved" }>;
 type CheckpointWrittenEvent = Extract<Event, { type: "checkpoint_written" }>;
 
 /** State derived from the append-only events for one run. */
@@ -24,6 +28,7 @@ export interface RunState {
   };
   readonly pendingToolCalls: ReadonlyMap<ToolIntentEvent["callId"], ToolIntentEvent>;
   readonly toolExecutionStarted?: ReadonlySet<ToolIntentEvent["callId"]>;
+  readonly toolExecutionAttempts: ReadonlyMap<ToolIntentEvent["callId"], number>;
   readonly pendingApprovals: ReadonlyMap<
     ApprovalRequestedEvent["approvalId"],
     ApprovalRequestedEvent
@@ -36,6 +41,9 @@ export interface RunState {
     ApprovalRequestedEvent["approvalId"],
     Extract<Event, { type: "approval_resolved" }>
   >;
+  readonly inputRequests: ReadonlyMap<InputRequestedEvent["requestId"], InputRequestedEvent>;
+  readonly pendingInputs: ReadonlyMap<InputRequestedEvent["requestId"], InputRequestedEvent>;
+  readonly resolvedInputs: ReadonlyMap<InputResolvedEvent["requestId"], InputResolvedEvent>;
   readonly lastCheckpoint?: {
     readonly checkpointId: CheckpointWrittenEvent["checkpointId"];
     readonly atSeq: number;
@@ -59,12 +67,16 @@ interface MutableRunState {
   };
   pendingToolCalls: Map<ToolIntentEvent["callId"], ToolIntentEvent>;
   toolExecutionStarted: Set<ToolIntentEvent["callId"]>;
+  toolExecutionAttempts: Map<ToolIntentEvent["callId"], number>;
   pendingApprovals: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   approvalRequests: Map<ApprovalRequestedEvent["approvalId"], ApprovalRequestedEvent>;
   resolvedApprovals: Map<
     ApprovalRequestedEvent["approvalId"],
     Extract<Event, { type: "approval_resolved" }>
   >;
+  inputRequests: Map<InputRequestedEvent["requestId"], InputRequestedEvent>;
+  pendingInputs: Map<InputRequestedEvent["requestId"], InputRequestedEvent>;
+  resolvedInputs: Map<InputResolvedEvent["requestId"], InputResolvedEvent>;
   lastCheckpoint?: NonNullable<RunState["lastCheckpoint"]>;
   segmentId: Event["segmentId"];
   startedAt: number;
@@ -200,7 +212,9 @@ function applyToolResult(
   pendingToolCalls.delete(event.callId);
   const toolExecutionStarted = new Set(state.toolExecutionStarted);
   toolExecutionStarted.delete(event.callId);
-  return { ...state, pendingToolCalls, toolExecutionStarted };
+  const toolExecutionAttempts = new Map(state.toolExecutionAttempts);
+  toolExecutionAttempts.delete(event.callId);
+  return { ...state, pendingToolCalls, toolExecutionStarted, toolExecutionAttempts };
 }
 
 function applyToolLifecycle(state: MutableRunState, event: Event): MutableRunState | undefined {
@@ -214,12 +228,26 @@ function applyToolLifecycle(state: MutableRunState, event: Event): MutableRunSta
     if (!state.pendingToolCalls.has(event.callId)) {
       throw new CorruptLogError("Tool execution marker has no pending intent.");
     }
-    if (state.toolExecutionStarted.has(event.callId)) {
-      throw new CorruptLogError("Tool execution marker was duplicated.");
+    const previousAttempt = state.toolExecutionAttempts.get(event.callId) ?? 0;
+    if (previousAttempt > 0) {
+      const requests = Array.from(state.inputRequests.values()).filter(
+        (request) => request.callId === event.callId,
+      );
+      const latestRound = Math.max(-1, ...requests.map(({ round }) => round));
+      const latestRequests = requests.filter(({ round }) => round === latestRound);
+      if (
+        latestRequests.length === 0 ||
+        latestRound < previousAttempt ||
+        latestRequests.some(({ requestId }) => !state.resolvedInputs.has(requestId))
+      ) {
+        throw new CorruptLogError("A repeated tool execution marker requires a resolved input round.");
+      }
     }
     const toolExecutionStarted = new Set(state.toolExecutionStarted);
     toolExecutionStarted.add(event.callId);
-    return { ...state, toolExecutionStarted };
+    const toolExecutionAttempts = new Map(state.toolExecutionAttempts);
+    toolExecutionAttempts.set(event.callId, previousAttempt + 1);
+    return { ...state, toolExecutionStarted, toolExecutionAttempts };
   }
   return undefined;
 }
@@ -238,6 +266,41 @@ function applyApprovalRequest(
   const resolvedApprovals = new Map(state.resolvedApprovals);
   resolvedApprovals.delete(event.approvalId);
   return { ...state, pendingApprovals, approvalRequests, resolvedApprovals };
+}
+
+function applyInputRequest(state: MutableRunState, event: InputRequestedEvent): MutableRunState {
+  if (
+    state.inputRequests.has(event.requestId) ||
+    (event.source === "mcp_mrtr" &&
+      (event.callId === undefined ||
+        event.serverId === undefined ||
+        event.inputKey === undefined ||
+        !state.pendingToolCalls.has(event.callId)))
+  ) {
+    throw new CorruptLogError("Input request does not match a pending tool call.");
+  }
+  const inputRequests = new Map(state.inputRequests);
+  inputRequests.set(event.requestId, event);
+  const pendingInputs = new Map(state.pendingInputs);
+  pendingInputs.set(event.requestId, event);
+  return { ...state, inputRequests, pendingInputs };
+}
+
+function applyInputResolution(state: MutableRunState, event: InputResolvedEvent): MutableRunState {
+  const request = state.pendingInputs.get(event.requestId);
+  if (
+    request === undefined ||
+    request.source !== event.source ||
+    request.mode !== event.mode ||
+    request.round !== event.round
+  ) {
+    throw new CorruptLogError("Input resolution does not match a pending request.");
+  }
+  const pendingInputs = new Map(state.pendingInputs);
+  pendingInputs.delete(event.requestId);
+  const resolvedInputs = new Map(state.resolvedInputs);
+  resolvedInputs.set(event.requestId, event);
+  return { ...state, pendingInputs, resolvedInputs };
 }
 
 function applyApprovalResolution(
@@ -309,6 +372,12 @@ function applyEvent(state: MutableRunState, event: Event, runId: Event["runId"])
   if (event.type === "approval_resolved") {
     return applyApprovalResolution(withEnvelope, event);
   }
+  if (event.type === "input_requested") {
+    return applyInputRequest(withEnvelope, event);
+  }
+  if (event.type === "input_resolved") {
+    return applyInputResolution(withEnvelope, event);
+  }
   if (event.type === "checkpoint_written") {
     return {
       ...withEnvelope,
@@ -341,9 +410,13 @@ export function foldRunState(events: Iterable<Event>): RunState {
     usage: { inputTokens: 0, outputTokens: 0, costMicros: 0 },
     pendingToolCalls: new Map(),
     toolExecutionStarted: new Set(),
+    toolExecutionAttempts: new Map(),
     pendingApprovals: new Map(),
     approvalRequests: new Map(),
     resolvedApprovals: new Map(),
+    inputRequests: new Map(),
+    pendingInputs: new Map(),
+    resolvedInputs: new Map(),
     segmentId: first.value.segmentId,
     startedAt: first.value.ts,
     lastTs: first.value.ts,

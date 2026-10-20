@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: Apache-2.0
+import {
+  CLIENT_CAPABILITIES_META_KEY,
+  type CallToolRequest,
+  type CallToolRequestOptions,
+  type CallToolResult,
+  type Client,
+} from "@modelcontextprotocol/client";
+import { ServerConfigSchema } from "@harness/schemas";
+import { describe, expect, it } from "vitest";
+import { invokeMcpTool } from "./mcp-call.js";
+
+function serverConfig(input: {
+  readonly enabled: boolean;
+  readonly modes?: ("form" | "url")[];
+}) {
+  return ServerConfigSchema.parse({
+    id: "mcp_test",
+    transport: { kind: "stdio", command: "unused-test-command" },
+    protocol: "2026-07-28",
+    elicitation: {
+      enabled: input.enabled,
+      ...(input.modes === undefined ? {} : { modes: input.modes }),
+    },
+  });
+}
+
+describe("invokeMcpTool elicitation metadata", () => {
+  it("declares only configured modes and preserves exact retry material", async () => {
+    const calls: CallToolRequest["params"][] = [];
+    const options: (CallToolRequestOptions | undefined)[] = [];
+    const client: Pick<Client, "callTool"> = {
+      callTool: async (params, requestOptions) => {
+        calls.push(params);
+        options.push(requestOptions);
+        return { content: [] } satisfies CallToolResult;
+      },
+    };
+    const requestState = "opaque-\u0000-\u{1f4a1}";
+    await invokeMcpTool({
+      client,
+      server: serverConfig({ enabled: true, modes: ["form"] }),
+      params: {
+        name: "echo",
+        arguments: {},
+        _meta: {
+          [CLIENT_CAPABILITIES_META_KEY]: { roots: {}, sampling: {} },
+        },
+      },
+      inputRetry: {
+        round: 2,
+        requestState,
+        inputResponses: {
+          "server-key": { action: "accept", answer: { answer: "Ada" } },
+        },
+      },
+    });
+
+    expect(calls[0]).toMatchObject({
+      requestState,
+      inputResponses: {
+        "server-key": { action: "accept", content: { answer: "Ada" } },
+      },
+      _meta: {
+        [CLIENT_CAPABILITIES_META_KEY]: { elicitation: { form: {} } },
+      },
+    });
+    expect(options[0]?.allowInputRequired).toBe(true);
+  });
+
+  it("removes caller-supplied capabilities when elicitation is disabled", async () => {
+    const calls: CallToolRequest["params"][] = [];
+    const client: Pick<Client, "callTool"> = {
+      callTool: async (params) => {
+        calls.push(params);
+        return { content: [] } satisfies CallToolResult;
+      },
+    };
+    await invokeMcpTool({
+      client,
+      server: serverConfig({ enabled: false }),
+      params: {
+        name: "echo",
+        arguments: {},
+        _meta: {
+          [CLIENT_CAPABILITIES_META_KEY]: { elicitation: { form: {}, url: {} }, roots: {} },
+        },
+      },
+    });
+    expect(calls[0]?._meta?.[CLIENT_CAPABILITIES_META_KEY]).toBeUndefined();
+  });
+
+  it("rejects an answer that cannot be represented by an MCP elicitation result", async () => {
+    const client: Pick<Client, "callTool"> = {
+      callTool: async () => ({ content: [] }),
+    };
+    await expect(
+      invokeMcpTool({
+        client,
+        server: serverConfig({ enabled: true, modes: ["form"] }),
+        params: { name: "echo", arguments: {} },
+        inputRetry: {
+          round: 1,
+          inputResponses: {
+            "server-key": { action: "accept", answer: "not-a-form-content-object" },
+          },
+        },
+      }),
+    ).rejects.toThrow("Resolved input does not match");
+  });
+});

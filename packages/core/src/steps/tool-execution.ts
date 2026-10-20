@@ -4,7 +4,7 @@ import { Code, HarnessError, Sha256Hex, type Event, type JsonValue } from "@harn
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@harness/pii";
 import { setActiveSpanAttribute } from "@harness/telemetry";
-import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
+import { RunEventRecordingError, type Clock, type EventPartial, type RunRecorder } from "../recorder.js";
 import type {
   ModelToolCall,
   RunContext,
@@ -56,6 +56,9 @@ export function executedArgsHashFor(
 /** Extracts typed tool codes, preserving recorder failure semantics. */
 export function toolErrorCode(error: unknown): Code {
   if (error instanceof SummaryRecordingError) {
+    throw error.failure;
+  }
+  if (error instanceof RunEventRecordingError) {
     throw error.failure;
   }
   if (error instanceof HarnessError) {
@@ -199,6 +202,12 @@ export async function executePreparedTool(options: ExecutePreparedToolOptions): 
   }
   if (execution.suspend === true) {
     if (options.signal.reason === "shutdown" && options.intentEvent !== undefined) {
+      return options.intentEvent;
+    }
+    if (execution.suspendReason === "awaiting_input") {
+      if (options.intentEvent === undefined) {
+        throw new ToolTimeoutError();
+      }
       return options.intentEvent;
     }
     return options.recorder.record({

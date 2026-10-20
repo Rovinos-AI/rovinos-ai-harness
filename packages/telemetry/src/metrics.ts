@@ -37,6 +37,14 @@ export const HOST_APP_REJECTED_REASONS = [
 
 /** Policy outcomes used by the decision counter. */
 export const POLICY_DECISIONS = ["allow", "ask", "deny"] as const;
+/** Bounded outcomes for MCP human-input requests. */
+export const MCP_INPUT_REQUEST_OUTCOMES = [
+  "asked",
+  "declined_sensitive",
+  "rejected",
+  "rounds_exceeded",
+  "rate_limited",
+] as const;
 
 /** Bounded reasons for dropping or stripping telemetry data. */
 export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];
@@ -44,6 +52,8 @@ export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];
 export type HostAppRejectedReason = (typeof HOST_APP_REJECTED_REASONS)[number];
 /** Bounded policy decision outcome. */
 export type PolicyDecision = (typeof POLICY_DECISIONS)[number];
+/** Bounded outcomes counted for an MCP human-input request. */
+export type McpInputRequestOutcome = (typeof MCP_INPUT_REQUEST_OUTCOMES)[number];
 interface TelemetryDropAttributes extends Readonly<Record<string, TelemetryDropReason>> {
   readonly "harness.telemetry.dropped.reason": TelemetryDropReason;
 }
@@ -60,12 +70,17 @@ interface ModelUsageAttributes extends Readonly<Record<string, CodeType>> {
 interface QuotaRejectionAttributes extends Readonly<Record<string, CodeType>> {
   readonly "harness.quota.id": CodeType;
 }
+interface McpInputRequestAttributes
+  extends Readonly<Record<string, McpInputRequestOutcome>> {
+  readonly "harness.mcp.input_requests.outcome": McpInputRequestOutcome;
+}
 
 /** String-valued metric attributes are explicitly closed enumerations. */
 export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
   "harness.telemetry.dropped.reason": TELEMETRY_DROP_REASONS,
   "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
   "harness.policy.decision": POLICY_DECISIONS,
+  "harness.mcp.input_requests.outcome": MCP_INPUT_REQUEST_OUTCOMES,
 } as const;
 
 /** Collector allowlist of metric names and their allowed datapoint attribute keys. */
@@ -84,6 +99,7 @@ export const METRIC_ALLOWLIST = {
   "harness.sentinel.short_values_skipped": [],
   "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
   "harness.mcp.discovery_failed": [],
+  "harness.mcp.input_requests": ["harness.mcp.input_requests.outcome"],
 } as const satisfies Record<Code, readonly Code[]>;
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
@@ -100,6 +116,7 @@ let modelCacheReadCounter: Counter<ModelUsageAttributes> | undefined;
 let modelCacheWriteCounter: Counter<ModelUsageAttributes> | undefined;
 let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
 let quotaRejectionsCounter: Counter<QuotaRejectionAttributes> | undefined;
+let mcpInputRequestsCounter: Counter<McpInputRequestAttributes> | undefined;
 
 function createCounter<TAttributes extends Attributes>(
   name: keyof typeof METRIC_ALLOWLIST,
@@ -217,6 +234,14 @@ function getQuotaRejectionsCounter(): Counter<QuotaRejectionAttributes> {
     (meter, name) => meter.createCounter<QuotaRejectionAttributes>(name),
   );
   return quotaRejectionsCounter;
+}
+
+function getMcpInputRequestsCounter(): Counter<McpInputRequestAttributes> {
+  mcpInputRequestsCounter ??= createCounter<McpInputRequestAttributes>(
+    "harness.mcp.input_requests",
+    (meter, name) => meter.createCounter<McpInputRequestAttributes>(name),
+  );
+  return mcpInputRequestsCounter;
 }
 
 /** Counts one quota rejection using the configured quota's bounded code. */
@@ -359,6 +384,15 @@ export function countModelUsage(
 export function countMcpDiscoveryFailed(): void {
   try {
     getMcpDiscoveryFailedCounter().add(1);
+  } catch {
+    return;
+  }
+}
+
+/** Counts an MCP input-request outcome without server identifiers or request content. */
+export function countMcpInputRequest(outcome: McpInputRequestOutcome): void {
+  try {
+    getMcpInputRequestsCounter().add(1, { "harness.mcp.input_requests.outcome": outcome });
   } catch {
     return;
   }

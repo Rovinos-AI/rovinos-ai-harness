@@ -24,6 +24,8 @@ import {
   requestPolicyApproval,
   setPolicySpanAttributes,
 } from "./policy-step.js";
+import { createMcpElicitationPort } from "./input-step.js";
+import type { ElicitationRetry } from "@harness/mcp";
 import {
   executePreparedTool,
   executedArgsHashField,
@@ -55,6 +57,7 @@ export interface ResumeToolStepOptions extends ToolStepExecutionOptions {
   readonly ids: IdGenerator;
   readonly checkpointer?: Checkpointer;
   readonly policy?: PolicyPort;
+  readonly history?: readonly Event[];
   readonly beforeToolExecution?: () => Promise<void>;
   readonly onEvents?: (events: readonly Event[]) => void;
 }
@@ -65,6 +68,7 @@ interface RunToolCallBehavior {
   readonly checkEditedPolicy?: boolean;
   readonly existingIntent?: ToolIntentEvent;
   readonly prepared?: PreparedToolCall;
+  readonly inputRetry?: ElicitationRetry;
 }
 
 function intentPartial(options: {
@@ -103,7 +107,7 @@ export async function runToolCall(
   const call = unregistered?.call ?? proposedCall;
   const safeBehavior =
     unregistered === undefined ? behavior : { ...behavior, prepared: unregistered.prepared };
-  const context = executionContext(options, events);
+  const context = executionContext(options, events, call.callId, behavior.inputRetry);
   await options.recorder.withStepSpan(TOOL_CALL_SPAN, {}, (span) =>
     runToolCallWithinSpan({
       options,
@@ -338,11 +342,11 @@ async function executeAndRecord(
     readonly executedArgsHash: string | undefined;
   },
 ): Promise<Event> {
-  if (
-    !options.description.idempotent &&
-    options.intentEvent?.type === "tool_intent" &&
-    input.options.tool.resumeStrategy?.(options.call.toolId) === undefined
-  ) {
+  const recordExecutionMarker =
+    input.behavior.inputRetry !== undefined ||
+    (!options.description.idempotent &&
+      input.options.tool.resumeStrategy?.(options.call.toolId) === undefined);
+  if (recordExecutionMarker && options.intentEvent?.type === "tool_intent") {
     const started = await input.options.recorder.record({
       type: "tool_execution_started",
       v: 1,
@@ -383,8 +387,17 @@ async function prepareRunToolCall(
   return behavior.prepared ?? prepareToolCall(options.tool, proposedCall, context);
 }
 
-function executionContext(options: ToolStepExecutionOptions, events: Event[]) {
-  return toolRunContext(
+function executionContext(
+  options: ToolStepExecutionOptions & {
+    readonly ids?: IdGenerator;
+    readonly checkpointer?: Checkpointer;
+    readonly history?: readonly Event[];
+  },
+  events: Event[],
+  callId: Id,
+  inputRetry?: ElicitationRetry,
+) {
+  const base = toolRunContext(
     {
       runId: options.runId,
       signal: options.signal,
@@ -394,6 +407,22 @@ function executionContext(options: ToolStepExecutionOptions, events: Event[]) {
     options.recorder,
     events,
   );
+  if (options.ids === undefined) {
+    return base;
+  }
+  return {
+    ...base,
+    elicitation: createMcpElicitationPort({
+      callId,
+      clock: options.clock,
+      events,
+      history: options.history ?? [],
+      ids: options.ids,
+      recorder: options.recorder,
+      checkpointer: options.checkpointer,
+    }),
+    ...(inputRetry === undefined ? {} : { inputRetry }),
+  };
 }
 
 /** Records prepared tool intents durably before execution, then records results. */
@@ -406,7 +435,20 @@ export async function toolStep(options: ToolStepOptions): Promise<readonly Event
         : options.tool.describe(call.toolId, call.args);
     const prepared = options.preparedCalls?.[index];
     const behavior = prepared === undefined ? {} : { prepared };
-    events.push(...(await runToolCall(options, call, description, behavior)));
+    const callEvents = await runToolCall(
+      { ...options, history: [...options.history, ...events] },
+      call,
+      description,
+      behavior,
+    );
+    events.push(...callEvents);
+    if (
+      callEvents.some(
+        (event) => event.type === "run_status_changed" && event.to === "suspended",
+      )
+    ) {
+      break;
+    }
   }
   return events;
 }

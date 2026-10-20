@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   ProtocolError,
+  CLIENT_CAPABILITIES_META_KEY,
   type CallToolRequest,
   type CallToolRequestOptions,
   type CallToolResult,
@@ -10,6 +11,7 @@ import type { ServerConfig } from "@harness/schemas";
 import { McpProtocolError } from "./errors.js";
 import { buildActiveRequestMeta } from "./trace-injection.js";
 import type { McpTool } from "./tool-list.js";
+import { toWireInputResponses, type ElicitationRetry } from "./elicitation/mrtr.js";
 
 /**
  * Calls a discovered tool with request metadata and its discovered definition.
@@ -22,19 +24,35 @@ import type { McpTool } from "./tool-list.js";
  * @returns The remote tool result.
  */
 export async function invokeMcpTool(options: {
-  readonly client: Client;
+  readonly client: Pick<Client, "callTool">;
   readonly server: ServerConfig;
   readonly params: CallToolRequest["params"];
   readonly requestOptions?: CallToolRequestOptions;
   readonly toolDefinition?: McpTool;
+  readonly inputRetry?: ElicitationRetry;
 }): Promise<CallToolResult> {
   const { _meta: existingMeta, ...callParams } = options.params;
   const requestMeta = buildActiveRequestMeta(options.server, existingMeta);
+  const clientCapabilities = { ...requestMeta };
+  delete clientCapabilities[CLIENT_CAPABILITIES_META_KEY];
+  if (options.server.elicitation.enabled) {
+    clientCapabilities[CLIENT_CAPABILITIES_META_KEY] = {
+      elicitation: Object.fromEntries(options.server.elicitation.modes.map((mode) => [mode, {}])),
+    };
+  }
   try {
     return await options.client.callTool(
       {
         ...callParams,
-        ...(requestMeta === undefined ? {} : { _meta: requestMeta }),
+        ...(options.inputRetry === undefined
+          ? {}
+          : {
+              inputResponses: toWireInputResponses(options.inputRetry.inputResponses),
+              ...(options.inputRetry.requestState === undefined
+                ? {}
+                : { requestState: options.inputRetry.requestState }),
+            }),
+        ...(Object.keys(clientCapabilities).length === 0 ? {} : { _meta: clientCapabilities }),
       },
       {
         timeout: options.server.timeouts.callMs,

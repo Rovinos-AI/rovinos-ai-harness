@@ -47,6 +47,7 @@ export interface ToolResumeStrategy {
 /** Decision for one tool intent that has no recorded result. */
 export type DanglingIntentAction =
   | { readonly kind: "rerun"; readonly callId: ToolIntentEvent["callId"] }
+  | { readonly kind: "retry_input"; readonly callId: ToolIntentEvent["callId"] }
   | { readonly kind: "strategy"; readonly callId: ToolIntentEvent["callId"] }
   | { readonly kind: "escalate"; readonly callId: ToolIntentEvent["callId"] }
   | {
@@ -79,10 +80,25 @@ export function planDanglingIntents(
     if (intent.policyDecision === "deny") {
       return { kind: "fail", callId: intent.callId, errorCode: "pii_blocked" };
     }
+    const resumeStrategy = toolPort.resumeStrategy?.(intent.toolId);
+    const inputRequests = Array.from(state.inputRequests.values()).filter(
+      (request) => request.callId === intent.callId,
+    );
+    const latestRound = Math.max(-1, ...inputRequests.map(({ round }) => round));
+    const latestInputs = inputRequests.filter(({ round }) => round === latestRound);
+    const initialAttempt =
+      resumeStrategy !== undefined || (intent.idempotent && description.idempotent) ? 0 : 1;
+    if (
+      latestInputs.length > 0 &&
+      latestInputs.every(({ requestId }) => state.resolvedInputs.has(requestId)) &&
+      (state.toolExecutionAttempts.get(intent.callId) ?? 0) <= initialAttempt + latestRound - 1
+    ) {
+      return { kind: "retry_input", callId: intent.callId };
+    }
     if (intent.policyDecision === "ask") {
       return { kind: "escalate", callId: intent.callId };
     }
-    if (toolPort.resumeStrategy?.(intent.toolId) !== undefined) {
+    if (resumeStrategy !== undefined) {
       return { kind: "strategy", callId: intent.callId };
     }
     if (intent.idempotent && description.idempotent) {

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ProtocolError, type CallToolResult } from "@modelcontextprotocol/client";
-import { Code, JsonValue, compileJsonSchema } from "@harness/schemas";
+import {
+  isInputRequiredResult,
+  ProtocolError,
+  type CallToolResult,
+} from "@modelcontextprotocol/client";
+import { Code, HarnessError, JsonValue, compileJsonSchema } from "@harness/schemas";
 import type { JsonValue as JsonValueType, ServerConfig } from "@harness/schemas";
 import * as telemetry from "@harness/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
@@ -8,6 +12,17 @@ import { McpConnectionError } from "./connection.js";
 import type { McpConnection, McpConnectionDependencies } from "./connection.js";
 import type { OAuthTokenStore } from "./oauth/token-store.js";
 import { McpProtocolError } from "./errors.js";
+import { countMcpInputRequest } from "@harness/telemetry";
+import {
+  type ElicitationInputOutcome,
+  type ElicitationPort,
+  type ElicitationRetry,
+} from "./elicitation/mrtr.js";
+import { requestsSensitiveFormField } from "./elicitation/sensitive.js";
+import {
+  InputRequestContentSchema,
+  validateInputRequiredResult,
+} from "./elicitation/validate.js";
 import { McpPool } from "./pool.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
 
@@ -34,11 +49,19 @@ export interface McpToolCall {
 /** Context required to execute one MCP tool call. */
 export interface McpToolCallContext {
   readonly signal: AbortSignal;
+  /** Core-owned durable handler for MRTR input requests. */
+  readonly elicitation?: ElicitationPort;
+  /** Resolved responses and opaque state for a resumed tool call. */
+  readonly inputRetry?: ElicitationRetry;
+  /** Tokenizes server-provided request content before durable recording. */
+  readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
 }
 
 /** Safe tool result structurally compatible with the core tool port. */
 export interface McpToolExecutionResult {
   readonly binary?: boolean;
+  readonly suspend?: boolean;
+  readonly suspendReason?: "awaiting_input";
   readonly outcome: "ok" | "error";
   readonly result: JsonValueType;
   readonly errorCode?: string;
@@ -269,6 +292,13 @@ function failure(code: string, result: JsonValueType = null): McpToolExecutionRe
   return { outcome: "error", errorCode: Code.parse(code), result };
 }
 
+function isRecorderFailure(error: unknown): boolean {
+  return (
+    error instanceof HarnessError &&
+    (error.code === "run_event_record_failed" || error.code === "pii_summary_record_failed")
+  );
+}
+
 function setOutcome(span: Span, outcome: McpToolExecutionResult): void {
   telemetry.setActiveSpanAttribute("harness.outcome", outcome.outcome);
   if (outcome.outcome === "error") {
@@ -292,27 +322,121 @@ async function executeRegisteredTool(options: {
   readonly call: McpToolCall;
   readonly signal: AbortSignal;
   readonly offloadBinaryResults: boolean;
+  readonly elicitation?: ElicitationPort;
+  readonly inputRetry?: ElicitationRetry;
+  readonly tokenizeHumanInput?: (value: JsonValueType) => Promise<JsonValueType>;
 }): Promise<McpToolExecutionResult> {
-  const { connection, route, call, signal, offloadBinaryResults } = options;
+  const { connection, route, call, signal, offloadBinaryResults, elicitation } = options;
   if (signal.aborted) {
     return failure("mcp_timeout");
   }
   if (!isRecord(call.args) || !validToolArgs(route.inputSchema, call.args)) {
     return failure("args_invalid");
   }
+  let inputRetry = options.inputRetry;
+  let round = inputRetry?.round ?? 0;
   let result: CallToolResult;
-  try {
-    result = await connection.callTool(
-      { name: route.nativeName, arguments: call.args },
-      route.inputSchema,
-      { signal },
-      route.tool,
-    );
-  } catch (error) {
-    return failure(errorCode(error, signal));
-  }
-  if (Reflect.get(result, "resultType") === "input_required") {
-    return failure("mcp_input_required_unsupported");
+  for (;;) {
+    try {
+      result = await connection.callTool(
+        { name: route.nativeName, arguments: call.args },
+        route.inputSchema,
+        { signal },
+        route.tool,
+        inputRetry,
+      );
+    } catch (error) {
+      return failure(errorCode(error, signal));
+    }
+    if (!isInputRequiredResult(result)) {
+      break;
+    }
+    round += 1;
+    if (round > route.server.elicitation.maxRounds) {
+      countMcpInputRequest("rounds_exceeded");
+      return failure("mcp_input_rounds_exceeded");
+    }
+    let validated;
+    try {
+      validated = validateInputRequiredResult(result, route.server);
+    } catch {
+      countMcpInputRequest("rejected");
+      return failure("mcp_input_request_invalid");
+    }
+    const sensitiveInputKeys = validated.inputRequests
+      .filter(requestsSensitiveFormField)
+      .map(({ inputKey }) => inputKey);
+    const sensitiveKeys = new Set(sensitiveInputKeys);
+    if (elicitation === undefined) {
+      countMcpInputRequest("rejected");
+      return failure("mcp_input_request_invalid");
+    }
+    if (options.tokenizeHumanInput === undefined) {
+      countMcpInputRequest("rejected");
+      return failure("mcp_input_request_invalid");
+    }
+    let tokenizedRequests;
+    try {
+      const tokenized = await options.tokenizeHumanInput(
+        JsonValue.parse(
+          validated.inputRequests.map(({ inputKey: _inputKey, ...request }) => request),
+        ),
+      );
+      const parsed = InputRequestContentSchema.parse(tokenized);
+      tokenizedRequests = parsed.map((request, index) => {
+        const original = validated.inputRequests[index];
+        if (original === undefined) {
+          throw new Error("Validated request count changed.");
+        }
+        return { ...request, inputKey: original.inputKey };
+      });
+    } catch (error) {
+      if (isRecorderFailure(error)) {
+        throw error;
+      }
+      return failure("mcp_input_request_invalid");
+    }
+    let inputOutcome: ElicitationInputOutcome;
+    try {
+      inputOutcome = await elicitation.handleInputRequired({
+        callId: call.callId,
+        serverId: route.server.id,
+        round,
+        maxPerRun: route.server.elicitation.maxPerRun,
+        inputRequests: tokenizedRequests,
+        sensitiveInputKeys,
+        ...(validated.requestState === undefined
+          ? {}
+          : { requestState: validated.requestState }),
+      });
+    } catch (error) {
+      if (isRecorderFailure(error)) {
+        throw error;
+      }
+      return failure("mcp_input_request_invalid");
+    }
+    if (inputOutcome.kind === "error") {
+      countMcpInputRequest(
+        inputOutcome.errorCode === "mcp_input_rate_limited" ? "rate_limited" : "rejected",
+      );
+      return failure(inputOutcome.errorCode);
+    }
+    for (const request of validated.inputRequests) {
+      countMcpInputRequest(sensitiveKeys.has(request.inputKey) ? "declined_sensitive" : "asked");
+    }
+    if (inputOutcome.kind === "suspend") {
+      return {
+        outcome: "ok",
+        result: null,
+        suspend: true,
+        suspendReason: "awaiting_input",
+      };
+    }
+    inputRetry = {
+      inputResponses: inputOutcome.inputResponses,
+      round,
+      ...(validated.requestState === undefined ? {} : { requestState: validated.requestState }),
+    };
   }
   const mapped = normalizedResult(result);
   const serialized = JSON.stringify(mapped.offloadValue);
@@ -440,6 +564,11 @@ export class McpToolPort {
             call,
             signal,
             offloadBinaryResults: this.options.offloadBinaryResults === true,
+            ...(context.elicitation === undefined ? {} : { elicitation: context.elicitation }),
+            ...(context.inputRetry === undefined ? {} : { inputRetry: context.inputRetry }),
+            ...(context.tokenizeHumanInput === undefined
+              ? {}
+              : { tokenizeHumanInput: context.tokenizeHumanInput }),
           });
           setOutcome(span, outcome);
           return outcome;

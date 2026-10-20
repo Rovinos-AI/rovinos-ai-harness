@@ -10,6 +10,7 @@ import { requestPolicyApproval } from "./policy-step.js";
 import { TOOL_CALL_SPAN } from "../spans.js";
 import type { DanglingIntentAction, ToolResumeDecision } from "../resume-policy.js";
 import type { ApprovalRequestedEvent, RunState, ToolIntentEvent } from "../run-state.js";
+import { inputRetryForCall } from "./input-step.js";
 import { runToolCall, type ResumeToolStepOptions } from "./tool-step.js";
 import { requestResumeApprovals } from "./resume-approval-request.js";
 import {
@@ -155,11 +156,28 @@ async function applyDanglingIntentAction(
   if (description === undefined) {
     return recordDanglingFailure(options, intent, "unknown_tool");
   }
+  if (action.kind === "retry_input") {
+    const inputRetry = inputRetryForCall(state, intent.callId);
+    if (inputRetry === undefined) {
+      throw new ResumeActionMismatchError();
+    }
+    await options.beforeToolExecution?.();
+    const call = callFromIntent(intent);
+    return runToolCall(options, call, description, {
+      existingIntent: intent,
+      prepared: { call },
+      inputRetry,
+    });
+  }
   if (!intent.idempotent || !description.idempotent) {
     return "escalate";
   }
   await options.beforeToolExecution?.();
-  return runToolCall(options, callFromIntent(intent), description, { existingIntent: intent });
+  const inputRetry = inputRetryForCall(state, intent.callId);
+  return runToolCall(options, callFromIntent(intent), description, {
+    existingIntent: intent,
+    ...(inputRetry === undefined ? {} : { inputRetry }),
+  });
 }
 
 async function applyToolResumeDecision(
