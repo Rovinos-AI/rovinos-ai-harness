@@ -79,7 +79,9 @@ interface MatchCounts {
 }
 
 const corpusPath = fileURLToPath(new URL("../test/pii-corpus/corpus.jsonl", import.meta.url));
-const thresholdsPath = fileURLToPath(new URL("../test/pii-corpus/thresholds.json", import.meta.url));
+const thresholdsPath = fileURLToPath(
+  new URL("../test/pii-corpus/thresholds.json", import.meta.url),
+);
 
 /** Computes precision, recall, F1, exact matches, and the IoU >= 0.5 fallback. */
 export function evaluatePiiReport(
@@ -89,7 +91,7 @@ export function evaluatePiiReport(
   thresholds: PiiThresholds,
 ): PiiReport {
   if (samples.length === 0 || samples.length !== detections.length) {
-    throw new Error("PII report input is invalid.");
+    throw new TypeError("PII report input is invalid.");
   }
 
   const entityTypes = new Set<string>();
@@ -154,8 +156,11 @@ function matchCounts(
   predictions: readonly Detection[],
   minimumIou: number,
 ): MatchCounts {
-  const candidates: { readonly goldIndex: number; readonly predictionIndex: number; readonly iou: number }[] =
-    [];
+  const candidates: {
+    readonly goldIndex: number;
+    readonly predictionIndex: number;
+    readonly iou: number;
+  }[] = [];
   for (const [goldIndex, expected] of gold.entries()) {
     for (const [predictionIndex, prediction] of predictions.entries()) {
       const iou = intersectionOverUnion(expected, prediction);
@@ -168,12 +173,17 @@ function matchCounts(
       }
     }
   }
-  candidates.sort(
-    (left, right) =>
-      right.iou - left.iou ||
-      left.goldIndex - right.goldIndex ||
-      left.predictionIndex - right.predictionIndex,
-  );
+  candidates.sort((left, right) => {
+    const iouDifference = right.iou - left.iou;
+    if (iouDifference !== 0) {
+      return iouDifference;
+    }
+    const goldDifference = left.goldIndex - right.goldIndex;
+    if (goldDifference !== 0) {
+      return goldDifference;
+    }
+    return left.predictionIndex - right.predictionIndex;
+  });
 
   const matchedGold = new Set<number>();
   const matchedPredictions = new Set<number>();
@@ -197,8 +207,7 @@ function matchCounts(
 function toMetric(counts: MatchCounts): z.infer<typeof PiiMetricSchema> {
   const precisionDenominator = counts.truePositive + counts.falsePositive;
   const recallDenominator = counts.truePositive + counts.falseNegative;
-  const precision =
-    precisionDenominator === 0 ? 1 : counts.truePositive / precisionDenominator;
+  const precision = precisionDenominator === 0 ? 1 : counts.truePositive / precisionDenominator;
   const recall = recallDenominator === 0 ? 1 : counts.truePositive / recallDenominator;
   return {
     ...counts,
@@ -214,7 +223,7 @@ export function formatPiiReport(report: PiiReport): string {
     "# Synthetic PII detector report",
     "",
     `- Mode: ${report.mode}`,
-    `- Samples: ${report.sampleCount}`,
+    `- Samples: ${String(report.sampleCount)}`,
     `- Thresholds: ${report.passed ? "PASS" : "FAIL"}`,
     "",
     "| Entity | Exact P / R / F1 | IoU ≥ 0.5 P / R / F1 | Threshold | Status |",
@@ -226,7 +235,7 @@ export function formatPiiReport(report: PiiReport): string {
     const threshold =
       result.threshold === null
         ? "not set"
-        : `${result.threshold.minPrecision}/${result.threshold.minRecall}`;
+        : `${result.threshold.minPrecision.toFixed(2)}/${result.threshold.minRecall.toFixed(2)}`;
     lines.push(
       `| ${entityType} | ${formatMetric(result.exact)} | ${formatMetric(result.iou50)} | ${threshold} | ${result.passed ? "PASS" : "FAIL"} |`,
     );
@@ -239,9 +248,11 @@ function formatMetric(metric: z.infer<typeof PiiMetricSchema>): string {
 }
 
 function readCorpus(path: string): PiiCorpusSample[] {
-  const lines = readFileSync(path, "utf8").split(/\r?\n/u).filter((line) => line.length > 0);
+  const lines = readFileSync(path, "utf8")
+    .split(/\r?\n/u)
+    .filter((line) => line.length > 0);
   if (lines.length === 0) {
-    throw new Error("PII corpus is empty.");
+    throw new TypeError("PII corpus is empty.");
   }
   return lines.map((line) => parseJson(PiiCorpusSampleSchema, line));
 }
@@ -304,7 +315,7 @@ function collectRegexDetections(samples: readonly PiiCorpusSample[]): Detection[
   return samples.map((sample) => {
     const result = registry.detect(sample.text);
     if (result instanceof Promise) {
-      throw new Error("Unexpected asynchronous regex detector.");
+      throw new TypeError("Unexpected asynchronous regex detector.");
     }
     return result;
   });
@@ -338,7 +349,7 @@ function parseOptions(args: readonly string[]): ReportOptions {
       outputDirectory = value;
       index++;
     } else {
-      throw new Error("Unsupported PII report argument.");
+      throw new TypeError("Unsupported PII report argument.");
     }
   }
   return {
@@ -349,7 +360,7 @@ function parseOptions(args: readonly string[]): ReportOptions {
   };
 }
 
-async function runPiiReport(args: readonly string[]): Promise<number> {
+function runPiiReport(args: readonly string[]): number {
   const options = parseOptions(args);
   const samples = readCorpus(options.corpusPath);
   const thresholds = parseJson(PiiThresholdsSchema, readFileSync(options.thresholdsPath, "utf8"));
@@ -369,12 +380,10 @@ async function runPiiReport(args: readonly string[]): Promise<number> {
 
 const entryPoint = process.argv[1];
 if (entryPoint !== undefined && resolve(entryPoint) === fileURLToPath(import.meta.url)) {
-  void runPiiReport(process.argv.slice(2))
-    .then((exitCode) => {
-      process.exitCode = exitCode;
-    })
-    .catch(() => {
-      process.stderr.write("PII report failed; detector values are not included.\n");
-      process.exitCode = 1;
-    });
+  try {
+    process.exitCode = runPiiReport(process.argv.slice(2));
+  } catch {
+    process.stderr.write("PII report failed; detector values are not included.\n");
+    process.exitCode = 1;
+  }
 }

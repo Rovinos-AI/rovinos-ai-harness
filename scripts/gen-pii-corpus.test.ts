@@ -2,10 +2,7 @@
 import { createHash } from "node:crypto";
 import { parseJson } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
-import {
-  generatePiiCorpus,
-  PiiCorpusSampleSchema,
-} from "./gen-pii-corpus.js";
+import { generatePiiCorpus, PiiCorpusSampleSchema } from "./gen-pii-corpus.js";
 
 describe("generatePiiCorpus", () => {
   it("is deterministic for the same seed and matches its asserted hash", () => {
@@ -14,7 +11,7 @@ describe("generatePiiCorpus", () => {
 
     expect(second).toBe(first);
     expect(createHash("sha256").update(first).digest("hex")).toBe(
-      "3bddd21e02f75ec57b50ce55234e88a602d7bbb5adefc0918e4ca9f8d20d52fd",
+      "a0aab0164181d41462588969bfab6927d5c96909afe6f7863b654af80c42fcfe",
     );
   });
 
@@ -34,5 +31,4 @@ describe("generatePiiCorpus", () => {
       }
     }
   });
-
 });

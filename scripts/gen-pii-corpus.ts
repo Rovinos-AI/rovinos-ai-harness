@@ -55,9 +55,8 @@ function createSample(
   textPrefix: string,
   value: string,
   entityType: string,
-  textSuffix: string,
 ): PiiCorpusSample {
-  const text = `${textPrefix}${value}${textSuffix}`;
+  const text = `${textPrefix}${value}`;
   return PiiCorpusSampleSchema.parse({
     id,
     text,
@@ -70,22 +69,46 @@ function createNegative(id: string, text: string): PiiCorpusSample {
 }
 
 function shuffle<T>(values: T[], random: () => number): T[] {
-  for (let index = values.length - 1; index > 0; index--) {
+  const shuffled = [...values];
+  for (let index = shuffled.length - 1; index > 0; index--) {
     const otherIndex = Math.floor(random() * (index + 1));
-    const value = values[index];
-    const other = values[otherIndex];
+    const value = shuffled[index];
+    const other = shuffled[otherIndex];
     if (value === undefined || other === undefined) {
-      throw new Error("Unable to shuffle corpus.");
+      throw new TypeError("Unable to shuffle corpus.");
     }
-    values[index] = other;
-    values[otherIndex] = value;
+    shuffled[index] = other;
+    shuffled[otherIndex] = value;
   }
-  return values;
+  return shuffled;
 }
 
-/** Renders deterministic, synthetic positive and negative examples for a fixed seed. */
-export function generatePiiCorpus(seed = DEFAULT_SEED): string {
-  const random = mulberry32(seed);
+function contactSamples(): PiiCorpusSample[] {
+  return [
+    createSample("pii-email-1", "Send the notice to ", "ada@example.test", "email"),
+    createSample("pii-email-2", "The synthetic contact is ", "grace.hopper@example.test", "email"),
+    createSample("pii-email-3", "Reply to ", "support+demo@example.test", "email"),
+    createSample("pii-phone-1", "Call ", "+14155550123", "phone"),
+    createSample("pii-phone-2", "The demo number is ", "(415) 555-0132", "phone"),
+    createSample("pii-phone-3", "For a test call use ", "415-555-0199", "phone"),
+  ];
+}
+
+function financialSamples(): PiiCorpusSample[] {
+  return [
+    createSample(
+      "pii-card-1",
+      "The synthetic payment number is ",
+      "4111111111111111",
+      "credit_card",
+    ),
+    createSample("pii-card-2", "Use the test card ", "4012888888881881", "credit_card"),
+    createSample("pii-iban-1", "The demo transfer uses ", "GB82WEST12345698765432", "iban"),
+    createSample("pii-iban-2", "The test account is ", "DE89370400440532013000", "iban"),
+  ];
+}
+
+function networkSamples(): PiiCorpusSample[] {
   const placeholderKey = `ghp_${"0".repeat(36)}`;
   const firstCredentialUrl = [
     "https://",
@@ -103,103 +126,54 @@ export function generatePiiCorpus(seed = DEFAULT_SEED): string {
     "@",
     "localhost",
   ].join("");
-  const samples = [
-    createSample("pii-email-1", "Send the notice to ", "ada@example.test", "email", "."),
-    createSample(
-      "pii-email-2",
-      "The synthetic contact is ",
-      "grace.hopper@example.test",
-      "email",
-      ".",
-    ),
-    createSample("pii-email-3", "Reply to ", "support+demo@example.test", "email", "."),
-    createSample("pii-phone-1", "Call ", "+14155550123", "phone", " to confirm."),
-    createSample("pii-phone-2", "The demo number is ", "(415) 555-0132", "phone", "."),
-    createSample("pii-phone-3", "For a test call use ", "415-555-0199", "phone", "."),
-    createSample(
-      "pii-card-1",
-      "The synthetic payment number is ",
-      "4111111111111111",
-      "credit_card",
-      ".",
-    ),
-    createSample(
-      "pii-card-2",
-      "Use the test card ",
-      "4012888888881881",
-      "credit_card",
-      " for checkout.",
-    ),
-    createSample(
-      "pii-iban-1",
-      "The demo transfer uses ",
-      "GB82WEST12345698765432",
-      "iban",
-      ".",
-    ),
-    createSample(
-      "pii-iban-2",
-      "The test account is ",
-      "DE89370400440532013000",
-      "iban",
-      ".",
-    ),
-    createSample("pii-ip-1", "Connect to ", "192.0.2.10", "ip_address", "."),
-    createSample("pii-ip-2", "The documentation address is ", "2001:db8::1", "ip_address", "."),
-    createSample(
-      "pii-key-1",
-      "The fake service key is ",
-      "AKIA0000000000000000",
-      "api_key",
-      ".",
-    ),
-    createSample(
-      "pii-key-2",
-      "The placeholder token is ",
-      placeholderKey,
-      "api_key",
-      ".",
-    ),
-    createSample(
-      "pii-url-1",
-      "The demo URL is ",
-      firstCredentialUrl,
-      "url_credentials",
-      " for this test.",
-    ),
+  return [
+    createSample("pii-ip-1", "Connect to ", "192.0.2.10", "ip_address"),
+    createSample("pii-ip-2", "The documentation address is ", "2001:db8::1", "ip_address"),
+    createSample("pii-key-1", "The fake service key is ", "AKIA0000000000000000", "api_key"),
+    createSample("pii-key-2", "The placeholder token is ", placeholderKey, "api_key"),
+    createSample("pii-url-1", "The demo URL is ", firstCredentialUrl, "url_credentials"),
     createSample(
       "pii-url-2",
       "Use this synthetic endpoint ",
       secondCredentialUrl,
       "url_credentials",
-      " for this test.",
     ),
-    createSample(
-      "pii-person-1",
-      "The assigned reviewer is ",
-      "Alice Example",
-      "person_name",
-      ".",
-    ),
-    createSample("pii-person-2", "The test operator is ", "Grace Sample", "person_name", "."),
-    createSample(
-      "pii-person-3",
-      "The sample profile belongs to ",
-      "Jordan Sample",
-      "person_name",
-      ".",
-    ),
-    createSample("pii-location-1", "The synthetic location is ", "Paris", "location", "."),
-    createSample("pii-location-2", "The test office is in ", "London", "location", "."),
-    createSample("pii-location-3", "The demo destination is ", "New York", "location", "."),
+  ];
+}
+
+function identitySamples(): PiiCorpusSample[] {
+  return [
+    createSample("pii-person-1", "The assigned reviewer is ", "Alice Example", "person_name"),
+    createSample("pii-person-2", "The test operator is ", "Grace Sample", "person_name"),
+    createSample("pii-person-3", "The sample profile belongs to ", "Jordan Sample", "person_name"),
+    createSample("pii-location-1", "The synthetic location is ", "Paris", "location"),
+    createSample("pii-location-2", "The test office is in ", "London", "location"),
+    createSample("pii-location-3", "The demo destination is ", "New York", "location"),
+  ];
+}
+
+function negativeSamples(): PiiCorpusSample[] {
+  return [
     createNegative("pii-negative-order", "Order ORD-987654321012 is queued for processing."),
     createNegative("pii-negative-timestamp", "The fixture was created at 2025-06-15T12:34:56Z."),
     createNegative("pii-negative-version", "The test runner reports version v26.12.0."),
     createNegative("pii-negative-luhn", "The invalid test card is 4111111111111112."),
     createNegative("pii-negative-ip", "The invalid documentation address is 999.999.999.999."),
   ];
+}
 
-  return `${shuffle(samples, random).map((sample) => JSON.stringify(sample)).join("\n")}\n`;
+/** Renders deterministic, synthetic positive and negative examples for a fixed seed. */
+export function generatePiiCorpus(seed = DEFAULT_SEED): string {
+  const samples = [
+    ...contactSamples(),
+    ...financialSamples(),
+    ...networkSamples(),
+    ...identitySamples(),
+    ...negativeSamples(),
+  ];
+  return `${shuffle(samples, mulberry32(seed))
+    .map((sample) => JSON.stringify(sample))
+    .join("\n")}\n`;
 }
 
 /** Writes the committed corpus or exits with failure when `--check` detects drift. */

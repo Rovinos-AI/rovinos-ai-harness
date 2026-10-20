@@ -36,9 +36,7 @@ function detection(start: number, end: number) {
   });
 }
 
-function thresholds(
-  regex: Record<string, { minPrecision: number; minRecall: number }> = {},
-) {
+function thresholds(regex: Record<string, { minPrecision: number; minRecall: number }> = {}) {
   return PiiThresholdsSchema.parse({ regex, presidio: {} });
 }
 
