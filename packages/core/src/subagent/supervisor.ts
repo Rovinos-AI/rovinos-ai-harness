@@ -17,6 +17,7 @@ import {
   type RunConfig,
 } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
+import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { IdGenerator, ModelToolCall, RunContext, ToolPort } from "../ports.js";
 import type { Clock } from "../recorder.js";
 import { foldRunState } from "../run-state.js";
@@ -306,9 +307,7 @@ export class SubagentSupervisor {
         ...(usage.costMicros === undefined ? {} : { costMicros: usage.costMicros }),
       });
     } catch {
-      trace
-        .getSpan(otelContext.active())
-        ?.setAttribute("harness.subagent.completion_record_failed", true);
+      setActiveSpanAttribute("harness.subagent.completion_record_failed", true);
     }
   }
 

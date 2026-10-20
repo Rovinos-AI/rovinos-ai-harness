@@ -2,7 +2,7 @@
 import { ProtocolError, type CallToolResult } from "@modelcontextprotocol/client";
 import { Code, JsonValue, compileJsonSchema } from "@harness/schemas";
 import type { JsonValue as JsonValueType, ServerConfig } from "@harness/schemas";
-import { attr, countMcpDiscoveryFailed, defineSemconvSpan, withSpan } from "@harness/telemetry";
+import * as telemetry from "@harness/telemetry";
 import { context as otelContext, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { McpConnectionError } from "./connection.js";
 import type { McpConnection, McpConnectionDependencies } from "./connection.js";
@@ -11,13 +11,13 @@ import { McpProtocolError } from "./errors.js";
 import { McpPool } from "./pool.js";
 import { ToolRegistry, type ResolvedTool } from "./registry.js";
 
-const MCP_CALL_SPAN = defineSemconvSpan(
+const MCP_CALL_SPAN = telemetry.defineSemconvSpan(
   "mcp.client.call",
   {
-    "mcp.method.name": attr.enum(["tools/call"]),
-    "harness.mcp.server_id": attr.code(),
-    "harness.tool.id": attr.code(),
-    "harness.outcome": attr.enum(["ok", "error"]),
+    "mcp.method.name": telemetry.attr.enum(["tools/call"]),
+    "harness.mcp.server_id": telemetry.attr.code(),
+    "harness.tool.id": telemetry.attr.code(),
+    "harness.outcome": telemetry.attr.enum(["ok", "error"]),
   },
   { taskId: "6.5", packageName: "@harness/mcp" },
 );
@@ -270,9 +270,9 @@ function failure(code: string, result: JsonValueType = null): McpToolExecutionRe
 }
 
 function setOutcome(span: Span, outcome: McpToolExecutionResult): void {
-  span.setAttribute("harness.outcome", outcome.outcome);
+  telemetry.setActiveSpanAttribute("harness.outcome", outcome.outcome);
   if (outcome.outcome === "error") {
-    span.setAttribute("harness.error.code", outcome.errorCode ?? "mcp_error");
+    telemetry.setActiveSpanAttribute("harness.error.code", outcome.errorCode ?? "mcp_error");
     span.setStatus({ code: SpanStatusCode.ERROR });
   }
 }
@@ -373,7 +373,7 @@ export class McpToolPort {
             return { config: server, tools: await pool.listTools(server.id) };
           } catch (error) {
             dependencies.logger?.log({ code: "mcp_discovery_failed", serverId: server.id });
-            countMcpDiscoveryFailed();
+            telemetry.countMcpDiscoveryFailed();
             if (error instanceof McpConnectionError && error.code === "mcp_auth_required") {
               throw error;
             }
@@ -424,7 +424,7 @@ export class McpToolPort {
     }
     const connection = this.pool.connection(route.server.id);
     const signal = AbortSignal.any([context.signal, AbortSignal.timeout(description.timeoutMs)]);
-    return withSpan(
+    return telemetry.withSpan(
       MCP_CALL_SPAN,
       {
         "mcp.method.name": "tools/call",

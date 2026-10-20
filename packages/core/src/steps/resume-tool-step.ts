@@ -51,7 +51,7 @@ async function recordDanglingFailure(
     });
     events.push(result);
     span.setStatus({ code: SpanStatusCode.ERROR });
-    span.setAttribute("harness.error.code", code);
+    setActiveSpanAttribute("harness.error.code", code);
     return result;
   });
   return events;
@@ -222,7 +222,7 @@ async function applyToolResumeDecision(
     events.push(...(await options.recorder.recordBatch(batch)));
     if (decision.execution.outcome === "error") {
       span.setStatus({ code: SpanStatusCode.ERROR });
-      span.setAttribute("harness.error.code", decision.execution.errorCode ?? "tool_failed");
+      setActiveSpanAttribute("harness.error.code", decision.execution.errorCode ?? "tool_failed");
     }
     const last = events.at(-1);
     if (last === undefined) {
