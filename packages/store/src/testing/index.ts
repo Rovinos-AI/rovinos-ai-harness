@@ -9,3 +9,5 @@ export type {
 } from "./conformance-concurrency.js";
 export { createEventBuilders } from "./testing.js";
 export type { EventStoreTestBuilders } from "./testing.js";
+export { runQueueConformance } from "../queue/conformance.js";
+export type { RunQueueFactory, RunQueueFactoryCreator } from "../queue/conformance.js";
