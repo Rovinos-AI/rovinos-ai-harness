@@ -152,53 +152,7 @@ function financialSamples(): PiiCorpusSample[] {
   ];
 }
 
-function networkSamples(): PiiCorpusSample[] {
-  const placeholderKey = `ghp_${"0".repeat(36)}`;
-  const firstCredentialUrl = [
-    "https://",
-    "demo-user",
-    ":",
-    "synthetic-pass",
-    "@",
-    "localhost",
-  ].join("");
-  const secondCredentialUrl = [
-    "http://",
-    "test-user",
-    ":",
-    "placeholder-pass",
-    "@",
-    "localhost",
-  ].join("");
-  const thirdCredentialUrl = [
-    "https://",
-    "sample-user",
-    ":",
-    "fake-pass",
-    "@",
-    "service.invalid",
-  ].join("");
-  const fourthCredentialUrl = [
-    "http://",
-    "demo-user",
-    ":",
-    "placeholder-pass",
-    "@",
-    "api.example.test",
-  ].join("");
-  const fifthCredentialUrl = [
-    "https://",
-    "fixture-user",
-    ":",
-    "test-password",
-    "@",
-    "sandbox.example.test",
-  ].join("");
-  const placeholderJwt = [
-    "eyJ" + "hbGciOiJub25lIn0",
-    "eyJzdWIiOiJ0ZXN0In0",
-    "signatureplaceholder123",
-  ].join(".");
+function ipSamples(): PiiCorpusSample[] {
   return [
     createSample("pii-ip-1", "Connect to ", "192.0.2.10", "ip_address"),
     createSample("pii-ip-2", "The documentation address is ", "2001:db8::1", "ip_address"),
@@ -206,11 +160,51 @@ function networkSamples(): PiiCorpusSample[] {
     createSample("pii-ip-4", "Reach the test service at ", "203.0.113.17", "ip_address"),
     createSample("pii-ip-5", "The IPv6 fixture is ", "2001:db8:85a3::8a2e:370:7334", "ip_address"),
     createSample("pii-ip-6", "The sandbox address is ", "2001:db8:1234:5678::1", "ip_address"),
+  ];
+}
+
+function keySamples(): PiiCorpusSample[] {
+  const placeholderKey = `ghp_${"0".repeat(36)}`;
+  const placeholderJwt = [
+    "eyJ" + "hbGciOiJub25lIn0",
+    "eyJzdWIiOiJ0ZXN0In0",
+    "signatureplaceholder123",
+  ].join(".");
+  return [
     createSample("pii-key-1", "The fake service key is ", "AKIA0000000000000000", "api_key"),
     createSample("pii-key-2", "The placeholder token is ", placeholderKey, "api_key"),
     createSample("pii-key-3", "The demo access key is ", `AKIA${"1".repeat(16)}`, "api_key"),
     createSample("pii-key-4", "The fake GitHub token is ", `ghp_${"A".repeat(36)}`, "api_key"),
     createSample("pii-key-5", "The synthetic JWT is ", placeholderJwt, "api_key"),
+  ];
+}
+
+function credentialUrl(
+  protocol: "http" | "https",
+  username: string,
+  password: string,
+  host: string,
+): string {
+  return `${protocol}://${username}:${password}@${host}`;
+}
+
+function urlSamples(): PiiCorpusSample[] {
+  const firstCredentialUrl = credentialUrl("https", "demo-user", "synthetic-pass", "localhost");
+  const secondCredentialUrl = credentialUrl("http", "test-user", "placeholder-pass", "localhost");
+  const thirdCredentialUrl = credentialUrl("https", "sample-user", "fake-pass", "service.invalid");
+  const fourthCredentialUrl = credentialUrl(
+    "http",
+    "demo-user",
+    "placeholder-pass",
+    "api.example.test",
+  );
+  const fifthCredentialUrl = credentialUrl(
+    "https",
+    "fixture-user",
+    "test-password",
+    "sandbox.example.test",
+  );
+  return [
     createSample("pii-url-1", "The demo URL is ", firstCredentialUrl, "url_credentials"),
     createSample(
       "pii-url-2",
@@ -237,6 +231,10 @@ function networkSamples(): PiiCorpusSample[] {
       "test-password@sandbox.example.test",
     ),
   ];
+}
+
+function networkSamples(): PiiCorpusSample[] {
+  return [...ipSamples(), ...keySamples(), ...urlSamples()];
 }
 
 function identitySamples(): PiiCorpusSample[] {
