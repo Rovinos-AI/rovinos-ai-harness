@@ -2,7 +2,7 @@
 import { ServerConfigSchema } from "@harness/schemas";
 import { describe, expect, it } from "vitest";
 import { requestsSensitiveFormField } from "./sensitive.js";
-import { validateInputRequiredResult } from "./validate.js";
+import { McpInputRequestError, validateInputRequiredResult } from "./validate.js";
 
 const server = ServerConfigSchema.parse({
   id: "mcp_test",
@@ -121,6 +121,30 @@ describe("validateInputRequiredResult", () => {
       ),
     ).toThrow();
   });
+
+  it.each([
+    { inputRequests: { bad: "not-an-object" } },
+    { inputRequests: { bad: { method: "sampling/createMessage", params: {} } } },
+    {
+      inputRequests: {
+        bad: {
+          method: "elicitation/create",
+          params: { mode: "form", message: "form/url mismatch", url: "https://example.test" },
+        },
+      },
+    },
+    { inputRequests: { form }, requestState: "x".repeat(9) },
+  ])("maps malformed request data to a typed MCP error", (payload) => {
+    expect(() => validateInputRequiredResult({ resultType: "input_required", ...payload }, server))
+      .toThrow(McpInputRequestError);
+    try {
+      validateInputRequiredResult({ resultType: "input_required", ...payload }, server);
+    } catch (error) {
+      expect(error).toBeInstanceOf(McpInputRequestError);
+      expect(error).not.toHaveProperty("issues");
+      expect(error).toMatchObject({ code: "mcp_input_request_invalid" });
+    }
+  });
 });
 
 describe("requestsSensitiveFormField", () => {
@@ -170,4 +194,38 @@ describe("requestsSensitiveFormField", () => {
       }),
     ).toBe(false);
   });
+
+  it.each(["discard_reason", "cardinality", "scorecard"])(
+    "does not decline harmless field name %s",
+    (name) => {
+      expect(
+        requestsSensitiveFormField({
+          inputKey: "key",
+          mode: "form",
+          message: "Provide data",
+          requestedSchema: {
+            type: "object",
+            properties: { [name]: { type: "string" } },
+          },
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["card_number", "Card number", "CVV", "api-key", "access_token"])(
+    "declines sensitive field name %s",
+    (name) => {
+      expect(
+        requestsSensitiveFormField({
+          inputKey: "key",
+          mode: "form",
+          message: "Provide data",
+          requestedSchema: {
+            type: "object",
+            properties: { [name]: { type: "string" } },
+          },
+        }),
+      ).toBe(true);
+    },
+  );
 });

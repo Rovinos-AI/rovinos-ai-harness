@@ -21,6 +21,7 @@ import {
 import { requestsSensitiveFormField } from "./elicitation/sensitive.js";
 import {
   InputRequestContentSchema,
+  McpInputRequestError,
   validateInputRequiredResult,
 } from "./elicitation/validate.js";
 import { McpPool } from "./pool.js";
@@ -359,9 +360,11 @@ async function executeRegisteredTool(options: {
     let validated;
     try {
       validated = validateInputRequiredResult(result, route.server);
-    } catch {
+    } catch (error) {
       countMcpInputRequest("rejected");
-      return failure("mcp_input_request_invalid");
+      return failure(
+        error instanceof McpInputRequestError ? error.code : "mcp_input_request_invalid",
+      );
     }
     const sensitiveInputKeys = validated.inputRequests
       .filter(requestsSensitiveFormField)
