@@ -13,6 +13,7 @@ import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
 import type { ToolPort } from "./ports.js";
 import { LeaseLostError, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
+import { inheritedBudgets } from "./continue.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
 import type { RoleRegistry } from "./roles.js";
@@ -23,6 +24,7 @@ import {
   createRuntimeContinuation,
   readChildBudgetAllocation,
   readStoredGoal,
+  readContinuationHistory,
   startRun,
   type RunControl,
 } from "./runtime-runs.js";
@@ -269,6 +271,7 @@ function composeRuntime(
   });
   return {
     store,
+    ...(options.overrides.queue === undefined ? {} : { queue: options.overrides.queue }),
     vault: vaultResolver,
     keys,
     sandboxBackend: options.sandboxBackend,
@@ -285,7 +288,7 @@ function composeRuntime(
       return result;
     },
     ...appCallbacks,
-    resolveApproval: (runId, approvalId, decision, resolveOptions) => {
+    resolveApproval: async (runId, approvalId, decision, resolveOptions) => {
       if (
         decision === "edit" &&
         options.overrides.tool === undefined &&
@@ -293,7 +296,7 @@ function composeRuntime(
       ) {
         throw new ApprovalEditUnavailableError();
       }
-      return resolveApprovalEvent(
+      const resolved = await resolveApprovalEvent(
         store,
         runId,
         approvalId,
@@ -303,6 +306,10 @@ function composeRuntime(
         tool,
         resolveOptions?.metadata,
       );
+      if (options.overrides.queue !== undefined && config.run.autoResume) {
+        await options.overrides.queue.enqueue({ kind: "resume", runId });
+      }
+      return resolved;
     },
     close: () =>
       closeRuntimeResources({
@@ -325,6 +332,16 @@ function createRuntimeResume(
   return async (runId, resumeOptions: RuntimeResumeOptions = {}) => {
     const firstNewSeq = await store.head(runId);
     const childAllocation = await readChildBudgetAllocation(store, runId);
+    const previousEventLogs = await readContinuationHistory(
+      store,
+      runId,
+      config.run.continuations.maxChainLength,
+    );
+    const budgets =
+      childAllocation?.budgets ??
+      (previousEventLogs !== undefined && config.run.continuations.inheritBudgets
+        ? inheritedBudgets(config.run.budgets, previousEventLogs)
+        : config.run.budgets);
     return runWithControl(
       runId,
       async (signal) => {
@@ -349,7 +366,8 @@ function createRuntimeResume(
             context,
             signal: composed.signal,
             scopes,
-            budgets: childAllocation?.budgets ?? config.run.budgets,
+            budgets,
+            ...(previousEventLogs === undefined ? {} : { previousEventLogs }),
             ...(childAllocation === undefined ? {} : { deadlineTs: childAllocation.deadlineTs }),
             checkpointEveryEvents: config.run.checkpointEveryEvents,
             ...(config.store?.snapshotKeep === undefined

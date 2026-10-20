@@ -8,10 +8,21 @@ import {
   StoreUnavailableError,
   type Clock,
   type EventStore,
+  type RunQueue,
+  type RunQueueIdGenerator,
   type StoreKeyRotation,
+  SystemRunQueueIdGenerator,
 } from "@harness/store";
-import { migratePostgresConnection, PostgresEventStore } from "@harness/store-postgres";
-import { migrateSqliteFile, SqliteEventStore } from "@harness/store-sqlite";
+import {
+  migratePostgresConnection,
+  PostgresEventStore,
+  PostgresRunQueue,
+} from "@harness/store-postgres";
+import {
+  migrateSqliteFile,
+  SqliteEventStore,
+  SqliteRunQueue,
+} from "@harness/store-sqlite";
 import {
   InMemoryVault,
   PostgresVault,
@@ -368,6 +379,27 @@ export async function openConfiguredStore(
     readOnly,
     ...(storeConfig.snapshotKeep === undefined ? {} : { snapshotKeep: storeConfig.snapshotKeep }),
   });
+}
+
+/** Opens the durable run queue using the configured event-store database. */
+export async function openConfiguredRunQueue(
+  config: { readonly store?: StoreConfig },
+  options: ConfiguredStoreOptions & { readonly ids?: RunQueueIdGenerator } = {},
+): Promise<RunQueue> {
+  const clock = options.clock ?? { now: () => Date.now() };
+  const ids = options.ids ?? new SystemRunQueueIdGenerator(clock);
+  const storeConfig = config.store ?? {};
+  if (storeConfig.dialect === "postgres") {
+    return new PostgresRunQueue(
+      await postgresConnectionString(storeConfig, options.secretResolver),
+      {},
+      clock,
+      ids,
+    );
+  }
+  const dataDir = resolveDataDir(process.env, options.dataDir);
+  await mkdir(dataDir, { recursive: true });
+  return new SqliteRunQueue(join(dataDir, "harness.db"), {}, clock, ids);
 }
 
 /** Applies or lists migrations for the same configured store used at runtime. */

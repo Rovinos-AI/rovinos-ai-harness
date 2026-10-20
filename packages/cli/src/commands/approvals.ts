@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import type { Command } from "commander";
 import type { HarnessConfig } from "@harness/config";
 import type { Runtime, RunState } from "@harness/core";
+import type { RunQueue } from "@harness/store";
 import {
   ApprovalListResultSchema,
   ApprovalResolveResultSchema,
@@ -136,13 +137,47 @@ async function withRuntime<T>(
   overrides: Parameters<typeof createCommandRuntime>[2],
   action: (runtime: Runtime, config: HarnessConfig) => Promise<T>,
   config?: HarnessConfig,
+  disableAutoResume = false,
+  useQueue = false,
 ): Promise<T> {
   const runtimeConfig = config ?? (await context.loadConfig());
-  const runtime = await createCommandRuntime(context, runtimeConfig, overrides);
+  let queue: RunQueue | undefined;
+  if (useQueue) {
+    if (context.openRunQueue !== undefined) {
+      queue = await context.openRunQueue(runtimeConfig);
+    } else {
+      const { openConfiguredRunQueue } = await import("@harness/core");
+      queue = await openConfiguredRunQueue(runtimeConfig, {
+        clock: context.clock,
+        ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
+        ...(context.secretResolver === undefined
+          ? {}
+          : { secretResolver: context.secretResolver }),
+      });
+    }
+  }
+  const configuredRuntime =
+    disableAutoResume && runtimeConfig.run.autoResume
+      ? { ...runtimeConfig, run: { ...runtimeConfig.run, autoResume: false } }
+      : runtimeConfig;
+  let runtime: Runtime;
+  try {
+    runtime = await createCommandRuntime(context, configuredRuntime, {
+      ...overrides,
+      ...(queue === undefined ? {} : { queue }),
+    });
+  } catch (error) {
+    await queue?.close();
+    throw error;
+  }
   try {
     return await action(runtime, runtimeConfig);
   } finally {
-    await runtime.close();
+    try {
+      await runtime.close();
+    } finally {
+      await queue?.close();
+    }
   }
 }
 
@@ -375,6 +410,8 @@ async function decide(
       }
     },
     config,
+    options.resume === true,
+    true,
   );
 }
 
@@ -405,6 +442,9 @@ function registerSweep(approvals: Command, context: CliContext): void {
     .action(() =>
       withRuntime(context, undefined, (runtime, config) =>
         runApprovalSweep(runtime, context, config),
+      undefined,
+      false,
+      true,
       ),
     );
 }

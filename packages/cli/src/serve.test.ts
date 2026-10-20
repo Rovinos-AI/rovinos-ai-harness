@@ -3,6 +3,7 @@ import { HarnessConfigSchema } from "@harness/config";
 import type * as ControlPlane from "@harness/control-plane";
 import type { Runtime } from "@harness/core";
 import { Code, Id } from "@harness/schemas";
+import type { RunQueue, RunQueueJob } from "@harness/store";
 import { InMemoryEventStore } from "@harness/store";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -76,8 +77,31 @@ function createContext() {
   const stderr: string[] = [];
   const store = new InMemoryEventStore();
   const closeRuntime = vi.fn(() => Promise.resolve());
+  const queuedJob: RunQueueJob = {
+    jobId: Id.parse("00000000000000000000000003"),
+    kind: "resume",
+    runId: Id.parse("00000000000000000000000001"),
+    priority: 0,
+    availableAt: 1_000,
+    attempts: 0,
+    maxAttempts: 5,
+    createdAt: 1_000,
+    updatedAt: 1_000,
+  };
+  const closeQueue = vi.fn(() => Promise.resolve());
+  const queue: RunQueue = {
+    enqueue: () => Promise.resolve(queuedJob),
+    claim: () => Promise.resolve([]),
+    heartbeat: () => Promise.resolve(true),
+    complete: () => Promise.resolve(true),
+    fail: () => Promise.resolve("retry"),
+    release: () => Promise.resolve(true),
+    getDeadLetter: () => Promise.resolve(undefined),
+    close: closeQueue,
+  };
   const runtime: Runtime = {
     store,
+    queue,
     sandboxBackend: {
       exec: () => Promise.reject(new Error("Sandbox is not used by serve tests.")),
     },
@@ -114,9 +138,10 @@ function createContext() {
       },
     }),
     clock: { now: () => 1_000 },
+    openRunQueue: () => Promise.resolve(queue),
     createRuntime: () => runtime,
   };
-  return { context, runtime, closeRuntime, stdout, stderr };
+  return { context, runtime, closeRuntime, closeQueue, stdout, stderr };
 }
 
 afterEach(() => {
@@ -126,7 +151,7 @@ afterEach(() => {
 
 describe("serve command", () => {
   it("defaults to loopback HTTP and stops cleanly on SIGTERM", async () => {
-    const { context, runtime, closeRuntime, stdout, stderr } = createContext();
+    const { context, runtime, closeRuntime, closeQueue, stdout, stderr } = createContext();
     const sigtermListeners = process.listenerCount("SIGTERM");
     const result = main(["serve"], context, [serveCommand]);
     const signalWait = waitForSignalListener("SIGTERM", sigtermListeners);
@@ -167,10 +192,11 @@ describe("serve command", () => {
     expect(stdout).toEqual(["http://127.0.0.1:3000/mcp\n"]);
     expect(stderr).toEqual([]);
     expect(closeRuntime.mock.calls).toHaveLength(1);
+    expect(closeQueue).toHaveBeenCalledOnce();
   });
 
   it.each(["SIGINT", "SIGTERM"] as const)("stops stdio cleanly on %s", async (signal) => {
-    const { context, closeRuntime, stdout, stderr } = createContext();
+    const { context, closeRuntime, closeQueue, stdout, stderr } = createContext();
     const sigintListeners = process.listenerCount("SIGINT");
     const sigtermListeners = process.listenerCount("SIGTERM");
     const result = main(["serve", "--stdio"], context, [serveCommand]);
@@ -189,6 +215,7 @@ describe("serve command", () => {
     expect(stdout).toEqual([]);
     expect(stderr).toEqual([]);
     expect(closeRuntime.mock.calls).toHaveLength(1);
+    expect(closeQueue).toHaveBeenCalledOnce();
   });
 
   it("rejects invalid transports, ports, and stdio JSON mode with error codes", async () => {

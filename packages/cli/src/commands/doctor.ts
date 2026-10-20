@@ -18,6 +18,7 @@ import {
   Code,
   DoctorResultsSchema,
   HarnessError,
+  Id,
   type DoctorCheckResult,
   type SecretRef,
 } from "@harness/schemas";
@@ -81,6 +82,38 @@ function keysConfiguredCheck(
         return { status: "ok", code: "keys_configured" };
       } finally {
         provider.dispose();
+      }
+    },
+  };
+}
+
+function workerQueueReachableCheck(
+  core: typeof Core,
+  config: HarnessConfig | undefined,
+  secretResolver: SecretValueResolver,
+): DoctorCheck {
+  return {
+    id: "worker_queue_reachable",
+    title: "Worker queue",
+    run: async (ctx) => {
+      if (config === undefined) {
+        return { status: "warn", code: "worker_queue_unconfigured" };
+      }
+      let queue: Awaited<ReturnType<typeof core.openConfiguredRunQueue>> | undefined;
+      try {
+        const openedQueue = await core.openConfiguredRunQueue(config, {
+          dataDir: ctx.dataDir,
+          secretResolver: {
+            resolve: (ref) => secretResolver.resolve(ref, ctx.signal),
+          },
+        });
+        queue = openedQueue;
+        await openedQueue.getDeadLetter(Id.parse("00000000000000000000000000"));
+        return { status: "ok", code: "worker_queue_reachable" };
+      } catch {
+        return { status: "fail", code: "worker_queue_unreachable" };
+      } finally {
+        await queue?.close().catch(() => undefined);
       }
     },
   };
@@ -215,6 +248,7 @@ function defaultDoctorChecks({
   return [
     ...core.doctorChecks(),
     keysConfiguredCheck(config, env, secretResolver),
+    workerQueueReachableCheck(core, config, secretResolver),
     ...(config?.pii.presidio === undefined
       ? []
       : [createPresidioReachableCheck(config.pii.presidio)]),

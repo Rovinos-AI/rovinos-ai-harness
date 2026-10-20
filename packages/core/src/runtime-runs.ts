@@ -10,7 +10,7 @@ import {
 import type { EventStore } from "@harness/store";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 import type { ToolPort } from "./ports.js";
-import { continueRun as startContinuation } from "./continue.js";
+import { continueRun as startContinuation, loadContinuationChain } from "./continue.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 import { RunRecorder } from "./recorder.js";
 import type { Runtime, RuntimeComposition } from "./runtime-config.js";
@@ -31,6 +31,26 @@ export async function readStoredGoal(store: EventStore, runId: Id): Promise<Json
     }
   }
   return undefined;
+}
+
+/** Reads continuation ancestors for a queued continuation that has not started yet. */
+export async function readContinuationHistory(
+  store: EventStore,
+  runId: Id,
+  maxChainLength: number,
+): Promise<Event[][] | undefined> {
+  let continuation = false;
+  for await (const event of store.read(runId)) {
+    if (event.type === "run_created") {
+      continuation = event.continuationOf !== undefined;
+      break;
+    }
+  }
+  if (!continuation) {
+    return undefined;
+  }
+  const chain = await loadContinuationChain(store, runId, maxChainLength);
+  return chain.slice(0, -1);
 }
 
 /** Recovers an inherited child allocation so runtime recreation cannot widen its limits. */

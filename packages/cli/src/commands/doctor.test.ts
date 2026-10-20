@@ -86,6 +86,7 @@ describe("harness doctor", () => {
         { id: "config_valid", status: "ok", code: "config_valid" },
         { id: "policy_configured", status: "warn", code: "policy_default_deny" },
         { id: "secret_refs_resolvable", status: "ok", code: "secret_refs_resolvable" },
+        { id: "worker_queue_reachable", status: "ok", code: "worker_queue_reachable" },
       ]),
     );
     expect(stdout.join("")).not.toContain(secretValue);

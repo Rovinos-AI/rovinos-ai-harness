@@ -25,7 +25,7 @@ import type { z } from "zod";
 import type { SandboxBackend, WorkspaceSnapshotPort } from "@harness/sandbox";
 import type { ProviderAdapter } from "@harness/models";
 import type { McpConnectionDependencies } from "@harness/mcp";
-import type { EventStore } from "@harness/store";
+import type { EventStore, RunQueue } from "@harness/store";
 import type {
   AuditingVaultResolver,
   LocalKeyProvider,
@@ -47,6 +47,8 @@ import type { AppContentTokenize, RuntimeAppContent } from "./runtime-apps.js";
 /** Runtime dependencies that can be replaced by tests or embedding applications. */
 export interface RuntimeOverrides {
   readonly store?: EventStore;
+  /** Optional durable queue used for worker execution and automatic approval resumption. */
+  readonly queue?: RunQueue;
   readonly dataDir?: string;
   /** Directory used to resolve role prompt and result-schema references. */
   readonly roleConfigDirectory?: string;
@@ -109,6 +111,8 @@ export interface RuntimeResumeOptions {
 /** Composed run-loop operations and their shared dependencies. */
 export interface Runtime {
   readonly store: EventStore;
+  /** Queue used to schedule worker jobs when one was configured by the embedder. */
+  readonly queue?: RunQueue;
   /** Read-only resolver for audited vault access by runtime consumers. */
   readonly vault: AuditingVaultResolver;
   /** Key provider shared by encryption consumers in the composed runtime. */

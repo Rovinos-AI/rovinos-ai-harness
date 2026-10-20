@@ -46,7 +46,7 @@ export class RunNotResumableError extends HarnessError {
 
   /** Creates the invalid run-state resume error. */
   constructor() {
-    super("Only running or suspended runs can be resumed.");
+    super("Only pending, running, or suspended runs can be resumed.");
     this.name = "RunNotResumableError";
   }
 }
@@ -140,7 +140,7 @@ async function readResumeHistory(options: ResumeRunOptions): Promise<ResumeHisto
   if (state.status === "completed" || state.status === "failed" || state.status === "cancelled") {
     throw new RunAlreadyTerminalError();
   }
-  if (state.status !== "running" && state.status !== "suspended") {
+  if (state.status !== "pending" && state.status !== "running" && state.status !== "suspended") {
     throw new RunNotResumableError();
   }
   if (state.nextSeq !== head) {
@@ -158,6 +158,17 @@ async function readResumeHistory(options: ResumeRunOptions): Promise<ResumeHisto
 }
 
 function claimEvents(state: RunState): EventPartial[] {
+  if (state.status === "pending") {
+    return [
+      {
+        type: "run_status_changed",
+        v: 1,
+        from: "pending",
+        to: "running",
+        reason: "start",
+      },
+    ];
+  }
   if (state.status === "running") {
     return [
       {

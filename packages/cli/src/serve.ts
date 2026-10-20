@@ -2,6 +2,7 @@
 import { HarnessError, ServeResultSchema } from "@harness/schemas";
 import type { ControlPlaneOperations } from "@harness/control-plane";
 import type { Runtime, ToolPort } from "@harness/core";
+import type { RunQueue } from "@harness/store";
 import { z } from "zod";
 import type { CommandModule } from "./command.js";
 import { createCommandRuntime } from "./command.js";
@@ -40,11 +41,29 @@ export const serveCommand: CommandModule = {
 
           const config = await context.loadConfig();
           const tool = await context.createToolPort?.(config);
-          const runtime = await createCommandRuntime(
-            context,
-            config,
-            tool === undefined ? undefined : { tool },
-          );
+          let queue: RunQueue;
+          if (context.openRunQueue !== undefined) {
+            queue = await context.openRunQueue(config);
+          } else {
+            const { openConfiguredRunQueue } = await import("@harness/core");
+            queue = await openConfiguredRunQueue(config, {
+              clock: context.clock,
+              ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
+              ...(context.secretResolver === undefined
+                ? {}
+                : { secretResolver: context.secretResolver }),
+            });
+          }
+          let runtime: Runtime;
+          try {
+            runtime = await createCommandRuntime(context, config, {
+              ...(tool === undefined ? {} : { tool }),
+              queue,
+            });
+          } catch (error) {
+            await queue.close();
+            throw error;
+          }
           let closeServer: (() => Promise<void>) | undefined;
           try {
             const { startControlPlaneHttp, startControlPlaneStdio } =
@@ -52,6 +71,7 @@ export const serveCommand: CommandModule = {
             const operations = createControlPlaneOperations(runtime, tool);
             const controlPlaneOptions = {
               ...(config.controlPlane === undefined ? {} : { controlPlane: config.controlPlane }),
+              runQueue: queue,
               ...(context.secretResolver === undefined
                 ? {}
                 : { secretResolver: context.secretResolver }),
@@ -79,7 +99,11 @@ export const serveCommand: CommandModule = {
             try {
               await closeServer?.();
             } finally {
-              await runtime.close();
+              try {
+                await runtime.close();
+              } finally {
+                await queue.close();
+              }
             }
           }
         },
@@ -116,19 +140,17 @@ function createControlPlaneOperations(
     resumeRun: (runId, signal, onClaimed) => runtime.resume(runId, { signal, onClaimed }),
     cancelRun: (runId) => runtime.cancel(runId),
     resolveApproval: async ({ runId, approvalId, decision, edits, reason, approverId }) => {
-      const { resolveApproval } = await import("@harness/core");
-      await resolveApproval(
-        runtime.store,
+      await runtime.resolveApproval(
         runId,
         approvalId,
         decision,
-        edits,
-        runtime.clock,
-        tool,
         {
-          decidedBy: "human",
-          approverId,
-          ...(reason === undefined ? {} : { reason }),
+          ...(edits === undefined ? {} : { edits }),
+          metadata: {
+            decidedBy: "human",
+            approverId,
+            ...(reason === undefined ? {} : { reason }),
+          },
         },
       );
     },

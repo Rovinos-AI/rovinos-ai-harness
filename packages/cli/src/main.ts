@@ -23,6 +23,7 @@ import { policyCommand } from "./commands/policy.js";
 import { serversCommand } from "./commands/servers.js";
 import { storeCommand } from "./commands/store.js";
 import { healthcheckCommand } from "./healthcheck.js";
+import { workerCommand } from "./commands/worker.js";
 
 /** Static command registry; later epics add their owned commands here. */
 export const COMMANDS: CommandModule[] = [
@@ -40,6 +41,7 @@ export const COMMANDS: CommandModule[] = [
   serversCommand,
   storeCommand,
   healthcheckCommand,
+  workerCommand,
 ];
 
 const systemClock: Clock = { now: () => Date.now() };

@@ -2,6 +2,7 @@
 import type { Command } from "commander";
 import type { HarnessConfig } from "@harness/config";
 import { Code, HarnessError, Principal } from "@harness/schemas";
+import type { RunQueue } from "@harness/store";
 import type {
   ApprovalResolutionMetadata,
   ConfiguredKeyRotation,
@@ -46,6 +47,8 @@ export interface CliContext {
   clock: Clock;
   /** Creates a composed run-loop runtime, optionally replacing its ports. */
   createRuntime?(config: HarnessConfig, overrides?: RuntimeOverrides): Promise<Runtime> | Runtime;
+  /** Opens the configured durable queue when a command needs to schedule worker jobs. */
+  openRunQueue?(config: HarnessConfig): Promise<RunQueue>;
   /** Terminal prompt used to confirm approval decisions; absent means non-interactive. */
   interactive?: Interactive;
   /** Test override for the runtime vault used by `harness approvals show --reveal`. */
