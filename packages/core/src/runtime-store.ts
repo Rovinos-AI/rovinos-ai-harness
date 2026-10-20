@@ -5,15 +5,13 @@ import { join } from "node:path";
 import {
   AesGcmContentCodec,
   InMemoryEventStore,
-  migratePostgresConnection,
-  migrateSqliteFile,
-  PostgresEventStore,
-  SqliteEventStore,
   StoreUnavailableError,
   type Clock,
   type EventStore,
   type StoreKeyRotation,
 } from "@harness/store";
+import { migratePostgresConnection, PostgresEventStore } from "@harness/store-postgres";
+import { migrateSqliteFile, SqliteEventStore } from "@harness/store-sqlite";
 import {
   InMemoryVault,
   PostgresVault,

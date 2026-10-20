@@ -1,5 +1,9 @@
 # Event store content encryption
 
+The `@harness/store` package provides the event-store contract and in-memory adapter.
+Install `@harness/store-sqlite` for `SqliteEventStore` or `@harness/store-postgres` for
+`PostgresEventStore`; each adapter package supplies only its own database driver.
+
 SQLite and Postgres stores use `JsonContentCodec` by default. To encrypt persisted content, pass an
 `AesGcmContentCodec` when opening the store:
 
