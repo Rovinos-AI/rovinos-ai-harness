@@ -4,6 +4,8 @@
     "allowJs": true,
     "checkJs": true,
     "composite": false,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "rootDir": "src",
     "outDir": "dist"
   },

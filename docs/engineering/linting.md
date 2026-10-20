@@ -29,6 +29,26 @@ words deliberately to `docs/engineering/project-words.txt`.
   current Node APIs, and predictable error handling.
 - `harness/import-direction` reads `docs/engineering/layers.json`; cross-package imports must follow
   that table and use `@harness/*` package names.
+- `harness/no-raw-tracer` prevents raw OpenTelemetry SDK imports, `trace.getTracer`, raw span
+  creation (`startSpan`/`startActiveSpan`), exception recording (`recordException`), renaming
+  (`updateName`), and span attribute mutation (`setAttribute`/`setAttributes`) outside approved
+  files. Attribute mutations are identified through span-producing calls and variable bindings,
+  including variables initialized or assigned from `getSpan`, `getActiveSpan`, `start`, `startSpan`,
+  and `startActiveSpan`, as well as parameters annotated as `Span`. Unrelated DOM attribute updates
+  are not span mutations.
+
+  Create spans through registered definitions: use `definition.start(attributes)` for direct span
+  work or `withSpan(definition, attributes, run)` to scope work. Update the active span through
+  `setActiveSpanAttribute`; do not reach into raw OpenTelemetry span APIs.
+
+  The default allowlist is limited to `packages/telemetry/src/{registry,log-registry,tracer,sdk,testing}.ts`,
+  `**/*.test.ts`, `test/canary/telemetry.ts`, `test/fixtures/sample-mcp-server/server.ts`, and
+  `test/mcp-servers.int-client.test.mjs`. The registry and telemetry SDK files implement the
+  approved boundary; test support and named fixtures need raw spans for setup or leak probes.
+  Extend it only for a concrete boundary or test fixture that cannot use the approved API, use the
+  narrowest exact path possible, and add a RuleTester regression demonstrating why the exception is
+  required. The rule's `allowedFiles` option configures this list; patterns are matched relative to
+  ESLint's configured working directory.
 - Package restrictions keep telemetry SDKs and parsers behind approved boundaries. Browser paths
   also reject Node globals/imports and unsafe HTML sinks. Test files use Vitest rules while keeping
   TypeScript safety checks enabled.

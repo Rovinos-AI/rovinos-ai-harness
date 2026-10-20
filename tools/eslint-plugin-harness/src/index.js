@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import path from "node:path";
 import { AST_NODE_TYPES } from "@typescript-eslint/utils";
+import { noRawTracerRule } from "./rules/no-raw-tracer.ts";
 
 /** @typedef {import("@typescript-eslint/utils/ts-eslint").RuleModule<"forbidden">} HarnessRule */
+/** @typedef {import("./rules/no-raw-tracer.ts").NoRawTracerRule} NoRawTracerRule */
 /** @typedef {import("@typescript-eslint/utils").TSESTree.Node} Node */
 /** @typedef {Record<string, readonly string[] | string>} PackageLayers */
 
@@ -281,7 +283,7 @@ const createMetricRegistryOnly = (context) => {
  * Creates the lint rules using the validated package-layer configuration.
  *
  * @param {PackageLayers} packageLayers - The internal package dependency map.
- * @returns {{meta: {name: string}, rules: {"import-direction": HarnessRule, "no-relative-packages": HarnessRule, "schema-inferred-types": HarnessRule, "metric-registry-only": HarnessRule}}}
+ * @returns {{meta: {name: string}, rules: {"import-direction": HarnessRule, "no-relative-packages": HarnessRule, "schema-inferred-types": HarnessRule, "metric-registry-only": HarnessRule, "no-raw-tracer": NoRawTracerRule}}}
  */
 export const createHarnessPlugin = (packageLayers) => {
   const layerNames = new Set(Object.keys(packageLayers).filter((name) => !name.startsWith("$")));
@@ -342,6 +344,7 @@ export const createHarnessPlugin = (packageLayers) => {
       "no-relative-packages": noRelativePackages,
       "schema-inferred-types": schemaInferredTypes,
       "metric-registry-only": metricRegistryOnly,
+      "no-raw-tracer": noRawTracerRule,
     },
   };
 };
