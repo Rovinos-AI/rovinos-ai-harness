@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { RuleTester } from "@typescript-eslint/rule-tester";
-import { afterAll, describe, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { noRawTracerRule } from "./no-raw-tracer.ts";
 
@@ -110,4 +110,10 @@ ruleTester.run("no-raw-tracer", noRawTracerRule, {
       errors: [{ messageId: "forbidden" }],
     },
   ],
+});
+
+it("names the registered span APIs in its diagnostic", () => {
+  expect(noRawTracerRule.meta.messages.forbidden).toContain(
+    "defineSpan(...).start(...) or withSpan(...)",
+  );
 });

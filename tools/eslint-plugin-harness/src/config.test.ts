@@ -214,12 +214,6 @@ describe("ESLint configuration", () => {
       typescriptFixture,
     ],
     [
-      "raw span creation",
-      'tracer.startSpan("harness.test");',
-      "harness/no-raw-tracer",
-      resolve(rootDirectory, "packages/core/src/recorder.ts"),
-    ],
-    [
       "focused test",
       'import { describe, it } from "vitest";\ndescribe.only("focused", () => { it("runs", () => {}); });',
       "vitest/no-focused-tests",
@@ -295,14 +289,12 @@ describe("ESLint configuration", () => {
     expect(await lint("export const answer = 42;")).toEqual([]);
   });
 
-  it("explains the registered span API for raw tracer calls", async () => {
-    const messages = await lint(
-      'tracer.startSpan("harness.test");',
+  it("enables the raw tracer rule as an error", async () => {
+    const config: unknown = await eslint.calculateConfigForFile(
       resolve(rootDirectory, "packages/core/src/recorder.ts"),
     );
-    expect(
-      messages.find((message) => message.ruleId === "harness/no-raw-tracer")?.message,
-    ).toContain("defineSpan(...).start(...) or withSpan(...)");
+    const rules = isRecord(config) && isRecord(config.rules) ? config.rules : {};
+    expect(firstRuleSetting(rules["harness/no-raw-tracer"])).toBe(2);
   });
 
   it("applies generated and build ignores globally", async () => {
