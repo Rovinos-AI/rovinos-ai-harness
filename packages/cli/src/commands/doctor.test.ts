@@ -2,7 +2,12 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HarnessConfigSchema, loadConfig as loadConfigFromFile } from "@harness/config";
+import {
+  CompositeSecretResolver,
+  HarnessConfigSchema,
+  loadConfig as loadConfigFromFile,
+  Secret,
+} from "@harness/config";
 import { DoctorResultsSchema, parseJson, type DoctorCheckStatus } from "@harness/schemas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
@@ -159,6 +164,49 @@ describe("harness doctor", () => {
       detail: "previous",
     });
     expect(unresolvedOutput).not.toContain("HARNESS_DOCTOR_PREVIOUS_KEY");
+  });
+
+  it("resolves AKV config references through the injected resolver without printing key material", async () => {
+    await createDataDirectory();
+    const keyValue = Buffer.alloc(32, 18).toString("base64");
+    const reference = "akv:vault-name/harness-key-primary";
+    const config = HarnessConfigSchema.parse({
+      models: {
+        providers: [{ id: "provider", kind: "openai", apiKey: reference }],
+      },
+      keys: {
+        currentKeyId: "primary",
+        keys: [{ id: "primary", secret: reference }],
+      },
+    });
+    let resolutions = 0;
+    const { context, stdout, stderr } = createContext(() => Promise.resolve(config));
+    context.secretResolver = new CompositeSecretResolver({
+      akv: {
+        resolve: () => {
+          resolutions += 1;
+          return Promise.resolve(new Secret(keyValue));
+        },
+      },
+    });
+
+    const exitCode = await main(["--json", "doctor"], context, [createDoctorCommand()]);
+    const output = stdout.join("") + stderr.join("");
+    const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(results).toContainEqual({
+      id: "keys_configured",
+      status: "ok",
+      code: "keys_configured",
+    });
+    expect(results).toContainEqual({
+      id: "secret_refs_resolvable",
+      status: "ok",
+      code: "secret_refs_resolvable",
+    });
+    expect(resolutions).toBeGreaterThan(0);
+    expect(output).not.toContain(keyValue);
   });
 
   it("keeps env and file secret values out of table and JSON failure output", async () => {

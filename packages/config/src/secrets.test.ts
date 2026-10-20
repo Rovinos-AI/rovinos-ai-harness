@@ -43,25 +43,34 @@ function requireConfigError(error: unknown): ConfigError {
 }
 
 describe("SecretRefSchema", () => {
-  it.each(["env:API_KEY", "file:/run/secrets/model-key", "akv:vault-name/secret-name"])(
-    "accepts %s references",
-    (ref) => {
-      expect(SecretRefSchema.parse(ref)).toBe(ref);
-    },
-  );
+  it.each([
+    "env:API_KEY",
+    "file:/run/secrets/model-key",
+    "akv:vault-name/secret-name",
+    "akv:vault-name/secret-name#version-1",
+  ])("accepts %s references", (ref) => {
+    expect(SecretRefSchema.parse(ref)).toBe(ref);
+  });
 
-  it.each(["", "http:value", "env:", "env:1INVALID", "file:relative/path", "akv:vault/"])(
-    "rejects invalid reference %s with a safe code",
-    (ref) => {
-      const result = SecretRefSchema.safeParse(ref);
-      const messages = result.success ? [] : result.error.issues.map((issue) => issue.message);
+  it.each([
+    "",
+    "http:value",
+    "env:",
+    "env:1INVALID",
+    "file:relative/path",
+    "akv:vault/",
+    "akv:1invalid-vault/secret",
+    "akv:vault-name/invalid_secret",
+    "akv:vault-name/secret#",
+  ])("rejects invalid reference %s with a safe code", (ref) => {
+    const result = SecretRefSchema.safeParse(ref);
+    const messages = result.success ? [] : result.error.issues.map((issue) => issue.message);
 
-      expect(result).toMatchObject({
-        success: false,
-      });
-      expect(messages).toContain("secret_ref_invalid");
-    },
-  );
+    expect(result).toMatchObject({
+      success: false,
+    });
+    expect(messages).toContain("secret_ref_invalid");
+  });
 });
 
 describe("Secret", () => {
@@ -167,6 +176,20 @@ describe("FileSecretResolver", () => {
             },
             { once: true },
           );
+
+          it("enforces the Azure Key Vault name and version length limits", () => {
+            const maximumLengthRef = `akv:${"v".repeat(24)}/${"s".repeat(127)}#${"x".repeat(64)}`;
+            const oversizedRefs = [
+              `akv:${"v".repeat(25)}/secret`,
+              `akv:vault-name/${"s".repeat(128)}`,
+              `akv:vault-name/secret#${"x".repeat(65)}`,
+            ];
+
+            expect(SecretRefSchema.safeParse(maximumLengthRef).success).toBe(true);
+            for (const ref of oversizedRefs) {
+              expect(SecretRefSchema.safeParse(ref).success).toBe(false);
+            }
+          });
         });
       },
     });
@@ -207,6 +230,19 @@ describe("CompositeSecretResolver", () => {
     await expect(
       resolver.resolve(SecretRefSchema.parse("akv:vault-name/secret-name")),
     ).rejects.toMatchObject({ code: "secret_resolver_unavailable" });
+  });
+
+  it("dispatches AKV references and wraps results in a redacting Secret", async () => {
+    const resolver = new CompositeSecretResolver({
+      akv: {
+        resolve: () => Promise.resolve({ reveal: () => "private-akv-value" }),
+      },
+    });
+
+    const secret = await resolver.resolve(SecretRefSchema.parse("akv:vault-name/secret-name"));
+    expect(secret.reveal()).toBe("private-akv-value");
+    expect(String(secret)).toBe("[REDACTED]");
+    expect(JSON.stringify(secret)).toBe('"[REDACTED]"');
   });
 });
 

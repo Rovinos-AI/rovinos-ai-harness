@@ -5,6 +5,7 @@ import {
   FileSecretResolver,
   getConfigSecretRefs,
   type HarnessConfig,
+  type SecretValueResolver,
 } from "@harness/config";
 import {
   createServersAuthorizedCheck,
@@ -20,7 +21,7 @@ import {
   type DoctorCheckResult,
   type SecretRef,
 } from "@harness/schemas";
-import { LocalKeyProvider, LocalKeyProviderError } from "@harness/vault";
+import { AkvSecretResolver, LocalKeyProvider, LocalKeyProviderError } from "@harness/vault";
 import type { DoctorCheck, DoctorContext, RuntimeConfig } from "@harness/core";
 import type * as Core from "@harness/core";
 import type { Command } from "commander";
@@ -38,6 +39,7 @@ class DoctorChecksFailedError extends HarnessError {
 function keysConfiguredCheck(
   config: RuntimeConfig | undefined,
   env: Readonly<Record<string, string | undefined>>,
+  secretResolver: SecretValueResolver,
 ): DoctorCheck {
   return {
     id: "keys_configured",
@@ -53,10 +55,7 @@ function keysConfiguredCheck(
       }
       const provider = new LocalKeyProvider({
         config: config.keys,
-        secretResolver: new CompositeSecretResolver({
-          env: new EnvSecretResolver(env),
-          file: new FileSecretResolver(),
-        }),
+        secretResolver,
         env,
         onWarning: () => undefined,
       });
@@ -126,10 +125,11 @@ interface DoctorContextOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly dataDir: string;
   readonly envResolver: EnvSecretResolver;
+  readonly secretResolver: SecretValueResolver;
 }
 
 function createDoctorContext(options: DoctorContextOptions): DoctorContext {
-  const { config, configErrorCode, env, dataDir, envResolver } = options;
+  const { config, configErrorCode, env, dataDir, envResolver, secretResolver } = options;
   return {
     config,
     ...(configErrorCode === undefined ? {} : { configErrorCode }),
@@ -145,6 +145,7 @@ function createDoctorContext(options: DoctorContextOptions): DoctorContext {
             fileWarning = code;
           },
         }),
+        akv: secretResolver,
       });
       await resolver.resolve(ref, signal);
       return fileWarning;
@@ -154,7 +155,7 @@ function createDoctorContext(options: DoctorContextOptions): DoctorContext {
 
 async function openOAuthResources(
   config: HarnessConfig | undefined,
-  secretResolver: CompositeSecretResolver,
+  secretResolver: SecretValueResolver,
   env: Readonly<Record<string, string | undefined>>,
   dataDir: string,
 ): Promise<{ readonly keys?: LocalKeyProvider; readonly store?: OAuthTokenStore }> {
@@ -181,7 +182,7 @@ async function openOAuthResources(
 }
 
 function createMcpDependencies(
-  secretResolver: CompositeSecretResolver,
+  secretResolver: SecretValueResolver,
   env: Readonly<Record<string, string | undefined>>,
   store: OAuthTokenStore | undefined,
 ): McpConnectionDependencies {
@@ -193,16 +194,25 @@ function createMcpDependencies(
   };
 }
 
-function defaultDoctorChecks(
-  core: typeof Core,
-  config: HarnessConfig | undefined,
-  env: Readonly<Record<string, string | undefined>>,
-  dependencies: McpConnectionDependencies,
-): DoctorCheck[] {
+interface DefaultDoctorChecksOptions {
+  readonly core: typeof Core;
+  readonly config: HarnessConfig | undefined;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly dependencies: McpConnectionDependencies;
+  readonly secretResolver: SecretValueResolver;
+}
+
+function defaultDoctorChecks({
+  core,
+  config,
+  env,
+  dependencies,
+  secretResolver,
+}: DefaultDoctorChecksOptions): DoctorCheck[] {
   const servers = config?.servers ?? [];
   return [
     ...core.doctorChecks(),
-    keysConfiguredCheck(config, env),
+    keysConfiguredCheck(config, env, secretResolver),
     ...(config?.pii.presidio === undefined
       ? []
       : [createPresidioReachableCheck(config.pii.presidio)]),
@@ -236,21 +246,31 @@ async function runDoctor(
   const env = process.env;
   const core = await import("@harness/core");
   const envResolver = new EnvSecretResolver(env);
-  const secretResolver = new CompositeSecretResolver({
-    env: envResolver,
-    file: new FileSecretResolver(),
-  });
+  const secretResolver =
+    context.secretResolver ??
+    new CompositeSecretResolver({
+      env: envResolver,
+      file: new FileSecretResolver(),
+      akv: new AkvSecretResolver(),
+    });
   const doctorContext = createDoctorContext({
     config,
     configErrorCode,
     env,
     dataDir: core.resolveDataDir(env),
     envResolver,
+    secretResolver,
   });
   const resources = await openOAuthResources(config, secretResolver, env, doctorContext.dataDir);
   try {
     const dependencies = createMcpDependencies(secretResolver, env, resources.store);
-    const defaultChecks = defaultDoctorChecks(core, config, env, dependencies);
+    const defaultChecks = defaultDoctorChecks({
+      core,
+      config,
+      env,
+      dependencies,
+      secretResolver,
+    });
     const results = await core.runDoctor(doctorContext, checks ?? defaultChecks);
     printDoctorResults(program, context, results);
     if (results.some(({ status }) => status === "fail")) {

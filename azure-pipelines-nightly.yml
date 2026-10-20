@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+trigger: none
+pr: none
+
+schedules:
+  - cron: "0 3 * * *"
+    displayName: Nightly Azure Key Vault live test
+    branches:
+      include:
+        - main
+    always: true
+
+pool:
+  name: Default
+
+variables:
+  YARN_GLOBAL_FOLDER: $(Pipeline.Workspace)/.yarn
+
+jobs:
+  - job: live_akv
+    displayName: Azure Key Vault live test
+    steps:
+      - checkout: self
+        fetchDepth: 1
+      - template: pipelines/templates/node-setup.yml
+      - task: AzureCLI@2
+        displayName: Read live Azure Key Vault test secret
+        inputs:
+          azureSubscription: $(HARNESS_AKV_SERVICE_CONNECTION)
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: yarn test:live:akv
+        env:
+          HARNESS_LIVE_AKV: $(HARNESS_LIVE_AKV)
