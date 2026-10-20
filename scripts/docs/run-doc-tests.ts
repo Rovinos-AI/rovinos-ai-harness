@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-type BlockKind = "run" | "cleanup";
+type BlockKind = "run" | "cleanup" | "prelude";
 
 interface CaptureDirective {
   readonly name: string;
@@ -19,6 +19,7 @@ export interface DocTestBlock {
   readonly kind: BlockKind;
   readonly code: string;
   readonly captures: readonly CaptureDirective[];
+  readonly expectedExitCode?: number;
 }
 
 interface CommandResult {
@@ -41,7 +42,8 @@ class DocTestError extends Error {
   }
 }
 
-const testMarkerPattern = /^<!--\s*test:(run|cleanup)\s*-->$/u;
+const testMarkerPattern = /^<!--\s*test:(run|cleanup|prelude)\s*-->$/u;
+const expectedExitCodePattern = /^<!--\s*test:expect-exit=(\d+)\s*-->$/u;
 const fenceOpeningPattern = /^(`{3,}|~{3,})([\w-]+)(?:\s.*)?$/u;
 const rootDirectory = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const excludedDirectories = new Set([".git", ".tmp", "coverage", "dist", "node_modules"]);
@@ -92,13 +94,77 @@ interface FenceOptions {
   readonly language: string | undefined;
   readonly kind: BlockKind | undefined;
   readonly captures: readonly CaptureDirective[];
+  readonly expectedExitCode: number | undefined;
 }
 
-function markedFence({ lines, start, openingFence, language, kind, captures }: FenceOptions): {
+interface ExtractionState {
+  pendingKind: BlockKind | undefined;
+  pendingCaptures: CaptureDirective[];
+  pendingExpectedExitCode: number | undefined;
+}
+
+function blockKindFromMarker(marker: string): BlockKind {
+  switch (marker) {
+    case "run":
+      return "run";
+    case "prelude":
+      return "prelude";
+    default:
+      return "cleanup";
+  }
+}
+
+function consumeDirective(line: string, state: ExtractionState): boolean {
+  const marker = testMarkerPattern.exec(line)?.[1];
+  if (marker !== undefined) {
+    if (state.pendingKind !== undefined) {
+      throw new DocTestError();
+    }
+    state.pendingKind = blockKindFromMarker(marker);
+    return true;
+  }
+
+  const expectedExitMatch = expectedExitCodePattern.exec(line);
+  if (expectedExitMatch !== null) {
+    const expectedExitCode = Number(expectedExitMatch[1]);
+    if (
+      state.pendingExpectedExitCode !== undefined ||
+      !Number.isSafeInteger(expectedExitCode) ||
+      expectedExitCode > 255
+    ) {
+      throw new DocTestError();
+    }
+    state.pendingExpectedExitCode = expectedExitCode;
+    return true;
+  }
+  if (line.startsWith("<!-- test:expect-exit=")) {
+    throw new DocTestError();
+  }
+
+  const capture = captureDirective(line);
+  if (capture !== undefined) {
+    state.pendingCaptures.push(capture);
+    return true;
+  }
+  return line.length === 0;
+}
+
+function markedFence({
+  lines,
+  start,
+  openingFence,
+  language,
+  kind,
+  captures,
+  expectedExitCode,
+}: FenceOptions): {
   readonly block?: DocTestBlock;
   readonly closingIndex: number;
 } {
   if (kind !== undefined && language !== "bash" && language !== "sh" && language !== "shell") {
+    throw new DocTestError();
+  }
+  if (expectedExitCode !== undefined && kind !== "run") {
     throw new DocTestError();
   }
   const codeLines: string[] = [];
@@ -114,7 +180,16 @@ function markedFence({ lines, start, openingFence, language, kind, captures }: F
     return { closingIndex };
   }
   return {
-    ...(kind === undefined ? {} : { block: { kind, code: codeLines.join("\n"), captures } }),
+    ...(kind === undefined
+      ? {}
+      : {
+          block: {
+            kind,
+            code: codeLines.join("\n"),
+            captures,
+            ...(expectedExitCode === undefined ? {} : { expectedExitCode }),
+          },
+        }),
     closingIndex,
   };
 }
@@ -123,41 +198,33 @@ function markedFence({ lines, start, openingFence, language, kind, captures }: F
 export function extractDocTestBlocks(markdown: string): DocTestBlock[] {
   const lines = markdown.split(/\r?\n/u);
   const blocks: DocTestBlock[] = [];
-  let pendingKind: BlockKind | undefined;
-  let pendingCaptures: CaptureDirective[] = [];
+  const state: ExtractionState = {
+    pendingKind: undefined,
+    pendingCaptures: [],
+    pendingExpectedExitCode: undefined,
+  };
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const trimmed = line.trim();
-    const testMarker = testMarkerPattern.exec(trimmed)?.[1];
-    if (testMarker !== undefined) {
-      if (pendingKind !== undefined) {
-        throw new DocTestError();
-      }
-      pendingKind = testMarker === "run" ? "run" : "cleanup";
-      continue;
-    }
-    const capture = captureDirective(trimmed);
-    if (capture !== undefined) {
-      pendingCaptures.push(capture);
-      continue;
-    }
-    if (trimmed.length === 0) {
+    const trimmed = (lines[index] ?? "").trim();
+    if (consumeDirective(trimmed, state)) {
       continue;
     }
 
     const fence = fenceOpeningPattern.exec(trimmed);
     if (fence === null) {
-      pendingKind = undefined;
-      pendingCaptures = [];
+      state.pendingKind = undefined;
+      state.pendingCaptures = [];
+      state.pendingExpectedExitCode = undefined;
       continue;
     }
     const openingFence = fence[1] ?? "";
     const language = fence[2]?.toLowerCase();
-    const kind = pendingKind;
-    const captures = pendingCaptures;
-    pendingKind = undefined;
-    pendingCaptures = [];
+    const kind = state.pendingKind;
+    const captures = state.pendingCaptures;
+    const expectedExitCode = state.pendingExpectedExitCode;
+    state.pendingKind = undefined;
+    state.pendingCaptures = [];
+    state.pendingExpectedExitCode = undefined;
 
     const parsedFence = markedFence({
       lines,
@@ -166,6 +233,7 @@ export function extractDocTestBlocks(markdown: string): DocTestBlock[] {
       language,
       kind,
       captures,
+      expectedExitCode,
     });
     index = parsedFence.closingIndex;
     if (parsedFence.block !== undefined) {
@@ -174,6 +242,9 @@ export function extractDocTestBlocks(markdown: string): DocTestBlock[] {
   }
 
   if (blocks.every(({ kind }) => kind !== "run")) {
+    throw new DocTestError();
+  }
+  if (blocks.filter(({ kind }) => kind === "prelude").length > 1) {
     throw new DocTestError();
   }
   return blocks;
@@ -225,6 +296,7 @@ interface BlockExecutionContext {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
   readonly execute: BlockExecutor;
+  readonly prelude: string;
 }
 
 interface BlockExecutionOptions {
@@ -237,12 +309,10 @@ function executeBlock(
   context: BlockExecutionContext,
 ): DocTestError | undefined {
   try {
-    const result = context.execute(
-      substituteCaptures(block.code, context.captures),
-      context.cwd,
-      context.env,
-    );
-    if (result.error !== undefined || result.status !== 0) {
+    const code = substituteCaptures(block.code, context.captures);
+    const executionCode = context.prelude.length === 0 ? code : `${context.prelude}\n${code}`;
+    const result = context.execute(executionCode, context.cwd, context.env);
+    if (result.error !== undefined || result.status !== (block.expectedExitCode ?? 0)) {
       return new DocTestError(result.status ?? 1);
     }
     captureValues(block, result, context.captures);
@@ -283,7 +353,8 @@ export function executeDocTestBlocks(
   const captures = new Map<string, string>();
   const env = options.env ?? process.env;
   const execute = options.execute ?? executeShellBlock;
-  const context = { captures, cwd: options.cwd, env, execute };
+  const prelude = blocks.find(({ kind }) => kind === "prelude")?.code ?? "";
+  const context = { captures, cwd: options.cwd, env, execute, prelude };
   const failure = executeBlocks(
     blocks.filter(({ kind }) => kind === "run"),
     context,
@@ -339,9 +410,15 @@ async function copyWorktree(workingDirectory: string): Promise<void> {
 }
 
 /** Runs quickstart documentation blocks from a temporary copy of the repository. */
+/** Creates the temporary checkout parent even when it does not already exist. */
+export async function createDocTestTemporaryRoot(parentDirectory: string): Promise<string> {
+  await mkdir(parentDirectory, { recursive: true });
+  return mkdtemp(join(parentDirectory, "quickstart-doc-tests-"));
+}
+
 export async function runQuickstartDocTests(): Promise<void> {
   const markdown = await readFile(join(rootDirectory, "docs/quickstart.md"), "utf8");
-  const temporaryRoot = await mkdtemp(join(rootDirectory, ".tmp/quickstart-doc-tests-"));
+  const temporaryRoot = await createDocTestTemporaryRoot(join(rootDirectory, ".tmp"));
   const workingDirectory = join(temporaryRoot, "checkout");
   await mkdir(workingDirectory, { recursive: true });
 

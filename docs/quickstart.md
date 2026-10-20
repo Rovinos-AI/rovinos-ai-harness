@@ -8,27 +8,32 @@ uses synthetic input and requests approval before writing a file in the run's is
 - Docker Engine or Docker Desktop with Compose v2.
 - A POSIX-compatible shell.
 
-The first setup builds the harness image locally. Generated credentials are stored only in the
-ignored `examples/quickstart/.env` and `examples/quickstart/.env.control-plane-token` files; do not
-commit or share them.
+The first setup builds the harness and sandbox-runner images locally. The generated encryption key
+is stored in the ignored `examples/quickstart/.env` file. Control-plane and sandbox-runner tokens
+are generated inside the stack and kept in a named volume with per-service ownership and `0400`
+permissions; you do not need to create or handle token files.
+
+## Command helpers
+
+The commands below assume you are running them from the repository root.
+
+<!-- test:prelude -->
+
+```bash
+set -euo pipefail
+compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
+harness() { compose run --rm --no-deps harness "$@"; }
+```
 
 ## Prepare the environment
 
 <!-- test:run -->
 
 ```bash
-set -euo pipefail
-compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
-harness() { compose run --rm --no-deps harness "$@"; }
 cp examples/quickstart/.env.example examples/quickstart/.env
-cp test/fixtures/empty-secret examples/quickstart/.env.control-plane-token
-if ! docker image inspect "${HARNESS_IMAGE:-harness:quickstart}" >/dev/null 2>&1; then
-  compose build harness
-fi
+compose build harness sandbox-runner
 key="$(harness keys generate | sed -n '1p')"
-control_token="$(harness keys generate | sed -n '1p')"
 test -n "$key"
-test -n "$control_token"
 while IFS= read -r line; do
   if [[ "$line" == HARNESS_KEY=* ]]; then
     printf 'HARNESS_KEY=%s\n' "$key"
@@ -38,9 +43,7 @@ while IFS= read -r line; do
 done < examples/quickstart/.env > examples/quickstart/.env.tmp
 chmod 600 examples/quickstart/.env.tmp
 mv examples/quickstart/.env.tmp examples/quickstart/.env
-printf '%s\n' "$control_token" > examples/quickstart/.env.control-plane-token
-chmod 600 examples/quickstart/.env.control-plane-token
-unset key control_token
+unset key
 ```
 
 ## Start the stack
@@ -48,32 +51,28 @@ unset key control_token
 <!-- test:run -->
 
 ```bash
-docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml up -d --wait
+compose up -d --wait
 ```
+
+The quickstart does not expose the HTTP control-plane endpoint; its commands use the CLI through
+Compose. For remote HTTP access, configure TLS as described in
+[Control-plane security](control-plane-security.md).
 
 ## Run and inspect the sample
 
+Exit code `5` means the run is suspended while waiting for human approval.
+
 <!-- capture:runId=(?<runId>[0-9A-HJKMNP-TV-Z]{26}) -->
+<!-- test:expect-exit=5 -->
 <!-- test:run -->
 
 ```bash
-set -euo pipefail
-compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
-harness() { compose run --rm --no-deps harness "$@"; }
-if harness run --input examples/quickstart/task.json --fake-model examples/quickstart/fake-model.script.json; then
-  exit 1
-else
-  status=$?
-fi
-test "$status" -eq 5
+harness run --input examples/quickstart/task.json --fake-model examples/quickstart/fake-model.script.json
 ```
 
 <!-- test:run -->
 
 ```bash
-set -euo pipefail
-compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
-harness() { compose run --rm --no-deps harness "$@"; }
 harness inspect <runId>
 ```
 
@@ -87,31 +86,23 @@ until the approval is recorded.
 <!-- test:run -->
 
 ```bash
-set -euo pipefail
-compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
-harness() { compose run --rm --no-deps harness "$@"; }
 harness --json approvals list
 ```
 
 <!-- test:run -->
 
 ```bash
-set -euo pipefail
-compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
-harness() { compose run --rm --no-deps harness "$@"; }
 harness approvals approve <approvalId> --yes
 ```
 
 ## Resume the run
 
-The second scripted completion lets the resumed run finish without configuring a real model provider.
+The second scripted completion lets the resumed run finish without configuring a real model
+provider.
 
 <!-- test:run -->
 
 ```bash
-set -euo pipefail
-compose() { docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml "$@"; }
-harness() { compose run --rm --no-deps harness "$@"; }
 harness resume <runId> --fake-model examples/quickstart/resume-model.script.json
 ```
 
@@ -140,10 +131,8 @@ configuration file. See [Secret references](secrets.md) for supported references
 <!-- test:cleanup -->
 
 ```bash
-set -euo pipefail
 if [ -f examples/quickstart/.env ]; then
-  docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker-compose.quickstart.yml down --volumes --remove-orphans
+  compose down --volumes --remove-orphans
 fi
 rm -f examples/quickstart/.env examples/quickstart/.env.tmp
-rm -f examples/quickstart/.env.control-plane-token
 ```

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Synthetic example only; containsRealData: false.
+# Synthetic example only; contains_real_data: false.
 keys:
   currentKeyId: quickstart
   keys:
@@ -11,7 +11,11 @@ controlPlane:
   auth:
     tokens:
       - id: quickstart
-        secret: file:/run/secrets/control_plane_token
+        secret: file:/run/harness-secrets/control-plane-token
         scopes: [admin]
   listen:
-    host: 0.0.0.0
+    host: 127.0.0.1
+sandbox:
+  runner:
+    url: http://sandbox-runner:8080
+    token: file:/run/harness-secrets/sandbox-runner-client-token

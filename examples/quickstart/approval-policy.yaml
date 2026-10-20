@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Synthetic example only; containsRealData: false.
+# Synthetic example only; contains_real_data: false.
 version: 1
 defaultDecision: deny
 rules:
