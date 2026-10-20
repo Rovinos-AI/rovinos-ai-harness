@@ -108,6 +108,13 @@ export interface RuntimeResumeOptions {
   readonly onClaimed?: () => void;
 }
 
+/** Run lifecycle handle returned once an execution has been scheduled. */
+export interface RuntimeRunHandle {
+  readonly runId: Id;
+  readonly started: Promise<void>;
+  readonly completion: Promise<RunLoopResult>;
+}
+
 /** Composed run-loop operations and their shared dependencies. */
 export interface Runtime {
   readonly store: EventStore;
@@ -127,13 +134,13 @@ export interface Runtime {
   start(
     goal: JsonValue,
     options?: { readonly role?: Code; readonly runId?: Id; readonly requestedBy?: Principal },
-  ): {
-    readonly runId: Id;
-    readonly started: Promise<void>;
-    readonly completion: Promise<RunLoopResult>;
-  };
-  /** Starts a follow-up run from an eligible terminal run. */
-  continueRun(runId: Id, input: RunInput): Promise<RunLoopResult>;
+  ): RuntimeRunHandle;
+  /** Starts a follow-up run and exposes durable startup and eventual completion. */
+  continueRun(
+    runId: Id,
+    input: RunInput,
+    options?: { readonly requestedBy?: Principal },
+  ): RuntimeRunHandle;
   resume(runId: Id, options?: RuntimeResumeOptions): Promise<RunLoopResult>;
   /** Requests durable cancellation and reports if the run was already terminal. */
   cancel(runId: Id): Promise<CancelRunResult>;

@@ -12,6 +12,7 @@ import { z } from "zod";
 import { APPROVAL_RESOURCE_URI } from "./resources/approval.js";
 import {
   approveInputSchema,
+  continueRunInputSchema,
   decisionOutputSchema,
   denyInputSchema,
   getRunInputSchema,
@@ -19,6 +20,8 @@ import {
   listRunsInputSchema,
   listRunsOutputSchema,
   resumeRunOutputSchema,
+  startRunInputSchema,
+  startRunOutputSchema,
   runLifecycleInputSchema,
 } from "./schemas.js";
 
@@ -70,6 +73,20 @@ export function toolDefinitions(): Tool[] {
       outputSchema: z.toJSONSchema(decisionOutputSchema),
       annotations: { idempotentHint: true, openWorldHint: false },
       _meta: { ui: { visibility: ["app"] } },
+    },
+    {
+      name: "start_run",
+      description: "Start a run and return its metadata.",
+      inputSchema: objectInputSchema(startRunInputSchema),
+      outputSchema: z.toJSONSchema(startRunOutputSchema),
+      annotations: { idempotentHint: false, openWorldHint: false },
+    },
+    {
+      name: "continue_run",
+      description: "Start a follow-up run from a completed run.",
+      inputSchema: objectInputSchema(continueRunInputSchema),
+      outputSchema: z.toJSONSchema(startRunOutputSchema),
+      annotations: { idempotentHint: false, openWorldHint: false },
     },
     {
       name: "resume_run",

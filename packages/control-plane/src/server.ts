@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Principal, type ControlPlaneConfig, type Id } from "@harness/schemas";
+import {
+  Code,
+  Principal,
+  type ControlPlaneConfig,
+  type Id,
+  type RunStatus,
+} from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { AuditingVaultResolver } from "@harness/vault";
 import { CLIENT_CAPABILITIES_META_KEY, McpServer } from "@modelcontextprotocol/server";
@@ -21,6 +27,9 @@ import { registerDenyTool } from "./tools/deny.js";
 import { registerGetRunTool } from "./tools/get-run.js";
 import { registerListRunsTool } from "./tools/list-runs.js";
 import { registerResumeRunTool } from "./tools/resume-run.js";
+import { registerStartRunTool } from "./tools/start-run.js";
+import { registerContinueRunTool } from "./tools/continue-run.js";
+import type { StartRunInput, ContinueRunInput } from "./schemas.js";
 import {
   registerApprovalAppTools,
   ApprovalAppRevealRateLimiter,
@@ -45,6 +54,20 @@ const MCP_APP_MIME = "text/html;profile=mcp-app";
 
 /** Mutation operations supplied by the composed runtime. */
 export interface ControlPlaneOperations {
+  readonly startRun?: (
+    input: StartRunInput & {
+      readonly requestedBy: Principal;
+      readonly allowedExistingRunIds?: readonly Id[];
+    },
+  ) => Promise<{ readonly runId: Id; readonly status: RunStatus }>;
+  readonly continueRun?: (
+    runId: Id,
+    input: Omit<ContinueRunInput, "runId"> & { readonly requestedBy: Principal },
+  ) => Promise<{ readonly runId: Id; readonly status: RunStatus }>;
+  readonly checkRunQuota?: (input: {
+    readonly requestedBy: Principal;
+    readonly role?: Code;
+  }) => Promise<void>;
   readonly resumeRun?: (runId: Id, signal: AbortSignal, onClaimed: () => void) => Promise<unknown>;
   readonly cancelRun?: (runId: Id) => Promise<unknown>;
   readonly resolveApproval?: ResolveApprovalOperation;
@@ -119,6 +142,31 @@ export function createControlPlaneServer(
     clientCapabilities,
   });
   const supervisor = options.runSupervisor ?? createRunSupervisor(options);
+  registerStartRunTool(server, {
+    ...(options.operations?.startRun === undefined
+      ? {}
+      : { startRun: options.operations.startRun }),
+    checkRunQuota: (requestedBy, role) =>
+      options.operations?.checkRunQuota?.({
+        requestedBy,
+        ...(role === undefined ? {} : { role }),
+      }) ?? Promise.resolve(),
+    allowAgentStartedRuns: options.controlPlane?.allowAgentStartedRuns === true,
+    confirmationGate,
+    clientCapabilities,
+    ...(options.onAudit === undefined ? {} : { onAudit: options.onAudit }),
+  });
+  registerContinueRunTool(server, {
+    ...(options.operations?.continueRun === undefined
+      ? {}
+      : { continueRun: options.operations.continueRun }),
+    checkRunQuota: (requestedBy) =>
+      options.operations?.checkRunQuota?.({ requestedBy }) ?? Promise.resolve(),
+    allowAgentStartedRuns: options.controlPlane?.allowAgentStartedRuns === true,
+    confirmationGate,
+    clientCapabilities,
+    ...(options.onAudit === undefined ? {} : { onAudit: options.onAudit }),
+  });
   registerLifecycleTools({
     server,
     store,

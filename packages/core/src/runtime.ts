@@ -43,6 +43,7 @@ export type {
   RuntimeConfig,
   RuntimeOverrides,
   RuntimeResumeOptions,
+  RuntimeRunHandle,
 } from "./runtime-config.js";
 
 class RunInputMissingError extends HarnessError {

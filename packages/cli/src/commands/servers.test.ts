@@ -28,6 +28,7 @@ import { createOutput } from "../output.js";
 import { main } from "../main.js";
 import { createDoctorCommand } from "./doctor.js";
 import { createServersCommand } from "./servers.js";
+import { createLoginKeys } from "./servers-auth.js";
 import { LocalKeyProvider } from "@harness/vault";
 
 const descriptionCanary = "servers-check-description-canary";
@@ -466,6 +467,13 @@ afterEach(async () => {
 });
 
 describe("harness servers check", () => {
+  it("requires encryption key configuration for OAuth credentials", () => {
+    const harnessConfig = HarnessConfigSchema.parse({});
+    const { context } = createContext(() => Promise.resolve(harnessConfig));
+
+    expect(() => createLoginKeys(harnessConfig, context)).toThrow("key_config_required");
+  });
+
   it("reports safe registry and propagation diagnostics without invoking tools", async () => {
     const peer = await createPeer();
     const serverConfig = {
