@@ -29,6 +29,10 @@ words deliberately to `docs/engineering/project-words.txt`.
   current Node APIs, and predictable error handling.
 - `harness/import-direction` reads `docs/engineering/layers.json`; cross-package imports must follow
   that table and use `@harness/*` package names.
+- `harness/no-raw-tracer` prevents raw OpenTelemetry span creation, exception recording, and
+  attribute mutation outside the telemetry registry. Use `defineSpan(...).start(...)` or `withSpan`;
+  SDK-backed test support and the standalone canary/MCP integration fixtures are allowlisted for
+  their test-only spans and leak probes.
 - Package restrictions keep telemetry SDKs and parsers behind approved boundaries. Browser paths
   also reject Node globals/imports and unsafe HTML sinks. Test files use Vitest rules while keeping
   TypeScript safety checks enabled.

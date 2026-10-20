@@ -205,6 +205,7 @@ const configuration = [
       ],
       "harness/import-direction": "error",
       "harness/metric-registry-only": "error",
+      "harness/no-raw-tracer": "error",
       "harness/no-relative-packages": "error",
       "harness/schema-inferred-types": "error",
       "jsdoc/require-jsdoc": [
