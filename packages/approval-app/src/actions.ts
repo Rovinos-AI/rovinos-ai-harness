@@ -2,6 +2,7 @@
 import { ResolveRequest, ResolveResponse, type ApprovalPayload } from "@harness/schemas/browser";
 import type { AppTelemetry } from "@harness/app-telemetry";
 import { createEditForm } from "./edit-form.js";
+import { getStrings, type UiStrings } from "./kit/strings.js";
 import { mountRevealFlow, type RevealFlow } from "./reveal.js";
 
 /** Terminal outcome returned by the approval resolve tool. */
@@ -26,6 +27,7 @@ export interface ApprovalActionsBridge {
 export interface ApprovalActionsOptions {
   readonly approvalId: string;
   readonly payload: ApprovalPayload;
+  readonly locale?: () => string;
   readonly isExpired: () => boolean;
   readonly bridge: ApprovalActionsBridge;
   readonly telemetry: AppTelemetryForActions;
@@ -75,21 +77,31 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-const errorMessages: Readonly<Record<string, string>> = {
-  approval_not_found: "This approval could not be found.",
-  approval_already_resolved: "This approval has already been resolved.",
-  approval_run_not_suspended: "This run is no longer awaiting approval.",
-  approval_resolution_conflict: "The approval could not be resolved. Try again.",
-  edit_invalid: "The edited values are invalid.",
-  edit_not_allowed: "One or more edited fields are not allowed.",
+type ErrorStringKey = keyof Pick<
+  UiStrings,
+  | "errorApprovalMissing"
+  | "errorAlreadyResolved"
+  | "errorRunNotSuspended"
+  | "errorResolutionConflict"
+  | "errorInvalidEdit"
+  | "errorEditNotAllowed"
+>;
+
+const errorMessages: Readonly<Record<string, ErrorStringKey>> = {
+  approval_not_found: "errorApprovalMissing",
+  approval_already_resolved: "errorAlreadyResolved",
+  approval_run_not_suspended: "errorRunNotSuspended",
+  approval_resolution_conflict: "errorResolutionConflict",
+  edit_invalid: "errorInvalidEdit",
+  edit_not_allowed: "errorEditNotAllowed",
 };
 
-function errorMessage(code: string | undefined): string {
+function errorMessage(code: string | undefined, locale: string | undefined): string {
   const mapped = code === undefined ? undefined : errorMessages[code];
   if (mapped !== undefined) {
-    return mapped;
+    return getStrings(locale)[mapped];
   }
-  return "The approval could not be resolved.";
+  return getStrings(locale).errorResolve;
 }
 
 function button(
@@ -138,12 +150,45 @@ function reportError(context: ActionContext, code: UiErrorCode, message: string)
   context.options.reportError(code);
 }
 
-function decisionStatus(decision: ApprovalDecision): string {
+function decisionStatus(decision: ApprovalDecision, locale: string | undefined): string {
+  const strings = getStrings(locale);
   return {
-    approve: "Approval granted.",
-    deny: "Approval denied.",
-    edit: "Edits submitted.",
+    approve: strings.approvalGranted,
+    deny: strings.approvalDenied,
+    edit: strings.editsSubmitted,
   }[decision];
+}
+
+function handleResolveResult(
+  context: ActionContext,
+  decision: ApprovalDecision,
+  result: ApprovalToolCallOutcome,
+  decisionDurationMs: number,
+): void {
+  const { status, options } = context;
+  if (result.kind === "unavailable" && options.onResolveUnavailable !== undefined) {
+    options.onResolveUnavailable();
+    return;
+  }
+  if (result.kind !== "response") {
+    reportError(context, "resolve_failed", errorMessage(undefined, options.locale?.()));
+    setBusy(context, false);
+    return;
+  }
+  const response = ResolveResponse.safeParse(result.value);
+  if (!response.success || !response.data.ok) {
+    const code = response.success ? response.data.code : undefined;
+    reportError(context, "resolve_failed", errorMessage(code, options.locale?.()));
+    setBusy(context, false);
+    return;
+  }
+  options.telemetry.record("ui.decision", { decision }, decisionDurationMs);
+  void options.telemetry.flush();
+  options.flushInteractions();
+  status.textContent = decisionStatus(decision, options.locale?.());
+  options.onDecision(decision);
+  context.state.editForm?.remove();
+  setBusy(context, true);
 }
 
 async function resolveDecision(
@@ -165,38 +210,16 @@ async function resolveDecision(
     ...(edits === undefined ? {} : { edits }),
   });
   if (!request.success) {
-    reportError(context, "resolve_failed", "The approval could not be resolved.");
+    reportError(context, "resolve_failed", getStrings(context.options.locale?.()).errorResolve);
     return;
   }
   setBusy(context, true);
-  status.textContent = "Submitting decision.";
+  status.textContent = getStrings(context.options.locale?.()).submittingDecision;
   try {
     const result = await context.options.bridge.callTool("harness.approvals.resolve", request.data);
-    if (result.kind === "unavailable" && context.options.onResolveUnavailable !== undefined) {
-      context.options.onResolveUnavailable();
-      return;
-    }
-    if (result.kind !== "response") {
-      reportError(context, "resolve_failed", errorMessage(undefined));
-      setBusy(context, false);
-      return;
-    }
-    const response = ResolveResponse.safeParse(result.value);
-    if (!response.success || !response.data.ok) {
-      const code = response.success ? response.data.code : undefined;
-      reportError(context, "resolve_failed", errorMessage(code));
-      setBusy(context, false);
-      return;
-    }
-    context.options.telemetry.record("ui.decision", { decision }, decisionDurationMs);
-    void context.options.telemetry.flush();
-    context.options.flushInteractions();
-    status.textContent = decisionStatus(decision);
-    context.options.onDecision(decision);
-    context.state.editForm?.remove();
-    setBusy(context, true);
+    handleResolveResult(context, decision, result, decisionDurationMs);
   } catch {
-    reportError(context, "resolve_failed", errorMessage(undefined));
+    reportError(context, "resolve_failed", errorMessage(undefined, context.options.locale?.()));
     setBusy(context, false);
   }
 }
@@ -212,31 +235,31 @@ function openEditForm(context: ActionContext): void {
   }
   state.editForm = createEditForm(context.document, context.options.payload, (edits) => {
     if (edits.length === 0) {
-      status.textContent = "No changes to submit.";
+      status.textContent = getStrings(context.options.locale?.()).noChanges;
       return;
     }
     void resolveDecision(context, "edit", edits);
   });
   context.editHost.append(state.editForm);
-  status.textContent = "Editing approval.";
+  status.textContent = getStrings(context.options.locale?.()).editingApproval;
 }
 
 function bindActionHandlers(context: ActionContext): void {
   button(
     context.actions,
-    "Approve",
+    getStrings(context.options.locale?.()).approve,
     () => void resolveDecision(context, "approve"),
     context.listeners.signal,
   );
   button(
     context.actions,
-    "Deny",
+    getStrings(context.options.locale?.()).deny,
     () => void resolveDecision(context, "deny"),
     context.listeners.signal,
   );
   button(
     context.actions,
-    "Edit",
+    getStrings(context.options.locale?.()).edit,
     () => {
       openEditForm(context);
     },

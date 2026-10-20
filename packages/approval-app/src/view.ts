@@ -6,7 +6,8 @@ import {
   type ApprovalPayload,
   type JsonValue,
 } from "@harness/schemas/browser";
-import { appendTokenText } from "./tokens.js";
+import { appendTokenText } from "./kit/components.js";
+import { formatMessage, getStrings } from "./kit/strings.js";
 
 type ApprovalDecision = "approve" | "deny" | "edit";
 
@@ -25,6 +26,7 @@ export interface ApprovalPayloadContext {
 export interface ApprovalViewOptions {
   readonly clock: { now(): number };
   readonly onError: (code: "payload_invalid") => void;
+  readonly locale?: () => string;
   readonly onPayload?: (context: ApprovalPayloadContext) => (() => void) | undefined;
 }
 
@@ -78,22 +80,33 @@ function argumentNode(
   const raw = state.revealed.get(state.pointer);
   if (raw !== undefined) {
     const revealed = document.createElement("div");
-    revealed.textContent = `${label}: ${raw}`;
+    revealed.textContent =
+      formatMessage(getStrings(document.documentElement.lang).argumentValue, { label }) + raw;
     return revealed;
   }
   if (typeof value !== "object" || value === null) {
-    const leaf = element(document, "div", `${label}: `);
+    const leaf = element(
+      document,
+      "div",
+      formatMessage(getStrings(document.documentElement.lang).argumentValue, { label }),
+    );
     appendTokenText(leaf, typeof value === "string" ? JSON.stringify(value) : String(value));
     return leaf;
   }
   const branch = element(document, "details");
   branch.open = true;
   const entries = Object.entries(value);
-  const branchType = Array.isArray(value)
-    ? `array, ${String(value.length)} ${value.length === 1 ? "item" : "items"}`
-    : "object";
-  const empty = entries.length === 0 ? ", empty" : "";
-  branch.append(element(document, "summary", `${label} (${branchType}${empty})`));
+  const strings = getStrings(document.documentElement.lang);
+  const empty = entries.length === 0 ? strings.emptySuffix : "";
+  const summary = Array.isArray(value)
+    ? formatMessage(strings.argumentArray, {
+        label,
+        count: value.length,
+        items: value.length === 1 ? strings.oneItem : strings.manyItems,
+        empty,
+      })
+    : formatMessage(strings.argumentObject, { label, empty });
+  branch.append(element(document, "summary", summary));
   const children = element(document, "ul");
   for (const [key, child] of entries) {
     const item = element(document, "li");
@@ -114,16 +127,22 @@ function addMetadata(document: Document, row: HTMLElement, label: string, value:
   row.append(element(document, "dt", label), element(document, "dd", value));
 }
 
-function decisionStatus(decision: ApprovalDecision): string {
+function decisionStatus(decision: ApprovalDecision, locale: string | undefined): string {
+  const strings = getStrings(locale);
   return {
-    approve: "Approval granted.",
-    deny: "Approval denied.",
-    edit: "Edits submitted.",
+    approve: strings.approvalGranted,
+    deny: strings.approvalDenied,
+    edit: strings.editsSubmitted,
   }[decision];
 }
 
-function updatePendingStatus(status: HTMLElement, expired: boolean): void {
-  const nextStatus = expired ? "Approval expired" : "Pending approval";
+function updatePendingStatus(
+  status: HTMLElement,
+  expired: boolean,
+  locale: string | undefined,
+): void {
+  const strings = getStrings(locale);
+  const nextStatus = expired ? strings.expiredStatus : strings.pendingStatus;
   const liveStatus = status;
   if (liveStatus.textContent !== nextStatus) {
     liveStatus.textContent = nextStatus;
@@ -132,10 +151,11 @@ function updatePendingStatus(status: HTMLElement, expired: boolean): void {
 
 function createViewDom(root: HTMLElement): ApprovalViewDom {
   const document = root.ownerDocument;
+  const strings = getStrings(document.documentElement.lang);
   const main = element(document, "main");
-  const heading = element(document, "h1", "Waiting for approval");
+  const heading = element(document, "h1", strings.waitingHeading);
   heading.tabIndex = -1;
-  const status = element(document, "p", "Waiting for host...");
+  const status = element(document, "p", strings.waitingStatus);
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
   const content = element(document, "div");
@@ -145,48 +165,69 @@ function createViewDom(root: HTMLElement): ApprovalViewDom {
   return { document, heading, status, content };
 }
 
+function createPayloadMetadata(
+  document: Document,
+  payload: ApprovalPayload,
+  strings: ReturnType<typeof getStrings>,
+): { readonly metadata: HTMLElement; readonly expiry: HTMLElement } {
+  const metadata = element(document, "dl");
+  addMetadata(document, metadata, strings.tool, payload.toolId);
+  addMetadata(document, metadata, strings.rule, payload.ruleId);
+  addMetadata(document, metadata, strings.reason, payload.reason);
+  const expiry = element(document, "dd");
+  metadata.append(element(document, "dt", strings.expiry), expiry);
+  return { metadata, expiry };
+}
+
+function createPayloadActions(
+  document: Document,
+  payload: ApprovalPayload,
+  strings: ReturnType<typeof getStrings>,
+): HTMLElement {
+  const actions = element(document, "nav");
+  actions.setAttribute("aria-label", strings.approvalActions);
+  const labels =
+    payload.editableFields.length > 0
+      ? [strings.approve, strings.deny, strings.edit]
+      : [strings.approve, strings.deny];
+  for (const label of labels) {
+    const control = element(document, "button", label);
+    control.type = "button";
+    actions.append(control);
+  }
+  return actions;
+}
+
 function createPayloadView(options: PayloadRenderOptions): {
   readonly refresh: () => void;
   readonly cleanup: () => void;
 } {
   const { document, heading, status, content, payload, approvalId, viewOptions } = options;
+  const strings = getStrings(viewOptions.locale?.() ?? document.documentElement.lang);
   heading.replaceChildren();
   appendTokenText(heading, payload.summary);
-  const metadata = element(document, "dl");
-  addMetadata(document, metadata, "Tool", payload.toolId);
-  addMetadata(document, metadata, "Rule", payload.ruleId);
-  addMetadata(document, metadata, "Reason", payload.reason);
-  const expiry = element(document, "dd");
-  metadata.append(element(document, "dt", "Expiry"), expiry);
+  const { metadata, expiry } = createPayloadMetadata(document, payload, strings);
 
   const args = element(document, "section");
-  args.setAttribute("aria-label", "Arguments");
+  args.setAttribute("aria-label", strings.arguments);
   const argumentTree = element(document, "div");
-  args.append(element(document, "h2", "Arguments"), argumentTree);
+  args.append(element(document, "h2", strings.arguments), argumentTree);
   const renderRevealed = (revealed: ReadonlyMap<string, string>): void => {
     argumentTree.replaceChildren(
-      argumentNode(document, payload.args, "Arguments", { pointer: "", revealed }),
+      argumentNode(document, payload.args, strings.arguments, { pointer: "", revealed }),
     );
   };
   const isExpired = (): boolean =>
     payload.expiresAt !== undefined && payload.expiresAt <= viewOptions.clock.now();
   renderRevealed(new Map());
 
-  const actions = element(document, "nav");
-  actions.setAttribute("aria-label", "Approval actions");
-  const labels =
-    payload.editableFields.length > 0 ? ["Approve", "Deny", "Edit"] : ["Approve", "Deny"];
-  for (const label of labels) {
-    const control = element(document, "button", label);
-    control.type = "button";
-    actions.append(control);
-  }
+  const actions = createPayloadActions(document, payload, strings);
   const editHost = element(document, "div");
   content.append(metadata, args, actions, editHost);
   let terminalDecision: ApprovalDecision | undefined;
   const onDecision = (decision: ApprovalDecision): void => {
     terminalDecision = decision;
-    status.textContent = decisionStatus(decision);
+    status.textContent = decisionStatus(decision, viewOptions.locale?.());
     disableActions();
   };
   const disableActions = (): void => {
@@ -216,10 +257,14 @@ function createPayloadView(options: PayloadRenderOptions): {
     const expired = isExpired();
     expiry.textContent =
       remaining === undefined
-        ? "No expiry"
-        : `${String(Math.max(0, Math.ceil(remaining / 1000)))} seconds remaining`;
+        ? strings.noExpiry
+        : formatMessage(
+            strings.secondsRemaining,
+            { seconds: Math.max(0, Math.ceil(remaining / 1000)) },
+            viewOptions.locale?.(),
+          );
     if (terminalDecision === undefined) {
-      updatePendingStatus(status, expired);
+      updatePendingStatus(status, expired, viewOptions.locale?.());
     }
     if (expired || terminalDecision !== undefined) {
       disableActions();
@@ -264,9 +309,10 @@ export function createApprovalView(root: HTMLElement, options: ApprovalViewOptio
     dom.content.replaceChildren();
     refresh = (): void => undefined;
     if (!parsed.success) {
-      dom.heading.textContent = "Approval unavailable";
-      if (dom.status.textContent !== "Invalid approval payload") {
-        dom.status.textContent = "Invalid approval payload";
+      const strings = getStrings(options.locale?.() ?? dom.document.documentElement.lang);
+      dom.heading.textContent = strings.invalidHeading;
+      if (dom.status.textContent !== strings.invalidStatus) {
+        dom.status.textContent = strings.invalidStatus;
       }
       dom.heading.focus();
       previousContentKey = contentKey;

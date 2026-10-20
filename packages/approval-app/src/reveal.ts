@@ -5,11 +5,13 @@ import {
   RevealResponse,
   type ApprovalPayload,
 } from "@harness/schemas/browser";
+import { formatMessage, getStrings } from "./kit/strings.js";
 
 /** Host and view callbacks required by the time-limited sensitive-value reveal. */
 export interface RevealFlowOptions {
   readonly approvalId: string;
   readonly payload: ApprovalPayload;
+  readonly locale?: () => string;
   readonly isExpired: () => boolean;
   readonly bridge: {
     readonly callTool: (
@@ -69,13 +71,15 @@ function createConfirmation(
   actions: HTMLElement,
   document: Document,
   fieldCount: number,
+  locale: string | undefined,
 ): {
   readonly reveal: HTMLButtonElement;
   readonly dialog: HTMLDialogElement;
   readonly confirmButton: HTMLButtonElement;
   readonly cancelButton: HTMLButtonElement;
 } {
-  const reveal = element(document, "button", "Reveal values");
+  const strings = getStrings(locale);
+  const reveal = element(document, "button", strings.revealValues);
   reveal.type = "button";
   reveal.disabled = fieldCount === 0;
   actions.append(reveal);
@@ -86,12 +90,12 @@ function createConfirmation(
   const text = element(
     document,
     "p",
-    `Show raw values for ${String(fieldCount)} fields? This is logged.`,
+    formatMessage(strings.revealConfirmation, { count: fieldCount }, locale),
   );
   text.id = "approval-reveal-confirmation";
-  const confirmButton = element(document, "button", "Show raw values");
+  const confirmButton = element(document, "button", strings.showRawValues);
   confirmButton.type = "button";
-  const cancelButton = element(document, "button", "Cancel");
+  const cancelButton = element(document, "button", strings.cancel);
   cancelButton.type = "button";
   dialog.append(text, confirmButton, cancelButton);
   actions.after(dialog);
@@ -126,6 +130,39 @@ function containDialogFocus(dialog: HTMLDialogElement, document: Document): void
   });
 }
 
+function shouldSkipReveal(options: RevealFlowOptions, pointers: readonly string[]): boolean {
+  return options.isBusy() || options.isDisposed() || pointers.length === 0 || options.isExpired();
+}
+
+async function requestRevealedValues(
+  options: RevealFlowOptions,
+  pointers: readonly string[],
+): Promise<ReadonlyMap<string, string> | undefined> {
+  const request = RevealRequest.safeParse({ approvalId: options.approvalId, pointers });
+  if (!request.success) {
+    options.reportError(getStrings(options.locale?.()).errorReveal);
+    return undefined;
+  }
+  const response = RevealResponse.safeParse(
+    await options.bridge.callTool("harness.approvals.reveal", request.data),
+  );
+  if (!response.success) {
+    options.reportError(getStrings(options.locale?.()).errorReveal);
+    return undefined;
+  }
+  if (options.isDisposed()) {
+    return undefined;
+  }
+  const permitted = new Set(pointers);
+  const values = new Map<string, string>();
+  for (const { pointer, value } of response.data.values) {
+    if (permitted.has(pointer)) {
+      values.set(pointer, value);
+    }
+  }
+  return values;
+}
+
 function createRevealController(
   pointers: readonly string[],
   options: RevealFlowOptions,
@@ -136,42 +173,25 @@ function createRevealController(
   readonly revealedValueCount: () => number;
 } {
   const revealedValues = new Map<string, string>();
-  const revealStatus = "Values revealed for 30 seconds.";
+  const revealStatus = getStrings(options.locale?.()).revealedFor;
   let maskTimer: number | undefined;
 
   const showReveal = async (): Promise<void> => {
-    if (options.isBusy() || options.isDisposed() || pointers.length === 0 || options.isExpired()) {
+    if (shouldSkipReveal(options, pointers)) {
       return;
     }
     options.setBusy(true);
     const { status } = options;
-    status.textContent = "Revealing values.";
+    status.textContent = getStrings(options.locale?.()).revealingValues;
     try {
-      const request = RevealRequest.safeParse({
-        approvalId: options.approvalId,
-        pointers,
-      });
-      if (!request.success) {
-        options.reportError("The values could not be revealed.");
+      const values = await requestRevealedValues(options, pointers);
+      if (values === undefined) {
         return;
       }
-      const response = RevealResponse.safeParse(
-        await options.bridge.callTool("harness.approvals.reveal", request.data),
-      );
-      if (!response.success) {
-        options.reportError("The values could not be revealed.");
-        return;
-      }
-      if (options.isDisposed()) {
-        return;
-      }
-      const permitted = new Set(pointers);
       revealedValues.clear();
-      response.data.values.forEach(({ pointer, value }) => {
-        if (permitted.has(pointer)) {
-          revealedValues.set(pointer, value);
-        }
-      });
+      for (const [pointer, value] of values) {
+        revealedValues.set(pointer, value);
+      }
       options.renderRevealed(revealedValues);
       status.textContent = revealStatus;
       if (maskTimer !== undefined) {
@@ -181,12 +201,12 @@ function createRevealController(
         revealedValues.clear();
         options.renderRevealed(revealedValues);
         if (status.textContent === revealStatus) {
-          status.textContent = "Sensitive values hidden.";
+          status.textContent = getStrings(options.locale?.()).hiddenValues;
         }
         maskTimer = undefined;
       }, 30_000);
     } catch {
-      options.reportError("The values could not be revealed.");
+      options.reportError(getStrings(options.locale?.()).errorReveal);
     } finally {
       options.setBusy(false);
     }
@@ -240,7 +260,7 @@ function bindRevealEvents(
         confirmButton.focus();
       } catch {
         options.setBusy(false);
-        options.reportError("The values could not be revealed.");
+        options.reportError(getStrings(options.locale?.()).errorReveal);
       }
     },
     { signal: listeners.signal },
@@ -284,7 +304,7 @@ function bindRevealEvents(
 export function mountRevealFlow(actions: HTMLElement, options: RevealFlowOptions): RevealFlow {
   const document = actions.ownerDocument;
   const pointers = collectTokenPointers(options.payload.args).slice(0, 20);
-  const controls = createConfirmation(actions, document, pointers.length);
+  const controls = createConfirmation(actions, document, pointers.length, options.locale?.());
   const listeners = new AbortController();
   const controller = createRevealController(pointers, options, document.defaultView);
   bindRevealEvents(controls, options, pointers, {
