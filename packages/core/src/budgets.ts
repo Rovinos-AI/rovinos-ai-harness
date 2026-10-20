@@ -3,7 +3,7 @@ import type { Event, RunConfig } from "@harness/schemas";
 import { foldRunState, type RunState } from "./run-state.js";
 
 /** Budget dimensions checked before a model or tool operation. */
-export type BudgetKind = "steps" | "cost" | "wall_clock";
+export type BudgetKind = "steps" | "cost" | "wall_clock" | "quota";
 
 /** A budget violation and the observed usage that exceeded its limit. */
 export interface BudgetViolation {

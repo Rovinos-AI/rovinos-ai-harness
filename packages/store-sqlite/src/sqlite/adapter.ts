@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
 import { fileURLToPath } from "node:url";
+import { Code } from "@harness/schemas";
 import type {
   Id,
   TraceId,
@@ -23,6 +24,10 @@ import {
   watchEvents,
   watchRunSummaries,
   InvalidEventError,
+  UsageLimitExceededError,
+  UsageLedgerPeriodSchema,
+  UsageLedgerRowSchema,
+  parseUsageLedgerDeltas,
   SeqConflictError,
   StoreMigrationError,
   type ContentCodec,
@@ -30,6 +35,9 @@ import {
   type ChangeSubscription,
   type EncodedSnapshot,
   type EventStore,
+  type UsageLedgerDelta,
+  type UsageLedgerPeriod,
+  type UsageLedgerRow,
   type IdempotencyKeyHash,
   type IdempotencyKeyTakeoverOptions,
   type ListRunsOptions,
@@ -98,6 +106,20 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
   private readonly pruneSnapshots: Database.Statement<[Id, Id, number]>;
   private readonly latestSnapshotQuery: Database.Statement<[Id], SnapshotRow>;
   private readonly retainedSnapshotsQuery: Database.Statement<[Id, number], SnapshotRow>;
+  private readonly readUsageLedgerQuery: Database.Statement<
+    [Code, UsageLedgerPeriod, number],
+    {
+      quota_id: Code;
+      period: UsageLedgerPeriod;
+      period_start: number;
+      cost_micros: number;
+      runs_started: number;
+    }
+  >;
+  private readonly upsertUsageLedger: Database.Statement<
+    [Code, UsageLedgerPeriod, number, number, number],
+    { quota_id: Code }
+  >;
   private readonly snapshotKeep: number;
   private readonly pollIntervalMs: number;
   private readonly changeEmitter = new ChangeEmitter();
@@ -193,6 +215,12 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     this.retainedSnapshotsQuery = this.db.prepare<[Id, number], SnapshotRow>(
       "SELECT snapshot_id, run_id, at_seq, created_at, meta_json, content_blob, key_id FROM snapshots WHERE run_id = ? ORDER BY at_seq DESC, snapshot_id DESC LIMIT ?",
     );
+    this.readUsageLedgerQuery = this.db.prepare(
+      "SELECT quota_id, period, period_start, cost_micros, runs_started FROM usage_ledger WHERE quota_id = ? AND period = ? AND period_start = ?",
+    );
+    this.upsertUsageLedger = this.db.prepare(
+      "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, runs_started) VALUES (?, ?, ?, ?, ?) ON CONFLICT (quota_id, period, period_start) DO UPDATE SET cost_micros = usage_ledger.cost_micros + excluded.cost_micros, runs_started = usage_ledger.runs_started + excluded.runs_started",
+    );
   }
 
   /** {@inheritDoc StoreKeyRotation.reencryptBatch} */
@@ -237,6 +265,61 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     });
   }
 
+  /** {@inheritDoc EventStore.appendWithUsage} */
+  async appendWithUsage(
+    ...args: Parameters<EventStore["appendWithUsage"]>
+  ): Promise<{ nextSeq: number }> {
+    const [runId, events, expectedSeq, usageUpdates, leaseOwner] = args;
+    return this.writeAppend({
+      runId,
+      encoded: await encodeEvents(this.codec, runId, events, expectedSeq),
+      expectedSeq,
+      usageUpdates: parseUsageLedgerDeltas(usageUpdates),
+      ...(leaseOwner === undefined ? {} : { leaseOwner }),
+    });
+  }
+
+  /** {@inheritDoc EventStore.readUsageLedger} */
+  readUsageLedger(
+    quotaId: Code,
+    period: UsageLedgerPeriod,
+    periodStarts: readonly number[],
+  ): Promise<UsageLedgerRow[]> {
+    const parsedQuotaId = Code.safeParse(quotaId);
+    const parsedPeriod = UsageLedgerPeriodSchema.safeParse(period);
+    if (
+      !parsedQuotaId.success ||
+      !parsedPeriod.success ||
+      periodStarts.some((periodStart) => !Number.isSafeInteger(periodStart) || periodStart < 0)
+    ) {
+      return Promise.reject(new InvalidEventError([["quotaId"]]));
+    }
+    try {
+      return Promise.resolve(
+        periodStarts.flatMap((periodStart) => {
+          const row = this.readUsageLedgerQuery.get(
+            parsedQuotaId.data,
+            parsedPeriod.data,
+            periodStart,
+          );
+          return row === undefined
+            ? []
+            : [
+                UsageLedgerRowSchema.parse({
+                  quotaId: row.quota_id,
+                  period: row.period,
+                  periodStart: row.period_start,
+                  costMicros: row.cost_micros,
+                  runsStarted: row.runs_started,
+                }),
+              ];
+        }),
+      );
+    } catch (error) {
+      return Promise.reject(storeError(error));
+    }
+  }
+
   /** {@inheritDoc EventStore.claimRunExecution} */
   claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean> {
     return claimSqliteExecutionLease({ db: this.db, runId, owner, now, leaseMs });
@@ -257,6 +340,7 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
     readonly encoded: readonly EncodedEvent[];
     readonly expectedSeq: number;
     readonly encodedSnapshot?: EncodedSnapshot;
+    readonly usageUpdates?: readonly UsageLedgerDelta[];
     readonly leaseOwner?: Id;
   }): { nextSeq: number } {
     const { runId, encoded, expectedSeq, encodedSnapshot, leaseOwner } = options;
@@ -295,6 +379,28 @@ export class SqliteEventStore implements EventStore, StoreKeyRotation {
             metaJson,
             blob,
             keyId,
+          );
+        }
+
+        for (const delta of options.usageUpdates ?? []) {
+          const current = this.readUsageLedgerQuery.get(
+            delta.quotaId,
+            delta.period,
+            delta.periodStart,
+          );
+          const currentRuns = current?.runs_started ?? 0;
+          if (
+            delta.maxRunsStarted !== undefined &&
+            currentRuns + delta.runsStarted > delta.maxRunsStarted
+          ) {
+            throw new UsageLimitExceededError(delta.quotaId);
+          }
+          this.upsertUsageLedger.run(
+            delta.quotaId,
+            delta.period,
+            delta.periodStart,
+            delta.costMicros,
+            delta.runsStarted,
           );
         }
 

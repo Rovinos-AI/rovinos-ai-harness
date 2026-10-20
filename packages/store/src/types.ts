@@ -1,6 +1,79 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Code, Event, Id, NewEvent, RunStatus, Snapshot, TraceId } from "@harness/schemas";
+import { Code as CodeSchema } from "@harness/schemas";
 import { z } from "zod";
+import { InvalidEventError } from "./errors.js";
+
+/** Period boundaries used by cross-run quota accounting. */
+export const UsageLedgerPeriodSchema = z.enum(["hour", "day", "month"]);
+/** Window type associated with a ledger period. */
+export type UsageLedgerPeriod = z.infer<typeof UsageLedgerPeriodSchema>;
+
+/** Runtime schema for one incremental quota usage-ledger update. */
+export const UsageLedgerDeltaSchema = z
+  .object({
+    quotaId: CodeSchema,
+    period: UsageLedgerPeriodSchema,
+    periodStart: z.number().int().nonnegative(),
+    costMicros: z.number().int().nonnegative(),
+    runsStarted: z.number().int().nonnegative(),
+    maxRunsStarted: z.number().int().positive().optional(),
+  })
+  .strict();
+
+/** Increment applied to a quota usage-ledger period. */
+export type UsageLedgerDelta = z.infer<typeof UsageLedgerDeltaSchema>;
+
+/** Runtime schema for one persisted quota usage-ledger period. */
+export const UsageLedgerRowSchema = z
+  .object({
+    quotaId: CodeSchema,
+    period: UsageLedgerPeriodSchema,
+    periodStart: z.number().int().nonnegative(),
+    costMicros: z.number().int().nonnegative(),
+    runsStarted: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/** Persisted quota usage for one period. */
+export type UsageLedgerRow = z.infer<typeof UsageLedgerRowSchema>;
+
+/** Validate and combine increments targeting the same quota period. */
+export function parseUsageLedgerDeltas(input: unknown): UsageLedgerDelta[] {
+  const parsed = UsageLedgerDeltaSchema.array().safeParse(input);
+  if (!parsed.success) {
+    throw new InvalidEventError(
+      parsed.error.issues.map(({ path }) =>
+        path.flatMap((part) =>
+          typeof part === "string" || typeof part === "number" ? [part] : [],
+        ),
+      ),
+    );
+  }
+  const combined = new Map<string, UsageLedgerDelta>();
+  for (const delta of parsed.data) {
+    const key = `${delta.quotaId}:${delta.period}:${delta.periodStart}`;
+    const previous = combined.get(key);
+    const maxRunsStarted =
+      previous?.maxRunsStarted === undefined
+        ? delta.maxRunsStarted
+        : delta.maxRunsStarted === undefined
+          ? previous.maxRunsStarted
+          : Math.min(previous.maxRunsStarted, delta.maxRunsStarted);
+    combined.set(
+      key,
+      UsageLedgerDeltaSchema.parse({
+        quotaId: delta.quotaId,
+        period: delta.period,
+        periodStart: delta.periodStart,
+        costMicros: (previous?.costMicros ?? 0) + delta.costMicros,
+        runsStarted: (previous?.runsStarted ?? 0) + delta.runsStarted,
+        ...(maxRunsStarted === undefined ? {} : { maxRunsStarted }),
+      }),
+    );
+  }
+  return [...combined.values()];
+}
 
 /** Runtime schema for per-run checkpoint snapshot retention configuration. */
 export const snapshotStoreOptionsSchema = z
@@ -122,6 +195,29 @@ export interface EventStore {
     snapshot: Snapshot,
     leaseOwner?: Id,
   ): Promise<{ nextSeq: number }>;
+
+  /**
+   * Atomically append events and apply quota usage updates.
+   * @param runId Run identifier to append to.
+   * @param events Events without their store-assigned sequence numbers.
+   * @param expectedSeq Next sequence number the caller expects.
+   * @param usageUpdates Quota usage increments committed with the events.
+   * @returns The next free sequence number after the append.
+   */
+  appendWithUsage(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    usageUpdates: readonly UsageLedgerDelta[],
+    leaseOwner?: Id,
+  ): Promise<{ nextSeq: number }>;
+
+  /** Read persisted usage for the requested quota periods. */
+  readUsageLedger(
+    quotaId: Code,
+    period: UsageLedgerPeriod,
+    periodStarts: readonly number[],
+  ): Promise<UsageLedgerRow[]>;
 
   /** Atomically claim an execution lease for one run until its expiry. */
   claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean>;

@@ -65,6 +65,31 @@ function modelRequest(id: typeof runId, ts: number): NewEvent {
   };
 }
 
+function modelResponse(id: typeof runId, ts: number, costMicros: number): NewEvent {
+  return {
+    runId: id,
+    ts,
+    v: 1,
+    traceId,
+    spanId,
+    segmentId: id,
+    type: "model_response",
+    requestId: id,
+    provider: "test",
+    model: "test",
+    inputTokens: 1,
+    outputTokens: 1,
+    costMicros,
+    finishReason: "stop",
+    latencyMs: 1,
+    schemaValid: true,
+    repairAttempts: 0,
+    fallbackDepth: 0,
+    content: [{ type: "text", text: "synthetic" }],
+    providerBlobs: null,
+  };
+}
+
 function runStatusChanged(id: typeof runId, ts: number, from: RunStatus, to: RunStatus): NewEvent {
   return {
     runId: id,
@@ -110,6 +135,68 @@ describe("InMemoryEventStore", () => {
     expect(await collect(readEvents)).toEqual(events);
     await expect(store.head(runId)).resolves.toBe(2);
     await expect(store.head(otherRunId)).resolves.toBe(0);
+  });
+
+  it("commits model usage with its event and rolls both back on a sequence conflict", async () => {
+    const store = new InMemoryEventStore();
+    await store.append(runId, [runCreated(runId, 10)], 0);
+
+    await store.appendWithUsage(
+      runId,
+      [modelResponse(runId, 11, 500)],
+      1,
+      [{ quotaId: "daily", period: "day", periodStart: 0, costMicros: 500, runsStarted: 0 }],
+    );
+    await expect(store.readUsageLedger("daily", "day", [0])).resolves.toEqual([
+      { quotaId: "daily", period: "day", periodStart: 0, costMicros: 500, runsStarted: 0 },
+    ]);
+    await expect(
+      store.appendWithUsage(
+        runId,
+        [modelResponse(runId, 12, 200)],
+        1,
+        [{ quotaId: "daily", period: "day", periodStart: 0, costMicros: 200, runsStarted: 0 }],
+      ),
+    ).rejects.toBeInstanceOf(SeqConflictError);
+
+    await expect(store.head(runId)).resolves.toBe(2);
+    await expect(store.readUsageLedger("daily", "day", [0])).resolves.toEqual([
+      { quotaId: "daily", period: "day", periodStart: 0, costMicros: 500, runsStarted: 0 },
+    ]);
+    await store.close();
+  });
+
+  it("serializes concurrent hourly run-start increments against one quota limit", async () => {
+    const store = new InMemoryEventStore();
+    const runIds = Array.from({ length: 10 }, (_, index) =>
+      Id.parse(String(index + 10).padStart(26, "0")),
+    );
+    const results = await Promise.allSettled(
+      runIds.map((id, index) =>
+        store.appendWithUsage(
+          id,
+          [runCreated(id, index + 1)],
+          0,
+          [
+            {
+              quotaId: "hourly",
+              period: "hour",
+              periodStart: 3_600_000,
+              costMicros: 0,
+              runsStarted: 1,
+              maxRunsStarted: 5,
+            },
+          ],
+        ),
+      ),
+    );
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(5);
+    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(5);
+    await expect(store.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
+      { quotaId: "hourly", period: "hour", periodStart: 3_600_000, costMicros: 0, runsStarted: 5 },
+    ]);
+    await store.close();
   });
 
   it("refreshes only the run that changes while watching many idle runs", async () => {

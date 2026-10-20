@@ -21,6 +21,7 @@ import {
   RunExecutionLeaseLostError,
   SeqConflictError,
   StoreUnavailableError,
+  UsageLimitExceededError,
 } from "./errors.js";
 import {
   type EventStore,
@@ -28,7 +29,14 @@ import {
   type IdempotencyKeyHash,
   type RunSummary,
   type SnapshotStoreOptions,
+  UsageLedgerPeriodSchema,
+  UsageLedgerRowSchema,
+  parseUsageLedgerDeltas,
+  type UsageLedgerDelta,
+  type UsageLedgerPeriod,
+  type UsageLedgerRow,
 } from "./types.js";
+import { z } from "zod";
 import {
   claimMemoryIdempotencyKey,
   deleteMemoryIdempotencyKeyClaims,
@@ -63,6 +71,7 @@ export class InMemoryEventStore implements EventStore {
   private readonly confirmationStates = new Map<string, number>();
   private readonly idempotencyKeys = new Map<string, MemoryIdempotencyClaim>();
   private readonly executionLeases = new Map<Id, { readonly owner: Id; expiresAt: number }>();
+  private readonly usageLedger = new Map<string, UsageLedgerRow>();
   private nextGlobalSeq = 0;
   private readonly codec: ContentCodec;
   private readonly snapshotKeep: number;
@@ -114,11 +123,55 @@ export class InMemoryEventStore implements EventStore {
     }
   }
 
+  /** {@inheritDoc EventStore.appendWithUsage} */
+  appendWithUsage(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    usageUpdates: readonly UsageLedgerDelta[],
+    leaseOwner?: Id,
+  ): Promise<{ nextSeq: number }> {
+    try {
+      return Promise.resolve(
+        this.appendEvents({
+          runId,
+          events,
+          expectedSeq,
+          usageUpdates: parseUsageLedgerDeltas(usageUpdates),
+          ...(leaseOwner === undefined ? {} : { leaseOwner }),
+        }),
+      );
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new StoreUnavailableError());
+    }
+  }
+
+  /** {@inheritDoc EventStore.readUsageLedger} */
+  readUsageLedger(
+    quotaId: Code,
+    period: UsageLedgerPeriod,
+    periodStarts: readonly number[],
+  ): Promise<UsageLedgerRow[]> {
+    const parsedQuotaId = Code.safeParse(quotaId);
+    const parsedPeriod = UsageLedgerPeriodSchema.safeParse(period);
+    const periods = z.array(z.number().int().nonnegative()).parse(periodStarts);
+    if (!parsedQuotaId.success || !parsedPeriod.success) {
+      return Promise.reject(new InvalidEventError([["quotaId"]]));
+    }
+    return Promise.resolve(
+      periods.flatMap((periodStart) => {
+        const row = this.usageLedger.get(`${parsedQuotaId.data}:${parsedPeriod.data}:${periodStart}`);
+        return row === undefined ? [] : [UsageLedgerRowSchema.parse(row)];
+      }),
+    );
+  }
+
   private appendEvents(options: {
     readonly runId: Id;
     readonly events: readonly NewEvent[];
     readonly expectedSeq: number;
     readonly encodedSnapshot?: EncodedSnapshot;
+    readonly usageUpdates?: readonly UsageLedgerDelta[];
     readonly leaseOwner?: Id;
   }): { nextSeq: number } {
     const { runId, events, expectedSeq, encodedSnapshot, leaseOwner } = options;
@@ -140,7 +193,33 @@ export class InMemoryEventStore implements EventStore {
       throw new InvalidEventError([["snapshotId"]]);
     }
 
+    const updatedUsage = new Map<string, UsageLedgerRow>();
+    for (const delta of options.usageUpdates ?? []) {
+      const key = `${delta.quotaId}:${delta.period}:${delta.periodStart}`;
+      const previous =
+        updatedUsage.get(key) ??
+        this.usageLedger.get(key) ?? {
+          quotaId: delta.quotaId,
+          period: delta.period,
+          periodStart: delta.periodStart,
+          costMicros: 0,
+          runsStarted: 0,
+        };
+      const next = UsageLedgerRowSchema.parse({
+        ...previous,
+        costMicros: previous.costMicros + delta.costMicros,
+        runsStarted: previous.runsStarted + delta.runsStarted,
+      });
+      if (delta.maxRunsStarted !== undefined && next.runsStarted > delta.maxRunsStarted) {
+        throw new UsageLimitExceededError(delta.quotaId);
+      }
+      updatedUsage.set(key, next);
+    }
+
     this.runs.set(runId, [...stored, ...validated]);
+    for (const [key, row] of updatedUsage) {
+      this.usageLedger.set(key, row);
+    }
     this.recordTraceRuns(runId, validated);
     if (encodedSnapshot !== undefined) {
       this.snapshots.set(

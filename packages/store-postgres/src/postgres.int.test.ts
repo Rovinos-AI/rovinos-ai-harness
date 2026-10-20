@@ -155,6 +155,58 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
 
+it("serializes concurrent quota ledger updates with event appends", async () => {
+  const { admin, schema } = await createSchema();
+  const stores = Array.from(
+    { length: 10 },
+    () => new PostgresEventStore(connectionString, { schema }),
+  );
+  const builders = createEventBuilders();
+  try {
+    const runIds = stores.map(() => builders.nextRunId());
+    const results = await Promise.allSettled(
+      stores.map((store, index) => {
+        const runId = runIds[index];
+        if (runId === undefined) {
+          throw new Error("Expected a run id");
+        }
+        return store.appendWithUsage(
+          runId,
+          [builders.runCreated(runId)],
+          0,
+          [
+            {
+              quotaId: "hourly",
+              period: "hour",
+              periodStart: 3_600_000,
+              costMicros: 0,
+              runsStarted: 1,
+              maxRunsStarted: 5,
+            },
+          ],
+        );
+      }),
+    );
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(5);
+    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(5);
+    await expect(stores[0]?.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
+      { quotaId: "hourly", period: "hour", periodStart: 3_600_000, costMicros: 0, runsStarted: 5 },
+    ]);
+    for (const [index, result] of results.entries()) {
+      if (result.status === "rejected") {
+        const runId = runIds[index];
+        if (runId !== undefined) {
+          await expect(stores[0]?.head(runId)).resolves.toBe(0);
+        }
+      }
+    }
+  } finally {
+    await Promise.all(stores.map((store) => store.close()));
+    await dropSchema(admin, schema);
+  }
+});
+
 it("resumes Postgres event and snapshot rotation without interrupting reads", async () => {
   const { admin, schema } = await createSchema();
   let currentKeyId = "key-a";

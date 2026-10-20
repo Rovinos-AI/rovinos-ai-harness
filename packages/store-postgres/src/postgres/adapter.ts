@@ -3,6 +3,7 @@ import {
   Code,
   Id,
   type Code as SinkId,
+  type Code as CodeType,
   type Event,
   type NewEvent,
   type Snapshot,
@@ -27,6 +28,10 @@ import {
   type ListRunsOptions,
   type ReencryptBatchInput,
   type RunSummary,
+  UsageLedgerRowSchema,
+  UsageLedgerPeriodSchema,
+  type UsageLedgerRow,
+  type UsageLedgerPeriod,
   type SnapshotRow,
   type StoreKeyRotation,
 } from "@harness/store/adapter-internal";
@@ -186,6 +191,54 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
   ): Promise<{ nextSeq: number }> {
     const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     return this.writer.appendWithSnapshot(runId, events, expectedSeq, snapshot, leaseOwner);
+  }
+
+  /** {@inheritDoc EventStore.appendWithUsage} */
+  async appendWithUsage(
+    ...args: Parameters<EventStore["appendWithUsage"]>
+  ): Promise<{ nextSeq: number }> {
+    return this.writer.appendWithUsage(...args);
+  }
+
+  /** {@inheritDoc EventStore.readUsageLedger} */
+  async readUsageLedger(
+    quotaId: CodeType,
+    period: UsageLedgerPeriod,
+    periodStarts: readonly number[],
+  ): Promise<UsageLedgerRow[]> {
+    const parsedQuotaId = Code.safeParse(quotaId);
+    const parsedPeriod = UsageLedgerPeriodSchema.safeParse(period);
+    if (
+      !parsedQuotaId.success ||
+      !parsedPeriod.success ||
+      periodStarts.some((period) => !Number.isSafeInteger(period) || period < 0)
+    ) {
+      throw new InvalidEventError([["quotaId"]]);
+    }
+    try {
+      await this.ensureInitialized();
+      const result = await this.pool.query<{
+        quota_id: string;
+        period: UsageLedgerPeriod;
+        period_start: number | string;
+        cost_micros: number | string;
+        runs_started: number | string;
+      }>(
+        "SELECT quota_id, period, period_start, cost_micros, runs_started FROM usage_ledger WHERE quota_id = $1 AND period = $2 AND period_start = ANY($3::BIGINT[])",
+        [parsedQuotaId.data, parsedPeriod.data, [...periodStarts]],
+      );
+      return result.rows.map((row) =>
+        UsageLedgerRowSchema.parse({
+          quotaId: row.quota_id,
+          period: row.period,
+          periodStart: integer(row.period_start),
+          costMicros: integer(row.cost_micros),
+          runsStarted: integer(row.runs_started),
+        }),
+      );
+    } catch (error) {
+      throw storeError(error);
+    }
   }
 
   /** {@inheritDoc EventStore.claimRunExecution} */

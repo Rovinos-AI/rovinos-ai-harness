@@ -11,7 +11,12 @@ import {
 } from "@harness/schemas";
 import type { PoolClient, QueryResultRow } from "pg";
 import { z } from "zod";
-import type { ContentCodec, EncodedSnapshot, RunSummary } from "@harness/store/adapter-internal";
+import type {
+  ContentCodec,
+  EncodedSnapshot,
+  RunSummary,
+  UsageLedgerDelta,
+} from "@harness/store/adapter-internal";
 import {
   ContentDecryptFailedError,
   InvalidEventError,
@@ -19,6 +24,7 @@ import {
   RunExecutionLeaseLostError,
   SeqConflictError,
   StoreUnavailableError,
+  UsageLimitExceededError,
   isPreservedStoreError,
 } from "@harness/store/adapter-internal";
 import { insertSnapshot } from "./snapshot.js";
@@ -325,6 +331,7 @@ export interface AppendTransactionOptions {
   expectedSeq: number;
   encodedSnapshot?: EncodedSnapshot;
   snapshotKeep?: number;
+  usageUpdates?: readonly UsageLedgerDelta[];
   leaseOwner?: Id;
 }
 
@@ -333,7 +340,15 @@ export async function appendTransaction(
   client: PoolClient,
   options: AppendTransactionOptions,
 ): Promise<number> {
-  const { runId, encoded, expectedSeq, encodedSnapshot, snapshotKeep = 5, leaseOwner } = options;
+  const {
+    runId,
+    encoded,
+    expectedSeq,
+    encodedSnapshot,
+    snapshotKeep = 5,
+    usageUpdates,
+    leaseOwner,
+  } = options;
   const { first, last } = appendBoundaryEvents(encoded);
 
   let transactionStarted = false;
@@ -369,6 +384,22 @@ export async function appendTransaction(
       status,
       lastTs: last.ts,
     });
+    for (const delta of usageUpdates ?? []) {
+      const result = await client.query<{ quota_id: string }>(
+        "INSERT INTO usage_ledger (quota_id, period, period_start, cost_micros, runs_started) SELECT $1, $2, $3, $4, $5 WHERE $6::BIGINT IS NULL OR $5 <= $6 ON CONFLICT (quota_id, period, period_start) DO UPDATE SET cost_micros = usage_ledger.cost_micros + EXCLUDED.cost_micros, runs_started = usage_ledger.runs_started + EXCLUDED.runs_started WHERE $6::BIGINT IS NULL OR usage_ledger.runs_started + EXCLUDED.runs_started <= $6 RETURNING quota_id",
+        [
+          delta.quotaId,
+          delta.period,
+          delta.periodStart,
+          delta.costMicros,
+          delta.runsStarted,
+          delta.maxRunsStarted ?? null,
+        ],
+      );
+      if (result.rows.length !== 1) {
+        throw new UsageLimitExceededError(delta.quotaId);
+      }
+    }
     if (encodedSnapshot !== undefined) {
       await insertSnapshot(client, encodedSnapshot);
       await client.query(

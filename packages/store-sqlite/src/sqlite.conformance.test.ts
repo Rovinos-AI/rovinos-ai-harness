@@ -2,7 +2,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { KeyProvider } from "@harness/schemas";
+import { Id, type KeyProvider, type NewEvent } from "@harness/schemas";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { AesGcmContentCodec, JsonContentCodec, type ContentCodec } from "@harness/store";
 import { SqliteEventStore } from "./index.js";
@@ -30,6 +30,31 @@ const encryptedCodec = new AesGcmContentCodec({
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "harness-store-conformance-"));
 });
+
+function modelResponse(runId: Id, costMicros: number): NewEvent {
+  return {
+    runId,
+    ts: 2,
+    v: 1,
+    traceId: "a".repeat(32),
+    spanId: "b".repeat(16),
+    segmentId: runId,
+    type: "model_response",
+    requestId: runId,
+    provider: "test",
+    model: "test",
+    inputTokens: 1,
+    outputTokens: 1,
+    costMicros,
+    finishReason: "stop",
+    latencyMs: 1,
+    schemaValid: true,
+    repairAttempts: 0,
+    fallbackDepth: 0,
+    content: [{ type: "text", text: "synthetic" }],
+    providerBlobs: null,
+  };
+}
 
 afterAll(async () => {
   if (directory !== undefined) {
@@ -86,6 +111,69 @@ it("observes appends from another SQLite adapter instance through polling", asyn
     await Promise.all([watcher.close(), writer.close()]);
   }
 });
+
+it("commits usage with model responses and enforces hourly starts under concurrent writers", async () => {
+  if (directory === undefined) {
+    throw new Error("SQLite conformance directory is not initialized");
+  }
+  const path = join(directory, "usage-ledger.sqlite");
+  const store = new SqliteEventStore(path);
+  const runId = Id.parse("00000000000000000000000021");
+  const builders = createEventBuilders();
+  try {
+    await store.append(runId, [builders.runCreated(runId)], 0);
+    await store.appendWithUsage(
+      runId,
+      [modelResponse(runId, 700)],
+      1,
+      [{ quotaId: "daily", period: "day", periodStart: 0, costMicros: 700, runsStarted: 0 }],
+    );
+    await expect(store.readUsageLedger("daily", "day", [0])).resolves.toEqual([
+      { quotaId: "daily", period: "day", periodStart: 0, costMicros: 700, runsStarted: 0 },
+    ]);
+
+    const runIds = Array.from({ length: 10 }, (_, index) =>
+      Id.parse(String(index + 30).padStart(26, "0")),
+    );
+    const writers = runIds.map(() => new SqliteEventStore(path));
+    const results = await Promise.allSettled(
+      runIds.map((id, index) =>
+        writers[index]?.appendWithUsage(
+          id,
+          [builders.runCreated(id)],
+          0,
+          [
+            {
+              quotaId: "hourly",
+              period: "hour",
+              periodStart: 3_600_000,
+              costMicros: 0,
+              runsStarted: 1,
+              maxRunsStarted: 5,
+            },
+          ],
+        ),
+      ),
+    );
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(5);
+    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(5);
+    await expect(store.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
+      { quotaId: "hourly", period: "hour", periodStart: 3_600_000, costMicros: 0, runsStarted: 5 },
+    ]);
+    for (const [index, result] of results.entries()) {
+      if (result.status === "rejected") {
+        const id = runIds[index];
+        if (id !== undefined) {
+          await expect(store.head(id)).resolves.toBe(0);
+        }
+      }
+    }
+    await Promise.all(writers.map((writer) => writer.close()));
+  } finally {
+    await store.close();
+  }
+});
+
 runEventStoreConformance(
   "SqliteEventStore encrypted",
   sqliteFactory("events-encrypted.sqlite", encryptedCodec),
