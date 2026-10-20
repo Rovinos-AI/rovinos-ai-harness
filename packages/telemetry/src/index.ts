@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 export { attr, getAttrMeta, isSafeAttr, type AttrMeta } from "./attr.js";
-export { SpanRegistryError, type SpanRegistryIssue } from "./errors.js";
+export { SpanRegistryError, TelemetrySdkError, type SpanRegistryIssue } from "./errors.js";
 export { LogRegistryError } from "./log-registry.js";
 export {
   SafeEvent,
@@ -51,6 +51,7 @@ export {
   listSpanDefinitions,
   lookupSpanDefinition,
   setActiveSpanAttribute,
+  safeRecordError,
   withSpan,
   type SpanDefinition,
   type SpanDefinitionShape,

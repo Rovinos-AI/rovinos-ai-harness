@@ -152,6 +152,22 @@ function harnessErrorCode(error: unknown): Code | undefined {
 }
 
 /**
+ * Records only the closed error code and error status on a registered span.
+ *
+ * @param span - Span created from a registered definition.
+ * @param error - Error value used only to extract its stable code.
+ */
+export function safeRecordError(span: Span, error: unknown): void {
+  span.setStatus({ code: SpanStatusCode.ERROR });
+  const definition = activeSpanDefinitions.get(span);
+  if (definition === undefined || !("harness.error.code" in definition.shape)) {
+    return;
+  }
+  const code = harnessErrorCode(error) ?? Code.parse("unknown_error");
+  span.setAttribute("harness.error.code", code);
+}
+
+/**
  * Registers a span name and its allowlisted attribute shape.
  *
  * @param name - Harness span name matching `harness.<lowercase_name>`.
@@ -309,11 +325,7 @@ export async function withSpan<Shape extends SpanDefinitionShape, Schema extends
   try {
     return await fn(span);
   } catch (error) {
-    span.setStatus({ code: SpanStatusCode.ERROR });
-    const code = harnessErrorCode(error);
-    if (code !== undefined && "harness.error.code" in definition.shape) {
-      span.setAttribute("harness.error.code", code);
-    }
+    safeRecordError(span, error);
     throw error;
   } finally {
     span.end();
