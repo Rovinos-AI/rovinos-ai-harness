@@ -240,6 +240,66 @@ describe("formSchemaToZod", () => {
     ).toBe(false);
   });
 
+  it.each([
+    ["string constraints", { type: "string", minLength: 2, default: "x" }],
+    ["number bounds", { type: "number", minimum: 1, default: 0 }],
+    ["enum membership", { type: "string", enum: ["a", "b"], default: "c" }],
+    [
+      "multi-select membership",
+      { type: "array", items: { type: "string", enum: ["a", "b"] }, default: ["c"] },
+    ],
+    [
+      "multi-select bounds",
+      {
+        type: "array",
+        items: { type: "string", enum: ["a", "b"] },
+        minItems: 2,
+        default: ["a"],
+      },
+    ],
+  ])("validates %s defaults against answer constraints", (_description, field) => {
+    const schema = FormSchema.parse({
+      type: "object",
+      properties: { value: field },
+    });
+
+    expect(formSchemaToZod(schema).safeParse({}).success).toBe(false);
+  });
+
+  it("counts string bounds in Unicode code points", () => {
+    const maxLengthSchema = formSchemaToZod(
+      FormSchema.parse({
+        type: "object",
+        properties: { value: { type: "string", maxLength: 1 } },
+      }),
+    );
+    const minLengthSchema = formSchemaToZod(
+      FormSchema.parse({
+        type: "object",
+        properties: { value: { type: "string", minLength: 2 } },
+      }),
+    );
+
+    expect(maxLengthSchema.safeParse({ value: "😀" }).success).toBe(true);
+    expect(minLengthSchema.safeParse({ value: "😀" }).success).toBe(false);
+    expect(minLengthSchema.safeParse({ value: "😀😃" }).success).toBe(true);
+  });
+
+  it("does not throw when building an answer schema from a malformed runtime pattern", () => {
+    const schema = FormSchema.parse({
+      type: "object",
+      properties: { value: { type: "string" } },
+    });
+    const field = schema.properties.value;
+    if (field === undefined) {
+      throw new Error("Missing parsed form field.");
+    }
+    Reflect.set(field, "pattern", "[");
+
+    expect(() => formSchemaToZod(schema).safeParse({ value: "x" })).not.toThrow();
+    expect(formSchemaToZod(schema).safeParse({ value: "x" }).success).toBe(false);
+  });
+
   it("validates URI, date, date-time, and enum-valued strings", () => {
     const answerSchema = formSchemaToZod(
       FormSchema.parse({
@@ -259,6 +319,15 @@ describe("formSchemaToZod", () => {
         uri: "https://example.test",
         date: "2026-10-20",
         timestamp: "2026-10-20T08:00:00Z",
+        enum: "two",
+        pattern: "ab",
+      }).success,
+    ).toBe(true);
+    expect(
+      answerSchema.safeParse({
+        uri: "https://example.test",
+        date: "2026-10-20",
+        timestamp: "2026-10-20T10:00:00+02:00",
         enum: "two",
         pattern: "ab",
       }).success,
@@ -315,6 +384,55 @@ describe("InputRequestSchema", () => {
     };
     expect(InputRequestSchema.parse(request)).toMatchObject(request);
     expect(InputRequestSchema.safeParse({ ...request, url: "not a URL" }).success).toBe(false);
+  });
+
+  it.each([
+    [
+      "form without schema",
+      {
+        requestId: "00000000000000000000000001",
+        source: "agent",
+        round: 0,
+        mode: "form",
+        message: "Enter a value.",
+      },
+    ],
+    [
+      "form with URL",
+      {
+        requestId: "00000000000000000000000001",
+        source: "agent",
+        round: 0,
+        mode: "form",
+        message: "Enter a value.",
+        schema: validForm,
+        url: "https://example.test/continue",
+      },
+    ],
+    [
+      "URL without URL",
+      {
+        requestId: "00000000000000000000000001",
+        source: "agent",
+        round: 0,
+        mode: "url",
+        message: "Continue in a browser.",
+      },
+    ],
+    [
+      "URL with schema",
+      {
+        requestId: "00000000000000000000000001",
+        source: "agent",
+        round: 0,
+        mode: "url",
+        message: "Continue in a browser.",
+        schema: validForm,
+        url: "https://example.test/continue",
+      },
+    ],
+  ])("rejects inconsistent mode/payload: %s", (_description, request) => {
+    expect(InputRequestSchema.safeParse(request).success).toBe(false);
   });
 });
 

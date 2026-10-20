@@ -58,6 +58,7 @@ function contentCanaryValue(type: EventType, field: string, canary: string): unk
 
 function eventsWithContentCanaries(runId: Id, canaries: readonly string[]): NewEvent[] {
   let canaryIndex = 0;
+  let inputUrlCanary: string | undefined;
   const events: NewEvent[] = [];
   for (const sample of eventSamples) {
     const event: Record<string, unknown> = { ...sample, runId, segmentId: runId };
@@ -69,10 +70,30 @@ function eventsWithContentCanaries(runId: Id, canaries: readonly string[]): NewE
       if (canary === undefined) {
         throw new Error("Missing generated content canary.");
       }
+      if (sample.type === "input_requested" && field === "url") {
+        inputUrlCanary = canary;
+        canaryIndex += 1;
+        continue;
+      }
       event[field] = contentCanaryValue(sample.type, field, canary);
       canaryIndex += 1;
     }
     events.push(EventSchema.parse(event));
+  }
+  if (inputUrlCanary !== undefined) {
+    const sample = eventSamples.find(({ type }) => type === "input_requested");
+    if (sample?.type !== "input_requested") {
+      throw new Error("Missing input-request event sample.");
+    }
+    const urlEvent: Record<string, unknown> = {
+      ...sample,
+      runId,
+      segmentId: runId,
+      mode: "url",
+      url: contentCanaryValue("input_requested", "url", inputUrlCanary),
+    };
+    Reflect.deleteProperty(urlEvent, "schema");
+    events.push(EventSchema.parse(urlEvent));
   }
   if (canaryIndex !== canaries.length) {
     throw new Error("Unused generated content canary.");

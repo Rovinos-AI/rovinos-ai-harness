@@ -22,8 +22,52 @@ const InputRequestBase = z
   })
   .strict();
 
-/** Normalized request for information from a human. */
-export const InputRequestSchema = InputRequestBase.superRefine((request, context) => {
+/** Apply shared payload constraints to normalized requests and input-request events. */
+export function refineInputRequestPayload(
+  request: {
+    source: "mcp_mrtr" | "mcp_legacy" | "agent";
+    mode: "form" | "url";
+    schema?:
+      { properties: Record<string, { type: string; pattern?: string | undefined }> } | undefined;
+    url?: string | undefined;
+  },
+  context: z.RefinementCtx,
+): void {
+  if (request.mode === "form") {
+    if (request.schema === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["schema"],
+        message: "Form-mode requests require a form schema.",
+        params: { errorCode: "input_request_payload_invalid" },
+      });
+    }
+    if (request.url !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["url"],
+        message: "Form-mode requests cannot include a URL.",
+        params: { errorCode: "input_request_payload_invalid" },
+      });
+    }
+  } else {
+    if (request.url === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["url"],
+        message: "URL-mode requests require a URL.",
+        params: { errorCode: "input_request_payload_invalid" },
+      });
+    }
+    if (request.schema !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["schema"],
+        message: "URL-mode requests cannot include a form schema.",
+        params: { errorCode: "input_request_payload_invalid" },
+      });
+    }
+  }
   if (
     request.source !== "mcp_legacy" &&
     request.schema !== undefined &&
@@ -38,7 +82,10 @@ export const InputRequestSchema = InputRequestBase.superRefine((request, context
       params: { errorCode: "input_schema_unsupported" },
     });
   }
-});
+}
+
+/** Normalized request for information from a human. */
+export const InputRequestSchema = InputRequestBase.superRefine(refineInputRequestPayload);
 
 /** Inferred normalized input request. */
 export type InputRequest = z.infer<typeof InputRequestSchema>;

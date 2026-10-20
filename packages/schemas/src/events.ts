@@ -6,7 +6,8 @@ import { JsonValue } from "./json.js";
 import { MessageSchema, PartSchema } from "./messages.js";
 import { Code, Id, Sha256Hex, SpanId, TraceId, Traceparent, WorkspaceRef } from "./primitives.js";
 import { Principal } from "./principal.js";
-import { FormSchema } from "./human-input.js";
+import { FormSchema } from "./form-schema.js";
+import { refineInputRequestPayload } from "./human-input.js";
 
 /** Supported run lifecycle states. */
 export const RunStatus = z.enum([
@@ -202,22 +203,7 @@ const inputRequestedEvent = z
     requestState: JsonValue.optional(),
   })
   .strict()
-  .superRefine((event, context) => {
-    if (
-      event.source !== "mcp_legacy" &&
-      event.schema !== undefined &&
-      Object.values(event.schema.properties).some(
-        (field) => field.type === "string" && field.pattern !== undefined,
-      )
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["schema"],
-        message: "Regular-expression patterns are supported only for legacy servers.",
-        params: { errorCode: "input_schema_unsupported" },
-      });
-    }
-  });
+  .superRefine(refineInputRequestPayload);
 
 const inputResolvedEvent = z
   .object({

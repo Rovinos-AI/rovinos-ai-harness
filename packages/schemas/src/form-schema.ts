@@ -27,7 +27,7 @@ const StringFieldSchema = z
     pattern: z
       .string()
       .superRefine((pattern, context) => {
-        if (!isRegexSafePattern(pattern) || !isValidRegex(pattern)) {
+        if (compileSafeRegex(pattern) === undefined) {
           context.addIssue({
             code: "custom",
             message: "The regular-expression pattern is invalid or unsafe.",
@@ -200,7 +200,7 @@ export function formSchemaToZod(schema: FormSchema): z.ZodType {
   for (const [key, field] of Object.entries(schema.properties)) {
     let fieldSchema = propertyToZod(field);
     if ("default" in field && field.default !== undefined && !required.has(key)) {
-      fieldSchema = fieldSchema.default(field.default);
+      fieldSchema = fieldSchema.prefault(field.default);
     } else if (!required.has(key)) {
       fieldSchema = fieldSchema.optional();
     }
@@ -228,11 +228,14 @@ function stringPropertyToZod(
   field: Extract<FormSchema["properties"][string], { type: "string" }>,
 ): z.ZodType {
   let schema = z.string();
-  if (field.minLength !== undefined) {
-    schema = schema.min(field.minLength);
-  }
-  if (field.maxLength !== undefined) {
-    schema = schema.max(field.maxLength);
+  if (field.minLength !== undefined || field.maxLength !== undefined) {
+    schema = schema.refine((value) => {
+      const length = Array.from(value).length;
+      return (
+        (field.minLength === undefined || length >= field.minLength) &&
+        (field.maxLength === undefined || length <= field.maxLength)
+      );
+    });
   }
   switch (field.format) {
     case "email":
@@ -245,13 +248,14 @@ function stringPropertyToZod(
       schema = schema.refine((value) => z.iso.date().safeParse(value).success);
       break;
     case "date-time":
-      schema = schema.refine((value) => z.iso.datetime().safeParse(value).success);
+      schema = schema.refine((value) => z.iso.datetime({ offset: true }).safeParse(value).success);
       break;
     case undefined:
       break;
   }
   if (field.pattern !== undefined) {
-    schema = schema.regex(new RegExp(field.pattern, "u"));
+    const regex = compileSafeRegex(field.pattern);
+    schema = schema.refine((value) => regex?.test(value) ?? false);
   }
   if (field.enum !== undefined) {
     const values = field.enum;
@@ -296,12 +300,14 @@ function multiSelectPropertyToZod(
   return schema;
 }
 
-function isValidRegex(pattern: string): boolean {
+function compileSafeRegex(pattern: string): RegExp | undefined {
+  if (!isRegexSafePattern(pattern)) {
+    return undefined;
+  }
   try {
-    new RegExp(pattern, "u");
-    return true;
+    return new RegExp(pattern, "u");
   } catch {
-    return false;
+    return undefined;
   }
 }
 

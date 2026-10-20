@@ -86,6 +86,45 @@ describe("Event", () => {
     ).toBe(false);
   });
 
+  it("ties input-request event mode to its corresponding payload", () => {
+    const requested = eventSamples.find(({ type }) => type === "input_requested");
+    if (requested?.type !== "input_requested") {
+      throw new Error("Missing input_requested sample.");
+    }
+
+    const formWithoutSchema = { ...requested };
+    Reflect.deleteProperty(formWithoutSchema, "schema");
+    expect(Event.safeParse(formWithoutSchema).success).toBe(false);
+
+    const formWithUrl = { ...requested, url: "https://example.test" };
+    expect(Event.safeParse(formWithUrl).success).toBe(false);
+
+    const urlWithoutUrl = { ...requested };
+    Reflect.set(urlWithoutUrl, "mode", "url");
+    Reflect.deleteProperty(urlWithoutUrl, "schema");
+    expect(Event.safeParse(urlWithoutUrl).success).toBe(false);
+
+    const urlWithSchema = { ...requested, url: "https://example.test" };
+    Reflect.set(urlWithSchema, "mode", "url");
+    expect(Event.safeParse(urlWithSchema).success).toBe(false);
+
+    const urlRequest = { ...requested, url: "https://example.test" };
+    Reflect.set(urlRequest, "mode", "url");
+    Reflect.deleteProperty(urlRequest, "schema");
+    expect(Event.safeParse(urlRequest).success).toBe(true);
+
+    expect(
+      Event.safeParse({
+        ...requested,
+        source: "agent",
+        schema: {
+          type: "object",
+          properties: { value: { type: "string", pattern: "x" } },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts continuation links and follow-up inputs as metadata", () => {
     const created = eventSamples.find(({ type }) => type === "run_created");
     const input = eventSamples.find(({ type }) => type === "run_input");

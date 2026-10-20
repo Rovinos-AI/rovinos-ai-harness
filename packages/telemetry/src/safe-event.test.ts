@@ -275,6 +275,7 @@ const unexportedEvents = [
     round: 1,
     mode: "form",
     message: "INPUT_MESSAGE_CANARY",
+    schema: { type: "object", properties: { value: { type: "string" } } },
   }),
   validEvent({
     type: "context_compacted",
@@ -401,6 +402,7 @@ describe("SafeEvent projection", () => {
       const canary = `CANARY_${sample.type}_${index.toString()}`;
       const contentFields = Object.entries(EVENT_FIELD_CLASS[sample.type])
         .filter(([, classification]) => classification === "content")
+        .filter(([field]) => !(sample.type === "input_requested" && field === "url"))
         .map(([field]) => field);
       const injected = Object.fromEntries(
         contentFields.map((field) => {
@@ -415,6 +417,18 @@ describe("SafeEvent projection", () => {
 
       expect(JSON.stringify(toSafeEvent(event, "sanitizer.v1"))).not.toContain(canary);
     }
+
+    const inputRequest = eventSamples.find(({ type }) => type === "input_requested");
+    if (inputRequest?.type !== "input_requested") {
+      throw new Error("Missing input-request event sample.");
+    }
+    const urlInput = {
+      ...inputRequest,
+      mode: "url",
+      url: "https://example.test/CANARY_input_requested_url",
+    };
+    Reflect.deleteProperty(urlInput, "schema");
+    expect(toSafeEvent(Event.parse(urlInput), "sanitizer.v1")).toBeNull();
   });
 
   it("projects only decision metadata from tool intents", () => {
