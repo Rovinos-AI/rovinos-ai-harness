@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { Event, Id } from "@harness/schemas";
+import type { Event, Id, Snapshot } from "@harness/schemas";
 import type { Link } from "@opentelemetry/api";
 import type { EventStore } from "@harness/store";
+import type { WorkspaceSnapshotPort } from "@harness/sandbox";
 import { CorruptLogError } from "./run-state.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
 
@@ -60,6 +61,30 @@ export function restoreRunScope(
   scopes: RunScopeRegistry,
 ): Promise<void> {
   return registerRunScope({ store, runId, events, scopes, visited: new Set<Id>() });
+}
+
+interface WorkspaceRestoreOptions {
+  readonly options: {
+    readonly runId: Id;
+    readonly restoreOnResume?: boolean | undefined;
+    readonly workspaceSnapshotter?: WorkspaceSnapshotPort | undefined;
+  };
+  readonly snapshot: Snapshot | undefined;
+}
+
+/** Restores the saved workspace when it is missing or explicitly required. */
+export async function restoreWorkspaceSnapshot(options: WorkspaceRestoreOptions): Promise<void> {
+  const {
+    options: { runId, restoreOnResume, workspaceSnapshotter },
+    snapshot,
+  } = options;
+  if (snapshot?.workspaceRef === undefined || workspaceSnapshotter === undefined) {
+    return;
+  }
+  const workspaceExists = await workspaceSnapshotter.hasWorkspace(runId);
+  if (restoreOnResume === true || !workspaceExists) {
+    await workspaceSnapshotter.restore(runId, snapshot.workspaceRef);
+  }
 }
 
 function linkFromTraceparent(traceparent: string): Link | undefined {

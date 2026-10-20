@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessConfigSchema } from "@harness/config";
+import { RunAlreadyTerminalError } from "@harness/core";
 import type { RunQueue, RunQueueJob } from "@harness/store";
 import { describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
@@ -102,19 +103,65 @@ describe("harness worker", () => {
     expect(openQueue).not.toHaveBeenCalled();
   });
 
+  it("acknowledges a queued run that became terminal before resume", async () => {
+    const { context, stdout, stderr } = createContext();
+    const queue = fakeQueue();
+    const listeners = new Map<"SIGINT" | "SIGTERM", () => void>();
+    const claim = vi
+      .fn<RunQueue["claim"]>()
+      .mockResolvedValueOnce([{ ...job, leaseOwner: "w_00000000000000000000000003" }])
+      .mockResolvedValue([]);
+    const complete = vi.fn(() => {
+      listeners.get("SIGTERM")?.();
+      return Promise.resolve(true);
+    });
+    const fail = vi.fn(() => Promise.resolve("retry" as const));
+    queue.claim = claim;
+    queue.complete = complete;
+    queue.fail = fail;
+    const resume = vi.fn(() => Promise.reject(new RunAlreadyTerminalError()));
+    const deps: WorkerCommandDependencies = {
+      openQueue: () => Promise.resolve(queue),
+      createRuntime: () =>
+        Promise.resolve({
+          ids: { next: () => "00000000000000000000000003" },
+          clock: { now: () => 100 },
+          resume,
+          close: vi.fn(() => Promise.resolve()),
+        }),
+      processLike: {
+        once: (signal, listener) => {
+          listeners.set(signal, listener);
+        },
+        removeListener: (signal) => {
+          listeners.delete(signal);
+        },
+      },
+    };
+
+    const exitCode = await main(["worker"], context, [createWorkerCommand(deps)]);
+
+    expect(exitCode).toBe(ExitCode.ok);
+    expect(resume).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledOnce();
+    expect(fail).not.toHaveBeenCalled();
+    expect(stdout).toEqual(["worker_started\n"]);
+    expect(stderr).toEqual([]);
+  });
+
   it("closes the queue when runtime construction fails", async () => {
     const { context, stdout, stderr } = createContext();
     const closeQueue = vi.fn(() => Promise.resolve());
     const queue = fakeQueue(closeQueue);
     const createRuntime = vi.fn(() =>
-      Promise.reject(Object.assign(new Error("Runtime creation failed."), { code: "runtime_failed" })),
+      Promise.reject(
+        Object.assign(new Error("Runtime creation failed."), { code: "runtime_failed" }),
+      ),
     );
 
-    const exitCode = await main(
-      ["worker"],
-      context,
-      [createWorkerCommand({ openQueue: () => Promise.resolve(queue), createRuntime })],
-    );
+    const exitCode = await main(["worker"], context, [
+      createWorkerCommand({ openQueue: () => Promise.resolve(queue), createRuntime }),
+    ]);
 
     expect(exitCode).toBe(ExitCode.failure);
     expect(stdout).toEqual([]);

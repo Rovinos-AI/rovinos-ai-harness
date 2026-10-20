@@ -9,7 +9,10 @@ import {
 } from "./runtime-cancellation.js";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
-import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
+import {
+  ApprovalAlreadyResolvedError,
+  resolveApproval as resolveApprovalEvent,
+} from "./approvals.js";
 import type { ToolPort } from "./ports.js";
 import { LeaseLostError, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
@@ -296,20 +299,31 @@ function composeRuntime(
       ) {
         throw new ApprovalEditUnavailableError();
       }
-      const resolved = await resolveApprovalEvent(
-        store,
-        runId,
-        approvalId,
-        decision,
-        resolveOptions?.edits,
-        clock,
-        tool,
-        resolveOptions?.metadata,
-      );
-      if (options.overrides.queue !== undefined && config.run.autoResume) {
-        await options.overrides.queue.enqueue({ kind: "resume", runId });
+      try {
+        const resolved = await resolveApprovalEvent(
+          store,
+          runId,
+          approvalId,
+          decision,
+          resolveOptions?.edits,
+          clock,
+          tool,
+          resolveOptions?.metadata,
+        );
+        if (options.overrides.queue !== undefined && config.run.autoResume) {
+          await options.overrides.queue.enqueue({ kind: "resume", runId });
+        }
+        return resolved;
+      } catch (error) {
+        if (
+          error instanceof ApprovalAlreadyResolvedError &&
+          options.overrides.queue !== undefined &&
+          config.run.autoResume
+        ) {
+          await options.overrides.queue.enqueue({ kind: "resume", runId });
+        }
+        throw error;
       }
-      return resolved;
     },
     close: () =>
       closeRuntimeResources({

@@ -232,10 +232,7 @@ describe("countDroppedTelemetry", () => {
 
     expect(createCounter).toHaveBeenCalledWith("harness.worker.jobs");
     expect(add.mock.calls).toEqual(
-      WORKER_JOB_OUTCOMES.map((outcome) => [
-        1,
-        { "harness.worker.jobs.outcome": outcome },
-      ]),
+      WORKER_JOB_OUTCOMES.map((outcome) => [1, { "harness.worker.jobs.outcome": outcome }]),
     );
     expectAddCallsAreAllowlisted("harness.worker.jobs");
     expect(createHistogram).toHaveBeenCalledWith("harness.worker.queue_lag_ms");

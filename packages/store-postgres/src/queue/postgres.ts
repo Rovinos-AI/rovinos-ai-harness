@@ -43,6 +43,7 @@ export class PostgresRunQueue implements RunQueue {
   private readonly clock: Clock;
   private readonly ids: RunQueueIdGenerator;
   private readonly maxAttempts: number;
+  private readonly readOnly: boolean;
   private initialized: Promise<void> | undefined;
 
   /**
@@ -54,7 +55,11 @@ export class PostgresRunQueue implements RunQueue {
    */
   constructor(
     connectionString: string,
-    options: RunQueueOptions & { poolSize?: number; schema?: string } = {},
+    options: RunQueueOptions & {
+      readonly poolSize?: number;
+      readonly schema?: string;
+      readonly readOnly?: boolean;
+    } = {},
     clock: Clock = systemClock,
     ids: RunQueueIdGenerator = new SystemRunQueueIdGenerator(clock),
   ) {
@@ -66,6 +71,7 @@ export class PostgresRunQueue implements RunQueue {
     this.clock = clock;
     this.ids = ids;
     this.maxAttempts = parsedOptions.data.maxAttempts;
+    this.readOnly = parsedOptions.data.readOnly;
     this.pool = new Pool({
       connectionString: connection.data,
       max: parsedOptions.data.poolSize,
@@ -79,6 +85,9 @@ export class PostgresRunQueue implements RunQueue {
   }
 
   private ensureInitialized(): Promise<void> {
+    if (this.readOnly) {
+      return Promise.resolve();
+    }
     this.initialized ??= (async () => {
       await migrate(this.pool, "postgres", {
         appliedAt: this.now(),
@@ -146,6 +155,16 @@ export class PostgresRunQueue implements RunQueue {
         );
         const existingRow = duplicate.rows[0];
         if (existingRow !== undefined) {
+          if (
+            existingRow.lease_owner !== null &&
+            existingRow.lease_expires_at !== null &&
+            numberColumn(existingRow.lease_expires_at) > this.now()
+          ) {
+            await client.query(
+              "UPDATE run_queue SET wake_requested = TRUE, updated_at = $1 WHERE job_id = $2 AND lease_owner IS NOT NULL AND lease_expires_at > $1",
+              [this.now(), existingRow.job_id],
+            );
+          }
           result = queueJob(existingRow);
         }
       }
@@ -267,6 +286,13 @@ export class PostgresRunQueue implements RunQueue {
       ) {
         return false;
       }
+      if (row.wake_requested) {
+        const requeued = await client.query(
+          "UPDATE run_queue SET available_at = $1, attempts = GREATEST(attempts - 1, 0), lease_owner = NULL, lease_expires_at = NULL, wake_requested = FALSE, updated_at = $1 WHERE job_id = $2 AND lease_owner = $3 AND lease_expires_at > $1",
+          [now, id, worker],
+        );
+        return requeued.rowCount === 1;
+      }
       const result = await client.query(
         "DELETE FROM run_queue WHERE job_id = $1 AND lease_owner = $2 AND lease_expires_at > $3",
         [id, worker, now],
@@ -350,7 +376,7 @@ export class PostgresRunQueue implements RunQueue {
         return false;
       }
       const result = await client.query(
-        "UPDATE run_queue SET available_at = $1, attempts = GREATEST(attempts - 1, 0), lease_owner = NULL, lease_expires_at = NULL, updated_at = $1 WHERE job_id = $2 AND lease_owner = $3 AND lease_expires_at > $1",
+        "UPDATE run_queue SET available_at = $1, attempts = GREATEST(attempts - 1, 0), lease_owner = NULL, lease_expires_at = NULL, wake_requested = FALSE, updated_at = $1 WHERE job_id = $2 AND lease_owner = $3 AND lease_expires_at > $1",
         [now, id, worker],
       );
       return result.rowCount === 1;

@@ -15,7 +15,12 @@ import { RUN_SPAN } from "./spans.js";
 import { applyDanglingIntents } from "./steps/resume-tool-step.js";
 import { suspendForShutdown } from "./steps/shutdown.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
-import { previousSegmentLink, readRunEvents, restoreRunScope } from "./resume-history.js";
+import {
+  previousSegmentLink,
+  readRunEvents,
+  restoreRunScope,
+  restoreWorkspaceSnapshot,
+} from "./resume-history.js";
 import { claimResumeLock } from "./resume-lock.js";
 
 /** Error raised when attempting to resume a completed, failed, or cancelled run. */
@@ -197,7 +202,7 @@ function claimEvents(state: RunState): EventPartial[] {
 
 async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
   const { options, recorder, events, snapshot, eventsAfterSnapshot, checkpointer } = execution;
-  await restoreWorkspace(execution);
+  await restoreWorkspaceSnapshot(execution);
   await options.context.restore(snapshot?.context, eventsAfterSnapshot);
 
   const budgetTracker = new BudgetTracker(options.budgets, undefined, options.deadlineTs);
@@ -291,17 +296,6 @@ async function applyResumeActions(
     return failed;
   }
   return undefined;
-}
-
-async function restoreWorkspace(execution: ResumeExecution): Promise<void> {
-  const { options, snapshot } = execution;
-  if (snapshot?.workspaceRef === undefined || options.workspaceSnapshotter === undefined) {
-    return;
-  }
-  const workspaceExists = await options.workspaceSnapshotter.hasWorkspace(options.runId);
-  if (options.restoreOnResume === true || !workspaceExists) {
-    await options.workspaceSnapshotter.restore(options.runId, snapshot.workspaceRef);
-  }
 }
 
 class ResumeBudgetExceededError extends Error {}
@@ -410,6 +404,7 @@ async function resumeFromHistory(
     options.clock,
     undefined,
     leaseOwner,
+    options.signal,
   );
   const newEventStart = events.length;
   const checkpointer = new Checkpointer({

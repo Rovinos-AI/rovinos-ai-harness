@@ -103,6 +103,7 @@ export class RunRecorder {
     private readonly clock: Clock,
     private readonly tripQueue: TripQueue = sentinelTripQueue,
     private readonly leaseOwner?: Id,
+    private readonly signal?: AbortSignal,
   ) {
     this.nextSequence = startSeq;
   }
@@ -277,6 +278,7 @@ export class RunRecorder {
     partials: readonly EventPartial[],
     spanContext: SpanContext,
   ): Promise<Event[]> {
+    this.assertWritable();
     if (this.storedHead !== undefined) {
       throw new LeaseLostError(this.storedHead);
     }
@@ -312,6 +314,7 @@ export class RunRecorder {
     snapshot: Omit<Snapshot, "atSeq">,
     spanContext: SpanContext,
   ): Promise<Event> {
+    this.assertWritable();
     if (this.storedHead !== undefined) {
       throw new LeaseLostError(this.storedHead);
     }
@@ -348,5 +351,11 @@ export class RunRecorder {
     }
 
     return EventSchema.parse({ ...newEvent, seq: expectedSeq });
+  }
+
+  private assertWritable(): void {
+    if (this.signal?.aborted === true && this.signal.reason === "lease_lost") {
+      throw new LeaseLostError(this.nextSequence);
+    }
   }
 }

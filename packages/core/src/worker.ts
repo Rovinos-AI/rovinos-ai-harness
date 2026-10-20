@@ -102,6 +102,7 @@ export class Worker {
   private readonly retryAfterMs: number;
   private readonly stopping = new AbortController();
   private readonly active = new Map<string, AbortController>();
+  private readonly activeJobs = new Set<Promise<void>>();
   private running = false;
 
   constructor(options: WorkerOptions) {
@@ -123,7 +124,7 @@ export class Worker {
     this.queue = options.queue;
     this.clock = options.clock;
     this.execute = options.execute;
-    this.workerId = Code.parse(`w_${options.ids.next()}`);
+    this.workerId = Code.parse(`w_${options.ids.next().toLowerCase()}`);
   }
 
   /** Stops claiming new jobs and asks active runs to suspend at a safe point. */
@@ -159,11 +160,7 @@ export class Worker {
       }
     } finally {
       this.stop();
-      await Promise.all(
-        Array.from(this.active.keys(), (jobId) =>
-          this.waitForJob(jobId),
-        ),
-      );
+      await Promise.all(this.activeJobs);
       this.running = false;
     }
   }
@@ -171,19 +168,32 @@ export class Worker {
   private startJob(job: RunQueueJob): void {
     const controller = new AbortController();
     this.active.set(job.jobId, controller);
-    void this.processJob(job, controller)
+    const processing = this.processJob(job, controller)
       .catch(() => undefined)
-      .finally(() => this.active.delete(job.jobId));
+      .finally(() => {
+        this.active.delete(job.jobId);
+        this.activeJobs.delete(processing);
+      });
+    this.activeJobs.add(processing);
   }
 
   private async processJob(job: RunQueueJob, controller: AbortController): Promise<void> {
-    let heartbeatTimer: ReturnType<typeof setTimeout>;
+    let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
+    let done = false;
     let outcome: WorkerJobOutcome = "failed";
     const stop = (): void => {
       controller.abort("shutdown");
     };
     this.stopping.signal.addEventListener("abort", stop, { once: true });
+    const scheduleHeartbeat = (): void => {
+      if (!done) {
+        heartbeatTimer = setTimeout(() => void heartbeat(), Math.floor(this.leaseMs / 3));
+      }
+    };
     const heartbeat = async (): Promise<void> => {
+      if (done) {
+        return;
+      }
       try {
         if (!(await this.queue.heartbeat(job.jobId, this.workerId, this.leaseMs))) {
           controller.abort("lease_lost");
@@ -193,11 +203,9 @@ export class Worker {
         controller.abort("lease_lost");
         return;
       }
-      if (!controller.signal.aborted) {
-        heartbeatTimer = setTimeout(() => void heartbeat(), Math.floor(this.leaseMs / 3));
-      }
+      scheduleHeartbeat();
     };
-    heartbeatTimer = setTimeout(() => void heartbeat(), Math.floor(this.leaseMs / 3));
+    scheduleHeartbeat();
     recordWorkerQueueLag(Math.max(0, this.clock.now() - job.availableAt));
 
     try {
@@ -207,9 +215,7 @@ export class Worker {
         return;
       }
       if (controller.signal.reason === "shutdown" && result.status === "suspended") {
-        outcome = (await this.queue.release(job.jobId, this.workerId))
-          ? "suspended"
-          : "lease_lost";
+        outcome = (await this.queue.release(job.jobId, this.workerId)) ? "suspended" : "lease_lost";
         return;
       }
       if (!isFinished(result.status) && result.status !== "suspended") {
@@ -241,15 +247,12 @@ export class Worker {
       );
       outcome = result === "lease_lost" ? "lease_lost" : "failed";
     } finally {
-      clearTimeout(heartbeatTimer);
+      done = true;
+      if (heartbeatTimer !== undefined) {
+        clearTimeout(heartbeatTimer);
+      }
       this.stopping.signal.removeEventListener("abort", stop);
       countWorkerJob(outcome);
-    }
-  }
-
-  private async waitForJob(jobId: string): Promise<void> {
-    while (this.active.has(jobId)) {
-      await waitForPoll(this.pollIntervalMs, new AbortController().signal);
     }
   }
 

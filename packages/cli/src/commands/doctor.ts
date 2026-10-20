@@ -102,6 +102,7 @@ function workerQueueReachableCheck(
       let queue: Awaited<ReturnType<typeof core.openConfiguredRunQueue>> | undefined;
       try {
         const openedQueue = await core.openConfiguredRunQueue(config, {
+          readOnly: true,
           dataDir: ctx.dataDir,
           secretResolver: {
             resolve: (ref) => secretResolver.resolve(ref, ctx.signal),

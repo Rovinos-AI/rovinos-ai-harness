@@ -176,6 +176,7 @@ describe("SQLite schema migrations", () => {
       "0004",
       "0005",
       "0006",
+      "0007",
     ]);
     const names = db
       .prepare<[], { name: string }>(
@@ -238,11 +239,13 @@ describe("SQLite schema migrations", () => {
     expect(await readdir(directory)).toContain("0004_idempotency_keys.sql");
     expect(await readdir(directory)).toContain("0005_run_execution_leases.sql");
     expect(await readdir(directory)).toContain("0006_run_queue.sql");
+    expect(await readdir(directory)).toContain("0007_run_queue_wakeups.sql");
     const postgresMigrations = new URL(
       "../packages/store-postgres/migrations/postgres/",
       import.meta.url,
     );
     expect(await readdir(postgresMigrations)).toContain("0006_run_queue.sql");
+    expect(await readdir(postgresMigrations)).toContain("0007_run_queue_wakeups.sql");
     expect(await readFile(new URL("0001_init.sql", directory), "utf8")).toContain(
       "CREATE TABLE IF NOT EXISTS events",
     );

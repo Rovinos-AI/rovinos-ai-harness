@@ -18,11 +18,7 @@ import {
   PostgresEventStore,
   PostgresRunQueue,
 } from "@harness/store-postgres";
-import {
-  migrateSqliteFile,
-  SqliteEventStore,
-  SqliteRunQueue,
-} from "@harness/store-sqlite";
+import { migrateSqliteFile, SqliteEventStore, SqliteRunQueue } from "@harness/store-sqlite";
 import {
   InMemoryVault,
   PostgresVault,
@@ -392,14 +388,21 @@ export async function openConfiguredRunQueue(
   if (storeConfig.dialect === "postgres") {
     return new PostgresRunQueue(
       await postgresConnectionString(storeConfig, options.secretResolver),
-      {},
+      { readOnly: options.readOnly === true },
       clock,
       ids,
     );
   }
   const dataDir = resolveDataDir(process.env, options.dataDir);
-  await mkdir(dataDir, { recursive: true });
-  return new SqliteRunQueue(join(dataDir, "harness.db"), {}, clock, ids);
+  if (options.readOnly !== true) {
+    await mkdir(dataDir, { recursive: true });
+  }
+  return new SqliteRunQueue(
+    join(dataDir, "harness.db"),
+    { readOnly: options.readOnly === true },
+    clock,
+    ids,
+  );
 }
 
 /** Applies or lists migrations for the same configured store used at runtime. */

@@ -49,16 +49,12 @@ async function openQueue(config: HarnessConfig, context: CliContext): Promise<Ru
   return openConfiguredRunQueue(config, {
     clock: context.clock,
     ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
-    ...(context.secretResolver === undefined
-      ? {}
-      : { secretResolver: context.secretResolver }),
+    ...(context.secretResolver === undefined ? {} : { secretResolver: context.secretResolver }),
   });
 }
 
 /** Registers `harness worker`, which continuously drains the configured run queue. */
-export function createWorkerCommand(
-  dependencies: WorkerCommandDependencies = {},
-): CommandModule {
+export function createWorkerCommand(dependencies: WorkerCommandDependencies = {}): CommandModule {
   return {
     name: "worker",
     register(program, context) {
@@ -86,13 +82,22 @@ export function createWorkerCommand(
           const processLike = dependencies.processLike ?? process;
           let stop: (() => void) | undefined;
           try {
-            const { Worker } = await import("@harness/core");
+            const { RunAlreadyTerminalError, Worker } = await import("@harness/core");
             const worker = new Worker({
               queue,
               ids: runtime.ids,
               clock: runtime.clock,
               concurrency: concurrency.data,
-              execute: (job, signal) => runtime.resume(job.runId, { signal }),
+              execute: async (job, signal) => {
+                try {
+                  return await runtime.resume(job.runId, { signal });
+                } catch (error) {
+                  if (error instanceof RunAlreadyTerminalError) {
+                    return { status: "completed" };
+                  }
+                  throw error;
+                }
+              },
             });
             stop = (): void => {
               worker.stop();

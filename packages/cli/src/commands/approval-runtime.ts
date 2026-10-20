@@ -5,12 +5,22 @@ import type { RunQueue } from "@harness/store";
 import type { CliContext } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 
+/** Options for configuring the runtime shared by approval commands. */
 export interface ApprovalRuntimeOptions {
-  readonly config?: HarnessConfig;
+  readonly config?: HarnessConfig | undefined;
   readonly disableAutoResume?: boolean;
   readonly useQueue?: boolean;
 }
 
+/**
+ * Opens the approval runtime, performs one operation, and closes owned resources.
+ *
+ * @param context - CLI context providing config, clocks, and runtime dependencies.
+ * @param overrides - Optional runtime composition overrides.
+ * @param action - Operation to run with the runtime and validated configuration.
+ * @param options - Runtime and queue behavior for this operation.
+ * @returns The action's result.
+ */
 export async function withApprovalRuntime<T>(
   context: CliContext,
   overrides: Parameters<typeof createCommandRuntime>[2],
@@ -52,8 +62,6 @@ async function openQueue(context: CliContext, config: HarnessConfig): Promise<Ru
   return openConfiguredRunQueue(config, {
     clock: context.clock,
     ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
-    ...(context.secretResolver === undefined
-      ? {}
-      : { secretResolver: context.secretResolver }),
+    ...(context.secretResolver === undefined ? {} : { secretResolver: context.secretResolver }),
   });
 }

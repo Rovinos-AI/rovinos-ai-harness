@@ -39,6 +39,7 @@ interface QueueRow {
   lease_expires_at: number | null;
   idempotency_key: string | null;
   last_error_code: string | null;
+  wake_requested: number;
   created_at: number;
   updated_at: number;
 }
@@ -57,6 +58,9 @@ interface DeadLetterRow {
 
 const durationSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const limitSchema = z.number().int().min(1).max(1000);
+const SqliteQueueOptionsSchema = RunQueueOptionsSchema.extend({
+  readOnly: z.boolean().default(false),
+}).strict();
 const identifierPairSchema = z
   .object({ jobId: QueueJobIdSchema, workerId: WorkerIdSchema })
   .strict();
@@ -122,22 +126,26 @@ export class SqliteRunQueue implements RunQueue {
    */
   constructor(
     path: string,
-    options: RunQueueOptions = {},
+    options: RunQueueOptions & { readonly readOnly?: boolean } = {},
     clock: Clock = systemClock,
     ids: RunQueueIdGenerator = new SystemRunQueueIdGenerator(clock),
   ) {
-    this.maxAttempts = parseQueueInput(RunQueueOptionsSchema, options).maxAttempts;
+    const parsedOptions = parseQueueInput(SqliteQueueOptionsSchema, options);
+    this.maxAttempts = parsedOptions.maxAttempts;
+    const readOnly = parsedOptions.readOnly;
     this.clock = clock;
     this.ids = ids;
-    this.db = new Database(path);
+    this.db = new Database(path, readOnly ? { readonly: true, fileMustExist: true } : undefined);
     try {
-      this.db.pragma("journal_mode = WAL");
-      this.db.pragma("busy_timeout = 5000");
-      this.db.pragma("foreign_keys = ON");
-      migrate(this.db, "sqlite", {
-        appliedAt: this.now(),
-        migrationDirectory: fileURLToPath(new URL("../../migrations/sqlite/", import.meta.url)),
-      });
+      if (!readOnly) {
+        this.db.pragma("journal_mode = WAL");
+        this.db.pragma("busy_timeout = 5000");
+        this.db.pragma("foreign_keys = ON");
+        migrate(this.db, "sqlite", {
+          appliedAt: this.now(),
+          migrationDirectory: fileURLToPath(new URL("../../migrations/sqlite/", import.meta.url)),
+        });
+      }
       this.enqueueStatement = this.db.prepare<
         [string, string, string, number, number, number, string | null, number, number]
       >(
@@ -193,6 +201,17 @@ export class SqliteRunQueue implements RunQueue {
           const row = this.findDuplicateStatement.get(job.runId, idempotencyKey, idempotencyKey);
           if (row === undefined) {
             throw new Error("Queue insert did not produce an active job");
+          }
+          if (
+            row.lease_owner !== null &&
+            row.lease_expires_at !== null &&
+            row.lease_expires_at > now
+          ) {
+            this.db
+              .prepare(
+                "UPDATE run_queue SET wake_requested = 1, updated_at = ? WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
+              )
+              .run(now, row.job_id, row.lease_owner, now);
           }
           return queueJob(row);
         })
@@ -265,14 +284,33 @@ export class SqliteRunQueue implements RunQueue {
       const result = this.db
         .transaction(() => {
           const now = this.now();
-          return this.db
-            .prepare(
-              "DELETE FROM run_queue WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
+          const row = this.db
+            .prepare<[string, string, number], QueueRow>(
+              "SELECT * FROM run_queue WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
             )
-            .run(id, worker, now);
+            .get(id, worker, now);
+          if (row === undefined) {
+            return false;
+          }
+          if (row.wake_requested !== 0) {
+            return (
+              this.db
+                .prepare(
+                  "UPDATE run_queue SET available_at = ?, attempts = MAX(attempts - 1, 0), lease_owner = NULL, lease_expires_at = NULL, wake_requested = 0, updated_at = ? WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
+                )
+                .run(now, now, id, worker, now).changes === 1
+            );
+          }
+          return (
+            this.db
+              .prepare(
+                "DELETE FROM run_queue WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
+              )
+              .run(id, worker, now).changes === 1
+          );
         })
         .immediate();
-      return result.changes === 1;
+      return result;
     });
   }
 
@@ -344,7 +382,7 @@ export class SqliteRunQueue implements RunQueue {
           const now = this.now();
           return this.db
             .prepare(
-              "UPDATE run_queue SET available_at = ?, attempts = MAX(attempts - 1, 0), lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
+              "UPDATE run_queue SET available_at = ?, attempts = MAX(attempts - 1, 0), lease_owner = NULL, lease_expires_at = NULL, wake_requested = 0, updated_at = ? WHERE job_id = ? AND lease_owner = ? AND lease_expires_at > ?",
             )
             .run(now, now, id, worker, now);
         })

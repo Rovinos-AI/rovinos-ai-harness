@@ -9,6 +9,7 @@ import {
   Secret,
 } from "@harness/config";
 import { DoctorResultsSchema, parseJson, type DoctorCheckStatus } from "@harness/schemas";
+import { SqliteRunQueue } from "@harness/store-sqlite";
 import { AkvSecretResolverError } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
@@ -36,6 +37,8 @@ function createContext(loadConfigForTest: CliContext["loadConfig"]) {
 async function createDataDirectory(): Promise<string> {
   temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-doctor-cli-"));
   vi.stubEnv("HARNESS_DATA_DIR", temporaryDirectory);
+  const queue = new SqliteRunQueue(join(temporaryDirectory, "harness.db"));
+  await queue.close();
   return temporaryDirectory;
 }
 

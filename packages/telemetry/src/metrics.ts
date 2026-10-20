@@ -121,7 +121,7 @@ function createCounter<TAttributes extends Attributes>(
   return factory(metrics.getMeter("@harness/telemetry"), name);
 }
 
-function createHistogram(name: keyof typeof METRIC_ALLOWLIST): Histogram<NoMetricAttributes> {
+function createMetricHistogram(name: keyof typeof METRIC_ALLOWLIST): Histogram<NoMetricAttributes> {
   return metrics.getMeter("@harness/telemetry").createHistogram<NoMetricAttributes>(name);
 }
 
@@ -229,15 +229,14 @@ function getMcpDiscoveryFailedCounter(): Counter<NoMetricAttributes> {
 }
 
 function getWorkerJobsCounter(): Counter<WorkerJobAttributes> {
-  workerJobsCounter ??= createCounter<WorkerJobAttributes>(
-    "harness.worker.jobs",
-    (meter, name) => meter.createCounter<WorkerJobAttributes>(name),
+  workerJobsCounter ??= createCounter<WorkerJobAttributes>("harness.worker.jobs", (meter, name) =>
+    meter.createCounter<WorkerJobAttributes>(name),
   );
   return workerJobsCounter;
 }
 
 function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {
-  workerQueueLagHistogram ??= createHistogram("harness.worker.queue_lag_ms");
+  workerQueueLagHistogram ??= createMetricHistogram("harness.worker.queue_lag_ms");
   return workerQueueLagHistogram;
 }
 

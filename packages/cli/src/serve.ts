@@ -101,9 +101,7 @@ async function openRunQueue(context: CliContext, config: HarnessConfig): Promise
   return openConfiguredRunQueue(config, {
     clock: context.clock,
     ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
-    ...(context.secretResolver === undefined
-      ? {}
-      : { secretResolver: context.secretResolver }),
+    ...(context.secretResolver === undefined ? {} : { secretResolver: context.secretResolver }),
   });
 }
 
@@ -149,19 +147,14 @@ function createControlPlaneOperations(runtime: Runtime): ControlPlaneOperations 
     resumeRun: (runId, signal, onClaimed) => runtime.resume(runId, { signal, onClaimed }),
     cancelRun: (runId) => runtime.cancel(runId),
     resolveApproval: async ({ runId, approvalId, decision, edits, reason, approverId }) => {
-      await runtime.resolveApproval(
-        runId,
-        approvalId,
-        decision,
-        {
-          ...(edits === undefined ? {} : { edits }),
-          metadata: {
-            decidedBy: "human",
-            approverId,
-            ...(reason === undefined ? {} : { reason }),
-          },
+      await runtime.resolveApproval(runId, approvalId, decision, {
+        ...(edits === undefined ? {} : { edits }),
+        metadata: {
+          decidedBy: "human",
+          approverId,
+          ...(reason === undefined ? {} : { reason }),
         },
-      );
+      });
     },
   };
 }
