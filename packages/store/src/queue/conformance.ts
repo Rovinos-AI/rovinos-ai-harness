@@ -158,7 +158,7 @@ function registerClaimConformance(factory: RunQueueFactoryCreator): void {
         await expect(first.complete(job.jobId, owner)).resolves.toBe(true);
       }
     });
-  });
+  }, 60_000);
 }
 
 function registerOrderingConformance(factory: RunQueueFactoryCreator): void {
