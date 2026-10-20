@@ -20,6 +20,7 @@ export async function withRunStartup(
       ...(options.parentRunId === undefined ? {} : { parentRunId: options.parentRunId }),
       ...(options.parentCallId === undefined ? {} : { parentCallId: options.parentCallId }),
       ...(options.continuationOf === undefined ? {} : { continuationOf: options.continuationOf }),
+      ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
       ...(options.scopeId === undefined ? {} : { scopeId: options.scopeId }),
       depth: options.depth ?? 0,
     },

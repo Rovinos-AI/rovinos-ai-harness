@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, type Code, type Event, type Id, type JsonValue } from "@harness/schemas";
+import { HarnessError, type Event, type Id, type JsonValue } from "@harness/schemas";
 import { SeqConflictError, type EventStore } from "@harness/store";
+import { ApprovalEditError } from "@harness/policy";
+import { ApprovalEditPreparationError, prepareApprovalEdits } from "./approval-edits.js";
 import {
-  ApprovalEditError,
-  ApprovalPayloadSchema,
-  diffToEdits,
-  validateEdits,
-} from "@harness/policy";
+  assertApproverMayResolve,
+  type ApprovalResolutionMetadata,
+} from "./approval-principals.js";
 import type { Checkpointer } from "./checkpoint.js";
 import { LeaseLostError, RunRecorder, type Clock, type EventPartial } from "./recorder.js";
 import { foldRunState, type RunState } from "./run-state.js";
@@ -18,18 +18,13 @@ import {
   resolveDanglingIntentApproval,
 } from "./steps/resume-tool-step.js";
 import type { ResumeToolStepOptions } from "./steps/tool-step.js";
-import { prepareToolCall, toolRunContext } from "./steps/prepare-tool.js";
 
 export { ApprovalEditsRequiredError };
+export { ApprovalPrincipalRequiredError, ApproverIsRequesterError } from "./approval-principals.js";
+export type { ApprovalResolutionMetadata };
 
 /** A human decision supported by an approval resolution. */
 export type ApprovalDecision = Extract<Event, { type: "approval_resolved" }>["decision"];
-
-/** Metadata describing who or what resolved an approval. */
-export interface ApprovalResolutionMetadata {
-  readonly decidedBy: Extract<Event, { type: "approval_resolved" }>["decidedBy"];
-  readonly reason?: Code;
-}
 
 /** Inputs and checkpoint state required to suspend a run for one approval. */
 export interface RequestApprovalOptions {
@@ -104,64 +99,7 @@ export class ApprovalRequestStateError extends HarnessError {
   }
 }
 
-class ApprovalEditPreparationError extends HarnessError {
-  readonly code = "pii_prepare_failed";
-
-  constructor() {
-    super("Approval edits require a PII-aware tool port.");
-  }
-}
-
 const systemClock: Clock = { now: Date.now };
-
-interface PrepareApprovalEditOptions {
-  readonly tool: ToolPort;
-  readonly approval: Extract<Event, { type: "approval_requested" }>;
-  readonly intent: Extract<Event, { type: "tool_intent" }>;
-  readonly edits: JsonValue;
-  readonly runId: Id;
-  readonly recorder: RunRecorder;
-  readonly events: Event[];
-}
-
-async function prepareApprovalEdits(options: PrepareApprovalEditOptions): Promise<JsonValue> {
-  const { tool, approval, intent, edits, runId, recorder, events } = options;
-  const parsedPayload = ApprovalPayloadSchema.safeParse(approval.payload);
-  if (
-    !parsedPayload.success ||
-    parsedPayload.data.callId !== intent.callId ||
-    parsedPayload.data.toolId !== intent.toolId
-  ) {
-    throw new ApprovalEditError("edit_invalid");
-  }
-  const pointerEdits = diffToEdits(parsedPayload.data.args, edits);
-  const context = toolRunContext({ runId, signal: new AbortController().signal }, recorder, events);
-  const validateSchema =
-    tool.validateInputSchema === undefined
-      ? undefined
-      : (args: JsonValue, schema: JsonValue) =>
-          tool.validateInputSchema?.(intent.toolId, args, schema, context) ??
-          Promise.resolve(false);
-  return validateEdits(
-    parsedPayload.data,
-    pointerEdits,
-    tool.describe(intent.toolId, intent.args)?.inputSchema,
-    {
-      tokenize: async (args) => {
-        const prepared = await prepareToolCall(
-          tool,
-          { callId: approval.callId, toolId: intent.toolId, args },
-          context,
-        );
-        if (prepared.errorCode !== undefined) {
-          throw new ApprovalEditPreparationError();
-        }
-        return prepared.call.args;
-      },
-      ...(validateSchema === undefined ? {} : { validateSchema }),
-    },
-  );
-}
 
 /**
  * Records an approval request, suspends the run, and forces a checkpoint.
@@ -255,6 +193,7 @@ async function readState(
 ): Promise<{
   readonly state: RunState;
   readonly lastEvent: Event;
+  readonly events: readonly Event[];
 }> {
   const events: Event[] = [];
   for await (const event of store.read(runId)) {
@@ -264,7 +203,7 @@ async function readState(
   if (lastEvent === undefined) {
     throw new ApprovalNotFoundError();
   }
-  return { state: foldRunState(events), lastEvent };
+  return { state: foldRunState(events), lastEvent, events };
 }
 
 async function retryApprovalResolution(options: {
@@ -322,11 +261,12 @@ export async function resolveApproval(
     }
   }
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const { state, lastEvent } = await readState(store, runId);
+    const { state, lastEvent, events: runEvents } = await readState(store, runId);
     const request = pendingApproval(state, approvalId);
     if (state.status !== "suspended") {
       throw new ApprovalRunNotSuspendedError();
     }
+    assertApproverMayResolve(runEvents[0], state.pendingToolCalls.get(request.callId), metadata);
 
     const resolvedAt = Math.floor(clock.now());
     const recorder = new RunRecorder(store, runId, lastEvent.segmentId, state.nextSeq, {
@@ -337,20 +277,20 @@ export async function resolveApproval(
       const event = await recorder.withStepSpan(APPROVAL_WAIT_SPAN, {}, async () => {
         let resolvedEdits = edits;
         if (decision === "edit" && edits !== undefined && tool !== undefined) {
-          const intent = state.pendingToolCalls.get(request.callId);
-          if (intent === undefined) {
+          const editIntent = state.pendingToolCalls.get(request.callId);
+          if (editIntent === undefined) {
             throw new ApprovalNotFoundError();
           }
           resolvedEdits = await prepareApprovalEdits({
             tool,
             approval: request,
-            intent,
+            intent: editIntent,
             edits,
             runId,
             recorder,
             events,
           });
-          if (tool.describe(intent.toolId, intent.args) === undefined) {
+          if (tool.describe(editIntent.toolId, editIntent.args) === undefined) {
             throw new ApprovalEditError("edit_invalid");
           }
         }
@@ -360,6 +300,7 @@ export async function resolveApproval(
           approvalId,
           decision,
           decidedBy: metadata.decidedBy,
+          ...(metadata.approverId === undefined ? {} : { approverId: metadata.approverId }),
           ...(metadata.reason === undefined ? {} : { reason: metadata.reason }),
           waitMs: Math.max(0, resolvedAt - request.ts),
           ...(resolvedEdits === undefined ? {} : { edits: resolvedEdits }),

@@ -15,6 +15,7 @@ export {
   type JsonSchemaValidator,
 } from "./json-schema.js";
 export { JsonValue } from "./json.js";
+export { Principal } from "./principal.js";
 export { ApprovalPayloadSchema, type ApprovalPayload } from "./approval-payload.js";
 export { AppContentEnvelopeSchema, type AppContentEnvelope } from "./app-content.js";
 export {
@@ -167,6 +168,7 @@ export {
   type Detection,
 } from "./pii-detection.js";
 export { TelemetryConfigSchema, type TelemetryConfig } from "./config/telemetry.js";
+export { CliConfigSchema, type CliConfig } from "./config/cli.js";
 export { HostConfigSchema, type HostConfig } from "./config/host.js";
 export {
   ControlPlaneAuthScopeSchema,

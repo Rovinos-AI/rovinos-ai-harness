@@ -15,6 +15,7 @@ import {
   type ModelsConfig,
   type RunConfig,
   type RunInput,
+  type Principal,
   type SecretRef,
   type ServersConfig,
   type StoreConfig,
@@ -116,11 +117,14 @@ export interface Runtime {
   readonly sandboxBackend: SandboxBackend;
   readonly clock: Clock;
   readonly ids: IdGenerator;
-  run(goal: JsonValue, options?: { readonly role?: Code }): Promise<RunLoopResult>;
+  run(
+    goal: JsonValue,
+    options?: { readonly role?: Code; readonly requestedBy?: Principal },
+  ): Promise<RunLoopResult>;
   /** Starts a run and exposes when its initial events are durable and when execution settles. */
   start(
     goal: JsonValue,
-    options?: { readonly role?: Code; readonly runId?: Id },
+    options?: { readonly role?: Code; readonly runId?: Id; readonly requestedBy?: Principal },
   ): {
     readonly runId: Id;
     readonly started: Promise<void>;

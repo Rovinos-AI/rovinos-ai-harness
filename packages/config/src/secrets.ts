@@ -6,6 +6,7 @@ import { HarnessError, SecretRefSchema, type SecretRef } from "@harness/schemas"
 
 /** Stable error codes raised while resolving a secret reference. */
 export type SecretResolutionErrorCode =
+  | "secret_access_denied"
   | "secret_not_found"
   | "secret_ref_invalid"
   | "secret_resolver_unavailable"
@@ -68,6 +69,12 @@ export interface SecretResolver {
    * @param signal - Optional cancellation signal for the resolution operation.
    */
   resolve(ref: SecretRef, signal?: AbortSignal): Promise<Secret>;
+}
+
+/** Minimal resolver contract accepted by the composite `akv:` scheme. */
+export interface SecretValueResolver {
+  /** Resolves a reference to a value that can be explicitly revealed. */
+  resolve(ref: SecretRef, signal?: AbortSignal): Promise<{ reveal(): string }>;
 }
 
 /** Warning emitted when a POSIX secret file can be read by all users. */
@@ -193,12 +200,15 @@ export interface CompositeSecretResolverOptions {
   readonly env?: SecretResolver;
   /** Resolver for `file:` references. */
   readonly file?: SecretResolver;
+  /** Resolver for `akv:` references, injected to avoid a config-to-vault dependency. */
+  readonly akv?: SecretValueResolver;
 }
 
-/** Dispatches secret references to environment or file resolvers. */
+/** Dispatches secret references to environment, file, or injected Key Vault resolvers. */
 export class CompositeSecretResolver implements SecretResolver {
   private readonly envResolver: SecretResolver;
   private readonly fileResolver: SecretResolver;
+  private readonly akvResolver: SecretValueResolver | undefined;
 
   /**
    * Creates a resolver with optional scheme-specific implementations.
@@ -208,9 +218,10 @@ export class CompositeSecretResolver implements SecretResolver {
   constructor(options: CompositeSecretResolverOptions = {}) {
     this.envResolver = options.env ?? new EnvSecretResolver();
     this.fileResolver = options.file ?? new FileSecretResolver();
+    this.akvResolver = options.akv;
   }
 
-  /** Resolves `env:` and `file:` references; `akv:` awaits Key Vault support. */
+  /** Resolves the scheme-specific secret reference and returns a redacting Secret. */
   async resolve(ref: SecretRef, signal?: AbortSignal): Promise<Secret> {
     throwIfAborted(signal);
     const parsed = SecretRefSchema.safeParse(ref);
@@ -222,6 +233,9 @@ export class CompositeSecretResolver implements SecretResolver {
     }
     if (parsed.data.startsWith("file:")) {
       return this.fileResolver.resolve(parsed.data, signal);
+    }
+    if (parsed.data.startsWith("akv:") && this.akvResolver !== undefined) {
+      return new Secret((await this.akvResolver.resolve(parsed.data, signal)).reveal());
     }
     throw new SecretResolutionError("secret_resolver_unavailable");
   }

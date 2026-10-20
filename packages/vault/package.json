@@ -19,6 +19,8 @@
     "build": "tsc -b tsconfig.build.json"
   },
   "dependencies": {
+    "@azure/identity": "4.14.0",
+    "@azure/keyvault-secrets": "4.11.2",
     "@harness/crypto": "workspace:^",
     "@harness/schemas": "workspace:^",
     "better-sqlite3": "13.0.3",

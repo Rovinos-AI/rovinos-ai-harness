@@ -6,10 +6,11 @@ import { loadConfig, type HarnessConfig } from "@harness/config";
 import {
   JsonValue as JsonValueSchema,
   RunInputSchema,
+  type Code,
   type Event,
   type Id,
 } from "@harness/schemas";
-import { toSafeEvent, type SafeEvent } from "@harness/telemetry";
+import type { SafeEvent } from "@harness/telemetry";
 import { SdkError } from "./types.js";
 import { contentEntries, readEvents, safeEvents } from "./event-views.js";
 import { runtimeOverridesFrom } from "./runtime-overrides.js";
@@ -94,6 +95,7 @@ class HarnessClient implements Harness {
   constructor(
     private readonly runtime: Runtime,
     private readonly piiEnabled: boolean,
+    private readonly correlationEnabled: boolean,
   ) {}
 
   async startRun(options: StartRunOptions): Promise<RunStartResult> {
@@ -140,6 +142,10 @@ class HarnessClient implements Harness {
     return result === undefined ? { runId: candidateRunId } : { result };
   }
 
+  private projectSafeEvents(events: readonly Event[], policyVersion: Code) {
+    return safeEvents(events, policyVersion, this.correlationEnabled, this.runtime.keys);
+  }
+
   private async launchRun(
     input: StartRunOptions,
     runInput: ReturnType<typeof JsonValueSchema.parse>,
@@ -149,6 +155,7 @@ class HarnessClient implements Harness {
     const { runId, started, completion } = this.runtime.start(runInput, {
       ...(input.role === undefined ? {} : { role: input.role }),
       ...(candidateRunId === undefined ? {} : { runId: candidateRunId }),
+      ...(input.requestedBy === undefined ? {} : { requestedBy: input.requestedBy }),
     });
     this.trackRun(runId, completion);
     const start = started.then(() => runId);
@@ -211,7 +218,7 @@ class HarnessClient implements Harness {
       steps: state.steps,
       usage: state.usage,
       pendingApprovals: Array.from(state.pendingApprovals.keys()),
-      recentEvents: safeEvents(events.slice(-20), firstEvent.policyVersion),
+      recentEvents: await this.projectSafeEvents(events.slice(-20), firstEvent.policyVersion),
     });
   }
 
@@ -255,7 +262,7 @@ class HarnessClient implements Harness {
     }
     await this.runtime.resolveApproval(runId, parsedApprovalId, parsedDecision, {
       ...(parsedOptions.edits === undefined ? {} : { edits: parsedOptions.edits }),
-      metadata: { decidedBy: "human" },
+      metadata: { decidedBy: "human", approverId: parsedOptions.principal },
     });
     return ApprovalResolutionResultSchema.parse({
       runId,
@@ -403,10 +410,7 @@ class HarnessClient implements Harness {
         signal: controller.signal,
         ...(options.maxBuffered === undefined ? {} : { maxBuffered: options.maxBuffered }),
       })) {
-        const safe = toSafeEvent(event, created.policyVersion);
-        if (safe !== null) {
-          yield safe;
-        }
+        yield* await this.projectSafeEvents([event], created.policyVersion);
       }
     } finally {
       options.signal?.removeEventListener("abort", onAbort);
@@ -431,5 +435,5 @@ export async function createHarness(options: CreateHarnessOptions): Promise<Harn
       ? parsedOptions.config
       : await loadConfig({ configPath: parsedOptions.configPath });
   const runtime = await createRuntime(config, runtimeOverrides);
-  return new HarnessClient(runtime, config.pii.enabled);
+  return new HarnessClient(runtime, config.pii.enabled, config.telemetry.correlation.enabled);
 }

@@ -21,4 +21,5 @@ export {
   type SecretFileWarningHandler,
   type SecretResolutionErrorCode,
   type SecretResolver,
+  type SecretValueResolver,
 } from "./secrets.js";

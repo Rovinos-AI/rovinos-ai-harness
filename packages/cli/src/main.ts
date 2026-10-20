@@ -2,6 +2,7 @@
 import { CompositeSecretResolver, loadConfig, type HarnessConfig } from "@harness/config";
 import { HARNESS_VERSION } from "@harness/schemas";
 import { emitKeysRotated } from "@harness/telemetry";
+import { AkvSecretResolver } from "@harness/vault";
 import { Command, CommanderError } from "commander";
 import { dirname, resolve } from "node:path";
 import type { CliContext, Clock, CommandModule } from "./command.js";
@@ -45,7 +46,7 @@ const systemClock: Clock = { now: () => Date.now() };
 
 /** Creates the CLI context with config loading, runtime composition, and output routing. */
 export function createDefaultContext(program: Command, out: Output): CliContext {
-  const secretResolver = new CompositeSecretResolver();
+  const secretResolver = new CompositeSecretResolver({ akv: new AkvSecretResolver() });
   return {
     loadConfig: (): Promise<HarnessConfig> => {
       const configPath = program.opts<{ config?: string }>().config;

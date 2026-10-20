@@ -286,7 +286,11 @@ describe("sweepApprovals", () => {
 
     expect(result).toEqual({ examined: 1, expired: 1, escalated: 0, failed: 0 });
     expect(fixture.store.resolutionMetadata).toEqual([
-      { decidedBy: "expiry", reason: Code.parse("expired") },
+      {
+        decidedBy: "expiry",
+        approverId: "system.sweeper",
+        reason: Code.parse("expired"),
+      },
     ]);
     expect(notifier.notify).not.toHaveBeenCalled();
   });

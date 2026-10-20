@@ -24,6 +24,7 @@ import {
   Sha256Hex,
   parseJson,
   type Event,
+  type Principal,
 } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
@@ -160,7 +161,13 @@ function createFixture(
   } satisfies Fixture;
 }
 
-async function seed(fixture: Fixture, args: JsonValue, ttlMs?: number, escalateAfterMs?: number) {
+async function seed(
+  fixture: Fixture,
+  args: JsonValue,
+  ttlMs?: number,
+  escalateAfterMs?: number,
+  identity: { readonly requestedBy?: Principal; readonly separationOfDuties?: boolean } = {},
+) {
   const runId = fixture.nextId();
   const segmentId = fixture.nextId();
   const callId = fixture.nextId();
@@ -173,6 +180,7 @@ async function seed(fixture: Fixture, args: JsonValue, ttlMs?: number, escalateA
         v: 1,
         configHash: Sha256Hex.parse("a".repeat(64)),
         policyVersion: "test",
+        ...(identity.requestedBy === undefined ? {} : { requestedBy: identity.requestedBy }),
       },
       { type: "run_status_changed", v: 1, from: "pending", to: "running", reason: "start" },
       {
@@ -182,6 +190,9 @@ async function seed(fixture: Fixture, args: JsonValue, ttlMs?: number, escalateA
         toolId: "send_mail",
         idempotent: false,
         policyDecision: "ask",
+        ...(identity.separationOfDuties === undefined
+          ? {}
+          : { policySeparationOfDuties: identity.separationOfDuties }),
         ...(escalateAfterMs === undefined ? {} : { policyEscalateAfterMs: escalateAfterMs }),
         argsHash: Sha256Hex.parse("b".repeat(64)),
         args,
@@ -391,6 +402,19 @@ describe("harness approvals", () => {
     expect(await run(fixture, "approvals", "deny", approvalId, "--yes")).toBe(
       ExitCode.notFoundOrResolved,
     );
+  });
+
+  it("returns exit code 4 when the requester tries to approve their own run", async () => {
+    const fixture = createFixture();
+    const { approvalId } = await seed(fixture, { to: "<EMAIL_1>" }, undefined, undefined, {
+      requestedBy: "cli.requester",
+      separationOfDuties: true,
+    });
+
+    expect(
+      await run(fixture, "approvals", "approve", approvalId, "--yes", "--as", "requester"),
+    ).toBe(ExitCode.policyDenied);
+    expect(fixture.stderr.join("")).toContain("approver_is_requester");
   });
 
   it("denies and resumes immediately with --resume", async () => {

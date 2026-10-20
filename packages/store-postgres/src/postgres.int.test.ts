@@ -346,6 +346,7 @@ it("reads persisted v1 approval resolutions that predate decidedBy", async () =>
       approvalId,
       decision: "approve",
       decidedBy: "human",
+      approverId: "cli.test",
       waitMs: 1,
     },
   ];

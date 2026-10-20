@@ -63,6 +63,7 @@ const events = [
     kind: "approval_wait",
     decision: "approve",
     decidedBy: "human",
+    approverPseudonym: `p_${"a".repeat(26)}`,
     reason: "approved",
     waitMs: 10,
   }),
@@ -114,7 +115,12 @@ const events = [
     outputTokens: 2,
     costMicros: 3,
   }),
-  SafeEvent.parse({ ...common, kind: "run_created", configHash: "a".repeat(64) }),
+  SafeEvent.parse({
+    ...common,
+    kind: "run_created",
+    configHash: "a".repeat(64),
+    requestedByPseudonym: `p_${"a".repeat(26)}`,
+  }),
 ];
 
 describe("SafeEvent log projection", () => {

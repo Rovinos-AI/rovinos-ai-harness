@@ -9,14 +9,24 @@ export async function createRuntimePolicy(
   config: RuntimeConfig,
   overrides: RuntimeOverrides,
 ): Promise<PolicyPort> {
-  if (overrides.policy !== undefined) {
-    return overrides.policy;
+  const policy =
+    overrides.policy ??
+    (config.policy?.file === undefined
+      ? new PolicyEngine({ version: 1, defaultDecision: "deny", rules: [] })
+      : new PolicyEngine(
+          await loadPolicy(
+            resolvePath(overrides.roleConfigDirectory ?? process.cwd(), config.policy.file),
+          ),
+        ));
+  const globallyRequired = config.policy?.approvals?.separationOfDuties === true;
+  if (!globallyRequired) {
+    return policy;
   }
-  if (config.policy?.file === undefined) {
-    return new PolicyEngine({ version: 1, defaultDecision: "deny", rules: [] });
-  }
-  const document = await loadPolicy(
-    resolvePath(overrides.roleConfigDirectory ?? process.cwd(), config.policy.file),
-  );
-  return new PolicyEngine(document);
+  return {
+    version: policy.version,
+    decide(call, context) {
+      const decision = policy.decide(call, context);
+      return { ...decision, separationOfDuties: true };
+    },
+  };
 }
