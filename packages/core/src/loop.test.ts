@@ -38,9 +38,9 @@ import {
   InMemoryEventStore,
   RunExecutionLeaseLostError,
   SeqConflictError,
-  SqliteEventStore,
   type EventStore,
 } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { delegatingStore } from "./testing/delegating-store.js";
 import {
   CalibratingTokenCounter,

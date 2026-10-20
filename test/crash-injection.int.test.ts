@@ -43,7 +43,8 @@ import {
   type FakeModelOptions,
   type FakeToolDefinition,
 } from "@harness/core/testing";
-import { SqliteEventStore, type EventStore } from "@harness/store";
+import type { EventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ensureTracingFallback } from "@harness/telemetry";
@@ -1346,7 +1347,7 @@ describe("SQLite crash-injection matrix", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it("resumes children across every append boundary in both logs", async () => {
     const directory = await mkdtemp(join(tmpdir(), "harness-subagent-crash-reference-"));

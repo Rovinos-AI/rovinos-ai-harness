@@ -4,7 +4,7 @@ import { HarnessConfigSchema } from "@harness/config";
 import type { ModelPort } from "@harness/core";
 import { createHarness } from "./index.js";
 import { Code, FakeClock, Id } from "@harness/schemas";
-import { PostgresEventStore } from "@harness/store";
+import { PostgresEventStore } from "@harness/store-postgres";
 import { Pool } from "pg";
 import { expect, it } from "vitest";
 

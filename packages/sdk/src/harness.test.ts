@@ -2,7 +2,8 @@
 import type { ModelPort, PolicyPort, ToolPort } from "@harness/core";
 import { CrashingEventStore } from "@harness/core/testing";
 import { HarnessConfigSchema } from "@harness/config";
-import { InMemoryEventStore, SqliteEventStore } from "@harness/store";
+import { InMemoryEventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import {
   Code,
   FakeClock,

@@ -33,8 +33,22 @@ RUN groupadd --gid 10003 sandbox-shared \
     && mkdir -p /workspaces \
     && chown 10002:10003 /workspaces \
     && chmod 0750 /workspaces \
+    && chown 10002:10003 /app \
+    && rm -rf /usr/bin/apt /usr/bin/apt-get /usr/bin/apt-cache /usr/bin/apt-cdrom /usr/bin/apt-config \
+      /usr/bin/dpkg* /usr/sbin/dpkg* /usr/lib/apt /usr/lib/dpkg \
+      /var/lib/apt /var/lib/dpkg /var/cache/apt \
+      /usr/share/doc/apt /usr/share/doc/dpkg /usr/share/man/man1/apt* \
+      /usr/share/man/man8/apt* /usr/share/man/man1/dpkg* /usr/share/man/man8/dpkg* \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+      /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
     && command -v prlimit \
-    && command -v setpriv
+    && command -v setpriv \
+    && command -v node \
+    && ! command -v apt-get \
+    && ! command -v dpkg \
+    && ! command -v npm \
+    && ! command -v docker
 COPY --from=build /app/node_modules/ ./node_modules/
 COPY --from=build /app/packages/sandbox/package.json ./packages/sandbox/package.json
 COPY --from=build /app/packages/sandbox/dist/ ./packages/sandbox/dist/
@@ -44,5 +58,9 @@ COPY --from=build /app/packages/schemas/package.json ./packages/schemas/package.
 COPY --from=build /app/packages/schemas/dist/ ./packages/schemas/dist/
 COPY --from=build /app/packages/crypto/package.json ./packages/crypto/package.json
 COPY --from=build /app/packages/crypto/dist/ ./packages/crypto/dist/
-USER 10002:10002
+USER 10002:10003
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/Rovinos-AI/rovinos-ai-harness" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.revision="${REVISION}"
 ENTRYPOINT ["node", "packages/sandbox/dist/runner/src/server.js"]

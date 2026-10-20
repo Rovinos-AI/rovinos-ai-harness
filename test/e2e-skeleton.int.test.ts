@@ -67,7 +67,8 @@ import {
   SandboxExecTool,
   type SandboxBackend,
 } from "@harness/sandbox";
-import { InMemoryEventStore, SqliteEventStore, type EventStore } from "@harness/store";
+import { InMemoryEventStore, type EventStore } from "@harness/store";
+import { SqliteEventStore } from "@harness/store-sqlite";
 import { ProviderError, type ProviderAdapter } from "@harness/models";
 import { FakeProvider } from "@harness/models/testing";
 import { ApprovalNotificationSchema, buildApprovalPayload } from "@harness/policy";
