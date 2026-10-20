@@ -1,0 +1,239 @@
+// SPDX-License-Identifier: Apache-2.0
+import { performance } from "node:perf_hooks";
+import fc from "fast-check";
+import { describe, expect, it } from "vitest";
+import { Code, Id } from "@harness/schemas";
+import { ActiveRuns } from "./active-runs.js";
+import { SentinelGate } from "./gate.js";
+import { VaultRunView, type VaultRunReader } from "./run-values.js";
+import { normalizeForScan, variantsOf } from "./variants.js";
+
+const runId = Id.parse("A".repeat(26));
+
+function createGate(value: string): SentinelGate {
+  const reader: VaultRunReader = {
+    version: () => Promise.resolve(1),
+    listRawValueEntries: () =>
+      Promise.resolve([{ entityType: Code.parse("email"), rawValue: value }]),
+  };
+  return new SentinelGate(new VaultRunView(reader), new ActiveRuns(), {
+    maxPrepareMs: 1_000,
+    maxScanMs: 1_000,
+  });
+}
+
+function htmlNumericEntities(value: string): string {
+  return Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint !== undefined &&
+      ((codePoint >= 48 && codePoint <= 57) ||
+        (codePoint >= 65 && codePoint <= 90) ||
+        (codePoint >= 97 && codePoint <= 122))
+    ) {
+      return character;
+    }
+    return codePoint === undefined ? character : `&#${codePoint.toString(10)};`;
+  }).join("");
+}
+
+function asciiCompatibilityForm(value: string): string {
+  return Array.from(value, (character) =>
+    String.fromCodePoint(character.charCodeAt(0) + 0xfee0),
+  ).join("");
+}
+
+describe("sentinel variants", () => {
+  it.each([
+    ["case folding", "Sensitive-Value", "sensitive-value"],
+    ["whitespace and dash removal", "grouped-value", "grouped" + "value"],
+    ["digits only", "123-456-7890", "1234567890"],
+    ["percent encoding", "person+tag@example.test", encodeURIComponent("person+tag@example.test")],
+    [
+      "base64",
+      "alignment-value",
+      Buffer.from("alignment-value").toString("base64").replaceAll(/=+$/gu, ""),
+    ],
+    ["base64url", "🧪+value", Buffer.from("🧪+value").toString("base64url")],
+    ["lowercase hex", "Sensitive-Value", Buffer.from("Sensitive-Value").toString("hex")],
+    [
+      "uppercase hex",
+      "Sensitive-Value",
+      Buffer.from("Sensitive-Value").toString("hex").toUpperCase(),
+    ],
+    ["HTML numeric entities", "person@example.test", "person&#64;example&#46;test"],
+  ])("detects %s in surrounding text", async (_name, raw, transformed) => {
+    await expect(
+      createGate(raw).check({ runId, text: `before ${transformed} after` }),
+    ).resolves.toEqual({ ok: false, reason: "hit" });
+  });
+
+  it.each([
+    ["percent", (raw: string) => encodeURIComponent(raw)],
+    ["base64", (raw: string) => Buffer.from(raw).toString("base64").replaceAll(/=+$/gu, "")],
+    ["hex", (raw: string) => Buffer.from(raw).toString("hex")],
+    ["HTML entities", htmlNumericEntities],
+  ])("detects %s encodings of the original Unicode value", async (_name, encode) => {
+    // cspell:disable-next-line
+    const raw = "ＡＢＣＤＥＦ";
+    await expect(
+      createGate(raw).check({ runId, text: `prefix ${encode(raw)} suffix` }),
+    ).resolves.toEqual({ ok: false, reason: "hit" });
+  });
+
+  it("detects composed lowercase and whitespace/dash removal", async () => {
+    await expect(
+      // cspell:disable-next-line
+      createGate("Sensitive-Value").check({ runId, text: "safe sensitivevalue payload" }),
+    ).resolves.toEqual({ ok: false, reason: "hit" });
+  });
+
+  it("normalizes compatibility characters and removes zero-width and bidi controls", async () => {
+    const raw = "Sensitive-Value";
+    const obfuscated = `${asciiCompatibilityForm("Sensitive")}\u200B-\u202E${asciiCompatibilityForm("Value")}`;
+
+    expect(normalizeForScan(obfuscated)).toEqual(["Sensitive-Value", "SensitiveValue"]);
+    await expect(
+      createGate(raw).check({ runId, text: `prefix ${obfuscated} suffix` }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "hit",
+    });
+  });
+
+  it("scans a second form with all whitespace and dashes removed", async () => {
+    await expect(
+      createGate("grouped" + "value").check({ runId, text: "before grouped - value after" }),
+    ).resolves.toEqual({ ok: false, reason: "hit" });
+  });
+
+  it.each(
+    [0, 1, 2].flatMap((prefixLength) =>
+      [0, 1, 2, 3, 4, 5].flatMap((suffixLength) =>
+        ["base64", "base64url"].map((encoding) => [prefixLength, suffixLength, encoding] as const),
+      ),
+    ),
+  )(
+    "detects base64 at byte offset %i with suffix length %i using %s",
+    async (prefixLength, suffixLength, encoding) => {
+      const raw = "alignment-value";
+      const bytes = Buffer.from(
+        `${"p".repeat(prefixLength)}${raw}${"s".repeat(suffixLength)}`,
+        "utf8",
+      );
+      const transformed =
+        encoding === "base64url"
+          ? bytes.toString("base64url")
+          : bytes.toString("base64").replaceAll(/=+$/gu, "");
+
+      await expect(
+        createGate(raw).check({ runId, text: `prefix ${transformed} suffix` }),
+      ).resolves.toEqual({ ok: false, reason: "hit" });
+    },
+  );
+
+  it("removes short variants and enforces the pattern-size limit", () => {
+    expect(variantsOf("a", 6)).toEqual([]);
+    expect(variantsOf("123/45", 6)).not.toContain("12345");
+    expect(variantsOf("123-456-7", 6)).toContain("1234567");
+    expect(() => variantsOf("Ａ".repeat(100_000), 1)).toThrow("sentinel_patterns_too_large");
+  });
+
+  it("does not expect hits for variants below the configured minimum", async () => {
+    await expect(
+      createGate("abcde---").check({ runId, text: "safe abcde payload" }),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("detects seeded random supported transform chains with random affixes", async () => {
+    const transforms: Readonly<Record<string, (value: string) => string>> = {
+      nfkc: (value) => value.normalize("NFKC"),
+      lowercase: (value) => value.toLowerCase(),
+      strip: (value) => value.replaceAll(/[\s-]/gu, ""),
+      digits: (value) => value.replaceAll(/\D/gu, ""),
+      percent: (value) => encodeURIComponent(value),
+      base64: (value) => Buffer.from(value).toString("base64").replaceAll(/=+$/gu, ""),
+      base64url: (value) => Buffer.from(value).toString("base64url"),
+      hex: (value) => Buffer.from(value).toString("hex"),
+      "hex-upper": (value) => Buffer.from(value).toString("hex").toUpperCase(),
+      entities: htmlNumericEntities,
+    };
+    const plaintextChain = fc
+      .tuple(
+        fc.boolean(),
+        fc.array(fc.constantFrom("lowercase", "strip"), { minLength: 1, maxLength: 2 }),
+      )
+      .map(([normalize, steps]) => [...(normalize ? ["nfkc"] : []), ...steps]);
+    const digitChain = fc.boolean().map((normalize) => [...(normalize ? ["nfkc"] : []), "digits"]);
+    const encodedChain = fc
+      .tuple(
+        fc.boolean(),
+        fc.constantFrom("percent", "base64", "base64url", "hex", "hex-upper", "entities"),
+      )
+      .map(([normalize, encoding]) => [...(normalize ? ["nfkc"] : []), encoding]);
+    const transformChain = fc.oneof(plaintextChain, digitChain, encodedChain);
+    const rawCharacter = fc.constantFrom(
+      ...Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"),
+      // cspell:disable-next-line
+      ...Array.from("ＡＢＣａｂｃ"),
+    );
+    const affixCharacter = fc.constantFrom(...Array.from("abcdefghijklmnopqrstuvwxyz0123456789"));
+    const rawValue = fc
+      .array(rawCharacter, { minLength: 6, maxLength: 18 })
+      .map((characters) => ["S", "e", "Ｎ", ...characters, ...Array.from("1234567")].join("-"));
+    const propertyCheck = await fc.check(
+      fc.asyncProperty(
+        rawValue,
+        transformChain,
+        fc.array(affixCharacter, { maxLength: 12 }).map((characters) => characters.join("")),
+        fc.array(affixCharacter, { maxLength: 12 }).map((characters) => characters.join("")),
+        (raw, chain, prefix, suffix) => {
+          const transformed = chain.reduce((value, step) => {
+            const transform = transforms[step];
+            return transform === undefined ? value : transform(value);
+          }, raw);
+          return createGate(raw)
+            .check({ runId, text: `${prefix}${transformed}${suffix}` })
+            .then((gateResult) => !gateResult.ok && gateResult.reason === "hit");
+        },
+      ),
+      { numRuns: 250, seed: 8606 },
+    );
+
+    expect(propertyCheck.failed).toBe(false);
+  });
+
+  it("does not claim arbitrary encryption or compression are supported", async () => {
+    const raw = "private-value-123";
+    const unsupported = "ciphertext:sealed-payload-987654321";
+
+    await expect(createGate(raw).check({ runId, text: unsupported })).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it("keeps a generous performance budget with variants enabled", async () => {
+    const values = Array.from(
+      { length: 25 },
+      (_, index) => `known-value-${index.toString(10)}-123456`,
+    );
+    const patterns = values.flatMap((value) => variantsOf(value));
+    const gateReader: VaultRunReader = {
+      version: () => Promise.resolve(1),
+      listRawValueEntries: () =>
+        Promise.resolve(values.map((rawValue) => ({ entityType: Code.parse("email"), rawValue }))),
+    };
+    const gate = new SentinelGate(new VaultRunView(gateReader), new ActiveRuns(), {
+      maxPrepareMs: 1_000,
+      maxScanMs: 1_000,
+    });
+    const startedAt = performance.now();
+
+    await expect(gate.check({ runId, text: "safe telemetry ".repeat(6_667) })).resolves.toEqual({
+      ok: true,
+    });
+    expect(patterns.length).toBeGreaterThan(values.length);
+    expect(patterns.length).toBeLessThanOrEqual(values.length * 16);
+    expect(performance.now() - startedAt).toBeLessThan(500);
+  });
+});

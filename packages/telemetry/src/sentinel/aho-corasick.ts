@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError } from "@harness/schemas";
 
-const MAX_TOTAL_PATTERN_CHARS = 1_000_000;
+export const MAX_TOTAL_PATTERN_CHARS = 1_000_000;
 
 interface TrieNode {
   readonly transitions: Map<number, number>;
