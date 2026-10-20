@@ -18,7 +18,7 @@ import { applyApprovalEdits, approvalEditsAreAllowed } from "@harness/policy";
 import { findTokens } from "@harness/vault";
 import { ListToolsResultSchema } from "@modelcontextprotocol/core";
 import { z } from "zod";
-import type { CliContext } from "../command.js";
+import { cliApprovalMetadata, type CliContext } from "../command.js";
 
 const APPROVAL_APP_ID = Code.parse("harness.approval");
 const RESOLVE_TOOL = "harness.approvals.resolve";
@@ -198,6 +198,7 @@ async function handleApprovalCall(options: {
 
 async function resolveApprovalCall(options: {
   readonly runtime: ApprovalViewRuntime;
+  readonly config: HarnessConfig;
   readonly runId: Id;
   readonly approvalId: Id;
   readonly arguments: Record<string, unknown>;
@@ -226,7 +227,7 @@ async function resolveApprovalCall(options: {
       request.data.decision,
       {
         ...(edits === undefined ? {} : { edits }),
-        metadata: { decidedBy: "human" },
+        metadata: cliApprovalMetadata(options.config),
       },
     );
     return {

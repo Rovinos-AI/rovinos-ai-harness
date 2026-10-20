@@ -43,7 +43,9 @@ function createRule(
   id: string,
   decision: Rule["decision"],
   match: Rule["match"] = { tools: ["mail.send"] },
-  options: Partial<Pick<Rule, "editable" | "approvalTtlMs" | "escalateAfterMs">> = {},
+  options: Partial<
+    Pick<Rule, "editable" | "approvalTtlMs" | "escalateAfterMs" | "separationOfDuties">
+  > = {},
 ): Rule {
   return RuleSchema.parse({
     id,
@@ -304,6 +306,7 @@ describe("evaluate", () => {
             editable: ["/subject"],
             approvalTtlMs: 30_000,
             escalateAfterMs: 10_000,
+            separationOfDuties: true,
           },
         ),
         createRule("later_ask", "ask"),
@@ -318,6 +321,7 @@ describe("evaluate", () => {
       editable: ["/subject"],
       approvalTtlMs: 30_000,
       escalateAfterMs: 10_000,
+      separationOfDuties: true,
       matched: [
         { ruleId: "allow_rule", decision: "allow" },
         { ruleId: "ask_rule", decision: "ask" },

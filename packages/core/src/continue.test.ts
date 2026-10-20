@@ -4,6 +4,7 @@ import {
   Code,
   FakeClock,
   Id,
+  Principal,
   RunConfigSchema,
   SequentialIdGenerator,
   Sha256Hex,
@@ -129,7 +130,9 @@ describe("continueRun", () => {
     );
     const vault = new InMemoryVault();
     try {
-      const original = await runtime.run("original question");
+      const original = await runtime.run("original question", {
+        requestedBy: Principal.parse("cli.requester"),
+      });
       const originalId = original.events[0]?.runId;
       if (originalId === undefined) {
         throw new Error("Expected an original run.");
@@ -151,6 +154,7 @@ describe("continueRun", () => {
         type: "run_created",
         continuationOf: originalId,
         scopeId: originalId,
+        requestedBy: "cli.requester",
       });
       expect(continuation.find((event) => event.type === "run_input")).toMatchObject({
         type: "run_input",

@@ -5,6 +5,7 @@ import {
   type JsonValue,
   type RunConfig,
   type RunInput,
+  type Principal,
 } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { RunScopeRegistry } from "./subagent/scope.js";
@@ -74,6 +75,7 @@ export type RunControl = (
 export interface RuntimeRunOptions {
   readonly runId?: Id;
   readonly role?: Code;
+  readonly requestedBy?: Principal;
   readonly onStarted?: () => void;
 }
 
@@ -104,6 +106,7 @@ export function startRun(
       goal,
       signal,
       ...(options.role === undefined ? {} : { role: options.role }),
+      ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
       scopeId: runId,
       budgets: config.run.budgets,
       checkpointEveryEvents: config.run.checkpointEveryEvents,

@@ -74,6 +74,8 @@ export function registerDenyTool(server: McpServer, options: DenyToolOptions): v
               runId: found.runId,
               approvalId: parsed.approvalId,
               decision: "deny",
+              approverId:
+                principal === undefined ? "cli.control_plane" : `token.${principal.tokenId}`,
               ...(parsed.reason === undefined ? {} : { reason: parsed.reason }),
             });
             return decisionResult(true);

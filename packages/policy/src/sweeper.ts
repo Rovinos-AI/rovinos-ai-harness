@@ -6,6 +6,7 @@ import {
   type Id,
   type Event,
   type ApprovalSweepResult,
+  type Principal,
 } from "@harness/schemas";
 import { z } from "zod";
 import { ApprovalPayloadSchema } from "./approval-payload.js";
@@ -27,6 +28,7 @@ export interface ApprovalSweepClock {
 /** Resolution metadata required when a pending approval expires. */
 export interface ApprovalExpiryResolution {
   readonly decidedBy: "expiry";
+  readonly approverId: Principal;
   readonly reason: Code;
 }
 
@@ -146,6 +148,7 @@ async function expireApproval(
   try {
     await store.resolveApproval(runId, approvalId, {
       decidedBy: "expiry",
+      approverId: "system.sweeper",
       reason: Code.parse("expired"),
     });
     return true;

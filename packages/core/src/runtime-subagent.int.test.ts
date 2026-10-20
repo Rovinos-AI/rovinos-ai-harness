@@ -862,7 +862,9 @@ describe("runtime subagent spawning", () => {
       if (spawnApproval?.type !== "approval_requested") {
         throw new Error("Expected the parent spawn to wait for approval.");
       }
-      await runtime.resolveApproval(rootRunId, spawnApproval.approvalId, "approve");
+      await runtime.resolveApproval(rootRunId, spawnApproval.approvalId, "approve", {
+        metadata: { decidedBy: "human", approverId: "cli.test" },
+      });
       await expect(runtime.resume(rootRunId)).resolves.toMatchObject({ status: "suspended" });
 
       parentEvents = await eventsFor(store, rootRunId);
@@ -884,7 +886,9 @@ describe("runtime subagent spawning", () => {
       if (childApproval?.type !== "approval_requested") {
         throw new Error("Expected the child to wait for approval.");
       }
-      await runtime.resolveApproval(spawn.childRunId, childApproval.approvalId, "approve");
+      await runtime.resolveApproval(spawn.childRunId, childApproval.approvalId, "approve", {
+        metadata: { decidedBy: "human", approverId: "cli.test" },
+      });
 
       const firstResume = runtime.resume(rootRunId);
       await childResumeStarted;
@@ -1006,7 +1010,9 @@ describe("runtime subagent spawning", () => {
       if (childApproval?.type !== "approval_requested") {
         throw new Error("Expected the child tool approval.");
       }
-      await runtime.resolveApproval(spawn.childRunId, childApproval.approvalId, "approve");
+      await runtime.resolveApproval(spawn.childRunId, childApproval.approvalId, "approve", {
+        metadata: { decidedBy: "human", approverId: "cli.test" },
+      });
       const recovered = await runtime.resume(parentRunId);
       expect(sanitizeRecoveredResult).toHaveBeenCalledWith(
         expect.objectContaining({ toolId: "agent.spawn" }),
