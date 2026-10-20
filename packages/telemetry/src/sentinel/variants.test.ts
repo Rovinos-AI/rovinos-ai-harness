@@ -68,6 +68,24 @@ describe("sentinel variants", () => {
     ).resolves.toEqual({ ok: false, reason: "hit" });
   });
 
+  it.each([
+    ["percent", (raw: string) => encodeURIComponent(raw)],
+    ["base64", (raw: string) => Buffer.from(raw).toString("base64").replaceAll(/=+$/gu, "")],
+    ["hex", (raw: string) => Buffer.from(raw).toString("hex")],
+    ["HTML entities", htmlNumericEntities],
+  ])("detects %s encodings of the original Unicode value", async (_name, encode) => {
+    const raw = "ＡＢＣＤＥＦ";
+    await expect(
+      createGate(raw).check({ runId, text: `prefix ${encode(raw)} suffix` }),
+    ).resolves.toEqual({ ok: false, reason: "hit" });
+  });
+
+  it("detects composed lowercase and whitespace/dash removal", async () => {
+    await expect(
+      createGate("Sensitive-Value").check({ runId, text: "safe sensitivevalue payload" }),
+    ).resolves.toEqual({ ok: false, reason: "hit" });
+  });
+
   it("normalizes compatibility characters and removes zero-width and bidi controls", async () => {
     const raw = "Sensitive-Value";
     const obfuscated = `${asciiCompatibilityForm("Sensitive")}\u200B-\u202E${asciiCompatibilityForm("Value")}`;
@@ -87,56 +105,103 @@ describe("sentinel variants", () => {
     ).resolves.toEqual({ ok: false, reason: "hit" });
   });
 
-  it("includes all three trimmed base64 byte alignments and removes short variants", () => {
-    const raw = "alignment-value";
-    const variants = variantsOf(raw, 1);
-    const expected = [0, 1, 2].map((alignment) =>
-      Buffer.from(`${"x".repeat(alignment)}${raw}`)
-        .toString("base64")
-        .replaceAll(/=+$/gu, "")
-        .slice(Math.floor((alignment * 8) / 6)),
-    );
+  it.each(
+    [0, 1, 2].flatMap((prefixLength) =>
+      [0, 1, 2, 3, 4, 5].flatMap((suffixLength) =>
+        ["base64", "base64url"].map((encoding) => [prefixLength, suffixLength, encoding] as const),
+      ),
+    ),
+  )(
+    "detects base64 at byte offset %i with suffix length %i using %s",
+    async (prefixLength, suffixLength, encoding) => {
+      const raw = "alignment-value";
+      const bytes = Buffer.from(
+        `${"p".repeat(prefixLength)}${raw}${"s".repeat(suffixLength)}`,
+        "utf8",
+      );
+      const transformed =
+        encoding === "base64url"
+          ? bytes.toString("base64url")
+          : bytes.toString("base64").replaceAll(/=+$/gu, "");
 
-    expect(expected.every((variant) => variants.includes(variant))).toBe(true);
+      await expect(
+        createGate(raw).check({ runId, text: `prefix ${transformed} suffix` }),
+      ).resolves.toEqual({ ok: false, reason: "hit" });
+    },
+  );
+
+  it("removes short variants and enforces the pattern-size limit", () => {
     expect(variantsOf("a", 6)).toEqual([]);
     expect(variantsOf("123/45", 6)).not.toContain("12345");
     expect(variantsOf("123-456-7", 6)).toContain("1234567");
+    expect(() => variantsOf("Ａ".repeat(100_000), 1)).toThrow("sentinel_patterns_too_large");
   });
 
-  it("detects random supported transforms embedded between random prefixes and suffixes", async () => {
-    const transforms = [
-      (value: string) => value.toLowerCase(),
-      (value: string) => value.replaceAll(/[\s-]/gu, ""),
-      (value: string) => encodeURIComponent(value),
-      (value: string) => Buffer.from(value).toString("base64").replaceAll(/=+$/gu, ""),
-      (value: string) => Buffer.from(value).toString("base64url"),
-      (value: string) => Buffer.from(value).toString("hex"),
-      (value: string) => Buffer.from(value).toString("hex").toUpperCase(),
-      htmlNumericEntities,
-    ];
+  it("does not expect hits for variants below the configured minimum", async () => {
+    await expect(
+      createGate("abcde---").check({ runId, text: "safe abcde payload" }),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("detects seeded random supported transform chains with random affixes", async () => {
+    const transforms: Readonly<Record<string, (value: string) => string>> = {
+      nfkc: (value) => value.normalize("NFKC"),
+      lowercase: (value) => value.toLowerCase(),
+      strip: (value) => value.replaceAll(/[\s-]/gu, ""),
+      digits: (value) => value.replaceAll(/\D/gu, ""),
+      percent: (value) => encodeURIComponent(value),
+      base64: (value) => Buffer.from(value).toString("base64").replaceAll(/=+$/gu, ""),
+      base64url: (value) => Buffer.from(value).toString("base64url"),
+      hex: (value) => Buffer.from(value).toString("hex"),
+      "hex-upper": (value) => Buffer.from(value).toString("hex").toUpperCase(),
+      entities: htmlNumericEntities,
+    };
+    const transformChains = [
+      ["lowercase"],
+      ["strip"],
+      ["lowercase", "strip"],
+      ["strip", "lowercase"],
+      ["nfkc"],
+      ["nfkc", "lowercase", "strip"],
+      ["digits"],
+      ["percent"],
+      ["nfkc", "percent"],
+      ["base64"],
+      ["nfkc", "base64"],
+      ["base64url"],
+      ["nfkc", "base64url"],
+      ["hex"],
+      ["nfkc", "hex"],
+      ["hex-upper"],
+      ["nfkc", "hex-upper"],
+      ["entities"],
+      ["nfkc", "entities"],
+    ] as const;
     const rawCharacter = fc.constantFrom(
-      ...Array.from("abcdefghijklmnopqrstuvwxyz0123456789@._+-"),
+      ...Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"),
+      ...Array.from("ＡＢＣａｂｃ"),
     );
-    const affixCharacter = fc.constantFrom(...Array.from("abcdefghijklmnopqrstuvwxyz"));
+    const affixCharacter = fc.constantFrom(...Array.from("abcdefghijklmnopqrstuvwxyz0123456789"));
+    const rawValue = fc
+      .array(rawCharacter, { minLength: 6, maxLength: 18 })
+      .map((characters) => ["S", "e", "Ｎ", ...characters, ...Array.from("1234567")].join("-"));
     const propertyCheck = await fc.check(
       fc.asyncProperty(
-        fc
-          .array(rawCharacter, { minLength: 8, maxLength: 24 })
-          .map((characters) => characters.join("")),
-        fc.integer({ min: 0, max: transforms.length - 1 }),
+        rawValue,
+        fc.constantFrom(...transformChains),
         fc.array(affixCharacter, { maxLength: 12 }).map((characters) => characters.join("")),
         fc.array(affixCharacter, { maxLength: 12 }).map((characters) => characters.join("")),
-        (raw, transformIndex, prefix, suffix) => {
-          const transformed = transforms[transformIndex]?.(raw);
-          if (transformed === undefined) {
-            return Promise.resolve(false);
-          }
+        (raw, chain, prefix, suffix) => {
+          const transformed = chain.reduce((value, step) => {
+            const transform = transforms[step];
+            return transform === undefined ? value : transform(value);
+          }, raw);
           return createGate(raw)
             .check({ runId, text: `${prefix}${transformed}${suffix}` })
             .then((gateResult) => !gateResult.ok && gateResult.reason === "hit");
         },
       ),
-      { numRuns: 250 },
+      { numRuns: 250, seed: 8606 },
     );
 
     expect(propertyCheck.failed).toBe(false);
@@ -172,6 +237,7 @@ describe("sentinel variants", () => {
       ok: true,
     });
     expect(patterns.length).toBeGreaterThan(values.length);
+    expect(patterns.length).toBeLessThanOrEqual(values.length * 16);
     expect(performance.now() - startedAt).toBeLessThan(500);
   });
 });
