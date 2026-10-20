@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Event } from "@harness/schemas";
+import { UsageLimitExceededError } from "@harness/store";
 import type { EventPartial } from "./recorder.js";
 import type { RunLoopOptions } from "./loop.js";
+import { QuotaExceededError } from "./quotas.js";
 import { foldRunState, isTerminalRunState } from "./run-state.js";
 import { RUN_SPAN, runSpanAttributes } from "./spans.js";
 
@@ -36,7 +38,19 @@ export async function withRunStartup(
     RUN_SPAN,
     runSpanAttributes(options),
     async () => {
-      const recorded = await options.recorder.recordBatch(startEvents);
+      let recorded: Event[];
+      try {
+        recorded = await options.recorder.recordBatch(
+          startEvents,
+          options.quotaService?.startUsageUpdates(options.quotaIdentity ?? {}),
+        );
+      } catch (error) {
+        if (error instanceof UsageLimitExceededError && options.quotaService !== undefined) {
+          options.quotaService.recordRejection(error.quotaId);
+          throw new QuotaExceededError(error.quotaId);
+        }
+        throw error;
+      }
       const last = recorded.at(-1);
       if (last === undefined) {
         throw new Error("Expected run creation events.");

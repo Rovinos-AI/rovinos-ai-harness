@@ -14,6 +14,7 @@ import {
   countPiiBlobHit,
   countPiiDetectorDegraded,
   countPolicyDecision,
+  countQuotaRejection,
   countDroppedTelemetry,
   countSentinelScopeReduced,
   countSkippedShortValues,
@@ -103,6 +104,14 @@ describe("countDroppedTelemetry", () => {
     );
     expect(TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.policy.decision"]).toEqual(POLICY_DECISIONS);
     expectAddCallsAreAllowlisted("harness.policy.decisions");
+  });
+
+  it("counts quota rejections using only the configured quota code", () => {
+    countQuotaRejection("team");
+
+    expect(createCounter).toHaveBeenCalledWith("harness.quota.rejections");
+    expect(add).toHaveBeenCalledWith(1, { "harness.quota.id": "team" });
+    expectAddCallsAreAllowlisted("harness.quota.rejections");
   });
 
   it("counts opaque PII blob hits without attributes", () => {

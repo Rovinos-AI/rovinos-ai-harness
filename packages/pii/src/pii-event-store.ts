@@ -43,6 +43,23 @@ interface WatchRunsOptionsLike {
   readonly signal: AbortSignal;
 }
 
+interface UsageLedgerDeltaLike {
+  readonly quotaId: Code;
+  readonly period: "hour" | "day" | "month";
+  readonly periodStart: number;
+  readonly costMicros: number;
+  readonly runsStarted: number;
+  readonly maxRunsStarted?: number;
+}
+
+interface UsageLedgerRowLike {
+  readonly quotaId: Code;
+  readonly period: "hour" | "day" | "month";
+  readonly periodStart: number;
+  readonly costMicros: number;
+  readonly runsStarted: number;
+}
+
 /** Structural event-store contract implemented by the wrapped store. */
 export interface EventStoreLike {
   append(
@@ -58,6 +75,18 @@ export interface EventStoreLike {
     snapshot: Snapshot,
     leaseOwner?: Id,
   ): Promise<{ nextSeq: number }>;
+  appendWithUsage(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    usageUpdates: readonly UsageLedgerDeltaLike[],
+    leaseOwner?: Id,
+  ): Promise<{ nextSeq: number }>;
+  readUsageLedger(
+    quotaId: Code,
+    period: UsageLedgerDeltaLike["period"],
+    periodStarts: readonly number[],
+  ): Promise<UsageLedgerRowLike[]>;
   claimRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean>;
   renewRunExecution(runId: Id, owner: Id, now: number, leaseMs: number): Promise<boolean>;
   releaseRunExecution(runId: Id, owner: Id): Promise<void>;
@@ -188,6 +217,32 @@ export class PiiEventStore implements EventStoreLike {
       sanitizedSnapshot,
       leaseOwner,
     );
+  }
+
+  async appendWithUsage(
+    runId: Id,
+    events: readonly NewEvent[],
+    expectedSeq: number,
+    usageUpdates: readonly UsageLedgerDeltaLike[],
+    leaseOwner?: Id,
+  ): Promise<{ nextSeq: number }> {
+    const prepared = await this.prepareEvents(runId, events, expectedSeq);
+    await this.notifySummaries(prepared.summaries);
+    return this.inner.appendWithUsage(
+      runId,
+      prepared.events,
+      expectedSeq,
+      usageUpdates,
+      leaseOwner,
+    );
+  }
+
+  readUsageLedger(
+    quotaId: Code,
+    period: UsageLedgerDeltaLike["period"],
+    periodStarts: readonly number[],
+  ): Promise<UsageLedgerRowLike[]> {
+    return this.inner.readUsageLedger(quotaId, period, periodStarts);
   }
 
   latestSnapshot(runId: Id): Promise<Snapshot | undefined> {

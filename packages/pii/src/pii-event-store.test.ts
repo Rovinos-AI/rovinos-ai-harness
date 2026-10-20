@@ -93,10 +93,13 @@ async function collect(events: AsyncIterable<Event>): Promise<Event[]> {
   return result;
 }
 
+type UsageLedgerRowLike = Awaited<ReturnType<EventStoreLike["readUsageLedger"]>>[number];
+
 function createInnerStore(): EventStoreLike {
   let events: Event[] = [];
   let savedSnapshot: Snapshot | undefined;
   let executionOwner: Id | undefined;
+  const usageLedger = new Map<string, UsageLedgerRowLike>();
   return {
     append(appendRunId, newEvents, expectedSeq, _leaseOwner) {
       if (appendRunId !== runId || expectedSeq !== events.length || newEvents.length === 0) {
@@ -114,6 +117,33 @@ function createInnerStore(): EventStoreLike {
       const result = await this.append(appendRunId, newEvents, expectedSeq);
       savedSnapshot = nextSnapshot;
       return result;
+    },
+    async appendWithUsage(appendRunId, newEvents, expectedSeq, usageUpdates, _leaseOwner) {
+      const result = await this.append(appendRunId, newEvents, expectedSeq);
+      for (const delta of usageUpdates) {
+        const key = `${delta.quotaId}:${delta.period}:${delta.periodStart}`;
+        const previous = usageLedger.get(key) ?? {
+          quotaId: delta.quotaId,
+          period: delta.period,
+          periodStart: delta.periodStart,
+          costMicros: 0,
+          runsStarted: 0,
+        };
+        usageLedger.set(key, {
+          ...previous,
+          costMicros: previous.costMicros + delta.costMicros,
+          runsStarted: previous.runsStarted + delta.runsStarted,
+        });
+      }
+      return result;
+    },
+    readUsageLedger(quotaId, period, periodStarts) {
+      return Promise.resolve(
+        periodStarts.flatMap((periodStart) => {
+          const row = usageLedger.get(`${quotaId}:${period}:${periodStart}`);
+          return row === undefined ? [] : [row];
+        }),
+      );
     },
     claimRunExecution(_runId, owner) {
       if (executionOwner !== undefined) {
@@ -245,6 +275,26 @@ describe("PiiEventStore", () => {
       { boundary: "storage", action: "tokenize", entities: [{ type: "email", count: 1 }] },
     ]);
     expect(JSON.stringify(summaries)).not.toContain(rawEmail);
+  });
+
+  it("tokenizes content before atomically appending usage-ledger updates", async () => {
+    const inner = createInnerStore();
+    const store = new PiiEventStore(inner, createTokenizer());
+    const rawEmail = canary("quota-usage");
+
+    await store.appendWithUsage(
+      runId,
+      [runCreated(), runInput({ text: rawEmail })],
+      0,
+      [{ quotaId: "team", period: "day", periodStart: 0, costMicros: 5, runsStarted: 0 }],
+    );
+
+    const events = await collect(store.read(runId));
+    expect(events[1]).toMatchObject({ type: "run_input", input: { text: "<EMAIL_1>" } });
+    expect(JSON.stringify(events)).not.toContain(rawEmail);
+    await expect(store.readUsageLedger("team", "day", [0])).resolves.toEqual([
+      { quotaId: "team", period: "day", periodStart: 0, costMicros: 5, runsStarted: 0 },
+    ]);
   });
 
   it("skips scanning marked events and marked content fields", async () => {

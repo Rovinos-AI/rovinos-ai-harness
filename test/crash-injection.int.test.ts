@@ -83,7 +83,7 @@ interface Reference {
 
 interface AppendBoundary {
   readonly runId: Id;
-  readonly method: "append" | "appendWithSnapshot";
+  readonly method: "append" | "appendWithSnapshot" | "appendWithUsage";
   readonly eventTypes: readonly Event["type"][];
   readonly callIds: readonly Id[];
 }

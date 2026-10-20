@@ -88,6 +88,10 @@ export interface SubagentSupervisorOptions {
   readonly parentTools: ToolPort;
   readonly runChild: SubagentRunner;
   readonly resumeChild: SubagentRunner;
+  readonly assertQuotaStart?: (
+    role: ResolvedRole,
+    parentRunId: Id,
+  ) => Promise<void>;
   readonly parentSpanContext?: () => SpanContext | undefined;
 }
 
@@ -139,6 +143,8 @@ export class SubagentSupervisor {
         recordSpawned,
         childRunId: this.options.ids.next(),
         concurrentSpawns,
+        assertQuotaStart: () =>
+          this.options.assertQuotaStart?.(role, context.runId) ?? Promise.resolve(),
       }),
     );
     if (allocation.completion !== undefined) {
