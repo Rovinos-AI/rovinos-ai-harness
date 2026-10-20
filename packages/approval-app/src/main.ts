@@ -12,9 +12,19 @@ import { mountApprovalActions, type ApprovalToolCallOutcome } from "./actions.js
 import { createApprovalFallback } from "./fallback.js";
 import { createApprovalTelemetry } from "./telemetry.js";
 import { createApprovalView } from "./view.js";
+import { applyHostContext } from "./kit/theme.js";
+import { getStrings } from "./kit/strings.js";
 
 const app = new App({ name: "harness-approval", version: "0.0.0" }, {}, { autoResize: false });
-const fallback = createApprovalFallback(document.body);
+let hostContext = applyHostContext(document.documentElement, app.getHostContext());
+document.title = getStrings(hostContext.locale).approvalTitle;
+const locale = (): string => hostContext.locale;
+const fallback = createApprovalFallback(document.body, locale);
+function updateHostContext(): void {
+  hostContext = applyHostContext(document.documentElement, app.getHostContext());
+  document.title = getStrings(hostContext.locale).approvalTitle;
+}
+app.addEventListener("hostcontextchanged", updateHostContext);
 const unavailableToolCodes = new Set(["app_tool_not_allowed", "unknown_tool", "tool_not_found"]);
 let finishHostConnection: (connected: boolean) => void = () => undefined;
 const hostConnection = new Promise<void>((resolve, reject) => {
@@ -116,6 +126,7 @@ const fallbackTimer = window.setTimeout(() => {
 }, 3000);
 const view = createApprovalView(document.body, {
   clock: { now: () => Date.now() },
+  locale,
   onError: (code) => {
     uiTelemetry.reportError(code);
   },
@@ -138,7 +149,7 @@ const view = createApprovalView(document.body, {
       }
       const status = document.createElement("p");
       status.setAttribute("role", "status");
-      status.textContent = "Approval identifier unavailable.";
+      status.textContent = getStrings(locale()).unavailableId;
       editHost.append(status);
       return undefined;
     }
@@ -162,6 +173,7 @@ const view = createApprovalView(document.body, {
     const mountedActions = mountApprovalActions(actions, editHost, {
       approvalId,
       payload,
+      locale,
       isExpired,
       bridge: {
         callTool: callApprovalTool,
@@ -236,6 +248,7 @@ const onPageHide = (event: PageTransitionEvent): void => {
     return;
   }
   window.removeEventListener("pagehide", onPageHide);
+  app.removeEventListener("hostcontextchanged", updateHostContext);
   window.clearInterval(interval);
   window.clearTimeout(fallbackTimer);
   fallback.dispose();
@@ -246,6 +259,7 @@ const onPageHide = (event: PageTransitionEvent): void => {
 window.addEventListener("pagehide", onPageHide);
 void app.connect().then(
   () => {
+    updateHostContext();
     hostConnected = true;
     window.clearTimeout(fallbackTimer);
     hideFallback();

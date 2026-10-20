@@ -1,20 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { buildApprovalHtml } from "./build.mjs";
+import { buildAllViewHtml, buildApprovalHtml } from "./build.mjs";
+
+async function contentHash(html: string): Promise<string> {
+  const newline = html.indexOf("\n");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(html.slice(newline + 1)),
+  );
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function gzipSize(html: string): Promise<number> {
+  const stream = new Blob([html]).stream().pipeThrough(new CompressionStream("gzip"));
+  return (await new Response(stream).arrayBuffer()).byteLength;
+}
+
+function viewHtmlEntries(value: unknown): { readonly name: string; readonly html: string }[] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("Expected view HTML output");
+  }
+  const entries: { name: string; html: string }[] = [];
+  for (const name of Object.keys(value)) {
+    const html: unknown = Reflect.get(value, name);
+    if (typeof html !== "string") {
+      throw new TypeError("Expected HTML for every view");
+    }
+    entries.push({ name, html });
+  }
+  return entries;
+}
 
 describe("single-file approval app", () => {
   it("builds inline script/style with a verifiable content hash and no external references", async () => {
     const html = await buildApprovalHtml();
     expect(html).not.toMatch(/https?:\/\//iu);
     const newline = html.indexOf("\n");
-    const hash = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(html.slice(newline + 1)),
-    );
-    const hex = [...new Uint8Array(hash)]
-      .map((value) => value.toString(16).padStart(2, "0"))
-      .join("");
+    const hex = await contentHash(html);
     expect(html.slice(0, newline)).toContain(`content-sha256: ${hex}`);
     const dom = new JSDOM(html);
     expect(dom.window.document.querySelectorAll("script")).toHaveLength(1);
@@ -60,6 +83,29 @@ describe("single-file approval app", () => {
     expect(html).toContain("content-sha256:");
   });
 
+  it("builds one hashed, self-contained HTML document per view within the gzip budget", async () => {
+    const views = viewHtmlEntries(
+      await buildAllViewHtml({
+        entries: {
+          configured: new URL("./fixtures/configured-view.ts", import.meta.url),
+        },
+      }),
+    );
+    expect(views.map(({ name }) => name)).toEqual(["approval", "configured"]);
+    for (const { html } of views) {
+      expect(html).not.toMatch(/https?:\/\//iu);
+      expect(await gzipSize(html)).toBeLessThanOrEqual(150 * 1024);
+      const newline = html.indexOf("\n");
+      const hash = await contentHash(html);
+      expect(html.slice(0, newline)).toContain(`content-sha256: ${hash}`);
+      const dom = new JSDOM(html);
+      expect(dom.window.document.querySelectorAll("script")).toHaveLength(1);
+      expect(dom.window.document.querySelectorAll("style")).toHaveLength(1);
+      expect(dom.window.document.querySelectorAll("[src], [href], [srcset]")).toHaveLength(0);
+      dom.window.close();
+    }
+  });
+
   it("keeps both theme palettes above 4.5:1 and provides focus, reduced-motion, and wrapping styles", async () => {
     const html = await buildApprovalHtml();
     const style = new JSDOM(html).window.document.querySelector("style")?.textContent ?? "";
@@ -90,8 +136,12 @@ describe("single-file approval app", () => {
       ":focus-visible",
       "overflow-wrap: anywhere",
       "flex-wrap: wrap",
+      '[data-display-mode="fullscreen"]',
+      '[data-display-mode="pip"]',
+      "@media (max-width: 480px)",
     ]) {
       expect(style).toContain(rule);
     }
+    expect(style).toMatch(/\[data-theme="light"\]\s*\{\s*color-scheme:\s*light;/u);
   });
 });
