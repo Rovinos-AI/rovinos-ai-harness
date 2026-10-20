@@ -54,7 +54,7 @@ interface ActionFixture {
   readonly setExpired: (expired: boolean) => void;
 }
 
-function setup(input: ApprovalPayload = payload): ActionFixture {
+function setup(input: ApprovalPayload = payload, locale?: string): ActionFixture {
   let expired = false;
   const root = document.createElement("main");
   const actions = document.createElement("nav");
@@ -93,6 +93,7 @@ function setup(input: ApprovalPayload = payload): ActionFixture {
   const mount = mountApprovalActions(actions, editHost, {
     approvalId,
     payload: input,
+    ...(locale === undefined ? {} : { locale: () => locale }),
     isExpired: () => expired,
     bridge,
     telemetry: { record, flush },
@@ -257,6 +258,15 @@ describe("approval actions", () => {
     expect(bridge.callTool).not.toHaveBeenCalled();
     expect(actions.parentElement?.querySelector<HTMLElement>('[role="status"]')?.textContent).toBe(
       "No changes to submit.",
+    );
+  });
+
+  it("formats reveal confirmation counts using the host locale", () => {
+    const { actions } = setup(payload, "ar-EG");
+    actions.querySelector<HTMLButtonElement>("button:last-child")?.click();
+    const fieldCount = new Intl.NumberFormat("ar-EG").format(2);
+    expect(document.querySelector("dialog")?.textContent).toContain(
+      `Show raw values for ${fieldCount} fields? This is logged.`,
     );
   });
 

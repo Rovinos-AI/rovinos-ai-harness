@@ -18,10 +18,17 @@ const payload = {
   expiresAt: 5000,
 };
 
-function setup(input: unknown = payload) {
+function setup(input: unknown = payload, locale?: string) {
   let now = 1000;
   const onError = vi.fn();
-  const view = createApprovalView(document.body, { clock: { now: () => now }, onError });
+  if (locale !== undefined) {
+    document.documentElement.lang = locale;
+  }
+  const view = createApprovalView(document.body, {
+    clock: { now: () => now },
+    onError,
+    ...(locale === undefined ? {} : { locale: () => locale }),
+  });
   view.receive(input);
   return {
     view,
@@ -35,6 +42,7 @@ function setup(input: unknown = payload) {
 
 afterEach(() => {
   document.body.replaceChildren();
+  document.documentElement.lang = "";
 });
 
 describe("approval view", () => {
@@ -356,4 +364,14 @@ describe("approval view", () => {
       expect(result.violations).toEqual([]);
     },
   );
+});
+
+it("formats array counts with the host locale", () => {
+  setup({ ...payload, args: { nested: [1, 2] } }, "ar-EG");
+  const formattedCount = new Intl.NumberFormat("ar-EG").format(2);
+  expect(
+    [...document.querySelectorAll("summary")].find((summary) =>
+      summary.textContent.includes("nested"),
+    )?.textContent,
+  ).toContain(formattedCount);
 });
