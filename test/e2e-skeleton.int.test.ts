@@ -8,6 +8,8 @@
 // Not wired yet: filesystem-backed offload workspace selection per run (19.5 -> #96)
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
 // Not wired yet: user pseudonym emission in runtime telemetry (12.8 -> #139)
+// Not wired yet: control-plane start_run requester attribution (18.5 -> #178)
+// Not wired yet: simulated eval approver identity (16.6 -> #172)
 import { Command } from "commander";
 import {
   Client,
@@ -94,7 +96,13 @@ import {
   StorePurgeResultSchema,
   parseJson,
 } from "@harness/schemas";
-import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
+import {
+  AkvKeyProvider,
+  AkvSecretResolver,
+  LocalKeyProvider,
+  SqliteVault,
+  Token,
+} from "@harness/vault";
 import {
   attr,
   createTelemetrySdk,
@@ -645,6 +653,28 @@ describe("config", () => {
     expect(await readFile(current.configPath, "utf8")).not.toContain(current.canary);
   });
 
+  it("loads a configured Azure Key Vault key through the injected resolver", async () => {
+    const keyBytes = Buffer.alloc(32, 37);
+    const provider = new AkvKeyProvider({
+      config: KeysConfigSchema.parse({
+        currentKeyId: "e2e-test",
+        keys: [{ id: "e2e-test", secret: "akv:vault-name/harness-key-e2e-test" }],
+      }),
+      vaultName: "vault-name",
+      secretResolver: new AkvSecretResolver({
+        clientFactory: () => ({
+          getSecret: () => Promise.resolve({ value: keyBytes.toString("base64") }),
+        }),
+      }),
+    });
+
+    try {
+      expect(await provider.getKey(provider.currentKeyId())).toEqual(new Uint8Array(keyBytes));
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it("maps sandbox egress config to the optional Compose overlay", async () => {
     const current = fixture();
     const config = await loadConfig({ configPath: current.configPath });
@@ -850,6 +880,8 @@ describe("MCP runtime", () => {
         "run",
         "--input",
         inputPath,
+        "--as",
+        "e2e_operator",
       ]);
       expect(firstRun.code).toBe(ExitCode.suspended);
       const firstRunId = jsonResult(RunResultSchema, firstRun.stdout).runId;
@@ -857,6 +889,10 @@ describe("MCP runtime", () => {
       let firstApprovalId: Id;
       try {
         const firstEvents = await readEvents(store, firstRunId);
+        expect(firstEvents[0]).toMatchObject({
+          type: "run_created",
+          requestedBy: "cli.e2e_operator",
+        });
         const approval = firstEvents.find((event) => event.type === "approval_requested");
         if (approval?.type !== "approval_requested") {
           throw new Error("The MCP call did not request approval.");
@@ -957,6 +993,7 @@ describe("MCP runtime", () => {
       expect(serverCalls).toEqual([{ value: "edited" }]);
       expect(firstRunEvents.find((event) => event.type === "approval_resolved")).toMatchObject({
         decision: "edit",
+        approverId: "cli.local",
         edits: { value: "edited" },
       });
 
@@ -1666,7 +1703,9 @@ describe("resume", () => {
         throw new Error("Expected the child approval request.");
       }
 
-      await runtime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
+      await runtime.resolveApproval(spawn.childRunId, approval.approvalId, "approve", {
+        metadata: { decidedBy: "human", approverId: "cli.test" },
+      });
       const resumed = await runtime.resume(parentRunId);
       const completedParentEvents = await readEvents(store, parentRunId);
       expect(resumed.status).toBe("completed");
@@ -2524,7 +2563,9 @@ describe("retention", () => {
       }
       const checkpoint = await runtime.store.latestSnapshot(execution.runId);
       expect(checkpoint?.workspaceRef).toBeDefined();
-      await runtime.resolveApproval(execution.runId, approvalId, "approve");
+      await runtime.resolveApproval(execution.runId, approvalId, "approve", {
+        metadata: { decidedBy: "human", approverId: "cli.test" },
+      });
       await rm(join(current.dataDirectory, "workspaces", execution.runId), {
         recursive: true,
         force: true,

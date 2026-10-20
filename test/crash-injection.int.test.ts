@@ -991,7 +991,9 @@ async function runSubagentCrashMatrix(reference: SubagentCrashReference): Promis
           if (approval?.type !== "approval_requested") {
             throw new Error("Expected child approval before resuming the parent.");
           }
-          await freshRuntime.resolveApproval(spawn.childRunId, approval.approvalId, "approve");
+          await freshRuntime.resolveApproval(spawn.childRunId, approval.approvalId, "approve", {
+            metadata: { decidedBy: "human", approverId: "cli.test" },
+          });
           try {
             await freshRuntime.resume(parentRunId);
           } catch (error) {
@@ -1286,7 +1288,16 @@ describe("SQLite crash-injection matrix", () => {
             blockedResumeError = error;
           }
           callsBeforeApproval = execute.mock.calls.length;
-          await resolveApproval(store, runId, request.approvalId, "approve", undefined, clock);
+          await resolveApproval(
+            store,
+            runId,
+            request.approvalId,
+            "approve",
+            undefined,
+            clock,
+            undefined,
+            { decidedBy: "human", approverId: "cli.test" },
+          );
           resumedStatus = (await runtime.resume(runId)).status;
         } else {
           callsBeforeApproval = execute.mock.calls.length;

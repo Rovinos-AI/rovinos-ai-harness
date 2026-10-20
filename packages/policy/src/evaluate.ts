@@ -48,6 +48,7 @@ export const ExplanationSchema = z
     editable: z.array(JsonPointerSchema),
     approvalTtlMs: z.number().int().positive().optional(),
     escalateAfterMs: z.number().int().positive().optional(),
+    separationOfDuties: z.boolean().optional(),
   })
   .strict();
 
@@ -224,6 +225,9 @@ function toExplanation(rule: Rule, matched: Explanation["matched"]): Explanation
     editable: rule.editable === undefined ? [] : [...rule.editable],
     ...(rule.approvalTtlMs === undefined ? {} : { approvalTtlMs: rule.approvalTtlMs }),
     ...(rule.escalateAfterMs === undefined ? {} : { escalateAfterMs: rule.escalateAfterMs }),
+    ...(rule.separationOfDuties === undefined
+      ? {}
+      : { separationOfDuties: rule.separationOfDuties }),
   });
 }
 

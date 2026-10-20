@@ -209,6 +209,7 @@ export interface ContinueRunOptions extends Omit<
   | "rootSpanParent"
   | "rootSpanLinks"
   | "initialBudgetViolation"
+  | "requestedBy"
 > {
   readonly store: EventStore;
   readonly runId: Id;
@@ -259,6 +260,7 @@ export async function continueRun(options: ContinueRunOptions): Promise<RunLoopR
     ? exhaustedInheritedBudget(runOptions.budgets, previousLogs)
     : undefined;
   const recorder = new RunRecorder(store, runId, runOptions.ids.next(), 0, runOptions.clock);
+  const rootCreated = previousLogs[0]?.[0];
 
   return runLoop({
     ...runOptions,
@@ -268,6 +270,9 @@ export async function continueRun(options: ContinueRunOptions): Promise<RunLoopR
     ...(initialBudgetViolation === undefined ? {} : { initialBudgetViolation }),
     scopeId,
     continuationOf: previousRunId,
+    ...(rootCreated?.type === "run_created" && rootCreated.requestedBy !== undefined
+      ? { requestedBy: rootCreated.requestedBy }
+      : {}),
     inputKind: "follow_up",
     previousEventLogs: previousLogs,
     rootSpanLinks: [linkedRoot(previousEvents)],

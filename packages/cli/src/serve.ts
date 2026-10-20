@@ -115,7 +115,7 @@ function createControlPlaneOperations(
   return {
     resumeRun: (runId, signal, onClaimed) => runtime.resume(runId, { signal, onClaimed }),
     cancelRun: (runId) => runtime.cancel(runId),
-    resolveApproval: async ({ runId, approvalId, decision, edits, reason }) => {
+    resolveApproval: async ({ runId, approvalId, decision, edits, reason, approverId }) => {
       const { resolveApproval } = await import("@harness/core");
       await resolveApproval(
         runtime.store,
@@ -125,7 +125,11 @@ function createControlPlaneOperations(
         edits,
         runtime.clock,
         tool,
-        { decidedBy: "human", ...(reason === undefined ? {} : { reason }) },
+        {
+          decidedBy: "human",
+          approverId,
+          ...(reason === undefined ? {} : { reason }),
+        },
       );
     },
   };

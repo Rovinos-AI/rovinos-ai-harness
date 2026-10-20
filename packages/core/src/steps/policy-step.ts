@@ -14,6 +14,17 @@ import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import type { IdGenerator, ModelToolCall, PolicyDecision, PolicyPort, ToolPort } from "../ports.js";
 import type { RunState, ToolIntentEvent } from "../run-state.js";
 
+type PolicyIntentFields = Pick<
+  Extract<EventPartial, { type: "tool_intent" }>,
+  | "policyDecision"
+  | "ruleId"
+  | "policyReason"
+  | "policyEditable"
+  | "policySeparationOfDuties"
+  | "policyApprovalTtlMs"
+  | "policyEscalateAfterMs"
+>;
+
 /** Decides whether a prepared call is allowed, needs approval, or is denied. */
 export function decidePolicy(
   policy: PolicyPort | undefined,
@@ -37,6 +48,9 @@ export function decidePolicy(
       ...(evaluated.escalateAfterMs === undefined
         ? {}
         : { escalateAfterMs: evaluated.escalateAfterMs }),
+      ...(evaluated.separationOfDuties === undefined
+        ? {}
+        : { separationOfDuties: evaluated.separationOfDuties }),
     });
   } catch {
     return { decision: "deny", ruleId: "default", reason: "policy_error", editable: [] };
@@ -94,6 +108,25 @@ export function setPolicySpanAttributes(decision: "allow" | "ask" | "deny", rule
   if (ruleId !== undefined) {
     setActiveSpanAttribute("harness.policy.rule_id", ruleId);
   }
+}
+
+/** Extracts decision metadata for the durable tool intent. */
+export function policyIntentFields(decision: PolicyDecision): PolicyIntentFields {
+  return {
+    policyDecision: decision.decision,
+    ruleId: decision.ruleId,
+    policyReason: decision.reason,
+    policyEditable: decision.editable,
+    ...(decision.separationOfDuties === undefined
+      ? {}
+      : { policySeparationOfDuties: decision.separationOfDuties }),
+    ...(decision.approvalTtlMs === undefined
+      ? {}
+      : { policyApprovalTtlMs: decision.approvalTtlMs }),
+    ...(decision.escalateAfterMs === undefined
+      ? {}
+      : { policyEscalateAfterMs: decision.escalateAfterMs }),
+  };
 }
 
 /** Records a policy approval request and its durable suspension checkpoint. */

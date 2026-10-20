@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, type ControlPlaneConfig, type Id } from "@harness/schemas";
+import { Code, Principal, type ControlPlaneConfig, type Id } from "@harness/schemas";
 import type { EventStore } from "@harness/store";
 import type { AuditingVaultResolver } from "@harness/vault";
 import { CLIENT_CAPABILITIES_META_KEY, McpServer } from "@modelcontextprotocol/server";
@@ -210,13 +210,20 @@ function registerConfiguredApprovalTools(input: {
       if (principal !== undefined) {
         return {
           tokenId: configuredAuthorization?.tokenId ?? principal.tokenId,
+          principal: Principal.parse(`token.${principal.tokenId}`),
           allowed:
             hasControlPlaneScope(principal, scope) &&
             (principal.runIds === undefined || principal.runIds.includes(runId)) &&
             (configuredAuthorization?.allowed ?? true),
         };
       }
-      return configuredAuthorization ?? { allowed: false, tokenId: Code.parse("unknown") };
+      return (
+        configuredAuthorization ?? {
+          allowed: false,
+          tokenId: Code.parse("unknown"),
+          principal: "cli.control_plane",
+        }
+      );
     },
     revealRateLimiter:
       input.options.approvalApp?.revealRateLimiter ?? new ApprovalAppRevealRateLimiter(),

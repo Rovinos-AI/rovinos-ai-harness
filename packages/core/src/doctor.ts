@@ -10,6 +10,7 @@ import {
   type DoctorCheckResult,
   type SecretRef,
 } from "@harness/schemas";
+import { AkvSecretResolverError } from "@harness/vault";
 
 /** Inputs available to registered environment checks. */
 export interface DoctorContext {
@@ -109,6 +110,14 @@ function knownSecretErrorCode(error: unknown): Code {
   return "secret_unavailable";
 }
 
+function isUnavailableAkvResolver(error: unknown, errorCode: Code, ref: SecretRef): boolean {
+  return (
+    errorCode === "secret_resolver_unavailable" &&
+    ref.startsWith("akv:") &&
+    !(error instanceof AkvSecretResolverError)
+  );
+}
+
 const initialChecks: DoctorCheck[] = [
   {
     id: "node_version",
@@ -171,7 +180,7 @@ const initialChecks: DoctorCheck[] = [
             return result("fail", "check_timeout");
           }
           const errorCode = knownSecretErrorCode(error);
-          if (errorCode === "secret_resolver_unavailable" && parsed.data.startsWith("akv:")) {
+          if (isUnavailableAkvResolver(error, errorCode, parsed.data)) {
             firstWarning ??= result("warn", errorCode, safeReferenceName(parsed.data));
           } else {
             firstFailure ??= result("fail", errorCode, safeReferenceName(parsed.data));

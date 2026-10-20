@@ -50,7 +50,7 @@ describe("Event", () => {
     expect(Event.safeParse({ ...response, cacheReadTokens: -1 }).success).toBe(false);
   });
 
-  it("defaults legacy approval resolutions to human and accepts an optional reason code", () => {
+  it("requires an approver for human resolutions but not expiry decisions", () => {
     const resolution = eventSamples.find(({ type }) => type === "approval_resolved");
     if (resolution?.type !== "approval_resolved") {
       throw new Error("Missing approval_resolved sample.");
@@ -59,6 +59,12 @@ describe("Event", () => {
     Reflect.deleteProperty(withoutDecidedBy, "decidedBy");
 
     expect(Event.parse(withoutDecidedBy)).toMatchObject({ decidedBy: "human" });
+    const withoutApprover = { ...resolution };
+    Reflect.deleteProperty(withoutApprover, "approverId");
+    expect(Event.safeParse(withoutApprover).success).toBe(false);
+    expect(
+      Event.parse({ ...withoutApprover, decidedBy: "expiry", reason: "expired" }),
+    ).toMatchObject({ decidedBy: "expiry", reason: "expired" });
     expect(Event.parse({ ...resolution, decidedBy: "expiry", reason: "expired" })).toMatchObject({
       decidedBy: "expiry",
       reason: "expired",

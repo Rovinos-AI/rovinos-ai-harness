@@ -51,6 +51,20 @@ describe("ControlPlaneConfigSchema", () => {
     });
   });
 
+  it("accepts the longest token id that fits its principal prefix", () => {
+    const tokenId = "a".repeat(58);
+    expect(
+      ControlPlaneConfigSchema.safeParse({
+        auth: { tokens: [{ id: tokenId, secret: "env:TOKEN", scopes: ["read"] }] },
+      }).success,
+    ).toBe(true);
+    expect(
+      ControlPlaneConfigSchema.safeParse({
+        auth: { tokens: [{ id: `${tokenId}a`, secret: "env:TOKEN", scopes: ["read"] }] },
+      }).success,
+    ).toBe(false);
+  });
+
   it.each([
     { auth: { tokens: [{ id: "bad id", secret: "env:TOKEN", scopes: ["read"] }] } },
     { auth: { tokens: [{ id: "valid.id", secret: "inline", scopes: ["read"] }] } },

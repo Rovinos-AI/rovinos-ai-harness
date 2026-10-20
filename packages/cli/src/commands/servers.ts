@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CompositeSecretResolver, type HarnessConfig } from "@harness/config";
+import { AkvSecretResolver } from "@harness/vault";
 import {
   McpConnection,
   McpConnectionError,
@@ -81,7 +82,7 @@ async function discoverServers(
   overrides: ServersCommandOverrides | undefined,
   oauthTokenStore?: OAuthTokenStore,
 ): Promise<DiscoveryResult[]> {
-  const defaultResolver = new CompositeSecretResolver();
+  const defaultResolver = new CompositeSecretResolver({ akv: new AkvSecretResolver() });
   const dependencies: McpConnectionDependencies = {
     resolveSecret: async (ref, signal) =>
       context.secretResolver === undefined

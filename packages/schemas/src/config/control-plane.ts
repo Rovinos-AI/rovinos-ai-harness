@@ -16,7 +16,7 @@ export const ControlPlaneAuthScopeSchema = z.enum([
 
 const authTokenSchema = z
   .object({
-    id: Code,
+    id: Code.max(58),
     secret: SecretRefSchema,
     scopes: z.array(ControlPlaneAuthScopeSchema).min(1),
     runIds: z.array(Id).min(1).optional(),
