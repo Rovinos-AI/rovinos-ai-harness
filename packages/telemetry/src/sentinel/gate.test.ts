@@ -6,6 +6,7 @@ import { ActiveRuns } from "./active-runs.js";
 import { assertSentinelGate, SentinelGate, SentinelRequiredError } from "./gate.js";
 import { TripQueue } from "./trips.js";
 import { VaultRunView, type VaultRunReader } from "./run-values.js";
+import { fitsPatternSizeLimit } from "./variants.js";
 
 vi.mock("../metrics.js", () => ({
   countSentinelScopeReduced: vi.fn(),
@@ -134,6 +135,56 @@ describe("SentinelGate", () => {
     await expect(gate.check({ text: "safe" })).resolves.toEqual({ ok: true });
     expect(countSentinelScopeReduced).toHaveBeenCalledOnce();
     expect(matcherForValues).toHaveBeenCalledTimes(2);
+  });
+
+  it("switches to per-run matchers when expanded patterns exceed the size limit", async () => {
+    const runs = new ActiveRuns();
+    runs.register(firstRun);
+    runs.register(secondRun);
+    const candidateValues = Array.from(
+      { length: 8_000 },
+      (_, index) => `sentinel-${index.toString(36).padStart(6, "0")}-1234567`,
+    );
+    let lowerBound = 0;
+    let upperBound = candidateValues.length;
+    while (lowerBound < upperBound) {
+      const middle = Math.ceil((lowerBound + upperBound) / 2);
+      if (fitsPatternSizeLimit(candidateValues.slice(0, middle))) {
+        lowerBound = middle;
+      } else {
+        upperBound = middle - 1;
+      }
+    }
+    const underLimitCount = lowerBound;
+    const firstRunValues = candidateValues.slice(0, underLimitCount);
+    const secondRunValues = candidateValues.slice(underLimitCount, underLimitCount + 1);
+    expect(secondRunValues).toHaveLength(1);
+    expect(fitsPatternSizeLimit(firstRunValues)).toBe(true);
+    expect(fitsPatternSizeLimit(secondRunValues)).toBe(true);
+    expect(fitsPatternSizeLimit([...firstRunValues, ...secondRunValues])).toBe(false);
+
+    const matcherForValues = vi.fn(matcherFor);
+    const gate = new SentinelGate(
+      new VaultRunView(
+        createReader(
+          new Map([
+            [firstRun, firstRunValues],
+            [secondRun, secondRunValues],
+          ]),
+        ),
+      ),
+      runs,
+      { matcherForValues, tripQueue: makeTripQueue() },
+    );
+
+    await expect(gate.check({ text: secondRunValues.at(-1) ?? "" })).resolves.toEqual({
+      ok: false,
+      reason: "hit",
+    });
+    expect(matcherForValues).toHaveBeenCalledTimes(2);
+    expect(matcherForValues).toHaveBeenNthCalledWith(1, firstRunValues);
+    expect(matcherForValues).toHaveBeenNthCalledWith(2, secondRunValues);
+    expect(countSentinelScopeReduced).toHaveBeenCalledOnce();
   });
 
   it("refreshes the matcher when a run's vault version changes", async () => {
