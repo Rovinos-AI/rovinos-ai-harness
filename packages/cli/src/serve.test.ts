@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessConfigSchema } from "@harness/config";
 import type * as ControlPlane from "@harness/control-plane";
-import type { Runtime } from "@harness/core";
+import { foldRunState, type Runtime } from "@harness/core";
 import { Code, Id, Principal } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
@@ -171,7 +171,48 @@ describe("serve command", () => {
     const repeatedStart = await operations.startRun(startOptions);
     expect(firstStart).toEqual(repeatedStart);
     expect(start).toHaveBeenCalledOnce();
+    const startWithoutKey = await operations.startRun({
+      goal: "synthetic start without a key",
+      requestedBy: Principal.parse("token.test"),
+    });
+    expect(startWithoutKey.status).toBe("pending");
+    expect(start).toHaveBeenCalledTimes(2);
     const runId = Id.parse("00000000000000000000000001");
+    const continuationRunId = builders.nextRunId();
+    await runtime.store.append(
+      continuationRunId,
+      [builders.runCreated(continuationRunId)],
+      0,
+    );
+    const continuationEvents = [];
+    for await (const event of runtime.store.read(continuationRunId)) {
+      continuationEvents.push(event);
+    }
+    const continuationState = foldRunState(continuationEvents);
+    vi.spyOn(runtime, "continueRun").mockResolvedValue({
+      events: continuationEvents,
+      status: "pending",
+      approvalIds: [],
+      state: continuationState,
+    });
+    await expect(
+      operations.continueRun(runId, {
+        goal: "synthetic continuation",
+        requestedBy: Principal.parse("token.test"),
+      }),
+    ).resolves.toEqual({ runId: continuationRunId, status: "pending" });
+    vi.spyOn(runtime, "continueRun").mockResolvedValue({
+      events: [],
+      status: "pending",
+      approvalIds: [],
+      state: continuationState,
+    });
+    await expect(
+      operations.continueRun(runId, {
+        goal: "synthetic continuation without created event",
+        requestedBy: Principal.parse("token.test"),
+      }),
+    ).rejects.toThrow("continue_run_failed");
     const abortSignal = new AbortController().signal;
     await expect(operations.resumeRun(runId, abortSignal, () => undefined)).rejects.toThrow();
     await expect(operations.cancelRun(runId)).rejects.toThrow();

@@ -100,6 +100,62 @@ describe("control-plane run creation tools", () => {
     expect(await store.listRuns({ limit: 10 })).toEqual({ runs: [] });
   });
 
+  it("requires human confirmation for a model-driven continuation", async () => {
+    const store = new InMemoryEventStore();
+    const continueRun = vi.fn();
+    const client = await connect(store, { operations: { continueRun } }, false);
+
+    const result = await client.callTool({
+      name: "continue_run",
+      arguments: { runId, goal: CONTENT_CANARY },
+    });
+
+    expect(result.structuredContent).toEqual({ code: "human_confirmation_unavailable" });
+    expect(JSON.stringify(result)).not.toContain(CONTENT_CANARY);
+    expect(continueRun).not.toHaveBeenCalled();
+  });
+
+  it("checks continuation quota before invoking the writer and hides operation errors", async () => {
+    const store = new InMemoryEventStore();
+    const continueRun = vi.fn(() => Promise.reject(new Error(CONTENT_CANARY)));
+    const client = await connect(store, {
+      operations: {
+        continueRun,
+        checkRunQuota: () => Promise.reject({ code: "quota_exceeded" }),
+      },
+    });
+
+    const quotaResult = await client.callTool({
+      name: "continue_run",
+      arguments: { runId, goal: CONTENT_CANARY },
+    });
+    expect(quotaResult.structuredContent).toEqual({ code: "quota_exceeded" });
+    expect(JSON.stringify(quotaResult)).not.toContain(CONTENT_CANARY);
+    expect(continueRun).not.toHaveBeenCalled();
+
+    const failedClient = await connect(store, {
+      operations: { continueRun },
+    });
+    const failure = await failedClient.callTool({
+      name: "continue_run",
+      arguments: { runId, goal: CONTENT_CANARY },
+    });
+    expect(failure.structuredContent).toEqual({ code: "continue_run_failed" });
+    expect(JSON.stringify(failure)).not.toContain(CONTENT_CANARY);
+    expect(continueRun).toHaveBeenCalledOnce();
+  });
+
+  it("reports when the continuation runtime is unavailable", async () => {
+    const client = await connect(new InMemoryEventStore(), { operations: {} });
+
+    const result = await client.callTool({
+      name: "continue_run",
+      arguments: { runId, goal: "Follow up" },
+    });
+
+    expect(result.structuredContent).toEqual({ code: "control_plane_runtime_unavailable" });
+  });
+
   it("returns the same run for a repeated idempotency key without echoing content", async () => {
     const store = new InMemoryEventStore();
     const seen = new Map<string, typeof runId>();

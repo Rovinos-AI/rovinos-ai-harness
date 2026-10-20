@@ -488,6 +488,7 @@ store: {}`,
 
     expect(config).toEqual({
       controlPlane: {
+        allowAgentStartedRuns: false,
         allowReveal: false,
         auth: { tokens: [] },
         listen: { host: "127.0.0.1", port: 3_000 },

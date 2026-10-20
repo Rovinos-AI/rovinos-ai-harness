@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HarnessError, JsonValue, ServeResultSchema, type Id } from "@harness/schemas";
 import type { ControlPlaneOperations } from "@harness/control-plane";
-import { foldRunState } from "@harness/core";
 import type { Runtime, ToolPort } from "@harness/core";
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
@@ -148,6 +147,7 @@ function createControlPlaneOperations(
           events.push(event);
         }
         if (events.length > 0) {
+          const { foldRunState } = await import("@harness/core");
           return { runId, status: foldRunState(events).status };
         }
       }
