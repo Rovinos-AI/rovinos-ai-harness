@@ -7,7 +7,7 @@ const liveReference = process.env.HARNESS_LIVE_AKV;
 const hasLiveReference =
   liveReference !== undefined &&
   liveReference.trim().length > 0 &&
-  liveReference !== "$(HARNESS_LIVE_AKV)";
+  !liveReference.trim().startsWith("$(");
 
 describe.skipIf(!hasLiveReference)("LIVE Azure Key Vault", () => {
   it("reads the configured test secret through DefaultAzureCredential", async () => {

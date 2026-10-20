@@ -71,6 +71,20 @@ describe("SecretRefSchema", () => {
     });
     expect(messages).toContain("secret_ref_invalid");
   });
+
+  it("enforces the Azure Key Vault name and version length limits", () => {
+    const maximumLengthRef = `akv:${"v".repeat(24)}/${"s".repeat(127)}#${"x".repeat(64)}`;
+    const oversizedRefs = [
+      `akv:${"v".repeat(25)}/secret`,
+      `akv:vault-name/${"s".repeat(128)}`,
+      `akv:vault-name/secret#${"x".repeat(65)}`,
+    ];
+
+    expect(SecretRefSchema.safeParse(maximumLengthRef).success).toBe(true);
+    for (const ref of oversizedRefs) {
+      expect(SecretRefSchema.safeParse(ref).success).toBe(false);
+    }
+  });
 });
 
 describe("Secret", () => {
@@ -176,20 +190,6 @@ describe("FileSecretResolver", () => {
             },
             { once: true },
           );
-
-          it("enforces the Azure Key Vault name and version length limits", () => {
-            const maximumLengthRef = `akv:${"v".repeat(24)}/${"s".repeat(127)}#${"x".repeat(64)}`;
-            const oversizedRefs = [
-              `akv:${"v".repeat(25)}/secret`,
-              `akv:vault-name/${"s".repeat(128)}`,
-              `akv:vault-name/secret#${"x".repeat(65)}`,
-            ];
-
-            expect(SecretRefSchema.safeParse(maximumLengthRef).success).toBe(true);
-            for (const ref of oversizedRefs) {
-              expect(SecretRefSchema.safeParse(ref).success).toBe(false);
-            }
-          });
         });
       },
     });

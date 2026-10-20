@@ -160,6 +160,18 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
+function isExpectedKeyReference(ref: SecretRef, vaultName: string, keyId: string): boolean {
+  if (!SecretRefSchema.safeParse(ref).success) {
+    return false;
+  }
+  try {
+    const parsed = parseReference(ref);
+    return parsed.vaultName === vaultName && parsed.secretName === `harness-key-${keyId}`;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolves `akv:<vaultName>/<secretName>[#version]` references through Azure Key Vault.
  *
@@ -242,8 +254,9 @@ export interface AkvKeyProviderOptions {
 /**
  * Loads canonical base64 32-byte keys from `harness-key-<keyId>` Key Vault secrets.
  *
- * Configured references are used only to enumerate active and historical key IDs.
- * Key material is cached in memory by `LocalKeyProvider` and zeroed by `dispose`.
+ * Configured references must name this vault's conventional secret for each key ID.
+ * References, including pinned versions, are preserved by `LocalKeyProvider`, which caches
+ * key material in memory and zeroes it by `dispose`.
  */
 export class AkvKeyProvider implements KeyProvider {
   readonly #provider: LocalKeyProvider;
@@ -259,9 +272,7 @@ export class AkvKeyProvider implements KeyProvider {
     if (
       config.data.keys.some(
         ({ id, secret }) =>
-          !keyIdPattern.test(id) ||
-          secret !== `akv:${options.vaultName}/harness-key-${id}` ||
-          !SecretRefSchema.safeParse(secret).success,
+          !keyIdPattern.test(id) || !isExpectedKeyReference(secret, options.vaultName, id),
       )
     ) {
       throw new LocalKeyProviderError("key_config_invalid");
@@ -270,9 +281,9 @@ export class AkvKeyProvider implements KeyProvider {
     this.#provider = new LocalKeyProvider({
       config: {
         currentKeyId: config.data.currentKeyId,
-        keys: config.data.keys.map(({ id }) => ({
+        keys: config.data.keys.map(({ id, secret }) => ({
           id,
-          secret: SecretRefSchema.parse(`akv:${options.vaultName}/harness-key-${id}`),
+          secret,
         })),
       },
       secretResolver: {

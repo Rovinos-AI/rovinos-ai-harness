@@ -4,7 +4,10 @@ The `akv:` reference form resolves a secret by vault name and secret name:
 
 ```yaml
 models:
-  apiKey: akv:my-vault/model-api-key
+  providers:
+    - id: openai
+      kind: openai
+      apiKey: akv:my-vault/model-api-key
 ```
 
 Pin a reference to a particular secret version with `#`:

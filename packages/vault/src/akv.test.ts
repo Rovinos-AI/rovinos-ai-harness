@@ -270,6 +270,37 @@ describe("AkvKeyProvider", () => {
     });
   });
 
+  it("preserves pinned versions when resolving configured key references", async () => {
+    const keyBytes = Buffer.alloc(32, 23);
+    const requests: { name: string; version: string | undefined }[] = [];
+    const provider = new AkvKeyProvider({
+      config: KeysConfigSchema.parse({
+        currentKeyId: "primary",
+        keys: [
+          {
+            id: "primary",
+            secret: "akv:vault-name/harness-key-primary#0123456789abcdef0123456789abcdef",
+          },
+        ],
+      }),
+      vaultName: "vault-name",
+      secretResolver: new AkvSecretResolver({
+        clientFactory: () => ({
+          getSecret: (name, options) => {
+            requests.push({ name, version: options?.version });
+            return secretResponse(keyBytes.toString("base64"));
+          },
+        }),
+      }),
+    });
+
+    await expect(provider.getKey("primary")).resolves.toEqual(new Uint8Array(keyBytes));
+    expect(requests).toEqual([
+      { name: "harness-key-primary", version: "0123456789abcdef0123456789abcdef" },
+    ]);
+    provider.dispose();
+  });
+
   it("reuses local key validation and rejects unknown or invalid configured IDs", async () => {
     const resolver = new AkvSecretResolver({
       clientFactory: () => ({

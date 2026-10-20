@@ -9,6 +9,7 @@ import {
   Secret,
 } from "@harness/config";
 import { DoctorResultsSchema, parseJson, type DoctorCheckStatus } from "@harness/schemas";
+import { AkvSecretResolverError } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "../command.js";
 import { ExitCode } from "../exit-codes.js";
@@ -39,6 +40,7 @@ async function createDataDirectory(): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   if (temporaryDirectory !== undefined) {
     await rm(temporaryDirectory, { recursive: true, force: true });
@@ -207,6 +209,85 @@ describe("harness doctor", () => {
     });
     expect(resolutions).toBeGreaterThan(0);
     expect(output).not.toContain(keyValue);
+  });
+
+  it("fails doctor when the installed Key Vault resolver is unavailable", async () => {
+    await createDataDirectory();
+    const reference = "akv:vault-name/model-api-key";
+    const config = HarnessConfigSchema.parse({
+      models: {
+        providers: [{ id: "provider", kind: "openai", apiKey: reference }],
+      },
+    });
+    const { context, stdout, stderr } = createContext(() => Promise.resolve(config));
+    context.secretResolver = {
+      resolve: () => Promise.reject(new AkvSecretResolverError("secret_resolver_unavailable")),
+    };
+
+    const exitCode = await main(["--json", "doctor"], context, [createDoctorCommand()]);
+    const results = parseJson(DoctorResultsSchema, stdout[0] ?? "");
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(results).toContainEqual({
+      id: "secret_refs_resolvable",
+      status: "fail",
+      code: "secret_resolver_unavailable",
+      detail: "akv_model-api-key",
+    });
+    expect(stderr).toEqual(["doctor_failed\n"]);
+  });
+
+  it("forwards the per-check abort signal to configured Key Vault keys", async () => {
+    await createDataDirectory();
+    vi.useFakeTimers();
+    const keyValue = Buffer.alloc(32, 29).toString("base64");
+    const reference = "akv:vault-name/harness-key-primary";
+    const config = HarnessConfigSchema.parse({
+      keys: {
+        currentKeyId: "primary",
+        keys: [{ id: "primary", secret: reference }],
+      },
+    });
+    const signals: (AbortSignal | undefined)[] = [];
+    let resolutions = 0;
+    let notifyKeyResolutionStarted: () => void = () => undefined;
+    const keyResolutionStarted = new Promise<void>((resolve) => {
+      notifyKeyResolutionStarted = resolve;
+    });
+    const { context, stdout } = createContext(() => Promise.resolve(config));
+    context.secretResolver = {
+      resolve: (_ref, signal) => {
+        resolutions += 1;
+        signals.push(signal);
+        if (resolutions === 1) {
+          return Promise.resolve(new Secret(keyValue));
+        }
+        notifyKeyResolutionStarted();
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              reject(new Error("cancelled"));
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+
+    const resultPromise = main(["--json", "doctor"], context, [createDoctorCommand()]);
+    await keyResolutionStarted;
+    await vi.advanceTimersByTimeAsync(5_000);
+    const exitCode = await resultPromise;
+
+    expect(exitCode).toBe(ExitCode.failure);
+    expect(resolutions).toBe(2);
+    expect(signals[1]?.aborted).toBe(true);
+    expect(parseJson(DoctorResultsSchema, stdout[0] ?? "")).toContainEqual({
+      id: "keys_configured",
+      status: "fail",
+      code: "check_timeout",
+    });
   });
 
   it("keeps env and file secret values out of table and JSON failure output", async () => {

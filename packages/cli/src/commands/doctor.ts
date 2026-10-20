@@ -55,7 +55,9 @@ function keysConfiguredCheck(
       }
       const provider = new LocalKeyProvider({
         config: config.keys,
-        secretResolver,
+        secretResolver: {
+          resolve: (ref) => secretResolver.resolve(ref, ctx.signal),
+        },
         env,
         onWarning: () => undefined,
       });
