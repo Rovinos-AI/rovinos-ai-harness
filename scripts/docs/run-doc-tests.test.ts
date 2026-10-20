@@ -104,17 +104,11 @@ describe("quickstart documentation test runner", () => {
   it("fails when a capture pattern is invalid or does not match", () => {
     expect(() =>
       extractDocTestBlocks(
-        [
-          "<!-- test:run -->",
-          "<!-- capture:runId=[ -->",
-          "```bash",
-          "run",
-          "```",
-        ].join("\n"),
+        ["<!-- test:run -->", "<!-- capture:runId=[ -->", "```bash", "run", "```"].join("\n"),
       ),
     ).toThrow("docs_quickstart_test_failed");
 
-    expect(() =>
+    expect(() => {
       executeDocTestBlocks(
         [
           "<!-- test:run -->",
@@ -124,7 +118,7 @@ describe("quickstart documentation test runner", () => {
           "```",
         ].join("\n"),
         { cwd: ".", execute: () => ({ status: 0, stdout: "", stderr: "" }) },
-      ),
-    ).toThrow("docs_quickstart_test_failed");
+      );
+    }).toThrow("docs_quickstart_test_failed");
   });
 });

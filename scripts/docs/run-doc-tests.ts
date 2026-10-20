@@ -2,9 +2,9 @@
 // Capture comments use `<!-- capture:name=REGEX_WITH_(?<name>...) -->`; their named group
 // supplies `<name>` placeholders to later blocks. Cleanup blocks run even after any failure.
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
-import { join, relative, resolve, sep } from "node:path";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 type BlockKind = "run" | "cleanup";
@@ -14,6 +14,7 @@ interface CaptureDirective {
   readonly pattern: string;
 }
 
+/** One runnable or guaranteed-cleanup shell block extracted from Markdown. */
 export interface DocTestBlock {
   readonly kind: BlockKind;
   readonly code: string;
@@ -41,8 +42,8 @@ class DocTestError extends Error {
 }
 
 const testMarkerPattern = /^<!--\s*test:(run|cleanup)\s*-->$/u;
-const captureMarkerPattern = /^<!--\s*capture:([A-Za-z][A-Za-z0-9]*)=(.*?)\s*-->$/u;
-const rootDirectory = fileURLToPath(new URL("../../", import.meta.url));
+const fenceOpeningPattern = /^(`{3,}|~{3,})([\w-]+)(?:\s.*)?$/u;
+const rootDirectory = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const excludedDirectories = new Set([".git", ".tmp", "coverage", "dist", "node_modules"]);
 
 function validateCapture(capture: CaptureDirective): void {
@@ -51,9 +52,71 @@ function validateCapture(capture: CaptureDirective): void {
   } catch {
     throw new DocTestError();
   }
-  if (!capture.pattern.includes(`(?<${capture.name}>`)) {
+  if (!/^[A-Za-z]\w*$/u.test(capture.name) || !capture.pattern.includes(`(?<${capture.name}>`)) {
     throw new DocTestError();
   }
+}
+
+function captureDirective(line: string): CaptureDirective | undefined {
+  const prefix = "<!-- capture:";
+  if (!line.startsWith(prefix) || !line.endsWith("-->")) {
+    return undefined;
+  }
+  const content = line.slice(prefix.length, -3).trim();
+  const separator = content.indexOf("=");
+  if (separator < 0) {
+    throw new DocTestError();
+  }
+  const capture = {
+    name: content.slice(0, separator).trim(),
+    pattern: content.slice(separator + 1).trim(),
+  };
+  validateCapture(capture);
+  return capture;
+}
+
+function isClosingFence(line: string, openingFence: string): boolean {
+  const trimmed = line.trim();
+  const character = openingFence.charAt(0);
+  return (
+    trimmed.length >= openingFence.length &&
+    trimmed.startsWith(character.repeat(openingFence.length)) &&
+    trimmed.replaceAll(character, "").length === 0
+  );
+}
+
+interface FenceOptions {
+  readonly lines: readonly string[];
+  readonly start: number;
+  readonly openingFence: string;
+  readonly language: string | undefined;
+  readonly kind: BlockKind | undefined;
+  readonly captures: readonly CaptureDirective[];
+}
+
+function markedFence({ lines, start, openingFence, language, kind, captures }: FenceOptions): {
+  readonly block?: DocTestBlock;
+  readonly closingIndex: number;
+} {
+  if (kind !== undefined && language !== "bash" && language !== "sh" && language !== "shell") {
+    throw new DocTestError();
+  }
+  const codeLines: string[] = [];
+  let closingIndex = start + 1;
+  while (closingIndex < lines.length && !isClosingFence(lines[closingIndex] ?? "", openingFence)) {
+    codeLines.push(lines[closingIndex] ?? "");
+    closingIndex += 1;
+  }
+  if (closingIndex >= lines.length) {
+    if (kind !== undefined) {
+      throw new DocTestError();
+    }
+    return { closingIndex };
+  }
+  return {
+    ...(kind === undefined ? {} : { block: { kind, code: codeLines.join("\n"), captures } }),
+    closingIndex,
+  };
 }
 
 /** Extracts marked shell blocks and capture comments from a Markdown document. */
@@ -66,27 +129,16 @@ export function extractDocTestBlocks(markdown: string): DocTestBlock[] {
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
     const trimmed = line.trim();
-    const testMarker = testMarkerPattern.exec(trimmed);
-    if (testMarker !== null) {
+    const testMarker = testMarkerPattern.exec(trimmed)?.[1];
+    if (testMarker !== undefined) {
       if (pendingKind !== undefined) {
         throw new DocTestError();
       }
-      const markerKind = testMarker[1];
-      if (markerKind !== "run" && markerKind !== "cleanup") {
-        throw new DocTestError();
-      }
-      pendingKind = markerKind;
+      pendingKind = testMarker === "run" ? "run" : "cleanup";
       continue;
     }
-    const captureMarker = captureMarkerPattern.exec(trimmed);
-    if (captureMarker !== null) {
-      const name = captureMarker[1];
-      const pattern = captureMarker[2]?.trim();
-      if (name === undefined || pattern === undefined || pattern.length === 0) {
-        throw new DocTestError();
-      }
-      const capture = { name, pattern };
-      validateCapture(capture);
+    const capture = captureDirective(trimmed);
+    if (capture !== undefined) {
       pendingCaptures.push(capture);
       continue;
     }
@@ -94,41 +146,30 @@ export function extractDocTestBlocks(markdown: string): DocTestBlock[] {
       continue;
     }
 
-    const fence = /^(`{3,}|~{3,})([A-Za-z0-9_-]+)(?:\s.*)?$/u.exec(trimmed);
+    const fence = fenceOpeningPattern.exec(trimmed);
     if (fence === null) {
       pendingKind = undefined;
       pendingCaptures = [];
       continue;
     }
-    const openingFence = fence[1];
-    if (openingFence === undefined) {
-      throw new DocTestError();
-    }
+    const openingFence = fence[1] ?? "";
     const language = fence[2]?.toLowerCase();
     const kind = pendingKind;
     const captures = pendingCaptures;
     pendingKind = undefined;
     pendingCaptures = [];
 
-    const closingFencePattern = new RegExp(`^${openingFence[0]}{${openingFence.length},}\\s*$`, "u");
-    const codeLines: string[] = [];
-    let closingIndex = index + 1;
-    while (closingIndex < lines.length && !closingFencePattern.test(lines[closingIndex]?.trim() ?? "")) {
-      codeLines.push(lines[closingIndex] ?? "");
-      closingIndex += 1;
-    }
-    if (closingIndex >= lines.length) {
-      if (kind !== undefined) {
-        throw new DocTestError();
-      }
-      break;
-    }
-    index = closingIndex;
-    if (kind !== undefined) {
-      if (language !== "bash" && language !== "sh" && language !== "shell") {
-        throw new DocTestError();
-      }
-      blocks.push({ kind, code: codeLines.join("\n"), captures });
+    const parsedFence = markedFence({
+      lines,
+      start: index,
+      openingFence,
+      language,
+      kind,
+      captures,
+    });
+    index = parsedFence.closingIndex;
+    if (parsedFence.block !== undefined) {
+      blocks.push(parsedFence.block);
     }
   }
 
@@ -139,11 +180,8 @@ export function extractDocTestBlocks(markdown: string): DocTestBlock[] {
 }
 
 /** Replaces each `<name>` placeholder with a value captured by an earlier block. */
-export function substituteCaptures(
-  code: string,
-  captures: ReadonlyMap<string, string>,
-): string {
-  return code.replace(/<([A-Za-z][A-Za-z0-9]*)>/gu, (_placeholder, name: string) => {
+export function substituteCaptures(code: string, captures: ReadonlyMap<string, string>): string {
+  return code.replaceAll(/<([A-Za-z]\w*)>/gu, (_placeholder, name: string) => {
     const value = captures.get(name);
     if (value === undefined) {
       throw new DocTestError();
@@ -160,8 +198,8 @@ function executeShellBlock(code: string, cwd: string, env: NodeJS.ProcessEnv): C
   );
   return {
     status: result.status,
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
+    stdout: result.stdout,
+    stderr: result.stderr,
     ...(result.error === undefined ? {} : { error: result.error }),
   };
 }
@@ -182,6 +220,56 @@ function captureValues(
   }
 }
 
+interface BlockExecutionContext {
+  readonly captures: Map<string, string>;
+  readonly cwd: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly execute: BlockExecutor;
+}
+
+interface BlockExecutionOptions {
+  readonly stopOnFailure: boolean;
+  readonly priorFailure?: DocTestError | undefined;
+}
+
+function executeBlock(
+  block: DocTestBlock,
+  context: BlockExecutionContext,
+): DocTestError | undefined {
+  try {
+    const result = context.execute(
+      substituteCaptures(block.code, context.captures),
+      context.cwd,
+      context.env,
+    );
+    if (result.error !== undefined || result.status !== 0) {
+      return new DocTestError(result.status ?? 1);
+    }
+    captureValues(block, result, context.captures);
+    return undefined;
+  } catch (error) {
+    return error instanceof DocTestError ? error : new DocTestError();
+  }
+}
+
+function executeBlocks(
+  blocks: readonly DocTestBlock[],
+  context: BlockExecutionContext,
+  options: BlockExecutionOptions,
+): DocTestError | undefined {
+  let failure = options.priorFailure;
+  for (const block of blocks) {
+    const blockFailure = executeBlock(block, context);
+    if (blockFailure !== undefined) {
+      failure ??= blockFailure;
+      if (options.stopOnFailure) {
+        break;
+      }
+    }
+  }
+  return failure;
+}
+
 /** Executes marked blocks sequentially and attempts every cleanup block after failures. */
 export function executeDocTestBlocks(
   markdown: string,
@@ -195,43 +283,59 @@ export function executeDocTestBlocks(
   const captures = new Map<string, string>();
   const env = options.env ?? process.env;
   const execute = options.execute ?? executeShellBlock;
-  let failure: DocTestError | undefined;
+  const context = { captures, cwd: options.cwd, env, execute };
+  const failure = executeBlocks(
+    blocks.filter(({ kind }) => kind === "run"),
+    context,
+    { stopOnFailure: true },
+  );
+  const finalFailure = executeBlocks(
+    blocks.filter(({ kind }) => kind === "cleanup"),
+    context,
+    { stopOnFailure: false, ...(failure === undefined ? {} : { priorFailure: failure }) },
+  );
 
-  for (const block of blocks.filter(({ kind }) => kind === "run")) {
-    try {
-      const result = execute(substituteCaptures(block.code, captures), options.cwd, env);
-      if (result.error !== undefined || result.status !== 0) {
-        throw new DocTestError(result.status ?? 1);
-      }
-      captureValues(block, result, captures);
-    } catch (error) {
-      failure = error instanceof DocTestError ? error : new DocTestError();
-      break;
-    }
-  }
-
-  for (const block of blocks.filter(({ kind }) => kind === "cleanup")) {
-    try {
-      const result = execute(substituteCaptures(block.code, captures), options.cwd, env);
-      if ((result.error !== undefined || result.status !== 0) && failure === undefined) {
-        failure = new DocTestError(result.status ?? 1);
-      }
-    } catch (error) {
-      if (failure === undefined) {
-        failure = error instanceof DocTestError ? error : new DocTestError();
-      }
-    }
-  }
-
-  if (failure !== undefined) {
-    throw failure;
+  if (finalFailure !== undefined) {
+    throw finalFailure;
   }
 }
 
 function shouldCopyPath(path: string): boolean {
-  const segments = relative(rootDirectory, path).split(sep);
-  return !segments.some((segment) => excludedDirectories.has(segment)) &&
-    !segments.some((segment) => segment === ".env" || (segment.startsWith(".env.") && segment !== ".env.example"));
+  const segments = path.split(sep);
+  return (
+    !segments.some((segment) => excludedDirectories.has(segment)) &&
+    !segments.some(
+      (segment) =>
+        segment === ".env" || (segment.startsWith(".env.") && segment !== ".env.example"),
+    )
+  );
+}
+
+async function copyWorktree(workingDirectory: string): Promise<void> {
+  const paths = execFileSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { cwd: rootDirectory, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 },
+  )
+    .split("\0")
+    .filter((path) => path.length > 0 && shouldCopyPath(path));
+
+  for (const path of paths) {
+    const sourcePath = join(rootDirectory, path);
+    const resolvedPath = await realpath(sourcePath).catch(() => {
+      throw new DocTestError();
+    });
+    if (!resolvedPath.startsWith(`${rootDirectory}${sep}`)) {
+      throw new DocTestError();
+    }
+    const sourceStats = await stat(resolvedPath);
+    const destinationPath = join(workingDirectory, path);
+    await mkdir(dirname(destinationPath), { recursive: true });
+    await copyFile(resolvedPath, destinationPath);
+    if ((sourceStats.mode & 0o111) !== 0) {
+      await chmod(destinationPath, sourceStats.mode & 0o777);
+    }
+  }
 }
 
 /** Runs quickstart documentation blocks from a temporary copy of the repository. */
@@ -242,16 +346,13 @@ export async function runQuickstartDocTests(): Promise<void> {
   await mkdir(workingDirectory, { recursive: true });
 
   try {
-    await cp(rootDirectory, workingDirectory, {
-      recursive: true,
-      filter: (source) => shouldCopyPath(resolve(source)),
-    });
+    await copyWorktree(workingDirectory);
     executeDocTestBlocks(markdown, {
       cwd: workingDirectory,
       env: {
         ...process.env,
         HARNESS_IMAGE: "harness:local",
-        COMPOSE_PROJECT_NAME: `harness-quickstart-${process.pid}-${randomUUID()}`,
+        COMPOSE_PROJECT_NAME: `harness-quickstart-${String(process.pid)}-${randomUUID()}`,
       },
     });
   } finally {
