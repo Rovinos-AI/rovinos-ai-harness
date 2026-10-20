@@ -74,6 +74,7 @@ describe("sentinel variants", () => {
     ["hex", (raw: string) => Buffer.from(raw).toString("hex")],
     ["HTML entities", htmlNumericEntities],
   ])("detects %s encodings of the original Unicode value", async (_name, encode) => {
+    // cspell:disable-next-line
     const raw = "ＡＢＣＤＥＦ";
     await expect(
       createGate(raw).check({ runId, text: `prefix ${encode(raw)} suffix` }),
@@ -82,6 +83,7 @@ describe("sentinel variants", () => {
 
   it("detects composed lowercase and whitespace/dash removal", async () => {
     await expect(
+      // cspell:disable-next-line
       createGate("Sensitive-Value").check({ runId, text: "safe sensitivevalue payload" }),
     ).resolves.toEqual({ ok: false, reason: "hit" });
   });
@@ -172,6 +174,7 @@ describe("sentinel variants", () => {
     const transformChain = fc.oneof(plaintextChain, digitChain, encodedChain);
     const rawCharacter = fc.constantFrom(
       ...Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"),
+      // cspell:disable-next-line
       ...Array.from("ＡＢＣａｂｃ"),
     );
     const affixCharacter = fc.constantFrom(...Array.from("abcdefghijklmnopqrstuvwxyz0123456789"));
