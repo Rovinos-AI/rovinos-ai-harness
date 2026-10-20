@@ -234,7 +234,7 @@ Owner task: `6.5`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.budget.kind` | enum: `steps`, `cost`, `wall_clock` | Required | `@harness/telemetry` |
+| `harness.budget.kind` | enum: `steps`, `cost`, `wall_clock`, `quota` | Required | `@harness/telemetry` |
 | `harness.budget.limit` | finite number | Required | `@harness/telemetry` |
 | `harness.budget.observed` | finite number | Required | `@harness/telemetry` |
 | `harness.event.seq` | integer | Required | `@harness/telemetry` |
@@ -252,6 +252,23 @@ Owner task: `6.5`.
 | `harness.checkpoint.seq` | integer | Required | `@harness/telemetry` |
 | `harness.event.seq` | integer | Required | `@harness/telemetry` |
 | `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
+| `harness.policy.version` | Code | Required | `@harness/telemetry` |
+| `harness.run.id` | Id | Required | `@harness/telemetry` |
+| `harness.span.id` | Code | Required | `@harness/telemetry` |
+| `harness.trace.id` | Code | Required | `@harness/telemetry` |
+
+### `harness.safe.input_wait`
+
+| Attribute | Type | Presence | Owning package |
+| --- | --- | --- | --- |
+| `harness.event.seq` | integer | Required | `@harness/telemetry` |
+| `harness.event.timestamp_ms` | integer | Required | `@harness/telemetry` |
+| `harness.input.action` | enum: `accept`, `decline`, `cancel` | Required | `@harness/telemetry` |
+| `harness.input.decided_by` | enum: `human`, `simulated`, `expiry`, `timeout`, `policy` | Required | `@harness/telemetry` |
+| `harness.input.mode` | enum: `form`, `url` | Required | `@harness/telemetry` |
+| `harness.input.round` | integer | Required | `@harness/telemetry` |
+| `harness.input.source` | enum: `mcp_mrtr`, `mcp_legacy`, `agent` | Required | `@harness/telemetry` |
+| `harness.input.wait_ms` | integer | Required | `@harness/telemetry` |
 | `harness.policy.version` | Code | Required | `@harness/telemetry` |
 | `harness.run.id` | Id | Required | `@harness/telemetry` |
 | `harness.span.id` | Code | Required | `@harness/telemetry` |

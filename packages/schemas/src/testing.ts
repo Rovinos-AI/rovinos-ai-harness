@@ -12,7 +12,14 @@ const envelope = { runId: id, seq: 0, ts: 1, v: 1, traceId, spanId, segmentId: i
 
 /** Synthetic valid examples used by event schema and classification tests. */
 export const eventSamples = [
-  { ...envelope, type: "run_created", configHash: sha256, policyVersion: "policy.v1", depth: 0 },
+  {
+    ...envelope,
+    type: "run_created",
+    configHash: sha256,
+    policyVersion: "policy.v1",
+    quotaRole: "worker",
+    depth: 0,
+  },
   { ...envelope, type: "run_input", input: "hello", inputKind: "initial" },
   { ...envelope, type: "run_status_changed", from: "pending", to: "running", reason: "started" },
   {
@@ -69,6 +76,37 @@ export const eventSamples = [
     decidedBy: "human",
     approverId: "cli.test",
     waitMs: 1,
+  },
+  {
+    ...envelope,
+    type: "input_requested",
+    requestId: id,
+    source: "mcp_mrtr",
+    serverId: "test.server",
+    callId: id,
+    round: 0,
+    mode: "form",
+    inputKey: "email",
+    message: "Provide an email address.",
+    schema: {
+      type: "object",
+      description: "Requested form",
+      properties: { email: { type: "string", format: "email" } },
+    },
+    requestState: { opaque: "state" },
+  },
+  {
+    ...envelope,
+    type: "input_resolved",
+    requestId: id,
+    source: "mcp_mrtr",
+    mode: "form",
+    round: 0,
+    action: "accept",
+    decidedBy: "human",
+    approverId: "cli.test",
+    waitMs: 1,
+    answer: { email: "person@example.test" },
   },
   {
     ...envelope,

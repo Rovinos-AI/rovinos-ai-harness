@@ -19,6 +19,7 @@ import {
 } from "@harness/context";
 import type { IdGenerator, ModelPort, RunContext, Summarizer } from "../ports.js";
 import type { RunRecorder } from "../recorder.js";
+import type { UsageLedgerDelta } from "@harness/store";
 import { COMPACTION_SPAN } from "../spans.js";
 
 const DEFAULT_KEEP_RECENT_GROUPS = 6;
@@ -161,6 +162,7 @@ export interface CompactionStepOptions {
   readonly sanitizeSummary: (text: string) => Promise<string>;
   readonly keepRecentGroups?: number;
   readonly signal?: AbortSignal;
+  readonly usageUpdatesForCost?: (costMicros: number | undefined) => readonly UsageLedgerDelta[];
 }
 
 function sourceGroups(
@@ -244,18 +246,21 @@ export async function compactionStep(options: CompactionStepOptions): Promise<Ev
   }
   return options.recorder.withStepSpan(COMPACTION_SPAN, {}, async () => {
     const tokenizedSummary = await options.sanitizeSummary(summary.text);
-    return options.recorder.record({
-      type: "context_compacted",
-      v: 1,
-      fromSeq: source.fromSeq,
-      toSeq: source.toSeq,
-      strategy: options.strategy.id,
-      strategyVersion: options.strategy.version,
-      summary: JsonValue.parse(tokenizedSummary),
-      inputTokens: summary.usage.inputTokens,
-      outputTokens: summary.usage.outputTokens,
-      ...(summary.usage.costMicros === undefined ? {} : { costMicros: summary.usage.costMicros }),
-    });
+    return options.recorder.record(
+      {
+        type: "context_compacted",
+        v: 1,
+        fromSeq: source.fromSeq,
+        toSeq: source.toSeq,
+        strategy: options.strategy.id,
+        strategyVersion: options.strategy.version,
+        summary: JsonValue.parse(tokenizedSummary),
+        inputTokens: summary.usage.inputTokens,
+        outputTokens: summary.usage.outputTokens,
+        ...(summary.usage.costMicros === undefined ? {} : { costMicros: summary.usage.costMicros }),
+      },
+      options.usageUpdatesForCost?.(summary.usage.costMicros),
+    );
   });
 }
 
@@ -280,6 +285,7 @@ export async function compactBeforeModelCall(options: {
   readonly deadlineTs?: number;
   readonly modelRef: ModelRef;
   readonly goal: JsonValue;
+  readonly usageUpdatesForCost?: (costMicros: number | undefined) => readonly UsageLedgerDelta[];
 }): Promise<void> {
   const compaction = options.compaction;
   if (compaction === undefined) {
@@ -302,6 +308,9 @@ export async function compactBeforeModelCall(options: {
     goal: typeof options.goal === "string" ? options.goal : JSON.stringify(options.goal),
     sanitizeSummary: compaction.sanitizeSummary,
     signal: options.signal,
+    ...(options.usageUpdatesForCost === undefined
+      ? {}
+      : { usageUpdatesForCost: options.usageUpdatesForCost }),
     ...(compaction.keepRecentGroups === undefined
       ? {}
       : { keepRecentGroups: compaction.keepRecentGroups }),

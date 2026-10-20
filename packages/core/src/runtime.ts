@@ -9,10 +9,8 @@ import {
 } from "./runtime-cancellation.js";
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
-import {
-  ApprovalAlreadyResolvedError,
-  resolveApproval as resolveApprovalEvent,
-} from "./approvals.js";
+import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
+import { withResumeWakeUp } from "./runtime-approval-wake.js";
 import type { ToolPort } from "./ports.js";
 import { LeaseLostError, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
@@ -26,11 +24,13 @@ import { createRuntimeToolPort } from "./runtime-tool-composition.js";
 import {
   createRuntimeContinuation,
   readChildBudgetAllocation,
+  readStoredQuotaIdentity,
   readStoredGoal,
   readContinuationHistory,
   startRun,
   type RunControl,
 } from "./runtime-runs.js";
+import { QuotaService } from "./quotas.js";
 import { setupRuntime } from "./runtime-setup.js";
 import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
@@ -46,6 +46,7 @@ export type {
   RuntimeConfig,
   RuntimeOverrides,
   RuntimeResumeOptions,
+  RuntimeRunHandle,
 } from "./runtime-config.js";
 
 class RunInputMissingError extends HarnessError {
@@ -299,8 +300,8 @@ function composeRuntime(
       ) {
         throw new ApprovalEditUnavailableError();
       }
-      try {
-        const resolved = await resolveApprovalEvent(
+      return withResumeWakeUp(options.overrides.queue, config.run.autoResume, runId, () =>
+        resolveApprovalEvent(
           store,
           runId,
           approvalId,
@@ -309,21 +310,8 @@ function composeRuntime(
           clock,
           tool,
           resolveOptions?.metadata,
-        );
-        if (options.overrides.queue !== undefined && config.run.autoResume) {
-          await options.overrides.queue.enqueue({ kind: "resume", runId });
-        }
-        return resolved;
-      } catch (error) {
-        if (
-          error instanceof ApprovalAlreadyResolvedError &&
-          options.overrides.queue !== undefined &&
-          config.run.autoResume
-        ) {
-          await options.overrides.queue.enqueue({ kind: "resume", runId });
-        }
-        throw error;
-      }
+        ),
+      );
     },
     close: () =>
       closeRuntimeResources({
@@ -343,6 +331,7 @@ function createRuntimeResume(
   runWithControl: RunControl,
 ): Runtime["resume"] {
   const { config, clock, ids, store, model, context, policy, scopes } = options;
+  const quotaService = new QuotaService(config.quotas ?? [], store, clock);
   return async (runId, resumeOptions: RuntimeResumeOptions = {}) => {
     const firstNewSeq = await store.head(runId);
     const childAllocation = await readChildBudgetAllocation(store, runId);
@@ -363,6 +352,7 @@ function createRuntimeResume(
         if (goal === undefined) {
           throw new RunInputMissingError();
         }
+        const quotaIdentity = await readStoredQuotaIdentity(store, runId);
         const composed = composeAbortSignals([
           signal,
           ...(resumeOptions.signal === undefined ? [] : [resumeOptions.signal]),
@@ -392,6 +382,8 @@ function createRuntimeResume(
               ? {}
               : { restoreOnResume: config.sandbox.restoreOnResume }),
             workspaceSnapshotter: options.workspaceSnapshotter,
+            quotaService,
+            quotaIdentity,
             ...(resumeOptions.onClaimed === undefined
               ? {}
               : { onClaimed: resumeOptions.onClaimed }),

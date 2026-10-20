@@ -37,6 +37,7 @@ export {
   countPiiBlobHit,
   countPiiDetectorDegraded,
   countPolicyDecision,
+  countQuotaRejection,
   countWorkerJob,
   METRIC_ALLOWLIST,
   recordWorkerQueueLag,

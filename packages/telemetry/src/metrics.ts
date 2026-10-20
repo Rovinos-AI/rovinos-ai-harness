@@ -67,6 +67,10 @@ interface ModelUsageAttributes extends Readonly<Record<string, CodeType>> {
   readonly "harness.model.provider": CodeType;
   readonly "harness.model.name": CodeType;
 }
+interface QuotaRejectionAttributes extends Readonly<Record<string, CodeType>> {
+  readonly "harness.quota.id": CodeType;
+}
+
 interface WorkerJobAttributes extends Readonly<Record<string, WorkerJobOutcome>> {
   readonly "harness.worker.jobs.outcome": WorkerJobOutcome;
 }
@@ -88,6 +92,7 @@ export const METRIC_ALLOWLIST = {
   "harness.model.tokens": ["harness.model.provider", "harness.model.name"],
   "harness.model.cost_micros": ["harness.model.provider", "harness.model.name"],
   "harness.policy.decisions": ["harness.policy.decision"],
+  "harness.quota.rejections": ["harness.quota.id"],
   "harness.pii.blob_hit": [],
   "harness.pii.detector_degraded": [],
   "harness.sentinel.scope_reduced": [],
@@ -111,6 +116,7 @@ let modelCostCounter: Counter<ModelUsageAttributes> | undefined;
 let modelCacheReadCounter: Counter<ModelUsageAttributes> | undefined;
 let modelCacheWriteCounter: Counter<ModelUsageAttributes> | undefined;
 let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
+let quotaRejectionsCounter: Counter<QuotaRejectionAttributes> | undefined;
 let workerJobsCounter: Counter<WorkerJobAttributes> | undefined;
 let workerQueueLagHistogram: Histogram<NoMetricAttributes> | undefined;
 
@@ -226,6 +232,23 @@ function getMcpDiscoveryFailedCounter(): Counter<NoMetricAttributes> {
     (meter, name) => meter.createCounter<NoMetricAttributes>(name),
   );
   return mcpDiscoveryFailedCounter;
+}
+
+function getQuotaRejectionsCounter(): Counter<QuotaRejectionAttributes> {
+  quotaRejectionsCounter ??= createCounter<QuotaRejectionAttributes>(
+    "harness.quota.rejections",
+    (meter, name) => meter.createCounter<QuotaRejectionAttributes>(name),
+  );
+  return quotaRejectionsCounter;
+}
+
+/** Counts one quota rejection using the configured quota's bounded code. */
+export function countQuotaRejection(quotaId: CodeType): void {
+  try {
+    getQuotaRejectionsCounter().add(1, { "harness.quota.id": Code.parse(quotaId) });
+  } catch {
+    return;
+  }
 }
 
 function getWorkerJobsCounter(): Counter<WorkerJobAttributes> {

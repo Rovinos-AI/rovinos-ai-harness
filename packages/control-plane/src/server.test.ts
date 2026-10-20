@@ -37,6 +37,16 @@ const contentFields = Object.entries(EVENT_FIELD_CLASS).flatMap(([type, fields])
 );
 
 function contentCanaryValue(type: EventType, field: string, canary: string): unknown {
+  if (type === "input_requested" && field === "schema") {
+    return {
+      type: "object",
+      description: canary,
+      properties: { value: { type: "string" } },
+    };
+  }
+  if (type === "input_requested" && field === "url") {
+    return `https://example.test/${encodeURIComponent(canary)}`;
+  }
   if (type === "model_request" && field === "messages") {
     return [{ role: "user", parts: [{ type: "text", text: canary }] }];
   }
@@ -48,6 +58,7 @@ function contentCanaryValue(type: EventType, field: string, canary: string): unk
 
 function eventsWithContentCanaries(runId: Id, canaries: readonly string[]): NewEvent[] {
   let canaryIndex = 0;
+  let inputUrlCanary: string | undefined;
   const events: NewEvent[] = [];
   for (const sample of eventSamples) {
     const event: Record<string, unknown> = { ...sample, runId, segmentId: runId };
@@ -59,10 +70,30 @@ function eventsWithContentCanaries(runId: Id, canaries: readonly string[]): NewE
       if (canary === undefined) {
         throw new Error("Missing generated content canary.");
       }
+      if (sample.type === "input_requested" && field === "url") {
+        inputUrlCanary = canary;
+        canaryIndex += 1;
+        continue;
+      }
       event[field] = contentCanaryValue(sample.type, field, canary);
       canaryIndex += 1;
     }
     events.push(EventSchema.parse(event));
+  }
+  if (inputUrlCanary !== undefined) {
+    const sample = eventSamples.find(({ type }) => type === "input_requested");
+    if (sample?.type !== "input_requested") {
+      throw new Error("Missing input-request event sample.");
+    }
+    const urlEvent: Record<string, unknown> = {
+      ...sample,
+      runId,
+      segmentId: runId,
+      mode: "url",
+      url: contentCanaryValue("input_requested", "url", inputUrlCanary),
+    };
+    Reflect.deleteProperty(urlEvent, "schema");
+    events.push(EventSchema.parse(urlEvent));
   }
   if (canaryIndex !== canaries.length) {
     throw new Error("Unused generated content canary.");
@@ -185,9 +216,11 @@ describe("control-plane inspection tools", () => {
 
     expect(tools.map(({ name }) => name).sort()).toEqual([
       "cancel_run",
+      "continue_run",
       "get_run",
       "list_runs",
       "resume_run",
+      "start_run",
     ]);
     expect(
       tools

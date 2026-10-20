@@ -6,6 +6,8 @@ export function delegatingStore(inner: EventStore): EventStore {
   return {
     append: (...args) => inner.append(...args),
     appendWithSnapshot: (...args) => inner.appendWithSnapshot(...args),
+    appendWithUsage: (...args) => inner.appendWithUsage(...args),
+    readUsageLedger: (...args) => inner.readUsageLedger(...args),
     claimRunExecution: (...args) => inner.claimRunExecution(...args),
     renewRunExecution: (...args) => inner.renewRunExecution(...args),
     releaseRunExecution: (...args) => inner.releaseRunExecution(...args),

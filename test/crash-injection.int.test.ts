@@ -83,7 +83,7 @@ interface Reference {
 
 interface AppendBoundary {
   readonly runId: Id;
-  readonly method: "append" | "appendWithSnapshot";
+  readonly method: "append" | "appendWithSnapshot" | "appendWithUsage";
   readonly eventTypes: readonly Event["type"][];
   readonly callIds: readonly Id[];
 }
@@ -294,6 +294,21 @@ class BoundaryRecordingStore implements EventStore {
       ),
     });
     return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot, leaseOwner);
+  }
+
+  appendWithUsage(...args: Parameters<EventStore["appendWithUsage"]>) {
+    const [forRun, events, expectedSeq, options] = args;
+    this.boundaries.push({
+      runId: forRun,
+      method: "appendWithUsage",
+      eventTypes: events.map(({ type }) => type),
+      callIds: [],
+    });
+    return this.inner.appendWithUsage(forRun, events, expectedSeq, options);
+  }
+
+  readUsageLedger(...args: Parameters<EventStore["readUsageLedger"]>) {
+    return this.inner.readUsageLedger(...args);
   }
 
   claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {
@@ -541,6 +556,14 @@ class PreIntentExecutionStore implements EventStore {
     leaseOwner?: Id,
   ): Promise<{ nextSeq: number }> {
     return this.inner.appendWithSnapshot(forRun, events, expectedSeq, snapshot, leaseOwner);
+  }
+
+  appendWithUsage(...args: Parameters<EventStore["appendWithUsage"]>) {
+    return this.inner.appendWithUsage(...args);
+  }
+
+  readUsageLedger(...args: Parameters<EventStore["readUsageLedger"]>) {
+    return this.inner.readUsageLedger(...args);
   }
 
   claimRunExecution(...args: Parameters<EventStore["claimRunExecution"]>) {

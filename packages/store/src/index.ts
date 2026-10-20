@@ -10,6 +10,7 @@ export {
   StoreMigrationError,
   StoreReadOnlyError,
   StoreUnavailableError,
+  UsageLimitExceededError,
 } from "./errors.js";
 export { AesGcmContentCodec } from "./aes-gcm-codec.js";
 export {
@@ -53,8 +54,14 @@ export {
   type ListRunsOptions,
   type RunSummary,
   sqliteStoreOptionsSchema,
+  UsageLedgerDeltaSchema,
+  UsageLedgerPeriodSchema,
+  UsageLedgerRowSchema,
   type SqliteStoreOptions,
   type SnapshotStoreOptions,
+  type UsageLedgerDelta,
+  type UsageLedgerPeriod,
+  type UsageLedgerRow,
   type WatchOptions,
   type WatchRunsOptions,
 } from "./types.js";

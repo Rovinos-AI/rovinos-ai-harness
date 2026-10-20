@@ -5,6 +5,7 @@ import {
   FakeClock,
   Id,
   Principal,
+  QuotasConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
   Sha256Hex,
@@ -24,7 +25,7 @@ import {
 } from "./continue.js";
 import { createRuntime } from "./runtime.js";
 import { FakeModelPort } from "./testing/fake-model.js";
-import type { ModelCompletion } from "./ports.js";
+import type { ModelCompletion, ModelPort } from "./ports.js";
 import { RunScopeRegistry } from "./subagent/scope.js";
 
 const traceId = "a".repeat(32);
@@ -91,7 +92,7 @@ async function seedRun(
 
 function runtimeOptions(
   store: InMemoryEventStore,
-  model: FakeModelPort,
+  model: ModelPort,
   run: Record<string, unknown> = {},
   scopes = new RunScopeRegistry(),
 ) {
@@ -117,6 +118,59 @@ async function readEvents(store: InMemoryEventStore, runId: Id): Promise<Event[]
 }
 
 describe("continueRun", () => {
+  it("persists the quota role across repeated continuations", async () => {
+    const store = new InMemoryEventStore();
+    const model = new FakeModelPort([
+      completedResponse("original answer"),
+      completedResponse("first continuation"),
+      completedResponse("second continuation"),
+    ]);
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        quotas: QuotasConfigSchema.parse([
+          { id: "analysts", match: { role: ["analyst"] }, maxRunsPerHour: 3 },
+        ]),
+      },
+      {
+        store,
+        transientVault: true,
+        clock: new FakeClock(1_000),
+        ids: new SequentialIdGenerator(),
+        model,
+      },
+    );
+
+    try {
+      const original = await runtime.run("original question", { role: "analyst" });
+      const originalId = original.events[0]?.runId;
+      if (originalId === undefined) {
+        throw new Error("Expected an original run.");
+      }
+      const first = await runtime.continueRun(originalId, {
+        goal: "first follow-up",
+      }).completion;
+      const firstId = first.events[0]?.runId;
+      if (firstId === undefined) {
+        throw new Error("Expected a first continuation.");
+      }
+      const second = await runtime.continueRun(firstId, {
+        goal: "second follow-up",
+      }).completion;
+
+      const created = [original, first, second].map(({ events }) => events[0]);
+      expect(created).toHaveLength(3);
+      expect(
+        created.map((event) => (event?.type === "run_created" ? event.quotaRole : undefined)),
+      ).toEqual(["analyst", "analyst", "analyst"]);
+      await expect(store.readUsageLedger("analysts", "hour", [0])).resolves.toMatchObject([
+        { runsStarted: 3 },
+      ]);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("continues a completed run without changing its log and retains token scope", async () => {
     const store = new InMemoryEventStore();
     const scopes = new RunScopeRegistry();
@@ -140,7 +194,13 @@ describe("continueRun", () => {
       const originalEvents = await readEvents(store, originalId);
       const token = await vault.put(originalId, Code.parse("email"), "synthetic@example.test");
 
-      const continued = await runtime.continueRun(originalId, { goal: "follow-up question" });
+      const continuationExecution = runtime.continueRun(
+        originalId,
+        { goal: "follow-up question" },
+        { requestedBy: Principal.parse("token.control_plane") },
+      );
+      await continuationExecution.started;
+      const continued = await continuationExecution.completion;
       const continuationId = continued.events[0]?.runId;
       if (continuationId === undefined) {
         throw new Error("Expected a continuation run.");
@@ -154,7 +214,7 @@ describe("continueRun", () => {
         type: "run_created",
         continuationOf: originalId,
         scopeId: originalId,
-        requestedBy: "cli.requester",
+        requestedBy: "token.control_plane",
       });
       expect(continuation.find((event) => event.type === "run_input")).toMatchObject({
         type: "run_input",
@@ -175,6 +235,70 @@ describe("continueRun", () => {
     }
   });
 
+  it("falls back to the root requester when continuing without an explicit requester", async () => {
+    const store = new InMemoryEventStore();
+    const configured = runtimeOptions(
+      store,
+      new FakeModelPort([
+        completedResponse("original answer"),
+        completedResponse("follow-up answer"),
+      ]),
+    );
+    const runtime = await createRuntime(configured.config, configured.overrides);
+    try {
+      const original = await runtime.run("original", {
+        requestedBy: Principal.parse("cli.root"),
+      });
+      const root = original.events[0];
+      if (root?.type !== "run_created") {
+        throw new Error("Expected an original run.");
+      }
+      const continuation = runtime.continueRun(root.runId, { goal: "follow-up" });
+      await continuation.started;
+      await continuation.completion;
+      const events = await readEvents(store, continuation.runId);
+
+      expect(events[0]).toMatchObject({ type: "run_created", requestedBy: "cli.root" });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("resolves continuation startup once its initial events are durable", async () => {
+    const store = new InMemoryEventStore();
+    let responseCount = 0;
+    let resolveContinuation: ((response: ModelCompletion) => void) | undefined;
+    const continuationResponse = new Promise<ModelCompletion>((resolve) => {
+      resolveContinuation = resolve;
+    });
+    const model: ModelPort = {
+      complete: () => {
+        responseCount += 1;
+        return responseCount === 1
+          ? Promise.resolve(completedResponse("original answer"))
+          : continuationResponse;
+      },
+    };
+    const configured = runtimeOptions(store, model);
+    const runtime = await createRuntime(configured.config, configured.overrides);
+    try {
+      const original = await runtime.run("original");
+      const root = original.events[0];
+      if (root?.type !== "run_created") {
+        throw new Error("Expected an original run.");
+      }
+      const continuation = runtime.continueRun(root.runId, { goal: "follow-up" });
+      await continuation.started;
+      expect(await store.head(continuation.runId)).toBeGreaterThan(0);
+      expect(responseCount).toBe(1);
+
+      resolveContinuation?.(completedResponse("follow-up answer"));
+      await expect(continuation.completion).resolves.toMatchObject({ status: "completed" });
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it.each(["running", "suspended", "cancelled", "failed"] as const)(
     "rejects a %s run without appending to it",
     async (status) => {
@@ -187,9 +311,9 @@ describe("continueRun", () => {
       );
       const head = await store.head(runId);
       try {
-        await expect(runtime.continueRun(runId, { goal: "follow-up" })).rejects.toBeInstanceOf(
-          RunNotTerminalError,
-        );
+        await expect(
+          runtime.continueRun(runId, { goal: "follow-up" }).completion,
+        ).rejects.toBeInstanceOf(RunNotTerminalError);
         expect(await store.head(runId)).toBe(head);
       } finally {
         await runtime.close();
@@ -208,9 +332,9 @@ describe("continueRun", () => {
     );
     const runtime = await createRuntime(runtimeOptionsValue.config, runtimeOptionsValue.overrides);
     try {
-      await expect(runtime.continueRun(runId, { goal: "follow-up" })).resolves.toMatchObject({
-        status: "completed",
-      });
+      const continuation = runtime.continueRun(runId, { goal: "follow-up" });
+      await continuation.started;
+      await expect(continuation.completion).resolves.toMatchObject({ status: "completed" });
     } finally {
       await runtime.close();
     }
@@ -230,9 +354,9 @@ describe("continueRun", () => {
         throw new Error("Expected an original run.");
       }
       const head = await store.head(originalId);
-      await expect(runtime.continueRun(originalId, { goal: "follow-up" })).rejects.toBeInstanceOf(
-        ContinuationChainTooLongError,
-      );
+      await expect(
+        runtime.continueRun(originalId, { goal: "follow-up" }).completion,
+      ).rejects.toBeInstanceOf(ContinuationChainTooLongError);
       expect(await store.head(originalId)).toBe(head);
     } finally {
       await runtime.close();
@@ -284,8 +408,13 @@ describe("continueRun", () => {
       if (originalId === undefined) {
         throw new Error("Expected an original run.");
       }
-      const first = await runtime.continueRun(originalId, { goal: "branch one" });
-      const second = await runtime.continueRun(originalId, { goal: "branch two" });
+      const firstExecution = runtime.continueRun(originalId, { goal: "branch one" });
+      const secondExecution = runtime.continueRun(originalId, { goal: "branch two" });
+      await Promise.all([firstExecution.started, secondExecution.started]);
+      const [first, second] = await Promise.all([
+        firstExecution.completion,
+        secondExecution.completion,
+      ]);
       const firstId = first.events[0]?.runId;
       const secondId = second.events[0]?.runId;
       if (firstId === undefined || secondId === undefined) {
@@ -328,7 +457,9 @@ describe("continueRun", () => {
     );
     const runtime = await createRuntime(configured.config, configured.overrides);
     try {
-      const continued = await runtime.continueRun(childId, { goal: "follow-up" });
+      const continuation = runtime.continueRun(childId, { goal: "follow-up" });
+      await continuation.started;
+      const continued = await continuation.completion;
       const continuationId = continued.events[0]?.runId;
       if (continuationId === undefined) {
         throw new Error("Expected a continuation run.");
@@ -367,7 +498,9 @@ describe("inherited continuation budgets", () => {
           throw new Error("Expected an original run.");
         }
 
-        const continued = await runtime.continueRun(originalId, { goal: "follow-up" });
+        const continuation = runtime.continueRun(originalId, { goal: "follow-up" });
+        await continuation.started;
+        const continued = await continuation.completion;
 
         expect(continued.status).toBe("failed");
         expect(model.requests).toHaveLength(1);
@@ -480,7 +613,9 @@ describe("continuation tracing", () => {
       if (sourceRoot?.type !== "run_created") {
         throw new Error("Expected a source root event.");
       }
-      await runtime.continueRun(sourceRoot.runId, { goal: "follow-up" });
+      const continuation = runtime.continueRun(sourceRoot.runId, { goal: "follow-up" });
+      await continuation.started;
+      await continuation.completion;
       await provider.forceFlush();
       const continuationSpan = getFinishedSpans().find(
         (span) =>

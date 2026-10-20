@@ -112,7 +112,14 @@ async function harness() {
       started: Promise.resolve(),
       completion: modelCall(),
     }),
-    continueRun: modelCall,
+    continueRun: () => {
+      const completion = modelCall();
+      return {
+        runId: Id.parse(runId),
+        started: completion.then(() => undefined),
+        completion,
+      };
+    },
     resume: modelCall,
     cancel: modelCall,
     resolveApproval: () => Promise.reject(new Error("Approval is not used by context tests.")),

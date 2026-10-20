@@ -95,6 +95,17 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             maxDepth: z.ZodDefault<z.ZodNumber>;
             maxChildren: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>>;
+        quotas: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            match: z.ZodObject<{
+                requestedBy: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                role: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            }, z.core.$strict>;
+            dailyCostUsd: z.ZodOptional<z.ZodNumber>;
+            monthlyCostUsd: z.ZodOptional<z.ZodNumber>;
+            maxConcurrentRuns: z.ZodOptional<z.ZodNumber>;
+            maxRunsPerHour: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strict>>>;
         store: z.ZodPrefault<z.ZodObject<{
             dialect: z.ZodOptional<z.ZodEnum<{
                 postgres: "postgres";
@@ -218,6 +229,17 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             toolPrefix: z.ZodOptional<z.ZodString>;
             idempotentTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
             useAnnotations: z.ZodDefault<z.ZodBoolean>;
+            elicitation: z.ZodPrefault<z.ZodObject<{
+                enabled: z.ZodDefault<z.ZodBoolean>;
+                modes: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+                    form: "form";
+                    url: "url";
+                }>>>;
+                maxRounds: z.ZodDefault<z.ZodNumber>;
+                maxPerRun: z.ZodDefault<z.ZodNumber>;
+                maxRequestStateBytes: z.ZodDefault<z.ZodNumber>;
+                legacyLiveTimeoutMs: z.ZodDefault<z.ZodNumber>;
+            }, z.core.$strict>>;
             timeouts: z.ZodPrefault<z.ZodObject<{
                 connectMs: z.ZodDefault<z.ZodNumber>;
                 callMs: z.ZodDefault<z.ZodNumber>;
@@ -252,6 +274,14 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             trust: "external" | "internal";
             propagateTrace: boolean;
             useAnnotations: boolean;
+            elicitation: {
+                enabled: boolean;
+                modes: ("form" | "url")[];
+                maxRounds: number;
+                maxPerRun: number;
+                maxRequestStateBytes: number;
+                legacyLiveTimeoutMs: number;
+            };
             timeouts: {
                 connectMs: number;
                 callMs: number;
@@ -287,6 +317,14 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             trust: "external" | "internal";
             propagateTrace: boolean;
             useAnnotations: boolean;
+            elicitation: {
+                enabled: boolean;
+                modes: ("form" | "url")[];
+                maxRounds: number;
+                maxPerRun: number;
+                maxRequestStateBytes: number;
+                legacyLiveTimeoutMs: number;
+            };
             timeouts: {
                 connectMs: number;
                 callMs: number;
@@ -414,8 +452,19 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             restoreOnResume: z.ZodOptional<z.ZodBoolean>;
             snapshotEncryption: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strict>>;
+        elicitation: z.ZodPrefault<z.ZodObject<{
+            channels: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+                app: "app";
+                cli: "cli";
+                control_plane: "control_plane";
+            }>>>;
+            urlAllowHosts: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            requireHttps: z.ZodDefault<z.ZodBoolean>;
+            expiresAfterMs: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strict>>;
         controlPlane: z.ZodOptional<z.ZodDefault<z.ZodObject<{
             allowReveal: z.ZodDefault<z.ZodBoolean>;
+            allowAgentStartedRuns: z.ZodDefault<z.ZodBoolean>;
             auth: z.ZodDefault<z.ZodObject<{
                 tokens: z.ZodDefault<z.ZodArray<z.ZodObject<{
                     id: z.ZodString;
@@ -689,6 +738,39 @@ export declare const RunViewSchema: z.ZodObject<{
         policyVersion: z.ZodString;
     }, z.core.$strict>, z.ZodObject<{
         kind: z.ZodEnum<{
+            input_wait: "input_wait";
+        }>;
+        source: z.ZodEnum<{
+            agent: "agent";
+            mcp_legacy: "mcp_legacy";
+            mcp_mrtr: "mcp_mrtr";
+        }>;
+        mode: z.ZodEnum<{
+            form: "form";
+            url: "url";
+        }>;
+        round: z.ZodNumber;
+        action: z.ZodEnum<{
+            accept: "accept";
+            cancel: "cancel";
+            decline: "decline";
+        }>;
+        decidedBy: z.ZodEnum<{
+            expiry: "expiry";
+            human: "human";
+            policy: "policy";
+            simulated: "simulated";
+            timeout: "timeout";
+        }>;
+        waitMs: z.ZodNumber;
+        runId: z.ZodString;
+        seq: z.ZodNumber;
+        ts: z.ZodNumber;
+        traceId: z.ZodString;
+        spanId: z.ZodString;
+        policyVersion: z.ZodString;
+    }, z.core.$strict>, z.ZodObject<{
+        kind: z.ZodEnum<{
             checkpoint: "checkpoint";
         }>;
         atSeq: z.ZodNumber;
@@ -762,6 +844,7 @@ export declare const RunViewSchema: z.ZodObject<{
         }>;
         budget: z.ZodEnum<{
             cost: "cost";
+            quota: "quota";
             steps: "steps";
             wall_clock: "wall_clock";
         }>;

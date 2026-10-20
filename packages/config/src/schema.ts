@@ -3,10 +3,12 @@ import { z } from "zod";
 import {
   ModelsConfigSchema,
   ControlPlaneConfigSchema,
+  ElicitationConfigSchema,
   CliConfigSchema,
   KeysConfigSchema,
   PiiConfigSchema,
   PolicyConfigSchema,
+  QuotasConfigSchema,
   RunConfigSchema,
   RolesConfigSchema,
   SandboxConfigSchema,
@@ -21,6 +23,7 @@ export const HarnessConfigSchema = z
   .object({
     run: RunConfigSchema,
     roles: RolesConfigSchema,
+    quotas: QuotasConfigSchema,
     store: StoreConfigSchema,
     keys: KeysConfigSchema.optional(),
     models: ModelsConfigSchema,
@@ -30,6 +33,7 @@ export const HarnessConfigSchema = z
     vault: VaultConfigSchema,
     telemetry: TelemetryConfigSchema,
     sandbox: SandboxConfigSchema,
+    elicitation: ElicitationConfigSchema,
     controlPlane: ControlPlaneConfigSchema.optional(),
     cli: CliConfigSchema.optional(),
   })
