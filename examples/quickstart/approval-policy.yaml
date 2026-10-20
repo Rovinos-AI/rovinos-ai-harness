@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Synthetic example only; containsRealData: false.
+version: 1
+defaultDecision: deny
+rules:
+  - id: ask_sample_write
+    description: Require human approval for the quickstart file write
+    match:
+      tools: [fs.write]
+    decision: ask
+    reason: sample_review

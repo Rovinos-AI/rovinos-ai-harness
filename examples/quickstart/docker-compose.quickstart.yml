@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+services:
+  harness:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: ${HARNESS_IMAGE:-harness:quickstart}
+    command: ["serve", "--http", "--port", "3000"]
+    environment:
+      HARNESS_CONFIG: /run/harness/harness.config.yaml
+      HARNESS_CONTROL_TOKEN: null
+      HARNESS_CONTROL_TOKEN_FILE: /run/secrets/control_plane_token
+      HARNESS_DATA_DIR: /var/lib/harness/event-store
+      HARNESS_KEY: ${HARNESS_KEY:-}
+      HARNESS_VAULT_DATA_DIR: /var/lib/harness/vault
+      NODE_ENV: production
+    volumes:
+      - quickstart-event-store:/var/lib/harness/event-store
+      - quickstart-vault:/var/lib/harness/vault
+      - ./examples/quickstart:/app/examples/quickstart:ro
+      - ./examples/quickstart/harness.config.yaml:/run/harness/harness.config.yaml:ro
+      - ./examples/quickstart/approval-policy.yaml:/run/harness/approval-policy.yaml:ro
+    secrets:
+      - control_plane_token
+    ports:
+      - "127.0.0.1:3000:3000"
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2
+    restart: unless-stopped
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    healthcheck:
+      test: ["CMD", "node", "dist/bin.js", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+    networks:
+      - harness-internal
+networks:
+  harness-internal:
+    internal: true
+volumes:
+  quickstart-event-store: {}
+  quickstart-vault: {}
+secrets:
+  control_plane_token:
+    file: ${HARNESS_CONTROL_TOKEN_FILE:-./.env.control-plane-token}

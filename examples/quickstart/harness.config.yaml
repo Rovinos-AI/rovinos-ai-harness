@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# Synthetic example only; containsRealData: false.
+keys:
+  currentKeyId: quickstart
+  keys:
+    - id: quickstart
+      secret: env:HARNESS_KEY
+policy:
+  file: /run/harness/approval-policy.yaml
+controlPlane:
+  auth:
+    tokens:
+      - id: quickstart
+        secret: file:/run/secrets/control_plane_token
+        scopes: [admin]
+  listen:
+    host: 0.0.0.0

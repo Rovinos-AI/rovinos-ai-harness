@@ -118,9 +118,10 @@ exceeded, and `1` means the run failed.
 
 ## `harness resume`
 
-`harness resume <runId>` resumes a suspended or interrupted run from its durable event log and latest
-checkpoint. The human and JSON output and exit codes match `harness run`. Resolve a pending approval
-through the approval API before resuming.
+`harness resume <runId> [--fake-model <script.json>]` resumes a suspended or interrupted run from its
+durable event log and latest checkpoint. The human and JSON output and exit codes match `harness run`.
+Resolve a pending approval through the approval API before resuming. `--fake-model` supplies scripted
+completions for an offline resume; its file uses the same format as `harness run --fake-model`.
 
 ## `harness continue`
 

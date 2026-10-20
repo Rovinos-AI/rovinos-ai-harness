@@ -1527,7 +1527,9 @@ describe("resume", () => {
       throw new Error("The run id is not available.");
     }
     current.sentinelProbe.enabled = true;
-    const result = await invokeCli(["--json", "resume", runId]);
+    const fakeModelPath = join(current.directory, "resume-model.json");
+    await writeFile(fakeModelPath, '[{"content":"completed"}]', "utf8");
+    const result = await invokeCli(["--json", "resume", runId, "--fake-model", fakeModelPath]);
     expect(result.code).toBe(ExitCode.ok);
     expect(jsonResult(RunResultSchema, result.stdout).status).toBe("completed");
     expect(current.callsAfterApproval).toEqual([ASK_TOOL]);
