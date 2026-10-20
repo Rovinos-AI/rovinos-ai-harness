@@ -545,6 +545,6 @@ describe("RoutingModelGateway", () => {
         dependencies,
         routing({ default: [{ provider: "missing", model: "model" }] }),
       ),
-    ).toThrowError(RoutingProviderUnknownError);
+    ).toThrow(RoutingProviderUnknownError);
   });
 });

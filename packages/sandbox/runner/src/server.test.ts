@@ -199,7 +199,7 @@ describe("runner HTTP request handler", () => {
     const serverUid = process.getuid?.() ?? 0;
     const serverGid = process.getgid?.() ?? 0;
 
-    expect(() => createRunnerServer(makeOptions({ executionUid: serverUid }))).toThrowError(
+    expect(() => createRunnerServer(makeOptions({ executionUid: serverUid }))).toThrow(
       RunnerConfigurationError,
     );
     expect(() => createRunnerServer(makeOptions({ executionGid: serverGid }))).not.toThrow();

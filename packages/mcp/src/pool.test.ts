@@ -72,7 +72,7 @@ describe("McpPool", () => {
       resolveSecret: () => Promise.reject(new Error("not used")),
     });
 
-    expect(() => pool.connection("unknown")).toThrowError("mcp_server_not_found");
+    expect(() => pool.connection("unknown")).toThrow("mcp_server_not_found");
   });
 
   it("creates per-server doctor results with only safe state and identifiers", async () => {

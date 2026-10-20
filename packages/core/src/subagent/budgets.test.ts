@@ -55,7 +55,7 @@ describe("deriveChildBudgets", () => {
   it("throws budget_exceeded when the parent has no steps left", () => {
     expect(() =>
       deriveChildBudgets(parentState({ steps: 10 }), parentBudgets, undefined, 100),
-    ).toThrowError(ChildBudgetExceededError);
+    ).toThrow(ChildBudgetExceededError);
   });
 
   it("throws budget_exceeded when cost or the wall-clock deadline is exhausted", () => {
@@ -66,8 +66,8 @@ describe("deriveChildBudgets", () => {
         undefined,
         100,
       ),
-    ).toThrowError(ChildBudgetExceededError);
-    expect(() => deriveChildBudgets(parentState(), parentBudgets, undefined, 1_100)).toThrowError(
+    ).toThrow(ChildBudgetExceededError);
+    expect(() => deriveChildBudgets(parentState(), parentBudgets, undefined, 1_100)).toThrow(
       ChildBudgetExceededError,
     );
   });
