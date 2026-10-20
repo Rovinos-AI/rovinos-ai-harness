@@ -2,9 +2,10 @@
 import { HarnessError, ServeResultSchema } from "@harness/schemas";
 import type { ControlPlaneOperations } from "@harness/control-plane";
 import type { Runtime, ToolPort } from "@harness/core";
+import type { HarnessConfig } from "@harness/config";
 import type { RunQueue } from "@harness/store";
 import { z } from "zod";
-import type { CommandModule } from "./command.js";
+import type { CliContext, CommandModule } from "./command.js";
 import { createCommandRuntime } from "./command.js";
 
 type ServeErrorCode = "serve_options_invalid" | "serve_port_invalid" | "stdio_json_unsupported";
@@ -40,22 +41,11 @@ export const serveCommand: CommandModule = {
           const mode = parseServeOptions(options, program.opts<{ json?: boolean }>().json === true);
 
           const config = await context.loadConfig();
-          const tool = await context.createToolPort?.(config);
-          let queue: RunQueue;
-          if (context.openRunQueue !== undefined) {
-            queue = await context.openRunQueue(config);
-          } else {
-            const { openConfiguredRunQueue } = await import("@harness/core");
-            queue = await openConfiguredRunQueue(config, {
-              clock: context.clock,
-              ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
-              ...(context.secretResolver === undefined
-                ? {}
-                : { secretResolver: context.secretResolver }),
-            });
-          }
+          const queue = await openRunQueue(context, config);
+          let tool: ToolPort | undefined;
           let runtime: Runtime;
           try {
+            tool = await context.createToolPort?.(config);
             runtime = await createCommandRuntime(context, config, {
               ...(tool === undefined ? {} : { tool }),
               queue,
@@ -68,7 +58,7 @@ export const serveCommand: CommandModule = {
           try {
             const { startControlPlaneHttp, startControlPlaneStdio } =
               await import("@harness/control-plane");
-            const operations = createControlPlaneOperations(runtime, tool);
+            const operations = createControlPlaneOperations(runtime);
             const controlPlaneOptions = {
               ...(config.controlPlane === undefined ? {} : { controlPlane: config.controlPlane }),
               runQueue: queue,
@@ -96,20 +86,42 @@ export const serveCommand: CommandModule = {
               await waitForShutdown(true);
             }
           } finally {
-            try {
-              await closeServer?.();
-            } finally {
-              try {
-                await runtime.close();
-              } finally {
-                await queue.close();
-              }
-            }
+            await closeServeResources(closeServer, runtime, queue);
           }
         },
       );
   },
 };
+
+async function openRunQueue(context: CliContext, config: HarnessConfig): Promise<RunQueue> {
+  if (context.openRunQueue !== undefined) {
+    return context.openRunQueue(config);
+  }
+  const { openConfiguredRunQueue } = await import("@harness/core");
+  return openConfiguredRunQueue(config, {
+    clock: context.clock,
+    ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
+    ...(context.secretResolver === undefined
+      ? {}
+      : { secretResolver: context.secretResolver }),
+  });
+}
+
+async function closeServeResources(
+  closeServer: (() => Promise<void>) | undefined,
+  runtime: Runtime,
+  queue: RunQueue,
+): Promise<void> {
+  try {
+    await closeServer?.();
+  } finally {
+    try {
+      await runtime.close();
+    } finally {
+      await queue.close();
+    }
+  }
+}
 
 function parseServeOptions(
   options: { readonly stdio?: boolean; readonly http?: boolean; readonly port?: string },
@@ -132,10 +144,7 @@ function parseServeOptions(
   return { http, port: parsedPort.data };
 }
 
-function createControlPlaneOperations(
-  runtime: Runtime,
-  tool: ToolPort | undefined,
-): ControlPlaneOperations {
+function createControlPlaneOperations(runtime: Runtime): ControlPlaneOperations {
   return {
     resumeRun: (runId, signal, onClaimed) => runtime.resume(runId, { signal, onClaimed }),
     cancelRun: (runId) => runtime.cancel(runId),

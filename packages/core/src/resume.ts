@@ -137,11 +137,8 @@ async function readResumeHistory(options: ResumeRunOptions): Promise<ResumeHisto
     await restoreRunScope(options.store, options.runId, events, options.scopes);
   }
   const state = foldRunState(events);
-  if (state.status === "completed" || state.status === "failed" || state.status === "cancelled") {
+  if (isTerminalRunState(state)) {
     throw new RunAlreadyTerminalError();
-  }
-  if (state.status !== "pending" && state.status !== "running" && state.status !== "suspended") {
-    throw new RunNotResumableError();
   }
   if (state.nextSeq !== head) {
     throw new ResumeConflictError();

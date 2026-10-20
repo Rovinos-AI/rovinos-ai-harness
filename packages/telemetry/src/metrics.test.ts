@@ -208,6 +208,7 @@ describe("countDroppedTelemetry", () => {
       "harness.telemetry.dropped.reason": dropReasons,
       "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
       "harness.policy.decision": POLICY_DECISIONS,
+      "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
     });
     expect(
       TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.telemetry.dropped.reason"].length,
@@ -238,8 +239,7 @@ describe("countDroppedTelemetry", () => {
     );
     expectAddCallsAreAllowlisted("harness.worker.jobs");
     expect(createHistogram).toHaveBeenCalledWith("harness.worker.queue_lag_ms");
-    expect(record).toHaveBeenCalledOnce();
-    expect(record).toHaveBeenCalledWith(25);
+    expect(record).toHaveBeenCalledExactlyOnceWith(25);
     expect(METRIC_ALLOWLIST["harness.worker.queue_lag_ms"]).toEqual([]);
   });
 

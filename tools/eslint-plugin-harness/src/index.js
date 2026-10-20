@@ -250,7 +250,8 @@ const createMetricRegistryOnly = (context) => {
         attributesTypeName !== "TelemetryDropAttributes" &&
         attributesTypeName !== "HostAppRejectedAttributes" &&
         attributesTypeName !== "PolicyDecisionAttributes" &&
-        attributesTypeName !== "ModelUsageAttributes"
+        attributesTypeName !== "ModelUsageAttributes" &&
+        attributesTypeName !== "WorkerJobAttributes"
       ) {
         context.report({ node, messageId: "forbidden" });
       }

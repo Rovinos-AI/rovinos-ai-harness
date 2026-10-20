@@ -80,7 +80,7 @@ class FakeQueue implements RunQueue {
 function fakeIds() {
   let nextId = 10;
   return {
-    next: () => `${nextId++}`.padStart(26, "0"),
+    next: () => String(nextId++).padStart(26, "0"),
   };
 }
 
@@ -93,13 +93,14 @@ afterEach(() => {
 describe("Worker", () => {
   it("executes and completes a queued start job", async () => {
     const queue = new FakeQueue();
-    let worker: Worker | undefined;
-    const execute = vi.fn(async (claimed: RunQueueJob) => {
+    const control: { worker?: Worker } = {};
+    const execute = vi.fn((claimed: RunQueueJob) => {
       expect(claimed.kind).toBe("start");
-      worker?.stop();
-      return { status: "completed" as const };
+      control.worker?.stop();
+      return Promise.resolve({ status: "completed" as const });
     });
-    worker = new Worker({ queue, ids: fakeIds(), clock: fakeClock, execute });
+    const worker = new Worker({ queue, ids: fakeIds(), clock: fakeClock, execute });
+    control.worker = worker;
 
     await worker.run();
 
@@ -116,7 +117,7 @@ describe("Worker", () => {
       job("continue", "00000000000000000000000004", "00000000000000000000000006"),
     ];
     const queue = new FakeQueue(jobs);
-    let worker: Worker | undefined;
+    const control: { worker?: Worker } = {};
     let active = 0;
     let peak = 0;
     let completed = 0;
@@ -138,11 +139,11 @@ describe("Worker", () => {
       active -= 1;
       completed += 1;
       if (completed === 3) {
-        worker?.stop();
+        control.worker?.stop();
       }
       return { status: "completed" as const };
     };
-    worker = new Worker({
+    const worker = new Worker({
       queue,
       ids: fakeIds(),
       clock: fakeClock,
@@ -150,6 +151,7 @@ describe("Worker", () => {
       concurrency: 2,
       pollIntervalMs: 1,
     });
+    control.worker = worker;
     const running = worker.run();
 
     await started;
@@ -164,7 +166,7 @@ describe("Worker", () => {
   it("aborts a leased run and does not complete it after heartbeat loss", async () => {
     const queue = new FakeQueue();
     queue.heartbeatResult = false;
-    let worker: Worker | undefined;
+    const control: { worker?: Worker } = {};
     const execute = vi.fn(
       (_claimed: RunQueueJob, signal: AbortSignal) =>
         new Promise<{ status: "running" }>((resolve) => {
@@ -172,14 +174,14 @@ describe("Worker", () => {
             "abort",
             () => {
               expect(signal.reason).toBe("lease_lost");
-              worker?.stop();
+              control.worker?.stop();
               resolve({ status: "running" });
             },
             { once: true },
           );
         }),
     );
-    worker = new Worker({
+    const worker = new Worker({
       queue,
       ids: fakeIds(),
       clock: fakeClock,
@@ -187,6 +189,7 @@ describe("Worker", () => {
       leaseMs: 3,
       pollIntervalMs: 1,
     });
+    control.worker = worker;
 
     await worker.run();
 
@@ -197,17 +200,20 @@ describe("Worker", () => {
 
   it("releases a suspended run back to the queue on shutdown", async () => {
     const queue = new FakeQueue();
-    let worker: Worker | undefined;
+    const control: { worker?: Worker } = {};
     const execute = (_claimed: RunQueueJob, signal: AbortSignal) =>
       new Promise<{ status: "suspended" }>((resolve) => {
         signal.addEventListener(
           "abort",
-          () => resolve({ status: "suspended" }),
+          () => {
+            resolve({ status: "suspended" });
+          },
           { once: true },
         );
-        worker?.stop();
+        control.worker?.stop();
       });
-    worker = new Worker({ queue, ids: fakeIds(), clock: fakeClock, execute });
+    const worker = new Worker({ queue, ids: fakeIds(), clock: fakeClock, execute });
+    control.worker = worker;
 
     await worker.run();
 
@@ -218,12 +224,12 @@ describe("Worker", () => {
 
   it("reports only the stable error code when a job fails", async () => {
     const queue = new FakeQueue();
-    let worker: Worker | undefined;
-    queue.onFail = () => worker?.stop();
-    const execute = async () => {
-      throw Object.assign(new Error("synthetic sensitive message"), { code: "model.failed" });
-    };
-    worker = new Worker({ queue, ids: fakeIds(), clock: fakeClock, execute });
+    const control: { worker?: Worker } = {};
+    queue.onFail = () => control.worker?.stop();
+    const execute = () =>
+      Promise.reject(Object.assign(new Error("synthetic sensitive message"), { code: "model.failed" }));
+    const worker = new Worker({ queue, ids: fakeIds(), clock: fakeClock, execute });
+    control.worker = worker;
 
     await worker.run();
 
@@ -232,14 +238,18 @@ describe("Worker", () => {
 
   it("rejects invalid limits and a second run loop", async () => {
     const queue = new FakeQueue();
-    expect(
-      () => new Worker({ queue, ids: fakeIds(), clock: fakeClock, execute: vi.fn(), concurrency: 0 }),
-    ).toThrowError(expect.objectContaining({ code: "worker_options_invalid" }));
+    let invalidOptionsError: unknown;
+    try {
+      new Worker({ queue, ids: fakeIds(), clock: fakeClock, execute: vi.fn(), concurrency: 0 });
+    } catch (error: unknown) {
+      invalidOptionsError = error;
+    }
+    expect(invalidOptionsError).toMatchObject({ code: "worker_options_invalid" });
     const worker = new Worker({
       queue,
       ids: fakeIds(),
       clock: fakeClock,
-      execute: async () => ({ status: "completed" }),
+      execute: () => Promise.resolve({ status: "completed" }),
     });
     const running = worker.run();
     await expect(worker.run()).rejects.toMatchObject({ code: "worker_already_running" });

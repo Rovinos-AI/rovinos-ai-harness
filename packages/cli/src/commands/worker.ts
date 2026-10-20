@@ -18,7 +18,12 @@ class WorkerCommandError extends HarnessError {
   }
 }
 
-type WorkerRuntime = Pick<Runtime, "ids" | "clock" | "resume" | "close">;
+type WorkerRuntime = Pick<Runtime, "ids" | "clock" | "close"> & {
+  resume(
+    runId: Parameters<Runtime["resume"]>[0],
+    options: Parameters<Runtime["resume"]>[1],
+  ): Promise<Pick<Awaited<ReturnType<Runtime["resume"]>>, "status">>;
+};
 
 interface WorkerProcessLike {
   once(signal: "SIGINT" | "SIGTERM", listener: () => void): unknown;
@@ -89,7 +94,9 @@ export function createWorkerCommand(
               concurrency: concurrency.data,
               execute: (job, signal) => runtime.resume(job.runId, { signal }),
             });
-            stop = (): void => worker.stop();
+            stop = (): void => {
+              worker.stop();
+            };
             processLike.once("SIGTERM", stop);
             processLike.once("SIGINT", stop);
             if (program.opts<{ json?: boolean }>().json === true) {

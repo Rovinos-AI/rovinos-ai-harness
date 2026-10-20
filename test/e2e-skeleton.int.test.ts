@@ -1552,20 +1552,21 @@ describe("resume", () => {
           current.argsAfterApproval,
         ),
       });
-      let worker: Worker | undefined;
-      worker = new Worker({
+      const control: { worker?: Worker } = {};
+      const worker = new Worker({
         queue,
         ids: current.ids,
         clock: current.clock,
         execute: async (job, signal) => {
           const resumed = await runtime?.resume(job.runId, { signal });
-          worker?.stop();
+          control.worker?.stop();
           if (resumed === undefined) {
             throw new Error("The worker runtime was not initialized.");
           }
           return resumed;
         },
       });
+      control.worker = worker;
       await worker.run();
       expect(await queue.claim("worker.verify", 1, 30_000)).toEqual([]);
     } finally {

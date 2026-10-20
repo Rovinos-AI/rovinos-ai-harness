@@ -21,16 +21,16 @@ const job: RunQueueJob = {
   updatedAt: 0,
 };
 
-function fakeQueue(): RunQueue {
+function fakeQueue(close = vi.fn(() => Promise.resolve())): RunQueue {
   return {
     enqueue: vi.fn(() => Promise.resolve(job)),
     claim: vi.fn(() => Promise.resolve([])),
     heartbeat: vi.fn(() => Promise.resolve(true)),
     complete: vi.fn(() => Promise.resolve(true)),
-    fail: vi.fn(() => Promise.resolve("retry")),
+    fail: vi.fn(() => Promise.resolve("retry" as const)),
     release: vi.fn(() => Promise.resolve(true)),
     getDeadLetter: vi.fn(() => Promise.resolve(undefined)),
-    close: vi.fn(() => Promise.resolve()),
+    close,
   };
 }
 
@@ -48,14 +48,14 @@ function createContext() {
   return { context, stdout, stderr };
 }
 
-function dependencies(queue: RunQueue): WorkerCommandDependencies {
+function dependencies(queue: RunQueue, removeListener = vi.fn()): WorkerCommandDependencies {
   return {
     openQueue: () => Promise.resolve(queue),
     createRuntime: () =>
       Promise.resolve({
         ids: { next: () => "00000000000000000000000003" },
         clock: { now: () => 100 },
-        resume: vi.fn(() => Promise.resolve({ status: "completed" })),
+        resume: vi.fn(() => Promise.resolve({ status: "completed" as const })),
         close: vi.fn(() => Promise.resolve()),
       }),
     processLike: {
@@ -64,7 +64,7 @@ function dependencies(queue: RunQueue): WorkerCommandDependencies {
           listener();
         }
       },
-      removeListener: vi.fn(),
+      removeListener,
     },
   };
 }
@@ -72,8 +72,10 @@ function dependencies(queue: RunQueue): WorkerCommandDependencies {
 describe("harness worker", () => {
   it("starts the worker and prints one JSON document", async () => {
     const { context, stdout, stderr } = createContext();
-    const queue = fakeQueue();
-    const deps = dependencies(queue);
+    const closeQueue = vi.fn(() => Promise.resolve());
+    const queue = fakeQueue(closeQueue);
+    const removeListener = vi.fn();
+    const deps = dependencies(queue, removeListener);
 
     const exitCode = await main(["--json", "worker", "--concurrency", "2"], context, [
       createWorkerCommand(deps),
@@ -82,8 +84,8 @@ describe("harness worker", () => {
     expect(exitCode).toBe(ExitCode.ok);
     expect(stdout).toEqual(['{"status":"worker_started"}\n']);
     expect(stderr).toEqual([]);
-    expect(queue.close).toHaveBeenCalledOnce();
-    expect(deps.processLike?.removeListener).toHaveBeenCalledTimes(2);
+    expect(closeQueue).toHaveBeenCalledOnce();
+    expect(removeListener).toHaveBeenCalledTimes(2);
   });
 
   it("rejects invalid concurrency before opening runtime resources", async () => {
@@ -102,8 +104,11 @@ describe("harness worker", () => {
 
   it("closes the queue when runtime construction fails", async () => {
     const { context, stdout, stderr } = createContext();
-    const queue = fakeQueue();
-    const createRuntime = vi.fn(() => Promise.reject(Object.assign(new Error(), { code: "runtime_failed" })));
+    const closeQueue = vi.fn(() => Promise.resolve());
+    const queue = fakeQueue(closeQueue);
+    const createRuntime = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("Runtime creation failed."), { code: "runtime_failed" })),
+    );
 
     const exitCode = await main(
       ["worker"],
@@ -114,6 +119,6 @@ describe("harness worker", () => {
     expect(exitCode).toBe(ExitCode.failure);
     expect(stdout).toEqual([]);
     expect(stderr).toEqual(["runtime_failed\n"]);
-    expect(queue.close).toHaveBeenCalledOnce();
+    expect(closeQueue).toHaveBeenCalledOnce();
   });
 });

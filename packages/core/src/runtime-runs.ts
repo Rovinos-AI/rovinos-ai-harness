@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   type Code,
+  type Event,
   type Id,
   type JsonValue,
   type RunConfig,

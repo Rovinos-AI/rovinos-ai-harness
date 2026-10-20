@@ -121,10 +121,8 @@ function createCounter<TAttributes extends Attributes>(
   return factory(metrics.getMeter("@harness/telemetry"), name);
 }
 
-function createHistogram<TAttributes extends Attributes>(
-  name: keyof typeof METRIC_ALLOWLIST,
-): Histogram<TAttributes> {
-  return metrics.getMeter("@harness/telemetry").createHistogram<TAttributes>(name);
+function createHistogram(name: keyof typeof METRIC_ALLOWLIST): Histogram<NoMetricAttributes> {
+  return metrics.getMeter("@harness/telemetry").createHistogram<NoMetricAttributes>(name);
 }
 
 function getDroppedCounter(): Counter<TelemetryDropAttributes> {
@@ -239,7 +237,7 @@ function getWorkerJobsCounter(): Counter<WorkerJobAttributes> {
 }
 
 function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {
-  workerQueueLagHistogram ??= createHistogram<NoMetricAttributes>("harness.worker.queue_lag_ms");
+  workerQueueLagHistogram ??= createHistogram("harness.worker.queue_lag_ms");
   return workerQueueLagHistogram;
 }
 
@@ -377,25 +375,25 @@ export function countMcpDiscoveryFailed(): void {
   } catch {
     return;
   }
+}
 
-  /** Counts a worker job using a bounded outcome and no identifiers. */
-  export function countWorkerJob(outcome: WorkerJobOutcome): void {
-    try {
-      getWorkerJobsCounter().add(1, { "harness.worker.jobs.outcome": outcome });
-    } catch {
-      return;
-    }
+/** Counts a worker job using a bounded outcome and no identifiers. */
+export function countWorkerJob(outcome: WorkerJobOutcome): void {
+  try {
+    getWorkerJobsCounter().add(1, { "harness.worker.jobs.outcome": outcome });
+  } catch {
+    return;
   }
+}
 
-  /** Records queue delay without identifiers or other attributes. */
-  export function recordWorkerQueueLag(lagMs: number): void {
-    if (!Number.isFinite(lagMs) || lagMs < 0) {
-      return;
-    }
-    try {
-      getWorkerQueueLagHistogram().record(lagMs);
-    } catch {
-      return;
-    }
+/** Records queue delay without identifiers or other attributes. */
+export function recordWorkerQueueLag(lagMs: number): void {
+  if (!Number.isFinite(lagMs) || lagMs < 0) {
+    return;
+  }
+  try {
+    getWorkerQueueLagHistogram().record(lagMs);
+  } catch {
+    return;
   }
 }

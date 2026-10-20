@@ -147,7 +147,7 @@ export class Worker {
         const available = this.concurrency - this.active.size;
         if (available > 0) {
           const jobs = await this.queue.claim(this.workerId, available, this.leaseMs);
-          if (this.stopping.signal.aborted) {
+          if (this.isStopping()) {
             await Promise.all(jobs.map((job) => this.queue.release(job.jobId, this.workerId)));
             break;
           }
@@ -177,7 +177,7 @@ export class Worker {
   }
 
   private async processJob(job: RunQueueJob, controller: AbortController): Promise<void> {
-    let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
+    let heartbeatTimer: ReturnType<typeof setTimeout>;
     let outcome: WorkerJobOutcome = "failed";
     const stop = (): void => {
       controller.abort("shutdown");
@@ -241,9 +241,7 @@ export class Worker {
       );
       outcome = result === "lease_lost" ? "lease_lost" : "failed";
     } finally {
-      if (heartbeatTimer !== undefined) {
-        clearTimeout(heartbeatTimer);
-      }
+      clearTimeout(heartbeatTimer);
       this.stopping.signal.removeEventListener("abort", stop);
       countWorkerJob(outcome);
     }
@@ -253,5 +251,9 @@ export class Worker {
     while (this.active.has(jobId)) {
       await waitForPoll(this.pollIntervalMs, new AbortController().signal);
     }
+  }
+
+  private isStopping(): boolean {
+    return this.stopping.signal.aborted;
   }
 }
