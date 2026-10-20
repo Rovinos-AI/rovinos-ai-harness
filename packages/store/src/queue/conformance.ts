@@ -112,6 +112,10 @@ function registerEnqueueCompletionRaceConformance(factory: RunQueueFactoryCreato
       ]);
       expect(runDuplicate.runId).toBe(byRun.runId);
       expect(runCompleted).toBe(true);
+      // Depending on the race, a new job for the run may remain; drain it so the next claim is deterministic.
+      for (const leftover of await queue.claim("worker.cleanup", 10, 100)) {
+        await queue.complete(leftover.jobId, "worker.cleanup");
+      }
 
       const byKey = await queue.enqueue({
         kind: "start",
