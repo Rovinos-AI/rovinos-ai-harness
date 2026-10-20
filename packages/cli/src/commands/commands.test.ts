@@ -556,6 +556,8 @@ describe("run, resume, and inspect CLI commands", () => {
   });
 
   it("shows pending approvals, warns before exposing content, and resumes after approval", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "harness-cli-approval-resume-"));
+    const resumeModelPath = await createFile("resume-model.json", '[{"content":"finished"}]');
     const tool = new FakeToolPort(
       new Map([
         [
@@ -596,7 +598,11 @@ describe("run, resume, and inspect CLI commands", () => {
       undefined,
       { decidedBy: "human", approverId: "cli.test" },
     );
-    const resumeCode = await main(["--json", "resume", runId], harness.context, [resumeCommand]);
+    const resumeCode = await main(
+      ["--json", "resume", runId, "--fake-model", resumeModelPath],
+      harness.context,
+      [resumeCommand],
+    );
 
     expect(resumeCode).toBe(ExitCode.ok);
     expect(harness.stdout.at(-1)).toContain('"status":"completed"');

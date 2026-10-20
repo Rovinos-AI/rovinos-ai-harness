@@ -71,7 +71,11 @@ export function extractDocTestBlocks(markdown: string): DocTestBlock[] {
       if (pendingKind !== undefined) {
         throw new DocTestError();
       }
-      pendingKind = testMarker[1] as BlockKind;
+      const markerKind = testMarker[1];
+      if (markerKind !== "run" && markerKind !== "cleanup") {
+        throw new DocTestError();
+      }
+      pendingKind = markerKind;
       continue;
     }
     const captureMarker = captureMarkerPattern.exec(trimmed);
@@ -97,6 +101,9 @@ export function extractDocTestBlocks(markdown: string): DocTestBlock[] {
       continue;
     }
     const openingFence = fence[1];
+    if (openingFence === undefined) {
+      throw new DocTestError();
+    }
     const language = fence[2]?.toLowerCase();
     const kind = pendingKind;
     const captures = pendingCaptures;

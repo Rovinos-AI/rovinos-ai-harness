@@ -14,7 +14,6 @@ commit or share them.
 
 ## Prepare the environment
 
-<!-- capture:runId=(?<runId>[0-9A-HJKMNP-TV-Z]{26}) -->
 <!-- test:run -->
 
 ```bash
@@ -30,7 +29,13 @@ key="$(harness keys generate | sed -n '1p')"
 control_token="$(harness keys generate | sed -n '1p')"
 test -n "$key"
 test -n "$control_token"
-sed "s|^HARNESS_KEY=.*|HARNESS_KEY=$key|" examples/quickstart/.env > examples/quickstart/.env.tmp
+while IFS= read -r line; do
+  if [[ "$line" == HARNESS_KEY=* ]]; then
+    printf 'HARNESS_KEY=%s\n' "$key"
+  else
+    printf '%s\n' "$line"
+  fi
+done < examples/quickstart/.env > examples/quickstart/.env.tmp
 chmod 600 examples/quickstart/.env.tmp
 mv examples/quickstart/.env.tmp examples/quickstart/.env
 printf '%s\n' "$control_token" > examples/quickstart/.env.control-plane-token
@@ -48,6 +53,7 @@ docker compose --env-file examples/quickstart/.env -f examples/quickstart/docker
 
 ## Run and inspect the sample
 
+<!-- capture:runId=(?<runId>[0-9A-HJKMNP-TV-Z]{26}) -->
 <!-- test:run -->
 
 ```bash
