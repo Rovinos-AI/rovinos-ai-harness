@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, Id, Principal, type RunStatus } from "@harness/schemas";
+import { Code, Principal, type Id, type RunStatus } from "@harness/schemas";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { controlPlanePrincipal, withControlPlaneAuthorization } from "../auth.js";
 import type { ConfirmationClientCapabilities, ConfirmationGate } from "../confirmation-gate.js";
-import {
-  continueRunInputSchema,
-  startRunOutputSchema,
-  type ContinueRunInput,
-} from "../schemas.js";
+import { continueRunInputSchema, startRunOutputSchema, type ContinueRunInput } from "../schemas.js";
 
 /** Dependencies for the `continue_run` tool. */
 export interface ContinueRunToolOptions {
@@ -17,6 +13,7 @@ export interface ContinueRunToolOptions {
     input: Omit<ContinueRunInput, "runId"> & { readonly requestedBy: Principal },
   ) => Promise<{ readonly runId: Id; readonly status: RunStatus }>;
   readonly checkRunQuota?: (requestedBy: Principal) => Promise<void>;
+  readonly allowAgentStartedRuns: boolean;
   readonly confirmationGate: ConfirmationGate;
   readonly clientCapabilities: (
     context: ServerContext,
@@ -25,10 +22,7 @@ export interface ContinueRunToolOptions {
 }
 
 /** Registers the scoped and confirmation-gated `continue_run` tool. */
-export function registerContinueRunTool(
-  server: McpServer,
-  options: ContinueRunToolOptions,
-): void {
+export function registerContinueRunTool(server: McpServer, options: ContinueRunToolOptions): void {
   server.registerTool(
     "continue_run",
     {
@@ -48,18 +42,20 @@ export function registerContinueRunTool(
         scope: "run",
         runId: parsed.data.runId,
         operation: async () => {
-          const gate = await options.confirmationGate.requireHuman(context, {
-            toolName: "continue_run",
-            targetId: parsed.data.runId,
-            arguments: parsed.data,
-            summary: `Continue run ${parsed.data.runId}?`,
-            clientCapabilities: options.clientCapabilities(context),
-          });
-          if (gate.status === "input_required") {
-            return gate.result;
-          }
-          if (gate.status === "denied") {
-            return runResult({ code: Code.parse(gate.code) });
+          if (!options.allowAgentStartedRuns) {
+            const gate = await options.confirmationGate.requireHuman(context, {
+              toolName: "continue_run",
+              targetId: parsed.data.runId,
+              arguments: parsed.data,
+              summary: `Continue run ${parsed.data.runId}?`,
+              clientCapabilities: options.clientCapabilities(context),
+            });
+            if (gate.status === "input_required") {
+              return gate.result;
+            }
+            if (gate.status === "denied") {
+              return runResult({ code: Code.parse(gate.code) });
+            }
           }
 
           const requestedBy = runRequester(context);
@@ -71,9 +67,7 @@ export function registerContinueRunTool(
             return runResult(
               await options.continueRun(parsed.data.runId, {
                 goal: parsed.data.goal,
-                ...(parsed.data.metadata === undefined
-                  ? {}
-                  : { metadata: parsed.data.metadata }),
+                ...(parsed.data.metadata === undefined ? {} : { metadata: parsed.data.metadata }),
                 requestedBy,
               }),
             );
@@ -92,7 +86,9 @@ function runRequester(context: ServerContext): Principal {
   return Principal.parse(`token.${principal?.tokenId ?? "local"}`);
 }
 
-function runResult(result: { readonly runId: Id; readonly status: RunStatus } | { readonly code: Code }) {
+function runResult(
+  result: { readonly runId: Id; readonly status: RunStatus } | { readonly code: Code },
+) {
   const output = startRunOutputSchema.parse(result);
   if ("code" in output) {
     return {

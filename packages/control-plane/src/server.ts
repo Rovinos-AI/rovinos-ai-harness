@@ -55,7 +55,10 @@ const MCP_APP_MIME = "text/html;profile=mcp-app";
 /** Mutation operations supplied by the composed runtime. */
 export interface ControlPlaneOperations {
   readonly startRun?: (
-    input: StartRunInput & { readonly requestedBy: Principal },
+    input: StartRunInput & {
+      readonly requestedBy: Principal;
+      readonly allowedExistingRunIds?: readonly Id[];
+    },
   ) => Promise<{ readonly runId: Id; readonly status: RunStatus }>;
   readonly continueRun?: (
     runId: Id,
@@ -159,6 +162,7 @@ export function createControlPlaneServer(
       : { continueRun: options.operations.continueRun }),
     checkRunQuota: (requestedBy) =>
       options.operations?.checkRunQuota?.({ requestedBy }) ?? Promise.resolve(),
+    allowAgentStartedRuns: options.controlPlane?.allowAgentStartedRuns === true,
     confirmationGate,
     clientCapabilities,
     ...(options.onAudit === undefined ? {} : { onAudit: options.onAudit }),

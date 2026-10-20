@@ -9,6 +9,9 @@ export { createDefaultContext } from "./main.js";
 /** Creates the CLI output router for standard output and error. */
 export { createOutput } from "./output.js";
 
+/** Creates control-plane run operations backed by a composed runtime. */
+export { createControlPlaneOperations } from "./serve.js";
+
 /** Stable exit codes returned by {@link main}. */
 export { ExitCode } from "./exit-codes.js";
 

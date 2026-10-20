@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { HarnessError, JsonValue, ServeResultSchema, type Id } from "@harness/schemas";
+import {
+  HarnessError,
+  JsonValue,
+  ServeResultSchema,
+  type Id,
+  type RunStatus,
+} from "@harness/schemas";
 import type { ControlPlaneOperations } from "@harness/control-plane";
 import type { Runtime, ToolPort } from "@harness/core";
 import { createHash } from "node:crypto";
@@ -10,7 +16,8 @@ import type { CommandModule } from "./command.js";
 import { createCommandRuntime } from "./command.js";
 
 type ServeErrorCode = "serve_options_invalid" | "serve_port_invalid" | "stdio_json_unsupported";
-type ServeRuntimeErrorCode = "start_idempotency_unavailable" | "continue_run_failed";
+type ServeRuntimeErrorCode =
+  "start_idempotency_unavailable" | "continue_run_failed" | "run_not_found";
 
 class ServeCommandError extends HarnessError {
   override readonly code: ServeErrorCode;
@@ -121,73 +128,14 @@ function parseServeOptions(
   return { http, port: parsedPort.data };
 }
 
-function createControlPlaneOperations(
+/** Creates control-plane mutation operations backed by a composed runtime. */
+export function createControlPlaneOperations(
   runtime: Runtime,
   tool: ToolPort | undefined,
 ): ControlPlaneOperations {
   return {
-    startRun: async ({ goal, metadata, role, idempotencyKey, requestedBy }) => {
-      const keyHash =
-        idempotencyKey === undefined
-          ? undefined
-          : IdempotencyKeyHashSchema.parse(
-              createHash("sha256")
-                .update("harness/sdk/idempotency/v1\0")
-                .update(idempotencyKey)
-                .digest("hex"),
-            );
-      const candidateRunId = runtime.ids.next();
-      const runId =
-        keyHash === undefined
-          ? candidateRunId
-          : await claimRunIdempotencyKey(runtime, keyHash, candidateRunId);
-      if (runId !== candidateRunId) {
-        const events = [];
-        for await (const event of runtime.store.read(runId)) {
-          events.push(event);
-        }
-        if (events.length > 0) {
-          const { foldRunState } = await import("@harness/core");
-          return { runId, status: foldRunState(events).status };
-        }
-      }
-      const runInput = JsonValue.parse({
-        goal,
-        ...(metadata === undefined ? {} : { metadata }),
-      });
-      const started = runtime.start(runInput, {
-        runId,
-        requestedBy,
-        ...(role === undefined ? {} : { role }),
-      });
-      try {
-        await started.started;
-      } catch (error) {
-        if (keyHash !== undefined) {
-          try {
-            if ((await runtime.store.head(runId)) === 0) {
-              await runtime.store.releaseIdempotencyKey(keyHash, runId);
-            }
-          } catch {
-            return Promise.reject(error);
-          }
-        }
-        throw error;
-      }
-      return { runId, status: "pending" as const };
-    },
-    continueRun: async (runId, { goal, metadata, requestedBy }) => {
-      const result = await runtime.continueRun(
-        runId,
-        { goal, ...(metadata === undefined ? {} : { metadata }) },
-        { requestedBy },
-      );
-      const created = result.events.find((event) => event.type === "run_created");
-      if (created?.type !== "run_created") {
-        throw new ServeRuntimeError("continue_run_failed");
-      }
-      return { runId: created.runId, status: result.status };
-    },
+    startRun: (input) => startControlPlaneRun(runtime, input),
+    continueRun: (runId, input) => continueControlPlaneRun(runtime, runId, input),
     resumeRun: (runId, signal, onClaimed) => runtime.resume(runId, { signal, onClaimed }),
     cancelRun: (runId) => runtime.cancel(runId),
     resolveApproval: async ({ runId, approvalId, decision, edits, reason, approverId }) => {
@@ -210,16 +158,107 @@ function createControlPlaneOperations(
   };
 }
 
+async function startControlPlaneRun(
+  runtime: Runtime,
+  {
+    goal,
+    metadata,
+    role,
+    idempotencyKey,
+    requestedBy,
+    allowedExistingRunIds,
+  }: Parameters<NonNullable<ControlPlaneOperations["startRun"]>>[0],
+): Promise<{ readonly runId: Id; readonly status: RunStatus }> {
+  const keyHash =
+    idempotencyKey === undefined
+      ? undefined
+      : IdempotencyKeyHashSchema.parse(
+          createHash("sha256")
+            .update("harness/control-plane/idempotency/v1\0")
+            .update(requestedBy)
+            .update("\0")
+            .update(idempotencyKey)
+            .digest("hex"),
+        );
+  const candidateRunId = runtime.ids.next();
+  const runId =
+    keyHash === undefined
+      ? candidateRunId
+      : await claimRunIdempotencyKey(runtime, keyHash, candidateRunId);
+  if (runId !== candidateRunId) {
+    const events = [];
+    for await (const event of runtime.store.read(runId)) {
+      events.push(event);
+    }
+    if (events.length > 0) {
+      if (allowedExistingRunIds !== undefined && !allowedExistingRunIds.includes(runId)) {
+        throw new ServeRuntimeError("run_not_found");
+      }
+      const { foldRunState } = await import("@harness/core");
+      return { runId, status: foldRunState(events).status };
+    }
+  }
+  const runInput = JsonValue.parse({
+    goal,
+    ...(metadata === undefined ? {} : { metadata }),
+  });
+  const started = runtime.start(runInput, {
+    runId,
+    requestedBy,
+    ...(role === undefined ? {} : { role }),
+  });
+  void started.completion.catch(() => undefined);
+  try {
+    await started.started;
+  } catch (error) {
+    if (keyHash !== undefined) {
+      await releaseFailedStart(runtime, keyHash, runId);
+    }
+    throw error;
+  }
+  return { runId, status: "pending" };
+}
+
+async function releaseFailedStart(
+  runtime: Runtime,
+  keyHash: ReturnType<typeof IdempotencyKeyHashSchema.parse>,
+  runId: Id,
+): Promise<void> {
+  try {
+    if ((await runtime.store.head(runId)) === 0) {
+      await runtime.store.releaseIdempotencyKey(keyHash, runId);
+    }
+  } catch {
+    // Preserve the original start failure when releasing its claim cannot be confirmed.
+    return;
+  }
+}
+
+async function continueControlPlaneRun(
+  runtime: Runtime,
+  runId: Id,
+  {
+    goal,
+    metadata,
+    requestedBy,
+  }: Parameters<NonNullable<ControlPlaneOperations["continueRun"]>>[1],
+): Promise<{ readonly runId: Id; readonly status: RunStatus }> {
+  const continuation = runtime.continueRun(
+    runId,
+    { goal, ...(metadata === undefined ? {} : { metadata }) },
+    { requestedBy },
+  );
+  void continuation.completion.catch(() => undefined);
+  await continuation.started;
+  return { runId: continuation.runId, status: "pending" };
+}
+
 async function claimRunIdempotencyKey(
   runtime: Runtime,
   keyHash: ReturnType<typeof IdempotencyKeyHashSchema.parse>,
   candidateRunId: Id,
 ): Promise<Id> {
-  let runId = await runtime.store.claimIdempotencyKey(
-    keyHash,
-    candidateRunId,
-    runtime.clock.now(),
-  );
+  let runId = await runtime.store.claimIdempotencyKey(keyHash, candidateRunId, runtime.clock.now());
   if (runId === candidateRunId) {
     return candidateRunId;
   }

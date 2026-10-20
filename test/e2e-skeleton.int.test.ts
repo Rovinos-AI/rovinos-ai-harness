@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   createDefaultContext,
+  createControlPlaneOperations,
   createOutput,
   ExitCode,
   main,
@@ -2411,17 +2412,7 @@ describe("control plane", () => {
     const server = createControlPlaneServer(runtime.store, {
       controlPlane: ControlPlaneConfigSchema.parse({ allowAgentStartedRuns: true }),
       isAppContext: () => true,
-      operations: {
-        startRun: async ({ goal, metadata, role, requestedBy }) => {
-          const run = runtime.start(
-            JsonValue.parse({ goal, ...(metadata === undefined ? {} : { metadata }) }),
-            { requestedBy, ...(role === undefined ? {} : { role }) },
-          );
-          await run.started;
-          const result = await run.completion;
-          return { runId: run.runId, status: result.status };
-        },
-      },
+      operations: createControlPlaneOperations(runtime, undefined),
     });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "control-plane-start-e2e", version: "1.0.0" });
@@ -2435,7 +2426,7 @@ describe("control plane", () => {
       });
       const output = JSON.stringify(result);
       const structured = startRunOutputSchema.parse(result.structuredContent);
-      expect(structured).toMatchObject({ status: "completed" });
+      expect(structured).toMatchObject({ status: "pending" });
       expect(output).not.toContain(contentCanary);
       if ("code" in structured) {
         throw new Error("The start_run tool returned a coded failure.");
@@ -2445,7 +2436,7 @@ describe("control plane", () => {
       const input = events.find((event) => event.type === "run_input");
       expect(created).toMatchObject({ type: "run_created", requestedBy: "token.local" });
       expect(JSON.stringify(input)).not.toContain(contentCanary);
-      expect(input).toMatchObject({ type: "run_input", input: { goal: expect.stringContaining("<") } });
+      expect(JSON.stringify(input)).toContain("<");
     } finally {
       await client.close();
       await server.close();

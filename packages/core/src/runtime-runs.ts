@@ -13,7 +13,7 @@ import type { ToolPort } from "./ports.js";
 import { continueRun as startContinuation } from "./continue.js";
 import { runLoop, type RunLoopResult } from "./loop.js";
 import { RunRecorder } from "./recorder.js";
-import type { Runtime, RuntimeComposition } from "./runtime-config.js";
+import type { Runtime, RuntimeComposition, RuntimeRunHandle } from "./runtime-config.js";
 import { configHash } from "./runtime-ids.js";
 
 /** Reads the original goal from a run's persisted input or first model request. */
@@ -135,11 +135,18 @@ export function createRuntimeContinuation(
     runOptions?: { readonly requestedBy?: Principal },
   ) => {
     const runId = ids.next();
+    let resolveStarted: () => void = () => undefined;
+    let rejectStarted: (reason?: unknown) => void = () => undefined;
+    const started = new Promise<void>((resolve, reject) => {
+      resolveStarted = resolve;
+      rejectStarted = reject;
+    });
+    void started.catch(() => undefined);
     const goal =
       input.metadata === undefined
         ? { goal: input.goal }
         : { goal: input.goal, metadata: input.metadata };
-    return runWithControl(runId, (signal) =>
+    const completion = runWithControl(runId, (signal) =>
       startContinuation({
         store,
         runId,
@@ -162,10 +169,11 @@ export function createRuntimeContinuation(
         policyVersion,
         continuations: config.run.continuations,
         scopes,
-        ...(runOptions?.requestedBy === undefined
-          ? {}
-          : { requestedBy: runOptions.requestedBy }),
+        onStarted: resolveStarted,
+        ...(runOptions?.requestedBy === undefined ? {} : { requestedBy: runOptions.requestedBy }),
       }),
     );
+    void completion.catch(rejectStarted);
+    return { runId, started, completion } satisfies RuntimeRunHandle;
   };
 }

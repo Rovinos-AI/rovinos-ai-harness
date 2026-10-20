@@ -35,18 +35,19 @@ remote address. Limits are local to one server process.
 ## Scopes, runs, and audit
 
 `read` grants `list_runs` and `get_run`; `approve` grants `approve`, `deny`, and
-`harness.approvals.resolve`; `run` grants `start_run`, `continue_run`, `resume_run`, and `cancel_run`; and `reveal` grants
-`harness.approvals.reveal`. `read_content` is reserved for the tokenized run-inspector content
-operation in task 18.8. `admin` grants all current scopes. `tools/list` omits tools outside the
-token's scopes. A token with `runIds` can list only those runs and cannot inspect, approve, reveal,
-continue, resume, or cancel another run. Starting a new run is not restricted to a source run id.
-Omitting `runIds` grants access to every run for the token's scopes.
+`harness.approvals.resolve`; `run` grants `start_run`, `continue_run`, `resume_run`, and
+`cancel_run`; and `reveal` grants `harness.approvals.reveal`. `read_content` is reserved for the
+tokenized run-inspector content operation in task 18.8. `admin` grants all current scopes.
+`tools/list` omits tools outside the token's scopes. A token with `runIds` can list only those runs
+and cannot inspect, approve, reveal, continue, resume, or cancel another run. `start_run` ignores
+the filter when creating a new run, but an idempotent retry cannot return an existing run outside
+the allowlist. Omitting `runIds` grants access to every run for the token's scopes.
 
 `start_run` and `continue_run` accept a goal as content and return only a run id, status, or coded
 failure. The goal is passed to the runtime, whose PII event-store boundary tokenizes `run_input`
 before persistence. Audit records contain the tool name, token id, and outcome code, not the goal or
-metadata. A start idempotency key is passed to the runtime operation; the CLI's store-backed claim
-uses a digest rather than persisting the supplied key.
+metadata. A start idempotency key is passed to the runtime operation; the CLI's store-backed claim uses a
+control-plane-specific digest scoped to the requesting token rather than persisting the supplied key.
 
 The server requires its human-confirmation gate for `start_run` and `continue_run` unless the
 embedding host asserts trusted app provenance. Set `controlPlane.allowAgentStartedRuns: true` only

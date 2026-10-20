@@ -468,10 +468,10 @@ afterEach(async () => {
 
 describe("harness servers check", () => {
   it("requires encryption key configuration for OAuth credentials", () => {
-    const config = HarnessConfigSchema.parse({});
-    const { context } = createContext(() => Promise.resolve(config));
+    const harnessConfig = HarnessConfigSchema.parse({});
+    const { context } = createContext(() => Promise.resolve(harnessConfig));
 
-    expect(() => createLoginKeys(config, context)).toThrow("key_config_required");
+    expect(() => createLoginKeys(harnessConfig, context)).toThrow("key_config_required");
   });
 
   it("reports safe registry and propagation diagnostics without invoking tools", async () => {

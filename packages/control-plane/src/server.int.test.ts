@@ -183,10 +183,16 @@ describe("control-plane HTTP transport", () => {
   it("requires run scope for start_run and continue_run", async () => {
     const store = new InMemoryEventStore();
     const startRun = vi.fn(() =>
-      Promise.resolve({ runId: Id.parse("00000000000000000000000003"), status: "pending" as const }),
+      Promise.resolve({
+        runId: Id.parse("00000000000000000000000003"),
+        status: "pending" as const,
+      }),
     );
     const continueRun = vi.fn(() =>
-      Promise.resolve({ runId: Id.parse("00000000000000000000000004"), status: "pending" as const }),
+      Promise.resolve({
+        runId: Id.parse("00000000000000000000000004"),
+        status: "pending" as const,
+      }),
     );
     const server = await startControlPlaneHttp(
       store,

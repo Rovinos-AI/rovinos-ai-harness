@@ -4,20 +4,18 @@ import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { controlPlanePrincipal, withControlPlaneAuthorization } from "../auth.js";
 import type { ConfirmationClientCapabilities, ConfirmationGate } from "../confirmation-gate.js";
-import {
-  startRunInputSchema,
-  startRunOutputSchema,
-  type StartRunInput,
-} from "../schemas.js";
+import { startRunInputSchema, startRunOutputSchema, type StartRunInput } from "../schemas.js";
 
 const NEW_RUN_CONFIRMATION_TARGET = Id.parse("00000000000000000000000000");
 
 /** Dependencies for the `start_run` tool. */
 export interface StartRunToolOptions {
-  readonly startRun?: (input: StartRunInput & { readonly requestedBy: Principal }) => Promise<{
-    readonly runId: Id;
-    readonly status: RunStatus;
-  }>;
+  readonly startRun?: (
+    input: StartRunInput & {
+      readonly requestedBy: Principal;
+      readonly allowedExistingRunIds?: readonly Id[];
+    },
+  ) => Promise<{ readonly runId: Id; readonly status: RunStatus }>;
   readonly checkRunQuota?: (requestedBy: Principal, role: Code | undefined) => Promise<void>;
   readonly allowAgentStartedRuns: boolean;
   readonly confirmationGate: ConfirmationGate;
@@ -63,6 +61,7 @@ export function registerStartRunTool(server: McpServer, options: StartRunToolOpt
             }
           }
 
+          const principal = controlPlanePrincipal(context);
           const requestedBy = runRequester(context);
           try {
             await options.checkRunQuota?.(requestedBy, parsed.data.role);
@@ -70,7 +69,13 @@ export function registerStartRunTool(server: McpServer, options: StartRunToolOpt
               return runResult({ code: Code.parse("control_plane_runtime_unavailable") });
             }
             return runResult(
-              await options.startRun({ ...parsed.data, requestedBy }),
+              await options.startRun({
+                ...parsed.data,
+                requestedBy,
+                ...(principal?.runIds === undefined
+                  ? {}
+                  : { allowedExistingRunIds: principal.runIds }),
+              }),
             );
           } catch (error) {
             return runResult({ code: safeErrorCode(error, "start_run_failed") });
@@ -87,7 +92,9 @@ function runRequester(context: ServerContext): Principal {
   return Principal.parse(`token.${principal?.tokenId ?? "local"}`);
 }
 
-function runResult(result: { readonly runId: Id; readonly status: RunStatus } | { readonly code: Code }) {
+function runResult(
+  result: { readonly runId: Id; readonly status: RunStatus } | { readonly code: Code },
+) {
   const output = startRunOutputSchema.parse(result);
   if ("code" in output) {
     return {

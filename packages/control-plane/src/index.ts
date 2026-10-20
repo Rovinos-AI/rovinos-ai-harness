@@ -38,10 +38,7 @@ export { registerDenyTool, type DenyToolOptions } from "./tools/deny.js";
 export { registerResumeRunTool, type ResumeRunToolOptions } from "./tools/resume-run.js";
 export { registerCancelRunTool, type CancelRunToolOptions } from "./tools/cancel-run.js";
 export { registerStartRunTool, type StartRunToolOptions } from "./tools/start-run.js";
-export {
-  registerContinueRunTool,
-  type ContinueRunToolOptions,
-} from "./tools/continue-run.js";
+export { registerContinueRunTool, type ContinueRunToolOptions } from "./tools/continue-run.js";
 export {
   registerApprovalAppTools,
   ApprovalAppRevealRateLimiter,

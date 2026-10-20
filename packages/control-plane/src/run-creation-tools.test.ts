@@ -3,16 +3,16 @@ import { ControlPlaneConfigSchema, Id, Principal } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createControlPlaneServer } from "./server.js";
+import { createControlPlaneServer, type ControlPlaneOperations } from "./server.js";
 
 const CONTENT_CANARY = "RUN_INPUT_PRIVATE_CANARY";
 const runId = Id.parse("00000000000000000000000001");
 const continuationId = Id.parse("00000000000000000000000002");
 
-const connections: Array<{
+const connections: {
   readonly client: Client;
   readonly server: ReturnType<typeof createControlPlaneServer>;
-}> = [];
+}[] = [];
 
 async function connect(
   store: InMemoryEventStore,
@@ -53,13 +53,19 @@ afterEach(async () => {
 describe("control-plane run creation tools", () => {
   it("starts and continues with the run scope, principal attribution, and safe outputs", async () => {
     const store = new InMemoryEventStore();
-    const startRun = vi.fn(({ goal, idempotencyKey, requestedBy }) => {
-      expect(goal).toBe(CONTENT_CANARY);
-      expect(idempotencyKey).toBe("request-key");
-      expect(requestedBy).toBe(Principal.parse("token.local"));
-      return Promise.resolve({ runId, status: "pending" as const });
-    });
-    const continueRun = vi.fn((_sourceRunId, input) => {
+    const startRun = vi.fn(
+      ({
+        goal,
+        idempotencyKey,
+        requestedBy,
+      }: Parameters<NonNullable<ControlPlaneOperations["startRun"]>>[0]) => {
+        expect(goal).toBe(CONTENT_CANARY);
+        expect(idempotencyKey).toBe("request-key");
+        expect(requestedBy).toBe(Principal.parse("token.local"));
+        return Promise.resolve({ runId, status: "pending" as const });
+      },
+    );
+    const continueRun = vi.fn((_sourceRunId: Id, input: { readonly requestedBy: Principal }) => {
       expect(input.requestedBy).toBe(Principal.parse("token.local"));
       return Promise.resolve({ runId: continuationId, status: "pending" as const });
     });
@@ -115,13 +121,40 @@ describe("control-plane run creation tools", () => {
     expect(continueRun).not.toHaveBeenCalled();
   });
 
+  it("allows a model-driven continuation without elicitation when explicitly enabled", async () => {
+    const store = new InMemoryEventStore();
+    const continueRun = vi.fn(() =>
+      Promise.resolve({ runId: continuationId, status: "pending" as const }),
+    );
+    const client = await connect(
+      store,
+      {
+        controlPlane: ControlPlaneConfigSchema.parse({ allowAgentStartedRuns: true }),
+        operations: { continueRun },
+      },
+      false,
+    );
+
+    const result = await client.callTool({
+      name: "continue_run",
+      arguments: { runId, goal: CONTENT_CANARY },
+    });
+
+    expect(result.structuredContent).toEqual({ runId: continuationId, status: "pending" });
+    expect(continueRun).toHaveBeenCalledOnce();
+    expect(JSON.stringify(result)).not.toContain(CONTENT_CANARY);
+  });
+
   it("checks continuation quota before invoking the writer and hides operation errors", async () => {
     const store = new InMemoryEventStore();
     const continueRun = vi.fn(() => Promise.reject(new Error(CONTENT_CANARY)));
+    const quotaError = Object.assign(new Error("synthetic quota failure"), {
+      code: "quota_exceeded",
+    });
     const client = await connect(store, {
       operations: {
         continueRun,
-        checkRunQuota: () => Promise.reject({ code: "quota_exceeded" }),
+        checkRunQuota: () => Promise.reject(quotaError),
       },
     });
 
@@ -159,14 +192,16 @@ describe("control-plane run creation tools", () => {
   it("returns the same run for a repeated idempotency key without echoing content", async () => {
     const store = new InMemoryEventStore();
     const seen = new Map<string, typeof runId>();
-    const startRun = vi.fn(({ idempotencyKey }) => {
-      const existing = seen.get(idempotencyKey ?? "");
-      if (existing !== undefined) {
-        return Promise.resolve({ runId: existing, status: "pending" as const });
-      }
-      seen.set(idempotencyKey ?? "", runId);
-      return Promise.resolve({ runId, status: "pending" as const });
-    });
+    const startRun = vi.fn(
+      ({ idempotencyKey }: Parameters<NonNullable<ControlPlaneOperations["startRun"]>>[0]) => {
+        const existing = seen.get(idempotencyKey ?? "");
+        if (existing !== undefined) {
+          return Promise.resolve({ runId: existing, status: "pending" as const });
+        }
+        seen.set(idempotencyKey ?? "", runId);
+        return Promise.resolve({ runId, status: "pending" as const });
+      },
+    );
     const client = await connect(store, {
       controlPlane: ControlPlaneConfigSchema.parse({ allowAgentStartedRuns: true }),
       operations: { startRun },
@@ -185,11 +220,14 @@ describe("control-plane run creation tools", () => {
   it("checks quota before invoking the run writer and maps failures to a safe code", async () => {
     const store = new InMemoryEventStore();
     const startRun = vi.fn(() => Promise.resolve({ runId, status: "pending" as const }));
+    const quotaError = Object.assign(new Error("synthetic quota failure"), {
+      code: "quota_exceeded",
+    });
     const client = await connect(store, {
       controlPlane: ControlPlaneConfigSchema.parse({ allowAgentStartedRuns: true }),
       operations: {
         startRun,
-        checkRunQuota: () => Promise.reject({ code: "quota_exceeded" }),
+        checkRunQuota: () => Promise.reject(quotaError),
       },
     });
 
