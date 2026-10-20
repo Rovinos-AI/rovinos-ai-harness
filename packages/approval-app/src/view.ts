@@ -104,7 +104,7 @@ function argumentNode(
         count: value.length,
         items: value.length === 1 ? strings.oneItem : strings.manyItems,
         empty,
-      })
+        }, document.documentElement.lang)
     : formatMessage(strings.argumentObject, { label, empty });
   branch.append(element(document, "summary", summary));
   const children = element(document, "ul");

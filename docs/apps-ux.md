@@ -1,6 +1,6 @@
 # Harness MCP App UI kit
 
-`@harness/approval-app/src/kit/` is the shared browser-safe component and theme layer for harness MCP Apps. It provides token pills, elicitation forms, tables, timelines, status badges, meters, confirmation dialogs, URL displays, and empty/error states. Add each view under `src/views/<name>/index.ts`; the package build discovers these entries and emits one `dist/<name>.html` resource for each.
+`@harness/approval-app/src/kit/` is the shared browser-safe component and theme layer for harness MCP Apps. It provides token pills, elicitation forms, tables, timelines, status badges, meters, confirmation dialogs, URL displays, and empty/error states. Add each view under `src/views/<name>/index.ts`; the package build discovers these entries and emits one `dist/<name>.html` resource for each. Build integrations can also pass additional named entrypoints through `buildAllViewHtml({ entries })`.
 
 ## Host context and layout
 

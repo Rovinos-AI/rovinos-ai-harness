@@ -84,8 +84,14 @@ describe("single-file approval app", () => {
   });
 
   it("builds one hashed, self-contained HTML document per view within the gzip budget", async () => {
-    const views = viewHtmlEntries(await buildAllViewHtml());
-    expect(views.map(({ name }) => name)).toEqual(["approval"]);
+    const views = viewHtmlEntries(
+      await buildAllViewHtml({
+        entries: {
+          configured: new URL("./fixtures/configured-view.ts", import.meta.url),
+        },
+      }),
+    );
+    expect(views.map(({ name }) => name)).toEqual(["approval", "configured"]);
     for (const { html } of views) {
       expect(html).not.toMatch(/https?:\/\//iu);
       expect(await gzipSize(html)).toBeLessThanOrEqual(150 * 1024);
@@ -136,5 +142,6 @@ describe("single-file approval app", () => {
     ]) {
       expect(style).toContain(rule);
     }
+    expect(style).toMatch(/\[data-theme="light"\]\s*\{\s*color-scheme:\s*light;/u);
   });
 });

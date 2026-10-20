@@ -91,6 +91,76 @@ describe("shared MCP App components", () => {
     });
   });
 
+  it("uses unique control and description IDs for each form instance", () => {
+    const schema = {
+      type: "object",
+      properties: { name: { type: "string", description: "Name description" } },
+    };
+    const first = createElicitationForm(document, schema, vi.fn());
+    const second = createElicitationForm(document, schema, vi.fn());
+    document.body.append(first, second);
+
+    const controls = [...document.querySelectorAll<HTMLInputElement>("input")];
+    const descriptions = [...document.querySelectorAll("span")];
+    expect(new Set(controls.map(({ id }) => id)).size).toBe(2);
+    expect(new Set(descriptions.map(({ id }) => id)).size).toBe(2);
+    for (const form of [first, second]) {
+      const label = form.querySelector("label");
+      const control = form.querySelector("input");
+      const description = form.querySelector("span");
+      expect(label?.htmlFor).toBe(control?.id);
+      expect(control?.getAttribute("aria-describedby")).toBe(description?.id);
+      expect(document.getElementById(control?.id ?? "")).toBe(control);
+      expect(document.getElementById(description?.id ?? "")).toBe(description);
+    }
+  });
+
+  it("submits false for a required boolean without native checkbox validation", () => {
+    const onSubmit = vi.fn();
+    const form = createElicitationForm(
+      document,
+      { type: "object", required: ["accepted"], properties: { accepted: { type: "boolean" } } },
+      onSubmit,
+    );
+    const checkbox = form.querySelector<HTMLInputElement>("input[type=checkbox]");
+    expect(checkbox?.required).toBe(false);
+    const window = document.defaultView;
+    if (window === null) {
+      throw new Error("Expected a jsdom window");
+    }
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith({ accepted: false });
+  });
+
+  it("omits blank optional numbers and rejects blank required numbers", () => {
+    const onSubmit = vi.fn();
+    const form = createElicitationForm(
+      document,
+      {
+        type: "object",
+        required: ["requiredCount"],
+        properties: {
+          optionalCount: { type: "number" },
+          requiredCount: { type: "number" },
+        },
+      },
+      onSubmit,
+    );
+    const inputs = form.querySelectorAll<HTMLInputElement>("input[type=number]");
+    inputs.item(1).value = "3";
+    const window = document.defaultView;
+    if (window === null) {
+      throw new Error("Expected a jsdom window");
+    }
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith({ requiredCount: 3 });
+
+    onSubmit.mockClear();
+    inputs.item(1).value = "";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("renders an error state for unsupported elicitation schemas", () => {
     const form = createElicitationForm(document, malicious, vi.fn());
     expect(form.querySelector('[role="alert"]')?.textContent).toContain("Something went wrong");
@@ -102,6 +172,12 @@ describe("shared MCP App components", () => {
       vi.fn(),
     );
     expect(nested.querySelector('[role="alert"]')).not.toBeNull();
+    const constrained = createElicitationForm(
+      document,
+      { type: "object", properties: { age: { type: "integer", minimum: 18 } } },
+      vi.fn(),
+    );
+    expect(constrained.querySelector('[role="alert"]')).not.toBeNull();
   });
 
   it("bounds untrusted form schemas and ignores prototype keys safely", () => {
@@ -145,7 +221,8 @@ describe("shared MCP App components", () => {
       throw new Error("Expected a jsdom window");
     }
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith({ value: "value" });
+    onSubmit.mockClear();
     count.value = "1.5";
     form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
     const submittedCall = onSubmit.mock.calls.at(-1);
@@ -156,6 +233,26 @@ describe("shared MCP App components", () => {
     expect(submitted).toMatchObject({ value: "value", count: 1.5 });
     expect(Object.hasOwn(submitted, "__proto__")).toBe(false);
     expect(Object.getPrototypeOf(submitted)).toBe(Object.prototype);
+  });
+
+  it("rejects fractional values for integer fields", () => {
+    const onSubmit = vi.fn();
+    const form = createElicitationForm(
+      document,
+      { type: "object", properties: { count: { type: "integer" } } },
+      onSubmit,
+    );
+    const count = form.querySelector<HTMLInputElement>("input");
+    if (count === null) {
+      throw new Error("Expected an integer control");
+    }
+    count.value = "1.5";
+    const window = document.defaultView;
+    if (window === null) {
+      throw new Error("Expected a jsdom window");
+    }
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("renders data in a native keyboard-scrollable table without interpreting markup", () => {
@@ -229,6 +326,39 @@ describe("shared MCP App components", () => {
     dialog.querySelectorAll("button")[0]?.click();
     dialog.querySelectorAll("button")[1]?.click();
     expect(onConfirm).toHaveBeenCalledOnce();
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("names multiple confirmation dialogs uniquely and handles Escape cancellation", () => {
+    const onCancel = vi.fn();
+    const first = createConfirmationDialog(document, {
+      title: "First action",
+      message: "Confirm the first action",
+      confirmLabel: "Continue",
+      cancelLabel: "Cancel",
+      onConfirm: vi.fn(),
+      onCancel,
+    });
+    const second = createConfirmationDialog(document, {
+      title: "Second action",
+      message: "Confirm the second action",
+      confirmLabel: "Continue",
+      cancelLabel: "Cancel",
+      onConfirm: vi.fn(),
+      onCancel,
+    });
+    document.body.append(first, second);
+    const firstTitleId = first.querySelector("h2")?.id;
+    const secondTitleId = second.querySelector("h2")?.id;
+    expect(firstTitleId).not.toBe(secondTitleId);
+    expect(first.getAttribute("aria-labelledby")).toBe(firstTitleId);
+    expect(second.getAttribute("aria-labelledby")).toBe(secondTitleId);
+
+    const window = document.defaultView;
+    if (window === null) {
+      throw new Error("Expected a jsdom window");
+    }
+    second.dispatchEvent(new window.Event("cancel", { cancelable: true }));
     expect(onCancel).toHaveBeenCalledOnce();
   });
 

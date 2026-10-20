@@ -87,6 +87,9 @@ h1:focus {
   border-radius: 0.3rem;
   padding: 0.1rem 0.3rem;
 }
+[data-theme="light"] {
+  color-scheme: light;
+}
 [data-theme="dark"] {
   color-scheme: dark;
   --color-background-primary: #121826;

@@ -102,11 +102,12 @@ export async function buildApprovalHtml(options = {}) {
 }
 
 /**
- * Builds every view with an `index.ts` entry to its own self-contained HTML resource.
+ * Builds every view with an `index.ts` entry and any configured entries.
  *
+ * @param {{ readonly entries?: Readonly<Record<string, URL>> }} options - Additional view entrypoints.
  * @returns A mapping from view directory name to built HTML.
  */
-export async function buildAllViewHtml() {
+export async function buildAllViewHtml(options = {}) {
   const viewsUrl = new URL("./src/views/", import.meta.url);
   const entries = await readdir(viewsUrl, { withFileTypes: true });
   const style = await readFile(new URL("./src/styles.css", import.meta.url), "utf8");
@@ -122,6 +123,15 @@ export async function buildAllViewHtml() {
       continue;
     }
     outputs[entry.name] = await buildHtml(fileURLToPath(entryPoint), style);
+  }
+  for (const [name, entryPoint] of Object.entries(options.entries ?? {})) {
+    if (!/^[a-z0-9-]+$/u.test(name) || entryPoint.protocol !== "file:") {
+      throw new Error("approval_build_invalid_view");
+    }
+    if (Object.hasOwn(outputs, name)) {
+      throw new Error("approval_build_duplicate_view");
+    }
+    outputs[name] = await buildHtml(fileURLToPath(entryPoint), style);
   }
   return outputs;
 }

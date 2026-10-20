@@ -14,7 +14,7 @@ const elicitationFieldSchema = z
       .max(100)
       .optional(),
   })
-  .loose();
+  .strict();
 
 const elicitationFormSchema = z
   .object({
@@ -24,7 +24,10 @@ const elicitationFormSchema = z
       .refine((properties) => Object.keys(properties).length <= 100),
     required: z.array(z.string().max(256)).max(100).optional(),
   })
-  .loose();
+  .strict();
+
+let nextElicitationFormId = 0;
+let nextConfirmationDialogId = 0;
 
 /** Zod-inferred subset of MCP elicitation form schemas rendered by the kit. */
 export type ElicitationFormSchema = z.infer<typeof elicitationFormSchema>;
@@ -127,6 +130,8 @@ export function createElicitationForm(
     form.append(createErrorState(document));
     return form;
   }
+  const formId = nextElicitationFormId;
+  nextElicitationFormId += 1;
   const values = new Map<
     string,
     {
@@ -136,12 +141,13 @@ export function createElicitationForm(
   >();
   const required = new Set(schema.required ?? []);
   for (const [name, candidate] of Object.entries(schema.properties)) {
-    const id = `elicitation-${String(values.size)}`;
+    const id = `elicitation-${String(formId)}-${String(values.size)}`;
     const label = element(document, "label", candidate.title ?? name);
     label.htmlFor = id;
     const control = formControl(document, candidate, name);
     control.id = id;
-    control.required = required.has(name);
+    control.required =
+      required.has(name) && !("type" in control && control.type === "checkbox");
     if (candidate.description !== undefined) {
       const description = element(document, "span", candidate.description);
       description.id = `${id}-description`;
@@ -170,11 +176,25 @@ export function createElicitationForm(
       if ("checked" in control && control.type === "checkbox") {
         result.push([name, control.checked]);
       } else if ("type" in control && control.type === "number") {
-        if (control.value.trim() === "" || !Number.isFinite(Number(control.value))) {
+        const rawValue = control.value.trim();
+        if (rawValue === "") {
+          if (required.has(name)) {
+            return;
+          }
+          continue;
+        }
+        const numericValue = Number(rawValue);
+        if (
+          !Number.isFinite(numericValue) ||
+          (field.type === "integer" && !Number.isInteger(numericValue))
+        ) {
           return;
         }
-        result.push([name, Number(control.value)]);
+        result.push([name, numericValue]);
       } else {
+        if (required.has(name) && control.value === "") {
+          return;
+        }
         result.push([name, control.value]);
       }
     }
@@ -341,7 +361,8 @@ export function createConfirmationDialog(
 ): HTMLDialogElement {
   const dialog = element(document, "dialog");
   const title = element(document, "h2", options.title);
-  title.id = "kit-confirmation-title";
+  title.id = `kit-confirmation-title-${String(nextConfirmationDialogId)}`;
+  nextConfirmationDialogId += 1;
   dialog.setAttribute("aria-labelledby", title.id);
   dialog.setAttribute("aria-modal", "true");
   dialog.append(title, element(document, "p", options.message));
@@ -360,6 +381,9 @@ export function createConfirmationDialog(
     if (dialog.open) {
       dialog.close();
     }
+  });
+  dialog.addEventListener("cancel", () => {
+    options.onCancel?.();
   });
   dialog.append(confirm, cancel);
   return dialog;

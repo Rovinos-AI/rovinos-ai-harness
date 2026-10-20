@@ -308,6 +308,7 @@ export function mountApprovalActions(
   context.revealFlow = mountRevealFlow(actions, {
     approvalId: options.approvalId,
     payload: options.payload,
+    ...(options.locale === undefined ? {} : { locale: options.locale }),
     isExpired: options.isExpired,
     bridge: {
       callTool: async (name, args) => {
