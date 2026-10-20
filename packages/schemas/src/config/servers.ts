@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Code } from "../primitives.js";
 import { SecretRefSchema } from "../secret-ref.js";
 import { isSecretKeyName } from "../secret-key-name.js";
+import { ServerElicitationConfigSchema } from "./elicitation.js";
 
 const ServerTimeoutsSchema = z
   .object({
@@ -131,6 +132,8 @@ const ServerConfigObjectSchema = z
     toolPrefix: Code.optional(),
     idempotentTools: ToolNamesSchema.optional(),
     useAnnotations: z.boolean().default(false),
+    // Elicitation options are owned by task 25.1.
+    elicitation: ServerElicitationConfigSchema,
     timeouts: ServerTimeoutsSchema,
     maxResultBytes: z.number().int().positive().default(1_048_576),
   })

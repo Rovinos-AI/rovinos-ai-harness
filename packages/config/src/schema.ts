@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   ModelsConfigSchema,
   ControlPlaneConfigSchema,
+  ElicitationConfigSchema,
   CliConfigSchema,
   KeysConfigSchema,
   PiiConfigSchema,
@@ -32,6 +33,7 @@ export const HarnessConfigSchema = z
     vault: VaultConfigSchema,
     telemetry: TelemetryConfigSchema,
     sandbox: SandboxConfigSchema,
+    elicitation: ElicitationConfigSchema,
     controlPlane: ControlPlaneConfigSchema.optional(),
     cli: CliConfigSchema.optional(),
   })

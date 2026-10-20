@@ -35,6 +35,7 @@ const expectedLogNames = [
   "harness.safe.approval_wait",
   "harness.safe.budget_exceeded",
   "harness.safe.checkpoint",
+  "harness.safe.input_wait",
   "harness.safe.model_call",
   "harness.safe.pii_action",
   "harness.safe.policy_decision",

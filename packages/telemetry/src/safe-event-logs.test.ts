@@ -67,6 +67,16 @@ const events = [
     reason: "approved",
     waitMs: 10,
   }),
+  SafeEvent.parse({
+    ...common,
+    kind: "input_wait",
+    source: "mcp_mrtr",
+    mode: "form",
+    round: 1,
+    action: "accept",
+    decidedBy: "human",
+    waitMs: 10,
+  }),
   SafeEvent.parse({ ...common, kind: "checkpoint", atSeq: 11, hasWorkspaceRef: true }),
   SafeEvent.parse({
     ...common,
