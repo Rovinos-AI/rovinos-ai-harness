@@ -96,7 +96,13 @@ import {
   StorePurgeResultSchema,
   parseJson,
 } from "@harness/schemas";
-import { LocalKeyProvider, SqliteVault, Token } from "@harness/vault";
+import {
+  AkvKeyProvider,
+  AkvSecretResolver,
+  LocalKeyProvider,
+  SqliteVault,
+  Token,
+} from "@harness/vault";
 import {
   attr,
   createTelemetrySdk,
@@ -645,6 +651,28 @@ describe("config", () => {
     expect(loaded.vault).toEqual({ backend: "sqlite", purgeAfterDays: 7 });
     expect(loaded.store.retention).toEqual({ completedRunsDays: 1, failedRunsDays: 1 });
     expect(await readFile(current.configPath, "utf8")).not.toContain(current.canary);
+  });
+
+  it("loads a configured Azure Key Vault key through the injected resolver", async () => {
+    const keyBytes = Buffer.alloc(32, 37);
+    const provider = new AkvKeyProvider({
+      config: KeysConfigSchema.parse({
+        currentKeyId: "e2e-test",
+        keys: [{ id: "e2e-test", secret: "akv:vault-name/harness-key-e2e-test" }],
+      }),
+      vaultName: "vault-name",
+      secretResolver: new AkvSecretResolver({
+        clientFactory: () => ({
+          getSecret: () => Promise.resolve({ value: keyBytes.toString("base64") }),
+        }),
+      }),
+    });
+
+    try {
+      expect(await provider.getKey(provider.currentKeyId())).toEqual(new Uint8Array(keyBytes));
+    } finally {
+      provider.dispose();
+    }
   });
 
   it("maps sandbox egress config to the optional Compose overlay", async () => {

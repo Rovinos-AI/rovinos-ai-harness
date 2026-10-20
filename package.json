@@ -49,6 +49,7 @@
     "test:integration": "vitest run --project integration --passWithNoTests",
     "test:canary": "vitest run --project canary --passWithNoTests",
     "test:replay": "vitest run --project replay --passWithNoTests",
+    "test:live:akv": "vitest run --project live packages/vault/src/akv.live.test.ts",
     "test:live:vertex": "vitest run --project live packages/models/src/providers/vertex.live.test.ts",
     "gen:agents": "yarn build:schemas && node scripts/gen-agents-index.mjs",
     "check:agents": "yarn build:schemas && node scripts/gen-agents-index.mjs --check && node --test scripts/gen-agents-index.test.mjs",

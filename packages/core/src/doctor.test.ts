@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SecretRefSchema } from "@harness/schemas";
+import { AkvSecretResolverError } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DOCTOR_TIMEOUT_MS,
@@ -358,6 +359,32 @@ describe("doctor registry", () => {
       {
         id: "secret_refs_resolvable",
         status: "warn",
+        code: "secret_resolver_unavailable",
+        detail: "akv_doctor-secret",
+      },
+    ]);
+  });
+
+  it("fails when the installed Key Vault resolver is unavailable", async () => {
+    const ref = SecretRefSchema.parse("akv:production-vault/doctor-secret");
+    const check = doctorChecks().find(({ id }) => id === "secret_refs_resolvable");
+    if (check === undefined) {
+      throw new Error("secret_refs_resolvable check is not registered");
+    }
+
+    await expect(
+      runDoctor(
+        context({
+          secretRefs: [ref],
+          resolveSecret: () =>
+            Promise.reject(new AkvSecretResolverError("secret_resolver_unavailable")),
+        }),
+        [check],
+      ),
+    ).resolves.toEqual([
+      {
+        id: "secret_refs_resolvable",
+        status: "fail",
         code: "secret_resolver_unavailable",
         detail: "akv_doctor-secret",
       },

@@ -3,7 +3,8 @@ import { z } from "zod";
 
 const environmentSecretRef = /^env:[A-Za-z_]\w*$/;
 const fileSecretRef = /^file:\/[^\0\r\n]+$/;
-const keyVaultSecretRef = /^akv:[^/\s]+\/[^/\s]+$/;
+const keyVaultSecretRef =
+  /^akv:[a-zA-Z][a-zA-Z0-9-]{2,23}\/[a-zA-Z0-9-]{1,127}(?:#[a-zA-Z0-9-]{1,64})?$/u;
 
 /** A reference to a secret stored outside the harness configuration. */
 export const SecretRefSchema = z
