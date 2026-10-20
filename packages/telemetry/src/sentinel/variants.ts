@@ -9,8 +9,8 @@ const WHITESPACE_AND_DASHES = /[\s-]/gu;
  * @param text Text from a sanitized telemetry payload.
  */
 export function normalizeForScan(text: string): readonly [string, string] {
-  const normalized = text.normalize("NFKC").replace(INVISIBLE_CONTROLS, "");
-  return [normalized, normalized.replace(WHITESPACE_AND_DASHES, "")];
+  const normalized = text.normalize("NFKC").replaceAll(INVISIBLE_CONTROLS, "");
+  return [normalized, normalized.replaceAll(WHITESPACE_AND_DASHES, "")];
 }
 
 /**
@@ -29,10 +29,10 @@ export function variantsOf(
   const candidates = new Set<string>([
     normalized,
     normalized.toLowerCase(),
-    normalized.replace(WHITESPACE_AND_DASHES, ""),
+    normalized.replaceAll(WHITESPACE_AND_DASHES, ""),
   ]);
 
-  const digits = normalized.replace(/\D/gu, "");
+  const digits = normalized.replaceAll(/\D/gu, "");
   if (digits.length >= 7) {
     candidates.add(digits);
   }
@@ -43,10 +43,10 @@ export function variantsOf(
   for (let alignment = 0; alignment < 3; alignment += 1) {
     const padded = Buffer.from(`${"x".repeat(alignment)}${normalized}`, "utf8")
       .toString("base64")
-      .replace(/=+$/u, "")
+      .replaceAll(/=+$/gu, "")
       .slice(Math.floor((alignment * 8) / 6));
     candidates.add(padded);
-    candidates.add(padded.replace(/\+/gu, "-").replace(/\//gu, "_"));
+    candidates.add(padded.replaceAll("+", "-").replaceAll("/", "_"));
   }
 
   const hex = utf8.toString("hex");
@@ -55,11 +55,16 @@ export function variantsOf(
 
   candidates.add(
     Array.from(normalized, (character) => {
-      if (/^[A-Za-z0-9]$/u.test(character)) {
+      const codePoint = character.codePointAt(0);
+      if (
+        codePoint !== undefined &&
+        ((codePoint >= 48 && codePoint <= 57) ||
+          (codePoint >= 65 && codePoint <= 90) ||
+          (codePoint >= 97 && codePoint <= 122))
+      ) {
         return character;
       }
-      const codePoint = character.codePointAt(0);
-      return codePoint === undefined ? character : `&#${codePoint};`;
+      return codePoint === undefined ? character : `&#${codePoint.toString(10)};`;
     }).join(""),
   );
 
