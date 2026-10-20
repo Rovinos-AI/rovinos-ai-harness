@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { Code, HarnessError, Sha256Hex, type Event, type JsonValue } from "@harness/schemas";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
 import { isSanitizedField, markSanitizedField } from "@harness/pii";
+import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { Clock, EventPartial, RunRecorder } from "../recorder.js";
 import type {
   ModelToolCall,
@@ -183,7 +184,7 @@ export async function executePreparedTool(options: ExecutePreparedToolOptions): 
     const timedOut = error instanceof ToolTimeoutError;
     const code = timedOut ? "tool_timeout" : toolErrorCode(error);
     options.span.setStatus({ code: SpanStatusCode.ERROR });
-    options.span.setAttribute("harness.error.code", code);
+    setActiveSpanAttribute("harness.error.code", code);
     return options.recorder.record({
       type: "tool_result",
       v: 1,
@@ -218,7 +219,7 @@ export async function executePreparedTool(options: ExecutePreparedToolOptions): 
   );
   if (execution.outcome === "error") {
     options.span.setStatus({ code: SpanStatusCode.ERROR });
-    options.span.setAttribute("harness.error.code", execution.errorCode ?? "tool_failed");
+    setActiveSpanAttribute("harness.error.code", execution.errorCode ?? "tool_failed");
   }
   return result;
 }

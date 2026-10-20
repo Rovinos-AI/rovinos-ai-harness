@@ -12,6 +12,7 @@ import {
 } from "@harness/schemas";
 import { requestHash } from "@harness/models";
 import { SpanStatusCode, type Span } from "@opentelemetry/api";
+import { setActiveSpanAttribute } from "@harness/telemetry";
 import type { EventPartial, RunRecorder } from "../recorder.js";
 import { MODEL_CALL_SPAN } from "../spans.js";
 import type { IdGenerator, ModelCompletion, ModelPort, RunContext, ToolPort } from "../ports.js";
@@ -239,7 +240,7 @@ async function recordModelFailure({
   const reason =
     code === "model_output_invalid" && options.outputSchema !== undefined ? "result_invalid" : code;
   span.setStatus({ code: SpanStatusCode.ERROR });
-  span.setAttribute("harness.error.code", reason);
+  setActiveSpanAttribute("harness.error.code", reason);
   const event = await options.recorder.record({
     type: "run_status_changed",
     v: 1,

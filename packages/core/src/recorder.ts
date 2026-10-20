@@ -24,6 +24,7 @@ import {
 import { SeqConflictError, type EventStore } from "@harness/store";
 import {
   sentinelTripQueue,
+  setActiveSpanAttribute,
   type SpanDefinition,
   type SpanDefinitionShape,
   type TripQueue,
@@ -241,12 +242,12 @@ export class RunRecorder {
     return context.with(activeContext, async () => {
       try {
         const event = await fn(span);
-        span.setAttribute("harness.event.seq", event.seq);
+        setActiveSpanAttribute("harness.event.seq", event.seq);
         return event;
       } catch (error) {
         span.setStatus({ code: SpanStatusCode.ERROR });
         if (error instanceof HarnessError) {
-          span.setAttribute("harness.error.code", error.code);
+          setActiveSpanAttribute("harness.error.code", error.code);
         }
         throw error;
       } finally {
