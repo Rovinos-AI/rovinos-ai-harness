@@ -11,6 +11,7 @@
 // Not wired yet: user pseudonym emission in runtime telemetry (12.8 -> #139)
 // Not wired yet: control-plane start_run requester attribution (18.5 -> #178)
 // Not wired yet: simulated eval approver identity (16.6 -> #172)
+// Not wired yet: worker claim-time concurrency quota enforcement (24.3 -> #232)
 import { Command } from "commander";
 import {
   Client,

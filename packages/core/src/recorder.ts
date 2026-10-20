@@ -21,7 +21,7 @@ import {
   type Snapshot,
   type WorkspaceRef,
 } from "@harness/schemas";
-import { SeqConflictError, type EventStore } from "@harness/store";
+import { SeqConflictError, type EventStore, type UsageLedgerDelta } from "@harness/store";
 import {
   sentinelTripQueue,
   setActiveSpanAttribute,
@@ -130,12 +130,15 @@ export class RunRecorder {
    * @returns The validated event with its assigned sequence.
    * @throws LeaseLostError when another writer has advanced the log.
    */
-  async record(partial: EventPartial): Promise<Event> {
+  async record(
+    partial: EventPartial,
+    usageUpdates: readonly UsageLedgerDelta[] = [],
+  ): Promise<Event> {
     if (this.storedHead !== undefined) {
       throw new LeaseLostError(this.storedHead);
     }
     const spanContext = this.activeSpanContext();
-    const [event] = await this.enqueue(() => this.append([partial], spanContext));
+    const [event] = await this.enqueue(() => this.append([partial], spanContext, usageUpdates));
     if (event === undefined) {
       throw new SpanContextMissingError();
     }
@@ -149,7 +152,10 @@ export class RunRecorder {
    * @returns The validated events with their assigned sequences.
    * @throws LeaseLostError when another writer has advanced the log.
    */
-  async recordBatch(partials: readonly EventPartial[]): Promise<Event[]> {
+  async recordBatch(
+    partials: readonly EventPartial[],
+    usageUpdates: readonly UsageLedgerDelta[] = [],
+  ): Promise<Event[]> {
     if (partials.length === 0) {
       return [];
     }
@@ -157,7 +163,7 @@ export class RunRecorder {
       throw new LeaseLostError(this.storedHead);
     }
     const spanContext = this.activeSpanContext();
-    const events = await this.enqueue(() => this.append(partials, spanContext));
+    const events = await this.enqueue(() => this.append(partials, spanContext, usageUpdates));
     return events;
   }
 
@@ -276,6 +282,7 @@ export class RunRecorder {
   private async append(
     partials: readonly EventPartial[],
     spanContext: SpanContext,
+    usageUpdates: readonly UsageLedgerDelta[],
   ): Promise<Event[]> {
     if (this.storedHead !== undefined) {
       throw new LeaseLostError(this.storedHead);
@@ -292,7 +299,13 @@ export class RunRecorder {
     }));
 
     try {
-      const result = await this.store.append(this.runId, newEvents, expectedSeq, this.leaseOwner);
+      const result =
+        usageUpdates.length === 0
+          ? await this.store.append(this.runId, newEvents, expectedSeq, this.leaseOwner)
+          : await this.store.appendWithUsage(this.runId, newEvents, expectedSeq, {
+              usageUpdates,
+              ...(this.leaseOwner === undefined ? {} : { leaseOwner: this.leaseOwner }),
+            });
       this.nextSequence = result.nextSeq;
     } catch (error) {
       if (error instanceof SeqConflictError) {

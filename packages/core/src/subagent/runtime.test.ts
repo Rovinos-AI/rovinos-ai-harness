@@ -4,6 +4,7 @@ import {
   FakeClock,
   Id,
   ModelsConfigSchema,
+  QuotasConfigSchema,
   Principal,
   RunConfigSchema,
   SequentialIdGenerator,
@@ -134,6 +135,9 @@ describe("production subagent runtime", () => {
     };
     const config = {
       run: RunConfigSchema.parse({}),
+      quotas: QuotasConfigSchema.parse([
+        { id: "selected_worker", match: { role: ["worker"] }, maxRunsPerHour: 1 },
+      ]),
       models: ModelsConfigSchema.parse({
         routing: {
           default: [{ provider: "local", model: "parent" }],
@@ -287,6 +291,9 @@ describe("production subagent runtime", () => {
       input: { goal: "inspect this" },
     });
     expect(modelRequests[0]?.role).toBe("worker_route");
+    await expect(store.readUsageLedger("selected_worker", "hour", [0])).resolves.toMatchObject([
+      { runsStarted: 1 },
+    ]);
     expect(modelRequests[0]?.messages[0]).toEqual({
       role: "system",
       parts: [{ type: "text", text: "Follow the task." }],
@@ -318,7 +325,9 @@ describe("production subagent runtime", () => {
       const model: ModelPort = {
         complete: (request) => {
           requests.push(request);
-          return Promise.resolve(completion());
+          return Promise.resolve(
+            completion(undefined, { inputTokens: 1, outputTokens: 1, costMicros: 7 }),
+          );
         },
       };
       const parentTools: ToolPort = {
@@ -335,6 +344,9 @@ describe("production subagent runtime", () => {
       });
       const config = {
         run: RunConfigSchema.parse({}),
+        quotas: QuotasConfigSchema.parse([
+          { id: "selected_worker", match: { role: ["worker"] }, dailyCostUsd: 25 },
+        ]),
         models,
         roles: [
           {
@@ -485,6 +497,9 @@ describe("production subagent runtime", () => {
       });
       expect(scopes.scopeOf(childRunId)).toBe(parentRunId);
       expect(requests[0]?.role).toBe("worker_route");
+      await expect(store.readUsageLedger("selected_worker", "day", [0])).resolves.toMatchObject([
+        { costMicros: 7 },
+      ]);
       expect((await readEvents(store, childRunId)).at(-1)).toMatchObject({
         type: "run_status_changed",
         to: "completed",

@@ -26,6 +26,7 @@ export {
   StoreMigrationError,
   StoreReadOnlyError,
   StoreUnavailableError,
+  UsageLimitExceededError,
   isPreservedStoreError,
 } from "./errors.js";
 export {
@@ -51,6 +52,13 @@ export {
   type RunSummary,
   type SnapshotStoreOptions,
   type SqliteStoreOptions,
+  UsageLedgerDeltaSchema,
+  UsageLedgerPeriodSchema,
+  UsageLedgerRowSchema,
+  type UsageLedgerDelta,
+  type UsageLedgerPeriod,
+  type UsageLedgerRow,
+  parseUsageLedgerDeltas,
   type WatchOptions,
   type WatchRunsOptions,
 } from "./types.js";

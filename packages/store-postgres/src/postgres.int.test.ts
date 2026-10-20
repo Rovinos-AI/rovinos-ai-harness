@@ -155,6 +155,57 @@ runEventStoreConformance("PostgresEventStore encrypted", encryptedPostgresFactor
 });
 runConcurrencyConformance("PostgresEventStore", postgresMultiFactory);
 
+it("serializes concurrent quota ledger updates with event appends", async () => {
+  const { admin, schema } = await createSchema();
+  const ledgerStores = Array.from(
+    { length: 10 },
+    () => new PostgresEventStore(connectionString, { schema }),
+  );
+  const builders = createEventBuilders();
+  try {
+    const runIds = ledgerStores.map(() => builders.nextRunId());
+    const results = await Promise.allSettled(
+      ledgerStores.map((store, index) => {
+        const runId = runIds[index];
+        if (runId === undefined) {
+          throw new Error("Expected a run id");
+        }
+        return store.appendWithUsage(runId, [builders.runCreated(runId)], 0, {
+          usageUpdates: [
+            {
+              quotaId: "hourly",
+              period: "hour",
+              periodStart: 3_600_000,
+              costMicros: 0,
+              runsStarted: 1,
+              maxRunsStarted: 5,
+            },
+          ],
+        });
+      }),
+    );
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(5);
+    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(5);
+    const firstStore = ledgerStores[0];
+    if (firstStore === undefined) {
+      throw new Error("Expected a ledger store");
+    }
+    await expect(firstStore.readUsageLedger("hourly", "hour", [3_600_000])).resolves.toEqual([
+      { quotaId: "hourly", period: "hour", periodStart: 3_600_000, costMicros: 0, runsStarted: 5 },
+    ]);
+    const rejectedRunIds = results.flatMap((result, index) =>
+      result.status === "rejected" && runIds[index] !== undefined ? [runIds[index]] : [],
+    );
+    expect(rejectedRunIds).toHaveLength(5);
+    const rejectedHeads = await Promise.all(rejectedRunIds.map((runId) => firstStore.head(runId)));
+    expect(rejectedHeads).toEqual([0, 0, 0, 0, 0]);
+  } finally {
+    await Promise.all(ledgerStores.map((store) => store.close()));
+    await dropSchema(admin, schema);
+  }
+});
+
 it("resumes Postgres event and snapshot rotation without interrupting reads", async () => {
   const { admin, schema } = await createSchema();
   let currentKeyId = "key-a";

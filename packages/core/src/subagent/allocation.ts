@@ -24,6 +24,7 @@ interface ResolveChildAllocationOptions {
   readonly recordSpawned: NonNullable<RunContext["recordSubagentSpawned"]>;
   readonly childRunId: Id;
   readonly concurrentSpawns: number;
+  readonly assertQuotaStart?: () => Promise<void>;
 }
 
 interface ResolvedChildAllocation {
@@ -94,6 +95,7 @@ export async function resolveChildAllocation(
     return { childRunId: existing.childRunId, allocation };
   }
 
+  await options.assertQuotaStart?.();
   const childRunId = options.childRunId;
   await options.recordSpawned({
     childRunId,

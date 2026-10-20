@@ -47,6 +47,7 @@ import { isRunTerminal, PostgresSubscriptions } from "./subscriptions.js";
 import { watchPostgresRuns } from "./watch-runs.js";
 import { countPostgresRowsByKey, reencryptPostgresBatch } from "./rotation.js";
 import { PostgresEventWriter } from "./writer.js";
+import { queryPostgresUsageLedger, readPostgresUsageLedger } from "./usage-ledger.js";
 
 const connectionStringSchema = z
   .url()
@@ -186,6 +187,29 @@ export class PostgresEventStore implements EventStore, StoreKeyRotation {
   ): Promise<{ nextSeq: number }> {
     const [runId, events, expectedSeq, snapshot, leaseOwner] = args;
     return this.writer.appendWithSnapshot(runId, events, expectedSeq, snapshot, leaseOwner);
+  }
+
+  /** {@inheritDoc EventStore.appendWithUsage} */
+  async appendWithUsage(
+    ...args: Parameters<EventStore["appendWithUsage"]>
+  ): Promise<{ nextSeq: number }> {
+    return this.writer.appendWithUsage(...args);
+  }
+
+  /** {@inheritDoc EventStore.readUsageLedger} */
+  async readUsageLedger(
+    quotaId: Parameters<EventStore["readUsageLedger"]>[0],
+    period: Parameters<EventStore["readUsageLedger"]>[1],
+    periodStarts: readonly number[],
+  ): ReturnType<EventStore["readUsageLedger"]> {
+    return readPostgresUsageLedger({
+      ensureInitialized: () => this.ensureInitialized(),
+      query: (parsedQuotaId, parsedPeriod, requestedStarts) =>
+        queryPostgresUsageLedger(this.pool, parsedQuotaId, parsedPeriod, requestedStarts),
+      quotaId,
+      period,
+      periodStarts,
+    });
   }
 
   /** {@inheritDoc EventStore.claimRunExecution} */

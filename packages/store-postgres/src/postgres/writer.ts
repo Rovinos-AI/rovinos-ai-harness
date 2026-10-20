@@ -7,6 +7,8 @@ import {
   type ContentCodec,
   type EncodedSnapshot,
   type EventStore,
+  type UsageLedgerDelta,
+  parseUsageLedgerDeltas,
 } from "@harness/store/adapter-internal";
 import { appendTransaction, encodeEvents, storeError, type EncodedEvent } from "./helpers.js";
 
@@ -70,14 +72,31 @@ export class PostgresEventWriter {
     });
   }
 
+  async appendWithUsage(
+    ...args: Parameters<EventStore["appendWithUsage"]>
+  ): Promise<{ nextSeq: number }> {
+    const [runId, events, expectedSeq, options] = args;
+    const { usageUpdates, leaseOwner } = options;
+    this.assertWritable();
+    const encoded = await encodeEvents(this.codec, runId, events, expectedSeq);
+    return this.appendEncoded({
+      runId,
+      encoded,
+      expectedSeq,
+      usageUpdates: parseUsageLedgerDeltas(usageUpdates),
+      ...(leaseOwner === undefined ? {} : { leaseOwner }),
+    });
+  }
+
   private async appendEncoded(options: {
     readonly runId: Id;
     readonly encoded: readonly EncodedEvent[];
     readonly expectedSeq: number;
     readonly encodedSnapshot?: EncodedSnapshot;
+    readonly usageUpdates?: readonly UsageLedgerDelta[];
     readonly leaseOwner?: Id;
   }): Promise<{ nextSeq: number }> {
-    const { runId, encoded, expectedSeq, encodedSnapshot, leaseOwner } = options;
+    const { runId, encoded, expectedSeq, encodedSnapshot, usageUpdates, leaseOwner } = options;
     await this.ensureInitialized();
     let client: PoolClient;
     try {
@@ -92,6 +111,7 @@ export class PostgresEventWriter {
           encoded,
           expectedSeq,
           ...(encodedSnapshot === undefined ? {} : { encodedSnapshot }),
+          ...(usageUpdates === undefined ? {} : { usageUpdates }),
           snapshotKeep: this.snapshotKeep,
           ...(leaseOwner === undefined ? {} : { leaseOwner }),
         }),

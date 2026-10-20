@@ -16,6 +16,7 @@ export const EVENT_FIELD_CLASS = {
     parentCallId: "meta",
     continuationOf: "meta",
     requestedBy: "meta",
+    quotaRole: "meta",
     scopeId: "meta",
     depth: "meta",
   },
