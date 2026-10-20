@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { expect, it } from "vitest";
 import { SequentialIdGenerator } from "@harness/schemas";
-import type { Clock } from "../types.js";
+import type { Clock } from "@harness/store";
 import { SqliteRunQueue } from "./sqlite.js";
-import { runQueueConformance, type RunQueueFactoryCreator } from "./conformance.js";
+import { runQueueConformance, type RunQueueFactoryCreator } from "@harness/store/testing";
 
 let nextDirectory = 0;
 

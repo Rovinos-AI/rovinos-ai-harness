@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { QueryResultRow } from "pg";
 import { z } from "zod";
+import type { RunQueueDeadLetter, RunQueueJob } from "@harness/store";
 import {
   RunQueueDeadLetterSchema,
   RunQueueJobSchema,
@@ -8,9 +9,7 @@ import {
   QueueJobIdSchema,
   WorkerIdSchema,
   parseQueueInput,
-  type RunQueueDeadLetter,
-  type RunQueueJob,
-} from "./types.js";
+} from "@harness/store/adapter-internal";
 
 /** Row shape returned by active queue queries. */
 export interface QueueRow extends QueryResultRow {

@@ -1,27 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 import Database from "better-sqlite3";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { migrate } from "../migrate.js";
-import { systemClock, type Clock } from "../types.js";
-import { sqliteStoreError } from "../sqlite/outbox.js";
+import { SystemRunQueueIdGenerator } from "@harness/store";
+import type {
+  Clock,
+  RunQueue,
+  RunQueueDeadLetter,
+  RunQueueFailResult,
+  RunQueueIdGenerator,
+  RunQueueJob,
+  RunQueueOptions,
+} from "@harness/store";
 import {
+  migrate,
   EnqueueRunJobSchema,
   QueueErrorCodeSchema,
   QueueJobIdSchema,
   RunQueueDeadLetterSchema,
   RunQueueJobSchema,
   RunQueueOptionsSchema,
-  SystemRunQueueIdGenerator,
+  systemClock,
   WorkerIdSchema,
   hashIdempotencyKey,
   parseQueueInput,
-  type RunQueue,
-  type RunQueueDeadLetter,
-  type RunQueueIdGenerator,
-  type RunQueueJob,
-  type RunQueueOptions,
-  type RunQueueFailResult,
-} from "./types.js";
+} from "@harness/store/adapter-internal";
+import { sqliteStoreError } from "../sqlite/outbox.js";
 
 interface QueueRow {
   job_id: string;
@@ -130,7 +134,10 @@ export class SqliteRunQueue implements RunQueue {
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("busy_timeout = 5000");
       this.db.pragma("foreign_keys = ON");
-      migrate(this.db, "sqlite", { appliedAt: this.now() });
+      migrate(this.db, "sqlite", {
+        appliedAt: this.now(),
+        migrationDirectory: fileURLToPath(new URL("../../migrations/sqlite/", import.meta.url)),
+      });
       this.enqueueStatement = this.db.prepare<
         [string, string, string, number, number, number, string | null, number, number]
       >(

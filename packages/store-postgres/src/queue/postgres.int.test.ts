@@ -2,9 +2,9 @@
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
 import { SequentialIdGenerator } from "@harness/schemas";
-import type { Clock } from "../types.js";
+import type { Clock } from "@harness/store";
 import { PostgresRunQueue } from "./postgres.js";
-import { runQueueConformance, type RunQueueFactoryCreator } from "./conformance.js";
+import { runQueueConformance, type RunQueueFactoryCreator } from "@harness/store/testing";
 
 const connectionString =
   process.env.TEST_POSTGRES_URL ?? "postgresql://harness@127.0.0.1:5432/harness";

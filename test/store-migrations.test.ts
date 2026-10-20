@@ -199,6 +199,8 @@ describe("SQLite schema migrations", () => {
         "idempotency_keys",
         "idempotency_keys_run_id_idx",
         "run_execution_leases",
+        "run_queue",
+        "run_queue_dead",
         "run_queue_run_id_idx",
       ]),
     );
@@ -236,6 +238,11 @@ describe("SQLite schema migrations", () => {
     expect(await readdir(directory)).toContain("0004_idempotency_keys.sql");
     expect(await readdir(directory)).toContain("0005_run_execution_leases.sql");
     expect(await readdir(directory)).toContain("0006_run_queue.sql");
+    const postgresMigrations = new URL(
+      "../packages/store-postgres/migrations/postgres/",
+      import.meta.url,
+    );
+    expect(await readdir(postgresMigrations)).toContain("0006_run_queue.sql");
     expect(await readFile(new URL("0001_init.sql", directory), "utf8")).toContain(
       "CREATE TABLE IF NOT EXISTS events",
     );

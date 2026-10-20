@@ -1,9 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Pool, type PoolClient } from "pg";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { migrate } from "../migrate.js";
+import {
+  SystemRunQueueIdGenerator,
+  type Clock,
+  type RunQueue,
+  type RunQueueDeadLetter,
+  type RunQueueFailResult,
+  type RunQueueIdGenerator,
+  type RunQueueJob,
+  type RunQueueOptions,
+} from "@harness/store";
+import {
+  migrate,
+  EnqueueRunJobSchema,
+  QueueErrorCodeSchema,
+  QueueJobIdSchema,
+  systemClock,
+  WorkerIdSchema,
+  hashIdempotencyKey,
+  parseQueueInput,
+} from "@harness/store/adapter-internal";
 import { storeError } from "../postgres/helpers.js";
-import { systemClock, type Clock } from "../types.js";
 import {
   connectionStringSchema,
   deadLetter,
@@ -17,21 +36,6 @@ import {
   retryTimestamp,
   type QueueRow,
 } from "./postgres-helpers.js";
-import {
-  EnqueueRunJobSchema,
-  QueueErrorCodeSchema,
-  QueueJobIdSchema,
-  SystemRunQueueIdGenerator,
-  WorkerIdSchema,
-  hashIdempotencyKey,
-  parseQueueInput,
-  type RunQueue,
-  type RunQueueDeadLetter,
-  type RunQueueFailResult,
-  type RunQueueIdGenerator,
-  type RunQueueJob,
-  type RunQueueOptions,
-} from "./types.js";
 
 /** Durable Postgres run queue using row locks with `SKIP LOCKED` for exclusive claims. */
 export class PostgresRunQueue implements RunQueue {
@@ -76,7 +80,10 @@ export class PostgresRunQueue implements RunQueue {
 
   private ensureInitialized(): Promise<void> {
     this.initialized ??= (async () => {
-      await migrate(this.pool, "postgres", { appliedAt: this.now() });
+      await migrate(this.pool, "postgres", {
+        appliedAt: this.now(),
+        migrationDirectory: fileURLToPath(new URL("../../migrations/postgres/", import.meta.url)),
+      });
     })().catch((error: unknown) => {
       this.initialized = undefined;
       throw storeError(error);

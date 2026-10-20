@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, it, vi } from "vitest";
 import { FakeClock, SequentialIdGenerator } from "@harness/schemas";
-import type { Clock } from "../types.js";
-import { runQueueConformance, type RunQueueFactoryCreator } from "./conformance.js";
+import type { Clock } from "@harness/store";
+import { runQueueConformance, type RunQueueFactoryCreator } from "@harness/store/testing";
 
 const fakePg = vi.hoisted(() => {
   type Row = Record<string, unknown>;
