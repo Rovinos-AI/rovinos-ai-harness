@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { formatMessage, getStrings } from "./kit/strings.js";
+
 /** Mounted CLI instructions for approval hosts without a usable app bridge. */
 export interface ApprovalFallback {
   show(fallbackText?: string, approvalId?: string): void;
@@ -6,12 +8,14 @@ export interface ApprovalFallback {
   dispose(): void;
 }
 
-function createCommand(
-  document: Document,
-  command: string,
-  label: string,
-  listeners: AbortController,
-): HTMLElement {
+function createCommand(options: {
+  readonly document: Document;
+  readonly command: string;
+  readonly label: string;
+  readonly locale: string | undefined;
+  readonly listeners: AbortController;
+}): HTMLElement {
+  const { document, command, label, locale, listeners } = options;
   const section = document.createElement("section");
   const heading = document.createElement("h3");
   heading.textContent = label;
@@ -19,11 +23,14 @@ function createCommand(
   input.type = "text";
   input.readOnly = true;
   input.value = command;
-  input.setAttribute("aria-label", `${label} command`);
+  input.setAttribute("aria-label", formatMessage(getStrings(locale).commandLabel, { label }));
   const copy = document.createElement("button");
   copy.type = "button";
-  copy.textContent = "Copy command";
-  copy.setAttribute("aria-label", `Copy ${label.toLowerCase()} command`);
+  copy.textContent = getStrings(locale).copyCommand;
+  copy.setAttribute(
+    "aria-label",
+    formatMessage(getStrings(locale).copyCommandLabel, { label: label.toLowerCase() }),
+  );
   const status = document.createElement("p");
   status.setAttribute("role", "status");
   copy.addEventListener(
@@ -36,11 +43,11 @@ function createCommand(
             throw new Error("clipboard_unavailable");
           }
           await clipboard.writeText(input.value);
-          status.textContent = "Command copied.";
+          status.textContent = getStrings(locale).commandCopied;
         } catch {
           input.focus();
           input.select();
-          status.textContent = "Copy unavailable. The command is selected for manual copying.";
+          status.textContent = getStrings(locale).copyUnavailable;
         }
       })();
     },
@@ -56,7 +63,7 @@ function createCommand(
  * @param root - Approval app container.
  * @returns Methods to show, hide, or dispose of the fallback card.
  */
-export function createApprovalFallback(root: HTMLElement): ApprovalFallback {
+export function createApprovalFallback(root: HTMLElement, locale?: () => string): ApprovalFallback {
   const document = root.ownerDocument;
   const listeners = new AbortController();
   const card = document.createElement("section");
@@ -64,7 +71,7 @@ export function createApprovalFallback(root: HTMLElement): ApprovalFallback {
   card.setAttribute("aria-labelledby", "approval-fallback-heading");
   const heading = document.createElement("h2");
   heading.id = "approval-fallback-heading";
-  heading.textContent = "Use the command line";
+  heading.textContent = getStrings(locale?.()).useCommandLine;
   const instructions = document.createElement("p");
   const commands = document.createElement("div");
   card.append(heading, instructions, commands);
@@ -77,11 +84,22 @@ export function createApprovalFallback(root: HTMLElement): ApprovalFallback {
         mounted = true;
       }
       const id = approvalId ?? "<id>";
-      instructions.textContent =
-        fallbackText ?? "The host bridge is unavailable. Resolve this approval from the CLI.";
+      instructions.textContent = fallbackText ?? getStrings(locale?.()).fallbackUnavailable;
       commands.replaceChildren(
-        createCommand(document, `harness approvals approve ${id}`, "Approve", listeners),
-        createCommand(document, `harness approvals deny ${id}`, "Deny", listeners),
+        createCommand({
+          document,
+          command: formatMessage(getStrings(locale?.()).approveCliCommand, { id }),
+          label: getStrings(locale?.()).approveCommand,
+          locale: locale?.(),
+          listeners,
+        }),
+        createCommand({
+          document,
+          command: formatMessage(getStrings(locale?.()).denyCliCommand, { id }),
+          label: getStrings(locale?.()).denyCommand,
+          locale: locale?.(),
+          listeners,
+        }),
       );
       card.hidden = false;
     },

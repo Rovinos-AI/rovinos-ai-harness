@@ -5,6 +5,7 @@ import {
   type ApprovalPayload,
   type JsonValue as Json,
 } from "@harness/schemas/browser";
+import { formatMessage, getStrings } from "./kit/strings.js";
 
 type FormControl =
   | { readonly kind: "text"; readonly input: HTMLInputElement }
@@ -131,8 +132,9 @@ export function createEditForm(
   onSubmit: (edits: { readonly pointer: string; readonly value: Json }[]) => void,
 ): HTMLFormElement {
   const form = element(document, "form");
+  const strings = getStrings(document.documentElement.lang);
   form.setAttribute("aria-labelledby", "approval-edit-heading");
-  form.append(element(document, "h2", "Edit approval"));
+  form.append(element(document, "h2", strings.editApproval));
   form.querySelector("h2")?.setAttribute("id", "approval-edit-heading");
   const controls: FieldControl[] = [];
   let index = 0;
@@ -140,7 +142,7 @@ export function createEditForm(
     const original = pointerValue(payload.args, pointer);
     const id = `approval-edit-${String(index)}`;
     const field = element(document, "div");
-    const label = element(document, "label", pointer === "" ? "All arguments" : pointer);
+    const label = element(document, "label", pointer === "" ? strings.allArguments : pointer);
     label.htmlFor = id;
     const control = createControl(document, original, id);
     const fieldControl: FieldControl = { pointer, original, control, touched: false };
@@ -153,7 +155,9 @@ export function createEditForm(
     const current = element(
       document,
       "p",
-      `Current tokenized value: ${original === undefined ? "(not set)" : JSON.stringify(original)}`,
+      formatMessage(strings.currentTokenizedValue, {
+        value: original === undefined ? strings.notSet : JSON.stringify(original),
+      }),
     );
     field.append(label, current, control.input);
     form.append(field);
@@ -163,9 +167,9 @@ export function createEditForm(
   const error = element(document, "p");
   error.setAttribute("role", "alert");
   form.append(error);
-  const submit = element(document, "button", "Submit edits");
+  const submit = element(document, "button", strings.submitEdits);
   submit.type = "button";
-  const cancel = element(document, "button", "Cancel");
+  const cancel = element(document, "button", strings.cancel);
   cancel.type = "button";
   cancel.addEventListener("click", () => {
     form.remove();
@@ -177,7 +181,7 @@ export function createEditForm(
     for (const control of controls) {
       const value = readControlValue(control);
       if (value === undefined) {
-        error.textContent = "Enter a valid value.";
+        error.textContent = strings.validValueRequired;
         control.control.input.focus();
         return;
       }

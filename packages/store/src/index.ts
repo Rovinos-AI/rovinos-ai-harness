@@ -26,6 +26,23 @@ export {
 } from "./rotate.js";
 export { JsonContentCodec } from "./codec.js";
 export { InMemoryEventStore } from "./memory.js";
+export {
+  EnqueueRunJobSchema,
+  InvalidRunQueueInputError,
+  RunQueueDeadLetterSchema,
+  RunQueueFailResultSchema,
+  RunQueueJobSchema,
+  RunQueueKindSchema,
+  type EnqueueRunJob,
+  type RunQueue,
+  type RunQueueDeadLetter,
+  type RunQueueFailResult,
+  type RunQueueIdGenerator,
+  type RunQueueJob,
+  type RunQueueKind,
+  type RunQueueOptions,
+  SystemRunQueueIdGenerator,
+} from "./queue/types.js";
 export type { ContentCodec, ContentCodecContext, EncodedContent } from "./codec.js";
 export {
   IdempotencyKeyHashSchema,

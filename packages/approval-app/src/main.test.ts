@@ -40,6 +40,7 @@ vi.mock("@modelcontextprotocol/ext-apps", async (importOriginal) => {
     App: class extends actual.EventDispatcher<Apps.AppEventMap> {
       connect = bridge.connect;
       callServerTool = bridge.call;
+      getHostContext = vi.fn<() => undefined>(() => undefined);
       constructor() {
         super();
         bridge.apps.set("app", this);
@@ -161,6 +162,7 @@ async function start() {
   bridge.connect.mockResolvedValue(undefined);
   bridge.call.mockResolvedValue({ content: [] });
   await import("./main.js");
+  await import("./views/approval/index.js");
   const app = bridge.apps.get("app");
   if (app === undefined) {
     throw new Error("App was not created");
