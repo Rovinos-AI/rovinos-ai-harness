@@ -118,6 +118,62 @@ function formControl(
   return input;
 }
 
+interface ElicitationControl {
+  readonly control: HTMLInputElement | HTMLSelectElement;
+  readonly field: ElicitationFormSchema["properties"][string];
+}
+
+type ElicitationValue =
+  | { readonly kind: "value"; readonly value: string | number | boolean }
+  | { readonly kind: "omit" }
+  | { readonly kind: "invalid" };
+
+function readElicitationValue(entry: ElicitationControl, required: boolean): ElicitationValue {
+  const { control, field } = entry;
+  if ("selectedIndex" in control) {
+    const selected = field.enum?.[control.selectedIndex];
+    return selected === undefined ? { kind: "invalid" } : { kind: "value", value: selected };
+  }
+  if ("checked" in control && control.type === "checkbox") {
+    return { kind: "value", value: control.checked };
+  }
+  if ("type" in control && control.type === "number") {
+    const rawValue = control.value.trim();
+    if (rawValue === "") {
+      return required ? { kind: "invalid" } : { kind: "omit" };
+    }
+    const numericValue = Number(rawValue);
+    if (
+      !Number.isFinite(numericValue) ||
+      (field.type === "integer" && !Number.isInteger(numericValue))
+    ) {
+      return { kind: "invalid" };
+    }
+    return { kind: "value", value: numericValue };
+  }
+  if (required && control.value === "") {
+    return { kind: "invalid" };
+  }
+  return { kind: "value", value: control.value };
+}
+
+function collectElicitationValues(
+  values: ReadonlyMap<string, ElicitationControl>,
+  required: ReadonlySet<string>,
+): Record<string, string | number | boolean> | undefined {
+  const result: [string, string | number | boolean][] = [];
+  for (const [name, entry] of values) {
+    const fieldValue = readElicitationValue(entry, required.has(name));
+    if (fieldValue.kind === "invalid") {
+      return undefined;
+    }
+    if (fieldValue.kind === "value") {
+      result.push([name, fieldValue.value]);
+    }
+  }
+  return Object.fromEntries(result);
+}
+
 /** Renders the supported object-form subset of an MCP elicitation schema. */
 export function createElicitationForm(
   document: Document,
@@ -132,13 +188,7 @@ export function createElicitationForm(
   }
   const formId = nextElicitationFormId;
   nextElicitationFormId += 1;
-  const values = new Map<
-    string,
-    {
-      readonly control: HTMLInputElement | HTMLSelectElement;
-      readonly field: ElicitationFormSchema["properties"][string];
-    }
-  >();
+  const values = new Map<string, ElicitationControl>();
   const required = new Set(schema.required ?? []);
   for (const [name, candidate] of Object.entries(schema.properties)) {
     const id = `elicitation-${String(formId)}-${String(values.size)}`;
@@ -146,8 +196,7 @@ export function createElicitationForm(
     label.htmlFor = id;
     const control = formControl(document, candidate, name);
     control.id = id;
-    control.required =
-      required.has(name) && !("type" in control && control.type === "checkbox");
+    control.required = required.has(name) && !("type" in control && control.type === "checkbox");
     if (candidate.description !== undefined) {
       const description = element(document, "span", candidate.description);
       description.id = `${id}-description`;
@@ -163,42 +212,10 @@ export function createElicitationForm(
   form.append(submit);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const result: [string, string | number | boolean][] = [];
-    for (const [name, { control, field }] of values) {
-      if ("selectedIndex" in control) {
-        const selected = field.enum?.[control.selectedIndex];
-        if (selected === undefined) {
-          return;
-        }
-        result.push([name, selected]);
-        continue;
-      }
-      if ("checked" in control && control.type === "checkbox") {
-        result.push([name, control.checked]);
-      } else if ("type" in control && control.type === "number") {
-        const rawValue = control.value.trim();
-        if (rawValue === "") {
-          if (required.has(name)) {
-            return;
-          }
-          continue;
-        }
-        const numericValue = Number(rawValue);
-        if (
-          !Number.isFinite(numericValue) ||
-          (field.type === "integer" && !Number.isInteger(numericValue))
-        ) {
-          return;
-        }
-        result.push([name, numericValue]);
-      } else {
-        if (required.has(name) && control.value === "") {
-          return;
-        }
-        result.push([name, control.value]);
-      }
+    const result = collectElicitationValues(values, required);
+    if (result !== undefined) {
+      onSubmit(result);
     }
-    onSubmit(Object.fromEntries(result));
   });
   return form;
 }

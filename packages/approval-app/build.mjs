@@ -104,7 +104,7 @@ export async function buildApprovalHtml(options = {}) {
 /**
  * Builds every view with an `index.ts` entry and any configured entries.
  *
- * @param {{ readonly entries?: Readonly<Record<string, URL>> }} options - Additional view entrypoints.
+ * @param options - Additional view entrypoints.
  * @returns A mapping from view directory name to built HTML.
  */
 export async function buildAllViewHtml(options = {}) {

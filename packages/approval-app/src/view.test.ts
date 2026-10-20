@@ -371,7 +371,7 @@ it("formats array counts with the host locale", () => {
   const formattedCount = new Intl.NumberFormat("ar-EG").format(2);
   expect(
     [...document.querySelectorAll("summary")].find((summary) =>
-      summary.textContent?.includes("nested"),
+      summary.textContent.includes("nested"),
     )?.textContent,
   ).toContain(formattedCount);
 });

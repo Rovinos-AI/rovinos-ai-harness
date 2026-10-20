@@ -99,12 +99,16 @@ function argumentNode(
   const strings = getStrings(document.documentElement.lang);
   const empty = entries.length === 0 ? strings.emptySuffix : "";
   const summary = Array.isArray(value)
-    ? formatMessage(strings.argumentArray, {
-        label,
-        count: value.length,
-        items: value.length === 1 ? strings.oneItem : strings.manyItems,
-        empty,
-        }, document.documentElement.lang)
+    ? formatMessage(
+        strings.argumentArray,
+        {
+          label,
+          count: value.length,
+          items: value.length === 1 ? strings.oneItem : strings.manyItems,
+          empty,
+        },
+        document.documentElement.lang,
+      )
     : formatMessage(strings.argumentObject, { label, empty });
   branch.append(element(document, "summary", summary));
   const children = element(document, "ul");

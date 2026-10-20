@@ -27,7 +27,8 @@ describe("view string catalog lint", () => {
           !path.endsWith(".test.tsx") &&
           path !== "./src/kit/strings.ts",
       )
-      .map(([, source]) => source);
+      .map(([, source]) => source)
+      .filter((source): source is string => typeof source === "string");
     expect(sources.length).toBeGreaterThan(0);
     for (const source of sources) {
       expect(hasLiteralCopy(source)).toBe(false);
