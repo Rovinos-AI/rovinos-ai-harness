@@ -43,9 +43,7 @@ describe("shared MCP App components", () => {
   });
 
   it("renders and submits supported elicitation field types safely", () => {
-    const onSubmit = vi.fn<
-      (values: Readonly<Record<string, string | number | boolean>>) => void
-    >();
+    const onSubmit = vi.fn<(values: Readonly<Record<string, string | number | boolean>>) => void>();
     const form = createElicitationForm(
       document,
       {
@@ -122,9 +120,7 @@ describe("shared MCP App components", () => {
       ).textContent,
     ).toContain("Something went wrong");
 
-    const onSubmit = vi.fn<
-      (values: Readonly<Record<string, string | number | boolean>>) => void
-    >();
+    const onSubmit = vi.fn<(values: Readonly<Record<string, string | number | boolean>>) => void>();
     const form = createElicitationForm(
       document,
       {
@@ -202,10 +198,7 @@ describe("shared MCP App components", () => {
 
   it("highlights only the domain of safe web URLs and renders other input as text", () => {
     const url = createUrlDisplay(document, "https://example.test/a?x=1");
-    const credentialUrl = createUrlDisplay(
-      document,
-      "https://example.test@example.test:8443/a",
-    );
+    const credentialUrl = createUrlDisplay(document, "https://example.test@example.test:8443/a");
     const javascript = createUrlDisplay(document, "javascript:alert(1)");
     const malformed = createUrlDisplay(document, malicious);
     expect(url.querySelector("strong")?.textContent).toBe("example.test");

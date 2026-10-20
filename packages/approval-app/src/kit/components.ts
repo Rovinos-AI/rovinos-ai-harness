@@ -240,10 +240,7 @@ export interface TimelineOptions {
 }
 
 /** Renders a semantic, localized ordered timeline. */
-export function createTimeline(
-  document: Document,
-  options: TimelineOptions,
-): HTMLOListElement {
+export function createTimeline(document: Document, options: TimelineOptions): HTMLOListElement {
   const { label, items, locale, timeZone } = options;
   const list = element(document, "ol");
   list.className = "timeline";
@@ -301,10 +298,7 @@ export function createUrlDisplay(document: Document, value: string): HTMLElement
   try {
     const parsed = new URL(value);
     const schemeEnd = value.indexOf("://");
-    if (
-      (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
-      schemeEnd < 0
-    ) {
+    if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || schemeEnd < 0) {
       display.textContent = value;
       return display;
     }
