@@ -37,6 +37,18 @@ export {
 } from "./types.js";
 export { VaultOperationError } from "./errors.js";
 export {
+  AkvKeyProvider,
+  AkvSecret,
+  AkvSecretResolver,
+  AkvSecretResolverError,
+  type AkvClock,
+  type AkvKeyProviderOptions,
+  type AkvSecretResolverErrorCode,
+  type AkvSecretResolverOptions,
+  type SecretClientFactory,
+  type SecretClientLike,
+} from "./akv.js";
+export {
   ReencryptBatchResultSchema,
   VaultKeyRowCountSchema,
   VaultReencryptBatchInputSchema,

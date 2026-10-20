@@ -158,6 +158,7 @@ describe("serve command", () => {
         runId,
         approvalId: runId,
         decision: "deny",
+        approverId: "token.test",
         reason: Code.parse("reviewed"),
       }),
     ).rejects.toThrow();

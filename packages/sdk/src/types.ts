@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Code, HarnessError, Id, JsonValue, RunStatus } from "@harness/schemas";
+import { Code, HarnessError, Id, JsonValue, Principal, RunStatus } from "@harness/schemas";
 import type { RuntimeOverrides } from "@harness/core";
 import { HarnessConfigSchema } from "@harness/config";
 import { SafeEvent } from "@harness/telemetry";
@@ -145,7 +145,7 @@ export const StartRunOptionsSchema = z
     metadata: runMetadataSchema,
     role: Code.optional(),
     idempotencyKey: z.string().min(1).max(256).optional(),
-    requestedBy: Code.optional(),
+    requestedBy: Principal.optional(),
   })
   .strict();
 
@@ -287,7 +287,7 @@ export type ApprovalDecision = z.infer<typeof ApprovalDecisionSchema>;
 export const ResolveApprovalOptionsSchema = z
   .object({
     edits: JsonValue.optional(),
-    principal: Code,
+    principal: Principal,
   })
   .strict();
 
@@ -337,7 +337,7 @@ export interface Harness {
    *
    * Idempotency keys are opaque identifiers and must not contain sensitive data. Their unsalted
    * SHA-256 hashes are stored, so low-entropy keys may be guessed from the store.
-   * `requestedBy` is validated but not recorded by the current event contract.
+   * `requestedBy` is recorded as the run creator's principal when provided.
    */
   startRun(options: StartRunOptions): Promise<RunStartResult>;
   /** Start a linked follow-up run for a completed run. */
@@ -351,8 +351,7 @@ export interface Harness {
   /** Request cooperative cancellation of a run. */
   cancelRun(runId: RunId): Promise<CancelRunResult>;
   /**
-   * Resolve a pending approval; `principal` is validated but not recorded by the current event contract.
-   * The event records `decidedBy: "human"`.
+   * Resolve a pending approval as the validated `principal`.
    */
   resolveApproval(
     approvalId: RunId,

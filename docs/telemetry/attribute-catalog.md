@@ -218,6 +218,7 @@ Owner task: `6.5`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
+| `harness.approval.approver_pseudonym` | Pseudonym | Optional | `@harness/telemetry` |
 | `harness.approval.decided_by` | enum: `human`, `policy`, `expiry` | Required | `@harness/telemetry` |
 | `harness.approval.decision` | enum: `approve`, `deny`, `edit` | Required | `@harness/telemetry` |
 | `harness.approval.reason` | Code | Optional | `@harness/telemetry` |
@@ -312,6 +313,7 @@ Owner task: `6.5`.
 | `harness.policy.version` | Code | Required | `@harness/telemetry` |
 | `harness.run.config_hash` | SHA-256 hash | Required | `@harness/telemetry` |
 | `harness.run.id` | Id | Required | `@harness/telemetry` |
+| `harness.run.requested_by_pseudonym` | Pseudonym | Optional | `@harness/telemetry` |
 | `harness.span.id` | Code | Required | `@harness/telemetry` |
 | `harness.trace.id` | Code | Required | `@harness/telemetry` |
 

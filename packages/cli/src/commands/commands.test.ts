@@ -586,7 +586,16 @@ describe("run, resume, and inspect CLI commands", () => {
     expect(harness.stdout.join("")).toContain("<EMAIL_1>");
     expect(harness.stderr[0]).toBe("content_may_be_sensitive\n");
 
-    await resolveApproval(harness.store, runId, approvalId, "approve", undefined, harness.clock);
+    await resolveApproval(
+      harness.store,
+      runId,
+      approvalId,
+      "approve",
+      undefined,
+      harness.clock,
+      undefined,
+      { decidedBy: "human", approverId: "cli.test" },
+    );
     const resumeCode = await main(["--json", "resume", runId], harness.context, [resumeCommand]);
 
     expect(resumeCode).toBe(ExitCode.ok);

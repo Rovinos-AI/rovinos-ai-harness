@@ -12,7 +12,7 @@ import {
   type JsonValue,
 } from "@harness/schemas";
 import type { ModelCompletion, ModelPort, ModelRequest, RunContext } from "@harness/core";
-import type { CommandModule } from "../command.js";
+import { cliPrincipal, type CommandModule } from "../command.js";
 import { createCommandRuntime } from "../command.js";
 
 class ScriptedModelError extends HarnessError {
@@ -117,34 +117,43 @@ export const runCommand: CommandModule = {
       .description("Start a run from a JSON input file or standard input")
       .requiredOption("--input <json-file|->", "JSON input file, or - to read standard input")
       .option("--fake-model <script.json>", "JSON array of scripted model completions")
-      .action(async (options: { readonly input: string; readonly fakeModel?: string }) => {
-        const input = await readInput(options.input);
-        const config = await context.loadConfig();
-        const model =
-          options.fakeModel === undefined ? undefined : await readFakeModel(options.fakeModel);
-        const runtime = await createCommandRuntime(
-          context,
-          config,
-          model === undefined ? undefined : { model },
-        );
-        try {
-          // TODO(13.7): Tokenize goal content before it enters the run loop.
-          const goal: JsonValue =
-            input.metadata === undefined
-              ? { goal: input.goal }
-              : { goal: input.goal, metadata: input.metadata };
-          const result = await runtime.run(goal);
-          const firstEvent = result.events[0];
-          if (firstEvent === undefined) {
-            throw new RunStatusError("run_failed");
+      .option("--as <name>", "attribute this run to a CLI principal")
+      .action(
+        async (options: {
+          readonly input: string;
+          readonly fakeModel?: string;
+          readonly as?: string;
+        }) => {
+          const input = await readInput(options.input);
+          const config = await context.loadConfig();
+          const model =
+            options.fakeModel === undefined ? undefined : await readFakeModel(options.fakeModel);
+          const runtime = await createCommandRuntime(
+            context,
+            config,
+            model === undefined ? undefined : { model },
+          );
+          try {
+            // TODO(13.7): Tokenize goal content before it enters the run loop.
+            const goal: JsonValue =
+              input.metadata === undefined
+                ? { goal: input.goal }
+                : { goal: input.goal, metadata: input.metadata };
+            const result = await runtime.run(goal, {
+              requestedBy: cliPrincipal(config, options.as),
+            });
+            const firstEvent = result.events[0];
+            if (firstEvent === undefined) {
+              throw new RunStatusError("run_failed");
+            }
+            const output: RunResult = { runId: firstEvent.runId, status: result.status };
+            context.out.json(RunResultSchema, output);
+            context.out.print(`${output.runId}\n`);
+            throwForRunStatus(result.status, result.events);
+          } finally {
+            await runtime.close();
           }
-          const output: RunResult = { runId: firstEvent.runId, status: result.status };
-          context.out.json(RunResultSchema, output);
-          context.out.print(`${output.runId}\n`);
-          throwForRunStatus(result.status, result.events);
-        } finally {
-          await runtime.close();
-        }
-      });
+        },
+      );
   },
 };

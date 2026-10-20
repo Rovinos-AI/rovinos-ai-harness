@@ -289,7 +289,10 @@ async function withFixture(
               fixtureRunId,
               request.data.approvalId,
               request.data.decision,
-              edits === undefined ? undefined : { edits: edits.args },
+              {
+                ...(edits === undefined ? {} : { edits: edits.args }),
+                metadata: { decidedBy: "human", approverId: "cli.test" },
+              },
             );
             const resumed = await runtimeFixture.runtime.resume(fixtureRunId);
             runtimeStatuses.push(resumed.status);

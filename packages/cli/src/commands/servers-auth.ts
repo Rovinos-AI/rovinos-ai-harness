@@ -9,7 +9,7 @@ import {
 import { openUrlInBrowser } from "@harness/sandbox";
 import { Code, HarnessError } from "@harness/schemas";
 import type { KeyProvider } from "@harness/schemas";
-import { LocalKeyProvider } from "@harness/vault";
+import { AkvSecretResolver, LocalKeyProvider } from "@harness/vault";
 import type { Command } from "commander";
 import { join } from "node:path";
 import { z } from "zod";
@@ -47,7 +47,8 @@ export function createLoginKeys(config: HarnessConfig, context: CliContext): Loc
   if (config.keys === undefined) {
     throw new ServersCommandError("key_config_required");
   }
-  const resolver = context.secretResolver ?? new CompositeSecretResolver();
+  const resolver =
+    context.secretResolver ?? new CompositeSecretResolver({ akv: new AkvSecretResolver() });
   return new LocalKeyProvider({
     config: config.keys,
     secretResolver: { resolve: (reference) => resolver.resolve(reference) },
@@ -103,7 +104,9 @@ async function runServersLogin(
       tokenStore: store,
       resolveSecret: async (reference) =>
         (
-          await (context.secretResolver ?? new CompositeSecretResolver()).resolve(reference)
+          await (
+            context.secretResolver ?? new CompositeSecretResolver({ akv: new AkvSecretResolver() })
+          ).resolve(reference)
         ).reveal(),
     });
     if (session.authorizationUrl.length === 0) {

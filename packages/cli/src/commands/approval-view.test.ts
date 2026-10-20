@@ -280,7 +280,7 @@ describe("approval reference host", () => {
       fixture.runId,
       fixture.approvalId,
       "approve",
-      { metadata: { decidedBy: "human" } },
+      { metadata: { decidedBy: "human", approverId: "cli.local" } },
     );
     const foreign = await fixture.dependencies.onAppCall(
       {
