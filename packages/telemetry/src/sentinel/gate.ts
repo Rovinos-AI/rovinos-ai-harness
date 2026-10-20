@@ -13,7 +13,7 @@ import { activeRuns, type ActiveRuns } from "./active-runs.js";
 import { SentinelMatcher } from "./matcher.js";
 import { sentinelTripQueue, type TripQueue } from "./trips.js";
 import type { RunValueSet, VaultRunView } from "./run-values.js";
-import { normalizeForScan, variantsOf } from "./variants.js";
+import { fitsPatternSizeLimit, normalizeForScan, variantsOf } from "./variants.js";
 
 const SentinelGateOptionsSchema = z
   .object({
@@ -252,7 +252,10 @@ export class SentinelGate {
       return this.combinedMatcher;
     }
     const combined = combineValueSets(valueSets.map(({ valueSet }) => valueSet));
-    if (combined.values.length > this.maxCombinedValues) {
+    if (
+      combined.values.length > this.maxCombinedValues ||
+      !fitsPatternSizeLimit(combined.values, this.minValueLength)
+    ) {
       const matchers = await Promise.all(valueSets.map(({ runId }) => this.runMatcher(runId)));
       const offsets: number[] = [];
       const entityTypesByValue: (readonly EntityCode[])[] = [];

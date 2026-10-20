@@ -156,27 +156,20 @@ describe("sentinel variants", () => {
       "hex-upper": (value) => Buffer.from(value).toString("hex").toUpperCase(),
       entities: htmlNumericEntities,
     };
-    const transformChains = [
-      ["lowercase"],
-      ["strip"],
-      ["lowercase", "strip"],
-      ["strip", "lowercase"],
-      ["nfkc"],
-      ["nfkc", "lowercase", "strip"],
-      ["digits"],
-      ["percent"],
-      ["nfkc", "percent"],
-      ["base64"],
-      ["nfkc", "base64"],
-      ["base64url"],
-      ["nfkc", "base64url"],
-      ["hex"],
-      ["nfkc", "hex"],
-      ["hex-upper"],
-      ["nfkc", "hex-upper"],
-      ["entities"],
-      ["nfkc", "entities"],
-    ] as const;
+    const plaintextChain = fc
+      .tuple(
+        fc.boolean(),
+        fc.array(fc.constantFrom("lowercase", "strip"), { minLength: 1, maxLength: 2 }),
+      )
+      .map(([normalize, steps]) => [...(normalize ? ["nfkc"] : []), ...steps]);
+    const digitChain = fc.boolean().map((normalize) => [...(normalize ? ["nfkc"] : []), "digits"]);
+    const encodedChain = fc
+      .tuple(
+        fc.boolean(),
+        fc.constantFrom("percent", "base64", "base64url", "hex", "hex-upper", "entities"),
+      )
+      .map(([normalize, encoding]) => [...(normalize ? ["nfkc"] : []), encoding]);
+    const transformChain = fc.oneof(plaintextChain, digitChain, encodedChain);
     const rawCharacter = fc.constantFrom(
       ...Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"),
       ...Array.from("ＡＢＣａｂｃ"),
@@ -188,7 +181,7 @@ describe("sentinel variants", () => {
     const propertyCheck = await fc.check(
       fc.asyncProperty(
         rawValue,
-        fc.constantFrom(...transformChains),
+        transformChain,
         fc.array(affixCharacter, { maxLength: 12 }).map((characters) => characters.join("")),
         fc.array(affixCharacter, { maxLength: 12 }).map((characters) => characters.join("")),
         (raw, chain, prefix, suffix) => {

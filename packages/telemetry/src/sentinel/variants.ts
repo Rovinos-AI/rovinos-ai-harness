@@ -85,3 +85,38 @@ export function variantsOf(
 
   return [...candidates];
 }
+
+/**
+ * Check whether the deduplicated expanded patterns fit the matcher's size budget.
+ * @param values Raw vault values to expand.
+ * @param minValueLength Minimum transformed pattern length.
+ */
+export function fitsPatternSizeLimit(
+  values: readonly string[],
+  minValueLength = DEFAULT_MIN_VALUE_LENGTH,
+): boolean {
+  const patterns = new Set<string>();
+  let totalPatternChars = 0;
+
+  try {
+    for (const value of values) {
+      for (const pattern of variantsOf(value, minValueLength)) {
+        if (patterns.has(pattern)) {
+          continue;
+        }
+        patterns.add(pattern);
+        totalPatternChars += pattern.length;
+        if (totalPatternChars > MAX_TOTAL_PATTERN_CHARS) {
+          return false;
+        }
+      }
+    }
+  } catch (error) {
+    if (error instanceof AhoCorasickError && error.code === "sentinel_patterns_too_large") {
+      return false;
+    }
+    throw error;
+  }
+
+  return true;
+}
