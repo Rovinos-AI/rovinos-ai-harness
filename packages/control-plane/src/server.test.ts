@@ -185,9 +185,11 @@ describe("control-plane inspection tools", () => {
 
     expect(tools.map(({ name }) => name).sort()).toEqual([
       "cancel_run",
+      "continue_run",
       "get_run",
       "list_runs",
       "resume_run",
+      "start_run",
     ]);
     expect(
       tools

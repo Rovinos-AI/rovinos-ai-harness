@@ -140,7 +140,11 @@ describe("continueRun", () => {
       const originalEvents = await readEvents(store, originalId);
       const token = await vault.put(originalId, Code.parse("email"), "synthetic@example.test");
 
-      const continued = await runtime.continueRun(originalId, { goal: "follow-up question" });
+      const continued = await runtime.continueRun(
+        originalId,
+        { goal: "follow-up question" },
+        { requestedBy: Principal.parse("token.control_plane") },
+      );
       const continuationId = continued.events[0]?.runId;
       if (continuationId === undefined) {
         throw new Error("Expected a continuation run.");
@@ -154,7 +158,7 @@ describe("continueRun", () => {
         type: "run_created",
         continuationOf: originalId,
         scopeId: originalId,
-        requestedBy: "cli.requester",
+        requestedBy: "token.control_plane",
       });
       expect(continuation.find((event) => event.type === "run_input")).toMatchObject({
         type: "run_input",

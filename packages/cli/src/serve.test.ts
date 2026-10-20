@@ -2,8 +2,9 @@
 import { HarnessConfigSchema } from "@harness/config";
 import type * as ControlPlane from "@harness/control-plane";
 import type { Runtime } from "@harness/core";
-import { Code, Id } from "@harness/schemas";
+import { Code, Id, Principal } from "@harness/schemas";
 import { InMemoryEventStore } from "@harness/store";
+import { createEventBuilders } from "@harness/store/testing";
 import { AuditingVaultResolver, InMemoryVault } from "@harness/vault";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliContext } from "./command.js";
@@ -143,12 +144,33 @@ describe("serve command", () => {
     expect(controlPlaneMocks.startHttp.mock.calls[0]?.[1]).toBe(3_000);
     const operations = controlPlaneMocks.httpOptions()?.operations;
     if (
+      operations?.startRun === undefined ||
+      operations.continueRun === undefined ||
       operations?.resumeRun === undefined ||
       operations.cancelRun === undefined ||
       operations.resolveApproval === undefined
     ) {
       throw new Error("Serve command did not configure all control-plane operations.");
     }
+    const builders = createEventBuilders();
+    vi.spyOn(runtime.ids, "next").mockImplementation(() => builders.nextRunId());
+    const start = vi.spyOn(runtime, "start").mockImplementation((_goal, options) => {
+      const runId = options?.runId ?? builders.nextRunId();
+      return {
+        runId,
+        started: runtime.store.append(runId, [builders.runCreated(runId)], 0).then(() => undefined),
+        completion: new Promise<never>(() => undefined),
+      };
+    });
+    const startOptions = {
+      goal: "synthetic idempotent start",
+      idempotencyKey: "synthetic-idempotency-key",
+      requestedBy: Principal.parse("token.test"),
+    };
+    const firstStart = await operations.startRun(startOptions);
+    const repeatedStart = await operations.startRun(startOptions);
+    expect(firstStart).toEqual(repeatedStart);
+    expect(start).toHaveBeenCalledOnce();
     const runId = Id.parse("00000000000000000000000001");
     const abortSignal = new AbortController().signal;
     await expect(operations.resumeRun(runId, abortSignal, () => undefined)).rejects.toThrow();

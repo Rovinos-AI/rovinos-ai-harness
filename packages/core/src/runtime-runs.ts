@@ -129,7 +129,11 @@ export function createRuntimeContinuation(
   runWithControl: RunControl,
 ): Runtime["continueRun"] {
   const { config, clock, ids, store, model, context, policy, policyVersion } = composition;
-  return (previousRunId: Id, input: RunInput) => {
+  return (
+    previousRunId: Id,
+    input: RunInput,
+    runOptions?: { readonly requestedBy?: Principal },
+  ) => {
     const runId = ids.next();
     const goal =
       input.metadata === undefined
@@ -158,6 +162,9 @@ export function createRuntimeContinuation(
         policyVersion,
         continuations: config.run.continuations,
         scopes,
+        ...(runOptions?.requestedBy === undefined
+          ? {}
+          : { requestedBy: runOptions.requestedBy }),
       }),
     );
   };

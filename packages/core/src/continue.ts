@@ -209,7 +209,6 @@ export interface ContinueRunOptions extends Omit<
   | "rootSpanParent"
   | "rootSpanLinks"
   | "initialBudgetViolation"
-  | "requestedBy"
 > {
   readonly store: EventStore;
   readonly runId: Id;
@@ -228,7 +227,16 @@ export interface ContinueRunOptions extends Omit<
  * @throws ContinuationChainTooLongError when the configured chain limit would be exceeded.
  */
 export async function continueRun(options: ContinueRunOptions): Promise<RunLoopResult> {
-  const { store, runId, previousRunId, goal, continuations, scopes, ...runOptions } = options;
+  const {
+    store,
+    runId,
+    previousRunId,
+    goal,
+    continuations,
+    scopes,
+    requestedBy,
+    ...runOptions
+  } = options;
   const previousLogs = await loadContinuationChain(
     store,
     previousRunId,
@@ -270,9 +278,11 @@ export async function continueRun(options: ContinueRunOptions): Promise<RunLoopR
     ...(initialBudgetViolation === undefined ? {} : { initialBudgetViolation }),
     scopeId,
     continuationOf: previousRunId,
-    ...(rootCreated?.type === "run_created" && rootCreated.requestedBy !== undefined
-      ? { requestedBy: rootCreated.requestedBy }
-      : {}),
+    ...(requestedBy !== undefined
+      ? { requestedBy }
+      : rootCreated?.type === "run_created" && rootCreated.requestedBy !== undefined
+        ? { requestedBy: rootCreated.requestedBy }
+        : {}),
     inputKind: "follow_up",
     previousEventLogs: previousLogs,
     rootSpanLinks: [linkedRoot(previousEvents)],

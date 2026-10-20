@@ -35,11 +35,26 @@ remote address. Limits are local to one server process.
 ## Scopes, runs, and audit
 
 `read` grants `list_runs` and `get_run`; `approve` grants `approve`, `deny`, and
-`harness.approvals.resolve`; `run` grants `resume_run` and `cancel_run`; and `reveal` grants
+`harness.approvals.resolve`; `run` grants `start_run`, `continue_run`, `resume_run`, and `cancel_run`; and `reveal` grants
 `harness.approvals.reveal`. `read_content` is reserved for the tokenized run-inspector content
 operation in task 18.8. `admin` grants all current scopes. `tools/list` omits tools outside the
 token's scopes. A token with `runIds` can list only those runs and cannot inspect, approve, reveal,
-resume, or cancel another run. Omitting `runIds` grants access to every run for the token's scopes.
+continue, resume, or cancel another run. Starting a new run is not restricted to a source run id.
+Omitting `runIds` grants access to every run for the token's scopes.
+
+`start_run` and `continue_run` accept a goal as content and return only a run id, status, or coded
+failure. The goal is passed to the runtime, whose PII event-store boundary tokenizes `run_input`
+before persistence. Audit records contain the tool name, token id, and outcome code, not the goal or
+metadata. A start idempotency key is passed to the runtime operation; the CLI's store-backed claim
+uses a digest rather than persisting the supplied key.
+
+The server requires its human-confirmation gate for `start_run` and `continue_run` unless the
+embedding host asserts trusted app provenance. Set `controlPlane.allowAgentStartedRuns: true` only
+when the deployment intentionally permits model-driven clients to create runs without that gate.
+HTTP token-bucket limits are checked before MCP dispatch. The quota preflight runs before either
+creation operation when supplied by the embedding runtime. The cross-run quota service described
+in task 24.7 is not yet implemented here, so this control-plane version does not enforce configured
+run quotas by itself.
 
 Authenticated tool calls emit metadata-only audit records with `tokenId`, `tool`, and `outcome`
 codes. Rejected HTTP requests are also audited with a fixed `unauthenticated` token id when no

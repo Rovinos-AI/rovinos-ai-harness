@@ -131,7 +131,11 @@ export interface Runtime {
     readonly completion: Promise<RunLoopResult>;
   };
   /** Starts a follow-up run from an eligible terminal run. */
-  continueRun(runId: Id, input: RunInput): Promise<RunLoopResult>;
+  continueRun(
+    runId: Id,
+    input: RunInput,
+    options?: { readonly requestedBy?: Principal },
+  ): Promise<RunLoopResult>;
   resume(runId: Id, options?: RuntimeResumeOptions): Promise<RunLoopResult>;
   /** Requests durable cancellation and reports if the run was already terminal. */
   cancel(runId: Id): Promise<CancelRunResult>;

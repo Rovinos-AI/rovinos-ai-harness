@@ -5,7 +5,7 @@ import { InMemoryEventStore } from "@harness/store";
 import { createEventBuilders } from "@harness/store/testing";
 import { AuditingVaultResolver, Token } from "@harness/vault";
 import { request } from "node:http";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ControlPlaneServerOptions } from "./server.js";
 import { startControlPlaneHttp } from "./server.js";
 
@@ -159,6 +159,7 @@ describe("control-plane HTTP transport", () => {
       expect(listed.structuredContent).toMatchObject({
         runs: [{ runId: allowedRunId }],
       });
+
       expect(JSON.stringify(listed)).not.toContain(deniedRunId);
       await expect(
         client.callTool({ name: "get_run", arguments: { runId: deniedRunId } }),
@@ -172,6 +173,48 @@ describe("control-plane HTTP transport", () => {
         isError: true,
         content: [{ type: "text", text: "control_plane_scope_required" }],
       });
+    } finally {
+      await client.close();
+      await server.close();
+      await store.close();
+    }
+  });
+
+  it("requires run scope for start_run and continue_run", async () => {
+    const store = new InMemoryEventStore();
+    const startRun = vi.fn(() =>
+      Promise.resolve({ runId: Id.parse("00000000000000000000000003"), status: "pending" as const }),
+    );
+    const continueRun = vi.fn(() =>
+      Promise.resolve({ runId: Id.parse("00000000000000000000000004"), status: "pending" as const }),
+    );
+    const server = await startControlPlaneHttp(
+      store,
+      0,
+      controlPlaneOptions({ operations: { startRun, continueRun } }, ["read"]),
+    );
+    const client = new Client({ name: "control-plane-run-scope-test", version: "1.0.0" });
+    try {
+      await client.connect(createHttpTransport(server.endpoint));
+      const { tools } = await client.listTools();
+      expect(tools.map(({ name }) => name).sort()).toEqual(["get_run", "list_runs"]);
+      await expect(
+        client.callTool({ name: "start_run", arguments: { goal: "synthetic" } }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: "control_plane_scope_required" }],
+      });
+      await expect(
+        client.callTool({
+          name: "continue_run",
+          arguments: { runId: Id.parse("00000000000000000000000005"), goal: "synthetic" },
+        }),
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: "control_plane_scope_required" }],
+      });
+      expect(startRun).not.toHaveBeenCalled();
+      expect(continueRun).not.toHaveBeenCalled();
     } finally {
       await client.close();
       await server.close();
@@ -290,9 +333,11 @@ describe("control-plane HTTP transport", () => {
       const { tools } = await client.listTools();
       expect(tools.map(({ name }) => name).sort()).toEqual([
         "cancel_run",
+        "continue_run",
         "get_run",
         "list_runs",
         "resume_run",
+        "start_run",
       ]);
       await expect(client.callTool({ name: "list_runs", arguments: {} })).resolves.toMatchObject({
         structuredContent: { runs: [] },
