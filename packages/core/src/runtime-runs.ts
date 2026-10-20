@@ -15,6 +15,8 @@ import { runLoop, type RunLoopResult } from "./loop.js";
 import { RunRecorder } from "./recorder.js";
 import type { Runtime, RuntimeComposition } from "./runtime-config.js";
 import { configHash } from "./runtime-ids.js";
+import { QuotaService } from "./quotas.js";
+import type { QuotaIdentity } from "./quotas.js";
 
 /** Reads the original goal from a run's persisted input or first model request. */
 export async function readStoredGoal(store: EventStore, runId: Id): Promise<JsonValue | undefined> {
@@ -93,7 +95,13 @@ export function startRun(
 ): Promise<RunLoopResult> {
   const { config, clock, ids, store, model, context, policy, policyVersion } = composition;
   const runId = options.runId ?? ids.next();
-  return options.runWithControl(runId, (signal) => {
+  const quotaService = new QuotaService(config.quotas ?? [], store, clock);
+  const quotaIdentity: QuotaIdentity = {
+    ...(options.role === undefined ? {} : { role: options.role }),
+    ...(options.requestedBy === undefined ? {} : { requestedBy: options.requestedBy }),
+  };
+  return options.runWithControl(runId, async (signal) => {
+    await quotaService.assertCanStart(quotaIdentity);
     const recorder = new RunRecorder(store, runId, ids.next(), 0, clock);
     return runLoop({
       recorder,
@@ -116,6 +124,8 @@ export function startRun(
       workspaceSnapshotter: composition.workspaceSnapshotter,
       configHash: configHash(config),
       policyVersion,
+      quotaService,
+      quotaIdentity,
       ...(options.onStarted === undefined ? {} : { onStarted: options.onStarted }),
     });
   });
@@ -129,14 +139,17 @@ export function createRuntimeContinuation(
   runWithControl: RunControl,
 ): Runtime["continueRun"] {
   const { config, clock, ids, store, model, context, policy, policyVersion } = composition;
+  const quotaService = new QuotaService(config.quotas ?? [], store, clock);
   return (previousRunId: Id, input: RunInput) => {
     const runId = ids.next();
     const goal =
       input.metadata === undefined
         ? { goal: input.goal }
         : { goal: input.goal, metadata: input.metadata };
-    return runWithControl(runId, (signal) =>
-      startContinuation({
+    return runWithControl(runId, async (signal) => {
+      const identity = await readStoredQuotaIdentity(store, previousRunId);
+      await quotaService.assertCanStart(identity);
+      return startContinuation({
         store,
         runId,
         previousRunId,
@@ -158,7 +171,30 @@ export function createRuntimeContinuation(
         policyVersion,
         continuations: config.run.continuations,
         scopes,
-      }),
-    );
+        quotaService,
+        quotaIdentity: identity,
+      });
+    });
+  };
+}
+
+/** Reads only the stable principal and role codes needed to enforce inherited quotas. */
+export async function readStoredQuotaIdentity(
+  store: EventStore,
+  runId: Id,
+): Promise<QuotaIdentity> {
+  let requestedBy: Principal | undefined;
+  let role: Code | undefined;
+  for await (const event of store.read(runId)) {
+    if (event.type === "run_created" && event.requestedBy !== undefined) {
+      requestedBy = event.requestedBy;
+    }
+    if (role === undefined && event.type === "run_created" && event.quotaRole !== undefined) {
+      role = event.quotaRole;
+    }
+  }
+  return {
+    ...(requestedBy === undefined ? {} : { requestedBy }),
+    ...(role === undefined ? {} : { role }),
   };
 }

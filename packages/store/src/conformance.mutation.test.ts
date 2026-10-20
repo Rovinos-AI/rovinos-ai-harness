@@ -21,6 +21,8 @@ function brokenFactory(): EventStoreFactory {
       },
       appendWithSnapshot: (runId, events, expectedSeq, snapshot, leaseOwner) =>
         reference.appendWithSnapshot(runId, events, expectedSeq, snapshot, leaseOwner),
+      appendWithUsage: (...args) => reference.appendWithUsage(...args),
+      readUsageLedger: (...args) => reference.readUsageLedger(...args),
       claimRunExecution: (...args) => reference.claimRunExecution(...args),
       renewRunExecution: (...args) => reference.renewRunExecution(...args),
       releaseRunExecution: (...args) => reference.releaseRunExecution(...args),

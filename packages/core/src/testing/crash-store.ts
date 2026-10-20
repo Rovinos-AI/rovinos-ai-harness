@@ -47,7 +47,7 @@ export class CrashingEventStore implements EventStore {
     }
   }
 
-  /** Number of append and appendWithSnapshot calls observed so far. */
+  /** Number of append calls observed so far. */
   get appendCalls(): number {
     return this.appendCount;
   }
@@ -84,6 +84,28 @@ export class CrashingEventStore implements EventStore {
     }
     const result = this.inner.appendWithSnapshot(runId, events, expectedSeq, snapshot, leaseOwner);
     return shouldCrash ? result.then(() => Promise.reject(new SimulatedCrash())) : result;
+  }
+
+  appendWithUsage(
+    ...args: Parameters<EventStore["appendWithUsage"]>
+  ): ReturnType<EventStore["appendWithUsage"]> {
+    const [runId, events, expectedSeq, options] = args;
+    const shouldCrash = this.shouldCrash();
+    if (
+      shouldCrash &&
+      (this.options.mode === "before_commit" ||
+        (this.options.persistentCrash === true && this.appendCount > this.options.crashAt))
+    ) {
+      return Promise.reject(new SimulatedCrash());
+    }
+    const result = this.inner.appendWithUsage(runId, events, expectedSeq, options);
+    return shouldCrash ? result.then(() => Promise.reject(new SimulatedCrash())) : result;
+  }
+
+  readUsageLedger(
+    ...args: Parameters<EventStore["readUsageLedger"]>
+  ): ReturnType<EventStore["readUsageLedger"]> {
+    return this.inner.readUsageLedger(...args);
   }
 
   claimRunExecution(

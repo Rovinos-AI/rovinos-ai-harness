@@ -22,10 +22,12 @@ import { createRuntimeToolPort } from "./runtime-tool-composition.js";
 import {
   createRuntimeContinuation,
   readChildBudgetAllocation,
+  readStoredQuotaIdentity,
   readStoredGoal,
   startRun,
   type RunControl,
 } from "./runtime-runs.js";
+import { QuotaService } from "./quotas.js";
 import { setupRuntime } from "./runtime-setup.js";
 import { createRuntimeAppCallbacks, hostedAppContentTokenizer } from "./runtime-apps.js";
 import { appendFinalRunTrips, flushAndDrainTrips } from "./runtime-sentinel-trips.js";
@@ -322,6 +324,7 @@ function createRuntimeResume(
   runWithControl: RunControl,
 ): Runtime["resume"] {
   const { config, clock, ids, store, model, context, policy, scopes } = options;
+  const quotaService = new QuotaService(config.quotas ?? [], store, clock);
   return async (runId, resumeOptions: RuntimeResumeOptions = {}) => {
     const firstNewSeq = await store.head(runId);
     const childAllocation = await readChildBudgetAllocation(store, runId);
@@ -332,6 +335,7 @@ function createRuntimeResume(
         if (goal === undefined) {
           throw new RunInputMissingError();
         }
+        const quotaIdentity = await readStoredQuotaIdentity(store, runId);
         const composed = composeAbortSignals([
           signal,
           ...(resumeOptions.signal === undefined ? [] : [resumeOptions.signal]),
@@ -360,6 +364,8 @@ function createRuntimeResume(
               ? {}
               : { restoreOnResume: config.sandbox.restoreOnResume }),
             workspaceSnapshotter: options.workspaceSnapshotter,
+            quotaService,
+            quotaIdentity,
             ...(resumeOptions.onClaimed === undefined
               ? {}
               : { onClaimed: resumeOptions.onClaimed }),

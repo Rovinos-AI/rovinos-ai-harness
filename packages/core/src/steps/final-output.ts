@@ -7,6 +7,7 @@ import { foldRunState } from "../run-state.js";
 import type { RunLoopExecution, RunLoopExecutionOptions } from "../loop.js";
 import type { RunRecorder } from "../recorder.js";
 import type { Checkpointer } from "../checkpoint.js";
+import { modelQuotaHooks } from "../model-quota-hooks.js";
 
 /** Performs the schema-enforced last model call for a child result. */
 export async function runStructuredFinalOutput(
@@ -21,6 +22,7 @@ export async function runStructuredFinalOutput(
     budgets: options.budgets,
     now: options.clock.now(),
     recorder: options.recorder,
+    ...modelQuotaHooks(options),
   });
   if (preflight.event !== undefined) {
     return preflight.event;
@@ -56,6 +58,7 @@ export async function runStructuredFinalOutput(
       ...(options.provider === undefined ? {} : { provider: options.provider }),
       ...(options.modelName === undefined ? {} : { modelName: options.modelName }),
       outputSchema,
+      ...modelQuotaHooks(options),
       ...(options.valueTransform === undefined ? {} : { valueTransform: options.valueTransform }),
       includeTools: false,
     },

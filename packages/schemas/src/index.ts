@@ -145,6 +145,13 @@ export {
   type RolesConfig,
 } from "./config/roles.js";
 export {
+  QuotaConfigSchema,
+  QuotaMatchSchema,
+  QuotasConfigSchema,
+  type QuotaConfig,
+  type QuotasConfig,
+} from "./config/quotas.js";
+export {
   ServerConfigSchema,
   ServersConfigSchema,
   type ServerConfig,

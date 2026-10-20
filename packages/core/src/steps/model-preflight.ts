@@ -56,14 +56,18 @@ export async function preflightModelBudget(options: {
   readonly budgets: RunConfig["budgets"];
   readonly now: number;
   readonly recorder: RunRecorder;
+  readonly checkQuota?: () => Promise<BudgetViolation | undefined>;
 }): Promise<ModelPreflightResult> {
   const state = foldRunState(options.events);
   const deadlineTs = options.budgetTracker.deadlineTs(state);
   const accounted = accountForOpenChildren(state, options.events, options.budgets);
-  const budget = options.budgetTracker.check(
+  let budget = options.budgetTracker.check(
     { ...accounted, steps: accounted.steps + 1 },
     options.now,
   );
+  if (budget.ok && options.checkQuota !== undefined) {
+    budget = (await options.checkQuota()) ?? budget;
+  }
   if (budget.ok) {
     return { deadlineTs };
   }

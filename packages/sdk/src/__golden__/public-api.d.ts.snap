@@ -94,6 +94,17 @@ export declare const CreateHarnessOptionsSchema: z.ZodUnion<readonly [z.ZodObjec
             maxDepth: z.ZodDefault<z.ZodNumber>;
             maxChildren: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strict>>>;
+        quotas: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            match: z.ZodObject<{
+                requestedBy: z.ZodOptional<z.ZodArray<z.ZodString>>;
+                role: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            }, z.core.$strict>;
+            dailyCostUsd: z.ZodOptional<z.ZodNumber>;
+            monthlyCostUsd: z.ZodOptional<z.ZodNumber>;
+            maxConcurrentRuns: z.ZodOptional<z.ZodNumber>;
+            maxRunsPerHour: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strict>>>;
         store: z.ZodPrefault<z.ZodObject<{
             dialect: z.ZodOptional<z.ZodEnum<{
                 postgres: "postgres";
@@ -831,6 +842,7 @@ export declare const RunViewSchema: z.ZodObject<{
         }>;
         budget: z.ZodEnum<{
             cost: "cost";
+            quota: "quota";
             steps: "steps";
             wall_clock: "wall_clock";
         }>;

@@ -5,6 +5,7 @@ import {
   FakeClock,
   Id,
   Principal,
+  QuotasConfigSchema,
   RunConfigSchema,
   SequentialIdGenerator,
   Sha256Hex,
@@ -117,6 +118,59 @@ async function readEvents(store: InMemoryEventStore, runId: Id): Promise<Event[]
 }
 
 describe("continueRun", () => {
+  it("persists the quota role across repeated continuations", async () => {
+    const store = new InMemoryEventStore();
+    const model = new FakeModelPort([
+      completedResponse("original answer"),
+      completedResponse("first continuation"),
+      completedResponse("second continuation"),
+    ]);
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        quotas: QuotasConfigSchema.parse([
+          { id: "analysts", match: { role: ["analyst"] }, maxRunsPerHour: 3 },
+        ]),
+      },
+      {
+        store,
+        transientVault: true,
+        clock: new FakeClock(1_000),
+        ids: new SequentialIdGenerator(),
+        model,
+      },
+    );
+
+    try {
+      const original = await runtime.run("original question", { role: "analyst" });
+      const originalId = original.events[0]?.runId;
+      if (originalId === undefined) {
+        throw new Error("Expected an original run.");
+      }
+      const first = await runtime.continueRun(originalId, {
+        goal: "first follow-up",
+      });
+      const firstId = first.events[0]?.runId;
+      if (firstId === undefined) {
+        throw new Error("Expected a first continuation.");
+      }
+      const second = await runtime.continueRun(firstId, {
+        goal: "second follow-up",
+      });
+
+      const created = [original, first, second].map(({ events }) => events[0]);
+      expect(created).toHaveLength(3);
+      expect(
+        created.map((event) => (event?.type === "run_created" ? event.quotaRole : undefined)),
+      ).toEqual(["analyst", "analyst", "analyst"]);
+      await expect(store.readUsageLedger("analysts", "hour", [0])).resolves.toMatchObject([
+        { runsStarted: 3 },
+      ]);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("continues a completed run without changing its log and retains token scope", async () => {
     const store = new InMemoryEventStore();
     const scopes = new RunScopeRegistry();

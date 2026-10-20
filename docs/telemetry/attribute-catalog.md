@@ -234,7 +234,7 @@ Owner task: `6.5`.
 
 | Attribute | Type | Presence | Owning package |
 | --- | --- | --- | --- |
-| `harness.budget.kind` | enum: `steps`, `cost`, `wall_clock` | Required | `@harness/telemetry` |
+| `harness.budget.kind` | enum: `steps`, `cost`, `wall_clock`, `quota` | Required | `@harness/telemetry` |
 | `harness.budget.limit` | finite number | Required | `@harness/telemetry` |
 | `harness.budget.observed` | finite number | Required | `@harness/telemetry` |
 | `harness.event.seq` | integer | Required | `@harness/telemetry` |

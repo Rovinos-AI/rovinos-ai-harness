@@ -113,7 +113,7 @@ const logDefinitions = {
   }),
   budget_exceeded: defineLogRecord("harness.safe.budget_exceeded", {
     ...commonShape,
-    "harness.budget.kind": attr.enum(["steps", "cost", "wall_clock"]),
+    "harness.budget.kind": attr.enum(["steps", "cost", "wall_clock", "quota"]),
     "harness.budget.limit": attr.num(),
     "harness.budget.observed": attr.num(),
   }),
