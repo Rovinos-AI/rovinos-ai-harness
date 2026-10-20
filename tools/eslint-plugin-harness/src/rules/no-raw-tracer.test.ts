@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { RuleTester } from "@typescript-eslint/rule-tester";
+import { ESLint } from "eslint";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { fileURLToPath } from "node:url";
 import { noRawTracerRule } from "./no-raw-tracer.ts";
 
-const rootDirectory = fileURLToPath(new URL("../../../../", import.meta.url));
-const sourceFile = (relativePath: string): string => `${rootDirectory}/${relativePath}`;
+const rootDirectory = resolve(import.meta.dirname, "../../../../");
+const sourceFile = (relativePath: string): string => resolve("/", relativePath);
 
 RuleTester.describe = describe;
 RuleTester.it = it;
@@ -73,10 +75,18 @@ ruleTester.run("no-raw-tracer", noRawTracerRule, {
       code: 'setActiveSpanAttribute("harness.error.code", "tool_failed");',
       filename: sourceFile("packages/core/src/recorder.ts"),
     },
+    {
+      code: `
+        const element = document.createElement("div");
+        element.setAttribute("role", "status");
+      `,
+      filename: sourceFile("packages/core/src/dom.ts"),
+    },
   ],
   invalid: [
     {
       code: `
+        const span = trace.getActiveSpan();
         tracer.startSpan("test");
         tracer.startActiveSpan("test", () => {});
         span.recordException(error);
@@ -88,6 +98,44 @@ ruleTester.run("no-raw-tracer", noRawTracerRule, {
       errors: [
         { messageId: "forbidden" },
         { messageId: "forbidden" },
+        { messageId: "forbidden" },
+        { messageId: "forbidden" },
+        { messageId: "forbidden" },
+        { messageId: "forbidden" },
+      ],
+    },
+    {
+      code: `
+        trace.getSpan(ctx)?.setAttribute("test", true);
+        const current = trace.getActiveSpan();
+        current?.setAttributes({ test: true });
+        const span = definition.start(attrs);
+        span.setAttribute("test", true);
+        function update(s: Span) {
+          s.setAttribute("test", true);
+        }
+        let assigned: Span | undefined;
+        assigned = trace.getSpan(ctx);
+        assigned?.setAttributes({ test: true });
+      `,
+      filename: sourceFile("packages/core/src/spans.ts"),
+      errors: [
+        { messageId: "forbidden" },
+        { messageId: "forbidden" },
+        { messageId: "forbidden" },
+        { messageId: "forbidden" },
+        { messageId: "forbidden" },
+      ],
+    },
+    {
+      code: `
+        const started = tracer.startSpan("test");
+        started.setAttribute("test", true);
+        const active = tracer.startActiveSpan("test", () => true);
+        active?.setAttributes({ test: true });
+      `,
+      filename: sourceFile("packages/core/src/spans.ts"),
+      errors: [
         { messageId: "forbidden" },
         { messageId: "forbidden" },
         { messageId: "forbidden" },
@@ -111,6 +159,22 @@ ruleTester.run("no-raw-tracer", noRawTracerRule, {
     },
   ],
 });
+
+it("matches allowed files relative to ESLint's configured working directory", async () => {
+  const originalCwd = process.cwd();
+  process.chdir(tmpdir());
+  try {
+    const eslint = new ESLint({ cwd: rootDirectory });
+    const [result] = await eslint.lintText('trace.getTracer("test");', {
+      filePath: resolve(rootDirectory, "packages/telemetry/src/registry.ts"),
+    });
+    expect(result?.messages.map((message) => message.ruleId)).not.toContain(
+      "harness/no-raw-tracer",
+    );
+  } finally {
+    process.chdir(originalCwd);
+  }
+}, 15_000);
 
 it("names the registered span APIs in its diagnostic", () => {
   expect(noRawTracerRule.meta.messages.forbidden).toContain(
