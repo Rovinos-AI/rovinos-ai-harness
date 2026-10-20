@@ -9,6 +9,7 @@ import {
   Id,
   JsonValue,
   ModelsConfigSchema,
+  QuotasConfigSchema,
   RolesConfigSchema,
   RunConfigSchema,
   ServerConfigSchema,
@@ -528,6 +529,115 @@ describe("createRuntime model routing", () => {
         expect.objectContaining({ type: "budget_exceeded", budget: "cost", observed: 2 }),
       );
       expect(execute).not.toHaveBeenCalled();
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("rejects an exhausted quota before writing run events", async () => {
+    const store = new InMemoryEventStore();
+    vi.spyOn(store, "readUsageLedger").mockResolvedValue([
+      {
+        quotaId: "team",
+        period: "day",
+        periodStart: Date.UTC(2026, 9, 20),
+        costMicros: 10,
+        runsStarted: 0,
+      },
+    ]);
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        quotas: QuotasConfigSchema.parse([
+          { id: "team", match: { requestedBy: ["cli.alice"] }, dailyCostUsd: 0.00001 },
+        ]),
+      },
+      { store, clock: { now: () => Date.UTC(2026, 9, 20, 14) } },
+    );
+
+    try {
+      await expect(
+        runtime.run("quota goal", { requestedBy: "cli.alice", role: "writer" }),
+      ).rejects.toMatchObject({ code: "quota_exceeded" });
+      await expect(store.listRuns({ limit: 10 })).resolves.toMatchObject({ runs: [] });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("accounts model-response cost atomically and fails before the next call when exhausted", async () => {
+    const callId = "00000000000000000000000031";
+    let modelCalls = 0;
+    const model: ModelPort = {
+      complete: () => {
+        modelCalls += 1;
+        return Promise.resolve({
+          parts: [{ type: "tool_call", callId, toolId: "quota_tool", args: {} }],
+          usage: { inputTokens: 1, outputTokens: 0, costMicros: 10 },
+          finishReason: "tool_calls",
+          provider: "local",
+          model: "model",
+          latencyMs: 0,
+          schemaValid: true,
+          repairAttempts: 0,
+          fallbackDepth: 0,
+          providerBlobs: null,
+        });
+      },
+    };
+    const tool: ToolPort = {
+      describe: () => ({ idempotent: true, timeoutMs: 1_000 }),
+      execute: () => Promise.resolve({ outcome: "ok", result: null }),
+      getToolSpecs: () => [
+        { toolId: "quota_tool", description: "Synthetic tool", inputSchema: {} },
+      ],
+    };
+    const store = new InMemoryEventStore();
+    const runtime = await createRuntime(
+      {
+        run: RunConfigSchema.parse({}),
+        quotas: QuotasConfigSchema.parse([
+          {
+            id: "team",
+            match: { requestedBy: ["cli.alice"] },
+            dailyCostUsd: 0.00001,
+          },
+        ]),
+      },
+      {
+        store,
+        model,
+        tool,
+        policy: allowAllPolicy,
+        clock: { now: () => Date.UTC(2026, 9, 20, 14) },
+      },
+    );
+
+    try {
+      const result = await runtime.run("quota goal", { requestedBy: "cli.alice" });
+      expect(modelCalls).toBe(1);
+      expect(result.status).toBe("failed");
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: "budget_exceeded",
+          budget: "quota",
+          limit: 10,
+          observed: 10,
+        }),
+      );
+      const response = result.events.find((event) => event.type === "model_response");
+      if (response?.type !== "model_response") {
+        throw new Error("Expected a recorded model response.");
+      }
+      await expect(store.readUsageLedger("team", "day", [Date.UTC(2026, 9, 20)])).resolves.toEqual([
+        {
+          quotaId: "team",
+          period: "day",
+          periodStart: Date.UTC(2026, 9, 20),
+          costMicros: 10,
+          runsStarted: 0,
+        },
+      ]);
     } finally {
       await runtime.close();
     }

@@ -5,6 +5,9 @@ import { Code, type Id } from "@harness/schemas";
 import { attr } from "./attr.js";
 import { defineLogRecord, type LogRecordDefinition } from "./log-registry.js";
 import { SafeEvent, type SafeEvent as SafeEventType } from "./safe-event.js";
+import { safeEventLogAttributeMap } from "./safe-event-log-map.js";
+
+export { safeEventLogAttributeMap };
 
 const commonShape = {
   "harness.run.id": attr.id(),
@@ -27,138 +30,6 @@ const pricingCacheMissingDefinition = defineLogRecord("harness.model.pricing_cac
   "harness.model.provider": attr.code(),
   "harness.model.name": attr.code(),
 });
-
-/** SafeEvent fields mapped to bounded OpenTelemetry attribute names. */
-export const safeEventLogAttributeMap = {
-  model_call: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    provider: "harness.model.provider",
-    model: "harness.model.name",
-    inputTokens: "harness.model.input_tokens",
-    outputTokens: "harness.model.output_tokens",
-    latencyMs: "harness.model.latency_ms",
-    schemaValid: "harness.model.schema_valid",
-    repairAttempts: "harness.model.repair_attempts",
-    finishReason: "harness.model.finish_reason",
-  },
-  tool_call: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    toolId: "harness.tool.id",
-    outcome: "harness.tool.outcome",
-    errorCode: "harness.error.code",
-    latencyMs: "harness.tool.latency_ms",
-  },
-  policy_decision: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    toolId: "harness.tool.id",
-    policyDecision: "harness.policy.decision",
-    ruleId: "harness.policy.rule_id",
-  },
-  approval_wait: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    decision: "harness.approval.decision",
-    decidedBy: "harness.approval.decided_by",
-    approverPseudonym: "harness.approval.approver_pseudonym",
-    reason: "harness.approval.reason",
-    waitMs: "harness.approval.wait_ms",
-  },
-  checkpoint: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    atSeq: "harness.checkpoint.seq",
-    hasWorkspaceRef: "harness.checkpoint.has_workspace_ref",
-  },
-  run_status: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    from: "harness.run.status.from",
-    to: "harness.run.status.to",
-    reason: "harness.run.status.reason",
-  },
-  pii_action: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    boundary: "harness.pii.boundary",
-    action: "harness.pii.action",
-    entities: "harness.pii.entity_count",
-  },
-  budget_exceeded: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    budget: "harness.budget.kind",
-    limit: "harness.budget.limit",
-    observed: "harness.budget.observed",
-  },
-  subagent_spawned: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    childRunId: "harness.subagent.run.id",
-    role: "harness.subagent.role",
-    parentCallId: "harness.subagent.parent_call.id",
-  },
-  subagent_completed: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    childRunId: "harness.subagent.run.id",
-    outcome: "harness.subagent.outcome",
-    inputTokens: "harness.subagent.input_tokens",
-    outputTokens: "harness.subagent.output_tokens",
-  },
-  run_created: {
-    runId: "harness.run.id",
-    seq: "harness.event.seq",
-    ts: "harness.event.timestamp_ms",
-    policyVersion: "harness.policy.version",
-    traceId: "harness.trace.id",
-    spanId: "harness.span.id",
-    configHash: "harness.run.config_hash",
-    requestedByPseudonym: "harness.run.requested_by_pseudonym",
-  },
-} as const satisfies Record<SafeEventType["kind"], Readonly<Record<string, string>>>;
 
 const logDefinitions = {
   model_call: defineLogRecord("harness.safe.model_call", {
@@ -192,6 +63,15 @@ const logDefinitions = {
     "harness.approval.approver_pseudonym": attr.optional(attr.pseudonym()),
     "harness.approval.reason": attr.optional(attr.code()),
     "harness.approval.wait_ms": attr.nonnegativeInt(),
+  }),
+  input_wait: defineLogRecord("harness.safe.input_wait", {
+    ...commonShape,
+    "harness.input.source": attr.enum(["mcp_mrtr", "mcp_legacy", "agent"]),
+    "harness.input.mode": attr.enum(["form", "url"]),
+    "harness.input.round": attr.nonnegativeInt(),
+    "harness.input.action": attr.enum(["accept", "decline", "cancel"]),
+    "harness.input.decided_by": attr.enum(["human", "simulated", "expiry", "timeout", "policy"]),
+    "harness.input.wait_ms": attr.nonnegativeInt(),
   }),
   checkpoint: defineLogRecord("harness.safe.checkpoint", {
     ...commonShape,
@@ -233,7 +113,7 @@ const logDefinitions = {
   }),
   budget_exceeded: defineLogRecord("harness.safe.budget_exceeded", {
     ...commonShape,
-    "harness.budget.kind": attr.enum(["steps", "cost", "wall_clock"]),
+    "harness.budget.kind": attr.enum(["steps", "cost", "wall_clock", "quota"]),
     "harness.budget.limit": attr.num(),
     "harness.budget.observed": attr.num(),
   }),

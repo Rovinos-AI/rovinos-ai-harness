@@ -60,6 +60,19 @@ const approvalWait = z
   })
   .strict();
 
+const inputWait = z
+  .object({
+    ...commonFields,
+    kind: attr.enum(["input_wait"]),
+    source: attr.enum(["mcp_mrtr", "mcp_legacy", "agent"]),
+    mode: attr.enum(["form", "url"]),
+    round: attr.nonnegativeInt(),
+    action: attr.enum(["accept", "decline", "cancel"]),
+    decidedBy: attr.enum(["human", "simulated", "expiry", "timeout", "policy"]),
+    waitMs: attr.nonnegativeInt(),
+  })
+  .strict();
+
 const checkpoint = z
   .object({
     ...commonFields,
@@ -101,7 +114,7 @@ const budgetExceeded = z
   .object({
     ...commonFields,
     kind: attr.enum(["budget_exceeded"]),
-    budget: attr.enum(["steps", "cost", "wall_clock"]),
+    budget: attr.enum(["steps", "cost", "wall_clock", "quota"]),
     limit: attr.num(),
     observed: attr.num(),
   })
@@ -144,6 +157,7 @@ export const safeEventSchemas = [
   toolCall,
   policyDecision,
   approvalWait,
+  inputWait,
   checkpoint,
   runStatus,
   piiAction,
@@ -177,6 +191,7 @@ type UnexportedEvent = Extract<
       | "model_request"
       | "tool_execution_started"
       | "approval_requested"
+      | "input_requested"
       | "context_compacted"
       | "app_content";
   }
@@ -200,6 +215,7 @@ function isUnexportedEvent(event: Event): event is UnexportedEvent {
     event.type === "model_request" ||
     event.type === "tool_execution_started" ||
     event.type === "approval_requested" ||
+    event.type === "input_requested" ||
     event.type === "context_compacted" ||
     event.type === "app_content"
   );
@@ -262,6 +278,22 @@ function projectApprovalResolved(
     decidedBy: event.decidedBy,
     ...(pseudonyms?.approverId === undefined ? {} : { approverPseudonym: pseudonyms.approverId }),
     ...(event.reason === undefined ? {} : { reason: event.reason }),
+    waitMs: event.waitMs,
+  });
+}
+
+function projectInputResolved(
+  event: Extract<Event, { type: "input_resolved" }>,
+  envelope: SafeEventEnvelope,
+): SafeEvent {
+  return SafeEvent.parse({
+    ...envelope,
+    kind: "input_wait",
+    source: event.source,
+    mode: event.mode,
+    round: event.round,
+    action: event.action,
+    decidedBy: event.decidedBy,
     waitMs: event.waitMs,
   });
 }
@@ -388,6 +420,8 @@ export function toSafeEvent(
       return projectToolIntent(event, envelope);
     case "approval_resolved":
       return projectApprovalResolved(event, envelope, pseudonyms);
+    case "input_resolved":
+      return projectInputResolved(event, envelope);
     case "checkpoint_written":
       return projectCheckpoint(event, envelope);
     case "run_status_changed":

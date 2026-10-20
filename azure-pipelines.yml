@@ -35,6 +35,8 @@ stages:
             displayName: Check telemetry attribute catalog
           - script: yarn gen:collector --check
             displayName: Check Collector allowlist
+          - script: yarn check:pii-corpus
+            displayName: Check synthetic PII corpus determinism
           - script: yarn lint
             displayName: Lint
             # Scoped to this step so unit tests never inherit it; they must not depend on the environment.
@@ -77,6 +79,8 @@ stages:
       - job: unit
         steps:
           - template: pipelines/templates/node-setup.yml
+          - script: yarn build
+            displayName: Build detector packages for the PII report
           - script: >
               yarn test:unit --reporter=junit
               --maxWorkers=4
@@ -85,6 +89,14 @@ stages:
               --coverage.reportOnFailure
               --coverage.reporter=cobertura
             displayName: Unit tests
+          - script: yarn pii:report --mode regex --out-dir "$(Build.ArtifactStagingDirectory)/pii-report"
+            displayName: Regex detector precision and recall report
+          - task: PublishBuildArtifacts@1
+            condition: succeededOrFailed()
+            inputs:
+              PathtoPublish: $(Build.ArtifactStagingDirectory)/pii-report
+              ArtifactName: pii-report-regex
+              publishLocation: Container
           - task: PublishTestResults@2
             condition: succeededOrFailed()
             inputs:
@@ -129,6 +141,15 @@ stages:
               TEST_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness
               TEST_VAULT_POSTGRES_URL: postgresql://harness@127.0.0.1:5432/harness_vault
               LINT_PULL_IMAGES: "1"
+          - script: yarn pii:report --mode presidio --out-dir "$(Build.ArtifactStagingDirectory)/pii-report"
+            condition: succeededOrFailed()
+            displayName: Presidio detector precision and recall report
+          - task: PublishBuildArtifacts@1
+            condition: succeededOrFailed()
+            inputs:
+              PathtoPublish: $(Build.ArtifactStagingDirectory)/pii-report
+              ArtifactName: pii-report-presidio
+              publishLocation: Container
           - bash: |
               mkdir -p "$(Build.ArtifactStagingDirectory)/playwright-traces"
               if [ -d reports/playwright-traces ]; then

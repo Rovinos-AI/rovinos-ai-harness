@@ -507,6 +507,7 @@ store: {}`,
         budgets: { maxSteps: 200, maxWallClockMs: 3_600_000, countSuspendedTime: false },
         subagents: { maxDepth: 4, maxChildrenPerRun: 8, maxConcurrentChildren: 2 },
       },
+      quotas: [],
       roles: [],
       store: {},
       models: {
@@ -542,6 +543,11 @@ store: {}`,
         correlation: { enabled: false },
       },
       sandbox: {},
+      elicitation: {
+        channels: [],
+        requireHttps: true,
+        expiresAfterMs: 604_800_000,
+      },
     });
   });
 

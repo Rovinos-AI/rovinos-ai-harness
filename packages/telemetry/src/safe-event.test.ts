@@ -29,7 +29,9 @@ function canaryValue(value: unknown, canary: string): unknown {
       : Object.fromEntries(
           entries.map(([key, nested]) => [
             key,
-            key === "role" || key === "type" ? nested : canaryValue(nested, canary),
+            key === "role" || key === "type" || key === "format"
+              ? nested
+              : canaryValue(nested, canary),
           ]),
         );
   }
@@ -117,6 +119,29 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
   },
   {
     event: validEvent({
+      type: "input_resolved",
+      requestId: "00000000000000000000000002",
+      source: "mcp_mrtr",
+      mode: "form",
+      round: 1,
+      action: "accept",
+      decidedBy: "human",
+      approverId: "cli.approver",
+      waitMs: 12,
+      answer: { email: "INPUT_ANSWER_CANARY" },
+    }),
+    kind: "input_wait",
+    fields: {
+      source: "mcp_mrtr",
+      mode: "form",
+      round: 1,
+      action: "accept",
+      decidedBy: "human",
+      waitMs: 12,
+    },
+  },
+  {
+    event: validEvent({
       type: "checkpoint_written",
       checkpointId: "00000000000000000000000002",
       atSeq: 6,
@@ -175,6 +200,16 @@ const mappedEvents: { event: Event; kind: string; fields: Record<string, unknown
     }),
     kind: "budget_exceeded",
     fields: { budget: "steps", limit: 10, observed: 11 },
+  },
+  {
+    event: validEvent({
+      type: "budget_exceeded",
+      budget: "quota",
+      limit: 10,
+      observed: 10,
+    }),
+    kind: "budget_exceeded",
+    fields: { budget: "quota", limit: 10, observed: 10 },
   },
   {
     event: validEvent({
@@ -242,6 +277,15 @@ const unexportedEvents = [
     approvalId: "00000000000000000000000002",
     callId: "00000000000000000000000002",
     payload: "APPROVAL_REQUEST_CANARY",
+  }),
+  validEvent({
+    type: "input_requested",
+    requestId: "00000000000000000000000002",
+    source: "mcp_mrtr",
+    round: 1,
+    mode: "form",
+    message: "INPUT_MESSAGE_CANARY",
+    schema: { type: "object", properties: { value: { type: "string" } } },
   }),
   validEvent({
     type: "context_compacted",
@@ -368,17 +412,33 @@ describe("SafeEvent projection", () => {
       const canary = `CANARY_${sample.type}_${index.toString()}`;
       const contentFields = Object.entries(EVENT_FIELD_CLASS[sample.type])
         .filter(([, classification]) => classification === "content")
+        .filter(([field]) => !(sample.type === "input_requested" && field === "url"))
         .map(([field]) => field);
       const injected = Object.fromEntries(
         contentFields.map((field) => {
           const baseValue = Object.entries(sample).find(([key]) => key === field)?.[1];
-          return [field, canaryValue(baseValue, canary)];
+          return [
+            field,
+            field === "url" ? `https://example.test/${canary}` : canaryValue(baseValue, canary),
+          ];
         }),
       );
       const event = Event.parse({ ...sample, ...injected });
 
       expect(JSON.stringify(toSafeEvent(event, "sanitizer.v1"))).not.toContain(canary);
     }
+
+    const inputRequest = eventSamples.find(({ type }) => type === "input_requested");
+    if (inputRequest?.type !== "input_requested") {
+      throw new Error("Missing input-request event sample.");
+    }
+    const urlInput = {
+      ...inputRequest,
+      mode: "url",
+      url: "https://example.test/CANARY_input_requested_url",
+    };
+    Reflect.deleteProperty(urlInput, "schema");
+    expect(toSafeEvent(Event.parse(urlInput), "sanitizer.v1")).toBeNull();
   });
 
   it("projects only decision metadata from tool intents", () => {

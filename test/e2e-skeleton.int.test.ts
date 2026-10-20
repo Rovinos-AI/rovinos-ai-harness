@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Every task that wires a capability into the runtime or CLI extends this test.
+// Not wired yet: human input contracts into runtime input handling (25.1 -> #239)
 // Not wired yet: MCP input_required to the human input broker (25.3 -> #241)
 // Not wired yet: control-plane consumer of store watch/watchRuns (24.5 -> #234)
 // Not wired yet: gateway token progress to live run updates (14.16 -> #157; 24.5 -> #234)
@@ -9,6 +10,7 @@
 // Not wired yet: Bedrock adapter registration in the runtime provider factory (14.19 -> #160)
 // Not wired yet: user pseudonym emission in runtime telemetry (12.8 -> #139)
 // Not wired yet: simulated eval approver identity (16.6 -> #172)
+// Not wired yet: worker claim-time concurrency quota enforcement (24.3 -> #232)
 import { Command } from "commander";
 import {
   Client,

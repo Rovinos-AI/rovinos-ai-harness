@@ -328,6 +328,9 @@ function fakeQuery(sql: string, values: unknown[]): FakeQueryResult {
   if (query.startsWith("SELECT to_regclass")) {
     return { rows: [{ initialized: fakePg.schemaInitialized }] };
   }
+  if (query.startsWith("INSERT INTO usage_ledger")) {
+    return { rows: [{ quota_id: text(values[0]) }] };
+  }
   if (query.startsWith("SELECT metadata_value FROM store_metadata")) {
     return {
       rows: fakePg.encryptionValue === "" ? [] : [{ metadata_value: fakePg.encryptionValue }],
@@ -1253,5 +1256,30 @@ it("filters Postgres run listings to direct continuations", async () => {
   await expect(store.listRuns({ continuationOf: parentId, limit: 10 })).resolves.toMatchObject({
     runs: [{ runId: secondBranch }, { runId: firstBranch }],
   });
+  await store.close();
+});
+
+it("appends usage updates atomically with events", async () => {
+  const builders = createEventBuilders();
+  const runId = builders.nextRunId();
+  const quotaId = Code.parse("analysts");
+  const store = new PostgresEventStore("postgresql://harness@localhost/harness");
+
+  await expect(
+    store.appendWithUsage(runId, [builders.runCreated(runId)], 0, {
+      usageUpdates: [
+        {
+          quotaId,
+          period: "hour",
+          periodStart: 0,
+          costMicros: 17,
+          runsStarted: 1,
+          maxRunsStarted: 5,
+        },
+      ],
+    }),
+  ).resolves.toEqual({ nextSeq: 1 });
+  expect(fakePg.events).toHaveLength(1);
+  expect(fakePg.runs.get(runId)?.next_seq).toBe(1);
   await store.close();
 });

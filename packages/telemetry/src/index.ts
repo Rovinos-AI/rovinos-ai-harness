@@ -37,6 +37,7 @@ export {
   countPiiBlobHit,
   countPiiDetectorDegraded,
   countPolicyDecision,
+  countQuotaRejection,
   METRIC_ALLOWLIST,
   type HostAppRejectedReason,
   type PolicyDecision,

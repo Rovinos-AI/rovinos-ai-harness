@@ -27,6 +27,14 @@ describe("ServerConfigSchema", () => {
       propagateTrace: false,
       toolPrefix: "internal",
       useAnnotations: false,
+      elicitation: {
+        enabled: false,
+        modes: ["form"],
+        maxRounds: 5,
+        maxPerRun: 20,
+        maxRequestStateBytes: 65_536,
+        legacyLiveTimeoutMs: 300_000,
+      },
       timeouts: { connectMs: 10_000, callMs: 60_000 },
       maxResultBytes: 1_048_576,
     });

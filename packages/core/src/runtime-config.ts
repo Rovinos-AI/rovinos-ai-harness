@@ -7,6 +7,7 @@ import {
   type Event,
   type PolicyConfig,
   type PiiConfig,
+  type QuotaConfig,
   type RolesConfig,
   type Id,
   type JsonValue,
@@ -92,6 +93,7 @@ export interface RuntimeConfig {
   readonly models?: ModelsConfig;
   readonly roles?: RolesConfig;
   readonly policy?: PolicyConfig;
+  readonly quotas?: readonly QuotaConfig[];
   readonly keys?: KeysConfig | undefined;
   readonly sandbox?: z.infer<typeof SandboxConfigSchema>;
   readonly servers?: ServersConfig;
