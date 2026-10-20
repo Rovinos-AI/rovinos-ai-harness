@@ -7,7 +7,6 @@ import {
   type UsageLedgerPeriod,
   type UsageLedgerRow,
 } from "@harness/store/adapter-internal";
-import type { Pool } from "pg";
 import { integer, storeError } from "./helpers.js";
 
 interface UsageLedgerRowRecord {
@@ -16,6 +15,14 @@ interface UsageLedgerRowRecord {
   readonly period_start: number | string;
   readonly cost_micros: number | string;
   readonly runs_started: number | string;
+}
+
+/** The query capability the ledger read needs; a `pg` `Pool` satisfies it. */
+export interface UsageLedgerQueryClient {
+  query(
+    text: string,
+    values: readonly unknown[],
+  ): Promise<{ readonly rows: readonly UsageLedgerRowRecord[] }>;
 }
 
 interface ReadUsageLedgerOptions {
@@ -32,12 +39,12 @@ interface ReadUsageLedgerOptions {
 
 /** Queries Postgres usage rows for the requested periods. */
 export async function queryPostgresUsageLedger(
-  pool: Pool,
+  pool: UsageLedgerQueryClient,
   quotaId: CodeType,
   period: UsageLedgerPeriod,
   periodStarts: readonly number[],
 ): Promise<readonly UsageLedgerRowRecord[]> {
-  const result = await pool.query<UsageLedgerRowRecord>(
+  const result = await pool.query(
     "SELECT quota_id, period, period_start, cost_micros, runs_started FROM usage_ledger WHERE quota_id = $1 AND period = $2 AND period_start = ANY($3::BIGINT[])",
     [quotaId, period, [...periodStarts]],
   );

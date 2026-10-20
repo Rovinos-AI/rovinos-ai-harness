@@ -6,7 +6,7 @@ import {
   type UsageLedgerPeriod,
 } from "@harness/store/adapter-internal";
 import { describe, expect, it, vi } from "vitest";
-import { readPostgresUsageLedger } from "./usage-ledger.js";
+import { queryPostgresUsageLedger, readPostgresUsageLedger } from "./usage-ledger.js";
 
 const quotaId = Code.parse("analysts");
 const period: UsageLedgerPeriod = "hour";
@@ -72,5 +72,21 @@ describe("readPostgresUsageLedger", () => {
       }),
     ).rejects.toBeInstanceOf(StoreUnavailableError);
     expect(query).not.toHaveBeenCalled();
+  });
+});
+
+describe("queryPostgresUsageLedger", () => {
+  it("selects the quota's rows for the requested period starts", async () => {
+    const rows = [
+      { quota_id: "analysts", period, period_start: "3", cost_micros: "17", runs_started: "2" },
+    ];
+    const query = vi.fn((_text: string, _values: readonly unknown[]) => Promise.resolve({ rows }));
+
+    await expect(queryPostgresUsageLedger({ query }, quotaId, period, [3, 4])).resolves.toBe(rows);
+    expect(query).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("FROM usage_ledger"), [
+      quotaId,
+      period,
+      [3, 4],
+    ]);
   });
 });
