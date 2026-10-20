@@ -80,9 +80,7 @@ describe("Event", () => {
     const withoutApprover = { ...resolution };
     Reflect.deleteProperty(withoutApprover, "approverId");
     expect(Event.safeParse(withoutApprover).success).toBe(false);
-    expect(
-      Event.safeParse({ ...withoutApprover, decidedBy: "expiry" }).success,
-    ).toBe(true);
+    expect(Event.safeParse({ ...withoutApprover, decidedBy: "expiry" }).success).toBe(true);
     expect(
       Event.safeParse({ ...resolution, action: "decline", answer: { private: "value" } }).success,
     ).toBe(false);

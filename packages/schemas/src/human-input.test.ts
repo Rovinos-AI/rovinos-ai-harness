@@ -16,7 +16,9 @@ function hasUnsupportedError(value: unknown): boolean {
   const result = FormSchema.safeParse(value);
   return (
     !result.success &&
-    result.error.issues.some((issue) => issue.params?.errorCode === "input_schema_unsupported")
+    result.error.issues.some(
+      (issue) => issue.code === "custom" && issue.params?.errorCode === "input_schema_unsupported",
+    )
   );
 }
 
@@ -25,10 +27,19 @@ describe("FormSchema", () => {
     ["root title and description", { ...validForm, title: "Title", description: "Description" }],
     [
       "string bounds and format",
-      { type: "object", properties: { email: { type: "string", minLength: 1, maxLength: 50, format: "email" } } },
+      {
+        type: "object",
+        properties: { email: { type: "string", minLength: 1, maxLength: 50, format: "email" } },
+      },
     ],
-    ["string default", { type: "object", properties: { name: { type: "string", default: "Example" } } }],
-    ["string enum", { type: "object", properties: { choice: { type: "string", enum: ["a", "b"] } } }],
+    [
+      "string default",
+      { type: "object", properties: { name: { type: "string", default: "Example" } } },
+    ],
+    [
+      "string enum",
+      { type: "object", properties: { choice: { type: "string", enum: ["a", "b"] } } },
+    ],
     [
       "titled oneOf choices",
       {
@@ -40,9 +51,18 @@ describe("FormSchema", () => {
       "safe legacy pattern",
       { type: "object", properties: { code: { type: "string", pattern: "a{1,4}" } } },
     ],
-    ["number bounds and default", { type: "object", properties: { count: { type: "number", minimum: 0, maximum: 10, default: 1 } } }],
+    [
+      "number bounds and default",
+      {
+        type: "object",
+        properties: { count: { type: "number", minimum: 0, maximum: 10, default: 1 } },
+      },
+    ],
     ["integer default", { type: "object", properties: { count: { type: "integer", default: 1 } } }],
-    ["boolean default", { type: "object", properties: { enabled: { type: "boolean", default: true } } }],
+    [
+      "boolean default",
+      { type: "object", properties: { enabled: { type: "boolean", default: true } } },
+    ],
     [
       "enum multi-select with bounds",
       {
@@ -63,7 +83,10 @@ describe("FormSchema", () => {
       {
         type: "object",
         properties: {
-          choices: { type: "array", items: { type: "string", anyOf: [{ const: "a", title: "Choice A" }] } },
+          choices: {
+            type: "array",
+            items: { type: "string", anyOf: [{ const: "a", title: "Choice A" }] },
+          },
         },
       },
     ],
@@ -74,19 +97,50 @@ describe("FormSchema", () => {
 
   it.each([
     ["unknown root keyword", { ...validForm, additionalProperties: false }],
-    ["unknown field keyword", { type: "object", properties: { answer: { type: "string", minItems: 1 } } }],
-    ["nested property", { type: "object", properties: { answer: { type: "object", properties: {} } } }],
+    [
+      "unknown field keyword",
+      { type: "object", properties: { answer: { type: "string", minItems: 1 } } },
+    ],
+    [
+      "nested property",
+      { type: "object", properties: { answer: { type: "object", properties: {} } } },
+    ],
     [
       "nested array item",
       { type: "object", properties: { answer: { type: "array", items: { type: "object" } } } },
     ],
-    ["unknown option keyword", { type: "object", properties: { choice: { type: "string", oneOf: [{ const: "a", title: "A", description: "No" }] } } }],
-    ["too many properties", { type: "object", properties: Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`p${index}`, { type: "boolean" }])) }],
-    ["unsafe pattern", { type: "object", properties: { code: { type: "string", pattern: "(a+)+$" } } }],
-    ["malformed pattern", { type: "object", properties: { code: { type: "string", pattern: "[" } } }],
+    [
+      "unknown option keyword",
+      {
+        type: "object",
+        properties: {
+          choice: { type: "string", oneOf: [{ const: "a", title: "A", description: "No" }] },
+        },
+      },
+    ],
+    [
+      "too many properties",
+      {
+        type: "object",
+        properties: Object.fromEntries(
+          Array.from({ length: 21 }, (_, index) => [`p${index.toString()}`, { type: "boolean" }]),
+        ),
+      },
+    ],
+    [
+      "unsafe pattern",
+      { type: "object", properties: { code: { type: "string", pattern: "(a+)+$" } } },
+    ],
+    [
+      "malformed pattern",
+      { type: "object", properties: { code: { type: "string", pattern: "[" } } },
+    ],
     ["invalid required property", { ...validForm, required: ["missing"] }],
     ["duplicate required property", { ...validForm, required: ["answer", "answer"] }],
-    ["invalid range", { type: "object", properties: { answer: { type: "string", minLength: 2, maxLength: 1 } } }],
+    [
+      "invalid range",
+      { type: "object", properties: { answer: { type: "string", minLength: 2, maxLength: 1 } } },
+    ],
   ])("rejects unsupported schema with stable code: %s", (_description, schema) => {
     const result = FormSchema.safeParse(schema);
     expect(result.success).toBe(false);
@@ -95,8 +149,17 @@ describe("FormSchema", () => {
 
   it.each([
     ["long title", { ...validForm, title: "t".repeat(201) }],
-    ["long description", { type: "object", properties: { answer: { type: "string", description: "d".repeat(201) } } }],
-    ["long choice title", { type: "object", properties: { choice: { type: "string", oneOf: [{ const: "a", title: "t".repeat(201) }] } } }],
+    [
+      "long description",
+      { type: "object", properties: { answer: { type: "string", description: "d".repeat(201) } } },
+    ],
+    [
+      "long choice title",
+      {
+        type: "object",
+        properties: { choice: { type: "string", oneOf: [{ const: "a", title: "t".repeat(201) }] } },
+      },
+    ],
   ])("rejects overlong labels: %s", (_description, schema) => {
     expect(FormSchema.safeParse(schema).success).toBe(false);
   });
@@ -117,11 +180,22 @@ describe("formSchemaToZod", () => {
       type: "object",
       properties: {
         email: { type: "string", format: "email", minLength: 5, maxLength: 40 },
-        choice: { type: "string", oneOf: [{ const: "yes", title: "Yes" }, { const: "no", title: "No" }] },
+        choice: {
+          type: "string",
+          oneOf: [
+            { const: "yes", title: "Yes" },
+            { const: "no", title: "No" },
+          ],
+        },
         count: { type: "number", minimum: 1, maximum: 10 },
         rank: { type: "integer", minimum: 1, maximum: 5 },
         enabled: { type: "boolean" },
-        tags: { type: "array", items: { type: "string", enum: ["a", "b"] }, minItems: 1, maxItems: 2 },
+        tags: {
+          type: "array",
+          items: { type: "string", enum: ["a", "b"] },
+          minItems: 1,
+          maxItems: 2,
+        },
         optional: { type: "string", default: "default" },
       },
       required: ["email", "choice", "count", "rank", "enabled", "tags"],
@@ -145,7 +219,10 @@ describe("formSchemaToZod", () => {
           type: "object",
           properties: {
             pattern: { type: "string", pattern: "a{1,3}" },
-            selected: { type: "array", items: { type: "string", anyOf: [{ const: "x", title: "X" }] } },
+            selected: {
+              type: "array",
+              items: { type: "string", anyOf: [{ const: "x", title: "X" }] },
+            },
           },
           required: ["pattern", "selected"],
         }),
@@ -219,8 +296,12 @@ describe("InputRequestSchema", () => {
         source: "mcp_mrtr",
       }).success,
     ).toBe(false);
-    expect(InputRequestSchema.safeParse({ ...request, inputKey: "k".repeat(129) }).success).toBe(false);
-    expect(InputRequestSchema.safeParse({ ...request, message: "m".repeat(2_001) }).success).toBe(false);
+    expect(InputRequestSchema.safeParse({ ...request, inputKey: "k".repeat(129) }).success).toBe(
+      false,
+    );
+    expect(InputRequestSchema.safeParse({ ...request, message: "m".repeat(2_001) }).success).toBe(
+      false,
+    );
   });
 
   it("accepts form and URL requests without optional fields", () => {

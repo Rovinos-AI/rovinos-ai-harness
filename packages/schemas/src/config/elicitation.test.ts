@@ -65,12 +65,14 @@ describe("ServerElicitationConfigSchema", () => {
     });
   });
 
-  it("rejects unknown keys, modes, and nonpositive limits", () => {
+  it("rejects unknown keys, modes, and zero limits", () => {
     expect(ServerElicitationConfigSchema.safeParse({ unknown: true }).success).toBe(false);
     expect(ServerElicitationConfigSchema.safeParse({ modes: ["email"] }).success).toBe(false);
     expect(ServerElicitationConfigSchema.safeParse({ maxRounds: 0 }).success).toBe(false);
     expect(ServerElicitationConfigSchema.safeParse({ maxPerRun: 0 }).success).toBe(false);
-    expect(ServerElicitationConfigSchema.safeParse({ maxRequestStateBytes: 0 }).success).toBe(false);
+    expect(ServerElicitationConfigSchema.safeParse({ maxRequestStateBytes: 0 }).success).toBe(
+      false,
+    );
     expect(ServerElicitationConfigSchema.safeParse({ legacyLiveTimeoutMs: 0 }).success).toBe(false);
   });
 });
