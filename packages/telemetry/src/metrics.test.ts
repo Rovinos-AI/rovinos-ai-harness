@@ -7,6 +7,7 @@ import {
   HOST_APP_REJECTED_REASONS,
   POLICY_DECISIONS,
   MCP_INPUT_REQUEST_OUTCOMES,
+  WORKER_JOB_OUTCOMES,
   METRIC_ALLOWLIST,
   countHostAppRejected,
   countHostAppSpansAccepted,
@@ -18,6 +19,8 @@ import {
   countPolicyDecision,
   countQuotaRejection,
   countDroppedTelemetry,
+  countWorkerJob,
+  recordWorkerQueueLag,
   countSentinelScopeReduced,
   countSkippedShortValues,
   type TelemetryDropReason,
@@ -25,6 +28,7 @@ import {
 
 const meter = metrics.getMeter("@harness/telemetry");
 const counter = meter.createCounter("harness.telemetry.dropped");
+const histogram = meter.createHistogram("harness.worker.queue_lag_ms");
 const getMeter = vi.spyOn(metrics, "getMeter").mockReturnValue(meter);
 const createdMetricNames: string[] = [];
 function createAllowlistedCounter(name: string): typeof counter {
@@ -35,7 +39,18 @@ function createAllowlistedCounter(name: string): typeof counter {
   return counter;
 }
 const createCounter = vi.spyOn(meter, "createCounter").mockImplementation(createAllowlistedCounter);
+function createAllowlistedHistogram(name: string): typeof histogram {
+  if (!Object.hasOwn(METRIC_ALLOWLIST, name)) {
+    throw new Error("metric_not_allowlisted");
+  }
+  createdMetricNames.push(name);
+  return histogram;
+}
+const createHistogram = vi
+  .spyOn(meter, "createHistogram")
+  .mockImplementation(createAllowlistedHistogram);
 const add = vi.spyOn(counter, "add");
+const record = vi.spyOn(histogram, "record");
 
 const dropReasons: readonly TelemetryDropReason[] = TELEMETRY_DROP_REASONS;
 
@@ -54,6 +69,7 @@ describe("countDroppedTelemetry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     add.mockImplementation(() => undefined);
+    record.mockImplementation(() => undefined);
   });
 
   it("records the bounded reason as the counter's only attribute", () => {
@@ -222,6 +238,7 @@ describe("countDroppedTelemetry", () => {
       "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
       "harness.policy.decision": POLICY_DECISIONS,
       "harness.mcp.input_requests.outcome": MCP_INPUT_REQUEST_OUTCOMES,
+      "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
     });
     expect(
       TELEMETRY_METRIC_STRING_ATTRIBUTES["harness.telemetry.dropped.reason"].length,
@@ -234,6 +251,23 @@ describe("countDroppedTelemetry", () => {
     expect(createCounter).toHaveBeenCalledWith("harness.sentinel.scope_reduced");
     expect(add).toHaveBeenCalledWith(1);
     expectAddCallsAreAllowlisted("harness.sentinel.scope_reduced");
+  });
+
+  it("records worker outcomes and queue lag without identifiers", () => {
+    for (const outcome of WORKER_JOB_OUTCOMES) {
+      countWorkerJob(outcome);
+    }
+    recordWorkerQueueLag(25);
+    recordWorkerQueueLag(Number.NaN);
+
+    expect(createCounter).toHaveBeenCalledWith("harness.worker.jobs");
+    expect(add.mock.calls).toEqual(
+      WORKER_JOB_OUTCOMES.map((outcome) => [1, { "harness.worker.jobs.outcome": outcome }]),
+    );
+    expectAddCallsAreAllowlisted("harness.worker.jobs");
+    expect(createHistogram).toHaveBeenCalledWith("harness.worker.queue_lag_ms");
+    expect(record).toHaveBeenCalledExactlyOnceWith(25);
+    expect(METRIC_ALLOWLIST["harness.worker.queue_lag_ms"]).toEqual([]);
   });
 
   it("has an instrument for every allowlist entry and no stale entries", () => {

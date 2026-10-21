@@ -37,6 +37,35 @@ describe("sanitizeAttributes", () => {
     expect(metricMocks.record.mock.calls).toEqual([["invalid_attr"], ["unregistered_attr"]]);
   });
 
+  it("denies sensitive attributes before validating their registered schemas", () => {
+    const deniedNames = [
+      "exception.message",
+      "exception.stacktrace",
+      "http.url",
+      "url.full",
+      "url.query",
+      "http.target",
+      "db.statement",
+      "gen_ai.prompt",
+      "gen_ai.prompt.0",
+      "gen_ai.completion",
+      "gen_ai.input",
+      "gen_ai.output",
+      "gen_ai.system_instructions",
+    ];
+    const definition = {
+      shape: Object.fromEntries(deniedNames.map((name) => [name, attr.code()])),
+    };
+    const attrs = Object.fromEntries(deniedNames.map((name) => [name, "canary_value"]));
+
+    const sanitized = sanitizeAttributes(definition, attrs);
+
+    const deniedCount = deniedNames.filter((name) => !Object.hasOwn(sanitized, name)).length;
+    expect(deniedCount).toBe(deniedNames.length);
+    expect(sanitized).toEqual({});
+    expect(metricMocks.record).not.toHaveBeenCalled();
+  });
+
   it.each([
     { definition: { shape: null }, attrs: {}, name: "malformed shape" },
     { definition: { shape: {} }, attrs: null, name: "malformed attributes" },

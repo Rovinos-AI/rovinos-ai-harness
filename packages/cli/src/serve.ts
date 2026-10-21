@@ -8,11 +8,12 @@ import {
 } from "@harness/schemas";
 import type { ControlPlaneOperations } from "@harness/control-plane";
 import type { Runtime, ToolPort } from "@harness/core";
+import type { HarnessConfig } from "@harness/config";
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { IdempotencyKeyHashSchema } from "@harness/store";
+import { IdempotencyKeyHashSchema, type RunQueue } from "@harness/store";
 import { z } from "zod";
-import type { CommandModule } from "./command.js";
+import type { CliContext, CommandModule } from "./command.js";
 import { createCommandRuntime } from "./command.js";
 
 type ServeErrorCode = "serve_options_invalid" | "serve_port_invalid" | "stdio_json_unsupported";
@@ -59,19 +60,27 @@ export const serveCommand: CommandModule = {
           const mode = parseServeOptions(options, program.opts<{ json?: boolean }>().json === true);
 
           const config = await context.loadConfig();
-          const tool = await context.createToolPort?.(config);
-          const runtime = await createCommandRuntime(
-            context,
-            config,
-            tool === undefined ? undefined : { tool },
-          );
+          const queue = await openRunQueue(context, config);
+          let tool: ToolPort | undefined;
+          let runtime: Runtime;
+          try {
+            tool = await context.createToolPort?.(config);
+            runtime = await createCommandRuntime(context, config, {
+              ...(tool === undefined ? {} : { tool }),
+              queue,
+            });
+          } catch (error) {
+            await queue.close();
+            throw error;
+          }
           let closeServer: (() => Promise<void>) | undefined;
           try {
             const { startControlPlaneHttp, startControlPlaneStdio } =
               await import("@harness/control-plane");
-            const operations = createControlPlaneOperations(runtime, tool);
+            const operations = createControlPlaneOperations(runtime);
             const controlPlaneOptions = {
               ...(config.controlPlane === undefined ? {} : { controlPlane: config.controlPlane }),
+              runQueue: queue,
               ...(context.secretResolver === undefined
                 ? {}
                 : { secretResolver: context.secretResolver }),
@@ -96,16 +105,40 @@ export const serveCommand: CommandModule = {
               await waitForShutdown(true);
             }
           } finally {
-            try {
-              await closeServer?.();
-            } finally {
-              await runtime.close();
-            }
+            await closeServeResources(closeServer, runtime, queue);
           }
         },
       );
   },
 };
+
+async function openRunQueue(context: CliContext, config: HarnessConfig): Promise<RunQueue> {
+  if (context.openRunQueue !== undefined) {
+    return context.openRunQueue(config);
+  }
+  const { openConfiguredRunQueue } = await import("@harness/core");
+  return openConfiguredRunQueue(config, {
+    clock: context.clock,
+    ...(context.dataDir === undefined ? {} : { dataDir: context.dataDir }),
+    ...(context.secretResolver === undefined ? {} : { secretResolver: context.secretResolver }),
+  });
+}
+
+async function closeServeResources(
+  closeServer: (() => Promise<void>) | undefined,
+  runtime: Runtime,
+  queue: RunQueue,
+): Promise<void> {
+  try {
+    await closeServer?.();
+  } finally {
+    try {
+      await runtime.close();
+    } finally {
+      await queue.close();
+    }
+  }
+}
 
 function parseServeOptions(
   options: { readonly stdio?: boolean; readonly http?: boolean; readonly port?: string },
@@ -129,31 +162,21 @@ function parseServeOptions(
 }
 
 /** Creates control-plane mutation operations backed by a composed runtime. */
-export function createControlPlaneOperations(
-  runtime: Runtime,
-  tool: ToolPort | undefined,
-): ControlPlaneOperations {
+export function createControlPlaneOperations(runtime: Runtime): ControlPlaneOperations {
   return {
     startRun: (input) => startControlPlaneRun(runtime, input),
     continueRun: (runId, input) => continueControlPlaneRun(runtime, runId, input),
     resumeRun: (runId, signal, onClaimed) => runtime.resume(runId, { signal, onClaimed }),
     cancelRun: (runId) => runtime.cancel(runId),
     resolveApproval: async ({ runId, approvalId, decision, edits, reason, approverId }) => {
-      const { resolveApproval } = await import("@harness/core");
-      await resolveApproval(
-        runtime.store,
-        runId,
-        approvalId,
-        decision,
-        edits,
-        runtime.clock,
-        tool,
-        {
+      await runtime.resolveApproval(runId, approvalId, decision, {
+        ...(edits === undefined ? {} : { edits }),
+        metadata: {
           decidedBy: "human",
           approverId,
           ...(reason === undefined ? {} : { reason }),
         },
-      );
+      });
     },
   };
 }

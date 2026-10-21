@@ -24,6 +24,9 @@ details.
 
 `run.shutdownGraceMs` defaults to `20000` and must be a positive integer. On SIGTERM or SIGINT, the run aborts in-flight work, suspends at a safe point, and writes a checkpoint before exiting with code 143 or 130. If the grace period expires first, the process attempts a best-effort checkpoint and exits with code 1. Set the container's `stop_grace_period` longer than this value so the container runtime does not terminate the process before graceful shutdown can finish.
 
+`run.autoResume` defaults to `true`. When a runtime is configured with a durable queue, successfully
+resolved approvals enqueue a resume job unless this setting is `false`.
+
 Approval escalation notifications default to metadata-only log output. Configure
 `policy.approvals.notifier` as `kind: log` or a webhook; webhook URLs must use
 HTTPS, and their `secretRef` resolves to a bearer token through the configured

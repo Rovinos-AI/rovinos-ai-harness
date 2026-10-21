@@ -15,13 +15,14 @@ import {
   ServerConfigSchema,
   parseJson,
 } from "@harness/schemas";
-import { InMemoryEventStore } from "@harness/store";
+import { InMemoryEventStore, type RunQueue, type RunQueueJob } from "@harness/store";
 import { ProviderError } from "@harness/models";
 import { PolicyDocumentSchema, policyVersion } from "@harness/policy";
 import type { PolicyDocument } from "@harness/policy";
 import { createRuntime as createRuntimeImpl } from "./runtime.js";
 import type { ProviderAdapter } from "@harness/models";
 import { createConfiguredModelPort } from "./runtime-model.js";
+import { ApprovalAlreadyResolvedError } from "./approvals.js";
 import type { ModelCompletion, ModelPort, PolicyPort, ToolPort } from "./ports.js";
 import { allowAllPolicy } from "./testing/allow-policy.js";
 
@@ -50,6 +51,94 @@ afterEach(async () => {
 });
 
 describe("createRuntime model routing", () => {
+  it("re-enqueues approval resumption when an already-resolved approval is retried", async () => {
+    const enqueued: { readonly kind: string; readonly runId: string }[] = [];
+    const queuedJob: RunQueueJob = {
+      jobId: Id.parse("00000000000000000000000040"),
+      kind: "resume",
+      runId: Id.parse("00000000000000000000000041"),
+      priority: 0,
+      availableAt: 100,
+      attempts: 0,
+      maxAttempts: 5,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    const queue: RunQueue = {
+      enqueue: (input) => {
+        enqueued.push({ kind: input.kind, runId: input.runId });
+        return Promise.resolve(queuedJob);
+      },
+      claim: () => Promise.resolve([]),
+      heartbeat: () => Promise.resolve(true),
+      complete: () => Promise.resolve(true),
+      fail: () => Promise.resolve("retry"),
+      release: () => Promise.resolve(true),
+      getDeadLetter: () => Promise.resolve(undefined),
+      close: () => Promise.resolve(),
+    };
+    const runId = Id.parse("00000000000000000000000041");
+    const toolCallId = Id.parse("00000000000000000000000042");
+    const toolId = Code.parse("runtime.approval");
+    const runtime = await createRuntime(
+      { run: RunConfigSchema.parse({}) },
+      {
+        store: new InMemoryEventStore(),
+        queue,
+        policy: {
+          version: "runtime.approval_test",
+          decide: () => ({
+            decision: "ask",
+            ruleId: "runtime_approval",
+            reason: "runtime_approval",
+            editable: [],
+          }),
+        },
+        model: {
+          complete: () =>
+            Promise.resolve({
+              parts: [{ type: "tool_call", callId: toolCallId, toolId, args: {} }],
+              usage: { inputTokens: 1, outputTokens: 1 },
+              finishReason: "tool_calls",
+              provider: "test",
+              model: "test",
+              latencyMs: 0,
+              schemaValid: true,
+              repairAttempts: 0,
+              fallbackDepth: 0,
+              providerBlobs: null,
+            }),
+        },
+        tool: {
+          describe: () => ({ idempotent: false, timeoutMs: 1_000 }),
+          prepare: (call) => Promise.resolve(call),
+          execute: () => Promise.resolve({ outcome: "ok", result: null }),
+        },
+        transientVault: true,
+      },
+    );
+    try {
+      const suspended = await runtime.start("synthetic approval goal", { runId }).completion;
+      const approvalId = suspended.approvalIds[0];
+      if (approvalId === undefined) {
+        throw new Error("Expected the run to suspend for approval.");
+      }
+
+      const metadata = { decidedBy: "human" as const, approverId: "cli.runtime_test" };
+      await runtime.resolveApproval(runId, approvalId, "approve", { metadata });
+      await expect(
+        runtime.resolveApproval(runId, approvalId, "approve", { metadata }),
+      ).rejects.toBeInstanceOf(ApprovalAlreadyResolvedError);
+
+      expect(enqueued).toEqual([
+        { kind: "resume", runId },
+        { kind: "resume", runId },
+      ]);
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("registers and closes the MCP tool port for configured servers", async () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const server = new McpServer({ name: "runtime-test", version: "1.0.0" });

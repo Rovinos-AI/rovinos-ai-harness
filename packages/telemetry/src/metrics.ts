@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { metrics, type Attributes, type Counter, type Meter } from "@opentelemetry/api";
+import {
+  metrics,
+  type Attributes,
+  type Counter,
+  type Histogram,
+  type Meter,
+} from "@opentelemetry/api";
 import { Code, type Code as CodeType, type ModelUsage } from "@harness/schemas";
 
 type NoMetricAttributes = Readonly<Record<string, never>>;
@@ -45,6 +51,8 @@ export const MCP_INPUT_REQUEST_OUTCOMES = [
   "rounds_exceeded",
   "rate_limited",
 ] as const;
+/** Closed worker job outcomes used by the worker counter. */
+export const WORKER_JOB_OUTCOMES = ["completed", "suspended", "failed", "lease_lost"] as const;
 
 /** Bounded reasons for dropping or stripping telemetry data. */
 export type TelemetryDropReason = (typeof TELEMETRY_DROP_REASONS)[number];
@@ -54,6 +62,8 @@ export type HostAppRejectedReason = (typeof HOST_APP_REJECTED_REASONS)[number];
 export type PolicyDecision = (typeof POLICY_DECISIONS)[number];
 /** Bounded outcomes counted for an MCP human-input request. */
 export type McpInputRequestOutcome = (typeof MCP_INPUT_REQUEST_OUTCOMES)[number];
+/** Bounded worker job outcome. */
+export type WorkerJobOutcome = (typeof WORKER_JOB_OUTCOMES)[number];
 interface TelemetryDropAttributes extends Readonly<Record<string, TelemetryDropReason>> {
   readonly "harness.telemetry.dropped.reason": TelemetryDropReason;
 }
@@ -74,12 +84,17 @@ interface McpInputRequestAttributes extends Readonly<Record<string, McpInputRequ
   readonly "harness.mcp.input_requests.outcome": McpInputRequestOutcome;
 }
 
+interface WorkerJobAttributes extends Readonly<Record<string, WorkerJobOutcome>> {
+  readonly "harness.worker.jobs.outcome": WorkerJobOutcome;
+}
+
 /** String-valued metric attributes are explicitly closed enumerations. */
 export const TELEMETRY_METRIC_STRING_ATTRIBUTES = {
   "harness.telemetry.dropped.reason": TELEMETRY_DROP_REASONS,
   "harness.host.app_rejected.reason": HOST_APP_REJECTED_REASONS,
   "harness.policy.decision": POLICY_DECISIONS,
   "harness.mcp.input_requests.outcome": MCP_INPUT_REQUEST_OUTCOMES,
+  "harness.worker.jobs.outcome": WORKER_JOB_OUTCOMES,
 } as const;
 
 /** Collector allowlist of metric names and their allowed datapoint attribute keys. */
@@ -99,6 +114,8 @@ export const METRIC_ALLOWLIST = {
   "harness.telemetry.dropped": ["harness.telemetry.dropped.reason"],
   "harness.mcp.discovery_failed": [],
   "harness.mcp.input_requests": ["harness.mcp.input_requests.outcome"],
+  "harness.worker.jobs": ["harness.worker.jobs.outcome"],
+  "harness.worker.queue_lag_ms": [],
 } as const satisfies Record<Code, readonly Code[]>;
 
 let droppedCounter: Counter<TelemetryDropAttributes> | undefined;
@@ -116,12 +133,18 @@ let modelCacheWriteCounter: Counter<ModelUsageAttributes> | undefined;
 let mcpDiscoveryFailedCounter: Counter<NoMetricAttributes> | undefined;
 let quotaRejectionsCounter: Counter<QuotaRejectionAttributes> | undefined;
 let mcpInputRequestsCounter: Counter<McpInputRequestAttributes> | undefined;
+let workerJobsCounter: Counter<WorkerJobAttributes> | undefined;
+let workerQueueLagHistogram: Histogram<NoMetricAttributes> | undefined;
 
 function createCounter<TAttributes extends Attributes>(
   name: keyof typeof METRIC_ALLOWLIST,
   factory: (meter: Meter, name: keyof typeof METRIC_ALLOWLIST) => Counter<TAttributes>,
 ): Counter<TAttributes> {
   return factory(metrics.getMeter("@harness/telemetry"), name);
+}
+
+function createMetricHistogram(name: keyof typeof METRIC_ALLOWLIST): Histogram<NoMetricAttributes> {
+  return metrics.getMeter("@harness/telemetry").createHistogram<NoMetricAttributes>(name);
 }
 
 function getDroppedCounter(): Counter<TelemetryDropAttributes> {
@@ -250,6 +273,18 @@ export function countQuotaRejection(quotaId: CodeType): void {
   } catch {
     return;
   }
+}
+
+function getWorkerJobsCounter(): Counter<WorkerJobAttributes> {
+  workerJobsCounter ??= createCounter<WorkerJobAttributes>("harness.worker.jobs", (meter, name) =>
+    meter.createCounter<WorkerJobAttributes>(name),
+  );
+  return workerJobsCounter;
+}
+
+function getWorkerQueueLagHistogram(): Histogram<NoMetricAttributes> {
+  workerQueueLagHistogram ??= createMetricHistogram("harness.worker.queue_lag_ms");
+  return workerQueueLagHistogram;
 }
 
 /** Counts a telemetry drop using its bounded reason code. */
@@ -392,6 +427,27 @@ export function countMcpDiscoveryFailed(): void {
 export function countMcpInputRequest(outcome: McpInputRequestOutcome): void {
   try {
     getMcpInputRequestsCounter().add(1, { "harness.mcp.input_requests.outcome": outcome });
+  } catch {
+    return;
+  }
+}
+
+/** Counts a worker job using a bounded outcome and no identifiers. */
+export function countWorkerJob(outcome: WorkerJobOutcome): void {
+  try {
+    getWorkerJobsCounter().add(1, { "harness.worker.jobs.outcome": outcome });
+  } catch {
+    return;
+  }
+}
+
+/** Records queue delay without identifiers or other attributes. */
+export function recordWorkerQueueLag(lagMs: number): void {
+  if (!Number.isFinite(lagMs) || lagMs < 0) {
+    return;
+  }
+  try {
+    getWorkerQueueLagHistogram().record(lagMs);
   } catch {
     return;
   }

@@ -8,6 +8,18 @@ import { noRawTracerRule } from "./rules/no-raw-tracer.ts";
 /** @typedef {import("@typescript-eslint/utils").TSESTree.Node} Node */
 /** @typedef {Record<string, readonly string[] | string>} PackageLayers */
 
+/** Attribute shapes the metrics registry may declare instruments with (closed, reviewed list). */
+const allowedMetricAttributeTypes = new Set([
+  "NoMetricAttributes",
+  "TelemetryDropAttributes",
+  "HostAppRejectedAttributes",
+  "PolicyDecisionAttributes",
+  "ModelUsageAttributes",
+  "QuotaRejectionAttributes",
+  "WorkerJobAttributes",
+  "McpInputRequestAttributes",
+]);
+
 /** @type {(filename: string) => string | undefined} */
 const packageName = (filename) => {
   const segments = filename.split(path.sep);
@@ -248,12 +260,8 @@ const createMetricRegistryOnly = (context) => {
           ? identifierName(attributesType.typeName)
           : undefined;
       if (
-        attributesTypeName !== "NoMetricAttributes" &&
-        attributesTypeName !== "TelemetryDropAttributes" &&
-        attributesTypeName !== "HostAppRejectedAttributes" &&
-        attributesTypeName !== "PolicyDecisionAttributes" &&
-        attributesTypeName !== "ModelUsageAttributes" &&
-        attributesTypeName !== "QuotaRejectionAttributes"
+        attributesTypeName === undefined ||
+        !allowedMetricAttributeTypes.has(attributesTypeName)
       ) {
         context.report({ node, messageId: "forbidden" });
       }

@@ -21,10 +21,7 @@ export async function runApprovalSweep(
   context: CliContext,
   config: HarnessConfig,
 ): Promise<void> {
-  const [{ sweepApprovals }, { resolveApproval }] = await Promise.all([
-    import("@harness/policy"),
-    import("@harness/core"),
-  ]);
+  const { sweepApprovals } = await import("@harness/policy");
   const store: ApprovalSweepStore = {
     listRuns: (options) => runtime.store.listRuns(options),
     read: (runId) => runtime.store.read(runId),
@@ -35,16 +32,7 @@ export async function runApprovalSweep(
     releaseApprovalNotification: (approvalId, runId, claimedAt) =>
       runtime.store.releaseApprovalNotification(approvalId, runId, claimedAt),
     resolveApproval: (runId, approvalId, metadata) =>
-      resolveApproval(
-        runtime.store,
-        runId,
-        approvalId,
-        "deny",
-        undefined,
-        context.clock,
-        undefined,
-        metadata,
-      ),
+      runtime.resolveApproval(runId, approvalId, "deny", { metadata }),
   };
   const notifier = await createApprovalNotifier(
     config.policy.approvals,

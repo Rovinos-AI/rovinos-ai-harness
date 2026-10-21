@@ -15,7 +15,12 @@ import { RUN_SPAN } from "./spans.js";
 import { applyDanglingIntents } from "./steps/resume-tool-step.js";
 import { suspendForShutdown } from "./steps/shutdown.js";
 import type { RunScopeRegistry } from "./subagent/scope.js";
-import { previousSegmentLink, readRunEvents, restoreRunScope } from "./resume-history.js";
+import {
+  previousSegmentLink,
+  readRunEvents,
+  restoreRunScope,
+  restoreWorkspaceSnapshot,
+} from "./resume-history.js";
 import { claimResumeLock } from "./resume-lock.js";
 
 /** Error raised when attempting to resume a completed, failed, or cancelled run. */
@@ -46,7 +51,7 @@ export class RunNotResumableError extends HarnessError {
 
   /** Creates the invalid run-state resume error. */
   constructor() {
-    super("Only running or suspended runs can be resumed.");
+    super("Only pending, running, or suspended runs can be resumed.");
     this.name = "RunNotResumableError";
   }
 }
@@ -148,11 +153,8 @@ async function readResumeHistory(options: ResumeRunOptions): Promise<ResumeHisto
     await restoreRunScope(options.store, options.runId, events, options.scopes);
   }
   const state = foldRunState(events);
-  if (state.status === "completed" || state.status === "failed" || state.status === "cancelled") {
+  if (isTerminalRunState(state)) {
     throw new RunAlreadyTerminalError();
-  }
-  if (state.status !== "running" && state.status !== "suspended") {
-    throw new RunNotResumableError();
   }
   if (state.nextSeq !== head) {
     throw new ResumeConflictError();
@@ -172,6 +174,17 @@ async function readResumeHistory(options: ResumeRunOptions): Promise<ResumeHisto
 }
 
 function claimEvents(state: RunState): EventPartial[] {
+  if (state.status === "pending") {
+    return [
+      {
+        type: "run_status_changed",
+        v: 1,
+        from: "pending",
+        to: "running",
+        reason: "start",
+      },
+    ];
+  }
   if (state.status === "running") {
     return [
       {
@@ -203,7 +216,7 @@ function claimEvents(state: RunState): EventPartial[] {
 
 async function continueClaimedRun(execution: ResumeExecution): Promise<Event> {
   const { options, recorder, events, snapshot, eventsAfterSnapshot, checkpointer } = execution;
-  await restoreWorkspace(execution);
+  await restoreWorkspaceSnapshot(execution);
   await options.context.restore(snapshot?.context, eventsAfterSnapshot);
 
   const budgetTracker = new BudgetTracker(options.budgets, undefined, options.deadlineTs);
@@ -301,17 +314,6 @@ async function applyResumeActions(
     return failed;
   }
   return undefined;
-}
-
-async function restoreWorkspace(execution: ResumeExecution): Promise<void> {
-  const { options, snapshot } = execution;
-  if (snapshot?.workspaceRef === undefined || options.workspaceSnapshotter === undefined) {
-    return;
-  }
-  const workspaceExists = await options.workspaceSnapshotter.hasWorkspace(options.runId);
-  if (options.restoreOnResume === true || !workspaceExists) {
-    await options.workspaceSnapshotter.restore(options.runId, snapshot.workspaceRef);
-  }
 }
 
 class ResumeBudgetExceededError extends Error {}
@@ -420,6 +422,7 @@ async function resumeFromHistory(
     options.clock,
     undefined,
     leaseOwner,
+    options.signal,
   );
   const newEventStart = events.length;
   const checkpointer = new Checkpointer({

@@ -115,13 +115,13 @@ export type RunQueueOptions = z.input<typeof RunQueueOptionsSchema>;
 
 /** Durable database-backed queue contract. */
 export interface RunQueue {
-  /** Insert a job or return the active job matching its run or idempotency key. */
+  /** Insert a job or return the matching active job, preserving wake-ups during a lease. */
   enqueue(job: EnqueueRunJob): Promise<RunQueueJob>;
   /** Atomically lease up to `limit` available jobs to one worker. */
   claim(workerId: string, limit: number, leaseMs: number): Promise<RunQueueJob[]>;
   /** Extend the current, unexpired lease when it is still owned by this worker. */
   heartbeat(jobId: string, workerId: string, leaseMs: number): Promise<boolean>;
-  /** Remove a currently leased job after its run has finished. */
+  /** Finish a leased job, retaining it when a wake-up arrived during execution. */
   complete(jobId: string, workerId: string): Promise<boolean>;
   /** Retry with exponential backoff or move the exhausted job to dead letters. */
   fail(
