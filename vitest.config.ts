@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Keep the coverage floor in root config so Vitest applies it to every project.
+import { globSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import { composeIntegrationSuites } from "./scripts/compose/compose-suites.js";
+
+const parallelIntegrationSuites = globSync("**/*.int.test.ts", {
+  exclude: (path) => path === "node_modules" || path === ".tmp" || path === "dist",
+}).filter((path) => !(composeIntegrationSuites as readonly string[]).includes(path));
 
 export default defineConfig({
   resolve: {
@@ -68,8 +73,9 @@ export default defineConfig({
         extends: true,
         test: {
           name: "integration",
-          include: ["**/*.int.test.ts"],
-          exclude: ["**/node_modules/**", ...composeIntegrationSuites],
+          // An explicit list, not a project `exclude`: overriding `exclude` would drop the
+          // command-line `--exclude` globs that verification and CI pass.
+          include: parallelIntegrationSuites,
           globalSetup: ["./scripts/compose/build-images.ts"],
         },
       },
