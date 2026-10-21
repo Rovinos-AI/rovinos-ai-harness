@@ -4,6 +4,7 @@ import type { EventStore } from "@harness/store";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { controlPlanePrincipal, withControlPlaneAuthorization } from "../auth.js";
+import { RUNS_CONSOLE_RESOURCE_URI } from "../resources/runs-console.js";
 import {
   listRunsInputSchema,
   listRunsOutputSchema,
@@ -63,19 +64,25 @@ export function registerListRunsTool(
   server: McpServer,
   store: EventStore,
   audit?: ControlPlaneAuditHandler,
+  options: { readonly name?: string; readonly appOnly?: boolean } = {},
 ): void {
+  const name = options.name ?? "list_runs";
+  const uiMeta = options.appOnly
+    ? { ui: { visibility: ["app" as const], resourceUri: RUNS_CONSOLE_RESOURCE_URI } }
+    : { ui: { resourceUri: RUNS_CONSOLE_RESOURCE_URI } };
   server.registerTool(
-    "list_runs",
+    name,
     {
       description: "List run status and metadata counts.",
       inputSchema: listRunsInputSchema,
       outputSchema: listRunsOutputSchema,
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: uiMeta,
     },
     async (input, context) =>
       withControlPlaneAuthorization({
         context,
-        tool: Code.parse("list_runs"),
+        tool: Code.parse(name),
         scope: "read",
         operation: async () => {
           const principal = controlPlanePrincipal(context);

@@ -17,3 +17,9 @@ All harness-authored user-visible copy is in `src/kit/strings.ts`. Use the forma
 ## Build and checks
 
 Run `yarn workspace @harness/approval-app build` to produce the view resources. The build embeds script and style, hashes each document, rejects external URLs, and the unit tests enforce a 150 KiB gzip budget per view. Component tests cover hostile text, keyboard-operable controls, and axe checks in both built-in themes.
+
+## Runs console
+
+The `ui://harness/runs/v1` view lists run status, age, step counts, and pending approval counts. It refreshes through the app-visible `harness.runs.list` and `harness.runs.get` tools every five seconds, pauses while hidden, and backs off after tool errors. The `list_runs` model-facing tool remains available to clients without MCP Apps support and links the resource through `_meta.ui.resourceUri`.
+
+The console requests and displays metadata only. Run details use the `get_run` metadata projection; pending approval actions open the approval resource using the host bridge.

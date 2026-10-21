@@ -10,6 +10,7 @@ import {
 import type { Tool } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { APPROVAL_RESOURCE_URI } from "./resources/approval.js";
+import { RUNS_CONSOLE_RESOURCE_URI } from "./resources/runs-console.js";
 import {
   approveInputSchema,
   continueRunInputSchema,
@@ -34,6 +35,7 @@ export function toolDefinitions(): Tool[] {
       inputSchema: objectInputSchema(listRunsInputSchema),
       outputSchema: z.toJSONSchema(listRunsOutputSchema),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
     },
     {
       name: "get_run",
@@ -41,6 +43,22 @@ export function toolDefinitions(): Tool[] {
       inputSchema: objectInputSchema(getRunInputSchema),
       outputSchema: z.toJSONSchema(getRunOutputSchema),
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: "harness.runs.list",
+      description: "List run status and metadata counts for the runs console.",
+      inputSchema: objectInputSchema(listRunsInputSchema),
+      outputSchema: z.toJSONSchema(listRunsOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
+    },
+    {
+      name: "harness.runs.get",
+      description: "Get run metadata for the runs console detail panel.",
+      inputSchema: objectInputSchema(getRunInputSchema),
+      outputSchema: z.toJSONSchema(getRunOutputSchema),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      _meta: { ui: { visibility: ["app"], resourceUri: RUNS_CONSOLE_RESOURCE_URI } },
     },
     {
       name: "approve",
@@ -107,7 +125,12 @@ export function toolDefinitions(): Tool[] {
 
 /** Returns the authorization scope required by a control-plane tool. */
 export function toolScope(name: string): ControlPlaneAuthScope {
-  if (name === "list_runs" || name === "get_run") {
+  if (
+    name === "list_runs" ||
+    name === "get_run" ||
+    name === "harness.runs.list" ||
+    name === "harness.runs.get"
+  ) {
     return "read";
   }
   if (name === "approve" || name === "deny" || name === "harness.approvals.resolve") {

@@ -5,6 +5,7 @@ import type { EventStore } from "@harness/store";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { ControlPlaneAuditHandler } from "../auth.js";
 import { withControlPlaneAuthorization } from "../auth.js";
+import { RUNS_CONSOLE_RESOURCE_URI } from "../resources/runs-console.js";
 import {
   getRunInputSchema,
   getRunOutputSchema,
@@ -60,20 +61,29 @@ export function registerGetRunTool(
   server: McpServer,
   store: EventStore,
   audit?: ControlPlaneAuditHandler,
+  options: { readonly name?: string; readonly appOnly?: boolean } = {},
 ): void {
+  const name = options.name ?? "get_run";
   server.registerTool(
-    "get_run",
+    name,
     {
       description: "Get run status, usage, approvals, and recent safe event metadata.",
       inputSchema: getRunInputSchema,
       outputSchema: getRunOutputSchema,
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+      ...(options.appOnly
+        ? {
+            _meta: {
+              ui: { visibility: ["app" as const], resourceUri: RUNS_CONSOLE_RESOURCE_URI },
+            },
+          }
+        : {}),
     },
     async (input, context) => {
       const parsed = getRunInputSchema.parse(input);
       return withControlPlaneAuthorization({
         context,
-        tool: Code.parse("get_run"),
+        tool: Code.parse(name),
         scope: "read",
         runId: parsed.runId,
         operation: async () => {

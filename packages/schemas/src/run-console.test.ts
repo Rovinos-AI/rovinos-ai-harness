@@ -21,23 +21,23 @@ describe("runs console contracts", () => {
         ],
       }).runs,
     ).toHaveLength(1);
-    expect(
-      RunConsoleDetailSchema.parse({
-        runId,
-        status: "suspended",
-        steps: 4,
-        usage: { inputTokens: 1, outputTokens: 2, costMicros: 3 },
-        pendingApprovals: [
-          {
-            approvalId: "00000000000000000000000002",
-            toolId: "tool.call",
-            ruleId: "policy.review",
-            expiresAt: 100,
-          },
-        ],
-        recentEvents: [{ type: "run_created" }],
-      }).pendingApprovals,
-    ).toHaveLength(1);
+    const detail = RunConsoleDetailSchema.parse({
+      runId,
+      status: "suspended",
+      steps: 4,
+      usage: { inputTokens: 1, outputTokens: 2, costMicros: 3 },
+      pendingApprovals: [
+        {
+          approvalId: "00000000000000000000000002",
+          toolId: "tool.call",
+          ruleId: "policy.review",
+          expiresAt: 100,
+        },
+      ],
+      recentEvents: [{ type: "run_created" }],
+    });
+    expect(detail.pendingApprovals).toHaveLength(1);
+    expect(detail).not.toHaveProperty("recentEvents");
   });
 
   it("rejects hostile identifiers and statuses rather than rendering them", () => {

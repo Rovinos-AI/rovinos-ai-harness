@@ -11,6 +11,7 @@ export {
 } from "./approval-tools.js";
 export { parseJson } from "./parse.js";
 export { parseTokenType } from "./pii-detection.js";
+export { RunStatus } from "./events.js";
 export { JsonValue } from "./json.js";
 export {
   RunConsoleDetailSchema,
@@ -18,4 +19,5 @@ export {
   RunConsoleRunSchema,
   type RunConsoleDetail,
   type RunConsoleList,
+  type RunConsoleRun,
 } from "./run-console.js";

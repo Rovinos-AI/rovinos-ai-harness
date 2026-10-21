@@ -48,10 +48,11 @@ export const RunConsoleDetailSchema = z
       })
       .strict(),
     pendingApprovals: z.array(RunConsolePendingApprovalSchema),
-  })
-  .passthrough();
+  });
 
 /** Inferred safe list output for the runs console. */
 export type RunConsoleList = z.infer<typeof RunConsoleListSchema>;
+/** Inferred safe run summary displayed by the console. */
+export type RunConsoleRun = z.infer<typeof RunConsoleRunSchema>;
 /** Inferred safe detail projection for the runs console. */
 export type RunConsoleDetail = z.infer<typeof RunConsoleDetailSchema>;

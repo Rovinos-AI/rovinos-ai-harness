@@ -37,6 +37,7 @@ import {
   type ApprovalAppScope,
 } from "./tools/approvals-app.js";
 import { loadApprovalHtml, registerApprovalResource } from "./resources/approval.js";
+import { loadRunsConsoleHtml, registerRunsConsoleResource } from "./resources/runs-console.js";
 import {
   controlPlanePrincipal,
   hasControlPlaneScope,
@@ -110,6 +111,8 @@ export interface ControlPlaneServerOptions {
     }) => void;
   };
   readonly approvalHtml?: string;
+  /** Built runs-console MCP App HTML; injectable for in-memory server tests. */
+  readonly runsConsoleHtml?: string;
 }
 
 /** Creates the MCP server with metadata-only inspection and confirmation-gated mutation tools. */
@@ -135,7 +138,16 @@ export function createControlPlaneServer(
     requestClientCapabilities(context, server);
   registerListRunsTool(server, store, options.onAudit);
   registerGetRunTool(server, store, options.onAudit);
+  registerListRunsTool(server, store, options.onAudit, {
+    name: "harness.runs.list",
+    appOnly: true,
+  });
+  registerGetRunTool(server, store, options.onAudit, {
+    name: "harness.runs.get",
+    appOnly: true,
+  });
   registerApprovalResource(server, options.approvalHtml ?? loadApprovalHtml());
+  registerRunsConsoleResource(server, options.runsConsoleHtml ?? loadRunsConsoleHtml());
   registerConfiguredApprovalTools({
     server,
     store,
@@ -184,12 +196,24 @@ export function createControlPlaneServer(
     return {
       tools: definitions.filter(
         (tool) =>
-          (tool._meta?.ui === undefined || supportsApps) &&
+          (!isAppOnlyTool(tool._meta) || supportsApps) &&
           (principal === undefined || hasControlPlaneScope(principal, toolScope(tool.name))),
       ),
     };
   });
   return server;
+}
+
+function isAppOnlyTool(meta: unknown): boolean {
+  const parsed = z
+    .object({
+      ui: z
+        .object({ visibility: z.array(z.string()).optional() })
+        .passthrough(),
+    })
+    .passthrough()
+    .safeParse(meta);
+  return parsed.success && parsed.data.ui.visibility?.includes("app") === true;
 }
 
 function registerLifecycleTools(input: {
