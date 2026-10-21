@@ -12,3 +12,10 @@ export {
 export { parseJson } from "./parse.js";
 export { parseTokenType } from "./pii-detection.js";
 export { JsonValue } from "./json.js";
+export {
+  RunConsoleDetailSchema,
+  RunConsoleListSchema,
+  RunConsoleRunSchema,
+  type RunConsoleDetail,
+  type RunConsoleList,
+} from "./run-console.js";
