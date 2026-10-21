@@ -139,6 +139,29 @@ function registerEnqueueCompletionRaceConformance(factory: RunQueueFactoryCreato
   });
 }
 
+function registerWakeDuringLeaseConformance(factory: RunQueueFactoryCreator): void {
+  it("preserves a wake-up enqueued while the matching job is leased", async () => {
+    const instance = await factory(new FakeClock(100));
+    try {
+      const queue = instance.open();
+      const first = await queue.enqueue({
+        kind: "start",
+        runId: "00000000000000000000000022",
+      });
+      const [claimed] = await queue.claim("worker.first", 1, 100);
+      expect(claimed?.jobId).toBe(first.jobId);
+
+      await queue.enqueue({ kind: "resume", runId: first.runId });
+
+      expect(await queue.complete(first.jobId, "worker.first")).toBe(true);
+      const [wakeUp] = await queue.claim("worker.second", 1, 100);
+      expect(wakeUp).toMatchObject({ jobId: first.jobId, runId: first.runId });
+    } finally {
+      await instance.cleanup();
+    }
+  });
+}
+
 function registerClaimConformance(factory: RunQueueFactoryCreator): void {
   it("claims each job once across two connections for 200 races", async () => {
     await withQueue(factory, async (instance) => {
@@ -339,6 +362,7 @@ export function runQueueConformance(name: string, factory: RunQueueFactoryCreato
     registerEnqueueConformance(factory);
     registerCompletedEnqueueConformance(factory);
     registerEnqueueCompletionRaceConformance(factory);
+    registerWakeDuringLeaseConformance(factory);
     registerClaimConformance(factory);
     registerOrderingConformance(factory);
     registerLeaseConformance(factory);

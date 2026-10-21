@@ -10,9 +10,11 @@ import {
 import { type EventStore } from "@harness/store";
 import { cancelRun } from "./cancel.js";
 import { resolveApproval as resolveApprovalEvent } from "./approvals.js";
+import { withResumeWakeUp } from "./runtime-approval-wake.js";
 import type { ToolPort } from "./ports.js";
 import { LeaseLostError, type Clock } from "./recorder.js";
 import { resumeRun } from "./resume.js";
+import { inheritedBudgets } from "./continue.js";
 import { installShutdownHandler, type ShutdownProcessLike } from "./shutdown.js";
 import type { RunLoopResult } from "./loop.js";
 import type { RoleRegistry } from "./roles.js";
@@ -24,6 +26,7 @@ import {
   readChildBudgetAllocation,
   readStoredQuotaIdentity,
   readStoredGoal,
+  readContinuationHistory,
   startRun,
   type RunControl,
 } from "./runtime-runs.js";
@@ -272,6 +275,7 @@ function composeRuntime(
   });
   return {
     store,
+    ...(options.overrides.queue === undefined ? {} : { queue: options.overrides.queue }),
     vault: vaultResolver,
     keys,
     sandboxBackend: options.sandboxBackend,
@@ -288,7 +292,7 @@ function composeRuntime(
       return result;
     },
     ...appCallbacks,
-    resolveApproval: (runId, approvalId, decision, resolveOptions) => {
+    resolveApproval: async (runId, approvalId, decision, resolveOptions) => {
       if (
         decision === "edit" &&
         options.overrides.tool === undefined &&
@@ -296,15 +300,17 @@ function composeRuntime(
       ) {
         throw new ApprovalEditUnavailableError();
       }
-      return resolveApprovalEvent(
-        store,
-        runId,
-        approvalId,
-        decision,
-        resolveOptions?.edits,
-        clock,
-        tool,
-        resolveOptions?.metadata,
+      return withResumeWakeUp(options.overrides.queue, config.run.autoResume, runId, () =>
+        resolveApprovalEvent(
+          store,
+          runId,
+          approvalId,
+          decision,
+          resolveOptions?.edits,
+          clock,
+          tool,
+          resolveOptions?.metadata,
+        ),
       );
     },
     close: () =>
@@ -329,6 +335,16 @@ function createRuntimeResume(
   return async (runId, resumeOptions: RuntimeResumeOptions = {}) => {
     const firstNewSeq = await store.head(runId);
     const childAllocation = await readChildBudgetAllocation(store, runId);
+    const previousEventLogs = await readContinuationHistory(
+      store,
+      runId,
+      config.run.continuations.maxChainLength,
+    );
+    const budgets =
+      childAllocation?.budgets ??
+      (previousEventLogs !== undefined && config.run.continuations.inheritBudgets
+        ? inheritedBudgets(config.run.budgets, previousEventLogs)
+        : config.run.budgets);
     return runWithControl(
       runId,
       async (signal) => {
@@ -354,7 +370,8 @@ function createRuntimeResume(
             context,
             signal: composed.signal,
             scopes,
-            budgets: childAllocation?.budgets ?? config.run.budgets,
+            budgets,
+            ...(previousEventLogs === undefined ? {} : { previousEventLogs }),
             ...(childAllocation === undefined ? {} : { deadlineTs: childAllocation.deadlineTs }),
             checkpointEveryEvents: config.run.checkpointEveryEvents,
             ...(config.store?.snapshotKeep === undefined

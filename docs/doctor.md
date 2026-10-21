@@ -1,10 +1,10 @@
 # Environment diagnostics
 
 `harness doctor` checks the local Node.js version, loaded configuration, configured secret
-references, and data-directory write access. When `pii.presidio` is configured, it also checks the
-analyzer's `/health` endpoint and reports `presidio_reachable` or `presidio_unreachable`. Checks
-run sequentially with a five-second timeout each. A failed check produces exit code `1`; warnings
-do not change the successful exit code.
+references, data-directory write access, and `worker_queue_reachable`. When `pii.presidio` is
+configured, it also checks the analyzer's `/health` endpoint and reports `presidio_reachable` or
+`presidio_unreachable`. Checks run sequentially with a five-second timeout each. A failed check
+produces exit code `1`; warnings do not change the successful exit code.
 
 Human output is a table containing each check's `id`, `status`, and `code`. With `--json`, the
 command prints one array validated by `DoctorResultsSchema` from
@@ -29,6 +29,6 @@ registerDoctorCheck({
 });
 ```
 
-Store the check with the package that owns the dependency it validates. Later checks can cover
-store connectivity, server reachability, Presidio, and sandbox availability without coupling the
-core registry to those packages.
+Store the check with the package that owns the dependency it validates. Checks for store
+connectivity, server reachability, Presidio, and sandbox availability stay outside the core
+registry, so core does not need to depend on those packages.

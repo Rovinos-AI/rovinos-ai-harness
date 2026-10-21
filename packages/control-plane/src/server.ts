@@ -6,7 +6,7 @@ import {
   type Id,
   type RunStatus,
 } from "@harness/schemas";
-import type { EventStore } from "@harness/store";
+import type { EventStore, RunQueue } from "@harness/store";
 import type { AuditingVaultResolver } from "@harness/vault";
 import { CLIENT_CAPABILITIES_META_KEY, McpServer } from "@modelcontextprotocol/server";
 import type { ServerContext } from "@modelcontextprotocol/server";
@@ -84,6 +84,8 @@ export interface ControlPlaneServerOptions {
   /** Metadata-only audit sink; defaults to the sanctioned telemetry logger. */
   readonly onAudit?: ControlPlaneAuditHandler;
   readonly operations?: ControlPlaneOperations;
+  /** Durable queue used for asynchronous run resumption, when configured. */
+  readonly runQueue?: RunQueue;
   readonly maxConcurrentRuns?: number;
   readonly runSupervisor?: RunSupervisor;
   readonly confirmationGate?: ConfirmationGate;
@@ -314,6 +316,7 @@ function createRunSupervisor(options: ControlPlaneServerOptions): RunSupervisor 
     ...(options.maxConcurrentRuns === undefined
       ? {}
       : { maxConcurrentRuns: options.maxConcurrentRuns }),
+    ...(options.runQueue === undefined ? {} : { queue: options.runQueue }),
     ...(options.operations?.resumeRun === undefined
       ? {}
       : { resumeRun: options.operations.resumeRun }),

@@ -24,6 +24,7 @@ export interface QueueRow extends QueryResultRow {
   lease_expires_at: string | number | null;
   idempotency_key: string | null;
   last_error_code: string | null;
+  wake_requested: boolean;
   created_at: string | number;
   updated_at: string | number;
 }
@@ -44,6 +45,7 @@ export interface DeadLetterRow extends QueryResultRow {
 /** Validated Postgres pool and schema options. */
 export const optionsSchema = RunQueueOptionsSchema.extend({
   poolSize: z.number().int().min(1).max(100).default(10),
+  readOnly: z.boolean().default(false),
   schema: z
     .string()
     .regex(/^[a-z_]\w{0,62}$/i)

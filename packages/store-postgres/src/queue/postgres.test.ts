@@ -88,6 +88,7 @@ const fakePg = vi.hoisted(() => {
         lease_expires_at: null,
         idempotency_key: key,
         last_error_code: null,
+        wake_requested: false,
         created_at: numberValue(values, 7),
         updated_at: numberValue(values, 7),
       };
@@ -105,6 +106,21 @@ const fakePg = vi.hoisted(() => {
         locks.set(String(row.job_id), clientId);
       }
       return { rows: row === undefined ? [] : [row], rowCount: row === undefined ? 0 : 1 };
+    }
+    if (sql.startsWith("UPDATE run_queue SET wake_requested = TRUE")) {
+      const row = jobs.get(stringValue(values, 1));
+      const now = numberValue(values, 0);
+      if (
+        row === undefined ||
+        row.lease_owner === null ||
+        typeof row.lease_expires_at !== "number" ||
+        row.lease_expires_at <= now
+      ) {
+        return { rows: [], rowCount: 0 };
+      }
+      row.wake_requested = true;
+      row.updated_at = now;
+      return { rows: [], rowCount: 1 };
     }
     if (sql.startsWith("SELECT * FROM run_queue WHERE attempts >= max_attempts")) {
       const now = numberValue(values, 0);
@@ -261,6 +277,7 @@ const fakePg = vi.hoisted(() => {
         updated_at: now,
         lease_owner: null,
         lease_expires_at: null,
+        ...(sql.includes("wake_requested = FALSE") ? { wake_requested: false } : {}),
       });
       return { rows: [], rowCount: 1 };
     }
@@ -285,6 +302,7 @@ const fakePg = vi.hoisted(() => {
     beforeNextLockedQuery(hook: () => void): void {
       beforeNextForUpdate = hook;
     },
+    migrationCount: () => migrations.size,
     reset() {
       jobs.clear();
       dead.clear();
@@ -352,6 +370,22 @@ it("rejects invalid Postgres queue configuration without opening a pool", () => 
   expect(() => new PostgresRunQueue("not-a-postgres-url")).toThrow(
     "Invalid Postgres run queue configuration",
   );
+});
+
+it("probes Postgres queue reachability without running migrations", async () => {
+  fakePg.reset();
+  const queue = new PostgresRunQueue(
+    "postgresql://synthetic@localhost/harness",
+    { schema: "test_queue", readOnly: true },
+    new FakeClock(100),
+    new SequentialIdGenerator(),
+  );
+  try {
+    await expect(queue.getDeadLetter("00000000000000000000000001")).resolves.toBeUndefined();
+    expect(fakePg.migrationCount()).toBe(0);
+  } finally {
+    await queue.close();
+  }
 });
 
 it("expires exhausted leases into dead letters on claim", async () => {

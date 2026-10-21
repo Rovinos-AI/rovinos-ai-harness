@@ -498,6 +498,7 @@ store: {}`,
       run: {
         checkpointEveryEvents: 20,
         shutdownGraceMs: 20_000,
+        autoResume: true,
         continuations: {
           allowFromFailed: false,
           maxChainLength: 50,

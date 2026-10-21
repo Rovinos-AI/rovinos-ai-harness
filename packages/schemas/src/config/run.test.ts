@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { RunConfigSchema } from "./run.js";
 
 describe("RunConfigSchema resume policy", () => {
+  it("enables approval auto-resume by default and allows it to be disabled", () => {
+    expect(RunConfigSchema.parse({}).autoResume).toBe(true);
+    expect(RunConfigSchema.parse({ autoResume: false }).autoResume).toBe(false);
+  });
+
   it("defaults subagent limits and accepts bounded overrides", () => {
     expect(RunConfigSchema.parse({}).subagents).toEqual({
       maxDepth: 4,
